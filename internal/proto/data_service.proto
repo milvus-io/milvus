@@ -288,3 +288,9 @@ message GetRecoveryInfoRequest {
   int64 partitionID = 3;
 }
 
+message DataNodeTtMsg {
+    common.MsgBase base =1;
+    string channel_name = 2;
+    uint64 timestamp = 3;
+}
+

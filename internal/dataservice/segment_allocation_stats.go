@@ -2,6 +2,7 @@ package dataservice
 
 import (
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"go.uber.org/zap"
 )
@@ -60,11 +61,12 @@ func (s *segAllocStats) loadSegmentsFromMeta() {
 			id:             seg.ID,
 			collectionID:   seg.CollectionID,
 			partitionID:    seg.PartitionID,
-			sealed:         false,
 			total:          seg.MaxRowNum,
 			allocations:    []*allocation{},
 			insertChannel:  seg.InsertChannel,
 			lastExpireTime: seg.LastExpireTime,
+			sealed: seg.State == commonpb.SegmentState_Sealed ||
+				seg.State == commonpb.SegmentState_Flushing,
 		}
 		s.stats[seg.ID] = stat
 	}
@@ -89,7 +91,7 @@ func (s *segAllocStats) appendAllocation(segmentID UniqueID, numRows int64, expi
 
 func (s *segAllocStats) sealSegment(id UniqueID) error {
 	s.stats[id].sealed = true
-	return s.meta.SealSegment(id, 0)
+	return s.meta.SealSegment(id)
 }
 
 func (s *segAllocStats) sealSegmentsBy(collectionID UniqueID) error {
@@ -98,7 +100,7 @@ func (s *segAllocStats) sealSegmentsBy(collectionID UniqueID) error {
 			if status.sealed {
 				continue
 			}
-			if err := s.meta.SealSegment(status.id, 0); err != nil {
+			if err := s.meta.SealSegment(status.id); err != nil {
 				return err
 			}
 			status.sealed = true

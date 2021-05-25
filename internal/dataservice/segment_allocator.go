@@ -1,5 +1,4 @@
 // Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
@@ -50,7 +49,7 @@ type segmentAllocatorInterface interface {
 	// SealAllSegments get all opened segment ids of collection. return success and failed segment ids
 	SealAllSegments(ctx context.Context, collectionID UniqueID) error
 	// GetFlushableSegments return flushable segment ids
-	GetFlushableSegments(ctx context.Context, ts Timestamp) ([]UniqueID, error)
+	GetFlushableSegments(ctx context.Context, channel string, ts Timestamp) ([]UniqueID, error)
 }
 
 type segmentAllocator struct {
@@ -291,7 +290,8 @@ func (s *segmentAllocator) SealAllSegments(ctx context.Context, collectionID Uni
 	return nil
 }
 
-func (s *segmentAllocator) GetFlushableSegments(ctx context.Context, t Timestamp) ([]UniqueID, error) {
+func (s *segmentAllocator) GetFlushableSegments(ctx context.Context, channel string,
+	t Timestamp) ([]UniqueID, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sp, _ := trace.StartSpanFromContext(ctx)
@@ -303,6 +303,9 @@ func (s *segmentAllocator) GetFlushableSegments(ctx context.Context, t Timestamp
 	ret := make([]UniqueID, 0)
 	segments := s.allocStats.getAllSegments()
 	for _, segStatus := range segments {
+		if segStatus.insertChannel != channel {
+			continue
+		}
 		if s.flushPolicy.apply(segStatus, t) {
 			ret = append(ret, segStatus.id)
 		}
