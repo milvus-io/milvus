@@ -50,7 +50,7 @@ type Client struct {
 
 func getDataNodeAddress(sess *sessionutil.Session, serverID int64) (string, error) {
 	key := typeutil.DataNodeRole + "-" + strconv.FormatInt(serverID, 10)
-	msess, err := sess.GetSessions(key)
+	msess, _, err := sess.GetSessions(key)
 	if err != nil {
 		return "", err
 	}
