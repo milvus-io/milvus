@@ -11,7 +11,7 @@ scikit-learn>=0.19.1
 # pymilvus-test>=0.3.0,<0.4.0
 kubernetes==10.0.1
 
-grpcio>=1.22.0
-grpcio-tools>=1.22.0
+grpcio>=1.22.0,<=1.37.0
+grpcio-tools>=1.22.0,<=1.37.0
 requests>=2.22.0
 ujson>=2.0.0
