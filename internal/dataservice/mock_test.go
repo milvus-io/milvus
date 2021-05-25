@@ -68,11 +68,11 @@ type mockDataNodeClient struct {
 	state internalpb.StateCode
 }
 
-func newMockDataNodeClient(id int64) *mockDataNodeClient {
+func newMockDataNodeClient(id int64) (*mockDataNodeClient, error) {
 	return &mockDataNodeClient{
 		id:    id,
 		state: internalpb.StateCode_Initializing,
-	}
+	}, nil
 }
 
 func (c *mockDataNodeClient) Init() error {
