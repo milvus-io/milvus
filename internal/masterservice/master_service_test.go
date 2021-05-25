@@ -1919,47 +1919,47 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.DataServiceSegmentChan = make(chan *msgstream.MsgPack)
-	err = c.checkInit()
-	assert.NotNil(t, err)
-
-	c.GetBinlogFilePathsFromDataServiceReq = func(segID, fieldID typeutil.UniqueID) ([]string, error) {
+	c.CallGetBinlogFilePathsService = func(segID, fieldID typeutil.UniqueID) ([]string, error) {
 		return []string{}, nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.GetNumRowsReq = func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error) {
+	c.CallGetNumRowsService = func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error) {
 		return 0, nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.BuildIndexReq = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error) {
+	c.CallBuildIndexService = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error) {
 		return 0, nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.DropIndexReq = func(ctx context.Context, indexID typeutil.UniqueID) error {
+	c.CallDropIndexService = func(ctx context.Context, indexID typeutil.UniqueID) error {
 		return nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.InvalidateCollectionMetaCache = func(ctx context.Context, ts typeutil.Timestamp, dbName, collectionName string) error {
+	c.CallInvalidateCollectionMetaCacheService = func(ctx context.Context, ts typeutil.Timestamp, dbName, collectionName string) error {
 		return nil
 	}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.CallReleaseCollectionService = func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID) error {
+		return nil
+	}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.DataServiceSegmentChan = make(chan *msgstream.MsgPack)
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
 	c.DataNodeFlushedSegmentChan = make(chan *msgstream.MsgPack)
-	err = c.checkInit()
-	assert.NotNil(t, err)
-
-	c.ReleaseCollection = func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID) error {
-		return nil
-	}
 	err = c.checkInit()
 	assert.Nil(t, err)
 }

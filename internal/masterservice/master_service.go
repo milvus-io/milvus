@@ -121,18 +121,18 @@ type Core struct {
 	DataNodeFlushedSegmentChan <-chan *ms.MsgPack
 
 	//get binlog file path from data service,
-	GetBinlogFilePathsFromDataServiceReq func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error)
-	GetNumRowsReq                        func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error)
+	CallGetBinlogFilePathsService func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error)
+	CallGetNumRowsService         func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error)
 
 	//call index builder's client to build index, return build id
-	BuildIndexReq func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error)
-	DropIndexReq  func(ctx context.Context, indexID typeutil.UniqueID) error
+	CallBuildIndexService func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error)
+	CallDropIndexService  func(ctx context.Context, indexID typeutil.UniqueID) error
 
 	//proxy service interface, notify proxy service to drop collection
-	InvalidateCollectionMetaCache func(ctx context.Context, ts typeutil.Timestamp, dbName string, collectionName string) error
+	CallInvalidateCollectionMetaCacheService func(ctx context.Context, ts typeutil.Timestamp, dbName string, collectionName string) error
 
 	//query service interface, notify query service to release collection
-	ReleaseCollection func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error
+	CallReleaseCollectionService func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error
 
 	//dd request scheduler
 	ddReqQueue chan reqTask //dd request will be push into this chan
@@ -214,29 +214,29 @@ func (c *Core) checkInit() error {
 	if c.SendDdDropPartitionReq == nil {
 		return fmt.Errorf("SendDdDropPartitionReq is nil")
 	}
-	if c.GetBinlogFilePathsFromDataServiceReq == nil {
-		return fmt.Errorf("GetBinlogFilePathsFromDataServiceReq is nil")
+	if c.CallGetBinlogFilePathsService == nil {
+		return fmt.Errorf("CallGetBinlogFilePathsService is nil")
 	}
-	if c.GetNumRowsReq == nil {
-		return fmt.Errorf("GetNumRowsReq is nil")
+	if c.CallGetNumRowsService == nil {
+		return fmt.Errorf("CallGetNumRowsService is nil")
 	}
-	if c.BuildIndexReq == nil {
-		return fmt.Errorf("BuildIndexReq is nil")
+	if c.CallBuildIndexService == nil {
+		return fmt.Errorf("CallBuildIndexService is nil")
 	}
-	if c.DropIndexReq == nil {
-		return fmt.Errorf("DropIndexReq is nil")
+	if c.CallDropIndexService == nil {
+		return fmt.Errorf("CallDropIndexService is nil")
 	}
-	if c.InvalidateCollectionMetaCache == nil {
-		return fmt.Errorf("InvalidateCollectionMetaCache is nil")
+	if c.CallInvalidateCollectionMetaCacheService == nil {
+		return fmt.Errorf("CallInvalidateCollectionMetaCacheService is nil")
+	}
+	if c.CallReleaseCollectionService == nil {
+		return fmt.Errorf("CallReleaseCollectionService is nil")
 	}
 	if c.DataServiceSegmentChan == nil {
 		return fmt.Errorf("DataServiceSegmentChan is nil")
 	}
 	if c.DataNodeFlushedSegmentChan == nil {
 		return fmt.Errorf("DataNodeFlushedSegmentChan is nil")
-	}
-	if c.ReleaseCollection == nil {
-		return fmt.Errorf("ReleaseCollection is nil")
 	}
 	return nil
 }
@@ -328,18 +328,18 @@ func (c *Core) startDataServiceSegmentLoop() {
 				segInfos = append(segInfos, segInfoMsg.Segment)
 			}
 			if len(segInfos) > 0 {
-				startPosByte, err := json.Marshal(segMsg.StartPositions)
+				startPosStr, err := EncodeMsgPositions(segMsg.StartPositions)
 				if err != nil {
-					log.Error("json.Marshal fail", zap.String("err", err.Error()))
+					log.Error("encode msg start positions fail", zap.String("err", err.Error()))
 					continue
 				}
-				endPosByte, err := json.Marshal(segMsg.EndPositions)
+				endPosStr, err := EncodeMsgPositions(segMsg.EndPositions)
 				if err != nil {
-					log.Error("json.Marshal fail", zap.String("err", err.Error()))
+					log.Error("encode msg end positions fail", zap.String("err", err.Error()))
 					continue
 				}
 
-				if _, err := c.MetaTable.AddSegment(segInfos, string(startPosByte), string(endPosByte)); err != nil {
+				if _, err := c.MetaTable.AddSegment(segInfos, startPosStr, endPosStr); err != nil {
 					//what if master add segment failed, but data service success?
 					log.Debug("add segment info meta table failed ", zap.String("error", err.Error()))
 					continue
@@ -362,14 +362,14 @@ func (c *Core) startDataNodeFlushedSegmentLoop() {
 				return
 			}
 
-			startPosByte, err := json.Marshal(segMsg.StartPositions)
+			startPosStr, err := EncodeMsgPositions(segMsg.StartPositions)
 			if err != nil {
-				log.Error("json.Marshal fail", zap.String("err", err.Error()))
+				log.Error("encode msg start positions fail", zap.String("err", err.Error()))
 				continue
 			}
-			endPosByte, err := json.Marshal(segMsg.EndPositions)
+			endPosStr, err := EncodeMsgPositions(segMsg.EndPositions)
 			if err != nil {
-				log.Error("json.Marshal fail", zap.String("err", err.Error()))
+				log.Error("encode msg end positions fail", zap.String("err", err.Error()))
 				continue
 			}
 
@@ -424,9 +424,11 @@ func (c *Core) startDataNodeFlushedSegmentLoop() {
 				}
 			}
 
-			_, err = c.MetaTable.AddIndex(segIdxInfos, string(startPosByte), string(endPosByte))
-			if err != nil {
-				log.Error("AddIndex fail", zap.String("err", err.Error()))
+			if len(segIdxInfos) > 0 {
+				_, err = c.MetaTable.AddIndex(segIdxInfos, startPosStr, endPosStr)
+				if err != nil {
+					log.Error("AddIndex fail", zap.String("err", err.Error()))
+				}
 			}
 		}
 	}
@@ -670,7 +672,7 @@ func (c *Core) SetProxyService(ctx context.Context, s types.ProxyService) error 
 	Params.ProxyTimeTickChannel = rsp.Value
 	log.Debug("proxy time tick", zap.String("channel name", Params.ProxyTimeTickChannel))
 
-	c.InvalidateCollectionMetaCache = func(ctx context.Context, ts typeutil.Timestamp, dbName string, collectionName string) error {
+	c.CallInvalidateCollectionMetaCacheService = func(ctx context.Context, ts typeutil.Timestamp, dbName string, collectionName string) error {
 		status, _ := s.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   0, //TODO,MsgType
@@ -700,7 +702,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 	Params.DataServiceSegmentChannel = rsp.Value
 	log.Debug("data service segment", zap.String("channel name", Params.DataServiceSegmentChannel))
 
-	c.GetBinlogFilePathsFromDataServiceReq = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error) {
+	c.CallGetBinlogFilePathsService = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error) {
 		ts, err := c.TSOAllocator(1)
 		if err != nil {
 			return nil, err
@@ -728,7 +730,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 		return nil, fmt.Errorf("binlog file not exist, segment id = %d, field id = %d", segID, fieldID)
 	}
 
-	c.GetNumRowsReq = func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error) {
+	c.CallGetNumRowsService = func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error) {
 		ts, err := c.TSOAllocator(1)
 		if err != nil {
 			return 0, err
@@ -762,7 +764,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 }
 
 func (c *Core) SetIndexService(s types.IndexService) error {
-	c.BuildIndexReq = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error) {
+	c.CallBuildIndexService = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error) {
 		rsp, err := s.BuildIndex(ctx, &indexpb.BuildIndexRequest{
 			DataPaths:   binlog,
 			TypeParams:  field.TypeParams,
@@ -779,7 +781,7 @@ func (c *Core) SetIndexService(s types.IndexService) error {
 		return rsp.IndexBuildID, nil
 	}
 
-	c.DropIndexReq = func(ctx context.Context, indexID typeutil.UniqueID) error {
+	c.CallDropIndexService = func(ctx context.Context, indexID typeutil.UniqueID) error {
 		rsp, err := s.DropIndex(ctx, &indexpb.DropIndexRequest{
 			IndexID: indexID,
 		})
@@ -796,7 +798,7 @@ func (c *Core) SetIndexService(s types.IndexService) error {
 }
 
 func (c *Core) SetQueryService(s types.QueryService) error {
-	c.ReleaseCollection = func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
+	c.CallReleaseCollectionService = func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
 		req := &querypb.ReleaseCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_ReleaseCollection,
@@ -824,7 +826,7 @@ func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, 
 	if c.MetaTable.IsSegmentIndexed(segID, field, idxInfo.IndexParams) {
 		return 0, nil
 	}
-	rows, err := c.GetNumRowsReq(segID, isFlush)
+	rows, err := c.CallGetNumRowsService(segID, isFlush)
 	if err != nil {
 		return 0, err
 	}
@@ -832,11 +834,11 @@ func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, 
 	if rows < Params.MinSegmentSizeToEnableIndex {
 		log.Debug("num of rows is less than MinSegmentSizeToEnableIndex", zap.Int64("num rows", rows))
 	} else {
-		binlogs, err := c.GetBinlogFilePathsFromDataServiceReq(segID, field.FieldID)
+		binlogs, err := c.CallGetBinlogFilePathsService(segID, field.FieldID)
 		if err != nil {
 			return 0, err
 		}
-		bldID, err = c.BuildIndexReq(c.ctx, binlogs, field, idxInfo)
+		bldID, err = c.CallBuildIndexService(c.ctx, binlogs, field, idxInfo)
 		if err != nil {
 			return 0, err
 		}
