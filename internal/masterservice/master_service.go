@@ -121,8 +121,8 @@ type Core struct {
 	DataNodeFlushedSegmentChan <-chan *ms.MsgPack
 
 	//get binlog file path from data service,
-	CallGetBinlogFilePathsFromDataService func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error)
-	CallGetNumRowsService                 func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error)
+	CallGetBinlogFilePathsService func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error)
+	CallGetNumRowsService         func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error)
 
 	//call index builder's client to build index, return build id
 	CallBuildIndexService func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error)
@@ -214,8 +214,8 @@ func (c *Core) checkInit() error {
 	if c.SendDdDropPartitionReq == nil {
 		return fmt.Errorf("SendDdDropPartitionReq is nil")
 	}
-	if c.CallGetBinlogFilePathsFromDataService == nil {
-		return fmt.Errorf("CallGetBinlogFilePathsFromDataService is nil")
+	if c.CallGetBinlogFilePathsService == nil {
+		return fmt.Errorf("CallGetBinlogFilePathsService is nil")
 	}
 	if c.CallGetNumRowsService == nil {
 		return fmt.Errorf("CallGetNumRowsService is nil")
@@ -700,7 +700,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 	Params.DataServiceSegmentChannel = rsp.Value
 	log.Debug("data service segment", zap.String("channel name", Params.DataServiceSegmentChannel))
 
-	c.CallGetBinlogFilePathsFromDataService = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error) {
+	c.CallGetBinlogFilePathsService = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error) {
 		ts, err := c.TSOAllocator(1)
 		if err != nil {
 			return nil, err
@@ -832,7 +832,7 @@ func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, 
 	if rows < Params.MinSegmentSizeToEnableIndex {
 		log.Debug("num of rows is less than MinSegmentSizeToEnableIndex", zap.Int64("num rows", rows))
 	} else {
-		binlogs, err := c.CallGetBinlogFilePathsFromDataService(segID, field.FieldID)
+		binlogs, err := c.CallGetBinlogFilePathsService(segID, field.FieldID)
 		if err != nil {
 			return 0, err
 		}

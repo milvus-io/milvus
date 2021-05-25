@@ -183,7 +183,7 @@ func TestGrpcService(t *testing.T) {
 		return nil
 	}
 
-	core.CallGetBinlogFilePathsFromDataService = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error) {
+	core.CallGetBinlogFilePathsService = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error) {
 		return []string{"file1", "file2", "file3"}, nil
 	}
 	core.CallGetNumRowsService = func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error) {

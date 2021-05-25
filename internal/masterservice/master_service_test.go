@@ -1919,7 +1919,7 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.CallGetBinlogFilePathsFromDataService = func(segID, fieldID typeutil.UniqueID) ([]string, error) {
+	c.CallGetBinlogFilePathsService = func(segID, fieldID typeutil.UniqueID) ([]string, error) {
 		return []string{}, nil
 	}
 	err = c.checkInit()
