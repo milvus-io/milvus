@@ -787,7 +787,7 @@ func (mt *metaTable) AddIndex(segIdxInfos []*pb.SegmentIndexInfo, msgStartPos st
 			if ok {
 				if SegmentIndexInfoEqual(segIdxInfo, &tmpInfo) {
 					log.Debug("Identical SegmentIndexInfo already exist", zap.Int64("IndexID", segIdxInfo.IndexID))
-					return 0, nil
+					continue
 				}
 				return 0, fmt.Errorf("index id = %d exist", segIdxInfo.IndexID)
 			}

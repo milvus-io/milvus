@@ -94,6 +94,7 @@ func TestGrpcService(t *testing.T) {
 		collName2 = "testColl-again"
 		partName  = "testPartition"
 		fieldName = "vector"
+		fieldID   = 100
 		segID     = 1001
 	)
 	rand.Seed(time.Now().UnixNano())
@@ -288,7 +289,7 @@ func TestGrpcService(t *testing.T) {
 			AutoID: true,
 			Fields: []*schemapb.FieldSchema{
 				{
-					FieldID:      100,
+					FieldID:      fieldID,
 					Name:         fieldName,
 					IsPrimaryKey: false,
 					DataType:     schemapb.DataType_FloatVector,
@@ -313,7 +314,7 @@ func TestGrpcService(t *testing.T) {
 				Timestamp: 100,
 				SourceID:  100,
 			},
-			DbName:         "testDb",
+			DbName:         dbName,
 			CollectionName: collName,
 			Schema:         sbf,
 		}
@@ -539,6 +540,14 @@ func TestGrpcService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, 1, len(part.SegmentIDs))
 
+		// send msg twice, partition still contains 1 segment
+		segInfoMsgPack1 := GenSegInfoMsgPack(seg)
+		SegmentInfoChan <- segInfoMsgPack1
+		time.Sleep(time.Millisecond * 100)
+		part1, err := core.MetaTable.GetPartitionByID(1, partID, 0)
+		assert.Nil(t, err)
+		assert.Equal(t, 1, len(part1.SegmentIDs))
+
 		req := &milvuspb.ShowSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_ShowSegments,
@@ -656,6 +665,16 @@ func TestGrpcService(t *testing.T) {
 		flushedSegMsgPack := GenFlushedSegMsgPack(segID)
 		FlushedSegmentChan <- flushedSegMsgPack
 		time.Sleep(time.Millisecond * 100)
+		segIdxInfo, err := core.MetaTable.GetSegmentIndexInfoByID(segID, -1, "")
+		assert.Nil(t, err)
+
+		// send msg twice, segIdxInfo should not change
+		flushedSegMsgPack1 := GenFlushedSegMsgPack(segID)
+		FlushedSegmentChan <- flushedSegMsgPack1
+		time.Sleep(time.Millisecond * 100)
+		segIdxInfo1, err := core.MetaTable.GetSegmentIndexInfoByID(segID, -1, "")
+		assert.Nil(t, err)
+		assert.Equal(t, segIdxInfo, segIdxInfo1)
 
 		req := &milvuspb.DescribeIndexRequest{
 			Base: &commonpb.MsgBase{
