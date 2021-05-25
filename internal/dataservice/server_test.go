@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 )
 
 func TestRegisterNode(t *testing.T) {
@@ -796,6 +798,7 @@ func TestResumeChannel(t *testing.T) {
 		defer svr.meta.RUnlock()
 		for _, segID := range segmentIDs {
 			seg, has := svr.meta.segments[segID]
+			log.Debug("check segment in meta", zap.Any("id", seg.ID), zap.Any("has", has))
 			assert.True(t, has)
 			if has {
 				assert.Equal(t, segRows, seg.NumRows)
