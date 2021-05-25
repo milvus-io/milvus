@@ -174,9 +174,9 @@ func TestMeta_Basic(t *testing.T) {
 		assert.EqualValues(t, 1, len(segIDs))
 		assert.Contains(t, segIDs, segID1_1)
 
-		err = meta.SealSegment(segID0_0, 200)
+		err = meta.SealSegment(segID0_0)
 		assert.Nil(t, err)
-		err = meta.FlushSegment(segID0_0, 300)
+		err = meta.FlushSegment(segID0_0)
 		assert.Nil(t, err)
 
 		info0_0, err = meta.GetSegment(segID0_0)
@@ -273,11 +273,11 @@ func TestMeta_Basic(t *testing.T) {
 		assert.NotNil(t, err)
 
 		// check seal non-exist segment
-		err = meta.SealSegment(segIDInvalid, 200)
+		err = meta.SealSegment(segIDInvalid)
 		assert.NotNil(t, err)
 
 		// check flush non-exist segment
-		err = meta.FlushSegment(segIDInvalid, 300)
+		err = meta.FlushSegment(segIDInvalid)
 		assert.NotNil(t, err)
 
 		err = meta.DropCollection(collID)
