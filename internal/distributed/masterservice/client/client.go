@@ -129,6 +129,11 @@ func (c *GrpcClient) Stop() error {
 	return c.conn.Close()
 }
 
+// Register dummy
+func (c *GrpcClient) Register() error {
+	return nil
+}
+
 func (c *GrpcClient) recall(caller func() (interface{}, error)) (interface{}, error) {
 	ret, err := caller()
 	if err == nil {

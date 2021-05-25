@@ -72,6 +72,11 @@ func (c *Client) Stop() error {
 	return c.conn.Close()
 }
 
+// Register dummy
+func (c *Client) Register() error {
+	return nil
+}
+
 func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	return c.grpcClient.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
 }

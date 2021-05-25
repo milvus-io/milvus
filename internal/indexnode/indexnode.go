@@ -77,10 +77,16 @@ func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 	return b, nil
 }
 
+// Register register index node at etcd
+func (i *IndexNode) Register() error {
+	i.session = sessionutil.NewSession(i.loopCtx, []string{Params.EtcdAddress})
+	i.session.Init(typeutil.IndexNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
+	Params.NodeID = i.session.ServerID
+	return nil
+}
+
 func (i *IndexNode) Init() error {
 	ctx := context.Background()
-	i.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress})
-	i.session.Init(typeutil.IndexNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
 
 	err := funcutil.WaitForComponentHealthy(ctx, i.serviceClient, "IndexService", 1000000, time.Millisecond*200)
 	if err != nil {

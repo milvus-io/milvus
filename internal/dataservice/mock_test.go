@@ -84,6 +84,10 @@ func (c *mockDataNodeClient) Start() error {
 	return nil
 }
 
+func (c *mockDataNodeClient) Register() error {
+	return nil
+}
+
 func (c *mockDataNodeClient) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	return &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{
@@ -131,6 +135,10 @@ func (m *mockMasterService) Start() error {
 }
 
 func (m *mockMasterService) Stop() error {
+	return nil
+}
+
+func (m *mockMasterService) Register() error {
 	return nil
 }
 

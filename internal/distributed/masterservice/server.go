@@ -161,7 +161,13 @@ func (s *Server) init() error {
 
 	log.Debug("init params done")
 
-	if err := s.startGrpc(); err != nil {
+	err := s.masterService.Register()
+	if err != nil {
+		return err
+	}
+
+	err = s.startGrpc()
+	if err != nil {
 		return err
 	}
 

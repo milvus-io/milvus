@@ -169,7 +169,11 @@ func (s *Server) init() error {
 	addr := Params.IP + ":" + strconv.Itoa(Params.Port)
 	log.Debug("DataNode address", zap.String("address", addr))
 
-	err := s.startGrpc()
+	err := s.datanode.Register()
+	if err != nil {
+		return err
+	}
+	err = s.startGrpc()
 	if err != nil {
 		return err
 	}
