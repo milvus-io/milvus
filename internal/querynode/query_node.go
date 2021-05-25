@@ -53,7 +53,8 @@ type QueryNode struct {
 	QueryNodeID UniqueID
 	stateCode   atomic.Value
 
-	replica ReplicaInterface
+	historicalReplica ReplicaInterface
+	streamReplica     ReplicaInterface
 
 	// internal services
 	metaService      *metaService
@@ -92,7 +93,8 @@ func NewQueryNode(ctx context.Context, queryNodeID UniqueID, factory msgstream.F
 	}
 
 	node.scheduler = newTaskScheduler(ctx1)
-	node.replica = newCollectionReplica()
+	node.historicalReplica = newCollectionReplica()
+	node.streamReplica = newCollectionReplica()
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return node
 }
@@ -112,7 +114,8 @@ func NewQueryNodeWithoutID(ctx context.Context, factory msgstream.Factory) *Quer
 	}
 
 	node.scheduler = newTaskScheduler(ctx1)
-	node.replica = newCollectionReplica()
+	node.historicalReplica = newCollectionReplica()
+	node.streamReplica = newCollectionReplica()
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 
 	return node
@@ -187,9 +190,9 @@ func (node *QueryNode) Start() error {
 	}
 
 	// init services and manager
-	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica, node.msFactory)
-	node.loadService = newLoadService(node.queryNodeLoopCtx, node.masterService, node.dataService, node.indexService, node.replica)
-	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, node.loadService.segLoader.indexLoader.fieldStatsChan, node.msFactory)
+	node.searchService = newSearchService(node.queryNodeLoopCtx, node.historicalReplica, node.msFactory)
+	node.loadService = newLoadService(node.queryNodeLoopCtx, node.masterService, node.dataService, node.indexService, node.historicalReplica, node.streamReplica)
+	node.statsService = newStatsService(node.queryNodeLoopCtx, node.historicalReplica, node.loadService.segLoader.indexLoader.fieldStatsChan, node.msFactory)
 
 	// start task scheduler
 	go node.scheduler.Start()
@@ -207,7 +210,8 @@ func (node *QueryNode) Stop() error {
 	node.queryNodeLoopCancel()
 
 	// free collectionReplica
-	node.replica.freeAll()
+	node.historicalReplica.freeAll()
+	node.streamReplica.freeAll()
 
 	// close services
 	for _, dsService := range node.dataSyncServices {

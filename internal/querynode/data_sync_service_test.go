@@ -116,7 +116,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	assert.Nil(t, err)
 
 	// dataSync
-	node.dataSyncServices[collectionID] = newDataSyncService(node.queryNodeLoopCtx, node.replica, msFactory, collectionID)
+	node.dataSyncServices[collectionID] = newDataSyncService(node.queryNodeLoopCtx, node.historicalReplica, msFactory, collectionID)
 	go node.dataSyncServices[collectionID].start()
 
 	<-node.queryNodeLoopCtx.Done()

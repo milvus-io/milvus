@@ -31,7 +31,8 @@ import (
 
 // segmentLoader is only responsible for loading the field data from binlog
 type segmentLoader struct {
-	replica ReplicaInterface
+	historicalReplica ReplicaInterface
+	streamReplica     ReplicaInterface
 
 	dataService types.DataService
 
@@ -205,7 +206,7 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, targetField
 	return nil
 }
 
-func newSegmentLoader(ctx context.Context, masterService types.MasterService, indexService types.IndexService, dataService types.DataService, replica ReplicaInterface) *segmentLoader {
+func newSegmentLoader(ctx context.Context, masterService types.MasterService, indexService types.IndexService, dataService types.DataService, historicalReplica ReplicaInterface, streamReplica ReplicaInterface) *segmentLoader {
 	option := &minioKV.Option{
 		Address:           Params.MinioEndPoint,
 		AccessKeyID:       Params.MinioAccessKeyID,
@@ -220,9 +221,10 @@ func newSegmentLoader(ctx context.Context, masterService types.MasterService, in
 		panic(err)
 	}
 
-	iLoader := newIndexLoader(ctx, masterService, indexService, replica)
+	iLoader := newIndexLoader(ctx, masterService, indexService, historicalReplica)
 	return &segmentLoader{
-		replica: replica,
+		historicalReplica: historicalReplica,
+		streamReplica:     streamReplica,
 
 		dataService: dataService,
 

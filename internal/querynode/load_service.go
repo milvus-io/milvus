@@ -55,19 +55,19 @@ func (s *loadService) close() {
 }
 
 func (s *loadService) loadSegmentActively(wg *sync.WaitGroup) {
-	collectionIDs, partitionIDs, segmentIDs := s.segLoader.replica.getSegmentsToLoadBySegmentType(segmentTypeGrowing)
+	collectionIDs, partitionIDs, segmentIDs := s.segLoader.historicalReplica.getSegmentsToLoadBySegmentType(segmentTypeGrowing)
 	if len(collectionIDs) <= 0 {
 		wg.Done()
 		return
 	}
 	log.Debug("do load segment for growing segments:", zap.String("segmentIDs", fmt.Sprintln(segmentIDs)))
 	for i := range collectionIDs {
-		collection, err := s.segLoader.replica.getCollectionByID(collectionIDs[i])
+		collection, err := s.segLoader.historicalReplica.getCollectionByID(collectionIDs[i])
 		if err != nil {
 			log.Warn(err.Error())
 		}
 
-		fieldIDs, err := s.segLoader.replica.getFieldIDsByCollectionID(collectionIDs[i])
+		fieldIDs, err := s.segLoader.historicalReplica.getFieldIDsByCollectionID(collectionIDs[i])
 		if err != nil {
 			log.Error(err.Error())
 			continue
@@ -77,7 +77,7 @@ func (s *loadService) loadSegmentActively(wg *sync.WaitGroup) {
 		err = s.loadSegmentInternal(collectionIDs[i], segment, fieldIDs)
 		if err == nil {
 			// replace segment
-			err = s.segLoader.replica.replaceGrowingSegmentBySealedSegment(segment)
+			err = handOff(s.segLoader.historicalReplica, s.segLoader.streamReplica, segment)
 		}
 		if err != nil {
 			deleteSegment(segment)
@@ -100,17 +100,17 @@ func (s *loadService) loadSegmentPassively(collectionID UniqueID, partitionID Un
 	// TODO: interim solution
 	if len(fieldIDs) == 0 {
 		var err error
-		fieldIDs, err = s.segLoader.replica.getFieldIDsByCollectionID(collectionID)
+		fieldIDs, err = s.segLoader.historicalReplica.getFieldIDsByCollectionID(collectionID)
 		if err != nil {
 			return err
 		}
 	}
 	for _, segmentID := range segmentIDs {
-		collection, err := s.segLoader.replica.getCollectionByID(collectionID)
+		collection, err := s.segLoader.historicalReplica.getCollectionByID(collectionID)
 		if err != nil {
 			return err
 		}
-		_, err = s.segLoader.replica.getPartitionByID(partitionID)
+		_, err = s.segLoader.historicalReplica.getPartitionByID(partitionID)
 		if err != nil {
 			return err
 		}
@@ -119,7 +119,7 @@ func (s *loadService) loadSegmentPassively(collectionID UniqueID, partitionID Un
 		segment.setLoadBinLogEnable(true)
 		err = s.loadSegmentInternal(collectionID, segment, fieldIDs)
 		if err == nil {
-			err = s.segLoader.replica.setSegment(segment)
+			err = s.segLoader.historicalReplica.setSegment(segment)
 		}
 		if err != nil {
 			log.Warn(err.Error())
@@ -137,13 +137,13 @@ func (s *loadService) addSegmentToLoadBuffer(segment *Segment) error {
 	partitionID := segment.partitionID
 	collectionID := segment.collectionID
 	deleteSegment(segment)
-	err := s.segLoader.replica.addSegment(segmentID, partitionID, collectionID, segmentTypeGrowing)
+	err := s.segLoader.historicalReplica.addSegment(segmentID, partitionID, collectionID, segmentTypeGrowing)
 	if err != nil {
 		return err
 	}
-	err = s.segLoader.replica.setSegmentEnableLoadBinLog(segmentID, true)
+	err = s.segLoader.historicalReplica.setSegmentEnableLoadBinLog(segmentID, true)
 	if err != nil {
-		s.segLoader.replica.removeSegment(segmentID)
+		s.segLoader.historicalReplica.removeSegment(segmentID)
 	}
 
 	return err
@@ -163,7 +163,7 @@ func (s *loadService) loadSegmentInternal(collectionID UniqueID, segment *Segmen
 	if err != nil {
 		return err
 	}
-	vectorFieldIDs, err := s.segLoader.replica.getVecFieldIDsByCollectionID(collectionID)
+	vectorFieldIDs, err := s.segLoader.historicalReplica.getVecFieldIDsByCollectionID(collectionID)
 	if err != nil {
 		return err
 	}
@@ -202,10 +202,10 @@ func (s *loadService) loadSegmentInternal(collectionID UniqueID, segment *Segmen
 	return nil
 }
 
-func newLoadService(ctx context.Context, masterService types.MasterService, dataService types.DataService, indexService types.IndexService, replica ReplicaInterface) *loadService {
+func newLoadService(ctx context.Context, masterService types.MasterService, dataService types.DataService, indexService types.IndexService, historicalReplica ReplicaInterface, streamReplica ReplicaInterface) *loadService {
 	ctx1, cancel := context.WithCancel(ctx)
 
-	segLoader := newSegmentLoader(ctx1, masterService, indexService, dataService, replica)
+	segLoader := newSegmentLoader(ctx1, masterService, indexService, dataService, historicalReplica, streamReplica)
 
 	return &loadService{
 		ctx:    ctx1,

@@ -148,7 +148,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		toSeekInfo = append(toSeekInfo, info.Pos)
 
 		log.Debug("prevent inserting segments", zap.String("segmentIDs", fmt.Sprintln(info.ExcludedSegments)))
-		err := w.node.replica.addExcludedSegments(collectionID, info.ExcludedSegments)
+		err := w.node.streamReplica.addExcludedSegments(collectionID, info.ExcludedSegments)
 		if err != nil {
 			log.Error(err.Error())
 			return err
@@ -205,16 +205,24 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 
 	log.Debug("query node load segment", zap.String("loadSegmentRequest", fmt.Sprintln(l.req)))
 
-	hasCollection := l.node.replica.hasCollection(collectionID)
-	hasPartition := l.node.replica.hasPartition(partitionID)
-	if !hasCollection {
-		// loading init
-		err := l.node.replica.addCollection(collectionID, schema)
+	hasCollectionHistorical := l.node.historicalReplica.hasCollection(collectionID)
+	hasCollectionStream := l.node.streamReplica.hasCollection(collectionID)
+	hasPartitionHistorical := l.node.historicalReplica.hasPartition(partitionID)
+	hasPartitionStream := l.node.streamReplica.hasPartition(partitionID)
+	if !hasCollectionHistorical {
+		err := l.node.historicalReplica.addCollection(collectionID, schema)
 		if err != nil {
 			return err
 		}
-		l.node.replica.initExcludedSegments(collectionID)
-		newDS := newDataSyncService(l.node.queryNodeLoopCtx, l.node.replica, l.node.msFactory, collectionID)
+	}
+	if !hasCollectionStream {
+		// loading init
+		err := l.node.streamReplica.addCollection(collectionID, schema)
+		if err != nil {
+			return err
+		}
+		l.node.streamReplica.initExcludedSegments(collectionID)
+		newDS := newDataSyncService(l.node.queryNodeLoopCtx, l.node.streamReplica, l.node.msFactory, collectionID)
 		// ignore duplicated dataSyncService error
 		_ = l.node.addDataSyncService(collectionID, newDS)
 		ds, err := l.node.getDataSyncService(collectionID)
@@ -224,22 +232,24 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 		go ds.start()
 		l.node.searchService.startSearchCollection(collectionID)
 	}
-	if !hasPartition {
-		err := l.node.replica.addPartition(collectionID, partitionID)
+	if !hasPartitionHistorical {
+		err := l.node.historicalReplica.addPartition(collectionID, partitionID)
 		if err != nil {
 			return err
 		}
 	}
-	err := l.node.replica.enablePartition(partitionID)
-	if err != nil {
-		return err
+	if !hasPartitionStream {
+		err := l.node.streamReplica.addPartition(collectionID, partitionID)
+		if err != nil {
+			return err
+		}
 	}
 
 	if len(segmentIDs) == 0 {
 		return nil
 	}
 
-	err = l.node.loadService.loadSegmentPassively(collectionID, partitionID, segmentIDs, fieldIDs)
+	err := l.node.loadService.loadSegmentPassively(collectionID, partitionID, segmentIDs, fieldIDs)
 	if err != nil {
 		return err
 	}
@@ -281,15 +291,21 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 		r.node.removeDataSyncService(r.req.CollectionID)
 		// TODO: use real vChannel
 		vChannel := fmt.Sprintln(r.req.CollectionID)
-		r.node.replica.removeTSafe(vChannel)
-		r.node.replica.removeExcludedSegments(r.req.CollectionID)
+		r.node.historicalReplica.removeTSafe(vChannel)
+		r.node.streamReplica.removeTSafe(vChannel)
+		r.node.streamReplica.removeExcludedSegments(r.req.CollectionID)
 	}
 
 	if r.node.searchService.hasSearchCollection(r.req.CollectionID) {
 		r.node.searchService.stopSearchCollection(r.req.CollectionID)
 	}
 
-	err = r.node.replica.removeCollection(r.req.CollectionID)
+	err = r.node.historicalReplica.removeCollection(r.req.CollectionID)
+	if err != nil {
+		return err
+	}
+
+	err = r.node.streamReplica.removeCollection(r.req.CollectionID)
 	if err != nil {
 		return err
 	}
@@ -326,7 +342,7 @@ func (r *releasePartitionsTask) PreExecute(ctx context.Context) error {
 
 func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 	for _, id := range r.req.PartitionIDs {
-		err := r.node.loadService.segLoader.replica.removePartition(id)
+		err := r.node.loadService.segLoader.historicalReplica.removePartition(id)
 		if err != nil {
 			// not return, try to release all partitions
 			log.Error(err.Error())

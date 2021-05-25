@@ -48,7 +48,7 @@ func (gcNode *gcNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	//// drop collections
 	//for _, collectionID := range gcMsg.gcRecord.collections {
-	//	err := gcNode.replica.removeCollection(collectionID)
+	//	err := gcNode.historicalReplica.removeCollection(collectionID)
 	//	if err != nil {
 	//		log.Println(err)
 	//	}
@@ -56,7 +56,7 @@ func (gcNode *gcNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	//
 	//// drop partitions
 	//for _, partition := range gcMsg.gcRecord.partitions {
-	//	err := gcNode.replica.removePartition(partition.partitionID)
+	//	err := gcNode.historicalReplica.removePartition(partition.partitionID)
 	//	if err != nil {
 	//		log.Println(err)
 	//	}

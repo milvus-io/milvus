@@ -21,7 +21,7 @@ import (
 
 func TestMetaService_start(t *testing.T) {
 	node := newQueryNodeMock()
-	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
+	node.metaService = newMetaService(node.queryNodeLoopCtx, node.historicalReplica)
 
 	node.metaService.start()
 	node.Stop()
@@ -94,7 +94,7 @@ func TestMetaService_printSegmentStruct(t *testing.T) {
 
 func TestMetaService_processCollectionCreate(t *testing.T) {
 	node := newQueryNodeMock()
-	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
+	node.metaService = newMetaService(node.queryNodeLoopCtx, node.historicalReplica)
 
 	id := "0"
 	value := `schema: <
@@ -128,10 +128,10 @@ func TestMetaService_processCollectionCreate(t *testing.T) {
 
 	node.metaService.processCollectionCreate(id, value)
 
-	collectionNum := node.replica.getCollectionNum()
+	collectionNum := node.historicalReplica.getCollectionNum()
 	assert.Equal(t, collectionNum, 1)
 
-	collection, err := node.replica.getCollectionByID(UniqueID(0))
+	collection, err := node.historicalReplica.getCollectionByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 	node.Stop()
@@ -141,7 +141,7 @@ func TestMetaService_processSegmentCreate(t *testing.T) {
 	node := newQueryNodeMock()
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionID, 0)
-	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
+	node.metaService = newMetaService(node.queryNodeLoopCtx, node.historicalReplica)
 
 	id := "0"
 	value := `partitionID: 2021
@@ -149,7 +149,7 @@ func TestMetaService_processSegmentCreate(t *testing.T) {
 
 	(*node.metaService).processSegmentCreate(id, value)
 
-	s, err := node.replica.getSegmentByID(UniqueID(0))
+	s, err := node.historicalReplica.getSegmentByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, s.segmentID, UniqueID(0))
 	node.Stop()
@@ -157,7 +157,7 @@ func TestMetaService_processSegmentCreate(t *testing.T) {
 
 func TestMetaService_processCreate(t *testing.T) {
 	node := newQueryNodeMock()
-	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
+	node.metaService = newMetaService(node.queryNodeLoopCtx, node.historicalReplica)
 
 	key1 := Params.MetaRootPath + "/collection/0"
 	msg1 := `schema: <
@@ -190,10 +190,10 @@ func TestMetaService_processCreate(t *testing.T) {
 				`
 
 	(*node.metaService).processCreate(key1, msg1)
-	collectionNum := node.replica.getCollectionNum()
+	collectionNum := node.historicalReplica.getCollectionNum()
 	assert.Equal(t, collectionNum, 1)
 
-	collection, err := node.replica.getCollectionByID(UniqueID(0))
+	collection, err := node.historicalReplica.getCollectionByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), UniqueID(0))
 
@@ -202,7 +202,7 @@ func TestMetaService_processCreate(t *testing.T) {
 				`
 
 	(*node.metaService).processCreate(key2, msg2)
-	s, err := node.replica.getSegmentByID(UniqueID(0))
+	s, err := node.historicalReplica.getSegmentByID(UniqueID(0))
 	assert.NoError(t, err)
 	assert.Equal(t, s.segmentID, UniqueID(0))
 	node.Stop()
@@ -210,7 +210,7 @@ func TestMetaService_processCreate(t *testing.T) {
 
 func TestMetaService_loadCollections(t *testing.T) {
 	node := newQueryNodeMock()
-	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
+	node.metaService = newMetaService(node.queryNodeLoopCtx, node.historicalReplica)
 
 	err2 := (*node.metaService).loadCollections()
 	assert.Nil(t, err2)
@@ -219,7 +219,7 @@ func TestMetaService_loadCollections(t *testing.T) {
 
 func TestMetaService_loadSegments(t *testing.T) {
 	node := newQueryNodeMock()
-	node.metaService = newMetaService(node.queryNodeLoopCtx, node.replica)
+	node.metaService = newMetaService(node.queryNodeLoopCtx, node.historicalReplica)
 
 	err2 := (*node.metaService).loadSegments()
 	assert.Nil(t, err2)

@@ -142,7 +142,7 @@ func TestSearch_Search(t *testing.T) {
 	assert.NoError(t, err)
 
 	// start dataSync
-	newDS := newDataSyncService(node.queryNodeLoopCtx, node.replica, msFactory, collectionID)
+	newDS := newDataSyncService(node.queryNodeLoopCtx, node.historicalReplica, msFactory, collectionID)
 	err = node.addDataSyncService(collectionID, newDS)
 	assert.NoError(t, err)
 	ds, err := node.getDataSyncService(collectionID)
@@ -150,19 +150,19 @@ func TestSearch_Search(t *testing.T) {
 	go ds.start()
 
 	// start search service
-	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica, msFactory)
+	node.searchService = newSearchService(node.queryNodeLoopCtx, node.historicalReplica, msFactory)
 	go node.searchService.start()
 	node.searchService.startSearchCollection(collectionID)
 
 	// TODO: use real vChannel
 	vChannel := fmt.Sprintln(collectionID)
-	err = node.replica.setTSafe(vChannel, 1000)
+	err = node.historicalReplica.setTSafe(vChannel, 1000)
 	assert.NoError(t, err)
 
 	// load segment
-	err = node.replica.addSegment(segmentID, defaultPartitionID, collectionID, segmentTypeSealed)
+	err = node.historicalReplica.addSegment(segmentID, defaultPartitionID, collectionID, segmentTypeSealed)
 	assert.NoError(t, err)
-	segment, err := node.replica.getSegmentByID(segmentID)
+	segment, err := node.historicalReplica.getSegmentByID(segmentID)
 	assert.NoError(t, err)
 	err = loadFields(segment, DIM, N)
 	assert.NoError(t, err)
@@ -191,7 +191,7 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	assert.NoError(t, err)
 
 	// start dataSync
-	newDS := newDataSyncService(node.queryNodeLoopCtx, node.replica, msFactory, collectionID)
+	newDS := newDataSyncService(node.queryNodeLoopCtx, node.historicalReplica, msFactory, collectionID)
 	err = node.addDataSyncService(collectionID, newDS)
 	assert.NoError(t, err)
 	ds, err := node.getDataSyncService(collectionID)
@@ -199,26 +199,26 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	go ds.start()
 
 	// start search service
-	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica, msFactory)
+	node.searchService = newSearchService(node.queryNodeLoopCtx, node.historicalReplica, msFactory)
 	go node.searchService.start()
 	node.searchService.startSearchCollection(collectionID)
 
 	// TODO: use real vChannel
 	vChannel := fmt.Sprintln(collectionID)
-	err = node.replica.setTSafe(vChannel, 1000)
+	err = node.historicalReplica.setTSafe(vChannel, 1000)
 	assert.NoError(t, err)
 
 	// load segments
-	err = node.replica.addSegment(segmentID1, defaultPartitionID, collectionID, segmentTypeSealed)
+	err = node.historicalReplica.addSegment(segmentID1, defaultPartitionID, collectionID, segmentTypeSealed)
 	assert.NoError(t, err)
-	segment1, err := node.replica.getSegmentByID(segmentID1)
+	segment1, err := node.historicalReplica.getSegmentByID(segmentID1)
 	assert.NoError(t, err)
 	err = loadFields(segment1, DIM, N)
 	assert.NoError(t, err)
 
-	err = node.replica.addSegment(segmentID2, defaultPartitionID, collectionID, segmentTypeSealed)
+	err = node.historicalReplica.addSegment(segmentID2, defaultPartitionID, collectionID, segmentTypeSealed)
 	assert.NoError(t, err)
-	segment2, err := node.replica.getSegmentByID(segmentID2)
+	segment2, err := node.historicalReplica.getSegmentByID(segmentID2)
 	assert.NoError(t, err)
 	err = loadFields(segment2, DIM, N)
 	assert.NoError(t, err)
