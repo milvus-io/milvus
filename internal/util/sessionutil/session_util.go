@@ -16,10 +16,20 @@ import (
 	"go.uber.org/zap"
 )
 
-const DefaultServiceRoot = "/session/"
-const DefaultIDKey = "id"
-const DefaultRetryTimes = 30
-const DefaultTTL = 10
+const (
+	DefaultServiceRoot = "/session/"
+	DefaultIDKey       = "id"
+	DefaultRetryTimes  = 30
+	DefaultTTL         = 10
+)
+
+type SessionEventType int
+
+const (
+	SessionNoneEvent SessionEventType = iota
+	SessionAddEvent
+	SessionDelEvent
+)
 
 // Session is a struct to store service's session, including ServerID, ServerName,
 // Address.
@@ -34,6 +44,11 @@ type Session struct {
 	etcdCli *clientv3.Client
 	leaseID clientv3.LeaseID
 	cancel  context.CancelFunc
+}
+
+type SessionEvent struct {
+	EventType SessionEventType
+	Session   *Session
 }
 
 // NewSession is a helper to build Session object.
@@ -222,34 +237,33 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 }
 
 // GetSessions will get all sessions registered in etcd.
-func (s *Session) GetSessions(prefix string) (map[string]*Session, error) {
+func (s *Session) GetSessions(prefix string) (map[string]*Session, int64, error) {
 	res := make(map[string]*Session)
 	key := path.Join(DefaultServiceRoot, prefix)
 	resp, err := s.etcdCli.Get(s.ctx, key, clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	for _, kv := range resp.Kvs {
 		session := &Session{}
 		err = json.Unmarshal([]byte(kv.Value), session)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		_, mapKey := path.Split(string(kv.Key))
 		res[mapKey] = session
 	}
-	return res, nil
+	return res, resp.Header.Revision, nil
 }
 
 // WatchServices watch the service's up and down in etcd, and saves it into local
 // sessions.
 // If a server up, it will be add to addChannel.
 // If a server is offline, it will be add to delChannel.
-func (s *Session) WatchServices(prefix string) (addChannel <-chan *Session, delChannel <-chan *Session) {
-	addCh := make(chan *Session, 10)
-	delCh := make(chan *Session, 10)
-	rch := s.etcdCli.Watch(s.ctx, path.Join(DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV())
+func (s *Session) WatchServices(prefix string, revision int64) (eventChannel <-chan *SessionEvent) {
+	eventCh := make(chan *SessionEvent, 100)
+	rch := s.etcdCli.Watch(s.ctx, path.Join(DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision))
 	go func() {
 		for {
 			select {
@@ -270,7 +284,10 @@ func (s *Session) WatchServices(prefix string) (addChannel <-chan *Session, delC
 							log.Error("watch services", zap.Error(err))
 							continue
 						}
-						addCh <- session
+						eventCh <- &SessionEvent{
+							EventType: SessionAddEvent,
+							Session:   session,
+						}
 					case mvccpb.DELETE:
 						log.Debug("watch services",
 							zap.Any("delete kv", ev.PrevKv))
@@ -280,14 +297,17 @@ func (s *Session) WatchServices(prefix string) (addChannel <-chan *Session, delC
 							log.Error("watch services", zap.Error(err))
 							continue
 						}
-						delCh <- session
+						eventCh <- &SessionEvent{
+							EventType: SessionDelEvent,
+							Session:   session,
+						}
 					}
 				}
 
 			}
 		}
 	}()
-	return addCh, delCh
+	return eventCh
 }
 
 func initEtcd(etcdAddress string) (*clientv3.Client, error) {

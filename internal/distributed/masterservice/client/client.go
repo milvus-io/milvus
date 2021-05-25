@@ -43,7 +43,7 @@ type GrpcClient struct {
 }
 
 func getMasterServiceAddr(sess *sessionutil.Session) (string, error) {
-	msess, err := sess.GetSessions(typeutil.MasterServiceRole)
+	msess, _, err := sess.GetSessions(typeutil.MasterServiceRole)
 	if err != nil {
 		return "", err
 	}
