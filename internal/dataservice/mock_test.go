@@ -66,6 +66,7 @@ func newTestSchema() *schemapb.CollectionSchema {
 type mockDataNodeClient struct {
 	id    int64
 	state internalpb.StateCode
+	ch    chan interface{}
 }
 
 func newMockDataNodeClient(id int64) (*mockDataNodeClient, error) {
@@ -106,6 +107,9 @@ func (c *mockDataNodeClient) WatchDmChannels(ctx context.Context, in *datapb.Wat
 }
 
 func (c *mockDataNodeClient) FlushSegments(ctx context.Context, in *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
+	if c.ch != nil {
+		c.ch <- in
+	}
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
