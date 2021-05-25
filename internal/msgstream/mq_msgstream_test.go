@@ -15,8 +15,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/stretchr/testify/assert"
@@ -57,7 +59,9 @@ func repackFunc(msgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error) {
 	return result, nil
 }
 
-func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
+func getTsMsg(msgType MsgType, reqID UniqueID) TsMsg {
+	hashValue := uint32(reqID)
+	time := uint64(reqID)
 	baseMsg := BaseMsg{
 		BeginTimestamp: 0,
 		EndTimestamp:   0,
@@ -69,14 +73,14 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     reqID,
-				Timestamp: 11,
+				Timestamp: time,
 				SourceID:  reqID,
 			},
 			CollectionName: "Collection",
 			PartitionName:  "Partition",
 			SegmentID:      1,
 			ChannelID:      "0",
-			Timestamps:     []Timestamp{uint64(reqID)},
+			Timestamps:     []Timestamp{time},
 			RowIDs:         []int64{1},
 			RowData:        []*commonpb.Blob{{}},
 		}
@@ -164,7 +168,9 @@ func getTsMsg(msgType MsgType, reqID UniqueID, hashValue uint32) TsMsg {
 	return nil
 }
 
-func getTimeTickMsg(reqID UniqueID, hashValue uint32, time uint64) TsMsg {
+func getTimeTickMsg(reqID UniqueID) TsMsg {
+	hashValue := uint32(reqID)
+	time := uint64(reqID)
 	baseMsg := BaseMsg{
 		BeginTimestamp: 0,
 		EndTimestamp:   0,
@@ -183,6 +189,28 @@ func getTimeTickMsg(reqID UniqueID, hashValue uint32, time uint64) TsMsg {
 		TimeTickMsg: timeTickResult,
 	}
 	return timeTickMsg
+}
+
+// Generate MsgPack contains 'num' msgs, with timestamp in (start, end)
+func getInsertMsgPack(num int, start int, end int) *MsgPack {
+	Rand := rand.New(rand.NewSource(time.Now().UnixNano()))
+	set := make(map[int]bool)
+	msgPack := MsgPack{}
+	for len(set) < num {
+		reqID := Rand.Int()%(end-start-1) + start
+		_, ok := set[reqID]
+		if !ok {
+			set[reqID] = true
+			msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, int64(reqID)))
+		}
+	}
+	return &msgPack
+}
+
+func getTimeTickMsgPack(reqID UniqueID) *MsgPack {
+	msgPack := MsgPack{}
+	msgPack.Msgs = append(msgPack.Msgs, getTimeTickMsg(reqID))
+	return &msgPack
 }
 
 func initPulsarStream(pulsarAddress string,
@@ -249,11 +277,19 @@ func receiveMsg(outputStream MsgStream, msgCount int) {
 				receiveCount++
 				fmt.Println("msg type: ", v.Type(), ", msg value: ", v)
 			}
+			fmt.Println("================")
 		}
 		if receiveCount >= msgCount {
 			break
 		}
 	}
+}
+
+func printMsgPack(msgPack *MsgPack) {
+	for _, v := range msgPack.Msgs {
+		fmt.Println("msg type: ", v.Type(), ", msg value: ", v)
+	}
+	fmt.Println("================")
 }
 
 func TestStream_PulsarMsgStream_Insert(t *testing.T) {
@@ -264,8 +300,8 @@ func TestStream_PulsarMsgStream_Insert(t *testing.T) {
 	consumerSubName := funcutil.RandomString(8)
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 3))
 
 	inputStream, outputStream := initPulsarStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
 	err := inputStream.Produce(&msgPack)
@@ -286,7 +322,7 @@ func TestStream_PulsarMsgStream_Delete(t *testing.T) {
 	consumerChannels := []string{c}
 	consumerSubName := funcutil.RandomString(8)
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Delete, 1, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Delete, 1))
 	//msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Delete, 3, 3))
 
 	inputStream, outputStream := initPulsarStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
@@ -307,8 +343,8 @@ func TestStream_PulsarMsgStream_Search(t *testing.T) {
 	consumerSubName := funcutil.RandomString(8)
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Search, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Search, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Search, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Search, 3))
 
 	inputStream, outputStream := initPulsarStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
 	err := inputStream.Produce(&msgPack)
@@ -327,8 +363,8 @@ func TestStream_PulsarMsgStream_SearchResult(t *testing.T) {
 	consumerChannels := []string{c}
 	consumerSubName := funcutil.RandomString(8)
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_SearchResult, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_SearchResult, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_SearchResult, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_SearchResult, 3))
 
 	inputStream, outputStream := initPulsarStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
 	err := inputStream.Produce(&msgPack)
@@ -347,8 +383,8 @@ func TestStream_PulsarMsgStream_TimeTick(t *testing.T) {
 	consumerChannels := []string{c}
 	consumerSubName := funcutil.RandomString(8)
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_TimeTick, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_TimeTick, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_TimeTick, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_TimeTick, 3))
 
 	inputStream, outputStream := initPulsarStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
 	err := inputStream.Produce(&msgPack)
@@ -368,8 +404,8 @@ func TestStream_PulsarMsgStream_BroadCast(t *testing.T) {
 	consumerSubName := funcutil.RandomString(8)
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_TimeTick, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_TimeTick, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_TimeTick, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_TimeTick, 3))
 
 	inputStream, outputStream := initPulsarStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
 	err := inputStream.Broadcast(&msgPack)
@@ -389,8 +425,8 @@ func TestStream_PulsarMsgStream_RepackFunc(t *testing.T) {
 	consumerSubName := funcutil.RandomString(8)
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 3))
 
 	inputStream, outputStream := initPulsarStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName, repackFunc)
 	err := inputStream.Produce(&msgPack)
@@ -521,10 +557,10 @@ func TestStream_PulsarMsgStream_DefaultRepackFunc(t *testing.T) {
 	consumerSubName := funcutil.RandomString(8)
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_TimeTick, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Search, 2, 2))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_SearchResult, 3, 3))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_QueryNodeStats, 4, 4))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_TimeTick, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Search, 2))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_SearchResult, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_QueryNodeStats, 4))
 
 	factory := ProtoUDFactory{}
 	pulsarClient, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
@@ -554,14 +590,14 @@ func TestStream_PulsarTtMsgStream_Insert(t *testing.T) {
 	consumerChannels := []string{c1, c2}
 	consumerSubName := funcutil.RandomString(8)
 	msgPack0 := MsgPack{}
-	msgPack0.Msgs = append(msgPack0.Msgs, getTimeTickMsg(0, 0, 0))
+	msgPack0.Msgs = append(msgPack0.Msgs, getTimeTickMsg(0))
 
 	msgPack1 := MsgPack{}
-	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 1, 1))
-	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 3, 3))
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 1))
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 3))
 
 	msgPack2 := MsgPack{}
-	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5, 5, 5))
+	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5))
 
 	inputStream, outputStream := initPulsarTtStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
 	err := inputStream.Broadcast(&msgPack0)
@@ -589,24 +625,25 @@ func TestStream_PulsarTtMsgStream_Seek(t *testing.T) {
 	consumerSubName := funcutil.RandomString(8)
 
 	msgPack0 := MsgPack{}
-	msgPack0.Msgs = append(msgPack0.Msgs, getTimeTickMsg(0, 0, 0))
+	msgPack0.Msgs = append(msgPack0.Msgs, getTimeTickMsg(0))
 
 	msgPack1 := MsgPack{}
-	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 1, 1))
-	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 19, 19))
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 1))
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 19))
 
 	msgPack2 := MsgPack{}
-	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5, 5, 5))
+	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5))
+
 
 	msgPack3 := MsgPack{}
-	msgPack3.Msgs = append(msgPack3.Msgs, getTsMsg(commonpb.MsgType_Insert, 14, 14))
-	msgPack3.Msgs = append(msgPack3.Msgs, getTsMsg(commonpb.MsgType_Insert, 9, 9))
+	msgPack3.Msgs = append(msgPack3.Msgs, getTsMsg(commonpb.MsgType_Insert, 14))
+	msgPack3.Msgs = append(msgPack3.Msgs, getTsMsg(commonpb.MsgType_Insert, 9))
 
 	msgPack4 := MsgPack{}
-	msgPack4.Msgs = append(msgPack4.Msgs, getTimeTickMsg(11, 11, 11))
+	msgPack4.Msgs = append(msgPack4.Msgs, getTimeTickMsg(11))
 
 	msgPack5 := MsgPack{}
-	msgPack5.Msgs = append(msgPack5.Msgs, getTimeTickMsg(15, 15, 15))
+	msgPack5.Msgs = append(msgPack5.Msgs, getTimeTickMsg(15))
 
 	inputStream, outputStream := initPulsarTtStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
 	err := inputStream.Broadcast(&msgPack0)
@@ -643,14 +680,14 @@ func TestStream_PulsarTtMsgStream_UnMarshalHeader(t *testing.T) {
 	consumerSubName := funcutil.RandomString(8)
 
 	msgPack0 := MsgPack{}
-	msgPack0.Msgs = append(msgPack0.Msgs, getTimeTickMsg(0, 0, 0))
+	msgPack0.Msgs = append(msgPack0.Msgs, getTimeTickMsg(0))
 
 	msgPack1 := MsgPack{}
-	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 1, 1))
-	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 3, 3))
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 1))
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 3))
 
 	msgPack2 := MsgPack{}
-	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5, 5, 5))
+	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5))
 
 	inputStream, outputStream := initPulsarTtStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
 	err := inputStream.Broadcast(&msgPack0)
@@ -666,6 +703,42 @@ func TestStream_PulsarTtMsgStream_UnMarshalHeader(t *testing.T) {
 		log.Fatalf("broadcast error = %v", err)
 	}
 	receiveMsg(outputStream, len(msgPack1.Msgs))
+	inputStream.Close()
+	outputStream.Close()
+}
+
+func TestStream_PulsarMsgStream_1(t *testing.T) {
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	c1, c2 := funcutil.RandomString(8), funcutil.RandomString(8)
+	producerChannels := []string{c1, c2}
+	consumerChannels := []string{c1, c2}
+	consumerSubName := funcutil.RandomString(8)
+
+	const msgsInPack = 5
+	const numOfMsgPack = 10
+	msgPacks := make([]*MsgPack, numOfMsgPack)
+
+	// generate MsgPack
+	for i := 0; i < numOfMsgPack; i++ {
+		if i%2 == 0 {
+			msgPacks[i] = getInsertMsgPack(msgsInPack, i/2*10, (i/2+2)*10)
+		} else {
+			msgPacks[i] = getTimeTickMsgPack(int64((i + 1) / 2 * 10))
+		}
+	}
+
+	inputStream, outputStream := initPulsarTtStream(pulsarAddress, producerChannels, consumerChannels, consumerSubName)
+
+	// broadcast
+	for i := 0; i < numOfMsgPack; i++ {
+		printMsgPack(msgPacks[i])
+		err := inputStream.Broadcast(msgPacks[i])
+		assert.Nil(t, err)
+	}
+
+	// consume
+	receiveMsg(outputStream, 25)
+
 	inputStream.Close()
 	outputStream.Close()
 }
@@ -755,8 +828,8 @@ func TestStream_RmqMsgStream_Insert(t *testing.T) {
 	consumerGroupName := "InsertGroup"
 
 	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 1, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 3, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 1))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 3))
 
 	rocksdbName := "/tmp/rocksmq_insert"
 	etcdKV := initRmq(rocksdbName)
@@ -776,14 +849,14 @@ func TestStream_RmqTtMsgStream_Insert(t *testing.T) {
 	consumerSubName := "subInsert"
 
 	msgPack0 := MsgPack{}
-	msgPack0.Msgs = append(msgPack0.Msgs, getTimeTickMsg(0, 0, 0))
+	msgPack0.Msgs = append(msgPack0.Msgs, getTimeTickMsg(0))
 
 	msgPack1 := MsgPack{}
-	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 1, 1))
-	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 3, 3))
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 1))
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 3))
 
 	msgPack2 := MsgPack{}
-	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5, 5, 5))
+	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5))
 
 	rocksdbName := "/tmp/rocksmq_insert_tt"
 	etcdKV := initRmq(rocksdbName)
