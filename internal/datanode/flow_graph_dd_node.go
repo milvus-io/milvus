@@ -109,7 +109,7 @@ func (ddNode *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			timestampMin: msMsg.TimestampMin(),
 			timestampMax: msMsg.TimestampMax(),
 		},
-		flushMessages: make([]*flushMsg, 0),
+		// flushMessages: make([]*flushMsg, 0),
 		gcRecord: &gcRecord{
 			collections: make([]UniqueID, 0),
 		},
@@ -141,34 +141,29 @@ func (ddNode *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	select {
 	case fmsg := <-ddNode.inFlushCh:
 		log.Debug(". receive flush message ...")
-		localSegs := make([]UniqueID, 0, len(fmsg.segmentIDs))
-		for _, segID := range fmsg.segmentIDs {
-			if ddNode.replica.hasSegment(segID) {
-				localSegs = append(localSegs, segID)
-
-				seg, _ := ddNode.replica.getSegmentByID(segID)
-				collID := seg.collectionID
-				if ddNode.ddBuffer.size(collID) > 0 {
-					log.Debug(".. ddl buffer not empty, flushing ...")
-					ddNode.flushMap.Store(collID, ddNode.ddBuffer.ddData[collID])
-					delete(ddNode.ddBuffer.ddData, collID)
-
-					binlogMetaCh := make(chan *datapb.DDLBinlogMeta)
-					go flush(collID, ddNode.flushMap, ddNode.kv, ddNode.idAllocator, binlogMetaCh)
-					go ddNode.flushComplete(binlogMetaCh, collID)
-
-				}
-			}
-		}
-
-		if len(localSegs) <= 0 {
+		segID := fmsg.segmentID
+		if !ddNode.replica.hasSegment(segID) {
 			log.Debug(".. Segment not exist in this datanode, skip flushing ...")
 			break
 		}
 
+		seg, _ := ddNode.replica.getSegmentByID(segID)
+		collID := seg.collectionID
+		if ddNode.ddBuffer.size(collID) > 0 {
+			log.Debug(".. ddl buffer not empty, flushing ...")
+			ddNode.flushMap.Store(collID, ddNode.ddBuffer.ddData[collID])
+			delete(ddNode.ddBuffer.ddData, collID)
+
+			binlogMetaCh := make(chan *datapb.DDLBinlogMeta)
+			go flush(collID, ddNode.flushMap, ddNode.kv, ddNode.idAllocator, binlogMetaCh)
+			go ddNode.flushComplete(binlogMetaCh, collID, fmsg.ddlFlushedCh)
+		} else {
+			// GOOSE TODO newest position
+			fmsg.ddlFlushedCh <- true
+		}
+
 		log.Debug(".. notifying insertbuffer ...")
-		fmsg.segmentIDs = localSegs
-		ddNode.ddMsg.flushMessages = append(ddNode.ddMsg.flushMessages, fmsg)
+		ddNode.ddMsg.flushMessage = fmsg
 
 	default:
 	}
@@ -181,7 +176,7 @@ func (ddNode *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	return []Msg{res}
 }
 
-func (ddNode *ddNode) flushComplete(binlogMetaCh <-chan *datapb.DDLBinlogMeta, collID UniqueID) {
+func (ddNode *ddNode) flushComplete(binlogMetaCh <-chan *datapb.DDLBinlogMeta, collID UniqueID, ddlFlushedCh chan<- bool) {
 	binlogMeta := <-binlogMetaCh
 	if binlogMeta == nil {
 		return
@@ -192,6 +187,10 @@ func (ddNode *ddNode) flushComplete(binlogMetaCh <-chan *datapb.DDLBinlogMeta, c
 	if err != nil {
 		log.Error("Save binlog meta to etcd Wrong", zap.Error(err))
 	}
+
+	ddlFlushedCh <- true
+	// TODO  remove above
+	// ddlFlushCh <- binlogMetaCh
 }
 
 /*

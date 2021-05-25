@@ -93,6 +93,7 @@ func (ib *insertBuffer) size(segmentID UniqueID) int32 {
 }
 
 func (ib *insertBuffer) full(segmentID UniqueID) bool {
+	log.Debug("Segment size", zap.Any("segment", segmentID), zap.Int32("size", ib.size(segmentID)), zap.Int32("maxsize", ib.maxSize))
 	return ib.size(segmentID) >= ib.maxSize
 }
 
@@ -482,55 +483,6 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		}
 	}
 
-	// iMsg is Flush() msg from dataservice
-	//   1. insertBuffer(not empty) -> binLogs -> minIO/S3
-	for _, msg := range iMsg.flushMessages {
-		for _, currentSegID := range msg.segmentIDs {
-			log.Debug(". Receiving flush message", zap.Int64("segmentID", currentSegID))
-
-			// finishCh := make(chan bool)
-			finishCh := make(chan map[UniqueID]string)
-			go ibNode.completeFlush(currentSegID, finishCh)
-
-			if ibNode.insertBuffer.size(currentSegID) <= 0 {
-				log.Debug(".. Buffer empty ...")
-				finishCh <- make(map[UniqueID]string)
-				continue
-			}
-
-			log.Debug(".. Buffer not empty, flushing ..")
-			ibNode.flushMap.Store(currentSegID, ibNode.insertBuffer.insertData[currentSegID])
-			delete(ibNode.insertBuffer.insertData, currentSegID)
-			clearFn := func() {
-				finishCh <- nil
-				log.Debug(".. Clearing flush Buffer ..")
-				ibNode.flushMap.Delete(currentSegID)
-			}
-
-			seg, err := ibNode.replica.getSegmentByID(currentSegID)
-			if err != nil {
-				log.Error("Flush failed .. cannot get segment ..", zap.Error(err))
-				clearFn()
-				continue
-			}
-
-			collSch, err := ibNode.getCollectionSchemaByID(seg.collectionID)
-			if err != nil {
-				log.Error("Flush failed .. cannot get collection schema ..", zap.Error(err))
-				clearFn()
-				continue
-			}
-
-			collMeta := &etcdpb.CollectionMeta{
-				Schema: collSch,
-				ID:     seg.collectionID,
-			}
-
-			go flushSegment(collMeta, currentSegID, seg.partitionID, seg.collectionID,
-				&ibNode.flushMap, ibNode.minIOKV, finishCh, ibNode.idAllocator)
-		}
-	}
-
 	for _, segToFlush := range segToUpdate {
 		// If full, auto flush
 		if ibNode.insertBuffer.full(segToFlush) {
@@ -557,6 +509,57 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				&ibNode.flushMap, ibNode.minIOKV, finishCh, ibNode.idAllocator)
 			go ibNode.bufferAutoFlushPaths(finishCh, segToFlush)
 		}
+	}
+
+	// iMsg is Flush() msg from dataservice
+	//   1. insertBuffer(not empty) -> binLogs -> minIO/S3
+	// for _, msg := range iMsg.flushMessages {
+	// for _, currentSegID := range msg.segmentIDs {
+	if iMsg.flushMessage != nil && ibNode.replica.hasSegment(iMsg.flushMessage.segmentID) {
+		currentSegID := iMsg.flushMessage.segmentID
+		log.Debug(". Receiving flush message", zap.Int64("segmentID", currentSegID))
+
+		finishCh := make(chan map[UniqueID]string)
+		go ibNode.completeFlush(currentSegID, finishCh, iMsg.flushMessage.dmlFlushedCh)
+
+		if ibNode.insertBuffer.size(currentSegID) <= 0 {
+			log.Debug(".. Buffer empty ...")
+			finishCh <- make(map[UniqueID]string)
+		} else {
+			log.Debug(".. Buffer not empty, flushing ..")
+			ibNode.flushMap.Store(currentSegID, ibNode.insertBuffer.insertData[currentSegID])
+			delete(ibNode.insertBuffer.insertData, currentSegID)
+			clearFn := func() {
+				finishCh <- nil
+				log.Debug(".. Clearing flush Buffer ..")
+				ibNode.flushMap.Delete(currentSegID)
+			}
+
+			var collMeta *etcdpb.CollectionMeta
+			var collSch *schemapb.CollectionSchema
+			seg, err := ibNode.replica.getSegmentByID(currentSegID)
+			if err != nil {
+				log.Error("Flush failed .. cannot get segment ..", zap.Error(err))
+				clearFn()
+				// TODO add error handling
+			}
+
+			collSch, err = ibNode.getCollectionSchemaByID(seg.collectionID)
+			if err != nil {
+				log.Error("Flush failed .. cannot get collection schema ..", zap.Error(err))
+				clearFn()
+				// TODO add error handling
+			}
+
+			collMeta = &etcdpb.CollectionMeta{
+				Schema: collSch,
+				ID:     seg.collectionID,
+			}
+
+			go flushSegment(collMeta, currentSegID, seg.partitionID, seg.collectionID,
+				&ibNode.flushMap, ibNode.minIOKV, finishCh, ibNode.idAllocator)
+		}
+
 	}
 
 	if err := ibNode.writeHardTimeTick(iMsg.timeRange.timestampMax); err != nil {
@@ -674,14 +677,17 @@ func (ibNode *insertBufferNode) bufferAutoFlushPaths(wait <-chan map[UniqueID]st
 	return ibNode.replica.bufferAutoFlushBinlogPaths(segID, field2Path)
 }
 
-func (ibNode *insertBufferNode) completeFlush(segID UniqueID, wait <-chan map[UniqueID]string) {
+func (ibNode *insertBufferNode) completeFlush(segID UniqueID, wait <-chan map[UniqueID]string, dmlFlushedCh chan<- bool) {
 	field2Path := <-wait
 
 	if field2Path == nil {
 		return
 	}
 
+	dmlFlushedCh <- true
+
 	// TODO Call DataService RPC SaveBinlogPaths
+	// TODO GetBufferedAutoFlushBinlogPaths
 	ibNode.replica.bufferAutoFlushBinlogPaths(segID, field2Path)
 	bufferField2Paths, err := ibNode.replica.getBufferPaths(segID)
 	if err != nil {

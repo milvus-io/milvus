@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/masterpb"
@@ -42,7 +43,7 @@ import (
 const ctxTimeInMillisecond = 5000
 const debug = false
 
-func newDataNodeMock() *DataNode {
+func newIDLEDataNodeMock() *DataNode {
 	var ctx context.Context
 
 	if debug {
@@ -59,27 +60,59 @@ func newDataNodeMock() *DataNode {
 
 	msFactory := msgstream.NewPmsFactory()
 	node := NewDataNode(ctx, msFactory)
-	replica := newReplica()
 
 	ms := &MasterServiceFactory{
 		ID:             0,
 		collectionID:   1,
 		collectionName: "collection-1",
 	}
+
 	node.SetMasterServiceInterface(ms)
 
 	ds := &DataServiceFactory{}
 	node.SetDataServiceInterface(ds)
 
-	var alloc allocatorInterface = NewAllocatorFactory(100)
+	return node
+}
 
-	chanSize := 100
-	flushChan := make(chan *flushMsg, chanSize)
-	node.flushChan = flushChan
-	node.dataSyncService = newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory)
-	node.dataSyncService.init()
-	node.metaService = newMetaService(node.ctx, replica, node.masterService)
-	node.replica = replica
+func newHEALTHDataNodeMock(dmChannelName, ddChannelName string) *DataNode {
+	var ctx context.Context
+
+	if debug {
+		ctx = context.Background()
+	} else {
+		var cancel context.CancelFunc
+		d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
+		ctx, cancel = context.WithDeadline(context.Background(), d)
+		go func() {
+			<-ctx.Done()
+			cancel()
+		}()
+	}
+
+	msFactory := msgstream.NewPmsFactory()
+	node := NewDataNode(ctx, msFactory)
+
+	ms := &MasterServiceFactory{
+		ID:             0,
+		collectionID:   1,
+		collectionName: "collection-1",
+	}
+
+	node.SetMasterServiceInterface(ms)
+
+	ds := &DataServiceFactory{}
+	node.SetDataServiceInterface(ds)
+
+	vpair := &datapb.VchannelPair{
+		CollectionID:    1,
+		DmlVchannelName: dmChannelName,
+		DdlVchannelName: ddChannelName,
+		DdlPosition:     &datapb.PositionPair{},
+		DmlPosition:     &datapb.PositionPair{},
+	}
+
+	_ = node.NewDataSyncService(vpair)
 
 	return node
 }
@@ -158,6 +191,28 @@ type MasterServiceFactory struct {
 
 type DataServiceFactory struct {
 	types.DataService
+}
+
+func (ds *DataServiceFactory) RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
+	ret := &datapb.RegisterNodeResponse{Status: &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success}}
+
+	ret.InitParams = &internalpb.InitParams{
+		NodeID: Params.NodeID,
+		StartParams: []*commonpb.KeyValuePair{
+			{Key: "DDChannelName", Value: "fake-dd-channel-name"},
+			{Key: "SegmentStatisticsChannelName", Value: "fake-segment-statistics-channel-name"},
+			{Key: "TimeTickChannelName", Value: "fake-time-tick-channel-name"},
+			{Key: "CompleteFlushChannelName", Value: "fake-complete-flush-name"},
+		},
+	}
+
+	return ret, nil
+}
+
+func (ds *DataServiceFactory) WatchDmChannels(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error) {
+	ret := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+	return ret, nil
 }
 
 func (mf *MetaFactory) CollectionMetaFactory(collectionID UniqueID, collectionName string) *etcdpb.CollectionMeta {
@@ -377,7 +432,7 @@ func GenRowData() (rawData []byte) {
 	return
 }
 
-func (df *DataFactory) GenMsgStreamInsertMsg(idx int) *msgstream.InsertMsg {
+func (df *DataFactory) GenMsgStreamInsertMsg(idx int, chanName string) *msgstream.InsertMsg {
 	var msg = &msgstream.InsertMsg{
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{uint32(idx)},
@@ -385,14 +440,14 @@ func (df *DataFactory) GenMsgStreamInsertMsg(idx int) *msgstream.InsertMsg {
 		InsertRequest: internalpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
-				MsgID:     0, // GOOSE TODO
+				MsgID:     0,
 				Timestamp: Timestamp(idx + 1000),
 				SourceID:  0,
 			},
-			CollectionName: "col1", // GOOSE TODO
+			CollectionName: "col1",
 			PartitionName:  "default",
-			SegmentID:      1,   // GOOSE TODO
-			ChannelID:      "0", // GOOSE TODO
+			SegmentID:      1,
+			ChannelID:      chanName,
 			Timestamps:     []Timestamp{Timestamp(idx + 1000)},
 			RowIDs:         []UniqueID{UniqueID(idx)},
 			RowData:        []*commonpb.Blob{{Value: df.rawData}},
@@ -401,9 +456,9 @@ func (df *DataFactory) GenMsgStreamInsertMsg(idx int) *msgstream.InsertMsg {
 	return msg
 }
 
-func (df *DataFactory) GetMsgStreamTsInsertMsgs(n int) (inMsgs []msgstream.TsMsg) {
+func (df *DataFactory) GetMsgStreamTsInsertMsgs(n int, chanName string) (inMsgs []msgstream.TsMsg) {
 	for i := 0; i < n; i++ {
-		var msg = df.GenMsgStreamInsertMsg(i)
+		var msg = df.GenMsgStreamInsertMsg(i, chanName)
 		var tsMsg msgstream.TsMsg = msg
 		inMsgs = append(inMsgs, tsMsg)
 	}
@@ -412,7 +467,7 @@ func (df *DataFactory) GetMsgStreamTsInsertMsgs(n int) (inMsgs []msgstream.TsMsg
 
 func (df *DataFactory) GetMsgStreamInsertMsgs(n int) (inMsgs []*msgstream.InsertMsg) {
 	for i := 0; i < n; i++ {
-		var msg = df.GenMsgStreamInsertMsg(i)
+		var msg = df.GenMsgStreamInsertMsg(i, "")
 		inMsgs = append(inMsgs, msg)
 	}
 	return
@@ -436,7 +491,7 @@ func NewAllocatorFactory(id ...UniqueID) *AllocatorFactory {
 func (alloc *AllocatorFactory) allocID() (UniqueID, error) {
 	alloc.Lock()
 	defer alloc.Unlock()
-	return alloc.r.Int63n(1000000), nil
+	return alloc.r.Int63n(10000), nil
 }
 
 func (alloc *AllocatorFactory) genKey(isalloc bool, ids ...UniqueID) (key string, err error) {
