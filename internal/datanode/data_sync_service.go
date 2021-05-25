@@ -18,6 +18,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"go.etcd.io/etcd/clientv3"
@@ -26,35 +27,44 @@ import (
 )
 
 type dataSyncService struct {
-	ctx         context.Context
-	fg          *flowgraph.TimeTickedFlowGraph
-	flushChan   <-chan *flushMsg
-	replica     Replica
-	idAllocator allocatorInterface
-	msFactory   msgstream.Factory
+	ctx          context.Context
+	fg           *flowgraph.TimeTickedFlowGraph
+	flushChan    <-chan *flushMsg
+	replica      Replica
+	idAllocator  allocatorInterface
+	msFactory    msgstream.Factory
+	collectionID UniqueID
 }
 
-func newDataSyncService(ctx context.Context, flushChan <-chan *flushMsg,
-	replica Replica, alloc allocatorInterface, factory msgstream.Factory) *dataSyncService {
+func newDataSyncService(ctx context.Context,
+	flushChan <-chan *flushMsg,
+	replica Replica,
+	alloc allocatorInterface,
+	factory msgstream.Factory,
+	vchanPair *datapb.VchannelPair) *dataSyncService {
+
 	service := &dataSyncService{
-		ctx:         ctx,
-		fg:          nil,
-		flushChan:   flushChan,
-		replica:     replica,
-		idAllocator: alloc,
-		msFactory:   factory,
+		ctx:          ctx,
+		fg:           nil,
+		flushChan:    flushChan,
+		replica:      replica,
+		idAllocator:  alloc,
+		msFactory:    factory,
+		collectionID: vchanPair.GetCollectionID(),
 	}
+
+	service.initNodes(vchanPair)
 	return service
 }
 
-func (dsService *dataSyncService) init() {
-	if len(Params.InsertChannelNames) == 0 {
-		log.Error("InsertChannels not readly, init datasync service failed")
-		return
-	}
+// func (dsService *dataSyncService) init() {
+// if len(Params.InsertChannelNames) == 0 {
+//     log.Error("InsertChannels not readly, init datasync service failed")
+//     return
+// }
 
-	dsService.initNodes()
-}
+//     dsService.initNodes()
+// }
 
 func (dsService *dataSyncService) start() {
 	log.Debug("Data Sync Service Start Successfully")
@@ -71,7 +81,7 @@ func (dsService *dataSyncService) close() {
 	}
 }
 
-func (dsService *dataSyncService) initNodes() {
+func (dsService *dataSyncService) initNodes(vchanPair *datapb.VchannelPair) {
 	// TODO: add delete pipeline support
 	var kvClient *clientv3.Client
 	var err error
@@ -96,14 +106,16 @@ func (dsService *dataSyncService) initNodes() {
 	m := map[string]interface{}{
 		"PulsarAddress":  Params.PulsarAddress,
 		"ReceiveBufSize": 1024,
-		"PulsarBufSize":  1024}
+		"PulsarBufSize":  1024,
+	}
+
 	err = dsService.msFactory.SetParams(m)
 	if err != nil {
 		panic(err)
 	}
 
-	var dmStreamNode Node = newDmInputNode(dsService.ctx, dsService.msFactory)
-	var ddStreamNode Node = newDDInputNode(dsService.ctx, dsService.msFactory)
+	var dmStreamNode Node = newDmInputNode(dsService.ctx, dsService.msFactory, vchanPair.GetDmlVchannelName(), vchanPair.GetDmlPosition())
+	var ddStreamNode Node = newDDInputNode(dsService.ctx, dsService.msFactory, vchanPair.GetDdlVchannelName(), vchanPair.GetDdlPosition())
 
 	var filterDmNode Node = newFilteredDmNode()
 	var ddNode Node = newDDNode(dsService.ctx, mt, dsService.flushChan, dsService.replica, dsService.idAllocator)

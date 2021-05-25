@@ -30,7 +30,7 @@ type key2SegMsg struct {
 type ddMsg struct {
 	collectionRecords map[UniqueID][]*metaOperateRecord
 	partitionRecords  map[UniqueID][]*metaOperateRecord
-	flushMessages     []*flushMsg
+	flushMessage      *flushMsg
 	gcRecord          *gcRecord
 	timeRange         TimeRange
 }
@@ -42,7 +42,7 @@ type metaOperateRecord struct {
 
 type insertMsg struct {
 	insertMessages []*msgstream.InsertMsg
-	flushMessages  []*flushMsg
+	flushMessage   *flushMsg
 	gcRecord       *gcRecord
 	timeRange      TimeRange
 	startPositions []*internalpb.MsgPosition
@@ -66,8 +66,10 @@ type gcRecord struct {
 type flushMsg struct {
 	msgID        UniqueID
 	timestamp    Timestamp
-	segmentIDs   []UniqueID
+	segmentID    UniqueID
 	collectionID UniqueID
+	ddlFlushedCh chan<- bool
+	dmlFlushedCh chan<- bool
 }
 
 func (ksMsg *key2SegMsg) TimeTick() Timestamp {

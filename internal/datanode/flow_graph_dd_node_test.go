@@ -151,7 +151,7 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	inFlushCh <- &flushMsg{
 		msgID:        5,
 		timestamp:    5,
-		segmentIDs:   []UniqueID{1},
+		segmentID:    UniqueID(1),
 		collectionID: collID,
 	}
 
