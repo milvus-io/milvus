@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/opentracing/opentracing-go"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
@@ -34,8 +35,9 @@ type searchCollection struct {
 	releaseCtx context.Context
 	cancel     context.CancelFunc
 
-	collectionID UniqueID
-	replica      ReplicaInterface
+	collectionID      UniqueID
+	historicalReplica ReplicaInterface
+	streamReplica     ReplicaInterface
 
 	msgBuffer     chan *msgstream.SearchMsg
 	unsolvedMSgMu sync.Mutex // guards unsolvedMsg
@@ -52,7 +54,7 @@ type searchCollection struct {
 
 type ResultEntityIds []UniqueID
 
-func newSearchCollection(releaseCtx context.Context, cancel context.CancelFunc, collectionID UniqueID, replica ReplicaInterface, searchResultStream msgstream.MsgStream) *searchCollection {
+func newSearchCollection(releaseCtx context.Context, cancel context.CancelFunc, collectionID UniqueID, historicalReplica ReplicaInterface, streamReplica ReplicaInterface, searchResultStream msgstream.MsgStream) *searchCollection {
 	receiveBufSize := Params.SearchReceiveBufSize
 	msgBuffer := make(chan *msgstream.SearchMsg, receiveBufSize)
 	unsolvedMsg := make([]*msgstream.SearchMsg, 0)
@@ -61,8 +63,9 @@ func newSearchCollection(releaseCtx context.Context, cancel context.CancelFunc, 
 		releaseCtx: releaseCtx,
 		cancel:     cancel,
 
-		collectionID: collectionID,
-		replica:      replica,
+		collectionID:      collectionID,
+		historicalReplica: historicalReplica,
+		streamReplica:     streamReplica,
 
 		msgBuffer:   msgBuffer,
 		unsolvedMsg: unsolvedMsg,
@@ -82,8 +85,8 @@ func (s *searchCollection) start() {
 func (s *searchCollection) register(collectionID UniqueID) {
 	// TODO: use real vChannel
 	vChannel := fmt.Sprintln(collectionID)
-	s.replica.addTSafe(vChannel)
-	tSafe, err := s.replica.getTSafer(vChannel)
+	s.streamReplica.addTSafe(vChannel)
+	tSafe, err := s.streamReplica.getTSafer(vChannel)
 	if err != nil {
 		log.Error(err.Error())
 		return
@@ -113,7 +116,7 @@ func (s *searchCollection) waitNewTSafe() (Timestamp, error) {
 	s.tSafeWatcher.hasUpdate()
 	// TODO: use real vChannel
 	vChannel := fmt.Sprintln(s.collectionID)
-	ts, err := s.replica.getTSafe(vChannel)
+	ts, err := s.streamReplica.getTSafe(vChannel)
 	return ts, err
 }
 
@@ -267,37 +270,58 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 	}
 }
 
-// TODO:: cache map[dsl]plan
-// TODO: reBatched search requests
 func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
+	searchResults := make([]*SearchResult, 0)
+	matchedSegments := make([]*Segment, 0)
+
+	// historical search
+	sp1, result1, match1, req1, plan1, err := s.searchInReplica(s.historicalReplica, searchMsg)
+	if err != nil {
+		return err
+	}
+	searchResults = append(searchResults, result1...)
+	matchedSegments = append(matchedSegments, match1...)
+
+	// streaming search
+	_, result2, match2, _, _, err := s.searchInReplica(s.streamReplica, searchMsg)
+	if err != nil {
+		return err
+	}
+	searchResults = append(searchResults, result2...)
+	matchedSegments = append(matchedSegments, match2...)
+
+	// TODO: does the plan and requests from historical replica and stream replica are the same?
+	return s.searchResultWrapper(sp1, searchMsg, searchResults, matchedSegments, req1, req1[0], plan1)
+}
+
+func (s *searchCollection) searchInReplica(replica ReplicaInterface, searchMsg *msgstream.SearchMsg) (opentracing.Span, []*SearchResult, []*Segment, []*searchRequest, *Plan, error) {
 	sp, ctx := trace.StartSpanFromContext(searchMsg.TraceCtx())
-	defer sp.Finish()
 	searchMsg.SetTraceCtx(ctx)
 	searchTimestamp := searchMsg.Base.Timestamp
 
 	collectionID := searchMsg.CollectionID
-	collection, err := s.replica.getCollectionByID(collectionID)
+	collection, err := replica.getCollectionByID(collectionID)
 	if err != nil {
-		return err
+		return nil, nil, nil, nil, nil, err
 	}
 	var plan *Plan
 	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
 		expr := searchMsg.SerializedExprPlan
 		plan, err = createPlanByExpr(*collection, expr)
 		if err != nil {
-			return err
+			return nil, nil, nil, nil, nil, err
 		}
 	} else {
 		dsl := searchMsg.Dsl
 		plan, err = createPlan(*collection, dsl)
 		if err != nil {
-			return err
+			return nil, nil, nil, nil, nil, err
 		}
 	}
 	searchRequestBlob := searchMsg.PlaceholderGroup
 	searchReq, err := parseSearchRequest(plan, searchRequestBlob)
 	if err != nil {
-		return err
+		return nil, nil, nil, nil, nil, err
 	}
 	queryNum := searchReq.getNumOfQuery()
 	searchRequests := make([]*searchRequest, 0)
@@ -307,22 +331,22 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	matchedSegments := make([]*Segment, 0)
 
 	//log.Debug("search msg's partitionID = ", partitionIDsInQuery)
-	partitionIDsInCol, err := s.replica.getPartitionIDs(collectionID)
+	partitionIDsInCol, err := replica.getPartitionIDs(collectionID)
 	if err != nil {
-		return err
+		return nil, nil, nil, nil, nil, err
 	}
 	var searchPartitionIDs []UniqueID
 	partitionIDsInQuery := searchMsg.PartitionIDs
 	if len(partitionIDsInQuery) == 0 {
 		if len(partitionIDsInCol) == 0 {
-			return errors.New("none of this collection's partition has been loaded")
+			return nil, nil, nil, nil, nil, errors.New("none of this collection's partition has been loaded")
 		}
 		searchPartitionIDs = partitionIDsInCol
 	} else {
 		for _, id := range partitionIDsInQuery {
-			_, err2 := s.replica.getPartitionByID(id)
+			_, err2 := replica.getPartitionByID(id)
 			if err2 != nil {
-				return err2
+				return nil, nil, nil, nil, nil, err2
 			}
 		}
 		searchPartitionIDs = partitionIDsInQuery
@@ -338,19 +362,19 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 			oplog.Object("dsl", searchMsg.Dsl))
 	}
 	for _, partitionID := range searchPartitionIDs {
-		segmentIDs, err := s.replica.getSegmentIDs(partitionID)
+		segmentIDs, err := replica.getSegmentIDs(partitionID)
 		if err != nil {
-			return err
+			return nil, nil, nil, nil, nil, err
 		}
 		for _, segmentID := range segmentIDs {
-			segment, err := s.replica.getSegmentByID(segmentID)
+			segment, err := replica.getSegmentByID(segmentID)
 			if err != nil {
-				return err
+				return nil, nil, nil, nil, nil, err
 			}
 			searchResult, err := segment.segmentSearch(plan, searchRequests, []Timestamp{searchTimestamp})
 
 			if err != nil {
-				return err
+				return nil, nil, nil, nil, nil, err
 			}
 			searchResults = append(searchResults, searchResult)
 			matchedSegments = append(matchedSegments, segment)
@@ -358,6 +382,20 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	}
 
 	sp.LogFields(oplog.String("statistical time", "segment search end"))
+	return sp, searchResults, matchedSegments, searchRequests, plan, nil
+}
+
+// TODO:: cache map[dsl]plan
+// TODO: reBatched search requests
+func (s *searchCollection) searchResultWrapper(sp opentracing.Span,
+	searchMsg *msgstream.SearchMsg,
+	searchResults []*SearchResult,
+	matchedSegments []*Segment,
+	searchRequests []*searchRequest,
+	searchReq *searchRequest,
+	plan *Plan) error {
+	defer sp.Finish()
+	searchTimestamp := searchMsg.Base.Timestamp
 	if len(searchResults) <= 0 {
 		for _, group := range searchRequests {
 			nq := group.getNumOfQuery()
@@ -386,7 +424,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 					MetricType:      plan.getMetricType(),
 				},
 			}
-			err = s.publishSearchResult(searchResultMsg, searchMsg.CollectionID)
+			err := s.publishSearchResult(searchResultMsg, searchMsg.CollectionID)
 			if err != nil {
 				return err
 			}
@@ -399,7 +437,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	var marshaledHits *MarshaledHits = nil
 	if numSegment == 1 {
 		inReduced[0] = true
-		err = fillTargetEntry(plan, searchResults, matchedSegments, inReduced)
+		err := fillTargetEntry(plan, searchResults, matchedSegments, inReduced)
 		sp.LogFields(oplog.String("statistical time", "fillTargetEntry end"))
 		if err != nil {
 			return err
@@ -410,7 +448,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 			return err
 		}
 	} else {
-		err = reduceSearchResults(searchResults, numSegment, inReduced)
+		err := reduceSearchResults(searchResults, numSegment, inReduced)
 		sp.LogFields(oplog.String("statistical time", "reduceSearchResults end"))
 		if err != nil {
 			return err

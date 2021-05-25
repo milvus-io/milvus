@@ -190,7 +190,7 @@ func (node *QueryNode) Start() error {
 	}
 
 	// init services and manager
-	node.searchService = newSearchService(node.queryNodeLoopCtx, node.historicalReplica, node.msFactory)
+	node.searchService = newSearchService(node.queryNodeLoopCtx, node.historicalReplica, node.streamReplica, node.msFactory)
 	node.loadService = newLoadService(node.queryNodeLoopCtx, node.masterService, node.dataService, node.indexService, node.historicalReplica, node.streamReplica)
 	node.statsService = newStatsService(node.queryNodeLoopCtx, node.historicalReplica, node.loadService.segLoader.indexLoader.fieldStatsChan, node.msFactory)
 
