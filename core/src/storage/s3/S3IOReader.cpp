@@ -25,6 +25,7 @@ S3IOReader::open(const std::string& name) {
 void
 S3IOReader::read(void* ptr, int64_t size) {
     memcpy(ptr, buffer_.data() + pos_, size);
+    pos_ += size;
 }
 
 void
