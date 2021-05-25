@@ -102,17 +102,24 @@ func (s *Server) init() error {
 	// --- QueryService ---
 	log.Debug("QueryService", zap.String("address", Params.QueryServiceAddress))
 	log.Debug("Init Query service client ...")
-	queryService := qsc.NewClient(Params.QueryServiceAddress, 20*time.Second)
+	queryService, err := qsc.NewClient(Params.QueryServiceAddress, 20*time.Second)
+	if err != nil {
+		return err
+	}
+
 	if err = queryService.Init(); err != nil {
 		panic(err)
 	}
+
 	if err = queryService.Start(); err != nil {
 		panic(err)
 	}
+
 	err = funcutil.WaitForComponentInitOrHealthy(ctx, queryService, "QueryService", 1000000, time.Millisecond*200)
 	if err != nil {
 		panic(err)
 	}
+
 	if err := s.SetQueryService(queryService); err != nil {
 		panic(err)
 	}

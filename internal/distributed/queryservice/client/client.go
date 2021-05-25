@@ -36,14 +36,14 @@ type Client struct {
 	retry   int
 }
 
-func NewClient(address string, timeout time.Duration) *Client {
+func NewClient(address string, timeout time.Duration) (*Client, error) {
 	return &Client{
 		grpcClient: nil,
 		conn:       nil,
 		addr:       address,
 		timeout:    timeout,
 		retry:      300,
-	}
+	}, nil
 }
 
 func (c *Client) Init() error {

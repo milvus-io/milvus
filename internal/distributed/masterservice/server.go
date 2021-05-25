@@ -61,7 +61,7 @@ type Server struct {
 	newProxyServiceClient func(string) types.ProxyService
 	newDataServiceClient  func(string) types.DataService
 	newIndexServiceClient func(string) types.IndexService
-	newQueryServiceClient func(string) types.QueryService
+	newQueryServiceClient func(string) (types.QueryService, error)
 
 	closer io.Closer
 }
@@ -121,15 +121,18 @@ func (s *Server) setClient() {
 		}
 		return isClient
 	}
-	s.newQueryServiceClient = func(s string) types.QueryService {
-		qsClient := qsc.NewClient(s, 5*time.Second)
+	s.newQueryServiceClient = func(s string) (types.QueryService, error) {
+		qsClient, err := qsc.NewClient(s, 5*time.Second)
+		if err != nil {
+			panic(err)
+		}
 		if err := qsClient.Init(); err != nil {
 			panic(err)
 		}
 		if err := qsClient.Start(); err != nil {
 			panic(err)
 		}
-		return qsClient
+		return qsClient, nil
 	}
 }
 
@@ -190,7 +193,7 @@ func (s *Server) init() error {
 	}
 	if s.newQueryServiceClient != nil {
 		log.Debug("query service", zap.String("address", Params.QueryServiceAddress))
-		queryService := s.newQueryServiceClient(Params.QueryServiceAddress)
+		queryService, _ := s.newQueryServiceClient(Params.QueryServiceAddress)
 		if err := s.masterService.SetQueryService(queryService); err != nil {
 			panic(err)
 		}
