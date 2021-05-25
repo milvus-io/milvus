@@ -112,10 +112,6 @@ func TestGrpcService(t *testing.T) {
 	msFactory := msgstream.NewPmsFactory()
 	svr, err := NewServer(ctx, msFactory)
 	assert.Nil(t, err)
-	svr.connectQueryService = false
-	svr.connectProxyService = false
-	svr.connectIndexService = false
-	svr.connectDataService = false
 
 	cms.Params.Init()
 	cms.Params.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
@@ -188,16 +184,16 @@ func TestGrpcService(t *testing.T) {
 		return nil
 	}
 
-	core.GetBinlogFilePathsFromDataServiceReq = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error) {
+	core.CallGetBinlogFilePathsService = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error) {
 		return []string{"file1", "file2", "file3"}, nil
 	}
-	core.GetNumRowsReq = func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error) {
+	core.CallGetNumRowsService = func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error) {
 		return cms.Params.MinSegmentSizeToEnableIndex, nil
 	}
 
 	var binlogLock sync.Mutex
 	binlogPathArray := make([]string, 0, 16)
-	core.BuildIndexReq = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error) {
+	core.CallBuildIndexService = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error) {
 		binlogLock.Lock()
 		defer binlogLock.Unlock()
 		binlogPathArray = append(binlogPathArray, binlog...)
@@ -206,7 +202,7 @@ func TestGrpcService(t *testing.T) {
 
 	var dropIDLock sync.Mutex
 	dropID := make([]typeutil.UniqueID, 0, 16)
-	core.DropIndexReq = func(ctx context.Context, indexID typeutil.UniqueID) error {
+	core.CallDropIndexService = func(ctx context.Context, indexID typeutil.UniqueID) error {
 		dropIDLock.Lock()
 		defer dropIDLock.Unlock()
 		dropID = append(dropID, indexID)
@@ -214,12 +210,12 @@ func TestGrpcService(t *testing.T) {
 	}
 
 	collectionMetaCache := make([]string, 0, 16)
-	core.InvalidateCollectionMetaCache = func(ctx context.Context, ts typeutil.Timestamp, dbName string, collectionName string) error {
+	core.CallInvalidateCollectionMetaCacheService = func(ctx context.Context, ts typeutil.Timestamp, dbName string, collectionName string) error {
 		collectionMetaCache = append(collectionMetaCache, collectionName)
 		return nil
 	}
 
-	core.ReleaseCollection = func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
+	core.CallReleaseCollectionService = func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
 		return nil
 	}
 
@@ -908,14 +904,10 @@ func (m *mockQuery) Stop() error {
 func TestRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	svr := Server{
-		masterService:       &mockCore{},
-		ctx:                 ctx,
-		cancel:              cancel,
-		grpcErrChan:         make(chan error),
-		connectDataService:  true,
-		connectProxyService: true,
-		connectIndexService: true,
-		connectQueryService: true,
+		masterService: &mockCore{},
+		ctx:           ctx,
+		cancel:        cancel,
+		grpcErrChan:   make(chan error),
 	}
 	Params.Init()
 	Params.Port = 1000000
