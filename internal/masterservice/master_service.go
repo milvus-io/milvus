@@ -328,18 +328,18 @@ func (c *Core) startDataServiceSegmentLoop() {
 				segInfos = append(segInfos, segInfoMsg.Segment)
 			}
 			if len(segInfos) > 0 {
-				startPosByte, err := json.Marshal(segMsg.StartPositions)
+				startPosStr, err := EncodeMsgPositions(segMsg.StartPositions)
 				if err != nil {
-					log.Error("json.Marshal fail", zap.String("err", err.Error()))
+					log.Error("encode msg start positions fail", zap.String("err", err.Error()))
 					continue
 				}
-				endPosByte, err := json.Marshal(segMsg.EndPositions)
+				endPosStr, err := EncodeMsgPositions(segMsg.EndPositions)
 				if err != nil {
-					log.Error("json.Marshal fail", zap.String("err", err.Error()))
+					log.Error("encode msg end positions fail", zap.String("err", err.Error()))
 					continue
 				}
 
-				if _, err := c.MetaTable.AddSegment(segInfos, string(startPosByte), string(endPosByte)); err != nil {
+				if _, err := c.MetaTable.AddSegment(segInfos, startPosStr, endPosStr); err != nil {
 					//what if master add segment failed, but data service success?
 					log.Debug("add segment info meta table failed ", zap.String("error", err.Error()))
 					continue
@@ -362,14 +362,14 @@ func (c *Core) startDataNodeFlushedSegmentLoop() {
 				return
 			}
 
-			startPosByte, err := json.Marshal(segMsg.StartPositions)
+			startPosStr, err := EncodeMsgPositions(segMsg.StartPositions)
 			if err != nil {
-				log.Error("json.Marshal fail", zap.String("err", err.Error()))
+				log.Error("encode msg start positions fail", zap.String("err", err.Error()))
 				continue
 			}
-			endPosByte, err := json.Marshal(segMsg.EndPositions)
+			endPosStr, err := EncodeMsgPositions(segMsg.EndPositions)
 			if err != nil {
-				log.Error("json.Marshal fail", zap.String("err", err.Error()))
+				log.Error("encode msg end positions fail", zap.String("err", err.Error()))
 				continue
 			}
 
@@ -424,9 +424,11 @@ func (c *Core) startDataNodeFlushedSegmentLoop() {
 				}
 			}
 
-			_, err = c.MetaTable.AddIndex(segIdxInfos, string(startPosByte), string(endPosByte))
-			if err != nil {
-				log.Error("AddIndex fail", zap.String("err", err.Error()))
+			if len(segIdxInfos) > 0 {
+				_, err = c.MetaTable.AddIndex(segIdxInfos, startPosStr, endPosStr)
+				if err != nil {
+					log.Error("AddIndex fail", zap.String("err", err.Error()))
+				}
 			}
 		}
 	}
