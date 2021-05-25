@@ -181,7 +181,7 @@ func (s *Server) init() error {
 	log.Debug("Data service", zap.String("address", Params.DataServiceAddress))
 	log.Debug("QueryNode Init data service client ...")
 
-	dataService := dsc.NewClient(Params.DataServiceAddress)
+	dataService := dsc.NewClient(Params.DataServiceAddress, []string{qn.Params.EtcdAddress}, 10)
 	if err = dataService.Init(); err != nil {
 		panic(err)
 	}

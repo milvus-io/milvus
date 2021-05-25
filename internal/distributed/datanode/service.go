@@ -56,7 +56,7 @@ type Server struct {
 	dataService   types.DataService
 
 	newMasterServiceClient func(string) (types.MasterService, error)
-	newDataServiceClient   func(string) types.DataService
+	newDataServiceClient   func(string, string, time.Duration) types.DataService
 
 	closer io.Closer
 }
@@ -72,8 +72,8 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		newMasterServiceClient: func(s string) (types.MasterService, error) {
 			return msc.NewClient(s, []string{dn.Params.EtcdAddress}, 20*time.Second)
 		},
-		newDataServiceClient: func(s string) types.DataService {
-			return dsc.NewClient(Params.DataServiceAddress)
+		newDataServiceClient: func(s, etcdAddress string, timeout time.Duration) types.DataService {
+			return dsc.NewClient(Params.DataServiceAddress, []string{etcdAddress}, timeout)
 		},
 	}
 
@@ -205,7 +205,7 @@ func (s *Server) init() error {
 	if s.newDataServiceClient != nil {
 		log.Debug("Data service address", zap.String("address", Params.DataServiceAddress))
 		log.Debug("DataNode Init data service client ...")
-		dataServiceClient := s.newDataServiceClient(Params.DataServiceAddress)
+		dataServiceClient := s.newDataServiceClient(Params.DataServiceAddress, dn.Params.EtcdAddress, 10)
 		if err = dataServiceClient.Init(); err != nil {
 			panic(err)
 		}
