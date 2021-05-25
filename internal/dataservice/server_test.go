@@ -223,7 +223,7 @@ func TestFlush(t *testing.T) {
 	})
 	assert.Nil(t, err)
 	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-	ids, err := svr.segAllocator.GetFlushableSegments(context.TODO(), expireTs)
+	ids, err := svr.segAllocator.GetFlushableSegments(context.TODO(), "channel-1", expireTs)
 	assert.Nil(t, err)
 	assert.EqualValues(t, 1, len(ids))
 	assert.EqualValues(t, segID, ids[0])
@@ -606,6 +606,107 @@ func TestSaveBinlogPaths(t *testing.T) {
 	})
 }
 
+func TestDataNodeTtChannel(t *testing.T) {
+	svr := newTestServer(t)
+	defer closeTestServer(t, svr)
+
+	svr.meta.AddCollection(&datapb.CollectionInfo{
+		ID:         0,
+		Schema:     newTestSchema(),
+		Partitions: []int64{0},
+	})
+
+	ch := make(chan interface{}, 1)
+	svr.createDataNodeClient = func(addr string) types.DataNode {
+		cli := newMockDataNodeClient(0)
+		cli.ch = ch
+		return cli
+	}
+
+	ttMsgStream, err := svr.msFactory.NewMsgStream(context.TODO())
+	assert.Nil(t, err)
+	ttMsgStream.AsProducer([]string{Params.TimeTickChannelName})
+	ttMsgStream.Start()
+	defer ttMsgStream.Close()
+
+	genMsg := func(msgType commonpb.MsgType, ch string, t Timestamp) *msgstream.DataNodeTtMsg {
+		return &msgstream.DataNodeTtMsg{
+			BaseMsg: msgstream.BaseMsg{
+				HashValues: []uint32{0},
+			},
+			DataNodeTtMsg: datapb.DataNodeTtMsg{
+				Base: &commonpb.MsgBase{
+					MsgType:   msgType,
+					MsgID:     0,
+					Timestamp: t,
+					SourceID:  0,
+				},
+				ChannelName: ch,
+				Timestamp:   t,
+			},
+		}
+	}
+
+	resp, err := svr.RegisterNode(context.TODO(), &datapb.RegisterNodeRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   0,
+			MsgID:     0,
+			Timestamp: 0,
+			SourceID:  0,
+		},
+		Address: &commonpb.Address{
+			Ip:   "localhost:7777",
+			Port: 8080,
+		},
+	})
+	assert.Nil(t, err)
+	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+	t.Run("Test segment flush after tt", func(t *testing.T) {
+		resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
+			NodeID:   0,
+			PeerRole: "",
+			SegmentIDRequests: []*datapb.SegmentIDRequest{
+				{
+					CollectionID: 0,
+					PartitionID:  0,
+					ChannelName:  "ch-1",
+					Count:        100,
+				},
+			},
+		})
+
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, 1, len(resp.SegIDAssignments))
+		assign := resp.SegIDAssignments[0]
+
+		resp2, err := svr.Flush(context.TODO(), &datapb.FlushRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Flush,
+				MsgID:     0,
+				Timestamp: 0,
+				SourceID:  0,
+			},
+			DbID:         0,
+			CollectionID: 0,
+		})
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp2.ErrorCode)
+
+		msgPack := msgstream.MsgPack{}
+		msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", assign.ExpireTime)
+		msgPack.Msgs = append(msgPack.Msgs, msg)
+		ttMsgStream.Produce(&msgPack)
+
+		flushMsg := <-ch
+		flushReq := flushMsg.(*datapb.FlushSegmentsRequest)
+		assert.EqualValues(t, 1, len(flushReq.SegmentIDs))
+		assert.EqualValues(t, assign.SegID, flushReq.SegmentIDs[0])
+	})
+
+}
+
 func TestResumeChannel(t *testing.T) {
 	Params.Init()
 
@@ -698,69 +799,6 @@ func TestResumeChannel(t *testing.T) {
 			assert.True(t, has)
 			if has {
 				assert.Equal(t, segRows, seg.NumRows)
-			}
-		}
-	})
-
-	t.Run("Test ResumeSegmentFlushChannel", func(t *testing.T) {
-		genMsg := func(msgType commonpb.MsgType, t Timestamp, segID int64) *msgstream.FlushCompletedMsg {
-			return &msgstream.FlushCompletedMsg{
-				BaseMsg: msgstream.BaseMsg{
-					HashValues: []uint32{0},
-				},
-				SegmentFlushCompletedMsg: internalpb.SegmentFlushCompletedMsg{
-					Base: &commonpb.MsgBase{
-						MsgType:   msgType,
-						MsgID:     0,
-						Timestamp: t,
-						SourceID:  0,
-					},
-					SegmentID: segID,
-				},
-			}
-		}
-		svr := newTestServer(t)
-
-		ch := make(chan struct{})
-
-		segInfoStream, _ := svr.msFactory.NewMsgStream(svr.ctx)
-		segInfoStream.AsProducer([]string{Params.SegmentInfoChannelName})
-		segInfoStream.Start()
-		defer segInfoStream.Close()
-		go func() {
-			for _, segID := range segmentIDs {
-
-				msgPack := msgstream.MsgPack{}
-				msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentFlushDone, uint64(time.Now().Unix()), segID))
-
-				err := segInfoStream.Produce(&msgPack)
-				assert.Nil(t, err)
-				time.Sleep(time.Millisecond * 5)
-			}
-			ch <- struct{}{}
-		}()
-
-		time.Sleep(time.Millisecond * 50)
-		//stop current server, simulating server quit
-		svr.Stop()
-
-		time.Sleep(time.Second)
-		// start new test server as restarting
-		svr = newTestServer(t)
-		defer svr.Stop()
-		<-ch
-
-		//wait for Server processing last messages
-		time.Sleep(time.Second)
-
-		//ASSERT PART
-		svr.meta.RLock()
-		defer svr.meta.RUnlock()
-		for _, segID := range segmentIDs {
-			seg, has := svr.meta.segments[segID]
-			assert.True(t, has)
-			if has {
-				assert.Equal(t, seg.State, commonpb.SegmentState_Flushed)
 			}
 		}
 	})

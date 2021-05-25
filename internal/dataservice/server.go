@@ -1,5 +1,4 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.//
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
@@ -16,21 +15,17 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"path"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/logutil"
 
-	"github.com/golang/protobuf/proto"
 	grpcdatanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/timesync"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -62,20 +57,15 @@ type Server struct {
 	statsHandler     *statsHandler
 	allocator        allocatorInterface
 	cluster          *dataNodeCluster
-	msgProducer      *timesync.MsgProducer
 	masterClient     types.MasterService
-	ttMsgStream      msgstream.MsgStream
-	k2sMsgStream     msgstream.MsgStream
 	ddChannelMu      struct {
 		sync.Mutex
 		name string
 	}
 	session              *sessionutil.Session
-	segmentInfoStream    msgstream.MsgStream
 	flushMsgStream       msgstream.MsgStream
 	insertChannels       []string
 	msFactory            msgstream.Factory
-	ttBarrier            timesync.TimeTickBarrier
 	createDataNodeClient func(addr string) (types.DataNode, error)
 }
 
@@ -183,7 +173,9 @@ func (s *Server) checkStateIsHealthy() bool {
 
 func (s *Server) initMeta() error {
 	connectEtcdFn := func() error {
-		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
+		etcdClient, err := clientv3.New(clientv3.Config{
+			Endpoints: []string{Params.EtcdAddress},
+		})
 		if err != nil {
 			return err
 		}
@@ -199,26 +191,6 @@ func (s *Server) initMeta() error {
 
 func (s *Server) initMsgProducer() error {
 	var err error
-	if s.ttMsgStream, err = s.msFactory.NewMsgStream(s.ctx); err != nil {
-		return err
-	}
-	s.ttMsgStream.AsConsumer([]string{Params.TimeTickChannelName}, Params.DataServiceSubscriptionName)
-	log.Debug("dataservice AsConsumer: " + Params.TimeTickChannelName + " : " + Params.DataServiceSubscriptionName)
-	s.ttMsgStream.Start()
-	s.ttBarrier = timesync.NewHardTimeTickBarrier(s.ctx, s.ttMsgStream, s.cluster.GetNodeIDs())
-	s.ttBarrier.Start()
-	if s.k2sMsgStream, err = s.msFactory.NewMsgStream(s.ctx); err != nil {
-		return err
-	}
-	s.k2sMsgStream.AsProducer(Params.K2SChannelNames)
-	log.Debug("dataservice AsProducer: " + strings.Join(Params.K2SChannelNames, ", "))
-	s.k2sMsgStream.Start()
-	dataNodeTTWatcher := newDataNodeTimeTickWatcher(s.meta, s.segAllocator, s.cluster)
-	k2sMsgWatcher := timesync.NewMsgTimeTickWatcher(s.k2sMsgStream)
-	if s.msgProducer, err = timesync.NewTimeSyncMsgProducer(s.ttBarrier, dataNodeTTWatcher, k2sMsgWatcher); err != nil {
-		return err
-	}
-	s.msgProducer.Start(s.ctx)
 	// segment flush stream
 	s.flushMsgStream, err = s.msFactory.NewMsgStream(s.ctx)
 	if err != nil {
@@ -340,7 +312,7 @@ func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 	s.serverLoopWg.Add(2)
 	go s.startStatsChannel(s.serverLoopCtx)
-	go s.startSegmentFlushChannel(s.serverLoopCtx)
+	go s.startDataNodeTtLoop(s.serverLoopCtx)
 }
 
 func (s *Server) startStatsChannel(ctx context.Context) {
@@ -370,7 +342,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 		}
 		msgPack := statsStream.Consume()
 		if msgPack == nil {
-			continue
+			return
 		}
 		for _, msg := range msgPack.Msgs {
 			if msg.Type() != commonpb.MsgType_SegmentStatistics {
@@ -398,60 +370,69 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 	}
 }
 
-func (s *Server) startSegmentFlushChannel(ctx context.Context) {
+func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
-	flushStream, _ := s.msFactory.NewMsgStream(ctx)
-	flushStream.AsConsumer([]string{Params.SegmentInfoChannelName}, Params.DataServiceSubscriptionName)
-	log.Debug("DataService AsConsumer: " + Params.SegmentInfoChannelName + " : " + Params.DataServiceSubscriptionName)
-
-	// try to restore last processed pos
-	pos, err := s.loadStreamLastPos(streamTypeFlush)
-	if err == nil {
-		err = flushStream.Seek([]*internalpb.MsgPosition{pos})
-		if err != nil {
-			log.Error("Failed to seek to last pos for segment flush Stream",
-				zap.String("SegInfoChannelName", Params.SegmentInfoChannelName),
-				zap.String("DataServiceSubscriptionName", Params.DataServiceSubscriptionName),
-				zap.Error(err))
-		}
+	ttMsgStream, err := s.msFactory.NewMsgStream(ctx)
+	if err != nil {
+		log.Error("new msg stream failed", zap.Error(err))
+		return
 	}
-
-	flushStream.Start()
-	defer flushStream.Close()
+	ttMsgStream.AsConsumer([]string{Params.TimeTickChannelName},
+		Params.DataServiceSubscriptionName)
+	log.Debug(fmt.Sprintf("dataservice AsConsumer:%s:%s",
+		Params.TimeTickChannelName, Params.DataServiceSubscriptionName))
+	ttMsgStream.Start()
+	defer ttMsgStream.Close()
 	for {
 		select {
 		case <-ctx.Done():
-			log.Debug("segment flush channel shut down")
+			log.Debug("data node tt loop done")
 			return
 		default:
 		}
-		msgPack := flushStream.Consume()
+		msgPack := ttMsgStream.Consume()
 		if msgPack == nil {
-			continue
+			return
 		}
 		for _, msg := range msgPack.Msgs {
-			if msg.Type() != commonpb.MsgType_SegmentFlushDone {
-				log.Warn("receive unknown msg from segment flush channel", zap.Stringer("msgType", msg.Type()))
+			if msg.Type() != commonpb.MsgType_DataNodeTt {
+				log.Warn("receive unexpected msg type from tt channel",
+					zap.Stringer("msgType", msg.Type()))
 				continue
 			}
-			fcMsg := msg.(*msgstream.FlushCompletedMsg)
-			err := s.meta.FlushSegment(fcMsg.SegmentID, fcMsg.BeginTimestamp)
-			log.Debug("DataService flushed segment", zap.Any("segmentID", fcMsg.SegmentID), zap.Error(err))
+			ttMsg := msg.(*msgstream.DataNodeTtMsg)
+
+			coll2Segs := make(map[UniqueID][]UniqueID)
+			ch := ttMsg.ChannelName
+			ts := ttMsg.Timestamp
+			segments, err := s.segAllocator.GetFlushableSegments(ctx, ch, ts)
 			if err != nil {
-				log.Error("get segment from meta error", zap.Int64("segmentID", fcMsg.SegmentID), zap.Error(err))
+				log.Warn("get flushable segments failed", zap.Error(err))
 				continue
+			}
+			for _, id := range segments {
+				sInfo, err := s.meta.GetSegment(id)
+				if err != nil {
+					log.Error("get segment from meta error", zap.Int64("id", id),
+						zap.Error(err))
+					continue
+				}
+				collID, segID := sInfo.CollectionID, sInfo.ID
+				coll2Segs[collID] = append(coll2Segs[collID], segID)
 			}
 
-			if fcMsg.MsgPosition != nil {
-				err = s.storeStreamPos(streamTypeFlush, fcMsg.MsgPosition)
-				if err != nil {
-					log.Error("Fail to store current success pos for segment flush stream",
-						zap.Stringer("pos", fcMsg.MsgPosition),
-						zap.Error(err))
-				}
-			} else {
-				log.Warn("Empty Msg Pos found ", zap.Int64("msgid", msg.ID()))
+			for collID, segIDs := range coll2Segs {
+				s.cluster.FlushSegment(&datapb.FlushSegmentsRequest{
+					Base: &commonpb.MsgBase{
+						MsgType:   commonpb.MsgType_Flush,
+						MsgID:     -1, // todo add msg id
+						Timestamp: 0,  // todo
+						SourceID:  Params.NodeID,
+					},
+					CollectionID: collID,
+					SegmentIDs:   segIDs,
+				})
 			}
 		}
 	}
@@ -459,10 +440,7 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 
 func (s *Server) Stop() error {
 	s.cluster.ShutDownClients()
-	s.ttMsgStream.Close()
-	s.k2sMsgStream.Close()
-	s.ttBarrier.Close()
-	s.msgProducer.Close()
+	s.flushMsgStream.Close()
 	s.stopServerLoop()
 	return nil
 }
@@ -475,105 +453,6 @@ func (s *Server) CleanMeta() error {
 func (s *Server) stopServerLoop() {
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
-}
-
-func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	resp := &internalpb.ComponentStates{
-		State: &internalpb.ComponentInfo{
-			NodeID:    Params.NodeID,
-			Role:      role,
-			StateCode: s.state.Load().(internalpb.StateCode),
-		},
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
-	}
-	dataNodeStates, err := s.cluster.GetDataNodeStates(ctx)
-	if err != nil {
-		resp.Status.Reason = err.Error()
-		return resp, nil
-	}
-	resp.SubcomponentStates = dataNodeStates
-	resp.Status.ErrorCode = commonpb.ErrorCode_Success
-	return resp, nil
-}
-
-func (s *Server) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Value: Params.TimeTickChannelName,
-	}, nil
-}
-
-func (s *Server) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Value: Params.StatisticsChannelName,
-	}, nil
-}
-
-func (s *Server) RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
-	ret := &datapb.RegisterNodeResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
-	}
-	log.Debug("DataService: RegisterNode:", zap.String("IP", req.Address.Ip), zap.Int64("Port", req.Address.Port),
-		zap.Any("NodeID", req.Base.SourceID))
-	node, err := s.newDataNode(req.Address.Ip, req.Address.Port, req.Base.SourceID)
-	if err != nil {
-		ret.Status.Reason = err.Error()
-		log.Debug("DataService newDataNode failed", zap.Error(err))
-		return ret, nil
-	}
-
-	resp, err := node.client.WatchDmChannels(s.ctx, &datapb.WatchDmChannelsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   0,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.NodeID,
-		},
-		ChannelNames: s.insertChannels,
-	})
-
-	if err = VerifyResponse(resp, err); err != nil {
-		ret.Status.Reason = err.Error()
-		return ret, nil
-	}
-
-	if err := s.getDDChannel(); err != nil {
-		ret.Status.Reason = err.Error()
-		return ret, nil
-	}
-
-	if s.ttBarrier != nil {
-		if err = s.ttBarrier.AddPeer(node.id); err != nil {
-			ret.Status.Reason = err.Error()
-			return ret, nil
-		}
-	}
-
-	if err = s.cluster.Register(node); err != nil {
-		ret.Status.Reason = err.Error()
-		return ret, nil
-	}
-
-	ret.Status.ErrorCode = commonpb.ErrorCode_Success
-	ret.InitParams = &internalpb.InitParams{
-		NodeID: Params.NodeID,
-		StartParams: []*commonpb.KeyValuePair{
-			{Key: "DDChannelName", Value: s.ddChannelMu.name},
-			{Key: "SegmentStatisticsChannelName", Value: Params.StatisticsChannelName},
-			{Key: "TimeTickChannelName", Value: Params.TimeTickChannelName},
-			{Key: "CompleteFlushChannelName", Value: Params.SegmentInfoChannelName},
-		},
-	}
-	return ret, nil
 }
 
 func (s *Server) newDataNode(ip string, port int64, id UniqueID) (*dataNode, error) {
@@ -596,87 +475,6 @@ func (s *Server) newDataNode(ip string, port int64, id UniqueID) (*dataNode, err
 		}{ip: ip, port: port},
 		client:     client,
 		channelNum: 0,
-	}, nil
-}
-
-func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error) {
-	if !s.checkStateIsHealthy() {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "server is initializing",
-		}, nil
-	}
-	if err := s.segAllocator.SealAllSegments(ctx, req.CollectionID); err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    fmt.Sprintf("Seal all segments error %s", err),
-		}, nil
-	}
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
-}
-
-func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
-	if !s.checkStateIsHealthy() {
-		return &datapb.AssignSegmentIDResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			},
-		}, nil
-	}
-
-	assigns := make([]*datapb.SegmentIDAssignment, 0, len(req.SegmentIDRequests))
-
-	var appendFailedAssignment = func(err string) {
-		assigns = append(assigns, &datapb.SegmentIDAssignment{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err,
-			},
-		})
-	}
-
-	for _, r := range req.SegmentIDRequests {
-		if !s.meta.HasCollection(r.CollectionID) {
-			if err := s.loadCollectionFromMaster(ctx, r.CollectionID); err != nil {
-				appendFailedAssignment(fmt.Sprintf("can not load collection %d", r.CollectionID))
-				log.Error("load collection from master error", zap.Int64("collectionID", r.CollectionID), zap.Error(err))
-				continue
-			}
-		}
-		//if err := s.validateAllocRequest(r.CollectionID, r.PartitionID, r.ChannelName); err != nil {
-		//result.Status.Reason = err.Error()
-		//assigns = append(assigns, result)
-		//continue
-		//}
-
-		segmentID, retCount, expireTs, err := s.segAllocator.AllocSegment(ctx, r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
-		if err != nil {
-			appendFailedAssignment(fmt.Sprintf("allocation of collection %d, partition %d, channel %s, count %d error:  %s",
-				r.CollectionID, r.PartitionID, r.ChannelName, r.Count, err.Error()))
-			continue
-		}
-
-		result := &datapb.SegmentIDAssignment{
-			SegID:        segmentID,
-			ChannelName:  r.ChannelName,
-			Count:        uint32(retCount),
-			CollectionID: r.CollectionID,
-			PartitionID:  r.PartitionID,
-			ExpireTime:   expireTs,
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    "",
-			},
-		}
-		assigns = append(assigns, result)
-	}
-	return &datapb.AssignSegmentIDResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		SegIDAssignments: assigns,
 	}, nil
 }
 
@@ -730,234 +528,38 @@ func (s *Server) loadCollectionFromMaster(ctx context.Context, collectionID int6
 	return s.meta.AddCollection(collInfo)
 }
 
-func (s *Server) ShowSegments(ctx context.Context, req *datapb.ShowSegmentsRequest) (*datapb.ShowSegmentsResponse, error) {
-	resp := &datapb.ShowSegmentsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
-	}
-	if !s.checkStateIsHealthy() {
-		resp.Status.Reason = "server is initializing"
-		return resp, nil
-	}
-	ids := s.meta.GetSegmentsOfPartition(req.CollectionID, req.PartitionID)
-	resp.Status.ErrorCode = commonpb.ErrorCode_Success
-	resp.SegmentIDs = ids
-	return resp, nil
-}
-
-func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
-	resp := &datapb.GetSegmentStatesResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
-	}
-	if !s.checkStateIsHealthy() {
-		resp.Status.Reason = "server is initializing"
-		return resp, nil
-	}
-
-	for _, segmentID := range req.SegmentIDs {
-		state := &datapb.SegmentStateInfo{
-			Status:    &commonpb.Status{},
-			SegmentID: segmentID,
-		}
-		segmentInfo, err := s.meta.GetSegment(segmentID)
-		if err != nil {
-			state.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			state.Status.Reason = "get segment states error: " + err.Error()
-		} else {
-			state.Status.ErrorCode = commonpb.ErrorCode_Success
-			state.State = segmentInfo.State
-			state.StartPosition = segmentInfo.StartPosition
-			state.EndPosition = segmentInfo.EndPosition
-		}
-		resp.States = append(resp.States, state)
-	}
-	resp.Status.ErrorCode = commonpb.ErrorCode_Success
-
-	return resp, nil
-}
-
-func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
-	resp := &datapb.GetInsertBinlogPathsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
-	}
-	p := path.Join(Params.SegmentFlushMetaPath, strconv.FormatInt(req.SegmentID, 10))
-	_, values, err := s.kvClient.LoadWithPrefix(p)
-	if err != nil {
-		resp.Status.Reason = err.Error()
-		return resp, nil
-	}
-	m := make(map[int64][]string)
-	tMeta := &datapb.SegmentFieldBinlogMeta{}
-	for _, v := range values {
-		if err := proto.UnmarshalText(v, tMeta); err != nil {
-			resp.Status.Reason = fmt.Errorf("DataService GetInsertBinlogPaths UnmarshalText datapb.SegmentFieldBinlogMeta err:%w", err).Error()
-			return resp, nil
-		}
-		m[tMeta.FieldID] = append(m[tMeta.FieldID], tMeta.BinlogPath)
-	}
-
-	fids := make([]UniqueID, len(m))
-	paths := make([]*internalpb.StringList, len(m))
-	for k, v := range m {
-		fids = append(fids, k)
-		paths = append(paths, &internalpb.StringList{Values: v})
-	}
-	resp.Status.ErrorCode = commonpb.ErrorCode_Success
-	resp.FieldIDs = fids
-	resp.Paths = paths
-	return resp, nil
-}
-
-func (s *Server) GetInsertChannels(ctx context.Context, req *datapb.GetInsertChannelsRequest) (*internalpb.StringList, error) {
-	return &internalpb.StringList{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Values: s.insertChannels,
-	}, nil
-}
-
-func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {
-	resp := &datapb.GetCollectionStatisticsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
-	}
-	nums, err := s.meta.GetNumRowsOfCollection(req.CollectionID)
-	if err != nil {
-		resp.Status.Reason = err.Error()
-		return resp, nil
-	}
-	resp.Status.ErrorCode = commonpb.ErrorCode_Success
-	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "row_count", Value: strconv.FormatInt(nums, 10)})
-	return resp, nil
-}
-
-func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error) {
-	resp := &datapb.GetPartitionStatisticsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
-	}
-	nums, err := s.meta.GetNumRowsOfPartition(req.CollectionID, req.PartitionID)
-	if err != nil {
-		resp.Status.Reason = err.Error()
-		return resp, nil
-	}
-	resp.Status.ErrorCode = commonpb.ErrorCode_Success
-	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "row_count", Value: strconv.FormatInt(nums, 10)})
-	return resp, nil
-}
-
-func (s *Server) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Value: Params.SegmentInfoChannelName,
-	}, nil
-}
-
-func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
-	resp := &datapb.GetSegmentInfoResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
-	}
-	if !s.checkStateIsHealthy() {
-		resp.Status.Reason = "data service is not healthy"
-		return resp, nil
-	}
-	infos := make([]*datapb.SegmentInfo, 0, len(req.SegmentIDs))
-	for _, id := range req.SegmentIDs {
-		info, err := s.meta.GetSegment(id)
-		if err != nil {
-			resp.Status.Reason = err.Error()
-			return resp, nil
-		}
-		infos = append(infos, info)
-	}
-	resp.Status.ErrorCode = commonpb.ErrorCode_Success
-	resp.Infos = infos
-	return resp, nil
-}
-
-// SaveBinlogPaths implement DataServiceServer
-func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
-	resp := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-	}
-	if !s.checkStateIsHealthy() {
-		resp.Reason = "server is initializing"
-		return resp, nil
-	}
-	if s.flushMsgStream == nil {
-		resp.Reason = "flush msg stream nil"
-		return resp, nil
-	}
-
-	// check segment id & collection id matched
-	_, err := s.meta.GetCollection(req.GetCollectionID())
-	if err != nil {
-		log.Error("Failed to get collection info", zap.Int64("collectionID", req.GetCollectionID()), zap.Error(err))
-		resp.Reason = err.Error()
-		return resp, err
-	}
-
+func (s *Server) prepareBinlogAndPos(req *datapb.SaveBinlogPathsRequest) (map[string]string, error) {
+	meta := make(map[string]string)
 	segInfo, err := s.meta.GetSegment(req.GetSegmentID())
 	if err != nil {
 		log.Error("Failed to get segment info", zap.Int64("segmentID", req.GetSegmentID()), zap.Error(err))
-		resp.Reason = err.Error()
-		return resp, err
+		return nil, err
 	}
 	log.Debug("segment", zap.Int64("segment", segInfo.CollectionID))
 
-	meta := make(map[string]string)
 	fieldMeta, err := s.prepareField2PathMeta(req.SegmentID, req.Field2BinlogPaths)
 	if err != nil {
-		resp.Reason = err.Error()
-		return resp, err
+		return nil, err
 	}
 	for k, v := range fieldMeta {
 		meta[k] = v
 	}
 	ddlMeta, err := s.prepareDDLBinlogMeta(req.CollectionID, req.GetDdlBinlogPaths())
 	if err != nil {
-		resp.Reason = err.Error()
-		return resp, err
+		return nil, err
 	}
 	for k, v := range ddlMeta {
 		meta[k] = v
 	}
 	segmentPos, err := s.prepareSegmentPos(segInfo, req.GetDmlPosition(), req.GetDdlPosition())
 	if err != nil {
-		resp.Reason = err.Error()
-		return resp, err
+		return nil, err
 	}
 	for k, v := range segmentPos {
 		meta[k] = v
 	}
-	// Save into k-v store
-	err = s.SaveBinLogMetaTxn(meta)
-	if err != nil {
-		resp.Reason = err.Error()
-		return resp, err
-	}
-	// write flush msg into segmentInfo/flush stream
-	msgPack := composeSegmentFlushMsgPack(req.SegmentID)
-	err = s.flushMsgStream.Produce(&msgPack)
-	if err != nil {
-		resp.Reason = err.Error()
-		return resp, err
-	}
 
-	resp.ErrorCode = commonpb.ErrorCode_Success
-	return resp, nil
+	return meta, nil
 }
 
 func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
