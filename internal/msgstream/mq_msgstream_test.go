@@ -723,7 +723,9 @@ func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 	inputStream := getPulsarInputStream(pulsarAddress, producerChannels)
 	outputStream := getPulsarTtOutputStream(pulsarAddress, consumerChannels, consumerSubName)
 
-	// broadcast
+	// produce msg
+	fmt.Printf("Produce %d Msgs\n", numOfMsgPack)
+	fmt.Println("================================")
 	for i := 0; i < numOfMsgPack; i++ {
 		printMsgPack(msgPacks[i])
 		if i%2 == 0 {
@@ -737,7 +739,9 @@ func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 		}
 	}
 
-	// consume
+	// consume msg
+	fmt.Printf("Receive Msgs\n")
+	fmt.Println("================================")
 	checkNMsgPack := func(t *testing.T, outputStream MsgStream, num int) error {
 		for i := 0; i < num; i++ {
 			msgPack := outputStream.Consume()
