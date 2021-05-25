@@ -308,6 +308,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 	log.Debug("dataservice AsConsumer: " + Params.StatisticsChannelName + " : " + Params.DataServiceSubscriptionName)
 	// try to restore last processed pos
 	pos, err := s.loadStreamLastPos(streamTypeStats)
+	log.Debug("load last pos of stats channel", zap.Any("pos", pos))
 	if err == nil {
 		err = statsStream.Seek(pos)
 		if err != nil {

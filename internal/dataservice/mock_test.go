@@ -16,6 +16,7 @@ import (
 	"time"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -278,4 +279,26 @@ func (m *mockMasterService) GetDdChannel(ctx context.Context) (*milvuspb.StringR
 
 func (m *mockMasterService) UpdateChannelTimeTick(ctx context.Context, req *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
+}
+
+type mockStartupPolicy struct {
+}
+
+func newMockStartupPolicy() clusterStartupPolicy {
+	return &mockStartupPolicy{}
+}
+
+func (p *mockStartupPolicy) apply(oldCluster map[string]*datapb.DataNodeInfo, delta *clusterDeltaChange) []*datapb.DataNodeInfo {
+	return nil
+}
+
+type mockSessionManager struct {
+}
+
+func newMockSessionManager() sessionManager {
+	return &mockSessionManager{}
+}
+
+func (m *mockSessionManager) sendRequest(addr string, executor func(node types.DataNode) error) error {
+	return nil
 }
