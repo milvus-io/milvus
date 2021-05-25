@@ -210,6 +210,9 @@ func TestMasterService(t *testing.T) {
 	assert.Nil(t, err)
 	randVal := rand.Int()
 
+	err = core.Register()
+	assert.Nil(t, err)
+
 	Params.TimeTickChannel = fmt.Sprintf("master-time-tick-%d", randVal)
 	Params.DdChannel = fmt.Sprintf("master-dd-%d", randVal)
 	Params.StatisticsChannel = fmt.Sprintf("master-statistics-%d", randVal)
@@ -1711,6 +1714,9 @@ func TestMasterService2(t *testing.T) {
 	core, err := NewCore(ctx, msFactory)
 	assert.Nil(t, err)
 	randVal := rand.Int()
+
+	err = core.Register()
+	assert.Nil(t, err)
 
 	Params.TimeTickChannel = fmt.Sprintf("master-time-tick-%d", randVal)
 	Params.DdChannel = fmt.Sprintf("master-dd-%d", randVal)

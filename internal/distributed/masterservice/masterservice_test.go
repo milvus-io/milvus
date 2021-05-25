@@ -129,12 +129,15 @@ func TestGrpcService(t *testing.T) {
 
 	t.Logf("master service port = %d", Params.Port)
 
+	core, ok := (svr.masterService).(*cms.Core)
+	assert.True(t, ok)
+
+	err = core.Register()
+	assert.Nil(t, err)
+
 	err = svr.startGrpc()
 	assert.Nil(t, err)
 	svr.masterService.UpdateStateCode(internalpb.StateCode_Initializing)
-
-	core, ok := (svr.masterService).(*cms.Core)
-	assert.True(t, ok)
 
 	etcdCli, err := initEtcd(cms.Params.EtcdAddress)
 	assert.Nil(t, err)
@@ -803,6 +806,10 @@ func (m *mockCore) SetIndexService(types.IndexService) error {
 }
 
 func (m *mockCore) SetQueryService(types.QueryService) error {
+	return nil
+}
+
+func (m *mockCore) Register() error {
 	return nil
 }
 
