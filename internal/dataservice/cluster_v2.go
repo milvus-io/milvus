@@ -116,7 +116,7 @@ func (c *cluster) watch(nodes []*datapb.DataNodeInfo) []*datapb.DataNodeInfo {
 				Base: &commonpb.MsgBase{
 					SourceID: Params.NodeID,
 				},
-				ChannelNames: uncompletes,
+				// ChannelNames: uncompletes, // TODO
 			}
 			resp, err := cli.WatchDmChannels(context.Background(), req)
 			if err != nil {
