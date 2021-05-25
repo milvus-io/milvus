@@ -18,38 +18,38 @@ def gen_unique_str(str_value=None):
     return "test_" + prefix if str_value is None else str_value + "_" + prefix
 
 
-def gen_int64_field(name=ct.default_int64_field, is_primary=False, description=ct.int_field_desc):
+def gen_int64_field(name=ct.default_int64_field, is_primary=False, description=ct.default_desc):
     int64_field = FieldSchema(name=name, dtype=DataType.INT64, description=description, is_primary=is_primary)
     return int64_field
 
 
-def gen_float_field(name=ct.default_float_field, is_primary=False, description=ct.float_field_desc):
+def gen_float_field(name=ct.default_float_field, is_primary=False, description=ct.default_desc):
     float_field = FieldSchema(name=name, dtype=DataType.FLOAT, description=description, is_primary=is_primary)
     return float_field
 
 
 def gen_float_vec_field(name=ct.default_float_vec_field_name, is_primary=False, dim=ct.default_dim,
-                        description=ct.float_vec_field_desc):
+                        description=ct.default_desc):
     float_vec_field = FieldSchema(name=name, dtype=DataType.FLOAT_VECTOR, description=description, dim=dim,
                                   is_primary=is_primary)
     return float_vec_field
 
 
 def gen_binary_vec_field(name=ct.default_binary_vec_field_name, is_primary=False, dim=ct.default_dim,
-                         description=ct.binary_vec_field_desc):
+                         description=ct.default_desc):
     binary_vec_field = FieldSchema(name=name, dtype=DataType.BINARY_VECTOR, description=description, dim=dim,
                                    is_primary=is_primary)
     return binary_vec_field
 
 
-def gen_default_collection_schema(description=ct.default_collection_desc, primary_field=None):
+def gen_default_collection_schema(description=ct.default_desc, primary_field=None):
     fields = [gen_int64_field(), gen_float_field(), gen_float_vec_field()]
     schema = CollectionSchema(fields=fields, description=description, primary_field=primary_field)
     return schema
 
 
-def gen_collection_schema(fields, description=ct.collection_desc, **kwargs):
-    schema = CollectionSchema(fields=fields, description=description, **kwargs)
+def gen_collection_schema(fields, primary_field=None, description=ct.default_desc):
+    schema = CollectionSchema(fields=fields, primary_field=primary_field, description=description)
     return schema
 
 
@@ -103,6 +103,16 @@ def get_vectors(num, dim, is_normal=True):
     return vectors.tolist()
 
 
+def gen_binary_vectors(num, dim):
+    raw_vectors = []
+    binary_vectors = []
+    for i in range(num):
+        raw_vector = [random.randint(0, 1) for i in range(dim)]
+        raw_vectors.append(raw_vector)
+        binary_vectors.append(bytes(np.packbits(raw_vector, axis=-1).tolist()))
+    return raw_vectors, binary_vectors
+
+
 def gen_invalid_field_types():
     field_types = [
         6,
@@ -114,6 +124,14 @@ def gen_invalid_field_types():
         "a"
     ]
     return field_types
+
+
+def gen_all_type_fields():
+    fields = []
+    for k, v in DataType.__members__.items():
+        field = FieldSchema(name=k.lower(), dtype=v)
+        fields.append(field)
+    return fields
 
 
 def modify_file(file_name_list, input_content=""):

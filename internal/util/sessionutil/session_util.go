@@ -190,7 +190,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 	}
 	err := retry.Retry(DefaultRetryTimes, time.Millisecond*500, registerFn)
 	if err != nil {
-		return ch, nil
+		return nil, err
 	}
 	return ch, nil
 }
@@ -208,9 +208,11 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 			case resp, ok := <-ch:
 				if !ok {
 					close(failCh)
+					return
 				}
 				if resp == nil {
 					close(failCh)
+					return
 				}
 				failCh <- true
 			}

@@ -68,29 +68,39 @@ pass1SelectLists(void** listIndices,
   // BlockSelect add cannot be used in a warp divergent circumstance; we
   // handle the remainder warp below
   for (; i < limit; i += blockDim.x) {
-    index = getListIndex(queryId,
-                         start + i,
-                         listIndices,
-                         prefixSumOffsets,
-                         topQueryToCentroid,
-                         opt);
-    if (bitsetEmpty || (!(bitset[index >> 3] & (0x1 << (index & 0x7))))) {
+    do {
+      if (!bitsetEmpty) {
+        index = getListIndex(queryId,
+                             start + i,
+                             listIndices,
+                             prefixSumOffsets,
+                             topQueryToCentroid,
+                             opt);
+        if (bitset[index >> 3] & (0x1 << (index & 0x7))) {
+          break;
+        }
+      }
       heap.addThreadQ(distanceStart[i], start + i);
-    }
+    } while(0);
     heap.checkThreadQ();
   }
 
   // Handle warp divergence separately
   if (i < num) {
-    index = getListIndex(queryId,
-                         start + i,
-                         listIndices,
-                         prefixSumOffsets,
-                         topQueryToCentroid,
-                         opt);
-    if (bitsetEmpty || (!(bitset[index >> 3] & (0x1 << (index & 0x7))))) {
+    do {
+      if (!bitsetEmpty) {
+        index = getListIndex(queryId,
+                             start + i,
+                             listIndices,
+                             prefixSumOffsets,
+                             topQueryToCentroid,
+                             opt);
+        if (bitset[index >> 3] & (0x1 << (index & 0x7))) {
+          break;
+        }
+      }
       heap.addThreadQ(distanceStart[i], start + i);
-    }
+    } while(0);
   }
 
   // Merge all final results
