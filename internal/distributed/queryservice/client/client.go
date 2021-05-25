@@ -37,6 +37,7 @@ type Client struct {
 }
 
 func NewClient(address string, timeout time.Duration) (*Client, error) {
+
 	return &Client{
 		grpcClient: nil,
 		conn:       nil,

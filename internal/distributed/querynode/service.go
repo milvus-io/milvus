@@ -104,7 +104,7 @@ func (s *Server) init() error {
 	log.Debug("Init Query service client ...")
 	queryService, err := qsc.NewClient(Params.QueryServiceAddress, 20*time.Second)
 	if err != nil {
-		return err
+		panic(err)
 	}
 
 	if err = queryService.Init(); err != nil {
