@@ -934,7 +934,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	for k, v := range ddlMeta {
 		meta[k] = v
 	}
-	segmentPos, err := s.prepareSegmentPos(req.SegmentID, req.GetDmlPosition(), req.GetDdlPosition())
+	segmentPos, err := s.prepareSegmentPos(segInfo, req.GetDmlPosition(), req.GetDdlPosition())
 	if err != nil {
 		resp.Reason = err.Error()
 		return resp, err
