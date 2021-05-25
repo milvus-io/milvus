@@ -222,9 +222,7 @@ func getPulsarInputStream(pulsarAddress string, producerChannels []string, opts 
 		inputStream.SetRepackFunc(opt)
 	}
 	inputStream.Start()
-	var input MsgStream = inputStream
-
-	return input
+	return inputStream
 }
 
 func getPulsarOutputStream(pulsarAddress string, consumerChannels []string, consumerSubName string) MsgStream {
@@ -233,9 +231,7 @@ func getPulsarOutputStream(pulsarAddress string, consumerChannels []string, cons
 	outputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
 	outputStream.AsConsumer(consumerChannels, consumerSubName)
 	outputStream.Start()
-	var output MsgStream = outputStream
-
-	return output
+	return outputStream
 }
 
 func getPulsarTtOutputStream(pulsarAddress string, consumerChannels []string, consumerSubName string) MsgStream {
@@ -244,8 +240,7 @@ func getPulsarTtOutputStream(pulsarAddress string, consumerChannels []string, co
 	outputStream, _ := NewMqTtMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
 	outputStream.AsConsumer(consumerChannels, consumerSubName)
 	outputStream.Start()
-	var output MsgStream = outputStream
-	return output
+	return outputStream
 }
 
 func receiveMsg(outputStream MsgStream, msgCount int) {
@@ -628,7 +623,6 @@ func TestStream_PulsarTtMsgStream_Seek(t *testing.T) {
 
 	msgPack2 := MsgPack{}
 	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5))
-
 
 	msgPack3 := MsgPack{}
 	msgPack3.Msgs = append(msgPack3.Msgs, getTsMsg(commonpb.MsgType_Insert, 14))
