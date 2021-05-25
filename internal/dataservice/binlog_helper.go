@@ -38,7 +38,9 @@ func (s *Server) genKey(alloc bool, ids ...UniqueID) (key string, err error) {
 }
 
 var (
-	errNilKvClient = errors.New("kv client not initialized")
+	errNilKvClient    = errors.New("kv client not initialized")
+	errNilID2Paths    = errors.New("nil ID2PathList")
+	errNilSegmentInfo = errors.New("nil segment info")
 )
 
 //SaveBinLogMetaTxn saves segment-field2Path, collection-tsPath/ddlPath into kv store in transcation
@@ -48,10 +50,6 @@ func (s *Server) SaveBinLogMetaTxn(meta map[string]string) error {
 	}
 	return s.kvClient.MultiSave(meta)
 }
-
-var (
-	errNilID2Paths = errors.New("nil ID2PathList")
-)
 
 // prepareField2PathMeta parses fields2Paths ID2PathList
 //		into key-value for kv store
@@ -174,23 +172,29 @@ func (s *Server) getDDLBinlogMeta(collID UniqueID) (metas []*datapb.DDLBinlogMet
 }
 
 // prepareSegmentPos prepare segment flushed pos
-func (s *Server) prepareSegmentPos(segmentID UniqueID, dmlPos, ddlPos *datapb.PositionPair) (map[string]string, error) {
-	result := make(map[string]string, 2)
+func (s *Server) prepareSegmentPos(segInfo *datapb.SegmentInfo, dmlPos, ddlPos *datapb.PositionPair) (map[string]string, error) {
+	if segInfo == nil {
+		return nil, errNilSegmentInfo
+	}
+
+	result := make(map[string]string, 4)
 	if dmlPos != nil {
-		key, err := s.genKey(false, segmentID)
+		key, err := s.genKey(false, segInfo.ID)
 		if err != nil {
 			return nil, err
 		}
 		msPosPair := proto.MarshalTextString(dmlPos)
-		result[path.Join(Params.SegmentDmlPosSubPath, key)] = msPosPair
+		result[path.Join(Params.SegmentDmlPosSubPath, key)] = msPosPair                   // segment pos
+		result[path.Join(Params.DmlChannelPosSubPath, segInfo.InsertChannel)] = msPosPair // DmlChannel pos
 	}
 	if ddlPos != nil {
-		key, err := s.genKey(false, segmentID)
+		key, err := s.genKey(false, segInfo.ID)
 		if err != nil {
 			return nil, err
 		}
 		msPosPair := proto.MarshalTextString(ddlPos)
-		result[path.Join(Params.SegmentDmlPosSubPath, key)] = msPosPair
+		result[path.Join(Params.SegmentDmlPosSubPath, key)] = msPosPair                   //segment pos
+		result[path.Join(Params.DdlChannelPosSubPath, segInfo.InsertChannel)] = msPosPair // DdlChannel pos(use dm channel as Key, since dd channel may share same channel name)
 	}
 
 	return map[string]string{}, nil
