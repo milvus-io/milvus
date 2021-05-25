@@ -197,7 +197,7 @@ func getInsertMsgPack(num int, start int, end int) *MsgPack {
 	set := make(map[int]bool)
 	msgPack := MsgPack{}
 	for len(set) < num {
-		reqID := Rand.Int()%(end-start-1) + start
+		reqID := Rand.Int()%(end-start-1) + start + 1
 		_, ok := set[reqID]
 		if !ok {
 			set[reqID] = true
@@ -726,12 +726,32 @@ func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 	// broadcast
 	for i := 0; i < numOfMsgPack; i++ {
 		printMsgPack(msgPacks[i])
-		err := inputStream.Broadcast(msgPacks[i])
-		assert.Nil(t, err)
+		if i%2 == 0 {
+			// insert msg use Produce
+			err := inputStream.Produce(msgPacks[i])
+			assert.Nil(t, err)
+		} else {
+			// tt msg use Broadcase
+			err := inputStream.Broadcast(msgPacks[i])
+			assert.Nil(t, err)
+		}
 	}
 
 	// consume
-	receiveMsg(outputStream, 25)
+	checkNMsgPack := func(t *testing.T, outputStream MsgStream, num int) error {
+		for i := 0; i < num; i++ {
+			msgPack := outputStream.Consume()
+			if len(msgPack.Msgs) > 0 {
+				for _, msg := range msgPack.Msgs {
+					fmt.Println("msg type: ", msg.Type(), ", msg value: ", msg)
+					assert.Greater(t, msg.BeginTs(), Timestamp(i*10))
+				}
+				fmt.Println("================")
+			}
+		}
+		return nil
+	}
+	checkNMsgPack(t, outputStream, numOfMsgPack/2)
 
 	inputStream.Close()
 	outputStream.Close()
