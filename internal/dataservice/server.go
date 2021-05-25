@@ -76,7 +76,7 @@ type Server struct {
 	insertChannels       []string
 	msFactory            msgstream.Factory
 	ttBarrier            timesync.TimeTickBarrier
-	createDataNodeClient func(addr string) types.DataNode
+	createDataNodeClient func(addr string, serverID int64) (types.DataNode, error)
 }
 
 func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
@@ -87,8 +87,12 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 		msFactory: factory,
 	}
 	s.insertChannels = s.getInsertChannels()
-	s.createDataNodeClient = func(addr string) types.DataNode {
-		return grpcdatanodeclient.NewClient(addr)
+	s.createDataNodeClient = func(addr string, serverID int64) (types.DataNode, error) {
+		node, err := grpcdatanodeclient.NewClient(addr, serverID, []string{Params.EtcdAddress}, 10)
+		if err != nil {
+			return nil, err
+		}
+		return node, nil
 	}
 	s.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return s, nil
@@ -566,7 +570,10 @@ func (s *Server) RegisterNode(ctx context.Context, req *datapb.RegisterNodeReque
 }
 
 func (s *Server) newDataNode(ip string, port int64, id UniqueID) (*dataNode, error) {
-	client := s.createDataNodeClient(fmt.Sprintf("%s:%d", ip, port))
+	client, err := s.createDataNodeClient(fmt.Sprintf("%s:%d", ip, port), id)
+	if err != nil {
+		return nil, err
+	}
 	if err := client.Init(); err != nil {
 		return nil, err
 	}
