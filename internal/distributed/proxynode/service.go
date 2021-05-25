@@ -394,6 +394,10 @@ func (s *Server) GetQuerySegmentInfo(ctx context.Context, request *milvuspb.GetQ
 
 }
 
+func (s *Server) Dummy(ctx context.Context, request *milvuspb.DummyRequest) (*milvuspb.DummyResponse, error) {
+	return s.proxynode.Dummy(ctx, request)
+}
+
 func (s *Server) RegisterLink(ctx context.Context, request *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error) {
 	return s.proxynode.RegisterLink(ctx, request)
 }

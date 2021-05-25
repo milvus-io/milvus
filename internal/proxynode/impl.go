@@ -1435,6 +1435,28 @@ func (node *ProxyNode) getSegmentsOfCollection(ctx context.Context, dbName strin
 	return ret, nil
 }
 
+func (node *ProxyNode) Dummy(ctx context.Context, req *milvuspb.DummyRequest) (*milvuspb.DummyResponse, error) {
+	if req.RequestType == "retrieve" {
+		request := &milvuspb.RetrieveRequest{
+			DbName:         "",
+			CollectionName: "",
+			PartitionNames: []string{},
+			Ids:            &schemapb.IDs{},
+			OutputFields:   []string{},
+		}
+
+		_, _ = node.Retrieve(ctx, request)
+
+		return &milvuspb.DummyResponse{
+			Response: `{"status": "success"}`,
+		}, nil
+	}
+
+	return &milvuspb.DummyResponse{
+		Response: `{"status": "fail"}`,
+	}, nil
+}
+
 func (node *ProxyNode) RegisterLink(ctx context.Context, req *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	log.Debug("RegisterLink",
