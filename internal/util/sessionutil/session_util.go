@@ -274,6 +274,8 @@ func (s *Session) WatchServices(prefix string, revision int64) (eventChannel <-c
 					return
 				}
 				for _, ev := range wresp.Events {
+					session := &Session{}
+					var eventType SessionEventType
 					switch ev.Type {
 					case mvccpb.PUT:
 						log.Debug("watch services",
@@ -284,23 +286,20 @@ func (s *Session) WatchServices(prefix string, revision int64) (eventChannel <-c
 							log.Error("watch services", zap.Error(err))
 							continue
 						}
-						eventCh <- &SessionEvent{
-							EventType: SessionAddEvent,
-							Session:   session,
-						}
+						eventType = SessionAddEvent
 					case mvccpb.DELETE:
 						log.Debug("watch services",
 							zap.Any("delete kv", ev.PrevKv))
-						session := &Session{}
 						err := json.Unmarshal([]byte(ev.PrevKv.Value), session)
 						if err != nil {
 							log.Error("watch services", zap.Error(err))
 							continue
 						}
-						eventCh <- &SessionEvent{
-							EventType: SessionDelEvent,
-							Session:   session,
-						}
+						eventType = SessionDelEvent
+					}
+					eventCh <- &SessionEvent{
+						EventType: eventType,
+						Session:   session,
 					}
 				}
 
