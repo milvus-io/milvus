@@ -256,3 +256,18 @@ message DataNodeTtMsg {
     string channel_name = 2;
     uint64 timestamp = 3;
 }
+enum ChannelWatchState {
+  Uncomplete = 0;
+  Complete = 1;
+}
+
+message ChannelStatus {
+  string name = 1;
+  ChannelWatchState state=2;
+}
+
+message DataNodeInfo {
+  string address = 1;
+  int64 version  = 2;
+  repeated ChannelStatus channels = 3;
+}
