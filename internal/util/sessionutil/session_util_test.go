@@ -1,6 +1,7 @@
 package sessionutil
 
 import (
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -81,6 +82,9 @@ func TestInit(t *testing.T) {
 	s.Init("test", "testAddr", false)
 	assert.NotEqual(t, int64(0), s.leaseID)
 	assert.NotEqual(t, int64(0), s.ServerID)
+	sessions, err := s.GetSessions("test")
+	assert.Nil(t, err)
+	assert.Contains(t, sessions, "test-"+strconv.FormatInt(s.ServerID, 10))
 }
 
 func TestUpdateSessions(t *testing.T) {

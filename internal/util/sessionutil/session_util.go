@@ -236,7 +236,8 @@ func (s *Session) GetSessions(prefix string) (map[string]*Session, error) {
 		if err != nil {
 			return nil, err
 		}
-		res[string(kv.Key)] = session
+		_, mapKey := path.Split(string(kv.Key))
+		res[mapKey] = session
 	}
 	return res, nil
 }
