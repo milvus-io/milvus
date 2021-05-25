@@ -40,7 +40,7 @@ type MsgStream interface {
 	AsProducer(channels []string)
 	AsConsumer(channels []string, subName string)
 	SetRepackFunc(repackFunc RepackFunc)
-
+	ComputeProduceChannelIndexes(tsMsgs []TsMsg) [][]int32
 	Produce(*MsgPack) error
 	Broadcast(*MsgPack) error
 	Consume() *MsgPack

@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proxynode"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
 )
@@ -165,10 +164,10 @@ func (s *Server) init() error {
 		}
 	}()
 
-	self := sessionutil.NewSession("proxynode", funcutil.GetLocalIP()+":"+strconv.Itoa(Params.Port), false)
-	sm := sessionutil.NewSessionManager(ctx, proxynode.Params.EtcdAddress, proxynode.Params.MetaRootPath, self)
-	sm.Init()
-	sessionutil.SetGlobalSessionManager(sm)
+	err = s.proxynode.Register()
+	if err != nil {
+		return err
+	}
 
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)
@@ -190,7 +189,7 @@ func (s *Server) init() error {
 	masterServiceAddr := Params.MasterAddress
 	log.Debug("proxynode", zap.String("master address", masterServiceAddr))
 	timeout := 3 * time.Second
-	s.masterServiceClient, err = grpcmasterserviceclient.NewClient(masterServiceAddr, timeout)
+	s.masterServiceClient, err = grpcmasterserviceclient.NewClient(masterServiceAddr, []string{proxynode.Params.EtcdAddress}, timeout)
 	if err != nil {
 		return err
 	}
@@ -398,6 +397,10 @@ func (s *Server) GetPersistentSegmentInfo(ctx context.Context, request *milvuspb
 func (s *Server) GetQuerySegmentInfo(ctx context.Context, request *milvuspb.GetQuerySegmentInfoRequest) (*milvuspb.GetQuerySegmentInfoResponse, error) {
 	return s.proxynode.GetQuerySegmentInfo(ctx, request)
 
+}
+
+func (s *Server) Dummy(ctx context.Context, request *milvuspb.DummyRequest) (*milvuspb.DummyResponse, error) {
+	return s.proxynode.Dummy(ctx, request)
 }
 
 func (s *Server) RegisterLink(ctx context.Context, request *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error) {

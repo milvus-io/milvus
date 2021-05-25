@@ -86,7 +86,6 @@ func TestMetaService_printSegmentStruct(t *testing.T) {
 		ID:           UniqueID(0),
 		CollectionID: UniqueID(0),
 		PartitionID:  defaultPartitionID,
-		OpenTime:     Timestamp(0),
 		NumRows:      UniqueID(0),
 	}
 

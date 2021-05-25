@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -41,6 +42,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type QueryNode struct {
@@ -68,6 +71,8 @@ type QueryNode struct {
 
 	msFactory msgstream.Factory
 	scheduler *taskScheduler
+
+	session *sessionutil.Session
 }
 
 func NewQueryNode(ctx context.Context, queryNodeID UniqueID, factory msgstream.Factory) *QueryNode {
@@ -111,6 +116,14 @@ func NewQueryNodeWithoutID(ctx context.Context, factory msgstream.Factory) *Quer
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 
 	return node
+}
+
+// Register register query node at etcd
+func (node *QueryNode) Register() error {
+	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, []string{Params.EtcdAddress})
+	node.session.Init(typeutil.QueryNodeRole, Params.QueryNodeIP+":"+strconv.FormatInt(Params.QueryNodePort, 10), false)
+	Params.QueryNodeID = node.session.ServerID
+	return nil
 }
 
 func (node *QueryNode) Init() error {

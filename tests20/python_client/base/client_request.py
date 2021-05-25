@@ -127,6 +127,7 @@ class ApiReq(Base):
         schema = cf.gen_default_collection_schema() if schema is None else schema
         collection, _ = self.collection.collection_init(name=name, data=data,
                                                         schema=schema, check_res=check_res, **kwargs)
+        assert name == collection.name
         return collection
 
     def _partition(self, name=None, descriptions=None, **kwargs):
@@ -139,3 +140,4 @@ class ApiReq(Base):
                                                        description=descriptions,
                                                        **kwargs)
         return m_partition
+

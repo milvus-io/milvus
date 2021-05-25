@@ -34,6 +34,7 @@ type Component interface {
 	Stop() error
 	GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error)
 	GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
+	Register() error
 }
 
 type DataNode interface {
@@ -104,6 +105,7 @@ type MasterService interface {
 	//global timestamp allocator
 	AllocTimestamp(ctx context.Context, req *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error)
 	AllocID(ctx context.Context, req *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error)
+	UpdateChannelTimeTick(ctx context.Context, req *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error)
 
 	//segment
 	DescribeSegment(ctx context.Context, req *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)

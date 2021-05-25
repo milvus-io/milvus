@@ -38,6 +38,8 @@ service MilvusService {
   rpc GetPersistentSegmentInfo(GetPersistentSegmentInfoRequest) returns (GetPersistentSegmentInfoResponse) {}
   rpc GetQuerySegmentInfo(GetQuerySegmentInfoRequest) returns (GetQuerySegmentInfoResponse) {}
 
+  rpc Dummy(DummyRequest) returns (DummyResponse) {}
+
   // TODO: remove
   rpc RegisterLink(RegisterLinkRequest) returns (RegisterLinkResponse) {}
 }
@@ -351,12 +353,8 @@ message PersistentSegmentInfo {
   int64 segmentID = 1;
   int64 collectionID = 2;
   int64 partitionID = 3;
-  uint64 open_time = 4;
-  uint64 sealed_time = 5;
-  uint64 flushed_time = 6;
-  int64 num_rows = 7;
-  int64 mem_size = 8;
-  common.SegmentState state = 9;
+  int64 num_rows = 4;
+  common.SegmentState state = 5;
 }
 
 message GetPersistentSegmentInfoRequest {
@@ -391,6 +389,13 @@ message GetQuerySegmentInfoResponse {
   repeated QuerySegmentInfo infos = 2;
 }
 
+message DummyRequest {
+  string request_type = 1;
+}
+
+message DummyResponse {
+  string response = 1;
+}
 
 message RegisterLinkRequest {
 }

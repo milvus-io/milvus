@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -46,11 +47,21 @@ type QueryService struct {
 	queryChannels       []*queryChannelInfo
 	qcMutex             *sync.Mutex
 
+	session *sessionutil.Session
+
 	stateCode  atomic.Value
 	isInit     atomic.Value
 	enableGrpc bool
 
 	msFactory msgstream.Factory
+}
+
+// Register register query service at etcd
+func (qs *QueryService) Register() error {
+	qs.session = sessionutil.NewSession(qs.loopCtx, []string{Params.EtcdAddress})
+	qs.session.Init(typeutil.QueryServiceRole, Params.Address, true)
+	Params.NodeID = uint64(qs.session.ServerID)
+	return nil
 }
 
 func (qs *QueryService) Init() error {

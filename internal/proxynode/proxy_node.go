@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -56,8 +57,10 @@ type ProxyNode struct {
 	tick  *timeTick
 
 	idAllocator  *allocator.IDAllocator
-	tsoAllocator *allocator.TimestampAllocator
+	tsoAllocator *TimestampAllocator
 	segAssigner  *SegIDAssigner
+
+	session *sessionutil.Session
 
 	queryMsgStream msgstream.MsgStream
 	msFactory      msgstream.Factory
@@ -80,6 +83,14 @@ func NewProxyNode(ctx context.Context, factory msgstream.Factory) (*ProxyNode, e
 		zap.Any("state of proxynode", internalpb.StateCode_Abnormal))
 	return node, nil
 
+}
+
+// Register register proxy node at etcd
+func (node *ProxyNode) Register() error {
+	node.session = sessionutil.NewSession(node.ctx, []string{Params.EtcdAddress})
+	node.session.Init(typeutil.ProxyNodeRole, Params.NetworkAddress, false)
+	Params.ProxyID = node.session.ServerID
+	return nil
 }
 
 func (node *ProxyNode) Init() error {
@@ -170,7 +181,7 @@ func (node *ProxyNode) Init() error {
 	log.Debug("create query message stream ...")
 
 	masterAddr := Params.MasterAddress
-	idAllocator, err := allocator.NewIDAllocator(node.ctx, masterAddr)
+	idAllocator, err := allocator.NewIDAllocator(node.ctx, masterAddr, []string{Params.EtcdAddress})
 
 	if err != nil {
 		return err
@@ -178,12 +189,11 @@ func (node *ProxyNode) Init() error {
 	node.idAllocator = idAllocator
 	node.idAllocator.PeerID = Params.ProxyID
 
-	tsoAllocator, err := allocator.NewTimestampAllocator(node.ctx, masterAddr)
+	tsoAllocator, err := NewTimestampAllocator(node.masterService, Params.ProxyID)
 	if err != nil {
 		return err
 	}
 	node.tsoAllocator = tsoAllocator
-	node.tsoAllocator.PeerID = Params.ProxyID
 
 	segAssigner, err := NewSegIDAssigner(node.ctx, node.dataService, node.lastTick)
 	if err != nil {
@@ -221,9 +231,6 @@ func (node *ProxyNode) Start() error {
 	node.idAllocator.Start()
 	log.Debug("start id allocator ...")
 
-	node.tsoAllocator.Start()
-	log.Debug("start tso allocator ...")
-
 	node.segAssigner.Start()
 	log.Debug("start seg assigner ...")
 
@@ -247,7 +254,6 @@ func (node *ProxyNode) Stop() error {
 	node.cancel()
 
 	globalInsertChannelsMap.CloseAllMsgStream()
-	node.tsoAllocator.Close()
 	node.idAllocator.Close()
 	node.segAssigner.Close()
 	node.sched.Close()

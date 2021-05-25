@@ -5,17 +5,16 @@ go 1.15
 require (
 	github.com/HdrHistogram/hdrhistogram-go v1.0.1 // indirect
 	github.com/antonmedv/expr v1.8.9
-	github.com/apache/pulsar-client-go v0.4.0
-	github.com/beefsack/go-rate v0.0.0-20180408011153-efa7637bb9b6 // indirect
-	github.com/bmizerany/perks v0.0.0-20141205001514-d9a9656a3a4b // indirect
+	github.com/apache/pulsar-client-go v0.5.0
+	github.com/apache/thrift/lib/go/thrift v0.0.0-20210120171102-e27e82c46ba4
 	github.com/coreos/etcd v3.3.13+incompatible
-	github.com/datadog/zstd v1.4.6-0.20200617134701-89f69fb7df32 // indirect
 	github.com/facebookgo/ensure v0.0.0-20200202191622-63f1cf65ac4c // indirect
 	github.com/facebookgo/stack v0.0.0-20160209184415-751773369052 // indirect
 	github.com/facebookgo/subset v0.0.0-20200203212716-c811ad88dec4 // indirect
 	github.com/frankban/quicktest v1.10.2 // indirect
 	github.com/go-basic/ipv4 v1.0.0
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e // indirect
+	github.com/golang/mock v1.3.1
 	github.com/golang/protobuf v1.4.3
 	github.com/google/btree v1.0.0
 	github.com/jarcoal/httpmock v1.0.8
@@ -26,6 +25,7 @@ require (
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/pierrec/lz4 v2.5.2+incompatible // indirect
 	github.com/pkg/errors v0.9.1
+	github.com/prometheus/client_golang v1.7.1
 	github.com/sirupsen/logrus v1.6.0 // indirect
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/spf13/cast v1.3.0
@@ -49,7 +49,7 @@ require (
 )
 
 replace (
-	github.com/apache/pulsar-client-go => github.com/apache/pulsar-client-go v0.4.0
+	github.com/apache/pulsar-client-go => github.com/apache/pulsar-client-go v0.5.0
 	github.com/coreos/etcd => github.com/ozonru/etcd v3.3.20-grpc1.27-origmodule+incompatible
 	go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
 

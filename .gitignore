@@ -76,3 +76,6 @@ gtags.conf
 # go-codecov
 coverage.txt
 profile.out
+
+# virtualenv
+venv/

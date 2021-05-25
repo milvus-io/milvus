@@ -20,6 +20,7 @@ import (
 type ParamTable struct {
 	paramtable.BaseTable
 
+	IP            string
 	Port          int
 	MasterAddress string
 }
@@ -38,6 +39,7 @@ func (pt *ParamTable) Init() {
 
 func (pt *ParamTable) initParams() {
 	pt.initMasterAddress()
+	pt.initDataServiceAddress()
 }
 
 func (pt *ParamTable) LoadFromEnv() {
@@ -54,4 +56,12 @@ func (pt *ParamTable) initMasterAddress() {
 		panic(err)
 	}
 	pt.MasterAddress = ret
+}
+
+func (pt *ParamTable) initDataServiceAddress() {
+	ret, err := pt.Load("_DataServiceAddress")
+	if err != nil {
+		panic(err)
+	}
+	pt.IP = ret
 }

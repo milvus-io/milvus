@@ -147,18 +147,6 @@ func (meta *meta) GetNumRowsOfCollection(collectionID UniqueID) (int64, error) {
 	return ret, nil
 }
 
-func (meta *meta) GetMemSizeOfCollection(collectionID UniqueID) (int64, error) {
-	meta.RLock()
-	defer meta.RUnlock()
-	var ret int64 = 0
-	for _, info := range meta.segments {
-		if info.CollectionID == collectionID {
-			ret += info.MemSize
-		}
-	}
-	return ret, nil
-}
-
 func (meta *meta) AddSegment(segment *datapb.SegmentInfo) error {
 	meta.Lock()
 	defer meta.Unlock()
@@ -172,21 +160,33 @@ func (meta *meta) AddSegment(segment *datapb.SegmentInfo) error {
 	return nil
 }
 
-func (meta *meta) UpdateSegment(segment *datapb.SegmentInfo) error {
+func (meta *meta) UpdateSegmentStatistic(segment *datapb.SegmentInfo) error {
 	meta.Lock()
 	defer meta.Unlock()
 	seg, ok := meta.segments[segment.ID]
 	if !ok {
 		return newErrSegmentNotFound(segment.ID)
 	}
-	seg.OpenTime = segment.OpenTime
-	seg.SealedTime = segment.SealedTime
 	seg.NumRows = segment.NumRows
-	seg.MemSize = segment.MemSize
 	seg.StartPosition = proto.Clone(segment.StartPosition).(*internalpb.MsgPosition)
 	seg.EndPosition = proto.Clone(segment.EndPosition).(*internalpb.MsgPosition)
 
 	if err := meta.saveSegmentInfo(segment); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (meta *meta) SetLastExpireTime(segmentID UniqueID, expireTs Timestamp) error {
+	meta.Lock()
+	defer meta.Unlock()
+	seg, ok := meta.segments[segmentID]
+	if !ok {
+		return newErrSegmentNotFound(segmentID)
+	}
+	seg.LastExpireTime = expireTs
+
+	if err := meta.saveSegmentInfo(seg); err != nil {
 		return err
 	}
 	return nil
@@ -227,7 +227,6 @@ func (meta *meta) SealSegment(segID UniqueID, timetick Timestamp) error {
 		return newErrSegmentNotFound(segID)
 	}
 
-	segInfo.SealedTime = timetick
 	segInfo.State = commonpb.SegmentState_Sealed
 	if err := meta.saveSegmentInfo(segInfo); err != nil {
 		return err
@@ -243,7 +242,6 @@ func (meta *meta) FlushSegment(segID UniqueID, timetick Timestamp) error {
 	if !ok {
 		return newErrSegmentNotFound(segID)
 	}
-	segInfo.FlushedTime = timetick
 	segInfo.State = commonpb.SegmentState_Flushed
 	if err := meta.saveSegmentInfo(segInfo); err != nil {
 		return err
@@ -354,6 +352,19 @@ func (meta *meta) GetNumRowsOfPartition(collectionID UniqueID, partitionID Uniqu
 	return ret, nil
 }
 
+func (meta *meta) GetUnFlushedSegments() []*datapb.SegmentInfo {
+	meta.RLock()
+	defer meta.RUnlock()
+	segments := make([]*datapb.SegmentInfo, 0)
+	for _, info := range meta.segments {
+		if info.State != commonpb.SegmentState_Flushed {
+			cInfo := proto.Clone(info).(*datapb.SegmentInfo)
+			segments = append(segments, cInfo)
+		}
+	}
+	return segments
+}
+
 func (meta *meta) saveSegmentInfo(segment *datapb.SegmentInfo) error {
 	segBytes := proto.MarshalTextString(segment)
 
@@ -372,10 +383,7 @@ func BuildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueI
 		CollectionID:  collectionID,
 		PartitionID:   partitionID,
 		InsertChannel: channelName,
-		OpenTime:      0,
-		SealedTime:    0,
 		NumRows:       0,
-		MemSize:       0,
 		State:         commonpb.SegmentState_Growing,
 		StartPosition: &internalpb.MsgPosition{
 			ChannelName: channelName,

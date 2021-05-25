@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
@@ -69,7 +68,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		cancel:      cancel,
 		grpcErrChan: make(chan error),
 		newMasterServiceClient: func(s string) (types.MasterService, error) {
-			return msc.NewClient(s, 10*time.Second)
+			return msc.NewClient(s, []string{dataservice.Params.EtcdAddress}, 10*time.Second)
 		},
 	}
 	s.dataService, err = dataservice.CreateServer(s.ctx, factory)
@@ -89,13 +88,15 @@ func (s *Server) init() error {
 	s.closer = closer
 
 	dataservice.Params.Init()
+	dataservice.Params.IP = Params.IP
+	dataservice.Params.Port = Params.Port
 
-	self := sessionutil.NewSession("dataservice", funcutil.GetLocalIP()+":"+strconv.Itoa(Params.Port), true)
-	sm := sessionutil.NewSessionManager(ctx, dataservice.Params.EtcdAddress, dataservice.Params.MetaRootPath, self)
-	sm.Init()
-	sessionutil.SetGlobalSessionManager(sm)
+	err := s.dataService.Register()
+	if err != nil {
+		return err
+	}
 
-	err := s.startGrpc()
+	err = s.startGrpc()
 	if err != nil {
 		return err
 	}

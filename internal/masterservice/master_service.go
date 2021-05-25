@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -113,28 +114,31 @@ type Core struct {
 	//setMsgStreams, send drop partition into dd channel
 	SendDdDropPartitionReq func(ctx context.Context, req *internalpb.DropPartitionRequest) error
 
-	//setMsgStreams segment channel, receive segment info from data service, if master create segment
-	DataServiceSegmentChan chan *datapb.SegmentInfo
+	// if master create segment, data service will put segment msg into this channel
+	DataServiceSegmentChan <-chan *ms.MsgPack
 
-	//setMsgStreams ,if segment flush completed, data node would put segment id into msg stream
-	DataNodeSegmentFlushCompletedChan chan typeutil.UniqueID
+	// if segment flush completed, data node would put segment msg into this channel
+	DataNodeFlushedSegmentChan <-chan *ms.MsgPack
 
 	//get binlog file path from data service,
-	GetBinlogFilePathsFromDataServiceReq func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error)
-	GetNumRowsReq                        func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error)
+	CallGetBinlogFilePathsService func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error)
+	CallGetNumRowsService         func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error)
 
 	//call index builder's client to build index, return build id
-	BuildIndexReq func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error)
-	DropIndexReq  func(ctx context.Context, indexID typeutil.UniqueID) error
+	CallBuildIndexService func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error)
+	CallDropIndexService  func(ctx context.Context, indexID typeutil.UniqueID) error
 
 	//proxy service interface, notify proxy service to drop collection
-	InvalidateCollectionMetaCache func(ctx context.Context, ts typeutil.Timestamp, dbName string, collectionName string) error
+	CallInvalidateCollectionMetaCacheService func(ctx context.Context, ts typeutil.Timestamp, dbName string, collectionName string) error
 
 	//query service interface, notify query service to release collection
-	ReleaseCollection func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error
+	CallReleaseCollectionService func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error
 
 	//dd request scheduler
 	ddReqQueue chan reqTask //dd request will be push into this chan
+
+	// channel timetick
+	chanTimeTick *timetickSync
 
 	//time tick loop
 	lastTimeTick typeutil.Timestamp
@@ -146,6 +150,8 @@ type Core struct {
 	initOnce  sync.Once
 	startOnce sync.Once
 	//isInit    atomic.Value
+
+	session *sessionutil.Session
 
 	msFactory ms.Factory
 }
@@ -208,29 +214,29 @@ func (c *Core) checkInit() error {
 	if c.SendDdDropPartitionReq == nil {
 		return fmt.Errorf("SendDdDropPartitionReq is nil")
 	}
+	if c.CallGetBinlogFilePathsService == nil {
+		return fmt.Errorf("CallGetBinlogFilePathsService is nil")
+	}
+	if c.CallGetNumRowsService == nil {
+		return fmt.Errorf("CallGetNumRowsService is nil")
+	}
+	if c.CallBuildIndexService == nil {
+		return fmt.Errorf("CallBuildIndexService is nil")
+	}
+	if c.CallDropIndexService == nil {
+		return fmt.Errorf("CallDropIndexService is nil")
+	}
+	if c.CallInvalidateCollectionMetaCacheService == nil {
+		return fmt.Errorf("CallInvalidateCollectionMetaCacheService is nil")
+	}
+	if c.CallReleaseCollectionService == nil {
+		return fmt.Errorf("CallReleaseCollectionService is nil")
+	}
 	if c.DataServiceSegmentChan == nil {
 		return fmt.Errorf("DataServiceSegmentChan is nil")
 	}
-	if c.GetBinlogFilePathsFromDataServiceReq == nil {
-		return fmt.Errorf("GetBinlogFilePathsFromDataServiceReq is nil")
-	}
-	if c.GetNumRowsReq == nil {
-		return fmt.Errorf("GetNumRowsReq is nil")
-	}
-	if c.BuildIndexReq == nil {
-		return fmt.Errorf("BuildIndexReq is nil")
-	}
-	if c.DropIndexReq == nil {
-		return fmt.Errorf("DropIndexReq is nil")
-	}
-	if c.InvalidateCollectionMetaCache == nil {
-		return fmt.Errorf("InvalidateCollectionMetaCache is nil")
-	}
-	if c.DataNodeSegmentFlushCompletedChan == nil {
-		return fmt.Errorf("DataNodeSegmentFlushCompletedChan is nil")
-	}
-	if c.ReleaseCollection == nil {
-		return fmt.Errorf("ReleaseCollection is nil")
+	if c.DataNodeFlushedSegmentChan == nil {
+		return fmt.Errorf("DataNodeFlushedSegmentChan is nil")
 	}
 	return nil
 }
@@ -301,69 +307,127 @@ func (c *Core) startTimeTickLoop() {
 	}
 }
 
-//data service send segment info to master when create segment
+// data service send segment info msg to master when create segment
 func (c *Core) startDataServiceSegmentLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Debug("close data service segment loop")
 			return
-		case seg, ok := <-c.DataServiceSegmentChan:
+		case segMsg, ok := <-c.DataServiceSegmentChan:
 			if !ok {
-				log.Debug("data service segment is closed, exit loop")
+				log.Debug("data service segment channel is closed, exit loop")
 				return
 			}
-			if seg == nil {
-				log.Warn("segment from data service is nil")
-			} else if _, err := c.MetaTable.AddSegment(seg); err != nil {
-				//what if master add segment failed, but data service success?
-				log.Warn("add segment info meta table failed ", zap.String("error", err.Error()))
-			} else {
-				log.Debug("add segment", zap.Int64("collection id", seg.CollectionID), zap.Int64("partition id", seg.PartitionID), zap.Int64("segment id", seg.ID))
+			var segInfos []*datapb.SegmentInfo
+			for _, msg := range segMsg.Msgs {
+				if msg.Type() != commonpb.MsgType_SegmentInfo {
+					continue
+				}
+				segInfoMsg := msg.(*ms.SegmentInfoMsg)
+				segInfos = append(segInfos, segInfoMsg.Segment)
+			}
+			if len(segInfos) > 0 {
+				startPosStr, err := EncodeMsgPositions(segMsg.StartPositions)
+				if err != nil {
+					log.Error("encode msg start positions fail", zap.String("err", err.Error()))
+					continue
+				}
+				endPosStr, err := EncodeMsgPositions(segMsg.EndPositions)
+				if err != nil {
+					log.Error("encode msg end positions fail", zap.String("err", err.Error()))
+					continue
+				}
+
+				if _, err := c.MetaTable.AddSegment(segInfos, startPosStr, endPosStr); err != nil {
+					//what if master add segment failed, but data service success?
+					log.Debug("add segment info meta table failed ", zap.String("error", err.Error()))
+					continue
+				}
 			}
 		}
 	}
 }
 
-func (c *Core) startSegmentFlushCompletedLoop() {
+// data node will put msg in this channel when flush segment
+func (c *Core) startDataNodeFlushedSegmentLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Debug("close segment flush completed loop")
 			return
-		case segID, ok := <-c.DataNodeSegmentFlushCompletedChan:
+		case segMsg, ok := <-c.DataNodeFlushedSegmentChan:
 			if !ok {
 				log.Debug("data node segment flush completed chan has closed, exit loop")
+				return
 			}
-			log.Debug("flush segment", zap.Int64("id", segID))
-			coll, err := c.MetaTable.GetCollectionBySegmentID(segID)
+
+			startPosStr, err := EncodeMsgPositions(segMsg.StartPositions)
 			if err != nil {
-				log.Warn("GetCollectionBySegmentID error", zap.Error(err))
-				break
+				log.Error("encode msg start positions fail", zap.String("err", err.Error()))
+				continue
 			}
-			err = c.MetaTable.AddFlushedSegment(segID)
+			endPosStr, err := EncodeMsgPositions(segMsg.EndPositions)
 			if err != nil {
-				log.Warn("AddFlushedSegment error", zap.Error(err))
+				log.Error("encode msg end positions fail", zap.String("err", err.Error()))
+				continue
 			}
-			for _, f := range coll.FieldIndexes {
-				idxInfo, err := c.MetaTable.GetIndexByID(f.IndexID)
+
+			var segIdxInfos []*etcdpb.SegmentIndexInfo
+			for _, msg := range segMsg.Msgs {
+				// check msg type
+				if msg.Type() != commonpb.MsgType_SegmentFlushDone {
+					continue
+				}
+				flushMsg := msg.(*ms.FlushCompletedMsg)
+				segID := flushMsg.SegmentID
+				log.Debug("flush segment", zap.Int64("id", segID))
+
+				coll, err := c.MetaTable.GetCollectionBySegmentID(segID)
 				if err != nil {
-					log.Warn("index not found", zap.Int64("index id", f.IndexID))
+					log.Warn("GetCollectionBySegmentID error", zap.Error(err))
+					continue
+				}
+				err = c.MetaTable.AddFlushedSegment(segID)
+				if err != nil {
+					log.Warn("AddFlushedSegment error", zap.Error(err))
 					continue
 				}
 
-				fieldSch, err := GetFieldSchemaByID(coll, f.FiledID)
-				if err != nil {
-					log.Warn("field schema not found", zap.Int64("field id", f.FiledID))
-					continue
-				}
+				for _, f := range coll.FieldIndexes {
+					fieldSch, err := GetFieldSchemaByID(coll, f.FiledID)
+					if err != nil {
+						log.Warn("field schema not found", zap.Int64("field id", f.FiledID))
+						continue
+					}
 
-				if err = c.BuildIndex(segID, fieldSch, idxInfo, true); err != nil {
-					log.Error("build index fail", zap.String("error", err.Error()))
-				} else {
-					log.Debug("build index", zap.String("index name", idxInfo.IndexName),
-						zap.String("field name", fieldSch.Name),
-						zap.Int64("segment id", segID))
+					idxInfo, err := c.MetaTable.GetIndexByID(f.IndexID)
+					if err != nil {
+						log.Warn("index not found", zap.Int64("index id", f.IndexID))
+						continue
+					}
+
+					info := etcdpb.SegmentIndexInfo{
+						SegmentID:   segID,
+						FieldID:     fieldSch.FieldID,
+						IndexID:     idxInfo.IndexID,
+						EnableIndex: false,
+					}
+					info.BuildID, err = c.BuildIndex(segID, fieldSch, idxInfo, true)
+					if err == nil {
+						info.EnableIndex = true
+					} else {
+						log.Error("build index fail", zap.String("error", err.Error()))
+					}
+
+					segIdxInfos = append(segIdxInfos, &info)
+				}
+			}
+
+			if len(segIdxInfos) > 0 {
+				_, err = c.MetaTable.AddIndex(segIdxInfos, startPosStr, endPosStr)
+				if err != nil {
+					log.Error("AddIndex fail", zap.String("err", err.Error()))
 				}
 			}
 		}
@@ -426,16 +490,6 @@ func (c *Core) setMsgStreams() error {
 		return fmt.Errorf("ProxyTimeTickChannel is empty")
 	}
 
-	var err error
-	m := map[string]interface{}{
-		"PulsarAddress":  Params.PulsarAddress,
-		"ReceiveBufSize": 1024,
-		"PulsarBufSize":  1024}
-	err = c.msFactory.SetParams(m)
-	if err != nil {
-		return err
-	}
-
 	proxyTimeTickStream, _ := c.msFactory.NewMsgStream(c.ctx)
 	proxyTimeTickStream.AsConsumer([]string{Params.ProxyTimeTickChannel}, Params.MsgChannelSubName)
 	log.Debug("master AsConsumer: " + Params.ProxyTimeTickChannel + " : " + Params.MsgChannelSubName)
@@ -469,7 +523,7 @@ func (c *Core) setMsgStreams() error {
 				MsgType:   commonpb.MsgType_TimeTick,
 				MsgID:     0,
 				Timestamp: t,
-				SourceID:  int64(Params.NodeID),
+				SourceID:  c.session.ServerID,
 			},
 		}
 		timeTickMsg := &ms.TimeTickMsg{
@@ -587,45 +641,25 @@ func (c *Core) setMsgStreams() error {
 		}
 	}()
 
-	//segment channel, data service create segment,or data node flush segment will put msg in this channel
 	if Params.DataServiceSegmentChannel == "" {
 		return fmt.Errorf("DataServiceSegmentChannel is empty")
 	}
-	dataServiceStream, _ := c.msFactory.NewMsgStream(c.ctx)
-	dataServiceStream.AsConsumer([]string{Params.DataServiceSegmentChannel}, Params.MsgChannelSubName)
-	log.Debug("master AsConsumer: " + Params.DataServiceSegmentChannel + " : " + Params.MsgChannelSubName)
-	dataServiceStream.Start()
-	c.DataServiceSegmentChan = make(chan *datapb.SegmentInfo, 1024)
-	c.DataNodeSegmentFlushCompletedChan = make(chan typeutil.UniqueID, 1024)
 
-	// receive segment info from msg stream
-	go func() {
-		for {
-			select {
-			case <-c.ctx.Done():
-				return
-			case segMsg, ok := <-dataServiceStream.Chan():
-				if !ok {
-					log.Warn("data service segment msg closed")
-				}
-				if len(segMsg.Msgs) > 0 {
-					for _, segm := range segMsg.Msgs {
-						segInfoMsg, ok := segm.(*ms.SegmentInfoMsg)
-						if ok {
-							c.DataServiceSegmentChan <- segInfoMsg.Segment
-						} else {
-							flushMsg, ok := segm.(*ms.FlushCompletedMsg)
-							if ok {
-								c.DataNodeSegmentFlushCompletedChan <- flushMsg.SegmentFlushCompletedMsg.SegmentID
-							} else {
-								log.Debug("receive unexpected msg from data service stream", zap.Stringer("segment", segInfoMsg.SegmentMsg.Segment))
-							}
-						}
-					}
-				}
-			}
-		}
-	}()
+	// data service will put msg into this channel when create segment
+	dsStream, _ := c.msFactory.NewMsgStream(c.ctx)
+	dsSubName := Params.MsgChannelSubName + "ds"
+	dsStream.AsConsumer([]string{Params.DataServiceSegmentChannel}, dsSubName)
+	log.Debug("master AsConsumer: " + Params.DataServiceSegmentChannel + " : " + dsSubName)
+	dsStream.Start()
+	c.DataServiceSegmentChan = dsStream.Chan()
+
+	// data node will put msg into this channel when flush segment
+	dnStream, _ := c.msFactory.NewMsgStream(c.ctx)
+	dnSubName := Params.MsgChannelSubName + "dn"
+	dnStream.AsConsumer([]string{Params.DataServiceSegmentChannel}, dnSubName)
+	log.Debug("master AsConsumer: " + Params.DataServiceSegmentChannel + " : " + dnSubName)
+	dnStream.Start()
+	c.DataNodeFlushedSegmentChan = dnStream.Chan()
 
 	return nil
 }
@@ -638,13 +672,13 @@ func (c *Core) SetProxyService(ctx context.Context, s types.ProxyService) error 
 	Params.ProxyTimeTickChannel = rsp.Value
 	log.Debug("proxy time tick", zap.String("channel name", Params.ProxyTimeTickChannel))
 
-	c.InvalidateCollectionMetaCache = func(ctx context.Context, ts typeutil.Timestamp, dbName string, collectionName string) error {
+	c.CallInvalidateCollectionMetaCacheService = func(ctx context.Context, ts typeutil.Timestamp, dbName string, collectionName string) error {
 		status, _ := s.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   0, //TODO,MsgType
 				MsgID:     0,
 				Timestamp: ts,
-				SourceID:  int64(Params.NodeID),
+				SourceID:  c.session.ServerID,
 			},
 			DbName:         dbName,
 			CollectionName: collectionName,
@@ -668,7 +702,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 	Params.DataServiceSegmentChannel = rsp.Value
 	log.Debug("data service segment", zap.String("channel name", Params.DataServiceSegmentChannel))
 
-	c.GetBinlogFilePathsFromDataServiceReq = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error) {
+	c.CallGetBinlogFilePathsService = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error) {
 		ts, err := c.TSOAllocator(1)
 		if err != nil {
 			return nil, err
@@ -678,7 +712,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 				MsgType:   0, //TODO, msg type
 				MsgID:     0,
 				Timestamp: ts,
-				SourceID:  int64(Params.NodeID),
+				SourceID:  c.session.ServerID,
 			},
 			SegmentID: segID,
 		})
@@ -696,7 +730,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 		return nil, fmt.Errorf("binlog file not exist, segment id = %d, field id = %d", segID, fieldID)
 	}
 
-	c.GetNumRowsReq = func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error) {
+	c.CallGetNumRowsService = func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error) {
 		ts, err := c.TSOAllocator(1)
 		if err != nil {
 			return 0, err
@@ -706,7 +740,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 				MsgType:   0, //TODO, msg type
 				MsgID:     0,
 				Timestamp: ts,
-				SourceID:  int64(Params.NodeID),
+				SourceID:  c.session.ServerID,
 			},
 			SegmentIDs: []typeutil.UniqueID{segID},
 		})
@@ -730,7 +764,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 }
 
 func (c *Core) SetIndexService(s types.IndexService) error {
-	c.BuildIndexReq = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error) {
+	c.CallBuildIndexService = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error) {
 		rsp, err := s.BuildIndex(ctx, &indexpb.BuildIndexRequest{
 			DataPaths:   binlog,
 			TypeParams:  field.TypeParams,
@@ -747,7 +781,7 @@ func (c *Core) SetIndexService(s types.IndexService) error {
 		return rsp.IndexBuildID, nil
 	}
 
-	c.DropIndexReq = func(ctx context.Context, indexID typeutil.UniqueID) error {
+	c.CallDropIndexService = func(ctx context.Context, indexID typeutil.UniqueID) error {
 		rsp, err := s.DropIndex(ctx, &indexpb.DropIndexRequest{
 			IndexID: indexID,
 		})
@@ -764,13 +798,13 @@ func (c *Core) SetIndexService(s types.IndexService) error {
 }
 
 func (c *Core) SetQueryService(s types.QueryService) error {
-	c.ReleaseCollection = func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
+	c.CallReleaseCollectionService = func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
 		req := &querypb.ReleaseCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_ReleaseCollection,
 				MsgID:     0, //TODO, msg ID
 				Timestamp: ts,
-				SourceID:  int64(Params.NodeID),
+				SourceID:  c.session.ServerID,
 			},
 			DbID:         dbID,
 			CollectionID: collectionID,
@@ -788,38 +822,38 @@ func (c *Core) SetQueryService(s types.QueryService) error {
 }
 
 // BuildIndex will check row num and call build index service
-func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, isFlush bool) error {
+func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, isFlush bool) (typeutil.UniqueID, error) {
 	if c.MetaTable.IsSegmentIndexed(segID, field, idxInfo.IndexParams) {
-		return nil
+		return 0, nil
 	}
-	rows, err := c.GetNumRowsReq(segID, isFlush)
+	rows, err := c.CallGetNumRowsService(segID, isFlush)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	var bldID typeutil.UniqueID
-	enableIdx := false
 	if rows < Params.MinSegmentSizeToEnableIndex {
 		log.Debug("num of rows is less than MinSegmentSizeToEnableIndex", zap.Int64("num rows", rows))
 	} else {
-		binlogs, err := c.GetBinlogFilePathsFromDataServiceReq(segID, field.FieldID)
+		binlogs, err := c.CallGetBinlogFilePathsService(segID, field.FieldID)
 		if err != nil {
-			return err
+			return 0, err
 		}
-		bldID, err = c.BuildIndexReq(c.ctx, binlogs, field, idxInfo)
+		bldID, err = c.CallBuildIndexService(c.ctx, binlogs, field, idxInfo)
 		if err != nil {
-			return err
+			return 0, err
 		}
-		enableIdx = true
 	}
-	seg := etcdpb.SegmentIndexInfo{
-		SegmentID:   segID,
-		FieldID:     field.FieldID,
-		IndexID:     idxInfo.IndexID,
-		BuildID:     bldID,
-		EnableIndex: enableIdx,
-	}
-	_, err = c.MetaTable.AddIndex(&seg)
-	return err
+	log.Debug("build index", zap.String("index name", idxInfo.IndexName),
+		zap.String("field name", field.Name),
+		zap.Int64("segment id", segID))
+	return bldID, nil
+}
+
+// Register register master service at etcd
+func (c *Core) Register() error {
+	c.session = sessionutil.NewSession(c.ctx, []string{Params.EtcdAddress})
+	c.session.Init(typeutil.MasterServiceRole, Params.Address, true)
+	return nil
 }
 
 func (c *Core) Init() error {
@@ -876,6 +910,18 @@ func (c *Core) Init() error {
 		}
 		c.TSOAllocatorUpdate = func() error {
 			return tsoAllocator.UpdateTSO()
+		}
+
+		m := map[string]interface{}{
+			"PulsarAddress":  Params.PulsarAddress,
+			"ReceiveBufSize": 1024,
+			"PulsarBufSize":  1024}
+		if initError = c.msFactory.SetParams(m); initError != nil {
+			return
+		}
+		c.chanTimeTick, initError = newTimeTickSync(c)
+		if initError != nil {
+			return
 		}
 
 		c.ddReqQueue = make(chan reqTask, 1024)
@@ -958,7 +1004,7 @@ func (c *Core) Start() error {
 		return err
 	}
 
-	log.Debug("master", zap.Int64("node id", int64(Params.NodeID)))
+	log.Debug("master", zap.Int64("node id", c.session.ServerID))
 	log.Debug("master", zap.String("dd channel name", Params.DdChannel))
 	log.Debug("master", zap.String("time tick channel name", Params.TimeTickChannel))
 
@@ -969,8 +1015,9 @@ func (c *Core) Start() error {
 		go c.startDdScheduler()
 		go c.startTimeTickLoop()
 		go c.startDataServiceSegmentLoop()
-		go c.startSegmentFlushCompletedLoop()
+		go c.startDataNodeFlushedSegmentLoop()
 		go c.tsLoop()
+		go c.chanTimeTick.StartWatch()
 		c.stateCode.Store(internalpb.StateCode_Healthy)
 	})
 	log.Debug("Master service", zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Healthy)]))
@@ -989,7 +1036,7 @@ func (c *Core) GetComponentStates(ctx context.Context) (*internalpb.ComponentSta
 
 	return &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{
-			NodeID:    int64(Params.NodeID),
+			NodeID:    c.session.ServerID,
 			Role:      typeutil.MasterServiceRole,
 			StateCode: code,
 			ExtraInfo: nil,
@@ -1000,7 +1047,7 @@ func (c *Core) GetComponentStates(ctx context.Context) (*internalpb.ComponentSta
 		},
 		SubcomponentStates: []*internalpb.ComponentInfo{
 			{
-				NodeID:    int64(Params.NodeID),
+				NodeID:    c.session.ServerID,
 				Role:      typeutil.MasterServiceRole,
 				StateCode: code,
 				ExtraInfo: nil,
@@ -1646,5 +1693,28 @@ func (c *Core) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*maste
 		},
 		ID:    start,
 		Count: in.Count,
+	}, nil
+}
+
+// UpdateChannelTimeTick used to handle ChannelTimeTickMsg
+func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}
+	if in.Base.MsgType != commonpb.MsgType_TimeTick {
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = fmt.Sprintf("UpdateChannelTimeTick receive invalid message %d", in.Base.GetMsgType())
+		return status, nil
+	}
+	err := c.chanTimeTick.UpdateTimeTick(in)
+	if err != nil {
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = err.Error()
+		return status, nil
+	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
 	}, nil
 }

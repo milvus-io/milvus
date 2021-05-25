@@ -227,3 +227,9 @@ message MsgPosition {
   string msgGroup = 3;
   uint64 timestamp = 4;
 }
+
+message ChannelTimeTickMsg {
+  common.MsgBase base = 1;
+  repeated string channelNames = 2;
+  repeated uint64 timestamps = 3;
+}

@@ -35,6 +35,7 @@ type UniqueID = typeutil.UniqueID
 type IDAllocator struct {
 	Allocator
 
+	etcdAddr      []string
 	masterAddress string
 	masterClient  types.MasterService
 
@@ -46,7 +47,7 @@ type IDAllocator struct {
 	PeerID UniqueID
 }
 
-func NewIDAllocator(ctx context.Context, masterAddr string) (*IDAllocator, error) {
+func NewIDAllocator(ctx context.Context, masterAddr string, etcdAddr []string) (*IDAllocator, error) {
 
 	ctx1, cancel := context.WithCancel(ctx)
 	a := &IDAllocator{
@@ -56,6 +57,7 @@ func NewIDAllocator(ctx context.Context, masterAddr string) (*IDAllocator, error
 			Role:       "IDAllocator",
 		},
 		countPerRPC:   IDCountPerRPC,
+		etcdAddr:      etcdAddr,
 		masterAddress: masterAddr,
 	}
 	a.TChan = &EmptyTicker{}
@@ -69,7 +71,8 @@ func NewIDAllocator(ctx context.Context, masterAddr string) (*IDAllocator, error
 
 func (ia *IDAllocator) Start() error {
 	var err error
-	ia.masterClient, err = msc.NewClient(ia.masterAddress, 20*time.Second)
+
+	ia.masterClient, err = msc.NewClient(ia.masterAddress, ia.etcdAddr, 20*time.Second)
 	if err != nil {
 		panic(err)
 	}

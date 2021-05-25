@@ -16,6 +16,7 @@ import (
 	"errors"
 	"io"
 	"math/rand"
+	"strconv"
 	"time"
 
 	"go.uber.org/zap"
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -47,7 +49,8 @@ type IndexNode struct {
 
 	sched *TaskScheduler
 
-	kv kv.BaseKV
+	kv      kv.BaseKV
+	session *sessionutil.Session
 
 	serviceClient types.IndexService // method factory
 
@@ -72,6 +75,14 @@ func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 		return nil, err
 	}
 	return b, nil
+}
+
+// Register register index node at etcd
+func (i *IndexNode) Register() error {
+	i.session = sessionutil.NewSession(i.loopCtx, []string{Params.EtcdAddress})
+	i.session.Init(typeutil.IndexNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
+	Params.NodeID = i.session.ServerID
+	return nil
 }
 
 func (i *IndexNode) Init() error {
