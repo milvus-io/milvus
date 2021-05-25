@@ -250,3 +250,9 @@ message SaveBinlogPathsRequest {
   PositionPair dml_position = 6;
   PositionPair ddl_position =7;
 }
+
+message DataNodeTtMsg {
+    common.MsgBase base =1;
+    string channel_name = 2;
+    uint64 timestamp = 3;
+}
