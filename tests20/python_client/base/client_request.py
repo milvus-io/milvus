@@ -22,9 +22,7 @@ def request_catch():
             except Exception as e:
                 log.error("[ClientRequest API Exception]%s: %s" % (str(func), str(e)))
                 return e, False
-
         return inner_wrapper
-
     return wrapper
 
 
@@ -90,7 +88,6 @@ class Base:
         host = request.config.getoption("--host")
         port = request.config.getoption("--port")
         handler = request.config.getoption("--handler")
-        log.info("host: %s, port: %s.", host, port)
         param_info.prepare_param_info(host, port, handler)
 
 

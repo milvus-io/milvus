@@ -287,7 +287,7 @@ class TestPartitionOperations(ApiReq):
                 Partition(collection, name)
 
         m_collection = self._collection()
-        for i in range(threads_num):
+        for _ in range(threads_num):
             t = threading.Thread(target=create_partition, args=(m_collection, threads_num))
             threads.append(t)
             t.start()
@@ -309,12 +309,12 @@ class TestPartitionOperations(ApiReq):
                   2. there is a new empty partition named "_default"
         """
         m_collection = self._collection()
-        default_partition = m_collection.partition(default_partition_name)
+        default_partition = m_collection.partition(ct.default_partition_name)
         default_partition.insert(gen_default_list_data())
         assert default_partition.is_empty is False
         default_partition.drop()
-        assert m_collection.has_partition(default_partition_name)
-        default_partition = m_collection.partition(default_partition_name)
+        assert m_collection.has_partition(ct.default_partition_name)
+        default_partition = m_collection.partition(ct.default_partition_name)
         assert default_partition.is_empty
 
     @pytest.mark.tags(CaseLabel.L1)

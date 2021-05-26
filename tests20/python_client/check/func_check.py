@@ -175,6 +175,7 @@ class CheckFunc:
         assert collection.name == params["name"]
         assert collection.description == params["schema"].description
         assert collection.schema == params["schema"]
+        pass
 
     @staticmethod
     def partition_property_check(partition, func_name, params):
@@ -187,4 +188,5 @@ class CheckFunc:
         assert partition.description == params["description"]
         assert partition.is_empty == params["is_empty"]
         assert partition.num_entities == params["num_entities"]
+        pass
 
