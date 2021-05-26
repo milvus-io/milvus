@@ -97,17 +97,11 @@ class ApiReq(Base):
     Public methods that can be used to add cases.
     """
 
-    @pytest.fixture(
-        scope="module",
-        params=ct.get_invalid_strs
-    )
+    @pytest.fixture(scope="module",params=ct.get_invalid_strs)
     def get_invalid_string(self, request):
         yield request.param
 
-    @pytest.fixture(
-        scope="module",
-        params=cf.gen_simple_index()
-    )
+    @pytest.fixture(scope="module",params=cf.gen_simple_index())
     def get_index_param(self, request):
         yield request.param
 

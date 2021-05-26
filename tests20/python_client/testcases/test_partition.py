@@ -1,13 +1,11 @@
 import threading
-
 import pytest
 
-import common.common_type
 from pymilvus_orm import Partition
 from base.client_request import ApiReq
-from utils.util_log import test_log as log
 from common.common_type import *
 from common.common_func import *
+
 
 prefix = "partition_"
 
@@ -25,7 +23,7 @@ class TestPartitionParams(ApiReq):
         m_collection = self._collection()
         p_name = gen_unique_str(prefix)
         descriptions = gen_unique_str("desc_")
-        m_partition, _ = self.partition.partition_init(
+        _, _ = self.partition.partition_init(
             m_collection, p_name, description=descriptions,
             check_res=CheckParams.partition_property_check
         )
@@ -54,7 +52,7 @@ class TestPartitionParams(ApiReq):
         m_collection = self._collection()
         p_name = gen_unique_str(prefix)
         descriptions = ""
-        m_partition, _ = self.partition.partition_init(
+        _, _ = self.partition.partition_init(
             m_collection, p_name, description=descriptions,
             check_res=CheckParams.partition_property_check)
         assert (m_collection.has_partition(p_name))
@@ -250,8 +248,8 @@ class TestPartitionOperations(ApiReq):
         m_collection = self._collection(gen_unique_str())
         m_collection2 = self._collection(gen_unique_str())
         p_name = gen_unique_str(prefix)
-        m_partition, _ = self.partition.partition_init(m_collection, p_name)
-        m_partition2, _ = self.partition.partition_init(m_collection2, p_name)
+        _, _ = self.partition.partition_init(m_collection, p_name)
+        _, _ = self.partition.partition_init(m_collection2, p_name)
         assert m_collection.has_partition(p_name)
         assert m_collection2.has_partition(p_name)
 
@@ -265,7 +263,7 @@ class TestPartitionOperations(ApiReq):
         m_collection = self._collection()
         for _ in range(10):
             p_name = gen_unique_str(prefix)
-            m_partition, _ = self.partition.partition_init(m_collection, p_name)
+            _, _ = self.partition.partition_init(m_collection, p_name)
             assert m_collection.has_partition(p_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -334,6 +332,7 @@ class TestPartitionOperations(ApiReq):
         assert m_collection.has_partition(p_name) is False
         with pytest.raises(Exception) as e:
             m_partition.drop()
+            log.info(e)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_partition_create_and_drop_multi_times(self):
@@ -430,6 +429,7 @@ class TestPartitionOperations(ApiReq):
         m_partition.drop()
         with pytest.raises(Exception) as e:
             m_partition.release()
+            log.info(e)
             # TODO assert the error code
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -448,6 +448,7 @@ class TestPartitionOperations(ApiReq):
         m_collection.drop()
         with pytest.raises(Exception) as e:
             m_partition.release()
+            log.info(e)
             # TODO assert the error code
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -511,6 +512,7 @@ class TestPartitionOperations(ApiReq):
         m_partition.drop()
         with pytest.raises(Exception) as e:
             m_partition.insert(gen_default_dataframe_data())
+            log.info(e)
             # TODO: assert the error code
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -528,6 +530,7 @@ class TestPartitionOperations(ApiReq):
         m_collection.drop()
         with pytest.raises(Exception) as e:
             m_partition.insert(gen_default_dataframe_data())
+            log.info(e)
             # TODO: assert the error code
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -561,6 +564,7 @@ class TestPartitionOperations(ApiReq):
         data = gen_default_list_data(nb=10, dim=dim)
         with pytest.raises(Exception) as e:
             m_partition.insert(data)
+            log.info(e)
             # TODO: assert expected_err in error code
 
     @pytest.mark.tags(CaseLabel.L1)
