@@ -38,4 +38,6 @@ type RocksMQ interface {
 	Consume(topicName string, groupName string, n int) ([]ConsumerMessage, error)
 	Seek(topicName string, groupName string, msgID UniqueID) error
 	ExistConsumerGroup(topicName string, groupName string) (bool, *Consumer)
+
+	Notify(topicName, groupName string)
 }
