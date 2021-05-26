@@ -1058,6 +1058,7 @@ func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertReque
 			},
 		},
 		rowIDAllocator: node.idAllocator,
+		segIDAssigner:  node.segAssigner,
 	}
 	if len(it.PartitionName) <= 0 {
 		it.PartitionName = Params.DefaultPartitionName
@@ -1433,6 +1434,28 @@ func (node *ProxyNode) getSegmentsOfCollection(ctx context.Context, dbName strin
 		ret = append(ret, showSegmentResponse.SegmentIDs...)
 	}
 	return ret, nil
+}
+
+func (node *ProxyNode) Dummy(ctx context.Context, req *milvuspb.DummyRequest) (*milvuspb.DummyResponse, error) {
+	if req.RequestType == "retrieve" {
+		request := &milvuspb.RetrieveRequest{
+			DbName:         "",
+			CollectionName: "",
+			PartitionNames: []string{},
+			Ids:            &schemapb.IDs{},
+			OutputFields:   []string{},
+		}
+
+		_, _ = node.Retrieve(ctx, request)
+
+		return &milvuspb.DummyResponse{
+			Response: `{"status": "success"}`,
+		}, nil
+	}
+
+	return &milvuspb.DummyResponse{
+		Response: `{"status": "fail"}`,
+	}, nil
 }
 
 func (node *ProxyNode) RegisterLink(ctx context.Context, req *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error) {

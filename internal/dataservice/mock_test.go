@@ -68,11 +68,11 @@ type mockDataNodeClient struct {
 	state internalpb.StateCode
 }
 
-func newMockDataNodeClient(id int64) *mockDataNodeClient {
+func newMockDataNodeClient(id int64) (*mockDataNodeClient, error) {
 	return &mockDataNodeClient{
 		id:    id,
 		state: internalpb.StateCode_Initializing,
-	}
+	}, nil
 }
 
 func (c *mockDataNodeClient) Init() error {
@@ -81,6 +81,10 @@ func (c *mockDataNodeClient) Init() error {
 
 func (c *mockDataNodeClient) Start() error {
 	c.state = internalpb.StateCode_Healthy
+	return nil
+}
+
+func (c *mockDataNodeClient) Register() error {
 	return nil
 }
 
@@ -131,6 +135,10 @@ func (m *mockMasterService) Start() error {
 }
 
 func (m *mockMasterService) Stop() error {
+	return nil
+}
+
+func (m *mockMasterService) Register() error {
 	return nil
 }
 
