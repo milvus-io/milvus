@@ -70,10 +70,11 @@ type mockDataNodeClient struct {
 	ch    chan interface{}
 }
 
-func newMockDataNodeClient(id int64) (*mockDataNodeClient, error) {
+func newMockDataNodeClient(id int64, ch chan interface{}) (*mockDataNodeClient, error) {
 	return &mockDataNodeClient{
 		id:    id,
 		state: internalpb.StateCode_Initializing,
+		ch:    ch,
 	}, nil
 }
 
@@ -301,12 +302,21 @@ func (p *mockStartupPolicy) apply(oldCluster map[string]*datapb.DataNodeInfo, de
 }
 
 type mockSessionManager struct {
+	ch chan interface{}
 }
 
-func newMockSessionManager() sessionManager {
-	return &mockSessionManager{}
+func newMockSessionManager(ch chan interface{}) sessionManager {
+	return &mockSessionManager{
+		ch: ch,
+	}
 }
 
-func (m *mockSessionManager) sendRequest(addr string, executor func(node types.DataNode) error) error {
-	return nil
+func (m *mockSessionManager) getOrCreateSession(addr string) (types.DataNode, error) {
+	return newMockDataNodeClient(0, m.ch)
+}
+
+func (m *mockSessionManager) releaseSession(addr string) {
+
+}
+func (m *mockSessionManager) release() {
 }
