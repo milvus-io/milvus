@@ -22,10 +22,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -70,12 +73,20 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	assert.Nil(t, err)
 
 	iBNode := newInsertBufferNode(ctx, newBinlogMeta(), replica, msFactory, NewAllocatorFactory())
-	inMsg := genInsertMsg()
+
+	ddlFlushedCh := make(chan []*datapb.DDLBinlogMeta)
+	dmlFlushedCh := make(chan []*datapb.ID2PathList)
+
+	inMsg := genInsertMsg(ddlFlushedCh, dmlFlushedCh)
 	var iMsg flowgraph.Msg = &inMsg
 	iBNode.Operate([]flowgraph.Msg{iMsg})
+
+	isflushed := <-dmlFlushedCh
+	assert.NotNil(t, isflushed)
+	log.Debug("DML binlog paths", zap.Any("paths", isflushed))
 }
 
-func genInsertMsg() insertMsg {
+func genInsertMsg(ddlFlushedCh chan<- []*datapb.DDLBinlogMeta, dmlFlushedCh chan<- []*datapb.ID2PathList) insertMsg {
 
 	timeRange := TimeRange{
 		timestampMin: 0,
@@ -92,7 +103,7 @@ func genInsertMsg() insertMsg {
 
 	var iMsg = &insertMsg{
 		insertMessages: make([]*msgstream.InsertMsg, 0),
-		flushMessages:  make([]*flushMsg, 0),
+		// flushMessages:  make([]*flushMsg, 0),
 		timeRange: TimeRange{
 			timestampMin: timeRange.timestampMin,
 			timestampMax: timeRange.timestampMax,
@@ -104,14 +115,15 @@ func genInsertMsg() insertMsg {
 	dataFactory := NewDataFactory()
 	iMsg.insertMessages = append(iMsg.insertMessages, dataFactory.GetMsgStreamInsertMsgs(2)...)
 
-	fmsg := &flushMsg{
+	iMsg.flushMessage = &flushMsg{
 		msgID:        1,
 		timestamp:    2000,
-		segmentIDs:   []UniqueID{1},
+		segmentID:    UniqueID(1),
 		collectionID: UniqueID(1),
+		ddlFlushedCh: ddlFlushedCh,
+		dmlFlushedCh: dmlFlushedCh,
 	}
 
-	iMsg.flushMessages = append(iMsg.flushMessages, fmsg)
 	return *iMsg
 
 }
