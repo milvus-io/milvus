@@ -106,9 +106,6 @@ func (i *IndexService) Register() error {
 func (i *IndexService) Init() error {
 	log.Debug("indexservice", zap.String("etcd address", Params.EtcdAddress))
 
-	i.session = sessionutil.NewSession(i.loopCtx, []string{Params.EtcdAddress})
-	i.session.Init(typeutil.IndexServiceRole, Params.Address, true)
-	i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, 0)
 	i.assignChan = make(chan []UniqueID, 1024)
 	connectEtcdFn := func() error {
 		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
