@@ -11,8 +11,14 @@
 
 package querynode
 
-type Streaming struct {
-	replica         ReplicaInterface
-	dataSyncService *dataSyncService
-	statsService    *statsService
+import (
+	"context"
+	"sync"
+)
+
+type taskScheduler struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	wg sync.WaitGroup
 }
