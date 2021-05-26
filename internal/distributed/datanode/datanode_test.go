@@ -125,7 +125,7 @@ func TestRun(t *testing.T) {
 	dnServer.newMasterServiceClient = func(s string) (types.MasterService, error) {
 		return &mockMaster{}, nil
 	}
-	dnServer.newDataServiceClient = func(s, etcdAddress string, timeout time.Duration) types.DataService {
+	dnServer.newDataServiceClient = func(s, etcdMetaRoot, etcdAddress string, timeout time.Duration) types.DataService {
 		return &mockDataService{}
 	}
 

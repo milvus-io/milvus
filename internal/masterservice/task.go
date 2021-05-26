@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
@@ -310,13 +311,23 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 
 	//notify query service to release collection
 	go func() {
-		if err = t.core.CallReleaseCollectionService(t.core.ctx, t.Req.Base.Timestamp, 0, collMeta.ID); err != nil {
+		if err = t.core.CallReleaseCollectionService(t.core.ctx, ts, 0, collMeta.ID); err != nil {
 			log.Warn("CallReleaseCollectionService failed", zap.String("error", err.Error()))
 		}
 	}()
 
+	req := proxypb.InvalidateCollMetaCacheRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   0, //TODO, msg type
+			MsgID:     0, //TODO, msg id
+			Timestamp: ts,
+			SourceID:  t.core.session.ServerID,
+		},
+		DbName:         t.Req.DbName,
+		CollectionName: t.Req.CollectionName,
+	}
 	// error doesn't matter here
-	t.core.CallInvalidateCollectionMetaCacheService(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
+	t.core.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
 
 	// Update DDOperation in etcd
 	return t.core.setDdMsgSendFlag(true)
@@ -482,8 +493,18 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		t.core.SendTimeTick(ts)
 	}
 
+	req := proxypb.InvalidateCollMetaCacheRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   0, //TODO, msg type
+			MsgID:     0, //TODO, msg id
+			Timestamp: ts,
+			SourceID:  t.core.session.ServerID,
+		},
+		DbName:         t.Req.DbName,
+		CollectionName: t.Req.CollectionName,
+	}
 	// error doesn't matter here
-	t.core.CallInvalidateCollectionMetaCacheService(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
+	t.core.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
 
 	// Update DDOperation in etcd
 	return t.core.setDdMsgSendFlag(true)
@@ -548,8 +569,18 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		t.core.SendTimeTick(ts)
 	}
 
+	req := proxypb.InvalidateCollMetaCacheRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   0, //TODO, msg type
+			MsgID:     0, //TODO, msg id
+			Timestamp: ts,
+			SourceID:  t.core.session.ServerID,
+		},
+		DbName:         t.Req.DbName,
+		CollectionName: t.Req.CollectionName,
+	}
 	// error doesn't matter here
-	t.core.CallInvalidateCollectionMetaCacheService(ctx, t.Req.Base.Timestamp, t.Req.DbName, t.Req.CollectionName)
+	t.core.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
 
 	// Update DDOperation in etcd
 	return t.core.setDdMsgSendFlag(true)

@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	DefaultServiceRoot = "/session/"
+	DefaultServiceRoot = "session/"
 	DefaultIDKey       = "id"
 	DefaultRetryTimes  = 30
 	DefaultTTL         = 10
@@ -41,9 +41,10 @@ type Session struct {
 	Address    string `json:"Address,omitempty"`
 	Exclusive  bool   `json:"Exclusive,omitempty"`
 
-	etcdCli *clientv3.Client
-	leaseID clientv3.LeaseID
-	cancel  context.CancelFunc
+	etcdCli  *clientv3.Client
+	leaseID  clientv3.LeaseID
+	cancel   context.CancelFunc
+	metaRoot string
 }
 
 type SessionEvent struct {
@@ -54,11 +55,12 @@ type SessionEvent struct {
 // NewSession is a helper to build Session object.
 // ServerID and LeaseID will be assigned after registeration.
 // etcdCli is initialized when NewSession
-func NewSession(ctx context.Context, etcdAddress []string) *Session {
+func NewSession(ctx context.Context, metaRoot string, etcdAddress []string) *Session {
 	ctx, cancel := context.WithCancel(ctx)
 	session := &Session{
-		ctx:    ctx,
-		cancel: cancel,
+		ctx:      ctx,
+		cancel:   cancel,
+		metaRoot: metaRoot,
 	}
 
 	connectEtcdFn := func() error {
@@ -104,17 +106,17 @@ func (s *Session) getServerID() (int64, error) {
 func (s *Session) checkIDExist() {
 	s.etcdCli.Txn(s.ctx).If(
 		clientv3.Compare(
-			clientv3.Version(path.Join(DefaultServiceRoot, DefaultIDKey)),
+			clientv3.Version(path.Join(s.metaRoot, DefaultServiceRoot, DefaultIDKey)),
 			"=",
 			0)).
-		Then(clientv3.OpPut(path.Join(DefaultServiceRoot, DefaultIDKey), "1")).Commit()
+		Then(clientv3.OpPut(path.Join(s.metaRoot, DefaultServiceRoot, DefaultIDKey), "1")).Commit()
 
 }
 
 func (s *Session) getServerIDWithKey(key string, retryTimes int) (int64, error) {
 	res := int64(0)
 	getServerIDWithKeyFn := func() error {
-		getResp, err := s.etcdCli.Get(s.ctx, path.Join(DefaultServiceRoot, key))
+		getResp, err := s.etcdCli.Get(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, key))
 		if err != nil {
 			return nil
 		}
@@ -129,10 +131,10 @@ func (s *Session) getServerIDWithKey(key string, retryTimes int) (int64, error) 
 		}
 		txnResp, err := s.etcdCli.Txn(s.ctx).If(
 			clientv3.Compare(
-				clientv3.Value(path.Join(DefaultServiceRoot, DefaultIDKey)),
+				clientv3.Value(path.Join(s.metaRoot, DefaultServiceRoot, DefaultIDKey)),
 				"=",
 				value)).
-			Then(clientv3.OpPut(path.Join(DefaultServiceRoot, DefaultIDKey), strconv.FormatInt(valueInt+1, 10))).Commit()
+			Then(clientv3.OpPut(path.Join(s.metaRoot, DefaultServiceRoot, DefaultIDKey), strconv.FormatInt(valueInt+1, 10))).Commit()
 		if err != nil {
 			return err
 		}
@@ -182,10 +184,10 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 		}
 		txnResp, err := s.etcdCli.Txn(s.ctx).If(
 			clientv3.Compare(
-				clientv3.Version(path.Join(DefaultServiceRoot, key)),
+				clientv3.Version(path.Join(s.metaRoot, DefaultServiceRoot, key)),
 				"=",
 				0)).
-			Then(clientv3.OpPut(path.Join(DefaultServiceRoot, key), string(sessionJSON), clientv3.WithLease(resp.ID))).Commit()
+			Then(clientv3.OpPut(path.Join(s.metaRoot, DefaultServiceRoot, key), string(sessionJSON), clientv3.WithLease(resp.ID))).Commit()
 
 		if err != nil {
 			fmt.Printf("compare and swap error %s\n. maybe the key has registered", err)
@@ -239,7 +241,7 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 // GetSessions will get all sessions registered in etcd.
 func (s *Session) GetSessions(prefix string) (map[string]*Session, int64, error) {
 	res := make(map[string]*Session)
-	key := path.Join(DefaultServiceRoot, prefix)
+	key := path.Join(s.metaRoot, DefaultServiceRoot, prefix)
 	resp, err := s.etcdCli.Get(s.ctx, key, clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
@@ -263,7 +265,7 @@ func (s *Session) GetSessions(prefix string) (map[string]*Session, int64, error)
 // If a server is offline, it will be add to delChannel.
 func (s *Session) WatchServices(prefix string, revision int64) (eventChannel <-chan *SessionEvent) {
 	eventCh := make(chan *SessionEvent, 100)
-	rch := s.etcdCli.Watch(s.ctx, path.Join(DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision))
+	rch := s.etcdCli.Watch(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision))
 	go func() {
 		for {
 			select {
