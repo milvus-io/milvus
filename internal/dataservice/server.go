@@ -73,9 +73,9 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 	rand.Seed(time.Now().UnixNano())
 	s := &Server{
 		ctx:       ctx,
-		cluster:   newDataNodeCluster(),
 		msFactory: factory,
 	}
+	s.cluster = newDataNodeCluster()
 	s.insertChannels = s.getInsertChannels()
 	s.createDataNodeClient = func(addr string, serverID int64) (types.DataNode, error) {
 		node, err := grpcdatanodeclient.NewClient(addr, serverID, []string{Params.EtcdAddress}, 10)

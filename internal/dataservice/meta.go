@@ -124,6 +124,7 @@ func (m *meta) HasCollection(collID UniqueID) bool {
 	_, ok := m.collections[collID]
 	return ok
 }
+
 func (m *meta) GetCollection(collectionID UniqueID) (*datapb.CollectionInfo, error) {
 	m.RLock()
 	defer m.RUnlock()

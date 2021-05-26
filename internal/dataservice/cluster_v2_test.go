@@ -100,11 +100,11 @@ func TestWatchIfNeeded(t *testing.T) {
 	assert.EqualValues(t, "localhost:8080", dataNodes[addr].Address)
 
 	chName := "ch1"
-	cluster.watchIfNeeded(chName)
+	cluster.watchIfNeeded(chName, 0)
 	dataNodes = cluster.dataManager.getDataNodes(true)
 	assert.EqualValues(t, 1, len(dataNodes[addr].Channels))
 	assert.EqualValues(t, chName, dataNodes[addr].Channels[0].Name)
-	cluster.watchIfNeeded(chName)
+	cluster.watchIfNeeded(chName, 0)
 	assert.EqualValues(t, 1, len(dataNodes[addr].Channels))
 	assert.EqualValues(t, chName, dataNodes[addr].Channels[0].Name)
 }
@@ -138,5 +138,5 @@ func createCluster(t *testing.T, options ...clusterOption) *cluster {
 	sessionManager := newMockSessionManager()
 	dataManager, err := newClusterNodeManager(kv)
 	assert.Nil(t, err)
-	return newCluster(dataManager, sessionManager, options...)
+	return newCluster(dataManager, sessionManager, dummyPosProvider{}, options...)
 }

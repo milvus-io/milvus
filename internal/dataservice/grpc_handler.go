@@ -69,7 +69,15 @@ func (s *Server) RegisterNode(ctx context.Context, req *datapb.RegisterNodeReque
 		ret.Status.Reason = err.Error()
 		return ret, nil
 	}
+	vchans := s.getAllActiveVChannels()
+	vchanPairs, err := s.GetVChanPositions(vchans)
+	if err != nil {
+		ret.Status.Reason = err.Error()
+		return ret, nil
+	}
 
+	//TODO silver, remove after cluster_v2 integrated
+	// old logic, watch all channels
 	resp, err := node.client.WatchDmChannels(s.ctx, &datapb.WatchDmChannelsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   0,
@@ -77,6 +85,7 @@ func (s *Server) RegisterNode(ctx context.Context, req *datapb.RegisterNodeReque
 			Timestamp: 0,
 			SourceID:  Params.NodeID,
 		},
+		Vchannels: vchanPairs,
 		// ChannelNames: s.insertChannels, // TODO
 	})
 
@@ -192,6 +201,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 		SegIDAssignments: assigns,
 	}, nil
 }
+
 func (s *Server) ShowSegments(ctx context.Context, req *datapb.ShowSegmentsRequest) (*datapb.ShowSegmentsResponse, error) {
 	resp := &datapb.ShowSegmentsResponse{
 		Status: &commonpb.Status{

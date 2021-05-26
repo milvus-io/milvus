@@ -25,11 +25,12 @@ type cluster struct {
 	mu             sync.RWMutex
 	dataManager    *clusterNodeManager
 	sessionManager sessionManager
+	posProvider    positionProvider
 
 	startupPolicy    clusterStartupPolicy
 	registerPolicy   dataNodeRegisterPolicy
 	unregisterPolicy dataNodeUnregisterPolicy
-	assginPolicy     channelAssignPolicy
+	assignPolicy     channelAssignPolicy
 }
 
 type clusterOption struct {
@@ -56,7 +57,7 @@ func withUnregistorPolicy(p dataNodeUnregisterPolicy) clusterOption {
 
 func withAssignPolicy(p channelAssignPolicy) clusterOption {
 	return clusterOption{
-		apply: func(c *cluster) { c.assginPolicy = p },
+		apply: func(c *cluster) { c.assignPolicy = p },
 	}
 }
 
@@ -76,15 +77,16 @@ func defaultAssignPolicy() channelAssignPolicy {
 	return newAllAssignPolicy()
 }
 
-func newCluster(dataManager *clusterNodeManager, sessionManager sessionManager, opts ...clusterOption) *cluster {
+func newCluster(dataManager *clusterNodeManager, sessionManager sessionManager, pp positionProvider, opts ...clusterOption) *cluster {
 	c := &cluster{
 		dataManager:    dataManager,
 		sessionManager: sessionManager,
+		posProvider:    pp,
 	}
 	c.startupPolicy = defaultStartupPolicy()
 	c.registerPolicy = defaultRegisterPolicy()
 	c.unregisterPolicy = defaultUnregisterPolicy()
-	c.assginPolicy = defaultAssignPolicy()
+	c.assignPolicy = defaultAssignPolicy()
 
 	for _, opt := range opts {
 		opt.apply(c)
@@ -105,18 +107,27 @@ func (c *cluster) startup(dataNodes []*datapb.DataNodeInfo) error {
 
 func (c *cluster) watch(nodes []*datapb.DataNodeInfo) []*datapb.DataNodeInfo {
 	for _, n := range nodes {
-		uncompletes := make([]string, 0)
+		uncompletes := make([]vchannel, 0, len(n.Channels))
 		for _, ch := range n.Channels {
 			if ch.State == datapb.ChannelWatchState_Uncomplete {
-				uncompletes = append(uncompletes, ch.Name)
+				uncompletes = append(uncompletes, vchannel{
+					CollectionID: ch.CollectionID,
+					DmlChannel:   ch.Name,
+					DdlChannel:   c.posProvider.GetDdlChannel(),
+				})
 			}
+		}
+		pairs, err := c.posProvider.GetVChanPositions(uncompletes)
+		if err != nil {
+			log.Error("failed to get vchan position", zap.Error(err))
+			continue
 		}
 		executor := func(cli types.DataNode) error {
 			req := &datapb.WatchDmChannelsRequest{
 				Base: &commonpb.MsgBase{
 					SourceID: Params.NodeID,
 				},
-				// ChannelNames: uncompletes, // TODO
+				Vchannels: pairs,
 			}
 			resp, err := cli.WatchDmChannels(context.Background(), req)
 			if err != nil {
@@ -163,11 +174,11 @@ func (c *cluster) unregister(n *datapb.DataNodeInfo) {
 	c.dataManager.updateDataNodes(rets)
 }
 
-func (c *cluster) watchIfNeeded(channel string) {
+func (c *cluster) watchIfNeeded(channel string, collectionID UniqueID) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	cNodes := c.dataManager.getDataNodes(true)
-	rets := c.assginPolicy.apply(cNodes, channel)
+	rets := c.assignPolicy.apply(cNodes, channel, collectionID)
 	c.dataManager.updateDataNodes(rets)
 	rets = c.watch(rets)
 	c.dataManager.updateDataNodes(rets)
