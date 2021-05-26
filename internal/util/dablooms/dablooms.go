@@ -12,11 +12,11 @@
 package dablooms
 
 /*
-#cgo CFLAGS: -I/home/yukun/github/milvus/internal/util/dablooms/cwrapper
+#cgo CFLAGS: -I${SRCDIR}/cwrapper
 
-#cgo LDFLAGS: -L/home/yukun/github/milvus/internal/util/dablooms/cwrapper/output -l:libdablooms.a -lstdc++
+#cgo LDFLAGS: -L${SRCDIR}/cwrapper/output -ldablooms -lstdc++ -lm
 #include <stdlib.h>
-#include "dablooms.h"
+#include <dablooms.h>
 */
 import "C"
 

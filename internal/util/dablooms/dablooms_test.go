@@ -27,7 +27,7 @@ type stats struct {
 	FalseNegatives int64
 }
 
-var Capacity uint = 1000000
+var Capacity uint64 = 1000000
 var ErrorRate float64 = .05
 
 func PrintResults(stats *stats) {

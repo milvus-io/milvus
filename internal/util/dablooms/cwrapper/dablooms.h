@@ -1,5 +1,11 @@
 /* Copyright @2012 by Justin Hines at Bitly under a very liberal license. See LICENSE in the source distribution. */
 
+#pragma once
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #ifndef __BLOOM_H__
 #define __BLOOM_H__
 #include <stdint.h>
@@ -68,4 +74,8 @@ int scaling_bloom_add(scaling_bloom_t *bloom, const char *s, size_t len, uint64_
 int scaling_bloom_remove(scaling_bloom_t *bloom, const char *s, size_t len, uint64_t id);
 int scaling_bloom_check(scaling_bloom_t *bloom, const char *s, size_t len);
 size_t bloom_size(scaling_bloom_t *bloom);
+#endif
+
+#ifdef __cplusplus
+}
 #endif
