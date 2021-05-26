@@ -138,7 +138,7 @@ func (s *Server) init() error {
 	log.Debug("DataService", zap.String("Address", Params.DataServiceAddress))
 	log.Debug("QueryService Init data service client ...")
 
-	dataService := dsc.NewClient(Params.DataServiceAddress)
+	dataService := dsc.NewClient(Params.DataServiceAddress, []string{qs.Params.EtcdAddress}, 10)
 	if err = dataService.Init(); err != nil {
 		panic(err)
 	}

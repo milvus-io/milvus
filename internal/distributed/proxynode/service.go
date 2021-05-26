@@ -207,7 +207,7 @@ func (s *Server) init() error {
 
 	dataServiceAddr := Params.DataServiceAddress
 	log.Debug("proxynode", zap.String("data service address", dataServiceAddr))
-	s.dataServiceClient = grpcdataserviceclient.NewClient(dataServiceAddr)
+	s.dataServiceClient = grpcdataserviceclient.NewClient(dataServiceAddr, []string{proxynode.Params.EtcdAddress}, 10)
 	err = s.dataServiceClient.Init()
 	if err != nil {
 		return err
