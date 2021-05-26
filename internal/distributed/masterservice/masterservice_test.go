@@ -925,7 +925,7 @@ func TestRun(t *testing.T) {
 	svr.newProxyServiceClient = func(s string) types.ProxyService {
 		return &mockProxy{}
 	}
-	svr.newDataServiceClient = func(s string) types.DataService {
+	svr.newDataServiceClient = func(s, address string, timeout time.Duration) types.DataService {
 		return &mockDataService{}
 	}
 	svr.newIndexServiceClient = func(s string) types.IndexService {

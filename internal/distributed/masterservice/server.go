@@ -59,7 +59,7 @@ type Server struct {
 	queryService types.QueryService
 
 	newProxyServiceClient func(string) types.ProxyService
-	newDataServiceClient  func(string) types.DataService
+	newDataServiceClient  func(string, string, time.Duration) types.DataService
 	newIndexServiceClient func(string) types.IndexService
 	newQueryServiceClient func(string) (types.QueryService, error)
 
@@ -98,8 +98,8 @@ func (s *Server) setClient() {
 		}
 		return psClient
 	}
-	s.newDataServiceClient = func(s string) types.DataService {
-		dsClient := dsc.NewClient(s)
+	s.newDataServiceClient = func(s, etcdAddress string, timeout time.Duration) types.DataService {
+		dsClient := dsc.NewClient(s, []string{etcdAddress}, timeout)
 		if err := dsClient.Init(); err != nil {
 			panic(err)
 		}
@@ -183,7 +183,7 @@ func (s *Server) init() error {
 	}
 	if s.newDataServiceClient != nil {
 		log.Debug("data service", zap.String("address", Params.DataServiceAddress))
-		dataService := s.newDataServiceClient(Params.DataServiceAddress)
+		dataService := s.newDataServiceClient(Params.DataServiceAddress, cms.Params.EtcdAddress, 10)
 		if err := s.masterService.SetDataService(ctx, dataService); err != nil {
 			panic(err)
 		}

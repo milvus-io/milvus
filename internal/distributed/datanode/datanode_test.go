@@ -18,6 +18,7 @@ import (
 	"net"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -124,7 +125,7 @@ func TestRun(t *testing.T) {
 	dnServer.newMasterServiceClient = func(s string) (types.MasterService, error) {
 		return &mockMaster{}, nil
 	}
-	dnServer.newDataServiceClient = func(s string) types.DataService {
+	dnServer.newDataServiceClient = func(s, etcdAddress string, timeout time.Duration) types.DataService {
 		return &mockDataService{}
 	}
 
