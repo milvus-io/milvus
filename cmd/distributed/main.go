@@ -22,103 +22,207 @@ import (
 	"github.com/milvus-io/milvus/cmd/distributed/roles"
 )
 
-func createPidFile(service string, alias string, runtimeDir string) (*os.File, error) {
-	var fileName string
-	if len(alias) != 0 {
-		fileName = fmt.Sprintf("%s-%s.pid", service, alias)
-	} else {
-		fileName = service + ".pid"
-	}
+const (
+	ROLE_MASTER        = "master"
+	ROLE_PROXY_SERVICE = "proxyservice"
+	ROLE_QUERY_SERVICE = "queryservice"
+	ROLE_INDEX_SERVICE = "indexservice"
+	ROLE_DATA_SERVICE  = "dataservice"
+	ROLE_PROXY_NODE    = "proxynode"
+	ROLE_QUERY_NODE    = "querynode"
+	ROLE_INDEX_NODE    = "indexnode"
+	ROLE_DATA_NODE     = "datanode"
+)
 
-	fileFullName := path.Join(runtimeDir, fileName)
+func getPidFileName(service string, alias string) string {
+	var filename string
+	if len(alias) != 0 {
+		filename = fmt.Sprintf("%s-%s.pid", service, alias)
+	} else {
+		filename = service + ".pid"
+	}
+	return filename
+}
+
+func createPidFile(filename string, runtimeDir string) error {
+	fileFullName := path.Join(runtimeDir, filename)
 
 	fd, err := os.OpenFile(fileFullName, os.O_CREATE|os.O_RDWR, 0664)
 	if err != nil {
-		return nil, fmt.Errorf("service %s is running, error  = %w", service, err)
+		return fmt.Errorf("file %s is in-use, error = %w", filename, err)
 	}
 	fmt.Println("open pid file: ", fileFullName)
+	defer fd.Close()
 
 	err = syscall.Flock(int(fd.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 	if err != nil {
-		return nil, fmt.Errorf("service %s is running, error = %w", service, err)
+		return fmt.Errorf("file %s is in-use, error = %w", filename, err)
 	}
 	fmt.Println("lock pid file: ", fileFullName)
 
 	fd.Truncate(0)
 	_, err = fd.WriteString(fmt.Sprintf("%d", os.Getpid()))
 
-	return fd, err
+	return err
 }
 
-func removePidFile(fd *os.File) {
-	_ = syscall.Close(int(fd.Fd()))
-	_ = os.Remove(fd.Name())
+func closePidFile(fd *os.File) {
+	fd.Close()
 }
 
-func run(service string, alias string, runTimeDir string) error {
-	fd, err := createPidFile(service, alias, runTimeDir)
-	if err != nil {
-		return fmt.Errorf("create pid file fail, service %s", service)
+func removePidFile(filename string, runtimeDir string) {
+	fileFullName := path.Join(runtimeDir, filename)
+	_ = os.Remove(fileFullName)
+}
+
+func run(role *roles.MilvusRoles, alias string, runtimeDir string) error {
+	if role.EnableMaster {
+		filename := getPidFileName(ROLE_MASTER, alias)
+		if err := createPidFile(filename, runtimeDir); err != nil {
+			return fmt.Errorf("create pid file fail, service %s", filename)
+		}
+		defer removePidFile(filename, runtimeDir)
 	}
-	defer removePidFile(fd)
-
-	role := roles.MilvusRoles{}
-	switch service {
-	case "master":
-		role.EnableMaster = true
-	case "msgstream":
-		role.EnableMsgStreamService = true
-	case "proxyservice":
-		role.EnableProxyService = true
-	case "proxynode":
-		role.EnableProxyNode = true
-	case "queryservice":
-		role.EnableQueryService = true
-	case "querynode":
-		role.EnableQueryNode = true
-	case "dataservice":
-		role.EnableDataService = true
-	case "datanode":
-		role.EnableDataNode = true
-	case "indexservice":
-		role.EnableIndexService = true
-	case "indexnode":
-		role.EnableIndexNode = true
-	default:
-		return fmt.Errorf("unknown service = %s", service)
+	if role.EnableProxyService {
+		filename := getPidFileName(ROLE_PROXY_SERVICE, alias)
+		if err := createPidFile(filename, runtimeDir); err != nil {
+			return fmt.Errorf("create pid file fail, service %s", filename)
+		}
+		defer removePidFile(filename, runtimeDir)
+	}
+	if role.EnableQueryService {
+		filename := getPidFileName(ROLE_QUERY_SERVICE, alias)
+		if err := createPidFile(filename, runtimeDir); err != nil {
+			return fmt.Errorf("create pid file fail, service %s", filename)
+		}
+		defer removePidFile(filename, runtimeDir)
+	}
+	if role.EnableIndexService {
+		filename := getPidFileName(ROLE_INDEX_SERVICE, alias)
+		if err := createPidFile(filename, runtimeDir); err != nil {
+			return fmt.Errorf("create pid file fail, service %s", filename)
+		}
+		defer removePidFile(filename, runtimeDir)
+	}
+	if role.EnableDataService {
+		filename := getPidFileName(ROLE_DATA_SERVICE, alias)
+		if err := createPidFile(filename, runtimeDir); err != nil {
+			return fmt.Errorf("create pid file fail, service %s", filename)
+		}
+		defer removePidFile(filename, runtimeDir)
+	}
+	if role.EnableProxyNode {
+		filename := getPidFileName(ROLE_PROXY_NODE, alias)
+		if err := createPidFile(filename, runtimeDir); err != nil {
+			return fmt.Errorf("create pid file fail, service %s", filename)
+		}
+		defer removePidFile(filename, runtimeDir)
+	}
+	if role.EnableQueryNode {
+		filename := getPidFileName(ROLE_QUERY_NODE, alias)
+		if err := createPidFile(filename, runtimeDir); err != nil {
+			return fmt.Errorf("create pid file fail, service %s", filename)
+		}
+		defer removePidFile(filename, runtimeDir)
+	}
+	if role.EnableIndexNode {
+		filename := getPidFileName(ROLE_INDEX_NODE, alias)
+		if err := createPidFile(filename, runtimeDir); err != nil {
+			return fmt.Errorf("create pid file fail, service %s", filename)
+		}
+		defer removePidFile(filename, runtimeDir)
+	}
+	if role.EnableDataNode {
+		filename := getPidFileName(ROLE_DATA_NODE, alias)
+		if err := createPidFile(filename, runtimeDir); err != nil {
+			return fmt.Errorf("create pid file fail, service %s", filename)
+		}
+		defer removePidFile(filename, runtimeDir)
 	}
 	role.Run(false)
 	return nil
 }
 
-func stop(service string, alias string, runTimeDir string) error {
-	var fileName string
-	if len(alias) != 0 {
-		fileName = fmt.Sprintf("%s-%s.pid", service, alias)
-	} else {
-		fileName = service + ".pid"
-	}
-	var err error
-	var fd *os.File
-	if fd, err = os.OpenFile(path.Join(runTimeDir, fileName), os.O_RDONLY, 0664); err != nil {
+func stopRole(filename string, runtimeDir string) error {
+	var pid int
+
+	fd, err := os.OpenFile(path.Join(runtimeDir, filename), os.O_RDONLY, 0664)
+	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = fd.Close()
-	}()
-	var pid int
+	defer closePidFile(fd)
+
 	_, err = fmt.Fscanf(fd, "%d", &pid)
 	if err != nil {
 		return err
 	}
-	p, err := os.FindProcess(pid)
+	process, err := os.FindProcess(pid)
 	if err != nil {
 		return err
 	}
-	err = p.Signal(syscall.SIGTERM)
+	err = process.Signal(syscall.SIGTERM)
 	if err != nil {
 		return err
 	}
+	return nil
+}
+
+func stop(role *roles.MilvusRoles, alias string, runtimeDir string) error {
+	if role.EnableMaster {
+		filename := getPidFileName(ROLE_MASTER, alias)
+		if err := stopRole(filename, runtimeDir); err != nil {
+			return fmt.Errorf("stop process fail, service %s", filename)
+		}
+	}
+	if role.EnableProxyService {
+		filename := getPidFileName(ROLE_PROXY_SERVICE, alias)
+		if err := stopRole(filename, runtimeDir); err != nil {
+			return fmt.Errorf("stop process fail, service %s", filename)
+		}
+	}
+	if role.EnableQueryService {
+		filename := getPidFileName(ROLE_QUERY_SERVICE, alias)
+		if err := stopRole(filename, runtimeDir); err != nil {
+			return fmt.Errorf("stop process fail, service %s", filename)
+		}
+	}
+	if role.EnableIndexService {
+		filename := getPidFileName(ROLE_INDEX_SERVICE, alias)
+		if err := stopRole(filename, runtimeDir); err != nil {
+			return fmt.Errorf("stop process fail, service %s", filename)
+		}
+	}
+	if role.EnableDataService {
+		filename := getPidFileName(ROLE_DATA_SERVICE, alias)
+		if err := stopRole(filename, runtimeDir); err != nil {
+			return fmt.Errorf("stop process fail, service %s", filename)
+		}
+	}
+	if role.EnableProxyNode {
+		filename := getPidFileName(ROLE_PROXY_NODE, alias)
+		if err := stopRole(filename, runtimeDir); err != nil {
+			return fmt.Errorf("stop process fail, service %s", filename)
+		}
+	}
+	if role.EnableQueryNode {
+		filename := getPidFileName(ROLE_QUERY_NODE, alias)
+		if err := stopRole(filename, runtimeDir); err != nil {
+			return fmt.Errorf("stop process fail, service %s", filename)
+		}
+	}
+	if role.EnableIndexNode {
+		filename := getPidFileName(ROLE_INDEX_NODE, alias)
+		if err := stopRole(filename, runtimeDir); err != nil {
+			return fmt.Errorf("stop process fail, service %s", filename)
+		}
+	}
+	if role.EnableDataNode {
+		filename := getPidFileName(ROLE_DATA_NODE, alias)
+		if err := stopRole(filename, runtimeDir); err != nil {
+			return fmt.Errorf("stop process fail, service %s", filename)
+		}
+	}
+	role.Run(false)
 	return nil
 }
 
@@ -150,14 +254,52 @@ func main() {
 		return
 	}
 	command := os.Args[1]
-	serverType := os.Args[2]
 	flags := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 
 	var svrAlias string
 	flags.StringVar(&svrAlias, "alias", "", "set alias")
 
-	if err := flags.Parse(os.Args[3:]); err != nil {
+	role := roles.MilvusRoles{}
+	flags.BoolVar(&role.EnableMaster, "master", false, "enable master")
+	flags.BoolVar(&role.EnableProxyService, "proxyservice", false, "enable proxy service")
+	flags.BoolVar(&role.EnableQueryService, "queryservice", false, "enable query service")
+	flags.BoolVar(&role.EnableDataService, "dataservice", false, "enable data service")
+	flags.BoolVar(&role.EnableIndexService, "indexservice", false, "enable index service")
+	flags.BoolVar(&role.EnableProxyNode, "proxynode", false, "enable proxy node")
+	flags.BoolVar(&role.EnableQueryNode, "querynode", false, "enable query node")
+	flags.BoolVar(&role.EnableDataNode, "datanode", false, "enable data node")
+	flags.BoolVar(&role.EnableIndexNode, "indexnode", false, "enable index node")
+
+	if err := flags.Parse(os.Args[2:]); err != nil {
 		os.Exit(-1)
+	}
+
+	if role.EnableMaster {
+		fmt.Printf("CYD - %s is set TRUE\n", ROLE_MASTER)
+	}
+	if role.EnableProxyService {
+		fmt.Printf("CYD - %s is set TRUE\n", ROLE_PROXY_SERVICE)
+	}
+	if role.EnableQueryService {
+		fmt.Printf("CYD - %s is set TRUE\n", ROLE_QUERY_SERVICE)
+	}
+	if role.EnableIndexService {
+		fmt.Printf("CYD - %s is set TRUE\n", ROLE_INDEX_SERVICE)
+	}
+	if role.EnableDataService {
+		fmt.Printf("CYD - %s is set TRUE\n", ROLE_DATA_SERVICE)
+	}
+	if role.EnableProxyNode {
+		fmt.Printf("CYD - %s is set TRUE\n", ROLE_PROXY_NODE)
+	}
+	if role.EnableQueryNode {
+		fmt.Printf("CYD - %s is set TRUE\n", ROLE_QUERY_NODE)
+	}
+	if role.EnableIndexNode {
+		fmt.Printf("CYD - %s is set TRUE\n", ROLE_INDEX_NODE)
+	}
+	if role.EnableDataNode {
+		fmt.Printf("CYD - %s is set TRUE\n", ROLE_DATA_NODE)
 	}
 
 	runtimeDir := "/run/milvus"
@@ -172,11 +314,11 @@ func main() {
 
 	switch command {
 	case "run":
-		if err := run(serverType, svrAlias, runtimeDir); err != nil {
+		if err := run(&role, svrAlias, runtimeDir); err != nil {
 			panic(err)
 		}
 	case "stop":
-		if err := stop(serverType, svrAlias, runtimeDir); err != nil {
+		if err := stop(&role, svrAlias, runtimeDir); err != nil {
 			panic(err)
 		}
 	default:
