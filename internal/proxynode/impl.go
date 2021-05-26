@@ -1058,6 +1058,7 @@ func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertReque
 			},
 		},
 		rowIDAllocator: node.idAllocator,
+		segIDAssigner:  node.segAssigner,
 	}
 	if len(it.PartitionName) <= 0 {
 		it.PartitionName = Params.DefaultPartitionName
