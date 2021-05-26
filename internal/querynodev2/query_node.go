@@ -13,9 +13,10 @@ package querynode
 
 import (
 	"context"
+	"sync/atomic"
+
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
-	"sync/atomic"
 )
 
 type QueryNode struct {

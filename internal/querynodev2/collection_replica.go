@@ -76,7 +76,6 @@ type ReplicaInterface interface {
 	hasSegment(segmentID UniqueID) bool
 	getSegmentNum() int
 	setSegmentEnableIndex(segmentID UniqueID, enable bool) error
-	setSegmentEnableLoadBinLog(segmentID UniqueID, enable bool) error
 	getSegmentsToLoadBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID)
 	getSegmentStatistics() []*internalpb.SegmentStats
 
@@ -592,20 +591,6 @@ func (colReplica *collectionReplica) setSegmentEnableIndex(segmentID UniqueID, e
 	return nil
 }
 
-func (colReplica *collectionReplica) setSegmentEnableLoadBinLog(segmentID UniqueID, enable bool) error {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-
-	targetSegment, err := colReplica.getSegmentByIDPrivate(segmentID)
-	if targetSegment.segmentType != segmentTypeGrowing {
-		return errors.New("unexpected segment type")
-	}
-	if err == nil && targetSegment != nil {
-		targetSegment.setLoadBinLogEnable(enable)
-	}
-	return nil
-}
-
 func (colReplica *collectionReplica) initExcludedSegments(collectionID UniqueID) {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
@@ -690,9 +675,6 @@ func (colReplica *collectionReplica) getSegmentsToLoadBySegmentType(segType segm
 	targetSegmentIDs := make([]UniqueID, 0)
 
 	for _, segment := range colReplica.segments {
-		if !segment.enableLoadBinLog {
-			continue
-		}
 		if segment.getType() == segType {
 			if segType == segmentTypeSealed && !segment.getEnableIndex() {
 				continue

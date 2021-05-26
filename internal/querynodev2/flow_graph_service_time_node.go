@@ -14,12 +14,13 @@ package querynode
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	"go.uber.org/zap"
 )
 
 type serviceTimeNode struct {
@@ -56,13 +57,13 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 
 	// update service time
-	ts := stNode.replica.getTSafe(stNode.collectionID)
-	if ts != nil {
-		ts.set(serviceTimeMsg.timeRange.timestampMax)
-		//log.Debug("update tSafe:",
-		//	zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)),
-		//	zap.Int64("collectionID", stNode.collectionID))
-	}
+	//ts := stNode.replica.getTSafe(stNode.collectionID)
+	//if ts != nil {
+	//	ts.set(serviceTimeMsg.timeRange.timestampMax)
+	//	//log.Debug("update tSafe:",
+	//	//	zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)),
+	//	//	zap.Int64("collectionID", stNode.collectionID))
+	//}
 
 	if err := stNode.sendTimeTick(serviceTimeMsg.timeRange.timestampMax); err != nil {
 		log.Error("Error: send time tick into pulsar channel failed", zap.Error(err))

@@ -23,15 +23,13 @@ package querynode
 */
 import "C"
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
 	"unsafe"
 
-	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
-
-	"errors"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -55,8 +53,8 @@ type Segment struct {
 	lastMemSize  int64
 	lastRowCount int64
 
-	once             sync.Once // guards enableIndex
-	enableIndex      bool
+	once        sync.Once // guards enableIndex
+	enableIndex bool
 
 	rmMutex          sync.Mutex // guards recentlyModified
 	recentlyModified bool
@@ -132,12 +130,12 @@ func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, c
 	log.Debug("create segment", zap.Int64("segmentID", segmentID))
 
 	var newSegment = &Segment{
-		segmentPtr:       segmentPtr,
-		segmentType:      segType,
-		segmentID:        segmentID,
-		partitionID:      partitionID,
-		collectionID:     collectionID,
-		indexInfos:       indexInfos,
+		segmentPtr:   segmentPtr,
+		segmentType:  segType,
+		segmentID:    segmentID,
+		partitionID:  partitionID,
+		collectionID: collectionID,
+		indexInfos:   indexInfos,
 	}
 
 	return newSegment
@@ -450,7 +448,9 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 	var numOfRow = len(*entityIDs)
 	var sizeofPerRow = len((*records)[0].Value)
 
-	assert.Equal(nil, numOfRow, len(*records))
+	if numOfRow != len(*records) {
+		return errors.New("illegal insert records")
+	}
 
 	var rawData = make([]byte, numOfRow*sizeofPerRow)
 	var copyOffset = 0
