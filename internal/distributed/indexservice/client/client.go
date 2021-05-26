@@ -13,12 +13,15 @@ package grpcindexserviceclient
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 	"time"
 
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
@@ -33,9 +36,28 @@ import (
 type UniqueID = typeutil.UniqueID
 
 type Client struct {
-	grpcClient indexpb.IndexServiceClient
-	address    string
 	ctx        context.Context
+	grpcClient indexpb.IndexServiceClient
+	conn       *grpc.ClientConn
+
+	address   string
+	sess      *sessionutil.Session
+	timeout   time.Duration
+	recallTry int
+	reconnTry int
+}
+
+func getIndexServiceAddress(sess *sessionutil.Session) (string, error) {
+	key := typeutil.IndexServiceRole
+	msess, _, err := sess.GetSessions(key)
+	if err != nil {
+		return "", err
+	}
+	ms, ok := msess[key]
+	if !ok {
+		return "", fmt.Errorf("number of master service is incorrect, %d", len(msess))
+	}
+	return ms.Address, nil
 }
 
 func NewClient(address string) *Client {
