@@ -27,6 +27,7 @@ import (
 
 	dsc "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
 	isc "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
+	pnc "github.com/milvus-io/milvus/internal/distributed/proxynode/client"
 	psc "github.com/milvus-io/milvus/internal/distributed/proxyservice/client"
 	qsc "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
 	"github.com/milvus-io/milvus/internal/log"
@@ -40,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
 // grpc wrapper
@@ -59,7 +61,7 @@ type Server struct {
 	queryService types.QueryService
 
 	newProxyServiceClient func(string) types.ProxyService
-	newDataServiceClient  func(string, string, time.Duration) types.DataService
+	newDataServiceClient  func(string, string, string, time.Duration) types.DataService
 	newIndexServiceClient func(string) types.IndexService
 	newQueryServiceClient func(string) (types.QueryService, error)
 
@@ -98,8 +100,8 @@ func (s *Server) setClient() {
 		}
 		return psClient
 	}
-	s.newDataServiceClient = func(s, etcdAddress string, timeout time.Duration) types.DataService {
-		dsClient := dsc.NewClient(s, []string{etcdAddress}, timeout)
+	s.newDataServiceClient = func(s, etcdMetaRoot, etcdAddress string, timeout time.Duration) types.DataService {
+		dsClient := dsc.NewClient(s, etcdMetaRoot, []string{etcdAddress}, timeout)
 		if err := dsClient.Init(); err != nil {
 			panic(err)
 		}
@@ -173,6 +175,19 @@ func (s *Server) init() error {
 
 	s.masterService.UpdateStateCode(internalpb.StateCode_Initializing)
 
+	s.masterService.SetNewProxyClient(
+		func(s *sessionutil.Session) (types.ProxyNode, error) {
+			cli := pnc.NewClient(ctx, s.Address)
+			if err := cli.Init(); err != nil {
+				return nil, err
+			}
+			if err := cli.Start(); err != nil {
+				return nil, err
+			}
+			return cli, nil
+		},
+	)
+
 	if s.newProxyServiceClient != nil {
 		log.Debug("proxy service", zap.String("address", Params.ProxyServiceAddress))
 		proxyService := s.newProxyServiceClient(Params.ProxyServiceAddress)
@@ -183,7 +198,7 @@ func (s *Server) init() error {
 	}
 	if s.newDataServiceClient != nil {
 		log.Debug("data service", zap.String("address", Params.DataServiceAddress))
-		dataService := s.newDataServiceClient(Params.DataServiceAddress, cms.Params.EtcdAddress, 10)
+		dataService := s.newDataServiceClient(Params.DataServiceAddress, cms.Params.MetaRootPath, cms.Params.EtcdAddress, 10)
 		if err := s.masterService.SetDataService(ctx, dataService); err != nil {
 			panic(err)
 		}
