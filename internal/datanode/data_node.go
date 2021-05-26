@@ -284,8 +284,8 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 			return status, errors.New(status.GetReason())
 		}
 
-		ddlFlushedCh := make(chan bool)
-		dmlFlushedCh := make(chan bool)
+		ddlFlushedCh := make(chan []*datapb.DDLBinlogMeta)
+		dmlFlushedCh := make(chan []*datapb.ID2PathList)
 
 		flushmsg := &flushMsg{
 			msgID:        req.Base.MsgID,
@@ -299,15 +299,58 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		flushCh <- flushmsg
 
 		// GOOSE TODO get binlog paths.
-		waitReceive := func(wg *sync.WaitGroup, flushedCh <-chan bool, req *datapb.SaveBinlogPathsRequest) {
+		// waitReceive := func(wg *sync.WaitGroup, flushedCh <-chan bool, req *datapb.SaveBinlogPathsRequest) {
+		//     defer wg.Done()
+		//     select {
+		//     case <-time.After(300 * time.Second):
+		//         return
+		//     case isFlushed := <-flushedCh:
+		//         if isFlushed {
+		//             log.Debug("Yeah! It's safe to notify dataservice")
+		//         }
+		//     }
+		// }
+
+		waitReceive := func(wg *sync.WaitGroup, flushedCh interface{}, req *datapb.SaveBinlogPathsRequest) {
 			defer wg.Done()
-			select {
-			case <-time.After(300 * time.Second):
-				return
-			case isFlushed := <-flushedCh:
-				if isFlushed {
-					log.Debug("Yeah! It's safe to notify dataservice")
+			switch flushedCh.(type) {
+			case chan []*datapb.ID2PathList:
+				select {
+				case <-time.After(300 * time.Second):
+					return
+				case meta := <-flushedCh.(chan []*datapb.ID2PathList):
+					if meta == nil {
+						log.Info("Dml messages flush failed!")
+						// Modify req to confirm failure
+						return
+					}
+
+					// Modify req with valid dml binlog paths
+					log.Info("Insert messeges flush done!", zap.Any("Binlog paths", meta))
 				}
+
+			case chan []*datapb.DDLBinlogMeta:
+				select {
+				case <-time.After(300 * time.Second):
+					return
+				case meta := <-flushedCh.(chan []*datapb.DDLBinlogMeta):
+					if meta == nil {
+						log.Info("Ddl messages flush failed!")
+						// Modify req to confirm failure
+						return
+					}
+
+					if len(meta) == 0 {
+						log.Info("Ddl messages flush Done")
+						// Modify req with empty ddl binlog paths
+						return
+					}
+
+					// Modify req with valid ddl binlog paths
+					log.Info("Ddl messages flush done!", zap.Any("Binlog paths", meta))
+				}
+			default:
+				log.Error("Not supported type")
 			}
 		}
 
