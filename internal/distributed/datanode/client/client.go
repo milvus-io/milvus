@@ -13,6 +13,7 @@ package grpcdatanodeclient
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -43,6 +44,10 @@ type Client struct {
 }
 
 func NewClient(address string, etcdAddr []string, timeout time.Duration) (*Client, error) {
+	if address == "" {
+		return nil, fmt.Errorf("address is empty")
+	}
+
 	return &Client{
 		grpc:      nil,
 		conn:      nil,
@@ -56,27 +61,23 @@ func NewClient(address string, etcdAddr []string, timeout time.Duration) (*Clien
 
 func (c *Client) Init() error {
 	tracer := opentracing.GlobalTracer()
-	if c.address != "" {
-		connectGrpcFunc := func() error {
-			log.Debug("DataNode connect ", zap.String("address", c.address))
-			conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
-				grpc.WithUnaryInterceptor(
-					otgrpc.OpenTracingClientInterceptor(tracer)),
-				grpc.WithStreamInterceptor(
-					otgrpc.OpenTracingStreamClientInterceptor(tracer)))
-			if err != nil {
-				return err
-			}
-			c.conn = conn
-			return nil
-		}
-
-		err := retry.Retry(c.reconnTry, time.Millisecond*500, connectGrpcFunc)
+	connectGrpcFunc := func() error {
+		log.Debug("DataNode connect ", zap.String("address", c.address))
+		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
+			grpc.WithUnaryInterceptor(
+				otgrpc.OpenTracingClientInterceptor(tracer)),
+			grpc.WithStreamInterceptor(
+				otgrpc.OpenTracingStreamClientInterceptor(tracer)))
 		if err != nil {
 			return err
 		}
-	} else {
-		return c.reconnect()
+		c.conn = conn
+		return nil
+	}
+
+	err := retry.Retry(c.reconnTry, time.Millisecond*500, connectGrpcFunc)
+	if err != nil {
+		return err
 	}
 	c.grpc = datapb.NewDataNodeClient(c.conn)
 	return nil
