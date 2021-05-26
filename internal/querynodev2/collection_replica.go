@@ -90,9 +90,9 @@ type ReplicaInterface interface {
 	getSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID)
 	replaceGrowingSegmentBySealedSegment(segment *Segment) error
 
-	getTSafe(collectionID UniqueID) tSafer
-	addTSafe(collectionID UniqueID)
-	removeTSafe(collectionID UniqueID)
+	//getTSafe(collectionID UniqueID) tSafer
+	//addTSafe(collectionID UniqueID)
+	//removeTSafe(collectionID UniqueID)
 	freeAll()
 }
 

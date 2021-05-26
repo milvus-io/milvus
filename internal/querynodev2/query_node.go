@@ -11,6 +11,29 @@
 
 package querynode
 
-type QueryNode struct {
+import (
+	"context"
+	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/types"
+	"sync/atomic"
+)
 
+type QueryNode struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	NodeID    UniqueID
+	stateCode atomic.Value
+
+	historical *Historical
+	streaming  *Streaming
+
+	// clients
+	masterService types.MasterService
+	queryService  types.QueryService
+	indexService  types.IndexService
+	dataService   types.DataService
+
+	msFactory msgstream.Factory
+	scheduler *taskScheduler
 }
