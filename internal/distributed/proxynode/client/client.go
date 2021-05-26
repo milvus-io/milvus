@@ -38,7 +38,7 @@ type Client struct {
 	recallTry int
 }
 
-func NewClient(ctx context.Context, address string, serverID int64, etcdAddr []string, timeout time.Duration) *Client {
+func NewClient(ctx context.Context, address string, timeout time.Duration) *Client {
 	return &Client{
 		address:   address,
 		ctx:       ctx,
