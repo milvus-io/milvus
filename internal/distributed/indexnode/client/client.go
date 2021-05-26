@@ -91,7 +91,3 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 func (c *Client) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	return c.grpcClient.CreateIndex(ctx, req)
 }
-
-func (c *Client) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	return c.grpcClient.DropIndex(ctx, req)
-}

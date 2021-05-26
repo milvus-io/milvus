@@ -24,7 +24,6 @@ service IndexNode {
   rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
   rpc CreateIndex(CreateIndexRequest) returns (common.Status){}
-  rpc DropIndex(DropIndexRequest) returns (common.Status) {}
 }
 
 message RegisterNodeRequest {

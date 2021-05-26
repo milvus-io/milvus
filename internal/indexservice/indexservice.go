@@ -97,26 +97,24 @@ func NewIndexService(ctx context.Context) (*IndexService, error) {
 
 // Register register index service at etcd
 func (i *IndexService) Register() error {
-	i.session = sessionutil.NewSession(i.loopCtx, []string{Params.EtcdAddress})
-	i.session.Init(typeutil.IndexServiceRole, Params.Address, true)
+
 	return nil
 }
 
 func (i *IndexService) Init() error {
 	log.Debug("indexservice", zap.String("etcd address", Params.EtcdAddress))
 
-	ctx := context.Background()
-	i.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress})
+	i.session = sessionutil.NewSession(i.loopCtx, []string{Params.EtcdAddress})
 	i.session.Init(typeutil.IndexServiceRole, Params.Address, true)
-
 	i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, 0)
+	i.assignChan = make(chan []UniqueID, 1024)
 	connectEtcdFn := func() error {
 		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
 		if err != nil {
 			return err
 		}
 		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
-		metakv, err := NewMetaTable(etcdKV)
+		metakv, err := NewMetaTable(etcdKV, i)
 		if err != nil {
 			return err
 		}
@@ -161,8 +159,6 @@ func (i *IndexService) Init() error {
 	i.UpdateStateCode(internalpb.StateCode_Healthy)
 
 	i.nodeTasks = NewNodeTasks()
-
-	i.assignChan = make(chan []UniqueID, 1024)
 	return nil
 }
 
@@ -253,7 +249,7 @@ func (i *IndexService) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRe
 		zap.Strings("DataPath = ", req.DataPaths),
 		zap.Any("TypeParams", req.TypeParams),
 		zap.Any("IndexParams", req.IndexParams))
-	hasIndex, indexBuildID := i.metaTable.hasSameReq(req)
+	hasIndex, indexBuildID := i.metaTable.HasSameReq(req)
 	if hasIndex {
 		log.Debug("IndexService", zap.Any("hasIndex true", indexBuildID))
 		return &indexpb.BuildIndexResponse{
@@ -362,13 +358,6 @@ func (i *IndexService) DropIndex(ctx context.Context, req *indexpb.DropIndexRequ
 				i.metaTable.DeleteIndex(indexBuildID)
 			}
 		}()
-
-		go func() {
-			allNodeClients := i.nodeClients.PeekAllClients()
-			for _, client := range allNodeClients {
-				client.DropIndex(ctx, req)
-			}
-		}()
 	}()
 
 	log.Debug("IndexService", zap.Int64("DropIndex success by ID", req.IndexID))
@@ -434,7 +423,7 @@ func (i *IndexService) recycleUnusedIndexFiles() {
 		case <-ctx.Done():
 			return
 		case <-timeTicker.C:
-			metas := i.metaTable.getUnusedIndexFiles(recycleIndexLimit)
+			metas := i.metaTable.GetUnusedIndexFiles(recycleIndexLimit)
 			for _, meta := range metas {
 				if meta.indexMeta.MarkDeleted {
 					unusedIndexFilePathPrefix := strconv.Itoa(int(meta.indexMeta.IndexBuildID))
@@ -449,7 +438,7 @@ func (i *IndexService) recycleUnusedIndexFiles() {
 							log.Debug("IndexService", zap.String("Remove index files error", err.Error()))
 						}
 					}
-					if err := i.metaTable.updateRecycleState(meta.indexMeta.IndexBuildID); err != nil {
+					if err := i.metaTable.UpdateRecycleState(meta.indexMeta.IndexBuildID); err != nil {
 						log.Debug("IndexService", zap.String("Remove index files error", err.Error()))
 					}
 				}
@@ -472,7 +461,7 @@ func (i *IndexService) assignmentTasksLoop() {
 			return
 		case indexBuildIDs := <-i.assignChan:
 			for _, indexBuildID := range indexBuildIDs {
-				meta := i.metaTable.getIndexMeta(indexBuildID)
+				meta := i.metaTable.GetIndexMeta(indexBuildID)
 				log.Debug("IndexService", zap.Any("Meta", meta))
 				if meta.indexMeta.State == commonpb.IndexState_Finished {
 					continue
@@ -483,6 +472,8 @@ func (i *IndexService) assignmentTasksLoop() {
 				nodeID, builderClient, nodeServerID := i.nodeClients.PeekClient()
 				if builderClient == nil {
 					log.Debug("IndexService has no available IndexNode")
+					i.assignChan <- []UniqueID{indexBuildID}
+					continue
 				}
 				req := &indexpb.CreateIndexRequest{
 					IndexBuildID: indexBuildID,
@@ -565,7 +556,7 @@ func (i *IndexService) watchMetaLoop() {
 					//TODO: get indexBuildID fast
 					log.Debug("IndexService", zap.Any("Meta need load by IndexBuildID", indexBuildID))
 
-					reload := i.metaTable.loadMetaFromETCD(indexBuildID, eventRevision)
+					reload := i.metaTable.LoadMetaFromETCD(indexBuildID, eventRevision)
 					if reload {
 						i.nodeTasks.finishTask(indexBuildID)
 					}

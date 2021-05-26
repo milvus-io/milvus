@@ -195,10 +195,6 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	return s.indexnode.CreateIndex(ctx, req)
 }
 
-func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	return s.indexnode.DropIndex(ctx, request)
-}
-
 func NewServer(ctx context.Context) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	node, err := indexnode.NewIndexNode(ctx1)

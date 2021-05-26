@@ -119,6 +119,31 @@ func (it *IndexBuildTask) OnEnqueue() error {
 
 func (it *IndexBuildTask) PreExecute(ctx context.Context) error {
 	log.Debug("preExecute...")
+
+	indexMeta := indexpb.IndexMeta{}
+	resp, err := it.etcdKV.LoadWithPrefix2(it.req.MetaPath)
+	if err != nil {
+		log.Debug("IndexService", zap.Any("load meta error with path", it.req.MetaPath))
+		log.Debug("IndexService", zap.Any("Load meta error", err))
+		return err
+	}
+	err = proto.UnmarshalText(string(resp.Kvs[0].Value), &indexMeta)
+	if err != nil {
+		log.Debug("IndexService", zap.Any("Unmarshal error", err))
+		return err
+	}
+	if indexMeta.Version > it.req.Version || indexMeta.State == commonpb.IndexState_Finished {
+		log.Debug("IndexNode", zap.Any("This task no longer needs to be done with IndexBuildID", indexMeta.IndexBuildID))
+		return errors.New("This task no longer needs to be done with IndexBuildID ")
+	}
+	if indexMeta.MarkDeleted {
+		indexMeta.State = commonpb.IndexState_Finished
+		value := proto.MarshalTextString(&indexMeta)
+		err := it.etcdKV.Save(it.req.MetaPath, value)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -137,39 +162,36 @@ func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 		return err
 	}
 
-	indexMeta := indexpb.IndexMeta{}
-	resp, err := it.etcdKV.LoadWithPrefix2(it.req.MetaPath)
-	if err != nil {
-		log.Debug("IndexService", zap.Any("load meta error with path", it.req.MetaPath))
-		log.Debug("IndexService", zap.Any("Load meta error", err))
+	fn := func() error {
+		indexMeta := indexpb.IndexMeta{}
+		resp, err := it.etcdKV.LoadWithPrefix2(it.req.MetaPath)
+		if err != nil {
+			log.Debug("IndexService", zap.Any("load meta error with path", it.req.MetaPath))
+			log.Debug("IndexService", zap.Any("Load meta error", err))
+			return err
+		}
+		err = proto.UnmarshalText(string(resp.Kvs[0].Value), &indexMeta)
+		if err != nil {
+			log.Debug("IndexService", zap.Any("Unmarshal error", err))
+			return err
+		}
+		if indexMeta.Version > it.req.Version || indexMeta.State == commonpb.IndexState_Finished {
+			log.Debug("IndexNode", zap.Any("Notify build index", "This version is not the latest version"))
+			return nil
+		}
+		indexMeta.IndexFilePaths = it.savePaths
+		indexMeta.State = commonpb.IndexState_Finished
+		if it.err != nil {
+			indexMeta.State = commonpb.IndexState_Failed
+		}
+		log.Debug("IndexNode", zap.Any("MetaPath", it.req.MetaPath))
+		err = it.etcdKV.CompareVersionAndSwap(it.req.MetaPath, resp.Kvs[0].Version,
+			proto.MarshalTextString(&indexMeta))
 		return err
 	}
-	err = proto.UnmarshalText(string(resp.Kvs[0].Value), &indexMeta)
-	if err != nil {
-		log.Debug("IndexService", zap.Any("Unmarshal error", err))
-		return err
-	}
-	if indexMeta.Version > it.req.Version {
-		log.Debug("IndexNode", zap.Any("Notify build index", "This version is not the latest version"))
-		return nil
-	}
-	indexMeta.IndexFilePaths = it.savePaths
-	indexMeta.State = commonpb.IndexState_Finished
-	if it.err != nil {
-		indexMeta.State = commonpb.IndexState_Failed
-	}
-	log.Debug("IndexNode", zap.Any("MetaPath", it.req.MetaPath))
-	err = it.etcdKV.CompareVersionAndSwap(it.req.MetaPath, resp.Kvs[0].Version,
-		proto.MarshalTextString(&indexMeta))
-	if err != nil {
-		resp2, _ := it.etcdKV.LoadWithPrefix2(it.req.MetaPath)
-		log.Debug("IndexNode", zap.Any("write meta to etcd error", err),
-			zap.Any("read revision", resp.Kvs[0].Version),
-			zap.Any("write revision", resp2.Kvs[0].Version))
-		return err
-	}
-	log.Debug("IndexNode", zap.Any("Task finished with IndexBuildID", indexMeta.IndexBuildID))
-	return nil
+
+	err := retry.Retry(3, time.Millisecond*200, fn)
+	return err
 }
 
 func (it *IndexBuildTask) Execute(ctx context.Context) error {

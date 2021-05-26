@@ -67,7 +67,6 @@ type IndexNode interface {
 	TimeTickProvider
 
 	CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error)
-	DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
 }
 
 type IndexService interface {

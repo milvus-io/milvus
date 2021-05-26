@@ -21,7 +21,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/retry"
 
-	"github.com/golang/protobuf/proto"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
@@ -219,33 +218,6 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 	log.Debug("IndexNode", zap.Int64("IndexNode successfully schedule with indexBuildID", request.IndexBuildID))
 
 	return ret, nil
-}
-
-func (i *IndexNode) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	log.Debug("IndexNode", zap.Int64("Drop index by id", request.IndexID))
-	indexBuildIDs := i.sched.IndexBuildQueue.tryToRemoveUselessIndexBuildTask(request.IndexID)
-	log.Debug("IndexNode", zap.Any("The index of the IndexBuildIDs to be deleted", indexBuildIDs))
-	for _, indexBuildID := range indexBuildIDs {
-		metaPath := "/indexes/" + strconv.FormatInt(indexBuildID, 10)
-		indexMeta := indexpb.IndexMeta{}
-		value, err := i.etcdKV.Load(metaPath)
-		if err != nil {
-			log.Debug("IndexNode", zap.Any("Drop index err", err.Error()))
-		}
-		err = proto.UnmarshalText(value, &indexMeta)
-		if err != nil {
-			log.Debug("IndexNode", zap.Any("Drop index err", err.Error()))
-		}
-		indexMeta.State = commonpb.IndexState_Finished
-		err = i.etcdKV.Save(metaPath, proto.MarshalTextString(&indexMeta))
-		if err != nil {
-			log.Debug("IndexNode", zap.Any("Drop index err", err.Error()))
-		}
-	}
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}, nil
 }
 
 // AddStartCallback adds a callback in the startServer phase.
