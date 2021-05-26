@@ -313,12 +313,12 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 
 		waitReceive := func(wg *sync.WaitGroup, flushedCh interface{}, req *datapb.SaveBinlogPathsRequest) {
 			defer wg.Done()
-			switch flushedCh.(type) {
+			switch Ch := flushedCh.(type) {
 			case chan []*datapb.ID2PathList:
 				select {
 				case <-time.After(300 * time.Second):
 					return
-				case meta := <-flushedCh.(chan []*datapb.ID2PathList):
+				case meta := <-Ch:
 					if meta == nil {
 						log.Info("Dml messages flush failed!")
 						// Modify req to confirm failure
@@ -333,7 +333,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 				select {
 				case <-time.After(300 * time.Second):
 					return
-				case meta := <-flushedCh.(chan []*datapb.DDLBinlogMeta):
+				case meta := <-Ch:
 					if meta == nil {
 						log.Info("Ddl messages flush failed!")
 						// Modify req to confirm failure
