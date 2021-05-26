@@ -239,6 +239,20 @@ func initPulsarTtStream(pulsarAddress string,
 	return input, output
 }
 
+func getPulsarTtOutputStreamAndSeek(pulsarAddress string, positions []*MsgPosition) MsgStream {
+	factory := ProtoUDFactory{}
+	pulsarClient, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	outputStream, _ := NewMqTtMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+	//outputStream.AsConsumer(consumerChannels, consumerSubName)
+	for _, pos := range positions {
+		pos.MsgGroup = funcutil.RandomString(4)
+		fmt.Println("msg group: ", pos.MsgGroup)
+		outputStream.Seek(pos)
+	}
+	outputStream.Start()
+	return outputStream
+}
+
 func receiveMsg(outputStream MsgStream, msgCount int) {
 	receiveCount := 0
 	for {
@@ -622,15 +636,15 @@ func TestStream_PulsarTtMsgStream_Seek(t *testing.T) {
 
 	outputStream.Consume()
 	receivedMsg := outputStream.Consume()
-	for _, position := range receivedMsg.StartPositions {
-		outputStream.Seek(position)
-	}
+	outputStream.Close()
+	outputStream = getPulsarTtOutputStreamAndSeek(pulsarAddress, receivedMsg.EndPositions)
+
 	err = inputStream.Broadcast(&msgPack5)
 	assert.Nil(t, err)
-	//seekMsg, _ := outputStream.Consume()
-	//for _, msg := range seekMsg.Msgs {
-	//	assert.Equal(t, msg.BeginTs(), uint64(14))
-	//}
+	seekMsg := outputStream.Consume()
+	for _, msg := range seekMsg.Msgs {
+		assert.Equal(t, msg.BeginTs(), uint64(14))
+	}
 	inputStream.Close()
 	outputStream.Close()
 }
