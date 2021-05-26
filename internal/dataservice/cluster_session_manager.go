@@ -12,28 +12,34 @@ package dataservice
 
 import (
 	"sync"
+	"time"
 
-	grpcdatanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	"github.com/milvus-io/milvus/internal/types"
 )
 
 const retryTimes = 2
 
 type sessionManager interface {
-	sendRequest(addr string, executor func(node types.DataNode) error) error
+	getOrCreateSession(addr string) (types.DataNode, error)
+	releaseSession(addr string)
+	release()
 }
 
 type clusterSessionManager struct {
-	mu       sync.RWMutex
-	sessions map[string]types.DataNode
+	mu                sync.RWMutex
+	sessions          map[string]types.DataNode
+	dataClientCreator func(addr string, timeout time.Duration) (types.DataNode, error)
 }
 
-func newClusterSessionManager() *clusterSessionManager {
-	return &clusterSessionManager{sessions: make(map[string]types.DataNode)}
+func newClusterSessionManager(dataClientCreator func(addr string, timeout time.Duration) (types.DataNode, error)) *clusterSessionManager {
+	return &clusterSessionManager{
+		sessions:          make(map[string]types.DataNode),
+		dataClientCreator: dataClientCreator,
+	}
 }
 
 func (m *clusterSessionManager) createSession(addr string) error {
-	cli, err := grpcdatanodeclient.NewClient(addr, 0, []string{}, 0)
+	cli, err := m.dataClientCreator(addr, 0)
 	if err != nil {
 		return err
 	}
@@ -47,8 +53,13 @@ func (m *clusterSessionManager) createSession(addr string) error {
 	return nil
 }
 
-func (m *clusterSessionManager) getSession(addr string) types.DataNode {
-	return m.sessions[addr]
+func (m *clusterSessionManager) getOrCreateSession(addr string) (types.DataNode, error) {
+	if !m.hasSession(addr) {
+		if err := m.createSession(addr); err != nil {
+			return nil, err
+		}
+	}
+	return m.sessions[addr], nil
 }
 
 func (m *clusterSessionManager) hasSession(addr string) bool {
@@ -56,19 +67,17 @@ func (m *clusterSessionManager) hasSession(addr string) bool {
 	return ok
 }
 
-func (m *clusterSessionManager) sendRequest(addr string, executor func(node types.DataNode) error) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	success := false
-	var err error
-	for i := 0; !success && i < retryTimes; i++ {
-		if i != 0 || !m.hasSession(addr) {
-			m.createSession(addr)
-		}
-		err = executor(m.getSession(addr))
-		if err == nil {
-			return nil
-		}
+func (m *clusterSessionManager) releaseSession(addr string) {
+	cli, ok := m.sessions[addr]
+	if !ok {
+		return
 	}
-	return err
+	_ = cli.Stop()
+	delete(m.sessions, addr)
+}
+
+func (m *clusterSessionManager) release() {
+	for _, cli := range m.sessions {
+		_ = cli.Stop()
+	}
 }
