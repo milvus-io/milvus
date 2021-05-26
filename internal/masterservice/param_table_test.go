@@ -20,9 +20,6 @@ import (
 func TestParamTable(t *testing.T) {
 	Params.Init()
 
-	assert.NotEqual(t, Params.NodeID, 0)
-	t.Logf("master node ID = %d", Params.NodeID)
-
 	assert.NotEqual(t, Params.PulsarAddress, "")
 	t.Logf("pulsar address = %s", Params.PulsarAddress)
 

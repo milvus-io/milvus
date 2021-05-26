@@ -68,7 +68,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		cancel:      cancel,
 		grpcErrChan: make(chan error),
 		newMasterServiceClient: func(s string) (types.MasterService, error) {
-			return msc.NewClient(s, []string{dataservice.Params.EtcdAddress}, 10*time.Second)
+			return msc.NewClient(s, dataservice.Params.MetaRootPath, []string{dataservice.Params.EtcdAddress}, 10*time.Second)
 		},
 	}
 	s.dataService, err = dataservice.CreateServer(s.ctx, factory)
@@ -91,7 +91,12 @@ func (s *Server) init() error {
 	dataservice.Params.IP = Params.IP
 	dataservice.Params.Port = Params.Port
 
-	err := s.startGrpc()
+	err := s.dataService.Register()
+	if err != nil {
+		return err
+	}
+
+	err = s.startGrpc()
 	if err != nil {
 		return err
 	}

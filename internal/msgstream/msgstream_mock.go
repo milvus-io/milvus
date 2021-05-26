@@ -76,6 +76,10 @@ func (ms *SimpleMsgStream) Broadcast(pack *MsgPack) error {
 	return nil
 }
 
+func (ms *SimpleMsgStream) GetProduceChannels() []string {
+	return nil
+}
+
 func (ms *SimpleMsgStream) Consume() *MsgPack {
 	if ms.getMsgCount() <= 0 {
 		return nil

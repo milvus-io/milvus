@@ -169,6 +169,7 @@ func (ms *mqMsgStream) ComputeProduceChannelIndexes(tsMsgs []TsMsg) [][]int32 {
 	}
 	reBucketValues := make([][]int32, len(tsMsgs))
 	channelNum := uint32(len(ms.producerChannels))
+
 	if channelNum == 0 {
 		return nil
 	}
@@ -181,6 +182,10 @@ func (ms *mqMsgStream) ComputeProduceChannelIndexes(tsMsgs []TsMsg) [][]int32 {
 		reBucketValues[idx] = bucketValues
 	}
 	return reBucketValues
+}
+
+func (ms *mqMsgStream) GetProduceChannels() []string {
+	return ms.producerChannels
 }
 
 func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {

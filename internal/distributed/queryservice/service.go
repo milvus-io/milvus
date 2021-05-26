@@ -96,6 +96,10 @@ func (s *Server) init() error {
 	closer := trace.InitTracing("query_service")
 	s.closer = closer
 
+	if err := s.queryservice.Register(); err != nil {
+		return err
+	}
+
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
@@ -107,7 +111,7 @@ func (s *Server) init() error {
 	log.Debug("Master service", zap.String("address", Params.MasterAddress))
 	log.Debug("Init master service client ...")
 
-	masterService, err := msc.NewClient(Params.MasterAddress, []string{qs.Params.EtcdAddress}, 20*time.Second)
+	masterService, err := msc.NewClient(Params.MasterAddress, qs.Params.MetaRootPath, []string{qs.Params.EtcdAddress}, 20*time.Second)
 
 	if err != nil {
 		panic(err)
@@ -134,7 +138,7 @@ func (s *Server) init() error {
 	log.Debug("DataService", zap.String("Address", Params.DataServiceAddress))
 	log.Debug("QueryService Init data service client ...")
 
-	dataService := dsc.NewClient(Params.DataServiceAddress)
+	dataService := dsc.NewClient(Params.DataServiceAddress, qs.Params.MetaRootPath, []string{qs.Params.EtcdAddress}, 10)
 	if err = dataService.Init(); err != nil {
 		panic(err)
 	}

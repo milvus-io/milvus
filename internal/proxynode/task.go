@@ -18,8 +18,10 @@ import (
 	"math"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"time"
+	"unsafe"
 
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 
@@ -99,6 +101,7 @@ type InsertTask struct {
 	dataService    types.DataService
 	result         *milvuspb.InsertResponse
 	rowIDAllocator *allocator.IDAllocator
+	segIDAssigner  *SegIDAssigner
 }
 
 func (it *InsertTask) TraceCtx() context.Context {
@@ -158,6 +161,211 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstream.MsgPack) (*msgstream.MsgPack, error) {
+	newPack := &msgstream.MsgPack{
+		BeginTs:        pack.BeginTs,
+		EndTs:          pack.EndTs,
+		StartPositions: pack.StartPositions,
+		EndPositions:   pack.EndPositions,
+		Msgs:           nil,
+	}
+	tsMsgs := pack.Msgs
+	hashKeys := stream.ComputeProduceChannelIndexes(tsMsgs)
+	reqID := it.Base.MsgID
+	channelCountMap := make(map[int32]uint32)    //   channelID to count
+	channelMaxTSMap := make(map[int32]Timestamp) //  channelID to max Timestamp
+	channelNames := stream.GetProduceChannels()
+	log.Debug("_assignSemgentID, produceChannels:", zap.Any("Channels", channelNames))
+
+	for i, request := range tsMsgs {
+		if request.Type() != commonpb.MsgType_Insert {
+			return nil, fmt.Errorf("msg's must be Insert")
+		}
+		insertRequest, ok := request.(*msgstream.InsertMsg)
+		if !ok {
+			return nil, fmt.Errorf("msg's must be Insert")
+		}
+
+		keys := hashKeys[i]
+		timestampLen := len(insertRequest.Timestamps)
+		rowIDLen := len(insertRequest.RowIDs)
+		rowDataLen := len(insertRequest.RowData)
+		keysLen := len(keys)
+
+		if keysLen != timestampLen || keysLen != rowIDLen || keysLen != rowDataLen {
+			return nil, fmt.Errorf("the length of hashValue, timestamps, rowIDs, RowData are not equal")
+		}
+
+		for idx, channelID := range keys {
+			channelCountMap[channelID]++
+			if _, ok := channelMaxTSMap[channelID]; !ok {
+				channelMaxTSMap[channelID] = typeutil.ZeroTimestamp
+			}
+			ts := insertRequest.Timestamps[idx]
+			if channelMaxTSMap[channelID] < ts {
+				channelMaxTSMap[channelID] = ts
+			}
+		}
+	}
+
+	reqSegCountMap := make(map[int32]map[UniqueID]uint32)
+
+	for channelID, count := range channelCountMap {
+		ts, ok := channelMaxTSMap[channelID]
+		if !ok {
+			ts = typeutil.ZeroTimestamp
+			log.Debug("Warning: did not get max Timestamp!")
+		}
+		channelName := channelNames[channelID]
+		if channelName == "" {
+			return nil, fmt.Errorf("ProxyNode, repack_func, can not found channelName")
+		}
+		mapInfo, err := it.segIDAssigner.GetSegmentID(it.CollectionID, it.PartitionID, channelName, count, ts)
+		if err != nil {
+			return nil, err
+		}
+		reqSegCountMap[channelID] = make(map[UniqueID]uint32)
+		reqSegCountMap[channelID] = mapInfo
+		log.Debug("ProxyNode", zap.Int64("repackFunc, reqSegCountMap, reqID", reqID), zap.Any("mapinfo", mapInfo))
+	}
+
+	reqSegAccumulateCountMap := make(map[int32][]uint32)
+	reqSegIDMap := make(map[int32][]UniqueID)
+	reqSegAllocateCounter := make(map[int32]uint32)
+
+	for channelID, segInfo := range reqSegCountMap {
+		reqSegAllocateCounter[channelID] = 0
+		keys := make([]UniqueID, len(segInfo))
+		i := 0
+		for key := range segInfo {
+			keys[i] = key
+			i++
+		}
+		sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+		accumulate := uint32(0)
+		for _, key := range keys {
+			accumulate += segInfo[key]
+			if _, ok := reqSegAccumulateCountMap[channelID]; !ok {
+				reqSegAccumulateCountMap[channelID] = make([]uint32, 0)
+			}
+			reqSegAccumulateCountMap[channelID] = append(
+				reqSegAccumulateCountMap[channelID],
+				accumulate,
+			)
+			if _, ok := reqSegIDMap[channelID]; !ok {
+				reqSegIDMap[channelID] = make([]UniqueID, 0)
+			}
+			reqSegIDMap[channelID] = append(
+				reqSegIDMap[channelID],
+				key,
+			)
+		}
+	}
+
+	var getSegmentID = func(channelID int32) UniqueID {
+		reqSegAllocateCounter[channelID]++
+		cur := reqSegAllocateCounter[channelID]
+		accumulateSlice := reqSegAccumulateCountMap[channelID]
+		segIDSlice := reqSegIDMap[channelID]
+		for index, count := range accumulateSlice {
+			if cur <= count {
+				return segIDSlice[index]
+			}
+		}
+		log.Warn("Can't Found SegmentID")
+		return 0
+	}
+
+	factor := 10
+	threshold := Params.PulsarMaxMessageSize / factor
+	log.Debug("ProxyNode", zap.Int("threshold of message size: ", threshold))
+	// not accurate
+	getFixedSizeOfInsertMsg := func(msg *msgstream.InsertMsg) int {
+		size := 0
+
+		size += int(unsafe.Sizeof(*msg.Base))
+		size += int(unsafe.Sizeof(msg.DbName))
+		size += int(unsafe.Sizeof(msg.CollectionName))
+		size += int(unsafe.Sizeof(msg.PartitionName))
+		size += int(unsafe.Sizeof(msg.DbID))
+		size += int(unsafe.Sizeof(msg.CollectionID))
+		size += int(unsafe.Sizeof(msg.PartitionID))
+		size += int(unsafe.Sizeof(msg.SegmentID))
+		size += int(unsafe.Sizeof(msg.ChannelID))
+		size += int(unsafe.Sizeof(msg.Timestamps))
+		size += int(unsafe.Sizeof(msg.RowIDs))
+		return size
+	}
+
+	result := make(map[int32]msgstream.TsMsg)
+	curMsgSizeMap := make(map[int32]int)
+
+	for i, request := range tsMsgs {
+		insertRequest := request.(*msgstream.InsertMsg)
+		keys := hashKeys[i]
+		collectionName := insertRequest.CollectionName
+		collectionID := insertRequest.CollectionID
+		partitionID := insertRequest.PartitionID
+		partitionName := insertRequest.PartitionName
+		proxyID := insertRequest.Base.SourceID
+		for index, key := range keys {
+			ts := insertRequest.Timestamps[index]
+			rowID := insertRequest.RowIDs[index]
+			row := insertRequest.RowData[index]
+			segmentID := getSegmentID(key)
+			_, ok := result[key]
+			if !ok {
+				sliceRequest := internalpb.InsertRequest{
+					Base: &commonpb.MsgBase{
+						MsgType:   commonpb.MsgType_Insert,
+						MsgID:     reqID,
+						Timestamp: ts,
+						SourceID:  proxyID,
+					},
+					CollectionID:   collectionID,
+					PartitionID:    partitionID,
+					CollectionName: collectionName,
+					PartitionName:  partitionName,
+					SegmentID:      segmentID,
+					// todo rename to ChannelName
+					ChannelID: channelNames[key],
+				}
+				insertMsg := &msgstream.InsertMsg{
+					BaseMsg: msgstream.BaseMsg{
+						Ctx: request.TraceCtx(),
+					},
+					InsertRequest: sliceRequest,
+				}
+				result[key] = insertMsg
+				curMsgSizeMap[key] = getFixedSizeOfInsertMsg(insertMsg)
+			}
+			curMsg := result[key].(*msgstream.InsertMsg)
+			curMsgSize := curMsgSizeMap[key]
+			curMsg.HashValues = append(curMsg.HashValues, insertRequest.HashValues[index])
+			curMsg.Timestamps = append(curMsg.Timestamps, ts)
+			curMsg.RowIDs = append(curMsg.RowIDs, rowID)
+			curMsg.RowData = append(curMsg.RowData, row)
+			curMsgSize += 4 + 8 + int(unsafe.Sizeof(row.Value))
+			curMsgSize += len(row.Value)
+
+			if curMsgSize >= threshold {
+				newPack.Msgs = append(newPack.Msgs, curMsg)
+				delete(result, key)
+				curMsgSize = 0
+			}
+
+			curMsgSizeMap[key] = curMsgSize
+		}
+	}
+	for _, msg := range result {
+		if msg != nil {
+			newPack.Msgs = append(newPack.Msgs, msg)
+		}
+	}
+
+	return newPack, nil
 }
 
 func (it *InsertTask) Execute(ctx context.Context) error {
@@ -254,7 +462,14 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	err = stream.Produce(&msgPack)
+	// Assign SegmentID
+	var pack *msgstream.MsgPack
+	pack, err = it._assignSegmentID(stream, &msgPack)
+	if err != nil {
+		return err
+	}
+
+	err = stream.Produce(pack)
 	if err != nil {
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		it.result.Status.Reason = err.Error()

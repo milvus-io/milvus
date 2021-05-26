@@ -1058,6 +1058,7 @@ func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertReque
 			},
 		},
 		rowIDAllocator: node.idAllocator,
+		segIDAssigner:  node.segAssigner,
 	}
 	if len(it.PartitionName) <= 0 {
 		it.PartitionName = Params.DefaultPartitionName
@@ -1433,6 +1434,54 @@ func (node *ProxyNode) getSegmentsOfCollection(ctx context.Context, dbName strin
 		ret = append(ret, showSegmentResponse.SegmentIDs...)
 	}
 	return ret, nil
+}
+
+func (node *ProxyNode) Dummy(ctx context.Context, req *milvuspb.DummyRequest) (*milvuspb.DummyResponse, error) {
+	failedResponse := &milvuspb.DummyResponse{
+		Response: `{"status": "fail"}`,
+	}
+
+	// TODO(wxyu): change name RequestType to Request
+	drt, err := parseDummyRequestType(req.RequestType)
+	if err != nil {
+		log.Debug("Failed to parse dummy request type")
+		return failedResponse, nil
+	}
+
+	if drt.RequestType == "retrieve" {
+		drr, err := parseDummyRetrieveRequest(req.RequestType)
+		if err != nil {
+			log.Debug("Failed to parse dummy retrieve request")
+			return failedResponse, nil
+		}
+
+		request := &milvuspb.RetrieveRequest{
+			DbName:         drr.DbName,
+			CollectionName: drr.CollectionName,
+			PartitionNames: drr.PartitionNames,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: drr.Ids,
+					},
+				},
+			},
+			OutputFields: drr.OutputFields,
+		}
+
+		_, err = node.Retrieve(ctx, request)
+		if err != nil {
+			log.Debug("Failed to execute dummy retrieve")
+			return failedResponse, err
+		}
+
+		return &milvuspb.DummyResponse{
+			Response: `{"status": "success"}`,
+		}, nil
+	}
+
+	log.Debug("cannot find specify dummy request type")
+	return failedResponse, nil
 }
 
 func (node *ProxyNode) RegisterLink(ctx context.Context, req *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error) {

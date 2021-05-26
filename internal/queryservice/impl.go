@@ -90,7 +90,15 @@ func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterN
 	}
 
 	registerNodeAddress := req.Address.Ip + ":" + strconv.FormatInt(req.Address.Port, 10)
-	client := nodeclient.NewClient(registerNodeAddress)
+	client, err := nodeclient.NewClient(registerNodeAddress)
+	if err != nil {
+		return &querypb.RegisterNodeResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			InitParams: new(internalpb.InitParams),
+		}, err
+	}
 	if err := client.Init(); err != nil {
 		return &querypb.RegisterNodeResponse{
 			Status: &commonpb.Status{

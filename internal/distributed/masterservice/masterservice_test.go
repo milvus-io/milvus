@@ -13,8 +13,10 @@ package grpcmasterservice
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
@@ -87,6 +90,14 @@ func GenFlushedSegMsgPack(segID typeutil.UniqueID) *msgstream.MsgPack {
 	return &msgPack
 }
 
+type proxyNodeMock struct {
+	types.ProxyNode
+	invalidateCollectionMetaCache func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
+}
+
+func (p *proxyNodeMock) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+	return p.invalidateCollectionMetaCache(ctx, request)
+}
 func TestGrpcService(t *testing.T) {
 	const (
 		dbName    = "testDB"
@@ -129,16 +140,29 @@ func TestGrpcService(t *testing.T) {
 
 	t.Logf("master service port = %d", Params.Port)
 
+	core, ok := (svr.masterService).(*cms.Core)
+	assert.True(t, ok)
+
+	err = core.Register()
+	assert.Nil(t, err)
+
 	err = svr.startGrpc()
 	assert.Nil(t, err)
 	svr.masterService.UpdateStateCode(internalpb.StateCode_Initializing)
 
-	core, ok := (svr.masterService).(*cms.Core)
-	assert.True(t, ok)
-
 	etcdCli, err := initEtcd(cms.Params.EtcdAddress)
 	assert.Nil(t, err)
-	_, err = etcdCli.Delete(ctx, sessionutil.DefaultServiceRoot, clientv3.WithPrefix())
+	sessKey := path.Join(cms.Params.MetaRootPath, sessionutil.DefaultServiceRoot)
+	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
+	assert.Nil(t, err)
+
+	pnb, err := json.Marshal(
+		&sessionutil.Session{
+			ServerID: 100,
+		},
+	)
+	assert.Nil(t, err)
+	_, err = etcdCli.Put(ctx, path.Join(sessKey, typeutil.ProxyNodeRole+"-100"), string(pnb))
 	assert.Nil(t, err)
 
 	err = core.Init()
@@ -210,9 +234,15 @@ func TestGrpcService(t *testing.T) {
 	}
 
 	collectionMetaCache := make([]string, 0, 16)
-	core.CallInvalidateCollectionMetaCacheService = func(ctx context.Context, ts typeutil.Timestamp, dbName string, collectionName string) error {
-		collectionMetaCache = append(collectionMetaCache, collectionName)
-		return nil
+	pnm := proxyNodeMock{}
+	core.NewProxyClient = func(*sessionutil.Session) (types.ProxyNode, error) {
+		return &pnm, nil
+	}
+	pnm.invalidateCollectionMetaCache = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+		collectionMetaCache = append(collectionMetaCache, request.CollectionName)
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}, nil
 	}
 
 	core.CallReleaseCollectionService = func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
@@ -224,7 +254,7 @@ func TestGrpcService(t *testing.T) {
 
 	svr.masterService.UpdateStateCode(internalpb.StateCode_Healthy)
 
-	cli, err := grpcmasterserviceclient.NewClient(Params.Address, []string{cms.Params.EtcdAddress}, 3*time.Second)
+	cli, err := grpcmasterserviceclient.NewClient(Params.Address, cms.Params.MetaRootPath, []string{cms.Params.EtcdAddress}, 3*time.Second)
 	assert.Nil(t, err)
 
 	err = cli.Init()
@@ -806,6 +836,10 @@ func (m *mockCore) SetQueryService(types.QueryService) error {
 	return nil
 }
 
+func (m *mockCore) Register() error {
+	return nil
+}
+
 func (m *mockCore) Init() error {
 	return nil
 }
@@ -816,6 +850,9 @@ func (m *mockCore) Start() error {
 
 func (m *mockCore) Stop() error {
 	return fmt.Errorf("stop error")
+}
+
+func (m *mockCore) SetNewProxyClient(func(sess *sessionutil.Session) (types.ProxyNode, error)) {
 }
 
 type mockProxy struct {
@@ -918,7 +955,7 @@ func TestRun(t *testing.T) {
 	svr.newProxyServiceClient = func(s string) types.ProxyService {
 		return &mockProxy{}
 	}
-	svr.newDataServiceClient = func(s string) types.DataService {
+	svr.newDataServiceClient = func(s, metaRoot, address string, timeout time.Duration) types.DataService {
 		return &mockDataService{}
 	}
 	svr.newIndexServiceClient = func(s string) types.IndexService {
@@ -937,7 +974,8 @@ func TestRun(t *testing.T) {
 
 	etcdCli, err := initEtcd(cms.Params.EtcdAddress)
 	assert.Nil(t, err)
-	_, err = etcdCli.Delete(ctx, sessionutil.DefaultServiceRoot, clientv3.WithPrefix())
+	sessKey := path.Join(cms.Params.MetaRootPath, sessionutil.DefaultServiceRoot)
+	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 	err = svr.Run()
 	assert.Nil(t, err)

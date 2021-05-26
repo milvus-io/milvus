@@ -14,6 +14,7 @@ import (
 	"context"
 	"math"
 	"math/rand"
+	"path"
 	"testing"
 	"time"
 
@@ -231,8 +232,9 @@ func TestFlush(t *testing.T) {
 func TestGetComponentStates(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
-	cli := newMockDataNodeClient(1)
-	err := cli.Init()
+	cli, err := newMockDataNodeClient(1)
+	assert.Nil(t, err)
+	err = cli.Init()
 	assert.Nil(t, err)
 	err = cli.Start()
 	assert.Nil(t, err)
@@ -788,7 +790,8 @@ func newTestServer(t *testing.T) *Server {
 
 	etcdCli, err := initEtcd(Params.EtcdAddress)
 	assert.Nil(t, err)
-	_, err = etcdCli.Delete(context.Background(), sessionutil.DefaultServiceRoot, clientv3.WithPrefix())
+	sessKey := path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot)
+	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
 	svr, err := CreateServer(context.TODO(), factory)
@@ -800,7 +803,7 @@ func newTestServer(t *testing.T) *Server {
 	assert.Nil(t, err)
 	defer ms.Stop()
 	svr.SetMasterClient(ms)
-	svr.createDataNodeClient = func(addr string) types.DataNode {
+	svr.createDataNodeClient = func(addr string) (types.DataNode, error) {
 		return newMockDataNodeClient(0)
 	}
 	assert.Nil(t, err)

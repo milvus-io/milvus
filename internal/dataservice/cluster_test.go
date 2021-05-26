@@ -24,8 +24,9 @@ func TestDataNodeClusterRegister(t *testing.T) {
 	dataNodeNum := 3
 	ids := make([]int64, 0, dataNodeNum)
 	for i := 0; i < dataNodeNum; i++ {
-		c := newMockDataNodeClient(int64(i))
-		err := c.Init()
+		c, err := newMockDataNodeClient(int64(i))
+		assert.Nil(t, err)
+		err = c.Init()
 		assert.Nil(t, err)
 		err = c.Start()
 		assert.Nil(t, err)
@@ -74,8 +75,9 @@ func TestWatchChannels(t *testing.T) {
 	cluster := newDataNodeCluster()
 	for _, c := range cases {
 		for i := 0; i < dataNodeNum; i++ {
-			c := newMockDataNodeClient(int64(i))
-			err := c.Init()
+			c, err := newMockDataNodeClient(int64(i))
+			assert.Nil(t, err)
+			err = c.Init()
 			assert.Nil(t, err)
 			err = c.Start()
 			assert.Nil(t, err)

@@ -2,6 +2,7 @@ import os
 import random
 import string
 import numpy as np
+import pandas as pd
 from sklearn import preprocessing
 
 from pymilvus_orm.types import DataType
@@ -53,7 +54,7 @@ def gen_collection_schema(fields, primary_field=None, description=ct.default_des
     return schema
 
 
-def gen_default_binary_collection_schema(description=ct.default_binary_desc, primary_field=None):
+def gen_default_binary_collection_schema(description=ct.default_desc, primary_field=None):
     fields = [gen_int64_field(), gen_float_field(), gen_binary_vec_field()]
     binary_schema = CollectionSchema(fields=fields, description=description, primary_field=primary_field)
     return binary_schema
@@ -65,8 +66,17 @@ def gen_vectors(nb, dim):
     return vectors.tolist()
 
 
+def gen_binary_vectors(num, dim):
+    raw_vectors = []
+    binary_vectors = []
+    for _ in range(num):
+        raw_vector = [random.randint(0, 1) for _ in range(dim)]
+        raw_vectors.append(raw_vector)
+        binary_vectors.append(bytes(np.packbits(raw_vector, axis=-1).tolist()))
+    return raw_vectors, binary_vectors
+
+
 def gen_default_dataframe_data(nb=ct.default_nb):
-    import pandas as pd
     int_values = pd.Series(data=[i for i in range(nb)])
     float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
     float_vec_values = gen_vectors(nb, ct.default_dim)
@@ -78,11 +88,39 @@ def gen_default_dataframe_data(nb=ct.default_nb):
     return df
 
 
+def gen_default_binary_dataframe_data(nb=ct.default_nb):
+    int_values = pd.Series(data=[i for i in range(nb)])
+    float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
+    _, binary_vec_values = gen_binary_vectors(nb, ct.default_dim)
+    df = pd.DataFrame({
+        ct.default_int64_field: int_values,
+        ct.default_float_field: float_values,
+        ct.default_binary_vec_field_name: binary_vec_values
+    })
+    return df
+
+
 def gen_default_list_data(nb=ct.default_nb):
     int_values = [i for i in range(nb)]
-    float_values = [float(i) for i in range(nb)]
+    float_values = [np.float32(i) for i in range(nb)]
     float_vec_values = gen_vectors(nb, ct.default_dim)
     data = [int_values, float_values, float_vec_values]
+    return data
+
+
+def gen_numpy_data(nb=ct.default_nb):
+    int_values = np.arange(nb, dtype='int64')
+    float_values = np.arange(nb, dtype='float32')
+    float_vec_values = gen_vectors(nb, ct.default_dim)
+    data = [int_values, float_values, float_vec_values]
+    return data
+
+
+def gen_default_binary_list_data(nb=ct.default_nb):
+    int_values = [i for i in range(nb)]
+    float_values = [np.float32(i) for i in range(nb)]
+    _, binary_vec_values = gen_binary_vectors(nb, ct.default_dim)
+    data = [int_values, float_values, binary_vec_values]
     return data
 
 
@@ -95,22 +133,6 @@ def gen_simple_index():
         dic.update({"params": ct.default_index_params[i]})
         index_params.append(dic)
     return index_params
-
-
-def get_vectors(num, dim, is_normal=True):
-    vectors = [[random.random() for _ in range(dim)] for _ in range(num)]
-    vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
-    return vectors.tolist()
-
-
-def gen_binary_vectors(num, dim):
-    raw_vectors = []
-    binary_vectors = []
-    for i in range(num):
-        raw_vector = [random.randint(0, 1) for i in range(dim)]
-        raw_vectors.append(raw_vector)
-        binary_vectors.append(bytes(np.packbits(raw_vector, axis=-1).tolist()))
-    return raw_vectors, binary_vectors
 
 
 def gen_invalid_field_types():
@@ -132,6 +154,21 @@ def gen_all_type_fields():
         field = FieldSchema(name=k.lower(), dtype=v)
         fields.append(field)
     return fields
+
+
+def gen_invalid_dataframe():
+    vec = gen_vectors(3, 2)
+    dfs = [
+        # just columns df
+        pd.DataFrame(columns=[ct.default_int64_field, ct.default_float_vec_field_name]),
+        # no column just data df
+        pd.DataFrame({' ': vec}),
+        # datetime df
+        pd.DataFrame({"date": pd.date_range('20210101', periods=3)}),
+        # invalid column df
+        pd.DataFrame({'%$#': vec}),
+    ]
+    return dfs
 
 
 def modify_file(file_name_list, input_content=""):

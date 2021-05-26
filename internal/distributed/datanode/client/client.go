@@ -13,6 +13,7 @@ package grpcdatanodeclient
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -30,17 +31,32 @@ import (
 )
 
 type Client struct {
-	ctx     context.Context
-	grpc    datapb.DataNodeClient
-	conn    *grpc.ClientConn
+	ctx context.Context
+
+	grpc datapb.DataNodeClient
+	conn *grpc.ClientConn
+
 	address string
+
+	timeout   time.Duration
+	reconnTry int
+	recallTry int
 }
 
-func NewClient(address string) *Client {
-	return &Client{
-		address: address,
-		ctx:     context.Background(),
+func NewClient(address string, timeout time.Duration) (*Client, error) {
+	if address == "" {
+		return nil, fmt.Errorf("address is empty")
 	}
+
+	return &Client{
+		grpc:      nil,
+		conn:      nil,
+		address:   address,
+		ctx:       context.Background(),
+		timeout:   timeout,
+		recallTry: 3,
+		reconnTry: 10,
+	}, nil
 }
 
 func (c *Client) Init() error {
@@ -59,12 +75,54 @@ func (c *Client) Init() error {
 		return nil
 	}
 
-	err := retry.Retry(100000, time.Millisecond*200, connectGrpcFunc)
+	err := retry.Retry(c.reconnTry, time.Millisecond*500, connectGrpcFunc)
 	if err != nil {
 		return err
 	}
 	c.grpc = datapb.NewDataNodeClient(c.conn)
 	return nil
+}
+
+func (c *Client) reconnect() error {
+	tracer := opentracing.GlobalTracer()
+	var err error
+	connectGrpcFunc := func() error {
+		log.Debug("DataNode connect ", zap.String("address", c.address))
+		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
+			grpc.WithUnaryInterceptor(
+				otgrpc.OpenTracingClientInterceptor(tracer)),
+			grpc.WithStreamInterceptor(
+				otgrpc.OpenTracingStreamClientInterceptor(tracer)))
+		if err != nil {
+			return err
+		}
+		c.conn = conn
+		return nil
+	}
+
+	err = retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
+	if err != nil {
+		return err
+	}
+	c.grpc = datapb.NewDataNodeClient(c.conn)
+	return nil
+}
+
+func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error) {
+	ret, err := caller()
+	if err == nil {
+		return ret, nil
+	}
+	for i := 0; i < c.recallTry; i++ {
+		err = c.reconnect()
+		if err == nil {
+			ret, err = caller()
+			if err == nil {
+				return ret, nil
+			}
+		}
+	}
+	return ret, err
 }
 
 func (c *Client) Start() error {
@@ -75,18 +133,35 @@ func (c *Client) Stop() error {
 	return c.conn.Close()
 }
 
+// Register dummy
+func (c *Client) Register() error {
+	return nil
+}
+
 func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	return c.grpc.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
+	ret, err := c.recall(func() (interface{}, error) {
+		return c.grpc.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
+	})
+	return ret.(*internalpb.ComponentStates), err
 }
 
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	return c.grpc.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
+	ret, err := c.recall(func() (interface{}, error) {
+		return c.grpc.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
+	})
+	return ret.(*milvuspb.StringResponse), err
 }
 
 func (c *Client) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
-	return c.grpc.WatchDmChannels(ctx, req)
+	ret, err := c.recall(func() (interface{}, error) {
+		return c.grpc.WatchDmChannels(ctx, req)
+	})
+	return ret.(*commonpb.Status), err
 }
 
 func (c *Client) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
-	return c.grpc.FlushSegments(ctx, req)
+	ret, err := c.recall(func() (interface{}, error) {
+		return c.grpc.FlushSegments(ctx, req)
+	})
+	return ret.(*commonpb.Status), err
 }
