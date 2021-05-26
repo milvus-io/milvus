@@ -13,6 +13,6 @@ package querynode
 
 type Historical struct {
 	replica      ReplicaInterface
-	loadService  *LoadService
-	statsService *StatsService
+	loader       *segmentLoader
+	statsService *statsService
 }

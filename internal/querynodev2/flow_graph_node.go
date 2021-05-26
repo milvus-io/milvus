@@ -11,8 +11,8 @@
 
 package querynode
 
-type Streaming struct {
-	replica         ReplicaInterface
-	dataSyncService *DataSyncService
-	statsService    *statsService
-}
+import "github.com/milvus-io/milvus/internal/util/flowgraph"
+
+type baseNode = flowgraph.BaseNode
+type node = flowgraph.Node
+type inputNode = flowgraph.InputNode
