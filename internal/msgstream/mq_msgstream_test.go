@@ -243,6 +243,20 @@ func getPulsarTtOutputStream(pulsarAddress string, consumerChannels []string, co
 	return outputStream
 }
 
+func getPulsarTtOutputStreamAndSeek(pulsarAddress string, positions []*MsgPosition) MsgStream {
+	factory := ProtoUDFactory{}
+	pulsarClient, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	outputStream, _ := NewMqTtMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+	//outputStream.AsConsumer(consumerChannels, consumerSubName)
+	outputStream.Start()
+	for _, pos := range positions {
+		pos.MsgGroup = funcutil.RandomString(4)
+		fmt.Println("msg group: ", pos.MsgGroup)
+		outputStream.Seek(pos)
+	}
+	return outputStream
+}
+
 func receiveMsg(outputStream MsgStream, msgCount int) {
 	receiveCount := 0
 	for {
@@ -712,7 +726,7 @@ func TestStream_PulsarTtMsgStream_UnMarshalHeader(t *testing.T) {
 //             ^          ^          ^          ^          ^          ^
 //            TT(10)     TT(20)     TT(30)     TT(40)     TT(50)     TT(100)
 //
-// And check:
+// Then check:
 //   1. For each msg in MsgPack received by ttMsgStream consumer, there should be
 //        msgPack.BeginTs < msg.BeginTs() <= msgPack.EndTs
 //   2. The count of consumed msg should be equal to the count of produced msg
@@ -782,6 +796,94 @@ func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 
 	inputStream.Close()
 	outputStream.Close()
+}
+
+//
+// This testcase will generate MsgPacks as following:
+//
+//     Insert     Insert     Insert     Insert     Insert     Insert
+//  |----------|----------|----------|----------|----------|----------|
+//             ^          ^          ^          ^          ^          ^
+//            TT(10)     TT(20)     TT(30)     TT(40)     TT(50)     TT(100)
+//
+// Then check:
+//   1. ttMsgStream consumer can seek to the right position and resume
+//   2. The count of consumed msg should be equal to the count of produced msg
+//
+func TestStream_PulsarTtMsgStream_2(t *testing.T) {
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	c1, c2 := funcutil.RandomString(8), funcutil.RandomString(8)
+	producerChannels := []string{c1, c2}
+	consumerChannels := []string{c1, c2}
+	consumerSubName := funcutil.RandomString(8)
+
+	const msgsInPack = 5
+	const numOfMsgPack = 10
+	msgPacks := make([]*MsgPack, numOfMsgPack)
+
+	// generate MsgPack
+	for i := 0; i < numOfMsgPack; i++ {
+		if i%2 == 0 {
+			msgPacks[i] = getInsertMsgPack(msgsInPack, i/2*10, i/2*10+22)
+		} else {
+			msgPacks[i] = getTimeTickMsgPack(int64((i + 1) / 2 * 10))
+		}
+	}
+	msgPacks = append(msgPacks, nil)
+	msgPacks = append(msgPacks, getTimeTickMsgPack(100))
+
+	inputStream := getPulsarInputStream(pulsarAddress, producerChannels)
+
+	// produce msg
+	fmt.Printf("\nProduce %d Msgs\n", numOfMsgPack)
+	fmt.Println("================================")
+	for i := 0; i < len(msgPacks); i++ {
+		printMsgPack(msgPacks[i])
+		if i%2 == 0 {
+			// insert msg use Produce
+			err := inputStream.Produce(msgPacks[i])
+			assert.Nil(t, err)
+		} else {
+			// tt msg use Broadcast
+			err := inputStream.Broadcast(msgPacks[i])
+			assert.Nil(t, err)
+		}
+	}
+
+	// consume msg
+	fmt.Printf("\nReceive Msgs\n")
+	fmt.Println("================================")
+	rcvMsgPacks := make([]*MsgPack, 0)
+
+	resumeMsgPack := func(t *testing.T) int {
+		var outputStream MsgStream
+		msgCount := len(rcvMsgPacks)
+		if msgCount == 0 {
+			outputStream = getPulsarTtOutputStream(pulsarAddress, consumerChannels, consumerSubName)
+		} else {
+			outputStream = getPulsarTtOutputStreamAndSeek(pulsarAddress, rcvMsgPacks[msgCount-1].EndPositions)
+		}
+		msgPack := outputStream.Consume()
+		rcvMsgPacks = append(rcvMsgPacks, msgPack)
+		if len(msgPack.Msgs) > 0 {
+			for _, msg := range msgPack.Msgs {
+				fmt.Println("msg type: ", msg.Type(), ", msg value: ", msg)
+				assert.Greater(t, msg.BeginTs(), msgPack.BeginTs)
+				assert.LessOrEqual(t, msg.BeginTs(), msgPack.EndTs)
+			}
+			fmt.Println("================")
+		}
+		outputStream.Close()
+		return len(rcvMsgPacks[msgCount].Msgs)
+	}
+
+	msgCount := 0
+	for i := 0; i < len(msgPacks)/2; i++ {
+		msgCount += resumeMsgPack(t)
+	}
+	assert.Equal(t, (len(msgPacks)/2-1)*msgsInPack, msgCount)
+
+	inputStream.Close()
 }
 
 /****************************************Rmq test******************************************/
