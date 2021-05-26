@@ -60,8 +60,7 @@ type IndexService struct {
 	sched   *TaskScheduler
 	session *sessionutil.Session
 
-	addChan <-chan *sessionutil.Session
-	delChan <-chan *sessionutil.Session
+	eventChan <-chan *sessionutil.SessionEvent
 
 	assignChan chan []UniqueID
 
@@ -96,6 +95,13 @@ func NewIndexService(ctx context.Context) (*IndexService, error) {
 	return i, nil
 }
 
+// Register register index service at etcd
+func (i *IndexService) Register() error {
+	i.session = sessionutil.NewSession(i.loopCtx, []string{Params.EtcdAddress})
+	i.session.Init(typeutil.IndexServiceRole, Params.Address, true)
+	return nil
+}
+
 func (i *IndexService) Init() error {
 	log.Debug("indexservice", zap.String("etcd address", Params.EtcdAddress))
 
@@ -103,7 +109,7 @@ func (i *IndexService) Init() error {
 	i.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress})
 	i.session.Init(typeutil.IndexServiceRole, Params.Address, true)
 
-	i.addChan, i.delChan = i.session.WatchServices(typeutil.IndexNodeRole)
+	i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, 0)
 	connectEtcdFn := func() error {
 		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
 		if err != nil {
@@ -515,14 +521,18 @@ func (i *IndexService) watchNodeLoop() {
 		select {
 		case <-ctx.Done():
 			return
-		case session := <-i.addChan:
-			log.Debug("IndexService", zap.Any("Add indexnode, session serverID", session.ServerID))
-		case session := <-i.delChan:
-			serverID := session.ServerID
-			log.Debug("IndexService", zap.Any("The IndexNode crashed with ID", serverID))
-			indexBuildIDs := i.nodeTasks.getTasksByLeaseKey(serverID)
-			i.assignChan <- indexBuildIDs
-			i.nodeTasks.delete(serverID)
+		case event := <-i.eventChan:
+			switch event.EventType {
+			case sessionutil.SessionAddEvent:
+				serverID := event.Session.ServerID
+				log.Debug("IndexService", zap.Any("Add IndexNode, session serverID", serverID))
+			case sessionutil.SessionDelEvent:
+				serverID := event.Session.ServerID
+				log.Debug("IndexService", zap.Any("The IndexNode crashed with ID", serverID))
+				indexBuildIDs := i.nodeTasks.getTasksByLeaseKey(serverID)
+				i.assignChan <- indexBuildIDs
+				i.nodeTasks.delete(serverID)
+			}
 		}
 	}
 }

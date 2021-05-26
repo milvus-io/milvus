@@ -12,7 +12,6 @@
 package masterservice
 
 import (
-	"fmt"
 	"path"
 	"strconv"
 	"sync"
@@ -26,8 +25,6 @@ var once sync.Once
 
 type ParamTable struct {
 	paramtable.BaseTable
-
-	NodeID uint64
 
 	Address string
 	Port    int
@@ -65,8 +62,6 @@ func (p *ParamTable) Init() {
 			panic(err)
 		}
 
-		p.initNodeID()
-
 		p.initPulsarAddress()
 		p.initEtcdAddress()
 		p.initMetaRootPath()
@@ -88,10 +83,6 @@ func (p *ParamTable) Init() {
 		p.initLogCfg()
 		p.initRoleName()
 	})
-}
-
-func (p *ParamTable) initNodeID() {
-	p.NodeID = uint64(p.ParseInt64("master.nodeID"))
 }
 
 func (p *ParamTable) initPulsarAddress() {
@@ -227,12 +218,12 @@ func (p *ParamTable) initLogCfg() {
 		panic(err)
 	}
 	if len(rootPath) != 0 {
-		p.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("masterservice-%d.log", p.NodeID))
+		p.Log.File.Filename = path.Join(rootPath, "masterservice.log")
 	} else {
 		p.Log.File.Filename = ""
 	}
 }
 
 func (p *ParamTable) initRoleName() {
-	p.RoleName = fmt.Sprintf("%s-%d", "MasterService", p.NodeID)
+	p.RoleName = "MasterService"
 }

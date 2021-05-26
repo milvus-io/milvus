@@ -1,6 +1,7 @@
 package sessionutil
 
 import (
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -78,9 +79,12 @@ func TestInit(t *testing.T) {
 	defer etcdKV.RemoveWithPrefix("")
 
 	s := NewSession(ctx, []string{etcdAddr})
-	s.Init("test", "testAddr", false)
+	s.Init("inittest", "testAddr", false)
 	assert.NotEqual(t, int64(0), s.leaseID)
 	assert.NotEqual(t, int64(0), s.ServerID)
+	sessions, _, err := s.GetSessions("inittest")
+	assert.Nil(t, err)
+	assert.Contains(t, sessions, "inittest-"+strconv.FormatInt(s.ServerID, 10))
 }
 
 func TestUpdateSessions(t *testing.T) {
@@ -106,10 +110,10 @@ func TestUpdateSessions(t *testing.T) {
 
 	s := NewSession(ctx, []string{etcdAddr})
 
-	sessions, err := s.GetSessions("test")
+	sessions, rev, err := s.GetSessions("test")
 	assert.Nil(t, err)
 	assert.Equal(t, len(sessions), 0)
-	addCh, delCh := s.WatchServices("test")
+	eventCh := s.WatchServices("test", rev)
 
 	sList := []*Session{}
 
@@ -129,29 +133,34 @@ func TestUpdateSessions(t *testing.T) {
 	wg.Wait()
 
 	assert.Eventually(t, func() bool {
-		sessions, _ := s.GetSessions("test")
+		sessions, _, _ := s.GetSessions("test")
 		return len(sessions) == 10
 	}, 10*time.Second, 100*time.Millisecond)
-	notExistSessions, _ := s.GetSessions("testt")
+	notExistSessions, _, _ := s.GetSessions("testt")
 	assert.Equal(t, len(notExistSessions), 0)
 
-	etcdKV.RemoveWithPrefix("")
+	etcdKV.RemoveWithPrefix(DefaultServiceRoot)
 	assert.Eventually(t, func() bool {
-		sessions, _ := s.GetSessions("test")
+		sessions, _, _ := s.GetSessions("test")
 		return len(sessions) == 0
 	}, 10*time.Second, 100*time.Millisecond)
 
-	addSessions := []*Session{}
-	for i := 0; i < 10; i++ {
-		session := <-addCh
-		addSessions = append(addSessions, session)
+	sessionEvents := []*SessionEvent{}
+	addEventLen := 0
+	delEventLen := 0
+	eventLength := len(eventCh)
+	for i := 0; i < eventLength; i++ {
+		sessionEvent := <-eventCh
+		if sessionEvent.EventType == SessionAddEvent {
+			addEventLen++
+		}
+		if sessionEvent.EventType == SessionDelEvent {
+			delEventLen++
+		}
+		sessionEvents = append(sessionEvents, sessionEvent)
 	}
-	assert.Equal(t, len(addSessions), 10)
+	assert.Equal(t, len(sessionEvents), 20)
+	assert.Equal(t, addEventLen, 10)
+	assert.Equal(t, delEventLen, 10)
 
-	delSessions := []*Session{}
-	for i := 0; i < 10; i++ {
-		session := <-delCh
-		delSessions = append(delSessions, session)
-	}
-	assert.Equal(t, len(addSessions), 10)
 }

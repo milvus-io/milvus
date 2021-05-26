@@ -164,6 +164,11 @@ func (s *Server) init() error {
 		}
 	}()
 
+	err = s.proxynode.Register()
+	if err != nil {
+		return err
+	}
+
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
@@ -392,6 +397,10 @@ func (s *Server) GetPersistentSegmentInfo(ctx context.Context, request *milvuspb
 func (s *Server) GetQuerySegmentInfo(ctx context.Context, request *milvuspb.GetQuerySegmentInfoRequest) (*milvuspb.GetQuerySegmentInfoResponse, error) {
 	return s.proxynode.GetQuerySegmentInfo(ctx, request)
 
+}
+
+func (s *Server) Dummy(ctx context.Context, request *milvuspb.DummyRequest) (*milvuspb.DummyResponse, error) {
+	return s.proxynode.Dummy(ctx, request)
 }
 
 func (s *Server) RegisterLink(ctx context.Context, request *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error) {

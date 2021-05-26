@@ -72,6 +72,10 @@ func (s *Server) init() error {
 	closer := trace.InitTracing("index_service")
 	s.closer = closer
 
+	if err := s.indexservice.Register(); err != nil {
+		return err
+	}
+
 	s.loopWg.Add(1)
 	go s.startGrpcLoop(Params.ServicePort)
 	// wait for grpc indexservice loop start

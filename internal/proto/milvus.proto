@@ -38,6 +38,8 @@ service MilvusService {
   rpc GetPersistentSegmentInfo(GetPersistentSegmentInfoRequest) returns (GetPersistentSegmentInfoResponse) {}
   rpc GetQuerySegmentInfo(GetQuerySegmentInfoRequest) returns (GetQuerySegmentInfoResponse) {}
 
+  rpc Dummy(DummyRequest) returns (DummyResponse) {}
+
   // TODO: remove
   rpc RegisterLink(RegisterLinkRequest) returns (RegisterLinkResponse) {}
 }
@@ -387,6 +389,13 @@ message GetQuerySegmentInfoResponse {
   repeated QuerySegmentInfo infos = 2;
 }
 
+message DummyRequest {
+  string request_type = 1;
+}
+
+message DummyResponse {
+  string response = 1;
+}
 
 message RegisterLinkRequest {
 }

@@ -14,7 +14,6 @@ package grpcmasterserviceclient
 import (
 	"context"
 	"fmt"
-	"path"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -43,14 +42,13 @@ type GrpcClient struct {
 }
 
 func getMasterServiceAddr(sess *sessionutil.Session) (string, error) {
-	msess, err := sess.GetSessions(typeutil.MasterServiceRole)
+	key := typeutil.MasterServiceRole
+	msess, _, err := sess.GetSessions(key)
 	if err != nil {
 		return "", err
 	}
-	key := path.Join(sessionutil.DefaultServiceRoot, typeutil.MasterServiceRole)
-	var ms *sessionutil.Session
-	var ok bool
-	if ms, ok = msess[key]; !ok {
+	ms, ok := msess[key]
+	if !ok {
 		return "", fmt.Errorf("number of master service is incorrect, %d", len(msess))
 	}
 	return ms.Address, nil
@@ -58,12 +56,8 @@ func getMasterServiceAddr(sess *sessionutil.Session) (string, error) {
 
 func NewClient(addr string, etcdAddr []string, timeout time.Duration) (*GrpcClient, error) {
 	sess := sessionutil.NewSession(context.Background(), etcdAddr)
-
-	if addr == "" {
-		var err error
-		if addr, err = getMasterServiceAddr(sess); err != nil {
-			return nil, err
-		}
+	if sess == nil {
+		return nil, fmt.Errorf("new session error, maybe can not connect to etcd")
 	}
 
 	return &GrpcClient{
@@ -106,16 +100,20 @@ func (c *GrpcClient) Init() error {
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
 	var err error
-	for i := 0; i < c.reconnTry; i++ {
-		if c.conn, err = grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
-			grpc.WithUnaryInterceptor(
-				otgrpc.OpenTracingClientInterceptor(tracer)),
-			grpc.WithStreamInterceptor(
-				otgrpc.OpenTracingStreamClientInterceptor(tracer))); err == nil {
-			break
+	if c.addr != "" {
+		for i := 0; i < c.reconnTry; i++ {
+			if c.conn, err = grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
+				grpc.WithUnaryInterceptor(
+					otgrpc.OpenTracingClientInterceptor(tracer)),
+				grpc.WithStreamInterceptor(
+					otgrpc.OpenTracingStreamClientInterceptor(tracer))); err == nil {
+				break
+			}
 		}
-	}
-	if err != nil {
+		if err != nil {
+			return fmt.Errorf("connect to specific address gprc error")
+		}
+	} else {
 		return c.reconnect()
 	}
 	c.grpcClient = masterpb.NewMasterServiceClient(c.conn)
@@ -127,6 +125,11 @@ func (c *GrpcClient) Start() error {
 }
 func (c *GrpcClient) Stop() error {
 	return c.conn.Close()
+}
+
+// Register dummy
+func (c *GrpcClient) Register() error {
+	return nil
 }
 
 func (c *GrpcClient) recall(caller func() (interface{}, error)) (interface{}, error) {
