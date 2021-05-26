@@ -536,9 +536,11 @@ func TestSaveBinlogPaths(t *testing.T) {
 			},
 			SegmentID:    2,
 			CollectionID: 0,
-			Field2BinlogPaths: &datapb.ID2PathList{
-				ID:    1,
-				Paths: []string{"/by-dev/test/0/1/2/1/Allo1", "/by-dev/test/0/1/2/1/Allo2"},
+			Field2BinlogPaths: []*datapb.ID2PathList{
+				{
+					ID:    1,
+					Paths: []string{"/by-dev/test/0/1/2/1/Allo1", "/by-dev/test/0/1/2/1/Allo2"},
+				},
 			},
 			DdlBinlogPaths: []*datapb.DDLBinlogMeta{
 				{
@@ -587,9 +589,11 @@ func TestSaveBinlogPaths(t *testing.T) {
 		resp, err := svr.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
 			SegmentID:    10,
 			CollectionID: 5,
-			Field2BinlogPaths: &datapb.ID2PathList{
-				ID:    1,
-				Paths: []string{"/by-dev/test/0/1/2/1/Allo1", "/by-dev/test/0/1/2/1/Allo2"},
+			Field2BinlogPaths: []*datapb.ID2PathList{
+				{
+					ID:    1,
+					Paths: []string{"/by-dev/test/0/1/2/1/Allo1", "/by-dev/test/0/1/2/1/Allo2"},
+				},
 			},
 			DdlBinlogPaths: []*datapb.DDLBinlogMeta{
 				{

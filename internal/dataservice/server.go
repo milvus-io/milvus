@@ -533,13 +533,16 @@ func (s *Server) prepareBinlogAndPos(req *datapb.SaveBinlogPathsRequest) (map[st
 	}
 	log.Debug("segment", zap.Int64("segment", segInfo.CollectionID))
 
-	fieldMeta, err := s.prepareField2PathMeta(req.SegmentID, req.Field2BinlogPaths)
-	if err != nil {
-		return nil, err
+	for _, fieldBlp := range req.Field2BinlogPaths {
+		fieldMeta, err := s.prepareField2PathMeta(req.SegmentID, fieldBlp)
+		if err != nil {
+			return nil, err
+		}
+		for k, v := range fieldMeta {
+			meta[k] = v
+		}
 	}
-	for k, v := range fieldMeta {
-		meta[k] = v
-	}
+
 	ddlMeta, err := s.prepareDDLBinlogMeta(req.CollectionID, req.GetDdlBinlogPaths())
 	if err != nil {
 		return nil, err
