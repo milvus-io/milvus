@@ -159,7 +159,7 @@ func (ddNode *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			go ddNode.flushComplete(binlogMetaCh, collID, fmsg.ddlFlushedCh)
 		} else {
 			// GOOSE TODO newest position
-			fmsg.ddlFlushedCh <- true
+			fmsg.ddlFlushedCh <- make([]*datapb.DDLBinlogMeta, 0)
 		}
 
 		log.Debug(".. notifying insertbuffer ...")
@@ -176,9 +176,10 @@ func (ddNode *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	return []Msg{res}
 }
 
-func (ddNode *ddNode) flushComplete(binlogMetaCh <-chan *datapb.DDLBinlogMeta, collID UniqueID, ddlFlushedCh chan<- bool) {
+func (ddNode *ddNode) flushComplete(binlogMetaCh <-chan *datapb.DDLBinlogMeta, collID UniqueID, ddlFlushedCh chan<- []*datapb.DDLBinlogMeta) {
 	binlogMeta := <-binlogMetaCh
 	if binlogMeta == nil {
+		ddlFlushedCh <- nil
 		return
 	}
 
@@ -188,7 +189,7 @@ func (ddNode *ddNode) flushComplete(binlogMetaCh <-chan *datapb.DDLBinlogMeta, c
 		log.Error("Save binlog meta to etcd Wrong", zap.Error(err))
 	}
 
-	ddlFlushedCh <- true
+	ddlFlushedCh <- []*datapb.DDLBinlogMeta{binlogMeta}
 	// TODO  remove above
 	// ddlFlushCh <- binlogMetaCh
 }
