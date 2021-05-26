@@ -618,10 +618,11 @@ func TestDataNodeTtChannel(t *testing.T) {
 	})
 
 	ch := make(chan interface{}, 1)
-	svr.createDataNodeClient = func(addr string) types.DataNode {
-		cli := newMockDataNodeClient(0)
+	svr.createDataNodeClient = func(addr string, serverID int64) (types.DataNode, error) {
+		cli, err := newMockDataNodeClient(0)
+		assert.Nil(t, err)
 		cli.ch = ch
-		return cli
+		return cli, nil
 	}
 
 	ttMsgStream, err := svr.msFactory.NewMsgStream(context.TODO())
