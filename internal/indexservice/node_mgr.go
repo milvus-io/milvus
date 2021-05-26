@@ -41,7 +41,7 @@ func (i *IndexService) addNode(nodeID UniqueID, req *indexpb.RegisterNodeRequest
 	}
 
 	nodeAddress := req.Address.Ip + ":" + strconv.FormatInt(req.Address.Port, 10)
-	nodeClient, err := grpcindexnodeclient.NewClient(nodeAddress, nodeID, []string{Params.EtcdAddress}, 10)
+	nodeClient, err := grpcindexnodeclient.NewClient(nodeAddress, []string{Params.EtcdAddress}, 10)
 	if err != nil {
 		return err
 	}

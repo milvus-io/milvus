@@ -13,15 +13,11 @@ package grpcindexnodeclient
 
 import (
 	"context"
-	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
@@ -37,34 +33,17 @@ type Client struct {
 	conn       *grpc.ClientConn
 	ctx        context.Context
 
-	address  string
-	serverID int64
+	address string
 
-	sess      *sessionutil.Session
 	timeout   time.Duration
 	reconnTry int
 	recallTry int
 }
 
-func getIndexNodeAddress(sess *sessionutil.Session, serverID int64) (string, error) {
-	key := typeutil.IndexNodeRole + "-" + strconv.FormatInt(serverID, 10)
-	msess, _, err := sess.GetSessions(key)
-	if err != nil {
-		return "", err
-	}
-	ms, ok := msess[key]
-	if !ok {
-		return "", fmt.Errorf("number of master service is incorrect, %d", len(msess))
-	}
-	return ms.Address, nil
-}
-
-func NewClient(address string, serverID int64, etcdAddr []string, timeout time.Duration) (*Client, error) {
-	sess := sessionutil.NewSession(context.Background(), etcdAddr)
+func NewClient(address string, etcdAddr []string, timeout time.Duration) (*Client, error) {
 	return &Client{
 		address:   address,
 		ctx:       context.Background(),
-		sess:      sess,
 		timeout:   timeout,
 		recallTry: 3,
 		reconnTry: 10,
@@ -101,17 +80,6 @@ func (c *Client) Init() error {
 func (c *Client) reconnect() error {
 	tracer := opentracing.GlobalTracer()
 	var err error
-	getIndexNodeAddressFn := func() error {
-		c.address, err = getIndexNodeAddress(c.sess, c.serverID)
-		if err != nil {
-			return err
-		}
-		return nil
-	}
-	err = retry.Retry(c.reconnTry, 3*time.Second, getIndexNodeAddressFn)
-	if err != nil {
-		return err
-	}
 	connectGrpcFunc := func() error {
 		log.Debug("indexnode connect ", zap.String("address", c.address))
 		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
