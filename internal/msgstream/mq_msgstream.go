@@ -102,8 +102,7 @@ func (ms *mqMsgStream) AsProducer(channels []string) {
 	}
 }
 
-func (ms *mqMsgStream) AsConsumer(channels []string,
-	subName string) {
+func (ms *mqMsgStream) AsConsumer(channels []string, subName string) {
 	for _, channel := range channels {
 		if _, ok := ms.consumers[channel]; ok {
 			continue
@@ -185,14 +184,14 @@ func (ms *mqMsgStream) ComputeProduceChannelIndexes(tsMsgs []TsMsg) [][]int32 {
 }
 
 func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
-	tsMsgs := msgPack.Msgs
-	if len(tsMsgs) <= 0 {
+	if msgPack == nil || len(msgPack.Msgs) <= 0 {
 		log.Debug("Warning: Receive empty msgPack")
 		return nil
 	}
 	if len(ms.producers) <= 0 {
 		return errors.New("nil producer in msg stream")
 	}
+	tsMsgs := msgPack.Msgs
 	reBucketValues := ms.ComputeProduceChannelIndexes(msgPack.Msgs)
 	var result map[int32]*MsgPack
 	var err error
@@ -246,6 +245,10 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 }
 
 func (ms *mqMsgStream) Broadcast(msgPack *MsgPack) error {
+	if msgPack == nil || len(msgPack.Msgs) <= 0 {
+		log.Debug("Warning: Receive empty msgPack")
+		return nil
+	}
 	for _, v := range msgPack.Msgs {
 		sp, spanCtx := MsgSpanFromCtx(v.TraceCtx(), v)
 

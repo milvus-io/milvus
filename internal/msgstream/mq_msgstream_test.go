@@ -262,8 +262,12 @@ func receiveMsg(outputStream MsgStream, msgCount int) {
 }
 
 func printMsgPack(msgPack *MsgPack) {
-	for _, v := range msgPack.Msgs {
-		fmt.Println("msg type: ", v.Type(), ", msg value: ", v)
+	if msgPack == nil {
+		fmt.Println("msg nil")
+	} else {
+		for _, v := range msgPack.Msgs {
+			fmt.Println("msg type: ", v.Type(), ", msg value: ", v)
+		}
 	}
 	fmt.Println("================")
 }
@@ -700,6 +704,11 @@ func TestStream_PulsarTtMsgStream_UnMarshalHeader(t *testing.T) {
 	outputStream.Close()
 }
 
+//
+//  |----------|----------|----------|----------|----------|----------|
+//             ^          ^          ^          ^          ^          ^
+//            TT(10)     TT(20)     TT(30)     TT(40)     TT(50)     TT(100)
+//
 func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	c1, c2 := funcutil.RandomString(8), funcutil.RandomString(8)
@@ -714,19 +723,21 @@ func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 	// generate MsgPack
 	for i := 0; i < numOfMsgPack; i++ {
 		if i%2 == 0 {
-			msgPacks[i] = getInsertMsgPack(msgsInPack, i/2*10, (i/2+2)*10)
+			msgPacks[i] = getInsertMsgPack(msgsInPack, i/2*10, i/2*10+22)
 		} else {
 			msgPacks[i] = getTimeTickMsgPack(int64((i + 1) / 2 * 10))
 		}
 	}
+	msgPacks = append(msgPacks, nil)
+	msgPacks = append(msgPacks, getTimeTickMsgPack(100))
 
 	inputStream := getPulsarInputStream(pulsarAddress, producerChannels)
 	outputStream := getPulsarTtOutputStream(pulsarAddress, consumerChannels, consumerSubName)
 
 	// produce msg
-	fmt.Printf("Produce %d Msgs\n", numOfMsgPack)
+	fmt.Printf("\nProduce %d Msgs\n", numOfMsgPack)
 	fmt.Println("================================")
-	for i := 0; i < numOfMsgPack; i++ {
+	for i := 0; i < len(msgPacks); i++ {
 		printMsgPack(msgPacks[i])
 		if i%2 == 0 {
 			// insert msg use Produce
@@ -740,11 +751,13 @@ func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 	}
 
 	// consume msg
-	fmt.Printf("Receive Msgs\n")
+	fmt.Printf("\nReceive Msgs\n")
 	fmt.Println("================================")
-	checkNMsgPack := func(t *testing.T, outputStream MsgStream, num int) error {
+	checkNMsgPack := func(t *testing.T, outputStream MsgStream, num int) int {
+		rcvMsg := 0
 		for i := 0; i < num; i++ {
 			msgPack := outputStream.Consume()
+			rcvMsg += len(msgPack.Msgs)
 			if len(msgPack.Msgs) > 0 {
 				for _, msg := range msgPack.Msgs {
 					fmt.Println("msg type: ", msg.Type(), ", msg value: ", msg)
@@ -753,9 +766,10 @@ func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 				fmt.Println("================")
 			}
 		}
-		return nil
+		return rcvMsg
 	}
-	checkNMsgPack(t, outputStream, numOfMsgPack/2)
+	msgCount := checkNMsgPack(t, outputStream, len(msgPacks)/2)
+	assert.Equal(t, (len(msgPacks)/2-1)*msgsInPack, msgCount)
 
 	inputStream.Close()
 	outputStream.Close()
