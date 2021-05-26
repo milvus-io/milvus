@@ -222,7 +222,6 @@ func stop(role *roles.MilvusRoles, alias string, runtimeDir string) error {
 			return fmt.Errorf("stop process fail, service %s", filename)
 		}
 	}
-	role.Run(false)
 	return nil
 }
 
@@ -272,34 +271,6 @@ func main() {
 
 	if err := flags.Parse(os.Args[2:]); err != nil {
 		os.Exit(-1)
-	}
-
-	if role.EnableMaster {
-		fmt.Printf("CYD - %s is set TRUE\n", ROLE_MASTER)
-	}
-	if role.EnableProxyService {
-		fmt.Printf("CYD - %s is set TRUE\n", ROLE_PROXY_SERVICE)
-	}
-	if role.EnableQueryService {
-		fmt.Printf("CYD - %s is set TRUE\n", ROLE_QUERY_SERVICE)
-	}
-	if role.EnableIndexService {
-		fmt.Printf("CYD - %s is set TRUE\n", ROLE_INDEX_SERVICE)
-	}
-	if role.EnableDataService {
-		fmt.Printf("CYD - %s is set TRUE\n", ROLE_DATA_SERVICE)
-	}
-	if role.EnableProxyNode {
-		fmt.Printf("CYD - %s is set TRUE\n", ROLE_PROXY_NODE)
-	}
-	if role.EnableQueryNode {
-		fmt.Printf("CYD - %s is set TRUE\n", ROLE_QUERY_NODE)
-	}
-	if role.EnableIndexNode {
-		fmt.Printf("CYD - %s is set TRUE\n", ROLE_INDEX_NODE)
-	}
-	if role.EnableDataNode {
-		fmt.Printf("CYD - %s is set TRUE\n", ROLE_DATA_NODE)
 	}
 
 	runtimeDir := "/run/milvus"
