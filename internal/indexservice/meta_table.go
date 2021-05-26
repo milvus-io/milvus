@@ -80,13 +80,22 @@ func (mt *metaTable) reloadFromKV() error {
 			return fmt.Errorf("IndexService metaTable reloadFromKV UnmarshalText indexpb.IndexMeta err:%w", err)
 		}
 
+		meta := &Meta{
+			indexMeta: &indexMeta,
+			revision:  kv.Version,
+		}
+		mt.indexBuildID2Meta[indexMeta.IndexBuildID] = *meta
+
+		if indexMeta.State == commonpb.IndexState_Finished {
+			continue
+		}
 		sessions, _, err := mt.indexService.session.GetSessions(typeutil.IndexNodeRole)
 		alive := false
 		if err != nil {
 			return err
 		}
 		for _, session := range sessions {
-			if indexMeta.NodeServerID == session.ServerID && indexMeta.State != commonpb.IndexState_Finished {
+			if indexMeta.NodeServerID == session.ServerID {
 				alive = true
 			}
 		}
@@ -97,12 +106,6 @@ func (mt *metaTable) reloadFromKV() error {
 			mt.indexService.assignChan <- indexBuildIDs
 			indexBuildIDs = []UniqueID{}
 		}
-
-		meta := &Meta{
-			indexMeta: &indexMeta,
-			revision:  kv.Version,
-		}
-		mt.indexBuildID2Meta[indexMeta.IndexBuildID] = *meta
 	}
 	mt.indexService.assignChan <- indexBuildIDs
 	return nil
