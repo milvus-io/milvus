@@ -26,12 +26,13 @@ func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
 	}
-	dataNodeStates, err := s.cluster.GetDataNodeStates(ctx)
-	if err != nil {
-		resp.Status.Reason = err.Error()
-		return resp, nil
-	}
-	resp.SubcomponentStates = dataNodeStates
+	// todo GetComponentStates need to be removed
+	//dataNodeStates, err := s.cluster.GetDataNodeStates(ctx)
+	//if err != nil {
+	//resp.Status.Reason = err.Error()
+	//return resp, nil
+	//}
+	//resp.SubcomponentStates = dataNodeStates
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }
@@ -55,58 +56,9 @@ func (s *Server) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 }
 
 func (s *Server) RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
-	ret := &datapb.RegisterNodeResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
-	}
-	log.Debug("DataService: RegisterNode:",
-		zap.String("IP", req.Address.Ip),
-		zap.Int64("Port", req.Address.Port))
-
-	node, err := s.newDataNode(req.Address.Ip, req.Address.Port, req.Base.SourceID)
-	if err != nil {
-		ret.Status.Reason = err.Error()
-		return ret, nil
-	}
-
-	resp, err := node.client.WatchDmChannels(s.ctx, &datapb.WatchDmChannelsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   0,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.NodeID,
-		},
-		// ChannelNames: s.insertChannels, // TODO
-	})
-
-	if err = VerifyResponse(resp, err); err != nil {
-		ret.Status.Reason = err.Error()
-		return ret, nil
-	}
-
-	if err := s.getDDChannel(); err != nil {
-		ret.Status.Reason = err.Error()
-		return ret, nil
-	}
-
-	if err = s.cluster.Register(node); err != nil {
-		ret.Status.Reason = err.Error()
-		return ret, nil
-	}
-
-	ret.Status.ErrorCode = commonpb.ErrorCode_Success
-	ret.InitParams = &internalpb.InitParams{
-		NodeID: Params.NodeID,
-		StartParams: []*commonpb.KeyValuePair{
-			{Key: "DDChannelName", Value: s.ddChannelMu.name},
-			{Key: "SegmentStatisticsChannelName", Value: Params.StatisticsChannelName},
-			{Key: "TimeTickChannelName", Value: Params.TimeTickChannelName},
-			{Key: "CompleteFlushChannelName", Value: Params.SegmentInfoChannelName},
-		},
-	}
-	return ret, nil
+	return nil, nil
 }
+
 func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error) {
 	if !s.checkStateIsHealthy() {
 		return &commonpb.Status{
@@ -192,6 +144,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 		SegIDAssignments: assigns,
 	}, nil
 }
+
 func (s *Server) ShowSegments(ctx context.Context, req *datapb.ShowSegmentsRequest) (*datapb.ShowSegmentsResponse, error) {
 	resp := &datapb.ShowSegmentsResponse{
 		Status: &commonpb.Status{
@@ -280,7 +233,7 @@ func (s *Server) GetInsertChannels(ctx context.Context, req *datapb.GetInsertCha
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		Values: s.insertChannels,
+		Values: []string{},
 	}, nil
 }
 
