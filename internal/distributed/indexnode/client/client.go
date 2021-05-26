@@ -113,7 +113,7 @@ func (c *Client) reconnect() error {
 		return err
 	}
 	connectGrpcFunc := func() error {
-		log.Debug("DataNode connect ", zap.String("address", c.address))
+		log.Debug("indexnode connect ", zap.String("address", c.address))
 		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
