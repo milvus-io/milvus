@@ -33,6 +33,7 @@ import (
 	"github.com/opentracing/opentracing-go"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -677,14 +678,15 @@ func (ibNode *insertBufferNode) bufferAutoFlushPaths(wait <-chan map[UniqueID]st
 	return ibNode.replica.bufferAutoFlushBinlogPaths(segID, field2Path)
 }
 
-func (ibNode *insertBufferNode) completeFlush(segID UniqueID, wait <-chan map[UniqueID]string, dmlFlushedCh chan<- bool) {
+func (ibNode *insertBufferNode) completeFlush(segID UniqueID, wait <-chan map[UniqueID]string, dmlFlushedCh chan<- []*datapb.ID2PathList) {
 	field2Path := <-wait
 
 	if field2Path == nil {
+		dmlFlushedCh <- nil
 		return
 	}
 
-	dmlFlushedCh <- true
+	// dmlFlushedCh <- true
 
 	// TODO Call DataService RPC SaveBinlogPaths
 	// TODO GetBufferedAutoFlushBinlogPaths
@@ -692,6 +694,7 @@ func (ibNode *insertBufferNode) completeFlush(segID UniqueID, wait <-chan map[Un
 	bufferField2Paths, err := ibNode.replica.getBufferPaths(segID)
 	if err != nil {
 		log.Error("Flush failed ... cannot get buffered paths", zap.Error(err))
+		dmlFlushedCh <- nil
 	}
 
 	// GOOSE TODO remove the below
@@ -699,8 +702,20 @@ func (ibNode *insertBufferNode) completeFlush(segID UniqueID, wait <-chan map[Un
 	err = ibNode.flushMeta.SaveSegmentBinlogMetaTxn(segID, bufferField2Paths)
 	if err != nil {
 		log.Error("Flush failed ... cannot save binlog paths ..", zap.Error(err))
+		dmlFlushedCh <- nil
 		return
 	}
+
+	binlogPaths := make([]*datapb.ID2PathList, 0, len(bufferField2Paths))
+	for k, paths := range bufferField2Paths {
+
+		binlogPaths = append(binlogPaths, &datapb.ID2PathList{
+			ID:    k,
+			Paths: paths,
+		})
+	}
+
+	dmlFlushedCh <- binlogPaths
 
 	log.Debug(".. Segment flush completed ..")
 	ibNode.replica.setIsFlushed(segID)
