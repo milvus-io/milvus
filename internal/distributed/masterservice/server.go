@@ -60,7 +60,7 @@ type Server struct {
 
 	newProxyServiceClient func(string) types.ProxyService
 	newDataServiceClient  func(string) types.DataService
-	newIndexServiceClient func(string) types.IndexService
+	newIndexServiceClient func(string, string, time.Duration) types.IndexService
 	newQueryServiceClient func(string) (types.QueryService, error)
 
 	closer io.Closer
@@ -111,8 +111,8 @@ func (s *Server) setClient() {
 		}
 		return dsClient
 	}
-	s.newIndexServiceClient = func(s string) types.IndexService {
-		isClient := isc.NewClient(s)
+	s.newIndexServiceClient = func(s, etcdAddress string, timeout time.Duration) types.IndexService {
+		isClient := isc.NewClient(s, []string{etcdAddress}, timeout)
 		if err := isClient.Init(); err != nil {
 			panic(err)
 		}
@@ -191,7 +191,7 @@ func (s *Server) init() error {
 	}
 	if s.newIndexServiceClient != nil {
 		log.Debug("index service", zap.String("address", Params.IndexServiceAddress))
-		indexService := s.newIndexServiceClient(Params.IndexServiceAddress)
+		indexService := s.newIndexServiceClient(Params.IndexServiceAddress, cms.Params.EtcdAddress, 10)
 		if err := s.masterService.SetIndexService(indexService); err != nil {
 			panic(err)
 		}

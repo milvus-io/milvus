@@ -928,7 +928,7 @@ func TestRun(t *testing.T) {
 	svr.newDataServiceClient = func(s string) types.DataService {
 		return &mockDataService{}
 	}
-	svr.newIndexServiceClient = func(s string) types.IndexService {
+	svr.newIndexServiceClient = func(s, etcdAddress string, timeout time.Duration) types.IndexService {
 		return &mockIndex{}
 	}
 	svr.newQueryServiceClient = func(s string) (types.QueryService, error) {

@@ -217,7 +217,7 @@ func (s *Server) init() error {
 
 	indexServiceAddr := Params.IndexServerAddress
 	log.Debug("proxynode", zap.String("index server address", indexServiceAddr))
-	s.indexServiceClient = grpcindexserviceclient.NewClient(indexServiceAddr)
+	s.indexServiceClient = grpcindexserviceclient.NewClient(indexServiceAddr, []string{proxynode.Params.EtcdAddress}, 10)
 	err = s.indexServiceClient.Init()
 	if err != nil {
 		return err
