@@ -705,9 +705,17 @@ func TestStream_PulsarTtMsgStream_UnMarshalHeader(t *testing.T) {
 }
 
 //
+// This testcase will generate MsgPacks as following:
+//
+//     Insert     Insert     Insert     Insert     Insert     Insert
 //  |----------|----------|----------|----------|----------|----------|
 //             ^          ^          ^          ^          ^          ^
 //            TT(10)     TT(20)     TT(30)     TT(40)     TT(50)     TT(100)
+//
+// And check:
+//   1. For each msg in MsgPack received by ttMsgStream consumer, there should be
+//        msgPack.BeginTs < msg.BeginTs() <= msgPack.EndTs
+//   2. The count of consumed msg should be equal to the count of produced msg
 //
 func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 	pulsarAddress, _ := Params.Load("_PulsarAddress")
@@ -744,7 +752,7 @@ func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 			err := inputStream.Produce(msgPacks[i])
 			assert.Nil(t, err)
 		} else {
-			// tt msg use Broadcase
+			// tt msg use Broadcast
 			err := inputStream.Broadcast(msgPacks[i])
 			assert.Nil(t, err)
 		}
@@ -761,7 +769,8 @@ func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 			if len(msgPack.Msgs) > 0 {
 				for _, msg := range msgPack.Msgs {
 					fmt.Println("msg type: ", msg.Type(), ", msg value: ", msg)
-					assert.Greater(t, msg.BeginTs(), Timestamp(i*10))
+					assert.Greater(t, msg.BeginTs(), msgPack.BeginTs)
+					assert.LessOrEqual(t, msg.BeginTs(), msgPack.EndTs)
 				}
 				fmt.Println("================")
 			}
