@@ -801,7 +801,7 @@ func newTestServer(t *testing.T) *Server {
 	assert.Nil(t, err)
 	defer ms.Stop()
 	svr.SetMasterClient(ms)
-	svr.createDataNodeClient = func(addr string, serverID int64) (types.DataNode, error) {
+	svr.createDataNodeClient = func(addr string) (types.DataNode, error) {
 		return newMockDataNodeClient(0)
 	}
 	assert.Nil(t, err)
