@@ -43,7 +43,7 @@ type Client struct {
 	recallTry int
 }
 
-func NewClient(address string, etcdAddr []string, timeout time.Duration) (*Client, error) {
+func NewClient(address string, timeout time.Duration) (*Client, error) {
 	if address == "" {
 		return nil, fmt.Errorf("address is empty")
 	}
