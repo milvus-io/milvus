@@ -22,33 +22,48 @@ import (
 	"github.com/milvus-io/milvus/cmd/distributed/roles"
 )
 
-func run(serverType, runtTimeDir, svrAlias string) error {
+func createPidFile(service string, alias string, runtimeDir string) (*os.File, error) {
 	var fileName string
-	if len(svrAlias) != 0 {
-		fileName = fmt.Sprintf("%s-%s.pid", serverType, svrAlias)
+	if len(alias) != 0 {
+		fileName = fmt.Sprintf("%s-%s.pid", service, alias)
 	} else {
-		fileName = serverType + ".pid"
+		fileName = service + ".pid"
 	}
-	var fd *os.File
-	var err error
 
-	if fd, err = os.OpenFile(path.Join(runtTimeDir, fileName), os.O_CREATE|os.O_RDWR, 0664); err != nil {
-		return fmt.Errorf("service %s is running, error  = %w", serverType, err)
+	fileFullName := path.Join(runtimeDir, fileName)
+
+	fd, err := os.OpenFile(fileFullName, os.O_CREATE|os.O_RDWR, 0664)
+	if err != nil {
+		return nil, fmt.Errorf("service %s is running, error  = %w", service, err)
 	}
-	fmt.Println("open pid file:", path.Join(runtTimeDir, fileName))
-	if err := syscall.Flock(int(fd.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		return fmt.Errorf("service %s is running, error = %w", serverType, err)
+	fmt.Println("open pid file: ", fileFullName)
+
+	err = syscall.Flock(int(fd.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	if err != nil {
+		return nil, fmt.Errorf("service %s is running, error = %w", service, err)
 	}
-	fmt.Println("lock pid file")
-	defer func() {
-		_ = syscall.Close(int(fd.Fd()))
-		_ = os.Remove(path.Join(runtTimeDir, fileName))
-	}()
+	fmt.Println("lock pid file: ", fileFullName)
+
 	fd.Truncate(0)
-	_, _ = fd.WriteString(fmt.Sprintf("%d", os.Getpid()))
+	_, err = fd.WriteString(fmt.Sprintf("%d", os.Getpid()))
+
+	return fd, err
+}
+
+func removePidFile(fd *os.File) {
+	_ = syscall.Close(int(fd.Fd()))
+	_ = os.Remove(fd.Name())
+}
+
+func run(service string, alias string, runTimeDir string) error {
+	fd, err := createPidFile(service, alias, runTimeDir)
+	if err != nil {
+		return fmt.Errorf("create pid file fail, service %s", service)
+	}
+	defer removePidFile(fd)
 
 	role := roles.MilvusRoles{}
-	switch serverType {
+	switch service {
 	case "master":
 		role.EnableMaster = true
 	case "msgstream":
@@ -70,22 +85,22 @@ func run(serverType, runtTimeDir, svrAlias string) error {
 	case "indexnode":
 		role.EnableIndexNode = true
 	default:
-		return fmt.Errorf("unknown server type = %s", serverType)
+		return fmt.Errorf("unknown service = %s", service)
 	}
 	role.Run(false)
 	return nil
 }
 
-func stop(serverType, runtimeDir, svrAlias string) error {
+func stop(service string, alias string, runTimeDir string) error {
 	var fileName string
-	if len(svrAlias) != 0 {
-		fileName = fmt.Sprintf("%s-%s.pid", serverType, svrAlias)
+	if len(alias) != 0 {
+		fileName = fmt.Sprintf("%s-%s.pid", service, alias)
 	} else {
-		fileName = serverType + ".pid"
+		fileName = service + ".pid"
 	}
 	var err error
 	var fd *os.File
-	if fd, err = os.OpenFile(path.Join(runtimeDir, fileName), os.O_RDONLY, 0664); err != nil {
+	if fd, err = os.OpenFile(path.Join(runTimeDir, fileName), os.O_RDONLY, 0664); err != nil {
 		return err
 	}
 	defer func() {
@@ -139,7 +154,7 @@ func main() {
 	flags := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 
 	var svrAlias string
-	flags.StringVar(&svrAlias, "alias", "", "set aliase")
+	flags.StringVar(&svrAlias, "alias", "", "set alias")
 
 	if err := flags.Parse(os.Args[3:]); err != nil {
 		os.Exit(-1)
@@ -150,18 +165,18 @@ func main() {
 		_, _ = fmt.Fprintf(os.Stderr, "set runtime dir at : %s failed, set it to /tmp/milvus directory\n", runtimeDir)
 		runtimeDir = "/tmp/milvus"
 		if err = makeRuntimeDir(runtimeDir); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "create runtime director at : %s failed\n", runtimeDir)
+			_, _ = fmt.Fprintf(os.Stderr, "create runtime directory at : %s failed\n", runtimeDir)
 			os.Exit(-1)
 		}
 	}
 
 	switch command {
 	case "run":
-		if err := run(serverType, runtimeDir, svrAlias); err != nil {
+		if err := run(serverType, svrAlias, runtimeDir); err != nil {
 			panic(err)
 		}
 	case "stop":
-		if err := stop(serverType, runtimeDir, svrAlias); err != nil {
+		if err := stop(serverType, svrAlias, runtimeDir); err != nil {
 			panic(err)
 		}
 	default:
