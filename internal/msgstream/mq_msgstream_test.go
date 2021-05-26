@@ -13,7 +13,6 @@ package msgstream
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"math/rand"
 	"os"
@@ -251,9 +250,9 @@ func getPulsarTtOutputStreamAndSeek(pulsarAddress string, positions []*MsgPositi
 	outputStream.Start()
 	for _, pos := range positions {
 		pos.MsgGroup = funcutil.RandomString(4)
-		fmt.Println("msg group: ", pos.MsgGroup)
 		outputStream.Seek(pos)
 	}
+	//outputStream.Start()
 	return outputStream
 }
 
@@ -265,9 +264,9 @@ func receiveMsg(outputStream MsgStream, msgCount int) {
 			msgs := result.Msgs
 			for _, v := range msgs {
 				receiveCount++
-				fmt.Println("msg type: ", v.Type(), ", msg value: ", v)
+				log.Println("msg type: ", v.Type(), ", msg value: ", v)
 			}
-			fmt.Println("================")
+			log.Println("================")
 		}
 		if receiveCount >= msgCount {
 			break
@@ -277,13 +276,13 @@ func receiveMsg(outputStream MsgStream, msgCount int) {
 
 func printMsgPack(msgPack *MsgPack) {
 	if msgPack == nil {
-		fmt.Println("msg nil")
+		log.Println("msg nil")
 	} else {
 		for _, v := range msgPack.Msgs {
-			fmt.Println("msg type: ", v.Type(), ", msg value: ", v)
+			log.Println("msg type: ", v.Type(), ", msg value: ", v)
 		}
 	}
-	fmt.Println("================")
+	log.Println("================")
 }
 
 func TestStream_PulsarMsgStream_Insert(t *testing.T) {
@@ -668,15 +667,15 @@ func TestStream_PulsarTtMsgStream_Seek(t *testing.T) {
 
 	outputStream.Consume()
 	receivedMsg := outputStream.Consume()
-	for _, position := range receivedMsg.StartPositions {
-		outputStream.Seek(position)
-	}
+	outputStream.Close()
+	outputStream = getPulsarTtOutputStreamAndSeek(pulsarAddress, receivedMsg.EndPositions)
+
 	err = inputStream.Broadcast(&msgPack5)
 	assert.Nil(t, err)
-	//seekMsg, _ := outputStream.Consume()
-	//for _, msg := range seekMsg.Msgs {
-	//	assert.Equal(t, msg.BeginTs(), uint64(14))
-	//}
+	seekMsg := outputStream.Consume()
+	for _, msg := range seekMsg.Msgs {
+		assert.Equal(t, msg.BeginTs(), uint64(14))
+	}
 	inputStream.Close()
 	outputStream.Close()
 }
@@ -757,8 +756,7 @@ func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 	outputStream := getPulsarTtOutputStream(pulsarAddress, consumerChannels, consumerSubName)
 
 	// produce msg
-	fmt.Printf("\nProduce %d Msgs\n", numOfMsgPack)
-	fmt.Println("================================")
+	log.Println("==============produce msg==================")
 	for i := 0; i < len(msgPacks); i++ {
 		printMsgPack(msgPacks[i])
 		if i%2 == 0 {
@@ -773,8 +771,7 @@ func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 	}
 
 	// consume msg
-	fmt.Printf("\nReceive Msgs\n")
-	fmt.Println("================================")
+	log.Println("===============receive msg=================")
 	checkNMsgPack := func(t *testing.T, outputStream MsgStream, num int) int {
 		rcvMsg := 0
 		for i := 0; i < num; i++ {
@@ -782,11 +779,11 @@ func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 			rcvMsg += len(msgPack.Msgs)
 			if len(msgPack.Msgs) > 0 {
 				for _, msg := range msgPack.Msgs {
-					fmt.Println("msg type: ", msg.Type(), ", msg value: ", msg)
+					log.Println("msg type: ", msg.Type(), ", msg value: ", msg)
 					assert.Greater(t, msg.BeginTs(), msgPack.BeginTs)
 					assert.LessOrEqual(t, msg.BeginTs(), msgPack.EndTs)
 				}
-				fmt.Println("================")
+				log.Println("================")
 			}
 		}
 		return rcvMsg
@@ -835,8 +832,7 @@ func TestStream_PulsarTtMsgStream_2(t *testing.T) {
 	inputStream := getPulsarInputStream(pulsarAddress, producerChannels)
 
 	// produce msg
-	fmt.Printf("\nProduce %d Msgs\n", numOfMsgPack)
-	fmt.Println("================================")
+	log.Println("===============produce msg=================")
 	for i := 0; i < len(msgPacks); i++ {
 		printMsgPack(msgPacks[i])
 		if i%2 == 0 {
@@ -851,8 +847,7 @@ func TestStream_PulsarTtMsgStream_2(t *testing.T) {
 	}
 
 	// consume msg
-	fmt.Printf("\nReceive Msgs\n")
-	fmt.Println("================================")
+	log.Println("=============receive msg===================")
 	rcvMsgPacks := make([]*MsgPack, 0)
 
 	resumeMsgPack := func(t *testing.T) int {
@@ -867,11 +862,11 @@ func TestStream_PulsarTtMsgStream_2(t *testing.T) {
 		rcvMsgPacks = append(rcvMsgPacks, msgPack)
 		if len(msgPack.Msgs) > 0 {
 			for _, msg := range msgPack.Msgs {
-				fmt.Println("msg type: ", msg.Type(), ", msg value: ", msg)
+				log.Println("msg type: ", msg.Type(), ", msg value: ", msg)
 				assert.Greater(t, msg.BeginTs(), msgPack.BeginTs)
 				assert.LessOrEqual(t, msg.BeginTs(), msgPack.EndTs)
 			}
-			fmt.Println("================")
+			log.Println("================")
 		}
 		outputStream.Close()
 		return len(rcvMsgPacks[msgCount].Msgs)
@@ -914,7 +909,7 @@ func Close(rocksdbName string, intputStream, outputStream MsgStream, etcdKV *etc
 	outputStream.Close()
 	etcdKV.Close()
 	err := os.RemoveAll(rocksdbName)
-	fmt.Println(err)
+	log.Println(err)
 }
 
 func initRmqStream(producerChannels []string,

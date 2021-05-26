@@ -477,7 +477,6 @@ func (ms *MqTtMsgStream) Close() {
 
 func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 	defer ms.wait.Done()
-	ms.unsolvedBuf = make(map[mqclient.Consumer][]TsMsg)
 	isChannelReady := make(map[mqclient.Consumer]bool)
 	eofMsgTimeStamp := make(map[mqclient.Consumer]Timestamp)
 
@@ -501,11 +500,11 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 				wg.Add(1)
 				go ms.findTimeTick(consumer, eofMsgTimeStamp, &wg, &findMapMutex)
 			}
-			ms.consumerLock.Unlock()
 			wg.Wait()
 			timeStamp, ok := checkTimeTickMsg(eofMsgTimeStamp, isChannelReady, &findMapMutex)
 			if !ok || timeStamp <= ms.lastTimeStamp {
 				//log.Printf("All timeTick's timestamps are inconsistent")
+				ms.consumerLock.Unlock()
 				continue
 			}
 			timeTickBuf := make([]TsMsg, 0)
@@ -551,6 +550,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 				ms.msgPositions[consumer] = newPos
 			}
 			ms.unsolvedMutex.Unlock()
+			ms.consumerLock.Unlock()
 
 			msgPack := MsgPack{
 				BeginTs:        ms.lastTimeStamp,
@@ -710,9 +710,9 @@ func (ms *MqTtMsgStream) Seek(mp *internalpb.MsgPosition) error {
 	ms.addConsumer(consumer, seekChannel)
 
 	//TODO: May cause problem
-	if len(consumer.Chan()) == 0 {
-		return nil
-	}
+	//if len(consumer.Chan()) == 0 {
+	//	return nil
+	//}
 
 	for {
 		select {
