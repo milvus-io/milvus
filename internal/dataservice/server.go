@@ -12,7 +12,6 @@ package dataservice
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 	"strconv"
@@ -20,9 +19,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	grpcdatanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	"github.com/milvus-io/milvus/internal/logutil"
 
-	grpcdatanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -51,39 +50,43 @@ type Server struct {
 	serverLoopCancel context.CancelFunc
 	serverLoopWg     sync.WaitGroup
 	state            atomic.Value
-	kvClient         *etcdkv.EtcdKV
-	meta             *meta
-	segAllocator     segmentAllocatorInterface
-	statsHandler     *statsHandler
-	allocator        allocatorInterface
-	cluster          *dataNodeCluster
-	masterClient     types.MasterService
-	ddChannelMu      struct {
+	initOnce         sync.Once
+	startOnce        sync.Once
+	stopOnce         sync.Once
+
+	kvClient          *etcdkv.EtcdKV
+	meta              *meta
+	segmentInfoStream msgstream.MsgStream
+	segAllocator      segmentAllocatorInterface
+	statsHandler      *statsHandler
+	allocator         allocatorInterface
+	cluster           *cluster
+	masterClient      types.MasterService
+	ddChannelMu       struct {
 		sync.Mutex
 		name string
 	}
-	session              *sessionutil.Session
-	flushMsgStream       msgstream.MsgStream
-	insertChannels       []string
-	msFactory            msgstream.Factory
-	createDataNodeClient func(addr string) (types.DataNode, error)
+
+	flushMsgStream msgstream.MsgStream
+	msFactory      msgstream.Factory
+
+	session  *sessionutil.Session
+	activeCh <-chan bool
+	watchCh  <-chan *sessionutil.SessionEvent
+
+	dataClientCreator func(addr string) (types.DataNode, error)
 }
 
 func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 	rand.Seed(time.Now().UnixNano())
 	s := &Server{
 		ctx:       ctx,
-		cluster:   newDataNodeCluster(),
 		msFactory: factory,
 	}
-	s.insertChannels = s.getInsertChannels()
-	s.createDataNodeClient = func(addr string) (types.DataNode, error) {
-		node, err := grpcdatanodeclient.NewClient(addr, 10*time.Second)
-		if err != nil {
-			return nil, err
-		}
-		return node, nil
+	s.dataClientCreator = func(addr string) (types.DataNode, error) {
+		return grpcdatanodeclient.NewClient(addr)
 	}
+
 	s.UpdateStateCode(internalpb.StateCode_Abnormal)
 	log.Debug("DataService", zap.Any("State", s.state.Load()))
 	return s, nil
@@ -104,63 +107,116 @@ func (s *Server) SetMasterClient(masterClient types.MasterService) {
 
 // Register register data service at etcd
 func (s *Server) Register() error {
-	s.session = sessionutil.NewSession(s.ctx, Params.MetaRootPath, []string{Params.EtcdAddress})
-	s.session.Init(typeutil.DataServiceRole, Params.IP, true)
+	s.activeCh = s.session.Init(typeutil.DataServiceRole, Params.IP, true)
 	Params.NodeID = s.session.ServerID
 	return nil
 }
 
 func (s *Server) Init() error {
+	s.initOnce.Do(func() {
+		s.session = sessionutil.NewSession(s.ctx, []string{Params.EtcdAddress})
+	})
 	return nil
 }
 
+var startOnce sync.Once
+
 func (s *Server) Start() error {
 	var err error
-	m := map[string]interface{}{
-		"PulsarAddress":  Params.PulsarAddress,
-		"ReceiveBufSize": 1024,
-		"PulsarBufSize":  1024}
-	err = s.msFactory.SetParams(m)
+	s.startOnce.Do(func() {
+		m := map[string]interface{}{
+			"PulsarAddress":  Params.PulsarAddress,
+			"ReceiveBufSize": 1024,
+			"PulsarBufSize":  1024}
+		err = s.msFactory.SetParams(m)
+		if err != nil {
+			return
+		}
+
+		if err = s.initMeta(); err != nil {
+			return
+		}
+
+		if err = s.initCluster(); err != nil {
+			return
+		}
+
+		if err = s.initSegmentInfoChannel(); err != nil {
+			return
+		}
+
+		s.allocator = newAllocator(s.masterClient)
+
+		s.startSegmentAllocator()
+		s.statsHandler = newStatsHandler(s.meta)
+		if err = s.initFlushMsgStream(); err != nil {
+			return
+		}
+
+		if err = s.initServiceDiscovery(); err != nil {
+			return
+		}
+
+		s.startServerLoop()
+
+		s.UpdateStateCode(internalpb.StateCode_Healthy)
+		log.Debug("start success")
+	})
+	return err
+}
+
+func (s *Server) initCluster() error {
+	dManager, err := newClusterNodeManager(s.kvClient)
 	if err != nil {
 		return err
 	}
+	sManager := newClusterSessionManager(s.dataClientCreator)
+	s.cluster = newCluster(s.ctx, dManager, sManager)
+	return nil
+}
 
-	if err := s.initMeta(); err != nil {
+func (s *Server) initServiceDiscovery() error {
+	sessions, rev, err := s.session.GetSessions(typeutil.DataNodeRole)
+	if err != nil {
 		log.Debug("DataService initMeta failed", zap.Error(err))
 		return err
 	}
+	log.Debug("registered sessions", zap.Any("sessions", sessions))
 
-	s.allocator = newAllocator(s.masterClient)
+	datanodes := make([]*datapb.DataNodeInfo, 0, len(sessions))
+	for _, session := range sessions {
+		datanodes = append(datanodes, &datapb.DataNodeInfo{
+			Address:  session.Address,
+			Version:  session.ServerID,
+			Channels: []*datapb.ChannelStatus{},
+		})
+	}
 
-	s.startSegmentAllocator()
-	s.statsHandler = newStatsHandler(s.meta)
-	if err = s.loadMetaFromMaster(); err != nil {
+	if err := s.cluster.startup(datanodes); err != nil {
 		log.Debug("DataService loadMetaFromMaster failed", zap.Error(err))
 		return err
 	}
-	if err = s.initMsgProducer(); err != nil {
-		log.Debug("DataService initMsgProducer failed", zap.Error(err))
-		return err
-	}
-	s.startServerLoop()
-	s.UpdateStateCode(internalpb.StateCode_Healthy)
-	log.Debug("start success")
-	log.Debug("DataService", zap.Any("State", s.state.Load()))
+
+	s.watchCh = s.session.WatchServices(typeutil.DataNodeRole, rev)
+
 	return nil
 }
 
 func (s *Server) startSegmentAllocator() {
-	stream := s.initSegmentInfoChannel()
-	helper := createNewSegmentHelper(stream)
+	helper := createNewSegmentHelper(s.segmentInfoStream)
 	s.segAllocator = newSegmentAllocator(s.meta, s.allocator, withAllocHelper(helper))
 }
 
-func (s *Server) initSegmentInfoChannel() msgstream.MsgStream {
-	segmentInfoStream, _ := s.msFactory.NewMsgStream(s.ctx)
-	segmentInfoStream.AsProducer([]string{Params.SegmentInfoChannelName})
+func (s *Server) initSegmentInfoChannel() error {
+	var err error
+	s.segmentInfoStream, err = s.msFactory.NewMsgStream(s.ctx)
+	if err != nil {
+		return err
+	}
+	s.segmentInfoStream.AsProducer([]string{Params.SegmentInfoChannelName})
 	log.Debug("DataService AsProducer: " + Params.SegmentInfoChannelName)
-	segmentInfoStream.Start()
-	return segmentInfoStream
+	s.segmentInfoStream.Start()
+	return nil
 }
 
 func (s *Server) UpdateStateCode(code internalpb.StateCode) {
@@ -189,7 +245,7 @@ func (s *Server) initMeta() error {
 	return retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
 }
 
-func (s *Server) initMsgProducer() error {
+func (s *Server) initFlushMsgStream() error {
 	var err error
 	// segment flush stream
 	s.flushMsgStream, err = s.msFactory.NewMsgStream(s.ctx)
@@ -200,72 +256,6 @@ func (s *Server) initMsgProducer() error {
 	log.Debug("dataservice AsProducer:" + Params.SegmentInfoChannelName)
 	s.flushMsgStream.Start()
 
-	return nil
-}
-
-func (s *Server) loadMetaFromMaster() error {
-	ctx := context.Background()
-	log.Debug("loading collection meta from master")
-	var err error
-	if err = s.checkMasterIsHealthy(); err != nil {
-		return err
-	}
-	if err = s.getDDChannel(); err != nil {
-		return err
-	}
-	collections, err := s.masterClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_ShowCollections,
-			MsgID:     -1, // todo add msg id
-			Timestamp: 0,  // todo
-			SourceID:  Params.NodeID,
-		},
-		DbName: "",
-	})
-	if err = VerifyResponse(collections, err); err != nil {
-		return err
-	}
-	for _, collectionName := range collections.CollectionNames {
-		collection, err := s.masterClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_DescribeCollection,
-				MsgID:     -1, // todo
-				Timestamp: 0,  // todo
-				SourceID:  Params.NodeID,
-			},
-			DbName:         "",
-			CollectionName: collectionName,
-		})
-		if err = VerifyResponse(collection, err); err != nil {
-			log.Error("describe collection error", zap.String("collectionName", collectionName), zap.Error(err))
-			continue
-		}
-		partitions, err := s.masterClient.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_ShowPartitions,
-				MsgID:     -1, // todo
-				Timestamp: 0,  // todo
-				SourceID:  Params.NodeID,
-			},
-			DbName:         "",
-			CollectionName: collectionName,
-			CollectionID:   collection.CollectionID,
-		})
-		if err = VerifyResponse(partitions, err); err != nil {
-			log.Error("show partitions error", zap.String("collectionName", collectionName), zap.Int64("collectionID", collection.CollectionID), zap.Error(err))
-			continue
-		}
-		err = s.meta.AddCollection(&datapb.CollectionInfo{
-			ID:         collection.CollectionID,
-			Schema:     collection.Schema,
-			Partitions: partitions.PartitionIDs,
-		})
-		if err != nil {
-			log.Error("add collection to meta error", zap.Int64("collectionID", collection.CollectionID), zap.Error(err))
-			continue
-		}
-	}
-	log.Debug("load collection meta from master complete")
 	return nil
 }
 
@@ -282,37 +272,13 @@ func (s *Server) getDDChannel() error {
 	return nil
 }
 
-func (s *Server) checkMasterIsHealthy() error {
-	ticker := time.NewTicker(300 * time.Millisecond)
-	ctx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
-	defer func() {
-		ticker.Stop()
-		cancel()
-	}()
-	for {
-		var resp *internalpb.ComponentStates
-		var err error
-		select {
-		case <-ctx.Done():
-			return errors.New("master is not healthy")
-		case <-ticker.C:
-			resp, err = s.masterClient.GetComponentStates(ctx)
-			if err = VerifyResponse(resp, err); err != nil {
-				return err
-			}
-		}
-		if resp.State.StateCode == internalpb.StateCode_Healthy {
-			break
-		}
-	}
-	return nil
-}
-
 func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
-	s.serverLoopWg.Add(2)
+	s.serverLoopWg.Add(4)
 	go s.startStatsChannel(s.serverLoopCtx)
 	go s.startDataNodeTtLoop(s.serverLoopCtx)
+	go s.startWatchService(s.serverLoopCtx)
+	go s.startActiveCheck(s.serverLoopCtx)
 }
 
 func (s *Server) startStatsChannel(ctx context.Context) {
@@ -404,7 +370,6 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 			}
 			ttMsg := msg.(*msgstream.DataNodeTtMsg)
 
-			coll2Segs := make(map[UniqueID][]UniqueID)
 			ch := ttMsg.ChannelName
 			ts := ttMsg.Timestamp
 			segments, err := s.segAllocator.GetFlushableSegments(ctx, ch, ts)
@@ -412,6 +377,9 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 				log.Warn("get flushable segments failed", zap.Error(err))
 				continue
 			}
+
+			log.Debug("flushable segments", zap.Any("segments", segments))
+			segmentInfos := make([]*datapb.SegmentInfo, 0, len(segments))
 			for _, id := range segments {
 				sInfo, err := s.meta.GetSegment(id)
 				if err != nil {
@@ -419,64 +387,80 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 						zap.Error(err))
 					continue
 				}
-				collID, segID := sInfo.CollectionID, sInfo.ID
-				coll2Segs[collID] = append(coll2Segs[collID], segID)
+				segmentInfos = append(segmentInfos, sInfo)
 			}
 
-			for collID, segIDs := range coll2Segs {
-				s.cluster.FlushSegment(&datapb.FlushSegmentsRequest{
-					Base: &commonpb.MsgBase{
-						MsgType:   commonpb.MsgType_Flush,
-						MsgID:     -1, // todo add msg id
-						Timestamp: 0,  // todo
-						SourceID:  Params.NodeID,
-					},
-					CollectionID: collID,
-					SegmentIDs:   segIDs,
-				})
+			s.cluster.flush(segmentInfos)
+		}
+	}
+}
+
+func (s *Server) startWatchService(ctx context.Context) {
+	defer s.serverLoopWg.Done()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Debug("watch service shutdown")
+			return
+		case event := <-s.watchCh:
+			datanode := &datapb.DataNodeInfo{
+				Address:  event.Session.Address,
+				Version:  event.Session.ServerID,
+				Channels: []*datapb.ChannelStatus{},
+			}
+			switch event.EventType {
+			case sessionutil.SessionAddEvent:
+				s.cluster.register(datanode)
+			case sessionutil.SessionDelEvent:
+				s.cluster.unregister(datanode)
+			default:
+				log.Warn("receive unknown service event type",
+					zap.Any("type", event.EventType))
 			}
 		}
 	}
 }
 
+func (s *Server) startActiveCheck(ctx context.Context) {
+	defer s.serverLoopWg.Done()
+
+	for {
+		select {
+		case _, ok := <-s.activeCh:
+			if ok {
+				continue
+			}
+			s.Stop()
+			log.Debug("disconnect with etcd")
+			return
+		case <-ctx.Done():
+			log.Debug("connection check shutdown")
+			return
+		}
+	}
+}
+
+var stopOnce sync.Once
+
 func (s *Server) Stop() error {
-	s.cluster.ShutDownClients()
-	s.flushMsgStream.Close()
-	s.stopServerLoop()
+	s.stopOnce.Do(func() {
+		s.cluster.releaseSessions()
+		s.segmentInfoStream.Close()
+		s.flushMsgStream.Close()
+		s.stopServerLoop()
+	})
 	return nil
 }
 
 // CleanMeta only for test
 func (s *Server) CleanMeta() error {
+	log.Debug("clean meta", zap.Any("kv", s.kvClient))
 	return s.kvClient.RemoveWithPrefix("")
 }
 
 func (s *Server) stopServerLoop() {
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
-}
-
-func (s *Server) newDataNode(ip string, port int64, id UniqueID) (*dataNode, error) {
-	client, err := s.createDataNodeClient(fmt.Sprintf("%s:%d", ip, port))
-	if err != nil {
-		return nil, err
-	}
-	if err := client.Init(); err != nil {
-		return nil, err
-	}
-
-	if err := client.Start(); err != nil {
-		return nil, err
-	}
-	return &dataNode{
-		id: id,
-		address: struct {
-			ip   string
-			port int64
-		}{ip: ip, port: port},
-		client:     client,
-		channelNum: 0,
-	}, nil
 }
 
 //func (s *Server) validateAllocRequest(collID UniqueID, partID UniqueID, channelName string) error {
