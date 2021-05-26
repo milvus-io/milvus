@@ -22,10 +22,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -71,18 +74,19 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 
 	iBNode := newInsertBufferNode(ctx, newBinlogMeta(), replica, msFactory, NewAllocatorFactory())
 
-	ddlFlushedCh := make(chan bool)
-	dmlFlushedCh := make(chan bool)
+	ddlFlushedCh := make(chan []*datapb.DDLBinlogMeta)
+	dmlFlushedCh := make(chan []*datapb.ID2PathList)
 
 	inMsg := genInsertMsg(ddlFlushedCh, dmlFlushedCh)
 	var iMsg flowgraph.Msg = &inMsg
 	iBNode.Operate([]flowgraph.Msg{iMsg})
 
 	isflushed := <-dmlFlushedCh
-	assert.True(t, isflushed)
+	assert.NotNil(t, isflushed)
+	log.Debug("DML binlog paths", zap.Any("paths", isflushed))
 }
 
-func genInsertMsg(ddlFlushedCh, dmlFlushedCh chan<- bool) insertMsg {
+func genInsertMsg(ddlFlushedCh chan<- []*datapb.DDLBinlogMeta, dmlFlushedCh chan<- []*datapb.ID2PathList) insertMsg {
 
 	timeRange := TimeRange{
 		timestampMin: 0,
