@@ -86,7 +86,7 @@ func (mt *metaTable) reloadFromKV() error {
 			return err
 		}
 		for _, session := range sessions {
-			if indexMeta.NodeServerID == session.ServerID {
+			if indexMeta.NodeServerID == session.ServerID && indexMeta.State != commonpb.IndexState_Finished {
 				alive = true
 			}
 		}
