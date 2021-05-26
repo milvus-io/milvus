@@ -170,7 +170,7 @@ func (s *Server) initCluster() error {
 		return err
 	}
 	sManager := newClusterSessionManager(s.dataClientCreator)
-	s.cluster = newCluster(s.ctx, dManager, sManager)
+	s.cluster = newCluster(s.ctx, dManager, sManager, dummyPosProvider{})
 	return nil
 }
 
