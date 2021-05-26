@@ -31,14 +31,14 @@ var Capacity uint64 = 1000000
 var ErrorRate float64 = .05
 
 func PrintResults(stats *stats) {
-	falsePositiveRate := stats.FalsePositives / (stats.FalsePositives + stats.TrueNegatives)
+	falsePositiveRate := float64(stats.FalsePositives) / float64(stats.FalsePositives+stats.TrueNegatives)
 	fmt.Printf("True positives:		%7d\n", stats.TruePositives)
 	fmt.Printf("True negatives:		%7d\n", stats.TrueNegatives)
 	fmt.Printf("False positives:	%7d\n", stats.FalsePositives)
 	fmt.Printf("False negatives:	%7d\n", stats.FalseNegatives)
-	fmt.Printf("False positive rate: %.4f\n", falsePositiveRate)
+	fmt.Printf("False positive rate: %f\n", falsePositiveRate)
 
-	if falsePositiveRate > int64(ErrorRate) {
+	if falsePositiveRate > ErrorRate {
 		fmt.Printf("False positive rate too high\n")
 	}
 }
@@ -51,13 +51,13 @@ func TestDablooms_Correctness(t *testing.T) {
 	for i := 0; i < int(Capacity*2); i++ {
 		if i%2 == 0 {
 			key := strconv.Itoa(i)
-			sb.Add([]byte(key), i)
+			sb.Add([]byte(key), int64(i))
 		}
 	}
 	end := time.Now().UnixNano()
 
 	seconds := float64((end - start) / 1e9)
-	fmt.Printf("The time cost for add: %fs", seconds)
+	fmt.Printf("The time cost for add: %fs\n", seconds)
 
 	results := &stats{
 		TruePositives:  0,
@@ -80,9 +80,12 @@ func TestDablooms_Correctness(t *testing.T) {
 	}
 	end = time.Now().UnixNano()
 	seconds = float64((end - start) / 1e9)
-	fmt.Printf("Time cost for check: %fs", seconds)
+	fmt.Printf("Time cost for check: %fs\n", seconds)
 
 	sb.Destroy()
 
-	assert.True(t, results.FalseNegatives > 0)
+	PrintResults(results)
+
+	// False negatives means that there should
+	assert.False(t, results.FalseNegatives > 0)
 }

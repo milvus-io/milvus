@@ -28,9 +28,9 @@ type ScalingBloom struct {
 	cfilter *C.scaling_bloom_t
 }
 
-func NewScalingBloom(capacity C.uint64_t, errorRate C.double) *ScalingBloom {
+func NewScalingBloom(capacity uint64, errorRate float64) *ScalingBloom {
 	sb := &ScalingBloom{
-		cfilter: C.new_scaling_bloom(capacity, errorRate),
+		cfilter: C.new_scaling_bloom(C.uint(capacity), C.double(errorRate)),
 	}
 	return sb
 }
@@ -39,14 +39,14 @@ func (sb *ScalingBloom) Destroy() {
 	C.free_scaling_bloom(sb.cfilter)
 }
 
-func (sb *ScalingBloom) Add(key []byte, id C.uint64_t) bool {
+func (sb *ScalingBloom) Add(key []byte, id int64) bool {
 	cKey := (*C.char)(unsafe.Pointer(&key[0]))
-	return C.scaling_bloom_add(sb.cfilter, cKey, C.size_t(len(key)), id) == 1
+	return C.scaling_bloom_add(sb.cfilter, cKey, C.size_t(len(key)), C.uint64_t(id)) == 1
 }
 
-func (sb *ScalingBloom) Remove(key []byte, id C.uint64_t) bool {
+func (sb *ScalingBloom) Remove(key []byte, id int64) bool {
 	cKey := (*C.char)(unsafe.Pointer(&key[0]))
-	return C.scaling_bloom_remove(sb.cfilter, cKey, C.size_t(len(key)), id) == 1
+	return C.scaling_bloom_remove(sb.cfilter, cKey, C.size_t(len(key)), C.uint64_t(id)) == 1
 }
 
 func (sb *ScalingBloom) Check(key []byte) bool {
