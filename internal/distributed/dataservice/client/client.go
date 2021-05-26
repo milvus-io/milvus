@@ -45,7 +45,7 @@ type Client struct {
 
 func getDataServiceAddress(sess *sessionutil.Session) (string, error) {
 	key := typeutil.DataServiceRole
-	msess, err := sess.GetSessions(key)
+	msess, _, err := sess.GetSessions(key)
 	if err != nil {
 		return "", err
 	}
