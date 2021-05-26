@@ -1,5 +1,3 @@
-import time
-
 import pandas as pd
 import pytest
 from milvus import DataType
