@@ -253,7 +253,7 @@ message SaveBinlogPathsRequest {
   common.MsgBase base = 1;
   int64 segmentID = 2;
   int64 collectionID = 3;
-  ID2PathList field2BinlogPaths = 4;
+  repeated ID2PathList field2BinlogPaths = 4;
   repeated DDLBinlogMeta ddlBinlogPaths = 5;
   PositionPair dml_position = 6;
   PositionPair ddl_position =7;
