@@ -158,7 +158,7 @@ func (s *Server) init() error {
 
 	// --- IndexService ---
 	log.Debug("Index service", zap.String("address", Params.IndexServiceAddress))
-	indexService := isc.NewClient(Params.IndexServiceAddress)
+	indexService := isc.NewClient(Params.IndexServiceAddress, qn.Params.MetaRootPath, []string{qn.Params.EtcdAddress}, 10)
 
 	if err := indexService.Init(); err != nil {
 		panic(err)
