@@ -143,6 +143,7 @@ func (node *ProxyNode) DropCollection(ctx context.Context, request *milvuspb.Dro
 		Condition:             NewTaskCondition(ctx),
 		DropCollectionRequest: request,
 		masterService:         node.masterService,
+		chMgr:                 node.chMgr,
 	}
 
 	err := node.sched.DdQueue.Enqueue(dct)
@@ -1062,6 +1063,7 @@ func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertReque
 		},
 		rowIDAllocator: node.idAllocator,
 		segIDAssigner:  node.segAssigner,
+		chMgr:          node.chMgr,
 	}
 	if len(it.PartitionName) <= 0 {
 		it.PartitionName = Params.DefaultPartitionName

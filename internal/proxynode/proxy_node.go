@@ -54,6 +54,8 @@ type ProxyNode struct {
 	proxyService  types.ProxyService
 	queryService  types.QueryService
 
+	chMgr channelsMgr
+
 	sched *TaskScheduler
 	tick  *timeTick
 
@@ -223,6 +225,11 @@ func (node *ProxyNode) Init() error {
 	}
 	node.segAssigner = segAssigner
 	node.segAssigner.PeerID = Params.ProxyID
+
+	// TODO(dragondriver): use real master service instance
+	mockMasterIns := newMockMaster()
+	chMgr := newChannelsMgr(mockMasterIns, node.msFactory)
+	node.chMgr = chMgr
 
 	node.sched, err = NewTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator, node.msFactory)
 	if err != nil {

@@ -106,6 +106,7 @@ type InsertTask struct {
 	result         *milvuspb.InsertResponse
 	rowIDAllocator *allocator.IDAllocator
 	segIDAssigner  *SegIDAssigner
+	chMgr          channelsMgr
 }
 
 func (it *InsertTask) TraceCtx() context.Context {
@@ -684,30 +685,14 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 
 	msgPack.Msgs[0] = tsMsg
 
-	stream, err := globalInsertChannelsMap.GetInsertMsgStream(collID)
+	stream, err := it.chMgr.getDMLStream(collID)
 	if err != nil {
-		resp, _ := it.dataService.GetInsertChannels(ctx, &datapb.GetInsertChannelsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_Insert, // todo
-				MsgID:     it.Base.MsgID,           // todo
-				Timestamp: 0,                       // todo
-				SourceID:  Params.ProxyID,
-			},
-			DbID:         0, // todo
-			CollectionID: collID,
-		})
-		if resp == nil {
-			return errors.New("get insert channels resp is nil")
-		}
-		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			return errors.New(resp.Status.Reason)
-		}
-		err = globalInsertChannelsMap.CreateInsertMsgStream(collID, resp.Values)
+		err = it.chMgr.createDMLMsgStream(collID)
 		if err != nil {
 			return err
 		}
 	}
-	stream, err = globalInsertChannelsMap.GetInsertMsgStream(collID)
+	stream, err = it.chMgr.getDMLStream(collID)
 	if err != nil {
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		it.result.Status.Reason = err.Error()
@@ -849,36 +834,7 @@ func (cct *CreateCollectionTask) PreExecute(ctx context.Context) error {
 func (cct *CreateCollectionTask) Execute(ctx context.Context) error {
 	var err error
 	cct.result, err = cct.masterService.CreateCollection(ctx, cct.CreateCollectionRequest)
-	if err != nil {
-		return err
-	}
-	if cct.result.ErrorCode == commonpb.ErrorCode_Success {
-		collID, err := globalMetaCache.GetCollectionID(ctx, cct.CollectionName)
-		if err != nil {
-			return err
-		}
-		resp, _ := cct.dataServiceClient.GetInsertChannels(ctx, &datapb.GetInsertChannelsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_Insert, // todo
-				MsgID:     cct.Base.MsgID,          // todo
-				Timestamp: 0,                       // todo
-				SourceID:  Params.ProxyID,
-			},
-			DbID:         0, // todo
-			CollectionID: collID,
-		})
-		if resp == nil {
-			return errors.New("get insert channels resp is nil")
-		}
-		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			return errors.New(resp.Status.Reason)
-		}
-		err = globalInsertChannelsMap.CreateInsertMsgStream(collID, resp.Values)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	return err
 }
 
 func (cct *CreateCollectionTask) PostExecute(ctx context.Context) error {
@@ -891,6 +847,7 @@ type DropCollectionTask struct {
 	ctx           context.Context
 	masterService types.MasterService
 	result        *commonpb.Status
+	chMgr         channelsMgr
 }
 
 func (dct *DropCollectionTask) TraceCtx() context.Context {
@@ -951,7 +908,7 @@ func (dct *DropCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	err = globalInsertChannelsMap.CloseInsertMsgStream(collID)
+	err = dct.chMgr.removeDMLStream(collID)
 	if err != nil {
 		return err
 	}
