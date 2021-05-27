@@ -10,14 +10,21 @@ from utils.util_log import test_log as log
 from common.common_type import *
 
 
+class Error:
+    def __init__(self, error):
+        self.code = getattr(error, 'code', 99999)
+        self.message = getattr(error, 'message', str(error))
+
+
 def partition_catch():
     def wrapper(func):
         def inner_wrapper(*args, **kwargs):
             try:
                 return func(*args, **kwargs), True
             except Exception as e:
-                log.error("[Partition API Exception]%s: %s" % (str(func), str(e)))
-                return e, False
+                log.info("exception: %s", e)
+                # log.error("[Partition API Exception]%s: %s" % (str(func), str(e)))
+                return Error(e), False
         return inner_wrapper
     return wrapper
 
@@ -43,7 +50,9 @@ class ApiPartition:
         func_name = sys._getframe().f_code.co_name
         res, check = func_req([Partition, collection, name, description], **kwargs)
         self.partition = res if check is True else None
-        check_result = CheckFunc(res, func_name, check_res, check_params, collection=collection, name=name, description=description,
+        check_result = CheckFunc(res, func_name, check_res, check_params,
+                                 collection=collection, name=name, description=description,
+                                 is_empty=True, num_entities=0,
                                  **kwargs).run()
         return res, check_result
 
