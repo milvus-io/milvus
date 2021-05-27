@@ -61,8 +61,8 @@ type Server struct {
 	queryService types.QueryService
 
 	newProxyServiceClient func(string) types.ProxyService
+	newIndexServiceClient func(string, string, string, time.Duration) types.IndexService
 	newDataServiceClient  func(string, string, string, time.Duration) types.DataService
-	newIndexServiceClient func(string) types.IndexService
 	newQueryServiceClient func(string) (types.QueryService, error)
 
 	closer io.Closer
@@ -113,8 +113,8 @@ func (s *Server) setClient() {
 		}
 		return dsClient
 	}
-	s.newIndexServiceClient = func(s string) types.IndexService {
-		isClient := isc.NewClient(s)
+	s.newIndexServiceClient = func(s, etcdAddress, metaRootPath string, timeout time.Duration) types.IndexService {
+		isClient := isc.NewClient(s, metaRootPath, []string{etcdAddress}, timeout)
 		if err := isClient.Init(); err != nil {
 			panic(err)
 		}
@@ -206,7 +206,7 @@ func (s *Server) init() error {
 	}
 	if s.newIndexServiceClient != nil {
 		log.Debug("index service", zap.String("address", Params.IndexServiceAddress))
-		indexService := s.newIndexServiceClient(Params.IndexServiceAddress)
+		indexService := s.newIndexServiceClient(Params.IndexServiceAddress, cms.Params.MetaRootPath, cms.Params.EtcdAddress, 10)
 		if err := s.masterService.SetIndexService(indexService); err != nil {
 			panic(err)
 		}
