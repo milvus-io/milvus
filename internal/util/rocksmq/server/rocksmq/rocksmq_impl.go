@@ -400,3 +400,18 @@ func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) err
 
 	return nil
 }
+
+func (rmq *rocksmq) Notify(topicName, groupName string) {
+	if vals, ok := rmq.consumers.Load(topicName); ok {
+		for _, v := range vals.([]*Consumer) {
+			if v.GroupName == groupName {
+				select {
+				case v.MsgMutex <- struct{}{}:
+					continue
+				default:
+					continue
+				}
+			}
+		}
+	}
+}
