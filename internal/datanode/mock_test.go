@@ -193,6 +193,10 @@ type DataServiceFactory struct {
 	types.DataService
 }
 
+func (ds *DataServiceFactory) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+}
+
 func (ds *DataServiceFactory) RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
 	ret := &datapb.RegisterNodeResponse{Status: &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success}}
@@ -207,11 +211,6 @@ func (ds *DataServiceFactory) RegisterNode(ctx context.Context, req *datapb.Regi
 		},
 	}
 
-	return ret, nil
-}
-
-func (ds *DataServiceFactory) WatchDmChannels(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error) {
-	ret := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 	return ret, nil
 }
 

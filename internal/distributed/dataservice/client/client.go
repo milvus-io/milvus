@@ -267,3 +267,7 @@ func (c *Client) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	})
 	return ret.(*datapb.GetSegmentInfoResponse), err
 }
+
+func (c *Client) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
+	return c.grpcClient.SaveBinlogPaths(ctx, req)
+}
