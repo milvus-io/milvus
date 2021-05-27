@@ -57,7 +57,7 @@ func getQueryServiceAddress(sess *sessionutil.Session) (string, error) {
 }
 
 // NewClient creates a client for queryservice grpc call.
-func NewClient(ctx context.Context, metaRootPath, address string, etcdAddr []string, timeout time.Duration) (*Client, error) {
+func NewClient(ctx context.Context, address, metaRootPath string, etcdAddr []string, timeout time.Duration) (*Client, error) {
 	sess := sessionutil.NewSession(context.Background(), metaRootPath, etcdAddr)
 
 	return &Client{
