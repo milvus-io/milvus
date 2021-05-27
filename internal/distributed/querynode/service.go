@@ -106,7 +106,7 @@ func (s *Server) init() error {
 	// --- QueryService ---
 	log.Debug("QueryService", zap.String("address", Params.QueryServiceAddress))
 	log.Debug("Init Query service client ...")
-	queryService, err := qsc.NewClient(Params.QueryServiceAddress, 20*time.Second)
+	queryService, err := qsc.NewClient(ctx, Params.QueryServiceAddress, qn.Params.MetaRootPath, []string{qn.Params.EtcdAddress}, 20*time.Second)
 	if err != nil {
 		panic(err)
 	}
