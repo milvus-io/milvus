@@ -709,13 +709,13 @@ func (ibNode *insertBufferNode) completeFlush(segID UniqueID, wait <-chan map[Un
 	}
 
 	// GOOSE TODO remove the below
-	log.Debug(".. Saving binlog paths to etcd ..", zap.Int("number of fields", len(field2Path)))
-	err = ibNode.flushMeta.SaveSegmentBinlogMetaTxn(segID, bufferField2Paths)
-	if err != nil {
-		log.Error("Flush failed ... cannot save binlog paths ..", zap.Error(err))
-		dmlFlushedCh <- nil
-		return
-	}
+	// log.Debug(".. Saving binlog paths to etcd ..", zap.Int("number of fields", len(field2Path)))
+	// err = ibNode.flushMeta.SaveSegmentBinlogMetaTxn(segID, bufferField2Paths)
+	// if err != nil {
+	//     log.Error("Flush failed ... cannot save binlog paths ..", zap.Error(err))
+	//     dmlFlushedCh <- nil
+	//     return
+	// }
 
 	binlogPaths := make([]*datapb.ID2PathList, 0, len(bufferField2Paths))
 	for k, paths := range bufferField2Paths {
@@ -732,28 +732,28 @@ func (ibNode *insertBufferNode) completeFlush(segID UniqueID, wait <-chan map[Un
 	ibNode.replica.setIsFlushed(segID)
 	ibNode.updateSegStatistics([]UniqueID{segID})
 
-	msgPack := msgstream.MsgPack{}
-	completeFlushMsg := internalpb.SegmentFlushCompletedMsg{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_SegmentFlushDone,
-			MsgID:     0, // GOOSE TODO
-			Timestamp: 0, // GOOSE TODO
-			SourceID:  Params.NodeID,
-		},
-		SegmentID: segID,
-	}
-	var msg msgstream.TsMsg = &msgstream.FlushCompletedMsg{
-		BaseMsg: msgstream.BaseMsg{
-			HashValues: []uint32{0},
-		},
-		SegmentFlushCompletedMsg: completeFlushMsg,
-	}
-
-	msgPack.Msgs = append(msgPack.Msgs, msg)
-	err = ibNode.completeFlushStream.Produce(&msgPack)
-	if err != nil {
-		log.Error(".. Produce complete flush msg failed ..", zap.Error(err))
-	}
+	// msgPack := msgstream.MsgPack{}
+	// completeFlushMsg := internalpb.SegmentFlushCompletedMsg{
+	//     Base: &commonpb.MsgBase{
+	//         MsgType:   commonpb.MsgType_SegmentFlushDone,
+	//         MsgID:     0, // GOOSE TODO
+	//         Timestamp: 0, // GOOSE TODO
+	//         SourceID:  Params.NodeID,
+	//     },
+	//     SegmentID: segID,
+	// }
+	// var msg msgstream.TsMsg = &msgstream.FlushCompletedMsg{
+	//     BaseMsg: msgstream.BaseMsg{
+	//         HashValues: []uint32{0},
+	//     },
+	//     SegmentFlushCompletedMsg: completeFlushMsg,
+	// }
+	//
+	// msgPack.Msgs = append(msgPack.Msgs, msg)
+	// err = ibNode.completeFlushStream.Produce(&msgPack)
+	// if err != nil {
+	//     log.Error(".. Produce complete flush msg failed ..", zap.Error(err))
+	// }
 }
 
 func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
