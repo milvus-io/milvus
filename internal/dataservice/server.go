@@ -84,7 +84,7 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 		msFactory: factory,
 	}
 	s.dataClientCreator = func(addr string) (types.DataNode, error) {
-		return grpcdatanodeclient.NewClient(addr)
+		return grpcdatanodeclient.NewClient(addr, 10*time.Second)
 	}
 
 	s.UpdateStateCode(internalpb.StateCode_Abnormal)
@@ -114,7 +114,7 @@ func (s *Server) Register() error {
 
 func (s *Server) Init() error {
 	s.initOnce.Do(func() {
-		s.session = sessionutil.NewSession(s.ctx, []string{Params.EtcdAddress})
+		s.session = sessionutil.NewSession(s.ctx, Params.MetaRootPath, []string{Params.EtcdAddress})
 	})
 	return nil
 }
