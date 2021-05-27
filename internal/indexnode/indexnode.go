@@ -79,7 +79,7 @@ func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 
 // Register register index node at etcd
 func (i *IndexNode) Register() error {
-	i.session = sessionutil.NewSession(i.loopCtx, []string{Params.EtcdAddress})
+	i.session = sessionutil.NewSession(i.loopCtx, Params.MetaRootPath, []string{Params.EtcdAddress})
 	i.session.Init(typeutil.IndexNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
 	Params.NodeID = i.session.ServerID
 	return nil

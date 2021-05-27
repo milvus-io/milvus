@@ -1,6 +1,6 @@
 from utils.util_log import test_log as log
 from common.common_type import *
-from pymilvus_orm import Collection
+from pymilvus_orm import Collection, Partition
 
 
 class CheckFunc:
@@ -28,9 +28,10 @@ class CheckFunc:
             check_result = self.req_pname_check(self.res, self.func_name, self.params.get('partition_tag'))
         elif self.check_res == CheckParams.list_count and self.check_params is not None:
             check_result = self.check_list_count(self.res, self.func_name, self.check_params)
-
         elif self.check_res == CheckParams.collection_property_check:
             check_result = self.req_collection_property_check(self.res, self.func_name, self.params)
+        elif self.check_res == CheckParams.partition_property_check:
+            check_result = self.partition_property_check(self.res, self.func_name, self.params)
         return check_result
 
     @staticmethod
@@ -174,3 +175,18 @@ class CheckFunc:
         assert collection.name == params["name"]
         assert collection.description == params["schema"].description
         assert collection.schema == params["schema"]
+        return True
+
+    @staticmethod
+    def partition_property_check(partition, func_name, params):
+        exp_func_name = "partition_init"
+        if func_name != exp_func_name:
+            log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
+        if not isinstance(partition, Partition):
+            raise Exception("The result to check isn't collection type object")
+        assert partition.name == params["name"]
+        assert partition.description == params["description"]
+        assert partition.is_empty == params["is_empty"]
+        assert partition.num_entities == params["num_entities"]
+        return True
+
