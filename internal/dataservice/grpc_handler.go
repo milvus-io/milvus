@@ -321,21 +321,21 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	if err != nil {
 		log.Error("Failed to get collection info", zap.Int64("collectionID", req.GetCollectionID()), zap.Error(err))
 		resp.Reason = err.Error()
-		return resp, err
+		return resp, nil
 	}
 
 	meta, err := s.prepareBinlogAndPos(req)
 	if err != nil {
 		log.Error("prepare binlog and pos meta failed", zap.Error(err))
 		resp.Reason = err.Error()
-		return resp, err
+		return resp, nil
 	}
 
 	// set segment to SegmentState_Flushing
 	err = s.meta.FlushSegmentWithBinlogAndPos(req.SegmentID, meta)
 	if err != nil {
 		resp.Reason = err.Error()
-		return resp, err
+		return resp, nil
 	}
 	log.Debug("flush segment with meta", zap.Int64("id", req.SegmentID),
 		zap.Any("meta", meta))
@@ -345,7 +345,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	err = s.flushMsgStream.Produce(&msgPack)
 	if err != nil {
 		resp.Reason = err.Error()
-		return resp, err
+		return resp, nil
 	}
 	log.Debug("send segment flush msg", zap.Int64("id", req.SegmentID))
 
@@ -353,7 +353,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	if err = s.meta.FlushSegment(req.SegmentID); err != nil {
 		log.Error("flush segment complete failed", zap.Error(err))
 		resp.Reason = err.Error()
-		return resp, err
+		return resp, nil
 	}
 	log.Debug("flush segment complete", zap.Int64("id", req.SegmentID))
 

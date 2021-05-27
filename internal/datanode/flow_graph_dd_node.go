@@ -182,16 +182,15 @@ func (ddNode *ddNode) flushComplete(binlogMetaCh <-chan *datapb.DDLBinlogMeta, c
 		ddlFlushedCh <- nil
 		return
 	}
+	//
+	// log.Debug(".. Saving ddl binlog meta ...")
+	// err := ddNode.binlogMeta.SaveDDLBinlogMetaTxn(collID, binlogMeta)
+	// if err != nil {
+	//     log.Error("Save binlog meta to etcd Wrong", zap.Error(err))
+	// }
 
-	log.Debug(".. Saving ddl binlog meta ...")
-	err := ddNode.binlogMeta.SaveDDLBinlogMetaTxn(collID, binlogMeta)
-	if err != nil {
-		log.Error("Save binlog meta to etcd Wrong", zap.Error(err))
-	}
-
-	ddlFlushedCh <- []*datapb.DDLBinlogMeta{binlogMeta}
 	// TODO  remove above
-	// ddlFlushCh <- binlogMetaCh
+	ddlFlushedCh <- []*datapb.DDLBinlogMeta{binlogMeta}
 }
 
 /*

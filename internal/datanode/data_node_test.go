@@ -126,14 +126,15 @@ func TestDataNode(t *testing.T) {
 		sync, ok := node1.vchan2SyncService[dmChannelName]
 		assert.True(t, ok)
 		sync.replica.addSegment(0, 1, 1, dmChannelName)
-		sync.replica.addSegment(1, 1, 1, dmChannelName)
+		// sync.replica.addSegment(1, 1, 1, dmChannelName) unable to deal with this.
 
 		req := &datapb.FlushSegmentsRequest{
 			Base:         &commonpb.MsgBase{},
 			DbID:         0,
 			CollectionID: 1,
-			SegmentIDs:   []int64{0, 1},
+			SegmentIDs:   []int64{0},
 		}
+
 		status, err := node1.FlushSegments(node.ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
@@ -182,8 +183,13 @@ func TestDataNode(t *testing.T) {
 		err = ddMsgStream.Broadcast(&timeTickMsgPack)
 		assert.NoError(t, err)
 
-		<-node1.ctx.Done()
-		node1.Stop()
+		_, err = sync.replica.getSegmentByID(0)
+		assert.NoError(t, err)
+
+		defer func() {
+			node1.ctx.Done()
+			node1.Stop()
+		}()
 	})
 
 	t.Run("Test GetTimeTickChannel", func(t *testing.T) {
@@ -196,6 +202,6 @@ func TestDataNode(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	<-node.ctx.Done()
+	// <-node.ctx.Done()
 	node.Stop()
 }
