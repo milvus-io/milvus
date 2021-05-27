@@ -65,8 +65,7 @@ func (s *segAllocStats) loadSegmentsFromMeta() {
 			allocations:    []*allocation{},
 			insertChannel:  seg.InsertChannel,
 			lastExpireTime: seg.LastExpireTime,
-			sealed: seg.State == commonpb.SegmentState_Sealed ||
-				seg.State == commonpb.SegmentState_Flushing,
+			sealed:         seg.State == commonpb.SegmentState_Sealed,
 		}
 		s.stats[seg.ID] = stat
 	}
