@@ -931,7 +931,7 @@ func TestRun(t *testing.T) {
 	svr.newIndexServiceClient = func(s string) types.IndexService {
 		return &mockIndex{}
 	}
-	svr.newQueryServiceClient = func(s string) (types.QueryService, error) {
+	svr.newQueryServiceClient = func(s, etcdAddress string) (types.QueryService, error) {
 		return &mockQuery{}, nil
 	}
 
