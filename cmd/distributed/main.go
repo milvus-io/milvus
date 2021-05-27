@@ -77,12 +77,6 @@ func removePidFile(filename string, runtimeDir string) {
 }
 
 func run(role *roles.MilvusRoles, alias string, runtimeDir string) error {
-	serviceEnabled := (role.EnableMaster || role.EnableProxyService || role.EnableQueryService || role.EnableIndexService || role.EnableDataService)
-	nodeEnabled := (role.EnableProxyNode || role.EnableQueryNode || role.EnableIndexNode || role.EnableDataNode)
-	if serviceEnabled && nodeEnabled {
-		return fmt.Errorf("not allow to launch service and node in one process")
-	}
-
 	if role.EnableMaster {
 		filename := getPidFileName(RoleMaster, alias)
 		if err := createPidFile(filename, runtimeDir); err != nil {
