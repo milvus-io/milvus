@@ -61,10 +61,7 @@ func (m *insertChannelsMap) CreateInsertMsgStream(collID UniqueID, channels []st
 	stream, _ := m.msFactory.NewMsgStream(context.Background())
 	stream.AsProducer(channels)
 	log.Debug("proxynode", zap.Strings("proxynode AsProducer: ", channels))
-	repack := func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
-		return insertRepackFunc(tsMsgs, hashKeys, m.nodeInstance.segAssigner, true)
-	}
-	stream.SetRepackFunc(repack)
+	stream.SetRepackFunc(insertRepackFunc)
 	stream.Start()
 	m.insertMsgStreams = append(m.insertMsgStreams, stream)
 	m.droppedBitMap = append(m.droppedBitMap, 0)

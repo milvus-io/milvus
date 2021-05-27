@@ -67,6 +67,10 @@ func (mms *MemMsgStream) SetRepackFunc(repackFunc RepackFunc) {
 	mms.repackFunc = repackFunc
 }
 
+func (mms *MemMsgStream) GetProduceChannels() []string {
+	return mms.producers
+}
+
 func (mms *MemMsgStream) AsProducer(channels []string) {
 	for _, channel := range channels {
 		err := Mmq.CreateChannel(channel)

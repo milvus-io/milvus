@@ -1,6 +1,9 @@
 package sessionutil
 
 import (
+	"fmt"
+	"math/rand"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -19,6 +22,7 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	Params.Init()
 
 	etcdAddr, err := Params.Load("_EtcdAddress")
+	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 	if err != nil {
 		panic(err)
 	}
@@ -26,7 +30,7 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "")
-	_, err = cli.Delete(ctx, DefaultServiceRoot, clientv3.WithPrefix())
+	_, err = cli.Delete(ctx, metaRoot, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
 	defer etcdKV.Close()
@@ -35,7 +39,7 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	var wg sync.WaitGroup
 	var muList sync.Mutex = sync.Mutex{}
 
-	s := NewSession(ctx, []string{etcdAddr})
+	s := NewSession(ctx, metaRoot, []string{etcdAddr})
 	res := make([]int64, 0)
 
 	getIDFunc := func() {
@@ -71,16 +75,20 @@ func TestInit(t *testing.T) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "")
-	_, err = cli.Delete(ctx, DefaultServiceRoot, clientv3.WithPrefix())
+	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
+	_, err = cli.Delete(ctx, metaRoot, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
 	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix("")
 
-	s := NewSession(ctx, []string{etcdAddr})
-	s.Init("test", "testAddr", false)
+	s := NewSession(ctx, metaRoot, []string{etcdAddr})
+	s.Init("inittest", "testAddr", false)
 	assert.NotEqual(t, int64(0), s.leaseID)
 	assert.NotEqual(t, int64(0), s.ServerID)
+	sessions, _, err := s.GetSessions("inittest")
+	assert.Nil(t, err)
+	assert.Contains(t, sessions, "inittest-"+strconv.FormatInt(s.ServerID, 10))
 }
 
 func TestUpdateSessions(t *testing.T) {
@@ -95,7 +103,8 @@ func TestUpdateSessions(t *testing.T) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "")
-	_, err = cli.Delete(ctx, DefaultServiceRoot, clientv3.WithPrefix())
+	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
+	_, err = cli.Delete(ctx, metaRoot, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
 	defer etcdKV.Close()
@@ -104,17 +113,17 @@ func TestUpdateSessions(t *testing.T) {
 	var wg sync.WaitGroup
 	var muList sync.Mutex = sync.Mutex{}
 
-	s := NewSession(ctx, []string{etcdAddr})
+	s := NewSession(ctx, metaRoot, []string{etcdAddr})
 
-	sessions, err := s.GetSessions("test")
+	sessions, rev, err := s.GetSessions("test")
 	assert.Nil(t, err)
 	assert.Equal(t, len(sessions), 0)
-	addCh, delCh := s.WatchServices("test")
+	eventCh := s.WatchServices("test", rev)
 
 	sList := []*Session{}
 
 	getIDFunc := func() {
-		singleS := NewSession(ctx, []string{etcdAddr})
+		singleS := NewSession(ctx, metaRoot, []string{etcdAddr})
 		singleS.Init("test", "testAddr", false)
 		muList.Lock()
 		sList = append(sList, singleS)
@@ -129,29 +138,34 @@ func TestUpdateSessions(t *testing.T) {
 	wg.Wait()
 
 	assert.Eventually(t, func() bool {
-		sessions, _ := s.GetSessions("test")
+		sessions, _, _ := s.GetSessions("test")
 		return len(sessions) == 10
 	}, 10*time.Second, 100*time.Millisecond)
-	notExistSessions, _ := s.GetSessions("testt")
+	notExistSessions, _, _ := s.GetSessions("testt")
 	assert.Equal(t, len(notExistSessions), 0)
 
-	etcdKV.RemoveWithPrefix("")
+	etcdKV.RemoveWithPrefix(metaRoot)
 	assert.Eventually(t, func() bool {
-		sessions, _ := s.GetSessions("test")
+		sessions, _, _ := s.GetSessions("test")
 		return len(sessions) == 0
 	}, 10*time.Second, 100*time.Millisecond)
 
-	addSessions := []*Session{}
-	for i := 0; i < 10; i++ {
-		session := <-addCh
-		addSessions = append(addSessions, session)
+	sessionEvents := []*SessionEvent{}
+	addEventLen := 0
+	delEventLen := 0
+	eventLength := len(eventCh)
+	for i := 0; i < eventLength; i++ {
+		sessionEvent := <-eventCh
+		if sessionEvent.EventType == SessionAddEvent {
+			addEventLen++
+		}
+		if sessionEvent.EventType == SessionDelEvent {
+			delEventLen++
+		}
+		sessionEvents = append(sessionEvents, sessionEvent)
 	}
-	assert.Equal(t, len(addSessions), 10)
+	assert.Equal(t, len(sessionEvents), 20)
+	assert.Equal(t, addEventLen, 10)
+	assert.Equal(t, delEventLen, 10)
 
-	delSessions := []*Session{}
-	for i := 0; i < 10; i++ {
-		session := <-delCh
-		delSessions = append(delSessions, session)
-	}
-	assert.Equal(t, len(addSessions), 10)
 }
