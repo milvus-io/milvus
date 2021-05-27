@@ -57,15 +57,6 @@ func newDataSyncService(ctx context.Context,
 	return service
 }
 
-// func (dsService *dataSyncService) init() {
-// if len(Params.InsertChannelNames) == 0 {
-//     log.Error("InsertChannels not readly, init datasync service failed")
-//     return
-// }
-
-//     dsService.initNodes()
-// }
-
 func (dsService *dataSyncService) start() {
 	log.Debug("Data Sync Service Start Successfully")
 	if dsService.fg != nil {
