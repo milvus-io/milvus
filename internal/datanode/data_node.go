@@ -137,7 +137,7 @@ func (node *DataNode) Register() error {
 func (node *DataNode) Init() error {
 	ctx := context.Background()
 
-	node.session = sessionutil.NewSession(ctx, []string{Params.EtcdAddress})
+	node.session = sessionutil.NewSession(ctx, Params.MetaRootPath, []string{Params.EtcdAddress})
 	node.session.Init(typeutil.DataNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
 
 	// TODO find DataService & MasterService

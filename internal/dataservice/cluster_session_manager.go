@@ -12,7 +12,6 @@ package dataservice
 
 import (
 	"sync"
-	"time"
 
 	"github.com/milvus-io/milvus/internal/types"
 )
@@ -28,10 +27,10 @@ type sessionManager interface {
 type clusterSessionManager struct {
 	mu                sync.RWMutex
 	sessions          map[string]types.DataNode
-	dataClientCreator func(addr string, timeout time.Duration) (types.DataNode, error)
+	dataClientCreator func(addr string) (types.DataNode, error)
 }
 
-func newClusterSessionManager(dataClientCreator func(addr string, timeout time.Duration) (types.DataNode, error)) *clusterSessionManager {
+func newClusterSessionManager(dataClientCreator func(addr string) (types.DataNode, error)) *clusterSessionManager {
 	return &clusterSessionManager{
 		sessions:          make(map[string]types.DataNode),
 		dataClientCreator: dataClientCreator,
@@ -39,7 +38,7 @@ func newClusterSessionManager(dataClientCreator func(addr string, timeout time.D
 }
 
 func (m *clusterSessionManager) createSession(addr string) error {
-	cli, err := m.dataClientCreator(addr, 0)
+	cli, err := m.dataClientCreator(addr)
 	if err != nil {
 		return err
 	}
