@@ -267,15 +267,15 @@ func main() {
 	flags.StringVar(&svrAlias, "alias", "", "set alias")
 
 	role := roles.MilvusRoles{}
-	flags.BoolVar(&role.EnableMaster, "master", false, "enable master")
-	flags.BoolVar(&role.EnableProxyService, "proxyservice", false, "enable proxy service")
-	flags.BoolVar(&role.EnableQueryService, "queryservice", false, "enable query service")
-	flags.BoolVar(&role.EnableDataService, "dataservice", false, "enable data service")
-	flags.BoolVar(&role.EnableIndexService, "indexservice", false, "enable index service")
-	flags.BoolVar(&role.EnableProxyNode, "proxynode", false, "enable proxy node")
-	flags.BoolVar(&role.EnableQueryNode, "querynode", false, "enable query node")
-	flags.BoolVar(&role.EnableDataNode, "datanode", false, "enable data node")
-	flags.BoolVar(&role.EnableIndexNode, "indexnode", false, "enable index node")
+	flags.BoolVar(&role.EnableMaster, ROLE_MASTER, false, "enable master")
+	flags.BoolVar(&role.EnableProxyService, ROLE_PROXY_SERVICE, false, "enable proxy service")
+	flags.BoolVar(&role.EnableQueryService, ROLE_QUERY_SERVICE, false, "enable query service")
+	flags.BoolVar(&role.EnableIndexService, ROLE_INDEX_SERVICE, false, "enable index service")
+	flags.BoolVar(&role.EnableDataService, ROLE_DATA_SERVICE, false, "enable data service")
+	flags.BoolVar(&role.EnableProxyNode, ROLE_PROXY_NODE, false, "enable proxy node")
+	flags.BoolVar(&role.EnableQueryNode, ROLE_QUERY_NODE, false, "enable query node")
+	flags.BoolVar(&role.EnableIndexNode, ROLE_INDEX_NODE, false, "enable index node")
+	flags.BoolVar(&role.EnableDataNode, ROLE_DATA_NODE, false, "enable data node")
 
 	if err := flags.Parse(os.Args[2:]); err != nil {
 		os.Exit(-1)
