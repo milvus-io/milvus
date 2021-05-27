@@ -113,7 +113,7 @@ func (i *IndexService) Init() error {
 			return err
 		}
 		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
-		metakv, err := NewMetaTable(etcdKV, i)
+		metakv, err := NewMetaTable(etcdKV)
 		if err != nil {
 			return err
 		}
@@ -158,6 +158,11 @@ func (i *IndexService) Init() error {
 	i.UpdateStateCode(internalpb.StateCode_Healthy)
 
 	i.nodeTasks = NewNodeTasks()
+
+	err = i.assignTasksServerStart()
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -564,4 +569,21 @@ func (i *IndexService) watchMetaLoop() {
 			}
 		}
 	}
+}
+
+func (i *IndexService) assignTasksServerStart() error {
+	sessions, _, err := i.session.GetSessions(typeutil.IndexNodeRole)
+	if err != nil {
+		return err
+	}
+	var serverIDs []int64
+	for _, session := range sessions {
+		serverIDs = append(serverIDs, session.ServerID)
+	}
+	tasks := i.metaTable.GetUnassignedTasks(serverIDs)
+	for _, taskQueue := range tasks {
+		i.assignChan <- taskQueue
+	}
+
+	return nil
 }

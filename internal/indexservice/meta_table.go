@@ -17,8 +17,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
 	"github.com/milvus-io/milvus/internal/util/retry"
 
 	"go.uber.org/zap"
@@ -43,16 +41,14 @@ type Meta struct {
 type metaTable struct {
 	client            *etcdkv.EtcdKV    // client of a reliable kv service, i.e. etcd client
 	indexBuildID2Meta map[UniqueID]Meta // index build id to index meta
-	indexService      *IndexService
 
 	lock sync.RWMutex
 }
 
-func NewMetaTable(kv *etcdkv.EtcdKV, i *IndexService) (*metaTable, error) {
+func NewMetaTable(kv *etcdkv.EtcdKV) (*metaTable, error) {
 	mt := &metaTable{
-		client:       kv,
-		indexService: i,
-		lock:         sync.RWMutex{},
+		client: kv,
+		lock:   sync.RWMutex{},
 	}
 	err := mt.reloadFromKV()
 	if err != nil {
@@ -67,47 +63,24 @@ func (mt *metaTable) reloadFromKV() error {
 	key := "indexes"
 	log.Debug("LoadWithPrefix ", zap.String("prefix", key))
 
-	resp, err := mt.client.LoadWithPrefix2(key)
+	_, values, versions, err := mt.client.LoadWithPrefix2(key)
 	if err != nil {
 		return err
 	}
-	var indexBuildIDs []UniqueID
 
-	for _, kv := range resp.Kvs {
+	for i := 0; i < len(values); i++ {
 		indexMeta := indexpb.IndexMeta{}
-		err = proto.UnmarshalText(string(kv.Value), &indexMeta)
+		err = proto.UnmarshalText(values[i], &indexMeta)
 		if err != nil {
 			return fmt.Errorf("IndexService metaTable reloadFromKV UnmarshalText indexpb.IndexMeta err:%w", err)
 		}
 
 		meta := &Meta{
 			indexMeta: &indexMeta,
-			revision:  kv.Version,
+			revision:  versions[i],
 		}
 		mt.indexBuildID2Meta[indexMeta.IndexBuildID] = *meta
-
-		if indexMeta.State == commonpb.IndexState_Finished {
-			continue
-		}
-		sessions, _, err := mt.indexService.session.GetSessions(typeutil.IndexNodeRole)
-		alive := false
-		if err != nil {
-			return err
-		}
-		for _, session := range sessions {
-			if indexMeta.NodeServerID == session.ServerID {
-				alive = true
-			}
-		}
-		if !alive {
-			indexBuildIDs = append(indexBuildIDs, indexMeta.IndexBuildID)
-		}
-		if len(indexBuildIDs) >= 10 {
-			mt.indexService.assignChan <- indexBuildIDs
-			indexBuildIDs = []UniqueID{}
-		}
 	}
-	mt.indexService.assignChan <- indexBuildIDs
 	return nil
 }
 
@@ -123,14 +96,33 @@ func (mt *metaTable) saveIndexMeta(meta *Meta) error {
 		return err
 	}
 
-	resp, err := mt.client.LoadWithPrefix2(key)
-	if err != nil {
-		return err
-	}
-	meta.revision = resp.Kvs[0].Version
+	meta.revision = meta.revision + 1
 	mt.indexBuildID2Meta[meta.indexMeta.IndexBuildID] = *meta
 
 	return nil
+}
+
+func (mt *metaTable) reloadMeta(indexBuildID UniqueID) (*Meta, error) {
+	key := "indexes/" + strconv.FormatInt(indexBuildID, 10)
+
+	_, values, version, err := mt.client.LoadWithPrefix2(key)
+	if err != nil {
+		return nil, err
+	}
+	im := &indexpb.IndexMeta{}
+	err = proto.UnmarshalText(values[0], im)
+	if err != nil {
+		return nil, err
+	}
+	if im.State == commonpb.IndexState_Finished {
+		return nil, nil
+	}
+	m := &Meta{
+		revision:  version[0],
+		indexMeta: im,
+	}
+
+	return m, nil
 }
 
 func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequest) error {
@@ -172,25 +164,10 @@ func (mt *metaTable) BuildIndex(indexBuildID UniqueID, serverID int64) error {
 	err := mt.saveIndexMeta(&meta)
 	if err != nil {
 		fn := func() error {
-			key := "indexes/" + strconv.FormatInt(meta.indexMeta.IndexBuildID, 10)
-
-			resp, err2 := mt.client.LoadWithPrefix2(key)
-			if err2 != nil {
-				return err2
+			m, err := mt.reloadMeta(meta.indexMeta.IndexBuildID)
+			if m == nil {
+				return err
 			}
-			im := &indexpb.IndexMeta{}
-			err2 = proto.UnmarshalText(string(resp.Kvs[0].Value), im)
-			if err2 != nil {
-				return err2
-			}
-			if im.State == commonpb.IndexState_Finished {
-				return nil
-			}
-			m := &Meta{
-				revision:  resp.Kvs[0].Version,
-				indexMeta: im,
-			}
-
 			m.indexMeta.NodeServerID = serverID
 			return mt.saveIndexMeta(m)
 		}
@@ -221,23 +198,9 @@ func (mt *metaTable) UpdateVersion(indexBuildID UniqueID) error {
 	err := mt.saveIndexMeta(&meta)
 	if err != nil {
 		fn := func() error {
-			key := "indexes/" + strconv.FormatInt(meta.indexMeta.IndexBuildID, 10)
-
-			resp, err2 := mt.client.LoadWithPrefix2(key)
-			if err2 != nil {
-				return err2
-			}
-			im := &indexpb.IndexMeta{}
-			err2 = proto.UnmarshalText(string(resp.Kvs[0].Value), im)
-			if err2 != nil {
-				return err2
-			}
-			if im.State == commonpb.IndexState_Finished {
-				return nil
-			}
-			m := &Meta{
-				revision:  resp.Kvs[0].Version,
-				indexMeta: im,
+			m, err := mt.reloadMeta(meta.indexMeta.IndexBuildID)
+			if m == nil {
+				return err
 			}
 			m.indexMeta.Version = m.indexMeta.Version + 1
 
@@ -262,23 +225,9 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 			if err := mt.saveIndexMeta(&meta); err != nil {
 				log.Debug("IndexService", zap.Any("Meta table mark deleted err", err.Error()))
 				fn := func() error {
-					key := "indexes/" + strconv.FormatInt(meta.indexMeta.IndexBuildID, 10)
-
-					resp, err2 := mt.client.LoadWithPrefix2(key)
-					if err2 != nil {
-						return err2
-					}
-					im := &indexpb.IndexMeta{}
-					err2 = proto.UnmarshalText(string(resp.Kvs[0].Value), im)
-					if err2 != nil {
-						return err2
-					}
-					if im.State == commonpb.IndexState_Finished {
-						return nil
-					}
-					m := &Meta{
-						revision:  resp.Kvs[0].Version,
-						indexMeta: im,
+					m, err := mt.reloadMeta(meta.indexMeta.IndexBuildID)
+					if m == nil {
+						return err
 					}
 
 					m.indexMeta.MarkDeleted = true
@@ -357,20 +306,9 @@ func (mt *metaTable) UpdateRecycleState(indexBuildID UniqueID) error {
 	meta.indexMeta.Recycled = true
 	if err := mt.saveIndexMeta(&meta); err != nil {
 		fn := func() error {
-			key := "indexes/" + strconv.FormatInt(meta.indexMeta.IndexBuildID, 10)
-
-			resp, err2 := mt.client.LoadWithPrefix2(key)
-			if err2 != nil {
-				return err2
-			}
-			im := &indexpb.IndexMeta{}
-			err2 = proto.UnmarshalText(string(resp.Kvs[0].Value), im)
-			if err2 != nil {
-				return err2
-			}
-			m := &Meta{
-				revision:  resp.Kvs[0].Version,
-				indexMeta: im,
+			m, err := mt.reloadMeta(meta.indexMeta.IndexBuildID)
+			if m == nil {
+				return err
 			}
 
 			m.indexMeta.Recycled = true
@@ -412,6 +350,30 @@ func (mt *metaTable) GetIndexMeta(indexBuildID UniqueID) Meta {
 	}
 
 	return meta
+}
+
+func (mt *metaTable) GetUnassignedTasks(serverIDs []int64) [][]UniqueID {
+	var tasks [][]UniqueID
+	var indexBuildIDs []UniqueID
+
+	for indexBuildID, meta := range mt.indexBuildID2Meta {
+		alive := false
+		for _, serverID := range serverIDs {
+			if meta.indexMeta.NodeServerID == serverID {
+				alive = true
+			}
+		}
+		if !alive {
+			indexBuildIDs = append(indexBuildIDs, indexBuildID)
+		}
+		if len(indexBuildIDs) >= 10 {
+			tasks = append(tasks, indexBuildIDs)
+			indexBuildIDs = []UniqueID{}
+		}
+	}
+	tasks = append(tasks, indexBuildIDs)
+
+	return tasks
 }
 
 func compare2Array(arr1, arr2 interface{}) bool {
@@ -493,25 +455,14 @@ func (mt *metaTable) LoadMetaFromETCD(indexBuildID int64, revision int64) bool {
 		}
 	}
 
-	key := "indexes/" + strconv.FormatInt(indexBuildID, 10)
-	resp, err := mt.client.LoadWithPrefix2(key)
-	if err != nil {
+	m, err := mt.reloadMeta(meta.indexMeta.IndexBuildID)
+	if m == nil {
 		log.Debug("IndexService", zap.Any("Load meta from etcd error", err))
 		return false
 	}
-	value := string(resp.Kvs[0].Value)
-	indexMeta := &indexpb.IndexMeta{}
-	err = proto.UnmarshalText(value, indexMeta)
-	if err != nil {
-		log.Debug("IndexService", zap.Any("Unmarshal error", err))
-		return false
-	}
 
-	log.Debug("IndexService", zap.Any("IndexMeta", indexMeta))
-	mt.indexBuildID2Meta[indexBuildID] = Meta{
-		indexMeta: indexMeta,
-		revision:  resp.Kvs[0].Version,
-	}
+	log.Debug("IndexService", zap.Any("IndexMeta", m))
+	mt.indexBuildID2Meta[indexBuildID] = *m
 
 	return true
 }
