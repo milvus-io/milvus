@@ -310,11 +310,7 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseS
 
 func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmentInfoRequest) (*queryPb.GetSegmentInfoResponse, error) {
 	infos := make([]*queryPb.SegmentInfo, 0)
-	for _, id := range in.SegmentIDs {
-		segment, err := node.historical.replica.getSegmentByID(id)
-		if err != nil {
-			continue
-		}
+	getSegmentInfo := func(segment *Segment) *queryPb.SegmentInfo {
 		var indexName string
 		var indexID int64
 		// TODO:: segment has multi vec column
@@ -334,6 +330,24 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 			IndexName:    indexName,
 			IndexID:      indexID,
 		}
+		return info
+	}
+	// get info from historical
+	for _, id := range in.SegmentIDs {
+		segment, err := node.historical.replica.getSegmentByID(id)
+		if err != nil {
+			continue
+		}
+		info := getSegmentInfo(segment)
+		infos = append(infos, info)
+	}
+	// get info from streaming
+	for _, id := range in.SegmentIDs {
+		segment, err := node.streaming.replica.getSegmentByID(id)
+		if err != nil {
+			continue
+		}
+		info := getSegmentInfo(segment)
 		infos = append(infos, info)
 	}
 	return &queryPb.GetSegmentInfoResponse{
