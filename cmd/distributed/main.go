@@ -78,90 +78,12 @@ func removePidFile(fd *os.File) {
 	os.Remove(fd.Name())
 }
 
-func run(role *roles.MilvusRoles, alias string, runtimeDir string) error {
-	if role.EnableMaster {
-		filename := getPidFileName(roleMaster, alias)
-		fd, err := createPidFile(filename, runtimeDir)
-		if err != nil {
-			return err
-		}
-		defer removePidFile(fd)
-	}
-	if role.EnableProxyService {
-		filename := getPidFileName(roleProxyService, alias)
-		fd, err := createPidFile(filename, runtimeDir)
-		if err != nil {
-			return err
-		}
-		defer removePidFile(fd)
-	}
-	if role.EnableQueryService {
-		filename := getPidFileName(roleQueryService, alias)
-		fd, err := createPidFile(filename, runtimeDir)
-		if err != nil {
-			return err
-		}
-		defer removePidFile(fd)
-	}
-	if role.EnableIndexService {
-		filename := getPidFileName(roleIndexService, alias)
-		fd, err := createPidFile(filename, runtimeDir)
-		if err != nil {
-			return err
-		}
-		defer removePidFile(fd)
-	}
-	if role.EnableDataService {
-		filename := getPidFileName(roleDataService, alias)
-		fd, err := createPidFile(filename, runtimeDir)
-		if err != nil {
-			return err
-		}
-		defer removePidFile(fd)
-	}
-	if role.EnableProxyNode {
-		filename := getPidFileName(roleProxyNode, alias)
-		fd, err := createPidFile(filename, runtimeDir)
-		if err != nil {
-			return err
-		}
-		defer removePidFile(fd)
-	}
-	if role.EnableQueryNode {
-		filename := getPidFileName(roleQueryNode, alias)
-		fd, err := createPidFile(filename, runtimeDir)
-		if err != nil {
-			return err
-		}
-		defer removePidFile(fd)
-	}
-	if role.EnableIndexNode {
-		filename := getPidFileName(roleIndexNode, alias)
-		fd, err := createPidFile(filename, runtimeDir)
-		if err != nil {
-			return err
-		}
-		defer removePidFile(fd)
-	}
-	if role.EnableDataNode {
-		filename := getPidFileName(roleDataNode, alias)
-		fd, err := createPidFile(filename, runtimeDir)
-		if err != nil {
-			return err
-		}
-		defer removePidFile(fd)
-	}
-	role.Run(false)
-	return nil
-}
-
-func stopRole(filename string, runtimeDir string) error {
+func stopPid(filename string, runtimeDir string) error {
 	var pid int
 
 	fd, err := os.OpenFile(path.Join(runtimeDir, filename), os.O_RDONLY, 0664)
-	// it's possible that pid file has already been removed
 	if err != nil {
-		return nil
+		return err
 	}
 	defer closePidFile(fd)
 
@@ -170,71 +92,12 @@ func stopRole(filename string, runtimeDir string) error {
 		return err
 	}
 	process, err := os.FindProcess(pid)
-	// it's possible that this process has already been killed
 	if err != nil {
-		return nil
+		return err
 	}
 	err = process.Signal(syscall.SIGTERM)
 	if err != nil {
 		return err
-	}
-	return nil
-}
-
-func stop(role *roles.MilvusRoles, alias string, runtimeDir string) error {
-	if role.EnableMaster {
-		filename := getPidFileName(roleMaster, alias)
-		if err := stopRole(filename, runtimeDir); err != nil {
-			return fmt.Errorf("stop process fail, service %s", filename)
-		}
-	}
-	if role.EnableProxyService {
-		filename := getPidFileName(roleProxyService, alias)
-		if err := stopRole(filename, runtimeDir); err != nil {
-			return fmt.Errorf("stop process fail, service %s", filename)
-		}
-	}
-	if role.EnableQueryService {
-		filename := getPidFileName(roleQueryService, alias)
-		if err := stopRole(filename, runtimeDir); err != nil {
-			return fmt.Errorf("stop process fail, service %s", filename)
-		}
-	}
-	if role.EnableIndexService {
-		filename := getPidFileName(roleIndexService, alias)
-		if err := stopRole(filename, runtimeDir); err != nil {
-			return fmt.Errorf("stop process fail, service %s", filename)
-		}
-	}
-	if role.EnableDataService {
-		filename := getPidFileName(roleDataService, alias)
-		if err := stopRole(filename, runtimeDir); err != nil {
-			return fmt.Errorf("stop process fail, service %s", filename)
-		}
-	}
-	if role.EnableProxyNode {
-		filename := getPidFileName(roleProxyNode, alias)
-		if err := stopRole(filename, runtimeDir); err != nil {
-			return fmt.Errorf("stop process fail, service %s", filename)
-		}
-	}
-	if role.EnableQueryNode {
-		filename := getPidFileName(roleQueryNode, alias)
-		if err := stopRole(filename, runtimeDir); err != nil {
-			return fmt.Errorf("stop process fail, service %s", filename)
-		}
-	}
-	if role.EnableIndexNode {
-		filename := getPidFileName(roleIndexNode, alias)
-		if err := stopRole(filename, runtimeDir); err != nil {
-			return fmt.Errorf("stop process fail, service %s", filename)
-		}
-	}
-	if role.EnableDataNode {
-		filename := getPidFileName(roleDataNode, alias)
-		if err := stopRole(filename, runtimeDir); err != nil {
-			return fmt.Errorf("stop process fail, service %s", filename)
-		}
 	}
 	return nil
 }
@@ -325,13 +188,17 @@ func main() {
 		}
 	}
 
+	filename := getPidFileName(serverType, svrAlias)
 	switch command {
 	case "run":
-		if err := run(&role, svrAlias, runtimeDir); err != nil {
+		fd, err := createPidFile(filename, runtimeDir)
+		if err != nil {
 			panic(err)
 		}
+		defer removePidFile(fd)
+		role.Run(false)
 	case "stop":
-		if err := stop(&role, svrAlias, runtimeDir); err != nil {
+		if err := stopPid(filename, runtimeDir); err != nil {
 			panic(err)
 		}
 	default:
