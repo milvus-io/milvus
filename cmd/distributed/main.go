@@ -45,100 +45,111 @@ func getPidFileName(service string, alias string) string {
 	return filename
 }
 
-func createPidFile(filename string, runtimeDir string) error {
+func createPidFile(filename string, runtimeDir string) (*os.File, error) {
 	fileFullName := path.Join(runtimeDir, filename)
 
 	fd, err := os.OpenFile(fileFullName, os.O_CREATE|os.O_RDWR, 0664)
 	if err != nil {
-		return fmt.Errorf("file %s is in-use, error = %w", filename, err)
+		return nil, fmt.Errorf("file %s is locked, error = %w", filename, err)
 	}
 	fmt.Println("open pid file:", fileFullName)
-	defer fd.Close()
 
 	err = syscall.Flock(int(fd.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 	if err != nil {
-		return fmt.Errorf("file %s is in-use, error = %w", filename, err)
+		return nil, fmt.Errorf("file %s is locked, error = %w", filename, err)
 	}
 	fmt.Println("lock pid file:", fileFullName)
 
 	fd.Truncate(0)
 	_, err = fd.WriteString(fmt.Sprintf("%d", os.Getpid()))
+	if err != nil {
+		return nil, fmt.Errorf("file %s write fail, error = %w", filename, err)
+	}
 
-	return err
+	return fd, nil
 }
 
 func closePidFile(fd *os.File) {
 	fd.Close()
 }
 
-func removePidFile(filename string, runtimeDir string) {
-	fileFullName := path.Join(runtimeDir, filename)
-	os.Remove(fileFullName)
+func removePidFile(fd *os.File) {
+	syscall.Close(int(fd.Fd()))
+	os.Remove(fd.Name())
 }
 
 func run(role *roles.MilvusRoles, alias string, runtimeDir string) error {
 	if role.EnableMaster {
 		filename := getPidFileName(roleMaster, alias)
-		if err := createPidFile(filename, runtimeDir); err != nil {
-			return fmt.Errorf("create pid file fail, service %s", filename)
+		fd, err := createPidFile(filename, runtimeDir)
+		if err != nil {
+			return err
 		}
-		defer removePidFile(filename, runtimeDir)
+		defer removePidFile(fd)
 	}
 	if role.EnableProxyService {
 		filename := getPidFileName(roleProxyService, alias)
-		if err := createPidFile(filename, runtimeDir); err != nil {
-			return fmt.Errorf("create pid file fail, service %s", filename)
+		fd, err := createPidFile(filename, runtimeDir)
+		if err != nil {
+			return err
 		}
-		defer removePidFile(filename, runtimeDir)
+		defer removePidFile(fd)
 	}
 	if role.EnableQueryService {
 		filename := getPidFileName(roleQueryService, alias)
-		if err := createPidFile(filename, runtimeDir); err != nil {
-			return fmt.Errorf("create pid file fail, service %s", filename)
+		fd, err := createPidFile(filename, runtimeDir)
+		if err != nil {
+			return err
 		}
-		defer removePidFile(filename, runtimeDir)
+		defer removePidFile(fd)
 	}
 	if role.EnableIndexService {
 		filename := getPidFileName(roleIndexService, alias)
-		if err := createPidFile(filename, runtimeDir); err != nil {
-			return fmt.Errorf("create pid file fail, service %s", filename)
+		fd, err := createPidFile(filename, runtimeDir)
+		if err != nil {
+			return err
 		}
-		defer removePidFile(filename, runtimeDir)
+		defer removePidFile(fd)
 	}
 	if role.EnableDataService {
 		filename := getPidFileName(roleDataService, alias)
-		if err := createPidFile(filename, runtimeDir); err != nil {
-			return fmt.Errorf("create pid file fail, service %s", filename)
+		fd, err := createPidFile(filename, runtimeDir)
+		if err != nil {
+			return err
 		}
-		defer removePidFile(filename, runtimeDir)
+		defer removePidFile(fd)
 	}
 	if role.EnableProxyNode {
 		filename := getPidFileName(roleProxyNode, alias)
-		if err := createPidFile(filename, runtimeDir); err != nil {
-			return fmt.Errorf("create pid file fail, service %s", filename)
+		fd, err := createPidFile(filename, runtimeDir)
+		if err != nil {
+			return err
 		}
-		defer removePidFile(filename, runtimeDir)
+		defer removePidFile(fd)
 	}
 	if role.EnableQueryNode {
 		filename := getPidFileName(roleQueryNode, alias)
-		if err := createPidFile(filename, runtimeDir); err != nil {
-			return fmt.Errorf("create pid file fail, service %s", filename)
+		fd, err := createPidFile(filename, runtimeDir)
+		if err != nil {
+			return err
 		}
-		defer removePidFile(filename, runtimeDir)
+		defer removePidFile(fd)
 	}
 	if role.EnableIndexNode {
 		filename := getPidFileName(roleIndexNode, alias)
-		if err := createPidFile(filename, runtimeDir); err != nil {
-			return fmt.Errorf("create pid file fail, service %s", filename)
+		fd, err := createPidFile(filename, runtimeDir)
+		if err != nil {
+			return err
 		}
-		defer removePidFile(filename, runtimeDir)
+		defer removePidFile(fd)
 	}
 	if role.EnableDataNode {
 		filename := getPidFileName(roleDataNode, alias)
-		if err := createPidFile(filename, runtimeDir); err != nil {
-			return fmt.Errorf("create pid file fail, service %s", filename)
+		fd, err := createPidFile(filename, runtimeDir)
+		if err != nil {
+			return err
 		}
-		defer removePidFile(filename, runtimeDir)
+		defer removePidFile(fd)
 	}
 	role.Run(false)
 	return nil
