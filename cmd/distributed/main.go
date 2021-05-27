@@ -23,16 +23,16 @@ import (
 )
 
 const (
-	RoleMaster       = "master"
-	RoleProxyService = "proxyservice"
-	RoleQueryService = "queryservice"
-	RoleIndexService = "indexservice"
-	RoleDataService  = "dataservice"
-	RoleProxyNode    = "proxynode"
-	RoleQueryNode    = "querynode"
-	RoleIndexNode    = "indexnode"
-	RoleDataNode     = "datanode"
-	RoleMixture      = "mixture"
+	roleMaster       = "master"
+	roleProxyService = "proxyservice"
+	roleQueryService = "queryservice"
+	roleIndexService = "indexservice"
+	roleDataService  = "dataservice"
+	roleProxyNode    = "proxynode"
+	roleQueryNode    = "querynode"
+	roleIndexNode    = "indexnode"
+	roleDataNode     = "datanode"
+	roleMixture      = "mixture"
 )
 
 func getPidFileName(service string, alias string) string {
@@ -78,63 +78,63 @@ func removePidFile(filename string, runtimeDir string) {
 
 func run(role *roles.MilvusRoles, alias string, runtimeDir string) error {
 	if role.EnableMaster {
-		filename := getPidFileName(RoleMaster, alias)
+		filename := getPidFileName(roleMaster, alias)
 		if err := createPidFile(filename, runtimeDir); err != nil {
 			return fmt.Errorf("create pid file fail, service %s", filename)
 		}
 		defer removePidFile(filename, runtimeDir)
 	}
 	if role.EnableProxyService {
-		filename := getPidFileName(RoleProxyService, alias)
+		filename := getPidFileName(roleProxyService, alias)
 		if err := createPidFile(filename, runtimeDir); err != nil {
 			return fmt.Errorf("create pid file fail, service %s", filename)
 		}
 		defer removePidFile(filename, runtimeDir)
 	}
 	if role.EnableQueryService {
-		filename := getPidFileName(RoleQueryService, alias)
+		filename := getPidFileName(roleQueryService, alias)
 		if err := createPidFile(filename, runtimeDir); err != nil {
 			return fmt.Errorf("create pid file fail, service %s", filename)
 		}
 		defer removePidFile(filename, runtimeDir)
 	}
 	if role.EnableIndexService {
-		filename := getPidFileName(RoleIndexService, alias)
+		filename := getPidFileName(roleIndexService, alias)
 		if err := createPidFile(filename, runtimeDir); err != nil {
 			return fmt.Errorf("create pid file fail, service %s", filename)
 		}
 		defer removePidFile(filename, runtimeDir)
 	}
 	if role.EnableDataService {
-		filename := getPidFileName(RoleDataService, alias)
+		filename := getPidFileName(roleDataService, alias)
 		if err := createPidFile(filename, runtimeDir); err != nil {
 			return fmt.Errorf("create pid file fail, service %s", filename)
 		}
 		defer removePidFile(filename, runtimeDir)
 	}
 	if role.EnableProxyNode {
-		filename := getPidFileName(RoleProxyNode, alias)
+		filename := getPidFileName(roleProxyNode, alias)
 		if err := createPidFile(filename, runtimeDir); err != nil {
 			return fmt.Errorf("create pid file fail, service %s", filename)
 		}
 		defer removePidFile(filename, runtimeDir)
 	}
 	if role.EnableQueryNode {
-		filename := getPidFileName(RoleQueryNode, alias)
+		filename := getPidFileName(roleQueryNode, alias)
 		if err := createPidFile(filename, runtimeDir); err != nil {
 			return fmt.Errorf("create pid file fail, service %s", filename)
 		}
 		defer removePidFile(filename, runtimeDir)
 	}
 	if role.EnableIndexNode {
-		filename := getPidFileName(RoleIndexNode, alias)
+		filename := getPidFileName(roleIndexNode, alias)
 		if err := createPidFile(filename, runtimeDir); err != nil {
 			return fmt.Errorf("create pid file fail, service %s", filename)
 		}
 		defer removePidFile(filename, runtimeDir)
 	}
 	if role.EnableDataNode {
-		filename := getPidFileName(RoleDataNode, alias)
+		filename := getPidFileName(roleDataNode, alias)
 		if err := createPidFile(filename, runtimeDir); err != nil {
 			return fmt.Errorf("create pid file fail, service %s", filename)
 		}
@@ -172,55 +172,55 @@ func stopRole(filename string, runtimeDir string) error {
 
 func stop(role *roles.MilvusRoles, alias string, runtimeDir string) error {
 	if role.EnableMaster {
-		filename := getPidFileName(RoleMaster, alias)
+		filename := getPidFileName(roleMaster, alias)
 		if err := stopRole(filename, runtimeDir); err != nil {
 			return fmt.Errorf("stop process fail, service %s", filename)
 		}
 	}
 	if role.EnableProxyService {
-		filename := getPidFileName(RoleProxyService, alias)
+		filename := getPidFileName(roleProxyService, alias)
 		if err := stopRole(filename, runtimeDir); err != nil {
 			return fmt.Errorf("stop process fail, service %s", filename)
 		}
 	}
 	if role.EnableQueryService {
-		filename := getPidFileName(RoleQueryService, alias)
+		filename := getPidFileName(roleQueryService, alias)
 		if err := stopRole(filename, runtimeDir); err != nil {
 			return fmt.Errorf("stop process fail, service %s", filename)
 		}
 	}
 	if role.EnableIndexService {
-		filename := getPidFileName(RoleIndexService, alias)
+		filename := getPidFileName(roleIndexService, alias)
 		if err := stopRole(filename, runtimeDir); err != nil {
 			return fmt.Errorf("stop process fail, service %s", filename)
 		}
 	}
 	if role.EnableDataService {
-		filename := getPidFileName(RoleDataService, alias)
+		filename := getPidFileName(roleDataService, alias)
 		if err := stopRole(filename, runtimeDir); err != nil {
 			return fmt.Errorf("stop process fail, service %s", filename)
 		}
 	}
 	if role.EnableProxyNode {
-		filename := getPidFileName(RoleProxyNode, alias)
+		filename := getPidFileName(roleProxyNode, alias)
 		if err := stopRole(filename, runtimeDir); err != nil {
 			return fmt.Errorf("stop process fail, service %s", filename)
 		}
 	}
 	if role.EnableQueryNode {
-		filename := getPidFileName(RoleQueryNode, alias)
+		filename := getPidFileName(roleQueryNode, alias)
 		if err := stopRole(filename, runtimeDir); err != nil {
 			return fmt.Errorf("stop process fail, service %s", filename)
 		}
 	}
 	if role.EnableIndexNode {
-		filename := getPidFileName(RoleIndexNode, alias)
+		filename := getPidFileName(roleIndexNode, alias)
 		if err := stopRole(filename, runtimeDir); err != nil {
 			return fmt.Errorf("stop process fail, service %s", filename)
 		}
 	}
 	if role.EnableDataNode {
-		filename := getPidFileName(RoleDataNode, alias)
+		filename := getPidFileName(roleDataNode, alias)
 		if err := stopRole(filename, runtimeDir); err != nil {
 			return fmt.Errorf("stop process fail, service %s", filename)
 		}
@@ -263,11 +263,11 @@ func main() {
 	flags.StringVar(&svrAlias, "alias", "", "set alias")
 
 	var enableMaster, enableProxyService, enableQueryService, enableIndexService, enableDataService bool
-	flags.BoolVar(&enableMaster, RoleMaster, false, "enable master")
-	flags.BoolVar(&enableProxyService, RoleProxyService, false, "enable proxy service")
-	flags.BoolVar(&enableQueryService, RoleQueryService, false, "enable query service")
-	flags.BoolVar(&enableIndexService, RoleIndexService, false, "enable index service")
-	flags.BoolVar(&enableDataService, RoleDataService, false, "enable data service")
+	flags.BoolVar(&enableMaster, roleMaster, false, "enable master")
+	flags.BoolVar(&enableProxyService, roleProxyService, false, "enable proxy service")
+	flags.BoolVar(&enableQueryService, roleQueryService, false, "enable query service")
+	flags.BoolVar(&enableIndexService, roleIndexService, false, "enable index service")
+	flags.BoolVar(&enableDataService, roleDataService, false, "enable data service")
 
 	if err := flags.Parse(os.Args[3:]); err != nil {
 		os.Exit(-1)
@@ -275,25 +275,25 @@ func main() {
 
 	role := roles.MilvusRoles{}
 	switch serverType {
-	case RoleMaster:
+	case roleMaster:
 		role.EnableMaster = true
-	case RoleProxyService:
+	case roleProxyService:
 		role.EnableProxyService = true
-	case RoleProxyNode:
+	case roleProxyNode:
 		role.EnableProxyNode = true
-	case RoleQueryService:
+	case roleQueryService:
 		role.EnableQueryService = true
-	case RoleQueryNode:
+	case roleQueryNode:
 		role.EnableQueryNode = true
-	case RoleDataService:
+	case roleDataService:
 		role.EnableDataService = true
-	case RoleDataNode:
+	case roleDataNode:
 		role.EnableDataNode = true
-	case RoleIndexService:
+	case roleIndexService:
 		role.EnableIndexService = true
-	case RoleIndexNode:
+	case roleIndexNode:
 		role.EnableIndexNode = true
-	case RoleMixture:
+	case roleMixture:
 		role.EnableMaster = enableMaster
 		role.EnableProxyService = enableProxyService
 		role.EnableQueryService = enableQueryService
