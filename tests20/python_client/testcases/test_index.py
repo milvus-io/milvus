@@ -3,6 +3,8 @@ import pytest
 from pymilvus_orm import FieldSchema
 
 from base.client_request import ApiReq
+from base.index import ApiIndex
+from base.collection import ApiCollection
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
@@ -62,34 +64,17 @@ class TestIndexParams(ApiReq):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_index_collection_name_invalid(self, get_invalid_collection_name):
+    def test_index_collection_None(self):
         """
-        target: test index with error collection name
-        method: input invalid name
+        target: test index with None collection
+        method: input none collection object
         expected: raise exception
         """
         self._connect()
-        c_name = get_invalid_collection_name
         index_name = cf.gen_unique_str(prefix)
-        collection = self._collection()
-        ex, _ = self.index.index_init(c_name, default_field_name, default_index_params, name=index_name)
+        ex, _ = self.index.index_init(None, default_field_name, default_index_params, name=index_name)
         log.error(str(ex))
         assert "invalid" or "illegal" in str(ex)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_index_collection_name_not_existed(self):
-        """
-        target: test index with error collection name
-        method: input collection name not created
-        expected: raise exception
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        index_name = cf.gen_unique_str(prefix)
-        collection = self._collection()
-        ex, _ = self.index.index_init(c_name, default_field_name, default_index_params, name=index_name)
-        log.error(str(ex))
-        assert "exist" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_field_name_invalid(self, get_invalid_field_name):
@@ -103,7 +88,7 @@ class TestIndexParams(ApiReq):
         index_name = cf.gen_unique_str(prefix)
         c_name = cf.gen_unique_str(prefix)
         collection = self._collection(c_name)
-        ex, _ = self.index.index_init(c_name, f_name, default_index_params, name=index_name)
+        ex, _ = self.index.index_init(collection, f_name, default_index_params, name=index_name)
         log.error(str(ex))
         assert "invalid" or "illegal" in str(ex)
 
@@ -119,7 +104,7 @@ class TestIndexParams(ApiReq):
         f_name = cf.gen_unique_str(prefix)
         index_name = cf.gen_unique_str(prefix)
         collection = self._collection(c_name)
-        ex, _ = self.index.index_init(c_name, f_name, default_index_params, name=index_name)
+        ex, _ = self.index.index_init(collection, f_name, default_index_params, name=index_name)
         log.error(str(ex))
         assert "exist" in str(ex)
 
@@ -136,7 +121,7 @@ class TestIndexParams(ApiReq):
         collection = self._collection(c_name)
         index_params = copy.deepcopy(default_index_params)
         index_params["index_type"] = get_invalid_index_type
-        ex, _ = self.index.index_init(c_name, default_field_name, index_params, name=index_name)
+        ex, _ = self.index.index_init(collection, default_field_name, index_params, name=index_name)
         log.error(str(ex))
         assert "invalid" or "illegal" in str(ex)
 
@@ -153,7 +138,7 @@ class TestIndexParams(ApiReq):
         collection = self._collection(c_name)
         index_params = copy.deepcopy(default_index_params)
         index_params["index_type"] = "IVFFFFFFF"
-        ex, _ = self.index.index_init(c_name, default_field_name, index_params, name=index_name)
+        ex, _ = self.index.index_init(collection, default_field_name, index_params, name=index_name)
         log.error(str(ex))
         assert "invalid" or "illegal" in str(ex)
 
@@ -169,7 +154,7 @@ class TestIndexParams(ApiReq):
         index_name = cf.gen_unique_str(prefix)
         collection = self._collection(c_name)
         index_params = get_invalid_index_params
-        ex, _ = self.index.index_init(c_name, default_field_name, index_params, name=index_name)
+        ex, _ = self.index.index_init(collection, default_field_name, index_params, name=index_name)
         log.error(str(ex))
         assert "invalid" or "illegal" in str(ex)
 
@@ -184,7 +169,7 @@ class TestIndexParams(ApiReq):
         c_name = cf.gen_unique_str(prefix)
         index_name = get_invalid_index_name
         collection = self._collection(c_name)
-        ex, _ = self.index.index_init(c_name, default_field_name, default_index_params, name=index_name)
+        ex, _ = self.index.index_init(collection, default_field_name, default_index_params, name=index_name)
         log.error(str(ex))
         assert "invalid" or "illegal" in str(ex)
 
@@ -203,7 +188,7 @@ class TestIndexBase(ApiReq):
         c_name = cf.gen_unique_str(prefix)
         index_name = cf.gen_unique_str(prefix)
         collection = self._collection(c_name)
-        index, _ = self.index.index_init(c_name, default_field_name, default_index_params, name=index_name)
+        index, _ = self.index.index_init(collection, default_field_name, default_index_params, name=index_name)
         # TODO: assert index
         assert index == collection.indexes[0]
 
@@ -219,7 +204,7 @@ class TestIndexBase(ApiReq):
         index_name = cf.gen_unique_str(prefix)
         collection = self._collection(c_name)
         index_params = get_valid_index_params
-        index, _ = self.index.index_init(c_name, default_field_name, index_params, name=index_name)
+        index, _ = self.index.index_init(collection, default_field_name, index_params, name=index_name)
         # TODO: assert index
         assert index == collection.indexes[0]
 
@@ -231,11 +216,10 @@ class TestIndexBase(ApiReq):
         expected: no exception raised
         """
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
         index_name = ct.default_index_name
         collection = self._collection()
-        collection.create_index(default_field_name, default_index_params, index_name=index_name)
-        ex, _ = self.index.index_init(c_name, default_field_name, default_index_params, name=index_name)
+        self.collection.create_index(default_field_name, default_index_params, index_name=index_name)
+        ex, _ = self.index.index_init(collection, default_field_name, default_index_params, name=index_name)
         assert "dup" in str(ex)
 
     # TODO: server not supported
@@ -300,7 +284,7 @@ class TestIndexBase(ApiReq):
         c_name = cf.gen_unique_str(prefix)
         index_name = cf.gen_unique_str(prefix)
         collection = self._collection(c_name)
-        ex, _ = self.index.index_init(c_name, default_field_name, default_index_params, name=index_name)
+        ex, _ = self.index.index_init(collection, default_field_name, default_index_params, name=index_name)
         assert "dup" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -314,7 +298,7 @@ class TestIndexBase(ApiReq):
         c_name = cf.gen_unique_str(prefix)
         index_name = ct.default_index_name
         collection = self._collection(c_name)
-        index, _ = self.index.index_init(c_name, default_field_name, default_index_params, name=index_name)
+        index, _ = self.index.index_init(collection, default_field_name, default_index_params, name=index_name)
         self.index.drop()
         assert len(collection.indexes) == 0
 
@@ -329,7 +313,7 @@ class TestIndexBase(ApiReq):
         c_name = cf.gen_unique_str(prefix)
         index_name = ct.default_index_name
         collection = self._collection(c_name)
-        index, _ = self.index.index_init(c_name, default_field_name, default_index_params, name=index_name)
+        index, _ = self.index.index_init(collection, default_field_name, default_index_params, name=index_name)
         _, _ = self.index.drop()
         ex, _ = self.index.drop()
         assert "error" in ex
@@ -350,11 +334,13 @@ class TestIndexAdvanced(ApiReq):
         c_name_2 = cf.gen_unique_str(prefix)
         index_name = ct.default_index_name
         collection = self._collection(c_name)
-        collection_2 = self._collection(c_name_2)
-        index, _ = self.index.index_init(c_name, default_field_name, default_index_params, name=index_name)
-        index_2, _ = self.index.index_init(c_name_2, default_field_name, default_index_params, name=index_name)
+        api_collection_2 = ApiCollection()
+        api_index_2 = ApiIndex()
+        collection_2 = api_collection_2.collection_init(c_name_2)
+        self.index.index_init(collection, default_field_name, default_index_params, name=index_name)
+        index_2, _ = api_index_2.index_init(collection_2, default_field_name, default_index_params, name=index_name)
         self.index.drop()
-        assert index_2 in self.collection_2.indexes
+        assert index_2 in collection_2.indexes
 
     @pytest.mark.tags(CaseLabel.L2)
     def _test_index_drop_during_inserting(self):
