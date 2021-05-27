@@ -20,17 +20,18 @@ import (
 	"time"
 
 	grpcdatanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
-	"github.com/milvus-io/milvus/internal/logutil"
+
+	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/logutil"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"

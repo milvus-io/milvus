@@ -16,10 +16,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
@@ -41,10 +44,10 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	inFlushCh := make(chan *flushMsg, 10)
 	defer close(inFlushCh)
 
-	testPath := "/test/datanode/root/meta"
-	err := clearEtcd(testPath)
-	require.NoError(t, err)
-	Params.MetaRootPath = testPath
+	// testPath := "/test/datanode/root/meta"
+	// err := clearEtcd(testPath)
+	// require.NoError(t, err)
+	// Params.MetaRootPath = testPath
 
 	// Params.FlushDdBufferSize = 4
 	replica := newReplica()
@@ -148,11 +151,13 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	}
 
 	replica.addSegment(1, collID, partitionID, "insert-01")
+	flushCh := make(chan []*datapb.DDLBinlogMeta)
 	inFlushCh <- &flushMsg{
 		msgID:        5,
 		timestamp:    5,
 		segmentID:    UniqueID(1),
 		collectionID: collID,
+		ddlFlushedCh: flushCh,
 	}
 
 	startPos := []*internalpb.MsgPosition{
@@ -172,4 +177,8 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 		startPos, startPos)
 	var inMsg Msg = msgStream
 	ddNode.Operate([]Msg{inMsg})
+
+	paths := <-flushCh
+	log.Debug("Flushed DDL binlog paths", zap.Any("paths", paths))
+	assert.Equal(t, 1, len(paths))
 }
