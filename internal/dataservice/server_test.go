@@ -562,7 +562,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 				},
 			},
 		})
-		assert.NotNil(t, err)
+		assert.Nil(t, err)
 		assert.EqualValues(t, resp.ErrorCode, commonpb.ErrorCode_UnexpectedError)
 	})
 }
