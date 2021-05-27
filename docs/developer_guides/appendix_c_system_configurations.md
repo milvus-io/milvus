@@ -27,9 +27,7 @@ $ MILVUS_CONFIG_FILE=/path/to/milvus/configs/milvus.yaml milvus run master
 `server type`：指定执行程序的类型。`server type` 有：
 
 * `master`
-* `msgstream`
-* `proxyservice`
-* `proxynode`
+* `proxy`
 * `queryservice`
 * `querynode`
 * `dataservice`
@@ -77,64 +75,17 @@ $ MILVUS_CONFIG_FILE=/path/to/milvus/configs/milvus.yaml milvus run master
 
 配置文件比命令行参数支持更多的选项。你可以根据 milvus.yaml.sample 文件按照需要创建一个新的配置文件 milvus.yaml 即可。
 
-**etcd.address**
-
-* etcd 服务地址
-* 默认值："localhost"
-
-**etcd.port**
-
-* etcd 服务端口
-* 默认值：2379
-
-**minio.address**
-
-* minio 服务地址
-* 默认值："localhost"
-
-**minio.port**
-
-* minio 服务端口
-* 默认值：9000
-
-**pulsar.address**
-
-* pulsar 服务地址
-* 默认值："localhost"
-
-**pulsar.port**
-
-* pulsar 服务端口
-* 默认值：6650
-
-**log.level**
-
-* 指定日志的输出级别。当前支持 `debug`，`info`，`warning`，`error`
-* 默认值："info"
-
-**log.format**
-
-* 指定日志的输出格式。当前支持 `text` 和 `json`
-* 默认值："text"
-
-**log.file.rootPath**
-
-* 指定日志的存储路径。
-* 默认值："/var/lib/milvus/logs"
-
-**log.file.maxSize**
-
-* 日志文件的大小限制
-* 默认值：300MB
-
-**log.file.maxAge**
-
-* 日志最大保留的天数
-* 默认值：0
-* 默认不清理旧的日志文件。如果设置该参数值，则会清理 `maxAge` 天前的日志文件。
-
-**log.file.maxBackups**
-
-* 保留日志文件的最大数量
-* 默认值：0
-* 默认保留所有旧的日志文件。如果设置该参数值为 `7`，则最多会保留 `7` 个旧的日志文件。
+| 名称         | 描述         | 默认值         |
+| --------- | --------- | --------- |
+| etcd.address | etcd 服务地址 | "localhost" |
+| etcd.port    | etcd 服务端口 | 2379        |
+| minio.address | minio 服务地址 | "localhost" |
+| minio.port    | minio 服务端口 | 9000      |
+| pulsar.address | pulsar 服务地址 | "localhost" |
+| pulsar.port   | pulsar 服务端口 | 6650     |
+| log.level    | 指定日志的输出级别。当前支持 `debug`，`info`，`warning`，`error` | "info"         |
+| log.format | 指定日志的输出格式。当前支持 `text` 和 `json` | "text" |
+| log.file.rootPath | 指定日志的存储路径| "/var/lib/milvus/logs" |
+| log.file.maxSize | 日志文件的大小限制 | 300MB |
+| log.file.maxAge | 日志最大保留的天数。默认不清理旧的日志文件。如果设置该参数值，则会清理 `maxAge` 天前的日志文件。 | 0 |
+| log.file.maxBackups | 保留日志文件的最大数量。默认保留所有旧的日志文件。如果设置该参数值为 `7`，则最多会保留 `7` 个旧的日志文件。 | 0 |
