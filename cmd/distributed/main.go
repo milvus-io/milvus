@@ -32,6 +32,7 @@ const (
 	RoleQueryNode    = "querynode"
 	RoleIndexNode    = "indexnode"
 	RoleDataNode     = "datanode"
+	RoleMixture      = "mixture"
 )
 
 func getPidFileName(service string, alias string) string {
@@ -51,14 +52,14 @@ func createPidFile(filename string, runtimeDir string) error {
 	if err != nil {
 		return fmt.Errorf("file %s is in-use, error = %w", filename, err)
 	}
-	fmt.Println("open pid file: ", fileFullName)
+	fmt.Println("open pid file:", fileFullName)
 	defer fd.Close()
 
 	err = syscall.Flock(int(fd.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 	if err != nil {
 		return fmt.Errorf("file %s is in-use, error = %w", filename, err)
 	}
-	fmt.Println("lock pid file: ", fileFullName)
+	fmt.Println("lock pid file:", fileFullName)
 
 	fd.Truncate(0)
 	_, err = fd.WriteString(fmt.Sprintf("%d", os.Getpid()))
@@ -261,23 +262,51 @@ func main() {
 		return
 	}
 	command := os.Args[1]
+	serverType := os.Args[2]
 	flags := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 
 	var svrAlias string
 	flags.StringVar(&svrAlias, "alias", "", "set alias")
 
-	role := roles.MilvusRoles{}
-	flags.BoolVar(&role.EnableMaster, RoleMaster, false, "enable master")
-	flags.BoolVar(&role.EnableProxyService, RoleProxyService, false, "enable proxy service")
-	flags.BoolVar(&role.EnableQueryService, RoleQueryService, false, "enable query service")
-	flags.BoolVar(&role.EnableIndexService, RoleIndexService, false, "enable index service")
-	flags.BoolVar(&role.EnableDataService, RoleDataService, false, "enable data service")
-	flags.BoolVar(&role.EnableProxyNode, RoleProxyNode, false, "enable proxy node")
-	flags.BoolVar(&role.EnableQueryNode, RoleQueryNode, false, "enable query node")
-	flags.BoolVar(&role.EnableIndexNode, RoleIndexNode, false, "enable index node")
-	flags.BoolVar(&role.EnableDataNode, RoleDataNode, false, "enable data node")
+	var enableMaster, enableProxyService, enableQueryService, enableIndexService, enableDataService bool
+	flags.BoolVar(&enableMaster, RoleMaster, false, "enable master")
+	flags.BoolVar(&enableProxyService, RoleProxyService, false, "enable proxy service")
+	flags.BoolVar(&enableQueryService, RoleQueryService, false, "enable query service")
+	flags.BoolVar(&enableIndexService, RoleIndexService, false, "enable index service")
+	flags.BoolVar(&enableDataService, RoleDataService, false, "enable data service")
 
-	if err := flags.Parse(os.Args[2:]); err != nil {
+	if err := flags.Parse(os.Args[3:]); err != nil {
+		os.Exit(-1)
+	}
+
+	role := roles.MilvusRoles{}
+	switch serverType {
+	case RoleMaster:
+		role.EnableMaster = true
+	case RoleProxyService:
+		role.EnableProxyService = true
+	case RoleProxyNode:
+		role.EnableProxyNode = true
+	case RoleQueryService:
+		role.EnableQueryService = true
+	case RoleQueryNode:
+		role.EnableQueryNode = true
+	case RoleDataService:
+		role.EnableDataService = true
+	case RoleDataNode:
+		role.EnableDataNode = true
+	case RoleIndexService:
+		role.EnableIndexService = true
+	case RoleIndexNode:
+		role.EnableIndexNode = true
+	case RoleMixture:
+		role.EnableMaster = enableMaster
+		role.EnableProxyService = enableProxyService
+		role.EnableQueryService = enableQueryService
+		role.EnableDataService = enableDataService
+		role.EnableIndexService = enableIndexService
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown server type = %s\n", serverType)
 		os.Exit(-1)
 	}
 
