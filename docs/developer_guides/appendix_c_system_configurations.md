@@ -35,8 +35,17 @@ $ MILVUS_CONFIG_FILE=/path/to/milvus/configs/milvus.yaml milvus run master
 * `indexservice`
 * `indexnode`
 * `standalone`
+* `mixture`
 
 `flags`：指定命令行选项。例如，你可以使用 `-f` 或者 `--config-file` 选项去指定配置文件路径。
+
+当 `server type` 为 `mixture` 时，必须附加以下几个 `flag` 中的一个或多个，表示这几个服务在一个进程内启动
+
+* `-master`
+* `-queryservice`
+* `-dataservice`
+* `-indexservice`
+
 
 > Getting help
 >
@@ -44,6 +53,7 @@ $ MILVUS_CONFIG_FILE=/path/to/milvus/configs/milvus.yaml milvus run master
 > ```shell
 > $ milvus run master --help
 > ```
+
 ### 命令行参数
 
 **--version**
