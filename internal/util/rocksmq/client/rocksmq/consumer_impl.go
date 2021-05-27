@@ -94,5 +94,10 @@ func (c *consumer) Chan() <-chan ConsumerMessage {
 }
 
 func (c *consumer) Seek(id UniqueID) error { //nolint:govet
-	return c.client.server.Seek(c.topic, c.consumerName, id)
+	err := c.client.server.Seek(c.topic, c.consumerName, id)
+	if err != nil {
+		return err
+	}
+	c.client.server.Notify(c.topic, c.consumerName)
+	return nil
 }
