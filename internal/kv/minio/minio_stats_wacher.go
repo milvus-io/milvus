@@ -69,7 +69,11 @@ func (s *MinioStatsWatcher) StartBackground(ctx context.Context) {
 		case <-ctx.Done():
 			log.Debug("minio stats shutdown")
 			return
-		case info := <-ch:
+		case info, ok := <-ch:
+			if !ok {
+				log.Debug("channel is closed")
+				return
+			}
 			if info.Err != nil {
 				log.Error("minio receive wrong notification", zap.Error(info.Err))
 				continue
