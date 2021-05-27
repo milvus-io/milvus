@@ -106,6 +106,8 @@ func (p *ParamTable) Init() {
 		p.initStatsStreamPosSubPath()
 		p.initSegmentDmlPosSubPath()
 		p.initSegmentDdlPosSubPath()
+		p.initDmlChannelPosSubPath()
+		p.initDdlChannelPosSubPath()
 	})
 }
 
