@@ -1,6 +1,8 @@
 package sessionutil
 
 import (
+	"fmt"
+	"math/rand"
 	"strconv"
 	"sync"
 	"testing"
@@ -20,6 +22,7 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	Params.Init()
 
 	etcdAddr, err := Params.Load("_EtcdAddress")
+	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 	if err != nil {
 		panic(err)
 	}
@@ -27,7 +30,7 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "")
-	_, err = cli.Delete(ctx, DefaultServiceRoot, clientv3.WithPrefix())
+	_, err = cli.Delete(ctx, metaRoot, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
 	defer etcdKV.Close()
@@ -36,7 +39,7 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	var wg sync.WaitGroup
 	var muList sync.Mutex = sync.Mutex{}
 
-	s := NewSession(ctx, []string{etcdAddr})
+	s := NewSession(ctx, metaRoot, []string{etcdAddr})
 	res := make([]int64, 0)
 
 	getIDFunc := func() {
@@ -72,13 +75,14 @@ func TestInit(t *testing.T) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "")
-	_, err = cli.Delete(ctx, DefaultServiceRoot, clientv3.WithPrefix())
+	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
+	_, err = cli.Delete(ctx, metaRoot, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
 	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix("")
 
-	s := NewSession(ctx, []string{etcdAddr})
+	s := NewSession(ctx, metaRoot, []string{etcdAddr})
 	s.Init("inittest", "testAddr", false)
 	assert.NotEqual(t, int64(0), s.leaseID)
 	assert.NotEqual(t, int64(0), s.ServerID)
@@ -99,7 +103,8 @@ func TestUpdateSessions(t *testing.T) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "")
-	_, err = cli.Delete(ctx, DefaultServiceRoot, clientv3.WithPrefix())
+	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
+	_, err = cli.Delete(ctx, metaRoot, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
 	defer etcdKV.Close()
@@ -108,7 +113,7 @@ func TestUpdateSessions(t *testing.T) {
 	var wg sync.WaitGroup
 	var muList sync.Mutex = sync.Mutex{}
 
-	s := NewSession(ctx, []string{etcdAddr})
+	s := NewSession(ctx, metaRoot, []string{etcdAddr})
 
 	sessions, rev, err := s.GetSessions("test")
 	assert.Nil(t, err)
@@ -118,7 +123,7 @@ func TestUpdateSessions(t *testing.T) {
 	sList := []*Session{}
 
 	getIDFunc := func() {
-		singleS := NewSession(ctx, []string{etcdAddr})
+		singleS := NewSession(ctx, metaRoot, []string{etcdAddr})
 		singleS.Init("test", "testAddr", false)
 		muList.Lock()
 		sList = append(sList, singleS)
@@ -139,7 +144,7 @@ func TestUpdateSessions(t *testing.T) {
 	notExistSessions, _, _ := s.GetSessions("testt")
 	assert.Equal(t, len(notExistSessions), 0)
 
-	etcdKV.RemoveWithPrefix(DefaultServiceRoot)
+	etcdKV.RemoveWithPrefix(metaRoot)
 	assert.Eventually(t, func() bool {
 		sessions, _, _ := s.GetSessions("test")
 		return len(sessions) == 0

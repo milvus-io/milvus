@@ -27,6 +27,7 @@ import (
 
 	dsc "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
 	isc "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
+	pnc "github.com/milvus-io/milvus/internal/distributed/proxynode/client"
 	psc "github.com/milvus-io/milvus/internal/distributed/proxyservice/client"
 	qsc "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
 	"github.com/milvus-io/milvus/internal/log"
@@ -40,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
 // grpc wrapper
@@ -59,8 +61,8 @@ type Server struct {
 	queryService types.QueryService
 
 	newProxyServiceClient func(string) types.ProxyService
-	newDataServiceClient  func(string) types.DataService
-	newIndexServiceClient func(string, string, time.Duration) types.IndexService
+	newIndexServiceClient func(string, string, string, time.Duration) types.IndexService
+	newDataServiceClient  func(string, string, string, time.Duration) types.DataService
 	newQueryServiceClient func(string) (types.QueryService, error)
 
 	closer io.Closer
@@ -98,8 +100,8 @@ func (s *Server) setClient() {
 		}
 		return psClient
 	}
-	s.newDataServiceClient = func(s string) types.DataService {
-		dsClient := dsc.NewClient(s)
+	s.newDataServiceClient = func(s, etcdMetaRoot, etcdAddress string, timeout time.Duration) types.DataService {
+		dsClient := dsc.NewClient(s, etcdMetaRoot, []string{etcdAddress}, timeout)
 		if err := dsClient.Init(); err != nil {
 			panic(err)
 		}
@@ -111,8 +113,8 @@ func (s *Server) setClient() {
 		}
 		return dsClient
 	}
-	s.newIndexServiceClient = func(s, etcdAddress string, timeout time.Duration) types.IndexService {
-		isClient := isc.NewClient(s, []string{etcdAddress}, timeout)
+	s.newIndexServiceClient = func(s, etcdAddress, metaRootPath string, timeout time.Duration) types.IndexService {
+		isClient := isc.NewClient(s, metaRootPath, []string{etcdAddress}, timeout)
 		if err := isClient.Init(); err != nil {
 			panic(err)
 		}
@@ -173,6 +175,19 @@ func (s *Server) init() error {
 
 	s.masterService.UpdateStateCode(internalpb.StateCode_Initializing)
 
+	s.masterService.SetNewProxyClient(
+		func(s *sessionutil.Session) (types.ProxyNode, error) {
+			cli := pnc.NewClient(ctx, s.Address)
+			if err := cli.Init(); err != nil {
+				return nil, err
+			}
+			if err := cli.Start(); err != nil {
+				return nil, err
+			}
+			return cli, nil
+		},
+	)
+
 	if s.newProxyServiceClient != nil {
 		log.Debug("proxy service", zap.String("address", Params.ProxyServiceAddress))
 		proxyService := s.newProxyServiceClient(Params.ProxyServiceAddress)
@@ -183,7 +198,7 @@ func (s *Server) init() error {
 	}
 	if s.newDataServiceClient != nil {
 		log.Debug("data service", zap.String("address", Params.DataServiceAddress))
-		dataService := s.newDataServiceClient(Params.DataServiceAddress)
+		dataService := s.newDataServiceClient(Params.DataServiceAddress, cms.Params.MetaRootPath, cms.Params.EtcdAddress, 10)
 		if err := s.masterService.SetDataService(ctx, dataService); err != nil {
 			panic(err)
 		}
@@ -191,7 +206,7 @@ func (s *Server) init() error {
 	}
 	if s.newIndexServiceClient != nil {
 		log.Debug("index service", zap.String("address", Params.IndexServiceAddress))
-		indexService := s.newIndexServiceClient(Params.IndexServiceAddress, cms.Params.EtcdAddress, 10)
+		indexService := s.newIndexServiceClient(Params.IndexServiceAddress, cms.Params.MetaRootPath, cms.Params.EtcdAddress, 10)
 		if err := s.masterService.SetIndexService(indexService); err != nil {
 			panic(err)
 		}

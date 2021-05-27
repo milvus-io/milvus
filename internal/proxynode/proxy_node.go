@@ -87,7 +87,7 @@ func NewProxyNode(ctx context.Context, factory msgstream.Factory) (*ProxyNode, e
 
 // Register register proxy node at etcd
 func (node *ProxyNode) Register() error {
-	node.session = sessionutil.NewSession(node.ctx, []string{Params.EtcdAddress})
+	node.session = sessionutil.NewSession(node.ctx, Params.MetaRootPath, []string{Params.EtcdAddress})
 	node.session.Init(typeutil.ProxyNodeRole, Params.NetworkAddress, false)
 	Params.ProxyID = node.session.ServerID
 	return nil
@@ -181,7 +181,7 @@ func (node *ProxyNode) Init() error {
 	log.Debug("create query message stream ...")
 
 	masterAddr := Params.MasterAddress
-	idAllocator, err := allocator.NewIDAllocator(node.ctx, masterAddr, []string{Params.EtcdAddress})
+	idAllocator, err := allocator.NewIDAllocator(node.ctx, masterAddr, Params.MetaRootPath, []string{Params.EtcdAddress})
 
 	if err != nil {
 		return err

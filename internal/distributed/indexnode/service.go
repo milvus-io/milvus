@@ -137,7 +137,7 @@ func (s *Server) init() error {
 	}
 
 	indexServiceAddr := Params.IndexServerAddress
-	s.indexServiceClient = grpcindexserviceclient.NewClient(indexServiceAddr, []string{indexnode.Params.EtcdAddress}, 10)
+	s.indexServiceClient = grpcindexserviceclient.NewClient(indexServiceAddr, indexnode.Params.MetaRootPath, []string{indexnode.Params.EtcdAddress}, 10)
 	err = s.indexServiceClient.Init()
 	if err != nil {
 		return err

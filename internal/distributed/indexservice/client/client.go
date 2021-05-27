@@ -59,8 +59,8 @@ func getIndexServiceAddress(sess *sessionutil.Session) (string, error) {
 	return ms.Address, nil
 }
 
-func NewClient(address string, etcdAddr []string, timeout time.Duration) *Client {
-	sess := sessionutil.NewSession(context.Background(), etcdAddr)
+func NewClient(address, metaRoot string, etcdAddr []string, timeout time.Duration) *Client {
+	sess := sessionutil.NewSession(context.Background(), metaRoot, etcdAddr)
 	return &Client{
 		address:   address,
 		ctx:       context.Background(),
