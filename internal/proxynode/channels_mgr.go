@@ -3,6 +3,7 @@ package proxynode
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"runtime"
 	"sort"
 	"sync"
@@ -62,6 +63,41 @@ func getUniqueIntGeneratorIns() uniqueIntGenerator {
 
 type masterService interface {
 	GetChannels(collectionID UniqueID) (map[vChan]pChan, error)
+}
+
+type mockMaster struct {
+	collectionID2Channels map[UniqueID]map[vChan]pChan
+}
+
+func newMockMaster() *mockMaster {
+	return &mockMaster{
+		collectionID2Channels: make(map[UniqueID]map[vChan]pChan),
+	}
+}
+
+func genUniqueStr() string {
+	l := rand.Uint64()%100 + 1
+	b := make([]byte, l)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%X", b)
+}
+
+func (m *mockMaster) GetChannels(collectionID UniqueID) (map[vChan]pChan, error) {
+	channels, ok := m.collectionID2Channels[collectionID]
+	if ok {
+		return channels, nil
+	}
+
+	channels = make(map[vChan]pChan)
+	l := rand.Uint64()%10 + 1
+	for i := 0; uint64(i) < l; i++ {
+		channels[genUniqueStr()] = genUniqueStr()
+	}
+
+	m.collectionID2Channels[collectionID] = channels
+	return channels, nil
 }
 
 type channelsMgrImpl struct {
