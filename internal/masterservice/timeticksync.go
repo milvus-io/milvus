@@ -12,20 +12,15 @@
 package masterservice
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"path"
 	"sync"
 
-	"github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
 
@@ -37,35 +32,14 @@ type timetickSync struct {
 	sendChan      chan map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg
 }
 
-func newTimeTickSync(core *Core) (*timetickSync, error) {
-	tss := timetickSync{
+func newTimeTickSync(core *Core) *timetickSync {
+	return &timetickSync{
 		lock:          sync.Mutex{},
 		core:          core,
 		proxyTimeTick: make(map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg),
 		chanStream:    make(map[string]msgstream.MsgStream),
 		sendChan:      make(chan map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg, 16),
 	}
-
-	ctx2, cancel := context.WithTimeout(core.ctx, RequestTimeout)
-	defer cancel()
-
-	resp, err := core.etcdCli.Get(ctx2, ProxyMetaPrefix, clientv3.WithPrefix())
-	if err != nil {
-		return nil, err
-	}
-	for _, v := range resp.Kvs {
-		var sess sessionutil.Session
-		err := json.Unmarshal(v.Value, &sess)
-		if err != nil {
-			log.Debug("unmarshal SvrSession failed", zap.Error(err))
-			continue
-		}
-		if _, ok := tss.proxyTimeTick[sess.ServerID]; !ok {
-			tss.proxyTimeTick[sess.ServerID] = nil
-		}
-	}
-
-	return &tss, nil
 }
 
 // sendToChannel send all channels' timetick to sendChan
@@ -101,50 +75,36 @@ func (t *timetickSync) UpdateTimeTick(in *internalpb.ChannelTimeTickMsg) error {
 	return nil
 }
 
+func (t *timetickSync) AddProxyNode(sess *sessionutil.Session) {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	t.proxyTimeTick[sess.ServerID] = nil
+}
+
+func (t *timetickSync) DelProxyNode(sess *sessionutil.Session) {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	if _, ok := t.proxyTimeTick[sess.ServerID]; ok {
+		delete(t.proxyTimeTick, sess.ServerID)
+		t.sendToChannel()
+	}
+}
+
+func (t *timetickSync) GetProxyNodes(sess []*sessionutil.Session) {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	for _, s := range sess {
+		t.proxyTimeTick[s.ServerID] = nil
+	}
+}
+
 // StartWatch watch proxy node change and process all channels' timetick msg
 func (t *timetickSync) StartWatch() {
-	proxyNodePrefix := path.Join(sessionutil.DefaultServiceRoot, typeutil.ProxyNodeRole)
-	rch := t.core.etcdCli.Watch(t.core.ctx, proxyNodePrefix, clientv3.WithPrefix(), clientv3.WithCreatedNotify())
 	for {
 		select {
 		case <-t.core.ctx.Done():
 			log.Debug("master service context done", zap.Error(t.core.ctx.Err()))
 			return
-		case wresp, ok := <-rch:
-			if !ok {
-				log.Debug("time tick sync watch etcd failed")
-			}
-			for _, ev := range wresp.Events {
-				switch ev.Type {
-				case mvccpb.PUT:
-					var sess sessionutil.Session
-					err := json.Unmarshal(ev.Kv.Value, &sess)
-					if err != nil {
-						log.Debug("watch proxy node, unmarshal failed", zap.Error(err))
-						continue
-					}
-					func() {
-						t.lock.Lock()
-						defer t.lock.Unlock()
-						t.proxyTimeTick[sess.ServerID] = nil
-					}()
-				case mvccpb.DELETE:
-					var sess sessionutil.Session
-					err := json.Unmarshal(ev.PrevKv.Value, &sess)
-					if err != nil {
-						log.Debug("watch proxy node, unmarshal failed", zap.Error(err))
-						continue
-					}
-					func() {
-						t.lock.Lock()
-						defer t.lock.Unlock()
-						if _, ok := t.proxyTimeTick[sess.ServerID]; ok {
-							delete(t.proxyTimeTick, sess.ServerID)
-							t.sendToChannel()
-						}
-					}()
-				}
-			}
 		case ptt, ok := <-t.sendChan:
 			if !ok {
 				log.Debug("timetickSync sendChan closed")

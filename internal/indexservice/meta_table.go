@@ -157,7 +157,7 @@ func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequ
 func (mt *metaTable) BuildIndex(indexBuildID UniqueID, serverID int64) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
-	log.Debug("IndexService update index state")
+	log.Debug("IndexService update index meta")
 
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
 	if !ok {

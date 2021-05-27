@@ -43,9 +43,7 @@ import (
 
 type proxyMock struct {
 	types.ProxyService
-	randVal   int
-	collArray []string
-	mutex     sync.Mutex
+	randVal int
 }
 
 func (p *proxyMock) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
@@ -56,7 +54,14 @@ func (p *proxyMock) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRes
 		Value: fmt.Sprintf("proxy-time-tick-%d", p.randVal),
 	}, nil
 }
-func (p *proxyMock) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+
+type proxyNodeMock struct {
+	types.ProxyNode
+	collArray []string
+	mutex     sync.Mutex
+}
+
+func (p *proxyNodeMock) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	p.collArray = append(p.collArray, request.CollectionName)
@@ -64,7 +69,7 @@ func (p *proxyMock) InvalidateCollectionMetaCache(ctx context.Context, request *
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
 }
-func (p *proxyMock) GetCollArray() []string {
+func (p *proxyNodeMock) GetCollArray() []string {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	ret := make([]string, 0, len(p.collArray))
@@ -222,19 +227,35 @@ func TestMasterService(t *testing.T) {
 
 	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second})
 	assert.Nil(t, err)
-	_, err = etcdCli.Delete(ctx, sessionutil.DefaultServiceRoot, clientv3.WithPrefix())
+	sessKey := path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot)
+	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 	defer func() {
-		_, _ = etcdCli.Delete(ctx, sessionutil.DefaultServiceRoot, clientv3.WithPrefix())
+		_, _ = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	}()
 
+	pnb, err := json.Marshal(
+		&sessionutil.Session{
+			ServerID: 100,
+		},
+	)
+	assert.Nil(t, err)
+	_, err = etcdCli.Put(ctx, path.Join(sessKey, typeutil.ProxyNodeRole+"-100"), string(pnb))
+	assert.Nil(t, err)
+
 	pm := &proxyMock{
-		randVal:   randVal,
-		collArray: make([]string, 0, 16),
-		mutex:     sync.Mutex{},
+		randVal: randVal,
 	}
 	err = core.SetProxyService(ctx, pm)
 	assert.Nil(t, err)
+
+	pnm := &proxyNodeMock{
+		collArray: make([]string, 0, 16),
+		mutex:     sync.Mutex{},
+	}
+	core.NewProxyClient = func(*sessionutil.Session) (types.ProxyNode, error) {
+		return pnm, nil
+	}
 
 	dm := &dataMock{randVal: randVal}
 	err = core.SetDataService(ctx, dm)
@@ -571,8 +592,8 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, collMeta.ID, partMsg.CollectionID)
 		assert.Equal(t, partMeta.PartitionID, partMsg.PartitionID)
 
-		assert.Equal(t, 1, len(pm.GetCollArray()))
-		assert.Equal(t, collName, pm.GetCollArray()[0])
+		assert.Equal(t, 1, len(pnm.GetCollArray()))
+		assert.Equal(t, collName, pnm.GetCollArray()[0])
 
 		// check DD operation info
 		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix, 0)
@@ -976,8 +997,8 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, collMeta.ID, dmsg.CollectionID)
 		assert.Equal(t, dropPartID, dmsg.PartitionID)
 
-		assert.Equal(t, 2, len(pm.GetCollArray()))
-		assert.Equal(t, collName, pm.GetCollArray()[1])
+		assert.Equal(t, 2, len(pnm.GetCollArray()))
+		assert.Equal(t, collName, pnm.GetCollArray()[1])
 
 		// check DD operation info
 		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix, 0)
@@ -1024,7 +1045,7 @@ func TestMasterService(t *testing.T) {
 		dmsg, ok := (msg.Msgs[0]).(*msgstream.DropCollectionMsg)
 		assert.True(t, ok)
 		assert.Equal(t, collMeta.ID, dmsg.CollectionID)
-		collArray := pm.GetCollArray()
+		collArray := pnm.GetCollArray()
 		assert.Equal(t, 3, len(collArray))
 		assert.Equal(t, collName, collArray[2])
 
@@ -1049,7 +1070,7 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 		time.Sleep(time.Second)
 		assert.Zero(t, len(ddStream.Chan()))
-		collArray = pm.GetCollArray()
+		collArray = pnm.GetCollArray()
 		assert.Equal(t, 3, len(collArray))
 		assert.Equal(t, collName, collArray[2])
 
@@ -1454,9 +1475,9 @@ func TestMasterService(t *testing.T) {
 		s2, err := json.Marshal(&p2)
 		assert.Nil(t, err)
 
-		_, err = core.etcdCli.Put(ctx2, path.Join(sessionutil.DefaultServiceRoot, typeutil.ProxyNodeRole)+"-1", string(s1))
+		_, err = core.etcdCli.Put(ctx2, path.Join(sessKey, typeutil.ProxyNodeRole)+"-1", string(s1))
 		assert.Nil(t, err)
-		_, err = core.etcdCli.Put(ctx2, path.Join(sessionutil.DefaultServiceRoot, typeutil.ProxyNodeRole)+"-2", string(s2))
+		_, err = core.etcdCli.Put(ctx2, path.Join(sessKey, typeutil.ProxyNodeRole)+"-2", string(s2))
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
 
@@ -1726,9 +1747,7 @@ func TestMasterService2(t *testing.T) {
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
 
 	pm := &proxyMock{
-		randVal:   randVal,
-		collArray: make([]string, 0, 16),
-		mutex:     sync.Mutex{},
+		randVal: randVal,
 	}
 	err = core.SetProxyService(ctx, pm)
 	assert.Nil(t, err)
@@ -1753,6 +1772,10 @@ func TestMasterService2(t *testing.T) {
 	}
 	err = core.SetQueryService(qm)
 	assert.Nil(t, err)
+
+	core.NewProxyClient = func(*sessionutil.Session) (types.ProxyNode, error) {
+		return nil, nil
+	}
 
 	err = core.Init()
 	assert.Nil(t, err)
@@ -1949,8 +1972,8 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.CallInvalidateCollectionMetaCacheService = func(ctx context.Context, ts typeutil.Timestamp, dbName, collectionName string) error {
-		return nil
+	c.NewProxyClient = func(*sessionutil.Session) (types.ProxyNode, error) {
+		return nil, nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)

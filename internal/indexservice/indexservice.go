@@ -97,7 +97,7 @@ func NewIndexService(ctx context.Context) (*IndexService, error) {
 
 // Register register index service at etcd
 func (i *IndexService) Register() error {
-	i.session = sessionutil.NewSession(i.loopCtx, []string{Params.EtcdAddress})
+	i.session = sessionutil.NewSession(i.loopCtx, Params.MetaRootPath, []string{Params.EtcdAddress})
 	i.session.Init(typeutil.IndexServiceRole, Params.Address, true)
 	i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, 0)
 	return nil

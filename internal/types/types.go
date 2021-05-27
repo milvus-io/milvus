@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
 type TimeTickProvider interface {
@@ -121,6 +122,7 @@ type MasterComponent interface {
 	SetDataService(context.Context, DataService) error
 	SetIndexService(IndexService) error
 	SetQueryService(QueryService) error
+	SetNewProxyClient(func(sess *sessionutil.Session) (ProxyNode, error))
 }
 
 type ProxyNode interface {
