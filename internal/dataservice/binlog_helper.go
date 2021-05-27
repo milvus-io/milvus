@@ -7,6 +7,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
 // binlog helper functions persisting binlog paths into kv storage.
@@ -198,4 +199,62 @@ func (s *Server) prepareSegmentPos(segInfo *datapb.SegmentInfo, dmlPos, ddlPos *
 	}
 
 	return map[string]string{}, nil
+}
+
+// GetVChanPositions get vchannel latest postitions with provided dml channel names
+func (s *Server) GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelPair, error) {
+	if s.kvClient == nil {
+		return nil, errNilKvClient
+	}
+	pairs := make([]*datapb.VchannelPair, 0, len(vchans))
+
+	for _, vchan := range vchans {
+
+		dmlKey := path.Join(Params.DmlChannelPosSubPath, vchan.DmlChannel)
+		ddlKey := path.Join(Params.DdlChannelPosSubPath, vchan.DmlChannel)
+
+		dmlPos := &datapb.PositionPair{}
+		ddlPos := &datapb.PositionPair{}
+
+		dmlVal, err := s.kvClient.Load(dmlKey)
+		zp := zeroPos(vchan.DmlChannel)
+		if err != nil {
+			dmlPos.StartPosition = &zp
+			dmlPos.EndPosition = &zp
+		} else {
+			err = proto.UnmarshalText(dmlVal, dmlPos)
+			if err != nil {
+				dmlPos.StartPosition = &zp
+				dmlPos.EndPosition = &zp
+			}
+		}
+
+		ddlVal, err := s.kvClient.Load(ddlKey)
+		zp = zeroPos(vchan.DdlChannel)
+		if err != nil {
+			ddlPos.StartPosition = &zp
+			ddlPos.EndPosition = &zp
+		} else {
+			err = proto.UnmarshalText(ddlVal, ddlPos)
+			if err != nil {
+				ddlPos.StartPosition = &zp
+				ddlPos.EndPosition = &zp
+			}
+		}
+
+		pairs = append(pairs, &datapb.VchannelPair{
+			CollectionID:    vchan.CollectionID,
+			DmlVchannelName: vchan.DmlChannel,
+			DdlVchannelName: vchan.DmlChannel,
+			DdlPosition:     ddlPos,
+			DmlPosition:     dmlPos,
+		})
+	}
+	return pairs, nil
+}
+
+func zeroPos(name string) internalpb.MsgPosition {
+	return internalpb.MsgPosition{
+		ChannelName: name,
+	}
 }
