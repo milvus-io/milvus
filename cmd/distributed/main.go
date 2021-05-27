@@ -76,6 +76,12 @@ func removePidFile(filename string, runtimeDir string) {
 }
 
 func run(role *roles.MilvusRoles, alias string, runtimeDir string) error {
+	service_enabled := (role.EnableMaster || role.EnableProxyService || role.EnableQueryService || role.EnableIndexService || role.EnableDataService)
+	node_enabled := (role.EnableProxyNode || role.EnableQueryNode || role.EnableIndexNode || role.EnableDataNode)
+	if service_enabled && node_enabled {
+		return fmt.Errorf("Not allow to launch service and node in one process\n")
+	}
+
 	if role.EnableMaster {
 		filename := getPidFileName(ROLE_MASTER, alias)
 		if err := createPidFile(filename, runtimeDir); err != nil {
@@ -237,7 +243,7 @@ func makeRuntimeDir(dir string) error {
 		return nil
 	}
 	if !st.IsDir() {
-		return fmt.Errorf("%s is exist, but is not directory", dir)
+		return fmt.Errorf("%s is not directory", dir)
 	}
 	tmpFile, err := ioutil.TempFile(dir, "tmp")
 	if err != nil {
@@ -277,10 +283,10 @@ func main() {
 
 	runtimeDir := "/run/milvus"
 	if err := makeRuntimeDir(runtimeDir); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "set runtime dir at : %s failed, set it to /tmp/milvus directory\n", runtimeDir)
+		_, _ = fmt.Fprintf(os.Stderr, "Set runtime dir at %s failed, set it to /tmp/milvus directory\n", runtimeDir)
 		runtimeDir = "/tmp/milvus"
 		if err = makeRuntimeDir(runtimeDir); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "create runtime directory at : %s failed\n", runtimeDir)
+			_, _ = fmt.Fprintf(os.Stderr, "Create runtime directory at %s failed\n", runtimeDir)
 			os.Exit(-1)
 		}
 	}
