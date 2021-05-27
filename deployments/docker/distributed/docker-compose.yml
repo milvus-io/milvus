@@ -29,7 +29,7 @@ services:
 
   master:
     image: registry.zilliz.com/milvus/milvus:master-release
-    command: ["/milvus/bin/milvus", "run", "-master"]
+    command: ["/milvus/bin/milvus", "run", "master"]
     environment:
       ETCD_ADDRESS: etcd:2379
       PULSAR_ADDRESS: pulsar://pulsar:6650
@@ -46,7 +46,7 @@ services:
 
   proxyservice:
     image: registry.zilliz.com/milvus/milvus:master-release
-    command: ["/milvus/bin/milvus", "run", "-proxyservice"]
+    command: ["/milvus/bin/milvus", "run", "proxyservice"]
     environment:
       PULSAR_ADDRESS: pulsar://pulsar:6650
     depends_on:
@@ -58,7 +58,7 @@ services:
 
   proxynode:
     image: registry.zilliz.com/milvus/milvus:master-release
-    command: ["/milvus/bin/milvus", "run", "-proxynode"]
+    command: ["/milvus/bin/milvus", "run", "proxynode"]
     environment:
       ETCD_ADDRESS: etcd:2379
       PULSAR_ADDRESS: pulsar://pulsar:6650
@@ -76,7 +76,7 @@ services:
 
   queryservice:
     image: registry.zilliz.com/milvus/milvus:master-release
-    command: ["/milvus/bin/milvus", "run", "-queryservice"]
+    command: ["/milvus/bin/milvus", "run", "queryservice"]
     environment:
       MASTER_ADDRESS: master:53100
       DATA_SERVICE_ADDRESS: dataservice:13333
@@ -89,7 +89,7 @@ services:
 
   querynode:
     image: registry.zilliz.com/milvus/milvus:master-release
-    command: ["/milvus/bin/milvus", "run", "-querynode"]
+    command: ["/milvus/bin/milvus", "run", "querynode"]
     environment:
       MINIO_ADDRESS: minio:9000
       PULSAR_ADDRESS: pulsar://pulsar:6650
@@ -105,7 +105,7 @@ services:
 
   indexservice:
     image: registry.zilliz.com/milvus/milvus:master-release
-    command: ["/milvus/bin/milvus", "run", "-indexservice"]
+    command: ["/milvus/bin/milvus", "run", "indexservice"]
     environment:
       ETCD_ADDRESS: etcd:2379
       MINIO_ADDRESS: minio:9000
@@ -119,7 +119,7 @@ services:
 
   indexnode:
     image: registry.zilliz.com/milvus/milvus:master-release
-    command: ["/milvus/bin/milvus", "run", "-indexnode"]
+    command: ["/milvus/bin/milvus", "run", "indexnode"]
     environment:
       MINIO_ADDRESS: minio:9000
       INDEX_SERVICE_ADDRESS: indexservice:31000
@@ -130,7 +130,7 @@ services:
 
   dataservice:
     image: registry.zilliz.com/milvus/milvus:master-release
-    command: ["/milvus/bin/milvus", "run", "-dataservice"]
+    command: ["/milvus/bin/milvus", "run", "dataservice"]
     environment:
       ETCD_ADDRESS: etcd:2379
       MINIO_ADDRESS: minio:9000
@@ -145,7 +145,7 @@ services:
 
   datanode:
     image: registry.zilliz.com/milvus/milvus:master-release
-    command: ["/milvus/bin/milvus", "run", "-datanode"]
+    command: ["/milvus/bin/milvus", "run", "datanode"]
     environment:
       ETCD_ADDRESS: etcd:2379
       MINIO_ADDRESS: minio:9000
