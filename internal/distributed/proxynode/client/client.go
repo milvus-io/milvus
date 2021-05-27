@@ -141,7 +141,7 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 
 func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, req *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
+		return c.grpcClient.InvalidateCollectionMetaCache(ctx, req)
 	})
 	return ret.(*commonpb.Status), err
 }
