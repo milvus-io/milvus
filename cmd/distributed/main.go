@@ -147,8 +147,9 @@ func stopRole(filename string, runtimeDir string) error {
 	var pid int
 
 	fd, err := os.OpenFile(path.Join(runtimeDir, filename), os.O_RDONLY, 0664)
+	// it's possible that pid file has already been removed
 	if err != nil {
-		return err
+		return nil
 	}
 	defer closePidFile(fd)
 
@@ -157,8 +158,9 @@ func stopRole(filename string, runtimeDir string) error {
 		return err
 	}
 	process, err := os.FindProcess(pid)
+	// it's possible that this process has already been killed
 	if err != nil {
-		return err
+		return nil
 	}
 	err = process.Signal(syscall.SIGTERM)
 	if err != nil {
