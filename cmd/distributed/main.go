@@ -72,7 +72,7 @@ func closePidFile(fd *os.File) {
 
 func removePidFile(filename string, runtimeDir string) {
 	fileFullName := path.Join(runtimeDir, filename)
-	_ = os.Remove(fileFullName)
+	os.Remove(fileFullName)
 }
 
 func run(role *roles.MilvusRoles, alias string, runtimeDir string) error {
@@ -283,10 +283,10 @@ func main() {
 
 	runtimeDir := "/run/milvus"
 	if err := makeRuntimeDir(runtimeDir); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "Set runtime dir at %s failed, set it to /tmp/milvus directory\n", runtimeDir)
+		fmt.Fprintf(os.Stderr, "Set runtime dir at %s failed, set it to /tmp/milvus directory\n", runtimeDir)
 		runtimeDir = "/tmp/milvus"
 		if err = makeRuntimeDir(runtimeDir); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "Create runtime directory at %s failed\n", runtimeDir)
+			fmt.Fprintf(os.Stderr, "Create runtime directory at %s failed\n", runtimeDir)
 			os.Exit(-1)
 		}
 	}
@@ -301,6 +301,6 @@ func main() {
 			panic(err)
 		}
 	default:
-		_, _ = fmt.Fprintf(os.Stderr, "unknown command : %s", command)
+		fmt.Fprintf(os.Stderr, "unknown command : %s", command)
 	}
 }
