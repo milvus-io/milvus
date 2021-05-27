@@ -298,6 +298,7 @@ enum ChannelWatchState {
 message ChannelStatus {
   string name = 1;
   ChannelWatchState state=2;
+  int64 collectionID = 3;
 }
 
 message DataNodeInfo {

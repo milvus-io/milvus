@@ -11,9 +11,13 @@
 package dataservice
 
 import (
+	"crypto/rand"
 	"fmt"
+	"math/big"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"go.uber.org/zap"
 )
 
 type clusterDeltaChange struct {
@@ -74,8 +78,43 @@ func (p *doNothingUnregisterPolicy) apply(cluster map[string]*datapb.DataNodeInf
 	return nil
 }
 
+type reassignRandomUnregisterPolicy struct{}
+
+func (p *reassignRandomUnregisterPolicy) apply(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo) []*datapb.DataNodeInfo {
+	if len(cluster) == 0 || // no available node
+		len(session.Channels) == 0 { // lost node not watching any channels
+		return []*datapb.DataNodeInfo{}
+	}
+
+	mChan := make(map[string]struct{}, len(session.Channels))
+	for _, chanSt := range session.Channels {
+		mChan[chanSt.Name] = struct{}{}
+	}
+
+	bIdx, err := rand.Int(rand.Reader, big.NewInt(int64(len(cluster))))
+	if err != nil {
+		log.Error("error generated rand idx", zap.Error(err))
+		return []*datapb.DataNodeInfo{}
+	}
+	idx := bIdx.Int64()
+	if int(idx) >= len(cluster) {
+		return []*datapb.DataNodeInfo{}
+	}
+	i := 0
+	for _, node := range cluster {
+		if i == int(idx) {
+			//TODO add channel to node
+			return []*datapb.DataNodeInfo{
+				node,
+			}
+		}
+		i++
+	}
+	return []*datapb.DataNodeInfo{}
+}
+
 type channelAssignPolicy interface {
-	apply(cluster map[string]*datapb.DataNodeInfo, channel string) []*datapb.DataNodeInfo
+	apply(cluster map[string]*datapb.DataNodeInfo, channel string, collectionID UniqueID) []*datapb.DataNodeInfo
 }
 
 type allAssignPolicy struct {
@@ -85,7 +124,7 @@ func newAllAssignPolicy() channelAssignPolicy {
 	return &allAssignPolicy{}
 }
 
-func (p *allAssignPolicy) apply(cluster map[string]*datapb.DataNodeInfo, channel string) []*datapb.DataNodeInfo {
+func (p *allAssignPolicy) apply(cluster map[string]*datapb.DataNodeInfo, channel string, collectionID UniqueID) []*datapb.DataNodeInfo {
 	ret := make([]*datapb.DataNodeInfo, 0)
 	for _, node := range cluster {
 		fmt.Printf("xxxxnode: %v\n", node.Address)
@@ -100,8 +139,9 @@ func (p *allAssignPolicy) apply(cluster map[string]*datapb.DataNodeInfo, channel
 			continue
 		}
 		node.Channels = append(node.Channels, &datapb.ChannelStatus{
-			Name:  channel,
-			State: datapb.ChannelWatchState_Uncomplete,
+			Name:         channel,
+			State:        datapb.ChannelWatchState_Uncomplete,
+			CollectionID: collectionID,
 		})
 		fmt.Printf("channelxxxx: %v\n", node.Channels)
 		ret = append(ret, node)
