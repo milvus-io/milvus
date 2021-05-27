@@ -56,8 +56,8 @@ func getQueryServiceAddress(sess *sessionutil.Session) (string, error) {
 	return ms.Address, nil
 }
 
-func NewClient(ctx context.Context, address string, etcdAddr []string, timeout time.Duration) (*Client, error) {
-	sess := sessionutil.NewSession(context.Background(), etcdAddr)
+func NewClient(ctx context.Context, metaRootPath, address string, etcdAddr []string, timeout time.Duration) (*Client, error) {
+	sess := sessionutil.NewSession(context.Background(), metaRootPath, etcdAddr)
 
 	return &Client{
 		ctx:        ctx,
