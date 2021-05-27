@@ -266,6 +266,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 
 	for _, id := range req.SegmentIDs {
 		chanName := node.getChannelName(id)
+		log.Info("vchannel", zap.String("name", chanName))
 		if chanName == "" {
 			status.Reason = fmt.Sprintf("DataNode not find segment %d!", id)
 			return status, errors.New(status.GetReason())
@@ -288,23 +289,9 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 			dmlFlushedCh: dmlFlushedCh,
 		}
 
-		flushCh <- flushmsg
-
-		// GOOSE TODO get binlog paths.
-		// waitReceive := func(wg *sync.WaitGroup, flushedCh <-chan bool, req *datapb.SaveBinlogPathsRequest) {
-		//     defer wg.Done()
-		//     select {
-		//     case <-time.After(300 * time.Second):
-		//         return
-		//     case isFlushed := <-flushedCh:
-		//         if isFlushed {
-		//             log.Debug("Yeah! It's safe to notify dataservice")
-		//         }
-		//     }
-		// }
-
 		waitReceive := func(wg *sync.WaitGroup, flushedCh interface{}, req *datapb.SaveBinlogPathsRequest) {
 			defer wg.Done()
+			log.Info("Inside waitReceive")
 			switch Ch := flushedCh.(type) {
 			case chan []*datapb.ID2PathList:
 				select {
@@ -334,7 +321,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 
 					if len(meta) == 0 {
 						log.Info("Ddl messages flush Done")
-						// Modify req with empty ddl binlog paths
+						// Modify req with empty ddl binlog paths and position
 						return
 					}
 
@@ -349,6 +336,8 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		// TODO make a queue for this func
 		currentSegID := id
 		go func() {
+			flushCh <- flushmsg
+
 			log.Info("Waiting for flush completed", zap.Int64("segmentID", currentSegID))
 			req := &datapb.SaveBinlogPathsRequest{
 				Base:         &commonpb.MsgBase{},
@@ -363,8 +352,20 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 			go waitReceive(&wg, dmlFlushedCh, req)
 			wg.Wait()
 
-			// TODO
-			//status := node.dataService.SaveBinlogPaths(req)
+			status, err := node.dataService.SaveBinlogPaths(node.ctx, req)
+			if err != nil {
+				log.Error("DataNode or DataService abnormal, restarting DataNode")
+				// TODO restart
+				return
+			}
+
+			if status.ErrorCode != commonpb.ErrorCode_Success {
+				log.Error("Save paths failed, resending request",
+					zap.String("error message", status.GetReason()))
+				// TODO resend
+				return
+			}
+
 			log.Info("Flush Completed", zap.Int64("segmentID", currentSegID))
 		}()
 
