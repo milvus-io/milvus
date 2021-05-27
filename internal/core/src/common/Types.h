@@ -17,13 +17,20 @@
 #include <boost/align/aligned_allocator.hpp>
 #include <memory>
 #include <vector>
+#include <utility>
 #include <NamedType/named_type.hpp>
+#include "pb/schema.pb.h"
 
 namespace milvus {
 using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp
 using engine::DataType;
 using engine::FieldElementType;
 using engine::idx_t;
+
+using ScalarArray = proto::schema::ScalarField;
+using DataArray = proto::schema::FieldData;
+using VectorArray = proto::schema::VectorField;
+using IdArray = proto::schema::IDs;
 
 using MetricType = faiss::MetricType;
 
@@ -42,6 +49,8 @@ constexpr std::false_type always_false{};
 
 template <typename T>
 using aligned_vector = std::vector<T, boost::alignment::aligned_allocator<T, 64>>;
+
+struct EntityResult {};
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 struct QueryResult {
@@ -72,9 +81,22 @@ struct QueryResult {
 
 using QueryResultPtr = std::shared_ptr<QueryResult>;
 
-using FieldId = fluent::NamedType<int64_t, struct FieldIdTag, fluent::Comparable, fluent::Hashable>;
-using FieldName = fluent::NamedType<std::string, struct FieldNameTag, fluent::Comparable, fluent::Hashable>;
-using FieldOffset = fluent::NamedType<int64_t, struct FieldOffsetTag, fluent::Comparable, fluent::Hashable>;
+struct EntityResults {
+    // use protobuf results to simplify
+};
+
+namespace impl {
+// hide identifier name to make auto completion happy
+struct FieldIdTag;
+struct FieldNameTag;
+struct FieldOffsetTag;
+struct SegOffsetTag;
+};  // namespace impl
+
+using FieldId = fluent::NamedType<int64_t, impl::FieldIdTag, fluent::Comparable, fluent::Hashable>;
+using FieldName = fluent::NamedType<std::string, impl::FieldNameTag, fluent::Comparable, fluent::Hashable>;
+using FieldOffset = fluent::NamedType<int64_t, impl::FieldOffsetTag, fluent::Comparable, fluent::Hashable>;
+using SegOffset = fluent::NamedType<int64_t, impl::SegOffsetTag, fluent::Arithmetic>;
 
 using BitsetView = faiss::BitsetView;
 inline BitsetView
