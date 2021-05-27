@@ -177,7 +177,7 @@ func (s *Server) init() error {
 
 	s.masterService.SetNewProxyClient(
 		func(s *sessionutil.Session) (types.ProxyNode, error) {
-			cli := pnc.NewClient(ctx, s.Address)
+			cli := pnc.NewClient(ctx, s.Address, 10)
 			if err := cli.Init(); err != nil {
 				return nil, err
 			}
