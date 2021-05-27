@@ -113,7 +113,7 @@ func (s *Server) setClient() {
 		}
 		return dsClient
 	}
-	s.newIndexServiceClient = func(s, etcdAddress, metaRootPath string, timeout time.Duration) types.IndexService {
+	s.newIndexServiceClient = func(s, metaRootPath, etcdAddress string, timeout time.Duration) types.IndexService {
 		isClient := isc.NewClient(s, metaRootPath, []string{etcdAddress}, timeout)
 		if err := isClient.Init(); err != nil {
 			panic(err)
