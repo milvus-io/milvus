@@ -19,6 +19,7 @@
 #include "utils/StringHelpFunctions.h"
 
 #include <arpa/inet.h>
+#include <netdb.h>
 
 #ifdef MILVUS_GPU_VERSION
 
@@ -554,6 +555,18 @@ ValidationUtil::ValidateIpAddress(const std::string& ip_address) {
             return Status(SERVER_UNEXPECTED_ERROR, msg);
         }
     }
+}
+
+Status
+ValidationUtil::ValidateHostname(const std::string& hostname) {
+    struct hostent* hent = gethostbyname(hostname.c_str());
+    fiu_do_on("ValidationUtil.ValidateHostname.invalid_hostname", hent = nullptr);
+    if (!hent) {
+        std::string msg = "Unresolvable hostname: " + hostname;
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
 }
 
 Status
