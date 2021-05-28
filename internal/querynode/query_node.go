@@ -30,7 +30,6 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -53,15 +52,12 @@ type QueryNode struct {
 	QueryNodeID UniqueID
 	stateCode   atomic.Value
 
-	replica ReplicaInterface
+	// internal components
+	historical *historical
+	streaming  *streaming
 
 	// internal services
-	metaService      *metaService
-	searchService    *searchService
-	loadService      *loadService
-	statsService     *statsService
-	dsServicesMu     sync.Mutex // guards dataSyncServices
-	dataSyncServices map[UniqueID]*dataSyncService
+	searchService *searchService
 
 	// clients
 	masterService types.MasterService
@@ -82,18 +78,13 @@ func NewQueryNode(ctx context.Context, queryNodeID UniqueID, factory msgstream.F
 		queryNodeLoopCtx:    ctx1,
 		queryNodeLoopCancel: cancel,
 		QueryNodeID:         queryNodeID,
-
-		dataSyncServices: make(map[UniqueID]*dataSyncService),
-		metaService:      nil,
-		searchService:    nil,
-		statsService:     nil,
-
-		msFactory: factory,
+		searchService:       nil,
+		msFactory:           factory,
 	}
 
 	node.scheduler = newTaskScheduler(ctx1)
-	node.replica = newCollectionReplica()
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
+
 	return node
 }
 
@@ -102,17 +93,11 @@ func NewQueryNodeWithoutID(ctx context.Context, factory msgstream.Factory) *Quer
 	node := &QueryNode{
 		queryNodeLoopCtx:    ctx1,
 		queryNodeLoopCancel: cancel,
-
-		dataSyncServices: make(map[UniqueID]*dataSyncService),
-		metaService:      nil,
-		searchService:    nil,
-		statsService:     nil,
-
-		msFactory: factory,
+		searchService:       nil,
+		msFactory:           factory,
 	}
 
 	node.scheduler = newTaskScheduler(ctx1)
-	node.replica = newCollectionReplica()
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 
 	return node
@@ -128,6 +113,13 @@ func (node *QueryNode) Register() error {
 
 func (node *QueryNode) Init() error {
 	ctx := context.Background()
+
+	node.historical = newHistorical(node.queryNodeLoopCtx,
+		node.masterService,
+		node.dataService,
+		node.indexService,
+		node.msFactory)
+	node.streaming = newStreaming()
 
 	C.SegcoreInit()
 	registerReq := &queryPb.RegisterNodeRequest{
@@ -192,17 +184,15 @@ func (node *QueryNode) Start() error {
 	}
 
 	// init services and manager
-	node.searchService = newSearchService(node.queryNodeLoopCtx, node.replica, node.msFactory)
-	node.loadService = newLoadService(node.queryNodeLoopCtx, node.masterService, node.dataService, node.indexService, node.replica)
-	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, node.loadService.segLoader.indexLoader.fieldStatsChan, node.msFactory)
+	// TODO: pass node.streaming.replica to search service
+	node.searchService = newSearchService(node.queryNodeLoopCtx, node.historical.replica, node.streaming.replica, node.msFactory)
 
 	// start task scheduler
 	go node.scheduler.Start()
 
 	// start services
 	go node.searchService.start()
-	go node.loadService.start()
-	go node.statsService.start()
+	go node.historical.start()
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
 	return nil
 }
@@ -211,23 +201,15 @@ func (node *QueryNode) Stop() error {
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	node.queryNodeLoopCancel()
 
-	// free collectionReplica
-	node.replica.freeAll()
-
 	// close services
-	for _, dsService := range node.dataSyncServices {
-		if dsService != nil {
-			dsService.close()
-		}
+	if node.historical != nil {
+		node.historical.close()
+	}
+	if node.streaming != nil {
+		node.streaming.close()
 	}
 	if node.searchService != nil {
 		node.searchService.close()
-	}
-	if node.loadService != nil {
-		node.loadService.close()
-	}
-	if node.statsService != nil {
-		node.statsService.close()
 	}
 	return nil
 }
@@ -266,30 +248,4 @@ func (node *QueryNode) SetDataService(data types.DataService) error {
 	}
 	node.dataService = data
 	return nil
-}
-
-func (node *QueryNode) getDataSyncService(collectionID UniqueID) (*dataSyncService, error) {
-	node.dsServicesMu.Lock()
-	defer node.dsServicesMu.Unlock()
-	ds, ok := node.dataSyncServices[collectionID]
-	if !ok {
-		return nil, errors.New("cannot found dataSyncService, collectionID =" + fmt.Sprintln(collectionID))
-	}
-	return ds, nil
-}
-
-func (node *QueryNode) addDataSyncService(collectionID UniqueID, ds *dataSyncService) error {
-	node.dsServicesMu.Lock()
-	defer node.dsServicesMu.Unlock()
-	if _, ok := node.dataSyncServices[collectionID]; ok {
-		return errors.New("dataSyncService has been existed, collectionID =" + fmt.Sprintln(collectionID))
-	}
-	node.dataSyncServices[collectionID] = ds
-	return nil
-}
-
-func (node *QueryNode) removeDataSyncService(collectionID UniqueID) {
-	node.dsServicesMu.Lock()
-	defer node.dsServicesMu.Unlock()
-	delete(node.dataSyncServices, collectionID)
 }
