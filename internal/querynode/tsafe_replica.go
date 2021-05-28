@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 )
 
+// TSafeReplicaInterface is the interface wrapper of tSafeReplica
 type TSafeReplicaInterface interface {
 	getTSafe(vChannel VChannel) Timestamp
 	setTSafe(vChannel VChannel, timestamp Timestamp)

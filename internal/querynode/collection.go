@@ -35,7 +35,7 @@ type Collection struct {
 	id              UniqueID
 	partitionIDs    []UniqueID
 	schema          *schemapb.CollectionSchema
-	watchedChannels []string
+	watchedChannels []VChannel
 }
 
 func (c *Collection) ID() UniqueID {
@@ -60,11 +60,11 @@ func (c *Collection) removePartitionID(partitionID UniqueID) {
 	c.partitionIDs = tmpIDs
 }
 
-func (c *Collection) addWatchedDmChannels(channels []string) {
+func (c *Collection) addWatchedDmChannels(channels []VChannel) {
 	c.watchedChannels = append(c.watchedChannels, channels...)
 }
 
-func (c *Collection) getWatchedDmChannels() []string {
+func (c *Collection) getWatchedDmChannels() []VChannel {
 	return c.watchedChannels
 }
 

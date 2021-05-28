@@ -21,11 +21,15 @@ const (
 )
 
 type (
-	UniqueID       = typeutil.UniqueID
-	Timestamp      = typeutil.Timestamp
-	IntPrimaryKey  = typeutil.IntPrimaryKey
-	DSL            = string
-	VChannel       = string
+	UniqueID = typeutil.UniqueID
+	// Timestamp
+	Timestamp = typeutil.Timestamp
+	// IntPrimaryKey
+	IntPrimaryKey = typeutil.IntPrimaryKey
+	DSL           = string
+	// VChannel
+	VChannel = string
+	// ConsumeSubName
 	ConsumeSubName = string
 )
 
