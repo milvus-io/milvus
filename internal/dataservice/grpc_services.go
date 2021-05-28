@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"strconv"
+	"sync/atomic"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/log"
@@ -15,26 +16,8 @@ import (
 	"go.uber.org/zap"
 )
 
-func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	resp := &internalpb.ComponentStates{
-		State: &internalpb.ComponentInfo{
-			NodeID:    Params.NodeID,
-			Role:      role,
-			StateCode: s.state.Load().(internalpb.StateCode),
-		},
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
-	}
-	// todo GetComponentStates need to be removed
-	//dataNodeStates, err := s.cluster.GetDataNodeStates(ctx)
-	//if err != nil {
-	//resp.Status.Reason = err.Error()
-	//return resp, nil
-	//}
-	//resp.SubcomponentStates = dataNodeStates
-	resp.Status.ErrorCode = commonpb.ErrorCode_Success
-	return resp, nil
+func (s *Server) isClosed() bool {
+	return atomic.LoadInt64(&s.isServing) == 0
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
@@ -55,22 +38,17 @@ func (s *Server) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 	}, nil
 }
 
-func (s *Server) RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
-	return nil, nil
-}
-
 func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error) {
-	if !s.checkStateIsHealthy() {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "server is initializing",
-		}, nil
+	resp := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}
+	if s.isClosed() {
+		resp.Reason = "server is closed"
+		return resp, nil
 	}
 	if err := s.segAllocator.SealAllSegments(ctx, req.CollectionID); err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    fmt.Sprintf("Seal all segments error %s", err),
-		}, nil
+		resp.Reason = fmt.Sprintf("Seal all segments error %s", err)
+		return resp, nil
 	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -78,7 +56,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb
 }
 
 func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
-	if !s.checkStateIsHealthy() {
+	if s.isClosed() {
 		return &datapb.AssignSegmentIDResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -151,7 +129,7 @@ func (s *Server) ShowSegments(ctx context.Context, req *datapb.ShowSegmentsReque
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
 	}
-	if !s.checkStateIsHealthy() {
+	if s.isClosed() {
 		resp.Status.Reason = "server is initializing"
 		return resp, nil
 	}
@@ -167,7 +145,7 @@ func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
 	}
-	if !s.checkStateIsHealthy() {
+	if s.isClosed() {
 		resp.Status.Reason = "server is initializing"
 		return resp, nil
 	}
@@ -284,7 +262,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
 	}
-	if !s.checkStateIsHealthy() {
+	if s.isClosed() {
 		resp.Status.Reason = "data service is not healthy"
 		return resp, nil
 	}
@@ -307,8 +285,8 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	resp := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
-	if !s.checkStateIsHealthy() {
-		resp.Reason = "server is initializing"
+	if s.isClosed() {
+		resp.Reason = "server is closed"
 		return resp, nil
 	}
 	if s.flushMsgStream == nil {
@@ -340,25 +318,18 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	log.Debug("flush segment with meta", zap.Int64("id", req.SegmentID),
 		zap.Any("meta", meta))
 
-	// write flush msg into segmentInfo/flush stream
-	msgPack := composeSegmentFlushMsgPack(req.SegmentID)
-	err = s.flushMsgStream.Produce(&msgPack)
-	if err != nil {
-		resp.Reason = err.Error()
-		return resp, nil
-	}
-	log.Debug("send segment flush msg", zap.Int64("id", req.SegmentID))
-
-	// set segment to SegmentState_Flushed
-	if err = s.meta.FlushSegment(req.SegmentID); err != nil {
-		log.Error("flush segment complete failed", zap.Error(err))
-		resp.Reason = err.Error()
-		return resp, nil
-	}
-	log.Debug("flush segment complete", zap.Int64("id", req.SegmentID))
-
 	s.segAllocator.DropSegment(ctx, req.SegmentID)
 
+	s.flushCh <- req.SegmentID
 	resp.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
+}
+
+// todo remove these rpc
+func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+	return nil, nil
+}
+
+func (s *Server) RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
+	return nil, nil
 }
