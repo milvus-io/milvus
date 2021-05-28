@@ -85,7 +85,7 @@ func (c *GrpcClient) reconnect() error {
 	addr, err := getMasterServiceAddr(c.sess)
 	if err != nil {
 		log.Debug("MasterServiceClient getMasterServiceAddr failed", zap.Error(err))
-		return nil
+		return err
 	}
 	log.Debug("MasterServiceClient getMasterServiceAddr success")
 	tracer := opentracing.GlobalTracer()

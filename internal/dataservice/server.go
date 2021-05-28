@@ -1,5 +1,4 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.//// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
 // http://www.apache.org/licenses/LICENSE-2.0
@@ -14,19 +13,18 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	grpcdatanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
-
+	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
+	masterclient "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
+	"github.com/milvus-io/milvus/internal/logutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/logutil"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
@@ -41,6 +39,8 @@ import (
 
 const role = "dataservice"
 
+const masterClientTimout = 20 * time.Second
+
 type (
 	UniqueID  = typeutil.UniqueID
 	Timestamp = typeutil.Timestamp
@@ -50,32 +50,28 @@ type Server struct {
 	serverLoopCtx    context.Context
 	serverLoopCancel context.CancelFunc
 	serverLoopWg     sync.WaitGroup
-	state            atomic.Value
-	initOnce         sync.Once
-	startOnce        sync.Once
-	stopOnce         sync.Once
+	isServing        int64
 
 	kvClient          *etcdkv.EtcdKV
 	meta              *meta
 	segmentInfoStream msgstream.MsgStream
-	segAllocator      segmentAllocatorInterface
+	segAllocator      segmentAllocator
 	statsHandler      *statsHandler
-	allocator         allocatorInterface
+	allocator         allocator
 	cluster           *cluster
 	masterClient      types.MasterService
-	ddChannelMu       struct {
-		sync.Mutex
-		name string
-	}
+	ddChannelName     string
 
+	flushCh        chan UniqueID
 	flushMsgStream msgstream.MsgStream
 	msFactory      msgstream.Factory
 
 	session  *sessionutil.Session
 	activeCh <-chan bool
-	watchCh  <-chan *sessionutil.SessionEvent
+	eventCh  <-chan *sessionutil.SessionEvent
 
-	dataClientCreator func(addr string) (types.DataNode, error)
+	dataClientCreator   func(addr string) (types.DataNode, error)
+	masterClientCreator func(addr string) (types.MasterService, error)
 }
 
 func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
@@ -83,27 +79,18 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 	s := &Server{
 		ctx:       ctx,
 		msFactory: factory,
+		flushCh:   make(chan UniqueID, 1024),
 	}
 	s.dataClientCreator = func(addr string) (types.DataNode, error) {
-		return grpcdatanodeclient.NewClient(addr, 10*time.Second)
+		return datanodeclient.NewClient(addr, 10*time.Second)
+	}
+	s.masterClientCreator = func(addr string) (types.MasterService, error) {
+		return masterclient.NewClient(addr, Params.MetaRootPath,
+			[]string{Params.EtcdAddress}, masterClientTimout)
 	}
 
-	s.UpdateStateCode(internalpb.StateCode_Abnormal)
 	log.Debug("DataService", zap.Any("State", s.state.Load()))
 	return s, nil
-}
-
-func (s *Server) getInsertChannels() []string {
-	channels := make([]string, 0, Params.InsertChannelNum)
-	var i int64 = 0
-	for ; i < Params.InsertChannelNum; i++ {
-		channels = append(channels, Params.InsertChannelPrefixName+strconv.FormatInt(i, 10))
-	}
-	return channels
-}
-
-func (s *Server) SetMasterClient(masterClient types.MasterService) {
-	s.masterClient = masterClient
 }
 
 // Register register data service at etcd
@@ -114,56 +101,56 @@ func (s *Server) Register() error {
 }
 
 func (s *Server) Init() error {
-	s.initOnce.Do(func() {
-		s.session = sessionutil.NewSession(s.ctx, Params.MetaRootPath, []string{Params.EtcdAddress})
-	})
+	s.session = sessionutil.NewSession(s.ctx, Params.MetaRootPath, []string{Params.EtcdAddress})
 	return nil
 }
 
-var startOnce sync.Once
-
 func (s *Server) Start() error {
 	var err error
-	s.startOnce.Do(func() {
-		m := map[string]interface{}{
-			"PulsarAddress":  Params.PulsarAddress,
-			"ReceiveBufSize": 1024,
-			"PulsarBufSize":  1024}
-		err = s.msFactory.SetParams(m)
-		if err != nil {
-			return
-		}
+	m := map[string]interface{}{
+		"PulsarAddress":  Params.PulsarAddress,
+		"ReceiveBufSize": 1024,
+		"PulsarBufSize":  1024}
+	err = s.msFactory.SetParams(m)
+	if err != nil {
+		return err
+	}
+	if err = s.initMasterClient(); err != nil {
+		return err
+	}
+	if err = s.getDDChannelFromMaster(); err != nil {
+		return err
+	}
 
-		if err = s.initMeta(); err != nil {
-			return
-		}
+	if err = s.initMeta(); err != nil {
+		return err
+	}
 
-		if err = s.initCluster(); err != nil {
-			return
-		}
+	if err = s.initCluster(); err != nil {
+		return err
+	}
 
-		if err = s.initSegmentInfoChannel(); err != nil {
-			return
-		}
+	if err = s.initSegmentInfoChannel(); err != nil {
+		return err
+	}
 
-		s.allocator = newAllocator(s.masterClient)
+	s.allocator = newAllocator(s.masterClient)
 
-		s.startSegmentAllocator()
-		s.statsHandler = newStatsHandler(s.meta)
-		if err = s.initFlushMsgStream(); err != nil {
-			return
-		}
+	s.startSegmentAllocator()
+	s.statsHandler = newStatsHandler(s.meta)
+	if err = s.initFlushMsgStream(); err != nil {
+		return err
+	}
 
-		if err = s.initServiceDiscovery(); err != nil {
-			return
-		}
+	if err = s.initServiceDiscovery(); err != nil {
+		return err
+	}
 
-		s.startServerLoop()
+	s.startServerLoop()
 
-		s.UpdateStateCode(internalpb.StateCode_Healthy)
-		log.Debug("start success")
-	})
-	return err
+	atomic.StoreInt64(&s.isServing, 1)
+	log.Debug("start success")
+	return nil
 }
 
 func (s *Server) initCluster() error {
@@ -198,8 +185,7 @@ func (s *Server) initServiceDiscovery() error {
 		return err
 	}
 
-	s.watchCh = s.session.WatchServices(typeutil.DataNodeRole, rev)
-
+	s.eventCh = s.session.WatchServices(typeutil.DataNodeRole, rev)
 	return nil
 }
 
@@ -218,14 +204,6 @@ func (s *Server) initSegmentInfoChannel() error {
 	log.Debug("DataService AsProducer: " + Params.SegmentInfoChannelName)
 	s.segmentInfoStream.Start()
 	return nil
-}
-
-func (s *Server) UpdateStateCode(code internalpb.StateCode) {
-	s.state.Store(code)
-}
-
-func (s *Server) checkStateIsHealthy() bool {
-	return s.state.Load().(internalpb.StateCode) == internalpb.StateCode_Healthy
 }
 
 func (s *Server) initMeta() error {
@@ -260,26 +238,23 @@ func (s *Server) initFlushMsgStream() error {
 	return nil
 }
 
-func (s *Server) getDDChannel() error {
-	s.ddChannelMu.Lock()
-	defer s.ddChannelMu.Unlock()
-	if len(s.ddChannelMu.name) == 0 {
-		resp, err := s.masterClient.GetDdChannel(s.ctx)
-		if err = VerifyResponse(resp, err); err != nil {
-			return err
-		}
-		s.ddChannelMu.name = resp.Value
+func (s *Server) getDDChannelFromMaster() error {
+	resp, err := s.masterClient.GetDdChannel(s.ctx)
+	if err = VerifyResponse(resp, err); err != nil {
+		return err
 	}
+	s.ddChannelName = resp.Value
 	return nil
 }
 
 func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
-	s.serverLoopWg.Add(4)
+	s.serverLoopWg.Add(5)
 	go s.startStatsChannel(s.serverLoopCtx)
 	go s.startDataNodeTtLoop(s.serverLoopCtx)
 	go s.startWatchService(s.serverLoopCtx)
 	go s.startActiveCheck(s.serverLoopCtx)
+	go s.startFlushLoop(s.serverLoopCtx)
 }
 
 func (s *Server) startStatsChannel(ctx context.Context) {
@@ -287,10 +262,10 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 	defer s.serverLoopWg.Done()
 	statsStream, _ := s.msFactory.NewMsgStream(ctx)
 	statsStream.AsConsumer([]string{Params.StatisticsChannelName}, Params.DataServiceSubscriptionName)
-	log.Debug("DataService AsConsumer: " + Params.StatisticsChannelName + " : " + Params.DataServiceSubscriptionName)
+(??)	log.Debug("dataservice AsConsumer: " + Params.StatisticsChannelName + " : " + Params.DataServiceSubscriptionName)
 	// try to restore last processed pos
 	pos, err := s.loadStreamLastPos(streamTypeStats)
-	log.Debug("load last pos of stats channel", zap.Any("pos", pos))
+	log.Debug("load last pos of stats channel", zap.Any("pos", pos), zap.Error(err))
 	if err == nil {
 		err = statsStream.Seek([]*internalpb.MsgPosition{pos})
 		if err != nil {
@@ -314,13 +289,16 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 		}
 		for _, msg := range msgPack.Msgs {
 			if msg.Type() != commonpb.MsgType_SegmentStatistics {
-				log.Warn("receive unknown msg from segment statistics channel", zap.Stringer("msgType", msg.Type()))
+				log.Warn("receive unknown msg from segment statistics channel",
+					zap.Stringer("msgType", msg.Type()))
 				continue
 			}
 			ssMsg := msg.(*msgstream.SegmentStatisticsMsg)
 			for _, stat := range ssMsg.SegStats {
 				if err := s.statsHandler.HandleSegmentStat(stat); err != nil {
-					log.Error("handle segment stat error", zap.Int64("segmentID", stat.SegmentID), zap.Error(err))
+					log.Error("handle segment stat error",
+						zap.Int64("segmentID", stat.SegmentID),
+						zap.Error(err))
 					continue
 				}
 			}
@@ -397,13 +375,14 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 }
 
 func (s *Server) startWatchService(ctx context.Context) {
+	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 	for {
 		select {
 		case <-ctx.Done():
 			log.Debug("watch service shutdown")
 			return
-		case event := <-s.watchCh:
+		case event := <-s.eventCh:
 			datanode := &datapb.DataNodeInfo{
 				Address:  event.Session.Address,
 				Version:  event.Session.ServerID,
@@ -423,6 +402,7 @@ func (s *Server) startWatchService(ctx context.Context) {
 }
 
 func (s *Server) startActiveCheck(ctx context.Context) {
+	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 
 	for {
@@ -441,15 +421,74 @@ func (s *Server) startActiveCheck(ctx context.Context) {
 	}
 }
 
-var stopOnce sync.Once
+func (s *Server) startFlushLoop(ctx context.Context) {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+	ctx2, cancel := context.WithCancel(ctx)
+	defer cancel()
+	// send `Flushing` segments
+	go s.handleFlushingSegments(ctx2)
+	var err error
+	for {
+		select {
+		case <-ctx.Done():
+			log.Debug("flush loop shutdown")
+			return
+		case segmentID := <-s.flushCh:
+			// write flush msg into segmentInfo/flush stream
+			msgPack := composeSegmentFlushMsgPack(segmentID)
+			err = s.flushMsgStream.Produce(&msgPack)
+			if err != nil {
+				log.Error("produce flush msg failed",
+					zap.Int64("segmentID", segmentID),
+					zap.Error(err))
+				continue
+			}
+			log.Debug("send segment flush msg", zap.Int64("id", segmentID))
+
+			// set segment to SegmentState_Flushed
+			if err = s.meta.FlushSegment(segmentID); err != nil {
+				log.Error("flush segment complete failed", zap.Error(err))
+				continue
+			}
+			log.Debug("flush segment complete", zap.Int64("id", segmentID))
+		}
+	}
+}
+
+func (s *Server) handleFlushingSegments(ctx context.Context) {
+	segments := s.meta.GetFlushingSegments()
+	for _, segment := range segments {
+		select {
+		case <-ctx.Done():
+			return
+		case s.flushCh <- segment.ID:
+		}
+	}
+}
+
+func (s *Server) initMasterClient() error {
+	var err error
+	s.masterClient, err = s.masterClientCreator("")
+	if err != nil {
+		return err
+	}
+	if err = s.masterClient.Init(); err != nil {
+		return err
+	}
+	return s.masterClient.Start()
+}
 
 func (s *Server) Stop() error {
-	s.stopOnce.Do(func() {
-		s.cluster.releaseSessions()
-		s.segmentInfoStream.Close()
-		s.flushMsgStream.Close()
-		s.stopServerLoop()
-	})
+	if !atomic.CompareAndSwapInt64(&s.isServing, 1, 0) {
+		return nil
+	}
+	log.Debug("dataservice server shutdown")
+	atomic.StoreInt64(&s.isServing, 0)
+	s.cluster.releaseSessions()
+	s.segmentInfoStream.Close()
+	s.flushMsgStream.Close()
+	s.stopServerLoop()
 	return nil
 }
 

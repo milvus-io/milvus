@@ -375,7 +375,20 @@ func (m *meta) GetUnFlushedSegments() []*datapb.SegmentInfo {
 	defer m.RUnlock()
 	segments := make([]*datapb.SegmentInfo, 0)
 	for _, info := range m.segments {
-		if info.State != commonpb.SegmentState_Flushed {
+		if info.State != commonpb.SegmentState_Flushing && info.State != commonpb.SegmentState_Flushed {
+			cInfo := proto.Clone(info).(*datapb.SegmentInfo)
+			segments = append(segments, cInfo)
+		}
+	}
+	return segments
+}
+
+func (m *meta) GetFlushingSegments() []*datapb.SegmentInfo {
+	m.RLock()
+	defer m.RUnlock()
+	segments := make([]*datapb.SegmentInfo, 0)
+	for _, info := range m.segments {
+		if info.State == commonpb.SegmentState_Flushing {
 			cInfo := proto.Clone(info).(*datapb.SegmentInfo)
 			segments = append(segments, cInfo)
 		}
