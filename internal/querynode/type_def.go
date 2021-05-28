@@ -22,14 +22,15 @@ const (
 
 type (
 	UniqueID = typeutil.UniqueID
-	// Timestamp
+	// Timestamp is timestamp
 	Timestamp = typeutil.Timestamp
-	// IntPrimaryKey
+	// IntPrimaryKey is the primary key of int type
 	IntPrimaryKey = typeutil.IntPrimaryKey
+	// DSL is the Domain Specific Language
 	DSL           = string
-	// VChannel
+	// VChannel is the virtual channel
 	VChannel = string
-	// ConsumeSubName
+	// ConsumeSubName is consumer's subscription name of the message stream
 	ConsumeSubName = string
 )
 
