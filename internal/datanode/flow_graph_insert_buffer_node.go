@@ -52,7 +52,6 @@ type insertBufferNode struct {
 	BaseNode
 	insertBuffer *insertBuffer
 	replica      Replica
-	flushMeta    *binlogMeta // GOOSE TODO remove
 	idAllocator  allocatorInterface
 	flushMap     sync.Map
 
@@ -525,8 +524,6 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	// iMsg is Flush() msg from dataservice
 	//   1. insertBuffer(not empty) -> binLogs -> minIO/S3
-	// for _, msg := range iMsg.flushMessages {
-	// for _, currentSegID := range msg.segmentIDs {
 	if iMsg.flushMessage != nil && ibNode.replica.hasSegment(iMsg.flushMessage.segmentID) {
 		currentSegID := iMsg.flushMessage.segmentID
 		log.Debug(". Receiving flush message", zap.Int64("segmentID", currentSegID))
@@ -697,25 +694,12 @@ func (ibNode *insertBufferNode) completeFlush(segID UniqueID, wait <-chan map[Un
 		return
 	}
 
-	// dmlFlushedCh <- true
-
-	// TODO Call DataService RPC SaveBinlogPaths
-	// TODO GetBufferedAutoFlushBinlogPaths
 	ibNode.replica.bufferAutoFlushBinlogPaths(segID, field2Path)
 	bufferField2Paths, err := ibNode.replica.getBufferPaths(segID)
 	if err != nil {
 		log.Error("Flush failed ... cannot get buffered paths", zap.Error(err))
 		dmlFlushedCh <- nil
 	}
-
-	// GOOSE TODO remove the below
-	// log.Debug(".. Saving binlog paths to etcd ..", zap.Int("number of fields", len(field2Path)))
-	// err = ibNode.flushMeta.SaveSegmentBinlogMetaTxn(segID, bufferField2Paths)
-	// if err != nil {
-	//     log.Error("Flush failed ... cannot save binlog paths ..", zap.Error(err))
-	//     dmlFlushedCh <- nil
-	//     return
-	// }
 
 	binlogPaths := make([]*datapb.ID2PathList, 0, len(bufferField2Paths))
 	for k, paths := range bufferField2Paths {
@@ -732,28 +716,6 @@ func (ibNode *insertBufferNode) completeFlush(segID UniqueID, wait <-chan map[Un
 	ibNode.replica.setIsFlushed(segID)
 	ibNode.updateSegStatistics([]UniqueID{segID})
 
-	// msgPack := msgstream.MsgPack{}
-	// completeFlushMsg := internalpb.SegmentFlushCompletedMsg{
-	//     Base: &commonpb.MsgBase{
-	//         MsgType:   commonpb.MsgType_SegmentFlushDone,
-	//         MsgID:     0, // GOOSE TODO
-	//         Timestamp: 0, // GOOSE TODO
-	//         SourceID:  Params.NodeID,
-	//     },
-	//     SegmentID: segID,
-	// }
-	// var msg msgstream.TsMsg = &msgstream.FlushCompletedMsg{
-	//     BaseMsg: msgstream.BaseMsg{
-	//         HashValues: []uint32{0},
-	//     },
-	//     SegmentFlushCompletedMsg: completeFlushMsg,
-	// }
-	//
-	// msgPack.Msgs = append(msgPack.Msgs, msg)
-	// err = ibNode.completeFlushStream.Produce(&msgPack)
-	// if err != nil {
-	//     log.Error(".. Produce complete flush msg failed ..", zap.Error(err))
-	// }
 }
 
 func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
@@ -846,8 +808,7 @@ func (ibNode *insertBufferNode) getCollectionandPartitionIDbySegID(segmentID Uni
 	return
 }
 
-func newInsertBufferNode(ctx context.Context, flushMeta *binlogMeta,
-	replica Replica, factory msgstream.Factory, idAllocator allocatorInterface) *insertBufferNode {
+func newInsertBufferNode(ctx context.Context, replica Replica, factory msgstream.Factory, idAllocator allocatorInterface) *insertBufferNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -905,8 +866,8 @@ func newInsertBufferNode(ctx context.Context, flushMeta *binlogMeta,
 		segmentStatisticsStream: segStatisticsMsgStream,
 		completeFlushStream:     completeFlushStream,
 		replica:                 replica,
-		flushMeta:               flushMeta,
-		flushMap:                sync.Map{},
-		idAllocator:             idAllocator,
+		// flushMeta:               flushMeta,
+		flushMap:    sync.Map{},
+		idAllocator: idAllocator,
 	}
 }

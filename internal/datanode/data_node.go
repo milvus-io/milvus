@@ -185,7 +185,7 @@ func (node *DataNode) Init() error {
 	return nil
 }
 
-// NewDataSyncService adds a new dataSyncService to DataNode
+// NewDataSyncService adds a new dataSyncService for new dmlVchannel and starts dataSyncService.
 func (node *DataNode) NewDataSyncService(vchanPair *datapb.VchannelPair) error {
 	if _, ok := node.vchan2SyncService[vchanPair.GetDmlVchannelName()]; ok {
 		return nil
@@ -196,6 +196,7 @@ func (node *DataNode) NewDataSyncService(vchanPair *datapb.VchannelPair) error {
 
 	flushChan := make(chan *flushMsg, 100)
 	dataSyncService := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchanPair)
+	// TODO metaService using timestamp in DescribeCollection
 	metaService := newMetaService(node.ctx, replica, node.masterService)
 	node.vchan2SyncService[vchanPair.GetDmlVchannelName()] = dataSyncService
 	node.vchan2FlushCh[vchanPair.GetDmlVchannelName()] = flushChan
@@ -206,18 +207,18 @@ func (node *DataNode) NewDataSyncService(vchanPair *datapb.VchannelPair) error {
 	return nil
 }
 
-// Start will update state to HEALTHY
+// Start will update DataNode state to HEALTHY
 func (node *DataNode) Start() error {
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
 	return nil
 }
 
-// UpdateStateCode update datanode's state code
+// UpdateStateCode updates datanode's state code
 func (node *DataNode) UpdateStateCode(code internalpb.StateCode) {
 	node.State.Store(code)
 }
 
-// WatchDmChannels set insert channel names data node subscribs to.
+// WatchDmChannels create a new dataSyncService for every unique dmlVchannel name, ignore if dmlVchannel existed.
 func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -225,7 +226,7 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 
 	switch {
 	case node.State.Load() != internalpb.StateCode_Healthy:
-		status.Reason = fmt.Sprintf("DataNode %d not initializing!", node.NodeID)
+		status.Reason = fmt.Sprintf("DataNode %d not healthy, please re-send message", node.NodeID)
 		return status, errors.New(status.GetReason())
 
 	case len(in.GetVchannels()) == 0:
@@ -266,6 +267,8 @@ func (node *DataNode) getChannelName(segID UniqueID) string {
 }
 
 // FlushSegments packs flush messages into flowgraph through flushChan.
+//   If DataNode receives a valid segment to flush, new flush message for the segment should be ignored.
+//   So if receiving calls to flush segment A, DataNode should guarantee the segment to be flushed.
 func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
 	log.Debug("FlushSegments ...", zap.Int("num", len(req.SegmentIDs)))
 	status := &commonpb.Status{
@@ -281,6 +284,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		}
 		flushCh, ok := node.vchan2FlushCh[chanName]
 		if !ok {
+			// TODO restart DataNode or reshape vchan2FlushCh and vchan2SyncService
 			status.Reason = "DataNode abnormal!"
 			return status, errors.New(status.GetReason())
 		}
