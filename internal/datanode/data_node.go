@@ -63,6 +63,7 @@ type DataNode struct {
 	State   atomic.Value // internalpb.StateCode_Initializing
 	watchDm chan struct{}
 
+	chanMut           sync.RWMutex
 	vchan2SyncService map[string]*dataSyncService
 	vchan2FlushCh     map[string]chan<- *flushMsg
 
@@ -179,6 +180,8 @@ func (node *DataNode) Init() error {
 
 // NewDataSyncService adds a new dataSyncService to DataNode
 func (node *DataNode) NewDataSyncService(vchanPair *datapb.VchannelPair) error {
+	node.chanMut.Lock()
+	defer node.chanMut.RLock()
 	if _, ok := node.vchan2SyncService[vchanPair.GetDmlVchannelName()]; ok {
 		return nil
 	}
@@ -249,6 +252,8 @@ func (node *DataNode) GetComponentStates(ctx context.Context) (*internalpb.Compo
 }
 
 func (node *DataNode) getChannelName(segID UniqueID) string {
+	node.chanMut.RLock()
+	defer node.chanMut.RUnlock()
 	for name, dataSync := range node.vchan2SyncService {
 		if dataSync.replica.hasSegment(segID) {
 			return name
@@ -271,7 +276,9 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 			status.Reason = fmt.Sprintf("DataNode not find segment %d!", id)
 			return status, errors.New(status.GetReason())
 		}
+		node.chanMut.RLock()
 		flushCh, ok := node.vchan2FlushCh[chanName]
+		node.chanMut.RUnlock()
 		if !ok {
 			status.Reason = "DataNode abnormal!"
 			return status, errors.New(status.GetReason())
@@ -378,6 +385,8 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 func (node *DataNode) Stop() error {
 	node.cancel()
 
+	node.chanMut.RLock()
+	defer node.chanMut.RUnlock()
 	// close services
 	for _, syncService := range node.vchan2SyncService {
 		if syncService != nil {
