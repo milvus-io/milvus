@@ -137,7 +137,7 @@ func (s *Server) init() error {
 	}
 
 	indexServiceAddr := Params.IndexServerAddress
-	s.indexServiceClient = grpcindexserviceclient.NewClient(indexServiceAddr)
+	s.indexServiceClient = grpcindexserviceclient.NewClient(indexServiceAddr, indexnode.Params.MetaRootPath, []string{indexnode.Params.EtcdAddress}, 10)
 	err = s.indexServiceClient.Init()
 	if err != nil {
 		return err
@@ -191,12 +191,8 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 	return s.indexnode.GetStatisticsChannel(ctx)
 }
 
-func (s *Server) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*commonpb.Status, error) {
-	return s.indexnode.BuildIndex(ctx, req)
-}
-
-func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	return s.indexnode.DropIndex(ctx, request)
+func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
+	return s.indexnode.CreateIndex(ctx, req)
 }
 
 func NewServer(ctx context.Context) (*Server, error) {

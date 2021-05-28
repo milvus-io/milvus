@@ -21,9 +21,12 @@ import (
 
 // An Item is something we manage in a priority queue.
 type PQItem struct {
-	value    types.IndexNode // The value of the item; arbitrary.
-	key      UniqueID
-	addr     *commonpb.Address
+	value types.IndexNode // The value of the item; arbitrary.
+	key   UniqueID
+	addr  *commonpb.Address
+
+	serverID int64
+
 	priority int // The priority of the item in the queue.
 	// The index is needed by update and is maintained by the heap.Interface methods.
 	index int // The index of the item in the heap.
@@ -135,12 +138,13 @@ func (pq *PriorityQueue) Peek() interface{} {
 	//return item.value
 }
 
-func (pq *PriorityQueue) PeekClient() (UniqueID, types.IndexNode) {
+// PeekClient picks an IndexNode with the lowest load.
+func (pq *PriorityQueue) PeekClient() (UniqueID, types.IndexNode, int64) {
 	item := pq.Peek()
 	if item == nil {
-		return UniqueID(-1), nil
+		return UniqueID(-1), nil, 0
 	}
-	return item.(*PQItem).key, item.(*PQItem).value
+	return item.(*PQItem).key, item.(*PQItem).value, item.(*PQItem).serverID
 }
 
 func (pq *PriorityQueue) PeekAllClients() []types.IndexNode {

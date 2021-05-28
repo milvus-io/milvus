@@ -15,12 +15,11 @@ import (
 	"context"
 	"errors"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/kv"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
 )
@@ -108,36 +107,16 @@ func (it *IndexAddTask) OnEnqueue() error {
 }
 
 func (it *IndexAddTask) PreExecute(ctx context.Context) error {
-	log.Debug("pretend to check Index Req")
-	nodeID, builderClient := it.nodeClients.PeekClient()
-	if builderClient == nil {
-		return errors.New("IndexAddTask Service not available")
-	}
-	it.builderClient = builderClient
-	it.buildClientNodeID = nodeID
-	err := it.table.AddIndex(it.indexBuildID, it.req)
-	if err != nil {
-		return err
-	}
+	it.req.IndexBuildID = it.indexBuildID
 	return nil
 }
 
 func (it *IndexAddTask) Execute(ctx context.Context) error {
-	it.req.IndexBuildID = it.indexBuildID
-	log.Debug("before index ...")
-	resp, err := it.builderClient.BuildIndex(ctx, it.req)
-	if err != nil {
-		log.Debug("indexservice", zap.String("build index finish err", err.Error()))
-		return err
-	}
-	if resp.ErrorCode != commonpb.ErrorCode_Success {
-		return errors.New(resp.Reason)
-	}
-	err = it.table.BuildIndex(it.indexBuildID)
+	log.Debug("IndexService", zap.Any("BuildIndex, IndexBuildID = ", it.indexBuildID))
+	err := it.table.AddIndex(it.indexBuildID, it.req)
 	if err != nil {
 		return err
 	}
-	it.nodeClients.IncPriority(it.buildClientNodeID, 1)
 	return nil
 }
 

@@ -16,7 +16,6 @@ service IndexService {
   rpc BuildIndex(BuildIndexRequest) returns (BuildIndexResponse){}
   rpc GetIndexStates(GetIndexStatesRequest) returns (GetIndexStatesResponse) {}
   rpc GetIndexFilePaths(GetIndexFilePathsRequest) returns (GetIndexFilePathsResponse){}
-  rpc NotifyBuildIndex(NotifyBuildIndexRequest) returns (common.Status) {}
   rpc DropIndex(DropIndexRequest) returns (common.Status) {}
 }
 
@@ -24,13 +23,13 @@ service IndexNode {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
   rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
-  rpc BuildIndex(BuildIndexRequest) returns (common.Status){}
-  rpc DropIndex(DropIndexRequest) returns (common.Status) {}
+  rpc CreateIndex(CreateIndexRequest) returns (common.Status){}
 }
 
 message RegisterNodeRequest {
   common.MsgBase base = 1;
   common.Address address = 2;
+  int64 serverID = 3;
 }
 
 message RegisterNodeResponse {
@@ -55,25 +54,29 @@ message GetIndexStatesResponse {
   repeated IndexInfo states = 2;
 }
 
+message CreateIndexRequest {
+  int64 indexBuildID = 1;
+  string index_name = 2;
+  int64 indexID = 3;
+  int64 version = 4;
+  string meta_path = 5;
+  repeated string data_paths = 6;
+  repeated common.KeyValuePair type_params = 7;
+  repeated common.KeyValuePair index_params = 8;
+}
+
 message BuildIndexRequest {
   int64 indexBuildID = 1;
   string index_name = 2;
   int64 indexID = 3;
-  repeated string data_paths = 4;
-  repeated common.KeyValuePair type_params = 5;
-  repeated common.KeyValuePair index_params = 6;
+  repeated string data_paths = 5;
+  repeated common.KeyValuePair type_params = 6;
+  repeated common.KeyValuePair index_params = 7;
 }
 
 message BuildIndexResponse {
   common.Status status = 1;
   int64 indexBuildID = 2;
-}
-
-message NotifyBuildIndexRequest {
-  common.Status status = 1;
-  int64 indexBuildID = 2;
-  repeated string index_file_paths = 3;
-  int64 nodeID = 4;
 }
 
 message GetIndexFilePathsRequest {
@@ -98,6 +101,9 @@ message IndexMeta {
   BuildIndexRequest req = 4;
   repeated string index_file_paths = 5;
   bool mark_deleted = 6;
+  int64 node_serverID = 7;
+  int64 version = 8;
+  bool recycled = 9;
 }
 
 message DropIndexRequest {

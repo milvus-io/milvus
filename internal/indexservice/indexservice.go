@@ -15,9 +15,13 @@ import (
 	"context"
 	"errors"
 	"math/rand"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/coreos/etcd/mvcc/mvccpb"
+	"github.com/golang/protobuf/proto"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -34,13 +38,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.etcd.io/etcd/clientv3"
 )
 
 const (
 	reqTimeoutInterval = time.Second * 10
 	durationInterval   = time.Second * 10
-	dropIndexLimit     = 20
+	recycleIndexLimit  = 20
 )
 
 type IndexService struct {
@@ -57,11 +60,17 @@ type IndexService struct {
 	sched   *TaskScheduler
 	session *sessionutil.Session
 
+	eventChan <-chan *sessionutil.SessionEvent
+
+	assignChan chan []UniqueID
+
 	idAllocator *allocator.GlobalIDAllocator
 
 	kv kv.BaseKV
 
 	metaTable *metaTable
+
+	nodeTasks *nodeTasks
 
 	nodeLock sync.RWMutex
 
@@ -80,6 +89,7 @@ func NewIndexService(ctx context.Context) (*IndexService, error) {
 		loopCtx:     ctx1,
 		loopCancel:  cancel,
 		nodeClients: &PriorityQueue{},
+		nodeTasks:   &nodeTasks{},
 	}
 
 	return i, nil
@@ -89,12 +99,14 @@ func NewIndexService(ctx context.Context) (*IndexService, error) {
 func (i *IndexService) Register() error {
 	i.session = sessionutil.NewSession(i.loopCtx, Params.MetaRootPath, []string{Params.EtcdAddress})
 	i.session.Init(typeutil.IndexServiceRole, Params.Address, true)
+	i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, 0)
 	return nil
 }
 
 func (i *IndexService) Init() error {
 	log.Debug("indexservice", zap.String("etcd address", Params.EtcdAddress))
 
+	i.assignChan = make(chan []UniqueID, 1024)
 	connectEtcdFn := func() error {
 		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
 		if err != nil {
@@ -144,6 +156,13 @@ func (i *IndexService) Init() error {
 		return err
 	}
 	i.UpdateStateCode(internalpb.StateCode_Healthy)
+
+	i.nodeTasks = NewNodeTasks()
+
+	err = i.assignTasksServerStart()
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -152,7 +171,16 @@ func (i *IndexService) Start() error {
 	go i.tsLoop()
 
 	i.loopWg.Add(1)
-	go i.dropIndexLoop()
+	go i.recycleUnusedIndexFiles()
+
+	i.loopWg.Add(1)
+	go i.assignmentTasksLoop()
+
+	i.loopWg.Add(1)
+	go i.watchNodeLoop()
+
+	i.loopWg.Add(1)
+	go i.watchMetaLoop()
 
 	i.sched.Start()
 	// Start callbacks
@@ -218,13 +246,24 @@ func (i *IndexService) GetStatisticsChannel(ctx context.Context) (*milvuspb.Stri
 }
 
 func (i *IndexService) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
-	log.Debug("indexservice building index ...",
+	log.Debug("IndexService building index ...",
 		zap.Int64("IndexBuildID", req.IndexBuildID),
 		zap.String("IndexName = ", req.IndexName),
 		zap.Int64("IndexID = ", req.IndexID),
 		zap.Strings("DataPath = ", req.DataPaths),
 		zap.Any("TypeParams", req.TypeParams),
 		zap.Any("IndexParams", req.IndexParams))
+	hasIndex, indexBuildID := i.metaTable.HasSameReq(req)
+	if hasIndex {
+		log.Debug("IndexService", zap.Any("hasIndex true", indexBuildID))
+		return &indexpb.BuildIndexResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+				Reason:    "already have same index",
+			},
+			IndexBuildID: indexBuildID,
+		}, nil
+	}
 	ret := &indexpb.BuildIndexResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -273,6 +312,7 @@ func (i *IndexService) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRe
 		ret.Status.Reason = err.Error()
 		return ret, nil
 	}
+	i.assignChan <- []UniqueID{t.indexBuildID}
 	ret.Status.ErrorCode = commonpb.ErrorCode_Success
 	ret.IndexBuildID = t.indexBuildID
 	return ret, nil
@@ -322,13 +362,6 @@ func (i *IndexService) DropIndex(ctx context.Context, req *indexpb.DropIndexRequ
 				i.metaTable.DeleteIndex(indexBuildID)
 			}
 		}()
-
-		go func() {
-			allNodeClients := i.nodeClients.PeekAllClients()
-			for _, client := range allNodeClients {
-				client.DropIndex(ctx, req)
-			}
-		}()
 	}()
 
 	log.Debug("IndexService", zap.Int64("DropIndex success by ID", req.IndexID))
@@ -359,27 +392,6 @@ func (i *IndexService) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIn
 	return ret, nil
 }
 
-func (i *IndexService) NotifyBuildIndex(ctx context.Context, nty *indexpb.NotifyBuildIndexRequest) (*commonpb.Status, error) {
-	log.Debug("IndexService",
-		zap.Int64("notify build index", nty.IndexBuildID),
-		zap.Strings("index file paths", nty.IndexFilePaths),
-		zap.Int64("node ID", nty.NodeID))
-	ret := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}
-	log.Debug("IndexService", zap.String("[IndexService][NotifyBuildIndex]", nty.String()))
-	if err := i.metaTable.NotifyBuildIndex(nty); err != nil {
-		ret.ErrorCode = commonpb.ErrorCode_BuildIndexError
-		ret.Reason = err.Error()
-		log.Debug("IndexService", zap.String("[IndexService][NotifyBuildIndex][metaTable][NotifyBuildIndex]", err.Error()))
-	}
-
-	log.Debug("IndexService", zap.Any("Index build completed with ID", nty.IndexBuildID))
-
-	i.nodeClients.IncPriority(nty.NodeID, -1)
-	return ret, nil
-}
-
 func (i *IndexService) tsLoop() {
 	tsoTicker := time.NewTicker(tso.UpdateTimestampStep)
 	defer tsoTicker.Stop()
@@ -401,27 +413,177 @@ func (i *IndexService) tsLoop() {
 	}
 }
 
-func (i *IndexService) dropIndexLoop() {
+func (i *IndexService) recycleUnusedIndexFiles() {
 	ctx, cancel := context.WithCancel(i.loopCtx)
 
 	defer cancel()
 	defer i.loopWg.Done()
 
 	timeTicker := time.NewTicker(durationInterval)
+	log.Debug("IndexService start recycle unused index files loop")
 
-	log.Debug("IndexService start drop index loop")
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-timeTicker.C:
-			indexMetas := i.metaTable.getMarkDeleted(dropIndexLimit)
-			for j := 0; j < len(indexMetas); j++ {
-				if err := i.kv.MultiRemove(indexMetas[j].IndexFilePaths); err != nil {
-					log.Debug("IndexService", zap.String("Remove index files error", err.Error()))
+			metas := i.metaTable.GetUnusedIndexFiles(recycleIndexLimit)
+			for _, meta := range metas {
+				if meta.indexMeta.MarkDeleted {
+					unusedIndexFilePathPrefix := strconv.Itoa(int(meta.indexMeta.IndexBuildID))
+					if err := i.kv.RemoveWithPrefix(unusedIndexFilePathPrefix); err != nil {
+						log.Debug("IndexService", zap.String("Remove index files error", err.Error()))
+					}
+					i.metaTable.DeleteIndex(meta.indexMeta.IndexBuildID)
+				} else {
+					for j := 1; j < int(meta.indexMeta.Version); j++ {
+						unusedIndexFilePathPrefix := strconv.Itoa(int(meta.indexMeta.IndexBuildID)) + "/" + strconv.Itoa(j)
+						if err := i.kv.RemoveWithPrefix(unusedIndexFilePathPrefix); err != nil {
+							log.Debug("IndexService", zap.String("Remove index files error", err.Error()))
+						}
+					}
+					if err := i.metaTable.UpdateRecycleState(meta.indexMeta.IndexBuildID); err != nil {
+						log.Debug("IndexService", zap.String("Remove index files error", err.Error()))
+					}
 				}
-				i.metaTable.DeleteIndex(indexMetas[j].IndexBuildID)
 			}
 		}
 	}
+}
+
+func (i *IndexService) assignmentTasksLoop() {
+	ctx, cancel := context.WithCancel(i.loopCtx)
+
+	defer cancel()
+	defer i.loopWg.Done()
+
+	log.Debug("IndexService start assign tasks loop")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case indexBuildIDs := <-i.assignChan:
+			for _, indexBuildID := range indexBuildIDs {
+				meta := i.metaTable.GetIndexMeta(indexBuildID)
+				log.Debug("IndexService", zap.Any("Meta", meta))
+				if meta.indexMeta.State == commonpb.IndexState_Finished {
+					continue
+				}
+				if err := i.metaTable.UpdateVersion(indexBuildID); err != nil {
+					log.Debug("IndexService", zap.String("build index update version err", err.Error()))
+				}
+				nodeID, builderClient, nodeServerID := i.nodeClients.PeekClient()
+				if builderClient == nil {
+					log.Debug("IndexService has no available IndexNode")
+					i.assignChan <- []UniqueID{indexBuildID}
+					continue
+				}
+				req := &indexpb.CreateIndexRequest{
+					IndexBuildID: indexBuildID,
+					IndexName:    meta.indexMeta.Req.IndexName,
+					IndexID:      meta.indexMeta.Req.IndexID,
+					Version:      meta.indexMeta.Version + 1,
+					MetaPath:     "/indexes/" + strconv.FormatInt(indexBuildID, 10),
+					DataPaths:    meta.indexMeta.Req.DataPaths,
+					TypeParams:   meta.indexMeta.Req.TypeParams,
+					IndexParams:  meta.indexMeta.Req.IndexParams,
+				}
+				resp, err := builderClient.CreateIndex(ctx, req)
+				if err != nil {
+					log.Debug("IndexService", zap.String("build index err", err.Error()))
+				}
+				if err = i.metaTable.BuildIndex(indexBuildID, nodeServerID); err != nil {
+					log.Debug("IndexService", zap.String("update meta table error", err.Error()))
+				}
+				if resp.ErrorCode != commonpb.ErrorCode_Success {
+					log.Debug("IndexService", zap.String("build index err", resp.Reason))
+				}
+				i.nodeClients.IncPriority(nodeID, 1)
+			}
+		}
+	}
+}
+
+func (i *IndexService) watchNodeLoop() {
+	ctx, cancel := context.WithCancel(i.loopCtx)
+
+	defer cancel()
+	defer i.loopWg.Done()
+	log.Debug("IndexService start watch node loop")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event := <-i.eventChan:
+			switch event.EventType {
+			case sessionutil.SessionAddEvent:
+				serverID := event.Session.ServerID
+				log.Debug("IndexService", zap.Any("Add IndexNode, session serverID", serverID))
+			case sessionutil.SessionDelEvent:
+				serverID := event.Session.ServerID
+				log.Debug("IndexService", zap.Any("The IndexNode crashed with ID", serverID))
+				indexBuildIDs := i.nodeTasks.getTasksByLeaseKey(serverID)
+				i.assignChan <- indexBuildIDs
+				i.nodeTasks.delete(serverID)
+			}
+		}
+	}
+}
+
+func (i *IndexService) watchMetaLoop() {
+	ctx, cancel := context.WithCancel(i.loopCtx)
+
+	defer cancel()
+	defer i.loopWg.Done()
+	log.Debug("IndexService start watch meta loop")
+
+	watchChan := i.metaTable.client.WatchWithPrefix("indexes")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case resp := <-watchChan:
+			log.Debug("meta updated.")
+			for _, event := range resp.Events {
+				eventRevision := event.Kv.Version
+				indexMeta := &indexpb.IndexMeta{}
+				err := proto.UnmarshalText(string(event.Kv.Value), indexMeta)
+				if err != nil {
+					log.Debug("IndexService", zap.Any("Unmarshal error", err))
+				}
+				indexBuildID := indexMeta.IndexBuildID
+				switch event.Type {
+				case mvccpb.PUT:
+					//TODO: get indexBuildID fast
+					log.Debug("IndexService", zap.Any("Meta need load by IndexBuildID", indexBuildID))
+
+					reload := i.metaTable.LoadMetaFromETCD(indexBuildID, eventRevision)
+					if reload {
+						i.nodeTasks.finishTask(indexBuildID)
+					}
+				case mvccpb.DELETE:
+				}
+			}
+		}
+	}
+}
+
+func (i *IndexService) assignTasksServerStart() error {
+	sessions, _, err := i.session.GetSessions(typeutil.IndexNodeRole)
+	if err != nil {
+		return err
+	}
+	var serverIDs []int64
+	for _, session := range sessions {
+		serverIDs = append(serverIDs, session.ServerID)
+	}
+	tasks := i.metaTable.GetUnassignedTasks(serverIDs)
+	for _, taskQueue := range tasks {
+		i.assignChan <- taskQueue
+	}
+
+	return nil
 }
