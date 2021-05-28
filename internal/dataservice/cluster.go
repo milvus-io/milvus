@@ -62,7 +62,7 @@ func withAssignPolicy(p channelAssignPolicy) clusterOption {
 }
 
 func defaultStartupPolicy() clusterStartupPolicy {
-	return newReWatchOnRestartsStartupPolicy()
+	return newWatchRestartsStartupPolicy()
 }
 
 func defaultRegisterPolicy() dataNodeRegisterPolicy {
@@ -74,7 +74,7 @@ func defaultUnregisterPolicy() dataNodeUnregisterPolicy {
 }
 
 func defaultAssignPolicy() channelAssignPolicy {
-	return newAllAssignPolicy()
+	return newAssignAllPolicy()
 }
 
 func newCluster(ctx context.Context, dataManager *clusterNodeManager, sessionManager sessionManager, posProvider positionProvider, opts ...clusterOption) *cluster {
@@ -165,6 +165,7 @@ func (c *cluster) register(n *datapb.DataNodeInfo) {
 func (c *cluster) unregister(n *datapb.DataNodeInfo) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.sessionManager.releaseSession(n.Address)
 	c.dataManager.unregister(n)
 	cNodes := c.dataManager.getDataNodes(true)
 	rets := c.unregisterPolicy.apply(cNodes, n)
