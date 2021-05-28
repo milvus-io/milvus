@@ -560,7 +560,6 @@ func (s *Server) prepareBinlogAndPos(req *datapb.SaveBinlogPathsRequest) (map[st
 		log.Error("Failed to get segment info", zap.Int64("segmentID", req.GetSegmentID()), zap.Error(err))
 		return nil, err
 	}
-	log.Debug("segment", zap.Int64("segment", segInfo.CollectionID))
 
 	for _, fieldBlp := range req.Field2BinlogPaths {
 		fieldMeta, err := s.prepareField2PathMeta(req.SegmentID, fieldBlp)
