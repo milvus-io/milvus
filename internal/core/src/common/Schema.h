@@ -11,8 +11,8 @@
 
 #pragma once
 #include "FieldMeta.h"
-#include <vector>
 #include <utility>
+#include <vector>
 #include <string>
 #include <unordered_map>
 #include <memory>
@@ -64,6 +64,12 @@ class Schema {
     void
     set_auto_id(bool is_auto_id) {
         is_auto_id_ = is_auto_id;
+    }
+
+    void
+    set_primary_key(FieldOffset field_offset) {
+        is_auto_id_ = false;
+        this->primary_key_offset_opt_ = field_offset;
     }
 
     bool
