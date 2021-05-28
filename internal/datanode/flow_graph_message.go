@@ -69,8 +69,6 @@ type flushMsg struct {
 	timestamp    Timestamp
 	segmentID    UniqueID
 	collectionID UniqueID
-	// ddlFlushedCh chan<- bool
-	// dmlFlushedCh chan<- bool
 	ddlFlushedCh chan<- []*datapb.DDLBinlogMeta
 	dmlFlushedCh chan<- []*datapb.ID2PathList
 }
