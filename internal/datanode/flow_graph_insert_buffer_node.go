@@ -160,6 +160,8 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 					ibNode.replica.setStartPosition(currentSegID, startPosition)
 				}
 			}
+			// set msg pack start positions, new design
+			ibNode.replica.setStartPositions(currentSegID, iMsg.startPositions)
 		}
 
 		segNum := uniqueSeg[currentSegID]
@@ -479,6 +481,8 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			ibNode.replica.setEndPosition(currentSegID, endPosition)
 		}
 
+		// store current startPositions as Segment->EndPostion
+		ibNode.replica.setEndPositions(currentSegID, iMsg.endPositions)
 	}
 
 	if len(iMsg.insertMessages) > 0 {
