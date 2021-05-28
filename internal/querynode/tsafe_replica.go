@@ -13,8 +13,6 @@ package querynode
 
 import (
 	"errors"
-	"fmt"
-	"strconv"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -88,20 +86,6 @@ func (t *tSafeReplica) registerTSafeWatcher(vChannel VChannel, watcher *tSafeWat
 		return
 	}
 	safer.registerTSafeWatcher(watcher)
-}
-
-// TODO: remove and use real vChannel
-func collectionIDToChannel(collectionID UniqueID) VChannel {
-	return fmt.Sprintln(collectionID)
-}
-
-// TODO: remove and use real vChannel
-func channelTOCollectionID(channel VChannel) UniqueID {
-	collectionID, err := strconv.ParseInt(channel, 10, 64)
-	if err != nil {
-		return 0
-	}
-	return collectionID
 }
 
 func newTSafeReplica() TSafeReplicaInterface {
