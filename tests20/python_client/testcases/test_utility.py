@@ -4,6 +4,7 @@ from pymilvus_orm import FieldSchema
 from base.client_request import ApiReq
 from base.collection import ApiCollection
 from base.partition import ApiPartition
+from base.index import ApiIndex
 from base.utility import ApiUtility
 from utils.util_log import test_log as log
 from common import common_func as cf
@@ -88,6 +89,65 @@ class TestUtilityParams(ApiReq):
         using = "empty"
         ut = ApiUtility(using=using)
         ex, _ = ut.list_collections()
+        log.error(str(ex))
+        assert "invalid" or "illegal" in str(ex)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_index_process_invalid_name(self, get_invalid_collection_name):
+        """
+        target: test building_process
+        method: input invalid name
+        expected: raise exception
+        """
+        self._connect()
+        c_name = get_invalid_collection_name
+        ut = ApiUtility()
+        ex, _ = ut.index_building_progress(c_name)
+        log.error(str(ex))
+        assert "invalid" or "illegal" in str(ex)
+
+    # TODO: not support index name
+    @pytest.mark.tags(CaseLabel.L1)
+    def _test_index_process_invalid_index_name(self, get_invalid_index_name):
+        """
+        target: test building_process
+        method: input invalid index name
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        index_name = get_invalid_index_name
+        ut = ApiUtility()
+        ex, _ = ut.index_building_progress(c_name, index_name)
+        log.error(str(ex))
+        assert "invalid" or "illegal" in str(ex)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_wait_index_invalid_name(self, get_invalid_collection_name):
+        """
+        target: test wait_index
+        method: input invalid name
+        expected: raise exception
+        """
+        self._connect()
+        c_name = get_invalid_collection_name
+        ut = ApiUtility()
+        ex, _ = ut.wait_for_index_building_complete(c_name)
+        log.error(str(ex))
+        assert "invalid" or "illegal" in str(ex)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_wait_index_invalid_index_name(self, get_invalid_index_name):
+        """
+        target: test wait_index
+        method: input invalid index name
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        index_name = get_invalid_index_name
+        ut = ApiUtility()
+        ex, _ = ut.wait_for_index_building_complete(c_name, index_name)
         log.error(str(ex))
         assert "invalid" or "illegal" in str(ex)
 
@@ -218,6 +278,172 @@ class TestUtilityBase(ApiReq):
         ut = ApiUtility()
         res, _ = ut.list_collections()
         assert len(res) == 0
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_index_process_collection_not_existed(self):
+        """
+        target: test building_process
+        method: input collection not created before
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        ut = ApiUtility()
+        ex, _ = ut.index_building_progress(c_name)
+        log.error(str(ex))
+        assert "exist" in str(ex)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_index_process_collection_empty(self):
+        """
+        target: test building_process
+        method: input empty collection
+        expected: no exception raised
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        self._collection(c_name)
+        ut = ApiUtility()
+        res, _ = ut.index_building_progress(c_name)
+        assert "num_indexed_entities" in res
+        assert res["num_indexed_entities"] == 0
+        assert "num_total_entities" in res
+        assert res["num_total_entities"] == 0
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_index_process_collection_insert_no_index(self):
+        """
+        target: test building_process
+        method: insert 1 entity, no index created
+        expected: no exception raised
+        """
+        nb = 1
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        self._collection(c_name)
+        data = cf.gen_default_list_data(nb)
+        self.collection.insert(data=data)
+        ut = ApiUtility()
+        res, _ = ut.index_building_progress(c_name)
+        assert "num_indexed_entities" in res
+        assert res["num_indexed_entities"] == 0
+        assert "num_total_entities" in res
+        assert res["num_total_entities"] == nb
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_index_process_collection_insert_index_not_enough(self):
+        """
+        target: test building_process
+        method: insert 1 entity, no index created
+        expected: no exception raised
+        """
+        nb = 1
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        self._collection(c_name)
+        data = cf.gen_default_list_data(nb)
+        self.collection.insert(data=data)
+        self.collection.create_index(default_field_name, default_index_params)
+        ut = ApiUtility()
+        ut.wait_for_index_building_complete(c_name)
+        res, _ = ut.index_building_progress(c_name)
+        assert "num_indexed_entities" in res
+        assert res["num_indexed_entities"] == 0
+        assert "num_total_entities" in res
+        assert res["num_total_entities"] == nb
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_index_process_collection_index(self):
+        """
+        target: test building_process
+        method: insert 1200 entities, build and call building_process
+        expected: 1200 entity indexed
+        """
+        nb = 1200
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        self._collection(c_name)
+        data = cf.gen_default_list_data(nb)
+        self.collection.insert(data=data)
+        self.collection.create_index(default_field_name, default_index_params)
+        ut = ApiUtility()
+        ut.wait_for_index_building_complete(c_name)
+        res, _ = ut.index_building_progress(c_name)
+        assert "num_indexed_entities" in res
+        assert res["num_indexed_entities"] == nb
+        assert "num_total_entities" in res
+        assert res["num_total_entities"] == nb
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_index_process_collection_indexing(self):
+        """
+        target: test building_process
+        method: call building_process during building
+        expected: 1200 entity indexed
+        """
+        nb = 1200
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        self._collection(c_name)
+        data = cf.gen_default_list_data(nb)
+        self.collection.insert(data=data)
+        self.collection.create_index(default_field_name, default_index_params)
+        ut = ApiUtility()
+        res, _ = ut.index_building_progress(c_name)
+        for _ in range(2):
+            assert "num_indexed_entities" in res
+            assert res["num_indexed_entities"] <= nb
+            assert res["num_indexed_entities"] >= 0
+            assert "num_total_entities" in res
+            assert res["num_total_entities"] == nb
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_wait_index_collection_not_existed(self):
+        """
+        target: test wait_index
+        method: input collection not created before
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        ut = ApiUtility()
+        ex, _ = ut.wait_for_index_building_complete(c_name)
+        log.error(str(ex))
+        assert "exist" in str(ex)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_wait_index_collection_empty(self):
+        """
+        target: test wait_index
+        method: input empty collection
+        expected: no exception raised
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        self._collection(c_name)
+        ut = ApiUtility()
+        res, _ = ut.wait_for_index_building_complete(c_name)
+        assert res is None
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_wait_index_collection_index(self):
+        """
+        target: test wait_index
+        method: insert 1200 entities, build and call wait_index
+        expected: 1200 entity indexed
+        """
+        nb = 1200
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        self._collection(c_name)
+        data = cf.gen_default_list_data(nb)
+        self.collection.insert(data=data)
+        self.collection.create_index(default_field_name, default_index_params)
+        ut = ApiUtility()
+        res, _ = ut.wait_for_index_building_complete(c_name)
+        assert res is None
+        res, _ = ut.index_building_progress(c_name)
+        assert res["num_indexed_entities"] == nb
 
 
 class TestUtilityAdvanced(ApiReq):
