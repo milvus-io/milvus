@@ -472,7 +472,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		}
 
 		// store current startPositions as Segment->EndPostion
-		ibNode.replica.setEndPositions(currentSegID, iMsg.startPositions)
+		ibNode.replica.setEndPositions(currentSegID, iMsg.endPositions)
 	}
 
 	if len(iMsg.insertMessages) > 0 {

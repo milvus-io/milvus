@@ -357,7 +357,7 @@ func (replica *CollectionSegmentReplica) setStartPositions(segID UniqueID, start
 	return nil
 }
 
-// setEndPositions set segment `End Position` - means the `startPositions` from the MsgPack when segment need to be flushed
+// setEndPositions set segment `End Position` - means the `endPositions` from the MsgPack when segment need to be flushed
 func (replica *CollectionSegmentReplica) setEndPositions(segID UniqueID, endPositions []*internalpb.MsgPosition) error {
 	replica.posMu.Lock()
 	defer replica.posMu.Unlock()
