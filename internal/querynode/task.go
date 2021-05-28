@@ -164,6 +164,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 			return errors.New(errMsg)
 		}
 	}
+	w.node.streaming.replica.addWatchedDmChannels(w.req.ChannelIDs)
 	log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
 	log.Debug("WatchDmChannels done", zap.String("ChannelIDs", fmt.Sprintln(w.req.ChannelIDs)))
 	return nil
@@ -205,15 +206,23 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 
 	log.Debug("query node load segment", zap.String("loadSegmentRequest", fmt.Sprintln(l.req)))
 
-	hasCollection := l.node.historical.replica.hasCollection(collectionID)
-	hasPartition := l.node.historical.replica.hasPartition(partitionID)
-	if !hasCollection {
+	hasCollectionInHistorical := l.node.historical.replica.hasCollection(collectionID)
+	hasPartitionInHistorical := l.node.historical.replica.hasPartition(partitionID)
+	if !hasCollectionInHistorical {
 		// loading init
 		err := l.node.historical.replica.addCollection(collectionID, schema)
 		if err != nil {
 			return err
 		}
-		l.node.historical.replica.initExcludedSegments(collectionID)
+
+		hasCollectionInStreaming := l.node.streaming.replica.hasCollection(collectionID)
+		if !hasCollectionInStreaming {
+			err = l.node.streaming.replica.addCollection(collectionID, schema)
+			if err != nil {
+				return err
+			}
+		}
+		l.node.streaming.replica.initExcludedSegments(collectionID)
 		newDS := newDataSyncService(l.node.queryNodeLoopCtx, l.node.streaming.replica, l.node.msFactory, collectionID)
 		// ignore duplicated dataSyncService error
 		_ = l.node.streaming.addDataSyncService(collectionID, newDS)
@@ -224,10 +233,18 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 		go ds.start()
 		l.node.searchService.startSearchCollection(collectionID)
 	}
-	if !hasPartition {
-		err := l.node.streaming.replica.addPartition(collectionID, partitionID)
+	if !hasPartitionInHistorical {
+		err := l.node.historical.replica.addPartition(collectionID, partitionID)
 		if err != nil {
 			return err
+		}
+
+		hasPartitionInStreaming := l.node.streaming.replica.hasPartition(partitionID)
+		if !hasPartitionInStreaming {
+			err = l.node.streaming.replica.addPartition(collectionID, partitionID)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	err := l.node.streaming.replica.enablePartition(partitionID)
@@ -287,9 +304,20 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 		r.node.searchService.stopSearchCollection(r.req.CollectionID)
 	}
 
-	err = r.node.streaming.replica.removeCollection(r.req.CollectionID)
-	if err != nil {
-		return err
+	hasCollectionInHistorical := r.node.historical.replica.hasCollection(r.req.CollectionID)
+	if hasCollectionInHistorical {
+		err := r.node.historical.replica.removeCollection(r.req.CollectionID)
+		if err != nil {
+			return err
+		}
+	}
+
+	hasCollectionInStreaming := r.node.streaming.replica.hasCollection(r.req.CollectionID)
+	if hasCollectionInStreaming {
+		err := r.node.streaming.replica.removePartition(r.req.CollectionID)
+		if err != nil {
+			return err
+		}
 	}
 
 	log.Debug("ReleaseCollection done", zap.Int64("collectionID", r.req.CollectionID))
@@ -324,10 +352,21 @@ func (r *releasePartitionsTask) PreExecute(ctx context.Context) error {
 
 func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 	for _, id := range r.req.PartitionIDs {
-		err := r.node.historical.loadService.segLoader.replica.removePartition(id)
-		if err != nil {
-			// not return, try to release all partitions
-			log.Error(err.Error())
+		hasPartitionInHistorical := r.node.historical.replica.hasPartition(id)
+		if hasPartitionInHistorical {
+			err := r.node.historical.replica.removePartition(id)
+			if err != nil {
+				// not return, try to release all partitions
+				log.Error(err.Error())
+			}
+		}
+
+		hasPartitionInStreaming := r.node.streaming.replica.hasPartition(id)
+		if hasPartitionInStreaming {
+			err := r.node.streaming.replica.removePartition(id)
+			if err != nil {
+				log.Error(err.Error())
+			}
 		}
 	}
 	return nil

@@ -179,6 +179,8 @@ func newQueryNodeMock() *QueryNode {
 	if err != nil {
 		panic(err)
 	}
+	svr.historical = newHistorical(svr.queryNodeLoopCtx, nil, nil, nil, svr.msFactory)
+	svr.streaming = newStreaming()
 
 	return svr
 }

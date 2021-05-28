@@ -149,7 +149,7 @@ func TestSearch_Search(t *testing.T) {
 	go ds.start()
 
 	// start search service
-	node.searchService = newSearchService(node.queryNodeLoopCtx, node.historical.replica, msFactory)
+	node.searchService = newSearchService(node.queryNodeLoopCtx, node.historical.replica, node.streaming.replica, msFactory)
 	go node.searchService.start()
 	node.searchService.startSearchCollection(collectionID)
 
@@ -197,7 +197,7 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	go ds.start()
 
 	// start search service
-	node.searchService = newSearchService(node.queryNodeLoopCtx, node.streaming.replica, msFactory)
+	node.searchService = newSearchService(node.queryNodeLoopCtx, node.streaming.replica, node.streaming.replica, msFactory)
 	go node.searchService.start()
 	node.searchService.startSearchCollection(collectionID)
 

@@ -78,19 +78,13 @@ func NewQueryNode(ctx context.Context, queryNodeID UniqueID, factory msgstream.F
 		queryNodeLoopCtx:    ctx1,
 		queryNodeLoopCancel: cancel,
 		QueryNodeID:         queryNodeID,
-		searchService: nil,
-		msFactory: factory,
+		searchService:       nil,
+		msFactory:           factory,
 	}
 
 	node.scheduler = newTaskScheduler(ctx1)
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 
-	node.historical = newHistorical(node.queryNodeLoopCtx,
-		node.masterService,
-		node.dataService,
-		node.indexService,
-		node.msFactory)
-	node.streaming = newStreaming()
 	return node
 }
 
@@ -99,19 +93,13 @@ func NewQueryNodeWithoutID(ctx context.Context, factory msgstream.Factory) *Quer
 	node := &QueryNode{
 		queryNodeLoopCtx:    ctx1,
 		queryNodeLoopCancel: cancel,
-		searchService: nil,
-		msFactory: factory,
+		searchService:       nil,
+		msFactory:           factory,
 	}
 
 	node.scheduler = newTaskScheduler(ctx1)
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 
-	node.historical = newHistorical(node.queryNodeLoopCtx,
-		node.masterService,
-		node.dataService,
-		node.indexService,
-		node.msFactory)
-	node.streaming = newStreaming()
 	return node
 }
 
@@ -125,6 +113,13 @@ func (node *QueryNode) Register() error {
 
 func (node *QueryNode) Init() error {
 	ctx := context.Background()
+
+	node.historical = newHistorical(node.queryNodeLoopCtx,
+		node.masterService,
+		node.dataService,
+		node.indexService,
+		node.msFactory)
+	node.streaming = newStreaming()
 
 	C.SegcoreInit()
 	registerReq := &queryPb.RegisterNodeRequest{
@@ -190,7 +185,7 @@ func (node *QueryNode) Start() error {
 
 	// init services and manager
 	// TODO: pass node.streaming.replica to search service
-	node.searchService = newSearchService(node.queryNodeLoopCtx, node.historical.replica, node.msFactory)
+	node.searchService = newSearchService(node.queryNodeLoopCtx, node.historical.replica, node.streaming.replica, node.msFactory)
 
 	// start task scheduler
 	go node.scheduler.Start()

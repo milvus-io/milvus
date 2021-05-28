@@ -247,11 +247,11 @@ func getPulsarTtOutputStreamAndSeek(pulsarAddress string, positions []*MsgPositi
 	pulsarClient, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
 	outputStream, _ := NewMqTtMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
 	//outputStream.AsConsumer(consumerChannels, consumerSubName)
-	outputStream.Start()
 	for _, pos := range positions {
 		pos.MsgGroup = funcutil.RandomString(4)
 		outputStream.Seek(pos)
 	}
+	outputStream.Start()
 	//outputStream.Start()
 	return outputStream
 }

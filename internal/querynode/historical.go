@@ -13,6 +13,7 @@ package querynode
 
 import (
 	"context"
+
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
 )
