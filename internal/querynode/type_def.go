@@ -27,7 +27,7 @@ type (
 	// IntPrimaryKey is the primary key of int type
 	IntPrimaryKey = typeutil.IntPrimaryKey
 	// DSL is the Domain Specific Language
-	DSL           = string
+	DSL = string
 	// VChannel is the virtual channel
 	VChannel = string
 	// ConsumeSubName is consumer's subscription name of the message stream
