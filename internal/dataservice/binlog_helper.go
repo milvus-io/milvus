@@ -194,11 +194,11 @@ func (s *Server) prepareSegmentPos(segInfo *datapb.SegmentInfo, dmlPos, ddlPos *
 			return nil, err
 		}
 		msPosPair := proto.MarshalTextString(ddlPos)
-		result[path.Join(Params.SegmentDmlPosSubPath, key)] = msPosPair                   //segment pos
+		result[path.Join(Params.SegmentDdlPosSubPath, key)] = msPosPair                   //segment pos
 		result[path.Join(Params.DdlChannelPosSubPath, segInfo.InsertChannel)] = msPosPair // DdlChannel pos(use dm channel as Key, since dd channel may share same channel name)
 	}
 
-	return map[string]string{}, nil
+	return result, nil
 }
 
 // GetVChanPositions get vchannel latest postitions with provided dml channel names
@@ -245,7 +245,7 @@ func (s *Server) GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelPair, e
 		pairs = append(pairs, &datapb.VchannelPair{
 			CollectionID:    vchan.CollectionID,
 			DmlVchannelName: vchan.DmlChannel,
-			DdlVchannelName: vchan.DmlChannel,
+			DdlVchannelName: vchan.DdlChannel,
 			DdlPosition:     ddlPos,
 			DmlPosition:     dmlPos,
 		})
