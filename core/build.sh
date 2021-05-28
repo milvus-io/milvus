@@ -16,9 +16,8 @@ WITH_MKL="OFF"
 WITH_PROMETHEUS="ON"
 FIU_ENABLE="OFF"
 BUILD_OPENBLAS="ON"
-WITH_AWS="OFF"
 
-while getopts "p:d:t:f:ulrcgahzmeis" arg; do
+while getopts "p:d:t:f:ulrcgahzmei" arg; do
   case $arg in
   p)
     INSTALL_PREFIX=$OPTARG
@@ -63,9 +62,6 @@ while getopts "p:d:t:f:ulrcgahzmeis" arg; do
   a)
     FPGA_VERSION="ON"
     ;;
-  s)
-    WITH_AWS="ON"
-    ;;
   h) # help
     echo "
 
@@ -83,11 +79,10 @@ parameter:
 -e: build without prometheus(default: OFF)
 -i: build FIU_ENABLE(default: OFF)
 -a: build FPGA(default: OFF)
--s: build with AWS S3(default: OFF)
 -h: help
 
 usage:
-./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} [-u] [-l] [-r] [-c] [-z] [-g] [-a] [-m] [-e] [-s] [-h]
+./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} [-u] [-l] [-r] [-c] [-z] [-g] [-a] [-m] [-e] [-h]
                 "
     exit 0
     ;;
@@ -122,7 +117,6 @@ CMAKE_CMD="cmake \
 -DFAISS_WITH_MKL=${WITH_MKL} \
 -DMILVUS_WITH_PROMETHEUS=${WITH_PROMETHEUS} \
 -DMILVUS_WITH_FIU=${FIU_ENABLE} \
--DMILVUS_WITH_AWS=${WITH_AWS} \
 ../"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}
