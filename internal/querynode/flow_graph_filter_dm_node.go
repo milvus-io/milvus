@@ -12,20 +12,24 @@
 package querynode
 
 import (
+	"errors"
 	"fmt"
+
+	"github.com/opentracing/opentracing-go"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/opentracing/opentracing-go"
-	"go.uber.org/zap"
 )
 
 type filterDmNode struct {
 	baseNode
+	graphType    flowGraphType
 	collectionID UniqueID
+	partitionID  UniqueID
 	replica      ReplicaInterface
 }
 
@@ -72,8 +76,6 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			if resMsg != nil {
 				iMsg.insertMessages = append(iMsg.insertMessages, resMsg)
 			}
-		// case commonpb.MsgType_kDelete:
-		// dmMsg.deleteMessages = append(dmMsg.deleteMessages, (*msg).(*msgstream.DeleteTask))
 		default:
 			log.Warn("Non supporting", zap.Int32("message type", int32(msg.Type())))
 		}
@@ -102,6 +104,11 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 		return nil
 	}
 
+	// if the flow graph type is partition, check if the partition is target partition
+	if fdmNode.graphType == flowGraphTypePartition && msg.PartitionID != fdmNode.partitionID {
+		return nil
+	}
+
 	// check if the segment is in excluded segments
 	excludedSegments, err := fdmNode.replica.getExcludedSegments(fdmNode.collectionID)
 	log.Debug("excluded segments", zap.String("segmentIDs", fmt.Sprintln(excludedSegments)))
@@ -115,12 +122,6 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 		}
 	}
 
-	// TODO: If the last record is drop type, all insert requests are invalid.
-	//if !records[len(records)-1].createOrDrop {
-	//	return nil
-	//}
-
-	// Filter insert requests before last record.
 	if len(msg.RowIDs) != len(msg.Timestamps) || len(msg.RowIDs) != len(msg.RowData) {
 		// TODO: what if the messages are misaligned? Here, we ignore those messages and print error
 		log.Error("Error, misaligned messages detected")
@@ -134,7 +135,11 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 	return msg
 }
 
-func newFilteredDmNode(replica ReplicaInterface, collectionID UniqueID) *filterDmNode {
+func newFilteredDmNode(replica ReplicaInterface,
+	graphType flowGraphType,
+	collectionID UniqueID,
+	partitionID UniqueID) *filterDmNode {
+
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -142,9 +147,16 @@ func newFilteredDmNode(replica ReplicaInterface, collectionID UniqueID) *filterD
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
+	if graphType != flowGraphTypeCollection && graphType != flowGraphTypePartition {
+		err := errors.New("invalid flow graph type")
+		log.Error(err.Error())
+	}
+
 	return &filterDmNode{
 		baseNode:     baseNode,
+		graphType:    graphType,
 		collectionID: collectionID,
+		partitionID:  partitionID,
 		replica:      replica,
 	}
 }
