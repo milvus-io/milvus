@@ -44,9 +44,8 @@ type ddNode struct {
 	inFlushCh   <-chan *flushMsg
 	idAllocator allocatorInterface
 
-	kv         kv.BaseKV
-	replica    Replica
-	binlogMeta *binlogMeta
+	kv      kv.BaseKV
+	replica Replica
 }
 
 type ddData struct {
@@ -109,7 +108,6 @@ func (ddNode *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			timestampMin: msMsg.TimestampMin(),
 			timestampMax: msMsg.TimestampMax(),
 		},
-		// flushMessages: make([]*flushMsg, 0),
 		gcRecord: &gcRecord{
 			collections: make([]UniqueID, 0),
 		},
@@ -158,7 +156,6 @@ func (ddNode *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			go flush(collID, ddNode.flushMap, ddNode.kv, ddNode.idAllocator, binlogMetaCh)
 			go ddNode.flushComplete(binlogMetaCh, collID, fmsg.ddlFlushedCh)
 		} else {
-			// GOOSE TODO newest position
 			fmsg.ddlFlushedCh <- make([]*datapb.DDLBinlogMeta, 0)
 		}
 
@@ -182,14 +179,7 @@ func (ddNode *ddNode) flushComplete(binlogMetaCh <-chan *datapb.DDLBinlogMeta, c
 		ddlFlushedCh <- nil
 		return
 	}
-	//
-	// log.Debug(".. Saving ddl binlog meta ...")
-	// err := ddNode.binlogMeta.SaveDDLBinlogMetaTxn(collID, binlogMeta)
-	// if err != nil {
-	//     log.Error("Save binlog meta to etcd Wrong", zap.Error(err))
-	// }
 
-	// TODO  remove above
 	ddlFlushedCh <- []*datapb.DDLBinlogMeta{binlogMeta}
 }
 
@@ -197,7 +187,6 @@ func (ddNode *ddNode) flushComplete(binlogMetaCh <-chan *datapb.DDLBinlogMeta, c
 flush will
     generate binlogs for all buffer data in ddNode,
     store the generated binlogs to minIO/S3,
-    store the keys(paths to minIO/s3) of the binlogs to etcd. todo remove
 
 The keys of the binlogs are generated as below:
     ${tenant}/data_definition_log/${collection_id}/ts/${log_idx}
@@ -449,7 +438,7 @@ func (ddNode *ddNode) dropPartition(msg *msgstream.DropPartitionMsg) {
 		append(ddNode.ddBuffer.ddData[collectionID].eventTypes, storage.DropPartitionEventType)
 }
 
-func newDDNode(ctx context.Context, binlogMeta *binlogMeta, inFlushCh <-chan *flushMsg,
+func newDDNode(ctx context.Context, inFlushCh <-chan *flushMsg,
 	replica Replica, idAllocator allocatorInterface) *ddNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
@@ -488,7 +477,6 @@ func newDDNode(ctx context.Context, binlogMeta *binlogMeta, inFlushCh <-chan *fl
 		idAllocator: idAllocator,
 		kv:          minioKV,
 		replica:     replica,
-		binlogMeta:  binlogMeta,
 		flushMap:    &sync.Map{},
 	}
 }

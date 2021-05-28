@@ -202,6 +202,6 @@ func TestDataNode(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	// <-node.ctx.Done()
+	<-node.ctx.Done()
 	node.Stop()
 }

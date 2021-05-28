@@ -90,16 +90,6 @@ func TestParamTable_DataNode(t *testing.T) {
 		log.Println("MetaRootPath:", path)
 	})
 
-	t.Run("Test SegFlushMetaSubPath", func(t *testing.T) {
-		path := Params.SegFlushMetaSubPath
-		log.Println("SegFlushMetaSubPath:", path)
-	})
-
-	t.Run("Test DDLFlushMetaSubPath", func(t *testing.T) {
-		path := Params.DDLFlushMetaSubPath
-		log.Println("DDLFlushMetaSubPath:", path)
-	})
-
 	t.Run("Test minioAccessKeyID", func(t *testing.T) {
 		id := Params.MinioAccessKeyID
 		log.Println("MinioAccessKeyID:", id)
