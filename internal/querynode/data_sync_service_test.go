@@ -115,7 +115,8 @@ func TestDataSyncService_Start(t *testing.T) {
 	err := msFactory.SetParams(m)
 	assert.Nil(t, err)
 
-	err = node.streaming.dataSyncService.addCollectionFlowGraph(collectionID, nil, "dataSyncTestSubName")
+	channels := []VChannel{"0"}
+	err = node.streaming.dataSyncService.addCollectionFlowGraph(collectionID, channels, "dataSyncTestSubName")
 	assert.NoError(t, err)
 	err = node.streaming.dataSyncService.startCollectionFlowGraph(collectionID)
 	assert.NoError(t, err)

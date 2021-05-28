@@ -98,9 +98,13 @@ func (q *queryNodeFlowGraph) newDmInputNode(ctx context.Context,
 	factory msgstream.Factory,
 ) *flowgraph.InputNode {
 
-	insertStream, _ := factory.NewTtMsgStream(ctx)
-	insertStream.AsConsumer([]string{channel}, subName)
-	q.dmlStream = insertStream
+	insertStream, err := factory.NewTtMsgStream(ctx)
+	if err != nil {
+		log.Error(err.Error())
+	} else {
+		insertStream.AsConsumer([]string{channel}, subName)
+		q.dmlStream = insertStream
+	}
 
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism

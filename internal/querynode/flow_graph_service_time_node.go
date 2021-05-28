@@ -105,9 +105,13 @@ func newServiceTimeNode(ctx context.Context,
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
-	timeTimeMsgStream, _ := factory.NewMsgStream(ctx)
-	timeTimeMsgStream.AsProducer([]string{Params.QueryTimeTickChannelName})
-	log.Debug("query node AsProducer: " + Params.QueryTimeTickChannelName)
+	timeTimeMsgStream, err := factory.NewMsgStream(ctx)
+	if err != nil {
+		log.Error(err.Error())
+	} else {
+		timeTimeMsgStream.AsProducer([]string{Params.QueryTimeTickChannelName})
+		log.Debug("query node AsProducer: " + Params.QueryTimeTickChannelName)
+	}
 
 	return &serviceTimeNode{
 		baseNode:          baseNode,

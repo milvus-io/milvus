@@ -74,8 +74,8 @@ func (dsService *dataSyncService) getCollectionFlowGraphs(collectionID UniqueID)
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
-	if _, ok := dsService.collectionFlowGraphs[collectionID]; ok {
-		return nil, errors.New("collection flow graph has been existed, collectionID = " + fmt.Sprintln(collectionID))
+	if _, ok := dsService.collectionFlowGraphs[collectionID]; !ok {
+		return nil, errors.New("collection flow graph doesn't existed, collectionID = " + fmt.Sprintln(collectionID))
 	}
 	return dsService.collectionFlowGraphs[collectionID], nil
 }
@@ -84,8 +84,8 @@ func (dsService *dataSyncService) startCollectionFlowGraph(collectionID UniqueID
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
-	if _, ok := dsService.collectionFlowGraphs[collectionID]; ok {
-		return errors.New("collection flow graph has been existed, collectionID = " + fmt.Sprintln(collectionID))
+	if _, ok := dsService.collectionFlowGraphs[collectionID]; !ok {
+		return errors.New("collection flow graph doesn't existed, collectionID = " + fmt.Sprintln(collectionID))
 	}
 	for _, fg := range dsService.collectionFlowGraphs[collectionID] {
 		// start flow graph
@@ -142,8 +142,8 @@ func (dsService *dataSyncService) getPartitionFlowGraphs(partitionID UniqueID) (
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
-	if _, ok := dsService.partitionFlowGraphs[partitionID]; ok {
-		return nil, errors.New("partition flow graph has been existed, partitionID = " + fmt.Sprintln(partitionID))
+	if _, ok := dsService.partitionFlowGraphs[partitionID]; !ok {
+		return nil, errors.New("partition flow graph doesn't existed, partitionID = " + fmt.Sprintln(partitionID))
 	}
 	return dsService.partitionFlowGraphs[partitionID], nil
 }
@@ -152,8 +152,8 @@ func (dsService *dataSyncService) startPartitionFlowGraph(partitionID UniqueID) 
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
-	if _, ok := dsService.partitionFlowGraphs[partitionID]; ok {
-		return errors.New("partition flow graph has been existed, partitionID = " + fmt.Sprintln(partitionID))
+	if _, ok := dsService.partitionFlowGraphs[partitionID]; !ok {
+		return errors.New("partition flow graph doesn't existed, partitionID = " + fmt.Sprintln(partitionID))
 	}
 	for _, fg := range dsService.partitionFlowGraphs[partitionID] {
 		// start flow graph

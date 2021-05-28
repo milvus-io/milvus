@@ -173,9 +173,12 @@ func newQueryNodeMock() *QueryNode {
 		}()
 	}
 
-	msFactory := msgstream.NewPmsFactory()
+	msFactory, err := newMessageStreamFactory()
+	if err != nil {
+		panic(err)
+	}
 	svr := NewQueryNode(ctx, Params.QueryNodeID, msFactory)
-	err := svr.SetQueryService(&queryServiceMock{})
+	err = svr.SetQueryService(&queryServiceMock{})
 	if err != nil {
 		panic(err)
 	}
