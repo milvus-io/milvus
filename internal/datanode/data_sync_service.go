@@ -13,15 +13,11 @@ package datanode
 
 import (
 	"context"
-	"time"
 
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	"github.com/milvus-io/milvus/internal/util/retry"
-	"go.etcd.io/etcd/clientv3"
 
 	"go.uber.org/zap"
 )
@@ -74,24 +70,6 @@ func (dsService *dataSyncService) close() {
 
 func (dsService *dataSyncService) initNodes(vchanPair *datapb.VchannelPair) {
 	// TODO: add delete pipeline support
-	var kvClient *clientv3.Client
-	var err error
-	connectEtcdFn := func() error {
-		kvClient, err = clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
-		if err != nil {
-			return err
-		}
-		return nil
-	}
-	err = retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
-	if err != nil {
-		panic(err)
-	}
-
-	etcdKV := etcdkv.NewEtcdKV(kvClient, Params.MetaRootPath)
-	// New binlogMeta
-	mt, _ := NewBinlogMeta(etcdKV, dsService.idAllocator)
-
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
 
 	m := map[string]interface{}{
@@ -100,7 +78,7 @@ func (dsService *dataSyncService) initNodes(vchanPair *datapb.VchannelPair) {
 		"PulsarBufSize":  1024,
 	}
 
-	err = dsService.msFactory.SetParams(m)
+	err := dsService.msFactory.SetParams(m)
 	if err != nil {
 		panic(err)
 	}
@@ -109,8 +87,8 @@ func (dsService *dataSyncService) initNodes(vchanPair *datapb.VchannelPair) {
 	var ddStreamNode Node = newDDInputNode(dsService.ctx, dsService.msFactory, vchanPair.GetDdlVchannelName(), vchanPair.GetDdlPosition())
 
 	var filterDmNode Node = newFilteredDmNode()
-	var ddNode Node = newDDNode(dsService.ctx, mt, dsService.flushChan, dsService.replica, dsService.idAllocator)
-	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, mt, dsService.replica, dsService.msFactory, dsService.idAllocator)
+	var ddNode Node = newDDNode(dsService.ctx, dsService.flushChan, dsService.replica, dsService.idAllocator)
+	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, dsService.replica, dsService.msFactory, dsService.idAllocator)
 	var gcNode Node = newGCNode(dsService.replica)
 
 	dsService.fg.AddNode(dmStreamNode)
