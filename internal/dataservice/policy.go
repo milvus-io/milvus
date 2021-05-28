@@ -25,17 +25,18 @@ type clusterDeltaChange struct {
 	restarts []string
 }
 type clusterStartupPolicy interface {
+	// apply accept all nodes and new/offline/restarts nodes and returns datanodes whose status need to be changed
 	apply(oldCluster map[string]*datapb.DataNodeInfo, delta *clusterDeltaChange) []*datapb.DataNodeInfo
 }
 
-type reWatchOnRestartsStartupPolicy struct {
+type watchRestartsStartupPolicy struct {
 }
 
-func newReWatchOnRestartsStartupPolicy() clusterStartupPolicy {
-	return &reWatchOnRestartsStartupPolicy{}
+func newWatchRestartsStartupPolicy() clusterStartupPolicy {
+	return &watchRestartsStartupPolicy{}
 }
 
-func (p *reWatchOnRestartsStartupPolicy) apply(cluster map[string]*datapb.DataNodeInfo, delta *clusterDeltaChange) []*datapb.DataNodeInfo {
+func (p *watchRestartsStartupPolicy) apply(cluster map[string]*datapb.DataNodeInfo, delta *clusterDeltaChange) []*datapb.DataNodeInfo {
 	ret := make([]*datapb.DataNodeInfo, 0)
 	for _, addr := range delta.restarts {
 		node := cluster[addr]
@@ -48,6 +49,7 @@ func (p *reWatchOnRestartsStartupPolicy) apply(cluster map[string]*datapb.DataNo
 }
 
 type dataNodeRegisterPolicy interface {
+	// apply accept all online nodes and new created node, returns nodes needed to be changed
 	apply(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo) []*datapb.DataNodeInfo
 }
 
@@ -63,6 +65,7 @@ func (p *doNothingRegisterPolicy) apply(cluster map[string]*datapb.DataNodeInfo,
 }
 
 type dataNodeUnregisterPolicy interface {
+	// apply accept all online nodes and unregistered node, returns nodes needed to be changed
 	apply(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo) []*datapb.DataNodeInfo
 }
 
@@ -77,9 +80,9 @@ func (p *doNothingUnregisterPolicy) apply(cluster map[string]*datapb.DataNodeInf
 	return nil
 }
 
-type reassignRandomUnregisterPolicy struct{}
+type randomAssignUnregisterPolicy struct{}
 
-func (p *reassignRandomUnregisterPolicy) apply(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo) []*datapb.DataNodeInfo {
+func (p *randomAssignUnregisterPolicy) apply(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo) []*datapb.DataNodeInfo {
 	if len(cluster) == 0 || // no available node
 		len(session.Channels) == 0 { // lost node not watching any channels
 		return []*datapb.DataNodeInfo{}
@@ -113,17 +116,18 @@ func (p *reassignRandomUnregisterPolicy) apply(cluster map[string]*datapb.DataNo
 }
 
 type channelAssignPolicy interface {
+	// apply accept all online nodes and new created channel with collectionID, returns node needed to be changed
 	apply(cluster map[string]*datapb.DataNodeInfo, channel string, collectionID UniqueID) []*datapb.DataNodeInfo
 }
 
-type allAssignPolicy struct {
+type assignAllPolicy struct {
 }
 
-func newAllAssignPolicy() channelAssignPolicy {
-	return &allAssignPolicy{}
+func newAssignAllPolicy() channelAssignPolicy {
+	return &assignAllPolicy{}
 }
 
-func (p *allAssignPolicy) apply(cluster map[string]*datapb.DataNodeInfo, channel string, collectionID UniqueID) []*datapb.DataNodeInfo {
+func (p *assignAllPolicy) apply(cluster map[string]*datapb.DataNodeInfo, channel string, collectionID UniqueID) []*datapb.DataNodeInfo {
 	ret := make([]*datapb.DataNodeInfo, 0)
 	for _, node := range cluster {
 		has := false

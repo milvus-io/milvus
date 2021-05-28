@@ -12,9 +12,7 @@
 package dataservice
 
 import (
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"go.uber.org/zap"
 )
 
 type vchannel struct {
@@ -56,31 +54,4 @@ func (dp dummyPosProvider) GetDdlChannel() string {
 //GetDdlChannel implements positionProvider
 func (s *Server) GetDdlChannel() string {
 	return s.ddChannelName
-}
-
-// getAllActiveVChannels get all vchannels with unflushed segments
-func (s *Server) getAllActiveVChannels() []vchannel {
-	segments := s.meta.GetUnFlushedSegments()
-
-	mChanCol := make(map[string]UniqueID)
-	for _, segment := range segments {
-		ocid, has := mChanCol[segment.InsertChannel]
-		if has && ocid != segment.CollectionID {
-			log.Error("col:vchan not 1:N",
-				zap.Int64("colid 1", ocid),
-				zap.Int64("colid 2", segment.CollectionID),
-				zap.String("channel", segment.InsertChannel))
-		}
-		mChanCol[segment.InsertChannel] = segment.CollectionID
-	}
-
-	vchans := make([]vchannel, 0, len(mChanCol))
-	for dmChan, colID := range mChanCol {
-		vchans = append(vchans, vchannel{
-			CollectionID: colID,
-			DmlChannel:   dmChan,
-			DdlChannel:   s.ddChannelName,
-		})
-	}
-	return vchans
 }
