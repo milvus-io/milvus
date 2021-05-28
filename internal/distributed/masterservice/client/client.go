@@ -74,7 +74,7 @@ func NewClient(addr string, metaRoot string, etcdAddr []string, timeout time.Dur
 func (c *GrpcClient) reconnect() error {
 	addr, err := getMasterServiceAddr(c.sess)
 	if err != nil {
-		return nil
+		return err
 	}
 	tracer := opentracing.GlobalTracer()
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)

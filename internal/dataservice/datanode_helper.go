@@ -55,13 +55,11 @@ func (dp dummyPosProvider) GetDdlChannel() string {
 
 //GetDdlChannel implements positionProvider
 func (s *Server) GetDdlChannel() string {
-	s.getDDChannel()
-	return s.ddChannelMu.name
+	return s.ddChannelName
 }
 
 // getAllActiveVChannels get all vchannels with unflushed segments
 func (s *Server) getAllActiveVChannels() []vchannel {
-	s.getDDChannel()
 	segments := s.meta.GetUnFlushedSegments()
 
 	mChanCol := make(map[string]UniqueID)
@@ -81,7 +79,7 @@ func (s *Server) getAllActiveVChannels() []vchannel {
 		vchans = append(vchans, vchannel{
 			CollectionID: colID,
 			DmlChannel:   dmChan,
-			DdlChannel:   s.ddChannelMu.name,
+			DdlChannel:   s.ddChannelName,
 		})
 	}
 	return vchans

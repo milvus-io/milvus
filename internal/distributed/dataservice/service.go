@@ -101,8 +101,6 @@ func (s *Server) init() error {
 		return err
 	}
 
-	s.dataService.UpdateStateCode(internalpb.StateCode_Initializing)
-
 	if s.newMasterServiceClient != nil {
 		log.Debug("master service", zap.String("address", Params.MasterAddress))
 		masterServiceClient, err := s.newMasterServiceClient(Params.MasterAddress)
@@ -120,7 +118,6 @@ func (s *Server) init() error {
 		if err = funcutil.WaitForComponentInitOrHealthy(ctx, masterServiceClient, "MasterService", 1000000, 200*time.Millisecond); err != nil {
 			panic(err)
 		}
-		s.dataService.SetMasterClient(masterServiceClient)
 	}
 
 	if err := s.dataService.Init(); err != nil {
