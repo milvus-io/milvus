@@ -911,16 +911,16 @@ func TestStream_PulsarMsgStream_3(t *testing.T) {
 
 	factory := ProtoUDFactory{}
 	pulsarClient, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
-	outputStream_2, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
-	outputStream_2.AsConsumer(consumerChannels, consumerSubName)
-	outputStream_2.Seek(seekPosition)
-	outputStream_2.Start()
+	outputStream2, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+	outputStream2.AsConsumer(consumerChannels, consumerSubName)
+	outputStream2.Seek(seekPosition)
+	outputStream2.Start()
 
 	for i := 6; i < 10; i++ {
-		result := outputStream_2.Consume()
+		result := outputStream2.Consume()
 		assert.Equal(t, result.Msgs[0].ID(), int64(i))
 	}
-	outputStream_2.Close()
+	outputStream2.Close()
 
 }
 

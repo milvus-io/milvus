@@ -376,7 +376,7 @@ func (ms *mqMsgStream) Seek(mp *internalpb.MsgPosition) error {
 		}
 		consumer.Ack(msg)
 
-		if bytes.Compare(msg.ID().Serialize(), messageID.Serialize()) != 0 {
+		if !bytes.Equal(msg.ID().Serialize(), messageID.Serialize()) {
 			err = fmt.Errorf("seek msg not correct")
 			log.Error("msMsgStream seek", zap.Error(err))
 		}
