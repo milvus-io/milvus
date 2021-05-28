@@ -185,7 +185,11 @@ func (node *QueryNode) Start() error {
 
 	// init services and manager
 	// TODO: pass node.streaming.replica to search service
-	node.searchService = newSearchService(node.queryNodeLoopCtx, node.historical.replica, node.streaming.replica, node.msFactory)
+	node.searchService = newSearchService(node.queryNodeLoopCtx,
+		node.historical.replica,
+		node.streaming.replica,
+		node.streaming.tSafeReplica,
+		node.msFactory)
 
 	// start task scheduler
 	go node.scheduler.Start()

@@ -71,14 +71,13 @@ endif()
 # **************************** Compiler arguments ****************************
 message( STATUS "Building Milvus CPU version" )
 
-
-#append_flags( CMAKE_CXX_FLAGS
-#              FLAGS
-#                    "-fPIC"
-#                    "-DELPP_THREAD_SAFE"
-#                    "-fopenmp"
-#                    "-Werror"
-#                    )
+append_flags( CMAKE_CXX_FLAGS
+              FLAGS
+                    "-fPIC"
+                    "-DELPP_THREAD_SAFE"
+                    "-fopenmp"
+                    "-Werror"
+                    )
 
 # **************************** Coding style check tools ****************************
 find_package( ClangTools )

@@ -109,6 +109,7 @@ datatype_is_floating(DataType datatype) {
 
 class FieldMeta {
  public:
+    static const FieldMeta RowIdMeta;
     FieldMeta(const FieldMeta&) = delete;
     FieldMeta(FieldMeta&&) = default;
     FieldMeta&
@@ -179,4 +180,5 @@ class FieldMeta {
     DataType type_ = DataType::NONE;
     std::optional<VectorInfo> vector_info_;
 };
+
 }  // namespace milvus

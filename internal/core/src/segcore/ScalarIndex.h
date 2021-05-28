@@ -8,34 +8,40 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
-#pragma once
-#include <memory>
 
-#include "segcore/SegmentInterface.h"
-#include "common/LoadInfo.h"
+#pragma once
+#include "exceptions/EasyAssert.h"
+#include "common/Types.h"
+#include "pb/schema.pb.h"
+
+#include <memory>
+#include <vector>
 #include <utility>
 
 namespace milvus::segcore {
 
-class SegmentSealed : public SegmentInternalInterface {
+class ScalarIndexBase {
  public:
-    virtual void
-    LoadIndex(const LoadIndexInfo& info) = 0;
-    virtual void
-    LoadFieldData(const LoadFieldDataInfo& info) = 0;
-    virtual void
-    DropIndex(const FieldId field_id) = 0;
-    virtual void
-    DropFieldData(const FieldId field_id) = 0;
-    virtual bool
-    HasIndex(FieldId field_id) const = 0;
-    virtual bool
-    HasFieldData(FieldId field_id) const = 0;
+    virtual std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    do_search_ids(const IdArray& ids) const = 0;
+    virtual ~ScalarIndexBase() = default;
 };
 
-using SegmentSealedPtr = std::unique_ptr<SegmentSealed>;
+class ScalarIndexVector : public ScalarIndexBase {
+    using T = int64_t;
 
-SegmentSealedPtr
-CreateSealedSegment(SchemaPtr schema);
+ public:
+    // TODO: use proto::schema::ids
+    void
+    append_data(const T* ids, int64_t count, SegOffset base);
 
+    void
+    build();
+
+    std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    do_search_ids(const IdArray& ids) const override;
+
+ private:
+    std::vector<std::pair<T, SegOffset>> mapping_;
+};
 }  // namespace milvus::segcore

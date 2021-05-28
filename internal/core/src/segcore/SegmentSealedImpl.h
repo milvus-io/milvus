@@ -12,9 +12,11 @@
 #pragma once
 #include "segcore/SegmentSealed.h"
 #include "SealedIndexingRecord.h"
+#include "ScalarIndex.h"
 #include <map>
 #include <vector>
 #include <memory>
+#include <utility>
 
 namespace milvus::segcore {
 class SegmentSealedImpl : public SegmentSealed {
@@ -107,17 +109,30 @@ class SegmentSealedImpl : public SegmentSealed {
         return system_ready_count_ == 1;
     }
 
+    virtual std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    search_ids(const IdArray& id_array) const;
+
+    //    virtual void
+    //    build_index_if_primary_key(FieldId field_id);
+
  private:
     // segment loading state
     boost::dynamic_bitset<> field_data_ready_bitset_;
     boost::dynamic_bitset<> vecindex_ready_bitset_;
     std::atomic<int> system_ready_count_ = 0;
     // segment datas
+
     // TODO: generate index for scalar
     std::optional<int64_t> row_count_opt_;
+
+    // TODO: use protobuf format
+    // TODO: remove duplicated indexing
     std::vector<std::unique_ptr<knowhere::Index>> scalar_indexings_;
-    SealedIndexingRecord vecindexs_;
+    std::unique_ptr<ScalarIndexBase> primary_key_index_;
+
     std::vector<aligned_vector<char>> field_datas_;
+
+    SealedIndexingRecord vecindexs_;
     aligned_vector<idx_t> row_ids_;
     SchemaPtr schema_;
 };
