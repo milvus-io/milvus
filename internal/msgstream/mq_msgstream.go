@@ -542,6 +542,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 						ChannelName: tempBuffer[0].Position().ChannelName,
 						MsgID:       tempBuffer[0].Position().MsgID,
 						Timestamp:   timeStamp,
+						MsgGroup:    consumer.Subscription(),
 					}
 					endMsgPositions = append(endMsgPositions, newPos)
 				} else {
@@ -549,6 +550,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 						ChannelName: timeTickMsg.Position().ChannelName,
 						MsgID:       timeTickMsg.Position().MsgID,
 						Timestamp:   timeStamp,
+						MsgGroup:    consumer.Subscription(),
 					}
 					endMsgPositions = append(endMsgPositions, newPos)
 				}
