@@ -115,13 +115,10 @@ func TestDataSyncService_Start(t *testing.T) {
 	err := msFactory.SetParams(m)
 	assert.Nil(t, err)
 
-	// dataSync
-	node.streaming.dataSyncServices[collectionID] = newDataSyncService(node.queryNodeLoopCtx,
-		node.streaming.replica,
-		node.streaming.tSafeReplica,
-		msFactory,
-		collectionID)
-	go node.streaming.dataSyncServices[collectionID].start()
+	err = node.streaming.dataSyncService.addCollectionFlowGraph(collectionID, nil, "dataSyncTestSubName")
+	assert.NoError(t, err)
+	err = node.streaming.dataSyncService.startCollectionFlowGraph(collectionID)
+	assert.NoError(t, err)
 
 	<-node.queryNodeLoopCtx.Done()
 	node.Stop()

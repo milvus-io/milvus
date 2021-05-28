@@ -39,6 +39,7 @@ type dataSyncService struct {
 	msFactory        msgstream.Factory
 }
 
+// collection flow graph
 func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID,
 	vChannels []string,
 	subName ConsumeSubName) error {
@@ -69,6 +70,45 @@ func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID,
 	return nil
 }
 
+func (dsService *dataSyncService) getCollectionFlowGraphs(collectionID UniqueID) ([]*queryNodeFlowGraph, error) {
+	dsService.mu.Lock()
+	defer dsService.mu.Unlock()
+
+	if _, ok := dsService.collectionFlowGraphs[collectionID]; ok {
+		return nil, errors.New("collection flow graph has been existed, collectionID = " + fmt.Sprintln(collectionID))
+	}
+	return dsService.collectionFlowGraphs[collectionID], nil
+}
+
+func (dsService *dataSyncService) startCollectionFlowGraph(collectionID UniqueID) error {
+	dsService.mu.Lock()
+	defer dsService.mu.Unlock()
+
+	if _, ok := dsService.collectionFlowGraphs[collectionID]; ok {
+		return errors.New("collection flow graph has been existed, collectionID = " + fmt.Sprintln(collectionID))
+	}
+	for _, fg := range dsService.collectionFlowGraphs[collectionID] {
+		// start flow graph
+		go fg.flowGraph.Start()
+	}
+	return nil
+}
+
+func (dsService *dataSyncService) removeCollectionFlowGraph(collectionID UniqueID) {
+	dsService.mu.Lock()
+	defer dsService.mu.Unlock()
+
+	if _, ok := dsService.collectionFlowGraphs[collectionID]; ok {
+		for _, nodeFG := range dsService.collectionFlowGraphs[collectionID] {
+			// close flow graph
+			nodeFG.flowGraph.Close()
+		}
+		dsService.collectionFlowGraphs[collectionID] = nil
+	}
+	delete(dsService.collectionFlowGraphs, collectionID)
+}
+
+// partition flow graph
 func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID,
 	partitionID UniqueID,
 	vChannels []string,
@@ -98,18 +138,28 @@ func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID,
 	return nil
 }
 
-func (dsService *dataSyncService) removeCollectionFlowGraph(collectionID UniqueID) {
+func (dsService *dataSyncService) getPartitionFlowGraphs(partitionID UniqueID) ([]*queryNodeFlowGraph, error) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
-	if _, ok := dsService.collectionFlowGraphs[collectionID]; ok {
-		for _, nodeFG := range dsService.collectionFlowGraphs[collectionID] {
-			// close flow graph
-			nodeFG.flowGraph.Close()
-		}
-		dsService.collectionFlowGraphs[collectionID] = nil
+	if _, ok := dsService.partitionFlowGraphs[partitionID]; ok {
+		return nil, errors.New("partition flow graph has been existed, partitionID = " + fmt.Sprintln(partitionID))
 	}
-	delete(dsService.collectionFlowGraphs, collectionID)
+	return dsService.partitionFlowGraphs[partitionID], nil
+}
+
+func (dsService *dataSyncService) startPartitionFlowGraph(partitionID UniqueID) error {
+	dsService.mu.Lock()
+	defer dsService.mu.Unlock()
+
+	if _, ok := dsService.partitionFlowGraphs[partitionID]; ok {
+		return errors.New("partition flow graph has been existed, partitionID = " + fmt.Sprintln(partitionID))
+	}
+	for _, fg := range dsService.partitionFlowGraphs[partitionID] {
+		// start flow graph
+		go fg.flowGraph.Start()
+	}
+	return nil
 }
 
 func (dsService *dataSyncService) removePartitionFlowGraph(partitionID UniqueID) {

@@ -119,7 +119,7 @@ func (node *QueryNode) Init() error {
 		node.dataService,
 		node.indexService,
 		node.msFactory)
-	node.streaming = newStreaming()
+	node.streaming = newStreaming(node.queryNodeLoopCtx, node.msFactory)
 
 	C.SegcoreInit()
 	registerReq := &queryPb.RegisterNodeRequest{

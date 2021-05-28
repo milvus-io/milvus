@@ -22,7 +22,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 )
@@ -110,35 +109,28 @@ func (w *watchDmChannelsTask) PreExecute(ctx context.Context) error {
 
 func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	log.Debug("starting WatchDmChannels ...", zap.String("ChannelIDs", fmt.Sprintln(w.req.ChannelIDs)))
+	// TODO: pass load type, col or partition
+
+	// 1. init channels in collection meta
 	collectionID := w.req.CollectionID
-	ds, err := w.node.streaming.getDataSyncService(collectionID)
-	if err != nil || ds.dmStream == nil {
-		errMsg := "null data sync service or null data manipulation stream, collectionID = " + fmt.Sprintln(collectionID)
-		log.Error(errMsg)
-		return errors.New(errMsg)
+	collection, err := w.node.streaming.replica.getCollectionByID(collectionID)
+	if err != nil {
+		log.Error(err.Error())
+		return err
 	}
+	collection.addWatchedDmChannels(w.req.ChannelIDs)
 
-	switch t := ds.dmStream.(type) {
-	case *msgstream.MqTtMsgStream:
-	default:
-		_ = t
-		errMsg := "type assertion failed for dm message stream"
-		log.Error(errMsg)
-		return errors.New(errMsg)
-	}
-
+	// 2. get subscription name
 	getUniqueSubName := func() string {
 		prefixName := Params.MsgChannelSubName
 		return prefixName + "-" + strconv.FormatInt(collectionID, 10)
 	}
+	consumeSubName := getUniqueSubName()
 
-	// add request channel
+	// 3. group channels by to seeking or consuming
 	consumeChannels := w.req.ChannelIDs
 	toSeekInfo := make([]*internalpb.MsgPosition, 0)
 	toDirSubChannels := make([]string, 0)
-
-	consumeSubName := getUniqueSubName()
-
 	for _, info := range w.req.Infos {
 		if len(info.Pos.MsgID) == 0 {
 			toDirSubChannels = append(toDirSubChannels, info.ChannelID)
@@ -155,23 +147,37 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	ds.dmStream.AsConsumer(toDirSubChannels, consumeSubName)
-	for _, pos := range toSeekInfo {
-		err := ds.dmStream.Seek(pos)
-		if err != nil {
-			errMsg := "msgStream seek error :" + err.Error()
-			log.Error(errMsg)
-			return errors.New(errMsg)
-		}
-	}
-
-	collection, err := w.node.streaming.replica.getCollectionByID(collectionID)
+	// 4. channel as consumer and add flow graph
+	err = w.node.streaming.dataSyncService.addCollectionFlowGraph(collectionID, toDirSubChannels, consumeSubName)
 	if err != nil {
-		log.Error(err.Error())
 		return err
 	}
-	collection.addWatchedDmChannels(w.req.ChannelIDs)
+
+	// 5. seek channel
+	for _, pos := range toSeekInfo {
+		nodeFGs, err := w.node.streaming.dataSyncService.getCollectionFlowGraphs(collectionID)
+		if err != nil {
+			return err
+		}
+		for _, fg := range nodeFGs {
+			if fg.channel == pos.ChannelName {
+				err := fg.seekQueryNodeFlowGraph(pos)
+				if err != nil {
+					errMsg := "msgStream seek error :" + err.Error()
+					log.Error(errMsg)
+					return errors.New(errMsg)
+				}
+			}
+		}
+	}
 	log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
+
+	// 6. start flow graphs
+	err = w.node.streaming.dataSyncService.startCollectionFlowGraph(collectionID)
+	if err != nil {
+		return err
+	}
+
 	log.Debug("WatchDmChannels done", zap.String("ChannelIDs", fmt.Sprintln(w.req.ChannelIDs)))
 	return nil
 }
@@ -229,18 +235,6 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 			}
 		}
 		l.node.streaming.replica.initExcludedSegments(collectionID)
-		newDS := newDataSyncService(l.node.queryNodeLoopCtx,
-			l.node.streaming.replica,
-			l.node.streaming.tSafeReplica,
-			l.node.msFactory,
-			collectionID)
-		// ignore duplicated dataSyncService error
-		_ = l.node.streaming.addDataSyncService(collectionID, newDS)
-		ds, err := l.node.streaming.getDataSyncService(collectionID)
-		if err != nil {
-			return err
-		}
-		go ds.start()
 		l.node.searchService.startSearchCollection(collectionID)
 	}
 	if !hasPartitionInHistorical {
@@ -302,22 +296,18 @@ func (r *releaseCollectionTask) PreExecute(ctx context.Context) error {
 }
 
 func (r *releaseCollectionTask) Execute(ctx context.Context) error {
-	ds, err := r.node.streaming.getDataSyncService(r.req.CollectionID)
-	if err == nil && ds != nil {
-		ds.close()
-		r.node.streaming.removeDataSyncService(r.req.CollectionID)
-		collection, err := r.node.historical.replica.getCollectionByID(r.req.CollectionID)
-		if err != nil {
-			log.Error(err.Error())
-		} else {
-			// remove all tSafes of the target collection
-			for _, channel := range collection.getWatchedDmChannels() {
-				r.node.streaming.tSafeReplica.removeTSafe(channel)
-			}
+	r.node.streaming.dataSyncService.removeCollectionFlowGraph(r.req.CollectionID)
+	collection, err := r.node.historical.replica.getCollectionByID(r.req.CollectionID)
+	if err != nil {
+		log.Error(err.Error())
+	} else {
+		// remove all tSafes of the target collection
+		for _, channel := range collection.getWatchedDmChannels() {
+			r.node.streaming.tSafeReplica.removeTSafe(channel)
 		}
-
-		r.node.streaming.replica.removeExcludedSegments(r.req.CollectionID)
 	}
+
+	r.node.streaming.replica.removeExcludedSegments(r.req.CollectionID)
 
 	if r.node.searchService.hasSearchCollection(r.req.CollectionID) {
 		r.node.searchService.stopSearchCollection(r.req.CollectionID)

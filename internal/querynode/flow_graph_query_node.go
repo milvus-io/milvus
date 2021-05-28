@@ -13,15 +13,17 @@ package querynode
 
 import (
 	"context"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
 type queryNodeFlowGraph struct {
+	channel   VChannel
 	flowGraph *flowgraph.TimeTickedFlowGraph
 	dmlStream msgstream.MsgStream
 }
@@ -34,9 +36,10 @@ func newQueryNodeFlowGraph(ctx context.Context,
 	tSafeReplica TSafeReplicaInterface,
 	channel VChannel,
 	subName ConsumeSubName,
-	factory msgstream.Factory,) *queryNodeFlowGraph {
+	factory msgstream.Factory) *queryNodeFlowGraph {
 
 	q := &queryNodeFlowGraph{
+		channel:   channel,
 		flowGraph: flowgraph.NewTimeTickedFlowGraph(ctx),
 	}
 

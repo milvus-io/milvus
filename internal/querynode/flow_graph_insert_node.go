@@ -26,7 +26,7 @@ import (
 
 type insertNode struct {
 	baseNode
-	replica      ReplicaInterface
+	replica ReplicaInterface
 }
 
 type InsertData struct {
@@ -171,7 +171,7 @@ func newInsertNode(replica ReplicaInterface) *insertNode {
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &insertNode{
-		baseNode:     baseNode,
-		replica:      replica,
+		baseNode: baseNode,
+		replica:  replica,
 	}
 }

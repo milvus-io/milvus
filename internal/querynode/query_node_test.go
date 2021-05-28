@@ -180,7 +180,7 @@ func newQueryNodeMock() *QueryNode {
 		panic(err)
 	}
 	svr.historical = newHistorical(svr.queryNodeLoopCtx, nil, nil, nil, svr.msFactory)
-	svr.streaming = newStreaming()
+	svr.streaming = newStreaming(ctx, msFactory)
 
 	return svr
 }
