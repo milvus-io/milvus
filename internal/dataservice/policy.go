@@ -84,35 +84,43 @@ type randomAssignUnregisterPolicy struct{}
 
 func (p *randomAssignUnregisterPolicy) apply(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo) []*datapb.DataNodeInfo {
 	if len(cluster) == 0 || // no available node
+		session == nil ||
 		len(session.Channels) == 0 { // lost node not watching any channels
 		return []*datapb.DataNodeInfo{}
 	}
 
-	mChan := make(map[string]struct{}, len(session.Channels))
+	appliedNodes := make([]*datapb.DataNodeInfo, 0, len(session.Channels))
+	raResult := make(map[int][]*datapb.ChannelStatus)
 	for _, chanSt := range session.Channels {
-		mChan[chanSt.Name] = struct{}{}
+		bIdx, err := rand.Int(rand.Reader, big.NewInt(int64(len(cluster))))
+		if err != nil {
+			log.Error("error generated rand idx", zap.Error(err))
+			return []*datapb.DataNodeInfo{}
+		}
+		idx := bIdx.Int64()
+		if int(idx) >= len(cluster) {
+			continue
+		}
+		cs, ok := raResult[int(idx)]
+		if !ok {
+			cs = make([]*datapb.ChannelStatus, 0, 10)
+		}
+		chanSt.State = datapb.ChannelWatchState_Uncomplete
+		cs = append(cs, chanSt)
+		raResult[int(idx)] = cs
 	}
 
-	bIdx, err := rand.Int(rand.Reader, big.NewInt(int64(len(cluster))))
-	if err != nil {
-		log.Error("error generated rand idx", zap.Error(err))
-		return []*datapb.DataNodeInfo{}
-	}
-	idx := bIdx.Int64()
-	if int(idx) >= len(cluster) {
-		return []*datapb.DataNodeInfo{}
-	}
 	i := 0
 	for _, node := range cluster {
-		if i == int(idx) {
-			//TODO add channel to node
-			return []*datapb.DataNodeInfo{
-				node,
-			}
-		}
+		cs, ok := raResult[i]
 		i++
+		if ok {
+			node.Channels = append(node.Channels, cs...)
+			appliedNodes = append(appliedNodes, node)
+		}
 	}
-	return []*datapb.DataNodeInfo{}
+
+	return appliedNodes
 }
 
 type channelAssignPolicy interface {
