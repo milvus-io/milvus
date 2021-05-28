@@ -10,6 +10,7 @@ from pymilvus_orm.schema import CollectionSchema, FieldSchema
 from common import common_type as ct
 from utils.util_log import test_log as log
 
+
 """" Methods of processing data """
 l2 = lambda x, y: np.linalg.norm(np.array(x) - np.array(y))
 
@@ -19,12 +20,12 @@ def gen_unique_str(str_value=None):
     return "test_" + prefix if str_value is None else str_value + "_" + prefix
 
 
-def gen_int64_field(name=ct.default_int64_field, is_primary=False, description=ct.default_desc):
+def gen_int64_field(name=ct.default_int64_field_name, is_primary=False, description=ct.default_desc):
     int64_field = FieldSchema(name=name, dtype=DataType.INT64, description=description, is_primary=is_primary)
     return int64_field
 
 
-def gen_float_field(name=ct.default_float_field, is_primary=False, description=ct.default_desc):
+def gen_float_field(name=ct.default_float_field_name, is_primary=False, description=ct.default_desc):
     float_field = FieldSchema(name=name, dtype=DataType.FLOAT, description=description, is_primary=is_primary)
     return float_field
 
@@ -76,50 +77,58 @@ def gen_binary_vectors(num, dim):
     return raw_vectors, binary_vectors
 
 
-def gen_default_dataframe_data(nb=ct.default_nb):
+def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim):
     int_values = pd.Series(data=[i for i in range(nb)])
     float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
-    float_vec_values = gen_vectors(nb, ct.default_dim)
+    float_vec_values = gen_vectors(nb, dim)
     df = pd.DataFrame({
-        ct.default_int64_field: int_values,
-        ct.default_float_field: float_values,
+        ct.default_int64_field_name: int_values,
+        ct.default_float_field_name: float_values,
         ct.default_float_vec_field_name: float_vec_values
     })
     return df
 
 
-def gen_default_binary_dataframe_data(nb=ct.default_nb):
+def gen_default_binary_dataframe_data(nb=ct.default_nb, dim=ct.default_dim):
     int_values = pd.Series(data=[i for i in range(nb)])
     float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
-    _, binary_vec_values = gen_binary_vectors(nb, ct.default_dim)
+    _, binary_vec_values = gen_binary_vectors(nb, dim)
     df = pd.DataFrame({
-        ct.default_int64_field: int_values,
-        ct.default_float_field: float_values,
+        ct.default_int64_field_name: int_values,
+        ct.default_float_field_name: float_values,
         ct.default_binary_vec_field_name: binary_vec_values
     })
     return df
 
 
-def gen_default_list_data(nb=ct.default_nb):
+def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim):
     int_values = [i for i in range(nb)]
     float_values = [np.float32(i) for i in range(nb)]
-    float_vec_values = gen_vectors(nb, ct.default_dim)
+    float_vec_values = gen_vectors(nb, dim)
     data = [int_values, float_values, float_vec_values]
     return data
 
 
-def gen_numpy_data(nb=ct.default_nb):
+def gen_default_tuple_data(nb=ct.default_nb, dim=ct.default_dim):
+    int_values = [i for i in range(nb)]
+    float_values = [float(i) for i in range(nb)]
+    float_vec_values = gen_vectors(nb, dim)
+    data = (int_values, float_values, float_vec_values)
+    return data
+
+
+def gen_numpy_data(nb=ct.default_nb, dim=ct.default_dim):
     int_values = np.arange(nb, dtype='int64')
     float_values = np.arange(nb, dtype='float32')
-    float_vec_values = gen_vectors(nb, ct.default_dim)
+    float_vec_values = gen_vectors(nb, dim)
     data = [int_values, float_values, float_vec_values]
     return data
 
 
-def gen_default_binary_list_data(nb=ct.default_nb):
+def gen_default_binary_list_data(nb=ct.default_nb, dim=ct.default_dim):
     int_values = [i for i in range(nb)]
     float_values = [np.float32(i) for i in range(nb)]
-    _, binary_vec_values = gen_binary_vectors(nb, ct.default_dim)
+    _, binary_vec_values = gen_binary_vectors(nb, dim)
     data = [int_values, float_values, binary_vec_values]
     return data
 
@@ -160,7 +169,7 @@ def gen_invalid_dataframe():
     vec = gen_vectors(3, 2)
     dfs = [
         # just columns df
-        pd.DataFrame(columns=[ct.default_int64_field, ct.default_float_vec_field_name]),
+        pd.DataFrame(columns=[ct.default_int64_field_name, ct.default_float_vec_field_name]),
         # no column just data df
         pd.DataFrame({' ': vec}),
         # datetime df

@@ -39,10 +39,6 @@ class TestCollectionParams(ApiReq):
         pass
 
     @pytest.fixture(scope="function", params=ct.get_invalid_strs)
-    def get_invalid_string(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
     def get_invalid_type_schema(self, request):
         if request.param is None:
             pytest.skip("None schema is valid")
@@ -173,7 +169,7 @@ class TestCollectionParams(ApiReq):
         collection = self._collection()
         c_name = collection.name
         assert_default_collection(collection)
-        schema = cf.gen_default_collection_schema(primary_field=ct.default_int64_field)
+        schema = cf.gen_default_collection_schema(primary_field=ct.default_int64_field_name)
         ex, _ = self.collection.collection_init(c_name, schema=schema)
         assert "The collection already exist, but the schema isnot the same as the passed in" in str(ex)
         assert collection.primary_field is None
@@ -451,9 +447,9 @@ class TestCollectionParams(ApiReq):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        schema = cf.gen_default_collection_schema(primary_field=ct.default_int64_field)
+        schema = cf.gen_default_collection_schema(primary_field=ct.default_int64_field_name)
         collection, _ = self.collection.collection_init(c_name, schema=schema)
-        assert collection.primary_field.name == ct.default_int64_field
+        assert collection.primary_field.name == ct.default_int64_field_name
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_collection_unsupported_primary_field(self, get_unsupported_primary_field):

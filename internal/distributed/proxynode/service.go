@@ -217,7 +217,7 @@ func (s *Server) init() error {
 
 	indexServiceAddr := Params.IndexServerAddress
 	log.Debug("proxynode", zap.String("index server address", indexServiceAddr))
-	s.indexServiceClient = grpcindexserviceclient.NewClient(indexServiceAddr)
+	s.indexServiceClient = grpcindexserviceclient.NewClient(indexServiceAddr, proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, 10)
 	err = s.indexServiceClient.Init()
 	if err != nil {
 		return err
@@ -227,7 +227,7 @@ func (s *Server) init() error {
 
 	queryServiceAddr := Params.QueryServiceAddress
 	log.Debug("proxynode", zap.String("query server address", queryServiceAddr))
-	s.queryServiceClient, err = grpcqueryserviceclient.NewClient(queryServiceAddr, timeout)
+	s.queryServiceClient, err = grpcqueryserviceclient.NewClient(ctx, queryServiceAddr, proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, timeout)
 	if err != nil {
 		return err
 	}
