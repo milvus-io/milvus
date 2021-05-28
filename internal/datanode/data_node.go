@@ -181,7 +181,7 @@ func (node *DataNode) Init() error {
 // NewDataSyncService adds a new dataSyncService to DataNode
 func (node *DataNode) NewDataSyncService(vchanPair *datapb.VchannelPair) error {
 	node.chanMut.Lock()
-	defer node.chanMut.RLock()
+	defer node.chanMut.Unlock()
 	if _, ok := node.vchan2SyncService[vchanPair.GetDmlVchannelName()]; ok {
 		return nil
 	}
