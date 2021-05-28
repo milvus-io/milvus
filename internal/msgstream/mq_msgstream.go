@@ -12,8 +12,10 @@
 package msgstream
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"time"
@@ -125,8 +127,6 @@ func (ms *mqMsgStream) AsConsumer(channels []string, subName string) {
 
 			ms.consumers[channel] = pc
 			ms.consumerChannels = append(ms.consumerChannels, channel)
-			ms.wait.Add(1)
-			go ms.receiveMsg(pc)
 			return nil
 		}
 		err := Retry(20, time.Millisecond*200, fn)
@@ -142,6 +142,10 @@ func (ms *mqMsgStream) SetRepackFunc(repackFunc RepackFunc) {
 }
 
 func (ms *mqMsgStream) Start() {
+	for _, c := range ms.consumers {
+		ms.wait.Add(1)
+		go ms.receiveMsg(c)
+	}
 }
 
 func (ms *mqMsgStream) Close() {
@@ -339,7 +343,11 @@ func (ms *mqMsgStream) receiveMsg(consumer mqclient.Consumer) {
 				MsgID: msg.ID().Serialize(),
 			})
 
-			msgPack := MsgPack{Msgs: []TsMsg{tsMsg}}
+			msgPack := MsgPack{
+				Msgs:           []TsMsg{tsMsg},
+				StartPositions: []*internalpb.MsgPosition{tsMsg.Position()},
+				EndPositions:   []*internalpb.MsgPosition{tsMsg.Position()},
+			}
 			ms.receiveBuf <- &msgPack
 
 			sp.Finish()
@@ -362,6 +370,17 @@ func (ms *mqMsgStream) Seek(mp *internalpb.MsgPosition) error {
 		if err != nil {
 			return err
 		}
+		msg, ok := <-consumer.Chan()
+		if !ok {
+			return errors.New("consumer closed")
+		}
+		consumer.Ack(msg)
+
+		if bytes.Compare(msg.ID().Serialize(), messageID.Serialize()) != 0 {
+			err = fmt.Errorf("seek msg not correct")
+			log.Error("msMsgStream seek", zap.Error(err))
+		}
+
 		return nil
 	}
 
