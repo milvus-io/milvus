@@ -12,7 +12,6 @@ package dataservice
 
 import (
 	"crypto/rand"
-	"fmt"
 	"math/big"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -127,7 +126,6 @@ func newAllAssignPolicy() channelAssignPolicy {
 func (p *allAssignPolicy) apply(cluster map[string]*datapb.DataNodeInfo, channel string, collectionID UniqueID) []*datapb.DataNodeInfo {
 	ret := make([]*datapb.DataNodeInfo, 0)
 	for _, node := range cluster {
-		fmt.Printf("xxxxnode: %v\n", node.Address)
 		has := false
 		for _, ch := range node.Channels {
 			if ch.Name == channel {
@@ -143,7 +141,6 @@ func (p *allAssignPolicy) apply(cluster map[string]*datapb.DataNodeInfo, channel
 			State:        datapb.ChannelWatchState_Uncomplete,
 			CollectionID: collectionID,
 		})
-		fmt.Printf("channelxxxx: %v\n", node.Channels)
 		ret = append(ret, node)
 	}
 

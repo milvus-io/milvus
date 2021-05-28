@@ -632,7 +632,6 @@ func TestDataNodeTtChannel(t *testing.T) {
 		assert.EqualValues(t, 1, len(resp.SegIDAssignments))
 		assign := resp.SegIDAssignments[0]
 
-		log.Debug("xxxxxxxxxxxxx", zap.Any("assign", assign))
 		resp2, err := svr.Flush(context.TODO(), &datapb.FlushRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Flush,
@@ -751,6 +750,7 @@ func TestResumeChannel(t *testing.T) {
 			log.Debug("check segment in meta", zap.Any("id", seg.ID), zap.Any("has", has))
 			assert.True(t, has)
 			if has {
+				log.Debug("compare num rows", zap.Any("id", seg.ID), zap.Any("expected", segRows), zap.Any("actual", seg.NumRows))
 				assert.Equal(t, segRows, seg.NumRows)
 			}
 		}
@@ -787,15 +787,11 @@ func newTestServer(t *testing.T, receiveCh chan interface{}) *Server {
 
 	svr, err := CreateServer(context.TODO(), factory)
 	assert.Nil(t, err)
-	ms := newMockMasterService()
-	err = ms.Init()
-	assert.Nil(t, err)
-	err = ms.Start()
-	assert.Nil(t, err)
-	defer ms.Stop()
-	svr.SetMasterClient(ms)
 	svr.dataClientCreator = func(addr string) (types.DataNode, error) {
 		return newMockDataNodeClient(0, receiveCh)
+	}
+	svr.masterClientCreator = func(addr string) (types.MasterService, error) {
+		return newMockMasterService(), nil
 	}
 	assert.Nil(t, err)
 	err = svr.Init()
