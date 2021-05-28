@@ -14,6 +14,7 @@ import (
 	"context"
 	"math"
 	"math/rand"
+	"path"
 	"testing"
 	"time"
 
@@ -789,7 +790,8 @@ func newTestServer(t *testing.T) *Server {
 
 	etcdCli, err := initEtcd(Params.EtcdAddress)
 	assert.Nil(t, err)
-	_, err = etcdCli.Delete(context.Background(), sessionutil.DefaultServiceRoot, clientv3.WithPrefix())
+	sessKey := path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot)
+	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
 	svr, err := CreateServer(context.TODO(), factory)

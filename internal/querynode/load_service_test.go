@@ -1038,26 +1038,26 @@ func TestSegmentLoad_Search_Vector(t *testing.T) {
 	defer node.Stop()
 
 	ctx := node.queryNodeLoopCtx
-	node.loadService = newLoadService(ctx, nil, nil, nil, node.replica)
+	node.historical.loadService = newLoadService(ctx, nil, nil, nil, node.historical.replica)
 
 	initTestMeta(t, node, collectionID, 0)
 
-	err := node.replica.addPartition(collectionID, partitionID)
+	err := node.historical.replica.addPartition(collectionID, partitionID)
 	assert.NoError(t, err)
 
-	err = node.replica.addSegment(segmentID, partitionID, collectionID, segmentTypeSealed)
+	err = node.historical.replica.addSegment(segmentID, partitionID, collectionID, segmentTypeSealed)
 	assert.NoError(t, err)
 
 	paths, srcFieldIDs, err := generateInsertBinLog(collectionID, partitionID, segmentID, keyPrefix)
 	assert.NoError(t, err)
 
-	fieldsMap, _ := node.loadService.segLoader.checkTargetFields(paths, srcFieldIDs, fieldIDs)
+	fieldsMap, _ := node.historical.loadService.segLoader.checkTargetFields(paths, srcFieldIDs, fieldIDs)
 	assert.Equal(t, len(fieldsMap), 4)
 
-	segment, err := node.replica.getSegmentByID(segmentID)
+	segment, err := node.historical.replica.getSegmentByID(segmentID)
 	assert.NoError(t, err)
 
-	err = node.loadService.segLoader.loadSegmentFieldsData(segment, fieldsMap)
+	err = node.historical.loadService.segLoader.loadSegmentFieldsData(segment, fieldsMap)
 	assert.NoError(t, err)
 
 	indexPaths, err := generateIndex(segmentID)
@@ -1070,7 +1070,7 @@ func TestSegmentLoad_Search_Vector(t *testing.T) {
 	err = segment.setIndexInfo(100, indexInfo)
 	assert.NoError(t, err)
 
-	err = node.loadService.segLoader.indexLoader.loadIndex(segment, 100)
+	err = node.historical.loadService.segLoader.indexLoader.loadIndex(segment, 100)
 	assert.NoError(t, err)
 
 	// do search
@@ -1098,7 +1098,7 @@ func TestSegmentLoad_Search_Vector(t *testing.T) {
 	assert.NoError(t, err)
 
 	searchTimestamp := Timestamp(1020)
-	collection, err := node.replica.getCollectionByID(collectionID)
+	collection, err := node.historical.replica.getCollectionByID(collectionID)
 	assert.NoError(t, err)
 	plan, err := createPlan(*collection, dslString)
 	assert.NoError(t, err)
