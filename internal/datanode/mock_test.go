@@ -26,7 +26,6 @@ import (
 	"go.uber.org/zap"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
@@ -134,13 +133,6 @@ func refreshChannelNames() {
 	suffix := "-test-data-node" + strconv.FormatInt(rand.Int63n(100), 10)
 	Params.DDChannelNames = makeNewChannelNames(Params.DDChannelNames, suffix)
 	Params.InsertChannelNames = makeNewChannelNames(Params.InsertChannelNames, suffix)
-}
-
-func newBinlogMeta() *binlogMeta {
-	kvMock := memkv.NewMemoryKV()
-	idAllocMock := NewAllocatorFactory(1)
-	mt, _ := NewBinlogMeta(kvMock, idAllocMock)
-	return mt
 }
 
 func clearEtcd(rootPath string) error {
