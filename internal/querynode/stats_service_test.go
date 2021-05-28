@@ -29,8 +29,8 @@ func TestStatsService_start(t *testing.T) {
 		"ReceiveBufSize": 1024,
 		"PulsarBufSize":  1024}
 	msFactory.SetParams(m)
-	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, nil, msFactory)
-	node.statsService.start()
+	node.historical.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, nil, msFactory)
+	node.historical.statsService.start()
 	node.Stop()
 }
 
@@ -57,11 +57,11 @@ func TestSegmentManagement_sendSegmentStatistic(t *testing.T) {
 
 	var statsMsgStream msgstream.MsgStream = statsStream
 
-	node.statsService = newStatsService(node.queryNodeLoopCtx, node.replica, nil, msFactory)
-	node.statsService.statsStream = statsMsgStream
-	node.statsService.statsStream.Start()
+	node.historical.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, nil, msFactory)
+	node.historical.statsService.statsStream = statsMsgStream
+	node.historical.statsService.statsStream.Start()
 
 	// send stats
-	node.statsService.publicStatistic(nil)
+	node.historical.statsService.publicStatistic(nil)
 	node.Stop()
 }

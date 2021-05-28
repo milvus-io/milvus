@@ -18,6 +18,10 @@
 #include <knowhere/index/vector_index/VecIndex.h>
 #include "common/SystemProperty.h"
 #include "query/PlanNode.h"
+#include "pb/schema.pb.h"
+#include <memory>
+#include <vector>
+#include <utility>
 
 namespace milvus::segcore {
 
@@ -34,6 +38,9 @@ class SegmentInterface {
            const query::PlaceholderGroup* placeholder_groups[],
            const Timestamp timestamps[],
            int64_t num_groups) const = 0;
+
+    virtual std::unique_ptr<proto::milvus::RetrieveResults>
+    GetEntityById(const std::vector<FieldOffset>& field_offsets, const IdArray& id_array) const = 0;
 
     virtual int64_t
     GetMemoryUsageInBytes() const = 0;
@@ -79,6 +86,9 @@ class SegmentInternalInterface : public SegmentInterface {
     void
     FillTargetEntry(const query::Plan* plan, QueryResult& results) const override;
 
+    std::unique_ptr<proto::milvus::RetrieveResults>
+    GetEntityById(const std::vector<FieldOffset>& field_offsets, const IdArray& id_array) const override;
+
  public:
     virtual void
     vector_search(int64_t vec_count,
@@ -109,6 +119,7 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual const knowhere::Index*
     chunk_index_impl(FieldOffset field_offset, int64_t chunk_id) const = 0;
 
+    // TODO remove system fields
     // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to system_type
     virtual void
     bulk_subscript(SystemFieldType system_type, const int64_t* seg_offsets, int64_t count, void* output) const = 0;
@@ -116,6 +127,14 @@ class SegmentInternalInterface : public SegmentInterface {
     // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to field_offset
     virtual void
     bulk_subscript(FieldOffset field_offset, const int64_t* seg_offsets, int64_t count, void* output) const = 0;
+
+    // TODO: special hack: FieldOffset == -1 -> RowId.
+    // TODO: remove this hack when transfer is done
+    virtual std::unique_ptr<DataArray>
+    BulkSubScript(FieldOffset field_offset, const SegOffset* seg_offsets, int64_t count) const;
+
+    virtual std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    search_ids(const IdArray& id_array) const;
 
     virtual void
     check_search(const query::Plan* plan) const = 0;

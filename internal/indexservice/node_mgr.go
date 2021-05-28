@@ -53,6 +53,7 @@ func (i *IndexService) addNode(nodeID UniqueID, req *indexpb.RegisterNodeRequest
 		value:    nodeClient,
 		key:      nodeID,
 		addr:     req.Address,
+		serverID: req.ServerID,
 		priority: 0,
 	}
 	i.nodeClients.Push(item)

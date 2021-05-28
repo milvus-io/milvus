@@ -26,7 +26,8 @@ type searchService struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	replica ReplicaInterface
+	historicalReplica ReplicaInterface
+	streamingReplica  ReplicaInterface
 
 	searchMsgStream       msgstream.MsgStream
 	searchResultMsgStream msgstream.MsgStream
@@ -36,7 +37,10 @@ type searchService struct {
 	emptySearchCollection *searchCollection
 }
 
-func newSearchService(ctx context.Context, replica ReplicaInterface, factory msgstream.Factory) *searchService {
+func newSearchService(ctx context.Context,
+	historicalReplica ReplicaInterface,
+	streamingReplica ReplicaInterface,
+	factory msgstream.Factory) *searchService {
 	searchStream, _ := factory.NewQueryMsgStream(ctx)
 	searchResultStream, _ := factory.NewQueryMsgStream(ctx)
 
@@ -56,7 +60,8 @@ func newSearchService(ctx context.Context, replica ReplicaInterface, factory msg
 		ctx:    searchServiceCtx,
 		cancel: searchServiceCancel,
 
-		replica: replica,
+		historicalReplica: historicalReplica,
+		streamingReplica:  streamingReplica,
 
 		searchMsgStream:       searchStream,
 		searchResultMsgStream: searchResultStream,
@@ -75,7 +80,7 @@ func (s *searchService) start() {
 
 func (s *searchService) collectionCheck(collectionID UniqueID) error {
 	// check if collection exists
-	if ok := s.replica.hasCollection(collectionID); !ok {
+	if ok := s.historicalReplica.hasCollection(collectionID); !ok {
 		err := errors.New("no collection found, collectionID = " + strconv.FormatInt(collectionID, 10))
 		log.Error(err.Error())
 		return err
@@ -139,14 +144,14 @@ func (s *searchService) close() {
 
 func (s *searchService) startSearchCollection(collectionID UniqueID) {
 	ctx1, cancel := context.WithCancel(s.ctx)
-	sc := newSearchCollection(ctx1, cancel, collectionID, s.replica, s.searchResultMsgStream)
+	sc := newSearchCollection(ctx1, cancel, collectionID, s.historicalReplica, s.streamingReplica, s.searchResultMsgStream)
 	s.searchCollections[collectionID] = sc
 	sc.start()
 }
 
 func (s *searchService) startEmptySearchCollection() {
 	ctx1, cancel := context.WithCancel(s.ctx)
-	sc := newSearchCollection(ctx1, cancel, UniqueID(-1), s.replica, s.searchResultMsgStream)
+	sc := newSearchCollection(ctx1, cancel, UniqueID(-1), s.historicalReplica, s.streamingReplica, s.searchResultMsgStream)
 	s.emptySearchCollection = sc
 	sc.start()
 }

@@ -11,8 +11,9 @@
 #pragma once
 #include <memory>
 
-#include "SegmentInterface.h"
+#include "segcore/SegmentInterface.h"
 #include "common/LoadInfo.h"
+#include <utility>
 
 namespace milvus::segcore {
 

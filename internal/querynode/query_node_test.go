@@ -121,18 +121,18 @@ func initTestMeta(t *testing.T, node *QueryNode, collectionID UniqueID, segmentI
 	}
 	collectionMeta := genTestCollectionMeta(collectionID, isBinary)
 
-	var err = node.replica.addCollection(collectionMeta.ID, collectionMeta.Schema)
+	var err = node.historical.replica.addCollection(collectionMeta.ID, collectionMeta.Schema)
 	assert.NoError(t, err)
 
-	collection, err := node.replica.getCollectionByID(collectionID)
+	collection, err := node.historical.replica.getCollectionByID(collectionID)
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), collectionID)
-	assert.Equal(t, node.replica.getCollectionNum(), 1)
+	assert.Equal(t, node.historical.replica.getCollectionNum(), 1)
 
-	err = node.replica.addPartition(collection.ID(), collectionMeta.PartitionIDs[0])
+	err = node.historical.replica.addPartition(collection.ID(), collectionMeta.PartitionIDs[0])
 	assert.NoError(t, err)
 
-	err = node.replica.addSegment(segmentID, collectionMeta.PartitionIDs[0], collectionID, segmentTypeGrowing)
+	err = node.historical.replica.addSegment(segmentID, collectionMeta.PartitionIDs[0], collectionID, segmentTypeGrowing)
 	assert.NoError(t, err)
 }
 
@@ -179,6 +179,8 @@ func newQueryNodeMock() *QueryNode {
 	if err != nil {
 		panic(err)
 	}
+	svr.historical = newHistorical(svr.queryNodeLoopCtx, nil, nil, nil, svr.msFactory)
+	svr.streaming = newStreaming()
 
 	return svr
 }

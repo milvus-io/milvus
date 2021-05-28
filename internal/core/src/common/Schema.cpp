@@ -32,7 +32,7 @@ RepeatedKeyValToMap(const google::protobuf::RepeatedPtrField<proto::common::KeyV
 std::shared_ptr<Schema>
 Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     auto schema = std::make_shared<Schema>();
-    schema->set_auto_id(schema_proto.autoid());
+    // schema->set_auto_id(schema_proto.autoid());
 
     // NOTE: only two system
 
@@ -51,11 +51,6 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
 
         auto data_type = DataType(child.data_type());
 
-        if (child.is_primary_key()) {
-            AssertInfo(!schema->primary_key_offset_opt_.has_value(), "repetitive primary key");
-            schema->primary_key_offset_opt_ = field_offset;
-        }
-
         if (datatype_is_vector(data_type)) {
             auto type_map = RepeatedKeyValToMap(child.type_params());
             auto index_map = RepeatedKeyValToMap(child.index_params());
@@ -71,13 +66,22 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         } else {
             schema->AddField(name, field_id, data_type);
         }
+
+        if (child.is_primary_key()) {
+            AssertInfo(!schema->get_primary_key_offset().has_value(), "repetitive primary key");
+            Assert(!schema_proto.autoid());
+            schema->set_primary_key(field_offset);
+        }
     }
-    if (schema->is_auto_id_) {
-        AssertInfo(!schema->primary_key_offset_opt_.has_value(), "auto id mode: shouldn't have primary key");
+    if (schema->get_is_auto_id()) {
+        AssertInfo(!schema->get_primary_key_offset().has_value(), "auto id mode: shouldn't have primary key");
     } else {
-        AssertInfo(schema->primary_key_offset_opt_.has_value(), "primary key should be specified when autoId is off");
+        AssertInfo(schema->get_primary_key_offset().has_value(), "primary key should be specified when autoId is off");
     }
 
     return schema;
 }
+
+const FieldMeta FieldMeta::RowIdMeta(FieldName("RowID"), FieldId(0), DataType::INT64);
+
 }  // namespace milvus

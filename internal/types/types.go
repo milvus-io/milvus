@@ -67,8 +67,7 @@ type IndexNode interface {
 	Component
 	TimeTickProvider
 
-	BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*commonpb.Status, error)
-	DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
+	CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error)
 }
 
 type IndexService interface {
@@ -80,7 +79,6 @@ type IndexService interface {
 	DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
 	GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error)
 	GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error)
-	NotifyBuildIndex(ctx context.Context, nty *indexpb.NotifyBuildIndexRequest) (*commonpb.Status, error)
 }
 
 type MasterService interface {

@@ -16,10 +16,15 @@ import (
 	"errors"
 	"runtime"
 	"strconv"
+	"time"
 
+	"github.com/milvus-io/milvus/internal/util/retry"
+
+	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -83,8 +88,9 @@ type IndexBuildTask struct {
 	BaseTask
 	index         Index
 	kv            kv.BaseKV
+	etcdKV        *etcdkv.EtcdKV
 	savePaths     []string
-	req           *indexpb.BuildIndexRequest
+	req           *indexpb.CreateIndexRequest
 	serviceClient types.IndexService
 	nodeID        UniqueID
 }
@@ -111,9 +117,55 @@ func (it *IndexBuildTask) OnEnqueue() error {
 	return nil
 }
 
+func (it *IndexBuildTask) checkIndexMeta(pre bool) error {
+	fn := func() error {
+		indexMeta := indexpb.IndexMeta{}
+		_, values, versions, err := it.etcdKV.LoadWithPrefix2(it.req.MetaPath)
+		if err != nil {
+			log.Debug("IndexService", zap.Any("load meta error with path", it.req.MetaPath))
+			log.Debug("IndexService", zap.Any("Load meta error", err))
+			return err
+		}
+		err = proto.UnmarshalText(values[0], &indexMeta)
+		if err != nil {
+			log.Debug("IndexService", zap.Any("Unmarshal error", err))
+			return err
+		}
+		if indexMeta.Version > it.req.Version || indexMeta.State == commonpb.IndexState_Finished {
+			log.Debug("IndexNode", zap.Any("Notify build index", "This version is not the latest version"))
+			return nil
+		}
+		if indexMeta.MarkDeleted {
+			indexMeta.State = commonpb.IndexState_Finished
+			v := proto.MarshalTextString(&indexMeta)
+			err := it.etcdKV.CompareVersionAndSwap(it.req.MetaPath, versions[0], v)
+			if err != nil {
+				return err
+			}
+			return nil
+		}
+		if pre {
+			return nil
+		}
+		indexMeta.IndexFilePaths = it.savePaths
+		indexMeta.State = commonpb.IndexState_Finished
+		if it.err != nil {
+			indexMeta.State = commonpb.IndexState_Failed
+		}
+		log.Debug("IndexNode", zap.Any("MetaPath", it.req.MetaPath))
+		err = it.etcdKV.CompareVersionAndSwap(it.req.MetaPath, versions[0],
+			proto.MarshalTextString(&indexMeta))
+		return err
+	}
+
+	err := retry.Retry(3, time.Millisecond*200, fn)
+	return err
+
+}
+
 func (it *IndexBuildTask) PreExecute(ctx context.Context) error {
 	log.Debug("preExecute...")
-	return nil
+	return it.checkIndexMeta(true)
 }
 
 func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
@@ -131,30 +183,7 @@ func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 		return err
 	}
 
-	nty := &indexpb.NotifyBuildIndexRequest{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		IndexBuildID:   it.req.IndexBuildID,
-		NodeID:         it.nodeID,
-		IndexFilePaths: it.savePaths,
-	}
-	if it.err != nil {
-		nty.Status.ErrorCode = commonpb.ErrorCode_BuildIndexError
-	}
-
-	ctx = context.TODO()
-	resp, err := it.serviceClient.NotifyBuildIndex(ctx, nty)
-	if err != nil {
-		log.Warn("indexnode", zap.String("error", err.Error()))
-		return err
-	}
-
-	if resp.ErrorCode != commonpb.ErrorCode_Success {
-		err = errors.New(resp.Reason)
-		log.Debug("indexnode", zap.String("[IndexBuildTask][PostExecute] err", err.Error()))
-	}
-	return err
+	return it.checkIndexMeta(false)
 }
 
 func (it *IndexBuildTask) Execute(ctx context.Context) error {
@@ -309,7 +338,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 
 		getSavePathByKey := func(key string) string {
 			// TODO: fix me, use more reasonable method
-			return strconv.Itoa(int(it.req.IndexBuildID)) + "/" + strconv.Itoa(int(partitionID)) + "/" + strconv.Itoa(int(segmentID)) + "/" + key
+			return strconv.Itoa(int(it.req.IndexBuildID)) + "/" + strconv.Itoa(int(it.req.Version)) + "/" + strconv.Itoa(int(partitionID)) + "/" + strconv.Itoa(int(segmentID)) + "/" + key
 		}
 		saveBlob := func(path string, value []byte) error {
 			return it.kv.Save(path, string(value))
@@ -322,7 +351,26 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 
 			savePath := getSavePathByKey(key)
 
-			err := saveBlob(savePath, value)
+			saveIndexFileFn := func() error {
+				v, err := it.etcdKV.Load(it.req.MetaPath)
+				if err != nil {
+					log.Debug("IndexService", zap.Any("load meta error with path", it.req.MetaPath))
+					log.Debug("IndexService", zap.Any("Load meta error", err))
+					return err
+				}
+				indexMeta := indexpb.IndexMeta{}
+				err = proto.UnmarshalText(v, &indexMeta)
+				if err != nil {
+					log.Debug("IndexService", zap.Any("Unmarshal error", err))
+					return err
+				}
+				if indexMeta.Version > it.req.Version {
+					log.Debug("IndexNode", zap.Any("Notify build index", "This version is not the latest version"))
+					return errors.New("This task has been reassigned ")
+				}
+				return saveBlob(savePath, value)
+			}
+			err := retry.Retry(5, time.Millisecond*200, saveIndexFileFn)
 			if err != nil {
 				return err
 			}

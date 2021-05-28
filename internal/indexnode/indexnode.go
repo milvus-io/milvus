@@ -19,9 +19,13 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/retry"
+
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -58,6 +62,9 @@ type IndexNode struct {
 	startCallbacks []func()
 	closeCallbacks []func()
 
+	etcdKV        *etcdkv.EtcdKV
+	finishedTasks map[UniqueID]commonpb.IndexState
+
 	closer io.Closer
 }
 
@@ -88,7 +95,17 @@ func (i *IndexNode) Register() error {
 func (i *IndexNode) Init() error {
 	ctx := context.Background()
 
-	err := funcutil.WaitForComponentHealthy(ctx, i.serviceClient, "IndexService", 1000000, time.Millisecond*200)
+	connectEtcdFn := func() error {
+		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
+		i.etcdKV = etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+		return err
+	}
+	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
+	if err != nil {
+		return err
+	}
+
+	err = funcutil.WaitForComponentHealthy(ctx, i.serviceClient, "IndexService", 1000000, time.Millisecond*200)
 	if err != nil {
 		return err
 	}
@@ -98,6 +115,7 @@ func (i *IndexNode) Init() error {
 			Ip:   Params.IP,
 			Port: int64(Params.Port),
 		},
+		ServerID: i.session.ServerID,
 	}
 
 	resp, err2 := i.serviceClient.RegisterNode(ctx, request)
@@ -164,11 +182,13 @@ func (i *IndexNode) SetIndexServiceClient(serviceClient types.IndexService) {
 	i.serviceClient = serviceClient
 }
 
-func (i *IndexNode) BuildIndex(ctx context.Context, request *indexpb.BuildIndexRequest) (*commonpb.Status, error) {
+func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	log.Debug("indexnode building index ...",
 		zap.Int64("IndexBuildID", request.IndexBuildID),
 		zap.String("Indexname", request.IndexName),
 		zap.Int64("IndexID", request.IndexID),
+		zap.Int64("Version", request.Version),
+		zap.String("MetaPath", request.MetaPath),
 		zap.Strings("DataPaths", request.DataPaths),
 		zap.Any("TypeParams", request.TypeParams),
 		zap.Any("IndexParams", request.IndexParams))
@@ -180,6 +200,7 @@ func (i *IndexNode) BuildIndex(ctx context.Context, request *indexpb.BuildIndexR
 		},
 		req:           request,
 		kv:            i.kv,
+		etcdKV:        i.etcdKV,
 		serviceClient: i.serviceClient,
 		nodeID:        Params.NodeID,
 	}
@@ -194,34 +215,9 @@ func (i *IndexNode) BuildIndex(ctx context.Context, request *indexpb.BuildIndexR
 		ret.Reason = err.Error()
 		return ret, nil
 	}
-	log.Debug("indexnode", zap.Int64("indexnode successfully schedule with indexBuildID", request.IndexBuildID))
-	return ret, nil
-}
+	log.Debug("IndexNode", zap.Int64("IndexNode successfully schedule with indexBuildID", request.IndexBuildID))
 
-func (i *IndexNode) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	log.Debug("IndexNode", zap.Int64("Drop index by id", request.IndexID))
-	indexBuildIDs := i.sched.IndexBuildQueue.tryToRemoveUselessIndexBuildTask(request.IndexID)
-	log.Debug("IndexNode", zap.Any("The index of the IndexBuildIDs to be deleted", indexBuildIDs))
-	for _, indexBuildID := range indexBuildIDs {
-		nty := &indexpb.NotifyBuildIndexRequest{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			IndexBuildID:   indexBuildID,
-			NodeID:         Params.NodeID,
-			IndexFilePaths: []string{},
-		}
-		resp, err := i.serviceClient.NotifyBuildIndex(ctx, nty)
-		if err != nil {
-			log.Warn("IndexNode", zap.String("DropIndex notify error", err.Error()))
-		} else if resp.ErrorCode != commonpb.ErrorCode_Success {
-			log.Warn("IndexNode", zap.String("DropIndex notify error reason", resp.Reason))
-		}
-	}
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}, nil
+	return ret, nil
 }
 
 // AddStartCallback adds a callback in the startServer phase.
