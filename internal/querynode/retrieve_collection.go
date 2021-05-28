@@ -13,8 +13,6 @@ package querynode
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -34,6 +32,7 @@ type retrieveCollection struct {
 	collectionID      UniqueID
 	historicalReplica ReplicaInterface
 	streamingReplica  ReplicaInterface
+	tSafeReplica      TSafeReplicaInterface
 
 	msgBuffer     chan *msgstream.RetrieveMsg
 	unsolvedMsgMu sync.Mutex
@@ -48,7 +47,13 @@ type retrieveCollection struct {
 	retrieveResultMsgStream msgstream.MsgStream
 }
 
-func newRetrieveCollection(releaseCtx context.Context, cancel context.CancelFunc, collectionID UniqueID, historicalReplica ReplicaInterface, streamingReplica ReplicaInterface, retrieveResultStream msgstream.MsgStream) *retrieveCollection {
+func newRetrieveCollection(releaseCtx context.Context,
+	cancel context.CancelFunc,
+	collectionID UniqueID,
+	historicalReplica ReplicaInterface,
+	streamingReplica ReplicaInterface,
+	tSafeReplica TSafeReplicaInterface,
+	retrieveResultStream msgstream.MsgStream) *retrieveCollection {
 	receiveBufSize := Params.RetrieveReceiveBufSize
 	msgBuffer := make(chan *msgstream.RetrieveMsg, receiveBufSize)
 	unsolvedMsg := make([]*msgstream.RetrieveMsg, 0)
@@ -60,6 +65,7 @@ func newRetrieveCollection(releaseCtx context.Context, cancel context.CancelFunc
 		collectionID:      collectionID,
 		historicalReplica: historicalReplica,
 		streamingReplica:  streamingReplica,
+		tSafeReplica:      tSafeReplica,
 
 		msgBuffer:   msgBuffer,
 		unsolvedMsg: unsolvedMsg,
@@ -87,24 +93,23 @@ func (rc *retrieveCollection) setServiceableTime(t Timestamp) {
 	rc.serviceableTimeMutex.Unlock()
 }
 
-func (rc *retrieveCollection) waitNewTSafe() (Timestamp, error) {
+func (rc *retrieveCollection) waitNewTSafe() Timestamp {
+	// block until dataSyncService updating tSafe
+	// TODO: remove and use vChannel
+	vChannel := collectionIDToChannel(rc.collectionID)
 	// block until dataSyncService updating tSafe
 	rc.tSafeWatcher.hasUpdate()
-	ts := rc.streamingReplica.getTSafe(rc.collectionID)
-	if ts != nil {
-		return ts.get(), nil
-	}
-	return 0, errors.New("tSafe closed, collectionID =" + fmt.Sprintln(rc.collectionID))
+	ts := rc.tSafeReplica.getTSafe(vChannel)
+	return ts
 }
 
 func (rc *retrieveCollection) register(collectionID UniqueID) {
-	rc.streamingReplica.addTSafe(collectionID)
-	tSafe := rc.streamingReplica.getTSafe(collectionID)
+	vChannel := collectionIDToChannel(collectionID)
+	rc.tSafeReplica.addTSafe(vChannel)
 	rc.tSafeMutex.Lock()
 	rc.tSafeWatcher = newTSafeWatcher()
 	rc.tSafeMutex.Unlock()
-	rc.tSafeMutex.Unlock()
-	tSafe.registerTSafeWatcher(rc.tSafeWatcher)
+	rc.tSafeReplica.registerTSafeWatcher(vChannel, rc.tSafeWatcher)
 }
 
 func (rc *retrieveCollection) addToUnsolvedMsg(msg *msgstream.RetrieveMsg) {
@@ -174,15 +179,11 @@ func (rc *retrieveCollection) doUnsolvedMsgRetrieve() {
 			log.Debug("stop retrieveCollection's doUnsolvedMsgRetrieve", zap.Int64("collectionID", rc.collectionID))
 			return
 		default:
-			serviceTime, err := rc.waitNewTSafe()
+			serviceTime := rc.waitNewTSafe()
 			rc.setServiceableTime(serviceTime)
 			log.Debug("querynode::doUnsolvedMsgRetrieve: setServiceableTime",
 				zap.Any("serviceTime", serviceTime),
 			)
-			if err != nil {
-				// TODO: emptyRetrieve or continue, note: collection has been released
-				continue
-			}
 			log.Debug("get tSafe from flow graph",
 				zap.Int64("collectionID", rc.collectionID),
 				zap.Uint64("tSafe", serviceTime))

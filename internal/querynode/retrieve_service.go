@@ -28,6 +28,7 @@ type retrieveService struct {
 
 	historicalReplica ReplicaInterface
 	streamingReplica  ReplicaInterface
+	tSafeReplica      TSafeReplicaInterface
 
 	retrieveMsgStream       msgstream.MsgStream
 	retrieveResultMsgStream msgstream.MsgStream
@@ -39,6 +40,7 @@ type retrieveService struct {
 func newRetrieveService(ctx context.Context,
 	historicalReplica ReplicaInterface,
 	streamingReplica ReplicaInterface,
+	tSafeReplica TSafeReplicaInterface,
 	factory msgstream.Factory) *retrieveService {
 	retrieveStream, _ := factory.NewQueryMsgStream(ctx)
 	retrieveResultStream, _ := factory.NewQueryMsgStream(ctx)
@@ -60,6 +62,7 @@ func newRetrieveService(ctx context.Context,
 
 		historicalReplica: historicalReplica,
 		streamingReplica:  streamingReplica,
+		tSafeReplica:      tSafeReplica,
 
 		retrieveMsgStream:       retrieveStream,
 		retrieveResultMsgStream: retrieveResultStream,
@@ -136,7 +139,13 @@ func (rs *retrieveService) close() {
 
 func (rs *retrieveService) startRetrieveCollection(collectionID UniqueID) {
 	ctx1, cancel := context.WithCancel(rs.ctx)
-	rc := newRetrieveCollection(ctx1, cancel, collectionID, rs.historicalReplica, rs.streamingReplica, rs.retrieveResultMsgStream)
+	rc := newRetrieveCollection(ctx1,
+		cancel,
+		collectionID,
+		rs.historicalReplica,
+		rs.streamingReplica,
+		rs.tSafeReplica,
+		rs.retrieveResultMsgStream)
 	rs.retrieveCollections[collectionID] = rc
 	rs.start()
 }
