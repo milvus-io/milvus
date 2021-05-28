@@ -18,7 +18,8 @@ import (
 )
 
 type streaming struct {
-	replica ReplicaInterface
+	replica      ReplicaInterface
+	tSafeReplica TSafeReplicaInterface
 
 	dsServicesMu     sync.Mutex // guards dataSyncServices
 	dataSyncServices map[UniqueID]*dataSyncService
@@ -26,9 +27,11 @@ type streaming struct {
 
 func newStreaming() *streaming {
 	replica := newCollectionReplica()
+	tReplica := newTSafeReplica()
 	ds := make(map[UniqueID]*dataSyncService)
 	return &streaming{
 		replica:          replica,
+		tSafeReplica:     tReplica,
 		dataSyncServices: ds,
 	}
 }

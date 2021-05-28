@@ -164,7 +164,13 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 			return errors.New(errMsg)
 		}
 	}
-	w.node.streaming.replica.addWatchedDmChannels(w.req.ChannelIDs)
+
+	collection, err := w.node.streaming.replica.getCollectionByID(collectionID)
+	if err != nil {
+		log.Error(err.Error())
+		return err
+	}
+	collection.addWatchedDmChannels(w.req.ChannelIDs)
 	log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
 	log.Debug("WatchDmChannels done", zap.String("ChannelIDs", fmt.Sprintln(w.req.ChannelIDs)))
 	return nil
@@ -223,7 +229,11 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 			}
 		}
 		l.node.streaming.replica.initExcludedSegments(collectionID)
-		newDS := newDataSyncService(l.node.queryNodeLoopCtx, l.node.streaming.replica, l.node.msFactory, collectionID)
+		newDS := newDataSyncService(l.node.queryNodeLoopCtx,
+			l.node.streaming.replica,
+			l.node.streaming.tSafeReplica,
+			l.node.msFactory,
+			collectionID)
 		// ignore duplicated dataSyncService error
 		_ = l.node.streaming.addDataSyncService(collectionID, newDS)
 		ds, err := l.node.streaming.getDataSyncService(collectionID)
@@ -296,7 +306,9 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 	if err == nil && ds != nil {
 		ds.close()
 		r.node.streaming.removeDataSyncService(r.req.CollectionID)
-		r.node.streaming.replica.removeTSafe(r.req.CollectionID)
+		// TODO: remove and use vChannel
+		vChannel := collectionIDToChannel(r.req.CollectionID)
+		r.node.streaming.tSafeReplica.removeTSafe(vChannel)
 		r.node.streaming.replica.removeExcludedSegments(r.req.CollectionID)
 	}
 

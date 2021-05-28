@@ -28,6 +28,7 @@ type searchService struct {
 
 	historicalReplica ReplicaInterface
 	streamingReplica  ReplicaInterface
+	tSafeReplica      TSafeReplicaInterface
 
 	searchMsgStream       msgstream.MsgStream
 	searchResultMsgStream msgstream.MsgStream
@@ -40,7 +41,9 @@ type searchService struct {
 func newSearchService(ctx context.Context,
 	historicalReplica ReplicaInterface,
 	streamingReplica ReplicaInterface,
+	tSafeReplica TSafeReplicaInterface,
 	factory msgstream.Factory) *searchService {
+
 	searchStream, _ := factory.NewQueryMsgStream(ctx)
 	searchResultStream, _ := factory.NewQueryMsgStream(ctx)
 
@@ -62,6 +65,7 @@ func newSearchService(ctx context.Context,
 
 		historicalReplica: historicalReplica,
 		streamingReplica:  streamingReplica,
+		tSafeReplica:      tSafeReplica,
 
 		searchMsgStream:       searchStream,
 		searchResultMsgStream: searchResultStream,
@@ -144,14 +148,26 @@ func (s *searchService) close() {
 
 func (s *searchService) startSearchCollection(collectionID UniqueID) {
 	ctx1, cancel := context.WithCancel(s.ctx)
-	sc := newSearchCollection(ctx1, cancel, collectionID, s.historicalReplica, s.streamingReplica, s.searchResultMsgStream)
+	sc := newSearchCollection(ctx1,
+		cancel,
+		collectionID,
+		s.historicalReplica,
+		s.streamingReplica,
+		s.tSafeReplica,
+		s.searchResultMsgStream)
 	s.searchCollections[collectionID] = sc
 	sc.start()
 }
 
 func (s *searchService) startEmptySearchCollection() {
 	ctx1, cancel := context.WithCancel(s.ctx)
-	sc := newSearchCollection(ctx1, cancel, UniqueID(-1), s.historicalReplica, s.streamingReplica, s.searchResultMsgStream)
+	sc := newSearchCollection(ctx1,
+		cancel,
+		UniqueID(-1),
+		s.historicalReplica,
+		s.streamingReplica,
+		s.tSafeReplica,
+		s.searchResultMsgStream)
 	s.emptySearchCollection = sc
 	sc.start()
 }
