@@ -123,8 +123,10 @@ func (ms *mqMsgStream) AsConsumer(channels []string, subName string) {
 				return errors.New("Consumer is nil")
 			}
 
+			ms.consumerLock.Lock()
 			ms.consumers[channel] = pc
 			ms.consumerChannels = append(ms.consumerChannels, channel)
+			ms.consumerLock.Unlock()
 			ms.wait.Add(1)
 			go ms.receiveMsg(pc)
 			return nil
@@ -291,15 +293,15 @@ func (ms *mqMsgStream) Broadcast(msgPack *MsgPack) error {
 func (ms *mqMsgStream) Consume() *MsgPack {
 	for {
 		select {
+		case <-ms.ctx.Done():
+			//log.Debug("context closed")
+			return nil
 		case cm, ok := <-ms.receiveBuf:
 			if !ok {
 				log.Debug("buf chan closed")
 				return nil
 			}
 			return cm
-		case <-ms.ctx.Done():
-			//log.Debug("context closed")
-			return nil
 		}
 	}
 }
@@ -316,21 +318,16 @@ func (ms *mqMsgStream) receiveMsg(consumer mqclient.Consumer) {
 				return
 			}
 			consumer.Ack(msg)
-			headerMsg := commonpb.MsgHeader{}
-			err := proto.Unmarshal(msg.Payload(), &headerMsg)
+			header := commonpb.MsgHeader{}
+			err := proto.Unmarshal(msg.Payload(), &header)
 			if err != nil {
 				log.Error("Failed to unmarshal message header", zap.Error(err))
 				continue
 			}
-			tsMsg, err := ms.unmarshal.Unmarshal(msg.Payload(), headerMsg.Base.MsgType)
+			tsMsg, err := ms.unmarshal.Unmarshal(msg.Payload(), header.Base.MsgType)
 			if err != nil {
 				log.Error("Failed to unmarshal tsMsg", zap.Error(err))
 				continue
-			}
-
-			sp, ok := ExtractFromPulsarMsgProperties(tsMsg, msg.Properties())
-			if ok {
-				tsMsg.SetTraceCtx(opentracing.ContextWithSpan(context.Background(), sp))
 			}
 
 			tsMsg.SetPosition(&MsgPosition{
@@ -338,6 +335,11 @@ func (ms *mqMsgStream) receiveMsg(consumer mqclient.Consumer) {
 				//FIXME
 				MsgID: msg.ID().Serialize(),
 			})
+
+			sp, ok := ExtractFromPulsarMsgProperties(tsMsg, msg.Properties())
+			if ok {
+				tsMsg.SetTraceCtx(opentracing.ContextWithSpan(context.Background(), sp))
+			}
 
 			msgPack := MsgPack{Msgs: []TsMsg{tsMsg}}
 			ms.receiveBuf <- &msgPack
@@ -418,8 +420,7 @@ func (ms *MqTtMsgStream) addConsumer(consumer mqclient.Consumer, channel string)
 	ms.stopConsumeChan[consumer] = stopConsumeChan
 }
 
-func (ms *MqTtMsgStream) AsConsumer(channels []string,
-	subName string) {
+func (ms *MqTtMsgStream) AsConsumer(channels []string, subName string) {
 	for _, channel := range channels {
 		if _, ok := ms.consumers[channel]; ok {
 			continue
@@ -582,6 +583,8 @@ func (ms *MqTtMsgStream) findTimeTick(consumer mqclient.Consumer,
 		select {
 		case <-ms.ctx.Done():
 			return
+		case <-ms.stopConsumeChan[consumer]:
+			return
 		case msg, ok := <-consumer.Chan():
 			if !ok {
 				log.Debug("consumer closed!")
@@ -589,13 +592,13 @@ func (ms *MqTtMsgStream) findTimeTick(consumer mqclient.Consumer,
 			}
 			consumer.Ack(msg)
 
-			headerMsg := commonpb.MsgHeader{}
-			err := proto.Unmarshal(msg.Payload(), &headerMsg)
+			header := commonpb.MsgHeader{}
+			err := proto.Unmarshal(msg.Payload(), &header)
 			if err != nil {
 				log.Error("Failed to unmarshal message header", zap.Error(err))
 				continue
 			}
-			tsMsg, err := ms.unmarshal.Unmarshal(msg.Payload(), headerMsg.Base.MsgType)
+			tsMsg, err := ms.unmarshal.Unmarshal(msg.Payload(), header.Base.MsgType)
 			if err != nil {
 				log.Error("Failed to unmarshal tsMsg", zap.Error(err))
 				continue
@@ -616,7 +619,7 @@ func (ms *MqTtMsgStream) findTimeTick(consumer mqclient.Consumer,
 			ms.unsolvedBuf[consumer] = append(ms.unsolvedBuf[consumer], tsMsg)
 			ms.unsolvedMutex.Unlock()
 
-			if headerMsg.Base.MsgType == commonpb.MsgType_TimeTick {
+			if header.Base.MsgType == commonpb.MsgType_TimeTick {
 				findMapMutex.Lock()
 				eofMsgMap[consumer] = tsMsg.(*TimeTickMsg).Base.Timestamp
 				findMapMutex.Unlock()
@@ -624,8 +627,6 @@ func (ms *MqTtMsgStream) findTimeTick(consumer mqclient.Consumer,
 				return
 			}
 			sp.Finish()
-		case <-ms.stopConsumeChan[consumer]:
-			return
 		}
 	}
 }
