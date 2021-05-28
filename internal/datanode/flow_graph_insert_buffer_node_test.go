@@ -72,7 +72,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
 
-	iBNode := newInsertBufferNode(ctx, newBinlogMeta(), replica, msFactory, NewAllocatorFactory())
+	iBNode := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory())
 
 	ddlFlushedCh := make(chan []*datapb.DDLBinlogMeta)
 	dmlFlushedCh := make(chan []*datapb.ID2PathList)
@@ -103,7 +103,6 @@ func genInsertMsg(ddlFlushedCh chan<- []*datapb.DDLBinlogMeta, dmlFlushedCh chan
 
 	var iMsg = &insertMsg{
 		insertMessages: make([]*msgstream.InsertMsg, 0),
-		// flushMessages:  make([]*flushMsg, 0),
 		timeRange: TimeRange{
 			timestampMin: timeRange.timestampMin,
 			timestampMax: timeRange.timestampMax,
@@ -128,7 +127,7 @@ func genInsertMsg(ddlFlushedCh chan<- []*datapb.DDLBinlogMeta, dmlFlushedCh chan
 
 }
 
-func TestFlushSegmentTxn(t *testing.T) {
+func TestFlushSegment(t *testing.T) {
 	idAllocMock := NewAllocatorFactory(1)
 	mockMinIO := memkv.NewMemoryKV()
 
@@ -140,7 +139,6 @@ func TestFlushSegmentTxn(t *testing.T) {
 
 	collMeta := genCollectionMeta(collectionID, "test_flush_segment_txn")
 	flushMap := sync.Map{}
-	flushMeta := newBinlogMeta()
 
 	finishCh := make(chan map[UniqueID]string)
 
@@ -175,7 +173,7 @@ func TestFlushSegmentTxn(t *testing.T) {
 		finishCh,
 		idAllocMock)
 
-	k, _ := flushMeta.genKey(false, collectionID, partitionID, segmentID, 0)
+	k, _ := idAllocMock.genKey(false, collectionID, partitionID, segmentID, 0)
 	key := path.Join(Params.StatsBinlogRootPath, k)
 	_, values, _ := mockMinIO.LoadWithPrefix(key)
 	assert.Equal(t, len(values), 1)
