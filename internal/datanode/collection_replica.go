@@ -45,6 +45,10 @@ type Replica interface {
 	bufferAutoFlushBinlogPaths(segmentID UniqueID, field2Path map[UniqueID]string) error
 	getBufferPaths(segID UniqueID) (map[UniqueID][]string, error)
 	getChannelName(segID UniqueID) (string, error)
+	//new msg postions
+	setStartPositions(segmentID UniqueID, startPos []*internalpb.MsgPosition) error
+	setEndPositions(segmentID UniqueID, endPos []*internalpb.MsgPosition) error
+	getSegmentPositions(segID UniqueID) ([]*internalpb.MsgPosition, []*internalpb.MsgPosition)
 }
 
 // Segment is the data structure of segments in data node replica.
@@ -71,6 +75,10 @@ type CollectionSegmentReplica struct {
 	mu          sync.RWMutex
 	segments    map[UniqueID]*Segment
 	collections map[UniqueID]*Collection
+
+	posMu          sync.Mutex
+	startPositions map[UniqueID][]*internalpb.MsgPosition
+	endPositions   map[UniqueID][]*internalpb.MsgPosition
 }
 
 var _ Replica = &CollectionSegmentReplica{}
@@ -80,8 +88,10 @@ func newReplica() Replica {
 	collections := make(map[UniqueID]*Collection)
 
 	var replica Replica = &CollectionSegmentReplica{
-		segments:    segments,
-		collections: collections,
+		segments:       segments,
+		collections:    collections,
+		startPositions: make(map[UniqueID][]*internalpb.MsgPosition),
+		endPositions:   make(map[UniqueID][]*internalpb.MsgPosition),
 	}
 	return replica
 }
@@ -337,4 +347,31 @@ func (replica *CollectionSegmentReplica) hasCollection(collectionID UniqueID) bo
 
 	_, ok := replica.collections[collectionID]
 	return ok
+}
+
+// setStartPositions set segment `Start Position` - means the `startPositions` from the MsgPack when segment is first found
+func (replica *CollectionSegmentReplica) setStartPositions(segID UniqueID, startPositions []*internalpb.MsgPosition) error {
+	replica.posMu.Lock()
+	defer replica.posMu.Unlock()
+	replica.startPositions[segID] = startPositions
+	return nil
+}
+
+// setEndPositions set segment `End Position` - means the `endPositions` from the MsgPack when segment need to be flushed
+func (replica *CollectionSegmentReplica) setEndPositions(segID UniqueID, endPositions []*internalpb.MsgPosition) error {
+	replica.posMu.Lock()
+	defer replica.posMu.Unlock()
+	replica.endPositions[segID] = endPositions
+	return nil
+}
+
+// getSegmentPositions returns stored segment start-end Positions
+// To te Noted: start/end positions are NOT start&end position from one single MsgPack, they are from different MsgPack!
+// see setStartPositions, setEndPositions comment
+func (replica *CollectionSegmentReplica) getSegmentPositions(segID UniqueID) ([]*internalpb.MsgPosition, []*internalpb.MsgPosition) {
+	replica.posMu.Lock()
+	defer replica.posMu.Unlock()
+	startPos := replica.startPositions[segID]
+	endPos := replica.endPositions[segID]
+	return startPos, endPos
 }
