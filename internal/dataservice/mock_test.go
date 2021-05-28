@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
-func newMemoryMeta(allocator allocatorInterface) (*meta, error) {
+func newMemoryMeta(allocator allocator) (*meta, error) {
 	memoryKV := memkv.NewMemoryKV()
 	return newMeta(memoryKV)
 }
