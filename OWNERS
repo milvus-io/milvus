@@ -1,0 +1,14 @@
+filters:
+  ".*":
+    reviewers:
+      - del-zhenwu
+      - jeffoverflow
+      - scsven
+      - shengjun1985
+      - yhmo
+    approvers:
+      - del-zhenwu
+      - jeffoverflow
+      - scsven
+      - shengjun1985
+      - yhmo
