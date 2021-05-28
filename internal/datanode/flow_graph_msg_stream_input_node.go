@@ -25,7 +25,6 @@ func newDmInputNode(ctx context.Context, factory msgstream.Factory, vchannelName
 
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
-	// consumeChannels := Params.InsertChannelNames
 	consumeSubName := Params.MsgChannelSubName
 
 	insertStream, _ := factory.NewTtMsgStream(ctx)

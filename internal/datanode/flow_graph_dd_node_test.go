@@ -44,14 +44,8 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	inFlushCh := make(chan *flushMsg, 10)
 	defer close(inFlushCh)
 
-	// testPath := "/test/datanode/root/meta"
-	// err := clearEtcd(testPath)
-	// require.NoError(t, err)
-	// Params.MetaRootPath = testPath
-
-	// Params.FlushDdBufferSize = 4
 	replica := newReplica()
-	ddNode := newDDNode(ctx, newBinlogMeta(), inFlushCh, replica, NewAllocatorFactory())
+	ddNode := newDDNode(ctx, inFlushCh, replica, NewAllocatorFactory())
 
 	collID := UniqueID(0)
 	collName := "col-test-0"
