@@ -25,7 +25,6 @@ package indexnode
 import "C"
 
 import (
-	"errors"
 	"fmt"
 	"unsafe"
 
@@ -41,100 +40,11 @@ import (
 // TODO: use storage.Blob instead later
 type Blob = storage.Blob
 
-// just for debugging
-type QueryResult interface {
-	Delete() error
-	NQ() int64
-	TOPK() int64
-	IDs() []int64
-	Distances() []float32
-}
-
-type CQueryResult struct {
-	ptr C.CIndexQueryResult
-}
-
-type CFunc func() C.CStatus
-
-func TryCatch(fn CFunc) error {
-	status := fn()
-	errorCode := status.error_code
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return fmt.Errorf("error code = %d, error msg = %s", errorCode, errorMsg)
-	}
-	return nil
-}
-
-func CreateQueryResult() (QueryResult, error) {
-	var ptr C.CIndexQueryResult
-	fn := func() C.CStatus {
-		return C.CreateQueryResult(&ptr)
-	}
-	err := TryCatch(fn)
-	if err != nil {
-		return nil, err
-	}
-	return &CQueryResult{
-		ptr: ptr,
-	}, nil
-}
-
-func (qs *CQueryResult) Delete() error {
-	fn := func() C.CStatus {
-		return C.DeleteIndexQueryResult(qs.ptr)
-	}
-	return TryCatch(fn)
-}
-
-func (qs *CQueryResult) NQ() int64 {
-	return int64(C.NqOfQueryResult(qs.ptr))
-}
-
-func (qs *CQueryResult) TOPK() int64 {
-	return int64(C.TopkOfQueryResult(qs.ptr))
-}
-
-func (qs *CQueryResult) IDs() []int64 {
-	nq := qs.NQ()
-	topk := qs.TOPK()
-
-	if nq <= 0 || topk <= 0 {
-		return []int64{}
-	}
-
-	// TODO: how could we avoid memory copy every time when this called
-	ids := make([]int64, nq*topk)
-	C.GetIdsOfQueryResult(qs.ptr, (*C.int64_t)(&ids[0]))
-
-	return ids
-}
-
-func (qs *CQueryResult) Distances() []float32 {
-	nq := qs.NQ()
-	topk := qs.TOPK()
-
-	if nq <= 0 || topk <= 0 {
-		return []float32{}
-	}
-
-	// TODO: how could we avoid memory copy every time when this called
-	distances := make([]float32, nq*topk)
-	C.GetDistancesOfQueryResult(qs.ptr, (*C.float)(&distances[0]))
-
-	return distances
-}
-
 type Index interface {
 	Serialize() ([]*Blob, error)
 	Load([]*Blob) error
 	BuildFloatVecIndexWithoutIds(vectors []float32) error
 	BuildBinaryVecIndexWithoutIds(vectors []byte) error
-	QueryOnFloatVecIndex(vectors []float32) (QueryResult, error)
-	QueryOnBinaryVecIndex(vectors []byte) (QueryResult, error)
-	QueryOnFloatVecIndexWithParam(vectors []float32, params map[string]string) (QueryResult, error)
-	QueryOnBinaryVecIndexWithParam(vectors []byte, params map[string]string) (QueryResult, error)
 	Delete() error
 }
 
@@ -283,116 +193,4 @@ func NewCIndex(typeParams, indexParams map[string]string) (Index, error) {
 	return &CIndex{
 		indexPtr: indexPtr,
 	}, nil
-}
-
-func (index *CIndex) QueryOnFloatVecIndex(vectors []float32) (QueryResult, error) {
-	if len(vectors) <= 0 {
-		return nil, errors.New("nq is zero")
-	}
-	res, err := CreateQueryResult()
-	if err != nil {
-		return nil, err
-	}
-	fn := func() C.CStatus {
-		cRes, ok := res.(*CQueryResult)
-		if !ok {
-			// TODO: ugly here, fix me later
-			panic("only CQueryResult is supported now!")
-		}
-		return C.QueryOnFloatVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.float)(&vectors[0]), &cRes.ptr)
-	}
-	err = TryCatch(fn)
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
-}
-
-func (index *CIndex) QueryOnBinaryVecIndex(vectors []byte) (QueryResult, error) {
-	if len(vectors) <= 0 {
-		return nil, errors.New("nq is zero")
-	}
-	res, err := CreateQueryResult()
-	if err != nil {
-		return nil, err
-	}
-	fn := func() C.CStatus {
-		cRes, ok := res.(*CQueryResult)
-		if !ok {
-			// TODO: ugly here, fix me later
-			panic("only CQueryResult is supported now!")
-		}
-		return C.QueryOnBinaryVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.uint8_t)(&vectors[0]), &cRes.ptr)
-	}
-	err = TryCatch(fn)
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
-}
-
-func (index *CIndex) QueryOnFloatVecIndexWithParam(vectors []float32, params map[string]string) (QueryResult, error) {
-	if len(vectors) <= 0 {
-		return nil, errors.New("nq is zero")
-	}
-
-	protoParams := &indexcgopb.MapParams{
-		Params: make([]*commonpb.KeyValuePair, 0),
-	}
-	for key, value := range params {
-		protoParams.Params = append(protoParams.Params, &commonpb.KeyValuePair{Key: key, Value: value})
-	}
-	paramsStr := proto.MarshalTextString(protoParams)
-	paramsPointer := C.CString(paramsStr)
-
-	res, err := CreateQueryResult()
-	if err != nil {
-		return nil, err
-	}
-	fn := func() C.CStatus {
-		cRes, ok := res.(*CQueryResult)
-		if !ok {
-			// TODO: ugly here, fix me later
-			panic("only CQueryResult is supported now!")
-		}
-		return C.QueryOnFloatVecIndexWithParam(index.indexPtr, (C.int64_t)(len(vectors)), (*C.float)(&vectors[0]), paramsPointer, &cRes.ptr)
-	}
-	err = TryCatch(fn)
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
-}
-
-func (index *CIndex) QueryOnBinaryVecIndexWithParam(vectors []byte, params map[string]string) (QueryResult, error) {
-	if len(vectors) <= 0 {
-		return nil, errors.New("nq is zero")
-	}
-
-	protoParams := &indexcgopb.MapParams{
-		Params: make([]*commonpb.KeyValuePair, 0),
-	}
-	for key, value := range params {
-		protoParams.Params = append(protoParams.Params, &commonpb.KeyValuePair{Key: key, Value: value})
-	}
-	paramsStr := proto.MarshalTextString(protoParams)
-	paramsPointer := C.CString(paramsStr)
-
-	res, err := CreateQueryResult()
-	if err != nil {
-		return nil, err
-	}
-	fn := func() C.CStatus {
-		cRes, ok := res.(*CQueryResult)
-		if !ok {
-			// TODO: ugly here, fix me later
-			panic("only CQueryResult is supported now!")
-		}
-		return C.QueryOnBinaryVecIndexWithParam(index.indexPtr, (C.int64_t)(len(vectors)), (*C.uint8_t)(&vectors[0]), paramsPointer, &cRes.ptr)
-	}
-	err = TryCatch(fn)
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
 }
