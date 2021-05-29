@@ -664,101 +664,91 @@ func checkTimeTickMsg(msg map[mqclient.Consumer]Timestamp,
 }
 
 func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
-	mp := msgPositions[0]
-	if len(mp.MsgID) == 0 {
-		return errors.New("when msgID's length equal to 0, please use AsConsumer interface")
-	}
-	var consumer mqclient.Consumer
-	var err error
+	DoMsgStreamSeek := func(mp *MsgPosition) (mqclient.Consumer, error) {
+		if _, ok := ms.consumers[mp.ChannelName]; ok {
+			return nil, fmt.Errorf("the channel should not been subscribed")
+		}
 
-	seekChannel := mp.ChannelName
-	subName := mp.MsgGroup
-
-	ms.consumerLock.Lock()
-	defer ms.consumerLock.Unlock()
-
-	consumer, ok := ms.consumers[seekChannel]
-	if ok {
-		return errors.New("the channel should not been subscribed")
-	}
-
-	fn := func() error {
 		receiveChannel := make(chan mqclient.ConsumerMessage, ms.bufSize)
-		consumer, err = ms.client.Subscribe(mqclient.ConsumerOptions{
-			Topic:                       seekChannel,
-			SubscriptionName:            subName,
+		consumer, err := ms.client.Subscribe(mqclient.ConsumerOptions{
+			Topic:                       mp.ChannelName,
+			SubscriptionName:            mp.MsgGroup,
 			SubscriptionInitialPosition: mqclient.SubscriptionPositionEarliest,
 			Type:                        mqclient.KeyShared,
 			MessageChannel:              receiveChannel,
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if consumer == nil {
-			err = errors.New("consumer is nil")
-			log.Debug("subscribe error", zap.String("error = ", err.Error()))
-			return err
+			return nil, fmt.Errorf("consumer is nil")
 		}
 
 		seekMsgID, err := ms.client.BytesToMsgID(mp.MsgID)
 		if err != nil {
-			log.Debug("convert messageID error", zap.String("error = ", err.Error()))
-			return err
+			return nil, err
 		}
 		err = consumer.Seek(seekMsgID)
 		if err != nil {
-			log.Debug("seek error ", zap.String("error = ", err.Error()))
-			return err
+			return nil, err
 		}
 
-		return nil
+		return consumer, nil
 	}
-	err = Retry(20, time.Millisecond*200, fn)
-	if err != nil {
-		errMsg := "Failed to seek, error = " + err.Error()
-		panic(errMsg)
-	}
-	ms.addConsumer(consumer, seekChannel)
 
-	//TODO: May cause problem
-	//if len(consumer.Chan()) == 0 {
-	//	return nil
-	//}
+	ms.consumerLock.Lock()
+	defer ms.consumerLock.Unlock()
 
-	for {
-		select {
-		case <-ms.ctx.Done():
-			return nil
-		case msg, ok := <-consumer.Chan():
-			if !ok {
-				return errors.New("consumer closed")
-			}
-			consumer.Ack(msg)
+	for _, mp := range msgPositions {
+		if len(mp.MsgID) == 0 {
+			return fmt.Errorf("when msgID's length equal to 0, please use AsConsumer interface")
+		}
 
-			headerMsg := commonpb.MsgHeader{}
-			err := proto.Unmarshal(msg.Payload(), &headerMsg)
-			if err != nil {
-				log.Error("Failed to unmarshal message header", zap.Error(err))
-			}
-			tsMsg, err := ms.unmarshal.Unmarshal(msg.Payload(), headerMsg.Base.MsgType)
-			if err != nil {
-				log.Error("Failed to unmarshal tsMsg", zap.Error(err))
-			}
-			if tsMsg.Type() == commonpb.MsgType_TimeTick {
-				if tsMsg.BeginTs() >= mp.Timestamp {
-					return nil
+		consumer, err := DoMsgStreamSeek(mp)
+		if err != nil {
+			return fmt.Errorf("Failed to seek, error %s", err.Error())
+		}
+		ms.addConsumer(consumer, mp.ChannelName)
+
+		//TODO: May cause problem
+		//if len(consumer.Chan()) == 0 {
+		//	return nil
+		//}
+
+		runLoop := true
+		for runLoop {
+			select {
+			case <-ms.ctx.Done():
+				return nil
+			case msg, ok := <-consumer.Chan():
+				if !ok {
+					return fmt.Errorf("consumer closed")
 				}
-				continue
-			}
-			if tsMsg.BeginTs() > mp.Timestamp {
-				tsMsg.SetPosition(&MsgPosition{
-					ChannelName: filepath.Base(msg.Topic()),
-					MsgID:       msg.ID().Serialize(),
-				})
-				ms.unsolvedBuf[consumer] = append(ms.unsolvedBuf[consumer], tsMsg)
+				consumer.Ack(msg)
+
+				headerMsg := commonpb.MsgHeader{}
+				err := proto.Unmarshal(msg.Payload(), &headerMsg)
+				if err != nil {
+					return fmt.Errorf("Failed to unmarshal message header, err %s", err.Error())
+				}
+				tsMsg, err := ms.unmarshal.Unmarshal(msg.Payload(), headerMsg.Base.MsgType)
+				if err != nil {
+					return fmt.Errorf("Failed to unmarshal tsMsg, err %s", err.Error())
+				}
+				if tsMsg.Type() == commonpb.MsgType_TimeTick && tsMsg.BeginTs() >= mp.Timestamp {
+					runLoop = false
+					break
+				} else if tsMsg.BeginTs() > mp.Timestamp {
+					tsMsg.SetPosition(&MsgPosition{
+						ChannelName: filepath.Base(msg.Topic()),
+						MsgID:       msg.ID().Serialize(),
+					})
+					ms.unsolvedBuf[consumer] = append(ms.unsolvedBuf[consumer], tsMsg)
+				}
 			}
 		}
 	}
+	return nil
 }
 
 //TODO test InMemMsgStream
