@@ -388,6 +388,7 @@ type MqTtMsgStream struct {
 	chanTtMsgTime      map[mqclient.Consumer]Timestamp
 	chanMsgBufMutex    *sync.Mutex
 	chanTtMsgTimeMutex *sync.RWMutex
+	chanWaitGroup      *sync.WaitGroup
 	lastTimeStamp      Timestamp
 	syncConsumer       chan int
 }
@@ -414,6 +415,7 @@ func NewMqTtMsgStream(ctx context.Context,
 		chanStopChan:       chanStopChan,
 		chanMsgBufMutex:    &sync.Mutex{},
 		chanTtMsgTimeMutex: &sync.RWMutex{},
+		chanWaitGroup:      &sync.WaitGroup{},
 		syncConsumer:       syncConsumer,
 	}, nil
 }
@@ -510,15 +512,14 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 		case <-ms.ctx.Done():
 			return
 		default:
-			wg := sync.WaitGroup{}
 			ms.consumerLock.Lock()
 			for _, consumer := range ms.consumers {
 				if !chanTtMsgSync[consumer] {
-					wg.Add(1)
-					go ms.findTimeTick(consumer, chanTtMsgTime, &wg)
+					ms.chanWaitGroup.Add(1)
+					go ms.findTimeTick(consumer, chanTtMsgTime)
 				}
 			}
-			wg.Wait()
+			ms.chanWaitGroup.Wait()
 
 			// block here until all channels reach same timetick
 			timeStamp, ok := ms.checkTimeTickMsg(chanTtMsgTime, chanTtMsgSync)
@@ -593,9 +594,8 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 
 // Save all msgs into chanMsgBuf[] till receive one ttMsg
 func (ms *MqTtMsgStream) findTimeTick(consumer mqclient.Consumer,
-	chanTtMsgTime map[mqclient.Consumer]Timestamp,
-	wg *sync.WaitGroup) {
-	defer wg.Done()
+	chanTtMsgTime map[mqclient.Consumer]Timestamp) {
+	defer ms.chanWaitGroup.Done()
 	for {
 		select {
 		case <-ms.ctx.Done():
