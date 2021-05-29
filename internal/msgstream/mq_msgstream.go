@@ -382,12 +382,12 @@ func (ms *mqMsgStream) Seek(mp *internalpb.MsgPosition) error {
 
 type MqTtMsgStream struct {
 	mqMsgStream
-	unsolvedBuf     map[mqclient.Consumer][]TsMsg
-	msgPositions    map[mqclient.Consumer]*internalpb.MsgPosition
-	unsolvedMutex   *sync.Mutex
+	chanMsgBuf      map[mqclient.Consumer][]TsMsg
+	chanMsgPos      map[mqclient.Consumer]*internalpb.MsgPosition
+	chanStop        map[mqclient.Consumer]chan bool
+	chanMsgBufMutex *sync.Mutex
 	lastTimeStamp   Timestamp
 	syncConsumer    chan int
-	stopConsumeChan map[mqclient.Consumer]chan bool
 }
 
 func NewMqTtMsgStream(ctx context.Context,
@@ -399,18 +399,18 @@ func NewMqTtMsgStream(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	unsolvedBuf := make(map[mqclient.Consumer][]TsMsg)
-	stopChannel := make(map[mqclient.Consumer]chan bool)
-	msgPositions := make(map[mqclient.Consumer]*internalpb.MsgPosition)
+	chanMsgBuf := make(map[mqclient.Consumer][]TsMsg)
+	chanStop := make(map[mqclient.Consumer]chan bool)
+	chanMsgPos := make(map[mqclient.Consumer]*internalpb.MsgPosition)
 	syncConsumer := make(chan int, 1)
 
 	return &MqTtMsgStream{
 		mqMsgStream:     *msgStream,
-		unsolvedBuf:     unsolvedBuf,
-		msgPositions:    msgPositions,
-		unsolvedMutex:   &sync.Mutex{},
+		chanMsgBuf:      chanMsgBuf,
+		chanMsgPos:      chanMsgPos,
+		chanStop:        chanStop,
+		chanMsgBufMutex: &sync.Mutex{},
 		syncConsumer:    syncConsumer,
-		stopConsumeChan: stopChannel,
 	}, nil
 }
 
@@ -419,15 +419,14 @@ func (ms *MqTtMsgStream) addConsumer(consumer mqclient.Consumer, channel string)
 		ms.syncConsumer <- 1
 	}
 	ms.consumers[channel] = consumer
-	ms.unsolvedBuf[consumer] = make([]TsMsg, 0)
+	ms.chanMsgBuf[consumer] = make([]TsMsg, 0)
 	ms.consumerChannels = append(ms.consumerChannels, channel)
-	ms.msgPositions[consumer] = &internalpb.MsgPosition{
+	ms.chanMsgPos[consumer] = &internalpb.MsgPosition{
 		ChannelName: channel,
 		MsgID:       make([]byte, 0),
 		Timestamp:   ms.lastTimeStamp,
 	}
-	stopConsumeChan := make(chan bool)
-	ms.stopConsumeChan[consumer] = stopConsumeChan
+	ms.chanStop[consumer] = make(chan bool)
 }
 
 func (ms *MqTtMsgStream) AsConsumer(channels []string, subName string) {
@@ -529,8 +528,8 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 			timeTickBuf := make([]TsMsg, 0)
 			startMsgPosition := make([]*internalpb.MsgPosition, 0)
 			endMsgPositions := make([]*internalpb.MsgPosition, 0)
-			ms.unsolvedMutex.Lock()
-			for consumer, msgs := range ms.unsolvedBuf {
+			ms.chanMsgBufMutex.Lock()
+			for consumer, msgs := range ms.chanMsgBuf {
 				if len(msgs) == 0 {
 					continue
 				}
@@ -547,9 +546,9 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 						tempBuffer = append(tempBuffer, v)
 					}
 				}
-				ms.unsolvedBuf[consumer] = tempBuffer
+				ms.chanMsgBuf[consumer] = tempBuffer
 
-				startMsgPosition = append(startMsgPosition, ms.msgPositions[consumer])
+				startMsgPosition = append(startMsgPosition, ms.chanMsgPos[consumer])
 				var newPos *internalpb.MsgPosition
 				if len(tempBuffer) > 0 {
 					// if tempBuffer is not empty, use tempBuffer[0] to seek
@@ -570,9 +569,9 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 					}
 					endMsgPositions = append(endMsgPositions, newPos)
 				}
-				ms.msgPositions[consumer] = newPos
+				ms.chanMsgPos[consumer] = newPos
 			}
-			ms.unsolvedMutex.Unlock()
+			ms.chanMsgBufMutex.Unlock()
 			ms.consumerLock.Unlock()
 
 			msgPack := MsgPack{
@@ -589,7 +588,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 	}
 }
 
-// Save all msgs into unsolvedBuf[] till receive one ttMsg
+// Save all msgs into chanMsgBuf[] till receive one ttMsg
 func (ms *MqTtMsgStream) findTimeTick(consumer mqclient.Consumer,
 	eofMsgMap map[mqclient.Consumer]Timestamp,
 	wg *sync.WaitGroup,
@@ -599,7 +598,7 @@ func (ms *MqTtMsgStream) findTimeTick(consumer mqclient.Consumer,
 		select {
 		case <-ms.ctx.Done():
 			return
-		case <-ms.stopConsumeChan[consumer]:
+		case <-ms.chanStop[consumer]:
 			return
 		case msg, ok := <-consumer.Chan():
 			if !ok {
@@ -619,9 +618,9 @@ func (ms *MqTtMsgStream) findTimeTick(consumer mqclient.Consumer,
 				tsMsg.SetTraceCtx(opentracing.ContextWithSpan(context.Background(), sp))
 			}
 
-			ms.unsolvedMutex.Lock()
-			ms.unsolvedBuf[consumer] = append(ms.unsolvedBuf[consumer], tsMsg)
-			ms.unsolvedMutex.Unlock()
+			ms.chanMsgBufMutex.Lock()
+			ms.chanMsgBuf[consumer] = append(ms.chanMsgBuf[consumer], tsMsg)
+			ms.chanMsgBufMutex.Unlock()
 
 			if tsMsg.Type() == commonpb.MsgType_TimeTick {
 				findMapMutex.Lock()
@@ -747,7 +746,7 @@ func (ms *MqTtMsgStream) Seek(mp *internalpb.MsgPosition) error {
 				continue
 			}
 			if tsMsg.BeginTs() > mp.Timestamp {
-				ms.unsolvedBuf[consumer] = append(ms.unsolvedBuf[consumer], tsMsg)
+				ms.chanMsgBuf[consumer] = append(ms.chanMsgBuf[consumer], tsMsg)
 			}
 		}
 	}
