@@ -382,12 +382,14 @@ func (ms *mqMsgStream) Seek(mp *internalpb.MsgPosition) error {
 
 type MqTtMsgStream struct {
 	mqMsgStream
-	chanMsgBuf      map[mqclient.Consumer][]TsMsg
-	chanMsgPos      map[mqclient.Consumer]*internalpb.MsgPosition
-	chanStopChan    map[mqclient.Consumer]chan bool
-	chanMsgBufMutex *sync.Mutex
-	lastTimeStamp   Timestamp
-	syncConsumer    chan int
+	chanMsgBuf         map[mqclient.Consumer][]TsMsg
+	chanMsgPos         map[mqclient.Consumer]*internalpb.MsgPosition
+	chanStopChan       map[mqclient.Consumer]chan bool
+	chanTtMsgTime      map[mqclient.Consumer]Timestamp
+	chanMsgBufMutex    *sync.Mutex
+	chanTtMsgTimeMutex *sync.RWMutex
+	lastTimeStamp      Timestamp
+	syncConsumer       chan int
 }
 
 func NewMqTtMsgStream(ctx context.Context,
@@ -400,17 +402,19 @@ func NewMqTtMsgStream(ctx context.Context,
 		return nil, err
 	}
 	chanMsgBuf := make(map[mqclient.Consumer][]TsMsg)
-	chanStopChan := make(map[mqclient.Consumer]chan bool)
 	chanMsgPos := make(map[mqclient.Consumer]*internalpb.MsgPosition)
+	chanStopChan := make(map[mqclient.Consumer]chan bool)
+	//chanTtMsgTime := make(map[mqclient.Consumer]Timestamp)
 	syncConsumer := make(chan int, 1)
 
 	return &MqTtMsgStream{
-		mqMsgStream:     *msgStream,
-		chanMsgBuf:      chanMsgBuf,
-		chanMsgPos:      chanMsgPos,
-		chanStopChan:    chanStopChan,
-		chanMsgBufMutex: &sync.Mutex{},
-		syncConsumer:    syncConsumer,
+		mqMsgStream:        *msgStream,
+		chanMsgBuf:         chanMsgBuf,
+		chanMsgPos:         chanMsgPos,
+		chanStopChan:       chanStopChan,
+		chanMsgBufMutex:    &sync.Mutex{},
+		chanTtMsgTimeMutex: &sync.RWMutex{},
+		syncConsumer:       syncConsumer,
 	}, nil
 }
 
@@ -507,18 +511,17 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 			return
 		default:
 			wg := sync.WaitGroup{}
-			findMapMutex := sync.RWMutex{}
 			ms.consumerLock.Lock()
 			for _, consumer := range ms.consumers {
 				if !chanTtMsgSync[consumer] {
 					wg.Add(1)
-					go ms.findTimeTick(consumer, chanTtMsgTime, &wg, &findMapMutex)
+					go ms.findTimeTick(consumer, chanTtMsgTime, &wg)
 				}
 			}
 			wg.Wait()
 
 			// block here until all channels reach same timetick
-			timeStamp, ok := checkTimeTickMsg(chanTtMsgTime, chanTtMsgSync, &findMapMutex)
+			timeStamp, ok := ms.checkTimeTickMsg(chanTtMsgTime, chanTtMsgSync)
 			if !ok || timeStamp <= ms.lastTimeStamp {
 				//log.Printf("All timeTick's timestamps are inconsistent")
 				ms.consumerLock.Unlock()
@@ -590,9 +593,8 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 
 // Save all msgs into chanMsgBuf[] till receive one ttMsg
 func (ms *MqTtMsgStream) findTimeTick(consumer mqclient.Consumer,
-	eofMsgMap map[mqclient.Consumer]Timestamp,
-	wg *sync.WaitGroup,
-	findMapMutex *sync.RWMutex) {
+	chanTtMsgTime map[mqclient.Consumer]Timestamp,
+	wg *sync.WaitGroup) {
 	defer wg.Done()
 	for {
 		select {
@@ -623,9 +625,9 @@ func (ms *MqTtMsgStream) findTimeTick(consumer mqclient.Consumer,
 			ms.chanMsgBufMutex.Unlock()
 
 			if tsMsg.Type() == commonpb.MsgType_TimeTick {
-				findMapMutex.Lock()
-				eofMsgMap[consumer] = tsMsg.(*TimeTickMsg).Base.Timestamp
-				findMapMutex.Unlock()
+				ms.chanTtMsgTimeMutex.Lock()
+				chanTtMsgTime[consumer] = tsMsg.(*TimeTickMsg).Base.Timestamp
+				ms.chanTtMsgTimeMutex.Unlock()
 				sp.Finish()
 				return
 			}
@@ -635,9 +637,8 @@ func (ms *MqTtMsgStream) findTimeTick(consumer mqclient.Consumer,
 }
 
 // return true only when all channels reach same timetick
-func checkTimeTickMsg(chanTtMsgTime map[mqclient.Consumer]Timestamp,
-	chanTtMsgSync map[mqclient.Consumer]bool,
-	mu *sync.RWMutex) (Timestamp, bool) {
+func (ms *MqTtMsgStream) checkTimeTickMsg(chanTtMsgTime map[mqclient.Consumer]Timestamp,
+	chanTtMsgSync map[mqclient.Consumer]bool) (Timestamp, bool) {
 
 	timeMap := make(map[Timestamp]int)
 	var maxTime Timestamp = 0
@@ -655,9 +656,9 @@ func checkTimeTickMsg(chanTtMsgTime map[mqclient.Consumer]Timestamp,
 		return maxTime, true
 	}
 	for consumer := range chanTtMsgTime {
-		mu.RLock()
+		ms.chanTtMsgTimeMutex.RLock()
 		chanTtMsgSync[consumer] = (chanTtMsgTime[consumer] == maxTime)
-		mu.RUnlock()
+		ms.chanTtMsgTimeMutex.RUnlock()
 	}
 
 	return 0, false
