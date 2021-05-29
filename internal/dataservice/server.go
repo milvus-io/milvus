@@ -542,7 +542,8 @@ func (s *Server) loadCollectionFromMaster(ctx context.Context, collectionID int6
 		CollectionID:   resp.CollectionID,
 	})
 	if err = VerifyResponse(presp, err); err != nil {
-		log.Error("show partitions error", zap.String("collectionName", resp.Schema.Name), zap.Int64("collectionID", resp.CollectionID), zap.Error(err))
+		log.Error("show partitions error", zap.String("collectionName", resp.Schema.Name),
+			zap.Int64("collectionID", resp.CollectionID), zap.Error(err))
 		return err
 	}
 	collInfo := &datapb.CollectionInfo{
