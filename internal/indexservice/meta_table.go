@@ -28,11 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 )
 
-const (
-	RequestTimeout = 10 * time.Second
-	maxTasks       = 10
-)
-
 type Meta struct {
 	indexMeta *indexpb.IndexMeta
 	revision  int64
@@ -138,7 +133,7 @@ func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequ
 			State:        commonpb.IndexState_Unissued,
 			IndexBuildID: indexBuildID,
 			Req:          req,
-			NodeServerID: 0,
+			NodeID:       0,
 			Version:      0,
 		},
 		revision: 0,
@@ -146,7 +141,7 @@ func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequ
 	return mt.saveIndexMeta(meta)
 }
 
-func (mt *metaTable) BuildIndex(indexBuildID UniqueID, serverID int64) error {
+func (mt *metaTable) BuildIndex(indexBuildID UniqueID, nodeID int64) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 	log.Debug("IndexService update index meta")
@@ -159,7 +154,7 @@ func (mt *metaTable) BuildIndex(indexBuildID UniqueID, serverID int64) error {
 	if meta.indexMeta.State != commonpb.IndexState_Unissued {
 		return fmt.Errorf("can not set lease key, index with ID = %d state is %d", indexBuildID, meta.indexMeta.State)
 	}
-	meta.indexMeta.NodeServerID = serverID
+	meta.indexMeta.NodeID = nodeID
 
 	err := mt.saveIndexMeta(&meta)
 	if err != nil {
@@ -168,7 +163,7 @@ func (mt *metaTable) BuildIndex(indexBuildID UniqueID, serverID int64) error {
 			if m == nil {
 				return err
 			}
-			m.indexMeta.NodeServerID = serverID
+			m.indexMeta.NodeID = nodeID
 			return mt.saveIndexMeta(m)
 		}
 		err2 := retry.Retry(5, time.Millisecond*200, fn)
@@ -352,14 +347,14 @@ func (mt *metaTable) GetIndexMeta(indexBuildID UniqueID) Meta {
 	return meta
 }
 
-func (mt *metaTable) GetUnassignedTasks(serverIDs []int64) [][]UniqueID {
+func (mt *metaTable) GetUnassignedTasks(nodeIDs []int64) [][]UniqueID {
 	var tasks [][]UniqueID
 	var indexBuildIDs []UniqueID
 
 	for indexBuildID, meta := range mt.indexBuildID2Meta {
 		alive := false
-		for _, serverID := range serverIDs {
-			if meta.indexMeta.NodeServerID == serverID {
+		for _, serverID := range nodeIDs {
+			if meta.indexMeta.NodeID == serverID {
 				alive = true
 			}
 		}
@@ -477,8 +472,8 @@ func NewNodeTasks() *nodeTasks {
 	}
 }
 
-func (nt *nodeTasks) getTasksByLeaseKey(serverID int64) []UniqueID {
-	indexBuildIDs, ok := nt.nodeID2Tasks[serverID]
+func (nt *nodeTasks) getTasksByNodeID(nodeID int64) []UniqueID {
+	indexBuildIDs, ok := nt.nodeID2Tasks[nodeID]
 	if !ok {
 		return nil
 	}

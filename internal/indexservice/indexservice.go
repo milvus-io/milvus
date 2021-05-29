@@ -473,7 +473,7 @@ func (i *IndexService) assignmentTasksLoop() {
 				if err := i.metaTable.UpdateVersion(indexBuildID); err != nil {
 					log.Debug("IndexService", zap.String("build index update version err", err.Error()))
 				}
-				nodeID, builderClient, nodeServerID := i.nodeClients.PeekClient()
+				nodeID, builderClient := i.nodeClients.PeekClient()
 				if builderClient == nil {
 					log.Debug("IndexService has no available IndexNode")
 					i.assignChan <- []UniqueID{indexBuildID}
@@ -493,7 +493,7 @@ func (i *IndexService) assignmentTasksLoop() {
 				if err != nil {
 					log.Debug("IndexService", zap.String("build index err", err.Error()))
 				}
-				if err = i.metaTable.BuildIndex(indexBuildID, nodeServerID); err != nil {
+				if err = i.metaTable.BuildIndex(indexBuildID, nodeID); err != nil {
 					log.Debug("IndexService", zap.String("update meta table error", err.Error()))
 				}
 				if resp.ErrorCode != commonpb.ErrorCode_Success {
@@ -524,7 +524,7 @@ func (i *IndexService) watchNodeLoop() {
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
 				log.Debug("IndexService", zap.Any("The IndexNode crashed with ID", serverID))
-				indexBuildIDs := i.nodeTasks.getTasksByLeaseKey(serverID)
+				indexBuildIDs := i.nodeTasks.getTasksByNodeID(serverID)
 				i.assignChan <- indexBuildIDs
 				i.nodeTasks.delete(serverID)
 			}
