@@ -881,7 +881,7 @@ func TestStream_PulsarTtMsgStream_2(t *testing.T) {
 	inputStream.Close()
 }
 
-func TestStream_PulsarMsgStream_3(t *testing.T) {
+func TestStream_MqMsgStream_Seek(t *testing.T) {
 	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	c := funcutil.RandomString(8)
 	producerChannels := []string{c}
