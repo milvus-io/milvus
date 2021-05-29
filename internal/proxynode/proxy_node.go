@@ -158,6 +158,8 @@ func (node *ProxyNode) Init() error {
 
 		Params.SearchChannelNames = []string{resp.RequestChannel}
 		Params.SearchResultChannelNames = []string{resp.ResultChannel}
+		Params.RetrieveChannelNames = []string{resp.RequestChannel}
+		Params.RetrieveResultChannelNames = []string{resp.ResultChannel}
 	}
 
 	// todo

@@ -52,6 +52,13 @@ type ParamTable struct {
 	SearchPulsarBufSize        int64
 	SearchResultReceiveBufSize int64
 
+	// Retrieve
+	RetrieveChannelNames         []string
+	RetrieveResultChannelNames   []string
+	RetrieveReceiveBufSize       int64
+	retrievePulsarBufSize        int64
+	RetrieveResultReceiveBufSize int64
+
 	// stats
 	StatsPublishInterval int
 	StatsChannelName     string
