@@ -39,7 +39,7 @@ type searchCollection struct {
 	tSafeReplica      TSafeReplicaInterface
 
 	msgBuffer     chan *msgstream.SearchMsg
-	unsolvedMSgMu sync.Mutex // guards unsolvedMsg
+	unsolvedMsgMu sync.Mutex // guards unsolvedMsg
 	unsolvedMsg   []*msgstream.SearchMsg
 
 	tSafeMutex   sync.Mutex
@@ -99,14 +99,14 @@ func (s *searchCollection) register(collectionID UniqueID) {
 }
 
 func (s *searchCollection) addToUnsolvedMsg(msg *msgstream.SearchMsg) {
-	s.unsolvedMSgMu.Lock()
-	defer s.unsolvedMSgMu.Unlock()
+	s.unsolvedMsgMu.Lock()
+	defer s.unsolvedMsgMu.Unlock()
 	s.unsolvedMsg = append(s.unsolvedMsg, msg)
 }
 
 func (s *searchCollection) popAllUnsolvedMsg() []*msgstream.SearchMsg {
-	s.unsolvedMSgMu.Lock()
-	defer s.unsolvedMSgMu.Unlock()
+	s.unsolvedMsgMu.Lock()
+	defer s.unsolvedMsgMu.Unlock()
 	tmp := s.unsolvedMsg
 	s.unsolvedMsg = s.unsolvedMsg[:0]
 	return tmp

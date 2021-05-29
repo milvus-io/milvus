@@ -15,11 +15,12 @@ import "C"
 import (
 	"context"
 	"errors"
+	"strconv"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"go.uber.org/zap"
-	"strconv"
 )
 
 type searchService struct {
@@ -48,7 +49,7 @@ func newSearchService(ctx context.Context,
 	searchResultStream, _ := factory.NewQueryMsgStream(ctx)
 
 	if len(Params.SearchChannelNames) > 0 && len(Params.SearchResultChannelNames) > 0 {
-		// query node need to consumer search channels and produce search result channels when init.
+		// query node need to consume search channels and produce search result channels when init.
 		consumeChannels := Params.SearchChannelNames
 		consumeSubName := Params.MsgChannelSubName
 		searchStream.AsConsumer(consumeChannels, consumeSubName)
