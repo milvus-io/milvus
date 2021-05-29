@@ -667,17 +667,19 @@ func (ms *MqTtMsgStream) Seek(mp *internalpb.MsgPosition) error {
 	if len(mp.MsgID) == 0 {
 		return errors.New("when msgID's length equal to 0, please use AsConsumer interface")
 	}
+
 	var consumer mqclient.Consumer
 	var err error
-	var hasWatched bool
+
 	seekChannel := mp.ChannelName
 	subName := mp.MsgGroup
+
 	ms.consumerLock.Lock()
 	defer ms.consumerLock.Unlock()
-	consumer, hasWatched = ms.consumers[seekChannel]
 
-	if hasWatched {
-		return errors.New("the channel should has not been subscribed")
+	consumer, ok := ms.consumers[seekChannel]
+	if ok {
+		return errors.New("the channel should not been subscribed")
 	}
 
 	fn := func() error {
