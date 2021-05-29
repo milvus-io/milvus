@@ -110,6 +110,7 @@ func newHEALTHDataNodeMock(dmChannelName, ddChannelName string) *DataNode {
 		DdlPosition:     &datapb.PositionPair{},
 		DmlPosition:     &datapb.PositionPair{},
 	}
+	node.Start()
 
 	_ = node.NewDataSyncService(vpair)
 
