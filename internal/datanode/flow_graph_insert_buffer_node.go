@@ -139,28 +139,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				log.Error("add segment wrong", zap.Error(err))
 			}
 
-			switch {
-			case iMsg.startPositions == nil || len(iMsg.startPositions) <= 0:
-				log.Error("insert Msg StartPosition empty")
-			default:
-				segment, err := ibNode.replica.getSegmentByID(currentSegID)
-				if err != nil {
-					log.Error("get segment wrong", zap.Error(err))
-				}
-				var startPosition *internalpb.MsgPosition = nil
-				for _, pos := range iMsg.startPositions {
-					if pos.ChannelName == segment.channelName {
-						startPosition = pos
-						break
-					}
-				}
-				if startPosition == nil {
-					log.Error("get position wrong", zap.Error(err))
-				} else {
-					ibNode.replica.setStartPosition(currentSegID, startPosition)
-				}
-			}
-			// set msg pack start positions, new design
+			// set msg pack start positions
 			ibNode.replica.setStartPositions(currentSegID, iMsg.startPositions)
 		}
 
@@ -461,27 +440,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		// 1.3 store in buffer
 		ibNode.insertBuffer.insertData[currentSegID] = idata
 
-		switch {
-		case iMsg.endPositions == nil || len(iMsg.endPositions) <= 0:
-			log.Error("insert Msg EndPosition empty")
-		default:
-			segment, err := ibNode.replica.getSegmentByID(currentSegID)
-			if err != nil {
-				log.Error("get segment wrong", zap.Error(err))
-			}
-			var endPosition *internalpb.MsgPosition = nil
-			for _, pos := range iMsg.endPositions {
-				if pos.ChannelName == segment.channelName {
-					endPosition = pos
-				}
-			}
-			if endPosition == nil {
-				log.Error("get position wrong", zap.Error(err))
-			}
-			ibNode.replica.setEndPosition(currentSegID, endPosition)
-		}
-
-		// store current startPositions as Segment->EndPostion
+		// store current endPositions as Segment->EndPostion
 		ibNode.replica.setEndPositions(currentSegID, iMsg.endPositions)
 	}
 
@@ -717,7 +676,6 @@ func (ibNode *insertBufferNode) completeFlush(segID UniqueID, wait <-chan map[Un
 	dmlFlushedCh <- binlogPaths
 
 	log.Debug(".. Segment flush completed ..")
-	ibNode.replica.setIsFlushed(segID)
 	ibNode.updateSegStatistics([]UniqueID{segID})
 
 }
@@ -870,8 +828,7 @@ func newInsertBufferNode(ctx context.Context, replica Replica, factory msgstream
 		segmentStatisticsStream: segStatisticsMsgStream,
 		completeFlushStream:     completeFlushStream,
 		replica:                 replica,
-		// flushMeta:               flushMeta,
-		flushMap:    sync.Map{},
-		idAllocator: idAllocator,
+		flushMap:                sync.Map{},
+		idAllocator:             idAllocator,
 	}
 }
