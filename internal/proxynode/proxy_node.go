@@ -228,9 +228,10 @@ func (node *ProxyNode) Init() error {
 	node.segAssigner = segAssigner
 	node.segAssigner.PeerID = Params.ProxyID
 
-	// TODO(dragondriver): use real master service instance
+	// TODO(dragondriver): use real master service & query service instance
 	mockMasterIns := newMockMaster()
-	chMgr := newChannelsMgr(mockMasterIns, node.msFactory)
+	mockQueryIns := newMockQueryService()
+	chMgr := newChannelsMgr(mockMasterIns, mockQueryIns, node.msFactory)
 	node.chMgr = chMgr
 
 	node.sched, err = NewTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator, node.msFactory)
