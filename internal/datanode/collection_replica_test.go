@@ -14,7 +14,6 @@ package datanode
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -135,8 +134,6 @@ func TestReplica_Segment(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, UniqueID(0), update.SegmentID)
 		assert.Equal(t, int64(100), update.NumRows)
-		assert.NotNil(t, update.StartPosition)
-		assert.Nil(t, update.EndPosition)
 
 		f2p := map[UniqueID]string{
 			1: "a",
@@ -156,16 +153,8 @@ func TestReplica_Segment(t *testing.T) {
 		assert.ElementsMatch(t, []string{"a", "a"}, r[1])
 		assert.ElementsMatch(t, []string{"b", "b"}, r[2])
 
-		err = replica.setIsFlushed(0)
-		assert.NoError(t, err)
-		err = replica.setStartPosition(0, &internalpb.MsgPosition{})
-		assert.NoError(t, err)
-		err = replica.setEndPosition(0, &internalpb.MsgPosition{})
-		assert.NoError(t, err)
 		update, err = replica.getSegmentStatisticsUpdates(0)
 		assert.NoError(t, err)
-		assert.Nil(t, update.StartPosition)
-		assert.NotNil(t, update.EndPosition)
 
 		err = replica.removeSegment(0)
 		assert.NoError(t, err)
@@ -179,17 +168,6 @@ func TestReplica_Segment(t *testing.T) {
 		seg, err := replica.getSegmentByID(0)
 		assert.Error(t, err)
 		assert.Nil(t, seg)
-
-		err = replica.setIsFlushed(0)
-		assert.Error(t, err)
-		err = replica.setStartPosition(0, &internalpb.MsgPosition{})
-		assert.Error(t, err)
-		err = replica.setStartPosition(0, nil)
-		assert.Error(t, err)
-		err = replica.setEndPosition(0, &internalpb.MsgPosition{})
-		assert.Error(t, err)
-		err = replica.setEndPosition(0, nil)
-		assert.Error(t, err)
 
 		err = replica.updateStatistics(0, 0)
 		assert.Error(t, err)
