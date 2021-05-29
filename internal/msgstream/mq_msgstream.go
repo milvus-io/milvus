@@ -389,7 +389,7 @@ type MqTtMsgStream struct {
 	chanMsgBufMutex    *sync.Mutex
 	chanTtMsgTimeMutex *sync.RWMutex
 	chanWaitGroup      *sync.WaitGroup
-	lastTimeStamp      Timestamp
+	currTimeStamp      Timestamp
 	syncConsumer       chan int
 }
 
@@ -431,7 +431,7 @@ func (ms *MqTtMsgStream) addConsumer(consumer mqclient.Consumer, channel string)
 	ms.chanMsgPos[consumer] = &internalpb.MsgPosition{
 		ChannelName: channel,
 		MsgID:       make([]byte, 0),
-		Timestamp:   ms.lastTimeStamp,
+		Timestamp:   ms.currTimeStamp,
 	}
 	ms.chanStopChan[consumer] = make(chan bool)
 	ms.chanTtMsgTime[consumer] = 0
@@ -514,6 +514,8 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 			return
 		default:
 			ms.consumerLock.Lock()
+
+			// wait all channels get ttMsg
 			for _, consumer := range ms.consumers {
 				if !chanTtMsgSync[consumer] {
 					ms.chanWaitGroup.Add(1)
@@ -524,7 +526,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 
 			// block here until all channels reach same timetick
 			timeStamp, ok := ms.checkTimeTickMsg(chanTtMsgSync)
-			if !ok || timeStamp <= ms.lastTimeStamp {
+			if !ok || timeStamp <= ms.currTimeStamp {
 				//log.Printf("All timeTick's timestamps are inconsistent")
 				ms.consumerLock.Unlock()
 				continue
@@ -580,7 +582,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 			ms.consumerLock.Unlock()
 
 			msgPack := MsgPack{
-				BeginTs:        ms.lastTimeStamp,
+				BeginTs:        ms.currTimeStamp,
 				EndTs:          timeStamp,
 				Msgs:           timeTickBuf,
 				StartPositions: startMsgPosition,
@@ -588,7 +590,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 			}
 
 			ms.receiveBuf <- &msgPack
-			ms.lastTimeStamp = timeStamp
+			ms.currTimeStamp = timeStamp
 		}
 	}
 }
@@ -638,7 +640,6 @@ func (ms *MqTtMsgStream) findTimeTick(consumer mqclient.Consumer) {
 
 // return true only when all channels reach same timetick
 func (ms *MqTtMsgStream) checkTimeTickMsg(chanTtMsgSync map[mqclient.Consumer]bool) (Timestamp, bool) {
-
 	timeMap := make(map[Timestamp]int)
 	var maxTime Timestamp = 0
 	for _, t := range ms.chanTtMsgTime {
