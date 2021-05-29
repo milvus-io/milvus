@@ -36,16 +36,12 @@ type Replica interface {
 	addSegment(segmentID UniqueID, collID UniqueID, partitionID UniqueID, channelName string) error
 	removeSegment(segmentID UniqueID) error
 	hasSegment(segmentID UniqueID) bool
-	setIsFlushed(segmentID UniqueID) error
-	setStartPosition(segmentID UniqueID, startPos *internalpb.MsgPosition) error
-	setEndPosition(segmentID UniqueID, endPos *internalpb.MsgPosition) error
 	updateStatistics(segmentID UniqueID, numRows int64) error
 	getSegmentStatisticsUpdates(segmentID UniqueID) (*internalpb.SegmentStatisticsUpdates, error)
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
 	bufferAutoFlushBinlogPaths(segmentID UniqueID, field2Path map[UniqueID]string) error
 	getBufferPaths(segID UniqueID) (map[UniqueID][]string, error)
 	getChannelName(segID UniqueID) (string, error)
-	//new msg postions
 	setStartPositions(segmentID UniqueID, startPos []*internalpb.MsgPosition) error
 	setEndPositions(segmentID UniqueID, endPos []*internalpb.MsgPosition) error
 	getSegmentPositions(segID UniqueID) ([]*internalpb.MsgPosition, []*internalpb.MsgPosition)
@@ -59,14 +55,8 @@ type Segment struct {
 	numRows      int64
 	memorySize   int64
 	isNew        atomic.Value // bool
-	isFlushed    bool
-
-	createTime    Timestamp // not using
-	endTime       Timestamp // not using
-	startPosition *internalpb.MsgPosition
-	endPosition   *internalpb.MsgPosition // not using
-	channelName   string
-	field2Paths   map[UniqueID][]string // fieldID to binlog paths, only auto-flushed paths will be buffered.
+	channelName  string
+	field2Paths  map[UniqueID][]string // fieldID to binlog paths, only auto-flushed paths will be buffered.
 }
 
 // CollectionSegmentReplica is the data replication of persistent data in datanode.
@@ -157,8 +147,6 @@ func (replica *CollectionSegmentReplica) getSegmentByID(segmentID UniqueID) (*Se
 }
 
 // `addSegment` add a new segment into replica when data node see the segment
-// for the first time in insert channels. It sets the startPosition of a segment, and
-// flags `isNew=true`
 func (replica *CollectionSegmentReplica) addSegment(
 	segmentID UniqueID,
 	collID UniqueID,
@@ -169,20 +157,12 @@ func (replica *CollectionSegmentReplica) addSegment(
 	defer replica.mu.Unlock()
 	log.Debug("Add Segment", zap.Int64("Segment ID", segmentID))
 
-	position := &internalpb.MsgPosition{
-		ChannelName: channelName,
-	}
-
 	seg := &Segment{
-		segmentID:     segmentID,
-		collectionID:  collID,
-		partitionID:   partitionID,
-		isFlushed:     false,
-		createTime:    0,
-		startPosition: position,
-		endPosition:   new(internalpb.MsgPosition),
-		channelName:   channelName,
-		field2Paths:   make(map[UniqueID][]string),
+		segmentID:    segmentID,
+		collectionID: collID,
+		partitionID:  partitionID,
+		channelName:  channelName,
+		field2Paths:  make(map[UniqueID][]string),
 	}
 
 	seg.isNew.Store(true)
@@ -208,48 +188,6 @@ func (replica *CollectionSegmentReplica) hasSegment(segmentID UniqueID) bool {
 	return ok
 }
 
-func (replica *CollectionSegmentReplica) setIsFlushed(segmentID UniqueID) error {
-	replica.mu.RLock()
-	defer replica.mu.RUnlock()
-
-	if seg, ok := replica.segments[segmentID]; ok {
-		seg.isFlushed = true
-		return nil
-	}
-
-	return fmt.Errorf("There's no segment %v", segmentID)
-}
-
-func (replica *CollectionSegmentReplica) setStartPosition(segmentID UniqueID, startPos *internalpb.MsgPosition) error {
-	replica.mu.RLock()
-	defer replica.mu.RUnlock()
-
-	if startPos == nil {
-		return fmt.Errorf("Nil MsgPosition")
-	}
-
-	if seg, ok := replica.segments[segmentID]; ok {
-		seg.startPosition = startPos
-		return nil
-	}
-	return fmt.Errorf("There's no segment %v", segmentID)
-}
-
-func (replica *CollectionSegmentReplica) setEndPosition(segmentID UniqueID, endPos *internalpb.MsgPosition) error {
-	replica.mu.RLock()
-	defer replica.mu.RUnlock()
-
-	if endPos == nil {
-		return fmt.Errorf("Nil MsgPosition")
-	}
-
-	if seg, ok := replica.segments[segmentID]; ok {
-		seg.endPosition = endPos
-		return nil
-	}
-	return fmt.Errorf("There's no segment %v", segmentID)
-}
-
 // `updateStatistics` updates the number of rows of a segment in replica.
 func (replica *CollectionSegmentReplica) updateStatistics(segmentID UniqueID, numRows int64) error {
 	replica.mu.Lock()
@@ -266,8 +204,6 @@ func (replica *CollectionSegmentReplica) updateStatistics(segmentID UniqueID, nu
 }
 
 // `getSegmentStatisticsUpdates` gives current segment's statistics updates.
-//  if the segment's flag `isNew` is true, updates will contain a valid start position.
-//  if the segment's flag `isFlushed` is true, updates will contain a valid end position.
 func (replica *CollectionSegmentReplica) getSegmentStatisticsUpdates(segmentID UniqueID) (*internalpb.SegmentStatisticsUpdates, error) {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
@@ -277,15 +213,6 @@ func (replica *CollectionSegmentReplica) getSegmentStatisticsUpdates(segmentID U
 			SegmentID:  segmentID,
 			MemorySize: seg.memorySize,
 			NumRows:    seg.numRows,
-		}
-
-		if seg.isNew.Load() == true {
-			updates.StartPosition = seg.startPosition
-			seg.isNew.Store(false)
-		}
-
-		if seg.isFlushed {
-			updates.EndPosition = seg.endPosition
 		}
 
 		return updates, nil
