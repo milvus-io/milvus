@@ -14,6 +14,7 @@ package msgstream
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"time"
@@ -351,9 +352,12 @@ func (ms *mqMsgStream) Chan() <-chan *MsgPack {
 	return ms.receiveBuf
 }
 
-func (ms *mqMsgStream) Seek(mp *internalpb.MsgPosition) error {
-	if _, ok := ms.consumers[mp.ChannelName]; ok {
-		consumer := ms.consumers[mp.ChannelName]
+func (ms *mqMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
+	for _, mp := range msgPositions {
+		consumer, ok := ms.consumers[mp.ChannelName]
+		if !ok {
+			return fmt.Errorf("channel %s not subscribed", mp.ChannelName)
+		}
 		messageID, err := ms.client.BytesToMsgID(mp.MsgID)
 		if err != nil {
 			return err
@@ -362,10 +366,8 @@ func (ms *mqMsgStream) Seek(mp *internalpb.MsgPosition) error {
 		if err != nil {
 			return err
 		}
-		return nil
 	}
-
-	return errors.New("msgStream seek fail")
+	return nil
 }
 
 type MqTtMsgStream struct {
@@ -661,21 +663,23 @@ func checkTimeTickMsg(msg map[mqclient.Consumer]Timestamp,
 	return 0, false
 }
 
-func (ms *MqTtMsgStream) Seek(mp *internalpb.MsgPosition) error {
+func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
+	mp := msgPositions[0]
 	if len(mp.MsgID) == 0 {
 		return errors.New("when msgID's length equal to 0, please use AsConsumer interface")
 	}
 	var consumer mqclient.Consumer
 	var err error
-	var hasWatched bool
+
 	seekChannel := mp.ChannelName
 	subName := mp.MsgGroup
+
 	ms.consumerLock.Lock()
 	defer ms.consumerLock.Unlock()
-	consumer, hasWatched = ms.consumers[seekChannel]
 
-	if hasWatched {
-		return errors.New("the channel should has not been subscribed")
+	consumer, ok := ms.consumers[seekChannel]
+	if ok {
+		return errors.New("the channel should not been subscribed")
 	}
 
 	fn := func() error {
