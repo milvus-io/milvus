@@ -384,7 +384,7 @@ type MqTtMsgStream struct {
 	mqMsgStream
 	chanMsgBuf      map[mqclient.Consumer][]TsMsg
 	chanMsgPos      map[mqclient.Consumer]*internalpb.MsgPosition
-	chanStop        map[mqclient.Consumer]chan bool
+	chanStopChan    map[mqclient.Consumer]chan bool
 	chanMsgBufMutex *sync.Mutex
 	lastTimeStamp   Timestamp
 	syncConsumer    chan int
@@ -400,7 +400,7 @@ func NewMqTtMsgStream(ctx context.Context,
 		return nil, err
 	}
 	chanMsgBuf := make(map[mqclient.Consumer][]TsMsg)
-	chanStop := make(map[mqclient.Consumer]chan bool)
+	chanStopChan := make(map[mqclient.Consumer]chan bool)
 	chanMsgPos := make(map[mqclient.Consumer]*internalpb.MsgPosition)
 	syncConsumer := make(chan int, 1)
 
@@ -408,7 +408,7 @@ func NewMqTtMsgStream(ctx context.Context,
 		mqMsgStream:     *msgStream,
 		chanMsgBuf:      chanMsgBuf,
 		chanMsgPos:      chanMsgPos,
-		chanStop:        chanStop,
+		chanStopChan:    chanStopChan,
 		chanMsgBufMutex: &sync.Mutex{},
 		syncConsumer:    syncConsumer,
 	}, nil
@@ -426,7 +426,7 @@ func (ms *MqTtMsgStream) addConsumer(consumer mqclient.Consumer, channel string)
 		MsgID:       make([]byte, 0),
 		Timestamp:   ms.lastTimeStamp,
 	}
-	ms.chanStop[consumer] = make(chan bool)
+	ms.chanStopChan[consumer] = make(chan bool)
 }
 
 func (ms *MqTtMsgStream) AsConsumer(channels []string, subName string) {
@@ -598,7 +598,7 @@ func (ms *MqTtMsgStream) findTimeTick(consumer mqclient.Consumer,
 		select {
 		case <-ms.ctx.Done():
 			return
-		case <-ms.chanStop[consumer]:
+		case <-ms.chanStopChan[consumer]:
 			return
 		case msg, ok := <-consumer.Chan():
 			if !ok {
