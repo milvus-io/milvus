@@ -663,14 +663,18 @@ func checkTimeTickMsg(msg map[mqclient.Consumer]Timestamp,
 	return 0, false
 }
 
+// Seek to the specified position
 func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
-	DoMsgStreamSeek := func(mp *MsgPosition) (mqclient.Consumer, error) {
+	var consumer mqclient.Consumer
+	var mp *MsgPosition
+	var err error
+	fn := func() error {
 		if _, ok := ms.consumers[mp.ChannelName]; ok {
-			return nil, fmt.Errorf("the channel should not been subscribed")
+			return fmt.Errorf("the channel should not been subscribed")
 		}
 
 		receiveChannel := make(chan mqclient.ConsumerMessage, ms.bufSize)
-		consumer, err := ms.client.Subscribe(mqclient.ConsumerOptions{
+		consumer, err = ms.client.Subscribe(mqclient.ConsumerOptions{
 			Topic:                       mp.ChannelName,
 			SubscriptionName:            mp.MsgGroup,
 			SubscriptionInitialPosition: mqclient.SubscriptionPositionEarliest,
@@ -678,34 +682,34 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 			MessageChannel:              receiveChannel,
 		})
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if consumer == nil {
-			return nil, fmt.Errorf("consumer is nil")
+			return fmt.Errorf("consumer is nil")
 		}
 
 		seekMsgID, err := ms.client.BytesToMsgID(mp.MsgID)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		err = consumer.Seek(seekMsgID)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
-		return consumer, nil
+		return nil
 	}
 
 	ms.consumerLock.Lock()
 	defer ms.consumerLock.Unlock()
 
-	for _, mp := range msgPositions {
+	for idx, _ := range msgPositions {
+		mp = msgPositions[idx]
 		if len(mp.MsgID) == 0 {
 			return fmt.Errorf("when msgID's length equal to 0, please use AsConsumer interface")
 		}
 
-		consumer, err := DoMsgStreamSeek(mp)
-		if err != nil {
+		if err = Retry(20, time.Millisecond*200, fn); err != nil {
 			return fmt.Errorf("Failed to seek, error %s", err.Error())
 		}
 		ms.addConsumer(consumer, mp.ChannelName)
