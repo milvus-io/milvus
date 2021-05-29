@@ -539,6 +539,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 			ms.chanMsgBufMutex.Lock()
 			for consumer, msgs := range ms.chanMsgBuf {
 				if len(msgs) == 0 {
+					log.Debug("CYD - msg buf empty")
 					continue
 				}
 				tempBuffer := make([]TsMsg, 0)
@@ -550,6 +551,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 					}
 					if v.EndTs() <= timeStamp {
 						timeTickBuf = append(timeTickBuf, v)
+						log.Debug("CYD - pack msg", zap.Uint64("curr", v.EndTs()), zap.Uint64("maxTime", timeStamp))
 					} else {
 						tempBuffer = append(tempBuffer, v)
 					}
@@ -647,6 +649,7 @@ func (ms *MqTtMsgStream) checkTimeTickMsg(chanTtMsgSync map[mqclient.Consumer]bo
 		timeMap[t]++
 		if t > maxTime {
 			maxTime = t
+			log.Debug("CYD - update maxTime", zap.Uint64("maxTime", maxTime))
 		}
 	}
 	// when all channels reach same timetick, timeMap should contain only 1 timestamp
@@ -654,8 +657,10 @@ func (ms *MqTtMsgStream) checkTimeTickMsg(chanTtMsgSync map[mqclient.Consumer]bo
 		for consumer := range ms.chanTtMsgTime {
 			chanTtMsgSync[consumer] = false
 		}
+		log.Debug("CYD - all channels tt sync")
 		return maxTime, true
 	}
+	log.Debug("CYD - channel tt count", zap.Int("ttCnt", len(timeMap)))
 	for consumer := range ms.chanTtMsgTime {
 		ms.chanTtMsgTimeMutex.RLock()
 		chanTtMsgSync[consumer] = (ms.chanTtMsgTime[consumer] == maxTime)
@@ -731,6 +736,7 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 					return fmt.Errorf("consumer closed")
 				}
 				consumer.Ack(msg)
+				//log.Debug("CYD SEEK")
 
 				headerMsg := commonpb.MsgHeader{}
 				err := proto.Unmarshal(msg.Payload(), &headerMsg)
@@ -742,6 +748,7 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 					return fmt.Errorf("Failed to unmarshal tsMsg, err %s", err.Error())
 				}
 				if tsMsg.Type() == commonpb.MsgType_TimeTick && tsMsg.BeginTs() >= mp.Timestamp {
+					log.Debug("CYD SEEK tt skip", zap.Uint64("curr", tsMsg.EndTs()), zap.Uint64("mpTime", mp.Timestamp))
 					runLoop = false
 					break
 				} else if tsMsg.BeginTs() > mp.Timestamp {
@@ -750,6 +757,9 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 						MsgID:       msg.ID().Serialize(),
 					})
 					ms.chanMsgBuf[consumer] = append(ms.chanMsgBuf[consumer], tsMsg)
+					log.Debug("CYD SEEK add to buf", zap.Uint64("curr", tsMsg.EndTs()), zap.Uint64("mpTime", mp.Timestamp))
+				} else {
+					log.Debug("CYD SEEK skip")
 				}
 			}
 		}
