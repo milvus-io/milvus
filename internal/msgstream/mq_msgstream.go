@@ -493,8 +493,8 @@ func (ms *MqTtMsgStream) Close() {
 
 func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 	defer ms.wait.Done()
-	isChannelReady := make(map[mqclient.Consumer]bool)
-	eofMsgTimeStamp := make(map[mqclient.Consumer]Timestamp)
+	chanTtMsgSync := make(map[mqclient.Consumer]bool)
+	chanTtMsgTime := make(map[mqclient.Consumer]Timestamp)
 
 	// block here until addConsumer
 	if _, ok := <-ms.syncConsumer; !ok {
@@ -511,16 +511,15 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 			findMapMutex := sync.RWMutex{}
 			ms.consumerLock.Lock()
 			for _, consumer := range ms.consumers {
-				if isChannelReady[consumer] {
-					continue
+				if !chanTtMsgSync[consumer] {
+					wg.Add(1)
+					go ms.findTimeTick(consumer, chanTtMsgTime, &wg, &findMapMutex)
 				}
-				wg.Add(1)
-				go ms.findTimeTick(consumer, eofMsgTimeStamp, &wg, &findMapMutex)
 			}
 			wg.Wait()
 
 			// block here until all channels reach same timetick
-			timeStamp, ok := checkTimeTickMsg(eofMsgTimeStamp, isChannelReady, &findMapMutex)
+			timeStamp, ok := checkTimeTickMsg(chanTtMsgTime, chanTtMsgSync, &findMapMutex)
 			if !ok || timeStamp <= ms.lastTimeStamp {
 				//log.Printf("All timeTick's timestamps are inconsistent")
 				ms.consumerLock.Unlock()
@@ -637,33 +636,29 @@ func (ms *MqTtMsgStream) findTimeTick(consumer mqclient.Consumer,
 }
 
 // return true only when all channels reach same timetick
-func checkTimeTickMsg(msg map[mqclient.Consumer]Timestamp,
-	isChannelReady map[mqclient.Consumer]bool,
+func checkTimeTickMsg(chanTtMsgTime map[mqclient.Consumer]Timestamp,
+	chanTtMsgSync map[mqclient.Consumer]bool,
 	mu *sync.RWMutex) (Timestamp, bool) {
-	checkMap := make(map[Timestamp]int)
+
+	timeMap := make(map[Timestamp]int)
 	var maxTime Timestamp = 0
-	for _, v := range msg {
-		checkMap[v]++
-		if v > maxTime {
-			maxTime = v
+	for _, t := range chanTtMsgTime {
+		timeMap[t]++
+		if t > maxTime {
+			maxTime = t
 		}
 	}
-	// when all channels reach same timetick, checkMap should contain only 1 timestamp
-	if len(checkMap) <= 1 {
-		for consumer := range msg {
-			isChannelReady[consumer] = false
+	// when all channels reach same timetick, timeMap should contain only 1 timestamp
+	if len(timeMap) <= 1 {
+		for consumer := range chanTtMsgTime {
+			chanTtMsgSync[consumer] = false
 		}
 		return maxTime, true
 	}
-	for consumer := range msg {
+	for consumer := range chanTtMsgTime {
 		mu.RLock()
-		v := msg[consumer]
+		chanTtMsgSync[consumer] = (chanTtMsgTime[consumer] == maxTime)
 		mu.RUnlock()
-		if v != maxTime {
-			isChannelReady[consumer] = false
-		} else {
-			isChannelReady[consumer] = true
-		}
 	}
 
 	return 0, false
