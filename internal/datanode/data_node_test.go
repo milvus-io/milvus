@@ -135,7 +135,7 @@ func TestDataNode(t *testing.T) {
 			SegmentIDs:   []int64{0},
 		}
 
-		status, err := node1.FlushSegments(node.ctx, req)
+		status, err := node1.FlushSegments(node1.ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
@@ -183,11 +183,16 @@ func TestDataNode(t *testing.T) {
 		err = ddMsgStream.Broadcast(&timeTickMsgPack)
 		assert.NoError(t, err)
 
+		err = insertMsgStream.Broadcast(&timeTickMsgPack)
+		assert.NoError(t, err)
+		err = ddMsgStream.Broadcast(&timeTickMsgPack)
+		assert.NoError(t, err)
+
 		_, err = sync.replica.getSegmentByID(0)
 		assert.NoError(t, err)
 
 		defer func() {
-			node1.ctx.Done()
+			<-node1.ctx.Done()
 			node1.Stop()
 		}()
 	})
