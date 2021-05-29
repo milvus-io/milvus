@@ -520,13 +520,13 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 			for _, consumer := range ms.consumers {
 				if !chanTtMsgSync[consumer] {
 					ms.chanWaitGroup.Add(1)
-					go ms.findTimeTick(consumer)
+					go ms.consumeToTtMsg(consumer)
 				}
 			}
 			ms.chanWaitGroup.Wait()
 
 			// block here until all channels reach same timetick
-			timeStamp, ok := ms.checkTimeTickMsg(chanTtMsgSync)
+			timeStamp, ok := ms.allChanReachSameTtMsg(chanTtMsgSync)
 			if !ok || timeStamp <= ms.currTimeStamp {
 				//log.Printf("All timeTick's timestamps are inconsistent")
 				ms.consumerLock.Unlock()
@@ -599,7 +599,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 }
 
 // Save all msgs into chanMsgBuf[] till receive one ttMsg
-func (ms *MqTtMsgStream) findTimeTick(consumer mqclient.Consumer) {
+func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqclient.Consumer) {
 	defer ms.chanWaitGroup.Done()
 	for {
 		select {
@@ -642,25 +642,25 @@ func (ms *MqTtMsgStream) findTimeTick(consumer mqclient.Consumer) {
 }
 
 // return true only when all channels reach same timetick
-func (ms *MqTtMsgStream) checkTimeTickMsg(chanTtMsgSync map[mqclient.Consumer]bool) (Timestamp, bool) {
-	timeMap := make(map[Timestamp]int)
+func (ms *MqTtMsgStream) allChanReachSameTtMsg(chanTtMsgSync map[mqclient.Consumer]bool) (Timestamp, bool) {
+	tsMap := make(map[Timestamp]int)
 	var maxTime Timestamp = 0
 	for _, t := range ms.chanTtMsgTime {
-		timeMap[t]++
+		tsMap[t]++
 		if t > maxTime {
 			maxTime = t
 			log.Debug("CYD - update maxTime", zap.Uint64("maxTime", maxTime))
 		}
 	}
 	// when all channels reach same timetick, timeMap should contain only 1 timestamp
-	if len(timeMap) <= 1 {
+	if len(tsMap) <= 1 {
 		for consumer := range ms.chanTtMsgTime {
 			chanTtMsgSync[consumer] = false
 		}
 		log.Debug("CYD - all channels tt sync")
 		return maxTime, true
 	}
-	log.Debug("CYD - channel tt count", zap.Int("ttCnt", len(timeMap)))
+	log.Debug("CYD - channel tt count", zap.Int("ttCnt", len(tsMap)))
 	for consumer := range ms.chanTtMsgTime {
 		ms.chanTtMsgTimeMutex.RLock()
 		chanTtMsgSync[consumer] = (ms.chanTtMsgTime[consumer] == maxTime)
