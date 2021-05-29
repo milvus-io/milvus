@@ -703,7 +703,7 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 	ms.consumerLock.Lock()
 	defer ms.consumerLock.Unlock()
 
-	for idx, _ := range msgPositions {
+	for idx := range msgPositions {
 		mp = msgPositions[idx]
 		if len(mp.MsgID) == 0 {
 			return fmt.Errorf("when msgID's length equal to 0, please use AsConsumer interface")
