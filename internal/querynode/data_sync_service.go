@@ -131,7 +131,7 @@ func (dsService *dataSyncService) initNodes() {
 }
 
 func (dsService *dataSyncService) seekSegment(position *internalpb.MsgPosition) error {
-	err := dsService.dmStream.Seek(position)
+	err := dsService.dmStream.Seek([]*internalpb.MsgPosition{position})
 	if err != nil {
 		return err
 	}

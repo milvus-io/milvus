@@ -347,7 +347,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 	// try to restore last processed pos
 	pos, err := s.loadStreamLastPos(streamTypeStats)
 	if err == nil {
-		err = statsStream.Seek(pos)
+		err = statsStream.Seek([]*internalpb.MsgPosition{pos})
 		if err != nil {
 			log.Error("Failed to seek to last pos for statsStream",
 				zap.String("StatisChanName", Params.StatisticsChannelName),
@@ -403,7 +403,7 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 	// try to restore last processed pos
 	pos, err := s.loadStreamLastPos(streamTypeFlush)
 	if err == nil {
-		err = flushStream.Seek(pos)
+		err = flushStream.Seek([]*internalpb.MsgPosition{pos})
 		if err != nil {
 			log.Error("Failed to seek to last pos for segment flush Stream",
 				zap.String("SegInfoChannelName", Params.SegmentInfoChannelName),

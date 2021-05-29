@@ -45,7 +45,7 @@ type MsgStream interface {
 	Produce(*MsgPack) error
 	Broadcast(*MsgPack) error
 	Consume() *MsgPack
-	Seek(offset *MsgPosition) error
+	Seek(offset []*MsgPosition) error
 }
 
 type Factory interface {
