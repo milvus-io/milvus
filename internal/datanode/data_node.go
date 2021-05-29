@@ -141,7 +141,6 @@ func (node *DataNode) Init() error {
 	node.session = sessionutil.NewSession(ctx, Params.MetaRootPath, []string{Params.EtcdAddress})
 	node.session.Init(typeutil.DataNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
 
-	// TODO find DataService & MasterService
 	req := &datapb.RegisterNodeRequest{
 		Base: &commonpb.MsgBase{
 			SourceID: node.NodeID,
@@ -195,12 +194,13 @@ func (node *DataNode) NewDataSyncService(vchanPair *datapb.VchannelPair) error {
 	}
 
 	replica := newReplica()
+
 	var alloc allocatorInterface = newAllocator(node.masterService)
+	metaService := newMetaService(node.ctx, replica, node.masterService)
 
 	flushChan := make(chan *flushMsg, 100)
 	dataSyncService := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchanPair)
 	// TODO metaService using timestamp in DescribeCollection
-	metaService := newMetaService(node.ctx, replica, node.masterService)
 	node.vchan2SyncService[vchanPair.GetDmlVchannelName()] = dataSyncService
 	node.vchan2FlushCh[vchanPair.GetDmlVchannelName()] = flushChan
 
@@ -246,6 +246,7 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 	}
 }
 
+// GetComponentStates will return current state of DataNode
 func (node *DataNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	log.Debug("DataNode current state", zap.Any("State", node.State.Load()))
 	states := &internalpb.ComponentStates{
@@ -271,29 +272,73 @@ func (node *DataNode) getChannelName(segID UniqueID) string {
 	return ""
 }
 
+// ReadyToFlush tells wether DataNode is ready for flushing
+func (node *DataNode) ReadyToFlush() error {
+	if node.State.Load().(internalpb.StateCode) != internalpb.StateCode_Healthy {
+		return errors.New("DataNode not in HEALTHY state")
+	}
+
+	node.chanMut.RLock()
+	defer node.chanMut.RUnlock()
+	if len(node.vchan2SyncService) == 0 && len(node.vchan2FlushCh) == 0 {
+		// Healthy but Idle
+		msg := "DataNode HEALTHY but IDLE, please try WatchDmChannels to make it work"
+		log.Info(msg)
+		return errors.New(msg)
+	}
+
+	if len(node.vchan2SyncService) != len(node.vchan2FlushCh) {
+		// TODO restart
+		msg := "DataNode HEALTHY but abnormal inside, restarting..."
+		log.Info(msg)
+		return errors.New(msg)
+	}
+	return nil
+}
+
+func (node *DataNode) getSegmentPositionPair(segmentID UniqueID, chanName string) ([]*internalpb.MsgPosition, []*internalpb.MsgPosition) {
+	node.chanMut.Lock()
+	defer node.chanMut.Unlock()
+	sync, ok := node.vchan2SyncService[chanName]
+	if !ok {
+		return nil, nil
+	}
+
+	starts, ends := sync.replica.getSegmentPositions(segmentID)
+	return starts, ends
+}
+
 // FlushSegments packs flush messages into flowgraph through flushChan.
 //   If DataNode receives a valid segment to flush, new flush message for the segment should be ignored.
 //   So if receiving calls to flush segment A, DataNode should guarantee the segment to be flushed.
+//
+//   There are 1 precondition: The segmentID in req is in ascending order.
 func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
-	log.Debug("FlushSegments ...", zap.Int("num", len(req.SegmentIDs)))
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
 
+	if err := node.ReadyToFlush(); err != nil {
+		status.Reason = err.Error()
+		return status, nil
+	}
+
+	log.Debug("FlushSegments ...", zap.Int("num", len(req.SegmentIDs)))
 	for _, id := range req.SegmentIDs {
 		chanName := node.getChannelName(id)
 		log.Info("vchannel", zap.String("name", chanName))
-		if chanName == "" {
+		if len(chanName) == 0 {
 			status.Reason = fmt.Sprintf("DataNode not find segment %d!", id)
 			return status, errors.New(status.GetReason())
 		}
+
 		node.chanMut.RLock()
 		flushCh, ok := node.vchan2FlushCh[chanName]
 		node.chanMut.RUnlock()
 		if !ok {
 			// TODO restart DataNode or reshape vchan2FlushCh and vchan2SyncService
-			status.Reason = "DataNode abnormal!"
-			return status, errors.New(status.GetReason())
+			status.Reason = "DataNode abnormal, restarting"
+			return status, nil
 		}
 
 		ddlFlushedCh := make(chan []*datapb.DDLBinlogMeta)
@@ -310,7 +355,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 
 		waitReceive := func(wg *sync.WaitGroup, flushedCh interface{}, req *datapb.SaveBinlogPathsRequest) {
 			defer wg.Done()
-			log.Info("Inside waitReceive")
+			log.Debug("Inside waitReceive")
 			switch Ch := flushedCh.(type) {
 			case chan []*datapb.ID2PathList:
 				select {
@@ -324,6 +369,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 					}
 
 					// Modify req with valid dml binlog paths
+					req.Field2BinlogPaths = meta
 					log.Info("Insert messeges flush done!", zap.Any("Binlog paths", meta))
 				}
 
@@ -345,6 +391,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 					}
 
 					// Modify req with valid ddl binlog paths
+					req.DdlBinlogPaths = meta
 					log.Info("Ddl messages flush done!", zap.Any("Binlog paths", meta))
 				}
 			default:
@@ -352,17 +399,18 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 			}
 		}
 
-		// TODO make a queue for this func
-		currentSegID := id
+		req := &datapb.SaveBinlogPathsRequest{
+			Base:         &commonpb.MsgBase{},
+			SegmentID:    id,
+			CollectionID: req.CollectionID,
+		}
+
+		// TODO Set start_positions and end_positions
+
+		log.Info("Waiting for flush completed", zap.Int64("segmentID", id))
+
 		go func() {
 			flushCh <- flushmsg
-
-			log.Info("Waiting for flush completed", zap.Int64("segmentID", currentSegID))
-			req := &datapb.SaveBinlogPathsRequest{
-				Base:         &commonpb.MsgBase{},
-				SegmentID:    currentSegID,
-				CollectionID: req.CollectionID,
-			}
 
 			var wg sync.WaitGroup
 			wg.Add(1)
@@ -371,6 +419,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 			go waitReceive(&wg, dmlFlushedCh, req)
 			wg.Wait()
 
+			log.Info("Notify DataService BinlogPaths and Positions")
 			status, err := node.dataService.SaveBinlogPaths(node.ctx, req)
 			if err != nil {
 				log.Error("DataNode or DataService abnormal, restarting DataNode")
@@ -385,7 +434,6 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 				return
 			}
 
-			log.Info("Flush Completed", zap.Int64("segmentID", currentSegID))
 		}()
 
 	}
