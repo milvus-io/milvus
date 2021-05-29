@@ -32,10 +32,16 @@ type dataSyncService struct {
 	dmStream  msgstream.MsgStream
 	msFactory msgstream.Factory
 
-	replica ReplicaInterface
+	replica      ReplicaInterface
+	tSafeReplica TSafeReplicaInterface
 }
 
-func newDataSyncService(ctx context.Context, replica ReplicaInterface, factory msgstream.Factory, collectionID UniqueID) *dataSyncService {
+func newDataSyncService(ctx context.Context,
+	replica ReplicaInterface,
+	tSafeReplica TSafeReplicaInterface,
+	factory msgstream.Factory,
+	collectionID UniqueID) *dataSyncService {
+
 	ctx1, cancel := context.WithCancel(ctx)
 
 	service := &dataSyncService{
@@ -44,6 +50,7 @@ func newDataSyncService(ctx context.Context, replica ReplicaInterface, factory m
 		collectionID: collectionID,
 		fg:           nil,
 		replica:      replica,
+		tSafeReplica: tSafeReplica,
 		msFactory:    factory,
 	}
 
@@ -73,7 +80,11 @@ func (dsService *dataSyncService) initNodes() {
 	var filterDmNode node = newFilteredDmNode(dsService.replica, dsService.collectionID)
 
 	var insertNode node = newInsertNode(dsService.replica, dsService.collectionID)
-	var serviceTimeNode node = newServiceTimeNode(dsService.ctx, dsService.replica, dsService.msFactory, dsService.collectionID)
+	var serviceTimeNode node = newServiceTimeNode(dsService.ctx,
+		dsService.replica,
+		dsService.tSafeReplica,
+		dsService.msFactory,
+		dsService.collectionID)
 
 	dsService.fg.AddNode(dmStreamNode)
 

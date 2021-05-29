@@ -15,13 +15,24 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-const rowIDFieldID = 0
-const timestampFieldID = 1
+const (
+	rowIDFieldID     = 0
+	timestampFieldID = 1
+)
 
-type UniqueID = typeutil.UniqueID
-type Timestamp = typeutil.Timestamp
-type IntPrimaryKey = typeutil.IntPrimaryKey
-type DSL = string
+type (
+	UniqueID = typeutil.UniqueID
+	// Timestamp is timestamp
+	Timestamp = typeutil.Timestamp
+	// IntPrimaryKey is the primary key of int type
+	IntPrimaryKey = typeutil.IntPrimaryKey
+	// DSL is the Domain Specific Language
+	DSL = string
+	// VChannel is the virtual channel
+	VChannel = string
+	// ConsumeSubName is consumer's subscription name of the message stream
+	ConsumeSubName = string
+)
 
 type TimeRange struct {
 	timestampMin Timestamp

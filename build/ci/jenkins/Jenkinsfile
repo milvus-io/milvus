@@ -94,6 +94,7 @@ pipeline {
                                 dir("${env.ARTIFACTS}") {
                                     sh "find ./kind -path '*/history/*' -type f | xargs tar -zcvf artifacts-milvus-${MILVUS_SERVER_TYPE}-e2e-logs.tar.gz --transform='s:^[^/]*/[^/]*/[^/]*/[^/]*/::g' || true"
                                     archiveArtifacts artifacts: "**.tar.gz", allowEmptyArchive: true
+                                    sh 'rm -rf ./kind'
                                     sh 'docker rm -f \$(docker network inspect -f \'{{ range \$key, \$value := .Containers }}{{ printf "%s " \$key}}{{ end }}\' kind) || true'
                                     sh 'docker network rm kind || true'
                                 }

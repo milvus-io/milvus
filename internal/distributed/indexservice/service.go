@@ -149,9 +149,6 @@ func (s *Server) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFil
 	return s.indexservice.GetIndexFilePaths(ctx, req)
 }
 
-func (s *Server) NotifyBuildIndex(ctx context.Context, nty *indexpb.NotifyBuildIndexRequest) (*commonpb.Status, error) {
-	return s.indexservice.NotifyBuildIndex(ctx, nty)
-}
 func (s *Server) startGrpcLoop(grpcPort int) {
 
 	defer s.loopWg.Done()

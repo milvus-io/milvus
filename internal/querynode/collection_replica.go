@@ -90,15 +90,10 @@ type ReplicaInterface interface {
 	getSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID)
 	replaceGrowingSegmentBySealedSegment(segment *Segment) error
 
-	getTSafe(collectionID UniqueID) tSafer
-	addTSafe(collectionID UniqueID)
-	removeTSafe(collectionID UniqueID)
 	freeAll()
 }
 
 type collectionReplica struct {
-	tSafes map[UniqueID]tSafer // map[collectionID]tSafer
-
 	mu          sync.RWMutex // guards all
 	collections map[UniqueID]*Collection
 	partitions  map[UniqueID]*Partition
@@ -643,31 +638,6 @@ func (colReplica *collectionReplica) getExcludedSegments(collectionID UniqueID) 
 	return colReplica.excludedSegments[collectionID], nil
 }
 
-//-----------------------------------------------------------------------------------------------------
-func (colReplica *collectionReplica) getTSafe(collectionID UniqueID) tSafer {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-	return colReplica.getTSafePrivate(collectionID)
-}
-
-func (colReplica *collectionReplica) getTSafePrivate(collectionID UniqueID) tSafer {
-	return colReplica.tSafes[collectionID]
-}
-
-func (colReplica *collectionReplica) addTSafe(collectionID UniqueID) {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-	colReplica.tSafes[collectionID] = newTSafe()
-}
-
-func (colReplica *collectionReplica) removeTSafe(collectionID UniqueID) {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-	ts := colReplica.getTSafePrivate(collectionID)
-	ts.close()
-	delete(colReplica.tSafes, collectionID)
-}
-
 func (colReplica *collectionReplica) freeAll() {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
@@ -719,8 +689,6 @@ func newCollectionReplica() ReplicaInterface {
 		segments:    segments,
 
 		excludedSegments: excludedSegments,
-
-		tSafes: make(map[UniqueID]tSafer),
 	}
 
 	return replica

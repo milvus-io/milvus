@@ -14,7 +14,6 @@ package querynode
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
@@ -34,11 +33,13 @@ type searchCollection struct {
 	releaseCtx context.Context
 	cancel     context.CancelFunc
 
-	collectionID UniqueID
-	replica      ReplicaInterface
+	collectionID      UniqueID
+	historicalReplica ReplicaInterface
+	streamingReplica  ReplicaInterface
+	tSafeReplica      TSafeReplicaInterface
 
 	msgBuffer     chan *msgstream.SearchMsg
-	unsolvedMSgMu sync.Mutex // guards unsolvedMsg
+	unsolvedMsgMu sync.Mutex // guards unsolvedMsg
 	unsolvedMsg   []*msgstream.SearchMsg
 
 	tSafeMutex   sync.Mutex
@@ -52,7 +53,13 @@ type searchCollection struct {
 
 type ResultEntityIds []UniqueID
 
-func newSearchCollection(releaseCtx context.Context, cancel context.CancelFunc, collectionID UniqueID, replica ReplicaInterface, searchResultStream msgstream.MsgStream) *searchCollection {
+func newSearchCollection(releaseCtx context.Context,
+	cancel context.CancelFunc,
+	collectionID UniqueID,
+	historicalReplica ReplicaInterface,
+	streamingReplica ReplicaInterface,
+	tSafeReplica TSafeReplicaInterface,
+	searchResultStream msgstream.MsgStream) *searchCollection {
 	receiveBufSize := Params.SearchReceiveBufSize
 	msgBuffer := make(chan *msgstream.SearchMsg, receiveBufSize)
 	unsolvedMsg := make([]*msgstream.SearchMsg, 0)
@@ -61,8 +68,10 @@ func newSearchCollection(releaseCtx context.Context, cancel context.CancelFunc, 
 		releaseCtx: releaseCtx,
 		cancel:     cancel,
 
-		collectionID: collectionID,
-		replica:      replica,
+		collectionID:      collectionID,
+		historicalReplica: historicalReplica,
+		streamingReplica:  streamingReplica,
+		tSafeReplica:      tSafeReplica,
 
 		msgBuffer:   msgBuffer,
 		unsolvedMsg: unsolvedMsg,
@@ -80,36 +89,36 @@ func (s *searchCollection) start() {
 }
 
 func (s *searchCollection) register(collectionID UniqueID) {
-	s.replica.addTSafe(collectionID)
-	tSafe := s.replica.getTSafe(collectionID)
+	// TODO: remove and use vChannel
+	vChannel := collectionIDToChannel(collectionID)
+	s.tSafeReplica.addTSafe(vChannel)
 	s.tSafeMutex.Lock()
 	s.tSafeWatcher = newTSafeWatcher()
 	s.tSafeMutex.Unlock()
-	tSafe.registerTSafeWatcher(s.tSafeWatcher)
+	s.tSafeReplica.registerTSafeWatcher(vChannel, s.tSafeWatcher)
 }
 
 func (s *searchCollection) addToUnsolvedMsg(msg *msgstream.SearchMsg) {
-	s.unsolvedMSgMu.Lock()
-	defer s.unsolvedMSgMu.Unlock()
+	s.unsolvedMsgMu.Lock()
+	defer s.unsolvedMsgMu.Unlock()
 	s.unsolvedMsg = append(s.unsolvedMsg, msg)
 }
 
 func (s *searchCollection) popAllUnsolvedMsg() []*msgstream.SearchMsg {
-	s.unsolvedMSgMu.Lock()
-	defer s.unsolvedMSgMu.Unlock()
+	s.unsolvedMsgMu.Lock()
+	defer s.unsolvedMsgMu.Unlock()
 	tmp := s.unsolvedMsg
 	s.unsolvedMsg = s.unsolvedMsg[:0]
 	return tmp
 }
 
-func (s *searchCollection) waitNewTSafe() (Timestamp, error) {
+func (s *searchCollection) waitNewTSafe() Timestamp {
+	// TODO: remove and use vChannel
+	vChannel := collectionIDToChannel(s.collectionID)
 	// block until dataSyncService updating tSafe
 	s.tSafeWatcher.hasUpdate()
-	ts := s.replica.getTSafe(s.collectionID)
-	if ts != nil {
-		return ts.get(), nil
-	}
-	return 0, errors.New("tSafe closed, collectionID =" + fmt.Sprintln(s.collectionID))
+	ts := s.tSafeReplica.getTSafe(vChannel)
+	return ts
 }
 
 func (s *searchCollection) getServiceableTime() Timestamp {
@@ -205,15 +214,11 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 			log.Debug("stop searchCollection's doUnsolvedMsgSearch", zap.Int64("collectionID", s.collectionID))
 			return
 		default:
-			serviceTime, err := s.waitNewTSafe()
+			serviceTime := s.waitNewTSafe()
 			s.setServiceableTime(serviceTime)
 			log.Debug("querynode::doUnsolvedMsgSearch: setServiceableTime",
 				zap.Any("serviceTime", serviceTime),
 			)
-			if err != nil {
-				// TODO: emptySearch or continue, note: collection has been released
-				continue
-			}
 			log.Debug("get tSafe from flow graph",
 				zap.Int64("collectionID", s.collectionID),
 				zap.Uint64("tSafe", serviceTime))
@@ -271,7 +276,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	searchTimestamp := searchMsg.Base.Timestamp
 
 	collectionID := searchMsg.CollectionID
-	collection, err := s.replica.getCollectionByID(collectionID)
+	collection, err := s.historicalReplica.getCollectionByID(collectionID)
 	if err != nil {
 		return err
 	}
@@ -302,25 +307,35 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	matchedSegments := make([]*Segment, 0)
 
 	//log.Debug("search msg's partitionID = ", partitionIDsInQuery)
-	partitionIDsInCol, err := s.replica.getPartitionIDs(collectionID)
-	if err != nil {
-		return err
+	partitionIDsInHistoricalCol, err1 := s.historicalReplica.getPartitionIDs(collectionID)
+	partitionIDsInStreamingCol, err2 := s.streamingReplica.getPartitionIDs(collectionID)
+
+	if err1 != nil && err2 != nil {
+		return err2
 	}
-	var searchPartitionIDs []UniqueID
+	var searchPartitionIDsInHistorical []UniqueID
+	var searchPartitionIDsInStreaming []UniqueID
 	partitionIDsInQuery := searchMsg.PartitionIDs
 	if len(partitionIDsInQuery) == 0 {
-		if len(partitionIDsInCol) == 0 {
+		if len(partitionIDsInHistoricalCol) == 0 {
 			return errors.New("none of this collection's partition has been loaded")
 		}
-		searchPartitionIDs = partitionIDsInCol
+		searchPartitionIDsInHistorical = partitionIDsInHistoricalCol
+		searchPartitionIDsInStreaming = partitionIDsInStreamingCol
 	} else {
 		for _, id := range partitionIDsInQuery {
-			_, err2 := s.replica.getPartitionByID(id)
-			if err2 != nil {
+			_, err1 = s.historicalReplica.getPartitionByID(id)
+			if err1 == nil {
+				searchPartitionIDsInHistorical = append(searchPartitionIDsInHistorical, id)
+			}
+			_, err2 = s.streamingReplica.getPartitionByID(id)
+			if err2 == nil {
+				searchPartitionIDsInStreaming = append(searchPartitionIDsInStreaming, id)
+			}
+			if err1 != nil && err2 != nil {
 				return err2
 			}
 		}
-		searchPartitionIDs = partitionIDsInQuery
 	}
 
 	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
@@ -332,13 +347,37 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 			oplog.Object("nq", queryNum),
 			oplog.Object("dsl", searchMsg.Dsl))
 	}
-	for _, partitionID := range searchPartitionIDs {
-		segmentIDs, err := s.replica.getSegmentIDs(partitionID)
+
+	sealedSegmentSearched := make([]UniqueID, 0)
+	for _, partitionID := range searchPartitionIDsInHistorical {
+		segmentIDs, err := s.historicalReplica.getSegmentIDs(partitionID)
 		if err != nil {
 			return err
 		}
 		for _, segmentID := range segmentIDs {
-			segment, err := s.replica.getSegmentByID(segmentID)
+			segment, err := s.historicalReplica.getSegmentByID(segmentID)
+			if err != nil {
+				return err
+			}
+			searchResult, err := segment.segmentSearch(plan, searchRequests, []Timestamp{searchTimestamp})
+
+			if err != nil {
+				return err
+			}
+			searchResults = append(searchResults, searchResult)
+			matchedSegments = append(matchedSegments, segment)
+			sealedSegmentSearched = append(sealedSegmentSearched, segmentID)
+		}
+	}
+
+	//TODO:: get searched channels
+	for _, partitionID := range searchPartitionIDsInStreaming {
+		segmentIDs, err := s.streamingReplica.getSegmentIDs(partitionID)
+		if err != nil {
+			return err
+		}
+		for _, segmentID := range segmentIDs {
+			segment, err := s.streamingReplica.getSegmentByID(segmentID)
 			if err != nil {
 				return err
 			}
@@ -456,10 +495,14 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 					Timestamp: searchTimestamp,
 					SourceID:  searchMsg.Base.SourceID,
 				},
-				Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-				ResultChannelID: searchMsg.ResultChannelID,
-				Hits:            hits,
-				MetricType:      plan.getMetricType(),
+				Status:                   &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				ResultChannelID:          searchMsg.ResultChannelID,
+				Hits:                     hits,
+				MetricType:               plan.getMetricType(),
+				SealedSegmentIDsSearched: sealedSegmentSearched,
+				ChannelIDsSearched:       collection.getWatchedDmChannels(),
+				//TODO:: get global sealed segment from etcd
+				GlobalSealedSegmentIDs: sealedSegmentSearched,
 			},
 		}
 

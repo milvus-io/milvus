@@ -140,6 +140,9 @@ message SearchResults {
   string result_channelID = 3;
   string metric_type = 4;
   repeated bytes hits = 5;
+  repeated int64 sealed_segmentIDs_searched = 6;
+  repeated string channelIDs_searched = 7;
+  repeated int64 global_sealed_segmentIDs = 8;
 }
 
 message RetrieveRequest {
