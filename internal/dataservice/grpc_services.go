@@ -92,6 +92,8 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 		//continue
 		//}
 
+		s.cluster.watchIfNeeded(r.ChannelName, r.CollectionID)
+
 		segmentID, retCount, expireTs, err := s.segAllocator.AllocSegment(ctx,
 			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
 		if err != nil {
