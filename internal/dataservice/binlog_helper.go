@@ -229,12 +229,12 @@ func (s *Server) GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelPair, e
 func zeroPos(name string) datapb.PositionPair {
 	return datapb.PositionPair{
 		StartPositions: []*internalpb.MsgPosition{
-			&internalpb.MsgPosition{ChannelName: name},
-			&internalpb.MsgPosition{ChannelName: Params.DataDefinitionChannelName},
+			{ChannelName: name},
+			{ChannelName: Params.DataDefinitionChannelName},
 		},
 		EndPositions: []*internalpb.MsgPosition{
-			&internalpb.MsgPosition{ChannelName: name},
-			&internalpb.MsgPosition{ChannelName: Params.DataDefinitionChannelName},
+			{ChannelName: name},
+			{ChannelName: Params.DataDefinitionChannelName},
 		},
 	}
 }

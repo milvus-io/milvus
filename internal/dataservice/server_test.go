@@ -513,7 +513,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 			},
 			StartEndPositions: &datapb.PositionPair{
 				StartPositions: []*internalpb.MsgPosition{
-					&internalpb.MsgPosition{
+					{
 						ChannelName: "ch1",
 						MsgID:       []byte{1, 2, 3},
 						MsgGroup:    "",
@@ -521,7 +521,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 					},
 				},
 				EndPositions: []*internalpb.MsgPosition{
-					&internalpb.MsgPosition{
+					{
 						ChannelName: "ch1",
 						MsgID:       []byte{3, 4, 5},
 						MsgGroup:    "",
@@ -811,7 +811,7 @@ func TestGetVChannelPos(t *testing.T) {
 		DdlBinlogPaths:    []*datapb.DDLBinlogMeta{},
 		StartEndPositions: &datapb.PositionPair{
 			StartPositions: []*internalpb.MsgPosition{
-				&internalpb.MsgPosition{
+				{
 					ChannelName: "ch1",
 					MsgID:       []byte{1, 2, 3},
 					MsgGroup:    "",
@@ -819,7 +819,7 @@ func TestGetVChannelPos(t *testing.T) {
 				},
 			},
 			EndPositions: []*internalpb.MsgPosition{
-				&internalpb.MsgPosition{
+				{
 					ChannelName: "ch1",
 					MsgID:       []byte{3, 4, 5},
 					MsgGroup:    "",
