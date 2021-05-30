@@ -511,32 +511,22 @@ func TestSaveBinlogPaths(t *testing.T) {
 					TsBinlogPath:  "/by-dev/test/0/ts/Allo8",
 				},
 			},
-			DmlPosition: &datapb.PositionPair{
-				StartPosition: &internalpb.MsgPosition{
-					ChannelName: "ch1",
-					MsgID:       []byte{1, 2, 3},
-					MsgGroup:    "",
-					Timestamp:   0,
+			StartEndPositions: &datapb.PositionPair{
+				StartPositions: []*internalpb.MsgPosition{
+					&internalpb.MsgPosition{
+						ChannelName: "ch1",
+						MsgID:       []byte{1, 2, 3},
+						MsgGroup:    "",
+						Timestamp:   0,
+					},
 				},
-				EndPosition: &internalpb.MsgPosition{
-					ChannelName: "ch1",
-					MsgID:       []byte{3, 4, 5},
-					MsgGroup:    "",
-					Timestamp:   0,
-				},
-			},
-			DdlPosition: &datapb.PositionPair{
-				StartPosition: &internalpb.MsgPosition{
-					ChannelName: "ch2",
-					MsgID:       []byte{1, 2, 3},
-					MsgGroup:    "",
-					Timestamp:   0,
-				},
-				EndPosition: &internalpb.MsgPosition{
-					ChannelName: "ch2",
-					MsgID:       []byte{3, 4, 5},
-					MsgGroup:    "",
-					Timestamp:   0,
+				EndPositions: []*internalpb.MsgPosition{
+					&internalpb.MsgPosition{
+						ChannelName: "ch1",
+						MsgID:       []byte{3, 4, 5},
+						MsgGroup:    "",
+						Timestamp:   0,
+					},
 				},
 			},
 		})
@@ -819,32 +809,22 @@ func TestGetVChannelPos(t *testing.T) {
 		CollectionID:      0,
 		Field2BinlogPaths: []*datapb.ID2PathList{},
 		DdlBinlogPaths:    []*datapb.DDLBinlogMeta{},
-		DmlPosition: &datapb.PositionPair{
-			StartPosition: &internalpb.MsgPosition{
-				ChannelName: "ch1",
-				MsgID:       []byte{1, 2, 3},
-				MsgGroup:    "",
-				Timestamp:   0,
+		StartEndPositions: &datapb.PositionPair{
+			StartPositions: []*internalpb.MsgPosition{
+				&internalpb.MsgPosition{
+					ChannelName: "ch1",
+					MsgID:       []byte{1, 2, 3},
+					MsgGroup:    "",
+					Timestamp:   0,
+				},
 			},
-			EndPosition: &internalpb.MsgPosition{
-				ChannelName: "ch1",
-				MsgID:       []byte{3, 4, 5},
-				MsgGroup:    "",
-				Timestamp:   0,
-			},
-		},
-		DdlPosition: &datapb.PositionPair{
-			StartPosition: &internalpb.MsgPosition{
-				ChannelName: "ch2",
-				MsgID:       []byte{1, 2, 3},
-				MsgGroup:    "",
-				Timestamp:   0,
-			},
-			EndPosition: &internalpb.MsgPosition{
-				ChannelName: "ch2",
-				MsgID:       []byte{3, 4, 5},
-				MsgGroup:    "",
-				Timestamp:   0,
+			EndPositions: []*internalpb.MsgPosition{
+				&internalpb.MsgPosition{
+					ChannelName: "ch1",
+					MsgID:       []byte{3, 4, 5},
+					MsgGroup:    "",
+					Timestamp:   0,
+				},
 			},
 		},
 	}
@@ -862,10 +842,8 @@ func TestGetVChannelPos(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.EqualValues(t, 1, len(pair))
-		assert.Nil(t, pair[0].DmlPosition.StartPosition.MsgID)
-		assert.Nil(t, pair[0].DmlPosition.EndPosition.MsgID)
-		assert.Nil(t, pair[0].DdlPosition.StartPosition.MsgID)
-		assert.Nil(t, pair[0].DdlPosition.EndPosition.MsgID)
+		assert.Nil(t, pair[0].StartEndPositions.StartPositions[0].MsgID)
+		assert.Nil(t, pair[0].StartEndPositions.EndPositions[0].MsgID)
 	})
 
 	t.Run("get existed channel", func(t *testing.T) {
@@ -879,10 +857,8 @@ func TestGetVChannelPos(t *testing.T) {
 		assert.Nil(t, err)
 		assert.EqualValues(t, 1, len(pair))
 		assert.EqualValues(t, 0, pair[0].CollectionID)
-		assert.EqualValues(t, []byte{1, 2, 3}, pair[0].DmlPosition.StartPosition.MsgID)
-		assert.EqualValues(t, []byte{3, 4, 5}, pair[0].DmlPosition.EndPosition.MsgID)
-		assert.EqualValues(t, []byte{1, 2, 3}, pair[0].DdlPosition.StartPosition.MsgID)
-		assert.EqualValues(t, []byte{3, 4, 5}, pair[0].DdlPosition.EndPosition.MsgID)
+		assert.Equal(t, []byte{1, 2, 3}, pair[0].StartEndPositions.StartPositions[0].MsgID)
+		assert.EqualValues(t, []byte{3, 4, 5}, pair[0].StartEndPositions.EndPositions[0].MsgID)
 	})
 }
 

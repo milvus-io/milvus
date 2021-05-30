@@ -83,8 +83,11 @@ func (dsService *dataSyncService) initNodes(vchanPair *datapb.VchannelPair) {
 		panic(err)
 	}
 
-	var dmStreamNode Node = newDmInputNode(dsService.ctx, dsService.msFactory, vchanPair.GetDmlVchannelName(), vchanPair.GetDmlPosition())
-	var ddStreamNode Node = newDDInputNode(dsService.ctx, dsService.msFactory, vchanPair.GetDdlVchannelName(), vchanPair.GetDdlPosition())
+	// TODO remove this two
+	var dmStreamNode Node = newDmInputNode(dsService.ctx, dsService.msFactory, vchanPair.GetDmlVchannelName())
+	var ddStreamNode Node = newDDInputNode(dsService.ctx, dsService.msFactory, vchanPair.GetDdlVchannelName())
+
+	// var streamNode Node = newInputNode(dsService.ctx, dsService.msFactory, vchanPair)
 
 	var filterDmNode Node = newFilteredDmNode()
 	var ddNode Node = newDDNode(dsService.ctx, dsService.flushChan, dsService.replica, dsService.idAllocator)

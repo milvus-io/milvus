@@ -20,7 +20,23 @@ import (
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
-func newDmInputNode(ctx context.Context, factory msgstream.Factory, vchannelName string, vchannelPos *datapb.PositionPair) *flowgraph.InputNode {
+func newInputNode(ctx context.Context, factory msgstream.Factory, vchannelPair *datapb.VchannelPair) *flowgraph.InputNode {
+	maxQueueLength := Params.FlowGraphMaxQueueLength
+	maxParallelism := Params.FlowGraphMaxParallelism
+
+	insertStream, _ := factory.NewTtMsgStream(ctx)
+	log.Debug("datanode Seek: " + vchannelPair.GetDmlVchannelName() + "," + vchannelPair.GetDdlVchannelName())
+
+	for _, pos := range vchannelPair.GetStartEndPositions().EndPositions {
+		insertStream.Seek(pos)
+	}
+
+	var stream msgstream.MsgStream = insertStream
+	node := flowgraph.NewInputNode(&stream, "inputNode", maxQueueLength, maxParallelism)
+	return node
+}
+
+func newDmInputNode(ctx context.Context, factory msgstream.Factory, vchannelName string) *flowgraph.InputNode {
 	// TODO use position pair in Seek
 
 	maxQueueLength := Params.FlowGraphMaxQueueLength
@@ -36,7 +52,7 @@ func newDmInputNode(ctx context.Context, factory msgstream.Factory, vchannelName
 	return node
 }
 
-func newDDInputNode(ctx context.Context, factory msgstream.Factory, vchannelName string, vchannelPos *datapb.PositionPair) *flowgraph.InputNode {
+func newDDInputNode(ctx context.Context, factory msgstream.Factory, vchannelName string) *flowgraph.InputNode {
 
 	// TODO use position pair in Seek
 	maxQueueLength := Params.FlowGraphMaxQueueLength

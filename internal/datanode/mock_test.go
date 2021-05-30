@@ -104,11 +104,10 @@ func newHEALTHDataNodeMock(dmChannelName, ddChannelName string) *DataNode {
 	node.SetDataServiceInterface(ds)
 
 	vpair := &datapb.VchannelPair{
-		CollectionID:    1,
-		DmlVchannelName: dmChannelName,
-		DdlVchannelName: ddChannelName,
-		DdlPosition:     &datapb.PositionPair{},
-		DmlPosition:     &datapb.PositionPair{},
+		CollectionID:      1,
+		DmlVchannelName:   dmChannelName,
+		DdlVchannelName:   ddChannelName,
+		StartEndPositions: &datapb.PositionPair{},
 	}
 	node.Start()
 

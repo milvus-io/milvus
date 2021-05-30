@@ -32,14 +32,6 @@ func (handler *statsHandler) HandleSegmentStat(segStats *internalpb.SegmentStati
 		return err
 	}
 
-	if segStats.StartPosition != nil {
-		segMeta.StartPosition = segStats.StartPosition
-	}
-
-	if segStats.EndPosition != nil {
-		segMeta.EndPosition = segStats.EndPosition
-	}
-
 	segMeta.NumRows = segStats.NumRows
 	log.Debug("stats_handler update segment", zap.Any("segmentID", segMeta.ID), zap.Any("State", segMeta.State))
 	return handler.meta.UpdateSegmentStatistic(segMeta)

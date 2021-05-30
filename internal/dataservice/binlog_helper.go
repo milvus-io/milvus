@@ -173,29 +173,21 @@ func (s *Server) getDDLBinlogMeta(collID UniqueID) (metas []*datapb.DDLBinlogMet
 }
 
 // prepareSegmentPos prepare segment flushed pos
-func (s *Server) prepareSegmentPos(segInfo *datapb.SegmentInfo, dmlPos, ddlPos *datapb.PositionPair) (map[string]string, error) {
+// func (s *Server) prepareSegmentPos(segInfo *datapb.SegmentInfo, dmlPos, ddlPos *datapb.PositionPair) (map[string]string, error) {
+func (s *Server) prepareSegmentPos(segInfo *datapb.SegmentInfo, posPair *datapb.PositionPair) (map[string]string, error) {
 	if segInfo == nil {
 		return nil, errNilSegmentInfo
 	}
 
 	result := make(map[string]string, 4)
-	if dmlPos != nil {
+	if posPair != nil {
 		key, err := s.genKey(false, segInfo.ID)
 		if err != nil {
 			return nil, err
 		}
-		msPosPair := proto.MarshalTextString(dmlPos)
-		result[path.Join(Params.SegmentDmlPosSubPath, key)] = msPosPair                   // segment pos
-		result[path.Join(Params.DmlChannelPosSubPath, segInfo.InsertChannel)] = msPosPair // DmlChannel pos
-	}
-	if ddlPos != nil {
-		key, err := s.genKey(false, segInfo.ID)
-		if err != nil {
-			return nil, err
-		}
-		msPosPair := proto.MarshalTextString(ddlPos)
-		result[path.Join(Params.SegmentDdlPosSubPath, key)] = msPosPair                   //segment pos
-		result[path.Join(Params.DdlChannelPosSubPath, segInfo.InsertChannel)] = msPosPair // DdlChannel pos(use dm channel as Key, since dd channel may share same channel name)
+		msPosPair := proto.MarshalTextString(posPair)
+		result[path.Join(Params.SegmentPosSubPath, key)] = msPosPair                     // segment pos
+		result[path.Join(Params.MsgStreamPosSubPath, segInfo.InsertChannel)] = msPosPair // MsgStream position of DmlChannel and DdlChannel
 	}
 
 	return result, nil
@@ -210,51 +202,39 @@ func (s *Server) GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelPair, e
 
 	for _, vchan := range vchans {
 
-		dmlKey := path.Join(Params.DmlChannelPosSubPath, vchan.DmlChannel)
-		ddlKey := path.Join(Params.DdlChannelPosSubPath, vchan.DmlChannel)
+		msgPosKey := path.Join(Params.MsgStreamPosSubPath, vchan.DmlChannel)
+		msgPos := &datapb.PositionPair{}
 
-		dmlPos := &datapb.PositionPair{}
-		ddlPos := &datapb.PositionPair{}
-
-		dmlVal, err := s.kvClient.Load(dmlKey)
+		msgPosStr, err := s.kvClient.Load(msgPosKey)
 		zp := zeroPos(vchan.DmlChannel)
 		if err != nil {
-			dmlPos.StartPosition = &zp
-			dmlPos.EndPosition = &zp
+			msgPos = &zp
 		} else {
-			err = proto.UnmarshalText(dmlVal, dmlPos)
+			err = proto.UnmarshalText(msgPosStr, msgPos)
 			if err != nil {
-				dmlPos.StartPosition = &zp
-				dmlPos.EndPosition = &zp
-			}
-		}
-
-		ddlVal, err := s.kvClient.Load(ddlKey)
-		zp = zeroPos(vchan.DdlChannel)
-		if err != nil {
-			ddlPos.StartPosition = &zp
-			ddlPos.EndPosition = &zp
-		} else {
-			err = proto.UnmarshalText(ddlVal, ddlPos)
-			if err != nil {
-				ddlPos.StartPosition = &zp
-				ddlPos.EndPosition = &zp
+				msgPos = &zp
 			}
 		}
 
 		pairs = append(pairs, &datapb.VchannelPair{
-			CollectionID:    vchan.CollectionID,
-			DmlVchannelName: vchan.DmlChannel,
-			DdlVchannelName: vchan.DdlChannel,
-			DdlPosition:     ddlPos,
-			DmlPosition:     dmlPos,
+			CollectionID:      vchan.CollectionID,
+			DmlVchannelName:   vchan.DmlChannel,
+			DdlVchannelName:   vchan.DdlChannel,
+			StartEndPositions: msgPos,
 		})
 	}
 	return pairs, nil
 }
 
-func zeroPos(name string) internalpb.MsgPosition {
-	return internalpb.MsgPosition{
-		ChannelName: name,
+func zeroPos(name string) datapb.PositionPair {
+	return datapb.PositionPair{
+		StartPositions: []*internalpb.MsgPosition{
+			&internalpb.MsgPosition{ChannelName: name},
+			&internalpb.MsgPosition{ChannelName: Params.DataDefinitionChannelName},
+		},
+		EndPositions: []*internalpb.MsgPosition{
+			&internalpb.MsgPosition{ChannelName: name},
+			&internalpb.MsgPosition{ChannelName: Params.DataDefinitionChannelName},
+		},
 	}
 }

@@ -578,7 +578,8 @@ func (s *Server) prepareBinlogAndPos(req *datapb.SaveBinlogPathsRequest) (map[st
 	for k, v := range ddlMeta {
 		meta[k] = v
 	}
-	segmentPos, err := s.prepareSegmentPos(segInfo, req.GetDmlPosition(), req.GetDdlPosition())
+
+	segmentPos, err := s.prepareSegmentPos(segInfo, req.GetStartEndPositions())
 	if err != nil {
 		return nil, err
 	}

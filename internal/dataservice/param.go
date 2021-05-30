@@ -34,10 +34,8 @@ type ParamTable struct {
 	KvRootPath              string
 	SegmentBinlogSubPath    string
 	CollectionBinlogSubPath string
-	SegmentDmlPosSubPath    string
-	SegmentDdlPosSubPath    string
-	DmlChannelPosSubPath    string
-	DdlChannelPosSubPath    string
+	SegmentPosSubPath       string // for datanode
+	MsgStreamPosSubPath     string // for datanode
 
 	// --- Pulsar ---
 	PulsarAddress string
@@ -59,6 +57,7 @@ type ParamTable struct {
 	DataServiceSubscriptionName string
 	K2SChannelNames             []string
 	ProxyTimeTickChannelName    string
+	DataDefinitionChannelName   string
 
 	SegmentFlushMetaPath string
 	Log                  log.Config
@@ -101,13 +100,12 @@ func (p *ParamTable) Init() {
 		p.initSegmentFlushMetaPath()
 		p.initLogCfg()
 		p.initProxyServiceTimeTickChannelName()
+		p.initDataDefinitionChannelName()
 
 		p.initFlushStreamPosSubPath()
 		p.initStatsStreamPosSubPath()
-		p.initSegmentDmlPosSubPath()
-		p.initSegmentDdlPosSubPath()
-		p.initDmlChannelPosSubPath()
-		p.initDdlChannelPosSubPath()
+		p.initSegmentPosSubPath()
+		p.initMsgStreamPosSubPath()
 	})
 }
 
@@ -300,6 +298,14 @@ func (p *ParamTable) initProxyServiceTimeTickChannelName() {
 	p.ProxyTimeTickChannelName = ch
 }
 
+func (p *ParamTable) initDataDefinitionChannelName() {
+	subPath, err := p.Load("msgChannel.chanNamePrefix.dataDefinition")
+	if err != nil {
+		panic(err)
+	}
+	p.DataDefinitionChannelName = subPath
+}
+
 func (p *ParamTable) initFlushStreamPosSubPath() {
 	subPath, err := p.Load("etcd.flushStreamPosSubPath")
 	if err != nil {
@@ -316,34 +322,18 @@ func (p *ParamTable) initStatsStreamPosSubPath() {
 	p.StatsStreamPosSubPath = subPath
 }
 
-func (p *ParamTable) initSegmentDmlPosSubPath() {
-	subPath, err := p.Load("etcd.segmentDmlPosSubPath")
+func (p *ParamTable) initSegmentPosSubPath() {
+	subPath, err := p.Load("etcd.segmentPosSubPath")
 	if err != nil {
 		panic(err)
 	}
-	p.SegmentDmlPosSubPath = subPath
+	p.SegmentPosSubPath = subPath
 }
 
-func (p *ParamTable) initSegmentDdlPosSubPath() {
-	subPath, err := p.Load("etcd.segmentDdlPosSubPath")
+func (p *ParamTable) initMsgStreamPosSubPath() {
+	subPath, err := p.Load("etcd.MsgStreamPosSubPath")
 	if err != nil {
 		panic(err)
 	}
-	p.SegmentDdlPosSubPath = subPath
-}
-
-func (p *ParamTable) initDmlChannelPosSubPath() {
-	subPath, err := p.Load("etcd.dmlChanPosSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.DmlChannelPosSubPath = subPath
-}
-
-func (p *ParamTable) initDdlChannelPosSubPath() {
-	subPath, err := p.Load("etcd.ddlChanPosSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.DdlChannelPosSubPath = subPath
+	p.MsgStreamPosSubPath = subPath
 }

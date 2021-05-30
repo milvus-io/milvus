@@ -168,12 +168,16 @@ message GetPartitionStatisticsResponse {
 message GetSegmentInfoChannelRequest {
 }
 
+message PositionPair {
+  repeated internal.MsgPosition start_positions = 1;
+  repeated internal.MsgPosition end_positions = 2;
+}
+
 message VchannelPair {
   int64 collectionID = 1;
   string dml_vchannel_name = 2;
   string ddl_vchannel_name = 3;
-  PositionPair ddl_position = 4;
-  PositionPair dml_position = 5;
+  PositionPair start_end_positions = 4;
 }
 
 message WatchDmChannelsRequest {
@@ -244,19 +248,13 @@ message ID2PathList {
   repeated string Paths = 2;
 }
 
-message PositionPair {
-  internal.MsgPosition start_position = 1;
-  internal.MsgPosition end_position = 2;
-}
-
 message SaveBinlogPathsRequest {
   common.MsgBase base = 1;
   int64 segmentID = 2;
   int64 collectionID = 3;
   repeated ID2PathList field2BinlogPaths = 4;
   repeated DDLBinlogMeta ddlBinlogPaths = 5;
-  PositionPair dml_position = 6;
-  PositionPair ddl_position =7;
+  PositionPair start_end_positions = 6;
 }
 
 message DataNodeTtMsg {

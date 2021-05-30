@@ -45,11 +45,10 @@ func TestDataNode(t *testing.T) {
 		for _, ch := range Params.InsertChannelNames {
 			log.Debug("InsertChannels", zap.String("name", ch))
 			vpair := &datapb.VchannelPair{
-				CollectionID:    1,
-				DmlVchannelName: ch,
-				DdlVchannelName: Params.DDChannelNames[0],
-				DdlPosition:     &datapb.PositionPair{},
-				DmlPosition:     &datapb.PositionPair{},
+				CollectionID:      1,
+				DmlVchannelName:   ch,
+				DdlVchannelName:   Params.DDChannelNames[0],
+				StartEndPositions: &datapb.PositionPair{},
 			}
 			vchannels = append(vchannels, vpair)
 		}
@@ -94,11 +93,10 @@ func TestDataNode(t *testing.T) {
 		dmChannelName := "fake-dm-channel-test-NewDataSyncService"
 		ddChannelName := "fake-dd-channel-test-NewDataSyncService"
 		vpair := &datapb.VchannelPair{
-			CollectionID:    1,
-			DmlVchannelName: dmChannelName,
-			DdlVchannelName: ddChannelName,
-			DdlPosition:     &datapb.PositionPair{},
-			DmlPosition:     &datapb.PositionPair{},
+			CollectionID:      1,
+			DmlVchannelName:   dmChannelName,
+			DdlVchannelName:   ddChannelName,
+			StartEndPositions: &datapb.PositionPair{},
 		}
 
 		require.Equal(t, 0, len(node2.vchan2FlushCh))

@@ -13,6 +13,7 @@ package dataservice
 
 import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
 type vchannel struct {
@@ -33,14 +34,16 @@ type dummyPosProvider struct{}
 func (dp dummyPosProvider) GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelPair, error) {
 	pairs := make([]*datapb.VchannelPair, len(vchans))
 	for _, vchan := range vchans {
-		dmlPos := &datapb.PositionPair{}
-		ddlPos := &datapb.PositionPair{}
+		posPair := &datapb.PositionPair{
+			StartPositions: make([]*internalpb.MsgPosition, 0),
+			EndPositions:   make([]*internalpb.MsgPosition, 0),
+		}
+
 		pairs = append(pairs, &datapb.VchannelPair{
-			CollectionID:    vchan.CollectionID,
-			DmlVchannelName: vchan.DmlChannel,
-			DdlVchannelName: vchan.DmlChannel,
-			DdlPosition:     ddlPos,
-			DmlPosition:     dmlPos,
+			CollectionID:      vchan.CollectionID,
+			DmlVchannelName:   vchan.DmlChannel,
+			DdlVchannelName:   vchan.DmlChannel,
+			StartEndPositions: posPair,
 		})
 	}
 	return pairs, nil

@@ -288,16 +288,21 @@ func (node *DataNode) ReadyToFlush() error {
 	return nil
 }
 
-func (node *DataNode) getSegmentPositionPair(segmentID UniqueID, chanName string) ([]*internalpb.MsgPosition, []*internalpb.MsgPosition) {
+func (node *DataNode) getSegmentPositions(segmentID UniqueID, chanName string) *datapb.PositionPair {
 	node.chanMut.Lock()
 	defer node.chanMut.Unlock()
 	sync, ok := node.vchan2SyncService[chanName]
 	if !ok {
-		return nil, nil
+		log.Error("DataNode abnormal, restarting")
+		return nil
 	}
 
 	starts, ends := sync.replica.getSegmentPositions(segmentID)
-	return starts, ends
+
+	return &datapb.PositionPair{
+		StartPositions: starts,
+		EndPositions:   ends,
+	}
 }
 
 // FlushSegments packs flush messages into flowgraph through flushChan.
@@ -396,8 +401,8 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 			SegmentID:    id,
 			CollectionID: req.CollectionID,
 		}
-
-		// TODO Set start_positions and end_positions
+		posPair := node.getSegmentPositions(id, chanName)
+		req.StartEndPositions = posPair
 
 		log.Info("Waiting for flush completed", zap.Int64("segmentID", id))
 
