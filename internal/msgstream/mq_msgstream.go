@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 	"sync"
 	"time"
@@ -518,20 +519,14 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 
 			// wait all channels get ttMsg
 			for _, consumer := range ms.consumers {
-				if !chanTtMsgSync[consumer] {
+				if chanTtMsgSync[consumer] {
 					ms.chanWaitGroup.Add(1)
 					go ms.consumeToTtMsg(consumer)
 				}
 			}
 			ms.chanWaitGroup.Wait()
 
-			// block here until all channels reach same timetick
-			timeStamp, ok := ms.allChanReachSameTtMsg(chanTtMsgSync)
-			if !ok || timeStamp <= ms.currTimeStamp {
-				//log.Printf("All timeTick's timestamps are inconsistent")
-				ms.consumerLock.Unlock()
-				continue
-			}
+			minTs := ms.getMinTs(chanTtMsgSync)
 
 			timeTickBuf := make([]TsMsg, 0)
 			startMsgPosition := make([]*internalpb.MsgPosition, 0)
@@ -549,9 +544,9 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 						timeTickMsg = v
 						continue
 					}
-					if v.EndTs() <= timeStamp {
+					if v.EndTs() <= minTs {
 						timeTickBuf = append(timeTickBuf, v)
-						log.Debug("CYD - pack msg", zap.Uint64("curr", v.EndTs()), zap.Uint64("maxTime", timeStamp))
+						log.Debug("CYD - pack msg", zap.Uint64("curr", v.EndTs()), zap.Uint64("minTs", minTs))
 					} else {
 						tempBuffer = append(tempBuffer, v)
 					}
@@ -565,7 +560,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 					newPos = &internalpb.MsgPosition{
 						ChannelName: tempBuffer[0].Position().ChannelName,
 						MsgID:       tempBuffer[0].Position().MsgID,
-						Timestamp:   timeStamp,
+						Timestamp:   minTs,
 						MsgGroup:    consumer.Subscription(),
 					}
 					endMsgPositions = append(endMsgPositions, newPos)
@@ -574,7 +569,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 					newPos = &internalpb.MsgPosition{
 						ChannelName: timeTickMsg.Position().ChannelName,
 						MsgID:       timeTickMsg.Position().MsgID,
-						Timestamp:   timeStamp,
+						Timestamp:   minTs,
 						MsgGroup:    consumer.Subscription(),
 					}
 					endMsgPositions = append(endMsgPositions, newPos)
@@ -584,16 +579,19 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 			ms.chanMsgBufMutex.Unlock()
 			ms.consumerLock.Unlock()
 
-			msgPack := MsgPack{
-				BeginTs:        ms.currTimeStamp,
-				EndTs:          timeStamp,
-				Msgs:           timeTickBuf,
-				StartPositions: startMsgPosition,
-				EndPositions:   endMsgPositions,
-			}
+			if len(timeTickBuf) > 0 {
+				msgPack := MsgPack{
+					BeginTs:        ms.currTimeStamp,
+					EndTs:          minTs,
+					Msgs:           timeTickBuf,
+					StartPositions: startMsgPosition,
+					EndPositions:   endMsgPositions,
+				}
 
-			ms.receiveBuf <- &msgPack
-			ms.currTimeStamp = timeStamp
+				log.Debug("CYD - send msg pack", zap.Int("len", len(msgPack.Msgs)), zap.Uint64("minTs", minTs))
+				ms.receiveBuf <- &msgPack
+				ms.currTimeStamp = minTs
+			}
 		}
 	}
 }
@@ -641,33 +639,22 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqclient.Consumer) {
 	}
 }
 
-// return true only when all channels reach same timetick
-func (ms *MqTtMsgStream) allChanReachSameTtMsg(chanTtMsgSync map[mqclient.Consumer]bool) (Timestamp, bool) {
-	tsMap := make(map[Timestamp]int)
-	var maxTime Timestamp = 0
+func (ms *MqTtMsgStream) getMinTs(chanTtMsgSync map[mqclient.Consumer]bool) Timestamp {
+	var minTs Timestamp = math.MaxUint32
 	for _, t := range ms.chanTtMsgTime {
-		tsMap[t]++
-		if t > maxTime {
-			maxTime = t
-			log.Debug("CYD - update maxTime", zap.Uint64("maxTime", maxTime))
+		if t < minTs {
+			minTs = t
+			log.Debug("CYD - update minTs", zap.Uint64("minTs", minTs))
 		}
 	}
-	// when all channels reach same timetick, timeMap should contain only 1 timestamp
-	if len(tsMap) <= 1 {
-		for consumer := range ms.chanTtMsgTime {
+	for consumer, t := range ms.chanTtMsgTime {
+		if t == minTs {
+			chanTtMsgSync[consumer] = true
+		} else {
 			chanTtMsgSync[consumer] = false
 		}
-		log.Debug("CYD - all channels tt sync")
-		return maxTime, true
 	}
-	log.Debug("CYD - channel tt count", zap.Int("ttCnt", len(tsMap)))
-	for consumer := range ms.chanTtMsgTime {
-		ms.chanTtMsgTimeMutex.RLock()
-		chanTtMsgSync[consumer] = (ms.chanTtMsgTime[consumer] == maxTime)
-		ms.chanTtMsgTimeMutex.RUnlock()
-	}
-
-	return 0, false
+	return minTs
 }
 
 // Seek to the specified position
