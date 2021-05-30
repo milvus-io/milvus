@@ -194,6 +194,12 @@ func getTimeTickMsg(reqID UniqueID) TsMsg {
 func getInsertMsgPack(num int, start int, end int) *MsgPack {
 	Rand := rand.New(rand.NewSource(time.Now().UnixNano()))
 	set := make(map[int]bool)
+	if start < 0 {
+		start = 0
+	}
+	if end < 0 {
+		end = 0
+	}
 	msgPack := MsgPack{}
 	for len(set) < num {
 		reqID := Rand.Int()%(end-start-1) + start + 1
@@ -877,20 +883,50 @@ func TestStream_PulsarTtMsgStream_2(t *testing.T) {
 //   2. The count of consumed msg should be equal to the count of produced msg
 //
 func TestStream_PulsarTtMsgStream_3(t *testing.T) {
-	//pulsarAddress, _ := Params.Load("_PulsarAddress")
-	//c1 := funcutil.RandomString(8)
-	//c2 := funcutil.RandomString(8)
-	//p1Channels := []string{c1}
-	//p2Channels := []string{c2}
-	//consumerChannels := []string{c1, c2}
-	//consumerSubName := funcutil.RandomString(8)
-	//
-	//const (
-	//	msgsInPack   = 5
-	//	numOfMsgPack = 10
-	//	deltaTs      = 10
-	//)
-	//msgPacks1 := make([]*MsgPack, numOfMsgPack)
+	pulsarAddr, _ := Params.Load("_PulsarAddress")
+	c1 := funcutil.RandomString(8)
+	c2 := funcutil.RandomString(8)
+	p1Channels := []string{c1}
+	p2Channels := []string{c2}
+	consumerChannels := []string{c1, c2}
+	consumerSubName := funcutil.RandomString(8)
+
+	inputStream1 := getPulsarInputStream(pulsarAddr, p1Channels)
+	inputStream2 := getPulsarInputStream(pulsarAddr, p2Channels)
+	outputStream := getPulsarTtOutputStream(pulsarAddr, consumerChannels, consumerSubName)
+
+	msgPacks1 := createMsgPacks(5, 10, 0, 10)
+	assert.Nil(t, sendMsgPacks(inputStream1, msgPacks1))
+
+	msgPacks2 := createMsgPacks(5, 10, -5, 10)
+	assert.Nil(t, sendMsgPacks(inputStream2, msgPacks2))
+
+	// consume msg
+	log.Println("===============receive msg=================")
+	checkNMsgPack := func(t *testing.T, outputStream MsgStream, num int) int {
+		rcvMsg := 0
+		for i := 0; i < num; i++ {
+			msgPack := outputStream.Consume()
+			rcvMsg += len(msgPack.Msgs)
+			if len(msgPack.Msgs) > 0 {
+				for _, msg := range msgPack.Msgs {
+					log.Println("msg type: ", msg.Type(), ", msg value: ", msg)
+					assert.Greater(t, msg.BeginTs(), msgPack.BeginTs)
+					assert.LessOrEqual(t, msg.BeginTs(), msgPack.EndTs)
+				}
+				log.Println("================")
+			}
+		}
+		return rcvMsg
+	}
+	msgCount := checkNMsgPack(t, outputStream, len(msgPacks1))
+	cnt1 := (len(msgPacks1)/2 - 1) * len(msgPacks1[0].Msgs)
+	cnt2 := (len(msgPacks2)/2 - 1) * len(msgPacks2[0].Msgs)
+	assert.Equal(t, (cnt1 + cnt2), msgCount)
+
+	inputStream1.Close()
+	inputStream2.Close()
+	outputStream.Close()
 }
 
 /****************************************Rmq test******************************************/
