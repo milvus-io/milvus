@@ -531,7 +531,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 			ms.chanMsgBufMutex.Lock()
 			for consumer, msgs := range ms.chanMsgBuf {
 				if len(msgs) == 0 {
-					log.Debug("CYD - msg buf empty")
+					//log.Debug("CYD - msg buf empty")
 					continue
 				}
 				tempBuffer := make([]TsMsg, 0)
@@ -561,7 +561,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 						MsgGroup:    consumer.Subscription(),
 					}
 					endMsgPositions = append(endMsgPositions, newPos)
-				} else {
+				} else if timeTickMsg != nil {
 					// if tempBuffer is empty, use timeTickMsg to seek
 					newPos = &internalpb.MsgPosition{
 						ChannelName: timeTickMsg.Position().ChannelName,
@@ -647,7 +647,7 @@ func (ms *MqTtMsgStream) getMinTs() Timestamp {
 	for _, t := range ms.chanTtMsgTime {
 		if t < minTs {
 			minTs = t
-			log.Debug("CYD - update minTs", zap.Uint64("minTs", minTs))
+			//log.Debug("CYD - update minTs", zap.Uint64("minTs", minTs))
 		}
 	}
 	return minTs
