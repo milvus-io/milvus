@@ -502,7 +502,6 @@ func (ms *MqTtMsgStream) Close() {
 
 func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 	defer ms.wait.Done()
-	chanTtMsgSync := make(map[mqclient.Consumer]bool)
 
 	// block here until addConsumer
 	if _, ok := <-ms.syncConsumer; !ok {
@@ -519,14 +518,12 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 
 			// wait all channels get ttMsg
 			for _, consumer := range ms.consumers {
-				if chanTtMsgSync[consumer] {
-					ms.chanWaitGroup.Add(1)
-					go ms.consumeToTtMsg(consumer)
-				}
+				ms.chanWaitGroup.Add(1)
+				go ms.consumeToTtMsg(consumer)
 			}
 			ms.chanWaitGroup.Wait()
 
-			minTs := ms.getMinTs(chanTtMsgSync)
+			minTs := ms.getMinTs()
 
 			timeTickBuf := make([]TsMsg, 0)
 			startMsgPosition := make([]*internalpb.MsgPosition, 0)
@@ -599,6 +596,12 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 // Save all msgs into chanMsgBuf[] till receive one ttMsg
 func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqclient.Consumer) {
 	defer ms.chanWaitGroup.Done()
+	ms.chanTtMsgTimeMutex.RLock()
+	ts, ok := ms.chanTtMsgTime[consumer]
+	ms.chanTtMsgTimeMutex.RUnlock()
+	if ok && ts > ms.currTimeStamp {
+		return
+	}
 	for {
 		select {
 		case <-ms.ctx.Done():
@@ -639,19 +642,12 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqclient.Consumer) {
 	}
 }
 
-func (ms *MqTtMsgStream) getMinTs(chanTtMsgSync map[mqclient.Consumer]bool) Timestamp {
+func (ms *MqTtMsgStream) getMinTs() Timestamp {
 	var minTs Timestamp = math.MaxUint32
 	for _, t := range ms.chanTtMsgTime {
 		if t < minTs {
 			minTs = t
 			log.Debug("CYD - update minTs", zap.Uint64("minTs", minTs))
-		}
-	}
-	for consumer, t := range ms.chanTtMsgTime {
-		if t == minTs {
-			chanTtMsgSync[consumer] = true
-		} else {
-			chanTtMsgSync[consumer] = false
 		}
 	}
 	return minTs
