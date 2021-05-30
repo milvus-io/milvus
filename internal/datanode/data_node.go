@@ -70,7 +70,8 @@ type DataNode struct {
 	masterService types.MasterService
 	dataService   types.DataService
 
-	session *sessionutil.Session
+	session  *sessionutil.Session
+	segCache *segmentCache
 
 	closer io.Closer
 
@@ -93,6 +94,7 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 
 		vchan2SyncService: make(map[string]*dataSyncService),
 		vchan2FlushCh:     make(map[string]chan<- *flushMsg),
+		segCache:          newSegmentCache(),
 	}
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return node
@@ -323,6 +325,12 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 			status.Reason = fmt.Sprintf("DataNode not find segment %d!", id)
 			return status, errors.New(status.GetReason())
 		}
+
+		if node.segCache.checkIfFlushingOrFlushed(id) {
+			// Segment in flushing or flushed, ignore
+			continue
+		}
+		node.segCache.setIsFlushing(id)
 
 		node.chanMut.RLock()
 		flushCh, ok := node.vchan2FlushCh[chanName]
