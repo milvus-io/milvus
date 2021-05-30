@@ -194,12 +194,6 @@ func getTimeTickMsg(reqID UniqueID) TsMsg {
 func getInsertMsgPack(num int, start int, end int) *MsgPack {
 	Rand := rand.New(rand.NewSource(time.Now().UnixNano()))
 	set := make(map[int]bool)
-	if start < 0 {
-		start = 0
-	}
-	if end < 0 {
-		end = 0
-	}
 	msgPack := MsgPack{}
 	for len(set) < num {
 		reqID := Rand.Int()%(end-start-1) + start + 1
@@ -718,15 +712,15 @@ func TestStream_PulsarTtMsgStream_UnMarshalHeader(t *testing.T) {
 	outputStream.Close()
 }
 
-func createMsgPacks(msgsInPack int, numOfMsgPack int, startTs int, deltaTs int) []*MsgPack {
+func createMsgPacks(msgsInPack int, numOfMsgPack int, deltaTs int) []*MsgPack {
 	msgPacks := make([]*MsgPack, numOfMsgPack)
 
 	// generate MsgPack
 	for i := 0; i < numOfMsgPack; i++ {
 		if i%2 == 0 {
-			msgPacks[i] = getInsertMsgPack(msgsInPack, startTs+i/2*deltaTs, startTs+(i/2+2)*deltaTs+2)
+			msgPacks[i] = getInsertMsgPack(msgsInPack, i/2*deltaTs, (i/2+2)*deltaTs+2)
 		} else {
-			msgPacks[i] = getTimeTickMsgPack(int64(startTs + (i+1)/2*deltaTs))
+			msgPacks[i] = getTimeTickMsgPack(int64((i + 1) / 2 * deltaTs))
 		}
 	}
 	msgPacks = append(msgPacks, nil)
@@ -776,7 +770,7 @@ func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 	inputStream := getPulsarInputStream(pulsarAddr, producerChannels)
 	outputStream := getPulsarTtOutputStream(pulsarAddr, consumerChannels, consumerSubName)
 
-	msgPacks := createMsgPacks(5, 10, 0, 10)
+	msgPacks := createMsgPacks(5, 10, 10)
 	err := sendMsgPacks(inputStream, msgPacks)
 	assert.Nil(t, err)
 
@@ -826,7 +820,7 @@ func TestStream_PulsarTtMsgStream_2(t *testing.T) {
 
 	inputStream := getPulsarInputStream(pulsarAddr, producerChannels)
 
-	msgPacks := createMsgPacks(5, 10, 0, 10)
+	msgPacks := createMsgPacks(5, 10, 10)
 	err := sendMsgPacks(inputStream, msgPacks)
 	assert.Nil(t, err)
 
@@ -874,9 +868,9 @@ func TestStream_PulsarTtMsgStream_2(t *testing.T) {
 //              TT(10)     TT(20)     TT(30)     TT(40)     TT(50)     TT(100)
 //
 //       Insert     Insert     Insert     Insert     Insert     Insert
-//  c2 |-----|----------|----------|----------|----------|---------------|
-//           ^          ^          ^          ^          ^               ^
-//         TT(5)     TT(15)     TT(25)     TT(35)     TT(45)           TT(100)
+//  c2 |----------|----------|----------|----------|----------|----------|
+//                ^          ^          ^          ^          ^          ^
+//              TT(10)     TT(20)     TT(30)     TT(40)     TT(50)     TT(100)
 // Then check:
 //   1. For each msg in MsgPack received by ttMsgStream consumer, there should be
 //        msgPack.BeginTs < msg.BeginTs() <= msgPack.EndTs
@@ -895,45 +889,10 @@ func TestStream_PulsarTtMsgStream_3(t *testing.T) {
 	inputStream2 := getPulsarInputStream(pulsarAddr, p2Channels)
 	outputStream := getPulsarTtOutputStream(pulsarAddr, consumerChannels, consumerSubName)
 
-	msgPacks1 := createMsgPacks(5, 10, 0, 10)
-	//msgPacks1 := make([]*MsgPack, 4)
-
-	//msgPacks1[0] = &MsgPack{}
-	//msgPacks1[0].Msgs = append(msgPacks1[0].Msgs, getTsMsg(commonpb.MsgType_Insert, 11))
-	//msgPacks1[0].Msgs = append(msgPacks1[0].Msgs, getTsMsg(commonpb.MsgType_Insert, 4))
-	//msgPacks1[0].Msgs = append(msgPacks1[0].Msgs, getTsMsg(commonpb.MsgType_Insert, 3))
-	//
-	//msgPacks1[1] = getTimeTickMsgPack(10)
-	//
-	//msgPacks1[2] = &MsgPack{}
-	//msgPacks1[2].Msgs = append(msgPacks1[2].Msgs, getTsMsg(commonpb.MsgType_Insert, 14))
-	//msgPacks1[2].Msgs = append(msgPacks1[2].Msgs, getTsMsg(commonpb.MsgType_Insert, 24))
-	//msgPacks1[2].Msgs = append(msgPacks1[2].Msgs, getTsMsg(commonpb.MsgType_Insert, 17))
-	//
-	//msgPacks1[3] = getTimeTickMsgPack(20)
-	//msgPacks1 = append(msgPacks1, nil)
-	//msgPacks1 = append(msgPacks1, getTimeTickMsgPack(30))
-
+	msgPacks1 := createMsgPacks(5, 10, 10)
 	assert.Nil(t, sendMsgPacks(inputStream1, msgPacks1))
 
-	msgPacks2 := createMsgPacks(5, 10, -5, 10)
-	//msgPacks2 := make([]*MsgPack, 4)
-	//
-	//msgPacks2[0] = &MsgPack{}
-	//msgPacks2[0].Msgs = append(msgPacks2[0].Msgs, getTsMsg(commonpb.MsgType_Insert, 9))
-	//msgPacks2[0].Msgs = append(msgPacks2[0].Msgs, getTsMsg(commonpb.MsgType_Insert, 7))
-	//msgPacks2[0].Msgs = append(msgPacks2[0].Msgs, getTsMsg(commonpb.MsgType_Insert, 10))
-	//
-	//msgPacks2[1] = getTimeTickMsgPack(5)
-	//
-	//msgPacks2[2] = &MsgPack{}
-	//msgPacks2[2].Msgs = append(msgPacks2[2].Msgs, getTsMsg(commonpb.MsgType_Insert, 12))
-	//msgPacks2[2].Msgs = append(msgPacks2[2].Msgs, getTsMsg(commonpb.MsgType_Insert, 21))
-	//msgPacks2[2].Msgs = append(msgPacks2[2].Msgs, getTsMsg(commonpb.MsgType_Insert, 8))
-	//
-	//msgPacks2[3] = getTimeTickMsgPack(15)
-	//msgPacks2 = append(msgPacks2, nil)
-	//msgPacks2 = append(msgPacks2, getTimeTickMsgPack(30))
+	msgPacks2 := createMsgPacks(5, 10, 10)
 	assert.Nil(t, sendMsgPacks(inputStream2, msgPacks2))
 
 	// consume msg
@@ -954,10 +913,12 @@ func TestStream_PulsarTtMsgStream_3(t *testing.T) {
 		}
 		return rcvMsg
 	}
-	msgCount := checkNMsgPack(t, outputStream, len(msgPacks1)-1)
-	cnt1 := (len(msgPacks1)/2 - 1) * len(msgPacks1[0].Msgs)
-	cnt2 := (len(msgPacks2)/2 - 1) * len(msgPacks2[0].Msgs)
-	assert.Equal(t, (cnt1 + cnt2), msgCount)
+	msgCount := checkNMsgPack(t, outputStream, len(msgPacks1)/2)
+	assert.Equal(t, (len(msgPacks1)/2-1)*len(msgPacks1[0].Msgs)*2, msgCount)
+	//msgCount := checkNMsgPack(t, outputStream, len(msgPacks1)-1)
+	//cnt1 := (len(msgPacks1)/2 - 1) * len(msgPacks1[0].Msgs)
+	//cnt2 := (len(msgPacks2)/2 - 1) * len(msgPacks2[0].Msgs)
+	//assert.Equal(t, (cnt1 + cnt2), msgCount)
 
 	inputStream1.Close()
 	inputStream2.Close()
