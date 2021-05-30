@@ -727,9 +727,9 @@ func TestStream_PulsarTtMsgStream_UnMarshalHeader(t *testing.T) {
 //
 func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 	pulsarAddress, _ := Params.Load("_PulsarAddress")
-	c1, c2 := funcutil.RandomString(8), funcutil.RandomString(8)
-	producerChannels := []string{c1, c2}
-	consumerChannels := []string{c1, c2}
+	c1 := funcutil.RandomString(8)
+	producerChannels := []string{c1}
+	consumerChannels := []string{c1}
 	consumerSubName := funcutil.RandomString(8)
 
 	const msgsInPack = 5
@@ -809,32 +809,18 @@ func TestStream_PulsarTtMsgStream_2(t *testing.T) {
 	consumerChannels := []string{c1}
 	consumerSubName := funcutil.RandomString(8)
 
-	const msgsInPack = 3
-	const numOfMsgPack = 4
+	const msgsInPack = 5
+	const numOfMsgPack = 10
 	msgPacks := make([]*MsgPack, numOfMsgPack)
 
 	// generate MsgPack
-	//for i := 0; i < numOfMsgPack; i++ {
-	//	if i%2 == 0 {
-	//		msgPacks[i] = getInsertMsgPack(msgsInPack, i/2*10, i/2*10+16)
-	//	} else {
-	//		msgPacks[i] = getTimeTickMsgPack(int64((i + 1) / 2 * 10))
-	//	}
-	//}
-	msgPacks[0] = &MsgPack{}
-	msgPacks[0].Msgs = append(msgPacks[0].Msgs, getTsMsg(commonpb.MsgType_Insert, 9))
-	msgPacks[0].Msgs = append(msgPacks[0].Msgs, getTsMsg(commonpb.MsgType_Insert, 4))
-	msgPacks[0].Msgs = append(msgPacks[0].Msgs, getTsMsg(commonpb.MsgType_Insert, 14))
-
-	msgPacks[1] = getTimeTickMsgPack(10)
-
-	msgPacks[2] = &MsgPack{}
-	msgPacks[2].Msgs = append(msgPacks[2].Msgs, getTsMsg(commonpb.MsgType_Insert, 23))
-	msgPacks[2].Msgs = append(msgPacks[2].Msgs, getTsMsg(commonpb.MsgType_Insert, 15))
-	msgPacks[2].Msgs = append(msgPacks[2].Msgs, getTsMsg(commonpb.MsgType_Insert, 12))
-
-	msgPacks[3] = getTimeTickMsgPack(20)
-
+	for i := 0; i < numOfMsgPack; i++ {
+		if i%2 == 0 {
+			msgPacks[i] = getInsertMsgPack(msgsInPack, i/2*10, i/2*10+16)
+		} else {
+			msgPacks[i] = getTimeTickMsgPack(int64((i + 1) / 2 * 10))
+		}
+	}
 	msgPacks = append(msgPacks, nil)
 	msgPacks = append(msgPacks, getTimeTickMsgPack(100))
 
