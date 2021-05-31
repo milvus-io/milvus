@@ -33,7 +33,7 @@ pull_request_rules:
   - name: Test passed for mergify changed
     conditions:
       - base=master
-      - files=.github/mergify.yml
+      - -files~=^(?!\.github\/mergify\.yml).*$
     actions:
       label:
         add:
