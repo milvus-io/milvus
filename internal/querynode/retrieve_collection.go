@@ -237,7 +237,43 @@ func (rc *retrieveCollection) doUnsolvedMsgRetrieve() {
 
 func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error {
 	// TODO(yukun)
+	retrieveResultMsg := &msgstream.RetrieveResultMsg{
+		BaseMsg: msgstream.BaseMsg{Ctx: retrieveMsg.Ctx},
+		RetrieveResults: internalpb.RetrieveResults{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_RetrieveResult,
+				MsgID:    retrieveMsg.Base.MsgID,
+				SourceID: retrieveMsg.Base.SourceID,
+			},
+			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			ResultChannelID: retrieveMsg.ResultChannelID,
+		},
+	}
+	err := rc.publishRetrieveResult(retrieveResultMsg, retrieveMsg.CollectionID)
+	if err != nil {
+		return err
+	}
 	return nil
+}
+
+func (rc *retrieveCollection) publishRetrieveResult(msg msgstream.TsMsg, collectionID UniqueID) error {
+	log.Debug("publishing retrieve result...",
+		zap.Int64("msgID", msg.ID()),
+		zap.Int64("collectionID", collectionID))
+	span, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+	defer span.Finish()
+	msg.SetTraceCtx(ctx)
+	msgPack := msgstream.MsgPack{}
+	msgPack.Msgs = append(msgPack.Msgs, msg)
+	err := rc.retrieveResultMsgStream.Produce(&msgPack)
+	if err != nil {
+		log.Error(err.Error())
+	} else {
+		log.Debug("publish retrieve result done",
+			zap.Int64("msgID", msg.ID()),
+			zap.Int64("collectionID", collectionID))
+	}
+	return err
 }
 
 func (rc *retrieveCollection) publishFailedRetrieveResult(retrieveMsg *msgstream.RetrieveMsg, errMsg string) error {
