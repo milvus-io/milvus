@@ -750,11 +750,15 @@ func sendMsgPacks(ms MsgStream, msgPacks []*MsgPack) error {
 //
 // This testcase will generate MsgPacks as following:
 //
-//     Insert     Insert     Insert     Insert     Insert     Insert
-//  |----------|----------|----------|----------|----------|----------|
-//             ^          ^          ^          ^          ^          ^
-//            TT(10)     TT(20)     TT(30)     TT(40)     TT(50)     TT(100)
+//       Insert     Insert     Insert     Insert     Insert     Insert
+//  c1 |----------|----------|----------|----------|----------|----------|
+//                ^          ^          ^          ^          ^          ^
+//              TT(10)     TT(20)     TT(30)     TT(40)     TT(50)     TT(100)
 //
+//       Insert     Insert     Insert     Insert     Insert     Insert
+//  c2 |----------|----------|----------|----------|----------|----------|
+//                ^          ^          ^          ^          ^          ^
+//              TT(10)     TT(20)     TT(30)     TT(40)     TT(50)     TT(100)
 // Then check:
 //   1. For each msg in MsgPack received by ttMsgStream consumer, there should be
 //        msgPack.BeginTs < msg.BeginTs() <= msgPack.EndTs
@@ -763,16 +767,21 @@ func sendMsgPacks(ms MsgStream, msgPacks []*MsgPack) error {
 func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 	pulsarAddr, _ := Params.Load("_PulsarAddress")
 	c1 := funcutil.RandomString(8)
-	producerChannels := []string{c1}
-	consumerChannels := []string{c1}
+	c2 := funcutil.RandomString(8)
+	p1Channels := []string{c1}
+	p2Channels := []string{c2}
+	consumerChannels := []string{c1, c2}
 	consumerSubName := funcutil.RandomString(8)
 
-	inputStream := getPulsarInputStream(pulsarAddr, producerChannels)
+	inputStream1 := getPulsarInputStream(pulsarAddr, p1Channels)
+	inputStream2 := getPulsarInputStream(pulsarAddr, p2Channels)
 	outputStream := getPulsarTtOutputStream(pulsarAddr, consumerChannels, consumerSubName)
 
-	msgPacks := createMsgPacks(5, 10, 10)
-	err := sendMsgPacks(inputStream, msgPacks)
-	assert.Nil(t, err)
+	msgPacks1 := createMsgPacks(5, 10, 10)
+	assert.Nil(t, sendMsgPacks(inputStream1, msgPacks1))
+
+	msgPacks2 := createMsgPacks(5, 10, 10)
+	assert.Nil(t, sendMsgPacks(inputStream2, msgPacks2))
 
 	// consume msg
 	log.Println("===============receive msg=================")
@@ -792,10 +801,11 @@ func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 		}
 		return rcvMsg
 	}
-	msgCount := checkNMsgPack(t, outputStream, len(msgPacks)/2)
-	assert.Equal(t, (len(msgPacks)/2-1)*len(msgPacks[0].Msgs), msgCount)
+	msgCount := checkNMsgPack(t, outputStream, len(msgPacks1)/2)
+	assert.Equal(t, (len(msgPacks1)/2-1)*len(msgPacks1[0].Msgs)*2, msgCount)
 
-	inputStream.Close()
+	inputStream1.Close()
+	inputStream2.Close()
 	outputStream.Close()
 }
 
@@ -857,72 +867,6 @@ func TestStream_PulsarTtMsgStream_2(t *testing.T) {
 	assert.Equal(t, (len(msgPacks)/2-1)*len(msgPacks[0].Msgs), msgCount)
 
 	inputStream.Close()
-}
-
-//
-// This testcase will generate MsgPacks as following:
-//
-//       Insert     Insert     Insert     Insert     Insert     Insert
-//  c1 |----------|----------|----------|----------|----------|----------|
-//                ^          ^          ^          ^          ^          ^
-//              TT(10)     TT(20)     TT(30)     TT(40)     TT(50)     TT(100)
-//
-//       Insert     Insert     Insert     Insert     Insert     Insert
-//  c2 |----------|----------|----------|----------|----------|----------|
-//                ^          ^          ^          ^          ^          ^
-//              TT(10)     TT(20)     TT(30)     TT(40)     TT(50)     TT(100)
-// Then check:
-//   1. For each msg in MsgPack received by ttMsgStream consumer, there should be
-//        msgPack.BeginTs < msg.BeginTs() <= msgPack.EndTs
-//   2. The count of consumed msg should be equal to the count of produced msg
-//
-func TestStream_PulsarTtMsgStream_3(t *testing.T) {
-	pulsarAddr, _ := Params.Load("_PulsarAddress")
-	c1 := funcutil.RandomString(8)
-	c2 := funcutil.RandomString(8)
-	p1Channels := []string{c1}
-	p2Channels := []string{c2}
-	consumerChannels := []string{c1, c2}
-	consumerSubName := funcutil.RandomString(8)
-
-	inputStream1 := getPulsarInputStream(pulsarAddr, p1Channels)
-	inputStream2 := getPulsarInputStream(pulsarAddr, p2Channels)
-	outputStream := getPulsarTtOutputStream(pulsarAddr, consumerChannels, consumerSubName)
-
-	msgPacks1 := createMsgPacks(5, 10, 10)
-	assert.Nil(t, sendMsgPacks(inputStream1, msgPacks1))
-
-	msgPacks2 := createMsgPacks(5, 10, 10)
-	assert.Nil(t, sendMsgPacks(inputStream2, msgPacks2))
-
-	// consume msg
-	log.Println("===============receive msg=================")
-	checkNMsgPack := func(t *testing.T, outputStream MsgStream, num int) int {
-		rcvMsg := 0
-		for i := 0; i < num; i++ {
-			msgPack := outputStream.Consume()
-			rcvMsg += len(msgPack.Msgs)
-			if len(msgPack.Msgs) > 0 {
-				for _, msg := range msgPack.Msgs {
-					log.Println("msg type: ", msg.Type(), ", msg value: ", msg)
-					assert.Greater(t, msg.BeginTs(), msgPack.BeginTs)
-					assert.LessOrEqual(t, msg.BeginTs(), msgPack.EndTs)
-				}
-				log.Println("================")
-			}
-		}
-		return rcvMsg
-	}
-	msgCount := checkNMsgPack(t, outputStream, len(msgPacks1)/2)
-	assert.Equal(t, (len(msgPacks1)/2-1)*len(msgPacks1[0].Msgs)*2, msgCount)
-	//msgCount := checkNMsgPack(t, outputStream, len(msgPacks1)-1)
-	//cnt1 := (len(msgPacks1)/2 - 1) * len(msgPacks1[0].Msgs)
-	//cnt2 := (len(msgPacks2)/2 - 1) * len(msgPacks2[0].Msgs)
-	//assert.Equal(t, (cnt1 + cnt2), msgCount)
-
-	inputStream1.Close()
-	inputStream2.Close()
-	outputStream.Close()
 }
 
 /****************************************Rmq test******************************************/

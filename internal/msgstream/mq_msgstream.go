@@ -390,7 +390,7 @@ type MqTtMsgStream struct {
 	chanMsgBufMutex    *sync.Mutex
 	chanTtMsgTimeMutex *sync.RWMutex
 	chanWaitGroup      *sync.WaitGroup
-	currTimeStamp      Timestamp
+	lastTimeStamp      Timestamp
 	syncConsumer       chan int
 }
 
@@ -432,7 +432,7 @@ func (ms *MqTtMsgStream) addConsumer(consumer mqclient.Consumer, channel string)
 	ms.chanMsgPos[consumer] = &internalpb.MsgPosition{
 		ChannelName: channel,
 		MsgID:       make([]byte, 0),
-		Timestamp:   ms.currTimeStamp,
+		Timestamp:   ms.lastTimeStamp,
 	}
 	ms.chanStopChan[consumer] = make(chan bool)
 	ms.chanTtMsgTime[consumer] = 0
@@ -527,7 +527,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 
 			// block here until all channels reach same timetick
 			currTs, ok := ms.allChanReachSameTtMsg(chanTtMsgSync)
-			if !ok || currTs <= ms.currTimeStamp {
+			if !ok || currTs <= ms.lastTimeStamp {
 				//log.Printf("All timeTick's timestamps are inconsistent")
 				ms.consumerLock.Unlock()
 				continue
@@ -583,19 +583,17 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 			ms.chanMsgBufMutex.Unlock()
 			ms.consumerLock.Unlock()
 
-			if len(timeTickBuf) > 0 {
-				msgPack := MsgPack{
-					BeginTs:        ms.currTimeStamp,
-					EndTs:          currTs,
-					Msgs:           timeTickBuf,
-					StartPositions: startMsgPosition,
-					EndPositions:   endMsgPositions,
-				}
-
-				//log.Debug("send msg pack", zap.Int("len", len(msgPack.Msgs)), zap.Uint64("currTs", currTs))
-				ms.receiveBuf <- &msgPack
+			msgPack := MsgPack{
+				BeginTs:        ms.lastTimeStamp,
+				EndTs:          currTs,
+				Msgs:           timeTickBuf,
+				StartPositions: startMsgPosition,
+				EndPositions:   endMsgPositions,
 			}
-			ms.currTimeStamp = currTs
+
+			//log.Debug("send msg pack", zap.Int("len", len(msgPack.Msgs)), zap.Uint64("currTs", currTs))
+			ms.receiveBuf <- &msgPack
+			ms.lastTimeStamp = currTs
 		}
 	}
 }
