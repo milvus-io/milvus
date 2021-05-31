@@ -203,6 +203,6 @@ func (mms *MemMsgStream) Chan() <-chan *MsgPack {
 	return mms.receiveBuf
 }
 
-func (mms *MemMsgStream) Seek(offset *MsgPosition) error {
+func (mms *MemMsgStream) Seek(offset []*MsgPosition) error {
 	return errors.New("MemMsgStream seek not implemented")
 }
