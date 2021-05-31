@@ -56,7 +56,6 @@ type Server struct {
 	meta              *meta
 	segmentInfoStream msgstream.MsgStream
 	segAllocator      segmentAllocator
-	statsHandler      *statsHandler
 	allocator         allocator
 	cluster           *cluster
 	masterClient      types.MasterService
@@ -137,7 +136,6 @@ func (s *Server) Start() error {
 	s.allocator = newAllocator(s.masterClient)
 
 	s.startSegmentAllocator()
-	s.statsHandler = newStatsHandler(s.meta)
 	if err = s.initFlushMsgStream(); err != nil {
 		return err
 	}
@@ -295,7 +293,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 			}
 			ssMsg := msg.(*msgstream.SegmentStatisticsMsg)
 			for _, stat := range ssMsg.SegStats {
-				if err := s.statsHandler.HandleSegmentStat(stat); err != nil {
+				if err := s.meta.UpdateSegmentStatistic(stat); err != nil {
 					log.Error("handle segment stat error",
 						zap.Int64("segmentID", stat.SegmentID),
 						zap.Error(err))
@@ -554,13 +552,8 @@ func (s *Server) loadCollectionFromMaster(ctx context.Context, collectionID int6
 	return s.meta.AddCollection(collInfo)
 }
 
-func (s *Server) prepareBinlogAndPos(req *datapb.SaveBinlogPathsRequest) (map[string]string, error) {
+func (s *Server) prepareBinlog(req *datapb.SaveBinlogPathsRequest) (map[string]string, error) {
 	meta := make(map[string]string)
-	segInfo, err := s.meta.GetSegment(req.GetSegmentID())
-	if err != nil {
-		log.Error("Failed to get segment info", zap.Int64("segmentID", req.GetSegmentID()), zap.Error(err))
-		return nil, err
-	}
 
 	for _, fieldBlp := range req.Field2BinlogPaths {
 		fieldMeta, err := s.prepareField2PathMeta(req.SegmentID, fieldBlp)
@@ -579,14 +572,6 @@ func (s *Server) prepareBinlogAndPos(req *datapb.SaveBinlogPathsRequest) (map[st
 	for k, v := range ddlMeta {
 		meta[k] = v
 	}
-	segmentPos, err := s.prepareSegmentPos(segInfo, req.GetDmlPosition(), req.GetDdlPosition())
-	if err != nil {
-		return nil, err
-	}
-	for k, v := range segmentPos {
-		meta[k] = v
-	}
-
 	return meta, nil
 }
 
