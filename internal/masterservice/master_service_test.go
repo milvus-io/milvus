@@ -261,8 +261,12 @@ func TestMasterService(t *testing.T) {
 
 	err = core.Init()
 	assert.Nil(t, err)
+
 	var localTSO uint64 = 0
+	localTSOLock := sync.RWMutex{}
 	core.TSOAllocator = func(c uint32) (uint64, error) {
+		localTSOLock.Lock()
+		defer localTSOLock.Unlock()
 		localTSO += uint64(c)
 		return localTSO, nil
 	}
@@ -302,7 +306,6 @@ func TestMasterService(t *testing.T) {
 						if _, ok := v.(*msgstream.TimeTickMsg); !ok {
 							ret = append(ret, v)
 						}
-
 					}
 					if len(ret) >= n {
 						return ret
@@ -310,11 +313,9 @@ func TestMasterService(t *testing.T) {
 				}
 			}
 		}
-
 	}
 
 	t.Run("time tick", func(t *testing.T) {
-
 		ttmsg, ok := <-timeTickStream.Chan()
 		assert.True(t, ok)
 		assert.Equal(t, 1, len(ttmsg.Msgs))
@@ -337,7 +338,6 @@ func TestMasterService(t *testing.T) {
 		ddm, ok := (ddmsg.Msgs[0]).(*msgstream.TimeTickMsg)
 		assert.True(t, ok)
 		assert.Greater(t, ddm.Base.Timestamp, uint64(0))
-
 		assert.Equal(t, ttm.Base.Timestamp, ddm.Base.Timestamp)
 	})
 
