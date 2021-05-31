@@ -106,9 +106,6 @@ func BenchmarkAllocTimestamp(b *testing.B) {
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
 
-	err = core.SetProxyService(ctx, &tbp{})
-	assert.Nil(b, err)
-
 	err = core.SetDataService(ctx, &tbd{})
 	assert.Nil(b, err)
 
