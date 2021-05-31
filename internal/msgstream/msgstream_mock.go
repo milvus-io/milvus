@@ -90,7 +90,7 @@ func (ms *SimpleMsgStream) Consume() *MsgPack {
 	return <-ms.msgChan
 }
 
-func (ms *SimpleMsgStream) Seek(offset *MsgPosition) error {
+func (ms *SimpleMsgStream) Seek(offset []*MsgPosition) error {
 	return nil
 }
 
