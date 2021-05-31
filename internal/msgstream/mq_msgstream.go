@@ -124,8 +124,10 @@ func (ms *mqMsgStream) AsConsumer(channels []string, subName string) {
 				return errors.New("Consumer is nil")
 			}
 
+			ms.consumerLock.Lock()
 			ms.consumers[channel] = pc
 			ms.consumerChannels = append(ms.consumerChannels, channel)
+			ms.consumerLock.Unlock()
 			ms.wait.Add(1)
 			go ms.receiveMsg(pc)
 			return nil
@@ -292,17 +294,37 @@ func (ms *mqMsgStream) Broadcast(msgPack *MsgPack) error {
 func (ms *mqMsgStream) Consume() *MsgPack {
 	for {
 		select {
+		case <-ms.ctx.Done():
+			//log.Debug("context closed")
+			return nil
 		case cm, ok := <-ms.receiveBuf:
 			if !ok {
 				log.Debug("buf chan closed")
 				return nil
 			}
 			return cm
-		case <-ms.ctx.Done():
-			//log.Debug("context closed")
-			return nil
 		}
 	}
+}
+
+func (ms *mqMsgStream) getTsMsgFromConsumerMsg(msg mqclient.ConsumerMessage) (TsMsg, error) {
+	header := commonpb.MsgHeader{}
+	err := proto.Unmarshal(msg.Payload(), &header)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to unmarshal message header, err %s", err.Error())
+	}
+	tsMsg, err := ms.unmarshal.Unmarshal(msg.Payload(), header.Base.MsgType)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to unmarshal tsMsg, err %s", err.Error())
+	}
+
+	// set msg info to tsMsg
+	tsMsg.SetPosition(&MsgPosition{
+		ChannelName: filepath.Base(msg.Topic()),
+		MsgID:       msg.ID().Serialize(),
+	})
+
+	return tsMsg, nil
 }
 
 func (ms *mqMsgStream) receiveMsg(consumer mqclient.Consumer) {
@@ -317,15 +339,10 @@ func (ms *mqMsgStream) receiveMsg(consumer mqclient.Consumer) {
 				return
 			}
 			consumer.Ack(msg)
-			headerMsg := commonpb.MsgHeader{}
-			err := proto.Unmarshal(msg.Payload(), &headerMsg)
+
+			tsMsg, err := ms.getTsMsgFromConsumerMsg(msg)
 			if err != nil {
-				log.Error("Failed to unmarshal message header", zap.Error(err))
-				continue
-			}
-			tsMsg, err := ms.unmarshal.Unmarshal(msg.Payload(), headerMsg.Base.MsgType)
-			if err != nil {
-				log.Error("Failed to unmarshal tsMsg", zap.Error(err))
+				log.Error("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
 				continue
 			}
 
@@ -333,12 +350,6 @@ func (ms *mqMsgStream) receiveMsg(consumer mqclient.Consumer) {
 			if ok {
 				tsMsg.SetTraceCtx(opentracing.ContextWithSpan(context.Background(), sp))
 			}
-
-			tsMsg.SetPosition(&MsgPosition{
-				ChannelName: filepath.Base(msg.Topic()),
-				//FIXME
-				MsgID: msg.ID().Serialize(),
-			})
 
 			msgPack := MsgPack{Msgs: []TsMsg{tsMsg}}
 			ms.receiveBuf <- &msgPack
@@ -372,12 +383,15 @@ func (ms *mqMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 
 type MqTtMsgStream struct {
 	mqMsgStream
-	unsolvedBuf     map[mqclient.Consumer][]TsMsg
-	msgPositions    map[mqclient.Consumer]*internalpb.MsgPosition
-	unsolvedMutex   *sync.Mutex
-	lastTimeStamp   Timestamp
-	syncConsumer    chan int
-	stopConsumeChan map[mqclient.Consumer]chan bool
+	chanMsgBuf         map[mqclient.Consumer][]TsMsg
+	chanMsgPos         map[mqclient.Consumer]*internalpb.MsgPosition
+	chanStopChan       map[mqclient.Consumer]chan bool
+	chanTtMsgTime      map[mqclient.Consumer]Timestamp
+	chanMsgBufMutex    *sync.Mutex
+	chanTtMsgTimeMutex *sync.RWMutex
+	chanWaitGroup      *sync.WaitGroup
+	lastTimeStamp      Timestamp
+	syncConsumer       chan int
 }
 
 func NewMqTtMsgStream(ctx context.Context,
@@ -389,18 +403,22 @@ func NewMqTtMsgStream(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	unsolvedBuf := make(map[mqclient.Consumer][]TsMsg)
-	stopChannel := make(map[mqclient.Consumer]chan bool)
-	msgPositions := make(map[mqclient.Consumer]*internalpb.MsgPosition)
+	chanMsgBuf := make(map[mqclient.Consumer][]TsMsg)
+	chanMsgPos := make(map[mqclient.Consumer]*internalpb.MsgPosition)
+	chanStopChan := make(map[mqclient.Consumer]chan bool)
+	chanTtMsgTime := make(map[mqclient.Consumer]Timestamp)
 	syncConsumer := make(chan int, 1)
 
 	return &MqTtMsgStream{
-		mqMsgStream:     *msgStream,
-		unsolvedBuf:     unsolvedBuf,
-		msgPositions:    msgPositions,
-		unsolvedMutex:   &sync.Mutex{},
-		syncConsumer:    syncConsumer,
-		stopConsumeChan: stopChannel,
+		mqMsgStream:        *msgStream,
+		chanMsgBuf:         chanMsgBuf,
+		chanMsgPos:         chanMsgPos,
+		chanStopChan:       chanStopChan,
+		chanTtMsgTime:      chanTtMsgTime,
+		chanMsgBufMutex:    &sync.Mutex{},
+		chanTtMsgTimeMutex: &sync.RWMutex{},
+		chanWaitGroup:      &sync.WaitGroup{},
+		syncConsumer:       syncConsumer,
 	}, nil
 }
 
@@ -409,19 +427,19 @@ func (ms *MqTtMsgStream) addConsumer(consumer mqclient.Consumer, channel string)
 		ms.syncConsumer <- 1
 	}
 	ms.consumers[channel] = consumer
-	ms.unsolvedBuf[consumer] = make([]TsMsg, 0)
 	ms.consumerChannels = append(ms.consumerChannels, channel)
-	ms.msgPositions[consumer] = &internalpb.MsgPosition{
+	ms.chanMsgBuf[consumer] = make([]TsMsg, 0)
+	ms.chanMsgPos[consumer] = &internalpb.MsgPosition{
 		ChannelName: channel,
 		MsgID:       make([]byte, 0),
 		Timestamp:   ms.lastTimeStamp,
 	}
-	stopConsumeChan := make(chan bool)
-	ms.stopConsumeChan[consumer] = stopConsumeChan
+	ms.chanStopChan[consumer] = make(chan bool)
+	ms.chanTtMsgTime[consumer] = 0
 }
 
-func (ms *MqTtMsgStream) AsConsumer(channels []string,
-	subName string) {
+// AsConsumer subscribes channels as consumer for a MsgStream
+func (ms *MqTtMsgStream) AsConsumer(channels []string, subName string) {
 	for _, channel := range channels {
 		if _, ok := ms.consumers[channel]; ok {
 			continue
@@ -484,9 +502,9 @@ func (ms *MqTtMsgStream) Close() {
 
 func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 	defer ms.wait.Done()
-	isChannelReady := make(map[mqclient.Consumer]bool)
-	eofMsgTimeStamp := make(map[mqclient.Consumer]Timestamp)
+	chanTtMsgSync := make(map[mqclient.Consumer]bool)
 
+	// block here until addConsumer
 	if _, ok := <-ms.syncConsumer; !ok {
 		log.Debug("consumer closed!")
 		return
@@ -497,28 +515,30 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 		case <-ms.ctx.Done():
 			return
 		default:
-			wg := sync.WaitGroup{}
-			findMapMutex := sync.RWMutex{}
 			ms.consumerLock.Lock()
+
+			// wait all channels get ttMsg
 			for _, consumer := range ms.consumers {
-				if isChannelReady[consumer] {
-					continue
+				if !chanTtMsgSync[consumer] {
+					ms.chanWaitGroup.Add(1)
+					go ms.consumeToTtMsg(consumer)
 				}
-				wg.Add(1)
-				go ms.findTimeTick(consumer, eofMsgTimeStamp, &wg, &findMapMutex)
 			}
-			wg.Wait()
-			timeStamp, ok := checkTimeTickMsg(eofMsgTimeStamp, isChannelReady, &findMapMutex)
-			if !ok || timeStamp <= ms.lastTimeStamp {
+			ms.chanWaitGroup.Wait()
+
+			// block here until all channels reach same timetick
+			currTs, ok := ms.allChanReachSameTtMsg(chanTtMsgSync)
+			if !ok || currTs <= ms.lastTimeStamp {
 				//log.Printf("All timeTick's timestamps are inconsistent")
 				ms.consumerLock.Unlock()
 				continue
 			}
+
 			timeTickBuf := make([]TsMsg, 0)
 			startMsgPosition := make([]*internalpb.MsgPosition, 0)
 			endMsgPositions := make([]*internalpb.MsgPosition, 0)
-			ms.unsolvedMutex.Lock()
-			for consumer, msgs := range ms.unsolvedBuf {
+			ms.chanMsgBufMutex.Lock()
+			for consumer, msgs := range ms.chanMsgBuf {
 				if len(msgs) == 0 {
 					continue
 				}
@@ -529,60 +549,64 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 						timeTickMsg = v
 						continue
 					}
-					if v.EndTs() <= timeStamp {
+					if v.EndTs() <= currTs {
 						timeTickBuf = append(timeTickBuf, v)
+						//log.Debug("pack msg", zap.Uint64("curr", v.EndTs()), zap.Uint64("currTs", currTs))
 					} else {
 						tempBuffer = append(tempBuffer, v)
 					}
 				}
-				ms.unsolvedBuf[consumer] = tempBuffer
+				ms.chanMsgBuf[consumer] = tempBuffer
 
-				startMsgPosition = append(startMsgPosition, ms.msgPositions[consumer])
+				startMsgPosition = append(startMsgPosition, ms.chanMsgPos[consumer])
 				var newPos *internalpb.MsgPosition
 				if len(tempBuffer) > 0 {
+					// if tempBuffer is not empty, use tempBuffer[0] to seek
 					newPos = &internalpb.MsgPosition{
 						ChannelName: tempBuffer[0].Position().ChannelName,
 						MsgID:       tempBuffer[0].Position().MsgID,
-						Timestamp:   timeStamp,
+						Timestamp:   currTs,
 						MsgGroup:    consumer.Subscription(),
 					}
 					endMsgPositions = append(endMsgPositions, newPos)
-				} else {
+				} else if timeTickMsg != nil {
+					// if tempBuffer is empty, use timeTickMsg to seek
 					newPos = &internalpb.MsgPosition{
 						ChannelName: timeTickMsg.Position().ChannelName,
 						MsgID:       timeTickMsg.Position().MsgID,
-						Timestamp:   timeStamp,
+						Timestamp:   currTs,
 						MsgGroup:    consumer.Subscription(),
 					}
 					endMsgPositions = append(endMsgPositions, newPos)
 				}
-				ms.msgPositions[consumer] = newPos
+				ms.chanMsgPos[consumer] = newPos
 			}
-			ms.unsolvedMutex.Unlock()
+			ms.chanMsgBufMutex.Unlock()
 			ms.consumerLock.Unlock()
 
 			msgPack := MsgPack{
 				BeginTs:        ms.lastTimeStamp,
-				EndTs:          timeStamp,
+				EndTs:          currTs,
 				Msgs:           timeTickBuf,
 				StartPositions: startMsgPosition,
 				EndPositions:   endMsgPositions,
 			}
 
+			//log.Debug("send msg pack", zap.Int("len", len(msgPack.Msgs)), zap.Uint64("currTs", currTs))
 			ms.receiveBuf <- &msgPack
-			ms.lastTimeStamp = timeStamp
+			ms.lastTimeStamp = currTs
 		}
 	}
 }
 
-func (ms *MqTtMsgStream) findTimeTick(consumer mqclient.Consumer,
-	eofMsgMap map[mqclient.Consumer]Timestamp,
-	wg *sync.WaitGroup,
-	findMapMutex *sync.RWMutex) {
-	defer wg.Done()
+// Save all msgs into chanMsgBuf[] till receive one ttMsg
+func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqclient.Consumer) {
+	defer ms.chanWaitGroup.Done()
 	for {
 		select {
 		case <-ms.ctx.Done():
+			return
+		case <-ms.chanStopChan[consumer]:
 			return
 		case msg, ok := <-consumer.Chan():
 			if !ok {
@@ -591,73 +615,54 @@ func (ms *MqTtMsgStream) findTimeTick(consumer mqclient.Consumer,
 			}
 			consumer.Ack(msg)
 
-			headerMsg := commonpb.MsgHeader{}
-			err := proto.Unmarshal(msg.Payload(), &headerMsg)
+			tsMsg, err := ms.getTsMsgFromConsumerMsg(msg)
 			if err != nil {
-				log.Error("Failed to unmarshal message header", zap.Error(err))
+				log.Error("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
 				continue
 			}
-			tsMsg, err := ms.unmarshal.Unmarshal(msg.Payload(), headerMsg.Base.MsgType)
-			if err != nil {
-				log.Error("Failed to unmarshal tsMsg", zap.Error(err))
-				continue
-			}
-
-			// set msg info to tsMsg
-			tsMsg.SetPosition(&MsgPosition{
-				ChannelName: filepath.Base(msg.Topic()),
-				MsgID:       msg.ID().Serialize(),
-			})
 
 			sp, ok := ExtractFromPulsarMsgProperties(tsMsg, msg.Properties())
 			if ok {
 				tsMsg.SetTraceCtx(opentracing.ContextWithSpan(context.Background(), sp))
 			}
 
-			ms.unsolvedMutex.Lock()
-			ms.unsolvedBuf[consumer] = append(ms.unsolvedBuf[consumer], tsMsg)
-			ms.unsolvedMutex.Unlock()
+			ms.chanMsgBufMutex.Lock()
+			ms.chanMsgBuf[consumer] = append(ms.chanMsgBuf[consumer], tsMsg)
+			ms.chanMsgBufMutex.Unlock()
 
-			if headerMsg.Base.MsgType == commonpb.MsgType_TimeTick {
-				findMapMutex.Lock()
-				eofMsgMap[consumer] = tsMsg.(*TimeTickMsg).Base.Timestamp
-				findMapMutex.Unlock()
+			if tsMsg.Type() == commonpb.MsgType_TimeTick {
+				ms.chanTtMsgTimeMutex.Lock()
+				ms.chanTtMsgTime[consumer] = tsMsg.(*TimeTickMsg).Base.Timestamp
+				ms.chanTtMsgTimeMutex.Unlock()
 				sp.Finish()
 				return
 			}
 			sp.Finish()
-		case <-ms.stopConsumeChan[consumer]:
-			return
 		}
 	}
 }
 
-func checkTimeTickMsg(msg map[mqclient.Consumer]Timestamp,
-	isChannelReady map[mqclient.Consumer]bool,
-	mu *sync.RWMutex) (Timestamp, bool) {
-	checkMap := make(map[Timestamp]int)
+// return true only when all channels reach same timetick
+func (ms *MqTtMsgStream) allChanReachSameTtMsg(chanTtMsgSync map[mqclient.Consumer]bool) (Timestamp, bool) {
+	tsMap := make(map[Timestamp]int)
 	var maxTime Timestamp = 0
-	for _, v := range msg {
-		checkMap[v]++
-		if v > maxTime {
-			maxTime = v
+	for _, t := range ms.chanTtMsgTime {
+		tsMap[t]++
+		if t > maxTime {
+			maxTime = t
 		}
 	}
-	if len(checkMap) <= 1 {
-		for consumer := range msg {
-			isChannelReady[consumer] = false
+	// when all channels reach same timetick, timeMap should contain only 1 timestamp
+	if len(tsMap) <= 1 {
+		for consumer := range ms.chanTtMsgTime {
+			chanTtMsgSync[consumer] = false
 		}
 		return maxTime, true
 	}
-	for consumer := range msg {
-		mu.RLock()
-		v := msg[consumer]
-		mu.RUnlock()
-		if v != maxTime {
-			isChannelReady[consumer] = false
-		} else {
-			isChannelReady[consumer] = true
-		}
+	for consumer := range ms.chanTtMsgTime {
+		ms.chanTtMsgTimeMutex.RLock()
+		chanTtMsgSync[consumer] = (ms.chanTtMsgTime[consumer] == maxTime)
+		ms.chanTtMsgTimeMutex.RUnlock()
 	}
 
 	return 0, false
@@ -747,7 +752,7 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 						ChannelName: filepath.Base(msg.Topic()),
 						MsgID:       msg.ID().Serialize(),
 					})
-					ms.unsolvedBuf[consumer] = append(ms.unsolvedBuf[consumer], tsMsg)
+					ms.chanMsgBuf[consumer] = append(ms.chanMsgBuf[consumer], tsMsg)
 				}
 			}
 		}
