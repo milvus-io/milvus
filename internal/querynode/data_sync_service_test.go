@@ -116,7 +116,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	assert.Nil(t, err)
 
 	channels := []VChannel{"0"}
-	err = node.streaming.dataSyncService.addCollectionFlowGraph(collectionID, channels, "dataSyncTestSubName")
+	err = node.streaming.dataSyncService.addCollectionFlowGraph(collectionID, channels)
 	assert.NoError(t, err)
 	err = node.streaming.dataSyncService.startCollectionFlowGraph(collectionID)
 	assert.NoError(t, err)
