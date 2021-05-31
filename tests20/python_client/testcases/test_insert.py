@@ -17,6 +17,12 @@ default_binary_schema = cf.gen_default_binary_collection_schema()
 class TestInsertParams(ApiReq):
     """ Test case of Insert interface """
 
+    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
+    def get_non_data_type(self, request):
+        if isinstance(request.param, list):
+            pytest.skip("list type is valid data type")
+        yield request.param
+
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(reason="issue #5302")
     def test_insert_dataframe_data(self):
@@ -48,33 +54,24 @@ class TestInsertParams(ApiReq):
         self.connection.connection.get_connection().flush([collection.name])
         assert collection.num_entities == nb
 
-    def test_insert_non_data_type(self):
+    def test_insert_non_data_type(self, get_non_data_type):
         """
         target: test insert with non-dataframe, non-list data
         method: insert with data (non-dataframe and non-list type)
         expected: raise exception
         """
-        pass
+        self._collection()
+        ex, _ = self.collection.insert(data=get_non_data_type)
+        log.error(str(ex))
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_insert_empty_data(self):
+    @pytest.mark.parametrize("data", [[], pd.DataFrame()])
+    def test_insert_empty_data(self, data):
         """
         target: test insert empty data
         method: insert empty
         expected: raise exception
         """
-        self._collection()
-        ex, _ = self.collection.insert(data=[])
-        assert "Column cnt not match with schema" in str(ex)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_insert_empty_dataframe(self):
-        """
-        target: test insert empty dataframe
-        method: insert with empty dataframe
-        expected: raise exception
-        """
-        data = pd.DataFrame()
         self._collection()
         ex, _ = self.collection.insert(data=data)
         assert "Column cnt not match with schema" in str(ex)
@@ -85,7 +82,30 @@ class TestInsertParams(ApiReq):
         method: dataframe just have columns
         expected: num entities is zero
         """
-        pass
+        self._collection()
+        columns = [ct.default_int64_field_name, ct.default_float_vec_field_name]
+        df = pd.DataFrame(columns=columns)
+        ex, _ = self.insert(data=df)
+        log.error(str(ex))
+
+    def test_insert_empty_field_name_dataframe(self):
+        """
+        target: test insert empty field name df
+        method: dataframe with empty column
+        expected: raise exception
+        """
+        self._collection()
+        nb = 100
+        int_values = pd.Series(data=[i for i in range(nb)])
+        float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
+        float_vec_values = cf.gen_vectors(nb, ct.default_dim)
+        df = pd.DataFrame({
+            ' ': int_values,
+            ' ': float_values,
+            ct.default_float_vec_field_name: float_vec_values
+        })
+        ex, _ = self.collection.insert(data=df)
+        assert "Field name should not be empty" in str(ex)
 
     def test_insert_invalid_field_name_dataframe(self):
         """
@@ -417,6 +437,7 @@ class TestInsertAsync(ApiReq):
       The following cases are used to test insert async
     ******************************************************************
     """
+
     def test_insert_sync(self):
         """
         target: test async insert
