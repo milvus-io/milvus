@@ -908,7 +908,7 @@ func TestStream_MqMsgStream_Seek(t *testing.T) {
 	pulsarClient, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
 	outputStream2, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
 	outputStream2.AsConsumer(consumerChannels, consumerSubName)
-	outputStream2.Seek(seekPosition)
+	outputStream2.Seek([]*internalpb.MsgPosition{seekPosition})
 	outputStream2.Start()
 
 	for i := 6; i < 10; i++ {
