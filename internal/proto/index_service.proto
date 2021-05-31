@@ -29,7 +29,7 @@ service IndexNode {
 message RegisterNodeRequest {
   common.MsgBase base = 1;
   common.Address address = 2;
-  int64 serverID = 3;
+  int64 nodeID = 3;
 }
 
 message RegisterNodeResponse {
@@ -101,7 +101,7 @@ message IndexMeta {
   BuildIndexRequest req = 4;
   repeated string index_file_paths = 5;
   bool mark_deleted = 6;
-  int64 node_serverID = 7;
+  int64 nodeID = 7;
   int64 version = 8;
   bool recycled = 9;
 }
