@@ -51,6 +51,13 @@ var (
 			Name:      "insert_channel_time_tick",
 			Help:      "Time tick of insert Channel in 24H",
 		}, []string{"vchannel"})
+	MasterDDChannelTimeTick = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "milvus",
+			Subsystem: "master",
+			Name:      "dd_channel_time_tick",
+			Help:      "Time tick of dd Channel in 24H",
+		})
 )
 
 //RegisterMaster register Master metrics
@@ -59,6 +66,7 @@ func RegisterMaster() {
 	prometheus.MustRegister(MasterCreateCollectionCounter)
 	prometheus.MustRegister(MasterDropCollectionCounter)
 	prometheus.MustRegister(MasterInsertChannelTimeTick)
+	prometheus.MustRegister(MasterDDChannelTimeTick)
 	//prometheus.MustRegister(PanicCounter)
 }
 

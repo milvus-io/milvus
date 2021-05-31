@@ -576,6 +576,7 @@ func (c *Core) setMsgStreams() error {
 		if err := ddStream.Broadcast(&msgPack); err != nil {
 			return err
 		}
+		metrics.MasterDDChannelTimeTick.Set(float64(tsoutil.Mod24H(t)))
 		return nil
 	}
 
@@ -719,7 +720,7 @@ func (c *Core) SetNewProxyClient(f func(sess *sessionutil.Session) (types.ProxyN
 	if c.NewProxyClient == nil {
 		c.NewProxyClient = f
 	} else {
-		log.Debug("NewProxyClient has alread set")
+		log.Debug("NewProxyClient has already set")
 	}
 }
 
