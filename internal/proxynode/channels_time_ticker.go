@@ -35,19 +35,24 @@ type channelsTimeTicker interface {
 	close() error
 	addPChan(pchan pChan) error
 	getLastTick(pchan pChan) (Timestamp, error)
+	getMinTsStatistics() (map[pChan]Timestamp, error)
 }
 
 type channelsTimeTickerImpl struct {
-	interval        time.Duration       // interval to synchronize
-	minTsStatistics map[pChan]Timestamp // pchan -> min Timestamp
-	statisticsMtx   sync.RWMutex
-	getStatistics   getPChanStatisticsFuncType
-	tso             tsoAllocator
-	currents        map[pChan]Timestamp
-	currentsMtx     sync.RWMutex
-	wg              sync.WaitGroup
-	ctx             context.Context
-	cancel          context.CancelFunc
+	interval          time.Duration       // interval to synchronize
+	minTsStatistics   map[pChan]Timestamp // pchan -> min Timestamp
+	statisticsMtx     sync.RWMutex
+	getStatisticsFunc getPChanStatisticsFuncType
+	tso               tsoAllocator
+	currents          map[pChan]Timestamp
+	currentsMtx       sync.RWMutex
+	wg                sync.WaitGroup
+	ctx               context.Context
+	cancel            context.CancelFunc
+}
+
+func (ticker *channelsTimeTickerImpl) getMinTsStatistics() (map[pChan]Timestamp, error) {
+	panic("implement me")
 }
 
 func (ticker *channelsTimeTickerImpl) initStatistics() {
@@ -86,7 +91,7 @@ func (ticker *channelsTimeTickerImpl) tick() error {
 	for pchan := range ticker.currents {
 		current := ticker.currents[pchan]
 
-		stats, err := ticker.getStatistics(pchan)
+		stats, err := ticker.getStatisticsFunc(pchan)
 		if err != nil {
 			continue
 		}
@@ -174,20 +179,20 @@ func newChannelsTimeTicker(
 	ctx context.Context,
 	interval time.Duration,
 	pchans []pChan,
-	getStatistics getPChanStatisticsFuncType,
+	getStatisticsFunc getPChanStatisticsFuncType,
 	tso tsoAllocator,
 ) *channelsTimeTickerImpl {
 
 	ctx1, cancel := context.WithCancel(ctx)
 
 	ticker := &channelsTimeTickerImpl{
-		interval:        interval,
-		minTsStatistics: make(map[pChan]Timestamp),
-		getStatistics:   getStatistics,
-		tso:             tso,
-		currents:        make(map[pChan]Timestamp),
-		ctx:             ctx1,
-		cancel:          cancel,
+		interval:          interval,
+		minTsStatistics:   make(map[pChan]Timestamp),
+		getStatisticsFunc: getStatisticsFunc,
+		tso:               tso,
+		currents:          make(map[pChan]Timestamp),
+		ctx:               ctx1,
+		cancel:            cancel,
 	}
 
 	for _, pchan := range pchans {
