@@ -127,7 +127,6 @@ func TestGrpcService(t *testing.T) {
 	cms.Params.Init()
 	cms.Params.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
 	cms.Params.KvRootPath = fmt.Sprintf("/%d/test/kv", randVal)
-	cms.Params.ProxyTimeTickChannel = fmt.Sprintf("proxyTimeTick%d", randVal)
 	cms.Params.MsgChannelSubName = fmt.Sprintf("msgChannel%d", randVal)
 	cms.Params.TimeTickChannel = fmt.Sprintf("timeTick%d", randVal)
 	cms.Params.DdChannel = fmt.Sprintf("ddChannel%d", randVal)
@@ -168,7 +167,6 @@ func TestGrpcService(t *testing.T) {
 	err = core.Init()
 	assert.Nil(t, err)
 
-	core.ProxyTimeTickChan = make(chan typeutil.Timestamp, 8)
 	FlushedSegmentChan := make(chan *msgstream.MsgPack, 8)
 	core.DataNodeFlushedSegmentChan = FlushedSegmentChan
 	SegmentInfoChan := make(chan *msgstream.MsgPack, 8)
@@ -855,32 +853,6 @@ func (m *mockCore) Stop() error {
 func (m *mockCore) SetNewProxyClient(func(sess *sessionutil.Session) (types.ProxyNode, error)) {
 }
 
-type mockProxy struct {
-	types.ProxyService
-}
-
-func (m *mockProxy) Init() error {
-	return nil
-}
-func (m *mockProxy) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{
-		State: &internalpb.ComponentInfo{
-			StateCode: internalpb.StateCode_Healthy,
-		},
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		SubcomponentStates: []*internalpb.ComponentInfo{
-			{
-				StateCode: internalpb.StateCode_Healthy,
-			},
-		},
-	}, nil
-}
-func (m *mockProxy) Stop() error {
-	return fmt.Errorf("stop error")
-}
-
 type mockDataService struct {
 	types.DataService
 }
@@ -952,9 +924,6 @@ func TestRun(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "listen tcp: address 1000000: invalid port")
 
-	svr.newProxyServiceClient = func(s string) types.ProxyService {
-		return &mockProxy{}
-	}
 	svr.newDataServiceClient = func(s, metaRoot, address string, timeout time.Duration) types.DataService {
 		return &mockDataService{}
 	}

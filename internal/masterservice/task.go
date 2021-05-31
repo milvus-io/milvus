@@ -226,10 +226,8 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
 	ddOp := func(ts typeutil.Timestamp) (string, error) {
-		if SetDDTimeTimeByMaster {
-			ddCollReq.Base.Timestamp = ts
-			ddPartReq.Base.Timestamp = ts
-		}
+		ddCollReq.Base.Timestamp = ts
+		ddPartReq.Base.Timestamp = ts
 		return EncodeDdOperation(&ddCollReq, &ddPartReq, CreateCollectionDDType)
 	}
 
@@ -247,9 +245,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	if SetDDTimeTimeByMaster {
-		t.core.SendTimeTick(ts)
-	}
+	t.core.SendTimeTick(ts)
 
 	// Update DDOperation in etcd
 	return t.core.setDdMsgSendFlag(true)
@@ -289,9 +285,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
 	ddOp := func(ts typeutil.Timestamp) (string, error) {
-		if SetDDTimeTimeByMaster {
-			ddReq.Base.Timestamp = ts
-		}
+		ddReq.Base.Timestamp = ts
 		return EncodeDdOperation(&ddReq, nil, DropCollectionDDType)
 	}
 
@@ -305,9 +299,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	if SetDDTimeTimeByMaster {
-		t.core.SendTimeTick(ts)
-	}
+	t.core.SendTimeTick(ts)
 
 	//notify query service to release collection
 	go func() {
@@ -476,9 +468,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
 	ddOp := func(ts typeutil.Timestamp) (string, error) {
-		if SetDDTimeTimeByMaster {
-			ddReq.Base.Timestamp = ts
-		}
+		ddReq.Base.Timestamp = ts
 		return EncodeDdOperation(&ddReq, nil, CreatePartitionDDType)
 	}
 
@@ -492,9 +482,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	if SetDDTimeTimeByMaster {
-		t.core.SendTimeTick(ts)
-	}
+	t.core.SendTimeTick(ts)
 
 	req := proxypb.InvalidateCollMetaCacheRequest{
 		Base: &commonpb.MsgBase{
@@ -552,9 +540,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
 	ddOp := func(ts typeutil.Timestamp) (string, error) {
-		if SetDDTimeTimeByMaster {
-			ddReq.Base.Timestamp = ts
-		}
+		ddReq.Base.Timestamp = ts
 		return EncodeDdOperation(&ddReq, nil, DropPartitionDDType)
 	}
 
@@ -568,9 +554,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	if SetDDTimeTimeByMaster {
-		t.core.SendTimeTick(ts)
-	}
+	t.core.SendTimeTick(ts)
 
 	req := proxypb.InvalidateCollMetaCacheRequest{
 		Base: &commonpb.MsgBase{
