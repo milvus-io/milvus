@@ -1725,7 +1725,6 @@ func TestMasterService2(t *testing.T) {
 		collName = "testColl"
 		partName = "testPartition"
 	)
-	SetDDTimeTimeByMaster = true
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

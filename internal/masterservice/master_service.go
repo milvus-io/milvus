@@ -57,8 +57,6 @@ import (
 
 //NEZA2017, DEBUG FLAG for milvus 2.0, this part should remove when milvus 2.0 release
 
-var SetDDTimeTimeByMaster bool = false
-
 // ------------------ struct -----------------------
 
 // DdOperation used to save ddMsg into ETCD
@@ -267,50 +265,28 @@ func (c *Core) startDdScheduler() {
 }
 
 func (c *Core) startTimeTickLoop() {
-	if SetDDTimeTimeByMaster {
-		ticker := time.NewTimer(time.Duration(Params.TimeTickInterval) * time.Millisecond)
-		cnt := 0
-		for {
-			select {
-			case <-c.ctx.Done():
-				log.Debug("master context closed", zap.Error(c.ctx.Err()))
-				return
-			case <-ticker.C:
-				if len(c.ddReqQueue) < 2 || cnt > 5 {
-					tt := &TimetickTask{
-						baseReqTask: baseReqTask{
-							ctx:  c.ctx,
-							cv:   make(chan error, 1),
-							core: c,
-						},
-					}
-					c.ddReqQueue <- tt
-					cnt = 0
-				} else {
-					cnt++
+	ticker := time.NewTimer(time.Duration(Params.TimeTickInterval) * time.Millisecond)
+	cnt := 0
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Debug("master context closed", zap.Error(c.ctx.Err()))
+			return
+		case <-ticker.C:
+			if len(c.ddReqQueue) < 2 || cnt > 5 {
+				tt := &TimetickTask{
+					baseReqTask: baseReqTask{
+						ctx:  c.ctx,
+						cv:   make(chan error, 1),
+						core: c,
+					},
 				}
+				c.ddReqQueue <- tt
+				cnt = 0
+			} else {
+				cnt++
+			}
 
-			}
-		}
-	} else {
-		for {
-			select {
-			case <-c.ctx.Done():
-				log.Debug("close master time tick loop")
-				return
-			case tt, ok := <-c.ProxyTimeTickChan:
-				if !ok {
-					log.Warn("proxyTimeTickStream is closed, exit time tick loop")
-					return
-				}
-				if tt <= c.lastTimeTick {
-					log.Warn("master time tick go back", zap.Uint64("last time tick", c.lastTimeTick), zap.Uint64("input time tick ", tt))
-				}
-				if err := c.SendTimeTick(tt); err != nil {
-					log.Warn("master send time tick into dd and time_tick channel failed", zap.String("error", err.Error()))
-				}
-				c.lastTimeTick = tt
-			}
 		}
 	}
 }
