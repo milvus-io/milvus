@@ -64,16 +64,16 @@ func getUniqueIntGeneratorIns() uniqueIntGenerator {
 
 type getChannelsFuncType = func(collectionID UniqueID) (map[vChan]pChan, error)
 
-type masterService interface {
+type getChannelsService interface {
 	GetChannels(collectionID UniqueID) (map[vChan]pChan, error)
 }
 
-type mockMaster struct {
+type mockGetChannelsService struct {
 	collectionID2Channels map[UniqueID]map[vChan]pChan
 }
 
-func newMockMaster() *mockMaster {
-	return &mockMaster{
+func newMockGetChannelsService() *mockGetChannelsService {
+	return &mockGetChannelsService{
 		collectionID2Channels: make(map[UniqueID]map[vChan]pChan),
 	}
 }
@@ -87,37 +87,7 @@ func genUniqueStr() string {
 	return fmt.Sprintf("%X", b)
 }
 
-func (m *mockMaster) GetChannels(collectionID UniqueID) (map[vChan]pChan, error) {
-	channels, ok := m.collectionID2Channels[collectionID]
-	if ok {
-		return channels, nil
-	}
-
-	channels = make(map[vChan]pChan)
-	l := rand.Uint64()%10 + 1
-	for i := 0; uint64(i) < l; i++ {
-		channels[genUniqueStr()] = genUniqueStr()
-	}
-
-	m.collectionID2Channels[collectionID] = channels
-	return channels, nil
-}
-
-type queryService interface {
-	GetChannels(collectionID UniqueID) (map[vChan]pChan, error)
-}
-
-type mockQueryService struct {
-	collectionID2Channels map[UniqueID]map[vChan]pChan
-}
-
-func newMockQueryService() *mockQueryService {
-	return &mockQueryService{
-		collectionID2Channels: make(map[UniqueID]map[vChan]pChan),
-	}
-}
-
-func (m *mockQueryService) GetChannels(collectionID UniqueID) (map[vChan]pChan, error) {
+func (m *mockGetChannelsService) GetChannels(collectionID UniqueID) (map[vChan]pChan, error) {
 	channels, ok := m.collectionID2Channels[collectionID]
 	if ok {
 		return channels, nil
@@ -475,9 +445,9 @@ func (mgr *channelsMgrImpl) removeAllDMLStream() error {
 	return mgr.dmlChannelsMgr.removeAllStream()
 }
 
-func newChannelsMgr(master masterService, query queryService, msgStreamFactory msgstream.Factory) channelsMgr {
+func newChannelsMgr(getDmlChannelsFunc getChannelsFuncType, getDqlChannelsFunc getChannelsFuncType, msgStreamFactory msgstream.Factory) channelsMgr {
 	return &channelsMgrImpl{
-		dmlChannelsMgr: newSingleTypeChannelsMgr(master.GetChannels, msgStreamFactory),
-		dqlChannelsMgr: newSingleTypeChannelsMgr(query.GetChannels, msgStreamFactory),
+		dmlChannelsMgr: newSingleTypeChannelsMgr(getDmlChannelsFunc, msgStreamFactory),
+		dqlChannelsMgr: newSingleTypeChannelsMgr(getDqlChannelsFunc, msgStreamFactory),
 	}
 }
