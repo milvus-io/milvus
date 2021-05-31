@@ -227,14 +227,14 @@ class TestLoadCollection:
         ids = connect.insert(collection, default_entities)
         assert len(ids) == default_nb
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        ids = connect.insert(collection, default_entities, partition_name=default_tag)
         assert len(ids) == default_nb
         connect.flush([collection])
         connect.load_collection(collection)
         connect.release_partitions(collection, [default_tag])
         with pytest.raises(Exception) as e:
-            connect.search(collection, default_single_query, partition_tags=[default_tag])
-        res = connect.search(collection, default_single_query, partition_tags=[default_partition_name])
+            connect.search(collection, default_single_query, partition_names=[default_tag])
+        res = connect.search(collection, default_single_query, partition_names=[default_partition_name])
         assert len(res[0]) == default_top_k
 
     def test_load_collection_release_all_partitions(self, connect, collection):
@@ -246,7 +246,7 @@ class TestLoadCollection:
         ids = connect.insert(collection, default_entities)
         assert len(ids) == default_nb
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        ids = connect.insert(collection, default_entities, partition_name=default_tag)
         assert len(ids) == default_nb
         connect.flush([collection])
         connect.load_collection(collection)
@@ -262,7 +262,7 @@ class TestLoadCollection:
         expected: search result empty
         """
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        ids = connect.insert(collection, default_entities, partition_name=default_tag)
         assert len(ids) == default_nb
         connect.flush([collection])
         connect.load_partitions(collection, [default_tag])
@@ -302,7 +302,7 @@ class TestReleaseAdvanced:
         top_k = 1
         connect.create_partition(collection, default_tag)
         query, _ = gen_query_vectors(field_name, default_entities, top_k, nq)
-        connect.insert(collection, default_entities, partition_tag=default_tag)
+        connect.insert(collection, default_entities, partition_name=default_tag)
         connect.flush([collection])
         connect.load_partitions(collection, [default_tag])
         res = connect.search(collection, query, _async=True)
@@ -321,7 +321,7 @@ class TestReleaseAdvanced:
         top_k = 1
         connect.create_partition(collection, default_tag)
         query, _ = gen_query_vectors(field_name, default_entities, top_k, nq)
-        connect.insert(collection, default_entities, partition_tag=default_tag)
+        connect.insert(collection, default_entities, partition_name=default_tag)
         connect.flush([collection])
         connect.load_partitions(collection, [default_tag])
         res = connect.search(collection, query, _async=True)
@@ -354,7 +354,7 @@ class TestReleaseAdvanced:
         expected:
         """
         connect.create_partition(collection, default_tag)
-        connect.insert(collection, default_entities, partition_tag=default_tag)
+        connect.insert(collection, default_entities, partition_name=default_tag)
         connect.flush([collection])
 
         def load():
@@ -464,14 +464,14 @@ class TestLoadPartition:
         expected: no error raised
         '''
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        ids = connect.insert(collection, default_entities, partition_name=default_tag)
         assert len(ids) == default_nb
         connect.flush([collection])
         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
         search_param = get_search_param(get_simple_index["index_type"])
         query, vecs = gen_query_vectors(field_name, default_entities, default_top_k, nq=1, search_params=search_param)
         connect.load_partitions(collection, [default_tag])
-        res = connect.search(collection, query, partition_tags=[default_tag])
+        res = connect.search(collection, query, partition_names=[default_tag])
         assert len(res[0]) == default_top_k
 
     @pytest.mark.level(2)
@@ -483,7 +483,7 @@ class TestLoadPartition:
         expected: no error raised
         '''
         connect.create_partition(binary_collection, default_tag)
-        ids = connect.insert(binary_collection, default_binary_entities, partition_tag=default_tag)
+        ids = connect.insert(binary_collection, default_binary_entities, partition_name=default_tag)
         assert len(ids) == default_nb
         connect.flush([binary_collection])
         for metric_type in binary_metrics():
@@ -563,7 +563,7 @@ class TestLoadPartition:
         expected: raise exception
         """
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        ids = connect.insert(collection, default_entities, partition_name=default_tag)
         assert len(ids) == default_nb
         connect.flush([collection])
         connect.release_partitions(collection, [default_tag])
@@ -571,7 +571,7 @@ class TestLoadPartition:
     @pytest.mark.level(2)
     def test_load_release_after_drop(self, connect, collection):
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        ids = connect.insert(collection, default_entities, partition_name=default_tag)
         assert len(ids) == default_nb
         connect.flush([collection])
         connect.load_partitions(collection, [default_tag])
@@ -601,7 +601,7 @@ class TestLoadPartition:
         expected: raise exception
         """
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        ids = connect.insert(collection, default_entities, partition_name=default_tag)
         assert len(ids) == default_nb
         connect.flush([collection])
         connect.load_partitions(collection, [default_tag])
@@ -622,7 +622,7 @@ class TestLoadPartition:
         expected: raise exception
         """
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        ids = connect.insert(collection, default_entities, partition_name=default_tag)
         assert len(ids) == default_nb
         connect.flush([collection])
         connect.load_partitions(collection, [default_tag])
