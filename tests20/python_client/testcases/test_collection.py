@@ -677,6 +677,7 @@ class TestCollectionParams(ApiReq):
         assert_default_collection(collection, c_name, exp_schema=default_binary_schema, exp_num=nb)
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(reason="issue #5414")
     def test_collection_binary_with_data_list(self):
         """
         target: test collection with data (list-like)
@@ -687,8 +688,8 @@ class TestCollectionParams(ApiReq):
         nb = ct.default_nb
         c_name = cf.gen_unique_str(prefix)
         data = cf.gen_default_binary_list_data(nb)
-        collection, _ = self.collection.collection_init(c_name, schema=default_binary_schema, data=data)
-        assert_default_collection(collection, c_name, exp_schema=default_binary_schema, exp_num=nb)
+        ex, _ = self.collection.collection_init(c_name, schema=default_binary_schema, data=data)
+        log.debug(str(ex))
 
 
 class TestCollectionOperation(ApiReq):
@@ -767,22 +768,6 @@ class TestCollectionOperation(ApiReq):
         assert not has
         with pytest.raises(Exception, match="can't find collection"):
             collection.num_entities
-
-    @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(reason="issue #5302")
-    def test_collection_schema_insert_dataframe(self):
-        """
-        target: test collection create and insert dataframe
-        method: 1. create by schema 2. insert dataframe
-        expected: assert num_entities
-        """
-        self._connect()
-        nb = ct.default_nb
-        collection = self._collection()
-        assert_default_collection(collection)
-        df = cf.gen_default_dataframe_data(nb)
-        self.collection.insert(data=df)
-        assert collection.num_entities == nb
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="issue #5302")
@@ -871,22 +856,6 @@ class TestCollectionOperation(ApiReq):
         ex, _ = self.collection.collection_init(name=c_name, schema=None, data=data)
         assert "Data of not pandas.DataFrame type should bepassed into the schema" in str(ex)
 
-    @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(reason="issue #5302")
-    def test_collection_schema_insert_data(self):
-        """
-        target: test collection create and insert list-like data
-        method: 1. create by schema 2. insert data
-        expected: assert num_entities
-        """
-        self._connect()
-        nb = ct.default_nb
-        collection = self._collection()
-        assert_default_collection(collection)
-        data = cf.gen_default_list_data(nb)
-        self.collection.insert(data=data)
-        assert collection.num_entities == nb
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_collection_after_drop(self):
         """
@@ -902,22 +871,6 @@ class TestCollectionOperation(ApiReq):
         re_collection = self._collection(name=c_name)
         assert_default_collection(re_collection, c_name)
         assert self.utility.has_collection(c_name)[0]
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5302")
-    def test_collection_binary_insert_dataframe(self):
-        """
-        target: test collection create and insert dataframe
-        method: 1. create by schema 2. insert dataframe
-        expected: assert num_entities
-        """
-        self._connect()
-        nb = ct.default_nb
-        collection = self._collection(schema=default_binary_schema)
-        assert_default_collection(collection, exp_schema=default_binary_schema)
-        df = cf.gen_default_binary_dataframe_data(nb)
-        self.collection.insert(data=df)
-        assert collection.num_entities == nb
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="issue #5414")
@@ -948,18 +901,3 @@ class TestCollectionOperation(ApiReq):
         ex, _ = self.collection.collection_init(name=c_name, schema=None, data=data)
         assert "Data of not pandas.DataFrame type should bepassed into the schema" in str(ex)
 
-    @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(reason="issue #5414")
-    def test_collection_binary_insert_data(self):
-        """
-        target: test collection create and insert list-like data
-        method: 1. create by schema 2. insert data
-        expected: assert num_entities
-        """
-        self._connect()
-        nb = ct.default_nb
-        collection = self._collection(schema=default_binary_schema)
-        assert_default_collection(collection, exp_schema=default_binary_schema)
-        data = cf.gen_default_binary_list_data(nb)
-        self.collection.insert(data=data)
-        assert collection.num_entities == nb
