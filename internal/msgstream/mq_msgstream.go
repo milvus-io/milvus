@@ -438,6 +438,7 @@ func (ms *MqTtMsgStream) addConsumer(consumer mqclient.Consumer, channel string)
 	ms.chanTtMsgTime[consumer] = 0
 }
 
+// AsConsumer subscribes channels as consumer for a MsgStream
 func (ms *MqTtMsgStream) AsConsumer(channels []string, subName string) {
 	for _, channel := range channels {
 		if _, ok := ms.consumers[channel]; ok {
