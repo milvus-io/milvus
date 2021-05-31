@@ -268,7 +268,7 @@ func (c *Core) startDdScheduler() {
 
 func (c *Core) startTimeTickLoop() {
 	if SetDDTimeTimeByMaster {
-		ticker := time.NewTimer(time.Duration(Params.TimeTickInterval) * time.Millisecond)
+		ticker := time.NewTicker(time.Duration(Params.TimeTickInterval) * time.Millisecond)
 		cnt := 0
 		for {
 			select {
