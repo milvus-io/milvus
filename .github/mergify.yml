@@ -75,3 +75,13 @@ pull_request_rules:
         remove:
           - ci-passed
 
+# ONLY for recovery branch
+  - name: Test passed for code changed
+    conditions:
+      - base=recovery
+      - "status-success=Code Checker AMD64 Ubuntu 18.04"
+      - "status-success=Build and test AMD64 Ubuntu 18.04"
+    actions:
+      label:
+        add:
+          - ci-passed
