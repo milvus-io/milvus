@@ -114,6 +114,6 @@ func (q *queryNodeFlowGraph) newDmInputNode(ctx context.Context,
 }
 
 func (q *queryNodeFlowGraph) seekQueryNodeFlowGraph(position *internalpb.MsgPosition) error {
-	err := q.dmlStream.Seek(position)
+	err := q.dmlStream.Seek([]*internalpb.MsgPosition{position})
 	return err
 }
