@@ -120,7 +120,7 @@ uid = "list_id_in_segment"
 #         nb = 10
 #         entities = gen_entities(nb)
 #         connect.create_partition(collection, default_tag)
-#         ids = connect.bulk_insert(collection, entities, partition_tag=default_tag)
+#         ids = connect.bulk_insert(collection, entities, partition_name=default_tag)
 #         connect.flush([collection])
 #         stats = connect.get_collection_stats(collection)
 #         assert stats["partitions"][1]["tag"] == default_tag
@@ -162,7 +162,7 @@ uid = "list_id_in_segment"
 #         expected: status ok
 #         '''
 #         connect.create_partition(collection, default_tag)
-#         ids = connect.bulk_insert(collection, default_entities, partition_tag=default_tag)
+#         ids = connect.bulk_insert(collection, default_entities, partition_name=default_tag)
 #         connect.flush([collection])
 #         stats = connect.get_collection_stats(collection)
 #         assert stats["partitions"][1]["tag"] == default_tag
@@ -255,7 +255,7 @@ uid = "list_id_in_segment"
 #         connect.create_partition(binary_collection, default_tag)
 #         nb = 10
 #         vectors, entities = gen_binary_entities(nb)
-#         ids = connect.bulk_insert(binary_collection, entities, partition_tag=default_tag)
+#         ids = connect.bulk_insert(binary_collection, entities, partition_name=default_tag)
 #         connect.flush([binary_collection])
 #         stats = connect.get_collection_stats(binary_collection)
 #         vector_ids = connect.list_id_in_segment(binary_collection, stats["partitions"][1]["segments"][0]["id"])
@@ -293,7 +293,7 @@ uid = "list_id_in_segment"
 #         expected: status ok
 #         '''
 #         connect.create_partition(binary_collection, default_tag)
-#         ids = connect.bulk_insert(binary_collection, default_binary_entities, partition_tag=default_tag)
+#         ids = connect.bulk_insert(binary_collection, default_binary_entities, partition_name=default_tag)
 #         connect.flush([binary_collection])
 #         stats = connect.get_collection_stats(binary_collection)
 #         assert stats["partitions"][1]["tag"] == default_tag

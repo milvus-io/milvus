@@ -323,7 +323,7 @@ default_single_query = {
 #         expected: entities deleted
 #         '''
 #         connect.create_partition(collection, default_tag)
-#         ids = connect.bulk_insert(collection, default_entities, partition_tag=default_tag)
+#         ids = connect.bulk_insert(collection, default_entities, partition_name=default_tag)
 #         connect.flush([collection])
 #         delete_ids = [ids[0], ids[-1]]
 #         status = connect.delete_entity_by_id(collection, delete_ids)
@@ -355,8 +355,8 @@ default_single_query = {
 #         tag_new = "tag_new"
 #         connect.create_partition(collection, default_tag)
 #         connect.create_partition(collection, tag_new)
-#         ids = connect.bulk_insert(collection, default_entities, partition_tag=default_tag)
-#         ids_new = connect.bulk_insert(collection, default_entities, partition_tag=tag_new)
+#         ids = connect.bulk_insert(collection, default_entities, partition_name=default_tag)
+#         ids_new = connect.bulk_insert(collection, default_entities, partition_name=tag_new)
 #         connect.flush([collection])
 #         delete_ids = [ids[0], ids_new[0]]
 #         status = connect.delete_entity_by_id(collection, delete_ids)
@@ -373,8 +373,8 @@ default_single_query = {
 #         tag_new = "tag_new"
 #         connect.create_partition(collection, default_tag)
 #         connect.create_partition(collection, tag_new)
-#         ids = connect.bulk_insert(collection, default_entities, partition_tag=default_tag)
-#         ids_new = connect.bulk_insert(collection, default_entities, partition_tag=tag_new)
+#         ids = connect.bulk_insert(collection, default_entities, partition_name=default_tag)
+#         ids_new = connect.bulk_insert(collection, default_entities, partition_name=tag_new)
 #         connect.flush([collection])
 #         connect.create_index(collection, field_name, get_simple_index)
 #         delete_ids = [ids[0], ids_new[0]]

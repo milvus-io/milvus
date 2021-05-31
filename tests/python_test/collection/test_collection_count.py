@@ -58,7 +58,7 @@ class TestCollectionCount:
         '''
         entities = gen_entities(insert_count)
         connect.create_partition(collection, tag)
-        ids = connect.insert(collection, entities, partition_tag=tag)
+        ids = connect.insert(collection, entities, partition_name=tag)
         assert len(ids) == insert_count
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
@@ -93,7 +93,7 @@ class TestCollectionCount:
     #     entities = gen_entities(insert_count)
     #     connect.create_partition(collection, tag)
     #     connect.create_partition(collection, new_tag)
-    #     res_ids = connect.insert(collection, entities, partition_tag=tag)
+    #     res_ids = connect.insert(collection, entities, partition_name=tag)
     #     connect.flush([collection])
     #     # res = connect.count_entities(collection)
     #     # assert res == insert_count
@@ -112,7 +112,7 @@ class TestCollectionCount:
     #     connect.create_partition(collection, tag)
     #     connect.create_partition(collection, new_tag)
     #     res_ids = connect.insert(collection, entities)
-    #     res_ids_2 = connect.insert(collection, entities, partition_tag=tag)
+    #     res_ids_2 = connect.insert(collection, entities, partition_name=tag)
     #     connect.flush([collection])
     #     # res = connect.count_entities(collection)
     #     # assert res == insert_count * 2
@@ -130,8 +130,8 @@ class TestCollectionCount:
     #     entities = gen_entities(insert_count)
     #     connect.create_partition(collection, tag)
     #     connect.create_partition(collection, new_tag)
-    #     res_ids = connect.insert(collection, entities, partition_tag=tag)
-    #     res_ids2 = connect.insert(collection, entities, partition_tag=new_tag)
+    #     res_ids = connect.insert(collection, entities, partition_name=tag)
+    #     res_ids2 = connect.insert(collection, entities, partition_name=new_tag)
     #     connect.flush([collection])
     #     # res = connect.count_entities(collection)
     #     # assert res == insert_count * 2
@@ -288,7 +288,7 @@ class TestCollectionCountBinary:
         '''
         raw_vectors, entities = gen_binary_entities(insert_count)
         connect.create_partition(binary_collection, tag)
-        connect.insert(binary_collection, entities, partition_tag=tag)
+        connect.insert(binary_collection, entities, partition_name=tag)
         connect.flush([binary_collection])
         stats = connect.get_collection_stats(binary_collection)
         assert stats[row_count] == insert_count
@@ -324,7 +324,7 @@ class TestCollectionCountBinary:
     #     raw_vectors, entities = gen_binary_entities(insert_count)
     #     connect.create_partition(binary_collection, tag)
     #     connect.create_partition(binary_collection, new_tag)
-    #     res_ids = connect.insert(binary_collection, entities, partition_tag=tag)
+    #     res_ids = connect.insert(binary_collection, entities, partition_name=tag)
     #     connect.flush([binary_collection])
     #     # res = connect.count_entities(binary_collection)
     #     # assert res == insert_count
@@ -343,7 +343,7 @@ class TestCollectionCountBinary:
     #     connect.create_partition(binary_collection, tag)
     #     connect.create_partition(binary_collection, new_tag)
     #     res_ids = connect.insert(binary_collection, entities)
-    #     res_ids_2 = connect.insert(binary_collection, entities, partition_tag=tag)
+    #     res_ids_2 = connect.insert(binary_collection, entities, partition_name=tag)
     #     connect.flush([binary_collection])
     #     # res = connect.count_entities(binary_collection)
     #     # assert res == insert_count * 2
@@ -362,8 +362,8 @@ class TestCollectionCountBinary:
     #     raw_vectors, entities = gen_binary_entities(insert_count)
     #     connect.create_partition(binary_collection, tag)
     #     connect.create_partition(binary_collection, new_tag)
-    #     res_ids = connect.insert(binary_collection, entities, partition_tag=tag)
-    #     res_ids2 = connect.insert(binary_collection, entities, partition_tag=new_tag)
+    #     res_ids = connect.insert(binary_collection, entities, partition_name=tag)
+    #     res_ids2 = connect.insert(binary_collection, entities, partition_name=new_tag)
     #     connect.flush([binary_collection])
     #     # res = connect.count_entities(binary_collection)
     #     # assert res == insert_count * 2
