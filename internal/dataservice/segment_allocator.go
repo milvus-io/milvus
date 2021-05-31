@@ -20,7 +20,6 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -230,24 +229,12 @@ func (s *channelSegmentAllocator) openNewSegment(ctx context.Context, collection
 		return nil, err
 	}
 	segmentInfo := &datapb.SegmentInfo{
-		ID:            id,
-		CollectionID:  collectionID,
-		PartitionID:   partitionID,
-		InsertChannel: channelName,
-		NumRows:       0,
-		State:         commonpb.SegmentState_Growing,
-		StartPosition: &internalpb.MsgPosition{
-			ChannelName: "",
-			MsgID:       []byte{},
-			MsgGroup:    "",
-			Timestamp:   0,
-		},
-		EndPosition: &internalpb.MsgPosition{
-			ChannelName: "",
-			MsgID:       []byte{},
-			MsgGroup:    "",
-			Timestamp:   0,
-		},
+		ID:             id,
+		CollectionID:   collectionID,
+		PartitionID:    partitionID,
+		InsertChannel:  channelName,
+		NumRows:        0,
+		State:          commonpb.SegmentState_Growing,
 		MaxRowNum:      int64(totalRows),
 		LastExpireTime: 0,
 	}

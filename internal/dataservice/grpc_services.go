@@ -164,8 +164,12 @@ func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 		} else {
 			state.Status.ErrorCode = commonpb.ErrorCode_Success
 			state.State = segmentInfo.State
-			state.StartPosition = segmentInfo.StartPosition
-			state.EndPosition = segmentInfo.EndPosition
+			if segmentInfo.DmlPosition != nil {
+				state.StartPosition = segmentInfo.DmlPosition.StartPosition
+				state.EndPosition = segmentInfo.DmlPosition.EndPosition
+			} else {
+
+			}
 		}
 		resp.States = append(resp.States, state)
 	}
@@ -304,15 +308,16 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		return resp, nil
 	}
 
-	meta, err := s.prepareBinlogAndPos(req)
+	meta, err := s.prepareBinlog(req)
 	if err != nil {
-		log.Error("prepare binlog and pos meta failed", zap.Error(err))
+		log.Error("prepare binlog meta failed", zap.Error(err))
 		resp.Reason = err.Error()
 		return resp, nil
 	}
 
 	// set segment to SegmentState_Flushing
-	err = s.meta.FlushSegmentWithBinlogAndPos(req.SegmentID, meta)
+	err = s.meta.FlushSegmentWithBinlogAndPos(req.SegmentID, req.DmlPosition,
+		req.DdlPosition, meta)
 	if err != nil {
 		resp.Reason = err.Error()
 		return resp, nil
