@@ -151,6 +151,8 @@ var (
 //RegisterMaster register Master metrics
 func RegisterMaster() {
 	prometheus.MustRegister(MasterProxyNodeLister)
+
+	// for grpc
 	prometheus.MustRegister(MasterCreateCollectionCounter)
 	prometheus.MustRegister(MasterDropCollectionCounter)
 	prometheus.MustRegister(MasterHasCollectionCounter)
@@ -165,6 +167,8 @@ func RegisterMaster() {
 	prometheus.MustRegister(MasterDescribeIndexCounter)
 	prometheus.MustRegister(MasterDescribeSegmentCounter)
 	prometheus.MustRegister(MasterShowSegmentsCounter)
+
+	// for time tick
 	prometheus.MustRegister(MasterInsertChannelTimeTick)
 	prometheus.MustRegister(MasterDDChannelTimeTick)
 	//prometheus.MustRegister(PanicCounter)
