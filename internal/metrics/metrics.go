@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"go.uber.org/zap"
@@ -21,8 +22,34 @@ var (
 )
 */
 
+var (
+	MasterProxyNodeLister = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "milvus",
+			Subsystem: "master",
+			Name:      "list_of_proxy_node",
+			Help:      "List of proxy nodes which has register with etcd",
+		}, []string{"client_id"})
+	MasterCreateCollectionCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "milvus",
+			Subsystem: "master",
+			Name:      "create_collection_total",
+			Help:      "Counter of create collection",
+		}, []string{"client_id", "type"})
+	MasterDropCollectionCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "milvus",
+			Subsystem: "master",
+			Name:      "drop_collection_total",
+			Help:      "Counter of drop collection",
+		}, []string{"client_id", "type"})
+)
+
 //RegisterMaster register Master metrics
 func RegisterMaster() {
+	prometheus.MustRegister(MasterCreateCollectionCounter)
+	prometheus.MustRegister(MasterDropCollectionCounter)
 	//prometheus.MustRegister(PanicCounter)
 }
 
