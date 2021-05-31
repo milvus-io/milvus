@@ -56,10 +56,6 @@ import (
 //  milvuspb -> milvuspb
 //  masterpb2 -> masterpb (master_service)
 
-//NEZA2017, DEBUG FLAG for milvus 2.0, this part should remove when milvus 2.0 release
-
-var SetDDTimeTimeByMaster bool = false
-
 // ------------------ struct -----------------------
 
 // DdOperation used to save ddMsg into ETCD
@@ -109,9 +105,6 @@ type Core struct {
 	cancel  context.CancelFunc
 	etcdCli *clientv3.Client
 	kvBase  *etcdkv.EtcdKV
-
-	//setMsgStreams, receive time tick from proxy service time tick channel
-	ProxyTimeTickChan chan typeutil.Timestamp
 
 	//setMsgStreams, send time tick into dd channel and time tick channel
 	SendTimeTick func(t typeutil.Timestamp) error
@@ -216,9 +209,6 @@ func (c *Core) checkInit() error {
 	if c.kvBase == nil {
 		return fmt.Errorf("kvBase is nil")
 	}
-	if c.ProxyTimeTickChan == nil {
-		return fmt.Errorf("ProxyTimeTickChan is nil")
-	}
 	if c.ddReqQueue == nil {
 		return fmt.Errorf("ddReqQueue is nil")
 	}
@@ -280,50 +270,28 @@ func (c *Core) startDdScheduler() {
 }
 
 func (c *Core) startTimeTickLoop() {
-	if SetDDTimeTimeByMaster {
-		ticker := time.NewTicker(time.Duration(Params.TimeTickInterval) * time.Millisecond)
-		cnt := 0
-		for {
-			select {
-			case <-c.ctx.Done():
-				log.Debug("master context closed", zap.Error(c.ctx.Err()))
-				return
-			case <-ticker.C:
-				if len(c.ddReqQueue) < 2 || cnt > 5 {
-					tt := &TimetickTask{
-						baseReqTask: baseReqTask{
-							ctx:  c.ctx,
-							cv:   make(chan error, 1),
-							core: c,
-						},
-					}
-					c.ddReqQueue <- tt
-					cnt = 0
-				} else {
-					cnt++
+	ticker := time.NewTicker(time.Duration(Params.TimeTickInterval) * time.Millisecond)
+	cnt := 0
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Debug("master context closed", zap.Error(c.ctx.Err()))
+			return
+		case <-ticker.C:
+			if len(c.ddReqQueue) < 2 || cnt > 5 {
+				tt := &TimetickTask{
+					baseReqTask: baseReqTask{
+						ctx:  c.ctx,
+						cv:   make(chan error, 1),
+						core: c,
+					},
 				}
+				c.ddReqQueue <- tt
+				cnt = 0
+			} else {
+				cnt++
+			}
 
-			}
-		}
-	} else {
-		for {
-			select {
-			case <-c.ctx.Done():
-				log.Debug("close master time tick loop")
-				return
-			case tt, ok := <-c.ProxyTimeTickChan:
-				if !ok {
-					log.Warn("proxyTimeTickStream is closed, exit time tick loop")
-					return
-				}
-				if tt <= c.lastTimeTick {
-					log.Warn("master time tick go back", zap.Uint64("last time tick", c.lastTimeTick), zap.Uint64("input time tick ", tt))
-				}
-				if err := c.SendTimeTick(tt); err != nil {
-					log.Warn("master send time tick into dd and time_tick channel failed", zap.String("error", err.Error()))
-				}
-				c.lastTimeTick = tt
-			}
 		}
 	}
 }
@@ -552,16 +520,6 @@ func (c *Core) setMsgStreams() error {
 		return fmt.Errorf("MsgChannelSubName is emptyr")
 	}
 
-	//proxy time tick stream,
-	if Params.ProxyTimeTickChannel == "" {
-		return fmt.Errorf("ProxyTimeTickChannel is empty")
-	}
-
-	proxyTimeTickStream, _ := c.msFactory.NewMsgStream(c.ctx)
-	proxyTimeTickStream.AsConsumer([]string{Params.ProxyTimeTickChannel}, Params.MsgChannelSubName)
-	log.Debug("master AsConsumer: " + Params.ProxyTimeTickChannel + " : " + Params.MsgChannelSubName)
-	proxyTimeTickStream.Start()
-
 	// master time tick channel
 	if Params.TimeTickChannel == "" {
 		return fmt.Errorf("TimeTickChannel is empty")
@@ -684,30 +642,9 @@ func (c *Core) setMsgStreams() error {
 		return nil
 	}
 
-	// receive time tick from msg stream
-	c.ProxyTimeTickChan = make(chan typeutil.Timestamp, 1024)
-	go func() {
-		for {
-			select {
-			case <-c.ctx.Done():
-				return
-			case ttmsgs, ok := <-proxyTimeTickStream.Chan():
-				if !ok {
-					log.Warn("proxy time tick msg stream closed")
-					return
-				}
-				if len(ttmsgs.Msgs) > 0 {
-					for _, ttm := range ttmsgs.Msgs {
-						ttmsg, ok := ttm.(*ms.TimeTickMsg)
-						if !ok {
-							continue
-						}
-						c.ProxyTimeTickChan <- ttmsg.Base.Timestamp
-					}
-				}
-			}
-		}
-	}()
+	if Params.DataServiceSegmentChannel == "" {
+		return fmt.Errorf("DataServiceSegmentChannel is empty")
+	}
 
 	// data service will put msg into this channel when create segment
 	dsChanName := Params.DataServiceSegmentChannel
@@ -730,17 +667,6 @@ func (c *Core) setMsgStreams() error {
 	return nil
 }
 
-func (c *Core) SetProxyService(ctx context.Context, s types.ProxyService) error {
-	rsp, err := s.GetTimeTickChannel(ctx)
-	if err != nil {
-		return err
-	}
-	Params.ProxyTimeTickChannel = rsp.Value
-	log.Debug("proxy time tick", zap.String("channel name", Params.ProxyTimeTickChannel))
-
-	return nil
-}
-
 //SetNewProxyClient create proxy node by this func
 func (c *Core) SetNewProxyClient(f func(sess *sessionutil.Session) (types.ProxyNode, error)) {
 	if c.NewProxyClient == nil {
@@ -751,6 +677,13 @@ func (c *Core) SetNewProxyClient(f func(sess *sessionutil.Session) (types.ProxyN
 }
 
 func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
+	rsp, err := s.GetSegmentInfoChannel(ctx)
+	if err != nil {
+		return err
+	}
+	Params.DataServiceSegmentChannel = rsp.Value
+	log.Debug("data service segment", zap.String("channel name", Params.DataServiceSegmentChannel))
+
 	c.CallGetBinlogFilePathsService = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) (retFiles []string, retErr error) {
 		defer func() {
 			if err := recover(); err != nil {

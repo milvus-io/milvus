@@ -33,7 +33,6 @@ type ParamTable struct {
 	EtcdAddress               string
 	MetaRootPath              string
 	KvRootPath                string
-	ProxyTimeTickChannel      string //get from proxy client
 	MsgChannelSubName         string
 	TimeTickChannel           string
 	DdChannel                 string

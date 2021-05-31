@@ -120,7 +120,6 @@ type MasterComponent interface {
 	MasterService
 
 	UpdateStateCode(internalpb.StateCode)
-	SetProxyService(context.Context, ProxyService) error
 	SetDataService(context.Context, DataService) error
 	SetIndexService(IndexService) error
 	SetQueryService(QueryService) error
