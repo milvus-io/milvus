@@ -20,7 +20,7 @@ type pChanStatistics struct {
 type channelsTimeTickerCheckFunc func(string, Timestamp) bool
 
 // ticker can update ts only when the minTs greater than the ts of ticker, we can use maxTs to update current later
-type getPChanStatisticsFunc func(pChan) (pChanStatistics, error)
+type getPChanStatisticsFuncType func(pChan) (pChanStatistics, error)
 
 // use interface tsoAllocator to keep channelsTimeTickerImpl testable
 type tsoAllocator interface {
@@ -41,7 +41,7 @@ type channelsTimeTickerImpl struct {
 	interval        time.Duration       // interval to synchronize
 	minTsStatistics map[pChan]Timestamp // pchan -> min Timestamp
 	statisticsMtx   sync.RWMutex
-	getStatistics   getPChanStatisticsFunc
+	getStatistics   getPChanStatisticsFuncType
 	tso             tsoAllocator
 	currents        map[pChan]Timestamp
 	currentsMtx     sync.RWMutex
@@ -96,6 +96,9 @@ func (ticker *channelsTimeTickerImpl) tick() error {
 			ticker.currents[pchan] = getTs(current+Timestamp(ticker.interval), stats.maxTs, func(ts1, ts2 Timestamp) bool {
 				return ts1 > ts2
 			})
+			//} else if stats.invalid {
+			//	ticker.minTsStatistics[pchan] = current
+			//	ticker.currents[pchan] = current + Timestamp(ticker.interval)
 		}
 	}
 
@@ -171,7 +174,7 @@ func newChannelsTimeTicker(
 	ctx context.Context,
 	interval time.Duration,
 	pchans []pChan,
-	getStatistics getPChanStatisticsFunc,
+	getStatistics getPChanStatisticsFuncType,
 	tso tsoAllocator,
 ) *channelsTimeTickerImpl {
 
