@@ -330,7 +330,7 @@ func TestMasterService(t *testing.T) {
 		ttm2, ok := (ttmsg2.Msgs[0]).(*msgstream.TimeTickMsg)
 		assert.True(t, ok)
 		assert.Greater(t, ttm2.Base.Timestamp, uint64(0))
-		assert.Equal(t, ttm2.Base.Timestamp, uint64(ttm.Base.Timestamp+1))
+		assert.Equal(t, ttm2.Base.Timestamp, ttm.Base.Timestamp+1)
 
 		ddmsg, ok := <-ddStream.Chan()
 		assert.True(t, ok)
