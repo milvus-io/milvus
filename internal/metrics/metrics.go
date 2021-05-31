@@ -30,6 +30,8 @@ var (
 			Name:      "list_of_proxy_node",
 			Help:      "List of proxy nodes which has register with etcd",
 		}, []string{"client_id"})
+
+	// for grpc
 	MasterCreateCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "milvus",
@@ -44,6 +46,92 @@ var (
 			Name:      "drop_collection_total",
 			Help:      "Counter of drop collection",
 		}, []string{"client_id", "type"})
+	MasterHasCollectionCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "milvus",
+			Subsystem: "master",
+			Name:      "has_collection_total",
+			Help:      "Counter of has collection",
+		}, []string{"client_id", "type"})
+	MasterDescribeCollectionCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "milvus",
+			Subsystem: "master",
+			Name:      "describe_collection_total",
+			Help:      "Counter of describe collection",
+		}, []string{"client_id", "type"})
+	MasterShowCollectionsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "milvus",
+			Subsystem: "master",
+			Name:      "show_collections_total",
+			Help:      "Counter of show collections",
+		}, []string{"client_id", "type"})
+	MasterCreatePartitionCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "milvus",
+			Subsystem: "master",
+			Name:      "create_partition_total",
+			Help:      "Counter of create partition",
+		}, []string{"client_id", "type"})
+	MasterDropPartitionCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "milvus",
+			Subsystem: "master",
+			Name:      "drop_partition_total",
+			Help:      "Counter of drop partition",
+		}, []string{"client_id", "type"})
+	MasterHasPartitionCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "milvus",
+			Subsystem: "master",
+			Name:      "has_partition_total",
+			Help:      "Counter of has partition",
+		}, []string{"client_id", "type"})
+	MasterShowPartitionsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "milvus",
+			Subsystem: "master",
+			Name:      "show_partitions_total",
+			Help:      "Counter of show partitions",
+		}, []string{"client_id", "type"})
+	MasterCreateIndexCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "milvus",
+			Subsystem: "master",
+			Name:      "create_index_total",
+			Help:      "Counter of create index",
+		}, []string{"client_id", "type"})
+	MasterDropIndexCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "milvus",
+			Subsystem: "master",
+			Name:      "drop_index_total",
+			Help:      "Counter of drop index",
+		}, []string{"client_id", "type"})
+	MasterDescribeIndexCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "milvus",
+			Subsystem: "master",
+			Name:      "describe_index_total",
+			Help:      "Counter of describe index",
+		}, []string{"client_id", "type"})
+	MasterDescribeSegmentCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "milvus",
+			Subsystem: "master",
+			Name:      "describe_segment_total",
+			Help:      "Counter of describe segment",
+		}, []string{"client_id", "type"})
+	MasterShowSegmentsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "milvus",
+			Subsystem: "master",
+			Name:      "show_segments_total",
+			Help:      "Counter of show segments",
+		}, []string{"client_id", "type"})
+
+	// for time tick
 	MasterInsertChannelTimeTick = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "milvus",
