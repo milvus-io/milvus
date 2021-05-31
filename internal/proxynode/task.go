@@ -95,6 +95,15 @@ type task interface {
 	Notify(err error)
 }
 
+type ddlTask interface {
+	task
+}
+
+type dmlTask interface {
+	task
+	getStatistics(pchan pChan) (pChanStatistics, error)
+}
+
 type BaseInsertTask = msgstream.InsertMsg
 
 type InsertTask struct {
@@ -140,6 +149,37 @@ func (it *InsertTask) SetTs(ts Timestamp) {
 
 func (it *InsertTask) EndTs() Timestamp {
 	return it.EndTimestamp
+}
+
+func (it *InsertTask) getStatistics(pchan pChan) (pChanStatistics, error) {
+	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.CollectionName)
+	if err != nil {
+		return pChanStatistics{invalid: true}, err
+	}
+
+	_, err = it.chMgr.getChannels(collID)
+	if err != nil {
+		err := it.chMgr.createDMLMsgStream(collID)
+		if err != nil {
+			return pChanStatistics{invalid: true}, err
+		}
+	}
+	pchans, err := it.chMgr.getChannels(collID)
+	if err != nil {
+		return pChanStatistics{invalid: true}, err
+	}
+
+	for _, ch := range pchans {
+		if pchan == ch {
+			return pChanStatistics{
+				minTs:   it.BeginTimestamp,
+				maxTs:   it.EndTimestamp,
+				invalid: false,
+			}, nil
+		}
+	}
+
+	return pChanStatistics{invalid: true}, nil
 }
 
 func (it *InsertTask) OnEnqueue() error {
