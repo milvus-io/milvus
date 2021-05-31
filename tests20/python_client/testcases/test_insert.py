@@ -1,5 +1,6 @@
 import time
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -21,6 +22,12 @@ class TestInsertParams(ApiReq):
     def get_non_data_type(self, request):
         if isinstance(request.param, list):
             pytest.skip("list type is valid data type")
+        yield request.param
+
+    @pytest.fixture(scope="module", params=ct.get_invalid_strs)
+    def get_invalid_field_name(self, request):
+        if isinstance(request.param, (list, dict)):
+            pytest.skip()
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -54,6 +61,7 @@ class TestInsertParams(ApiReq):
         self.connection.connection.get_connection().flush([collection.name])
         assert collection.num_entities == nb
 
+    @pytest.mark.tags(CaseLabel.L1)
     def test_insert_non_data_type(self, get_non_data_type):
         """
         target: test insert with non-dataframe, non-list data
@@ -62,7 +70,7 @@ class TestInsertParams(ApiReq):
         """
         self._collection()
         ex, _ = self.collection.insert(data=get_non_data_type)
-        log.error(str(ex))
+        assert "Datas must be list" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("data", [[], pd.DataFrame()])
@@ -76,6 +84,7 @@ class TestInsertParams(ApiReq):
         ex, _ = self.collection.insert(data=data)
         assert "Column cnt not match with schema" in str(ex)
 
+    @pytest.mark.tags(CaseLabel.L1)
     def test_insert_dataframe_only_columns(self):
         """
         target: test insert with dataframe just columns
@@ -85,9 +94,11 @@ class TestInsertParams(ApiReq):
         self._collection()
         columns = [ct.default_int64_field_name, ct.default_float_vec_field_name]
         df = pd.DataFrame(columns=columns)
-        ex, _ = self.insert(data=df)
-        log.error(str(ex))
+        ex, _ = self.collection.insert(data=df)
+        assert "Cannot infer schema from empty dataframe" in str(ex)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #5499")
     def test_insert_empty_field_name_dataframe(self):
         """
         target: test insert empty field name df
@@ -95,25 +106,25 @@ class TestInsertParams(ApiReq):
         expected: raise exception
         """
         self._collection()
-        nb = 100
-        int_values = pd.Series(data=[i for i in range(nb)])
-        float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
-        float_vec_values = cf.gen_vectors(nb, ct.default_dim)
-        df = pd.DataFrame({
-            ' ': int_values,
-            ' ': float_values,
-            ct.default_float_vec_field_name: float_vec_values
-        })
+        df = cf.gen_default_dataframe_data(10)
+        df.rename(columns={ct.default_int64_field_name: ' '}, inplace=True)
         ex, _ = self.collection.insert(data=df)
         assert "Field name should not be empty" in str(ex)
 
-    def test_insert_invalid_field_name_dataframe(self):
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #5499")
+    def test_insert_invalid_field_name_dataframe(self, get_invalid_field_name):
         """
         target: test insert with invalid dataframe data
         method: insert with invalid field name dataframe
         expected: raise exception
         """
-        pass
+        self._collection()
+        df = cf.gen_default_dataframe_data(10)
+        df.rename(columns={ct.default_int64_field_name: get_invalid_field_name}, inplace=True)
+        log.info(df)
+        ex, _ = self.collection.insert(data=df)
+        log.error(str(ex))
 
     def test_insert_dataframe_nan_value(self):
         """
@@ -218,69 +229,134 @@ class TestInsertParams(ApiReq):
         message = "Collection field dim is {},but entities field dim is {}".format(ct.default_dim, 129)
         assert message in str(ex)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #5499")
     def test_insert_field_name_not_match(self):
         """
         target: test insert field name not match
         method: data field name not match schema
         expected: raise exception
         """
-        pass
+        self._collection()
+        df = cf.gen_default_dataframe_data(10)
+        df.rename(columns={ct.default_float_field_name: "int"}, inplace=True)
+        log.info(df)
+        ex, _ = self.collection.insert(data=df)
+        log.error(str(ex))
 
+    @pytest.mark.tags(CaseLabel.L1)
     def test_insert_field_value_not_match(self):
         """
         target: test insert data value not match
         method: insert data value type not match schema
         expected: raise exception
         """
-        pass
+        self._collection()
+        nb = 10
+        df = cf.gen_default_dataframe_data(nb)
+        new_float_value = pd.Series(data=[float(i) for i in range(nb)], dtype="float64")
+        df.iloc[:, 1] = new_float_value
+        ex, _ = self.collection.insert(data=df)
+        assert "The types of schema and data do not match" in str(ex)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #5505")
     def test_insert_value_less(self):
         """
         target: test insert value less than other
         method: int field value less than vec-field value
         expected: raise exception
         """
-        pass
+        self._collection()
+        nb = 10
+        int_values = [i for i in range(nb-1)]
+        float_values = [np.float32(i) for i in range(nb)]
+        float_vec_values = cf.gen_vectors(nb, ct.default_dim)
+        data = [int_values, float_values, float_vec_values]
+        ids, _ = self.collection.insert(data=data)
+        log.info(ids)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #5508")
     def test_insert_vector_value_less(self):
         """
         target: test insert vector value less than other
         method: vec field value less than int field
         expected: todo
         """
-        pass
+        self._collection()
+        nb = 10
+        int_values = [i for i in range(nb)]
+        float_values = [np.float32(i) for i in range(nb)]
+        float_vec_values = cf.gen_vectors(nb-1, ct.default_dim)
+        data = [int_values, float_values, float_vec_values]
+        ex, _ = self.collection.insert(data=data)
+        log.info(str(ex))
 
+    @pytest.mark.tags(CaseLabel.L1)
     def test_insert_fields_more(self):
         """
         target: test insert with fields more
         method: field more than schema fields
         expected: todo
         """
-        pass
+        self._collection()
+        nb = ct.default_nb
+        df = cf.gen_default_dataframe_data(nb)
+        new_values = [i for i in range(nb)]
+        df.insert(3, 'new', new_values)
+        ex, _ = self.collection.insert(data=df)
+        assert "Column cnt not match with schema" in str(ex)
 
+    @pytest.mark.tags(CaseLabel.L1)
     def test_insert_fields_less(self):
         """
         target: test insert with fields less
         method: fields less than schema fields
         expected: raise exception
         """
-        pass
+        self._collection()
+        nb = ct.default_nb
+        df = cf.gen_default_dataframe_data(nb)
+        df.drop(ct.default_float_vec_field_name, axis=1, inplace=True)
+        ex, _ = self.collection.insert(data=df)
+        assert "Column cnt not match with schema" in str(ex)
 
+    @pytest.mark.tags(CaseLabel.L1)
     def test_insert_list_order_inconsistent_schema(self):
         """
         target: test insert data fields order inconsistent with schema
         method: insert list data, data fields order inconsistent with schema
         expected: raise exception
         """
-        pass
+        self._collection()
+        nb = 10
+        int_values = [i for i in range(nb)]
+        float_values = [np.float32(i) for i in range(nb)]
+        float_vec_values = cf.gen_vectors(nb, ct.default_dim)
+        data = [float_values, int_values, float_vec_values]
+        ex, _ = self.collection.insert(data=data)
+        assert "The types of schema and data do not match" in str(ex)
 
+    @pytest.mark.tags(CaseLabel.L1)
     def test_insert_dataframe_order_inconsistent_schema(self):
         """
         target: test insert with dataframe fields inconsistent with schema
         method: insert dataframe, and fields order inconsistent with schema
         expected: assert num entities
         """
-        pass
+        self._collection()
+        nb = 10
+        int_values = pd.Series(data=[i for i in range(nb)])
+        float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
+        float_vec_values = cf.gen_vectors(nb, ct.default_dim)
+        df = pd.DataFrame({
+            ct.default_float_field_name: float_values,
+            ct.default_float_vec_field_name: float_vec_values,
+            ct.default_int64_field_name: int_values
+        })
+        ex, _ = self.collection.insert(data=df)
+        assert "The types of schema and data do not match" in str(ex)
 
 
 class TestInsertOperation(ApiReq):
@@ -297,6 +373,7 @@ class TestInsertOperation(ApiReq):
     def setup_method(self):
         pass
 
+    @pytest.mark.tags(CaseLabel.L1)
     def test_insert_without_connection(self):
         """
         target: test insert without connection
@@ -310,7 +387,6 @@ class TestInsertOperation(ApiReq):
         data = cf.gen_default_list_data(10)
         ex, check = self.collection.insert(data=data)
         assert "There is no connection with alias '{}'".format(ct.default_alias) in str(ex)
-        assert self.collection.is_empty()
 
     def test_insert_drop_collection(self):
         """
@@ -442,7 +518,7 @@ class TestInsertAsync(ApiReq):
         """
         target: test async insert
         method: insert with async=True
-        expected: todo
+        expected: verify num entities
         """
         pass
 
@@ -450,6 +526,46 @@ class TestInsertAsync(ApiReq):
         """
         target: test insert with false async
         method: async = false
-        expected: no exception
+        expected: verify num entities
+        """
+        pass
+
+    def test_insert_async_callback(self):
+        """
+        target: test insert with callback func
+        method: insert with callback func
+        expected: verify num entities
+        """
+        pass
+
+    def test_insert_async_long(self):
+        """
+        target: test insert with async
+        method: insert 5w entities with callback func
+        expected: verify num entities
+        """
+        pass
+
+    def test_insert_async_callback_timeout(self):
+        """
+        target: test insert async with callback
+        method: insert 10w entities with timeout=1
+        expected: raise exception
+        """
+        pass
+
+    def test_insert_async_invalid_data(self):
+        """
+        target: test insert async with invalid data
+        method: insert async with invalid data
+        expected: raise exception
+        """
+        pass
+
+    def test_insert_async_invalid_partition(self):
+        """
+        target: test insert async with invalid partition
+        method: insert async with invalid partition
+        expected: raise exception
         """
         pass
