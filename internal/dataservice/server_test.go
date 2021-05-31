@@ -246,18 +246,6 @@ func TestGetSegmentStates(t *testing.T) {
 		InsertChannel: "",
 		NumRows:       0,
 		State:         commonpb.SegmentState_Growing,
-		StartPosition: &internalpb.MsgPosition{
-			ChannelName: "",
-			MsgID:       []byte{},
-			MsgGroup:    "",
-			Timestamp:   0,
-		},
-		EndPosition: &internalpb.MsgPosition{
-			ChannelName: "",
-			MsgID:       []byte{},
-			MsgGroup:    "",
-			Timestamp:   0,
-		},
 	})
 	assert.Nil(t, err)
 
@@ -809,6 +797,13 @@ func TestGetVChannelPos(t *testing.T) {
 	assert.Nil(t, err)
 	err = svr.meta.AddSegment(&datapb.SegmentInfo{
 		ID:            1,
+		CollectionID:  0,
+		PartitionID:   0,
+		InsertChannel: "ch1",
+	})
+	assert.Nil(t, err)
+	err = svr.meta.AddSegment(&datapb.SegmentInfo{
+		ID:            2,
 		CollectionID:  0,
 		PartitionID:   0,
 		InsertChannel: "ch1",
