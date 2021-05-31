@@ -134,7 +134,7 @@ func (s *searchCollection) waitNewTSafe() Timestamp {
 	_, _, recvOK := reflect.Select(s.watcherSelectCase)
 	if !recvOK {
 		log.Error("tSafe has been closed")
-		return 0
+		return invalidTimestamp
 	}
 	t := Timestamp(math.MaxInt64)
 	for channel := range s.tSafeWatchers {
@@ -240,6 +240,10 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 			return
 		default:
 			serviceTime := s.waitNewTSafe()
+			if serviceTime == invalidTimestamp {
+				log.Debug("tSafe closed")
+				return
+			}
 			s.setServiceableTime(serviceTime)
 			//log.Debug("querynode::doUnsolvedMsgSearch: setServiceableTime",
 			//	zap.Any("serviceTime", serviceTime),

@@ -13,6 +13,7 @@ package querynode
 
 import (
 	"errors"
+
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
