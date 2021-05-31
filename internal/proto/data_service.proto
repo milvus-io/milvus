@@ -234,8 +234,8 @@ message SegmentInfo {
   string insert_channel = 4;
   int64 num_rows = 5;
   common.SegmentState state = 6;
-  internal.MsgPosition start_position = 7;
-  internal.MsgPosition end_position = 8;
+  PositionPair dmlPosition = 7;
+  PositionPair ddlPosition = 8;
   int64 max_row_num = 9;
   uint64 last_expire_time = 10;
 }

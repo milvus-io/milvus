@@ -3,6 +3,7 @@ package dataservice
 import (
 	"errors"
 	"path"
+	"sort"
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
@@ -172,35 +173,6 @@ func (s *Server) getDDLBinlogMeta(collID UniqueID) (metas []*datapb.DDLBinlogMet
 	return
 }
 
-// prepareSegmentPos prepare segment flushed pos
-func (s *Server) prepareSegmentPos(segInfo *datapb.SegmentInfo, dmlPos, ddlPos *datapb.PositionPair) (map[string]string, error) {
-	if segInfo == nil {
-		return nil, errNilSegmentInfo
-	}
-
-	result := make(map[string]string, 4)
-	if dmlPos != nil {
-		key, err := s.genKey(false, segInfo.ID)
-		if err != nil {
-			return nil, err
-		}
-		msPosPair := proto.MarshalTextString(dmlPos)
-		result[path.Join(Params.SegmentDmlPosSubPath, key)] = msPosPair                   // segment pos
-		result[path.Join(Params.DmlChannelPosSubPath, segInfo.InsertChannel)] = msPosPair // DmlChannel pos
-	}
-	if ddlPos != nil {
-		key, err := s.genKey(false, segInfo.ID)
-		if err != nil {
-			return nil, err
-		}
-		msPosPair := proto.MarshalTextString(ddlPos)
-		result[path.Join(Params.SegmentDdlPosSubPath, key)] = msPosPair                   //segment pos
-		result[path.Join(Params.DdlChannelPosSubPath, segInfo.InsertChannel)] = msPosPair // DdlChannel pos(use dm channel as Key, since dd channel may share same channel name)
-	}
-
-	return result, nil
-}
-
 // GetVChanPositions get vchannel latest postitions with provided dml channel names
 func (s *Server) GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelPair, error) {
 	if s.kvClient == nil {
@@ -209,37 +181,27 @@ func (s *Server) GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelPair, e
 	pairs := make([]*datapb.VchannelPair, 0, len(vchans))
 
 	for _, vchan := range vchans {
-
-		dmlKey := path.Join(Params.DmlChannelPosSubPath, vchan.DmlChannel)
-		ddlKey := path.Join(Params.DdlChannelPosSubPath, vchan.DmlChannel)
+		segments := s.meta.GetSegmentsByChannel(vchan.DmlChannel)
+		sort.Slice(segments, func(i, j int) bool {
+			return segments[i].ID < segments[j].ID
+		})
 
 		dmlPos := &datapb.PositionPair{}
 		ddlPos := &datapb.PositionPair{}
 
-		dmlVal, err := s.kvClient.Load(dmlKey)
 		zp := zeroPos(vchan.DmlChannel)
-		if err != nil {
-			dmlPos.StartPosition = &zp
-			dmlPos.EndPosition = &zp
-		} else {
-			err = proto.UnmarshalText(dmlVal, dmlPos)
-			if err != nil {
-				dmlPos.StartPosition = &zp
-				dmlPos.EndPosition = &zp
-			}
-		}
+		dmlPos.StartPosition = &zp
+		dmlPos.EndPosition = &zp
+		ddlPos.StartPosition = &zp
+		ddlPos.EndPosition = &zp
 
-		ddlVal, err := s.kvClient.Load(ddlKey)
-		zp = zeroPos(vchan.DdlChannel)
-		if err != nil {
-			ddlPos.StartPosition = &zp
-			ddlPos.EndPosition = &zp
-		} else {
-			err = proto.UnmarshalText(ddlVal, ddlPos)
-			if err != nil {
-				ddlPos.StartPosition = &zp
-				ddlPos.EndPosition = &zp
+		// find the last segment with not-nil position
+		for i := 0; i < len(segments); i++ {
+			if segments[i].DmlPosition == nil {
+				break
 			}
+			dmlPos = segments[i].DmlPosition
+			ddlPos = segments[i].DdlPosition
 		}
 
 		pairs = append(pairs, &datapb.VchannelPair{
