@@ -53,7 +53,7 @@ class TestInsertParams(ApiReq):
         method: 1.create 2.insert list data
         expected: assert num entities
         """
-        conn = self._connect()
+        self._connect()
         nb = ct.default_nb
         collection = self._collection()
         data = cf.gen_default_list_data(nb)
@@ -385,7 +385,7 @@ class TestInsertOperation(ApiReq):
         res_list, _ = self.connection.list_connections()
         assert ct.default_alias not in res_list
         data = cf.gen_default_list_data(10)
-        ex, check = self.collection.insert(data=data)
+        ex, _ = self.collection.insert(data=data)
         assert "There is no connection with alias '{}'".format(ct.default_alias) in str(ex)
 
     def test_insert_drop_collection(self):
