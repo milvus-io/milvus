@@ -93,9 +93,6 @@ type Core struct {
 	etcdCli *clientv3.Client
 	kvBase  *etcdkv.EtcdKV
 
-	//setMsgStreams, receive time tick from proxy service time tick channel
-	ProxyTimeTickChan chan typeutil.Timestamp
-
 	//setMsgStreams, send time tick into dd channel and time tick channel
 	SendTimeTick func(t typeutil.Timestamp) error
 
@@ -199,9 +196,6 @@ func (c *Core) checkInit() error {
 	if c.kvBase == nil {
 		return fmt.Errorf("kvBase is nil")
 	}
-	if c.ProxyTimeTickChan == nil {
-		return fmt.Errorf("ProxyTimeTickChan is nil")
-	}
 	if c.ddReqQueue == nil {
 		return fmt.Errorf("ddReqQueue is nil")
 	}
@@ -263,7 +257,7 @@ func (c *Core) startDdScheduler() {
 }
 
 func (c *Core) startTimeTickLoop() {
-	ticker := time.NewTimer(time.Duration(Params.TimeTickInterval) * time.Millisecond)
+	ticker := time.NewTicker(time.Duration(Params.TimeTickInterval) * time.Millisecond)
 	cnt := 0
 	for {
 		select {
@@ -284,7 +278,6 @@ func (c *Core) startTimeTickLoop() {
 			} else {
 				cnt++
 			}
-
 		}
 	}
 }
