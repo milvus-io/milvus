@@ -774,16 +774,15 @@ func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 	consumerSubName := funcutil.RandomString(8)
 
 	inputStream1 := getPulsarInputStream(pulsarAddr, p1Channels)
-	inputStream2 := getPulsarInputStream(pulsarAddr, p2Channels)
-	outputStream := getPulsarTtOutputStream(pulsarAddr, consumerChannels, consumerSubName)
-
-	msgPacks1 := createMsgPacks(5, 10, 10)
+	msgPacks1 := createMsgPacks(3, 10, 10)
 	assert.Nil(t, sendMsgPacks(inputStream1, msgPacks1))
 
+	inputStream2 := getPulsarInputStream(pulsarAddr, p2Channels)
 	msgPacks2 := createMsgPacks(5, 10, 10)
 	assert.Nil(t, sendMsgPacks(inputStream2, msgPacks2))
 
 	// consume msg
+	outputStream := getPulsarTtOutputStream(pulsarAddr, consumerChannels, consumerSubName)
 	log.Println("===============receive msg=================")
 	checkNMsgPack := func(t *testing.T, outputStream MsgStream, num int) int {
 		rcvMsg := 0
@@ -802,7 +801,9 @@ func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 		return rcvMsg
 	}
 	msgCount := checkNMsgPack(t, outputStream, len(msgPacks1)/2)
-	assert.Equal(t, (len(msgPacks1)/2-1)*len(msgPacks1[0].Msgs)*2, msgCount)
+	cnt1 := (len(msgPacks1)/2 - 1) * len(msgPacks1[0].Msgs)
+	cnt2 := (len(msgPacks2)/2 - 1) * len(msgPacks2[0].Msgs)
+	assert.Equal(t, (cnt1 + cnt2), msgCount)
 
 	inputStream1.Close()
 	inputStream2.Close()
@@ -812,11 +813,15 @@ func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 //
 // This testcase will generate MsgPacks as following:
 //
-//     Insert     Insert     Insert     Insert     Insert     Insert
-//  |----------|----------|----------|----------|----------|----------|
-//             ^          ^          ^          ^          ^          ^
-//            TT(10)     TT(20)     TT(30)     TT(40)     TT(50)     TT(100)
+//      Insert     Insert     Insert     Insert     Insert     Insert
+// c1 |----------|----------|----------|----------|----------|----------|
+//               ^          ^          ^          ^          ^          ^
+//             TT(10)     TT(20)     TT(30)     TT(40)     TT(50)     TT(100)
 //
+//      Insert     Insert     Insert     Insert     Insert     Insert
+// c2 |----------|----------|----------|----------|----------|----------|
+//               ^          ^          ^          ^          ^          ^
+//             TT(10)     TT(20)     TT(30)     TT(40)     TT(50)     TT(100)
 // Then check:
 //   1. ttMsgStream consumer can seek to the right position and resume
 //   2. The count of consumed msg should be equal to the count of produced msg
@@ -824,15 +829,19 @@ func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 func TestStream_PulsarTtMsgStream_2(t *testing.T) {
 	pulsarAddr, _ := Params.Load("_PulsarAddress")
 	c1 := funcutil.RandomString(8)
-	producerChannels := []string{c1}
-	consumerChannels := []string{c1}
+	c2 := funcutil.RandomString(8)
+	p1Channels := []string{c1}
+	p2Channels := []string{c2}
+	consumerChannels := []string{c1, c2}
 	consumerSubName := funcutil.RandomString(8)
 
-	inputStream := getPulsarInputStream(pulsarAddr, producerChannels)
+	inputStream1 := getPulsarInputStream(pulsarAddr, p1Channels)
+	msgPacks1 := createMsgPacks(3, 10, 10)
+	assert.Nil(t, sendMsgPacks(inputStream1, msgPacks1))
 
-	msgPacks := createMsgPacks(5, 10, 10)
-	err := sendMsgPacks(inputStream, msgPacks)
-	assert.Nil(t, err)
+	inputStream2 := getPulsarInputStream(pulsarAddr, p2Channels)
+	msgPacks2 := createMsgPacks(5, 10, 10)
+	assert.Nil(t, sendMsgPacks(inputStream2, msgPacks2))
 
 	// consume msg
 	log.Println("=============receive msg===================")
@@ -861,12 +870,15 @@ func TestStream_PulsarTtMsgStream_2(t *testing.T) {
 	}
 
 	msgCount := 0
-	for i := 0; i < len(msgPacks)/2; i++ {
+	for i := 0; i < len(msgPacks1)/2; i++ {
 		msgCount += resumeMsgPack(t)
 	}
-	assert.Equal(t, (len(msgPacks)/2-1)*len(msgPacks[0].Msgs), msgCount)
+	cnt1 := (len(msgPacks1)/2 - 1) * len(msgPacks1[0].Msgs)
+	cnt2 := (len(msgPacks2)/2 - 1) * len(msgPacks2[0].Msgs)
+	assert.Equal(t, (cnt1 + cnt2), msgCount)
 
-	inputStream.Close()
+	inputStream1.Close()
+	inputStream2.Close()
 }
 
 /****************************************Rmq test******************************************/
