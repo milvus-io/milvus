@@ -45,9 +45,9 @@ func TestFlowGraphDDNode_Operate(t *testing.T) {
 	defer close(inFlushCh)
 
 	replica := newReplica()
-	ddNode := newDDNode(ctx, inFlushCh, replica, NewAllocatorFactory())
-
 	collID := UniqueID(0)
+	ddNode := newDDNode(ctx, inFlushCh, replica, NewAllocatorFactory(), collID)
+
 	collName := "col-test-0"
 	// create collection
 	createCollReq := internalpb.CreateCollectionRequest{
