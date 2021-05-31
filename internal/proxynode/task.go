@@ -116,6 +116,7 @@ type InsertTask struct {
 	rowIDAllocator *allocator.IDAllocator
 	segIDAssigner  *SegIDAssigner
 	chMgr          channelsMgr
+	chTicker       channelsTimeTicker
 }
 
 func (it *InsertTask) TraceCtx() context.Context {
@@ -737,6 +738,14 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		it.result.Status.Reason = err.Error()
 		return err
+	}
+
+	pchans, err := it.chMgr.getChannels(collID)
+	if err != nil {
+		return err
+	}
+	for _, pchan := range pchans {
+		_ = it.chTicker.addPChan(pchan)
 	}
 
 	// Assign SegmentID
