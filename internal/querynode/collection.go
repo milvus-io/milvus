@@ -61,6 +61,9 @@ func (c *Collection) removePartitionID(partitionID UniqueID) {
 }
 
 func (c *Collection) addWatchedDmChannels(channels []VChannel) {
+	log.Debug("add watch dm channels to collection",
+		zap.Any("channels", channels),
+		zap.Any("collectionID", c.ID()))
 	c.watchedChannels = append(c.watchedChannels, channels...)
 }
 
@@ -79,9 +82,10 @@ func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Co
 	collection := C.NewCollection(cSchemaBlob)
 
 	var newCollection = &Collection{
-		collectionPtr: collection,
-		id:            collectionID,
-		schema:        schema,
+		collectionPtr:   collection,
+		id:              collectionID,
+		schema:          schema,
+		watchedChannels: make([]VChannel, 0),
 	}
 	C.free(unsafe.Pointer(cSchemaBlob))
 

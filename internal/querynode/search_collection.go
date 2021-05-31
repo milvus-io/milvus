@@ -94,14 +94,16 @@ func (s *searchCollection) start() {
 }
 
 func (s *searchCollection) register() {
-	// register tSafe watcher and init watcher select case
-	collection, err := s.historicalReplica.getCollectionByID(s.collectionID)
+	collection, err := s.streamingReplica.getCollectionByID(s.collectionID)
 	if err != nil {
 		log.Error(err.Error())
 		return
 	}
 
 	s.watcherSelectCase = make([]reflect.SelectCase, 0)
+	log.Debug("register tSafe watcher and init watcher select case",
+		zap.Any("dml channels", collection.getWatchedDmChannels()),
+		zap.Any("collectionID", collection.ID()))
 	for _, channel := range collection.getWatchedDmChannels() {
 		s.tSafeReplica.addTSafe(channel)
 		s.tSafeWatchers[channel] = newTSafeWatcher()

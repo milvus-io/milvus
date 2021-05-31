@@ -40,10 +40,7 @@ type dataSyncService struct {
 }
 
 // collection flow graph
-func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID,
-	vChannels []string,
-	subName ConsumeSubName) error {
-
+func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, vChannels []string) error {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
@@ -61,11 +58,8 @@ func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID,
 			dsService.streamingReplica,
 			dsService.tSafeReplica,
 			vChannel,
-			subName,
 			dsService.msFactory)
 		dsService.collectionFlowGraphs[collectionID] = append(dsService.collectionFlowGraphs[collectionID], newFlowGraph)
-		// start flow graph
-		newFlowGraph.flowGraph.Start()
 	}
 	return nil
 }
@@ -109,11 +103,7 @@ func (dsService *dataSyncService) removeCollectionFlowGraph(collectionID UniqueI
 }
 
 // partition flow graph
-func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID,
-	partitionID UniqueID,
-	vChannels []string,
-	subName ConsumeSubName) error {
-
+func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID, partitionID UniqueID, vChannels []string) error {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
@@ -129,11 +119,8 @@ func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID,
 			dsService.streamingReplica,
 			dsService.tSafeReplica,
 			vChannel,
-			subName,
 			dsService.msFactory)
 		dsService.partitionFlowGraphs[partitionID] = append(dsService.partitionFlowGraphs[partitionID], newFlowGraph)
-		// start flow graph
-		newFlowGraph.flowGraph.Start()
 	}
 	return nil
 }

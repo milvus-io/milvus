@@ -13,6 +13,7 @@ package querynode
 
 import (
 	"context"
+	"errors"
 
 	"go.uber.org/zap"
 
@@ -35,7 +36,6 @@ func newQueryNodeFlowGraph(ctx context.Context,
 	streamingReplica ReplicaInterface,
 	tSafeReplica TSafeReplicaInterface,
 	channel VChannel,
-	subName ConsumeSubName,
 	factory msgstream.Factory) *queryNodeFlowGraph {
 
 	q := &queryNodeFlowGraph{
@@ -43,7 +43,7 @@ func newQueryNodeFlowGraph(ctx context.Context,
 		flowGraph: flowgraph.NewTimeTickedFlowGraph(ctx),
 	}
 
-	var dmStreamNode node = q.newDmInputNode(ctx, channel, subName, factory)
+	var dmStreamNode node = q.newDmInputNode(ctx, factory)
 	var filterDmNode node = newFilteredDmNode(streamingReplica, flowGraphType, collectionID, partitionID)
 	var insertNode node = newInsertNode(streamingReplica)
 	var serviceTimeNode node = newServiceTimeNode(ctx, tSafeReplica, channel, factory)
@@ -92,17 +92,11 @@ func newQueryNodeFlowGraph(ctx context.Context,
 	return q
 }
 
-func (q *queryNodeFlowGraph) newDmInputNode(ctx context.Context,
-	channel VChannel,
-	subName ConsumeSubName,
-	factory msgstream.Factory,
-) *flowgraph.InputNode {
-
+func (q *queryNodeFlowGraph) newDmInputNode(ctx context.Context, factory msgstream.Factory) *flowgraph.InputNode {
 	insertStream, err := factory.NewTtMsgStream(ctx)
 	if err != nil {
 		log.Error(err.Error())
 	} else {
-		insertStream.AsConsumer([]string{channel}, subName)
 		q.dmlStream = insertStream
 	}
 
@@ -111,6 +105,15 @@ func (q *queryNodeFlowGraph) newDmInputNode(ctx context.Context,
 
 	node := flowgraph.NewInputNode(&insertStream, "dmlInputNode", maxQueueLength, maxParallelism)
 	return node
+}
+
+func (q *queryNodeFlowGraph) consumerFlowGraph(channel VChannel, subName ConsumeSubName) error {
+	if q.dmlStream != nil {
+		return errors.New("null dml message stream in flow graph")
+	}
+	q.dmlStream.AsConsumer([]string{channel}, subName)
+	log.Debug("query node flow graph consumes from virtual channel", zap.Any("vChannel", channel))
+	return nil
 }
 
 func (q *queryNodeFlowGraph) seekQueryNodeFlowGraph(position *internalpb.MsgPosition) error {

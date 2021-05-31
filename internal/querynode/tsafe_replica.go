@@ -13,6 +13,7 @@ package querynode
 
 import (
 	"errors"
+	"go.uber.org/zap"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -37,6 +38,7 @@ func (t *tSafeReplica) getTSafe(vChannel VChannel) Timestamp {
 	defer t.mu.Unlock()
 	safer, err := t.getTSaferPrivate(vChannel)
 	if err != nil {
+		log.Error("get tSafe failed", zap.Error(err))
 		return 0
 	}
 	return safer.get()
@@ -47,6 +49,7 @@ func (t *tSafeReplica) setTSafe(vChannel VChannel, timestamp Timestamp) {
 	defer t.mu.Unlock()
 	safer, err := t.getTSaferPrivate(vChannel)
 	if err != nil {
+		log.Error("set tSafe failed", zap.Error(err))
 		return
 	}
 	safer.set(timestamp)
@@ -65,6 +68,7 @@ func (t *tSafeReplica) addTSafe(vChannel VChannel) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.tSafes[vChannel] = newTSafe()
+	log.Debug("add tSafe done", zap.Any("channel", vChannel))
 }
 
 func (t *tSafeReplica) removeTSafe(vChannel VChannel) {
@@ -83,6 +87,7 @@ func (t *tSafeReplica) registerTSafeWatcher(vChannel VChannel, watcher *tSafeWat
 	defer t.mu.Unlock()
 	safer, err := t.getTSaferPrivate(vChannel)
 	if err != nil {
+		log.Error("register tSafe watcher failed", zap.Error(err))
 		return
 	}
 	safer.registerTSafeWatcher(watcher)

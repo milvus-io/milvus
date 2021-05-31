@@ -15,11 +15,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go.uber.org/zap"
 	"math/rand"
 	"strconv"
 	"strings"
-
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -147,18 +146,34 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	// 4. channel as consumer and add flow graph
-	err = w.node.streaming.dataSyncService.addCollectionFlowGraph(collectionID, toDirSubChannels, consumeSubName)
+	// 4. add flow graph
+	err = w.node.streaming.dataSyncService.addCollectionFlowGraph(collectionID, consumeChannels)
 	if err != nil {
 		return err
 	}
+	log.Debug("query node add flow graphs, channels = " + strings.Join(consumeChannels, ", "))
 
-	// 5. seek channel
-	for _, pos := range toSeekInfo {
-		nodeFGs, err := w.node.streaming.dataSyncService.getCollectionFlowGraphs(collectionID)
-		if err != nil {
-			return err
+	// 5. channels as consumer
+	nodeFGs, err := w.node.streaming.dataSyncService.getCollectionFlowGraphs(collectionID)
+	if err != nil {
+		return err
+	}
+	for _, channel := range toDirSubChannels {
+		for _, fg := range nodeFGs {
+			if fg.channel == channel {
+				err := fg.consumerFlowGraph(channel, consumeSubName)
+				if err != nil {
+					errMsg := "msgStream consume error :" + err.Error()
+					log.Error(errMsg)
+					return errors.New(errMsg)
+				}
+			}
 		}
+	}
+	log.Debug("as consumer channels", zap.Any("channels", consumeChannels))
+
+	// 6. seek channel
+	for _, pos := range toSeekInfo {
 		for _, fg := range nodeFGs {
 			if fg.channel == pos.ChannelName {
 				err := fg.seekQueryNodeFlowGraph(pos)
@@ -170,9 +185,12 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 			}
 		}
 	}
-	log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
+	log.Debug("seek channels", zap.Any("toSeekInfo", toSeekInfo))
 
-	// 6. start flow graphs
+	// 7. start search collection
+	w.node.searchService.startSearchCollection(collectionID)
+
+	// 8. start flow graphs
 	err = w.node.streaming.dataSyncService.startCollectionFlowGraph(collectionID)
 	if err != nil {
 		return err
@@ -235,7 +253,6 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 			}
 		}
 		l.node.streaming.replica.initExcludedSegments(collectionID)
-		l.node.searchService.startSearchCollection(collectionID)
 	}
 	if !hasPartitionInHistorical {
 		err := l.node.historical.replica.addPartition(collectionID, partitionID)
@@ -323,7 +340,7 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 
 	hasCollectionInStreaming := r.node.streaming.replica.hasCollection(r.req.CollectionID)
 	if hasCollectionInStreaming {
-		err := r.node.streaming.replica.removePartition(r.req.CollectionID)
+		err := r.node.streaming.replica.removeCollection(r.req.CollectionID)
 		if err != nil {
 			return err
 		}
