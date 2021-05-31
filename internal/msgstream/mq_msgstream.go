@@ -354,12 +354,6 @@ func (ms *mqMsgStream) receiveMsg(consumer mqclient.Consumer) {
 				tsMsg.SetTraceCtx(opentracing.ContextWithSpan(context.Background(), sp))
 			}
 
-			tsMsg.SetPosition(&MsgPosition{
-				ChannelName: filepath.Base(msg.Topic()),
-				//FIXME
-				MsgID: msg.ID().Serialize(),
-			})
-
 			msgPack := MsgPack{
 				Msgs:           []TsMsg{tsMsg},
 				StartPositions: []*internalpb.MsgPosition{tsMsg.Position()},
