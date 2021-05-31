@@ -64,9 +64,9 @@ func (tt *TimeTick) Start() error {
 					},
 				}
 				msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
-				for _, msg := range msgPack.Msgs {
-					log.Debug("proxyservice", zap.Stringer("msg type", msg.Type()))
-				}
+				//for _, msg := range msgPack.Msgs {
+				//	log.Debug("proxyservice", zap.Stringer("msg type", msg.Type()))
+				//}
 				for _, channel := range tt.channels {
 					err = channel.Broadcast(&msgPack)
 					if err != nil {

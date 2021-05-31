@@ -38,10 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-const (
-	reqTimeoutInterval = time.Second * 10
-)
-
 type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
@@ -115,7 +111,7 @@ func (i *IndexNode) Init() error {
 			Ip:   Params.IP,
 			Port: int64(Params.Port),
 		},
-		ServerID: i.session.ServerID,
+		NodeID: i.session.ServerID,
 	}
 
 	resp, err2 := i.serviceClient.RegisterNode(ctx, request)
