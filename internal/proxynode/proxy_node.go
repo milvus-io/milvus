@@ -14,10 +14,13 @@ package proxynode
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 
 	"go.uber.org/zap"
 
@@ -228,10 +231,55 @@ func (node *ProxyNode) Init() error {
 	node.segAssigner = segAssigner
 	node.segAssigner.PeerID = Params.ProxyID
 
-	// TODO(dragondriver): use real master service & query service instance
-	mockMasterIns := newMockMaster()
-	mockQueryIns := newMockQueryService()
-	chMgr := newChannelsMgr(mockMasterIns, mockQueryIns, node.msFactory)
+	getDmlChannelsFunc := func(collectionID UniqueID) (map[vChan]pChan, error) {
+		req := &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DescribeCollection,
+				MsgID:     0, // todo
+				Timestamp: 0, // todo
+				SourceID:  0, // todo
+			},
+			DbName:         "", // todo
+			CollectionName: "", // todo
+			CollectionID:   collectionID,
+			TimeStamp:      0, // todo
+		}
+		resp, err := node.masterService.DescribeCollection(node.ctx, req)
+		if err != nil {
+			log.Warn("DescribeCollection", zap.Error(err))
+			return nil, err
+		}
+		if resp.Status.ErrorCode != 0 {
+			log.Warn("DescribeCollection",
+				zap.Any("ErrorCode", resp.Status.ErrorCode),
+				zap.Any("Reason", resp.Status.Reason))
+			return nil, err
+		}
+		if len(resp.VirtualChannelNames) != len(resp.PhysicalChannelNames) {
+			err := fmt.Errorf(
+				"len(VirtualChannelNames): %v, len(PhysicalChannelNames): %v",
+				len(resp.VirtualChannelNames),
+				len(resp.PhysicalChannelNames))
+			log.Warn("GetDmlChannels", zap.Error(err))
+			return nil, err
+		}
+
+		ret := make(map[vChan]pChan)
+		for idx, name := range resp.VirtualChannelNames {
+			if _, ok := ret[name]; ok {
+				err := fmt.Errorf(
+					"duplicated virtual channel found, vchan: %v, pchan: %v",
+					name,
+					resp.PhysicalChannelNames[idx])
+				return nil, err
+			}
+			ret[name] = resp.PhysicalChannelNames[idx]
+		}
+
+		return ret, nil
+	}
+	mockQueryService := newMockGetChannelsService()
+	chMgr := newChannelsMgr(getDmlChannelsFunc, mockQueryService.GetChannels, node.msFactory)
 	node.chMgr = chMgr
 
 	node.sched, err = NewTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator, node.msFactory)
@@ -243,13 +291,59 @@ func (node *ProxyNode) Init() error {
 
 	// TODO(dragondriver): read this from config
 	interval := time.Millisecond * 200
-	// TODO(dragondriver): use scheduler's method
-	getStats := func(ch pChan) (pChanStatistics, error) {
-		return pChanStatistics{}, nil
-	}
-	node.chTicker = newChannelsTimeTicker(node.ctx, interval, []string{}, getStats, tsoAllocator)
+	node.chTicker = newChannelsTimeTicker(node.ctx, interval, []string{}, node.sched.getPChanStatistics, tsoAllocator)
 
 	return nil
+}
+
+func (node *ProxyNode) sendChannelsTimeTickLoop() {
+	node.wg.Add(1)
+	go func() {
+		defer node.wg.Done()
+
+		// TODO(dragondriver): read this from config
+		interval := time.Millisecond * 200
+		timer := time.NewTicker(interval)
+
+		for {
+			select {
+			case <-node.ctx.Done():
+				return
+			case <-timer.C:
+				stats, err := node.chTicker.getMinTsStatistics()
+				if err != nil {
+					log.Warn("sendChannelsTimeTickLoop.getMinTsStatistics", zap.Error(err))
+					continue
+				}
+
+				channels := make([]pChan, len(stats))
+				tss := make([]Timestamp, len(stats))
+
+				req := &internalpb.ChannelTimeTickMsg{
+					Base: &commonpb.MsgBase{
+						MsgType:   commonpb.MsgType_Undefined, // todo
+						MsgID:     0,                          // todo
+						Timestamp: 0,                          // todo
+						SourceID:  node.session.ServerID,
+					},
+					ChannelNames: channels,
+					Timestamps:   tss,
+				}
+
+				status, err := node.masterService.UpdateChannelTimeTick(node.ctx, req)
+				if err != nil {
+					log.Warn("sendChannelsTimeTickLoop.UpdateChannelTimeTick", zap.Error(err))
+					continue
+				}
+				if status.ErrorCode != 0 {
+					log.Warn("sendChannelsTimeTickLoop.UpdateChannelTimeTick",
+						zap.Any("ErrorCode", status.ErrorCode),
+						zap.Any("Reason", status.Reason))
+					continue
+				}
+			}
+		}
+	}()
 }
 
 func (node *ProxyNode) Start() error {
@@ -282,6 +376,8 @@ func (node *ProxyNode) Start() error {
 		return err
 	}
 	log.Debug("start channelsTimeTicker")
+
+	node.sendChannelsTimeTickLoop()
 
 	// Start callbacks
 	for _, cb := range node.startCallbacks {
