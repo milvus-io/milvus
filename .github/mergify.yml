@@ -57,3 +57,12 @@ pull_request_rules:
         remove:
           - ci-passed
 
+  - name: Remove ci-passed when ci pending
+    conditions:
+      - base=master
+      - "check-pending=continuous-integration/jenkins/pr-merge"
+    actions:
+      label:
+        remove:
+          - ci-passed
+
