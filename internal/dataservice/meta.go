@@ -160,18 +160,15 @@ func (m *meta) AddSegment(segment *datapb.SegmentInfo) error {
 	return nil
 }
 
-func (m *meta) UpdateSegmentStatistic(segment *datapb.SegmentInfo) error {
+func (m *meta) UpdateSegmentStatistic(stats *internalpb.SegmentStatisticsUpdates) error {
 	m.Lock()
 	defer m.Unlock()
-	seg, ok := m.segments[segment.ID]
+	seg, ok := m.segments[stats.SegmentID]
 	if !ok {
-		return newErrSegmentNotFound(segment.ID)
+		return newErrSegmentNotFound(stats.SegmentID)
 	}
-	seg.NumRows = segment.NumRows
-	seg.StartPosition = proto.Clone(segment.StartPosition).(*internalpb.MsgPosition)
-	seg.EndPosition = proto.Clone(segment.EndPosition).(*internalpb.MsgPosition)
-
-	if err := m.saveSegmentInfo(segment); err != nil {
+	seg.NumRows = stats.NumRows
+	if err := m.saveSegmentInfo(seg); err != nil {
 		return err
 	}
 	return nil
@@ -234,7 +231,10 @@ func (m *meta) SealSegment(segID UniqueID) error {
 	return nil
 }
 
-func (m *meta) FlushSegmentWithBinlogAndPos(segID UniqueID, kv map[string]string) error {
+func (m *meta) FlushSegmentWithBinlogAndPos(segID UniqueID,
+	dmlPositionPair *datapb.PositionPair,
+	ddlPositionPair *datapb.PositionPair,
+	binlogMeta map[string]string) error {
 	m.Lock()
 	defer m.Unlock()
 
@@ -242,15 +242,33 @@ func (m *meta) FlushSegmentWithBinlogAndPos(segID UniqueID, kv map[string]string
 	if !ok {
 		return newErrSegmentNotFound(segID)
 	}
+	kv := make(map[string]string)
+	for k, v := range binlogMeta {
+		kv[k] = v
+	}
 	segInfo.State = commonpb.SegmentState_Flushing
+	segInfo.DmlPosition = dmlPositionPair
+	segInfo.DdlPosition = ddlPositionPair
 	segBytes := proto.MarshalTextString(segInfo)
-	key := fmt.Sprintf("%s/%d/%d/%d", segmentPrefix, segInfo.CollectionID, segInfo.PartitionID, segInfo.ID)
+	key := m.prepareSegmentPath(segInfo)
 	kv[key] = segBytes
 
 	if err := m.saveKvTxn(kv); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (m *meta) GetSegmentsByChannel(dmlCh string) []*datapb.SegmentInfo {
+	infos := make([]*datapb.SegmentInfo, 0)
+	for _, segment := range m.segments {
+		if segment.InsertChannel != dmlCh {
+			continue
+		}
+		cInfo := proto.Clone(segment).(*datapb.SegmentInfo)
+		infos = append(infos, cInfo)
+	}
+	return infos
 }
 
 func (m *meta) FlushSegment(segID UniqueID) error {
@@ -399,13 +417,17 @@ func (m *meta) GetFlushingSegments() []*datapb.SegmentInfo {
 func (m *meta) saveSegmentInfo(segment *datapb.SegmentInfo) error {
 	segBytes := proto.MarshalTextString(segment)
 
-	key := fmt.Sprintf("%s/%d/%d/%d", segmentPrefix, segment.CollectionID, segment.PartitionID, segment.ID)
+	key := m.prepareSegmentPath(segment)
 	return m.client.Save(key, segBytes)
 }
 
 func (m *meta) removeSegmentInfo(segment *datapb.SegmentInfo) error {
-	key := fmt.Sprintf("%s/%d/%d/%d", segmentPrefix, segment.CollectionID, segment.PartitionID, segment.ID)
+	key := m.prepareSegmentPath(segment)
 	return m.client.Remove(key)
+}
+
+func (m *meta) prepareSegmentPath(segInfo *datapb.SegmentInfo) string {
+	return fmt.Sprintf("%s/%d/%d/%d", segmentPrefix, segInfo.CollectionID, segInfo.PartitionID, segInfo.ID)
 }
 
 func (m *meta) saveKvTxn(kv map[string]string) error {
@@ -420,15 +442,5 @@ func BuildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueI
 		InsertChannel: channelName,
 		NumRows:       0,
 		State:         commonpb.SegmentState_Growing,
-		StartPosition: &internalpb.MsgPosition{
-			ChannelName: channelName,
-			MsgID:       make([]byte, 0),
-			Timestamp:   0,
-		},
-		EndPosition: &internalpb.MsgPosition{
-			ChannelName: channelName,
-			MsgID:       make([]byte, 0),
-			Timestamp:   0,
-		},
 	}, nil
 }

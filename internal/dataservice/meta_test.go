@@ -16,6 +16,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -209,8 +210,10 @@ func TestMeta_Basic(t *testing.T) {
 		assert.Nil(t, err)
 
 		// update seg1 to 300 rows
-		segInfo0.NumRows = rowCount1
-		err = meta.UpdateSegmentStatistic(segInfo0)
+		stat := &internalpb.SegmentStatisticsUpdates{}
+		stat.SegmentID = segInfo0.ID
+		stat.NumRows = rowCount1
+		err = meta.UpdateSegmentStatistic(stat)
 		assert.Nil(t, err)
 
 		nums, err = meta.GetNumRowsOfCollection(collID)
@@ -218,10 +221,9 @@ func TestMeta_Basic(t *testing.T) {
 		assert.EqualValues(t, rowCount1, nums)
 
 		// check update non-exist segment
-		segInfoNonExist := segInfo0
-		segInfoNonExist.ID, err = mockAllocator.allocID()
+		stat.SegmentID, err = mockAllocator.allocID()
 		assert.Nil(t, err)
-		err = meta.UpdateSegmentStatistic(segInfo0)
+		err = meta.UpdateSegmentStatistic(stat)
 		assert.NotNil(t, err)
 
 		// add seg2 with 300 rows
