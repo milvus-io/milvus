@@ -1,80 +1,59 @@
 pull_request_rules:
-  - name: Auto merge for code changed
+  - name: Test passed for code changed
     conditions:
       - base=master
       - "status-success=Code Checker AMD64 Ubuntu 18.04"
       - "status-success=Build and test AMD64 Ubuntu 18.04"
       - "status-success=continuous-integration/jenkins/pr-merge"
-      - "#approved-reviews-by>=1"
-      - "#changes-requested-reviews-by=0"
-      - -title~=(?i)\[wip\]
-      - -label=do-not-merge/work-in-progress
-      - -body~=[^\n]{72,}
-      - "status-success=DCO"
-      - -label=manual-merge
     actions:
-      merge:
-        method: squash
-        commit_message: title+body
+      label:
+        add:
+          - ci-passed
 
-  - name: Auto merge for tests changed
+  - name: Test passed for tests changed
     conditions:
       - base=master
       - -files~=^(?!test[0-9]*).+
       - "status-success=continuous-integration/jenkins/pr-merge"
-      - "#approved-reviews-by>=1"
-      - "#changes-requested-reviews-by=0"
-      - -title~=(?i)\[wip\]
-      - -label=do-not-merge/work-in-progress
-      - -body~=[^\n]{72,}
-      - "status-success=DCO"
-      - -label=manual-merge
     actions:
-      merge:
-        method: squash
-        commit_message: title+body
+      label:
+        add:
+          - ci-passed
 
-  - name: Auto merge for document changed
+  - name: Test passed for document changed
     conditions:
       - base=master
       - -files~=^[^\.]+$
       - -files~=\.(?!md|png)
-      - "#approved-reviews-by>=1"
-      - "#changes-requested-reviews-by=0"
-      - -body~=[^\n]{72,}
-      - -title~=(?i)\[wip\]
-      - -label=do-not-merge/work-in-progress
-      - "status-success=DCO"
-      - -label=manual-merge
     actions:
-      merge:
-        method: squash
-        commit_message: title+body
+      label:
+        add:
+          - ci-passed
 
-  - name: Warn on width limit exceeded
+  - name: Remove ci-passed when code check failed
     conditions:
       - base=master
-      - body~=[^\n]{72,}
+      - "check-failure=Code Checker AMD64 Ubuntu 18.04"
     actions:
-        comment:
-            message: |
-                The pull request body line width exceeded limit. Could you fix it @{{author}}?
+      label:
+        remove:
+          - ci-passed
 
-  - name: Warn on conflict
+  - name: Remove ci-passed when unittest failed
     conditions:
       - base=master
-      - conflict
+      - "check-failure=Build and test AMD64 Ubuntu 18.04"
     actions:
-        comment:
-            message: |
-                This pull request is now in conflicts. Could you fix it @{{author}}? 🙏
+      label:
+        remove:
+          - ci-passed
 
-  - name: Warn on DCO failed
+  - name: Remove ci-passed when ci failed
     conditions:
       - base=master
-      - -status-success=DCO
+      - "check-failure=continuous-integration/jenkins/pr-merge"
     actions:
-        comment:
-            message: |
-                DCO check failed. Could you fix it @{{author}}? 🙏
+      label:
+        remove:
+          - ci-passed
 
