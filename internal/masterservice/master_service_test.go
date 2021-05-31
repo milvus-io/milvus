@@ -41,20 +41,6 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
-type proxyMock struct {
-	types.ProxyService
-	randVal int
-}
-
-func (p *proxyMock) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Value: fmt.Sprintf("proxy-time-tick-%d", p.randVal),
-	}, nil
-}
-
 type proxyNodeMock struct {
 	types.ProxyNode
 	collArray []string
@@ -243,12 +229,6 @@ func TestMasterService(t *testing.T) {
 	_, err = etcdCli.Put(ctx, path.Join(sessKey, typeutil.ProxyNodeRole+"-100"), string(pnb))
 	assert.Nil(t, err)
 
-	pm := &proxyMock{
-		randVal: randVal,
-	}
-	err = core.SetProxyService(ctx, pm)
-	assert.Nil(t, err)
-
 	pnm := &proxyNodeMock{
 		collArray: make([]string, 0, 16),
 		mutex:     sync.Mutex{},
@@ -280,6 +260,11 @@ func TestMasterService(t *testing.T) {
 
 	err = core.Init()
 	assert.Nil(t, err)
+	var localTSO uint64 = 0
+	core.TSOAllocator = func(c uint32) (uint64, error) {
+		localTSO += uint64(c)
+		return localTSO, nil
+	}
 
 	err = core.Start()
 	assert.Nil(t, err)
@@ -290,9 +275,6 @@ func TestMasterService(t *testing.T) {
 		"pulsarBufSize":  1024}
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
-
-	proxyTimeTickStream, _ := msFactory.NewMsgStream(ctx)
-	proxyTimeTickStream.AsProducer([]string{Params.ProxyTimeTickChannel})
 
 	dataServiceSegmentStream, _ := msFactory.NewMsgStream(ctx)
 	dataServiceSegmentStream.AsProducer([]string{Params.DataServiceSegmentChannel})

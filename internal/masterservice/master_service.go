@@ -55,8 +55,6 @@ import (
 //  milvuspb -> milvuspb
 //  masterpb2 -> masterpb (master_service)
 
-//NEZA2017, DEBUG FLAG for milvus 2.0, this part should remove when milvus 2.0 release
-
 // ------------------ struct -----------------------
 
 // DdOperation used to save ddMsg into ETCD
@@ -490,16 +488,6 @@ func (c *Core) setMsgStreams() error {
 		return fmt.Errorf("MsgChannelSubName is emptyr")
 	}
 
-	//proxy time tick stream,
-	if Params.ProxyTimeTickChannel == "" {
-		return fmt.Errorf("ProxyTimeTickChannel is empty")
-	}
-
-	proxyTimeTickStream, _ := c.msFactory.NewMsgStream(c.ctx)
-	proxyTimeTickStream.AsConsumer([]string{Params.ProxyTimeTickChannel}, Params.MsgChannelSubName)
-	log.Debug("master AsConsumer: " + Params.ProxyTimeTickChannel + " : " + Params.MsgChannelSubName)
-	proxyTimeTickStream.Start()
-
 	// master time tick channel
 	if Params.TimeTickChannel == "" {
 		return fmt.Errorf("TimeTickChannel is empty")
@@ -621,31 +609,6 @@ func (c *Core) setMsgStreams() error {
 		return nil
 	}
 
-	// receive time tick from msg stream
-	c.ProxyTimeTickChan = make(chan typeutil.Timestamp, 1024)
-	go func() {
-		for {
-			select {
-			case <-c.ctx.Done():
-				return
-			case ttmsgs, ok := <-proxyTimeTickStream.Chan():
-				if !ok {
-					log.Warn("proxy time tick msg stream closed")
-					return
-				}
-				if len(ttmsgs.Msgs) > 0 {
-					for _, ttm := range ttmsgs.Msgs {
-						ttmsg, ok := ttm.(*ms.TimeTickMsg)
-						if !ok {
-							continue
-						}
-						c.ProxyTimeTickChan <- ttmsg.Base.Timestamp
-					}
-				}
-			}
-		}
-	}()
-
 	if Params.DataServiceSegmentChannel == "" {
 		return fmt.Errorf("DataServiceSegmentChannel is empty")
 	}
@@ -665,17 +628,6 @@ func (c *Core) setMsgStreams() error {
 	log.Debug("master AsConsumer: " + Params.DataServiceSegmentChannel + " : " + dnSubName)
 	dnStream.Start()
 	c.DataNodeFlushedSegmentChan = dnStream.Chan()
-
-	return nil
-}
-
-func (c *Core) SetProxyService(ctx context.Context, s types.ProxyService) error {
-	rsp, err := s.GetTimeTickChannel(ctx)
-	if err != nil {
-		return err
-	}
-	Params.ProxyTimeTickChannel = rsp.Value
-	log.Debug("proxy time tick", zap.String("channel name", Params.ProxyTimeTickChannel))
 
 	return nil
 }
