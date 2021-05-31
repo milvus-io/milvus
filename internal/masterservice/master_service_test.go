@@ -175,9 +175,10 @@ func (idx *indexMock) getFileArray() []string {
 }
 
 func consumeMsgChan(timeout time.Duration, targetChan <-chan *msgstream.MsgPack) {
+	ch := time.After(timeout)
 	for {
 		select {
-		case <-time.After(timeout):
+		case <-ch:
 			return
 		case <-targetChan:
 
@@ -559,6 +560,7 @@ func TestMasterService(t *testing.T) {
 		consumeMsgChan(time.Second, ddStream.Chan())
 		status, err := core.CreatePartition(ctx, req)
 		assert.Nil(t, err)
+		t.Log(status.Reason)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 		collMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
@@ -567,10 +569,9 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, partName, partMeta.PartitionName)
 
-		msg, ok := <-ddStream.Chan()
-		assert.True(t, ok)
-		assert.Equal(t, 1, len(msg.Msgs))
-		partMsg, ok := (msg.Msgs[0]).(*msgstream.CreatePartitionMsg)
+		msgs := getNotTtMsg(1, ddStream.Chan())
+		assert.Equal(t, 1, len(msgs))
+		partMsg, ok := (msgs[0]).(*msgstream.CreatePartitionMsg)
 		assert.True(t, ok)
 		assert.Equal(t, collMeta.ID, partMsg.CollectionID)
 		assert.Equal(t, partMeta.PartitionID, partMsg.PartitionID)
@@ -972,10 +973,9 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, Params.DefaultPartitionName, partMeta.PartitionName)
 
-		msg, ok := <-ddStream.Chan()
-		assert.True(t, ok)
-		assert.Equal(t, 1, len(msg.Msgs))
-		dmsg, ok := (msg.Msgs[0]).(*msgstream.DropPartitionMsg)
+		msgs := getNotTtMsg(1, ddStream.Chan())
+		assert.Equal(t, 1, len(msgs))
+		dmsg, ok := (msgs[0]).(*msgstream.DropPartitionMsg)
 		assert.True(t, ok)
 		assert.Equal(t, collMeta.ID, dmsg.CollectionID)
 		assert.Equal(t, dropPartID, dmsg.PartitionID)
@@ -1022,10 +1022,9 @@ func TestMasterService(t *testing.T) {
 		_, err = core.MetaTable.GetChanNameByVirtualChan(vChanName)
 		assert.NotNil(t, err)
 
-		msg, ok := <-ddStream.Chan()
-		assert.True(t, ok)
-		assert.Equal(t, 1, len(msg.Msgs))
-		dmsg, ok := (msg.Msgs[0]).(*msgstream.DropCollectionMsg)
+		msgs := getNotTtMsg(1, ddStream.Chan())
+		assert.Equal(t, 1, len(msgs))
+		dmsg, ok := (msgs[0]).(*msgstream.DropCollectionMsg)
 		assert.True(t, ok)
 		assert.Equal(t, collMeta.ID, dmsg.CollectionID)
 		collArray := pnm.GetCollArray()
