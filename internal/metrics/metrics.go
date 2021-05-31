@@ -44,12 +44,21 @@ var (
 			Name:      "drop_collection_total",
 			Help:      "Counter of drop collection",
 		}, []string{"client_id", "type"})
+	MasterInsertChannelTimeTick = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "milvus",
+			Subsystem: "master",
+			Name:      "insert_channel_time_tick",
+			Help:      "Time tick of insert Channel in 24H",
+		}, []string{"vchannel"})
 )
 
 //RegisterMaster register Master metrics
 func RegisterMaster() {
+	prometheus.MustRegister(MasterProxyNodeLister)
 	prometheus.MustRegister(MasterCreateCollectionCounter)
 	prometheus.MustRegister(MasterDropCollectionCounter)
+	prometheus.MustRegister(MasterInsertChannelTimeTick)
 	//prometheus.MustRegister(PanicCounter)
 }
 
