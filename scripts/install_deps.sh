@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 
-if [[ ! -x "$(command -v apt)" ]]; then
+if [[ -x "$(command -v apt)" ]]; then
     sudo apt install -y g++ gcc make libssl-dev zlib1g-dev libboost-regex-dev \
     libboost-program-options-dev libboost-system-dev libboost-filesystem-dev \
     libboost-serialization-dev python3-dev libboost-python-dev libcurl4-openssl-dev gfortran libtbb-dev
-elif [[ ! -x "$(command -v yum)" ]]; then
+elif [[ -x "$(command -v yum)" ]]; then
     sudo yum install -y epel-release centos-release-scl-rh \
       && sudo yum install -y make automake openssl-devel zlib-devel tbb-devel \
       libcurl-devel python3-devel boost-devel boost-python \
