@@ -87,7 +87,7 @@ func (dsService *dataSyncService) initNodes(vchanPair *datapb.VchannelPair) {
 	var ddStreamNode Node = newDDInputNode(dsService.ctx, dsService.msFactory, vchanPair.GetDdlVchannelName(), vchanPair.GetDdlPosition())
 
 	var filterDmNode Node = newFilteredDmNode()
-	var ddNode Node = newDDNode(dsService.ctx, dsService.flushChan, dsService.replica, dsService.idAllocator)
+	var ddNode Node = newDDNode(dsService.ctx, dsService.flushChan, dsService.replica, dsService.idAllocator, vchanPair.CollectionID)
 	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, dsService.replica, dsService.msFactory, dsService.idAllocator)
 	var gcNode Node = newGCNode(dsService.replica)
 

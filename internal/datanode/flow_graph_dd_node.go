@@ -26,7 +26,6 @@ import (
 	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -46,6 +45,8 @@ type ddNode struct {
 
 	kv      kv.BaseKV
 	replica Replica
+
+	collectionID UniqueID
 }
 
 type ddData struct {
@@ -85,6 +86,10 @@ func (ddNode *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		// TODO: add error handling
 	}
 
+	if len(in) == 0 {
+		return []flowgraph.Msg{}
+	}
+
 	msMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
 		log.Error("type assertion failed for MsgStreamMsg")
@@ -122,15 +127,27 @@ func (ddNode *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	// do dd tasks
 	for _, msg := range tsMessages {
-		switch msg.Type() {
-		case commonpb.MsgType_CreateCollection:
-			ddNode.createCollection(msg.(*msgstream.CreateCollectionMsg))
-		case commonpb.MsgType_DropCollection:
-			ddNode.dropCollection(msg.(*msgstream.DropCollectionMsg))
-		case commonpb.MsgType_CreatePartition:
-			ddNode.createPartition(msg.(*msgstream.CreatePartitionMsg))
-		case commonpb.MsgType_DropPartition:
-			ddNode.dropPartition(msg.(*msgstream.DropPartitionMsg))
+		switch msg := msg.(type) {
+		case *msgstream.CreateCollectionMsg:
+			if msg.CollectionID != ddNode.collectionID {
+				continue
+			}
+			ddNode.createCollection(msg)
+		case *msgstream.DropCollectionMsg:
+			if msg.CollectionID != ddNode.collectionID {
+				continue
+			}
+			ddNode.dropCollection(msg)
+		case *msgstream.CreatePartitionMsg:
+			if msg.CollectionID != ddNode.collectionID {
+				continue
+			}
+			ddNode.createPartition(msg)
+		case *msgstream.DropPartitionMsg:
+			if msg.CollectionID != ddNode.collectionID {
+				continue
+			}
+			ddNode.dropPartition(msg)
 		default:
 			log.Error("Not supporting message type", zap.Any("Type", msg.Type()))
 		}
@@ -439,7 +456,7 @@ func (ddNode *ddNode) dropPartition(msg *msgstream.DropPartitionMsg) {
 }
 
 func newDDNode(ctx context.Context, inFlushCh <-chan *flushMsg,
-	replica Replica, idAllocator allocatorInterface) *ddNode {
+	replica Replica, idAllocator allocatorInterface, collectionID UniqueID) *ddNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -478,5 +495,7 @@ func newDDNode(ctx context.Context, inFlushCh <-chan *flushMsg,
 		kv:          minioKV,
 		replica:     replica,
 		flushMap:    &sync.Map{},
+
+		collectionID: collectionID,
 	}
 }
