@@ -58,8 +58,8 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	// update service time
 	stNode.tSafeReplica.setTSafe(stNode.vChannel, serviceTimeMsg.timeRange.timestampMax)
-	log.Debug("update tSafe:",
-		zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)))
+	//log.Debug("update tSafe:",
+	//	zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)))
 
 	if err := stNode.sendTimeTick(serviceTimeMsg.timeRange.timestampMax); err != nil {
 		log.Error("Error: send time tick into pulsar channel failed", zap.Error(err))

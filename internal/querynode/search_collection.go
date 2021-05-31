@@ -241,12 +241,12 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 		default:
 			serviceTime := s.waitNewTSafe()
 			s.setServiceableTime(serviceTime)
-			log.Debug("querynode::doUnsolvedMsgSearch: setServiceableTime",
-				zap.Any("serviceTime", serviceTime),
-			)
-			log.Debug("get tSafe from flow graph",
-				zap.Int64("collectionID", s.collectionID),
-				zap.Uint64("tSafe", serviceTime))
+			//log.Debug("querynode::doUnsolvedMsgSearch: setServiceableTime",
+			//	zap.Any("serviceTime", serviceTime),
+			//)
+			//log.Debug("get tSafe from flow graph",
+			//	zap.Int64("collectionID", s.collectionID),
+			//	zap.Uint64("tSafe", serviceTime))
 
 			searchMsg := make([]*msgstream.SearchMsg, 0)
 			tempMsg := s.popAllUnsolvedMsg()

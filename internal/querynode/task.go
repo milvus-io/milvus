@@ -314,6 +314,7 @@ func (r *releaseCollectionTask) PreExecute(ctx context.Context) error {
 }
 
 func (r *releaseCollectionTask) Execute(ctx context.Context) error {
+	log.Debug("receive release collection task", zap.Any("collectionID", r.req.CollectionID))
 	r.node.streaming.dataSyncService.removeCollectionFlowGraph(r.req.CollectionID)
 	collection, err := r.node.historical.replica.getCollectionByID(r.req.CollectionID)
 	if err != nil {
