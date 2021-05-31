@@ -46,8 +46,8 @@ type TaskQueue interface {
 type BaseTaskQueue struct {
 	unissuedTasks *list.List
 	activeTasks   map[Timestamp]task
-	utLock        sync.Mutex
-	atLock        sync.Mutex
+	utLock        sync.RWMutex
+	atLock        sync.RWMutex
 
 	// maxTaskNum should keep still
 	maxTaskNum int64
@@ -62,8 +62,8 @@ func (queue *BaseTaskQueue) utChan() <-chan int {
 }
 
 func (queue *BaseTaskQueue) utEmpty() bool {
-	queue.utLock.Lock()
-	defer queue.utLock.Unlock()
+	queue.utLock.RLock()
+	defer queue.utLock.RUnlock()
 	return queue.unissuedTasks.Len() == 0
 }
 
@@ -84,8 +84,8 @@ func (queue *BaseTaskQueue) addUnissuedTask(t task) error {
 }
 
 func (queue *BaseTaskQueue) FrontUnissuedTask() task {
-	queue.utLock.Lock()
-	defer queue.utLock.Unlock()
+	queue.utLock.RLock()
+	defer queue.utLock.RUnlock()
 
 	if queue.unissuedTasks.Len() <= 0 {
 		log.Warn("sorry, but the unissued task list is empty!")
@@ -138,16 +138,16 @@ func (queue *BaseTaskQueue) PopActiveTask(ts Timestamp) task {
 }
 
 func (queue *BaseTaskQueue) getTaskByReqID(reqID UniqueID) task {
-	queue.utLock.Lock()
-	defer queue.utLock.Unlock()
+	queue.utLock.RLock()
+	defer queue.utLock.RUnlock()
 	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
 		if e.Value.(task).ID() == reqID {
 			return e.Value.(task)
 		}
 	}
 
-	queue.atLock.Lock()
-	defer queue.atLock.Unlock()
+	queue.atLock.RLock()
+	defer queue.atLock.RUnlock()
 	for ats := range queue.activeTasks {
 		if queue.activeTasks[ats].ID() == reqID {
 			return queue.activeTasks[ats]
@@ -158,16 +158,16 @@ func (queue *BaseTaskQueue) getTaskByReqID(reqID UniqueID) task {
 }
 
 func (queue *BaseTaskQueue) TaskDoneTest(ts Timestamp) bool {
-	queue.utLock.Lock()
-	defer queue.utLock.Unlock()
+	queue.utLock.RLock()
+	defer queue.utLock.RUnlock()
 	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
 		if e.Value.(task).EndTs() < ts {
 			return false
 		}
 	}
 
-	queue.atLock.Lock()
-	defer queue.atLock.Unlock()
+	queue.atLock.RLock()
+	defer queue.atLock.RUnlock()
 	for ats := range queue.activeTasks {
 		if ats < ts {
 			return false
@@ -205,6 +205,34 @@ type DdTaskQueue struct {
 
 type DmTaskQueue struct {
 	BaseTaskQueue
+}
+
+func (queue *DmTaskQueue) getPChanStatistics(pchan pChan) (pChanStatistics, error) {
+	queue.atLock.RLock()
+	defer queue.atLock.RUnlock()
+
+	stats := pChanStatistics{
+		minTs:   0,
+		maxTs:   ^uint64(0),
+		invalid: true,
+	}
+
+	for _, t := range queue.activeTasks {
+		dmlT, _ := t.(dmlTask)
+		stat, err := dmlT.getStatistics(pchan)
+		if err != nil {
+			return pChanStatistics{invalid: true}, nil
+		}
+		if stat.minTs < stats.minTs {
+			stats.minTs = stat.minTs
+		}
+		if stat.maxTs > stats.maxTs {
+			stats.maxTs = stat.maxTs
+		}
+		stats.invalid = false
+	}
+
+	return stats, nil
 }
 
 type DqTaskQueue struct {
@@ -255,7 +283,7 @@ func NewDqTaskQueue(sched *TaskScheduler) *DqTaskQueue {
 
 type TaskScheduler struct {
 	DdQueue TaskQueue
-	DmQueue TaskQueue
+	DmQueue *DmTaskQueue
 	DqQueue TaskQueue
 
 	idAllocator  *allocator.IDAllocator
@@ -527,4 +555,8 @@ func (sched *TaskScheduler) TaskDoneTest(ts Timestamp) bool {
 	dmTaskDone := sched.DmQueue.TaskDoneTest(ts)
 	//dqTaskDone := sched.DqQueue.TaskDoneTest(ts)
 	return ddTaskDone && dmTaskDone && true
+}
+
+func (sched *TaskScheduler) getPChanStatistics(pchan pChan) (pChanStatistics, error) {
+	return sched.DmQueue.getPChanStatistics(pchan)
 }
