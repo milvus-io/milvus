@@ -186,7 +186,6 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 			}
 		}
 	}
-	log.Debug("seek channels", zap.Any("toSeekInfo", toSeekInfo))
 
 	// 7. start search collection
 	w.node.searchService.startSearchCollection(collectionID)

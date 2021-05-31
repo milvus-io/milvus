@@ -13,8 +13,6 @@ package querynode
 
 import (
 	"errors"
-	"fmt"
-
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
@@ -111,7 +109,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 
 	// check if the segment is in excluded segments
 	excludedSegments, err := fdmNode.replica.getExcludedSegments(fdmNode.collectionID)
-	log.Debug("excluded segments", zap.String("segmentIDs", fmt.Sprintln(excludedSegments)))
+	//log.Debug("excluded segments", zap.String("segmentIDs", fmt.Sprintln(excludedSegments)))
 	if err != nil {
 		log.Error(err.Error())
 		return nil
