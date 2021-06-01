@@ -533,10 +533,12 @@ func (c *Core) startMsgStreamAndSeek(chanName string, subName string, key string
 		if err := DecodeMsgPositions(msgPosStr, &msgPositions); err != nil {
 			return nil, fmt.Errorf("decode msg positions fail, err %s", err.Error())
 		}
-		if err := stream.Seek(msgPositions); err != nil {
-			return nil, fmt.Errorf("msg stream seek fail, err %s", err.Error())
+		if len(msgPositions) > 0 {
+			if err := stream.Seek(msgPositions); err != nil {
+				return nil, fmt.Errorf("msg stream seek fail, err %s", err.Error())
+			}
+			log.Debug("msg stream: " + chanName + ":" + subName + " seek to stored position")
 		}
-		log.Debug("msg stream: " + chanName + ":" + subName + " seek to stored position")
 	}
 	stream.Start()
 	return &stream, nil

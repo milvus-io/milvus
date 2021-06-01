@@ -90,6 +90,32 @@ func GenFlushedSegMsgPack(segID typeutil.UniqueID) *msgstream.MsgPack {
 	return &msgPack
 }
 
+func CreateMsgStreamAsProducer(chanName string) *msgstream.MsgStream {
+	msFactory := msgstream.NewPmsFactory()
+	m := map[string]interface{}{
+		"PulsarAddress":  cms.Params.PulsarAddress,
+		"ReceiveBufSize": 1024,
+		"PulsarBufSize":  1024}
+	msFactory.SetParams(m)
+	stream, _ := msFactory.NewMsgStream(context.Background())
+	stream.AsProducer([]string{chanName})
+	stream.Start()
+	return &stream
+}
+
+func CreateMsgStreamAsConsumer(chanName string, subName string) *msgstream.MsgStream {
+	msFactory := msgstream.NewPmsFactory()
+	m := map[string]interface{}{
+		"PulsarAddress":  cms.Params.PulsarAddress,
+		"ReceiveBufSize": 1024,
+		"PulsarBufSize":  1024}
+	msFactory.SetParams(m)
+	stream, _ := msFactory.NewMsgStream(context.Background())
+	stream.AsConsumer([]string{chanName}, subName)
+	stream.Start()
+	return &stream
+}
+
 type proxyNodeMock struct {
 	types.ProxyNode
 	invalidateCollectionMetaCache func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
@@ -165,14 +191,21 @@ func TestGrpcService(t *testing.T) {
 	_, err = etcdCli.Put(ctx, path.Join(sessKey, typeutil.ProxyNodeRole+"-100"), string(pnb))
 	assert.Nil(t, err)
 
+	dataChanName := cms.Params.DataServiceSegmentChannel
+	dataServSubName := cms.Params.MsgChannelSubName + "ds"
+	segInfoProducer := CreateMsgStreamAsProducer(dataChanName)
+	segInfoConsumer := CreateMsgStreamAsConsumer(dataChanName, dataServSubName)
+
+	dataNodeSubName := cms.Params.MsgChannelSubName + "dn"
+	flushedSegProducer := CreateMsgStreamAsProducer(dataChanName)
+	flushedSegConsumer := CreateMsgStreamAsConsumer(dataChanName, dataNodeSubName)
+
 	err = core.Init()
 	assert.Nil(t, err)
 
 	core.ProxyTimeTickChan = make(chan typeutil.Timestamp, 8)
-	FlushedSegmentChan := make(chan *msgstream.MsgPack, 8)
-	core.DataNodeFlushedSegmentChan = FlushedSegmentChan
-	SegmentInfoChan := make(chan *msgstream.MsgPack, 8)
-	core.DataServiceSegmentChan = SegmentInfoChan
+	core.DataNodeFlushedSegmentChan = (*flushedSegConsumer).Chan()
+	core.DataServiceSegmentChan = (*segInfoConsumer).Chan()
 
 	timeTickArray := make([]typeutil.Timestamp, 0, 16)
 	core.SendTimeTick = func(ts typeutil.Timestamp) error {
@@ -560,7 +593,7 @@ func TestGrpcService(t *testing.T) {
 			PartitionID:  part.PartitionID,
 		}
 		segInfoMsgPack := GenSegInfoMsgPack(seg)
-		SegmentInfoChan <- segInfoMsgPack
+		(*segInfoProducer).Produce(segInfoMsgPack)
 		time.Sleep(time.Millisecond * 100)
 		part, err = core.MetaTable.GetPartitionByID(1, partID, 0)
 		assert.Nil(t, err)
@@ -568,7 +601,7 @@ func TestGrpcService(t *testing.T) {
 
 		// send msg twice, partition still contains 1 segment
 		segInfoMsgPack1 := GenSegInfoMsgPack(seg)
-		SegmentInfoChan <- segInfoMsgPack1
+		(*segInfoProducer).Produce(segInfoMsgPack1)
 		time.Sleep(time.Millisecond * 100)
 		part1, err := core.MetaTable.GetPartitionByID(1, partID, 0)
 		assert.Nil(t, err)
@@ -683,20 +716,20 @@ func TestGrpcService(t *testing.T) {
 			PartitionID:  part.PartitionID,
 		}
 		segInfoMsgPack := GenSegInfoMsgPack(seg)
-		SegmentInfoChan <- segInfoMsgPack
+		(*segInfoProducer).Produce(segInfoMsgPack)
 		time.Sleep(time.Millisecond * 100)
 		part, err = core.MetaTable.GetPartitionByID(1, partID, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, 2, len(part.SegmentIDs))
 		flushedSegMsgPack := GenFlushedSegMsgPack(segID)
-		FlushedSegmentChan <- flushedSegMsgPack
+		(*flushedSegProducer).Produce(flushedSegMsgPack)
 		time.Sleep(time.Millisecond * 100)
 		segIdxInfo, err := core.MetaTable.GetSegmentIndexInfoByID(segID, -1, "")
 		assert.Nil(t, err)
 
 		// send msg twice, segIdxInfo should not change
 		flushedSegMsgPack1 := GenFlushedSegMsgPack(segID)
-		FlushedSegmentChan <- flushedSegMsgPack1
+		(*flushedSegProducer).Produce(flushedSegMsgPack1)
 		time.Sleep(time.Millisecond * 100)
 		segIdxInfo1, err := core.MetaTable.GetSegmentIndexInfoByID(segID, -1, "")
 		assert.Nil(t, err)
