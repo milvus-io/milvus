@@ -101,8 +101,8 @@ func (rc *retrieveCollection) waitNewTSafe() Timestamp {
 	// block until any vChannel updating tSafe
 	_, _, recvOK := reflect.Select(rc.watcherSelectCase)
 	if !recvOK {
-		log.Error("tSafe has been closed")
-		return 0
+		//log.Error("tSafe has been closed")
+		return invalidTimestamp
 	}
 	t := Timestamp(math.MaxInt64)
 	for channel := range rc.tSafeWatchers {
@@ -202,6 +202,10 @@ func (rc *retrieveCollection) doUnsolvedMsgRetrieve() {
 			return
 		default:
 			serviceTime := rc.waitNewTSafe()
+			if serviceTime == invalidTimestamp {
+				log.Debug("tSafe closed")
+				return
+			}
 			rc.setServiceableTime(serviceTime)
 			log.Debug("querynode::doUnsolvedMsgRetrieve: setServiceableTime",
 				zap.Any("serviceTime", serviceTime),

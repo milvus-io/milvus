@@ -241,7 +241,7 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 		default:
 			serviceTime := s.waitNewTSafe()
 			if serviceTime == invalidTimestamp {
-				log.Debug("tSafe closed")
+				//log.Debug("tSafe closed")
 				return
 			}
 			s.setServiceableTime(serviceTime)
