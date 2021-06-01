@@ -107,7 +107,7 @@ class TestIndexBase:
         expected: return search success
         '''
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        ids = connect.insert(collection, default_entities, partition_name=default_tag)
         connect.create_index(collection, field_name, get_simple_index)
         if get_simple_index["index_type"] != "FLAT":
             index = connect.describe_index(collection, "")
@@ -123,7 +123,7 @@ class TestIndexBase:
         expected: return search success
         '''
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        ids = connect.insert(collection, default_entities, partition_name=default_tag)
         connect.flush([collection])
         connect.create_index(collection, field_name, get_simple_index)
         if get_simple_index["index_type"] != "FLAT":
@@ -311,7 +311,7 @@ class TestIndexBase:
         expected: return search success
         '''
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        ids = connect.insert(collection, default_entities, partition_name=default_tag)
         get_simple_index["metric_type"] = "IP"
         connect.create_index(collection, field_name, get_simple_index)
         if get_simple_index["index_type"] != "FLAT":
@@ -328,7 +328,7 @@ class TestIndexBase:
         expected: return search success
         '''
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        ids = connect.insert(collection, default_entities, partition_name=default_tag)
         connect.flush([collection])
         get_simple_index["metric_type"] = "IP"
         connect.create_index(collection, field_name, get_simple_index)
@@ -669,7 +669,7 @@ class TestIndexBinary:
         expected: return search success
         '''
         connect.create_partition(binary_collection, default_tag)
-        ids = connect.insert(binary_collection, default_binary_entities, partition_tag=default_tag)
+        ids = connect.insert(binary_collection, default_binary_entities, partition_name=default_tag)
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
         binary_index = connect.describe_index(binary_collection, "")
         create_target_index(get_jaccard_index, binary_field_name)
@@ -740,7 +740,7 @@ class TestIndexBinary:
         expected: return code 0, and index instructure
         '''
         connect.create_partition(binary_collection, default_tag)
-        ids = connect.insert(binary_collection, default_binary_entities, partition_tag=default_tag)
+        ids = connect.insert(binary_collection, default_binary_entities, partition_name=default_tag)
         connect.flush([binary_collection])
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
         stats = connect.get_collection_stats(binary_collection)
@@ -781,7 +781,7 @@ class TestIndexBinary:
         expected: return code 0, and default index param
         '''
         connect.create_partition(binary_collection, default_tag)
-        ids = connect.insert(binary_collection, default_binary_entities, partition_tag=default_tag)
+        ids = connect.insert(binary_collection, default_binary_entities, partition_name=default_tag)
         connect.flush([binary_collection])
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
         connect.drop_index(binary_collection, binary_field_name)

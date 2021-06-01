@@ -88,7 +88,7 @@ class TestCreateBase:
             assert message == "create partition failed: can't find collection: %s" % collection_name
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
-    def test_create_partition_tag_name_None(self, connect, collection):
+    def test_create_partition_name_name_None(self, connect, collection):
         '''
         target: test create partition, tag name set None, check status returned
         method: call function: create_partition
@@ -98,10 +98,10 @@ class TestCreateBase:
         try:
             connect.create_partition(collection, tag_name)
         except Exception as e:
-            assert e.args[0] == "`partition_tag` value None is illegal"
+            assert e.args[0] == "`partition_name` value None is illegal"
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
-    def test_create_different_partition_tags(self, connect, collection):
+    def test_create_different_partition_names(self, connect, collection):
         '''
         target: test create partition twice with different names
         method: call function: create_partition, and again
@@ -133,7 +133,7 @@ class TestCreateBase:
         '''
         connect.create_partition(id_collection, default_tag)
         ids = [i for i in range(default_nb)]
-        insert_ids = connect.insert(id_collection, default_entities, ids, partition_tag=default_tag)
+        insert_ids = connect.insert(id_collection, default_entities, ids, partition_name=default_tag)
         assert len(insert_ids) == len(ids)
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
@@ -147,7 +147,7 @@ class TestCreateBase:
         connect.create_partition(collection, default_tag)
         ids = [i for i in range(default_nb)]
         try:
-            connect.insert(collection, default_entities, ids, partition_tag=tag_new)
+            connect.insert(collection, default_entities, ids, partition_name=tag_new)
         except Exception as e:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
@@ -163,10 +163,10 @@ class TestCreateBase:
         '''
         connect.create_partition(id_collection, default_tag)
         ids = [i for i in range(default_nb)]
-        insert_ids = connect.insert(id_collection, default_entities, ids, partition_tag=default_tag)
+        insert_ids = connect.insert(id_collection, default_entities, ids, partition_name=default_tag)
         assert len(insert_ids) == default_nb
         ids = [(i+default_nb) for i in range(default_nb)]
-        new_insert_ids = connect.insert(id_collection, default_entities, ids, partition_tag=default_tag)
+        new_insert_ids = connect.insert(id_collection, default_entities, ids, partition_name=default_tag)
         assert len(new_insert_ids) == default_nb
         connect.flush([id_collection])
         res = connect.get_collection_stats(id_collection)
@@ -183,9 +183,9 @@ class TestCreateBase:
         collection_new = gen_unique_str()
         connect.create_collection(collection_new, default_fields)
         connect.create_partition(collection_new, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        ids = connect.insert(collection, default_entities, partition_name=default_tag)
         assert len(ids) == default_nb
-        ids_new = connect.insert(collection_new, default_entities, partition_tag=default_tag)
+        ids_new = connect.insert(collection_new, default_entities, partition_name=default_tag)
         assert len(ids_new) == default_nb
         connect.flush([collection, collection_new])
         res = connect.get_collection_stats(collection)
@@ -275,7 +275,7 @@ class TestHasBase:
             assert res
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
-    def test_has_partition_tag_not_existed(self, connect, collection):
+    def test_has_partition_name_not_existed(self, connect, collection):
         '''
         target: test has_partition, check status and result
         method: then call function: has_partition, with tag not existed
@@ -336,7 +336,7 @@ class TestDropBase:
         assert default_tag not in res2
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
-    def test_drop_partition_tag_not_existed(self, connect, collection):
+    def test_drop_partition_name_not_existed(self, connect, collection):
         '''
         target: test drop partition, but tag not existed
         method: create partitions first, then call function: drop_partition
@@ -353,7 +353,7 @@ class TestDropBase:
             assert message == "DropPartition failed: partition %s does not exist" % new_tag
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
-    def test_drop_partition_tag_not_existed_A(self, connect, collection):
+    def test_drop_partition_name_not_existed_A(self, connect, collection):
         '''
         target: test drop partition, but collection not existed
         method: create partitions first, then call function: drop_partition
@@ -468,7 +468,7 @@ class TestNewCase(object):
         expected: status not ok
         '''
         try:
-            connect.drop_partition(collection, partition_tag='_default')
+            connect.drop_partition(collection, partition_name='_default')
         except Exception as e:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
@@ -486,7 +486,7 @@ class TestNewCase(object):
         '''
         connect.create_partition(collection, default_tag)
         try:
-            connect.drop_partition(collection, partition_tag='_default')
+            connect.drop_partition(collection, partition_name='_default')
         except Exception as e:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1

@@ -309,11 +309,11 @@ class TestInsertBase:
     def test_insert_partition(self, connect, collection):
         '''
         target: test insert entities in collection created before
-        method: create collection and insert entities in it, with the partition_tag param
+        method: create collection and insert entities in it, with the partition_name param
         expected: the collection row count equals to nq
         '''
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        ids = connect.insert(collection, default_entities, partition_name=default_tag)
         assert len(ids) == default_nb
         assert connect.has_partition(collection, default_tag)
         connect.flush([collection])
@@ -326,12 +326,12 @@ class TestInsertBase:
     def test_insert_partition_with_ids(self, connect, id_collection):
         '''
         target: test insert entities in collection created before, insert with ids
-        method: create collection and insert entities in it, with the partition_tag param
+        method: create collection and insert entities in it, with the partition_name param
         expected: the collection row count equals to nq
         '''
         connect.create_partition(id_collection, default_tag)
         ids = [i for i in range(default_nb)]
-        res_ids = connect.insert(id_collection, gen_entities(default_nb), ids=ids, partition_tag=default_tag)
+        res_ids = connect.insert(id_collection, gen_entities(default_nb), ids=ids, partition_name=default_tag)
         assert res_ids == ids
         logging.getLogger().info(connect.describe_collection(id_collection))
 
@@ -343,7 +343,7 @@ class TestInsertBase:
         method: create partition and insert info collection without tag params
         expected: the collection row count equals to nb
         '''
-        ids = connect.insert(collection, default_entities, partition_tag=default_partition_name)
+        ids = connect.insert(collection, default_entities, partition_name=default_partition_name)
         assert len(ids) == default_nb
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
@@ -353,23 +353,23 @@ class TestInsertBase:
     def test_insert_partition_not_existed(self, connect, collection):
         '''
         target: test insert entities in collection created before
-        method: create collection and insert entities in it, with the not existed partition_tag param
+        method: create collection and insert entities in it, with the not existed partition_name param
         expected: error raised
         '''
         tag = gen_unique_str()
         with pytest.raises(Exception) as e:
-            connect.insert(collection, default_entities, partition_tag=tag)
+            connect.insert(collection, default_entities, partition_name=tag)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_partition_repeatedly(self, connect, collection):
         '''
         target: test insert entities in collection created before
-        method: create collection and insert entities in it repeatly, with the partition_tag param
+        method: create collection and insert entities in it repeatly, with the partition_name param
         expected: the collection row count equals to nq
         '''
         connect.create_partition(collection, default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
-        ids = connect.insert(collection, default_entities, partition_tag=default_tag)
+        ids = connect.insert(collection, default_entities, partition_name=default_tag)
+        ids = connect.insert(collection, default_entities, partition_name=default_tag)
         connect.flush([collection])
         res = connect.get_collection_stats(collection)
         assert res[row_count] == 2 * default_nb
@@ -572,11 +572,11 @@ class TestInsertBinary:
     def test_insert_binary_partition(self, connect, binary_collection):
         '''
         target: test insert entities and create partition tag
-        method: create collection and insert binary entities in it, with the partition_tag param
+        method: create collection and insert binary entities in it, with the partition_name param
         expected: the collection row count equals to nb
         '''
         connect.create_partition(binary_collection, default_tag)
-        ids = connect.insert(binary_collection, default_binary_entities, partition_tag=default_tag)
+        ids = connect.insert(binary_collection, default_binary_entities, partition_name=default_tag)
         assert len(ids) == default_nb
         assert connect.has_partition(binary_collection, default_tag)
         connect.flush([binary_collection])
@@ -1013,9 +1013,9 @@ class TestInsertInvalid(object):
         connect.create_partition(collection, default_tag)
         if tag_name is not None:
             with pytest.raises(Exception):
-                connect.insert(collection, default_entity, partition_tag=tag_name)
+                connect.insert(collection, default_entity, partition_name=tag_name)
         else:
-            connect.insert(collection, default_entity, partition_tag=tag_name)
+            connect.insert(collection, default_entity, partition_name=tag_name)
 
     def test_insert_with_invalid_field_name(self, connect, collection, get_field_name):
         tmp_entity = update_field_name(copy.deepcopy(default_entity), "int64", get_field_name)

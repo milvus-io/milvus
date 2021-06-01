@@ -294,7 +294,7 @@ class TestRestartBase:
             tag_tmp = gen_unique_str()
             partitions.append(tag_tmp)
             connect.create_partition(collection, tag_tmp)
-            ids = connect.bulk_insert(collection, big_entities, partition_tag=tag_tmp)
+            ids = connect.bulk_insert(collection, big_entities, partition_name=tag_tmp)
         connect.flush([collection], _async=True)
         res_count = connect.count_entities(collection)
         logging.getLogger().info(res_count)
