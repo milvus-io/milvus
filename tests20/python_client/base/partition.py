@@ -107,7 +107,7 @@ class ApiPartition:
 
     def search(self, data, anns_field, params, limit, expr=None, output_fields=None, check_res=None, check_params=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, check = func_req([self.partition.search, data, anns_field, params, check, limit, expr, output_fields], **kwargs)
-        check_result = CheckFunc(res, func_name, check_res, check_params, data=data, anns_field=anns_field, params=params,
+        res, check = func_req([self.partition.search, data, anns_field, params, limit, expr, output_fields], **kwargs)
+        check_result = CheckFunc(res, func_name, check_res, check_params, check, data=data, anns_field=anns_field, params=params,
                                  limit=limit, expr=expr, output_fields=output_fields, **kwargs).run()
         return res, check_result
