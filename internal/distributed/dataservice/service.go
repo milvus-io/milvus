@@ -26,6 +26,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/milvus-io/milvus/internal/dataservice"
 	msc "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
 	"github.com/milvus-io/milvus/internal/log"
@@ -165,9 +166,10 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		grpc.UnaryInterceptor(
 			otgrpc.OpenTracingServerInterceptor(tracer)),
 		grpc.StreamInterceptor(
-			otgrpc.OpenTracingStreamServerInterceptor(tracer)))
+			otgrpc.OpenTracingStreamServerInterceptor(tracer)),
+		grpc.UnaryInterceptor(grpc_prometheus.UnaryServerInterceptor))
 	datapb.RegisterDataServiceServer(s.grpcServer, s)
-
+	grpc_prometheus.Register(s.grpcServer)
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {
 		s.grpcErrChan <- err

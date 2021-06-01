@@ -13,6 +13,7 @@ package dataservice
 import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
@@ -69,7 +70,9 @@ func (c *clusterNodeManager) updateCluster(dataNodes []*datapb.DataNodeInfo) *cl
 	newNodes := make([]string, 0)
 	offlines := make([]string, 0)
 	restarts := make([]string, 0)
+	var onCnt, offCnt float64
 	for _, n := range dataNodes {
+		onCnt++
 		node, ok := c.dataNodes[n.Address]
 
 		if ok {
@@ -94,9 +97,12 @@ func (c *clusterNodeManager) updateCluster(dataNodes []*datapb.DataNodeInfo) *cl
 
 	for nAddr, node := range c.dataNodes {
 		if node.status == offline {
+			offCnt++
 			offlines = append(offlines, nAddr)
 		}
 	}
+	metrics.DataServiceDataNodeList.WithLabelValues("online").Set(onCnt)
+	metrics.DataServiceDataNodeList.WithLabelValues("offline").Set(offCnt)
 	return &clusterDeltaChange{
 		newNodes: newNodes,
 		offlines: offlines,
@@ -133,6 +139,7 @@ func (c *clusterNodeManager) register(n *datapb.DataNodeInfo) {
 			status: online,
 		}
 	}
+	c.updateMetrics()
 }
 
 func (c *clusterNodeManager) unregister(n *datapb.DataNodeInfo) {
@@ -141,6 +148,20 @@ func (c *clusterNodeManager) unregister(n *datapb.DataNodeInfo) {
 		return
 	}
 	node.status = offline
+	c.updateMetrics()
+}
+
+func (c *clusterNodeManager) updateMetrics() {
+	var offCnt, onCnt float64
+	for _, node := range c.dataNodes {
+		if node.status == online {
+			onCnt++
+		} else {
+			offCnt++
+		}
+	}
+	metrics.DataServiceDataNodeList.WithLabelValues("online").Set(onCnt)
+	metrics.DataServiceDataNodeList.WithLabelValues("offline").Set(offCnt)
 }
 
 func (c *clusterNodeManager) txnSaveNodes(nodes []*datapb.DataNodeInfo) error {
