@@ -458,7 +458,7 @@ func TestMasterService(t *testing.T) {
 		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
 		assert.Nil(t, err)
 		var ddOp DdOperation
-		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
+		err = DecodeDdOperation(ddOpStr, &ddOp)
 		assert.Nil(t, err)
 		assert.Equal(t, CreateCollectionDDType, ddOp.Type)
 
@@ -602,7 +602,7 @@ func TestMasterService(t *testing.T) {
 		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
 		assert.Nil(t, err)
 		var ddOp DdOperation
-		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
+		err = DecodeDdOperation(ddOpStr, &ddOp)
 		assert.Nil(t, err)
 		assert.Equal(t, CreatePartitionDDType, ddOp.Type)
 
@@ -1007,7 +1007,7 @@ func TestMasterService(t *testing.T) {
 		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
 		assert.Nil(t, err)
 		var ddOp DdOperation
-		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
+		err = DecodeDdOperation(ddOpStr, &ddOp)
 		assert.Nil(t, err)
 		assert.Equal(t, DropPartitionDDType, ddOp.Type)
 
@@ -1081,7 +1081,7 @@ func TestMasterService(t *testing.T) {
 		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
 		assert.Nil(t, err)
 		var ddOp DdOperation
-		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
+		err = DecodeDdOperation(ddOpStr, &ddOp)
 		assert.Nil(t, err)
 		assert.Equal(t, DropCollectionDDType, ddOp.Type)
 
