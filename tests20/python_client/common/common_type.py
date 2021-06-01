@@ -30,6 +30,8 @@ float_field_desc = "float type field"
 float_vec_field_desc = "float vector type field"
 binary_vec_field_desc = "binary vector type field"
 
+Not_Exist = "Not_Exist"
+
 
 """" List of parameters used to pass """
 get_invalid_strs = [
@@ -68,6 +70,7 @@ structure_metrics = ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
 
 class CheckParams:
     """ The name of the method used to check the result """
+    false = False
     cname_param_check = "collection_name_param_check"
     pname_param_check = "partition_name_param_check"
     list_count = "check_list_count"

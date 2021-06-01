@@ -77,7 +77,15 @@ class Base:
         self.utility = ApiUtility()
 
     def teardown(self):
-        pass
+        try:
+            """ Delete connection and reset configuration"""
+            res, cr = self.connection.list_connections()
+            for i in res:
+                if self.connection.get_connection(alias=i)[1]:
+                    self.connection.remove_connection(i, check_res='')
+            self.connection.configure()
+        except Exception as e:
+            pass
 
     @pytest.fixture(scope="module", autouse=True)
     def initialize_env(self, request):
@@ -97,18 +105,18 @@ class ApiReq(Base):
     Public methods that can be used to add cases.
     """
 
-    @pytest.fixture(scope="module",params=ct.get_invalid_strs)
+    @pytest.fixture(scope="module", params=ct.get_invalid_strs)
     def get_invalid_string(self, request):
         yield request.param
 
-    @pytest.fixture(scope="module",params=cf.gen_simple_index())
+    @pytest.fixture(scope="module", params=cf.gen_simple_index())
     def get_index_param(self, request):
         yield request.param
 
     def _connect(self):
         """ Testing func """
-        self.connection.configure(check_res='', default={"host": "192.168.1.240", "port": 19530})
-        res, _ = self.connection.create_connection(alias='default')
+        self.connection.configure(check_res='', default={"host": param_info.param_host, "port": param_info.param_port})
+        res = self.connection.create_connection(alias='default')
         return res
 
     def _collection(self, name=None, data=None, schema=None, check_res=None, **kwargs):

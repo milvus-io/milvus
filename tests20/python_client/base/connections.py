@@ -42,35 +42,35 @@ class ApiConnections:
     def configure(self, check_res=None, check_params=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, check = func_req([self.connection.configure], **kwargs)
-        check_result = CheckFunc(res, func_name, check_res, check_params, **kwargs).run()
+        check_result = CheckFunc(res, func_name, check_res, check_params, check, **kwargs).run()
         return res, check_result
 
     def remove_connection(self, alias, check_res=None, check_params=None):
         func_name = sys._getframe().f_code.co_name
         res, check = func_req([self.connection.remove_connection, alias])
-        check_result = CheckFunc(res, func_name, check_res, check_params, alias=alias).run()
+        check_result = CheckFunc(res, func_name, check_res, check_params, check, alias=alias).run()
         return res, check_result
 
     def create_connection(self, alias=DefaultConfig.DEFAULT_USING, check_res=None, check_params=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, check = func_req([self.connection.create_connection, alias], **kwargs)
-        check_result = CheckFunc(res, func_name, check_res, check_params, alias=alias, **kwargs).run()
+        check_result = CheckFunc(res, func_name, check_res, check_params, check, alias=alias, **kwargs).run()
         return res, check_result
 
     def get_connection(self, alias=DefaultConfig.DEFAULT_USING, check_res=None, check_params=None):
         func_name = sys._getframe().f_code.co_name
         res, check = func_req([self.connection.get_connection, alias])
-        check_result = CheckFunc(res, func_name, check_res, check_params, alias=alias).run()
+        check_result = CheckFunc(res, func_name, check_res, check_params, check, alias=alias).run()
         return res, check_result
 
     def list_connections(self, check_res=None, check_params=None):
         func_name = sys._getframe().f_code.co_name
         res, check = func_req([self.connection.list_connections])
-        check_result = CheckFunc(res, func_name, check_res, check_params).run()
+        check_result = CheckFunc(res, func_name, check_res, check_params, check).run()
         return res, check_result
 
     def get_connection_addr(self, alias, check_res=None, check_params=None):
         func_name = sys._getframe().f_code.co_name
         res, check = func_req([self.connection.get_connection_addr, alias])
-        check_result = CheckFunc(res, func_name, check_res, check_params, alias=alias).run()
+        check_result = CheckFunc(res, func_name, check_res, check_params, check, alias=alias).run()
         return res, check_result
