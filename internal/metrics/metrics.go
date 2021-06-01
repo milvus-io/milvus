@@ -10,6 +10,11 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	milvusNamespace      = `milvus`
+	subSystemDataService = `dataservice`
+)
+
 /*
 var (
 	PanicCounter = prometheus.NewCounterVec(
@@ -229,9 +234,21 @@ func RegisterQueryNode() {
 
 }
 
+var (
+	//DataServiceDataNodeList records the num of regsitered data nodes
+	DataServiceDataNodeList = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: subSystemDataService,
+			Name:      "list_of_data_node",
+			Help:      "List of data nodes regsitered within etcd",
+		}, []string{"status"},
+	)
+)
+
 //RegisterDataService register DataService metrics
 func RegisterDataService() {
-
+	prometheus.Register(DataServiceDataNodeList)
 }
 
 //RegisterDataNode register DataNode metrics
