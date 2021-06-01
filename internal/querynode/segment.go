@@ -24,6 +24,7 @@ package querynode
 import "C"
 import (
 	"fmt"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"strconv"
 	"sync"
 	"unsafe"
@@ -232,6 +233,16 @@ func (s *Segment) segmentSearch(plan *Plan,
 	}
 
 	return &searchResult, nil
+}
+
+func (s *Segment) segmentGetEntityByIds(plan *RetrievePlan) (*milvuspb.RetrieveResults, error) {
+	resProto := C.GetEntityByIds(s.segmentPtr, plan.RetrievePlanPtr, C.uint64_t(plan.Timestamp))
+	result := new(milvuspb.RetrieveResults)
+	err := HandleCProtoResult(&resProto, result)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (s *Segment) fillTargetEntry(plan *Plan,

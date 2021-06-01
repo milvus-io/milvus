@@ -20,6 +20,7 @@ extern "C" {
 
 typedef void* CPlan;
 typedef void* CPlaceholderGroup;
+typedef void* CRetrievePlan;
 
 CStatus
 CreatePlan(CCollection col, const char* dsl, CPlan* res_plan);
@@ -48,6 +49,12 @@ DeletePlan(CPlan plan);
 
 void
 DeletePlaceholderGroup(CPlaceholderGroup placeholder_group);
+
+CStatus
+CreateRetrievePlan(CCollection c_col, CProto retrieve_request, CRetrievePlan* output);
+
+void
+DeleteRetrievePlan(CRetrievePlan plan);
 
 #ifdef __cplusplus
 }

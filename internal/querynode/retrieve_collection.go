@@ -237,6 +237,12 @@ func (rc *retrieveCollection) doUnsolvedMsgRetrieve() {
 
 func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error {
 	// TODO(yukun)
+	// step 1: get retrieve object and defer destruction
+	// step 2: for each segment, call retrieve to get ids proto buffer
+	// step 3: merge all proto in go
+	// step 4: publish results
+	// retrieveProtoBlob, err := proto.Marshal(&retrieveMsg.RetrieveRequest)
+
 	retrieveResultMsg := &msgstream.RetrieveResultMsg{
 		BaseMsg: msgstream.BaseMsg{Ctx: retrieveMsg.Ctx},
 		RetrieveResults: internalpb.RetrieveResults{

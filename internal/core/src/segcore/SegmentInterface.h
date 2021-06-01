@@ -40,7 +40,9 @@ class SegmentInterface {
            int64_t num_groups) const = 0;
 
     virtual std::unique_ptr<proto::milvus::RetrieveResults>
-    GetEntityById(const std::vector<FieldOffset>& field_offsets, const IdArray& id_array) const = 0;
+    GetEntityById(const std::vector<FieldOffset>& field_offsets,
+                  const IdArray& id_array,
+                  Timestamp timestamp) const = 0;
 
     virtual int64_t
     GetMemoryUsageInBytes() const = 0;
@@ -87,7 +89,9 @@ class SegmentInternalInterface : public SegmentInterface {
     FillTargetEntry(const query::Plan* plan, QueryResult& results) const override;
 
     std::unique_ptr<proto::milvus::RetrieveResults>
-    GetEntityById(const std::vector<FieldOffset>& field_offsets, const IdArray& id_array) const override;
+    GetEntityById(const std::vector<FieldOffset>& field_offsets,
+                  const IdArray& id_array,
+                  Timestamp timestamp) const override;
 
  public:
     virtual void
@@ -134,7 +138,7 @@ class SegmentInternalInterface : public SegmentInterface {
     BulkSubScript(FieldOffset field_offset, const SegOffset* seg_offsets, int64_t count) const;
 
     virtual std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
-    search_ids(const IdArray& id_array) const;
+    search_ids(const IdArray& id_array, Timestamp timestamp) const = 0;
 
     virtual void
     check_search(const query::Plan* plan) const = 0;
