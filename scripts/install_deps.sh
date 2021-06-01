@@ -14,6 +14,7 @@ elif [[ -x "$(command -v yum)" ]]; then
     echo "source scl_source enable devtoolset-7" | sudo tee -a /etc/profile.d/devtoolset-7.sh
     echo "source scl_source enable llvm-toolset-7.0" | sudo tee -a /etc/profile.d/llvm-toolset-7.sh
     echo "export CLANG_TOOLS_PATH=/opt/rh/llvm-toolset-7.0/root/usr/bin" | sudo tee -a /etc/profile.d/llvm-toolset-7.sh
+    source "/etc/profile.d/llvm-toolset-7.sh"
 else
     echo "Error Install Dependencies ..."
     exit 1

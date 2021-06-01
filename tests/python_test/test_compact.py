@@ -237,7 +237,7 @@ from constants import *
 #         '''
 #         connect.create_partition(collection, default_tag)
 #         assert connect.has_partition(collection, default_tag)
-#         ids = connect.bulk_insert(collection, default_entities, partition_tag=default_tag)
+#         ids = connect.bulk_insert(collection, default_entities, partition_name=default_tag)
 #         connect.flush([collection])
 #         info = connect.get_collection_stats(collection)
 #         logging.getLogger().info(info["partitions"])

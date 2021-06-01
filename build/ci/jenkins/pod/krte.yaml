@@ -10,6 +10,8 @@ spec:
     env:
     - name: DOCKER_IN_DOCKER_ENABLED
       value: "true"
+    - name: DOCKER_VOLUME_DIRECTORY
+      value: "/mnt/disk/.docker"
     securityContext:
       privileged: true
     tty: true
