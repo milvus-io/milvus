@@ -79,6 +79,8 @@ func (c *Client) Init() error {
 	log.Debug("QueryServiceClient try connect QueryService", zap.Any("c.addr", c.addr))
 	if c.addr != "" {
 		connectGrpcFunc := func() error {
+			ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+			defer cancel()
 			ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
 			defer cancelFunc()
 			log.Debug("QueryServiceClient try connect ", zap.String("address", c.addr))
