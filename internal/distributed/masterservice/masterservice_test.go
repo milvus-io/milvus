@@ -200,6 +200,23 @@ func TestGrpcService(t *testing.T) {
 	flushedSegProducer := CreateMsgStreamAsProducer(dataChanName)
 	flushedSegConsumer := CreateMsgStreamAsConsumer(dataChanName, dataNodeSubName)
 
+	segInfo := &datapb.SegmentInfo{
+		ID:           1234,
+		CollectionID: 1,
+		PartitionID:  10,
+	}
+	segInfoMsgPack := GenSegInfoMsgPack(segInfo)
+	(*segInfoProducer).Produce(segInfoMsgPack)
+	segInfoMsgPack1 := (*segInfoConsumer).Consume()
+	segInfoPosStr, _ := cms.EncodeMsgPositions(segInfoMsgPack1.EndPositions)
+	_, err = etcdCli.Put(ctx, cms.DataServiceMsgEndPosPrefix, segInfoPosStr)
+
+	flushedSegMsgPack := GenFlushedSegMsgPack(2345)
+	(*flushedSegProducer).Produce(flushedSegMsgPack)
+	flushedSegMsgPack1 := (*flushedSegConsumer).Consume()
+	flushedSegPosStr, _ := cms.EncodeMsgPositions(flushedSegMsgPack1.EndPositions)
+	_, err = etcdCli.Put(ctx, cms.DataNodeMsgEndPosPrefix, flushedSegPosStr)
+
 	err = core.Init()
 	assert.Nil(t, err)
 
