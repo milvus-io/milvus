@@ -41,10 +41,10 @@ const (
 
 	TimestampPrefix = ComponentPrefix + "/timestamp"
 
-	DataServiceMsgStartPosPrefix = ComponentPrefix + "/ds-msg-start-position"
-	DataServiceMsgEndPosPrefix   = ComponentPrefix + "/ds-msg-end-position"
-	DataNodeMsgStartPosPrefix    = ComponentPrefix + "/dn-msg-start-position"
-	DataNodeMsgEndPosPrefix      = ComponentPrefix + "/dn-msg-end-position"
+	SegInfoMsgStartPosPrefix    = ComponentPrefix + "/seg-info-msg-start-position"
+	SegInfoMsgEndPosPrefix      = ComponentPrefix + "/seg-info-msg-end-position"
+	FlushedSegMsgStartPosPrefix = ComponentPrefix + "/flushed-seg-msg-start-position"
+	FlushedSegMsgEndPosPrefix   = ComponentPrefix + "/flushed-seg-msg-end-position"
 
 	DDOperationPrefix = ComponentPrefix + "/dd-operation"
 	DDMsgSendPrefix   = ComponentPrefix + "/dd-msg-send"
@@ -739,8 +739,8 @@ func (mt *metaTable) AddSegment(segInfos []*datapb.SegmentInfo, msgStartPos stri
 
 	// AddSegment is invoked from DataService
 	if msgStartPos != "" && msgEndPos != "" {
-		meta[DataServiceMsgStartPosPrefix] = msgStartPos
-		meta[DataServiceMsgEndPosPrefix] = msgEndPos
+		meta[SegInfoMsgStartPosPrefix] = msgStartPos
+		meta[SegInfoMsgEndPosPrefix] = msgEndPos
 	}
 
 	ts, err := mt.client.MultiSave(meta, nil)
@@ -808,8 +808,8 @@ func (mt *metaTable) AddIndex(segIdxInfos []*pb.SegmentIndexInfo, msgStartPos st
 
 	// AddIndex is invoked from DataNode flush operation
 	if msgStartPos != "" && msgEndPos != "" {
-		meta[DataNodeMsgStartPosPrefix] = msgStartPos
-		meta[DataNodeMsgEndPosPrefix] = msgEndPos
+		meta[FlushedSegMsgStartPosPrefix] = msgStartPos
+		meta[FlushedSegMsgEndPosPrefix] = msgEndPos
 	}
 
 	ts, err := mt.client.MultiSave(meta, nil)

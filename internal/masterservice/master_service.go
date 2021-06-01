@@ -716,7 +716,7 @@ func (c *Core) setMsgStreams() error {
 	// data service will put msg into this channel when create segment
 	dsChanName := Params.DataServiceSegmentChannel
 	dsSubName := Params.MsgChannelSubName + "ds"
-	dsStream, err := c.startMsgStreamAndSeek(dsChanName, dsSubName, DataServiceMsgEndPosPrefix)
+	dsStream, err := c.startMsgStreamAndSeek(dsChanName, dsSubName, SegInfoMsgEndPosPrefix)
 	if err != nil {
 		return err
 	}
@@ -725,7 +725,7 @@ func (c *Core) setMsgStreams() error {
 	// data node will put msg into this channel when flush segment
 	dnChanName := Params.DataServiceSegmentChannel
 	dnSubName := Params.MsgChannelSubName + "dn"
-	dnStream, err := c.startMsgStreamAndSeek(dnChanName, dnSubName, DataNodeMsgEndPosPrefix)
+	dnStream, err := c.startMsgStreamAndSeek(dnChanName, dnSubName, FlushedSegMsgEndPosPrefix)
 	if err != nil {
 		return err
 	}
