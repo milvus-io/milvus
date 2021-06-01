@@ -74,10 +74,10 @@ func NewClient(ctx context.Context, address, metaRootPath string, etcdAddr []str
 
 func (c *Client) Init() error {
 	tracer := opentracing.GlobalTracer()
-	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
-	defer cancel()
 	if c.addr != "" {
 		connectGrpcFunc := func() error {
+			ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+			defer cancel()
 			log.Debug("queryservice connect ", zap.String("address", c.addr))
 			conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 				grpc.WithUnaryInterceptor(
