@@ -70,7 +70,10 @@ type DdOperation struct {
 }
 
 const (
+	// MetricRequestsTotal used to count the num of total requests
 	MetricRequestsTotal   = "total"
+
+	// MetricRequestsSuccess used to count the num of successful requests
 	MetricRequestsSuccess = "success"
 )
 

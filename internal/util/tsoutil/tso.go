@@ -36,6 +36,7 @@ func ParseTS(ts uint64) (time.Time, uint64) {
 	return physicalTime, logical
 }
 
+// Mod24H parses the ts to millisecond in one day
 func Mod24H(ts uint64) uint64 {
 	logical := ts & logicalBitsMask
 	physical := ts >> logicalBits

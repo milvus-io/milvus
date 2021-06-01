@@ -23,6 +23,7 @@ var (
 */
 
 var (
+	// MasterProxyNodeLister used to count the num of registered proxy nodes
 	MasterProxyNodeLister = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "milvus",
@@ -31,7 +32,10 @@ var (
 			Help:      "List of proxy nodes which has register with etcd",
 		}, []string{"client_id"})
 
+	////////////////////////////////////////////////////////////////////////////
 	// for grpc
+
+	// MasterCreateCollectionCounter used to count the num of calls of CreateCollection
 	MasterCreateCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "milvus",
@@ -39,6 +43,8 @@ var (
 			Name:      "create_collection_total",
 			Help:      "Counter of create collection",
 		}, []string{"client_id", "type"})
+
+	// MasterDropCollectionCounter used to count the num of calls of DropCollection
 	MasterDropCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "milvus",
@@ -46,6 +52,8 @@ var (
 			Name:      "drop_collection_total",
 			Help:      "Counter of drop collection",
 		}, []string{"client_id", "type"})
+
+	// MasterHasCollectionCounter used to count the num of calls of HasCollection
 	MasterHasCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "milvus",
@@ -53,6 +61,8 @@ var (
 			Name:      "has_collection_total",
 			Help:      "Counter of has collection",
 		}, []string{"client_id", "type"})
+
+	// MasterDescribeCollectionCounter used to count the num of calls of DescribeCollection
 	MasterDescribeCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "milvus",
@@ -60,6 +70,8 @@ var (
 			Name:      "describe_collection_total",
 			Help:      "Counter of describe collection",
 		}, []string{"client_id", "type"})
+
+	// MasterShowCollectionsCounter used to count the num of calls of ShowCollections
 	MasterShowCollectionsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "milvus",
@@ -67,6 +79,8 @@ var (
 			Name:      "show_collections_total",
 			Help:      "Counter of show collections",
 		}, []string{"client_id", "type"})
+
+	// MasterCreatePartitionCounter used to count the num of calls of CreatePartition
 	MasterCreatePartitionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "milvus",
@@ -74,6 +88,8 @@ var (
 			Name:      "create_partition_total",
 			Help:      "Counter of create partition",
 		}, []string{"client_id", "type"})
+
+	// MasterDropPartitionCounter used to count the num of calls of DropPartition
 	MasterDropPartitionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "milvus",
@@ -81,6 +97,8 @@ var (
 			Name:      "drop_partition_total",
 			Help:      "Counter of drop partition",
 		}, []string{"client_id", "type"})
+
+	// MasterHasPartitionCounter used to count the num of calls of HasPartition
 	MasterHasPartitionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "milvus",
@@ -88,6 +106,8 @@ var (
 			Name:      "has_partition_total",
 			Help:      "Counter of has partition",
 		}, []string{"client_id", "type"})
+
+	// MasterShowPartitionsCounter used to count the num of calls of ShowPartitions
 	MasterShowPartitionsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "milvus",
@@ -95,6 +115,8 @@ var (
 			Name:      "show_partitions_total",
 			Help:      "Counter of show partitions",
 		}, []string{"client_id", "type"})
+
+	// MasterCreateIndexCounter used to count the num of calls of CreateIndex
 	MasterCreateIndexCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "milvus",
@@ -102,6 +124,8 @@ var (
 			Name:      "create_index_total",
 			Help:      "Counter of create index",
 		}, []string{"client_id", "type"})
+
+	// MasterDropIndexCounter used to count the num of calls of DropIndex
 	MasterDropIndexCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "milvus",
@@ -109,6 +133,8 @@ var (
 			Name:      "drop_index_total",
 			Help:      "Counter of drop index",
 		}, []string{"client_id", "type"})
+
+	// MasterDescribeIndexCounter used to count the num of calls of DescribeIndex
 	MasterDescribeIndexCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "milvus",
@@ -116,6 +142,8 @@ var (
 			Name:      "describe_index_total",
 			Help:      "Counter of describe index",
 		}, []string{"client_id", "type"})
+
+	// MasterDescribeSegmentCounter used to count the num of calls of DescribeSegment
 	MasterDescribeSegmentCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "milvus",
@@ -123,6 +151,8 @@ var (
 			Name:      "describe_segment_total",
 			Help:      "Counter of describe segment",
 		}, []string{"client_id", "type"})
+
+	// MasterShowSegmentsCounter used to count the num of calls of ShowSegments
 	MasterShowSegmentsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "milvus",
@@ -131,7 +161,10 @@ var (
 			Help:      "Counter of show segments",
 		}, []string{"client_id", "type"})
 
+	////////////////////////////////////////////////////////////////////////////
 	// for time tick
+
+	// MasterInsertChannelTimeTick used to count the time tick num of insert channel in 24H
 	MasterInsertChannelTimeTick = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "milvus",
@@ -139,6 +172,8 @@ var (
 			Name:      "insert_channel_time_tick",
 			Help:      "Time tick of insert Channel in 24H",
 		}, []string{"vchannel"})
+
+	// MasterDDChannelTimeTick used to count the time tick num of dd channel in 24H
 	MasterDDChannelTimeTick = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "milvus",
