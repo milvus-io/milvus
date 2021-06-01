@@ -42,6 +42,7 @@ func newRetrieveService(ctx context.Context,
 	streamingReplica ReplicaInterface,
 	tSafeReplica TSafeReplicaInterface,
 	factory msgstream.Factory) *retrieveService {
+
 	retrieveStream, _ := factory.NewQueryMsgStream(ctx)
 	retrieveResultStream, _ := factory.NewQueryMsgStream(ctx)
 
@@ -147,7 +148,7 @@ func (rs *retrieveService) startRetrieveCollection(collectionID UniqueID) {
 		rs.tSafeReplica,
 		rs.retrieveResultMsgStream)
 	rs.retrieveCollections[collectionID] = rc
-	rs.start()
+	rc.start()
 }
 
 func (rs *retrieveService) hasRetrieveCollection(collectionID UniqueID) bool {

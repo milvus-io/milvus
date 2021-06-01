@@ -103,6 +103,11 @@ func (rc *retrieveCollection) waitNewTSafe() Timestamp {
 	return ts
 }
 
+func (rc *retrieveCollection) start() {
+	go rc.receiveRetrieveMsg()
+	go rc.doUnsolvedMsgRetrieve()
+}
+
 func (rc *retrieveCollection) register(collectionID UniqueID) {
 	vChannel := collectionIDToChannel(collectionID)
 	rc.tSafeReplica.addTSafe(vChannel)
