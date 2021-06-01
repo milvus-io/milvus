@@ -113,9 +113,9 @@ func EncodeMsgPositions(msgPositions []*msgstream.MsgPosition) (string, error) {
 }
 
 // DecodeMsgPositions deserialize string to []*MsgPosition
-func DecodeMsgPositions(str string, msgPositions []*msgstream.MsgPosition) error {
+func DecodeMsgPositions(str string, msgPositions *[]*msgstream.MsgPosition) error {
 	if str == "" || str == "null" {
 		return nil
 	}
-	return json.Unmarshal([]byte(str), &msgPositions)
+	return json.Unmarshal([]byte(str), msgPositions)
 }
