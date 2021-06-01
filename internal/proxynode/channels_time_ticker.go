@@ -52,7 +52,10 @@ type channelsTimeTickerImpl struct {
 }
 
 func (ticker *channelsTimeTickerImpl) getMinTsStatistics() (map[pChan]Timestamp, error) {
-	panic("implement me")
+	ticker.statisticsMtx.RLock()
+	defer ticker.statisticsMtx.RUnlock()
+
+	return ticker.minTsStatistics, nil
 }
 
 func (ticker *channelsTimeTickerImpl) initStatistics() {
