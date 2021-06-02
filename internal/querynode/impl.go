@@ -85,11 +85,13 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 	consumeChannels := []string{in.RequestChannelID}
 	consumeSubName := Params.MsgChannelSubName
 	node.searchService.searchMsgStream.AsConsumer(consumeChannels, consumeSubName)
+	node.retrieveService.retrieveMsgStream.AsConsumer(consumeChannels, "RetrieveSubName")
 	log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
 
 	// add result channel
 	producerChannels := []string{in.ResultChannelID}
 	node.searchService.searchResultMsgStream.AsProducer(producerChannels)
+	node.retrieveService.retrieveResultMsgStream.AsProducer(producerChannels)
 	log.Debug("querynode AsProducer: " + strings.Join(producerChannels, ", "))
 
 	status := &commonpb.Status{
