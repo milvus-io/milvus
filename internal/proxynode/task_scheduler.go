@@ -423,6 +423,63 @@ func (sched *TaskScheduler) queryLoop() {
 	}
 }
 
+type searchResultBuf struct {
+	usedVChans                  map[interface{}]struct{} // set of vChan
+	receivedVChansSet           map[interface{}]struct{} // set of vChan
+	receivedSealedSegmentIDsSet map[interface{}]struct{} // set of UniqueID
+	receivedGlobalSegmentIDsSet map[interface{}]struct{} // set of UniqueID
+	resultBuf                   []*internalpb.SearchResults
+}
+
+func newSearchResultBuf() *searchResultBuf {
+	return &searchResultBuf{
+		usedVChans:                  make(map[interface{}]struct{}),
+		receivedVChansSet:           make(map[interface{}]struct{}),
+		receivedSealedSegmentIDsSet: make(map[interface{}]struct{}),
+		receivedGlobalSegmentIDsSet: make(map[interface{}]struct{}),
+		resultBuf:                   make([]*internalpb.SearchResults, 0),
+	}
+}
+
+func setContain(m1, m2 map[interface{}]struct{}) bool {
+	if len(m1) < len(m2) {
+		return false
+	}
+
+	for k2 := range m2 {
+		_, ok := m1[k2]
+		if !ok {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (sr *searchResultBuf) readyToReduce() bool {
+	if !setContain(sr.receivedVChansSet, sr.usedVChans) {
+		return false
+	}
+
+	return setContain(sr.receivedSealedSegmentIDsSet, sr.receivedGlobalSegmentIDsSet)
+}
+
+func (sr *searchResultBuf) addPartialResult(result *internalpb.SearchResults) {
+	sr.resultBuf = append(sr.resultBuf, result)
+
+	for _, vchan := range result.ChannelIDsSearched {
+		sr.receivedVChansSet[vchan] = struct{}{}
+	}
+
+	for _, sealedSegment := range result.SealedSegmentIDsSearched {
+		sr.receivedSealedSegmentIDsSet[sealedSegment] = struct{}{}
+	}
+
+	for _, globalSegment := range result.GlobalSealedSegmentIDs {
+		sr.receivedGlobalSegmentIDsSet[globalSegment] = struct{}{}
+	}
+}
+
 func (sched *TaskScheduler) queryResultLoop() {
 	defer sched.wg.Done()
 
@@ -436,7 +493,7 @@ func (sched *TaskScheduler) queryResultLoop() {
 	queryResultMsgStream.Start()
 	defer queryResultMsgStream.Close()
 
-	queryResultBuf := make(map[UniqueID][]*internalpb.SearchResults)
+	queryResultBuf := make(map[UniqueID]*searchResultBuf)
 	retrieveResultBuf := make(map[UniqueID][]*internalpb.RetrieveResults)
 
 	for {
@@ -462,30 +519,36 @@ func (sched *TaskScheduler) queryResultLoop() {
 						continue
 					}
 
+					st, ok := t.(*SearchTask)
+					if !ok {
+						delete(queryResultBuf, reqID)
+						continue
+					}
+
 					_, ok = queryResultBuf[reqID]
 					if !ok {
-						queryResultBuf[reqID] = make([]*internalpb.SearchResults, 0)
+						queryResultBuf[reqID] = newSearchResultBuf()
+						vchans, err := st.getVChannels()
+						if err != nil {
+							delete(queryResultBuf, reqID)
+							continue
+						}
+						for _, vchan := range vchans {
+							queryResultBuf[reqID].usedVChans[vchan] = struct{}{}
+						}
 					}
-					queryResultBuf[reqID] = append(queryResultBuf[reqID], &searchResultMsg.SearchResults)
+					queryResultBuf[reqID].addPartialResult(&searchResultMsg.SearchResults)
 
 					//t := sched.getTaskByReqID(reqID)
 					{
 						colName := t.(*SearchTask).query.CollectionName
-						log.Debug("Getcollection", zap.String("collection name", colName), zap.String("reqID", reqIDStr), zap.Int("answer cnt", len(queryResultBuf[reqID])))
+						log.Debug("Getcollection", zap.String("collection name", colName), zap.String("reqID", reqIDStr), zap.Int("answer cnt", len(queryResultBuf[reqID].resultBuf)))
 					}
-					if len(queryResultBuf[reqID]) == queryNodeNum {
-						t := sched.getTaskByReqID(reqID)
-						if t != nil {
-							qt, ok := t.(*SearchTask)
-							if ok {
-								qt.resultBuf <- queryResultBuf[reqID]
-								delete(queryResultBuf, reqID)
-							}
-						} else {
 
-							// log.Printf("task with reqID %v is nil", reqID)
-						}
+					if queryResultBuf[reqID].readyToReduce() {
+						st.resultBuf <- queryResultBuf[reqID].resultBuf
 					}
+
 					sp.Finish()
 				}
 				if retrieveResultMsg, rtOk := tsMsg.(*msgstream.RetrieveResultMsg); rtOk {

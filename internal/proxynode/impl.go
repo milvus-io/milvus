@@ -1130,6 +1130,7 @@ func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchReque
 		queryMsgStream: node.queryMsgStream,
 		resultBuf:      make(chan []*internalpb.SearchResults),
 		query:          request,
+		chMgr:          node.chMgr,
 	}
 
 	err := node.sched.DqQueue.Enqueue(qt)
