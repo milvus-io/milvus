@@ -17,7 +17,7 @@ import (
 )
 
 func (s *Server) isClosed() bool {
-	return atomic.LoadInt64(&s.isServing) == 0
+	return atomic.LoadInt64(&s.isServing) != 2
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
@@ -332,9 +332,29 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	return resp, nil
 }
 
-// todo remove these rpc
+// todo deprecated rpc
 func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	return nil, nil
+	resp := &internalpb.ComponentStates{
+		State: &internalpb.ComponentInfo{
+			NodeID:    Params.NodeID,
+			Role:      "dataservice",
+			StateCode: 0,
+		},
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+	}
+	state := atomic.LoadInt64(&s.isServing)
+	switch state {
+	case 1:
+		resp.State.StateCode = internalpb.StateCode_Initializing
+	case 2:
+		resp.State.StateCode = internalpb.StateCode_Healthy
+	default:
+		resp.State.StateCode = internalpb.StateCode_Abnormal
+	}
+	return resp, nil
 }
 
 func (s *Server) RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
