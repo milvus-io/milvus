@@ -19,6 +19,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -136,8 +137,7 @@ func (s *Server) init() error {
 		return err
 	}
 
-	indexServiceAddr := Params.IndexServerAddress
-	s.indexServiceClient = grpcindexserviceclient.NewClient(indexServiceAddr, indexnode.Params.MetaRootPath, []string{indexnode.Params.EtcdAddress}, 10)
+	s.indexServiceClient = grpcindexserviceclient.NewClient(indexnode.Params.MetaRootPath, []string{indexnode.Params.EtcdAddress}, 10*time.Second)
 	err = s.indexServiceClient.Init()
 	if err != nil {
 		return err

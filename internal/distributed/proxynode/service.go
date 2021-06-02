@@ -188,8 +188,8 @@ func (s *Server) init() error {
 
 	masterServiceAddr := Params.MasterAddress
 	log.Debug("proxynode", zap.String("master address", masterServiceAddr))
-	timeout := 3 * time.Second
-	s.masterServiceClient, err = grpcmasterserviceclient.NewClient(masterServiceAddr, proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, timeout)
+	timeout := 10 * time.Second
+	s.masterServiceClient, err = grpcmasterserviceclient.NewClient(proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, timeout)
 	if err != nil {
 		return err
 	}
@@ -207,7 +207,7 @@ func (s *Server) init() error {
 
 	dataServiceAddr := Params.DataServiceAddress
 	log.Debug("proxynode", zap.String("data service address", dataServiceAddr))
-	s.dataServiceClient = grpcdataserviceclient.NewClient(dataServiceAddr, proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, 10)
+	s.dataServiceClient = grpcdataserviceclient.NewClient(proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, 10*time.Second)
 	err = s.dataServiceClient.Init()
 	if err != nil {
 		return err
@@ -217,7 +217,7 @@ func (s *Server) init() error {
 
 	indexServiceAddr := Params.IndexServerAddress
 	log.Debug("proxynode", zap.String("index server address", indexServiceAddr))
-	s.indexServiceClient = grpcindexserviceclient.NewClient(indexServiceAddr, proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, 10)
+	s.indexServiceClient = grpcindexserviceclient.NewClient(proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, 10*time.Second)
 	err = s.indexServiceClient.Init()
 	if err != nil {
 		return err
@@ -227,7 +227,7 @@ func (s *Server) init() error {
 
 	queryServiceAddr := Params.QueryServiceAddress
 	log.Debug("proxynode", zap.String("query server address", queryServiceAddr))
-	s.queryServiceClient, err = grpcqueryserviceclient.NewClient(ctx, queryServiceAddr, proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, timeout)
+	s.queryServiceClient, err = grpcqueryserviceclient.NewClient(ctx, proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, timeout)
 	if err != nil {
 		return err
 	}

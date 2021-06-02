@@ -54,15 +54,14 @@ func getIndexServiceAddress(sess *sessionutil.Session) (string, error) {
 	}
 	ms, ok := msess[key]
 	if !ok {
-		return "", fmt.Errorf("number of master service is incorrect, %d", len(msess))
+		return "", fmt.Errorf("number of indexservice is incorrect, %d", len(msess))
 	}
 	return ms.Address, nil
 }
 
-func NewClient(address, metaRoot string, etcdAddr []string, timeout time.Duration) *Client {
+func NewClient(metaRoot string, etcdAddr []string, timeout time.Duration) *Client {
 	sess := sessionutil.NewSession(context.Background(), metaRoot, etcdAddr)
 	return &Client{
-		address:   address,
 		ctx:       context.Background(),
 		sess:      sess,
 		timeout:   timeout,
@@ -72,33 +71,10 @@ func NewClient(address, metaRoot string, etcdAddr []string, timeout time.Duratio
 }
 
 func (c *Client) Init() error {
-	tracer := opentracing.GlobalTracer()
-	if c.address != "" {
-		connectGrpcFunc := func() error {
-			log.Debug("indexservice connect ", zap.String("address", c.address))
-			conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
-				grpc.WithUnaryInterceptor(
-					otgrpc.OpenTracingClientInterceptor(tracer)),
-				grpc.WithStreamInterceptor(
-					otgrpc.OpenTracingStreamClientInterceptor(tracer)))
-			if err != nil {
-				return err
-			}
-			c.conn = conn
-			return nil
-		}
-		err := retry.Retry(100000, time.Millisecond*200, connectGrpcFunc)
-		if err != nil {
-			return err
-		}
-	} else {
-		return c.reconnect()
-	}
-	c.grpcClient = indexpb.NewIndexServiceClient(c.conn)
-	return nil
+	return c.connect()
 }
 
-func (c *Client) reconnect() error {
+func (c *Client) connect() error {
 	tracer := opentracing.GlobalTracer()
 	var err error
 	getIndexServiceAddressFn := func() error {
@@ -139,7 +115,7 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 		return ret, nil
 	}
 	for i := 0; i < c.recallTry; i++ {
-		err = c.reconnect()
+		err = c.connect()
 		if err == nil {
 			ret, err = caller()
 			if err == nil {

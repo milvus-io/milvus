@@ -106,7 +106,7 @@ func (s *Server) init() error {
 	// --- QueryService ---
 	log.Debug("QueryService", zap.String("address", Params.QueryServiceAddress))
 	log.Debug("Init Query service client ...")
-	queryService, err := qsc.NewClient(ctx, Params.QueryServiceAddress, qn.Params.MetaRootPath, []string{qn.Params.EtcdAddress}, 20*time.Second)
+	queryService, err := qsc.NewClient(ctx, qn.Params.MetaRootPath, []string{qn.Params.EtcdAddress}, 20*time.Second)
 	if err != nil {
 		panic(err)
 	}
@@ -134,7 +134,7 @@ func (s *Server) init() error {
 	log.Debug("Master service", zap.String("address", addr))
 	log.Debug("Init master service client ...")
 
-	masterService, err := msc.NewClient(addr, qn.Params.MetaRootPath, []string{qn.Params.EtcdAddress}, 20*time.Second)
+	masterService, err := msc.NewClient(qn.Params.MetaRootPath, []string{qn.Params.EtcdAddress}, 20*time.Second)
 	if err != nil {
 		panic(err)
 	}
@@ -158,7 +158,7 @@ func (s *Server) init() error {
 
 	// --- IndexService ---
 	log.Debug("Index service", zap.String("address", Params.IndexServiceAddress))
-	indexService := isc.NewClient(Params.IndexServiceAddress, qn.Params.MetaRootPath, []string{qn.Params.EtcdAddress}, 10)
+	indexService := isc.NewClient(qn.Params.MetaRootPath, []string{qn.Params.EtcdAddress}, 10*time.Second)
 
 	if err := indexService.Init(); err != nil {
 		panic(err)
@@ -181,7 +181,7 @@ func (s *Server) init() error {
 	log.Debug("Data service", zap.String("address", Params.DataServiceAddress))
 	log.Debug("QueryNode Init data service client ...")
 
-	dataService := dsc.NewClient(Params.DataServiceAddress, qn.Params.MetaRootPath, []string{qn.Params.EtcdAddress}, 10)
+	dataService := dsc.NewClient(qn.Params.MetaRootPath, []string{qn.Params.EtcdAddress}, 10*time.Second)
 	if err = dataService.Init(); err != nil {
 		panic(err)
 	}
