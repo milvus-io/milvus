@@ -21,9 +21,8 @@ package querynode
 */
 import "C"
 import (
-	"unsafe"
-
 	"errors"
+	"unsafe"
 )
 
 type Plan struct {

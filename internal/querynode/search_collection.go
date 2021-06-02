@@ -19,6 +19,7 @@ import (
 	"sync"
 
 	"github.com/golang/protobuf/proto"
+	oplog "github.com/opentracing/opentracing-go/log"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -28,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	oplog "github.com/opentracing/opentracing-go/log"
 )
 
 type searchCollection struct {

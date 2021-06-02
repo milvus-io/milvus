@@ -16,10 +16,11 @@ import (
 	"errors"
 	"strconv"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"go.uber.org/zap"
 )
 
 type retrieveService struct {

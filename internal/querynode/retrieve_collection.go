@@ -17,14 +17,15 @@ import (
 	"reflect"
 	"sync"
 
+	oplog "github.com/opentracing/opentracing-go/log"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	oplog "github.com/opentracing/opentracing-go/log"
-	"go.uber.org/zap"
 )
 
 type retrieveCollection struct {

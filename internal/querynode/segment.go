@@ -23,6 +23,7 @@ package querynode
 */
 import "C"
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -30,8 +31,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
-
-	"errors"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
