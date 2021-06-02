@@ -101,17 +101,17 @@ class TestConnectionOperation(ApiReq):
         expected: assert the configuration is successful
         """
         self.connection.add_connection(default={"host": host, "port": port}, dev={"host": host, "port": port})
-        assert self.connection.list_connections()[0] == ['default', 'dev']
-        assert self.connection.get_connection_addr(alias='default')[0] == {}
+        assert self.connection.list_connections()[0] == [('default', None), ('dev', None)]
+        assert self.connection.get_connection_addr(alias='default')[0] == {"host": host, "port": port}
 
         self.connection.add_connection(default={"host": host, "port": port}, dev={"host": host, "port": port})
-        assert self.connection.list_connections()[0] == ['default', 'dev']
+        assert self.connection.list_connections()[0] == [('default', None), ('dev', None)]
 
         self.connection.add_connection(default1={"host": host, "port": port})
-        assert self.connection.list_connections()[0] == ['default1']
+        assert self.connection.list_connections()[0] == [('default', None), ('dev', None), ('default1', None)]
 
         self.connection.add_connection()
-        assert self.connection.list_connections()[0] == []
+        assert self.connection.list_connections()[0] == [('default', None), ('dev', None), ('default1', None)]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_connection_remove_connection_not_exist(self):

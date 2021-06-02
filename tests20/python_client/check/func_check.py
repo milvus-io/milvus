@@ -18,6 +18,7 @@ class CheckFunc:
         self.keys = self.params.keys()
 
     def run(self):
+        # log.debug("[Run CheckFunc] Start checking res...")
         check_result = True
 
         if self.check_res is None:
