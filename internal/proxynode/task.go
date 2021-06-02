@@ -104,6 +104,11 @@ type dmlTask interface {
 	getStatistics(pchan pChan) (pChanStatistics, error)
 }
 
+type dqlTask interface {
+	task
+	getVChannels() ([]vChan, error)
+}
+
 type BaseInsertTask = msgstream.InsertMsg
 
 type InsertTask struct {
@@ -978,6 +983,7 @@ type SearchTask struct {
 	resultBuf      chan []*internalpb.SearchResults
 	result         *milvuspb.SearchResults
 	query          *milvuspb.SearchRequest
+	chMgr          channelsMgr
 }
 
 func (st *SearchTask) TraceCtx() context.Context {
@@ -1015,6 +1021,23 @@ func (st *SearchTask) SetTs(ts Timestamp) {
 func (st *SearchTask) OnEnqueue() error {
 	st.Base = &commonpb.MsgBase{}
 	return nil
+}
+
+func (st *SearchTask) getVChannels() ([]vChan, error) {
+	collID, err := globalMetaCache.GetCollectionID(st.ctx, st.query.CollectionName)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = st.chMgr.getChannels(collID)
+	if err != nil {
+		err := st.chMgr.createDMLMsgStream(collID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return st.chMgr.getVChannels(collID)
 }
 
 func (st *SearchTask) PreExecute(ctx context.Context) error {
