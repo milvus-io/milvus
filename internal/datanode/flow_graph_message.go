@@ -23,45 +23,11 @@ type (
 	MsgStreamMsg = flowgraph.MsgStreamMsg
 )
 
-type key2SegMsg struct {
-	tsMessages []msgstream.TsMsg
-	timeRange  TimeRange
-}
-
-type ddMsg struct {
-	collectionRecords map[UniqueID][]*metaOperateRecord
-	partitionRecords  map[UniqueID][]*metaOperateRecord
-	flushMessage      *flushMsg
-	gcRecord          *gcRecord
-	timeRange         TimeRange
-}
-
-type metaOperateRecord struct {
-	createOrDrop bool // create: true, drop: false
-	timestamp    Timestamp
-}
-
 type insertMsg struct {
 	insertMessages []*msgstream.InsertMsg
-	flushMessage   *flushMsg
-	gcRecord       *gcRecord
 	timeRange      TimeRange
 	startPositions []*internalpb.MsgPosition
 	endPositions   []*internalpb.MsgPosition
-}
-
-type deleteMsg struct {
-	deleteMessages []*msgstream.DeleteMsg
-	timeRange      TimeRange
-}
-
-type gcMsg struct {
-	gcRecord  *gcRecord
-	timeRange TimeRange
-}
-
-type gcRecord struct {
-	collections []UniqueID
 }
 
 type flushMsg struct {
@@ -69,26 +35,9 @@ type flushMsg struct {
 	timestamp    Timestamp
 	segmentID    UniqueID
 	collectionID UniqueID
-	ddlFlushedCh chan<- []*datapb.DDLBinlogMeta
 	dmlFlushedCh chan<- []*datapb.ID2PathList
-}
-
-func (ksMsg *key2SegMsg) TimeTick() Timestamp {
-	return ksMsg.timeRange.timestampMax
-}
-
-func (suMsg *ddMsg) TimeTick() Timestamp {
-	return suMsg.timeRange.timestampMax
 }
 
 func (iMsg *insertMsg) TimeTick() Timestamp {
 	return iMsg.timeRange.timestampMax
-}
-
-func (dMsg *deleteMsg) TimeTick() Timestamp {
-	return dMsg.timeRange.timestampMax
-}
-
-func (gcMsg *gcMsg) TimeTick() Timestamp {
-	return gcMsg.timeRange.timestampMax
 }

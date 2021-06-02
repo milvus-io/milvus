@@ -84,56 +84,27 @@ func (dsService *dataSyncService) initNodes(vchanPair *datapb.VchannelPair) {
 	}
 
 	var dmStreamNode Node = newDmInputNode(dsService.ctx, dsService.msFactory, vchanPair.GetDmlVchannelName(), vchanPair.GetDmlPosition())
-	var ddStreamNode Node = newDDInputNode(dsService.ctx, dsService.msFactory, vchanPair.GetDdlVchannelName(), vchanPair.GetDdlPosition())
-
-	var filterDmNode Node = newFilteredDmNode()
-	var ddNode Node = newDDNode(dsService.ctx, dsService.flushChan, dsService.replica, dsService.idAllocator, vchanPair.CollectionID)
-	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, dsService.replica, dsService.msFactory, dsService.idAllocator)
-	var gcNode Node = newGCNode(dsService.replica)
+	var ddNode Node = newDDNode()
+	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, dsService.replica, dsService.msFactory, dsService.idAllocator, dsService.flushChan)
 
 	dsService.fg.AddNode(dmStreamNode)
-	dsService.fg.AddNode(ddStreamNode)
-
-	dsService.fg.AddNode(filterDmNode)
 	dsService.fg.AddNode(ddNode)
-
 	dsService.fg.AddNode(insertBufferNode)
-	dsService.fg.AddNode(gcNode)
 
-	// dmStreamNode
+	// ddStreamNode
 	err = dsService.fg.SetEdges(dmStreamNode.Name(),
 		[]string{},
-		[]string{filterDmNode.Name()},
+		[]string{ddNode.Name()},
 	)
 	if err != nil {
 		log.Error("set edges failed in node", zap.String("name", dmStreamNode.Name()), zap.Error(err))
 		panic("set edges faild in the node")
 	}
 
-	// ddStreamNode
-	err = dsService.fg.SetEdges(ddStreamNode.Name(),
-		[]string{},
-		[]string{ddNode.Name()},
-	)
-	if err != nil {
-		log.Error("set edges failed in node", zap.String("name", ddStreamNode.Name()), zap.Error(err))
-		panic("set edges faild in the node")
-	}
-
-	// filterDmNode
-	err = dsService.fg.SetEdges(filterDmNode.Name(),
-		[]string{dmStreamNode.Name(), ddNode.Name()},
-		[]string{insertBufferNode.Name()},
-	)
-	if err != nil {
-		log.Error("set edges failed in node", zap.String("name", filterDmNode.Name()), zap.Error(err))
-		panic("set edges faild in the node")
-	}
-
 	// ddNode
 	err = dsService.fg.SetEdges(ddNode.Name(),
-		[]string{ddStreamNode.Name()},
-		[]string{filterDmNode.Name()},
+		[]string{dmStreamNode.Name()},
+		[]string{insertBufferNode.Name()},
 	)
 	if err != nil {
 		log.Error("set edges failed in node", zap.String("name", ddNode.Name()), zap.Error(err))
@@ -142,20 +113,11 @@ func (dsService *dataSyncService) initNodes(vchanPair *datapb.VchannelPair) {
 
 	// insertBufferNode
 	err = dsService.fg.SetEdges(insertBufferNode.Name(),
-		[]string{filterDmNode.Name()},
-		[]string{gcNode.Name()},
+		[]string{ddNode.Name()},
+		[]string{},
 	)
 	if err != nil {
 		log.Error("set edges failed in node", zap.String("name", insertBufferNode.Name()), zap.Error(err))
-		panic("set edges faild in the node")
-	}
-
-	// gcNode
-	err = dsService.fg.SetEdges(gcNode.Name(),
-		[]string{insertBufferNode.Name()},
-		[]string{})
-	if err != nil {
-		log.Error("set edges failed in node", zap.String("name", gcNode.Name()), zap.Error(err))
 		panic("set edges faild in the node")
 	}
 }

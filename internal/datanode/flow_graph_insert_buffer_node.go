@@ -54,12 +54,12 @@ type insertBufferNode struct {
 	replica      Replica
 	idAllocator  allocatorInterface
 	flushMap     sync.Map
+	flushChan    <-chan *flushMsg
 
 	minIOKV kv.BaseKV
 
 	timeTickStream          msgstream.MsgStream
 	segmentStatisticsStream msgstream.MsgStream
-	completeFlushStream     msgstream.MsgStream
 }
 
 type insertBuffer struct {
@@ -476,12 +476,13 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	// iMsg is Flush() msg from dataservice
 	//   1. insertBuffer(not empty) -> binLogs -> minIO/S3
-	if iMsg.flushMessage != nil && ibNode.replica.hasSegment(iMsg.flushMessage.segmentID) {
-		currentSegID := iMsg.flushMessage.segmentID
+	select {
+	case fmsg := <-ibNode.flushChan:
+		currentSegID := fmsg.segmentID
 		log.Debug(". Receiving flush message", zap.Int64("segmentID", currentSegID))
 
 		finishCh := make(chan map[UniqueID]string)
-		go ibNode.completeFlush(currentSegID, finishCh, iMsg.flushMessage.dmlFlushedCh)
+		go ibNode.completeFlush(currentSegID, finishCh, fmsg.dmlFlushedCh)
 
 		if ibNode.insertBuffer.size(currentSegID) <= 0 {
 			log.Debug(".. Buffer empty ...")
@@ -521,21 +522,19 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				&ibNode.flushMap, ibNode.minIOKV, finishCh, ibNode.idAllocator)
 		}
 
+	default:
 	}
 
-	if err := ibNode.writeHardTimeTick(iMsg.timeRange.timestampMax); err != nil {
-		log.Error("send hard time tick into pulsar channel failed", zap.Error(err))
-	}
+	// TODO write timetick
+	// if err := ibNode.writeHardTimeTick(iMsg.timeRange.timestampMax); err != nil {
+	//     log.Error("send hard time tick into pulsar channel failed", zap.Error(err))
+	// }
 
-	var res Msg = &gcMsg{
-		gcRecord:  iMsg.gcRecord,
-		timeRange: iMsg.timeRange,
-	}
 	for _, sp := range spans {
 		sp.Finish()
 	}
 
-	return []Msg{res}
+	return nil
 }
 
 func flushSegment(collMeta *etcdpb.CollectionMeta, segID, partitionID, collID UniqueID,
@@ -759,7 +758,7 @@ func (ibNode *insertBufferNode) getCollectionandPartitionIDbySegID(segmentID Uni
 	return
 }
 
-func newInsertBufferNode(ctx context.Context, replica Replica, factory msgstream.Factory, idAllocator allocatorInterface) *insertBufferNode {
+func newInsertBufferNode(ctx context.Context, replica Replica, factory msgstream.Factory, idAllocator allocatorInterface, flushCh <-chan *flushMsg) *insertBufferNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -802,22 +801,17 @@ func newInsertBufferNode(ctx context.Context, replica Replica, factory msgstream
 	var segStatisticsMsgStream msgstream.MsgStream = segS
 	segStatisticsMsgStream.Start()
 
-	// segment flush completed channel
-	cf, _ := factory.NewMsgStream(ctx)
-	cf.AsProducer([]string{Params.CompleteFlushChannelName})
-	log.Debug("datanode AsProducer: " + Params.CompleteFlushChannelName)
-	var completeFlushStream msgstream.MsgStream = cf
-	completeFlushStream.Start()
-
 	return &insertBufferNode{
-		BaseNode:                baseNode,
-		insertBuffer:            iBuffer,
-		minIOKV:                 minIOKV,
+		BaseNode:     baseNode,
+		insertBuffer: iBuffer,
+		minIOKV:      minIOKV,
+
 		timeTickStream:          wTtMsgStream,
 		segmentStatisticsStream: segStatisticsMsgStream,
-		completeFlushStream:     completeFlushStream,
-		replica:                 replica,
-		flushMap:                sync.Map{},
-		idAllocator:             idAllocator,
+
+		replica:     replica,
+		flushMap:    sync.Map{},
+		flushChan:   flushCh,
+		idAllocator: idAllocator,
 	}
 }
