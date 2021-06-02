@@ -13,6 +13,7 @@ package msgstream
 
 import (
 	"errors"
+	"strconv"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -127,7 +128,7 @@ func DefaultRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, 
 	for i, request := range tsMsgs {
 		keys := hashKeys[i]
 		if len(keys) != 1 {
-			return nil, errors.New("len(msg.hashValue) must equal 1")
+			return nil, errors.New("len(msg.hashValue) must equal 1, but it is: " + strconv.Itoa(len(keys)))
 		}
 		key := keys[0]
 		_, ok := result[key]
