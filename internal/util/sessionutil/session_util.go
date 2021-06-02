@@ -282,7 +282,6 @@ func (s *Session) WatchServices(prefix string, revision int64) (eventChannel <-c
 					case mvccpb.PUT:
 						log.Debug("watch services",
 							zap.Any("add kv", ev.Kv))
-						session := &Session{}
 						err := json.Unmarshal([]byte(ev.Kv.Value), session)
 						if err != nil {
 							log.Error("watch services", zap.Error(err))
