@@ -199,11 +199,58 @@ func consumeMsgChan(timeout time.Duration, targetChan <-chan *msgstream.MsgPack)
 	}
 }
 
+func GenSegInfoMsgPack(seg *datapb.SegmentInfo) *msgstream.MsgPack {
+	msgPack := msgstream.MsgPack{}
+	baseMsg := msgstream.BaseMsg{
+		BeginTimestamp: 0,
+		EndTimestamp:   0,
+		HashValues:     []uint32{0},
+	}
+	segMsg := &msgstream.SegmentInfoMsg{
+		BaseMsg: baseMsg,
+		SegmentMsg: datapb.SegmentMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_SegmentInfo,
+				MsgID:     0,
+				Timestamp: 0,
+				SourceID:  0,
+			},
+			Segment: seg,
+		},
+	}
+	msgPack.Msgs = append(msgPack.Msgs, segMsg)
+	return &msgPack
+}
+
+func GenFlushedSegMsgPack(segID typeutil.UniqueID) *msgstream.MsgPack {
+	msgPack := msgstream.MsgPack{}
+	baseMsg := msgstream.BaseMsg{
+		BeginTimestamp: 0,
+		EndTimestamp:   0,
+		HashValues:     []uint32{0},
+	}
+	segMsg := &msgstream.FlushCompletedMsg{
+		BaseMsg: baseMsg,
+		SegmentFlushCompletedMsg: internalpb.SegmentFlushCompletedMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_SegmentFlushDone,
+				MsgID:     0,
+				Timestamp: 0,
+				SourceID:  0,
+			},
+			SegmentID: segID,
+		},
+	}
+	msgPack.Msgs = append(msgPack.Msgs, segMsg)
+	return &msgPack
+}
+
 func TestMasterService(t *testing.T) {
 	const (
 		dbName   = "testDb"
 		collName = "testColl"
 		partName = "testPartition"
+		segID    = 1001
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -665,27 +712,8 @@ func TestMasterService(t *testing.T) {
 			CollectionID: coll.ID,
 			PartitionID:  part.PartitionID,
 		}
-
-		msgPack := msgstream.MsgPack{}
-		baseMsg := msgstream.BaseMsg{
-			BeginTimestamp: 0,
-			EndTimestamp:   0,
-			HashValues:     []uint32{0},
-		}
-		segMsg := &msgstream.SegmentInfoMsg{
-			BaseMsg: baseMsg,
-			SegmentMsg: datapb.SegmentMsg{
-				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_SegmentInfo,
-					MsgID:     0,
-					Timestamp: 0,
-					SourceID:  0,
-				},
-				Segment: seg,
-			},
-		}
-		msgPack.Msgs = append(msgPack.Msgs, segMsg)
-		err = dataServiceSegmentStream.Broadcast(&msgPack)
+		segInfoMsgPack := GenSegInfoMsgPack(seg)
+		err = dataServiceSegmentStream.Broadcast(segInfoMsgPack)
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
 
@@ -821,31 +849,12 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, 1, len(part.SegmentIDs))
 
 		seg := &datapb.SegmentInfo{
-			ID:           1001,
+			ID:           segID,
 			CollectionID: coll.ID,
 			PartitionID:  part.PartitionID,
 		}
-
-		msgPack := msgstream.MsgPack{}
-		baseMsg := msgstream.BaseMsg{
-			BeginTimestamp: 0,
-			EndTimestamp:   0,
-			HashValues:     []uint32{0},
-		}
-		segMsg := &msgstream.SegmentInfoMsg{
-			BaseMsg: baseMsg,
-			SegmentMsg: datapb.SegmentMsg{
-				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_SegmentInfo,
-					MsgID:     0,
-					Timestamp: 0,
-					SourceID:  0,
-				},
-				Segment: seg,
-			},
-		}
-		msgPack.Msgs = append(msgPack.Msgs, segMsg)
-		err = dataServiceSegmentStream.Broadcast(&msgPack)
+		segInfoMsgPack := GenSegInfoMsgPack(seg)
+		err = dataServiceSegmentStream.Broadcast(segInfoMsgPack)
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
 
@@ -853,20 +862,8 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, 2, len(part.SegmentIDs))
 
-		flushMsg := &msgstream.FlushCompletedMsg{
-			BaseMsg: baseMsg,
-			SegmentFlushCompletedMsg: internalpb.SegmentFlushCompletedMsg{
-				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_SegmentFlushDone,
-					MsgID:     0,
-					Timestamp: 0,
-					SourceID:  0,
-				},
-				SegmentID: 1001,
-			},
-		}
-		msgPack.Msgs = []msgstream.TsMsg{flushMsg}
-		err = dataServiceSegmentStream.Broadcast(&msgPack)
+		flushedSegMsgPack := GenFlushedSegMsgPack(segID)
+		err = dataServiceSegmentStream.Broadcast(flushedSegMsgPack)
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
 
