@@ -347,8 +347,16 @@ func TestMasterService(t *testing.T) {
 	ddStream.Start()
 
 	// test dataServiceSegmentStream seek
-	flushedSegMsgPack := GenFlushedSegMsgPack(9999)
-	err = dataServiceSegmentStream.Broadcast(flushedSegMsgPack)
+	dataNodeSubName := Params.MsgChannelSubName + "dn"
+	flushedSegStream, _ := msFactory.NewMsgStream(ctx)
+	flushedSegStream.AsConsumer([]string{Params.DataServiceSegmentChannel}, dataNodeSubName)
+	flushedSegStream.Start()
+	msgPack := GenFlushedSegMsgPack(9999)
+	err = dataServiceSegmentStream.Produce(msgPack)
+	assert.Nil(t, err)
+	flushedSegMsgPack := flushedSegStream.Consume()
+	flushedSegPosStr, _ := EncodeMsgPositions(flushedSegMsgPack.EndPositions)
+	_, err = etcdCli.Put(ctx, path.Join(Params.MetaRootPath, FlushedSegMsgEndPosPrefix), flushedSegPosStr)
 	assert.Nil(t, err)
 
 	err = core.Init()
