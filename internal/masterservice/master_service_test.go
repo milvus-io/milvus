@@ -325,15 +325,9 @@ func TestMasterService(t *testing.T) {
 	err = core.SetQueryService(qm)
 	assert.Nil(t, err)
 
-	err = core.Init()
-	assert.Nil(t, err)
-
-	err = core.Start()
-	assert.Nil(t, err)
-
 	m := map[string]interface{}{
-		"receiveBufSize": 1024,
 		"pulsarAddress":  Params.PulsarAddress,
+		"receiveBufSize": 1024,
 		"pulsarBufSize":  1024}
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
@@ -351,6 +345,17 @@ func TestMasterService(t *testing.T) {
 	ddStream, _ := msFactory.NewMsgStream(ctx)
 	ddStream.AsConsumer([]string{Params.DdChannel}, Params.MsgChannelSubName)
 	ddStream.Start()
+
+	// test dataServiceSegmentStream seek
+	flushedSegMsgPack := GenFlushedSegMsgPack(9999)
+	err = dataServiceSegmentStream.Broadcast(flushedSegMsgPack)
+	assert.Nil(t, err)
+
+	err = core.Init()
+	assert.Nil(t, err)
+
+	err = core.Start()
+	assert.Nil(t, err)
 
 	time.Sleep(time.Second)
 
