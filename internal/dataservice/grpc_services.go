@@ -338,5 +338,10 @@ func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 }
 
 func (s *Server) RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
-	return nil, nil
+	return &datapb.RegisterNodeResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+	}, nil
+
 }
