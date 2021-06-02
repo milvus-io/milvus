@@ -1,4 +1,4 @@
-from pymilvus_orm import connections
+from pymilvus_orm import Connections
 from pymilvus_orm.types import DataType
 from pymilvus_orm.default_config import DefaultConfig
 import sys
@@ -31,18 +31,25 @@ def func_req(_list, **kwargs):
             if len(_list) > 1:
                 for a in _list[1:]:
                     arg.append(a)
+            log.info("[%s] arg : %s, kwargs : %s" % (str(func), str(arg), str(kwargs)))
             return func(*arg, **kwargs)
     return False, False
 
 
 class ApiConnections:
     def __init__(self):
-        self.connection = connections
+        self.connection = Connections()
 
-    def configure(self, check_res=None, check_params=None, **kwargs):
+    def add_connection(self, check_res=None, check_params=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, check = func_req([self.connection.configure], **kwargs)
+        res, check = func_req([self.connection.add_connection], **kwargs)
         check_result = CheckFunc(res, func_name, check_res, check_params, check, **kwargs).run()
+        return res, check_result
+
+    def disconnect(self, alias, check_res=None, check_params=None):
+        func_name = sys._getframe().f_code.co_name
+        res, check = func_req([self.connection.disconnect, alias])
+        check_result = CheckFunc(res, func_name, check_res, check_params, check, alias=alias).run()
         return res, check_result
 
     def remove_connection(self, alias, check_res=None, check_params=None):
@@ -51,9 +58,9 @@ class ApiConnections:
         check_result = CheckFunc(res, func_name, check_res, check_params, check, alias=alias).run()
         return res, check_result
 
-    def create_connection(self, alias=DefaultConfig.DEFAULT_USING, check_res=None, check_params=None, **kwargs):
+    def connect(self, alias=DefaultConfig.DEFAULT_USING, check_res=None, check_params=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, check = func_req([self.connection.create_connection, alias], **kwargs)
+        res, check = func_req([self.connection.connect, alias], **kwargs)
         check_result = CheckFunc(res, func_name, check_res, check_params, check, alias=alias, **kwargs).run()
         return res, check_result
 
