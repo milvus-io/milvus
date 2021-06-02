@@ -9,6 +9,7 @@ class TestInfo:
         """ Make sure the path exists """
         self.home_dir = "/tmp/"
         self.log_dir = self.home_dir + "log/"
+        self.log_debug = "%s/refactor_test.debug" % self.log_dir
         self.log_info = "%s/refactor_test.log" % self.log_dir
         self.log_err = "%s/refactor_test.err" % self.log_dir
 
