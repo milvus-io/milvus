@@ -42,15 +42,16 @@ func newRetrieveService(ctx context.Context,
 	streamingReplica ReplicaInterface,
 	tSafeReplica TSafeReplicaInterface,
 	factory msgstream.Factory) *retrieveService {
+
 	retrieveStream, _ := factory.NewQueryMsgStream(ctx)
 	retrieveResultStream, _ := factory.NewQueryMsgStream(ctx)
 
-	if len(Params.RetrieveChannelNames) > 0 && len(Params.RetrieveResultChannelNames) > 0 {
-		consumeChannels := Params.RetrieveChannelNames
-		consumeSubName := Params.MsgChannelSubName
+	if len(Params.SearchChannelNames) > 0 && len(Params.SearchResultChannelNames) > 0 {
+		consumeChannels := Params.SearchChannelNames
+		consumeSubName := "RetrieveSubName"
 		retrieveStream.AsConsumer(consumeChannels, consumeSubName)
-		log.Debug("query node AdConsumer", zap.Any("retrieveChannels", consumeChannels), zap.Any("consumeSubName", consumeSubName))
-		producerChannels := Params.RetrieveChannelNames
+		log.Debug("query node AsConsumer", zap.Any("retrieveChannels", consumeChannels), zap.Any("consumeSubName", consumeSubName))
+		producerChannels := Params.SearchResultChannelNames
 		retrieveResultStream.AsProducer(producerChannels)
 		log.Debug("query node AsProducer", zap.Any("retrieveResultChannels", producerChannels))
 	}
@@ -147,7 +148,7 @@ func (rs *retrieveService) startRetrieveCollection(collectionID UniqueID) {
 		rs.tSafeReplica,
 		rs.retrieveResultMsgStream)
 	rs.retrieveCollections[collectionID] = rc
-	rs.start()
+	rc.start()
 }
 
 func (rs *retrieveService) hasRetrieveCollection(collectionID UniqueID) bool {
