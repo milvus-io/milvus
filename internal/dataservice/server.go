@@ -94,13 +94,14 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 
 // Register register data service at etcd
 func (s *Server) Register() error {
+	s.session = sessionutil.NewSession(s.ctx, Params.MetaRootPath, []string{Params.EtcdAddress})
 	s.activeCh = s.session.Init(typeutil.DataServiceRole, Params.IP, true)
 	Params.NodeID = s.session.ServerID
 	return nil
 }
 
 func (s *Server) Init() error {
-	s.session = sessionutil.NewSession(s.ctx, Params.MetaRootPath, []string{Params.EtcdAddress})
+	atomic.StoreInt64(&s.isServing, 1)
 	return nil
 }
 
@@ -146,7 +147,7 @@ func (s *Server) Start() error {
 
 	s.startServerLoop()
 
-	atomic.StoreInt64(&s.isServing, 1)
+	atomic.StoreInt64(&s.isServing, 2)
 	log.Debug("start success")
 	return nil
 }
@@ -478,7 +479,7 @@ func (s *Server) initMasterClient() error {
 }
 
 func (s *Server) Stop() error {
-	if !atomic.CompareAndSwapInt64(&s.isServing, 1, 0) {
+	if !atomic.CompareAndSwapInt64(&s.isServing, 2, 0) {
 		return nil
 	}
 	log.Debug("dataservice server shutdown")
