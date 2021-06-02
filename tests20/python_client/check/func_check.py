@@ -4,11 +4,12 @@ from pymilvus_orm import Collection, Partition
 
 
 class CheckFunc:
-    def __init__(self, res, func_name, check_res, check_params, **kwargs):
+    def __init__(self, res, func_name, check_res, check_params, check_res_result=True, **kwargs):
         self.res = res  # response of api request
         self.func_name = func_name
         self.check_res = check_res
         self.check_params = check_params
+        self.check_res_result = check_res_result
         self.params = {}
 
         for key, value in kwargs.items():
@@ -17,11 +18,14 @@ class CheckFunc:
         self.keys = self.params.keys()
 
     def run(self):
-        check_result = None
+        check_result = True
 
         if self.check_res is None:
-            pass
-            # log.info("self.check_res is None, the response of API: %s" % self.res)
+            assert self.check_res_result is True
+            check_result = True
+        elif self.check_res == CheckParams.false:
+            assert self.check_res_result is False
+            check_result = False
         elif self.check_res == CheckParams.cname_param_check:
             check_result = self.req_cname_check(self.res, self.func_name, self.params.get('collection_name'))
         elif self.check_res == CheckParams.pname_param_check:
@@ -32,6 +36,7 @@ class CheckFunc:
             check_result = self.req_collection_property_check(self.res, self.func_name, self.params)
         elif self.check_res == CheckParams.partition_property_check:
             check_result = self.partition_property_check(self.res, self.func_name, self.params)
+
         return check_result
 
     @staticmethod

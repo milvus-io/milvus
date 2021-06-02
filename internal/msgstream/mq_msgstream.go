@@ -12,6 +12,7 @@
 package msgstream
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -128,8 +129,6 @@ func (ms *mqMsgStream) AsConsumer(channels []string, subName string) {
 			ms.consumers[channel] = pc
 			ms.consumerChannels = append(ms.consumerChannels, channel)
 			ms.consumerLock.Unlock()
-			ms.wait.Add(1)
-			go ms.receiveMsg(pc)
 			return nil
 		}
 		err := Retry(20, time.Millisecond*200, fn)
@@ -145,6 +144,10 @@ func (ms *mqMsgStream) SetRepackFunc(repackFunc RepackFunc) {
 }
 
 func (ms *mqMsgStream) Start() {
+	for _, c := range ms.consumers {
+		ms.wait.Add(1)
+		go ms.receiveMsg(c)
+	}
 }
 
 func (ms *mqMsgStream) Close() {
@@ -351,7 +354,11 @@ func (ms *mqMsgStream) receiveMsg(consumer mqclient.Consumer) {
 				tsMsg.SetTraceCtx(opentracing.ContextWithSpan(context.Background(), sp))
 			}
 
-			msgPack := MsgPack{Msgs: []TsMsg{tsMsg}}
+			msgPack := MsgPack{
+				Msgs:           []TsMsg{tsMsg},
+				StartPositions: []*internalpb.MsgPosition{tsMsg.Position()},
+				EndPositions:   []*internalpb.MsgPosition{tsMsg.Position()},
+			}
 			ms.receiveBuf <- &msgPack
 
 			sp.Finish()
@@ -377,6 +384,18 @@ func (ms *mqMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 		if err != nil {
 			return err
 		}
+		msg, ok := <-consumer.Chan()
+		if !ok {
+			return errors.New("consumer closed")
+		}
+		consumer.Ack(msg)
+
+		if !bytes.Equal(msg.ID().Serialize(), messageID.Serialize()) {
+			err = fmt.Errorf("seek msg not correct")
+			log.Error("msMsgStream seek", zap.Error(err))
+		}
+
+		return nil
 	}
 	return nil
 }

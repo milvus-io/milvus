@@ -881,6 +881,49 @@ func TestStream_PulsarTtMsgStream_2(t *testing.T) {
 	inputStream2.Close()
 }
 
+func TestStream_MqMsgStream_Seek(t *testing.T) {
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	c := funcutil.RandomString(8)
+	producerChannels := []string{c}
+	consumerChannels := []string{c}
+	consumerSubName := funcutil.RandomString(8)
+
+	msgPack := &MsgPack{}
+	inputStream := getPulsarInputStream(pulsarAddress, producerChannels)
+	outputStream := getPulsarOutputStream(pulsarAddress, consumerChannels, consumerSubName)
+
+	for i := 0; i < 10; i++ {
+		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
+		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
+	}
+
+	err := inputStream.Produce(msgPack)
+	assert.Nil(t, err)
+	var seekPosition *internalpb.MsgPosition
+	for i := 0; i < 10; i++ {
+		result := outputStream.Consume()
+		assert.Equal(t, result.Msgs[0].ID(), int64(i))
+		if i == 5 {
+			seekPosition = result.EndPositions[0]
+		}
+	}
+	outputStream.Close()
+
+	factory := ProtoUDFactory{}
+	pulsarClient, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	outputStream2, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+	outputStream2.AsConsumer(consumerChannels, consumerSubName)
+	outputStream2.Seek([]*internalpb.MsgPosition{seekPosition})
+	outputStream2.Start()
+
+	for i := 6; i < 10; i++ {
+		result := outputStream2.Consume()
+		assert.Equal(t, result.Msgs[0].ID(), int64(i))
+	}
+	outputStream2.Close()
+
+}
+
 /****************************************Rmq test******************************************/
 
 func initRmq(name string) *etcdkv.EtcdKV {
