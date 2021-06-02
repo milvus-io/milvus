@@ -115,15 +115,21 @@ class ApiReq(Base):
 
     def _connect(self):
         """ Testing func """
+        log.info("creating connection")
         self.connection.configure(check_res='', default={"host": param_info.param_host, "port": param_info.param_port})
         res = self.connection.create_connection(alias='default')
+        log.info("created connection")
         return res
 
-    def _collection(self, name=None, data=None, schema=None, check_res=None, **kwargs):
+    def _collection(self, name=None, data=None, schema=None, check_res=None, exist=False, multiple=False, **kwargs):
         """ Testing func """
-        self._connect()
+        res, _ = self.connection.get_connection_addr(alias='default')
+        if (not res) or multiple:
+            self._connect()
         name = cf.gen_unique_str("ApiReq") if name is None else name
         schema = cf.gen_default_collection_schema() if schema is None else schema
+        if exist:
+            schema = None
         collection, _ = self.collection.collection_init(name=name, data=data,
                                                         schema=schema, check_res=check_res, **kwargs)
         assert name == collection.name
