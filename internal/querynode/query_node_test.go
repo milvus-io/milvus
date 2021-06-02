@@ -182,9 +182,6 @@ func newQueryNodeMock() *QueryNode {
 	svr.historical = newHistorical(svr.queryNodeLoopCtx, nil, nil, nil, svr.msFactory)
 	svr.streaming = newStreaming()
 
-	// start search service
-	go svr.searchService.start()
-
 	return svr
 }
 
