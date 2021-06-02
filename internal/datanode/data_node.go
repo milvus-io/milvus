@@ -341,7 +341,6 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 			return status, nil
 		}
 
-		ddlFlushedCh := make(chan []*datapb.DDLBinlogMeta)
 		dmlFlushedCh := make(chan []*datapb.ID2PathList)
 
 		flushmsg := &flushMsg{
@@ -349,7 +348,6 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 			timestamp:    req.Base.Timestamp,
 			segmentID:    id,
 			collectionID: req.CollectionID,
-			ddlFlushedCh: ddlFlushedCh,
 			dmlFlushedCh: dmlFlushedCh,
 		}
 
@@ -372,28 +370,6 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 					req.Field2BinlogPaths = meta
 					log.Info("Insert messeges flush done!", zap.Any("Binlog paths", meta))
 				}
-
-			case chan []*datapb.DDLBinlogMeta:
-				select {
-				case <-time.After(300 * time.Second):
-					return
-				case meta := <-Ch:
-					if meta == nil {
-						log.Info("Ddl messages flush failed!")
-						// Modify req to confirm failure
-						return
-					}
-
-					if len(meta) == 0 {
-						log.Info("Ddl messages flush Done")
-						// Modify req with empty ddl binlog paths and position
-						return
-					}
-
-					// Modify req with valid ddl binlog paths
-					req.DdlBinlogPaths = meta
-					log.Info("Ddl messages flush done!", zap.Any("Binlog paths", meta))
-				}
 			default:
 				log.Error("Not supported type")
 			}
@@ -413,8 +389,6 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 			flushCh <- flushmsg
 
 			var wg sync.WaitGroup
-			wg.Add(1)
-			go waitReceive(&wg, ddlFlushedCh, req)
 			wg.Add(1)
 			go waitReceive(&wg, dmlFlushedCh, req)
 			wg.Wait()
