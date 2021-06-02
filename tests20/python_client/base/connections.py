@@ -41,7 +41,7 @@ class ApiConnections:
 
     def configure(self, check_res=None, check_params=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, check = func_req([self.connection.configure], **kwargs)
+        res, check = func_req([self.connection.add_connection], **kwargs)
         check_result = CheckFunc(res, func_name, check_res, check_params, **kwargs).run()
         return res, check_result
 
@@ -53,7 +53,7 @@ class ApiConnections:
 
     def create_connection(self, alias=DefaultConfig.DEFAULT_USING, check_res=None, check_params=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, check = func_req([self.connection.create_connection, alias], **kwargs)
+        res, check = func_req([self.connection.connect, alias], **kwargs)
         check_result = CheckFunc(res, func_name, check_res, check_params, alias=alias, **kwargs).run()
         return res, check_result
 
