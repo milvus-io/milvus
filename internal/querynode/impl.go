@@ -92,6 +92,9 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 	node.searchService.searchResultMsgStream.AsProducer(producerChannels)
 	log.Debug("querynode AsProducer: " + strings.Join(producerChannels, ", "))
 
+	// start search service
+	go node.searchService.start()
+
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
