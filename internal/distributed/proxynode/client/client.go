@@ -30,18 +30,16 @@ import (
 type Client struct {
 	grpcClient proxypb.ProxyNodeServiceClient
 	conn       *grpc.ClientConn
-	ctx        context.Context
 
-	address   string
+	addr      string
 	timeout   time.Duration
 	reconnTry int
 	recallTry int
 }
 
-func NewClient(ctx context.Context, address string, timeout time.Duration) *Client {
+func NewClient(addr string, timeout time.Duration) *Client {
 	return &Client{
-		address:   address,
-		ctx:       ctx,
+		addr:      addr,
 		timeout:   timeout,
 		recallTry: 3,
 		reconnTry: 10,
@@ -51,8 +49,10 @@ func NewClient(ctx context.Context, address string, timeout time.Duration) *Clie
 func (c *Client) Init() error {
 	tracer := opentracing.GlobalTracer()
 	connectGrpcFunc := func() error {
-		log.Debug("proxynode connect ", zap.String("address", c.address))
-		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
+		log.Debug("proxynode connect ", zap.String("addr", c.addr))
+		ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+		defer cancel()
+		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(
@@ -74,8 +74,10 @@ func (c *Client) Init() error {
 func (c *Client) reconnect() error {
 	tracer := opentracing.GlobalTracer()
 	connectGrpcFunc := func() error {
-		log.Debug("ProxyNode connect ", zap.String("address", c.address))
-		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
+		log.Debug("proxynode connect ", zap.String("addr", c.addr))
+		ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+		defer cancel()
+		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(

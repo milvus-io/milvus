@@ -34,10 +34,10 @@ import (
 type Client struct {
 	grpcClient datapb.DataServiceClient
 	conn       *grpc.ClientConn
-	ctx        context.Context
-	addr       string
 
-	sess      *sessionutil.Session
+	addr string
+	sess *sessionutil.Session
+
 	timeout   time.Duration
 	recallTry int
 	reconnTry int
@@ -51,16 +51,14 @@ func getDataServiceAddress(sess *sessionutil.Session) (string, error) {
 	}
 	ms, ok := msess[key]
 	if !ok {
-		return "", fmt.Errorf("number of master service is incorrect, %d", len(msess))
+		return "", fmt.Errorf("number of dataservice is incorrect, %d", len(msess))
 	}
 	return ms.Address, nil
 }
 
-func NewClient(address, metaRoot string, etcdAddr []string, timeout time.Duration) *Client {
+func NewClient(metaRoot string, etcdAddr []string, timeout time.Duration) *Client {
 	sess := sessionutil.NewSession(context.Background(), metaRoot, etcdAddr)
 	return &Client{
-		addr:      address,
-		ctx:       context.Background(),
 		sess:      sess,
 		timeout:   timeout,
 		recallTry: 3,
@@ -69,35 +67,10 @@ func NewClient(address, metaRoot string, etcdAddr []string, timeout time.Duratio
 }
 
 func (c *Client) Init() error {
-	tracer := opentracing.GlobalTracer()
-	if c.addr != "" {
-		connectGrpcFunc := func() error {
-			log.Debug("dataservice connect ", zap.String("address", c.addr))
-			conn, err := grpc.DialContext(c.ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
-				grpc.WithUnaryInterceptor(
-					otgrpc.OpenTracingClientInterceptor(tracer)),
-				grpc.WithStreamInterceptor(
-					otgrpc.OpenTracingStreamClientInterceptor(tracer)))
-			if err != nil {
-				return err
-			}
-			c.conn = conn
-			return nil
-		}
-
-		err := retry.Retry(100000, time.Millisecond*200, connectGrpcFunc)
-		if err != nil {
-			return err
-		}
-	} else {
-		return c.reconnect()
-	}
-	c.grpcClient = datapb.NewDataServiceClient(c.conn)
-
-	return nil
+	return c.connect()
 }
 
-func (c *Client) reconnect() error {
+func (c *Client) connect() error {
 	tracer := opentracing.GlobalTracer()
 	var err error
 	getDataServiceAddressFn := func() error {
@@ -112,8 +85,10 @@ func (c *Client) reconnect() error {
 		return err
 	}
 	connectGrpcFunc := func() error {
-		log.Debug("DataService connect ", zap.String("address", c.addr))
-		conn, err := grpc.DialContext(c.ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
+		log.Debug("dataservice connect ", zap.String("address", c.addr))
+		ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+		defer cancel()
+		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(
@@ -139,7 +114,7 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 		return ret, nil
 	}
 	for i := 0; i < c.recallTry; i++ {
-		err = c.reconnect()
+		err = c.connect()
 		if err == nil {
 			ret, err = caller()
 			if err == nil {
