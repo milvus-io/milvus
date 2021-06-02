@@ -77,6 +77,7 @@ func newSearchService(ctx context.Context,
 }
 
 func (s *searchService) start() {
+	log.Debug("start search service")
 	s.searchMsgStream.Start()
 	s.searchResultMsgStream.Start()
 	s.startEmptySearchCollection()
@@ -134,6 +135,7 @@ func (s *searchService) consumeSearch() {
 }
 
 func (s *searchService) close() {
+	log.Debug("search service closed")
 	if s.searchMsgStream != nil {
 		s.searchMsgStream.Close()
 	}

@@ -240,17 +240,13 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 			return
 		default:
 			serviceTime := s.waitNewTSafe()
-			if serviceTime == invalidTimestamp {
-				//log.Debug("tSafe closed")
-				return
-			}
 			s.setServiceableTime(serviceTime)
-			//log.Debug("querynode::doUnsolvedMsgSearch: setServiceableTime",
-			//	zap.Any("serviceTime", serviceTime),
-			//)
-			//log.Debug("get tSafe from flow graph",
-			//	zap.Int64("collectionID", s.collectionID),
-			//	zap.Uint64("tSafe", serviceTime))
+			log.Debug("query node::doUnsolvedMsgSearch: setServiceableTime",
+				zap.Any("serviceTime", serviceTime),
+			)
+			log.Debug("get tSafe from flow graph",
+				zap.Int64("collectionID", s.collectionID),
+				zap.Uint64("tSafe", serviceTime))
 
 			searchMsg := make([]*msgstream.SearchMsg, 0)
 			tempMsg := s.popAllUnsolvedMsg()

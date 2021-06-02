@@ -15,6 +15,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -83,6 +85,7 @@ func (dsService *dataSyncService) startCollectionFlowGraph(collectionID UniqueID
 	}
 	for _, fg := range dsService.collectionFlowGraphs[collectionID] {
 		// start flow graph
+		log.Debug("start flow graph", zap.Any("channel", fg.channel))
 		go fg.flowGraph.Start()
 	}
 	return nil
@@ -95,7 +98,7 @@ func (dsService *dataSyncService) removeCollectionFlowGraph(collectionID UniqueI
 	if _, ok := dsService.collectionFlowGraphs[collectionID]; ok {
 		for _, nodeFG := range dsService.collectionFlowGraphs[collectionID] {
 			// close flow graph
-			nodeFG.flowGraph.Close()
+			nodeFG.close()
 		}
 		dsService.collectionFlowGraphs[collectionID] = nil
 	}
@@ -156,7 +159,7 @@ func (dsService *dataSyncService) removePartitionFlowGraph(partitionID UniqueID)
 	if _, ok := dsService.partitionFlowGraphs[partitionID]; ok {
 		for _, nodeFG := range dsService.partitionFlowGraphs[partitionID] {
 			// close flow graph
-			nodeFG.flowGraph.Close()
+			nodeFG.close()
 		}
 		dsService.partitionFlowGraphs[partitionID] = nil
 	}
