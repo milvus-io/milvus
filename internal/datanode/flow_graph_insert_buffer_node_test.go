@@ -72,21 +72,28 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
 
-	iBNode := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory())
+	flushChan := make(chan *flushMsg, 100)
+	iBNode := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan)
 
-	ddlFlushedCh := make(chan []*datapb.DDLBinlogMeta)
 	dmlFlushedCh := make(chan []*datapb.ID2PathList)
 
-	inMsg := genInsertMsg(ddlFlushedCh, dmlFlushedCh)
+	flushChan <- &flushMsg{
+		msgID:        1,
+		timestamp:    2000,
+		segmentID:    UniqueID(1),
+		collectionID: UniqueID(1),
+		dmlFlushedCh: dmlFlushedCh,
+	}
+
+	inMsg := genInsertMsg()
 	var iMsg flowgraph.Msg = &inMsg
 	iBNode.Operate([]flowgraph.Msg{iMsg})
-
 	isflushed := <-dmlFlushedCh
 	assert.NotNil(t, isflushed)
 	log.Debug("DML binlog paths", zap.Any("paths", isflushed))
 }
 
-func genInsertMsg(ddlFlushedCh chan<- []*datapb.DDLBinlogMeta, dmlFlushedCh chan<- []*datapb.ID2PathList) insertMsg {
+func genInsertMsg() insertMsg {
 
 	timeRange := TimeRange{
 		timestampMin: 0,
@@ -113,15 +120,6 @@ func genInsertMsg(ddlFlushedCh chan<- []*datapb.DDLBinlogMeta, dmlFlushedCh chan
 
 	dataFactory := NewDataFactory()
 	iMsg.insertMessages = append(iMsg.insertMessages, dataFactory.GetMsgStreamInsertMsgs(2)...)
-
-	iMsg.flushMessage = &flushMsg{
-		msgID:        1,
-		timestamp:    2000,
-		segmentID:    UniqueID(1),
-		collectionID: UniqueID(1),
-		ddlFlushedCh: ddlFlushedCh,
-		dmlFlushedCh: dmlFlushedCh,
-	}
 
 	return *iMsg
 
