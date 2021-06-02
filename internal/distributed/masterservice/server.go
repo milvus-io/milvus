@@ -60,7 +60,7 @@ type Server struct {
 
 	newIndexServiceClient func(string, string, time.Duration) types.IndexService
 	newDataServiceClient  func(string, string, time.Duration) types.DataService
-	newQueryServiceClient func(string, string) (types.QueryService, error)
+	newQueryServiceClient func(string, string, time.Duration) (types.QueryService, error)
 
 	closer io.Closer
 }
@@ -107,8 +107,8 @@ func (s *Server) setClient() {
 		}
 		return isClient
 	}
-	s.newQueryServiceClient = func(metaRootPath, etcdAddress string) (types.QueryService, error) {
-		qsClient, err := qsc.NewClient(context.Background(), metaRootPath, []string{etcdAddress}, 10*time.Second)
+	s.newQueryServiceClient = func(metaRootPath, etcdAddress string, timeout time.Duration) (types.QueryService, error) {
+		qsClient, err := qsc.NewClient(metaRootPath, []string{etcdAddress}, timeout)
 		if err != nil {
 			panic(err)
 		}
@@ -161,7 +161,7 @@ func (s *Server) init() error {
 
 	s.masterService.SetNewProxyClient(
 		func(s *sessionutil.Session) (types.ProxyNode, error) {
-			cli := pnc.NewClient(ctx, s.Address, 10)
+			cli := pnc.NewClient(s.Address, 3*time.Second)
 			if err := cli.Init(); err != nil {
 				return nil, err
 			}
@@ -174,7 +174,7 @@ func (s *Server) init() error {
 
 	if s.newDataServiceClient != nil {
 		log.Debug("data service", zap.String("address", Params.DataServiceAddress))
-		dataService := s.newDataServiceClient(cms.Params.MetaRootPath, cms.Params.EtcdAddress, 10*time.Second)
+		dataService := s.newDataServiceClient(cms.Params.MetaRootPath, cms.Params.EtcdAddress, 3*time.Second)
 		if err := s.masterService.SetDataService(ctx, dataService); err != nil {
 			panic(err)
 		}
@@ -182,7 +182,7 @@ func (s *Server) init() error {
 	}
 	if s.newIndexServiceClient != nil {
 		log.Debug("index service", zap.String("address", Params.IndexServiceAddress))
-		indexService := s.newIndexServiceClient(cms.Params.MetaRootPath, cms.Params.EtcdAddress, 10*time.Second)
+		indexService := s.newIndexServiceClient(cms.Params.MetaRootPath, cms.Params.EtcdAddress, 3*time.Second)
 		if err := s.masterService.SetIndexService(indexService); err != nil {
 			panic(err)
 		}
@@ -190,7 +190,7 @@ func (s *Server) init() error {
 	}
 	if s.newQueryServiceClient != nil {
 		log.Debug("query service", zap.String("address", Params.QueryServiceAddress))
-		queryService, _ := s.newQueryServiceClient(cms.Params.MetaRootPath, cms.Params.EtcdAddress)
+		queryService, _ := s.newQueryServiceClient(cms.Params.MetaRootPath, cms.Params.EtcdAddress, 3*time.Second)
 		if err := s.masterService.SetQueryService(queryService); err != nil {
 			panic(err)
 		}

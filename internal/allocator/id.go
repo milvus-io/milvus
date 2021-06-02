@@ -72,7 +72,7 @@ func NewIDAllocator(ctx context.Context, metaRoot string, etcdAddr []string) (*I
 func (ia *IDAllocator) Start() error {
 	var err error
 
-	ia.masterClient, err = msc.NewClient(ia.metaRoot, ia.etcdAddr, 20*time.Second)
+	ia.masterClient, err = msc.NewClient(ia.metaRoot, ia.etcdAddr, 3*time.Second)
 	if err != nil {
 		panic(err)
 	}

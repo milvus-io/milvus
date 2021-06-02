@@ -34,9 +34,10 @@ import (
 type Client struct {
 	grpcClient datapb.DataServiceClient
 	conn       *grpc.ClientConn
-	addr       string
 
-	sess      *sessionutil.Session
+	addr string
+	sess *sessionutil.Session
+
 	timeout   time.Duration
 	recallTry int
 	reconnTry int
@@ -84,11 +85,9 @@ func (c *Client) connect() error {
 		return err
 	}
 	connectGrpcFunc := func() error {
+		log.Debug("dataservice connect ", zap.String("address", c.addr))
 		ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 		defer cancel()
-		log.Debug("DataService connect ", zap.String("address", c.addr))
-		log.Debug("DataService connect ", zap.Any("context", ctx))
-		log.Debug("DataService connect ", zap.Any("timeout", c.timeout))
 		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),

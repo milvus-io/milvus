@@ -29,37 +29,36 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	RPCConnectionTimeout = 30 * time.Second
-	Retry                = 3
-)
-
 type Client struct {
-	ctx        context.Context
 	grpcClient querypb.QueryNodeClient
 	conn       *grpc.ClientConn
-	addr       string
+
+	addr string
 
 	timeout   time.Duration
 	reconnTry int
 	recallTry int
 }
 
-func NewClient(address string) (*Client, error) {
-	if address == "" {
-		return nil, fmt.Errorf("address is empty")
+func NewClient(addr string, timeout time.Duration) (*Client, error) {
+	if addr == "" {
+		return nil, fmt.Errorf("addr is empty")
 	}
 	return &Client{
-		ctx:  context.Background(),
-		addr: address,
+		addr:      addr,
+		timeout:   timeout,
+		recallTry: 3,
+		reconnTry: 10,
 	}, nil
 }
 
 func (c *Client) Init() error {
 	tracer := opentracing.GlobalTracer()
 	connectGrpcFunc := func() error {
-		log.Debug("querynode connect", zap.String("address", c.addr))
-		conn, err := grpc.DialContext(c.ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
+		log.Debug("querynode connect", zap.String("addr", c.addr))
+		ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+		defer cancel()
+		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(
@@ -82,8 +81,10 @@ func (c *Client) reconnect() error {
 	tracer := opentracing.GlobalTracer()
 	var err error
 	connectGrpcFunc := func() error {
-		log.Debug("querynode connect ", zap.String("address", c.addr))
-		conn, err := grpc.DialContext(c.ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
+		log.Debug("querynode connect ", zap.String("addr", c.addr))
+		ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+		defer cancel()
+		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(

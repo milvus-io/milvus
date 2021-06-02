@@ -111,7 +111,7 @@ func (s *Server) init() error {
 	log.Debug("Master service", zap.String("address", Params.MasterAddress))
 	log.Debug("Init master service client ...")
 
-	masterService, err := msc.NewClient(qs.Params.MetaRootPath, []string{qs.Params.EtcdAddress}, 20*time.Second)
+	masterService, err := msc.NewClient(qs.Params.MetaRootPath, []string{qs.Params.EtcdAddress}, 3*time.Second)
 
 	if err != nil {
 		panic(err)
@@ -138,7 +138,7 @@ func (s *Server) init() error {
 	log.Debug("DataService", zap.String("Address", Params.DataServiceAddress))
 	log.Debug("QueryService Init data service client ...")
 
-	dataService := dsc.NewClient(qs.Params.MetaRootPath, []string{qs.Params.EtcdAddress}, 10*time.Second)
+	dataService := dsc.NewClient(qs.Params.MetaRootPath, []string{qs.Params.EtcdAddress}, 3*time.Second)
 	if err = dataService.Init(); err != nil {
 		panic(err)
 	}

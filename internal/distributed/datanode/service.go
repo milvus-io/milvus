@@ -70,7 +70,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		msFactory:   factory,
 		grpcErrChan: make(chan error),
 		newMasterServiceClient: func() (types.MasterService, error) {
-			return msc.NewClient(dn.Params.MetaRootPath, []string{dn.Params.EtcdAddress}, 20*time.Second)
+			return msc.NewClient(dn.Params.MetaRootPath, []string{dn.Params.EtcdAddress}, 3*time.Second)
 		},
 		newDataServiceClient: func(etcdMetaRoot, etcdAddress string, timeout time.Duration) types.DataService {
 			return dsc.NewClient(etcdMetaRoot, []string{etcdAddress}, timeout)

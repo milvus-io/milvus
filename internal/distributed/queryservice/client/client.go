@@ -32,7 +32,6 @@ import (
 )
 
 type Client struct {
-	ctx        context.Context
 	grpcClient querypb.QueryServiceClient
 	conn       *grpc.ClientConn
 
@@ -57,11 +56,10 @@ func getQueryServiceAddress(sess *sessionutil.Session) (string, error) {
 }
 
 // NewClient creates a client for queryservice grpc call.
-func NewClient(ctx context.Context, metaRootPath string, etcdAddr []string, timeout time.Duration) (*Client, error) {
+func NewClient(metaRootPath string, etcdAddr []string, timeout time.Duration) (*Client, error) {
 	sess := sessionutil.NewSession(context.Background(), metaRootPath, etcdAddr)
 
 	return &Client{
-		ctx:        ctx,
 		grpcClient: nil,
 		conn:       nil,
 		timeout:    timeout,
@@ -90,7 +88,9 @@ func (c *Client) connect() error {
 	}
 	connectGrpcFunc := func() error {
 		log.Debug("QueryService connect ", zap.String("address", c.addr))
-		conn, err := grpc.DialContext(c.ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
+		ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+		defer cancel()
+		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(

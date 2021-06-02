@@ -32,7 +32,6 @@ import (
 
 // grpc client
 type GrpcClient struct {
-	ctx        context.Context
 	grpcClient masterpb.MasterServiceClient
 	conn       *grpc.ClientConn
 
@@ -65,7 +64,6 @@ func NewClient(metaRoot string, etcdAddr []string, timeout time.Duration) (*Grpc
 	}
 
 	return &GrpcClient{
-		ctx:        context.Background(),
 		grpcClient: nil,
 		conn:       nil,
 		timeout:    timeout,
@@ -91,7 +89,9 @@ func (c *GrpcClient) connect() error {
 	}
 	connectGrpcFunc := func() error {
 		log.Debug("masterservice connect ", zap.String("address", c.addr))
-		conn, err := grpc.DialContext(c.ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
+		ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+		defer cancel()
+		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(
