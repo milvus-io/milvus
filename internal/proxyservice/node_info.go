@@ -12,7 +12,6 @@
 package proxyservice
 
 import (
-	"context"
 	"errors"
 	"math/rand"
 	"strconv"
@@ -87,7 +86,7 @@ func (table *globalNodeInfoTable) createClients() error {
 	for nodeID, info := range table.infos {
 		_, ok := table.ProxyNodes[nodeID]
 		if !ok {
-			table.ProxyNodes[nodeID] = grpcproxynodeclient.NewClient(context.Background(), info.ip+":"+strconv.Itoa(int(info.port)), 10*time.Second)
+			table.ProxyNodes[nodeID] = grpcproxynodeclient.NewClient(info.ip+":"+strconv.Itoa(int(info.port)), 3*time.Second)
 			var err error
 			err = table.ProxyNodes[nodeID].Init()
 			if err != nil {

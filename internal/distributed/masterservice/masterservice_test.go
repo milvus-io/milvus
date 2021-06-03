@@ -247,12 +247,16 @@ func TestGrpcService(t *testing.T) {
 		return nil
 	}
 
+	cms.Params.Address = Params.Address
+	err = svr.masterService.Register()
+	assert.Nil(t, err)
+
 	err = svr.start()
 	assert.Nil(t, err)
 
 	svr.masterService.UpdateStateCode(internalpb.StateCode_Healthy)
 
-	cli, err := grpcmasterserviceclient.NewClient(Params.Address, cms.Params.MetaRootPath, []string{cms.Params.EtcdAddress}, 3*time.Second)
+	cli, err := grpcmasterserviceclient.NewClient(cms.Params.MetaRootPath, []string{cms.Params.EtcdAddress}, 3*time.Second)
 	assert.Nil(t, err)
 
 	err = cli.Init()
@@ -812,6 +816,10 @@ func TestGrpcService(t *testing.T) {
 
 	err = svr.Stop()
 	assert.Nil(t, err)
+
+	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
+	assert.Nil(t, err)
+
 }
 
 type mockCore struct {
@@ -924,14 +932,14 @@ func TestRun(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "listen tcp: address 1000000: invalid port")
 
-	svr.newDataServiceClient = func(s, metaRoot, address string, timeout time.Duration) types.DataService {
+	svr.newDataServiceClient = func(metaRoot, address string, timeout time.Duration) types.DataService {
 		return &mockDataService{}
 	}
-	svr.newIndexServiceClient = func(s, etcdAddress, metaRootPath string, timeout time.Duration) types.IndexService {
+	svr.newIndexServiceClient = func(etcdAddress, metaRootPath string, timeout time.Duration) types.IndexService {
 		return &mockIndex{}
 	}
-	svr.newQueryServiceClient = func(s, metaRootPath, etcdAddress string) (types.QueryService, error) {
-		return &mockQuery{}, nil
+	svr.newQueryServiceClient = func(metaRootPath, etcdAddress string, timeout time.Duration) types.QueryService {
+		return &mockQuery{}
 	}
 
 	Params.Port = rand.Int()%100 + 10000
