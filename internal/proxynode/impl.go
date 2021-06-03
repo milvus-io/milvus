@@ -1043,6 +1043,7 @@ func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertReque
 		ctx:         ctx,
 		Condition:   NewTaskCondition(ctx),
 		dataService: node.dataService,
+		req:         request,
 		BaseInsertTask: BaseInsertTask{
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: request.HashKeys,
@@ -1054,7 +1055,7 @@ func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertReque
 				},
 				CollectionName: request.CollectionName,
 				PartitionName:  request.PartitionName,
-				RowData:        request.RowData,
+				// RowData: transfer column based request to this
 			},
 		},
 		rowIDAllocator: node.idAllocator,
