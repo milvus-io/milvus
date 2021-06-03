@@ -58,13 +58,13 @@ func newSealPolicyV1() sealPolicy {
 }
 
 type flushPolicy interface {
-	apply(status *segAllocStatus, t Timestamp) bool
+	apply(status *segmentStatus, t Timestamp) bool
 }
 
 type flushPolicyV1 struct {
 }
 
-func (p *flushPolicyV1) apply(status *segAllocStatus, t Timestamp) bool {
+func (p *flushPolicyV1) apply(status *segmentStatus, t Timestamp) bool {
 	return status.sealed && status.lastExpireTime <= t
 }
 

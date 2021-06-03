@@ -16,7 +16,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -209,23 +208,6 @@ func TestMeta_Basic(t *testing.T) {
 		err = meta.AddSegment(segInfo0)
 		assert.Nil(t, err)
 
-		// update seg1 to 300 rows
-		stat := &internalpb.SegmentStatisticsUpdates{}
-		stat.SegmentID = segInfo0.ID
-		stat.NumRows = rowCount1
-		err = meta.UpdateSegmentStatistic(stat)
-		assert.Nil(t, err)
-
-		nums, err = meta.GetNumRowsOfCollection(collID)
-		assert.Nil(t, err)
-		assert.EqualValues(t, rowCount1, nums)
-
-		// check update non-exist segment
-		stat.SegmentID, err = mockAllocator.allocID()
-		assert.Nil(t, err)
-		err = meta.UpdateSegmentStatistic(stat)
-		assert.NotNil(t, err)
-
 		// add seg2 with 300 rows
 		segID1, err := mockAllocator.allocID()
 		assert.Nil(t, err)
@@ -238,10 +220,10 @@ func TestMeta_Basic(t *testing.T) {
 		// check partition/collection statistics
 		nums, err = meta.GetNumRowsOfPartition(collID, partID0)
 		assert.Nil(t, err)
-		assert.EqualValues(t, (rowCount1 + rowCount1), nums)
+		assert.EqualValues(t, (rowCount0 + rowCount1), nums)
 		nums, err = meta.GetNumRowsOfCollection(collID)
 		assert.Nil(t, err)
-		assert.EqualValues(t, (rowCount1 + rowCount1), nums)
+		assert.EqualValues(t, (rowCount0 + rowCount1), nums)
 	})
 
 	t.Run("Test Invalid", func(t *testing.T) {
