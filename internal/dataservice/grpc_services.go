@@ -316,8 +316,8 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	}
 
 	// set segment to SegmentState_Flushing
-	err = s.meta.FlushSegmentWithBinlogAndPos(req.SegmentID, req.DmlPosition,
-		req.DdlPosition, meta)
+	err = s.meta.FlushSegmentWithBinlogAndPos(req.SegmentID, nil,
+		nil, meta)
 	if err != nil {
 		resp.Reason = err.Error()
 		return resp, nil
