@@ -173,7 +173,8 @@ enum SegmentState : int {
   NotExist = 1,
   Growing = 2,
   Sealed = 3,
-  Flushed = 4,
+  Flushing = 4,
+  Flushed = 5,
   SegmentState_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   SegmentState_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
@@ -238,12 +239,13 @@ enum MsgType : int {
   AllocateSegment = 1205,
   SegmentStatistics = 1206,
   SegmentFlushDone = 1207,
+  DataNodeTt = 1208,
   MsgType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   MsgType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool MsgType_IsValid(int value);
 constexpr MsgType MsgType_MIN = Undefined;
-constexpr MsgType MsgType_MAX = SegmentFlushDone;
+constexpr MsgType MsgType_MAX = DataNodeTt;
 constexpr int MsgType_ARRAYSIZE = MsgType_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* MsgType_descriptor();

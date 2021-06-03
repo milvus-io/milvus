@@ -3,10 +3,12 @@ package dataservice
 import (
 	"errors"
 	"path"
+	"sort"
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
 // binlog helper functions persisting binlog paths into kv storage.
@@ -38,7 +40,9 @@ func (s *Server) genKey(alloc bool, ids ...UniqueID) (key string, err error) {
 }
 
 var (
-	errNilKvClient = errors.New("kv client not initialized")
+	errNilKvClient    = errors.New("kv client not initialized")
+	errNilID2Paths    = errors.New("nil ID2PathList")
+	errNilSegmentInfo = errors.New("nil segment info")
 )
 
 //SaveBinLogMetaTxn saves segment-field2Path, collection-tsPath/ddlPath into kv store in transcation
@@ -48,10 +52,6 @@ func (s *Server) SaveBinLogMetaTxn(meta map[string]string) error {
 	}
 	return s.kvClient.MultiSave(meta)
 }
-
-var (
-	errNilID2Paths = errors.New("nil ID2PathList")
-)
 
 // prepareField2PathMeta parses fields2Paths ID2PathList
 //		into key-value for kv store
@@ -173,25 +173,50 @@ func (s *Server) getDDLBinlogMeta(collID UniqueID) (metas []*datapb.DDLBinlogMet
 	return
 }
 
-// prepareSegmentPos prepare segment flushed pos
-func (s *Server) prepareSegmentPos(segmentID UniqueID, dmlPos, ddlPos *datapb.PositionPair) (map[string]string, error) {
-	result := make(map[string]string, 2)
-	if dmlPos != nil {
-		key, err := s.genKey(false, segmentID)
-		if err != nil {
-			return nil, err
-		}
-		msPosPair := proto.MarshalTextString(dmlPos)
-		result[path.Join(Params.SegmentDmlPosSubPath, key)] = msPosPair
+// GetVChanPositions get vchannel latest postitions with provided dml channel names
+func (s *Server) GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelPair, error) {
+	if s.kvClient == nil {
+		return nil, errNilKvClient
 	}
-	if ddlPos != nil {
-		key, err := s.genKey(false, segmentID)
-		if err != nil {
-			return nil, err
-		}
-		msPosPair := proto.MarshalTextString(ddlPos)
-		result[path.Join(Params.SegmentDmlPosSubPath, key)] = msPosPair
-	}
+	pairs := make([]*datapb.VchannelPair, 0, len(vchans))
 
-	return map[string]string{}, nil
+	for _, vchan := range vchans {
+		segments := s.meta.GetSegmentsByChannel(vchan.DmlChannel)
+		sort.Slice(segments, func(i, j int) bool {
+			return segments[i].ID < segments[j].ID
+		})
+
+		dmlPos := &datapb.PositionPair{}
+		ddlPos := &datapb.PositionPair{}
+
+		zp := zeroPos(vchan.DmlChannel)
+		dmlPos.StartPosition = &zp
+		dmlPos.EndPosition = &zp
+		ddlPos.StartPosition = &zp
+		ddlPos.EndPosition = &zp
+
+		// find the last segment with not-nil position
+		for i := 0; i < len(segments); i++ {
+			if segments[i].DmlPosition == nil {
+				break
+			}
+			dmlPos = segments[i].DmlPosition
+			ddlPos = segments[i].DdlPosition
+		}
+
+		pairs = append(pairs, &datapb.VchannelPair{
+			CollectionID:    vchan.CollectionID,
+			DmlVchannelName: vchan.DmlChannel,
+			DdlVchannelName: vchan.DdlChannel,
+			DdlPosition:     ddlPos,
+			DmlPosition:     dmlPos,
+		})
+	}
+	return pairs, nil
+}
+
+func zeroPos(name string) internalpb.MsgPosition {
+	return internalpb.MsgPosition{
+		ChannelName: name,
+	}
 }

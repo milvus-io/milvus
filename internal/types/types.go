@@ -49,9 +49,9 @@ type DataService interface {
 	Component
 	TimeTickProvider
 
-	RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error)
 	Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error)
 
+	RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error)
 	AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error)
 	ShowSegments(ctx context.Context, req *datapb.ShowSegmentsRequest) (*datapb.ShowSegmentsResponse, error)
 	GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
@@ -61,6 +61,7 @@ type DataService interface {
 	GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error)
 	GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error)
 	GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error)
+	SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error)
 }
 
 type IndexNode interface {
@@ -118,7 +119,6 @@ type MasterComponent interface {
 	MasterService
 
 	UpdateStateCode(internalpb.StateCode)
-	SetProxyService(context.Context, ProxyService) error
 	SetDataService(context.Context, DataService) error
 	SetIndexService(IndexService) error
 	SetQueryService(QueryService) error

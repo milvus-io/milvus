@@ -33,6 +33,7 @@ import (
 	"github.com/opentracing/opentracing-go"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -51,15 +52,14 @@ type insertBufferNode struct {
 	BaseNode
 	insertBuffer *insertBuffer
 	replica      Replica
-	flushMeta    *binlogMeta // GOOSE TODO remove
 	idAllocator  allocatorInterface
 	flushMap     sync.Map
+	flushChan    <-chan *flushMsg
 
 	minIOKV kv.BaseKV
 
 	timeTickStream          msgstream.MsgStream
 	segmentStatisticsStream msgstream.MsgStream
-	completeFlushStream     msgstream.MsgStream
 }
 
 type insertBuffer struct {
@@ -93,6 +93,7 @@ func (ib *insertBuffer) size(segmentID UniqueID) int32 {
 }
 
 func (ib *insertBuffer) full(segmentID UniqueID) bool {
+	log.Debug("Segment size", zap.Any("segment", segmentID), zap.Int32("size", ib.size(segmentID)), zap.Int32("maxsize", ib.maxSize))
 	return ib.size(segmentID) >= ib.maxSize
 }
 
@@ -138,27 +139,8 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				log.Error("add segment wrong", zap.Error(err))
 			}
 
-			switch {
-			case iMsg.startPositions == nil || len(iMsg.startPositions) <= 0:
-				log.Error("insert Msg StartPosition empty")
-			default:
-				segment, err := ibNode.replica.getSegmentByID(currentSegID)
-				if err != nil {
-					log.Error("get segment wrong", zap.Error(err))
-				}
-				var startPosition *internalpb.MsgPosition = nil
-				for _, pos := range iMsg.startPositions {
-					if pos.ChannelName == segment.channelName {
-						startPosition = pos
-						break
-					}
-				}
-				if startPosition == nil {
-					log.Error("get position wrong", zap.Error(err))
-				} else {
-					ibNode.replica.setStartPosition(currentSegID, startPosition)
-				}
-			}
+			// set msg pack start positions
+			ibNode.replica.setStartPositions(currentSegID, iMsg.startPositions)
 		}
 
 		segNum := uniqueSeg[currentSegID]
@@ -447,26 +429,8 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		// 1.3 store in buffer
 		ibNode.insertBuffer.insertData[currentSegID] = idata
 
-		switch {
-		case iMsg.endPositions == nil || len(iMsg.endPositions) <= 0:
-			log.Error("insert Msg EndPosition empty")
-		default:
-			segment, err := ibNode.replica.getSegmentByID(currentSegID)
-			if err != nil {
-				log.Error("get segment wrong", zap.Error(err))
-			}
-			var endPosition *internalpb.MsgPosition = nil
-			for _, pos := range iMsg.endPositions {
-				if pos.ChannelName == segment.channelName {
-					endPosition = pos
-				}
-			}
-			if endPosition == nil {
-				log.Error("get position wrong", zap.Error(err))
-			}
-			ibNode.replica.setEndPosition(currentSegID, endPosition)
-		}
-
+		// store current endPositions as Segment->EndPostion
+		ibNode.replica.setEndPositions(currentSegID, iMsg.endPositions)
 	}
 
 	if len(iMsg.insertMessages) > 0 {
@@ -479,55 +443,6 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			}
 			log.Debug("seg buffer status", zap.Int64("segmentID", k), zap.Int32("buffer size", ibNode.insertBuffer.size(k)))
 			stopSign++
-		}
-	}
-
-	// iMsg is Flush() msg from dataservice
-	//   1. insertBuffer(not empty) -> binLogs -> minIO/S3
-	for _, msg := range iMsg.flushMessages {
-		for _, currentSegID := range msg.segmentIDs {
-			log.Debug(". Receiving flush message", zap.Int64("segmentID", currentSegID))
-
-			// finishCh := make(chan bool)
-			finishCh := make(chan map[UniqueID]string)
-			go ibNode.completeFlush(currentSegID, finishCh)
-
-			if ibNode.insertBuffer.size(currentSegID) <= 0 {
-				log.Debug(".. Buffer empty ...")
-				finishCh <- make(map[UniqueID]string)
-				continue
-			}
-
-			log.Debug(".. Buffer not empty, flushing ..")
-			ibNode.flushMap.Store(currentSegID, ibNode.insertBuffer.insertData[currentSegID])
-			delete(ibNode.insertBuffer.insertData, currentSegID)
-			clearFn := func() {
-				finishCh <- nil
-				log.Debug(".. Clearing flush Buffer ..")
-				ibNode.flushMap.Delete(currentSegID)
-			}
-
-			seg, err := ibNode.replica.getSegmentByID(currentSegID)
-			if err != nil {
-				log.Error("Flush failed .. cannot get segment ..", zap.Error(err))
-				clearFn()
-				continue
-			}
-
-			collSch, err := ibNode.getCollectionSchemaByID(seg.collectionID)
-			if err != nil {
-				log.Error("Flush failed .. cannot get collection schema ..", zap.Error(err))
-				clearFn()
-				continue
-			}
-
-			collMeta := &etcdpb.CollectionMeta{
-				Schema: collSch,
-				ID:     seg.collectionID,
-			}
-
-			go flushSegment(collMeta, currentSegID, seg.partitionID, seg.collectionID,
-				&ibNode.flushMap, ibNode.minIOKV, finishCh, ibNode.idAllocator)
 		}
 	}
 
@@ -559,19 +474,67 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		}
 	}
 
-	if err := ibNode.writeHardTimeTick(iMsg.timeRange.timestampMax); err != nil {
-		log.Error("send hard time tick into pulsar channel failed", zap.Error(err))
+	// iMsg is Flush() msg from dataservice
+	//   1. insertBuffer(not empty) -> binLogs -> minIO/S3
+	select {
+	case fmsg := <-ibNode.flushChan:
+		currentSegID := fmsg.segmentID
+		log.Debug(". Receiving flush message", zap.Int64("segmentID", currentSegID))
+
+		finishCh := make(chan map[UniqueID]string)
+		go ibNode.completeFlush(currentSegID, finishCh, fmsg.dmlFlushedCh)
+
+		if ibNode.insertBuffer.size(currentSegID) <= 0 {
+			log.Debug(".. Buffer empty ...")
+			finishCh <- make(map[UniqueID]string)
+		} else {
+			log.Debug(".. Buffer not empty, flushing ..")
+			ibNode.flushMap.Store(currentSegID, ibNode.insertBuffer.insertData[currentSegID])
+			delete(ibNode.insertBuffer.insertData, currentSegID)
+			clearFn := func() {
+				finishCh <- nil
+				log.Debug(".. Clearing flush Buffer ..")
+				ibNode.flushMap.Delete(currentSegID)
+			}
+
+			var collMeta *etcdpb.CollectionMeta
+			var collSch *schemapb.CollectionSchema
+			seg, err := ibNode.replica.getSegmentByID(currentSegID)
+			if err != nil {
+				log.Error("Flush failed .. cannot get segment ..", zap.Error(err))
+				clearFn()
+				// TODO add error handling
+			}
+
+			collSch, err = ibNode.getCollectionSchemaByID(seg.collectionID)
+			if err != nil {
+				log.Error("Flush failed .. cannot get collection schema ..", zap.Error(err))
+				clearFn()
+				// TODO add error handling
+			}
+
+			collMeta = &etcdpb.CollectionMeta{
+				Schema: collSch,
+				ID:     seg.collectionID,
+			}
+
+			go flushSegment(collMeta, currentSegID, seg.partitionID, seg.collectionID,
+				&ibNode.flushMap, ibNode.minIOKV, finishCh, ibNode.idAllocator)
+		}
+
+	default:
 	}
 
-	var res Msg = &gcMsg{
-		gcRecord:  iMsg.gcRecord,
-		timeRange: iMsg.timeRange,
-	}
+	// TODO write timetick
+	// if err := ibNode.writeHardTimeTick(iMsg.timeRange.timestampMax); err != nil {
+	//     log.Error("send hard time tick into pulsar channel failed", zap.Error(err))
+	// }
+
 	for _, sp := range spans {
 		sp.Finish()
 	}
 
-	return []Msg{res}
+	return nil
 }
 
 func flushSegment(collMeta *etcdpb.CollectionMeta, segID, partitionID, collID UniqueID,
@@ -674,54 +637,35 @@ func (ibNode *insertBufferNode) bufferAutoFlushPaths(wait <-chan map[UniqueID]st
 	return ibNode.replica.bufferAutoFlushBinlogPaths(segID, field2Path)
 }
 
-func (ibNode *insertBufferNode) completeFlush(segID UniqueID, wait <-chan map[UniqueID]string) {
+func (ibNode *insertBufferNode) completeFlush(segID UniqueID, wait <-chan map[UniqueID]string, dmlFlushedCh chan<- []*datapb.ID2PathList) {
 	field2Path := <-wait
 
 	if field2Path == nil {
+		dmlFlushedCh <- nil
 		return
 	}
 
-	// TODO Call DataService RPC SaveBinlogPaths
 	ibNode.replica.bufferAutoFlushBinlogPaths(segID, field2Path)
 	bufferField2Paths, err := ibNode.replica.getBufferPaths(segID)
 	if err != nil {
 		log.Error("Flush failed ... cannot get buffered paths", zap.Error(err))
+		dmlFlushedCh <- nil
 	}
 
-	// GOOSE TODO remove the below
-	log.Debug(".. Saving binlog paths to etcd ..", zap.Int("number of fields", len(field2Path)))
-	err = ibNode.flushMeta.SaveSegmentBinlogMetaTxn(segID, bufferField2Paths)
-	if err != nil {
-		log.Error("Flush failed ... cannot save binlog paths ..", zap.Error(err))
-		return
+	binlogPaths := make([]*datapb.ID2PathList, 0, len(bufferField2Paths))
+	for k, paths := range bufferField2Paths {
+
+		binlogPaths = append(binlogPaths, &datapb.ID2PathList{
+			ID:    k,
+			Paths: paths,
+		})
 	}
+
+	dmlFlushedCh <- binlogPaths
 
 	log.Debug(".. Segment flush completed ..")
-	ibNode.replica.setIsFlushed(segID)
 	ibNode.updateSegStatistics([]UniqueID{segID})
 
-	msgPack := msgstream.MsgPack{}
-	completeFlushMsg := internalpb.SegmentFlushCompletedMsg{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_SegmentFlushDone,
-			MsgID:     0, // GOOSE TODO
-			Timestamp: 0, // GOOSE TODO
-			SourceID:  Params.NodeID,
-		},
-		SegmentID: segID,
-	}
-	var msg msgstream.TsMsg = &msgstream.FlushCompletedMsg{
-		BaseMsg: msgstream.BaseMsg{
-			HashValues: []uint32{0},
-		},
-		SegmentFlushCompletedMsg: completeFlushMsg,
-	}
-
-	msgPack.Msgs = append(msgPack.Msgs, msg)
-	err = ibNode.completeFlushStream.Produce(&msgPack)
-	if err != nil {
-		log.Error(".. Produce complete flush msg failed ..", zap.Error(err))
-	}
 }
 
 func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
@@ -814,8 +758,7 @@ func (ibNode *insertBufferNode) getCollectionandPartitionIDbySegID(segmentID Uni
 	return
 }
 
-func newInsertBufferNode(ctx context.Context, flushMeta *binlogMeta,
-	replica Replica, factory msgstream.Factory, idAllocator allocatorInterface) *insertBufferNode {
+func newInsertBufferNode(ctx context.Context, replica Replica, factory msgstream.Factory, idAllocator allocatorInterface, flushCh <-chan *flushMsg) *insertBufferNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -858,23 +801,17 @@ func newInsertBufferNode(ctx context.Context, flushMeta *binlogMeta,
 	var segStatisticsMsgStream msgstream.MsgStream = segS
 	segStatisticsMsgStream.Start()
 
-	// segment flush completed channel
-	cf, _ := factory.NewMsgStream(ctx)
-	cf.AsProducer([]string{Params.CompleteFlushChannelName})
-	log.Debug("datanode AsProducer: " + Params.CompleteFlushChannelName)
-	var completeFlushStream msgstream.MsgStream = cf
-	completeFlushStream.Start()
-
 	return &insertBufferNode{
-		BaseNode:                baseNode,
-		insertBuffer:            iBuffer,
-		minIOKV:                 minIOKV,
+		BaseNode:     baseNode,
+		insertBuffer: iBuffer,
+		minIOKV:      minIOKV,
+
 		timeTickStream:          wTtMsgStream,
 		segmentStatisticsStream: segStatisticsMsgStream,
-		completeFlushStream:     completeFlushStream,
-		replica:                 replica,
-		flushMeta:               flushMeta,
-		flushMap:                sync.Map{},
-		idAllocator:             idAllocator,
+
+		replica:     replica,
+		flushMap:    sync.Map{},
+		flushChan:   flushCh,
+		idAllocator: idAllocator,
 	}
 }

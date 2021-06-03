@@ -168,9 +168,17 @@ message GetPartitionStatisticsResponse {
 message GetSegmentInfoChannelRequest {
 }
 
+message VchannelPair {
+  int64 collectionID = 1;
+  string dml_vchannel_name = 2;
+  string ddl_vchannel_name = 3;
+  PositionPair ddl_position = 4;
+  PositionPair dml_position = 5;
+}
+
 message WatchDmChannelsRequest {
   common.MsgBase base = 1;
-  repeated string channel_names = 2;
+  repeated VchannelPair vchannels = 2;
 }
 
 message FlushSegmentsRequest {
@@ -225,16 +233,16 @@ message SegmentInfo {
   string insert_channel = 4;
   int64 num_rows = 5;
   common.SegmentState state = 6;
-  internal.MsgPosition start_position = 7;
-  internal.MsgPosition end_position = 8;
+  PositionPair dmlPosition = 7;
+  PositionPair ddlPosition = 8;
   int64 max_row_num = 9;
   uint64 last_expire_time = 10;
 }
 
-message ID2PathList {                                                                                            
-  int64 ID = 1;                                                                                                
-  repeated string Paths = 2;                                                                                   
-}                                                                                                                
+message ID2PathList {
+  int64 ID = 1;
+  repeated string Paths = 2;
+}
 
 message PositionPair {
   internal.MsgPosition start_position = 1;
@@ -245,8 +253,31 @@ message SaveBinlogPathsRequest {
   common.MsgBase base = 1;
   int64 segmentID = 2;
   int64 collectionID = 3;
-  ID2PathList field2BinlogPaths = 4;
+  repeated ID2PathList field2BinlogPaths = 4;
   repeated DDLBinlogMeta ddlBinlogPaths = 5;
   PositionPair dml_position = 6;
   PositionPair ddl_position =7;
+}
+
+message DataNodeTtMsg {
+    common.MsgBase base =1;
+    string channel_name = 2;
+    uint64 timestamp = 3;
+}
+
+enum ChannelWatchState {
+  Uncomplete = 0;
+  Complete = 1;
+}
+
+message ChannelStatus {
+  string name = 1;
+  ChannelWatchState state=2;
+  int64 collectionID = 3;
+}
+
+message DataNodeInfo {
+  string address = 1;
+  int64 version  = 2;
+  repeated ChannelStatus channels = 3;
 }

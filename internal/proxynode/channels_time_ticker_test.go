@@ -152,3 +152,50 @@ func TestChannelsTimeTickerImpl_getLastTick(t *testing.T) {
 
 	time.Sleep(time.Second)
 }
+
+func TestChannelsTimeTickerImpl_getMinTsStatistics(t *testing.T) {
+	interval := time.Millisecond * 10
+	pchanNum := rand.Uint64()%10 + 1
+	pchans := make([]pChan, 0, pchanNum)
+	for i := 0; uint64(i) < pchanNum; i++ {
+		pchans = append(pchans, genUniqueStr())
+	}
+	tso := newMockTsoAllocator()
+	ctx := context.Background()
+
+	ticker := newChannelsTimeTicker(ctx, interval, pchans, getStatistics, tso)
+	err := ticker.start()
+	assert.Equal(t, nil, err)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	b := make(chan struct{}, 1)
+	go func() {
+		defer wg.Done()
+		timer := time.NewTicker(interval * 40)
+		for {
+			select {
+			case <-b:
+				return
+			case <-timer.C:
+				stats, err := ticker.getMinTsStatistics()
+				assert.Equal(t, nil, err)
+				for pchan, ts := range stats {
+					log.Debug("TestChannelsTimeTickerImpl_getLastTick",
+						zap.Any("pchan", pchan),
+						zap.Any("minTs", ts))
+				}
+			}
+		}
+	}()
+	time.Sleep(time.Second)
+	b <- struct{}{}
+	wg.Wait()
+
+	defer func() {
+		err := ticker.close()
+		assert.Equal(t, nil, err)
+	}()
+
+	time.Sleep(time.Second)
+}

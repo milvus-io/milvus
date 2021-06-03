@@ -22,10 +22,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -69,10 +72,25 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
 
-	iBNode := newInsertBufferNode(ctx, newBinlogMeta(), replica, msFactory, NewAllocatorFactory())
+	flushChan := make(chan *flushMsg, 100)
+	iBNode := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan)
+
+	dmlFlushedCh := make(chan []*datapb.ID2PathList)
+
+	flushChan <- &flushMsg{
+		msgID:        1,
+		timestamp:    2000,
+		segmentID:    UniqueID(1),
+		collectionID: UniqueID(1),
+		dmlFlushedCh: dmlFlushedCh,
+	}
+
 	inMsg := genInsertMsg()
 	var iMsg flowgraph.Msg = &inMsg
 	iBNode.Operate([]flowgraph.Msg{iMsg})
+	isflushed := <-dmlFlushedCh
+	assert.NotNil(t, isflushed)
+	log.Debug("DML binlog paths", zap.Any("paths", isflushed))
 }
 
 func genInsertMsg() insertMsg {
@@ -92,7 +110,6 @@ func genInsertMsg() insertMsg {
 
 	var iMsg = &insertMsg{
 		insertMessages: make([]*msgstream.InsertMsg, 0),
-		flushMessages:  make([]*flushMsg, 0),
 		timeRange: TimeRange{
 			timestampMin: timeRange.timestampMin,
 			timestampMax: timeRange.timestampMax,
@@ -104,19 +121,11 @@ func genInsertMsg() insertMsg {
 	dataFactory := NewDataFactory()
 	iMsg.insertMessages = append(iMsg.insertMessages, dataFactory.GetMsgStreamInsertMsgs(2)...)
 
-	fmsg := &flushMsg{
-		msgID:        1,
-		timestamp:    2000,
-		segmentIDs:   []UniqueID{1},
-		collectionID: UniqueID(1),
-	}
-
-	iMsg.flushMessages = append(iMsg.flushMessages, fmsg)
 	return *iMsg
 
 }
 
-func TestFlushSegmentTxn(t *testing.T) {
+func TestFlushSegment(t *testing.T) {
 	idAllocMock := NewAllocatorFactory(1)
 	mockMinIO := memkv.NewMemoryKV()
 
@@ -128,7 +137,6 @@ func TestFlushSegmentTxn(t *testing.T) {
 
 	collMeta := genCollectionMeta(collectionID, "test_flush_segment_txn")
 	flushMap := sync.Map{}
-	flushMeta := newBinlogMeta()
 
 	finishCh := make(chan map[UniqueID]string)
 
@@ -163,7 +171,7 @@ func TestFlushSegmentTxn(t *testing.T) {
 		finishCh,
 		idAllocMock)
 
-	k, _ := flushMeta.genKey(false, collectionID, partitionID, segmentID, 0)
+	k, _ := idAllocMock.genKey(false, collectionID, partitionID, segmentID, 0)
 	key := path.Join(Params.StatsBinlogRootPath, k)
 	_, values, _ := mockMinIO.LoadWithPrefix(key)
 	assert.Equal(t, len(values), 1)
