@@ -519,6 +519,31 @@ func (c *Core) setDdMsgSendFlag(b bool) error {
 	return err
 }
 
+func (c *Core) startMsgStreamAndSeek(chanName string, subName string, key string) (*ms.MsgStream, error) {
+	stream, err := c.msFactory.NewMsgStream(c.ctx)
+	if err != nil {
+		return nil, err
+	}
+	stream.AsConsumer([]string{chanName}, subName)
+	log.Debug("AsConsumer: " + chanName + ":" + subName)
+
+	msgPosStr, err := c.MetaTable.client.Load(key, 0)
+	if err == nil {
+		msgPositions := make([]*ms.MsgPosition, 0)
+		if err := DecodeMsgPositions(msgPosStr, &msgPositions); err != nil {
+			return nil, fmt.Errorf("decode msg positions fail, err %s", err.Error())
+		}
+		if len(msgPositions) > 0 {
+			if err := stream.Seek(msgPositions); err != nil {
+				return nil, fmt.Errorf("msg stream seek fail, err %s", err.Error())
+			}
+			log.Debug("msg stream: " + chanName + ":" + subName + " seek to stored position")
+		}
+	}
+	stream.Start()
+	return &stream, nil
+}
+
 func (c *Core) setMsgStreams() error {
 	if Params.PulsarAddress == "" {
 		return fmt.Errorf("PulsarAddress is empty")
@@ -689,20 +714,22 @@ func (c *Core) setMsgStreams() error {
 	}
 
 	// data service will put msg into this channel when create segment
-	dsStream, _ := c.msFactory.NewMsgStream(c.ctx)
+	dsChanName := Params.DataServiceSegmentChannel
 	dsSubName := Params.MsgChannelSubName + "ds"
-	dsStream.AsConsumer([]string{Params.DataServiceSegmentChannel}, dsSubName)
-	log.Debug("master AsConsumer: " + Params.DataServiceSegmentChannel + " : " + dsSubName)
-	dsStream.Start()
-	c.DataServiceSegmentChan = dsStream.Chan()
+	dsStream, err := c.startMsgStreamAndSeek(dsChanName, dsSubName, SegInfoMsgEndPosPrefix)
+	if err != nil {
+		return err
+	}
+	c.DataServiceSegmentChan = (*dsStream).Chan()
 
 	// data node will put msg into this channel when flush segment
-	dnStream, _ := c.msFactory.NewMsgStream(c.ctx)
+	dnChanName := Params.DataServiceSegmentChannel
 	dnSubName := Params.MsgChannelSubName + "dn"
-	dnStream.AsConsumer([]string{Params.DataServiceSegmentChannel}, dnSubName)
-	log.Debug("master AsConsumer: " + Params.DataServiceSegmentChannel + " : " + dnSubName)
-	dnStream.Start()
-	c.DataNodeFlushedSegmentChan = dnStream.Chan()
+	dnStream, err := c.startMsgStreamAndSeek(dnChanName, dnSubName, FlushedSegMsgEndPosPrefix)
+	if err != nil {
+		return err
+	}
+	c.DataNodeFlushedSegmentChan = (*dnStream).Chan()
 
 	return nil
 }
