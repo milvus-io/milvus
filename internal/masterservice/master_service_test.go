@@ -243,14 +243,11 @@ func TestMasterService(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	msFactory := msgstream.NewPmsFactory()
+	coreFactory := msgstream.NewPmsFactory()
 	Params.Init()
-	core, err := NewCore(ctx, msFactory)
+	core, err := NewCore(ctx, coreFactory)
 	assert.Nil(t, err)
 	randVal := rand.Int()
-
-	err = core.Register()
-	assert.Nil(t, err)
 
 	Params.TimeTickChannel = fmt.Sprintf("master-time-tick-%d", randVal)
 	Params.DdChannel = fmt.Sprintf("master-dd-%d", randVal)
@@ -258,6 +255,9 @@ func TestMasterService(t *testing.T) {
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+
+	err = core.Register()
+	assert.Nil(t, err)
 
 	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second})
 	assert.Nil(t, err)
@@ -306,42 +306,35 @@ func TestMasterService(t *testing.T) {
 	err = core.SetQueryService(qm)
 	assert.Nil(t, err)
 
-	err = core.Init()
-	assert.Nil(t, err)
+	//err = core.Init()
+	//assert.Nil(t, err)
 
-	var localTSO uint64 = 0
-	localTSOLock := sync.RWMutex{}
-	core.TSOAllocator = func(c uint32) (uint64, error) {
-		localTSOLock.Lock()
-		defer localTSOLock.Unlock()
-		localTSO += uint64(c)
-		return localTSO, nil
-	}
+	//err = core.Start()
+	//assert.Nil(t, err)
 
-	err = core.Start()
-	assert.Nil(t, err)
+	tmpFactory := msgstream.NewPmsFactory()
 
 	m := map[string]interface{}{
 		"pulsarAddress":  Params.PulsarAddress,
 		"receiveBufSize": 1024,
 		"pulsarBufSize":  1024}
-	err = msFactory.SetParams(m)
+	err = tmpFactory.SetParams(m)
 	assert.Nil(t, err)
 
-	dataServiceSegmentStream, _ := msFactory.NewMsgStream(ctx)
+	dataServiceSegmentStream, _ := tmpFactory.NewMsgStream(ctx)
 	dataServiceSegmentStream.AsProducer([]string{Params.DataServiceSegmentChannel})
 
-	timeTickStream, _ := msFactory.NewMsgStream(ctx)
+	timeTickStream, _ := tmpFactory.NewMsgStream(ctx)
 	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
 	timeTickStream.Start()
 
-	ddStream, _ := msFactory.NewMsgStream(ctx)
+	ddStream, _ := tmpFactory.NewMsgStream(ctx)
 	ddStream.AsConsumer([]string{Params.DdChannel}, Params.MsgChannelSubName)
 	ddStream.Start()
 
 	// test dataServiceSegmentStream seek
 	dataNodeSubName := Params.MsgChannelSubName + "dn"
-	flushedSegStream, _ := msFactory.NewMsgStream(ctx)
+	flushedSegStream, _ := tmpFactory.NewMsgStream(ctx)
 	flushedSegStream.AsConsumer([]string{Params.DataServiceSegmentChannel}, dataNodeSubName)
 	flushedSegStream.Start()
 	msgPack := GenFlushedSegMsgPack(9999)
@@ -354,6 +347,15 @@ func TestMasterService(t *testing.T) {
 
 	err = core.Init()
 	assert.Nil(t, err)
+
+	var localTSO uint64 = 0
+	localTSOLock := sync.RWMutex{}
+	core.TSOAllocator = func(c uint32) (uint64, error) {
+		localTSOLock.Lock()
+		defer localTSOLock.Unlock()
+		localTSO += uint64(c)
+		return localTSO, nil
+	}
 
 	err = core.Start()
 	assert.Nil(t, err)
@@ -1733,15 +1735,15 @@ func TestMasterService2(t *testing.T) {
 	assert.Nil(t, err)
 	randVal := rand.Int()
 
-	err = core.Register()
-	assert.Nil(t, err)
-
 	Params.TimeTickChannel = fmt.Sprintf("master-time-tick-%d", randVal)
 	Params.DdChannel = fmt.Sprintf("master-dd-%d", randVal)
 	Params.StatisticsChannel = fmt.Sprintf("master-statistics-%d", randVal)
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+
+	err = core.Register()
+	assert.Nil(t, err)
 
 	dm := &dataMock{randVal: randVal}
 	err = core.SetDataService(ctx, dm)
