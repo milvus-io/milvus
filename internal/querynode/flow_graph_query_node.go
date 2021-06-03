@@ -114,7 +114,7 @@ func (q *queryNodeFlowGraph) newDmInputNode(ctx context.Context, factory msgstre
 }
 
 func (q *queryNodeFlowGraph) consumerFlowGraph(channel VChannel, subName ConsumeSubName) error {
-	if q.dmlStream != nil {
+	if q.dmlStream == nil {
 		return errors.New("null dml message stream in flow graph")
 	}
 	q.dmlStream.AsConsumer([]string{channel}, subName)

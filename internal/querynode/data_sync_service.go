@@ -63,6 +63,9 @@ func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, 
 			vChannel,
 			dsService.msFactory)
 		dsService.collectionFlowGraphs[collectionID] = append(dsService.collectionFlowGraphs[collectionID], newFlowGraph)
+		log.Debug("add collection flow graph",
+			zap.Any("collectionID", collectionID),
+			zap.Any("channel", vChannel))
 	}
 	return nil
 }
