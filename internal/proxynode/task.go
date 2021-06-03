@@ -889,6 +889,9 @@ func (st *SearchTask) Execute(ctx context.Context) error {
 	msgPack.Msgs[0] = tsMsg
 	err := st.queryMsgStream.Produce(&msgPack)
 	log.Debug("proxynode", zap.Int("length of searchMsg", len(msgPack.Msgs)))
+	log.Debug("proxy node sent one searchMsg",
+		zap.Any("msgID", tsMsg.ID()),
+		zap.Any("collectionID", st.CollectionID))
 	if err != nil {
 		log.Debug("proxynode", zap.String("send search request failed", err.Error()))
 	}
