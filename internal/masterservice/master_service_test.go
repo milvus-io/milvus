@@ -262,15 +262,15 @@ func TestMasterService(t *testing.T) {
 	assert.Nil(t, err)
 	randVal := rand.Int()
 
-	err = core.Register()
-	assert.Nil(t, err)
-
 	Params.TimeTickChannel = fmt.Sprintf("master-time-tick-%d", randVal)
 	Params.DdChannel = fmt.Sprintf("master-dd-%d", randVal)
 	Params.StatisticsChannel = fmt.Sprintf("master-statistics-%d", randVal)
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+
+	err = core.Register()
+	assert.Nil(t, err)
 
 	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second})
 	assert.Nil(t, err)
@@ -355,6 +355,7 @@ func TestMasterService(t *testing.T) {
 	err = dataServiceSegmentStream.Produce(msgPack)
 	assert.Nil(t, err)
 	flushedSegMsgPack := flushedSegStream.Consume()
+	flushedSegStream.Close()
 	flushedSegPosStr, _ := EncodeMsgPositions(flushedSegMsgPack.EndPositions)
 	_, err = etcdCli.Put(ctx, path.Join(Params.MetaRootPath, FlushedSegMsgEndPosPrefix), flushedSegPosStr)
 	assert.Nil(t, err)
@@ -1746,15 +1747,15 @@ func TestMasterService2(t *testing.T) {
 	assert.Nil(t, err)
 	randVal := rand.Int()
 
-	err = core.Register()
-	assert.Nil(t, err)
-
 	Params.TimeTickChannel = fmt.Sprintf("master-time-tick-%d", randVal)
 	Params.DdChannel = fmt.Sprintf("master-dd-%d", randVal)
 	Params.StatisticsChannel = fmt.Sprintf("master-statistics-%d", randVal)
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+
+	err = core.Register()
+	assert.Nil(t, err)
 
 	pm := &proxyMock{
 		randVal: randVal,
