@@ -289,6 +289,31 @@ namespace milvus {
 namespace proto {
 namespace milvus {
 
+enum ShowCollectionsType : int {
+  All = 0,
+  InMemory = 1,
+  ShowCollectionsType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
+  ShowCollectionsType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
+};
+bool ShowCollectionsType_IsValid(int value);
+constexpr ShowCollectionsType ShowCollectionsType_MIN = All;
+constexpr ShowCollectionsType ShowCollectionsType_MAX = InMemory;
+constexpr int ShowCollectionsType_ARRAYSIZE = ShowCollectionsType_MAX + 1;
+
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ShowCollectionsType_descriptor();
+template<typename T>
+inline const std::string& ShowCollectionsType_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, ShowCollectionsType>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function ShowCollectionsType_Name.");
+  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
+    ShowCollectionsType_descriptor(), enum_t_value);
+}
+inline bool ShowCollectionsType_Parse(
+    const std::string& name, ShowCollectionsType* value) {
+  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<ShowCollectionsType>(
+    ShowCollectionsType_descriptor(), name, value);
+}
 enum PlaceholderType : int {
   None = 0,
   BinaryVector = 100,
@@ -2218,6 +2243,7 @@ class ShowCollectionsRequest :
     kDbNameFieldNumber = 2,
     kBaseFieldNumber = 1,
     kTimeStampFieldNumber = 3,
+    kTypeFieldNumber = 4,
   };
   // string db_name = 2;
   void clear_db_name();
@@ -2243,6 +2269,11 @@ class ShowCollectionsRequest :
   ::PROTOBUF_NAMESPACE_ID::uint64 time_stamp() const;
   void set_time_stamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
 
+  // .milvus.proto.milvus.ShowCollectionsType type = 4;
+  void clear_type();
+  ::milvus::proto::milvus::ShowCollectionsType type() const;
+  void set_type(::milvus::proto::milvus::ShowCollectionsType value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.ShowCollectionsRequest)
  private:
   class _Internal;
@@ -2251,6 +2282,7 @@ class ShowCollectionsRequest :
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr db_name_;
   ::milvus::proto::common::MsgBase* base_;
   ::PROTOBUF_NAMESPACE_ID::uint64 time_stamp_;
+  int type_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -2370,6 +2402,7 @@ class ShowCollectionsResponse :
 
   enum : int {
     kCollectionNamesFieldNumber = 2,
+    kCollectionIdsFieldNumber = 3,
     kStatusFieldNumber = 1,
   };
   // repeated string collection_names = 2;
@@ -2389,6 +2422,17 @@ class ShowCollectionsResponse :
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& collection_names() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_collection_names();
 
+  // repeated int64 collection_ids = 3;
+  int collection_ids_size() const;
+  void clear_collection_ids();
+  ::PROTOBUF_NAMESPACE_ID::int64 collection_ids(int index) const;
+  void set_collection_ids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_collection_ids(::PROTOBUF_NAMESPACE_ID::int64 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+      collection_ids() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+      mutable_collection_ids();
+
   // .milvus.proto.common.Status status = 1;
   bool has_status() const;
   void clear_status();
@@ -2403,6 +2447,8 @@ class ShowCollectionsResponse :
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> collection_names_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > collection_ids_;
+  mutable std::atomic<int> _collection_ids_cached_byte_size_;
   ::milvus::proto::common::Status* status_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
@@ -11055,6 +11101,20 @@ inline void ShowCollectionsRequest::set_time_stamp(::PROTOBUF_NAMESPACE_ID::uint
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.ShowCollectionsRequest.time_stamp)
 }
 
+// .milvus.proto.milvus.ShowCollectionsType type = 4;
+inline void ShowCollectionsRequest::clear_type() {
+  type_ = 0;
+}
+inline ::milvus::proto::milvus::ShowCollectionsType ShowCollectionsRequest::type() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ShowCollectionsRequest.type)
+  return static_cast< ::milvus::proto::milvus::ShowCollectionsType >(type_);
+}
+inline void ShowCollectionsRequest::set_type(::milvus::proto::milvus::ShowCollectionsType value) {
+  
+  type_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ShowCollectionsRequest.type)
+}
+
 // -------------------------------------------------------------------
 
 // ShowCollectionsResponse
@@ -11167,6 +11227,36 @@ inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
 ShowCollectionsResponse::mutable_collection_names() {
   // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.ShowCollectionsResponse.collection_names)
   return &collection_names_;
+}
+
+// repeated int64 collection_ids = 3;
+inline int ShowCollectionsResponse::collection_ids_size() const {
+  return collection_ids_.size();
+}
+inline void ShowCollectionsResponse::clear_collection_ids() {
+  collection_ids_.Clear();
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 ShowCollectionsResponse::collection_ids(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ShowCollectionsResponse.collection_ids)
+  return collection_ids_.Get(index);
+}
+inline void ShowCollectionsResponse::set_collection_ids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
+  collection_ids_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ShowCollectionsResponse.collection_ids)
+}
+inline void ShowCollectionsResponse::add_collection_ids(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  collection_ids_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.ShowCollectionsResponse.collection_ids)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+ShowCollectionsResponse::collection_ids() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.ShowCollectionsResponse.collection_ids)
+  return collection_ids_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+ShowCollectionsResponse::mutable_collection_ids() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.ShowCollectionsResponse.collection_ids)
+  return &collection_ids_;
 }
 
 // -------------------------------------------------------------------
@@ -17444,6 +17534,11 @@ inline void RegisterLinkResponse::set_allocated_status(::milvus::proto::common::
 
 PROTOBUF_NAMESPACE_OPEN
 
+template <> struct is_proto_enum< ::milvus::proto::milvus::ShowCollectionsType> : ::std::true_type {};
+template <>
+inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::milvus::ShowCollectionsType>() {
+  return ::milvus::proto::milvus::ShowCollectionsType_descriptor();
+}
 template <> struct is_proto_enum< ::milvus::proto::milvus::PlaceholderType> : ::std::true_type {};
 template <>
 inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::milvus::PlaceholderType>() {
