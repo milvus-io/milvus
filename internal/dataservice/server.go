@@ -81,14 +81,13 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 		flushCh:   make(chan UniqueID, 1024),
 	}
 	s.dataClientCreator = func(addr string) (types.DataNode, error) {
-		return datanodeclient.NewClient(addr, 10*time.Second)
+		return datanodeclient.NewClient(addr, 3*time.Second)
 	}
 	s.masterClientCreator = func(addr string) (types.MasterService, error) {
-		return masterclient.NewClient(addr, Params.MetaRootPath,
+		return masterclient.NewClient(Params.MetaRootPath,
 			[]string{Params.EtcdAddress}, masterClientTimout)
 	}
 
-	log.Debug("DataService", zap.Any("State", s.state.Load()))
 	return s, nil
 }
 
@@ -261,7 +260,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 	defer s.serverLoopWg.Done()
 	statsStream, _ := s.msFactory.NewMsgStream(ctx)
 	statsStream.AsConsumer([]string{Params.StatisticsChannelName}, Params.DataServiceSubscriptionName)
-(??)	log.Debug("dataservice AsConsumer: " + Params.StatisticsChannelName + " : " + Params.DataServiceSubscriptionName)
+	log.Debug("dataservice AsConsumer: " + Params.StatisticsChannelName + " : " + Params.DataServiceSubscriptionName)
 	// try to restore last processed pos
 	pos, err := s.loadStreamLastPos(streamTypeStats)
 	log.Debug("load last pos of stats channel", zap.Any("pos", pos), zap.Error(err))

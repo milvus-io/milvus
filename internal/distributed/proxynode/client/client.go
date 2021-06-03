@@ -32,16 +32,16 @@ type Client struct {
 	conn       *grpc.ClientConn
 	ctx        context.Context
 
-	address   string
+	addr      string
 	timeout   time.Duration
 	reconnTry int
 	recallTry int
 }
 
-func NewClient(ctx context.Context, address string, timeout time.Duration) *Client {
+func NewClient(addr string, timeout time.Duration) *Client {
 	return &Client{
-		address:   address,
-		ctx:       ctx,
+		addr:      addr,
+		ctx:       context.Background(),
 		timeout:   timeout,
 		recallTry: 3,
 		reconnTry: 10,
@@ -53,8 +53,8 @@ func (c *Client) Init() error {
 	connectGrpcFunc := func() error {
 		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
 		defer cancelFunc()
-		log.Debug("ProxyNodeClient try connect ", zap.String("address", c.address))
-		conn, err := grpc.DialContext(ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
+		log.Debug("ProxyNodeClient try connect ", zap.String("address", c.addr))
+		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(
@@ -70,7 +70,7 @@ func (c *Client) Init() error {
 		log.Debug("ProxyNodeClient connect failed", zap.Error(err))
 		return err
 	}
-	log.Debug("ProxyNodeClient connect success", zap.String("address", c.address))
+	log.Debug("ProxyNodeClient connect success", zap.String("address", c.addr))
 	c.grpcClient = proxypb.NewProxyNodeServiceClient(c.conn)
 	return nil
 }
@@ -80,8 +80,8 @@ func (c *Client) reconnect() error {
 	connectGrpcFunc := func() error {
 		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
 		defer cancelFunc()
-		log.Debug("ProxyNodeClient try reconnect ", zap.String("address", c.address))
-		conn, err := grpc.DialContext(ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
+		log.Debug("ProxyNodeClient try reconnect ", zap.String("address", c.addr))
+		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(

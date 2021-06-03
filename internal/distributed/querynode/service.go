@@ -105,7 +105,7 @@ func (s *Server) init() error {
 	}
 	// --- QueryService ---
 	log.Debug("QueryNode start to new QueryServiceClient", zap.Any("QueryServiceAddress", Params.QueryServiceAddress))
-	queryService, err := qsc.NewClient(ctx, Params.QueryServiceAddress, qn.Params.MetaRootPath, []string{qn.Params.EtcdAddress}, 20*time.Second)
+	queryService, err := qsc.NewClient(qn.Params.MetaRootPath, []string{qn.Params.EtcdAddress}, 3*time.Second)
 	if err != nil {
 		log.Debug("QueryNode new QueryServiceClient failed", zap.Error(err))
 		panic(err)
@@ -138,7 +138,7 @@ func (s *Server) init() error {
 	addr := Params.MasterAddress
 
 	log.Debug("QueryNode start to new MasterServiceClient", zap.Any("QueryServiceAddress", addr))
-	masterService, err := msc.NewClient(addr, qn.Params.MetaRootPath, []string{qn.Params.EtcdAddress}, 20*time.Second)
+	masterService, err := msc.NewClient(qn.Params.MetaRootPath, []string{qn.Params.EtcdAddress}, 3*time.Second)
 	if err != nil {
 		log.Debug("QueryNode new MasterServiceClient failed", zap.Error(err))
 		panic(err)
@@ -166,8 +166,8 @@ func (s *Server) init() error {
 	}
 
 	// --- IndexService ---
-	log.Debug("QueryNode start to new IndexServiceClient", zap.Any("IndexServiceAddress", Params.IndexServiceAddress))
-	indexService := isc.NewClient(Params.IndexServiceAddress, qn.Params.MetaRootPath, []string{qn.Params.EtcdAddress}, 10*time.Second)
+	log.Debug("Index service", zap.String("address", Params.IndexServiceAddress))
+	indexService := isc.NewClient(qn.Params.MetaRootPath, []string{qn.Params.EtcdAddress}, 3*time.Second)
 
 	if err := indexService.Init(); err != nil {
 		log.Debug("QueryNode IndexServiceClient Init failed", zap.Error(err))
@@ -193,7 +193,7 @@ func (s *Server) init() error {
 
 	// --- DataService ---
 	log.Debug("QueryNode start to new DataServiceClient", zap.Any("DataServiceAddress", Params.DataServiceAddress))
-	dataService := dsc.NewClient(Params.DataServiceAddress, qn.Params.MetaRootPath, []string{qn.Params.EtcdAddress}, 10*time.Second)
+	dataService := dsc.NewClient(qn.Params.MetaRootPath, []string{qn.Params.EtcdAddress}, 3*time.Second)
 	if err = dataService.Init(); err != nil {
 		log.Debug("QueryNode DataServiceClient Init failed", zap.Error(err))
 		panic(err)

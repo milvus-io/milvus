@@ -54,7 +54,7 @@ type Server struct {
 	grpcServer    *grpc.Server
 	masterService types.MasterService
 
-	newMasterServiceClient func(string) (types.MasterService, error)
+	newMasterServiceClient func() (types.MasterService, error)
 
 	closer io.Closer
 }
@@ -68,8 +68,8 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		ctx:         ctx1,
 		cancel:      cancel,
 		grpcErrChan: make(chan error),
-		newMasterServiceClient: func(s string) (types.MasterService, error) {
-			return msc.NewClient(s, dataservice.Params.MetaRootPath, []string{dataservice.Params.EtcdAddress}, 10*time.Second)
+		newMasterServiceClient: func() (types.MasterService, error) {
+			return msc.NewClient(dataservice.Params.MetaRootPath, []string{dataservice.Params.EtcdAddress}, 3*time.Second)
 		},
 	}
 	s.dataService, err = dataservice.CreateServer(s.ctx, factory)
@@ -107,7 +107,7 @@ func (s *Server) init() error {
 
 	if s.newMasterServiceClient != nil {
 		log.Debug("DataService try to new master service client", zap.String("address", Params.MasterAddress))
-		masterServiceClient, err := s.newMasterServiceClient(Params.MasterAddress)
+		masterServiceClient, err := s.newMasterServiceClient()
 		if err != nil {
 			log.Debug("DataService new master service client failed", zap.Error(err))
 			panic(err)
@@ -166,8 +166,8 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		grpc.UnaryInterceptor(
 			otgrpc.OpenTracingServerInterceptor(tracer)),
 		grpc.StreamInterceptor(
-			otgrpc.OpenTracingStreamServerInterceptor(tracer)),
-		grpc.UnaryInterceptor(grpc_prometheus.UnaryServerInterceptor))
+			otgrpc.OpenTracingStreamServerInterceptor(tracer)))
+	//grpc.UnaryInterceptor(grpc_prometheus.UnaryServerInterceptor))
 	datapb.RegisterDataServiceServer(s.grpcServer, s)
 	grpc_prometheus.Register(s.grpcServer)
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)

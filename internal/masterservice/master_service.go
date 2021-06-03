@@ -898,6 +898,9 @@ func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, 
 // Register register master service at etcd
 func (c *Core) Register() error {
 	c.session = sessionutil.NewSession(c.ctx, Params.MetaRootPath, []string{Params.EtcdAddress})
+	if c.session == nil {
+		return fmt.Errorf("session is nil, maybe the etcd client connection fails")
+	}
 	c.sessCloseCh = c.session.Init(typeutil.MasterServiceRole, Params.Address, true)
 	return nil
 }

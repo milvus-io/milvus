@@ -33,21 +33,24 @@ type Client struct {
 	ctx        context.Context
 	grpcClient querypb.QueryNodeClient
 	conn       *grpc.ClientConn
-	addr       string
+
+	addr string
 
 	timeout   time.Duration
 	reconnTry int
 	recallTry int
 }
 
-func NewClient(address string) (*Client, error) {
-	if address == "" {
-		return nil, fmt.Errorf("address is empty")
+func NewClient(addr string, timeout time.Duration) (*Client, error) {
+	if addr == "" {
+		return nil, fmt.Errorf("addr is empty")
 	}
 	return &Client{
 		ctx:     context.Background(),
-		addr:    address,
-		timeout: 3 * time.Second,
+		addr:      addr,
+		timeout:   timeout,
+		recallTry: 3,
+		reconnTry: 10,
 	}, nil
 }
 

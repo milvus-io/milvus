@@ -34,19 +34,19 @@ type Client struct {
 	conn       *grpc.ClientConn
 	ctx        context.Context
 
-	address string
+	addr string
 
 	timeout   time.Duration
 	reconnTry int
 	recallTry int
 }
 
-func NewClient(address string, timeout time.Duration) (*Client, error) {
-	if address == "" {
+func NewClient(addr string, timeout time.Duration) (*Client, error) {
+	if addr == "" {
 		return nil, fmt.Errorf("address is empty")
 	}
 	return &Client{
-		address:   address,
+		addr:   addr,
 		ctx:       context.Background(),
 		timeout:   timeout,
 		recallTry: 3,
@@ -59,8 +59,8 @@ func (c *Client) Init() error {
 	connectGrpcFunc := func() error {
 		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
 		defer cancelFunc()
-		log.Debug("IndexNodeClient try connect ", zap.String("address", c.address))
-		conn, err := grpc.DialContext(ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
+		log.Debug("IndexNodeClient try connect ", zap.String("address", c.addr))
+		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(
@@ -76,7 +76,7 @@ func (c *Client) Init() error {
 		log.Debug("IndexNodeClient try connect failed", zap.Error(err))
 		return err
 	}
-	log.Debug("IndexNodeClient try connect success", zap.String("address", c.address))
+	log.Debug("IndexNodeClient try connect success", zap.String("address", c.addr))
 	c.grpcClient = indexpb.NewIndexNodeClient(c.conn)
 	return nil
 }
@@ -87,8 +87,8 @@ func (c *Client) reconnect() error {
 	connectGrpcFunc := func() error {
 		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
 		defer cancelFunc()
-		log.Debug("IndexNodeClient try reconnect ", zap.String("address", c.address))
-		conn, err := grpc.DialContext(ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
+		log.Debug("IndexNodeClient try reconnect ", zap.String("address", c.addr))
+		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(
@@ -105,7 +105,7 @@ func (c *Client) reconnect() error {
 		log.Debug("IndexNodeClient try reconnect failed", zap.Error(err))
 		return err
 	}
-	log.Debug("IndexNodeClient try reconnect success", zap.String("address", c.address))
+	log.Debug("IndexNodeClient try reconnect success", zap.String("address", c.addr))
 	c.grpcClient = indexpb.NewIndexNodeClient(c.conn)
 	return nil
 }

@@ -209,8 +209,7 @@ func (node *ProxyNode) Init() error {
 	log.Debug("proxynode", zap.Strings("proxynode AsProducer:", Params.SearchChannelNames))
 	log.Debug("create query message stream ...")
 
-	masterAddr := Params.MasterAddress
-	idAllocator, err := allocator.NewIDAllocator(node.ctx, masterAddr, Params.MetaRootPath, []string{Params.EtcdAddress})
+	idAllocator, err := allocator.NewIDAllocator(node.ctx, Params.MetaRootPath, []string{Params.EtcdAddress})
 
 	if err != nil {
 		return err
