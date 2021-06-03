@@ -14,7 +14,9 @@ def utility_catch():
     def wrapper(func):
         def inner_wrapper(*args, **kwargs):
             try:
-                return func(*args, **kwargs), True
+                res = func(*args, **kwargs)
+                log.debug("(func_res) Response : %s " % str(res))
+                return res, True
             except Exception as e:
                 log.error("[Utility API Exception]%s: %s" % (str(func), str(e)))
                 return e, False
@@ -31,6 +33,7 @@ def func_req(_list, **kwargs):
             if len(_list) > 1:
                 for a in _list[1:]:
                     arg.append(a)
+            log.debug("(func_req)[%s] Parameters ars arg: %s, kwargs: %s" % (str(func), str(arg), str(kwargs)))
             return func(*arg, **kwargs)
     return False, False
 
