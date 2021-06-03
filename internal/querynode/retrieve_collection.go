@@ -208,6 +208,7 @@ func (rc *retrieveCollection) doUnsolvedMsgRetrieve() {
 
 				if rm.EndTs() <= serviceTime {
 					retrieveMsg = append(retrieveMsg, rm)
+					continue
 				}
 				rc.addToUnsolvedMsg(rm)
 			}
