@@ -416,10 +416,10 @@ func (qs *QueryService) CreateQueryChannel(ctx context.Context) (*querypb.Create
 	allocatedQueryResultChannel := searchResultPrefix + "-" + strconv.FormatInt(int64(channelID), 10)
 
 	qs.qcMutex.Lock()
-	qs.queryChannels = append(qs.queryChannels, &queryChannelInfo{
-		requestChannel:  allocatedQueryChannel,
-		responseChannel: allocatedQueryResultChannel,
-	})
+	//qs.queryChannels = append(qs.queryChannels, &queryChannelInfo{
+	//	requestChannel:  allocatedQueryChannel,
+	//	responseChannel: allocatedQueryResultChannel,
+	//})
 
 	addQueryChannelsRequest := &querypb.AddQueryChannelRequest{
 		RequestChannelID: allocatedQueryChannel,

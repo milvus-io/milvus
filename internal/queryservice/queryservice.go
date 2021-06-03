@@ -14,6 +14,7 @@ package queryservice
 import (
 	"context"
 	"math/rand"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -65,6 +66,18 @@ func (qs *QueryService) Register() error {
 }
 
 func (qs *QueryService) Init() error {
+	// init query channel
+	channelID := len(qs.queryChannels)
+	searchPrefix := Params.SearchChannelPrefix
+	searchResultPrefix := Params.SearchResultChannelPrefix
+	allocatedQueryChannel := searchPrefix + "-" + strconv.FormatInt(int64(channelID), 10)
+	allocatedQueryResultChannel := searchResultPrefix + "-" + strconv.FormatInt(int64(channelID), 10)
+
+	qs.queryChannels = append(qs.queryChannels, &queryChannelInfo{
+		requestChannel:  allocatedQueryChannel,
+		responseChannel: allocatedQueryResultChannel,
+	})
+
 	return nil
 }
 
