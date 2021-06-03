@@ -27,6 +27,7 @@ set(SEGCORE_FILES
         SegmentInterface.cpp
         SegcoreConfig.cpp
         segcore_init_c.cpp
+        ScalarIndex.cpp
         )
 add_library(milvus_segcore SHARED
         ${SEGCORE_FILES}
@@ -38,5 +39,6 @@ target_link_libraries(milvus_segcore
         milvus_common
         milvus_query
         milvus_utils
+        milvus_storage
         )
 

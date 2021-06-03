@@ -76,14 +76,7 @@ func (i *IndexService) RegisterNode(ctx context.Context, req *indexpb.RegisterNo
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
 	}
-
-	nodeID, err := i.idAllocator.AllocOne()
-	if err != nil {
-		ret.Status.Reason = "IndexService:RegisterNode Failed to acquire NodeID"
-		return ret, nil
-	}
-
-	err = i.addNode(nodeID, req)
+	err := i.addNode(req.NodeID, req)
 	if err != nil {
 		ret.Status.Reason = err.Error()
 		return ret, nil
@@ -92,7 +85,7 @@ func (i *IndexService) RegisterNode(ctx context.Context, req *indexpb.RegisterNo
 	ret.Status.ErrorCode = commonpb.ErrorCode_Success
 	params := i.prepareNodeInitParams()
 	ret.InitParams = &internalpb.InitParams{
-		NodeID:      nodeID,
+		NodeID:      req.NodeID,
 		StartParams: params,
 	}
 	return ret, nil

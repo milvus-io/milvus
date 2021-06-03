@@ -85,11 +85,13 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 	consumeChannels := []string{in.RequestChannelID}
 	consumeSubName := Params.MsgChannelSubName
 	node.searchService.searchMsgStream.AsConsumer(consumeChannels, consumeSubName)
+	node.retrieveService.retrieveMsgStream.AsConsumer(consumeChannels, "RetrieveSubName")
 	log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
 
 	// add result channel
 	producerChannels := []string{in.ResultChannelID}
 	node.searchService.searchResultMsgStream.AsProducer(producerChannels)
+	node.retrieveService.retrieveResultMsgStream.AsProducer(producerChannels)
 	log.Debug("querynode AsProducer: " + strings.Join(producerChannels, ", "))
 
 	status := &commonpb.Status{
@@ -298,7 +300,7 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseS
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
 	for _, id := range in.SegmentIDs {
-		err2 := node.loadService.segLoader.replica.removeSegment(id)
+		err2 := node.historical.loadService.segLoader.replica.removeSegment(id)
 		if err2 != nil {
 			// not return, try to release all segments
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
@@ -310,11 +312,7 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseS
 
 func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmentInfoRequest) (*queryPb.GetSegmentInfoResponse, error) {
 	infos := make([]*queryPb.SegmentInfo, 0)
-	for _, id := range in.SegmentIDs {
-		segment, err := node.replica.getSegmentByID(id)
-		if err != nil {
-			continue
-		}
+	getSegmentInfo := func(segment *Segment) *queryPb.SegmentInfo {
 		var indexName string
 		var indexID int64
 		// TODO:: segment has multi vec column
@@ -334,6 +332,24 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 			IndexName:    indexName,
 			IndexID:      indexID,
 		}
+		return info
+	}
+	// get info from historical
+	for _, id := range in.SegmentIDs {
+		segment, err := node.historical.replica.getSegmentByID(id)
+		if err != nil {
+			continue
+		}
+		info := getSegmentInfo(segment)
+		infos = append(infos, info)
+	}
+	// get info from streaming
+	for _, id := range in.SegmentIDs {
+		segment, err := node.streaming.replica.getSegmentByID(id)
+		if err != nil {
+			continue
+		}
+		info := getSegmentInfo(segment)
 		infos = append(infos, info)
 	}
 	return &queryPb.GetSegmentInfoResponse{

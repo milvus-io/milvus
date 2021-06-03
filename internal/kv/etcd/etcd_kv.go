@@ -68,6 +68,27 @@ func (kv *EtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	return keys, values, nil
 }
 
+func (kv *EtcdKV) LoadWithPrefix2(key string) ([]string, []string, []int64, error) {
+	key = path.Join(kv.rootPath, key)
+	log.Debug("LoadWithPrefix ", zap.String("prefix", key))
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	keys := make([]string, 0, resp.Count)
+	values := make([]string, 0, resp.Count)
+	versions := make([]int64, 0, resp.Count)
+	for _, kv := range resp.Kvs {
+		keys = append(keys, string(kv.Key))
+		values = append(values, string(kv.Value))
+		versions = append(versions, kv.Version)
+	}
+	return keys, values, versions, nil
+}
+
 func (kv *EtcdKV) Load(key string) (string, error) {
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)

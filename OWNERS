@@ -1,0 +1,16 @@
+# Only for files in the root directory
+
+filters:
+  ".*":
+    reviewers:
+      - czs007
+      - jeffoverflow
+      - neza2017
+      - scsven
+      - shengjun1985
+    approvers:
+      - czs007
+      - jeffoverflow
+      - neza2017
+      - scsven
+      - shengjun1985

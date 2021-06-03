@@ -3,8 +3,10 @@ import pytest
 
 from pymilvus_orm import Partition
 from base.client_request import ApiReq
-from common.common_type import *
-from common.common_func import *
+from utils.util_log import test_log as log
+from common import common_func as cf
+from common import common_type as ct
+from common.common_type import CaseLabel, CheckParams
 
 
 prefix = "partition_"
@@ -21,8 +23,8 @@ class TestPartitionParams(ApiReq):
         expected: 1. create successfully
         """
         m_collection = self._collection()
-        p_name = gen_unique_str(prefix)
-        descriptions = gen_unique_str("desc_")
+        p_name = cf.gen_unique_str(prefix)
+        descriptions = cf.gen_unique_str("desc_")
         _, _ = self.partition.partition_init(
             m_collection, p_name, description=descriptions,
             check_res=CheckParams.partition_property_check
@@ -50,7 +52,7 @@ class TestPartitionParams(ApiReq):
         expected: 1. create successfully
         """
         m_collection = self._collection()
-        p_name = gen_unique_str(prefix)
+        p_name = cf.gen_unique_str(prefix)
         descriptions = ""
         _, _ = self.partition.partition_init(
             m_collection, p_name, description=descriptions,
@@ -58,20 +60,21 @@ class TestPartitionParams(ApiReq):
         assert (m_collection.has_partition(p_name))
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5373")
     def test_partition_dup_name(self):
         """
         target: verify create partitions with duplicate name
         method: 1. create partitions with duplicate name
         expected: 1. create successfully
-                  2. the same partition returned
+                  2. the same partition returned with diff object id
         """
-        m_collection = self._collection(name=gen_unique_str())
-        p_name = gen_unique_str(prefix)
-        descriptions = gen_unique_str()
-        m_partition = self.partition.partition_init(m_collection, p_name, descriptions)
-        m_partition2 = self.partition.partition_init(m_collection, p_name, descriptions)
-        assert (id(m_partition2) == id(m_partition))
+        m_collection = self._collection(name=cf.gen_unique_str())
+        p_name = cf.gen_unique_str(prefix)
+        descriptions = cf.gen_unique_str()
+        m_partition, _ = self.partition.partition_init(m_collection, p_name, descriptions)
+        m_partition2, _ = self.partition.partition_init(m_collection, p_name, descriptions)
+        assert (id(m_partition2) != id(m_partition))
+        assert m_partition.name == m_partition2.name
+        assert m_partition.description == m_partition2.description
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_specialchars_description(self, get_invalid_string):
@@ -81,7 +84,7 @@ class TestPartitionParams(ApiReq):
         expected: 1. create successfully
         """
         m_collection = self._collection()
-        p_name = gen_unique_str(prefix)
+        p_name = cf.gen_unique_str(prefix)
         descriptions = get_invalid_string
         m_partition, _ = self.partition.partition_init(
             m_collection, p_name, description=descriptions,
@@ -99,9 +102,9 @@ class TestPartitionParams(ApiReq):
         expected: 1. the same partition returned
         """
         m_collection = self._collection()
-        assert m_collection.has_partition(default_partition_name)
-        m_partition = m_collection.partition(default_partition_name)
-        m_partition2, _ = self.partition.partition_init(m_collection, default_partition_name)
+        assert m_collection.has_partition(ct.default_partition_name)
+        m_partition = m_collection.partition(ct.default_partition_name)
+        m_partition2, _ = self.partition.partition_init(m_collection, ct.default_partition_name)
         assert (id(m_partition2) == id(m_partition))
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -126,7 +129,7 @@ class TestPartitionParams(ApiReq):
         expected: 1. raise exception
         """
         m_collection = None
-        p_name = gen_unique_str(prefix)
+        p_name = cf.gen_unique_str(prefix)
         ex, _ = self.partition.partition_init(m_collection, p_name)
         assert "'NoneType' object has no attribute" in ex.message
 
@@ -139,7 +142,7 @@ class TestPartitionParams(ApiReq):
         expected: 1. drop successfully
         """
         m_collection = self._collection()
-        p_name = gen_unique_str(prefix)
+        p_name = cf.gen_unique_str(prefix)
         m_partition, _ = self.partition.partition_init(m_collection, p_name)
         assert m_collection.has_partition(p_name)
         m_partition.drop()
@@ -160,18 +163,18 @@ class TestPartitionParams(ApiReq):
         """
         m_partition = self._partition()
         m_partition2 = self._partition()
-        m_partition.insert(gen_default_list_data())
-        m_partition2.insert(gen_default_list_data())
+        m_partition.insert(cf.gen_default_list_data())
+        m_partition2.insert(cf.gen_default_list_data())
         m_partition.load()
         m_partition2.load()
-        search_vec = gen_vectors(1, default_dim)
+        search_vec = cf.gen_vectors(1, ct.default_dim)
         result = m_partition.search(data=search_vec,
-                                    anns_field=default_float_vec_field_name,
+                                    anns_field=ct.default_float_vec_field_name,
                                     params={"nprobe": 32},
                                     limit=1
                                     )
         result2 = m_partition2.search(data=search_vec,
-                                      anns_field=default_float_vec_field_name,
+                                      anns_field=ct.default_float_vec_field_name,
                                       params={"nprobe": 32},
                                       limit=1
                                       )
@@ -181,12 +184,12 @@ class TestPartitionParams(ApiReq):
         for _ in range(2):
             m_partition.release()
             result = m_partition.search(data=search_vec,
-                                        anns_field=default_float_vec_field_name,
+                                        anns_field=ct.default_float_vec_field_name,
                                         params={"nprobe": 32},
                                         limit=1
                                         )
             result2 = m_partition2.search(data=search_vec,
-                                          anns_field=default_float_vec_field_name,
+                                          anns_field=ct.default_float_vec_field_name,
                                           params={"nprobe": 32},
                                           limit=1
                                           )
@@ -195,9 +198,9 @@ class TestPartitionParams(ApiReq):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="issue #5302")
-    @pytest.mark.parametrize("data, nums", [(gen_default_dataframe_data(10), 10),
-                                            (gen_default_list_data(1), 1),
-                                            (gen_default_tuple_data(10), 10)
+    @pytest.mark.parametrize("data, nums", [(cf.gen_default_dataframe_data(10), 10),
+                                            (cf.gen_default_list_data(1), 1),
+                                            (cf.gen_default_tuple_data(10), 10)
                                             ])
     def test_partition_insert(self, data, nums):
         """
@@ -232,7 +235,7 @@ class TestPartitionOperations(ApiReq):
         """
         m_collection = self._collection()
         m_collection.drop()
-        p_name = gen_unique_str(prefix)
+        p_name = cf.gen_unique_str(prefix)
         ex, _ = self.partition.partition_init(m_collection, p_name)
         assert ex.code == 1
         assert "can't find collection" in ex.message
@@ -245,9 +248,9 @@ class TestPartitionOperations(ApiReq):
                 2. create a partition in collection2
         expected: 1. create successfully
         """
-        m_collection = self._collection(gen_unique_str())
-        m_collection2 = self._collection(gen_unique_str())
-        p_name = gen_unique_str(prefix)
+        m_collection = self._collection(cf.gen_unique_str())
+        m_collection2 = self._collection(cf.gen_unique_str())
+        p_name = cf.gen_unique_str(prefix)
         _, _ = self.partition.partition_init(m_collection, p_name)
         _, _ = self.partition.partition_init(m_collection2, p_name)
         assert m_collection.has_partition(p_name)
@@ -262,7 +265,7 @@ class TestPartitionOperations(ApiReq):
         """
         m_collection = self._collection()
         for _ in range(10):
-            p_name = gen_unique_str(prefix)
+            p_name = cf.gen_unique_str(prefix)
             _, _ = self.partition.partition_init(m_collection, p_name)
             assert m_collection.has_partition(p_name)
 
@@ -280,8 +283,8 @@ class TestPartitionOperations(ApiReq):
         #    pytest.skip("skip in http mode")
 
         def create_partition(collection, threads_n):
-            for _ in range(max_partition_num // threads_n):
-                name = gen_unique_str(prefix)
+            for _ in range(ct.max_partition_num // threads_n):
+                name = cf.gen_unique_str(prefix)
                 Partition(collection, name)
 
         m_collection = self._collection()
@@ -291,29 +294,27 @@ class TestPartitionOperations(ApiReq):
             t.start()
         for t in threads:
             t.join()
-        p_name = gen_unique_str()
+        p_name = cf.gen_unique_str()
         ex, _ = self.partition.partition_init(m_collection, p_name)
         assert ex.code == 1
         assert "maximum partition's number should be limit to 4096" in ex.message
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5392, #5302")
+    @pytest.mark.xfail(reason="issue #5302")
     def test_partition_drop_default_partition(self):
         """
         target: verify drop the _default partition
-        method: 1. insert some data into _default partition
-                2. drop the _default partition
-        expected: 1. drop successfully
-                  2. there is a new empty partition named "_default"
+        method: 1. drop the _default partition
+        expected: 1. raise exception
         """
         m_collection = self._collection()
         default_partition = m_collection.partition(ct.default_partition_name)
-        default_partition.insert(gen_default_list_data())
+        default_partition.insert(cf.gen_default_list_data())
+        # TODO need a flush?
         assert default_partition.is_empty is False
-        default_partition.drop()
-        assert m_collection.has_partition(ct.default_partition_name)
-        default_partition = m_collection.partition(ct.default_partition_name)
-        assert default_partition.is_empty
+        with pytest.raises(Exception) as e:
+            default_partition.drop()
+        log.info(e)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_drop_partition_twice(self):
@@ -325,7 +326,7 @@ class TestPartitionOperations(ApiReq):
         expected: raise exception when 2nd time
         """
         m_collection = self._collection()
-        p_name = gen_unique_str(prefix)
+        p_name = cf.gen_unique_str(prefix)
         m_partition, _ = self.partition.partition_init(m_collection, p_name)
         assert m_collection.has_partition(p_name)
         m_partition.drop()
@@ -344,7 +345,7 @@ class TestPartitionOperations(ApiReq):
         expected: create and drop successfully
         """
         m_collection = self._collection()
-        p_name = gen_unique_str(prefix)
+        p_name = cf.gen_unique_str(prefix)
         for _ in range(5):
             m_partition, _ = self.partition.partition_init(m_collection, p_name)
             assert m_collection.has_partition(p_name)
@@ -352,8 +353,8 @@ class TestPartitionOperations(ApiReq):
             assert m_collection.has_partition(p_name) is False
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("flush, expected", [(True, False), (False, False)])
-    def test_partition_drop_non_empty_partition(self, flush, expected):
+    @pytest.mark.parametrize("flush", [True, False])
+    def test_partition_drop_non_empty_partition(self, flush):
         """
         target: verify drop a partition which has data inserted
         method: 1.create a partition with default schema
@@ -363,19 +364,21 @@ class TestPartitionOperations(ApiReq):
         expected: drop successfully
         """
         m_collection = self._collection()
-        p_name = gen_unique_str(prefix)
+        p_name = cf.gen_unique_str(prefix)
         m_partition, _ = self.partition.partition_init(m_collection, p_name)
         assert m_collection.has_partition(p_name)
-        m_partition.insert(gen_default_dataframe_data())
+        m_partition.insert(cf.gen_default_dataframe_data())
         if flush:
+            # conn = self._connect()
+            # conn.flush([m_collection.name])
             # TODO: m_partition.flush()
             pass
         m_partition.drop()
-        assert m_collection.has_partition(p_name) is expected
+        assert m_collection.has_partition(p_name) is False
 
     @pytest.mark.tags(CaseLabel.L2)
-    # @pytest.mark.parametrize("flush", [True, False])
-    def test_partition_drop_indexed_partition(self, get_index_param):
+    @pytest.mark.parametrize("flush", [True, False])
+    def test_partition_drop_indexed_partition(self, flush, get_index_param):
         """
         target: verify drop an indexed partition
         method: 1.create a partition
@@ -386,19 +389,19 @@ class TestPartitionOperations(ApiReq):
         expected: drop successfully
         """
         m_collection = self._collection()
-        p_name = gen_unique_str(prefix)
+        p_name = cf.gen_unique_str(prefix)
         m_partition, _ = self.partition.partition_init(m_collection, p_name)
         assert m_collection.has_partition(p_name)
-        data = gen_default_list_data(nb=10)
+        data = cf.gen_default_list_data(nb=10)
         m_partition.insert(data)
         index_param = get_index_param
         log.info(m_collection.schema)
         m_collection.create_index(
-            default_float_vec_field_name,
+            ct.default_float_vec_field_name,
             index_param)
-        #if flush:
-            ## TODO: m_partition.flush()
-         #   pass
+        if flush:
+            # TODO: m_partition.flush()
+            pass
         m_partition.drop()
         assert m_collection.has_partition(p_name) is False
         log.info("collection name: %s", m_collection.name)
@@ -442,7 +445,7 @@ class TestPartitionOperations(ApiReq):
         expected: raise exception
         """
         m_collection = self._collection()
-        p_name = gen_unique_str(prefix)
+        p_name = cf.gen_unique_str(prefix)
         m_partition, _ = self.partition.partition_init(m_collection, p_name)
         assert m_collection.has_partition(p_name)
         m_collection.drop()
@@ -463,21 +466,21 @@ class TestPartitionOperations(ApiReq):
         expected: partition released successfully
         """
         m_collection = self._collection()
-        p_name = gen_unique_str(prefix)
+        p_name = cf.gen_unique_str(prefix)
         m_partition, _ = self.partition.partition_init(m_collection, p_name)
         assert m_collection.has_partition(p_name)
-        m_partition.insert(gen_default_list_data())
+        m_partition.insert(cf.gen_default_list_data())
         m_partition.load()
-        search_vec = gen_vectors(1, default_dim)
+        search_vec = cf.gen_vectors(1, ct.default_dim)
         result = m_partition.search(data=search_vec,
-                                    anns_field=default_float_vec_field_name,
+                                    anns_field=ct.default_float_vec_field_name,
                                     params={"nprobe": 32},
                                     limit=1
                                     )
         assert len(result) == 1
         m_collection.release()
         result = m_partition.search(data=search_vec,
-                                    anns_field=default_float_vec_field_name,
+                                    anns_field=ct.default_float_vec_field_name,
                                     params={"nprobe": 32},
                                     limit=1
                                     )
@@ -495,8 +498,8 @@ class TestPartitionOperations(ApiReq):
         expected: insert successfully
         """
         m_collection = self._collection()
-        default_partition = m_collection.partition(default_partition_name)
-        data = gen_default_dataframe_data()
+        default_partition = m_collection.partition(ct.default_partition_name)
+        data = cf.gen_default_dataframe_data()
         default_partition.insert(data)
         assert default_partition.num_entities == len(data)
 
@@ -511,7 +514,7 @@ class TestPartitionOperations(ApiReq):
         m_partition = self._partition()
         m_partition.drop()
         with pytest.raises(Exception) as e:
-            m_partition.insert(gen_default_dataframe_data())
+            m_partition.insert(cf.gen_default_dataframe_data())
             log.info(e)
             # TODO: assert the error code
 
@@ -524,12 +527,12 @@ class TestPartitionOperations(ApiReq):
         expected: raise exception
         """
         m_collection = self._collection()
-        p_name = gen_unique_str(prefix)
+        p_name = cf.gen_unique_str(prefix)
         m_partition, _ = self.partition.partition_init(m_collection, p_name)
         assert m_collection.has_partition(p_name)
         m_collection.drop()
         with pytest.raises(Exception) as e:
-            m_partition.insert(gen_default_dataframe_data())
+            m_partition.insert(cf.gen_default_dataframe_data())
             log.info(e)
             # TODO: assert the error code
 
@@ -544,13 +547,13 @@ class TestPartitionOperations(ApiReq):
         """
         m_partition = self._partition()
         max_size = 100000  # TODO: clarify the max size of data
-        data = gen_default_dataframe_data(max_size)
+        data = cf.gen_default_dataframe_data(max_size)
         m_partition.insert(data)
         assert m_partition.num_entities == max_size
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("dim, expected_err",
-                             [(default_dim - 1, "error"), (default_dim + 1, "error")])
+                             [(ct.default_dim - 1, "error"), (ct.default_dim + 1, "error")])
     def test_partition_insert_dismatched_dimensions(self, dim, expected_err):
         """
         target: verify insert maximum size data(256M?) a time
@@ -558,10 +561,10 @@ class TestPartitionOperations(ApiReq):
                 2. insert dismatch dim data
         expected: raise exception
         """
-        m_collection = self._collection(schema=gen_default_collection_schema())
-        p_name = gen_unique_str(prefix)
+        m_collection = self._collection(schema=cf.gen_default_collection_schema())
+        p_name = cf.gen_unique_str(prefix)
         m_partition, _ = self.partition.partition_init(m_collection, p_name)
-        data = gen_default_list_data(nb=10, dim=dim)
+        data = cf.gen_default_list_data(nb=10, dim=dim)
         with pytest.raises(Exception) as e:
             m_partition.insert(data)
             log.info(e)
@@ -577,3 +580,4 @@ class TestPartitionOperations(ApiReq):
         expected: insert successfully
         """
         pass
+

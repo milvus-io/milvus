@@ -31,10 +31,11 @@ import (
 )
 
 type Collection struct {
-	collectionPtr C.CCollection
-	id            UniqueID
-	partitionIDs  []UniqueID
-	schema        *schemapb.CollectionSchema
+	collectionPtr   C.CCollection
+	id              UniqueID
+	partitionIDs    []UniqueID
+	schema          *schemapb.CollectionSchema
+	watchedChannels []VChannel
 }
 
 func (c *Collection) ID() UniqueID {
@@ -57,6 +58,14 @@ func (c *Collection) removePartitionID(partitionID UniqueID) {
 		}
 	}
 	c.partitionIDs = tmpIDs
+}
+
+func (c *Collection) addWatchedDmChannels(channels []VChannel) {
+	c.watchedChannels = append(c.watchedChannels, channels...)
+}
+
+func (c *Collection) getWatchedDmChannels() []VChannel {
+	return c.watchedChannels
 }
 
 func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Collection {

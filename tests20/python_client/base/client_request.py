@@ -18,7 +18,9 @@ def request_catch():
     def wrapper(func):
         def inner_wrapper(*args, **kwargs):
             try:
-                return func(*args, **kwargs), True
+                res = func(*args, **kwargs)
+                log.debug("(func_res) Response : %s " % str(res))
+                return res, True
             except Exception as e:
                 log.error("[ClientRequest API Exception]%s: %s" % (str(func), str(e)))
                 return e, False
@@ -35,6 +37,7 @@ def func_req(_list, **kwargs):
             if len(_list) > 1:
                 for a in _list[1:]:
                     arg.append(a)
+            log.debug("(func_req)[%s] Parameters ars arg: %s, kwargs: %s" % (str(func), str(arg), str(kwargs)))
             return func(*arg, **kwargs)
     return False, False
 
@@ -69,7 +72,7 @@ class Base:
         pass
 
     def setup(self):
-        log.error("*" * 80)
+        log.info(("*" * 35) + " setup " + ("*" * 35))
         self.connection = ApiConnections()
         self.collection = ApiCollection()
         self.partition = ApiPartition()
@@ -77,12 +80,19 @@ class Base:
         self.utility = ApiUtility()
 
     def teardown(self):
-        pass
+        try:
+            """ Delete connection and reset configuration"""
+            log.info(("*" * 35) + " teardown " + ("*" * 35))
+            res = self.connection.list_connections()
+            for i in res[0]:
+                self.connection.remove_connection(i[0])
+        except Exception as e:
+            pass
 
     @pytest.fixture(scope="module", autouse=True)
     def initialize_env(self, request):
         """ clean log before testing """
-        cf.modify_file([test_info.log_info, test_info.log_err])
+        cf.modify_file([test_info.log_debug, test_info.log_info, test_info.log_err])
         log.info("[initialize_milvus] Log cleaned up, start testing...")
 
         host = request.config.getoption("--host")
@@ -97,18 +107,18 @@ class ApiReq(Base):
     Public methods that can be used to add cases.
     """
 
-    @pytest.fixture(scope="module",params=ct.get_invalid_strs)
+    @pytest.fixture(scope="module", params=ct.get_invalid_strs)
     def get_invalid_string(self, request):
         yield request.param
 
-    @pytest.fixture(scope="module",params=cf.gen_simple_index())
+    @pytest.fixture(scope="module", params=cf.gen_simple_index())
     def get_index_param(self, request):
         yield request.param
 
     def _connect(self):
         """ Testing func """
-        self.connection.configure(check_res='', default={"host": "192.168.1.239", "port": 19530})
-        res = self.connection.create_connection(alias='default')
+        self.connection.add_connection(default={"host": param_info.param_host, "port": param_info.param_port})
+        res = self.connection.connect(alias='default')
         return res
 
     def _collection(self, name=None, data=None, schema=None, check_res=None, **kwargs):

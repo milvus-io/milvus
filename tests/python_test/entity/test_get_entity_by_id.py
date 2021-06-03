@@ -178,7 +178,7 @@ default_single_query = {
 #         expected: entity returned
 #         '''
 #         connect.create_partition(collection, default_tag)
-#         ids = connect.bulk_insert(collection, default_entities, partition_tag = default_tag)
+#         ids = connect.bulk_insert(collection, default_entities, partition_name = default_tag)
 #         connect.flush([collection])
 #         get_ids = ids[:get_pos]
 #         res = connect.get_entity_by_id(collection, get_ids)
@@ -224,7 +224,7 @@ default_single_query = {
 #         tag_new = "tag_new"
 #         connect.create_partition(collection, default_tag)
 #         connect.create_partition(collection, tag_new)
-#         ids = connect.bulk_insert(collection, default_entities, partition_tag = default_tag)
+#         ids = connect.bulk_insert(collection, default_entities, partition_name = default_tag)
 #         connect.flush([collection])
 #         get_ids = ids[:get_pos]
 #         res = connect.get_entity_by_id(collection, get_ids)
@@ -241,8 +241,8 @@ default_single_query = {
 #         connect.create_partition(collection, default_tag)
 #         connect.create_partition(collection, tag_new)
 #         new_entities = gen_entities(default_nb + 1)
-#         ids = connect.bulk_insert(collection, default_entities, partition_tag = default_tag)
-#         ids_new = connect.bulk_insert(collection, new_entities, partition_tag = tag_new)
+#         ids = connect.bulk_insert(collection, default_entities, partition_name = default_tag)
+#         ids_new = connect.bulk_insert(collection, new_entities, partition_name = tag_new)
 #         connect.flush([collection])
 #         get_ids = ids[:get_pos]
 #         get_ids.extend(ids_new[:get_pos])
@@ -260,7 +260,7 @@ default_single_query = {
 #         expected: entity returned
 #         '''
 #         connect.create_partition(collection, default_tag)
-#         ids = connect.bulk_insert(collection, default_entities, partition_tag = default_tag)
+#         ids = connect.bulk_insert(collection, default_entities, partition_name = default_tag)
 #         connect.flush([collection])
 #         connect.create_index(collection, default_float_vec_field_name, get_simple_index)
 #         get_ids = ids[:get_pos]
@@ -509,7 +509,7 @@ default_single_query = {
 #         expected: get one entity
 #         '''
 #         connect.create_partition(collection, default_tag)
-#         ids = connect.bulk_insert(collection, default_entities, partition_tag = default_tag)
+#         ids = connect.bulk_insert(collection, default_entities, partition_name = default_tag)
 #         connect.flush([collection])
 #         status = connect.delete_entity_by_id(collection, [ids[get_pos]])
 #         connect.flush([collection])

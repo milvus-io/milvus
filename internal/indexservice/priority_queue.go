@@ -21,9 +21,10 @@ import (
 
 // An Item is something we manage in a priority queue.
 type PQItem struct {
-	value    types.IndexNode // The value of the item; arbitrary.
-	key      UniqueID
-	addr     *commonpb.Address
+	value types.IndexNode // The value of the item; arbitrary.
+	key   UniqueID
+	addr  *commonpb.Address
+
 	priority int // The priority of the item in the queue.
 	// The index is needed by update and is maintained by the heap.Interface methods.
 	index int // The index of the item in the heap.
@@ -60,7 +61,7 @@ func (pq *PriorityQueue) Push(x interface{}) {
 	pq.items = append(pq.items, item)
 }
 
-// do not call this directly.
+// Pop do not call this directly.
 func (pq *PriorityQueue) Pop() interface{} {
 	old := pq.items
 	n := len(old)
@@ -93,7 +94,7 @@ func (pq *PriorityQueue) getItemByKey(key UniqueID) interface{} {
 	return ret
 }
 
-// update modifies the priority and value of an Item in the queue.
+// IncPriority update modifies the priority and value of an Item in the queue.
 func (pq *PriorityQueue) IncPriority(key UniqueID, priority int) {
 	pq.lock.Lock()
 	defer pq.lock.Unlock()
@@ -104,7 +105,7 @@ func (pq *PriorityQueue) IncPriority(key UniqueID, priority int) {
 	}
 }
 
-// update modifies the priority and value of an Item in the queue.
+// UpdatePriority update modifies the priority and value of an Item in the queue.
 func (pq *PriorityQueue) UpdatePriority(key UniqueID, priority int) {
 	pq.lock.Lock()
 	defer pq.lock.Unlock()
@@ -135,6 +136,7 @@ func (pq *PriorityQueue) Peek() interface{} {
 	//return item.value
 }
 
+// PeekClient picks an IndexNode with the lowest load.
 func (pq *PriorityQueue) PeekClient() (UniqueID, types.IndexNode) {
 	item := pq.Peek()
 	if item == nil {

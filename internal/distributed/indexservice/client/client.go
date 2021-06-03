@@ -217,10 +217,3 @@ func (c *Client) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFil
 	})
 	return ret.(*indexpb.GetIndexFilePathsResponse), err
 }
-
-func (c *Client) NotifyBuildIndex(ctx context.Context, nty *indexpb.NotifyBuildIndexRequest) (*commonpb.Status, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.NotifyBuildIndex(ctx, nty)
-	})
-	return ret.(*commonpb.Status), err
-}

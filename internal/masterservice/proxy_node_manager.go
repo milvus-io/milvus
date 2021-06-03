@@ -20,6 +20,7 @@ import (
 
 	"github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.etcd.io/etcd/clientv3"
@@ -90,6 +91,9 @@ func (p *proxyNodeManager) WatchProxyNode() error {
 		f(sessions)
 	}
 	for _, s := range sessions {
+		metrics.MasterProxyNodeLister.WithLabelValues(metricProxyNode(s.ServerID)).Set(1)
+	}
+	for _, s := range sessions {
 		log.Debug("Get proxy node", zap.Int64("node id", s.ServerID), zap.String("node addr", s.Address), zap.String("node name", s.ServerName))
 	}
 
@@ -127,6 +131,7 @@ func (p *proxyNodeManager) WatchProxyNode() error {
 							f(sess)
 						}
 						p.lock.Unlock()
+						metrics.MasterProxyNodeLister.WithLabelValues(metricProxyNode(sess.ServerID)).Set(1)
 					case mvccpb.DELETE:
 						sess := new(sessionutil.Session)
 						err := json.Unmarshal(ev.PrevKv.Value, sess)
@@ -139,6 +144,7 @@ func (p *proxyNodeManager) WatchProxyNode() error {
 							f(sess)
 						}
 						p.lock.Unlock()
+						metrics.MasterProxyNodeLister.WithLabelValues(metricProxyNode(sess.ServerID)).Set(0)
 					}
 				}
 			}

@@ -153,16 +153,9 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 	return ret.(*milvuspb.StringResponse), err
 }
 
-func (c *Client) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*commonpb.Status, error) {
+func (c *Client) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.BuildIndex(ctx, req)
-	})
-	return ret.(*commonpb.Status), err
-}
-
-func (c *Client) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.DropIndex(ctx, req)
+		return c.grpcClient.CreateIndex(ctx, req)
 	})
 	return ret.(*commonpb.Status), err
 }

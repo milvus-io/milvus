@@ -15,18 +15,21 @@ import "C"
 import (
 	"context"
 	"errors"
+	"strconv"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"go.uber.org/zap"
-	"strconv"
 )
 
 type searchService struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	replica ReplicaInterface
+	historicalReplica ReplicaInterface
+	streamingReplica  ReplicaInterface
+	tSafeReplica      TSafeReplicaInterface
 
 	searchMsgStream       msgstream.MsgStream
 	searchResultMsgStream msgstream.MsgStream
@@ -36,12 +39,17 @@ type searchService struct {
 	emptySearchCollection *searchCollection
 }
 
-func newSearchService(ctx context.Context, replica ReplicaInterface, factory msgstream.Factory) *searchService {
+func newSearchService(ctx context.Context,
+	historicalReplica ReplicaInterface,
+	streamingReplica ReplicaInterface,
+	tSafeReplica TSafeReplicaInterface,
+	factory msgstream.Factory) *searchService {
+
 	searchStream, _ := factory.NewQueryMsgStream(ctx)
 	searchResultStream, _ := factory.NewQueryMsgStream(ctx)
 
 	if len(Params.SearchChannelNames) > 0 && len(Params.SearchResultChannelNames) > 0 {
-		// query node need to consumer search channels and produce search result channels when init.
+		// query node need to consume search channels and produce search result channels when init.
 		consumeChannels := Params.SearchChannelNames
 		consumeSubName := Params.MsgChannelSubName
 		searchStream.AsConsumer(consumeChannels, consumeSubName)
@@ -56,7 +64,9 @@ func newSearchService(ctx context.Context, replica ReplicaInterface, factory msg
 		ctx:    searchServiceCtx,
 		cancel: searchServiceCancel,
 
-		replica: replica,
+		historicalReplica: historicalReplica,
+		streamingReplica:  streamingReplica,
+		tSafeReplica:      tSafeReplica,
 
 		searchMsgStream:       searchStream,
 		searchResultMsgStream: searchResultStream,
@@ -75,7 +85,7 @@ func (s *searchService) start() {
 
 func (s *searchService) collectionCheck(collectionID UniqueID) error {
 	// check if collection exists
-	if ok := s.replica.hasCollection(collectionID); !ok {
+	if ok := s.historicalReplica.hasCollection(collectionID); !ok {
 		err := errors.New("no collection found, collectionID = " + strconv.FormatInt(collectionID, 10))
 		log.Error(err.Error())
 		return err
@@ -139,14 +149,26 @@ func (s *searchService) close() {
 
 func (s *searchService) startSearchCollection(collectionID UniqueID) {
 	ctx1, cancel := context.WithCancel(s.ctx)
-	sc := newSearchCollection(ctx1, cancel, collectionID, s.replica, s.searchResultMsgStream)
+	sc := newSearchCollection(ctx1,
+		cancel,
+		collectionID,
+		s.historicalReplica,
+		s.streamingReplica,
+		s.tSafeReplica,
+		s.searchResultMsgStream)
 	s.searchCollections[collectionID] = sc
 	sc.start()
 }
 
 func (s *searchService) startEmptySearchCollection() {
 	ctx1, cancel := context.WithCancel(s.ctx)
-	sc := newSearchCollection(ctx1, cancel, UniqueID(-1), s.replica, s.searchResultMsgStream)
+	sc := newSearchCollection(ctx1,
+		cancel,
+		UniqueID(-1),
+		s.historicalReplica,
+		s.streamingReplica,
+		s.tSafeReplica,
+		s.searchResultMsgStream)
 	s.emptySearchCollection = sc
 	sc.start()
 }
