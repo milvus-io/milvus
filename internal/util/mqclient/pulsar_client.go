@@ -58,7 +58,7 @@ func (pc *pulsarClient) Subscribe(options ConsumerOptions) (Consumer, error) {
 	if err != nil {
 		return nil, err
 	}
-	msgChannel := make(chan ConsumerMessage, 1)
+	msgChannel := make(chan ConsumerMessage)
 	pConsumer := &pulsarConsumer{c: consumer, msgChannel: msgChannel}
 
 	go func() {
@@ -67,6 +67,7 @@ func (pc *pulsarClient) Subscribe(options ConsumerOptions) (Consumer, error) {
 			case msg, ok := <-pConsumer.c.Chan():
 				if !ok {
 					close(msgChannel)
+					log.Debug("pulsar consumer channel closed")
 					return
 				}
 				msgChannel <- &pulsarMessage{msg: msg}
