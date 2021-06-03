@@ -256,8 +256,15 @@ message SaveBinlogPathsRequest {
   int64 collectionID = 3;
   repeated ID2PathList field2BinlogPaths = 4;
   repeated DDLBinlogMeta ddlBinlogPaths = 5;
-  PositionPair dml_position = 6;
-  PositionPair ddl_position =7;
+  repeated CheckPoint checkPoints = 6;
+  bool flushed = 7;
+}
+
+message CheckPoint {
+  int64 segmentID = 1;
+  int64 collectionID = 2;
+  internal.MsgPosition position = 3;
+  int64 rows = 4;
 }
 
 message DataNodeTtMsg {
@@ -266,11 +273,6 @@ message DataNodeTtMsg {
     uint64 timestamp = 3;
 }
 
-message CheckPoint {
-  int64 segmentID = 1;
-  internal.MsgPosition position = 2;
-  int64 num_of_rows = 3;
-}
 
 message VchannelInfo {
   int64 collectionID = 1;
