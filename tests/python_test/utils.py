@@ -11,7 +11,7 @@ import time
 import copy
 import numpy as np
 from sklearn import preprocessing
-from milvus import Milvus, DataType
+from pymilvus import Milvus, DataType
 
 port = 19530
 epsilon = 0.000001

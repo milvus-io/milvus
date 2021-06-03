@@ -1,5 +1,5 @@
 import pytest
-from milvus import DataType, ParamError, BaseException
+from pymilvus import DataType, ParamError, BaseException
 from utils import *
 from constants import *
 
