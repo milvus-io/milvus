@@ -171,6 +171,7 @@ func (s *Server) init() error {
 
 	err := s.datanode.Register()
 	if err != nil {
+		log.Debug("DataNode Register etcd failed", zap.Error(err))
 		return err
 	}
 	err = s.startGrpc()
@@ -184,18 +185,23 @@ func (s *Server) init() error {
 		log.Debug("Init master service client ...")
 		masterServiceClient, err := s.newMasterServiceClient(Params.MasterAddress)
 		if err != nil {
+			log.Debug("DataNode newMasterServiceClient failed", zap.Error(err))
 			panic(err)
 		}
 		if err = masterServiceClient.Init(); err != nil {
+			log.Debug("DataNode masterServiceClient Init failed", zap.Error(err))
 			panic(err)
 		}
 		if err = masterServiceClient.Start(); err != nil {
+			log.Debug("DataNode masterServiceClient Start failed", zap.Error(err))
 			panic(err)
 		}
 		err = funcutil.WaitForComponentHealthy(ctx, masterServiceClient, "MasterService", 1000000, time.Millisecond*200)
 		if err != nil {
+			log.Debug("DataNode wait masterService ready failed", zap.Error(err))
 			panic(err)
 		}
+		log.Debug("DataNode masterService is ready")
 		if err = s.SetMasterServiceInterface(masterServiceClient); err != nil {
 			panic(err)
 		}
@@ -207,15 +213,19 @@ func (s *Server) init() error {
 		log.Debug("DataNode Init data service client ...")
 		dataServiceClient := s.newDataServiceClient(Params.DataServiceAddress, dn.Params.MetaRootPath, dn.Params.EtcdAddress, 10)
 		if err = dataServiceClient.Init(); err != nil {
+			log.Debug("DataNode newDataServiceClient failed", zap.Error(err))
 			panic(err)
 		}
 		if err = dataServiceClient.Start(); err != nil {
+			log.Debug("DataNode dataServiceClient Start failed", zap.Error(err))
 			panic(err)
 		}
 		err = funcutil.WaitForComponentInitOrHealthy(ctx, dataServiceClient, "DataService", 1000000, time.Millisecond*200)
 		if err != nil {
+			log.Debug("DataNode wait dataServiceClient ready failed", zap.Error(err))
 			panic(err)
 		}
+		log.Debug("DataNode dataService is ready")
 		if err = s.SetDataServiceInterface(dataServiceClient); err != nil {
 			panic(err)
 		}
@@ -228,6 +238,7 @@ func (s *Server) init() error {
 		log.Warn("datanode init error: ", zap.Error(err))
 		return err
 	}
+	log.Debug("DataNode", zap.Any("State", internalpb.StateCode_Initializing))
 	return nil
 }
 

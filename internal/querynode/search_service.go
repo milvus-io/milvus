@@ -104,7 +104,10 @@ func (s *searchService) consumeSearch() {
 			msgPack := s.searchMsgStream.Consume()
 			if msgPack == nil || len(msgPack.Msgs) <= 0 {
 				msgPackNil := msgPack == nil
-				msgPackEmpty := len(msgPack.Msgs) <= 0
+				msgPackEmpty := true
+				if msgPack != nil {
+					msgPackEmpty = len(msgPack.Msgs) <= 0
+				}
 				log.Debug("consume search message failed", zap.Any("msgPack is Nil", msgPackNil),
 					zap.Any("msgPackEmpty", msgPackEmpty))
 
