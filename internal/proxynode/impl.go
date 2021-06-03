@@ -413,6 +413,7 @@ func (node *ProxyNode) ShowCollections(ctx context.Context, request *milvuspb.Sh
 		Condition:              NewTaskCondition(ctx),
 		ShowCollectionsRequest: request,
 		masterService:          node.masterService,
+		queryService:           node.queryService,
 	}
 
 	err := node.sched.DdQueue.Enqueue(sct)

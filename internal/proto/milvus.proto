@@ -115,15 +115,22 @@ message GetCollectionStatisticsResponse {
   repeated common.KeyValuePair stats = 2;
 }
 
+enum ShowCollectionsType {
+  All = 0;
+  InMemory = 1;
+}
+
 message ShowCollectionsRequest {
   common.MsgBase base = 1; // must
   string db_name = 2;
   uint64 time_stamp = 3;
+  ShowCollectionsType type = 4;
 }
 
 message ShowCollectionsResponse {
   common.Status status = 1;
   repeated string collection_names = 2;
+  repeated int64 collection_ids = 3;
 }
 
 message CreatePartitionRequest {

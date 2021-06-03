@@ -430,7 +430,10 @@ func (t *ShowCollectionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	t.Rsp.CollectionNames = coll
+	for name, id := range coll {
+		t.Rsp.CollectionNames = append(t.Rsp.CollectionNames, name)
+		t.Rsp.CollectionIds = append(t.Rsp.CollectionIds, id)
+	}
 	return nil
 }
 
