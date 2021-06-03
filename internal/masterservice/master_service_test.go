@@ -336,7 +336,10 @@ func TestMasterService(t *testing.T) {
 	assert.Nil(t, err)
 
 	flushedSegMsgPack := flushedSegStream.Consume()
+	flushedSegStream.Close()
+
 	flushedSegPosStr, _ := EncodeMsgPositions(flushedSegMsgPack.EndPositions)
+
 	_, err = etcdCli.Put(ctx, path.Join(Params.MetaRootPath, FlushedSegMsgEndPosPrefix), flushedSegPosStr)
 	assert.Nil(t, err)
 
