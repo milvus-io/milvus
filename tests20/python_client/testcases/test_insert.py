@@ -223,8 +223,23 @@ class TestInsertParams(ApiReq):
         """
         self._connect()
         nb = ct.default_nb
-        collection = self._collection()
+        self._collection()
         df = cf.gen_default_dataframe_data(nb, dim=129)
+        ex, _ = self.collection.insert(data=df)
+        message = "Collection field dim is {},but entities field dim is {}".format(ct.default_dim, 129)
+        assert message in str(ex)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_insert_binary_dim_not_match(self):
+        """
+        target: test insert binary with dim not match
+        method: insert binary data dim not equal to schema
+        expected: raise exception
+        """
+        self._connect()
+        nb = ct.default_nb
+        self._collection(schema=cf.gen_default_binary_collection_schema())
+        df = cf.gen_default_binary_dataframe_data(nb, dim=120)
         ex, _ = self.collection.insert(data=df)
         message = "Collection field dim is {},but entities field dim is {}".format(ct.default_dim, 129)
         assert message in str(ex)
