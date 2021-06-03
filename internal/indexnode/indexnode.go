@@ -121,7 +121,7 @@ func (i *IndexNode) Init() error {
 
 	resp, err2 := i.serviceClient.RegisterNode(ctx, request)
 	if err2 != nil {
-		log.Debug("IndexNode RegisterNode failed", zap.Error(err))
+		log.Debug("IndexNode RegisterNode failed", zap.Error(err2))
 		return err2
 	}
 
