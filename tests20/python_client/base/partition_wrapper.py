@@ -45,7 +45,7 @@ def func_req(_list, **kwargs):
     return False, False
 
 
-class ApiPartition:
+class ApiPartitionWrapper:
     partition = None
 
     def partition_init(self, collection, name, description="", check_res=None, check_params=None, **kwargs):
@@ -59,29 +59,37 @@ class ApiPartition:
                                  **kwargs).run()
         return res, check_result
 
+    @property
     def description(self, check_res=None, check_params=None):
-        func_name = sys._getframe().f_code.co_name
-        res, check = func_req([self.partition.description])
-        check_result = CheckFunc(res, func_name, check_res, check_params, check).run()
-        return res, check_result
+        return self.partition.description
+        # func_name = sys._getframe().f_code.co_name
+        # res, check = func_req([self.partition.description])
+        # check_result = CheckFunc(res, func_name, check_res, check_params, check).run()
+        # return res, check_result
 
+    @property
     def name(self, check_res=None, check_params=None):
-        func_name = sys._getframe().f_code.co_name
-        res, check = func_req([self.partition.name])
-        check_result = CheckFunc(res, func_name, check_res, check_params, check).run()
-        return res, check_result
+        return self.partition.name
+        # func_name = sys._getframe().f_code.co_name
+        # res, check = func_req([self.partition.name])
+        # check_result = CheckFunc(res, func_name, check_res, check_params, check).run()
+        # return res, check_result
 
+    @property
     def is_empty(self, check_res=None, check_params=None):
-        func_name = sys._getframe().f_code.co_name
-        res, check = func_req([self.partition.is_empty])
-        check_result = CheckFunc(res, func_name, check_res, check_params, check).run()
-        return res, check_result
+        return self.partition.is_empty
+        # func_name = sys._getframe().f_code.co_name
+        # res, check = func_req([self.partition.is_empty])
+        # check_result = CheckFunc(res, func_name, check_res, check_params, check).run()
+        # return res, check_result
 
+    @property
     def num_entities(self, check_res=None, check_params=None):
-        func_name = sys._getframe().f_code.co_name
-        res, check = func_req([self.partition.num_entities])
-        check_result = CheckFunc(res, func_name, check_res, check_params, check).run()
-        return res, check_result
+        return self.partition.num_entities
+        # func_name = sys._getframe().f_code.co_name
+        # res, check = func_req([self.partition.num_entities])
+        # check_result = CheckFunc(res, func_name, check_res, check_params, check).run()
+        # return res, check_result
 
     def drop(self, check_res=None, check_params=None, **kwargs):
         func_name = sys._getframe().f_code.co_name

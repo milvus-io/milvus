@@ -10,6 +10,12 @@ def pytest_addoption(parser):
     parser.addoption("--handler", action="store", default="GRPC", help="handler of request")
     parser.addoption("--tag", action="store", default="all", help="only run tests matching the tag.")
     parser.addoption('--dry_run', action='store_true', default=False, help="")
+    parser.addoption('--partition_name', action='store_true', default="partition_name", help="name of partition")
+    parser.addoption('--descriptions', action='store_true', default="partition_des", help="descriptions of partition")
+    parser.addoption('--collection_name', action='store_true', default="collection_name", help="name of collection")
+    parser.addoption('--search_vectors', action='store_true', default="search_vectors", help="vectors of search")
+    parser.addoption('--index_param', action='store_true', default="index_param", help="index_param of index")
+    parser.addoption('--data', action='store_true', default="data", help="data of request")
 
 
 @pytest.fixture
@@ -52,4 +58,31 @@ def dry_run(request):
     return request.config.getoption("--dry_run")
 
 
+@pytest.fixture
+def partition_name(request):
+    return request.config.getoption("--partition_name")
 
+
+@pytest.fixture
+def descriptions(request):
+    return request.config.getoption("--descriptions")
+
+
+@pytest.fixture
+def collection_name(request):
+    return request.config.getoption("--collection_name")
+
+
+@pytest.fixture
+def search_vectors(request):
+    return request.config.getoption("--search_vectors")
+
+
+@pytest.fixture
+def index_param(request):
+    return request.config.getoption("--index_param")
+
+
+@pytest.fixture
+def data(request):
+    return request.config.getoption("--data")
