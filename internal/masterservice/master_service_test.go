@@ -306,20 +306,11 @@ func TestMasterService(t *testing.T) {
 	err = core.SetQueryService(qm)
 	assert.Nil(t, err)
 
-	err = core.Init()
-	assert.Nil(t, err)
+	//err = core.Init()
+	//assert.Nil(t, err)
 
-	var localTSO uint64 = 0
-	localTSOLock := sync.RWMutex{}
-	core.TSOAllocator = func(c uint32) (uint64, error) {
-		localTSOLock.Lock()
-		defer localTSOLock.Unlock()
-		localTSO += uint64(c)
-		return localTSO, nil
-	}
-
-	err = core.Start()
-	assert.Nil(t, err)
+	//	err = core.Start()
+	//	assert.Nil(t, err)
 
 	m := map[string]interface{}{
 		"pulsarAddress":  Params.PulsarAddress,
@@ -347,6 +338,7 @@ func TestMasterService(t *testing.T) {
 	msgPack := GenFlushedSegMsgPack(9999)
 	err = dataServiceSegmentStream.Produce(msgPack)
 	assert.Nil(t, err)
+
 	flushedSegMsgPack := flushedSegStream.Consume()
 	flushedSegPosStr, _ := EncodeMsgPositions(flushedSegMsgPack.EndPositions)
 	_, err = etcdCli.Put(ctx, path.Join(Params.MetaRootPath, FlushedSegMsgEndPosPrefix), flushedSegPosStr)
@@ -354,6 +346,15 @@ func TestMasterService(t *testing.T) {
 
 	err = core.Init()
 	assert.Nil(t, err)
+
+	var localTSO uint64 = 0
+	localTSOLock := sync.RWMutex{}
+	core.TSOAllocator = func(c uint32) (uint64, error) {
+		localTSOLock.Lock()
+		defer localTSOLock.Unlock()
+		localTSO += uint64(c)
+		return localTSO, nil
+	}
 
 	err = core.Start()
 	assert.Nil(t, err)
