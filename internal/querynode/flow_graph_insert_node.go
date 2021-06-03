@@ -123,6 +123,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	for _, sp := range spans {
 		sp.Finish()
 	}
+
 	return []Msg{res}
 }
 
