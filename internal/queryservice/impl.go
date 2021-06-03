@@ -76,11 +76,14 @@ func (qs *QueryService) GetStatisticsChannel(ctx context.Context) (*milvuspb.Str
 }
 
 func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
-	log.Debug("register query node", zap.String("address", req.Address.String()))
 	// TODO:: add mutex
 	nodeID := req.Base.SourceID
+	log.Debug("register query node", zap.Any("QueryNodeID", nodeID), zap.String("address", req.Address.String()))
+
 	if _, ok := qs.queryNodes[nodeID]; ok {
 		err := errors.New("nodeID already exists")
+		log.Debug("register query node Failed nodeID already exist", zap.Any("QueryNodeID", nodeID), zap.String("address", req.Address.String()))
+
 		return &querypb.RegisterNodeResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
@@ -92,6 +95,8 @@ func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterN
 	registerNodeAddress := req.Address.Ip + ":" + strconv.FormatInt(req.Address.Port, 10)
 	client, err := nodeclient.NewClient(registerNodeAddress)
 	if err != nil {
+		log.Debug("register query node new NodeClient failed", zap.Any("QueryNodeID", nodeID), zap.String("address", req.Address.String()))
+
 		return &querypb.RegisterNodeResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
@@ -100,6 +105,8 @@ func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterN
 		}, err
 	}
 	if err := client.Init(); err != nil {
+		log.Debug("register query node client init failed", zap.Any("QueryNodeID", nodeID), zap.String("address", req.Address.String()))
+
 		return &querypb.RegisterNodeResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
@@ -108,6 +115,7 @@ func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterN
 		}, err
 	}
 	if err := client.Start(); err != nil {
+		log.Debug("register query node client start failed", zap.Any("QueryNodeID", nodeID), zap.String("address", req.Address.String()))
 		return nil, err
 	}
 	qs.queryNodes[nodeID] = newQueryNodeInfo(client)
@@ -129,6 +137,7 @@ func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterN
 		})
 	}
 	qs.qcMutex.Unlock()
+	log.Debug("register query node success", zap.Any("QueryNodeID", nodeID), zap.String("address", req.Address.String()), zap.Any("StartParams", startParams))
 
 	return &querypb.RegisterNodeResponse{
 		Status: &commonpb.Status{
@@ -409,18 +418,9 @@ func (qs *QueryService) ReleasePartitions(ctx context.Context, req *querypb.Rele
 }
 
 func (qs *QueryService) CreateQueryChannel(ctx context.Context) (*querypb.CreateQueryChannelResponse, error) {
-	channelID := len(qs.queryChannels)
-	searchPrefix := Params.SearchChannelPrefix
-	searchResultPrefix := Params.SearchResultChannelPrefix
-	allocatedQueryChannel := searchPrefix + "-" + strconv.FormatInt(int64(channelID), 10)
-	allocatedQueryResultChannel := searchResultPrefix + "-" + strconv.FormatInt(int64(channelID), 10)
-
 	qs.qcMutex.Lock()
-	qs.queryChannels = append(qs.queryChannels, &queryChannelInfo{
-		requestChannel:  allocatedQueryChannel,
-		responseChannel: allocatedQueryResultChannel,
-	})
-
+	allocatedQueryChannel := qs.queryChannels[0].requestChannel
+	allocatedQueryResultChannel := qs.queryChannels[0].responseChannel
 	addQueryChannelsRequest := &querypb.AddQueryChannelRequest{
 		RequestChannelID: allocatedQueryChannel,
 		ResultChannelID:  allocatedQueryResultChannel,

@@ -158,10 +158,14 @@ func (node *DataNode) Init() error {
 
 	resp, err := node.dataService.RegisterNode(ctx, req)
 	if err != nil {
-		return fmt.Errorf("Register node failed: %v", err)
+		err = fmt.Errorf("Register node failed: %v", err)
+		log.Debug("DataNode RegisterNode failed", zap.Error(err))
+		return err
 	}
 	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return fmt.Errorf("Receive error when registering data node, msg: %s", resp.Status.Reason)
+		err = fmt.Errorf("Receive error when registering data node, msg: %s", resp.Status.Reason)
+		log.Debug("DataNode RegisterNode failed", zap.Error(err))
+		return err
 	}
 
 	for _, kv := range resp.InitParams.StartParams {
@@ -178,6 +182,10 @@ func (node *DataNode) Init() error {
 			return fmt.Errorf("Invalid key: %v", kv.Key)
 		}
 	}
+	log.Debug("DataNode Init", zap.Any("DDChannelName", Params.DDChannelNames),
+		zap.Any("SegmentStatisticsChannelName", Params.SegmentStatisticsChannelName),
+		zap.Any("TimeTickChannelName", Params.TimeTickChannelName),
+		zap.Any("CompleteFlushChannelName", Params.TimeTickChannelName))
 
 	select {
 	case <-time.After(RPCConnectionTimeout):

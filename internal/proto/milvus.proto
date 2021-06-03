@@ -115,15 +115,22 @@ message GetCollectionStatisticsResponse {
   repeated common.KeyValuePair stats = 2;
 }
 
+enum ShowCollectionsType {
+  All = 0;
+  InMemory = 1;
+}
+
 message ShowCollectionsRequest {
   common.MsgBase base = 1; // must
   string db_name = 2;
   uint64 time_stamp = 3;
+  ShowCollectionsType type = 4;
 }
 
 message ShowCollectionsResponse {
   common.Status status = 1;
   repeated string collection_names = 2;
+  repeated int64 collection_ids = 3;
 }
 
 message CreatePartitionRequest {
@@ -274,12 +281,12 @@ message DropIndexRequest {
 }
 
 message InsertRequest {
-  common.MsgBase base = 1; // must
+  common.MsgBase base = 1;
   string db_name = 2;
-  string collection_name = 3; // must
-  string partition_name = 4; // must
-  repeated common.Blob row_data = 5; // must
-  repeated uint32 hash_keys = 6; // must
+  string collection_name = 3;
+  string partition_name = 4;
+  repeated schema.FieldData fields_data = 5;
+  repeated uint32 hash_keys = 6;
 }
 
 message InsertResponse {

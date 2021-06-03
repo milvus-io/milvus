@@ -413,6 +413,7 @@ func (node *ProxyNode) ShowCollections(ctx context.Context, request *milvuspb.Sh
 		Condition:              NewTaskCondition(ctx),
 		ShowCollectionsRequest: request,
 		masterService:          node.masterService,
+		queryService:           node.queryService,
 	}
 
 	err := node.sched.DdQueue.Enqueue(sct)
@@ -1043,6 +1044,7 @@ func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertReque
 		ctx:         ctx,
 		Condition:   NewTaskCondition(ctx),
 		dataService: node.dataService,
+		req:         request,
 		BaseInsertTask: BaseInsertTask{
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: request.HashKeys,
@@ -1054,7 +1056,7 @@ func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertReque
 				},
 				CollectionName: request.CollectionName,
 				PartitionName:  request.PartitionName,
-				RowData:        request.RowData,
+				// RowData: transfer column based request to this
 			},
 		},
 		rowIDAllocator: node.idAllocator,

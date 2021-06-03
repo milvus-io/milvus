@@ -11,6 +11,8 @@
 
 package miniokv
 
+/*
+
 import (
 	"context"
 	"strconv"
@@ -62,3 +64,4 @@ func TestMinioStats(t *testing.T) {
 	size := w.GetObjectCreateSize()
 	assert.EqualValues(t, 5, size)
 }
+*/

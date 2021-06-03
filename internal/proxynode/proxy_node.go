@@ -79,8 +79,8 @@ func NewProxyNode(ctx context.Context, factory msgstream.Factory) (*ProxyNode, e
 		msFactory: factory,
 	}
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
-	log.Debug("proxynode",
-		zap.Any("state of proxynode", internalpb.StateCode_Abnormal))
+	log.Debug("ProxyNode",
+		zap.Any("State", "Abnormal"))
 	return node, nil
 
 }
@@ -101,7 +101,7 @@ func (node *ProxyNode) Init() error {
 	if err != nil {
 		return err
 	}
-	log.Debug("service was ready ...")
+	log.Debug("ProxyService is ready ...")
 
 	request := &proxypb.RegisterNodeRequest{
 		Address: &commonpb.Address{
@@ -112,54 +112,74 @@ func (node *ProxyNode) Init() error {
 
 	response, err := node.proxyService.RegisterNode(ctx, request)
 	if err != nil {
+		log.Debug("ProxyNode RegisterNode failed", zap.Error(err))
 		return err
 	}
 	if response.Status.ErrorCode != commonpb.ErrorCode_Success {
+		log.Debug("ProxyNode RegisterNode failed", zap.String("Reason", response.Status.Reason))
 		return errors.New(response.Status.Reason)
 	}
 
 	err = Params.LoadConfigFromInitParams(response.InitParams)
 	if err != nil {
+		log.Debug("ProxyNode LoadConfigFromInitParams failed", zap.Error(err))
 		return err
 	}
 
 	// wait for dataservice state changed to Healthy
 	if node.dataService != nil {
+		log.Debug("ProxyNode wait for dataService ready")
 		err := funcutil.WaitForComponentHealthy(ctx, node.dataService, "DataService", 1000000, time.Millisecond*200)
 		if err != nil {
+			log.Debug("ProxyNode wait for dataService ready failed", zap.Error(err))
 			return err
 		}
+		log.Debug("ProxyNode dataService is ready")
 	}
 
 	// wait for queryService state changed to Healthy
 	if node.queryService != nil {
+		log.Debug("ProxyNode wait for queryService ready")
 		err := funcutil.WaitForComponentHealthy(ctx, node.queryService, "QueryService", 1000000, time.Millisecond*200)
 		if err != nil {
+			log.Debug("ProxyNode wait for queryService ready failed", zap.Error(err))
 			return err
 		}
+		log.Debug("ProxyNode queryService is ready")
 	}
 
 	// wait for indexservice state changed to Healthy
 	if node.indexService != nil {
+		log.Debug("ProxyNode wait for indexService ready")
 		err := funcutil.WaitForComponentHealthy(ctx, node.indexService, "IndexService", 1000000, time.Millisecond*200)
 		if err != nil {
+			log.Debug("ProxyNode wait for indexService ready failed", zap.Error(err))
 			return err
 		}
+		log.Debug("ProxyNode indexService is ready")
 	}
 
 	if node.queryService != nil {
 		resp, err := node.queryService.CreateQueryChannel(ctx)
 		if err != nil {
+			log.Debug("ProxyNode CreateQueryChannel failed", zap.Error(err))
 			return err
 		}
 		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+			log.Debug("ProxyNode CreateQueryChannel failed", zap.String("reason", resp.Status.Reason))
+
 			return errors.New(resp.Status.Reason)
 		}
+		log.Debug("ProxyNode CreateQueryChannel success")
 
 		Params.SearchChannelNames = []string{resp.RequestChannel}
 		Params.SearchResultChannelNames = []string{resp.ResultChannel}
 		Params.RetrieveChannelNames = []string{resp.RequestChannel}
 		Params.RetrieveResultChannelNames = []string{resp.ResultChannel}
+		log.Debug("ProxyNode CreateQueryChannel success", zap.Any("SearchChannelNames", Params.SearchChannelNames))
+		log.Debug("ProxyNode CreateQueryChannel success", zap.Any("SearchResultChannelNames", Params.SearchResultChannelNames))
+		log.Debug("ProxyNode CreateQueryChannel success", zap.Any("RetrieveChannelNames", Params.RetrieveChannelNames))
+		log.Debug("ProxyNode CreateQueryChannel success", zap.Any("RetrieveResultChannelNames", Params.RetrieveResultChannelNames))
 	}
 
 	// todo
@@ -245,9 +265,8 @@ func (node *ProxyNode) Start() error {
 	}
 
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
-	log.Debug("proxynode",
-		zap.Any("state of proxynode", internalpb.StateCode_Healthy))
-	log.Debug("proxy node is healthy ...")
+	log.Debug("ProxyNode",
+		zap.Any("State", internalpb.StateCode_Healthy))
 
 	return nil
 }
