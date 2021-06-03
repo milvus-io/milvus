@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -39,8 +40,8 @@ func (err errRemainInSufficient) Error() string {
 	return fmt.Sprintf("segment remaining is insufficient for %d", err.requestRows)
 }
 
-// segmentAllocator is used to allocate rows for segments and record the allocations.
-type segmentAllocator interface {
+// Manager manage segment related operations.
+type Manager interface {
 	// AllocSegment allocate rows and record the allocation.
 	AllocSegment(ctx context.Context, collectionID, partitionID UniqueID, channelName string, requestRows int64) (UniqueID, int64, Timestamp, error)
 	// DropSegment drop the segment from allocator.
@@ -49,14 +50,33 @@ type segmentAllocator interface {
 	SealAllSegments(ctx context.Context, collectionID UniqueID) error
 	// GetFlushableSegments return flushable segment ids
 	GetFlushableSegments(ctx context.Context, channel string, ts Timestamp) ([]UniqueID, error)
+	// UpdateSegmentStats update segment status
+	UpdateSegmentStats(stat *internalpb.SegmentStatisticsUpdates)
 }
 
-type channelSegmentAllocator struct {
-	mt         *meta
-	mu         sync.RWMutex
-	allocator  allocator
-	helper     allocHelper
-	allocStats *segAllocStats
+type segmentStatus struct {
+	id             UniqueID
+	collectionID   UniqueID
+	partitionID    UniqueID
+	sealed         bool
+	total          int64
+	insertChannel  string
+	allocations    []*allocation
+	lastExpireTime Timestamp
+	currentRows    int64
+}
+
+type allocation struct {
+	rowNums    int64
+	expireTime Timestamp
+}
+
+type SegmentManager struct {
+	meta      *meta
+	mu        sync.RWMutex
+	allocator allocator
+	helper    allocHelper
+	stats     map[UniqueID]*segmentStatus //segment id -> status
 
 	estimatePolicy calUpperLimitPolicy
 	allocPolicy    allocatePolicy
@@ -69,12 +89,12 @@ type allocHelper struct {
 }
 
 type allocOption struct {
-	apply func(alloc *channelSegmentAllocator)
+	apply func(manager *SegmentManager)
 }
 
 func withAllocHelper(helper allocHelper) allocOption {
 	return allocOption{
-		apply: func(alloc *channelSegmentAllocator) { alloc.helper = helper },
+		apply: func(manager *SegmentManager) { manager.helper = helper },
 	}
 }
 
@@ -86,25 +106,25 @@ func defaultAllocHelper() allocHelper {
 
 func withCalUpperLimitPolicy(policy calUpperLimitPolicy) allocOption {
 	return allocOption{
-		apply: func(alloc *channelSegmentAllocator) { alloc.estimatePolicy = policy },
+		apply: func(manager *SegmentManager) { manager.estimatePolicy = policy },
 	}
 }
 
 func withAllocPolicy(policy allocatePolicy) allocOption {
 	return allocOption{
-		apply: func(alloc *channelSegmentAllocator) { alloc.allocPolicy = policy },
+		apply: func(manager *SegmentManager) { manager.allocPolicy = policy },
 	}
 }
 
 func withSealPolicy(policy sealPolicy) allocOption {
 	return allocOption{
-		apply: func(alloc *channelSegmentAllocator) { alloc.sealPolicy = policy },
+		apply: func(manager *SegmentManager) { manager.sealPolicy = policy },
 	}
 }
 
 func withFlushPolicy(policy flushPolicy) allocOption {
 	return allocOption{
-		apply: func(alloc *channelSegmentAllocator) { alloc.flushPolicy = policy },
+		apply: func(manager *SegmentManager) { manager.flushPolicy = policy },
 	}
 }
 
@@ -124,12 +144,12 @@ func defaultFlushPolicy() flushPolicy {
 	return newFlushPolicyV1()
 }
 
-func newSegmentAllocator(meta *meta, allocator allocator, opts ...allocOption) *channelSegmentAllocator {
-	alloc := &channelSegmentAllocator{
-		mt:         meta,
-		allocator:  allocator,
-		helper:     defaultAllocHelper(),
-		allocStats: newAllocStats(meta),
+func newSegmentManager(meta *meta, allocator allocator, opts ...allocOption) *SegmentManager {
+	manager := &SegmentManager{
+		meta:      meta,
+		allocator: allocator,
+		helper:    defaultAllocHelper(),
+		stats:     make(map[UniqueID]*segmentStatus),
 
 		estimatePolicy: defaultCalUpperLimitPolicy(),
 		allocPolicy:    defaultAlocatePolicy(),
@@ -137,12 +157,30 @@ func newSegmentAllocator(meta *meta, allocator allocator, opts ...allocOption) *
 		flushPolicy:    defaultFlushPolicy(),
 	}
 	for _, opt := range opts {
-		opt.apply(alloc)
+		opt.apply(manager)
 	}
-	return alloc
+	manager.loadSegmentsFromMeta()
+	return manager
 }
 
-func (s *channelSegmentAllocator) AllocSegment(ctx context.Context, collectionID UniqueID,
+func (s *SegmentManager) loadSegmentsFromMeta() {
+	// load unflushed segments from meta
+	segments := s.meta.GetUnFlushedSegments()
+	for _, seg := range segments {
+		stat := &segmentStatus{
+			id:             seg.ID,
+			collectionID:   seg.CollectionID,
+			partitionID:    seg.PartitionID,
+			total:          seg.MaxRowNum,
+			allocations:    []*allocation{},
+			insertChannel:  seg.InsertChannel,
+			lastExpireTime: seg.LastExpireTime,
+			sealed:         seg.State == commonpb.SegmentState_Sealed,
+		}
+		s.stats[seg.ID] = stat
+	}
+}
+func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID,
 	partitionID UniqueID, channelName string, requestRows int64) (segID UniqueID, retCount int64, expireTime Timestamp, err error) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
@@ -150,9 +188,12 @@ func (s *channelSegmentAllocator) AllocSegment(ctx context.Context, collectionID
 	defer s.mu.Unlock()
 
 	var success bool
-	var status *segAllocStatus
-	segments := s.allocStats.getSegments(collectionID, partitionID, channelName)
-	for _, segStatus := range segments {
+	var status *segmentStatus
+	for _, segStatus := range s.stats {
+		if segStatus.sealed || segStatus.collectionID != collectionID ||
+			segStatus.partitionID != partitionID || segStatus.insertChannel != channelName {
+			continue
+		}
 		success, err = s.alloc(segStatus, requestRows)
 		if err != nil {
 			return
@@ -185,13 +226,12 @@ func (s *channelSegmentAllocator) AllocSegment(ctx context.Context, collectionID
 	return
 }
 
-func (s *channelSegmentAllocator) alloc(segStatus *segAllocStatus, numRows int64) (bool, error) {
-	info, err := s.mt.GetSegment(segStatus.id)
-	if err != nil {
-		return false, err
+func (s *SegmentManager) alloc(segStatus *segmentStatus, numRows int64) (bool, error) {
+	var allocSize int64
+	for _, allocation := range segStatus.allocations {
+		allocSize += allocation.rowNums
 	}
-	allocSize := segStatus.getAllocationSize()
-	if !s.allocPolicy.apply(segStatus.total, info.NumRows, allocSize, numRows) {
+	if !s.allocPolicy.apply(segStatus.total, segStatus.currentRows, allocSize, numRows) {
 		return false, nil
 	}
 
@@ -199,14 +239,21 @@ func (s *channelSegmentAllocator) alloc(segStatus *segAllocStatus, numRows int64
 	if err != nil {
 		return false, err
 	}
-	if err := s.allocStats.appendAllocation(segStatus.id, numRows, expireTs); err != nil {
+
+	alloc := &allocation{
+		rowNums:    numRows,
+		expireTime: expireTs,
+	}
+	segStatus.lastExpireTime = expireTs
+	segStatus.allocations = append(segStatus.allocations, alloc)
+
+	if err := s.meta.SetLastExpireTime(segStatus.id, expireTs); err != nil {
 		return false, err
 	}
-
 	return true, nil
 }
 
-func (s *channelSegmentAllocator) genExpireTs() (Timestamp, error) {
+func (s *SegmentManager) genExpireTs() (Timestamp, error) {
 	ts, err := s.allocator.allocTimestamp()
 	if err != nil {
 		return 0, err
@@ -217,7 +264,7 @@ func (s *channelSegmentAllocator) genExpireTs() (Timestamp, error) {
 	return expireTs, nil
 }
 
-func (s *channelSegmentAllocator) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string) (*segAllocStatus, error) {
+func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string) (*segmentStatus, error) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
 	id, err := s.allocator.allocID()
@@ -228,6 +275,19 @@ func (s *channelSegmentAllocator) openNewSegment(ctx context.Context, collection
 	if err != nil {
 		return nil, err
 	}
+	segStatus := &segmentStatus{
+		id:             id,
+		collectionID:   collectionID,
+		partitionID:    partitionID,
+		sealed:         false,
+		total:          int64(totalRows),
+		insertChannel:  channelName,
+		allocations:    []*allocation{},
+		lastExpireTime: 0,
+		currentRows:    0,
+	}
+
+	s.stats[id] = segStatus
 	segmentInfo := &datapb.SegmentInfo{
 		ID:             id,
 		CollectionID:   collectionID,
@@ -239,7 +299,7 @@ func (s *channelSegmentAllocator) openNewSegment(ctx context.Context, collection
 		LastExpireTime: 0,
 	}
 
-	if err := s.allocStats.addSegment(segmentInfo); err != nil {
+	if err := s.meta.AddSegment(segmentInfo); err != nil {
 		return nil, err
 	}
 
@@ -250,35 +310,45 @@ func (s *channelSegmentAllocator) openNewSegment(ctx context.Context, collection
 
 	s.helper.afterCreateSegment(segmentInfo)
 
-	return s.allocStats.getSegmentBy(segmentInfo.ID), nil
+	return segStatus, nil
 }
 
-func (s *channelSegmentAllocator) estimateTotalRows(collectionID UniqueID) (int, error) {
-	collMeta, err := s.mt.GetCollection(collectionID)
+func (s *SegmentManager) estimateTotalRows(collectionID UniqueID) (int, error) {
+	collMeta, err := s.meta.GetCollection(collectionID)
 	if err != nil {
 		return -1, err
 	}
 	return s.estimatePolicy.apply(collMeta.Schema)
 }
 
-func (s *channelSegmentAllocator) DropSegment(ctx context.Context, segmentID UniqueID) {
+func (s *SegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.allocStats.dropSegment(segmentID)
+	delete(s.stats, segmentID)
 }
 
-func (s *channelSegmentAllocator) SealAllSegments(ctx context.Context, collectionID UniqueID) error {
+func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID) error {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.allocStats.sealSegmentsBy(collectionID)
+	for _, status := range s.stats {
+		if status.collectionID == collectionID {
+			if status.sealed {
+				continue
+			}
+			if err := s.meta.SealSegment(status.id); err != nil {
+				return err
+			}
+			status.sealed = true
+		}
+	}
 	return nil
 }
 
-func (s *channelSegmentAllocator) GetFlushableSegments(ctx context.Context, channel string,
+func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel string,
 	t Timestamp) ([]UniqueID, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -289,8 +359,7 @@ func (s *channelSegmentAllocator) GetFlushableSegments(ctx context.Context, chan
 	}
 
 	ret := make([]UniqueID, 0)
-	segments := s.allocStats.getAllSegments()
-	for _, segStatus := range segments {
+	for _, segStatus := range s.stats {
 		if segStatus.insertChannel != channel {
 			continue
 		}
@@ -302,9 +371,18 @@ func (s *channelSegmentAllocator) GetFlushableSegments(ctx context.Context, chan
 	return ret, nil
 }
 
-func (s *channelSegmentAllocator) tryToSealSegment() error {
-	segments := s.allocStats.getAllSegments()
-	for _, segStatus := range segments {
+func (s *SegmentManager) UpdateSegmentStats(stat *internalpb.SegmentStatisticsUpdates) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	segment, ok := s.stats[stat.SegmentID]
+	if !ok {
+		return
+	}
+	segment.currentRows = stat.NumRows
+}
+
+func (s *SegmentManager) tryToSealSegment() error {
+	for _, segStatus := range s.stats {
 		if segStatus.sealed {
 			continue
 		}
@@ -315,31 +393,34 @@ func (s *channelSegmentAllocator) tryToSealSegment() error {
 		if !sealed {
 			continue
 		}
-		if err := s.allocStats.sealSegment(segStatus.id); err != nil {
+		if err := s.meta.SealSegment(segStatus.id); err != nil {
 			return err
 		}
+		segStatus.sealed = true
 	}
 
 	return nil
 }
 
-func (s *channelSegmentAllocator) checkSegmentSealed(segStatus *segAllocStatus) (bool, error) {
-	segMeta, err := s.mt.GetSegment(segStatus.id)
-	if err != nil {
-		return false, err
+func (s *SegmentManager) checkSegmentSealed(segStatus *segmentStatus) (bool, error) {
+	var allocSize int64
+	for _, allocation := range segStatus.allocations {
+		allocSize += allocation.rowNums
 	}
-
-	ret := s.sealPolicy.apply(segStatus.total, segMeta.NumRows, segStatus.getAllocationSize())
+	ret := s.sealPolicy.apply(segStatus.total, segStatus.currentRows, allocSize)
 	return ret, nil
 }
 
 // only for test
-func (s *channelSegmentAllocator) SealSegment(ctx context.Context, segmentID UniqueID) error {
+func (s *SegmentManager) SealSegment(ctx context.Context, segmentID UniqueID) error {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.allocStats.sealSegment(segmentID)
+	if err := s.meta.SealSegment(segmentID); err != nil {
+		return err
+	}
+	s.stats[segmentID].sealed = true
 	return nil
 }
 
