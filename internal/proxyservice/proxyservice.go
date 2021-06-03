@@ -32,8 +32,6 @@ type ProxyService struct {
 	nodeInfos *globalNodeInfoTable
 	stateCode internalpb.StateCode
 
-	//subStates *internalpb.ComponentStates
-
 	nodeStartParams []*commonpb.KeyValuePair
 
 	ctx    context.Context
@@ -55,7 +53,7 @@ func NewProxyService(ctx context.Context, factory msgstream.Factory) (*ProxyServ
 	s.sched = newTaskScheduler(ctx1)
 	s.nodeInfos = newGlobalNodeInfoTable()
 	s.UpdateStateCode(internalpb.StateCode_Abnormal)
-	log.Debug("proxyservice", zap.Any("state of proxyservice: ", internalpb.StateCode_Abnormal))
+	log.Debug("ProxyService", zap.Any("State", internalpb.StateCode_Abnormal))
 
 	return s, nil
 }

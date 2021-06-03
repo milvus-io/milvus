@@ -137,9 +137,12 @@ func (node *QueryNode) Init() error {
 
 	resp, err := node.queryService.RegisterNode(ctx, registerReq)
 	if err != nil {
+		log.Debug("QueryNode RegisterNode failed", zap.Error(err))
 		panic(err)
 	}
+	log.Debug("QueryNode RegisterNode success")
 	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		log.Debug("QueryNode RegisterNode failed", zap.Any("Reason", resp.Status.Reason))
 		panic(resp.Status.Reason)
 	}
 

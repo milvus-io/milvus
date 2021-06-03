@@ -19,6 +19,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -119,6 +121,7 @@ func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryServ
 	}
 
 	service.UpdateStateCode(internalpb.StateCode_Abnormal)
+	log.Debug("QueryService", zap.Any("queryChannels", queryChannels))
 	return service, nil
 }
 
