@@ -275,7 +275,6 @@ class TestInsertParams(ApiReq):
         assert "The types of schema and data do not match" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5505")
     def test_insert_value_less(self):
         """
         target: test insert value less than other
@@ -288,11 +287,10 @@ class TestInsertParams(ApiReq):
         float_values = [np.float32(i) for i in range(nb)]
         float_vec_values = cf.gen_vectors(nb, ct.default_dim)
         data = [int_values, float_values, float_vec_values]
-        ids, _ = self.collection.insert(data=data)
-        log.info(ids)
+        ex, _ = self.collection.insert(data=data)
+        assert "message=arrays must all be same length" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5508")
     def test_insert_vector_value_less(self):
         """
         target: test insert vector value less than other
@@ -306,7 +304,7 @@ class TestInsertParams(ApiReq):
         float_vec_values = cf.gen_vectors(nb-1, ct.default_dim)
         data = [int_values, float_values, float_vec_values]
         ex, _ = self.collection.insert(data=data)
-        log.info(str(ex))
+        assert "arrays must all be same length" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_fields_more(self):
