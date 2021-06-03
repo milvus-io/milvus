@@ -47,6 +47,7 @@ func newSearchService(ctx context.Context,
 
 	searchStream, _ := factory.NewQueryMsgStream(ctx)
 	searchResultStream, _ := factory.NewQueryMsgStream(ctx)
+	log.Debug("newSearchService", zap.Any("SearchChannelNames", Params.SearchChannelNames), zap.Any("SearchResultChannels", Params.SearchResultChannelNames))
 
 	if len(Params.SearchChannelNames) > 0 && len(Params.SearchResultChannelNames) > 0 {
 		// query node need to consume search channels and produce search result channels when init.
@@ -102,14 +103,24 @@ func (s *searchService) consumeSearch() {
 		default:
 			msgPack := s.searchMsgStream.Consume()
 			if msgPack == nil || len(msgPack.Msgs) <= 0 {
+				msgPackNil := msgPack == nil
+				msgPackEmpty := true
+				if msgPack != nil {
+					msgPackEmpty = len(msgPack.Msgs) <= 0
+				}
+				log.Debug("consume search message failed", zap.Any("msgPack is Nil", msgPackNil),
+					zap.Any("msgPackEmpty", msgPackEmpty))
+
 				continue
 			}
 			for _, msg := range msgPack.Msgs {
-				log.Debug("consume search message", zap.Int64("msgID", msg.ID()))
 				sm, ok := msg.(*msgstream.SearchMsg)
 				if !ok {
 					continue
 				}
+				log.Debug("consume search message",
+					zap.Int64("msgID", msg.ID()),
+					zap.Any("collectionID", sm.CollectionID))
 				sp, ctx := trace.StartSpanFromContext(sm.TraceCtx())
 				sm.SetTraceCtx(ctx)
 				err := s.collectionCheck(sm.CollectionID)

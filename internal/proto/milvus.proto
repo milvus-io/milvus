@@ -274,12 +274,12 @@ message DropIndexRequest {
 }
 
 message InsertRequest {
-  common.MsgBase base = 1; // must
+  common.MsgBase base = 1;
   string db_name = 2;
-  string collection_name = 3; // must
-  string partition_name = 4; // must
-  repeated common.Blob row_data = 5; // must
-  repeated uint32 hash_keys = 6; // must
+  string collection_name = 3;
+  string partition_name = 4;
+  repeated schema.FieldData fields_data = 5;
+  repeated uint32 hash_keys = 6;
 }
 
 message InsertResponse {

@@ -6188,23 +6188,23 @@ class InsertRequest :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kRowDataFieldNumber = 5,
+    kFieldsDataFieldNumber = 5,
     kHashKeysFieldNumber = 6,
     kDbNameFieldNumber = 2,
     kCollectionNameFieldNumber = 3,
     kPartitionNameFieldNumber = 4,
     kBaseFieldNumber = 1,
   };
-  // repeated .milvus.proto.common.Blob row_data = 5;
-  int row_data_size() const;
-  void clear_row_data();
-  ::milvus::proto::common::Blob* mutable_row_data(int index);
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::Blob >*
-      mutable_row_data();
-  const ::milvus::proto::common::Blob& row_data(int index) const;
-  ::milvus::proto::common::Blob* add_row_data();
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::Blob >&
-      row_data() const;
+  // repeated .milvus.proto.schema.FieldData fields_data = 5;
+  int fields_data_size() const;
+  void clear_fields_data();
+  ::milvus::proto::schema::FieldData* mutable_fields_data(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::FieldData >*
+      mutable_fields_data();
+  const ::milvus::proto::schema::FieldData& fields_data(int index) const;
+  ::milvus::proto::schema::FieldData* add_fields_data();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::FieldData >&
+      fields_data() const;
 
   // repeated uint32 hash_keys = 6;
   int hash_keys_size() const;
@@ -6263,7 +6263,7 @@ class InsertRequest :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::Blob > row_data_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::FieldData > fields_data_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 > hash_keys_;
   mutable std::atomic<int> _hash_keys_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr db_name_;
@@ -14927,31 +14927,31 @@ inline void InsertRequest::set_allocated_partition_name(std::string* partition_n
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.InsertRequest.partition_name)
 }
 
-// repeated .milvus.proto.common.Blob row_data = 5;
-inline int InsertRequest::row_data_size() const {
-  return row_data_.size();
+// repeated .milvus.proto.schema.FieldData fields_data = 5;
+inline int InsertRequest::fields_data_size() const {
+  return fields_data_.size();
 }
-inline ::milvus::proto::common::Blob* InsertRequest::mutable_row_data(int index) {
-  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.InsertRequest.row_data)
-  return row_data_.Mutable(index);
+inline ::milvus::proto::schema::FieldData* InsertRequest::mutable_fields_data(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.InsertRequest.fields_data)
+  return fields_data_.Mutable(index);
 }
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::Blob >*
-InsertRequest::mutable_row_data() {
-  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.InsertRequest.row_data)
-  return &row_data_;
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::FieldData >*
+InsertRequest::mutable_fields_data() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.InsertRequest.fields_data)
+  return &fields_data_;
 }
-inline const ::milvus::proto::common::Blob& InsertRequest::row_data(int index) const {
-  // @@protoc_insertion_point(field_get:milvus.proto.milvus.InsertRequest.row_data)
-  return row_data_.Get(index);
+inline const ::milvus::proto::schema::FieldData& InsertRequest::fields_data(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.InsertRequest.fields_data)
+  return fields_data_.Get(index);
 }
-inline ::milvus::proto::common::Blob* InsertRequest::add_row_data() {
-  // @@protoc_insertion_point(field_add:milvus.proto.milvus.InsertRequest.row_data)
-  return row_data_.Add();
+inline ::milvus::proto::schema::FieldData* InsertRequest::add_fields_data() {
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.InsertRequest.fields_data)
+  return fields_data_.Add();
 }
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::Blob >&
-InsertRequest::row_data() const {
-  // @@protoc_insertion_point(field_list:milvus.proto.milvus.InsertRequest.row_data)
-  return row_data_;
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::FieldData >&
+InsertRequest::fields_data() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.InsertRequest.fields_data)
+  return fields_data_;
 }
 
 // repeated uint32 hash_keys = 6;

@@ -158,7 +158,7 @@ func (node *QueryNode) Init() error {
 		}
 	}
 
-	log.Debug("", zap.Int64("QueryNodeID", Params.QueryNodeID))
+	log.Debug("QueryNode Init ", zap.Int64("QueryNodeID", Params.QueryNodeID), zap.Any("searchChannelNames", Params.SearchChannelNames))
 
 	if node.masterService == nil {
 		log.Error("null master service detected")
