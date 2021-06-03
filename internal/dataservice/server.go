@@ -55,7 +55,7 @@ type Server struct {
 	kvClient          *etcdkv.EtcdKV
 	meta              *meta
 	segmentInfoStream msgstream.MsgStream
-	segAllocator      segmentAllocator
+	segmentManager    Manager
 	allocator         allocator
 	cluster           *cluster
 	masterClient      types.MasterService
@@ -135,7 +135,7 @@ func (s *Server) Start() error {
 
 	s.allocator = newAllocator(s.masterClient)
 
-	s.startSegmentAllocator()
+	s.startSegmentManager()
 	if err = s.initFlushMsgStream(); err != nil {
 		return err
 	}
@@ -187,9 +187,9 @@ func (s *Server) initServiceDiscovery() error {
 	return nil
 }
 
-func (s *Server) startSegmentAllocator() {
+func (s *Server) startSegmentManager() {
 	helper := createNewSegmentHelper(s.segmentInfoStream)
-	s.segAllocator = newSegmentAllocator(s.meta, s.allocator, withAllocHelper(helper))
+	s.segmentManager = newSegmentManager(s.meta, s.allocator, withAllocHelper(helper))
 }
 
 func (s *Server) initSegmentInfoChannel() error {
@@ -260,19 +260,9 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 	defer s.serverLoopWg.Done()
 	statsStream, _ := s.msFactory.NewMsgStream(ctx)
 	statsStream.AsConsumer([]string{Params.StatisticsChannelName}, Params.DataServiceSubscriptionName)
-	log.Debug("dataservice AsConsumer: " + Params.StatisticsChannelName + " : " + Params.DataServiceSubscriptionName)
-	// try to restore last processed pos
-	pos, err := s.loadStreamLastPos(streamTypeStats)
-	log.Debug("load last pos of stats channel", zap.Any("pos", pos), zap.Error(err))
-	if err == nil {
-		err = statsStream.Seek([]*internalpb.MsgPosition{pos})
-		if err != nil {
-			log.Error("Failed to seek to last pos for statsStream",
-				zap.String("StatisticsChanName", Params.StatisticsChannelName),
-				zap.String("DataServiceSubscriptionName", Params.DataServiceSubscriptionName),
-				zap.Error(err))
-		}
-	}
+	log.Debug("dataservce stats stream",
+		zap.String("channelName", Params.StatisticsChannelName),
+		zap.String("descriptionName", Params.DataServiceSubscriptionName))
 	statsStream.Start()
 	defer statsStream.Close()
 	for {
@@ -293,22 +283,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 			}
 			ssMsg := msg.(*msgstream.SegmentStatisticsMsg)
 			for _, stat := range ssMsg.SegStats {
-				if err := s.meta.UpdateSegmentStatistic(stat); err != nil {
-					log.Error("handle segment stat error",
-						zap.Int64("segmentID", stat.SegmentID),
-						zap.Error(err))
-					continue
-				}
-			}
-			if ssMsg.MsgPosition != nil {
-				err := s.storeStreamPos(streamTypeStats, ssMsg.MsgPosition)
-				if err != nil {
-					log.Error("Fail to store current success pos for Stats stream",
-						zap.Stringer("pos", ssMsg.MsgPosition),
-						zap.Error(err))
-				}
-			} else {
-				log.Warn("Empty Msg Pos found ", zap.Int64("msgid", msg.ID()))
+				s.segmentManager.UpdateSegmentStats(stat)
 			}
 		}
 	}
@@ -349,7 +324,7 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 
 			ch := ttMsg.ChannelName
 			ts := ttMsg.Timestamp
-			segments, err := s.segAllocator.GetFlushableSegments(ctx, ch, ts)
+			segments, err := s.segmentManager.GetFlushableSegments(ctx, ch, ts)
 			if err != nil {
 				log.Warn("get flushable segments failed", zap.Error(err))
 				continue
