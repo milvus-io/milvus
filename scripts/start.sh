@@ -1,30 +1,30 @@
 cd ..
 
 echo "starting master"
-nohup ./bin/masterservice > ~/masterservice.out 2>&1 &
+nohup ./bin/milvus run master > ~/masterservice.out 2>&1 &
 
 echo "starting dataservice"
-nohup ./bin/dataservice > ~/dataservice.out 2>&1 &
+nohup ./bin/milvus run dataservice > ~/dataservice.out 2>&1 &
 
 echo "starting datanode"
-nohup ./bin/datanode > ~/datanode.out 2>&1 &
+nohup ./bin/milvus run datanode > ~/datanode.out 2>&1 &
 
 echo "starting proxyservice"
-nohup ./bin/proxyservice > ~/proxyservice.out 2>&1 &
+nohup ./bin/milvus run proxyservice > ~/proxyservice.out 2>&1 &
 
 echo "starting proxynode"
-nohup ./bin/proxynode > ~/proxynode.out 2>&1 &
+nohup ./bin/milvus run proxynode > ~/proxynode.out 2>&1 &
 
 echo "starting queryservice"
-nohup ./bin/queryservice > ~/queryservice.out 2>&1 &
+nohup ./bin/milvus run queryservice > ~/queryservice.out 2>&1 &
 
 echo "starting querynode1"
 export QUERY_NODE_ID=1
-nohup ./bin/querynode > ~/querynode1.out 2>&1 &
+nohup ./bin/milvus run querynode > ~/querynode1.out 2>&1 &
 
 
 echo "starting indexservice"
-nohup ./bin/indexservice > ~/indexservice.out 2>&1 &
+nohup ./bin/milvus run indexservice > ~/indexservice.out 2>&1 &
 
 echo "starting indexnode"
-nohup ./bin/indexnode > ~/indexnode.out 2>&1 &
+nohup ./bin/milvus run indexnode > ~/indexnode.out 2>&1 &

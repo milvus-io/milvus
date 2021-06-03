@@ -198,9 +198,9 @@ func (index *CIndexQuery) QueryOnBinaryVecIndex(vectors []byte) (QueryResult, er
 	if len(vectors) <= 0 {
 		return nil, errors.New("nq is zero")
 	}
-	res, err := CreateQueryResult()
-	if err != nil {
-		return nil, err
+	res, err1 := CreateQueryResult()
+	if err1 != nil {
+		return nil, err1
 	}
 	fn := func() C.CStatus {
 		cRes, ok := res.(*CQueryResult)
@@ -210,7 +210,7 @@ func (index *CIndexQuery) QueryOnBinaryVecIndex(vectors []byte) (QueryResult, er
 		}
 		return C.QueryOnBinaryVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.uint8_t)(&vectors[0]), &cRes.ptr)
 	}
-	err = TryCatch(fn)
+	err := TryCatch(fn)
 	if err != nil {
 		return nil, err
 	}

@@ -150,9 +150,12 @@ func (node *ProxyNode) Init() error {
 	if node.queryService != nil {
 		resp, err := node.queryService.CreateQueryChannel(ctx)
 		if err != nil {
+			log.Debug("ProxyNode CreateQueryChannel failed", zap.Error(err))
 			return err
 		}
 		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+			log.Debug("ProxyNode CreateQueryChannel failed", zap.String("reason", resp.Status.Reason))
+
 			return errors.New(resp.Status.Reason)
 		}
 
@@ -160,6 +163,10 @@ func (node *ProxyNode) Init() error {
 		Params.SearchResultChannelNames = []string{resp.ResultChannel}
 		Params.RetrieveChannelNames = []string{resp.RequestChannel}
 		Params.RetrieveResultChannelNames = []string{resp.ResultChannel}
+		log.Debug("ProxyNode CreateQueryChannel success", zap.Any("SearchChannelNames", Params.SearchChannelNames))
+		log.Debug("ProxyNode CreateQueryChannel success", zap.Any("SearchResultChannelNames", Params.SearchResultChannelNames))
+		log.Debug("ProxyNode CreateQueryChannel success", zap.Any("RetrieveChannelNames", Params.RetrieveChannelNames))
+		log.Debug("ProxyNode CreateQueryChannel success", zap.Any("RetrieveResultChannelNames", Params.RetrieveResultChannelNames))
 	}
 
 	// todo

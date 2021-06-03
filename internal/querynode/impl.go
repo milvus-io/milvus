@@ -14,7 +14,6 @@ package querynode
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"go.uber.org/zap"
 
@@ -71,28 +70,30 @@ func (node *QueryNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.Stri
 }
 
 func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQueryChannelRequest) (*commonpb.Status, error) {
-	if node.searchService == nil || node.searchService.searchMsgStream == nil {
-		errMsg := "null search service or null search message stream"
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    errMsg,
-		}
+	//if node.searchService == nil || node.searchService.searchMsgStream == nil {
+	//	errMsg := "null search service or null search message stream"
+	//	status := &commonpb.Status{
+	//		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	//		Reason:    errMsg,
+	//	}
+	//
+	//	return status, errors.New(errMsg)
+	//}
+	//
+	//// add request channel
+	//consumeChannels := []string{in.RequestChannelID}
+	//consumeSubName := Params.MsgChannelSubName
+	//node.searchService.searchMsgStream.AsConsumer(consumeChannels, consumeSubName)
+	//node.retrieveService.retrieveMsgStream.AsConsumer(consumeChannels, "RetrieveSubName")
+	//log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
+	//
+	//// add result channel
+	//producerChannels := []string{in.ResultChannelID}
+	//node.searchService.searchResultMsgStream.AsProducer(producerChannels)
+	//node.retrieveService.retrieveResultMsgStream.AsProducer(producerChannels)
+	//log.Debug("querynode AsProducer: " + strings.Join(producerChannels, ", "))
 
-		return status, errors.New(errMsg)
-	}
-
-	// add request channel
-	consumeChannels := []string{in.RequestChannelID}
-	consumeSubName := Params.MsgChannelSubName
-	node.searchService.searchMsgStream.AsConsumer(consumeChannels, consumeSubName)
-	node.retrieveService.retrieveMsgStream.AsConsumer(consumeChannels, "RetrieveSubName")
-	log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
-
-	// add result channel
-	producerChannels := []string{in.ResultChannelID}
-	node.searchService.searchResultMsgStream.AsProducer(producerChannels)
-	node.retrieveService.retrieveResultMsgStream.AsProducer(producerChannels)
-	log.Debug("querynode AsProducer: " + strings.Join(producerChannels, ", "))
+	// Do nothing
 
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
