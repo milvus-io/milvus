@@ -159,18 +159,20 @@ func (node *DataNode) Init() error {
 		return fmt.Errorf("Receive error when registering data node, msg: %s", resp.Status.Reason)
 	}
 
-	for _, kv := range resp.InitParams.StartParams {
-		switch kv.Key {
-		case "DDChannelName":
-			Params.DDChannelNames = []string{kv.Value}
-		case "SegmentStatisticsChannelName":
-			Params.SegmentStatisticsChannelName = kv.Value
-		case "TimeTickChannelName":
-			Params.TimeTickChannelName = kv.Value
-		case "CompleteFlushChannelName":
-			Params.CompleteFlushChannelName = kv.Value
-		default:
-			return fmt.Errorf("Invalid key: %v", kv.Key)
+	if resp.InitParams != nil {
+		for _, kv := range resp.InitParams.StartParams {
+			switch kv.Key {
+			case "DDChannelName":
+				Params.DDChannelNames = []string{kv.Value}
+			case "SegmentStatisticsChannelName":
+				Params.SegmentStatisticsChannelName = kv.Value
+			case "TimeTickChannelName":
+				Params.TimeTickChannelName = kv.Value
+			case "CompleteFlushChannelName":
+				Params.CompleteFlushChannelName = kv.Value
+			default:
+				return fmt.Errorf("Invalid key: %v", kv.Key)
+			}
 		}
 	}
 

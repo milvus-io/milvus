@@ -16,14 +16,17 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 	"github.com/opentracing/opentracing-go"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 
@@ -54,7 +57,7 @@ func getMasterServiceAddr(sess *sessionutil.Session) (string, error) {
 	return ms.Address, nil
 }
 
-func NewClient(addr string, metaRoot string, etcdAddr []string, timeout time.Duration) (*GrpcClient, error) {
+func NewClient(metaRoot string, etcdAddr []string, timeout time.Duration) (*GrpcClient, error) {
 	sess := sessionutil.NewSession(context.Background(), metaRoot, etcdAddr)
 	if sess == nil {
 		return nil, fmt.Errorf("new session error, maybe can not connect to etcd")
@@ -63,7 +66,6 @@ func NewClient(addr string, metaRoot string, etcdAddr []string, timeout time.Dur
 	return &GrpcClient{
 		grpcClient: nil,
 		conn:       nil,
-		addr:       addr,
 		timeout:    timeout,
 		reconnTry:  300,
 		recallTry:  3,
@@ -71,23 +73,37 @@ func NewClient(addr string, metaRoot string, etcdAddr []string, timeout time.Dur
 	}, nil
 }
 
-func (c *GrpcClient) reconnect() error {
-	addr, err := getMasterServiceAddr(c.sess)
+func (c *GrpcClient) connect() error {
+	tracer := opentracing.GlobalTracer()
+	var err error
+	getMasterServiceAddrFn := func() error {
+		c.addr, err = getMasterServiceAddr(c.sess)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+	err = retry.Retry(c.reconnTry, 3*time.Second, getMasterServiceAddrFn)
 	if err != nil {
 		return err
 	}
-	tracer := opentracing.GlobalTracer()
-	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
-	defer cancel()
-	for i := 0; i < c.reconnTry; i++ {
-		if c.conn, err = grpc.DialContext(ctx, addr, grpc.WithInsecure(), grpc.WithBlock(),
+	connectGrpcFunc := func() error {
+		log.Debug("masterservice connect ", zap.String("address", c.addr))
+		ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+		defer cancel()
+		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(
-				otgrpc.OpenTracingStreamClientInterceptor(tracer))); err == nil {
-			break
+				otgrpc.OpenTracingStreamClientInterceptor(tracer)))
+		if err != nil {
+			return err
 		}
+		c.conn = conn
+		return nil
 	}
+
+	err = retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
 	if err != nil {
 		return err
 	}
@@ -96,28 +112,7 @@ func (c *GrpcClient) reconnect() error {
 }
 
 func (c *GrpcClient) Init() error {
-	tracer := opentracing.GlobalTracer()
-	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
-	defer cancel()
-	var err error
-	if c.addr != "" {
-		for i := 0; i < c.reconnTry; i++ {
-			if c.conn, err = grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
-				grpc.WithUnaryInterceptor(
-					otgrpc.OpenTracingClientInterceptor(tracer)),
-				grpc.WithStreamInterceptor(
-					otgrpc.OpenTracingStreamClientInterceptor(tracer))); err == nil {
-				break
-			}
-		}
-		if err != nil {
-			return fmt.Errorf("connect to specific address gprc error")
-		}
-	} else {
-		return c.reconnect()
-	}
-	c.grpcClient = masterpb.NewMasterServiceClient(c.conn)
-	return nil
+	return c.connect()
 }
 
 func (c *GrpcClient) Start() error {
@@ -138,7 +133,7 @@ func (c *GrpcClient) recall(caller func() (interface{}, error)) (interface{}, er
 		return ret, nil
 	}
 	for i := 0; i < c.recallTry; i++ {
-		err = c.reconnect()
+		err = c.connect()
 		if err == nil {
 			ret, err = caller()
 			if err == nil {
