@@ -100,24 +100,44 @@ func (rs *retrieveService) consumeRetrieve() {
 				continue
 			}
 			for _, msg := range msgPack.Msgs {
-				log.Debug("consume retrieve message", zap.Int64("msgID", msg.ID()))
 				rm, ok := msg.(*msgstream.RetrieveMsg)
 				if !ok {
+					// Not a retrieve request, discard
 					continue
 				}
+				log.Info("RetrieveService consume retrieve message",
+					zap.Int64("collectionID", rm.CollectionID),
+					zap.Int64("requestID", msg.ID()),
+					zap.Any("requestType", "retrieve"),
+				)
+
 				sp, ctx := trace.StartSpanFromContext(rm.TraceCtx())
 				rm.SetTraceCtx(ctx)
 				err := rs.collectionCheck(rm.CollectionID)
 				if err != nil {
+					log.Debug("Failed to check collection exist, discard.",
+						zap.Int64("collectionID", rm.CollectionID),
+						zap.Int64("requestID", msg.ID()),
+						zap.Any("requestType", "retrieve"),
+					)
 					continue
 				}
+
 				_, ok = rs.retrieveCollections[rm.CollectionID]
 				if !ok {
 					rs.startRetrieveCollection(rm.CollectionID)
-					log.Debug("new retrieve collection, start retrieve collection service",
-						zap.Int64("collectionID", rm.CollectionID))
+					log.Debug("Receive retrieve request on new collection, start an new retrieve collection service",
+						zap.Int64("collectionID", rm.CollectionID),
+						zap.Int64("requestID", msg.ID()),
+						zap.Any("requestType", "retrieve"),
+					)
 				}
+
 				rs.retrieveCollections[rm.CollectionID].msgBuffer <- rm
+				log.Info("Put retrieve msg into msgBuffer",
+					zap.Any("requestID", msg.ID),
+					zap.Any("requestType", "retrieve"),
+				)
 				sp.Finish()
 			}
 		}
