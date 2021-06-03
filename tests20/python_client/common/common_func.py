@@ -222,20 +222,3 @@ def modify_file(file_name_list, input_content=""):
             f.close()
 
     log.info("[modify_file] File(%s) modification is complete." % file_name_list)
-
-class MyThread(threading.Thread):
-    def __init__(self, target, args=()):
-        threading.Thread.__init__(self, target=target, args=args)
-
-    def run(self):
-        self.exc = None
-        try:
-            super(MyThread, self).run()
-        except BaseException as e:
-            self.exc = e
-            log.error(traceback.format_exc())
-
-    def join(self):
-        super(MyThread, self).join()
-        if self.exc:
-            raise self.exc

@@ -1,21 +1,29 @@
+import threading
 import time
 import pytest
-import pandas as pd
 import random
+import numpy as np
 
 from base.client_request import ApiReq
 from utils.util_log import test_log as log
-from common.common_type import *
-from common.common_func import *
+from common import common_func as cf
+from common import common_type as ct
 
 uid = "search_collection"
-default_schema = gen_default_collection_schema()
-default_collection_name = gen_unique_str(uid)
-default_search_field = default_float_vec_field_name
+default_schema = cf.gen_default_collection_schema()
+default_collection_name = cf.gen_unique_str(uid)
+default_search_field = ct.default_float_vec_field_name
 default_search_exp = "int64 >= 0"
+default_dim = ct.default_dim
+default_nq = ct.default_nq
+default_limit = ct.default_limit
+default_search_params = ct.default_search_params
+epsilon = ct.epsilon
+CaseLabel = ct.CaseLabel
 
 class TestCollectionSearch(ApiReq):
     """ Test case of search interface """
+
     def init_data(self, insert_data=False, nb=3000, partition_num=0, multiple=False, is_binary=False):
         '''
         target: initialize before search
@@ -27,13 +35,13 @@ class TestCollectionSearch(ApiReq):
             self.clear_env()
         else:
             global default_collection_name
-            default_collection_name = gen_unique_str(uid)
+            default_collection_name = cf.gen_unique_str(uid)
         # 1 create collection
         if not is_binary:
-            default_schema = gen_default_collection_schema()
+            default_schema = cf.gen_default_collection_schema()
         else:
-            default_schema = gen_default_binary_collection_schema()
-        collection = self._collection(default_collection_name, data=None, schema=default_schema, multiple=multiple)
+            default_schema = cf.gen_default_binary_collection_schema()
+        collection, _ = self.collection.collection_init(default_collection_name, data=None, schema=default_schema)
         # 2 add extra partition if specified (default is 1 partition named "_default")
         if partition_num > 0:
             log.info("init_data: creating partitions")
@@ -45,7 +53,6 @@ class TestCollectionSearch(ApiReq):
             log.info("init_data: created partitions %s" % par)
         # 3 insert data if specified
         if insert_data:
-            dim = default_dim
             vectors = []
             raw_vectors = []
             log.info("init_data: inserting default data into collection %s (num_entities: %s)" % (collection.name, nb))
@@ -53,22 +60,22 @@ class TestCollectionSearch(ApiReq):
                 num = partition_num + 1
                 for i in range(num):
                     if not is_binary:
-                        vectors_num = [[random.random() for _ in range(dim)] for _ in range(nb // num)]
+                        vectors_num = [[random.random() for _ in range(default_dim)] for _ in range(nb // num)]
                         vectors += vectors_num
                         collection.insert(
                             [[i for i in range(nb // num)], [np.float32(i) for i in range(nb // num)], vectors_num],
                             par[i].name)
                     else:
-                        default_binary_data, binary_raw_data = gen_default_binary_dataframe_data(nb // num)
+                        default_binary_data, binary_raw_data = cf.gen_default_binary_dataframe_data(nb // num)
                         collection.insert(default_binary_data, par[i].name)
                         vectors += default_binary_data
                         raw_vectors += binary_raw_data
             else:
                 if not is_binary:
-                    vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
+                    vectors = [[random.random() for _ in range(default_dim)] for _ in range(nb)]
                     collection.insert([[i for i in range(nb)], [np.float32(i) for i in range(nb)], vectors])
                 else:
-                    default_binary_data, raw_vectors = gen_default_binary_dataframe_data(nb)
+                    default_binary_data, raw_vectors = cf.gen_default_binary_dataframe_data(nb)
                     collection.insert(default_binary_data)
                     vectors = default_binary_data
             collection.load()
@@ -112,7 +119,7 @@ class TestCollectionSearch(ApiReq):
         res_list, _ = self.utility.list_collections()
         count = 0
         for res in res_list:
-            collection = self._collection(name=res, exist=True)
+            collection = self.collection.collection_init(name=res)
             if "search_collection" in res:
                 self.clear_data(collection)
                 count = count + 1
@@ -174,7 +181,7 @@ class TestCollectionSearch(ApiReq):
         log.info("test_search_no_collection: Searching without collection ")
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         with pytest.raises(Exception) as e:
-            collection.search(vectors, default_float_vec_field_name, default_search_params, default_limit, "float_vector > 0")
+            collection.search(vectors, default_search_field, default_search_params, default_limit, "float_vector > 0")
         assert "CollectionNotExistException" in str(e.value)
         log.info("test_search_no_collection: test PASS with expected assertion: %s" % e.value)
 
@@ -295,12 +302,12 @@ class TestCollectionSearch(ApiReq):
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         log.info("test_search_param_invalid_expr: searching with invalid expr (empty)")
         with pytest.raises(Exception) as e:
-            collection.search(vectors[:default_nq], "float_vector", default_search_params, default_limit, " ")
+            collection.search(vectors[:default_nq], default_search_field, default_search_params, default_limit, " ")
         assert "invalid expression" in str(e.value)
         log.info("test_search_param_invalid_expr: test PASS with expected assertion: %s" % e.value)
         log.info("test_search_param_invalid_expr: searching with invalid expr")
         with pytest.raises(Exception) as e:
-            collection.search(vectors[:default_nq], "float_vector", default_search_params, default_limit, "int63 >= 0")
+            collection.search(vectors[:default_nq], default_search_field, default_search_params, default_limit, "int63 >= 0")
         assert "invalid expression" in str(e.value)
         log.info("test_search_param_invalid_expr: test PASS with expected assertion: %s" % e.value)
 
@@ -336,7 +343,7 @@ class TestCollectionSearch(ApiReq):
         collection.create_index("binary_vector", default_index)
         # 3. search with exception
         nq = 2
-        _, binary_vectors = gen_binary_vectors(3000, default_dim)
+        _, binary_vectors = cf.gen_binary_vectors(3000, default_dim)
         wrong_search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
         with pytest.raises(Exception) as e:
             collection.search(binary_vectors[:nq], "binary_vector", wrong_search_params, default_limit, default_search_exp)
@@ -436,15 +443,14 @@ class TestCollectionSearch(ApiReq):
         log.info("Test case of search interface: test_search_collection_multiple_times")
         # 1. initialize with data
         collection, _ = self.init_data(True, 10)
-        # 2. search with invalid data -- invalid dim
+        # 2. search for multiple times
         N = 5
-        nq = 2
         limit = 1
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(nq)]
-        for i in range(N):
-            res = collection.search(vectors[:nq], "float_vector", default_search_params, limit, "int64 >= 0")
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        for _ in range(N):
+            res = collection.search(vectors[:default_nq], "float_vector", default_search_params, limit, default_search_exp)
             log.info("test_search_collection_multiple_times: Searched results length: %s" % len(res))
-            assert len(res) == nq
+            assert len(res) == default_nq
             for hits in res:
                 assert len(hits) == limit
                 assert len(hits.ids) == limit
@@ -530,14 +536,14 @@ class TestCollectionSearch(ApiReq):
         expected: the return distance equals to the computed value
         '''
         # 1. initialize with binary data
-        collection, binary_vector, binary_raw_vector = self.init_data(insert_data=True, is_binary=True)
+        collection, _, binary_raw_vector = self.init_data(insert_data=True, is_binary=True)
         # 2. create index
         default_index = {"index_type": "BIN_IVF_FLAT", "params": {"nlist": 128}, "metric_type": "JACCARD"}
         collection.create_index("binary_vector", default_index)
         # 3. compute the distance
-        query_raw_vector, binary_vectors = gen_binary_vectors(3000, default_dim)
-        distance_0 = jaccard(query_raw_vector[0], binary_raw_vector[0])
-        distance_1 = jaccard(query_raw_vector[0], binary_raw_vector[1])
+        query_raw_vector, binary_vectors = cf.gen_binary_vectors(3000, default_dim)
+        distance_0 = cf.jaccard(query_raw_vector[0], binary_raw_vector[0])
+        distance_1 = cf.jaccard(query_raw_vector[0], binary_raw_vector[1])
         # 4. search and compare the distance
         search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
         res = collection.search(binary_vectors[:default_nq], "binary_vector", search_params, default_limit, "int64 >= 0")
@@ -551,16 +557,17 @@ class TestCollectionSearch(ApiReq):
         expected: the return distance equals to the computed value
         '''
         # 1. initialize with binary data
-        collection, binary_vector, binary_raw_vector = self.init_data(insert_data=True, is_binary=True)
+        collection, _, _ = self.init_data(insert_data=True, is_binary=True)
         # 2. create index
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
         collection.create_index("binary_vector", default_index)
         # 3. search and assert
-        query_raw_vector, binary_vectors = gen_binary_vectors(3000, default_dim)
+        query_raw_vector, binary_vectors = cf.gen_binary_vectors(3000, default_dim)
         search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
         with pytest.raises(Exception) as e:
             collection.search(binary_vectors[:default_nq], "binary_vector", search_params, default_limit,
                               "int64 >= 0")
+        log.info("test_search_binary_flat_with_L2: test PASS with expected assertion: %s" % e.value)
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_search_binary_hamming_flat_index(self):
@@ -570,14 +577,14 @@ class TestCollectionSearch(ApiReq):
         expected: the return distance equals to the computed value
         '''
         # 1. initialize with binary data
-        collection, binary_vector, binary_raw_vector = self.init_data(insert_data=True, is_binary=True)
+        collection, _, binary_raw_vector = self.init_data(insert_data=True, is_binary=True)
         # 2. create index
         default_index = {"index_type": "BIN_IVF_FLAT", "params": {"nlist": 128}, "metric_type": "HAMMING"}
         collection.create_index("binary_vector", default_index)
         # 3. compute the distance
-        query_raw_vector, binary_vectors = gen_binary_vectors(3000, default_dim)
-        distance_0 = hamming(query_raw_vector[0], binary_raw_vector[0])
-        distance_1 = hamming(query_raw_vector[0], binary_raw_vector[1])
+        query_raw_vector, binary_vectors = cf.gen_binary_vectors(3000, default_dim)
+        distance_0 = cf.hamming(query_raw_vector[0], binary_raw_vector[0])
+        distance_1 = cf.hamming(query_raw_vector[0], binary_raw_vector[1])
         # 4. search and compare the distance
         search_params = {"metric_type": "HAMMING", "params": {"nprobe": 10}}
         res = collection.search(binary_vectors[:default_nq], "binary_vector", search_params, default_limit,
@@ -592,14 +599,14 @@ class TestCollectionSearch(ApiReq):
         expected: the return distance equals to the computed value
         '''
         # 1. initialize with binary data
-        collection, binary_vector, binary_raw_vector = self.init_data(insert_data=True, is_binary=True)
+        collection, _, binary_raw_vector = self.init_data(insert_data=True, is_binary=True)
         # 2. create index
         default_index = {"index_type": "BIN_IVF_FLAT", "params": {"nlist": 128}, "metric_type": "TANIMOTO"}
         collection.create_index("binary_vector", default_index)
         # 3. compute the distance
-        query_raw_vector, binary_vectors = gen_binary_vectors(3000, default_dim)
-        distance_0 = tanimoto(query_raw_vector[0], binary_raw_vector[0])
-        distance_1 = tanimoto(query_raw_vector[0], binary_raw_vector[1])
+        query_raw_vector, binary_vectors = cf.gen_binary_vectors(3000, default_dim)
+        distance_0 = cf.tanimoto(query_raw_vector[0], binary_raw_vector[0])
+        distance_1 = cf.tanimoto(query_raw_vector[0], binary_raw_vector[1])
         # 4. search and compare the distance
         search_params = {"metric_type": "TANIMOTO", "params": {"nprobe": 10}}
         res = collection.search(binary_vectors[:default_nq], "binary_vector", search_params, default_limit,
@@ -615,7 +622,7 @@ class TestCollectionSearch(ApiReq):
         '''
         log.info("Test case of search interface: test_search_multi_collections")
         connection_num = 10
-        for i in range(connection_num):
+        for _ in range(connection_num):
             # 1. initialize with data
             collection, _ = self.init_data(insert_data=True, multiple=True)
             # 2. search
@@ -656,7 +663,7 @@ class TestCollectionSearch(ApiReq):
         # 2. search with multi-processes
         log.info("test_search_concurrent_multithreads: searching with %s processes" % threads_num)
         for i in range(threads_num):
-            t = MyThread(target=search, args=(collection,))
+            t = threading.Thread(target=search, args=(collection,))
             threads.append(t)
             t.start()
             time.sleep(0.2)
