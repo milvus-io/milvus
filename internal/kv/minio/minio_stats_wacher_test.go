@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 )
@@ -51,12 +52,15 @@ func TestMinioStats(t *testing.T) {
 		var e struct{}
 		receiveCh <- e
 	}
+	log.Debug("startCh background")
 	go w.StartBackground(context.TODO())
 
+	log.Debug("start receive")
 	<-startCh
 	err = cli.Save("a", string([]byte{65, 65, 65, 65, 65}))
 	assert.Nil(t, err)
 
+	log.Debug("receiveCh receive")
 	<-receiveCh
 
 	size := w.GetObjectCreateSize()

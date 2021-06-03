@@ -69,22 +69,22 @@ func (s *MinioStatsWatcher) StartBackground(ctx context.Context) {
 		case <-ctx.Done():
 			log.Debug("minio stats shutdown")
 			return
-		case info, ok := <-ch:
-			if !ok {
-				log.Debug("channel is closed")
-				return
-			}
+		case info := <-ch:
+			log.Debug("ch receive info")
 			if info.Err != nil {
 				log.Error("minio receive wrong notification", zap.Error(info.Err))
 				continue
 			}
 			var size int64
+			log.Debug("range records")
 			for _, record := range info.Records {
 				size += record.S3.Object.Size
 			}
+			log.Debug("enter lock")
 			s.mu.Lock()
 			s.objCreateSize += size
 			s.mu.Unlock()
+			log.Debug("outof lock")
 			s.helper.eventAfterNotify()
 		}
 	}
