@@ -75,7 +75,7 @@ func (c *Client) Init() error {
 		return nil
 	}
 
-	err := retry.Retry(c.reconnTry, time.Millisecond*500, connectGrpcFunc)
+	err := retry.Retry(100000, time.Millisecond*500, connectGrpcFunc)
 	if err != nil {
 		log.Debug("DataNodeClient try connect failed", zap.Error(err))
 		return err

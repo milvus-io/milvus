@@ -63,7 +63,7 @@ func (c *Client) Init() error {
 		c.conn = conn
 		return nil
 	}
-	err := retry.Retry(c.reconnTry, time.Millisecond*200, connectGrpcFunc)
+	err := retry.Retry(100000, time.Millisecond*200, connectGrpcFunc)
 	if err != nil {
 		log.Debug("ProxyNodeClient connect failed", zap.Error(err))
 		return err

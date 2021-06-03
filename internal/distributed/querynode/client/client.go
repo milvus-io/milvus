@@ -29,11 +29,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	RPCConnectionTimeout = 30 * time.Second
-	Retry                = 3
-)
-
 type Client struct {
 	ctx        context.Context
 	grpcClient querypb.QueryNodeClient
@@ -70,7 +65,7 @@ func (c *Client) Init() error {
 		c.conn = conn
 		return nil
 	}
-	err := retry.Retry(c.reconnTry, time.Millisecond*200, connectGrpcFunc)
+	err := retry.Retry(100000, time.Millisecond*200, connectGrpcFunc)
 	if err != nil {
 		log.Debug("QueryNodeClient try connect failed", zap.Error(err))
 		return err

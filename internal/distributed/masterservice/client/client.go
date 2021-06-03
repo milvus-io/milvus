@@ -37,6 +37,7 @@ type GrpcClient struct {
 
 	//inner member
 	addr      string
+	ctx        context.Context
 	timeout   time.Duration
 	reconnTry int
 	recallTry int
@@ -73,6 +74,7 @@ func NewClient(addr string, metaRoot string, etcdAddr []string, timeout time.Dur
 		conn:       nil,
 		addr:       addr,
 		timeout:    timeout,
+		ctx:       context.Background(),
 		reconnTry:  300,
 		recallTry:  3,
 		sess:       sess,
@@ -87,10 +89,8 @@ func (c *GrpcClient) reconnect() error {
 	}
 	log.Debug("MasterServiceClient getMasterServiceAddr success")
 	tracer := opentracing.GlobalTracer()
-	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
-	defer cancel()
 	for i := 0; i < c.reconnTry; i++ {
-		if c.conn, err = grpc.DialContext(ctx, addr, grpc.WithInsecure(), grpc.WithBlock(),
+		if c.conn, err = grpc.DialContext(c.ctx, addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(
@@ -109,13 +109,11 @@ func (c *GrpcClient) reconnect() error {
 
 func (c *GrpcClient) Init() error {
 	tracer := opentracing.GlobalTracer()
-	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
-	defer cancel()
 	var err error
 	log.Debug("MasterServiceClient Init", zap.Any("c.addr", c.addr))
 	if c.addr != "" {
-		for i := 0; i < c.reconnTry; i++ {
-			if c.conn, err = grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
+		for i := 0; i < 100000; i++ {
+			if c.conn, err = grpc.DialContext(c.ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 				grpc.WithUnaryInterceptor(
 					otgrpc.OpenTracingClientInterceptor(tracer)),
 				grpc.WithStreamInterceptor(
