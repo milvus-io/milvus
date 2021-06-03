@@ -93,7 +93,7 @@ func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterN
 	}
 
 	registerNodeAddress := req.Address.Ip + ":" + strconv.FormatInt(req.Address.Port, 10)
-	client, err := nodeclient.NewClient(registerNodeAddress)
+	client, err := nodeclient.NewClient(registerNodeAddress, 3*time.Second)
 	if err != nil {
 		log.Debug("register query node new NodeClient failed", zap.Any("QueryNodeID", nodeID), zap.String("address", req.Address.String()))
 

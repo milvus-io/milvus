@@ -81,10 +81,10 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 		flushCh:   make(chan UniqueID, 1024),
 	}
 	s.dataClientCreator = func(addr string) (types.DataNode, error) {
-		return datanodeclient.NewClient(addr, 10*time.Second)
+		return datanodeclient.NewClient(addr, 3*time.Second)
 	}
 	s.masterClientCreator = func(addr string) (types.MasterService, error) {
-		return masterclient.NewClient(addr, Params.MetaRootPath,
+		return masterclient.NewClient(Params.MetaRootPath,
 			[]string{Params.EtcdAddress}, masterClientTimout)
 	}
 
