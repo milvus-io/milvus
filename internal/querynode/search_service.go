@@ -105,11 +105,13 @@ func (s *searchService) consumeSearch() {
 				continue
 			}
 			for _, msg := range msgPack.Msgs {
-				log.Debug("consume search message", zap.Int64("msgID", msg.ID()))
 				sm, ok := msg.(*msgstream.SearchMsg)
 				if !ok {
 					continue
 				}
+				log.Debug("consume search message",
+					zap.Int64("msgID", msg.ID()),
+					zap.Any("collectionID", sm.CollectionID))
 				sp, ctx := trace.StartSpanFromContext(sm.TraceCtx())
 				sm.SetTraceCtx(ctx)
 				err := s.collectionCheck(sm.CollectionID)
