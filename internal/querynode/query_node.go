@@ -140,11 +140,11 @@ func (node *QueryNode) Init() error {
 		log.Debug("QueryNode RegisterNode failed", zap.Error(err))
 		panic(err)
 	}
-	log.Debug("QueryNode RegisterNode success")
 	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
 		log.Debug("QueryNode RegisterNode failed", zap.Any("Reason", resp.Status.Reason))
 		panic(resp.Status.Reason)
 	}
+	log.Debug("QueryNode RegisterNode success")
 
 	for _, kv := range resp.InitParams.StartParams {
 		switch kv.Key {
