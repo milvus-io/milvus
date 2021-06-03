@@ -306,12 +306,6 @@ func TestMasterService(t *testing.T) {
 	err = core.SetQueryService(qm)
 	assert.Nil(t, err)
 
-	//err = core.Init()
-	//assert.Nil(t, err)
-
-	//err = core.Start()
-	//assert.Nil(t, err)
-
 	tmpFactory := msgstream.NewPmsFactory()
 
 	m := map[string]interface{}{
@@ -340,6 +334,7 @@ func TestMasterService(t *testing.T) {
 	msgPack := GenFlushedSegMsgPack(9999)
 	err = dataServiceSegmentStream.Produce(msgPack)
 	assert.Nil(t, err)
+
 	flushedSegMsgPack := flushedSegStream.Consume()
 	flushedSegPosStr, _ := EncodeMsgPositions(flushedSegMsgPack.EndPositions)
 	_, err = etcdCli.Put(ctx, path.Join(Params.MetaRootPath, FlushedSegMsgEndPosPrefix), flushedSegPosStr)
