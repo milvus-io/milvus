@@ -86,7 +86,12 @@ func EncodeDdOperation(m proto.Message, m1 proto.Message, ddType string) (string
 	return string(ddOpByte), nil
 }
 
-// SegmentIndexInfoEqual return true if 2 SegmentIndexInfo are identical
+// DecodeDdOperation deserialize string to DdOperation
+func DecodeDdOperation(str string, ddOp *DdOperation) error {
+	return json.Unmarshal([]byte(str), ddOp)
+}
+
+// SegmentIndexInfoEqual return true if SegmentIndexInfos are identical
 func SegmentIndexInfoEqual(info1 *etcdpb.SegmentIndexInfo, info2 *etcdpb.SegmentIndexInfo) bool {
 	return info1.SegmentID == info2.SegmentID &&
 		info1.FieldID == info2.FieldID &&
@@ -105,4 +110,12 @@ func EncodeMsgPositions(msgPositions []*msgstream.MsgPosition) (string, error) {
 		return "", err
 	}
 	return string(resByte), nil
+}
+
+// DecodeMsgPositions deserialize string to []*MsgPosition
+func DecodeMsgPositions(str string, msgPositions *[]*msgstream.MsgPosition) error {
+	if str == "" || str == "null" {
+		return nil
+	}
+	return json.Unmarshal([]byte(str), msgPositions)
 }

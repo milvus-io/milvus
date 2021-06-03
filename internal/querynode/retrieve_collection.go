@@ -74,6 +74,8 @@ func newRetrieveCollection(releaseCtx context.Context,
 
 		msgBuffer:   msgBuffer,
 		unsolvedMsg: unsolvedMsg,
+
+		retrieveResultMsgStream: retrieveResultStream,
 	}
 
 	rc.register()
@@ -113,6 +115,11 @@ func (rc *retrieveCollection) waitNewTSafe() Timestamp {
 		}
 	}
 	return t
+}
+
+func (rc *retrieveCollection) start() {
+	go rc.receiveRetrieveMsg()
+	go rc.doUnsolvedMsgRetrieve()
 }
 
 func (rc *retrieveCollection) register() {
@@ -260,8 +267,9 @@ func (rc *retrieveCollection) doUnsolvedMsgRetrieve() {
 
 func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error {
 	// TODO(yukun)
+	resultChannelInt := 0
 	retrieveResultMsg := &msgstream.RetrieveResultMsg{
-		BaseMsg: msgstream.BaseMsg{Ctx: retrieveMsg.Ctx},
+		BaseMsg: msgstream.BaseMsg{Ctx: retrieveMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}},
 		RetrieveResults: internalpb.RetrieveResults{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_RetrieveResult,

@@ -20,10 +20,12 @@ def partition_catch():
     def wrapper(func):
         def inner_wrapper(*args, **kwargs):
             try:
-                return func(*args, **kwargs), True
+                res = func(*args, **kwargs)
+                log.debug("(func_res) Response : %s " % str(res))
+                return res, True
             except Exception as e:
-                log.info("exception: %s", e)
-                # log.error("[Partition API Exception]%s: %s" % (str(func), str(e)))
+                # log.info("exception: %s", e)
+                log.error("[Partition API Exception]%s: %s" % (str(func), str(e)))
                 return Error(e), False
         return inner_wrapper
     return wrapper
@@ -38,6 +40,7 @@ def func_req(_list, **kwargs):
             if len(_list) > 1:
                 for a in _list[1:]:
                     arg.append(a)
+            log.debug("(func_req)[%s] Parameters ars arg: %s, kwargs: %s" % (str(func), str(arg), str(kwargs)))
             return func(*arg, **kwargs)
     return False, False
 
