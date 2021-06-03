@@ -46,7 +46,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb
 		resp.Reason = "server is closed"
 		return resp, nil
 	}
-	if err := s.segAllocator.SealAllSegments(ctx, req.CollectionID); err != nil {
+	if err := s.segmentManager.SealAllSegments(ctx, req.CollectionID); err != nil {
 		resp.Reason = fmt.Sprintf("Seal all segments error %s", err)
 		return resp, nil
 	}
@@ -94,7 +94,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 
 		s.cluster.watchIfNeeded(r.ChannelName, r.CollectionID)
 
-		segmentID, retCount, expireTs, err := s.segAllocator.AllocSegment(ctx,
+		segmentID, retCount, expireTs, err := s.segmentManager.AllocSegment(ctx,
 			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
 		if err != nil {
 			errMsg := fmt.Sprintf("allocation of collection %d, partition %d, channel %s, count %d error:  %s",
@@ -325,7 +325,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	log.Debug("flush segment with meta", zap.Int64("id", req.SegmentID),
 		zap.Any("meta", meta))
 
-	s.segAllocator.DropSegment(ctx, req.SegmentID)
+	s.segmentManager.DropSegment(ctx, req.SegmentID)
 
 	s.flushCh <- req.SegmentID
 	resp.ErrorCode = commonpb.ErrorCode_Success
