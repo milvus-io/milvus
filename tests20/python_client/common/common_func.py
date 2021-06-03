@@ -160,8 +160,9 @@ def gen_invalid_field_types():
 def gen_all_type_fields():
     fields = []
     for k, v in DataType.__members__.items():
-        field = FieldSchema(name=k.lower(), dtype=v)
-        fields.append(field)
+        if v != DataType.UNKNOWN:
+            field = FieldSchema(name=k.lower(), dtype=v)
+            fields.append(field)
     return fields
 
 
