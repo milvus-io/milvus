@@ -38,12 +38,13 @@ type QueryService struct {
 	loopCancel context.CancelFunc
 
 	queryServiceID uint64
-	replica        Replica
-	sched          *TaskScheduler
+	meta        *meta
+	cluster     *queryNodeCluster
+	scheduler      *TaskScheduler
 
 	dataServiceClient   types.DataService
 	masterServiceClient types.MasterService
-	queryNodes          map[int64]*queryNodeInfo
+	//queryNodes          map[int64]*queryNodeCluster
 	queryChannels       []*queryChannelInfo
 	qcMutex             *sync.Mutex
 
@@ -69,14 +70,14 @@ func (qs *QueryService) Init() error {
 }
 
 func (qs *QueryService) Start() error {
-	qs.sched.Start()
+	qs.scheduler.Start()
 	log.Debug("start scheduler ...")
 	qs.UpdateStateCode(internalpb.StateCode_Healthy)
 	return nil
 }
 
 func (qs *QueryService) Stop() error {
-	qs.sched.Close()
+	qs.scheduler.Close()
 	log.Debug("close scheduler ...")
 	qs.loopCancel()
 	qs.UpdateStateCode(internalpb.StateCode_Abnormal)
@@ -89,21 +90,22 @@ func (qs *QueryService) UpdateStateCode(code internalpb.StateCode) {
 
 func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryService, error) {
 	rand.Seed(time.Now().UnixNano())
-	nodes := make(map[int64]*queryNodeInfo)
+	//cluster := newQueryNodeCluster()
 	queryChannels := make([]*queryChannelInfo, 0)
 	ctx1, cancel := context.WithCancel(ctx)
-	replica := newMetaReplica()
-	scheduler := NewTaskScheduler(ctx1)
+	meta := newMeta()
+	scheduler := NewTaskScheduler(ctx1, meta)
 	service := &QueryService{
 		loopCtx:       ctx1,
 		loopCancel:    cancel,
-		replica:       replica,
-		sched:         scheduler,
-		queryNodes:    nodes,
+		meta:       meta,
+		scheduler:     scheduler,
+		//cluster:    cluster,
 		queryChannels: queryChannels,
 		qcMutex:       &sync.Mutex{},
 		msFactory:     factory,
 	}
+	service.cluster = newQueryNodeCluster(meta)
 
 	service.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return service, nil

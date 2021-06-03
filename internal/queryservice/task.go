@@ -33,8 +33,15 @@ import (
 const (
 	LoadCollectionTaskName    = "LoadCollectionTask"
 	LoadPartitionTaskName     = "LoadPartitionTask"
-	ReleaseCollectionTaskName = "ReleaseCollection"
-	ReleasePartitionTaskName  = "ReleasePartition"
+	LoadSegmentTaskName       = "LoadSegmentTask"
+	ReleaseCollectionTaskName = "ReleaseCollectionTask"
+	ReleasePartitionTaskName  = "ReleasePartitionTask"
+	ReleaseSegmentTaskName    = "ReleaseSegmentTask"
+	WatchDmChannelTaskName    = "WatchDmChannelTask"
+	AddQueryChannelTaskName   = "AddQueryChannelTask"
+	HandoffSegmentTaskName    = "HandoffSegmentTask"
+	NodeDownTaskName          = "NodeDownTask"
+	LoadBalanceTaskName       = "LoadBalanceTask"
 )
 
 type task interface {
@@ -48,27 +55,38 @@ type task interface {
 	PostExecute(ctx context.Context) error
 	WaitToFinish() error
 	Notify(err error)
+	taskPriority() querypb.TriggerCondition
 }
 
 type BaseTask struct {
 	Condition
-	ctx    context.Context
-	cancel context.CancelFunc
-	result *commonpb.Status
+	ctx              context.Context
+	cancel           context.CancelFunc
+	result           *commonpb.Status
+	triggerCondition querypb.TriggerCondition
+	parentTask       task
+	childTasks       []task
 }
 
 func (bt *BaseTask) TraceCtx() context.Context {
 	return bt.ctx
 }
 
+func (bt *BaseTask) taskPriority() querypb.TriggerCondition {
+	return bt.triggerCondition
+}
+
+//************************grpcTask***************************//
 type LoadCollectionTask struct {
 	BaseTask
 	*querypb.LoadCollectionRequest
-	masterService types.MasterService
-	dataService   types.DataService
-	queryNodes    map[int64]*queryNodeInfo
-	meta          Replica
-	watchNeeded   bool
+	masterService            types.MasterService
+	dataService              types.DataService
+	cluster               *queryNodeCluster
+	meta                     *meta
+	toWatchPosition          map[string]*internalpb.MsgPosition
+	excludeSegment           map[string][]UniqueID
+	watchNeeded              bool
 }
 
 func (lct *LoadCollectionTask) ID() UniqueID {
@@ -174,12 +192,14 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 			ctx:       ctx,
 			Condition: NewTaskCondition(ctx),
 		},
-		LoadPartitionsRequest: loadPartitionsRequest,
-		masterService:         lct.masterService,
-		dataService:           lct.dataService,
-		queryNodes:            lct.queryNodes,
-		meta:                  lct.meta,
-		watchNeeded:           false,
+		LoadPartitionsRequest:    loadPartitionsRequest,
+		masterService:            lct.masterService,
+		dataService:              lct.dataService,
+		cluster:               lct.cluster,
+		meta:                     lct.meta,
+		toWatchPosition:          lct.toWatchPosition,
+		excludeSegment: lct.excludeSegment,
+		watchNeeded:              false,
 	}
 
 	err = loadPartitionTask.PreExecute(ctx)
@@ -209,7 +229,7 @@ func (lct *LoadCollectionTask) PostExecute(ctx context.Context) error {
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
 	if lct.watchNeeded {
-		err := watchDmChannels(ctx, lct.dataService, lct.queryNodes, lct.meta, dbID, collectionID, lct.Base)
+		err := watchDmChannels(ctx, lct.dataService, lct.cluster, lct.meta, dbID, collectionID, lct.Base, lct.toWatchPosition, lct.excludeSegment)
 		if err != nil {
 			log.Debug("watchDmChannels failed", zap.Int64("msgID", lct.ID()), zap.Int64("collectionID", collectionID), zap.Error(err))
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
@@ -230,7 +250,7 @@ func (lct *LoadCollectionTask) PostExecute(ctx context.Context) error {
 type ReleaseCollectionTask struct {
 	BaseTask
 	*querypb.ReleaseCollectionRequest
-	queryNodes map[int64]*queryNodeInfo
+	cluster *queryNodeCluster
 	meta       Replica
 }
 
@@ -263,8 +283,8 @@ func (rct *ReleaseCollectionTask) Execute(ctx context.Context) error {
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
-	for nodeID, node := range rct.queryNodes {
-		_, err := node.ReleaseCollection(ctx, rct.ReleaseCollectionRequest)
+	for nodeID := range rct.cluster.nodes {
+		_, err := rct.cluster.ReleaseCollection(ctx, nodeID, rct.ReleaseCollectionRequest)
 		if err != nil {
 			log.Error("release collection end, node occur error", zap.String("nodeID", fmt.Sprintln(nodeID)))
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
@@ -305,11 +325,13 @@ func (rct *ReleaseCollectionTask) PostExecute(ctx context.Context) error {
 type LoadPartitionTask struct {
 	BaseTask
 	*querypb.LoadPartitionsRequest
-	masterService types.MasterService
-	dataService   types.DataService
-	queryNodes    map[int64]*queryNodeInfo
-	meta          Replica
-	watchNeeded   bool
+	masterService            types.MasterService
+	dataService              types.DataService
+	cluster               *queryNodeCluster
+	meta                     *meta
+	toWatchPosition          map[string]*internalpb.MsgPosition
+	excludeSegment           map[string][]UniqueID
+	watchNeeded              bool
 }
 
 func (lpt *LoadPartitionTask) ID() UniqueID {
@@ -369,12 +391,13 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 					Timestamp: lpt.Base.Timestamp,
 					MsgID:     rand.Int63n(10000000000),
 				},
+				DbID: dbID,
 				CollectionID: collectionID,
 				PartitionID:  partitionID,
 				Schema:       schema,
 			}
-			for _, node := range lpt.queryNodes {
-				_, err := node.LoadSegments(ctx, loadSegmentRequest)
+			for nodeID := range lpt.cluster.nodes {
+				_, err := lpt.cluster.LoadSegments(ctx, nodeID, loadSegmentRequest)
 				if err != nil {
 					status.Reason = err.Error()
 					lpt.result = status
@@ -445,20 +468,22 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 				}
 			}
 
-			err = lpt.meta.addDmChannel(dbID, collectionID, channel, watchedStartPos)
+			err = lpt.meta.addDmChannels(dbID, collectionID, []string{channel})
 			if err != nil {
 				status.Reason = err.Error()
 				lpt.result = status
 				return err
 			}
-			err = lpt.meta.addExcludeSegmentIDs(dbID, collectionID, toLoadSegmentIDs)
-			if err != nil {
-				status.Reason = err.Error()
-				lpt.result = status
-				return err
-			}
+			lpt.toWatchPosition[channel] = watchedStartPos
+			lpt.excludeSegment[channel] = toLoadSegmentIDs
+			//err = lpt.meta.addExcludeSegmentIDs(dbID, collectionID, toLoadSegmentIDs)
+			//if err != nil {
+			//	status.Reason = err.Error()
+			//	lpt.result = status
+			//	return err
+			//}
 
-			segment2Node := shuffleSegmentsToQueryNode(toLoadSegmentIDs, lpt.queryNodes)
+			segment2Node := shuffleSegmentsToQueryNode(toLoadSegmentIDs, lpt.cluster)
 			for nodeID, assignedSegmentIDs := range segment2Node {
 				loadSegmentRequest := &querypb.LoadSegmentsRequest{
 					// TODO: use unique id allocator to assign reqID
@@ -466,19 +491,20 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 						Timestamp: lpt.Base.Timestamp,
 						MsgID:     rand.Int63n(10000000000),
 					},
+					DbID: dbID,
 					CollectionID: collectionID,
 					PartitionID:  partitionID,
 					SegmentIDs:   assignedSegmentIDs,
 					Schema:       schema,
 				}
 
-				queryNode := lpt.queryNodes[nodeID]
-				status, err := queryNode.LoadSegments(ctx, loadSegmentRequest)
+				//node := lpt.cluster.nodes[nodeID]
+				status, err := lpt.cluster.LoadSegments(ctx, nodeID, loadSegmentRequest)
 				if err != nil {
 					lpt.result = status
 					return err
 				}
-				queryNode.AddSegments(assignedSegmentIDs, collectionID)
+				lpt.cluster.AddSegments(assignedSegmentIDs, nodeID, collectionID)
 			}
 		}
 
@@ -502,7 +528,7 @@ func (lpt *LoadPartitionTask) PostExecute(ctx context.Context) error {
 	collectionID := lpt.CollectionID
 	partitionIDs := lpt.PartitionIDs
 	if lpt.watchNeeded {
-		err := watchDmChannels(ctx, lpt.dataService, lpt.queryNodes, lpt.meta, dbID, collectionID, lpt.Base)
+		err := watchDmChannels(ctx, lpt.dataService, lpt.cluster, lpt.meta, dbID, collectionID, lpt.Base, lpt.toWatchPosition, lpt.excludeSegment)
 		if err != nil {
 			log.Debug("watchDmChannels failed", zap.Int64("msgID", lpt.ID()), zap.Int64s("partitionIDs", partitionIDs), zap.Error(err))
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
@@ -523,8 +549,8 @@ func (lpt *LoadPartitionTask) PostExecute(ctx context.Context) error {
 type ReleasePartitionTask struct {
 	BaseTask
 	*querypb.ReleasePartitionsRequest
-	queryNodes map[int64]*queryNodeInfo
-	meta       Replica
+	cluster *queryNodeCluster
+	meta       *meta
 }
 
 func (rpt *ReleasePartitionTask) ID() UniqueID {
@@ -557,8 +583,8 @@ func (rpt *ReleasePartitionTask) Execute(ctx context.Context) error {
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
-	for _, node := range rpt.queryNodes {
-		status, err := node.client.ReleasePartitions(ctx, rpt.ReleasePartitionsRequest)
+	for nodeID := range rpt.cluster.nodes {
+		status, err := rpt.cluster.ReleasePartitions(ctx, nodeID, rpt.ReleasePartitionsRequest)
 		if err != nil {
 			rpt.result = status
 			return err
@@ -596,14 +622,46 @@ func (rpt *ReleasePartitionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+//****************************handoff task********************************//
+type HandoffTask struct {
+}
+
+//**************************queryNodeCluster down task***************************//
+type queryNodeDownTask struct {
+}
+
+//*********************** ***load balance task*** ************************//
+type loadBalanceTask struct {
+}
+
+//****************************internal task*******************************//
+
+type LoadSegmentTask struct {
+	BaseTask
+	sourceNode int64
+	dstNode int64
+	*querypb.LoadSegmentsRequest
+}
+
+type ReleaseSegmentTask struct {
+}
+
+type WatchDmChannelTask struct {
+}
+
+type AddQueryChannelTask struct {
+}
+
 func watchDmChannels(ctx context.Context,
 	dataService types.DataService,
-	queryNodes map[int64]*queryNodeInfo,
-	meta Replica,
+	cluster *queryNodeCluster,
+	meta *meta,
 	dbID UniqueID,
 	collectionID UniqueID,
-	msgBase *commonpb.MsgBase) error {
-	collection, err := meta.getCollectionByID(0, collectionID)
+	msgBase *commonpb.MsgBase,
+	toWatchPosition map[string]*internalpb.MsgPosition,
+	excludeSegment map[string][]UniqueID) error {
+	col, err := meta.getCollectionByID(0, collectionID)
 	if err != nil {
 		return err
 	}
@@ -624,7 +682,7 @@ func watchDmChannels(ctx context.Context,
 	channelsWithoutPos := make([]string, 0)
 	for _, channel := range dmChannels {
 		findChannel := false
-		ChannelsWithPos := collection.dmChannels
+		ChannelsWithPos := col.dmChannels
 		for _, ch := range ChannelsWithPos {
 			if channel == ch {
 				findChannel = true
@@ -635,25 +693,34 @@ func watchDmChannels(ctx context.Context,
 			channelsWithoutPos = append(channelsWithoutPos, channel)
 		}
 	}
-	for _, ch := range channelsWithoutPos {
-		pos := &internalpb.MsgPosition{
-			ChannelName: ch,
-		}
-		err = meta.addDmChannel(dbID, collectionID, ch, pos)
-		if err != nil {
-			return err
-		}
-	}
 
-	channels2NodeID := shuffleChannelsToQueryNode(dmChannels, queryNodes)
-	for nodeID, channels := range channels2NodeID {
-		node := queryNodes[nodeID]
+	err = meta.addDmChannels(dbID, collectionID, channelsWithoutPos)
+	if err != nil {
+		return err
+	}
+	//for _, ch := range channelsWithoutPos {
+	//	pos := &internalpb.MsgPosition{
+	//		ChannelName: ch,
+	//	}
+	//	err = meta.addDmChannels(dbID, collectionID, chs)
+	//	if err != nil {
+	//		return err
+	//	}
+	//}
+
+	nodeID2Channels := shuffleChannelsToQueryNode(dbID, dmChannels, cluster)
+	for nodeID, channels := range nodeID2Channels {
+		//node := queryNodes[nodeID]
 		watchDmChannelsInfo := make([]*querypb.WatchDmChannelInfo, 0)
 		for _, ch := range channels {
 			info := &querypb.WatchDmChannelInfo{
 				ChannelID:        ch,
-				Pos:              collection.dmChannels2Pos[ch],
-				ExcludedSegments: collection.excludeSegmentIds,
+				//Pos:              col.dmChannels2Pos[ch],
+				//ExcludedSegments: col.excludeSegmentIds,
+			}
+			if _, ok := toWatchPosition[ch]; ok {
+				info.Pos = toWatchPosition[ch]
+				info.ExcludedSegments = excludeSegment[ch]
 			}
 			watchDmChannelsInfo = append(watchDmChannelsInfo, info)
 		}
@@ -663,21 +730,22 @@ func watchDmChannels(ctx context.Context,
 			ChannelIDs:   channels,
 			Infos:        watchDmChannelsInfo,
 		}
-		_, err := node.WatchDmChannels(ctx, request)
+		_, err := cluster.WatchDmChannels(ctx, nodeID, request)
 		if err != nil {
 			return err
 		}
-		node.AddDmChannels(channels, collectionID)
+		cluster.AddDmChannels(dbID, nodeID, channels, collectionID)
 		log.Debug("query node ", zap.String("nodeID", strconv.FormatInt(nodeID, 10)), zap.String("watch channels", fmt.Sprintln(channels)))
 	}
 
 	return nil
 }
 
-func shuffleChannelsToQueryNode(dmChannels []string, queryNodes map[int64]*queryNodeInfo) map[int64][]string {
+func shuffleChannelsToQueryNode(dbID UniqueID, dmChannels []string, cluster *queryNodeCluster) map[int64][]string {
 	maxNumChannels := 0
-	for _, node := range queryNodes {
-		numChannels := node.getNumChannels()
+	for nodeID := range cluster.nodes {
+		//TODO::issue error
+		numChannels, _ := cluster.getNumChannels(dbID, nodeID)
 		if numChannels > maxNumChannels {
 			maxNumChannels = numChannels
 		}
@@ -688,8 +756,8 @@ func shuffleChannelsToQueryNode(dmChannels []string, queryNodes map[int64]*query
 	for {
 		lastOffset := offset
 		if !loopAll {
-			for id, node := range queryNodes {
-				if node.getSegmentsLength() >= maxNumChannels {
+			for id := range cluster.nodes {
+				if cluster.getSegmentsLength(id) >= maxNumChannels {
 					continue
 				}
 				if _, ok := res[id]; !ok {
@@ -702,7 +770,7 @@ func shuffleChannelsToQueryNode(dmChannels []string, queryNodes map[int64]*query
 				}
 			}
 		} else {
-			for id := range queryNodes {
+			for id := range cluster.nodes {
 				if _, ok := res[id]; !ok {
 					res[id] = make([]string, 0)
 				}
@@ -719,16 +787,16 @@ func shuffleChannelsToQueryNode(dmChannels []string, queryNodes map[int64]*query
 	}
 }
 
-func shuffleSegmentsToQueryNode(segmentIDs []UniqueID, queryNodes map[int64]*queryNodeInfo) map[int64][]UniqueID {
+func shuffleSegmentsToQueryNode(segmentIDs []UniqueID, cluster *queryNodeCluster) map[int64][]UniqueID {
 	maxNumSegments := 0
-	for _, node := range queryNodes {
-		numSegments := node.getNumSegments()
+	for nodeID := range cluster.nodes {
+		numSegments := cluster.getNumSegments(nodeID)
 		if numSegments > maxNumSegments {
 			maxNumSegments = numSegments
 		}
 	}
 	res := make(map[int64][]UniqueID)
-	for nodeID := range queryNodes {
+	for nodeID := range cluster.nodes {
 		segments := make([]UniqueID, 0)
 		res[nodeID] = segments
 	}
@@ -742,8 +810,8 @@ func shuffleSegmentsToQueryNode(segmentIDs []UniqueID, queryNodes map[int64]*que
 	for {
 		lastOffset := offset
 		if !loopAll {
-			for id, node := range queryNodes {
-				if node.getSegmentsLength() >= maxNumSegments {
+			for id := range cluster.nodes {
+				if cluster.getSegmentsLength(id) >= maxNumSegments {
 					continue
 				}
 				if _, ok := res[id]; !ok {
@@ -756,7 +824,7 @@ func shuffleSegmentsToQueryNode(segmentIDs []UniqueID, queryNodes map[int64]*que
 				}
 			}
 		} else {
-			for id := range queryNodes {
+			for id := range cluster.nodes {
 				if _, ok := res[id]; !ok {
 					res[id] = make([]UniqueID, 0)
 				}

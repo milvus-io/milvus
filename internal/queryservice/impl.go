@@ -20,7 +20,6 @@ import (
 
 	"go.uber.org/zap"
 
-	nodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -34,18 +33,7 @@ func (qs *QueryService) GetComponentStates(ctx context.Context) (*internalpb.Com
 		NodeID:    Params.QueryServiceID,
 		StateCode: qs.stateCode.Load().(internalpb.StateCode),
 	}
-	subComponentInfos := make([]*internalpb.ComponentInfo, 0)
-	for nodeID, node := range qs.queryNodes {
-		componentStates, err := node.GetComponentStates(ctx)
-		if err != nil {
-			subComponentInfos = append(subComponentInfos, &internalpb.ComponentInfo{
-				NodeID:    nodeID,
-				StateCode: internalpb.StateCode_Abnormal,
-			})
-			continue
-		}
-		subComponentInfos = append(subComponentInfos, componentStates.State)
-	}
+	subComponentInfos := qs.cluster.GetComponentInfos(ctx)
 	return &internalpb.ComponentStates{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -79,7 +67,7 @@ func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterN
 	log.Debug("register query node", zap.String("address", req.Address.String()))
 	// TODO:: add mutex
 	nodeID := req.Base.SourceID
-	if _, ok := qs.queryNodes[nodeID]; ok {
+	if _, ok := qs.cluster.nodes[nodeID]; ok {
 		err := errors.New("nodeID already exists")
 		return &querypb.RegisterNodeResponse{
 			Status: &commonpb.Status{
@@ -89,30 +77,31 @@ func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterN
 		}, err
 	}
 
-	registerNodeAddress := req.Address.Ip + ":" + strconv.FormatInt(req.Address.Port, 10)
-	client, err := nodeclient.NewClient(registerNodeAddress)
+	err := qs.cluster.RegisterNode(req.Address.Ip, req.Address.Port, req.Base.SourceID)
+	//registerNodeAddress := req.Address.Ip + ":" + strconv.FormatInt(req.Address.Port, 10)
+	//client, err := nodeclient.NewClient(registerNodeAddress)
 	if err != nil {
 		return &querypb.RegisterNodeResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			},
-			InitParams: new(internalpb.InitParams),
+			//InitParams: new(internalpb.InitParams),
 		}, err
 	}
-	if err := client.Init(); err != nil {
-		return &querypb.RegisterNodeResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			InitParams: new(internalpb.InitParams),
-		}, err
-	}
-	if err := client.Start(); err != nil {
-		return nil, err
-	}
-	qs.queryNodes[nodeID] = newQueryNodeInfo(client)
+	//if err := client.Init(); err != nil {
+	//	return &querypb.RegisterNodeResponse{
+	//		Status: &commonpb.Status{
+	//			ErrorCode: commonpb.ErrorCode_Success,
+	//		},
+	//		InitParams: new(internalpb.InitParams),
+	//	}, err
+	//}
+	//if err := client.Start(); err != nil {
+	//	return nil, err
+	//}
+	//qs.cluster.nodes[nodeID] = newQueryNode(client)
 
-	//TODO::return init params to queryNode
+	//TODO::return init params to queryNodeCluster
 	startParams := []*commonpb.KeyValuePair{
 		{Key: "StatsChannelName", Value: Params.StatsChannelName},
 		{Key: "TimeTickChannelName", Value: Params.TimeTickChannelName},
@@ -144,19 +133,19 @@ func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterN
 func (qs *QueryService) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
 	dbID := req.DbID
 	log.Debug("show collection start, dbID = ", zap.String("dbID", strconv.FormatInt(dbID, 10)))
-	collections, err := qs.replica.getCollections(dbID)
-	collectionIDs := make([]UniqueID, 0)
-	for _, collection := range collections {
-		collectionIDs = append(collectionIDs, collection.id)
-	}
-	if err != nil {
-		return &querypb.ShowCollectionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    err.Error(),
-			},
-		}, err
-	}
+	collectionIDs := qs.meta.showCollections()
+	//collectionIDs := make([]UniqueID, 0)
+	//for _, collection := range collections {
+	//	collectionIDs = append(collectionIDs, collection.id)
+	//}
+	//if err != nil {
+	//	return &querypb.ShowCollectionsResponse{
+	//		Status: &commonpb.Status{
+	//			ErrorCode: commonpb.ErrorCode_Success,
+	//			Reason:    err.Error(),
+	//		},
+	//	}, err
+	//}
 	log.Debug("show collection end")
 	return &querypb.ShowCollectionsResponse{
 		Status: &commonpb.Status{
@@ -167,7 +156,7 @@ func (qs *QueryService) ShowCollections(ctx context.Context, req *querypb.ShowCo
 }
 
 func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
-	dbID := req.DbID
+	//dbID := req.DbID
 	collectionID := req.CollectionID
 	schema := req.Schema
 	watchNeeded := false
@@ -177,34 +166,33 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
 
-	_, err := qs.replica.getCollectionByID(dbID, collectionID)
-	if err != nil {
+	hasCollection:= qs.meta.hasCollection(collectionID)
+	if !hasCollection {
 		watchNeeded = true
-		err = qs.replica.addCollection(dbID, collectionID, schema)
-		if err != nil {
-			status.Reason = err.Error()
-			return status, err
-		}
+		err := qs.meta.addCollection(collectionID, schema)
+		log.Error(err.Error())
+		//if err != nil {
+		//	status.Reason = err.Error()
+		//	return status, err
+		//}
 	}
 	loadCollectionTask := &LoadCollectionTask{
 		BaseTask: BaseTask{
 			ctx:       qs.loopCtx,
 			Condition: NewTaskCondition(qs.loopCtx),
 		},
-		LoadCollectionRequest: req,
-		masterService:         qs.masterServiceClient,
-		dataService:           qs.dataServiceClient,
-		queryNodes:            qs.queryNodes,
-		meta:                  qs.replica,
-		watchNeeded:           watchNeeded,
+		LoadCollectionRequest:    req,
+		masterService:            qs.masterServiceClient,
+		dataService:              qs.dataServiceClient,
+		cluster:               qs.cluster,
+		meta:                     qs.meta,
+		toWatchPosition:          make(map[string]*internalpb.MsgPosition),
+		excludeSegment: make(map[string][]UniqueID),
+		watchNeeded:              watchNeeded,
 	}
-	err = qs.sched.DdQueue.Enqueue(loadCollectionTask)
-	if err != nil {
-		status.Reason = err.Error()
-		return status, err
-	}
+	qs.scheduler.triggerTaskQueue.Enqueue([]task{loadCollectionTask})
 
-	err = loadCollectionTask.WaitToFinish()
+	err := loadCollectionTask.WaitToFinish()
 	if err != nil {
 		status.Reason = err.Error()
 		return status, err
@@ -216,14 +204,14 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 }
 
 func (qs *QueryService) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	dbID := req.DbID
+	//dbID := req.DbID
 	collectionID := req.CollectionID
 	log.Debug("ReleaseCollectionRequest received", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID))
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
-	_, err := qs.replica.getCollectionByID(dbID, collectionID)
-	if err != nil {
+	hasCollection := qs.meta.hasCollection(collectionID)
+	if !hasCollection {
 		log.Error("release collection end, query service don't have the log of", zap.String("collectionID", fmt.Sprintln(collectionID)))
 		return status, nil
 	}
@@ -234,16 +222,12 @@ func (qs *QueryService) ReleaseCollection(ctx context.Context, req *querypb.Rele
 			Condition: NewTaskCondition(ctx),
 		},
 		ReleaseCollectionRequest: req,
-		queryNodes:               qs.queryNodes,
-		meta:                     qs.replica,
+		cluster:               qs.cluster,
+		meta:                     qs.meta,
 	}
-	err = qs.sched.DdQueue.Enqueue(releaseCollectionTask)
-	if err != nil {
-		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		status.Reason = err.Error()
-		return status, err
-	}
-	err = releaseCollectionTask.WaitToFinish()
+	qs.scheduler.triggerTaskQueue.Enqueue([]task{releaseCollectionTask})
+
+	err := releaseCollectionTask.WaitToFinish()
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
@@ -251,18 +235,18 @@ func (qs *QueryService) ReleaseCollection(ctx context.Context, req *querypb.Rele
 	}
 
 	log.Debug("ReleaseCollectionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID))
-	//TODO:: queryNode cancel subscribe dmChannels
+	//TODO:: queryNodeCluster cancel subscribe dmChannels
 	return status, nil
 }
 
 func (qs *QueryService) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-	dbID := req.DbID
+	//dbID := req.DbID
 	collectionID := req.CollectionID
-	partitions, err := qs.replica.getPartitions(dbID, collectionID)
-	partitionIDs := make([]UniqueID, 0)
-	for _, partition := range partitions {
-		partitionIDs = append(partitionIDs, partition.id)
-	}
+	partitionIDs, err := qs.meta.showPartitions(collectionID)
+	//partitionIDs := make([]UniqueID, 0)
+	//for _, partition := range partitions {
+	//	partitionIDs = append(partitionIDs, partition.id)
+	//}
 	if err != nil {
 		return &querypb.ShowPartitionsResponse{
 			Status: &commonpb.Status{
@@ -284,7 +268,7 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 	collectionID := req.CollectionID
 	partitionIDs := req.PartitionIDs
 	log.Debug("LoadPartitionRequest received", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
-	status, watchNeeded, err := LoadPartitionMetaCheck(qs.replica, req)
+	status, watchNeeded, err := LoadPartitionMetaCheck(qs.meta, req)
 	if err != nil {
 		return status, err
 	}
@@ -294,19 +278,16 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 			ctx:       qs.loopCtx,
 			Condition: NewTaskCondition(qs.loopCtx),
 		},
-		LoadPartitionsRequest: req,
-		masterService:         qs.masterServiceClient,
-		dataService:           qs.dataServiceClient,
-		queryNodes:            qs.queryNodes,
-		meta:                  qs.replica,
-		watchNeeded:           watchNeeded,
+		LoadPartitionsRequest:    req,
+		masterService:            qs.masterServiceClient,
+		dataService:              qs.dataServiceClient,
+		cluster:               qs.cluster,
+		meta:                     qs.meta,
+		toWatchPosition:          make(map[string]*internalpb.MsgPosition),
+		excludeSegment: make(map[string][]UniqueID),
+		watchNeeded:              watchNeeded,
 	}
-	err = qs.sched.DdQueue.Enqueue(loadPartitionTask)
-	if err != nil {
-		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		status.Reason = err.Error()
-		return status, err
-	}
+	qs.scheduler.triggerTaskQueue.Enqueue([]task{loadPartitionTask})
 
 	err = loadPartitionTask.WaitToFinish()
 	if err != nil {
@@ -319,8 +300,8 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 	return status, nil
 }
 
-func LoadPartitionMetaCheck(meta Replica, req *querypb.LoadPartitionsRequest) (*commonpb.Status, bool, error) {
-	dbID := req.DbID
+func LoadPartitionMetaCheck(meta *meta, req *querypb.LoadPartitionsRequest) (*commonpb.Status, bool, error) {
+	//dbID := req.DbID
 	collectionID := req.CollectionID
 	partitionIDs := req.PartitionIDs
 	schema := req.Schema
@@ -336,25 +317,28 @@ func LoadPartitionMetaCheck(meta Replica, req *querypb.LoadPartitionsRequest) (*
 		return status, watchNeeded, err
 	}
 
-	_, err := meta.getCollectionByID(dbID, collectionID)
-	if err != nil {
-		err = meta.addCollection(dbID, collectionID, schema)
-		if err != nil {
-			status.Reason = err.Error()
-			return status, watchNeeded, err
-		}
+	hasCollection := meta.hasCollection(collectionID)
+	if !hasCollection {
+		err := meta.addCollection(collectionID, schema)
+		log.Error(err.Error())
+		//if err != nil {
+		//	status.Reason = err.Error()
+		//	return status, watchNeeded, err
+		//}
 		watchNeeded = true
 	}
 
 	for _, partitionID := range partitionIDs {
-		_, err = meta.getPartitionByID(dbID, collectionID, partitionID)
-		if err == nil {
-			continue
-		}
-		err = meta.addPartition(dbID, collectionID, partitionID)
-		if err != nil {
-			status.Reason = err.Error()
-			return status, watchNeeded, err
+		hasPartition := meta.hasPartition(collectionID, partitionID)
+		//if err == nil {
+		//	continue
+		//}
+		if !hasPartition {
+			err := meta.addPartition(collectionID, partitionID)
+			if err != nil {
+				status.Reason = err.Error()
+				return status, watchNeeded, err
+			}
 		}
 	}
 
@@ -363,7 +347,7 @@ func LoadPartitionMetaCheck(meta Replica, req *querypb.LoadPartitionsRequest) (*
 }
 
 func (qs *QueryService) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
-	dbID := req.DbID
+	//dbID := req.DbID
 	collectionID := req.CollectionID
 	partitionIDs := req.PartitionIDs
 	log.Debug("ReleasePartitionRequest received", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", req.CollectionID), zap.Int64s("partitionIDs", partitionIDs))
@@ -372,8 +356,8 @@ func (qs *QueryService) ReleasePartitions(ctx context.Context, req *querypb.Rele
 	}
 	toReleasedPartitionID := make([]UniqueID, 0)
 	for _, partitionID := range partitionIDs {
-		_, err := qs.replica.getPartitionByID(dbID, collectionID, partitionID)
-		if err == nil {
+		hasPartition := qs.meta.hasPartition(collectionID, partitionID)
+		if hasPartition {
 			toReleasedPartitionID = append(toReleasedPartitionID, partitionID)
 		}
 	}
@@ -386,17 +370,12 @@ func (qs *QueryService) ReleasePartitions(ctx context.Context, req *querypb.Rele
 				Condition: NewTaskCondition(ctx),
 			},
 			ReleasePartitionsRequest: req,
-			queryNodes:               qs.queryNodes,
-			meta:                     qs.replica,
+			cluster:               qs.cluster,
+			meta:                     qs.meta,
 		}
-		err := qs.sched.DdQueue.Enqueue(releasePartitionTask)
-		if err != nil {
-			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			status.Reason = err.Error()
-			return status, err
-		}
+		qs.scheduler.triggerTaskQueue.Enqueue([]task{releasePartitionTask})
 
-		err = releasePartitionTask.WaitToFinish()
+		err := releasePartitionTask.WaitToFinish()
 		if err != nil {
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			status.Reason = err.Error()
@@ -404,7 +383,7 @@ func (qs *QueryService) ReleasePartitions(ctx context.Context, req *querypb.Rele
 		}
 	}
 	log.Debug("ReleasePartitionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
-	//TODO:: queryNode cancel subscribe dmChannels
+	//TODO:: queryNodeCluster cancel subscribe dmChannels
 	return status, nil
 }
 
@@ -426,10 +405,10 @@ func (qs *QueryService) CreateQueryChannel(ctx context.Context) (*querypb.Create
 		ResultChannelID:  allocatedQueryResultChannel,
 	}
 	log.Debug("query service create query channel", zap.String("queryChannelName", allocatedQueryChannel))
-	for nodeID, node := range qs.queryNodes {
+	for nodeID := range qs.cluster.nodes {
 		log.Debug("node watch query channel", zap.String("nodeID", fmt.Sprintln(nodeID)))
 		fn := func() error {
-			_, err := node.AddQueryChannel(ctx, addQueryChannelsRequest)
+			_, err := qs.cluster.AddQueryChannel(ctx, nodeID, addQueryChannelsRequest)
 			return err
 		}
 		err := retry.Retry(10, time.Millisecond*200, fn)
@@ -455,43 +434,49 @@ func (qs *QueryService) CreateQueryChannel(ctx context.Context) (*querypb.Create
 }
 
 func (qs *QueryService) GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error) {
-	states, err := qs.replica.getPartitionStates(req.DbID, req.CollectionID, req.PartitionIDs)
-	if err != nil {
-		return &querypb.GetPartitionStatesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-			PartitionDescriptions: states,
-		}, err
-	}
-	return &querypb.GetPartitionStatesResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		PartitionDescriptions: states,
-	}, nil
-}
-
-func (qs *QueryService) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
-	segmentInfos := make([]*querypb.SegmentInfo, 0)
-	totalMemSize := int64(0)
-	for nodeID, node := range qs.queryNodes {
-		segmentInfo, err := node.client.GetSegmentInfo(ctx, req)
+	partitionIDs := req.PartitionIDs
+	partitionStates := make([]*querypb.PartitionStates, 0)
+	for _, partitionID := range partitionIDs {
+		state, err := qs.meta.getPartitionStateByID(partitionID)
 		if err != nil {
-			return &querypb.GetSegmentInfoResponse{
+			return &querypb.GetPartitionStatesResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
 					Reason:    err.Error(),
 				},
 			}, err
 		}
-		segmentInfos = append(segmentInfos, segmentInfo.Infos...)
-		for _, info := range segmentInfo.Infos {
-			totalMemSize = totalMemSize + info.MemSize
+		partitionState := &querypb.PartitionStates{
+			PartitionID: partitionID,
+			State: state,
 		}
-		log.Debug("getSegmentInfo", zap.Int64("nodeID", nodeID), zap.Int64("memory size", totalMemSize))
+		partitionStates = append(partitionStates, partitionState)
 	}
+
+	return &querypb.GetPartitionStatesResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		PartitionDescriptions: partitionStates,
+	}, nil
+}
+
+func (qs *QueryService) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
+	totalMemSize := int64(0)
+	segmentIDs := req.SegmentIDs
+	segmentInfos, err := qs.meta.getSegmentInfos(segmentIDs)
+	if err != nil {
+		return &querypb.GetSegmentInfoResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, err
+	}
+	for _, info := range segmentInfos {
+		totalMemSize = totalMemSize + info.MemSize
+	}
+	log.Debug("getSegmentInfo", zap.Int64("memory size", totalMemSize))
 	return &querypb.GetSegmentInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
