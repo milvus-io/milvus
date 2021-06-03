@@ -286,19 +286,18 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 		lastExpireTime: 0,
 		currentRows:    0,
 	}
-
 	s.stats[id] = segStatus
+
 	segmentInfo := &datapb.SegmentInfo{
 		ID:             id,
 		CollectionID:   collectionID,
 		PartitionID:    partitionID,
 		InsertChannel:  channelName,
-		NumRows:        0,
+		NumOfRows:      0,
 		State:          commonpb.SegmentState_Growing,
 		MaxRowNum:      int64(totalRows),
 		LastExpireTime: 0,
 	}
-
 	if err := s.meta.AddSegment(segmentInfo); err != nil {
 		return nil, err
 	}
@@ -386,7 +385,7 @@ func (s *SegmentManager) tryToSealSegment() error {
 		if segStatus.sealed {
 			continue
 		}
-		sealed, err := s.checkSegmentSealed(segStatus)
+		sealed, err := s.shouldSeal(segStatus)
 		if err != nil {
 			return err
 		}
@@ -402,7 +401,7 @@ func (s *SegmentManager) tryToSealSegment() error {
 	return nil
 }
 
-func (s *SegmentManager) checkSegmentSealed(segStatus *segmentStatus) (bool, error) {
+func (s *SegmentManager) shouldSeal(segStatus *segmentStatus) (bool, error) {
 	var allocSize int64
 	for _, allocation := range segStatus.allocations {
 		allocSize += allocation.rowNums

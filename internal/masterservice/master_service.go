@@ -771,7 +771,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 			retErr = nil
 			return
 		}
-		retRows = segInfo.Infos[0].NumRows
+		retRows = segInfo.Infos[0].NumOfRows
 		retErr = nil
 		return
 	}

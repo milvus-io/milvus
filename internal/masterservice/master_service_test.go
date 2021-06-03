@@ -99,8 +99,8 @@ func (d *dataMock) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInf
 		},
 		Infos: []*datapb.SegmentInfo{
 			{
-				NumRows: Params.MinSegmentSizeToEnableIndex,
-				State:   commonpb.SegmentState_Flushed,
+				NumOfRows: Params.MinSegmentSizeToEnableIndex,
+				State:     commonpb.SegmentState_Flushed,
 			},
 		},
 	}, nil

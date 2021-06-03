@@ -2540,9 +2540,9 @@ func (gibpt *GetIndexBuildProgressTask) Execute(ctx context.Context) error {
 	indexed := int64(0)
 
 	for _, info := range infoResp.Infos {
-		total += info.NumRows
+		total += info.NumOfRows
 		if buildFinishMap[buildIndexMap[info.ID]] {
-			indexed += info.NumRows
+			indexed += info.NumOfRows
 		}
 	}
 

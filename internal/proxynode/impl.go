@@ -1321,7 +1321,7 @@ func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvus
 			SegmentID:    info.ID,
 			CollectionID: info.CollectionID,
 			PartitionID:  info.PartitionID,
-			NumRows:      info.NumRows,
+			NumRows:      info.NumOfRows,
 			State:        info.State,
 		}
 	}
