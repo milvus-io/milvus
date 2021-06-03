@@ -27,6 +27,7 @@ import (
 
 // NOTE: start pulsar before test
 func TestDataSyncService_Start(t *testing.T) {
+	t.Skip()
 	const ctxTimeInMillisecond = 2000
 
 	delay := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
