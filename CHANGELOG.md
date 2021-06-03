@@ -7,11 +7,12 @@ Please mark all change in change log and use the issue from GitHub
 -   \#4897 Query results contain some deleted ids
 -   \#5164 Exception should be raised if insert or delete entity on the none-existed partition
 -   \#5191 Mishards throw "index out of range" error after continually search/insert for a period of time
+-   \#5574 IVF_SQ8 and IVF_PQ cannot be built on multiple GPUs
 
 ## Feature
 
 ## Improvement
--   \#5161 Enable Gpu cache
+-   \#5142 Enable Gpu cache
 -   \#5204 Improve IVF query on GPU when no entity deleted
 
 ## Task

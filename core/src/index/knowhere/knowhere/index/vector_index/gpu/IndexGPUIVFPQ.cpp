@@ -32,9 +32,14 @@ GPUIVFPQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     auto gpu_res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
     if (gpu_res != nullptr) {
         ResScope rs(gpu_res, gpu_id_, true);
-        auto device_index = new faiss::gpu::GpuIndexIVFPQ(
-            gpu_res->faiss_res.get(), dim, config[IndexParams::nlist].get<int64_t>(), config[IndexParams::m],
-            config[IndexParams::nbits], GetMetricType(config[Metric::TYPE].get<std::string>()));
+        faiss::gpu::GpuIndexIVFPQConfig idx_config;
+        idx_config.device = static_cast<int32_t>(gpu_id_);
+        int32_t nlist = config[IndexParams::nlist];
+        int32_t m = config[IndexParams::m];
+        int32_t nbits = config[IndexParams::nbits];
+        faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+        auto device_index =
+            new faiss::gpu::GpuIndexIVFPQ(gpu_res->faiss_res.get(), dim, nlist, m, nbits, metric_type, idx_config);
         device_index->train(rows, (float*)p_data);
         index_.reset(device_index);
         res_ = gpu_res;
