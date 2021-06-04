@@ -82,7 +82,7 @@ func (s *searchService) start() {
 	log.Debug("start search service")
 	s.searchMsgStream.Start()
 	s.searchResultMsgStream.Start()
-	//s.startEmptySearchCollection()
+	s.startEmptySearchCollection()
 	s.consumeSearch()
 }
 
@@ -125,14 +125,14 @@ func (s *searchService) consumeSearch() {
 					zap.Any("collectionID", sm.CollectionID))
 				sp, ctx := trace.StartSpanFromContext(sm.TraceCtx())
 				sm.SetTraceCtx(ctx)
-				//err := s.collectionCheck(sm.CollectionID)
-				//if err != nil {
-				//	s.emptySearchCollection.emptySearch(sm)
-				//	log.Debug("cannot found collection, do empty search done",
-				//		zap.Int64("msgID", sm.ID()),
-				//		zap.Int64("collectionID", sm.CollectionID))
-				//	continue
-				//}
+				err := s.collectionCheck(sm.CollectionID)
+				if err != nil {
+					s.emptySearchCollection.emptySearch(sm)
+					log.Debug("cannot found collection, do empty search done",
+						zap.Int64("msgID", sm.ID()),
+						zap.Int64("collectionID", sm.CollectionID))
+					continue
+				}
 				_, ok = s.searchCollections[sm.CollectionID]
 				if !ok {
 					s.startSearchCollection(sm.CollectionID)
