@@ -37,7 +37,7 @@ func newDataSyncService(ctx context.Context,
 	replica Replica,
 	alloc allocatorInterface,
 	factory msgstream.Factory,
-	vchanPair *datapb.VchannelPair) *dataSyncService {
+	vchan *datapb.VchannelInfo) *dataSyncService {
 
 	service := &dataSyncService{
 		ctx:          ctx,
@@ -46,10 +46,10 @@ func newDataSyncService(ctx context.Context,
 		replica:      replica,
 		idAllocator:  alloc,
 		msFactory:    factory,
-		collectionID: vchanPair.GetCollectionID(),
+		collectionID: vchan.GetCollectionID(),
 	}
 
-	service.initNodes(vchanPair)
+	service.initNodes(vchan)
 	return service
 }
 
@@ -68,7 +68,7 @@ func (dsService *dataSyncService) close() {
 	}
 }
 
-func (dsService *dataSyncService) initNodes(vchanPair *datapb.VchannelPair) {
+func (dsService *dataSyncService) initNodes(vchanPair *datapb.VchannelInfo) {
 	// TODO: add delete pipeline support
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
 
@@ -83,7 +83,7 @@ func (dsService *dataSyncService) initNodes(vchanPair *datapb.VchannelPair) {
 		panic(err)
 	}
 
-	var dmStreamNode Node = newDmInputNode(dsService.ctx, dsService.msFactory, vchanPair.GetDmlVchannelName(), vchanPair.GetDmlPosition())
+	var dmStreamNode Node = newDmInputNode(dsService.ctx, dsService.msFactory, vchanPair.GetChannelName(), vchanPair.GetCheckPoints())
 	var ddNode Node = newDDNode()
 	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, dsService.replica, dsService.msFactory, dsService.idAllocator, dsService.flushChan)
 

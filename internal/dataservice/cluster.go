@@ -117,7 +117,7 @@ func (c *cluster) watch(nodes []*datapb.DataNodeInfo) []*datapb.DataNodeInfo {
 				})
 			}
 		}
-		pairs, err := c.posProvider.GetVChanPositions(uncompletes)
+		_, err := c.posProvider.GetVChanPositions(uncompletes)
 		if err != nil {
 			log.Warn("get vchannel position failed", zap.Error(err))
 			continue
@@ -131,7 +131,8 @@ func (c *cluster) watch(nodes []*datapb.DataNodeInfo) []*datapb.DataNodeInfo {
 			Base: &commonpb.MsgBase{
 				SourceID: Params.NodeID,
 			},
-			Vchannels: pairs,
+			// TODO change to VChannel info
+			// Vchannels: pairs,
 		}
 		resp, err := cli.WatchDmChannels(c.ctx, req)
 		if err != nil {
