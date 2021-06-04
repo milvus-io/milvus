@@ -960,6 +960,10 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	return resp, nil
 }
 
+func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
+	panic("implement me")
+}
+
 func composeSegmentFlushMsgPack(segmentID UniqueID) msgstream.MsgPack {
 	msgPack := msgstream.MsgPack{
 		Msgs: make([]msgstream.TsMsg, 0, 1),
