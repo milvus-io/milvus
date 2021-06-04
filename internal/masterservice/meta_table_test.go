@@ -1189,20 +1189,28 @@ func TestMetaWithTimestamp(t *testing.T) {
 	c2, err = mt.GetCollectionByName("t2", tsoStart)
 	assert.NotNil(t, err)
 
+	getKeys := func(m map[string]typeutil.UniqueID) []string {
+		keys := make([]string, 0, len(m))
+		for key := range m {
+			keys = append(keys, key)
+		}
+		return keys
+	}
+
 	s1, err := mt.ListCollections(0)
 	assert.Nil(t, err)
 	assert.Equal(t, 2, len(s1))
-	assert.ElementsMatch(t, s1, []string{"t1", "t2"})
+	assert.ElementsMatch(t, getKeys(s1), []string{"t1", "t2"})
 
 	s1, err = mt.ListCollections(t2)
 	assert.Nil(t, err)
 	assert.Equal(t, 2, len(s1))
-	assert.ElementsMatch(t, s1, []string{"t1", "t2"})
+	assert.ElementsMatch(t, getKeys(s1), []string{"t1", "t2"})
 
 	s1, err = mt.ListCollections(t1)
 	assert.Nil(t, err)
 	assert.Equal(t, 1, len(s1))
-	assert.ElementsMatch(t, s1, []string{"t1"})
+	assert.ElementsMatch(t, getKeys(s1), []string{"t1"})
 
 	s1, err = mt.ListCollections(tsoStart)
 	assert.Nil(t, err)

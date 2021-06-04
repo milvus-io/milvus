@@ -1436,6 +1436,7 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 		Req: in,
 		Rsp: &milvuspb.ShowCollectionsResponse{
 			CollectionNames: nil,
+			CollectionIds:   nil,
 		},
 	}
 	c.ddReqQueue <- t
