@@ -38,7 +38,7 @@ GPUIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     if (gpu_res != nullptr) {
         ResScope rs(gpu_res, gpu_id_, true);
         faiss::gpu::GpuIndexIVFFlatConfig idx_config;
-        idx_config.device = gpu_id_;
+        idx_config.device = static_cast<int32_t>(gpu_id_);
         int32_t nlist = config[IndexParams::nlist];
         faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
         auto device_index =
