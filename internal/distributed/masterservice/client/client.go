@@ -16,6 +16,9 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/masterpb"
@@ -27,10 +30,11 @@ import (
 	"google.golang.org/grpc"
 )
 
-// grpc client
+// GrpcClient grpc client
 type GrpcClient struct {
 	grpcClient masterpb.MasterServiceClient
 	conn       *grpc.ClientConn
+	ctx        context.Context
 
 	//inner member
 	addr      string
@@ -45,10 +49,13 @@ func getMasterServiceAddr(sess *sessionutil.Session) (string, error) {
 	key := typeutil.MasterServiceRole
 	msess, _, err := sess.GetSessions(key)
 	if err != nil {
+		log.Debug("MasterServiceClient GetSessions failed", zap.Any("key", key))
 		return "", err
 	}
+	log.Debug("MasterServiceClient GetSessions success")
 	ms, ok := msess[key]
 	if !ok {
+		log.Debug("MasterServiceClient mess key not exist", zap.Any("key", key))
 		return "", fmt.Errorf("number of master service is incorrect, %d", len(msess))
 	}
 	return ms.Address, nil
@@ -57,12 +64,15 @@ func getMasterServiceAddr(sess *sessionutil.Session) (string, error) {
 func NewClient(addr string, metaRoot string, etcdAddr []string, timeout time.Duration) (*GrpcClient, error) {
 	sess := sessionutil.NewSession(context.Background(), metaRoot, etcdAddr)
 	if sess == nil {
-		return nil, fmt.Errorf("new session error, maybe can not connect to etcd")
+		err := fmt.Errorf("new session error, maybe can not connect to etcd")
+		log.Debug("MasterServiceClient NewClient failed", zap.Error(err))
+		return nil, err
 	}
 
 	return &GrpcClient{
 		grpcClient: nil,
 		conn:       nil,
+		ctx:        context.Background(),
 		addr:       addr,
 		timeout:    timeout,
 		reconnTry:  300,
@@ -74,48 +84,57 @@ func NewClient(addr string, metaRoot string, etcdAddr []string, timeout time.Dur
 func (c *GrpcClient) reconnect() error {
 	addr, err := getMasterServiceAddr(c.sess)
 	if err != nil {
+		log.Debug("MasterServiceClient getMasterServiceAddr failed", zap.Error(err))
 		return nil
 	}
+	log.Debug("MasterServiceClient getMasterServiceAddr success")
 	tracer := opentracing.GlobalTracer()
-	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
-	defer cancel()
 	for i := 0; i < c.reconnTry; i++ {
+		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
 		if c.conn, err = grpc.DialContext(ctx, addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(
 				otgrpc.OpenTracingStreamClientInterceptor(tracer))); err == nil {
+			cancelFunc()
 			break
 		}
+		cancelFunc()
 	}
 	if err != nil {
+		log.Debug("MasterServiceClient try reconnect failed", zap.Error(err))
 		return err
 	}
+	log.Debug("MasterServiceClient try reconnect success")
 	c.grpcClient = masterpb.NewMasterServiceClient(c.conn)
 	return nil
 }
 
 func (c *GrpcClient) Init() error {
 	tracer := opentracing.GlobalTracer()
-	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
-	defer cancel()
 	var err error
+	log.Debug("MasterServiceClient Init", zap.Any("c.addr", c.addr))
 	if c.addr != "" {
-		for i := 0; i < c.reconnTry; i++ {
+		for i := 0; i < 10000; i++ {
+			ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
 			if c.conn, err = grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 				grpc.WithUnaryInterceptor(
 					otgrpc.OpenTracingClientInterceptor(tracer)),
 				grpc.WithStreamInterceptor(
 					otgrpc.OpenTracingStreamClientInterceptor(tracer))); err == nil {
+				cancelFunc()
 				break
 			}
+			cancelFunc()
 		}
 		if err != nil {
+			log.Debug("MasterServiceClient connect to master failed", zap.Error(err))
 			return fmt.Errorf("connect to specific address gprc error")
 		}
 	} else {
 		return c.reconnect()
 	}
+	log.Debug("MasterServiceClient connect to master success")
 	c.grpcClient = masterpb.NewMasterServiceClient(c.conn)
 	return nil
 }
@@ -149,7 +168,7 @@ func (c *GrpcClient) recall(caller func() (interface{}, error)) (interface{}, er
 	return ret, err
 }
 
-// TODO: timeout need to be propagated through ctx
+// GetComponentStates TODO: timeout need to be propagated through ctx
 func (c *GrpcClient) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		return c.grpcClient.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
@@ -163,7 +182,7 @@ func (c *GrpcClient) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRe
 	return ret.(*milvuspb.StringResponse), err
 }
 
-//just define a channel, not used currently
+// GetStatisticsChannel just define a channel, not used currently
 func (c *GrpcClient) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		return c.grpcClient.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
@@ -171,7 +190,7 @@ func (c *GrpcClient) GetStatisticsChannel(ctx context.Context) (*milvuspb.String
 	return ret.(*milvuspb.StringResponse), err
 }
 
-//receive ddl from rpc and time tick from proxy service, and put them into this channel
+// GetDdChannel receive ddl from rpc and time tick from proxy service, and put them into this channel
 func (c *GrpcClient) GetDdChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		return c.grpcClient.GetDdChannel(ctx, &internalpb.GetDdChannelRequest{})
@@ -179,7 +198,7 @@ func (c *GrpcClient) GetDdChannel(ctx context.Context) (*milvuspb.StringResponse
 	return ret.(*milvuspb.StringResponse), err
 }
 
-//DDL request
+// CreateCollection DDL request
 func (c *GrpcClient) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		return c.grpcClient.CreateCollection(ctx, in)
@@ -241,7 +260,7 @@ func (c *GrpcClient) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartit
 	return ret.(*milvuspb.ShowPartitionsResponse), err
 }
 
-//index builder service
+// CreateIndex index builder service
 func (c *GrpcClient) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		return c.grpcClient.CreateIndex(ctx, in)
@@ -263,7 +282,7 @@ func (c *GrpcClient) DescribeIndex(ctx context.Context, in *milvuspb.DescribeInd
 	return ret.(*milvuspb.DescribeIndexResponse), err
 }
 
-//global timestamp allocator
+// AllocTimestamp global timestamp allocator
 func (c *GrpcClient) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		return c.grpcClient.AllocTimestamp(ctx, in)
@@ -286,7 +305,7 @@ func (c *GrpcClient) UpdateChannelTimeTick(ctx context.Context, in *internalpb.C
 	return ret.(*commonpb.Status), err
 }
 
-//receiver time tick from proxy service, and put it into this channel
+// DescribeSegment receiver time tick from proxy service, and put it into this channel
 func (c *GrpcClient) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		return c.grpcClient.DescribeSegment(ctx, in)

@@ -205,7 +205,6 @@ func (node *DataNode) Init() error {
 	node.dataSyncService.init()
 	node.metaService = newMetaService(node.ctx, replica, node.masterService)
 	node.replica = replica
-
 	return nil
 }
 

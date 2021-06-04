@@ -79,7 +79,7 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Debug("queryservice init done ...")
+	log.Debug("QueryService init done ...")
 
 	if err := s.start(); err != nil {
 		return err
@@ -108,53 +108,60 @@ func (s *Server) init() error {
 	}
 
 	// --- Master Server Client ---
-	log.Debug("Master service", zap.String("address", Params.MasterAddress))
-	log.Debug("Init master service client ...")
-
+	log.Debug("QueryService try to new MasterService client", zap.Any("MasterServiceAddress", Params.MasterAddress))
 	masterService, err := msc.NewClient(Params.MasterAddress, qs.Params.MetaRootPath, []string{qs.Params.EtcdAddress}, 20*time.Second)
-
 	if err != nil {
+		log.Debug("QueryService try to new MasterService client failed", zap.Error(err))
 		panic(err)
 	}
 
 	if err = masterService.Init(); err != nil {
+		log.Debug("QueryService MasterServiceClient Init failed", zap.Error(err))
 		panic(err)
 	}
 
 	if err = masterService.Start(); err != nil {
+		log.Debug("QueryService MasterServiceClient Start failed", zap.Error(err))
 		panic(err)
 	}
 	// wait for master init or healthy
+	log.Debug("QueryService try to wait for MasterService ready")
 	err = funcutil.WaitForComponentInitOrHealthy(ctx, masterService, "MasterService", 1000000, time.Millisecond*200)
 	if err != nil {
+		log.Debug("QueryService wait for MasterService ready failed", zap.Error(err))
 		panic(err)
 	}
 
 	if err := s.SetMasterService(masterService); err != nil {
 		panic(err)
 	}
+	log.Debug("QueryService report MasterService ready")
 
 	// --- Data service client ---
-	log.Debug("DataService", zap.String("Address", Params.DataServiceAddress))
-	log.Debug("QueryService Init data service client ...")
+	log.Debug("QueryService try to new DataService client", zap.Any("DataServiceAddress", Params.DataServiceAddress))
 
-	dataService := dsc.NewClient(Params.DataServiceAddress, qs.Params.MetaRootPath, []string{qs.Params.EtcdAddress}, 10)
+	dataService := dsc.NewClient(Params.DataServiceAddress, qs.Params.MetaRootPath, []string{qs.Params.EtcdAddress}, 10*time.Second)
 	if err = dataService.Init(); err != nil {
+		log.Debug("QueryService DataServiceClient Init failed", zap.Error(err))
 		panic(err)
 	}
 	if err = dataService.Start(); err != nil {
+		log.Debug("QueryService DataServiceClient Start failed", zap.Error(err))
 		panic(err)
 	}
+	log.Debug("QueryService try to wait for DataService ready")
 	err = funcutil.WaitForComponentInitOrHealthy(ctx, dataService, "DataService", 1000000, time.Millisecond*200)
 	if err != nil {
+		log.Debug("QueryService wait for DataService ready failed", zap.Error(err))
 		panic(err)
 	}
 	if err := s.SetDataService(dataService); err != nil {
 		panic(err)
 	}
+	log.Debug("QueryService report DataService ready")
 
 	s.queryservice.UpdateStateCode(internalpb.StateCode_Initializing)
-
+	log.Debug("QueryService", zap.Any("State", internalpb.StateCode_Initializing))
 	if err := s.queryservice.Init(); err != nil {
 		return err
 	}
