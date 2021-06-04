@@ -74,6 +74,7 @@ structure_metrics = ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
 class CheckParams:
     """ The name of the method used to check the result """
     false = False
+    err_res = "error_response"
     cname_param_check = "collection_name_param_check"
     pname_param_check = "partition_name_param_check"
     list_count = "check_list_count"
