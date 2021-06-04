@@ -13,10 +13,13 @@ package datanode
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 
 	"go.uber.org/zap"
@@ -30,6 +33,7 @@ type dataSyncService struct {
 	idAllocator  allocatorInterface
 	msFactory    msgstream.Factory
 	collectionID UniqueID
+	dataService  types.DataService
 }
 
 func newDataSyncService(ctx context.Context,
@@ -83,6 +87,43 @@ func (dsService *dataSyncService) initNodes(vchanPair *datapb.VchannelInfo) {
 		panic(err)
 	}
 
+	saveBinlog := func(fu *autoFlushUnit) error {
+		id2path := []*datapb.ID2PathList{}
+		checkPoints := []*datapb.CheckPoint{}
+		for k, v := range fu.field2Path {
+			id2path = append(id2path, &datapb.ID2PathList{ID: k, Paths: []string{v}})
+		}
+		for k, v := range fu.openSegCheckpoints {
+			v := v
+			checkPoints = append(checkPoints, &datapb.CheckPoint{
+				SegmentID: k,
+				NumOfRows: fu.numRows[k],
+				Position:  &v,
+			})
+		}
+
+		req := &datapb.SaveBinlogPathsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   0, //TOD msg type
+				MsgID:     0, //TODO,msg id
+				Timestamp: 0, //TODO, time stamp
+				SourceID:  Params.NodeID,
+			},
+			SegmentID:         fu.segID,
+			CollectionID:      0, //TODO
+			Field2BinlogPaths: id2path,
+			CheckPoints:       checkPoints,
+			Flushed:           fu.flushed,
+		}
+		rsp, err := dsService.dataService.SaveBinlogPaths(dsService.ctx, req)
+		if err != nil {
+			return fmt.Errorf("data service save bin log path failed, err = %w", err)
+		}
+		if rsp.ErrorCode != commonpb.ErrorCode_Success {
+			return fmt.Errorf("data service save bin log path failed, reason = %s", rsp.Reason)
+		}
+		return nil
+	}
 	var dmStreamNode Node = newDmInputNode(dsService.ctx, dsService.msFactory, vchanPair.GetChannelName(), vchanPair.GetCheckPoints())
 	var ddNode Node = newDDNode()
 	var insertBufferNode Node = newInsertBufferNode(
@@ -91,7 +132,7 @@ func (dsService *dataSyncService) initNodes(vchanPair *datapb.VchannelInfo) {
 		dsService.msFactory,
 		dsService.idAllocator,
 		dsService.flushChan,
-		nil, //TODO,=================== call data service save binlog =========
+		saveBinlog,
 	)
 
 	dsService.fg.AddNode(dmStreamNode)
