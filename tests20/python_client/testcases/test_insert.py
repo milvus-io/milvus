@@ -18,6 +18,13 @@ default_binary_schema = cf.gen_default_binary_collection_schema()
 class TestInsertParams(ApiReq):
     """ Test case of Insert interface """
 
+    def teardown_method(self):
+        if self.collection is not None and self.collection.collection is not None:
+            self.collection.drop()
+
+    def setup_method(self):
+        pass
+
     @pytest.fixture(scope="function", params=ct.get_invalid_strs)
     def get_non_data_type(self, request):
         if isinstance(request.param, list):
@@ -46,19 +53,18 @@ class TestInsertParams(ApiReq):
         assert collection.num_entities == nb
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(reason="issue #5470")
     def test_insert_list_data(self):
         """
         target: test insert list-like data
         method: 1.create 2.insert list data
         expected: assert num entities
         """
-        self._connect()
+        conn = self._connect()
         nb = ct.default_nb
         collection = self._collection()
         data = cf.gen_default_list_data(nb)
         self.collection.insert(data=data)
-        self.connection.connection.get_connection().flush([collection.name])
+        conn.flush([collection.name])
         assert collection.num_entities == nb
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -143,7 +149,6 @@ class TestInsertParams(ApiReq):
         pass
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(reason="issue #5445")
     def test_insert_none(self):
         """
         target: test insert None
@@ -151,11 +156,10 @@ class TestInsertParams(ApiReq):
         expected: raise exception
         """
         self._collection()
-        ex, _ = self.collection.insert(data=None)
-        log.info(str(ex))
+        ids, _ = self.collection.insert(data=None)
+        assert len(ids) == 0
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(reason="issue #5421")
     def test_insert_numpy_data(self):
         """
         target: test insert numpy.ndarray data
@@ -167,7 +171,7 @@ class TestInsertParams(ApiReq):
         self._collection()
         data = cf.gen_numpy_data(nb)
         ex, _ = self.collection.insert(data=data)
-        log.error(str(ex))
+        assert "Data type not support numpy.ndarray" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="issue #5302")
@@ -200,7 +204,6 @@ class TestInsertParams(ApiReq):
         assert collection.num_entities == nb
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(reason="issue #5470")
     def test_insert_single(self):
         """
         target: test insert single
@@ -283,7 +286,7 @@ class TestInsertParams(ApiReq):
         """
         self._collection()
         nb = 10
-        int_values = [i for i in range(nb-1)]
+        int_values = [i for i in range(nb - 1)]
         float_values = [np.float32(i) for i in range(nb)]
         float_vec_values = cf.gen_vectors(nb, ct.default_dim)
         data = [int_values, float_values, float_vec_values]
@@ -301,7 +304,7 @@ class TestInsertParams(ApiReq):
         nb = 10
         int_values = [i for i in range(nb)]
         float_values = [np.float32(i) for i in range(nb)]
-        float_vec_values = cf.gen_vectors(nb-1, ct.default_dim)
+        float_vec_values = cf.gen_vectors(nb - 1, ct.default_dim)
         data = [int_values, float_values, float_vec_values]
         ex, _ = self.collection.insert(data=data)
         assert "arrays must all be same length" in str(ex)
@@ -503,7 +506,6 @@ class TestInsertOperation(ApiReq):
         pass
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5470")
     def test_insert_multi_times(self):
         """
         target: test insert multi times
@@ -515,8 +517,7 @@ class TestInsertOperation(ApiReq):
         for _ in range(ct.default_nb):
             df = cf.gen_default_dataframe_data(1)
             self.collection.insert(data=df)
-        self.connection.connection.get_connection().flush([collection.name])
-        # conn.flush([collection.name])
+        conn.flush([collection.name])
         assert collection.num_entities == ct.default_nb
 
 
