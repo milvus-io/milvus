@@ -55,22 +55,8 @@ func (rc *rmqClient) Subscribe(options ConsumerOptions) (Consumer, error) {
 		return nil, err
 	}
 
-	msgChannel := make(chan ConsumerMessage, 1)
-	rConsumer := &rmqConsumer{c: cli, msgChannel: msgChannel}
+	rConsumer := &rmqConsumer{c: cli}
 
-	go func() {
-		for { //nolint:gosimple
-			select {
-			case msg, ok := <-rConsumer.c.Chan():
-				if !ok {
-					close(msgChannel)
-					return
-				}
-				msg.Topic = options.Topic
-				msgChannel <- &rmqMessage{msg: msg}
-			}
-		}
-	}()
 	return rConsumer, nil
 }
 

@@ -13,6 +13,7 @@ package mqclient
 
 import (
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/milvus-io/milvus/internal/log"
 )
 
 type pulsarConsumer struct {
@@ -25,6 +26,22 @@ func (pc *pulsarConsumer) Subscription() string {
 }
 
 func (pc *pulsarConsumer) Chan() <-chan ConsumerMessage {
+	if pc.msgChannel == nil {
+		pc.msgChannel = make(chan ConsumerMessage)
+		go func() {
+			for { //nolint:gosimple
+				select {
+				case msg, ok := <-pc.c.Chan():
+					if !ok {
+						close(pc.msgChannel)
+						log.Debug("pulsar consumer channel closed")
+						return
+					}
+					pc.msgChannel <- &pulsarMessage{msg: msg}
+				}
+			}
+		}()
+	}
 	return pc.msgChannel
 }
 
