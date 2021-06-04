@@ -306,6 +306,7 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 	if err == nil && ds != nil {
 		ds.close()
 		r.node.streaming.removeDataSyncService(r.req.CollectionID)
+
 		// TODO: remove and use vChannel
 		vChannel := collectionIDToChannel(r.req.CollectionID)
 		r.node.streaming.tSafeReplica.removeTSafe(vChannel)
