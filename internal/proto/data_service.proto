@@ -176,9 +176,16 @@ message VchannelPair {
   PositionPair dml_position = 5;
 }
 
+message VchannelInfo {
+  int64 collectionID = 1;
+  string channelName = 2;
+  repeated CheckPoint checkPoints = 3;
+  repeated int64 flushedSegments = 4;
+}
+
 message WatchDmChannelsRequest {
   common.MsgBase base = 1;
-  repeated VchannelPair vchannels = 2;
+  repeated VchannelInfo vchannels = 2;
 }
 
 message FlushSegmentsRequest {
