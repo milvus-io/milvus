@@ -169,13 +169,6 @@ message GetPartitionStatisticsResponse {
 message GetSegmentInfoChannelRequest {
 }
 
-message VchannelPair {
-  int64 collectionID = 1;
-  string dml_vchannel_name = 2;
-  string ddl_vchannel_name = 3;
-  PositionPair ddl_position = 4;
-  PositionPair dml_position = 5;
-}
 
 message VchannelInfo {
   int64 collectionID = 1;
@@ -239,12 +232,11 @@ message SegmentInfo {
   int64 collectionID = 2;
   int64 partitionID = 3;
   string insert_channel = 4;
-  int64 num_rows = 5;
+  int64 num_of_rows = 5;
   common.SegmentState state = 6;
-  PositionPair dmlPosition = 7;
-  PositionPair ddlPosition = 8;
-  int64 max_row_num = 9;
-  uint64 last_expire_time = 10;
+  internal.MsgPosition dml_position = 7;
+  int64 max_row_num = 8;
+  uint64 last_expire_time = 9;
 }
 
 message ID2PathList {
@@ -269,9 +261,8 @@ message SaveBinlogPathsRequest {
 
 message CheckPoint {
   int64 segmentID = 1;
-  int64 collectionID = 2;
-  internal.MsgPosition position = 3;
-  int64 rows = 4;
+  internal.MsgPosition position = 2;
+  int64 num_of_rows = 3;
 }
 
 message DataNodeTtMsg {
