@@ -12,27 +12,30 @@
 package querynode
 
 import (
-	"errors"
-	"fmt"
-	"sync"
+	"context"
+
+	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
 type streaming struct {
+	ctx context.Context
+
 	replica      ReplicaInterface
 	tSafeReplica TSafeReplicaInterface
 
-	dsServicesMu     sync.Mutex // guards dataSyncServices
-	dataSyncServices map[UniqueID]*dataSyncService
+	dataSyncService *dataSyncService
+	msFactory       msgstream.Factory
 }
 
-func newStreaming() *streaming {
+func newStreaming(ctx context.Context, factory msgstream.Factory) *streaming {
 	replica := newCollectionReplica()
 	tReplica := newTSafeReplica()
-	ds := make(map[UniqueID]*dataSyncService)
+	newDS := newDataSyncService(ctx, replica, tReplica, factory)
+
 	return &streaming{
-		replica:          replica,
-		tSafeReplica:     tReplica,
-		dataSyncServices: ds,
+		replica:         replica,
+		tSafeReplica:    tReplica,
+		dataSyncService: newDS,
 	}
 }
 
@@ -42,37 +45,11 @@ func (s *streaming) start() {
 
 func (s *streaming) close() {
 	// TODO: stop stats
-	for _, ds := range s.dataSyncServices {
-		ds.close()
+
+	if s.dataSyncService != nil {
+		s.dataSyncService.close()
 	}
-	s.dataSyncServices = make(map[UniqueID]*dataSyncService)
 
 	// free collectionReplica
 	s.replica.freeAll()
-}
-
-func (s *streaming) getDataSyncService(collectionID UniqueID) (*dataSyncService, error) {
-	s.dsServicesMu.Lock()
-	defer s.dsServicesMu.Unlock()
-	ds, ok := s.dataSyncServices[collectionID]
-	if !ok {
-		return nil, errors.New("cannot found dataSyncService, collectionID =" + fmt.Sprintln(collectionID))
-	}
-	return ds, nil
-}
-
-func (s *streaming) addDataSyncService(collectionID UniqueID, ds *dataSyncService) error {
-	s.dsServicesMu.Lock()
-	defer s.dsServicesMu.Unlock()
-	if _, ok := s.dataSyncServices[collectionID]; ok {
-		return errors.New("dataSyncService has been existed, collectionID =" + fmt.Sprintln(collectionID))
-	}
-	s.dataSyncServices[collectionID] = ds
-	return nil
-}
-
-func (s *streaming) removeDataSyncService(collectionID UniqueID) {
-	s.dsServicesMu.Lock()
-	defer s.dsServicesMu.Unlock()
-	delete(s.dataSyncServices, collectionID)
 }

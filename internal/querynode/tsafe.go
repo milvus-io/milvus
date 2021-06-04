@@ -31,8 +31,13 @@ func (watcher *tSafeWatcher) notify() {
 	}
 }
 
+// deprecated
 func (watcher *tSafeWatcher) hasUpdate() {
 	<-watcher.notifyChan
+}
+
+func (watcher *tSafeWatcher) watcherChan() <-chan bool {
+	return watcher.notifyChan
 }
 
 type tSafer interface {

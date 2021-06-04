@@ -13,7 +13,6 @@ package querynode
 
 import (
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
@@ -21,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
 type ddNode struct {

@@ -14,18 +14,18 @@ package querynode
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	"go.uber.org/zap"
 )
 
 type serviceTimeNode struct {
 	baseNode
-	collectionID      UniqueID
-	replica           ReplicaInterface
+	vChannel          VChannel
 	tSafeReplica      TSafeReplicaInterface
 	timeTickMsgStream msgstream.MsgStream
 }
@@ -57,12 +57,9 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 
 	// update service time
-	// TODO: remove and use vChannel
-	vChannel := collectionIDToChannel(stNode.collectionID)
-	stNode.tSafeReplica.setTSafe(vChannel, serviceTimeMsg.timeRange.timestampMax)
+	stNode.tSafeReplica.setTSafe(stNode.vChannel, serviceTimeMsg.timeRange.timestampMax)
 	//log.Debug("update tSafe:",
-	//	zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)),
-	//	zap.Int64("collectionID", stNode.collectionID))
+	//	zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)))
 
 	if err := stNode.sendTimeTick(serviceTimeMsg.timeRange.timestampMax); err != nil {
 		log.Error("Error: send time tick into pulsar channel failed", zap.Error(err))
@@ -97,10 +94,9 @@ func (stNode *serviceTimeNode) sendTimeTick(ts Timestamp) error {
 }
 
 func newServiceTimeNode(ctx context.Context,
-	replica ReplicaInterface,
 	tSafeReplica TSafeReplicaInterface,
-	factory msgstream.Factory,
-	collectionID UniqueID) *serviceTimeNode {
+	channel VChannel,
+	factory msgstream.Factory) *serviceTimeNode {
 
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
@@ -109,14 +105,17 @@ func newServiceTimeNode(ctx context.Context,
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
-	timeTimeMsgStream, _ := factory.NewMsgStream(ctx)
-	timeTimeMsgStream.AsProducer([]string{Params.QueryTimeTickChannelName})
-	log.Debug("querynode AsProducer: " + Params.QueryTimeTickChannelName)
+	timeTimeMsgStream, err := factory.NewMsgStream(ctx)
+	if err != nil {
+		log.Error(err.Error())
+	} else {
+		timeTimeMsgStream.AsProducer([]string{Params.QueryTimeTickChannelName})
+		log.Debug("query node AsProducer: " + Params.QueryTimeTickChannelName)
+	}
 
 	return &serviceTimeNode{
 		baseNode:          baseNode,
-		collectionID:      collectionID,
-		replica:           replica,
+		vChannel:          channel,
 		tSafeReplica:      tSafeReplica,
 		timeTickMsgStream: timeTimeMsgStream,
 	}

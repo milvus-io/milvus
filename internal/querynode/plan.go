@@ -22,8 +22,9 @@ package querynode
 import "C"
 import (
 	"errors"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"unsafe"
+
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 )
 
 type Plan struct {
