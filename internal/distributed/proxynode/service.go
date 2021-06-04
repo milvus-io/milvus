@@ -395,6 +395,10 @@ func (s *Server) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*co
 	return s.proxynode.Flush(ctx, request)
 }
 
+func (s *Server) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+	return s.proxynode.Query(ctx, request)
+}
+
 func (s *Server) GetDdChannel(ctx context.Context, request *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.proxynode.GetDdChannel(ctx, request)
 }
