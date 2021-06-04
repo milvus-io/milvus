@@ -34,6 +34,7 @@ service MilvusService {
   rpc Search(SearchRequest) returns (SearchResults) {}
   rpc Retrieve(RetrieveRequest) returns (RetrieveResults) {}
   rpc Flush(FlushRequest) returns (common.Status) {}
+  rpc Query(QueryRequest) returns (QueryResults) {}
 
   rpc GetPersistentSegmentInfo(GetPersistentSegmentInfoRequest) returns (GetPersistentSegmentInfoResponse) {}
   rpc GetQuerySegmentInfo(GetQuerySegmentInfoRequest) returns (GetQuerySegmentInfoResponse) {}
@@ -354,6 +355,20 @@ message FlushRequest {
   common.MsgBase base = 1;
   string db_name = 2;
   repeated string collection_names = 3;
+}
+
+message QueryRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+  string expr = 4;
+  repeated string output_fields = 5;
+  repeated string partition_names = 6;
+}
+
+message QueryResults {
+  common.Status status = 1;
+  repeated schema.FieldData fields_data = 2;
 }
 
 message PersistentSegmentInfo {
