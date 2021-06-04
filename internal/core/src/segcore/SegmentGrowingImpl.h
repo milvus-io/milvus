@@ -178,6 +178,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     std::shared_ptr<DeletedRecord::TmpBitmap>
     get_deleted_bitmap(int64_t del_barrier, Timestamp query_timestamp, int64_t insert_barrier, bool force = false);
 
+    std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    search_ids(const IdArray& id_array, Timestamp timestamp) const override;
+
  protected:
     int64_t
     num_chunk() const override;

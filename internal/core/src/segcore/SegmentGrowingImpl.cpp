@@ -449,4 +449,30 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     do_insert(reserved_offset, size, row_ids.data(), timestamps.data(), columns_data);
 }
 
+std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+SegmentGrowingImpl::search_ids(const IdArray& id_array, Timestamp timestamp) const {
+    Assert(id_array.has_int_id());
+    auto& src_int_arr = id_array.int_id();
+    auto res_id_arr = std::make_unique<IdArray>();
+    auto res_int_id_arr = res_id_arr->mutable_int_id();
+    std::vector<SegOffset> res_offsets;
+    for (auto uid : src_int_arr.data()) {
+        auto [iter_b, iter_e] = uid2offset_.equal_range(uid);
+        SegOffset the_offset(-1);
+        for (auto iter = iter_b; iter != iter_e; ++iter) {
+            auto offset = SegOffset(iter->second);
+            if (record_.timestamps_[offset.get()] < timestamp) {
+                the_offset = std::max(the_offset, offset);
+            }
+        }
+        // if not found, skip
+        if (the_offset == SegOffset(-1)) {
+            continue;
+        }
+        res_int_id_arr->add_data(uid);
+        res_offsets.push_back(the_offset);
+    }
+    return {std::move(res_id_arr), std::move(res_offsets)};
+}
+
 }  // namespace milvus::segcore

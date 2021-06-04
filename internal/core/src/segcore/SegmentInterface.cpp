@@ -190,11 +190,13 @@ SegmentInternalInterface::BulkSubScript(FieldOffset field_offset, const SegOffse
     }
 }
 
-std::unique_ptr<proto::milvus::RetrieveResults>
-SegmentInternalInterface::GetEntityById(const std::vector<FieldOffset>& field_offsets, const IdArray& id_array) const {
-    auto results = std::make_unique<proto::milvus::RetrieveResults>();
+std::unique_ptr<proto::plan::RetrieveResults>
+SegmentInternalInterface::GetEntityById(const std::vector<FieldOffset>& field_offsets,
+                                        const IdArray& id_array,
+                                        Timestamp timestamp) const {
+    auto results = std::make_unique<proto::plan::RetrieveResults>();
 
-    auto [ids_, seg_offsets] = search_ids(id_array);
+    auto [ids_, seg_offsets] = search_ids(id_array, timestamp);
     results->set_allocated_ids(ids_.release());
 
     auto fields_data = results->mutable_fields_data();
@@ -204,11 +206,4 @@ SegmentInternalInterface::GetEntityById(const std::vector<FieldOffset>& field_of
     }
     return results;
 }
-
-std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
-SegmentInternalInterface::search_ids(const IdArray& id_array) const {
-    // TODO: protobuf in a nutshell
-    PanicInfo("unimplemented");
-}
-
 }  // namespace milvus::segcore
