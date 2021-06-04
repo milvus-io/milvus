@@ -13,8 +13,17 @@ pull_request_rules:
   - name: Test passed for tests changed
     conditions:
       - base=master
-      - -files~=^(?!test[0-9]*).+
+      - -files~=^(?!tests).+
       - "status-success=continuous-integration/jenkins/pr-merge"
+    actions:
+      label:
+        add:
+          - ci-passed
+
+  - name: Test passed for tests20 changed
+    conditions:
+      - base=master
+      - -files~=^(?!tests20).+
     actions:
       label:
         add:
