@@ -47,16 +47,18 @@ func getQueryServiceAddress(sess *sessionutil.Session) (string, error) {
 	key := typeutil.QueryServiceRole
 	msess, _, err := sess.GetSessions(key)
 	if err != nil {
+		log.Debug("QueryServiceClient GetSessions failed", zap.Error(err))
 		return "", err
 	}
 	ms, ok := msess[key]
 	if !ok {
+		log.Debug("QueryServiceClient msess key not existed", zap.Any("key", key))
 		return "", fmt.Errorf("number of master service is incorrect, %d", len(msess))
 	}
 	return ms.Address, nil
 }
 
-// NewClient creates a client for queryservice grpc call.
+// NewClient creates a client for QueryService grpc call.
 func NewClient(ctx context.Context, address, metaRootPath string, etcdAddr []string, timeout time.Duration) (*Client, error) {
 	sess := sessionutil.NewSession(context.Background(), metaRootPath, etcdAddr)
 
@@ -74,11 +76,12 @@ func NewClient(ctx context.Context, address, metaRootPath string, etcdAddr []str
 
 func (c *Client) Init() error {
 	tracer := opentracing.GlobalTracer()
-	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
-	defer cancel()
+	log.Debug("QueryServiceClient try connect QueryService", zap.Any("c.addr", c.addr))
 	if c.addr != "" {
 		connectGrpcFunc := func() error {
-			log.Debug("queryservice connect ", zap.String("address", c.addr))
+			ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
+			defer cancelFunc()
+			log.Debug("QueryServiceClient try connect ", zap.String("address", c.addr))
 			conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 				grpc.WithUnaryInterceptor(
 					otgrpc.OpenTracingClientInterceptor(tracer)),
@@ -93,14 +96,14 @@ func (c *Client) Init() error {
 
 		err := retry.Retry(100000, time.Millisecond*200, connectGrpcFunc)
 		if err != nil {
+			log.Debug("QueryServiceClient try connect failed", zap.Error(err))
 			return err
 		}
 	} else {
 		return c.reconnect()
 	}
-
+	log.Debug("QueryServiceClient try connect success", zap.Any("QueryServiceAddr", c.addr))
 	c.grpcClient = querypb.NewQueryServiceClient(c.conn)
-	log.Debug("connected to queryService", zap.String("queryService", c.addr))
 	return nil
 }
 func (c *Client) reconnect() error {
@@ -115,11 +118,14 @@ func (c *Client) reconnect() error {
 	}
 	err = retry.Retry(c.reconnTry, 3*time.Second, getQueryServiceAddressFn)
 	if err != nil {
+		log.Debug("QueryServiceClient getQueryServiceAddress failed", zap.Error(err))
 		return err
 	}
 	connectGrpcFunc := func() error {
-		log.Debug("QueryService connect ", zap.String("address", c.addr))
-		conn, err := grpc.DialContext(c.ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
+		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
+		defer cancelFunc()
+		log.Debug("QueryServiceClient try reconnect ", zap.String("address", c.addr))
+		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(
@@ -133,8 +139,10 @@ func (c *Client) reconnect() error {
 
 	err = retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
 	if err != nil {
+		log.Debug("QueryServiceClient try reconnect failed", zap.Error(err))
 		return err
 	}
+	log.Debug("QueryServiceClient try reconnect success")
 	c.grpcClient = querypb.NewQueryServiceClient(c.conn)
 	return nil
 }
