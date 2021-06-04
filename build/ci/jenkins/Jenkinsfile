@@ -12,6 +12,7 @@ pipeline {
     options {
         timestamps()
         timeout(time: 1, unit: 'HOURS')
+        buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         // parallelsAlwaysFailFast()
     }
     stages {
