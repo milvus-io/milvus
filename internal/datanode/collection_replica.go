@@ -173,9 +173,13 @@ func (replica *CollectionSegmentReplica) addSegment(
 
 func (replica *CollectionSegmentReplica) removeSegment(segmentID UniqueID) error {
 	replica.mu.Lock()
-	defer replica.mu.Unlock()
-
 	delete(replica.segments, segmentID)
+	replica.mu.Unlock()
+
+	replica.posMu.Lock()
+	delete(replica.startPositions, segmentID)
+	delete(replica.endPositions, segmentID)
+	replica.posMu.Unlock()
 
 	return nil
 }
@@ -274,6 +278,15 @@ func (replica *CollectionSegmentReplica) hasCollection(collectionID UniqueID) bo
 
 	_, ok := replica.collections[collectionID]
 	return ok
+}
+
+// getSegmentsCheckpoints get current open segments checkpoints
+func (replica *CollectionSegmentReplica) getSegmentsCheckpoints() {
+	replica.mu.RLock()
+	//for segID, segment := range replica.segments {
+	//	if segment
+	//}
+	replica.mu.RUnlock()
 }
 
 // setStartPositions set segment `Start Position` - means the `startPositions` from the MsgPack when segment is first found

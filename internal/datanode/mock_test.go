@@ -103,16 +103,15 @@ func newHEALTHDataNodeMock(dmChannelName, ddChannelName string) *DataNode {
 	ds := &DataServiceFactory{}
 	node.SetDataServiceInterface(ds)
 
-	vpair := &datapb.VchannelPair{
+	vchan := &datapb.VchannelInfo{
 		CollectionID:    1,
-		DmlVchannelName: dmChannelName,
-		DdlVchannelName: ddChannelName,
-		DdlPosition:     &datapb.PositionPair{},
-		DmlPosition:     &datapb.PositionPair{},
+		ChannelName:     dmChannelName,
+		CheckPoints:     []*datapb.CheckPoint{},
+		FlushedSegments: []int64{},
 	}
 	node.Start()
 
-	_ = node.NewDataSyncService(vpair)
+	_ = node.NewDataSyncService(vchan)
 
 	return node
 }

@@ -53,21 +53,14 @@ func TestDataSyncService_Start(t *testing.T) {
 	ddlChannelName := "data_sync_service_test_ddl"
 	Params.FlushInsertBufferSize = 1
 
-	vchanPair := &datapb.VchannelPair{
+	vchan := &datapb.VchannelInfo{
 		CollectionID:    collMeta.GetID(),
-		DmlVchannelName: insertChannelName,
-		DdlVchannelName: ddlChannelName,
-		DmlPosition: &datapb.PositionPair{
-			StartPosition: &internalpb.MsgPosition{},
-			EndPosition:   &internalpb.MsgPosition{},
-		},
-		DdlPosition: &datapb.PositionPair{
-			StartPosition: &internalpb.MsgPosition{},
-			EndPosition:   &internalpb.MsgPosition{},
-		},
+		ChannelName:     insertChannelName,
+		CheckPoints:     []*datapb.CheckPoint{},
+		FlushedSegments: []int64{},
 	}
 
-	sync := newDataSyncService(ctx, flushChan, replica, allocFactory, msFactory, vchanPair)
+	sync := newDataSyncService(ctx, flushChan, replica, allocFactory, msFactory, vchan)
 
 	sync.replica.addCollection(collMeta.ID, collMeta.Schema)
 	go sync.start()

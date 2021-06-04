@@ -20,7 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
-func newDmInputNode(ctx context.Context, factory msgstream.Factory, vchannelName string, vchannelPos *datapb.PositionPair) *flowgraph.InputNode {
+func newDmInputNode(ctx context.Context, factory msgstream.Factory, vchannelName string, checkPoints []*datapb.CheckPoint) *flowgraph.InputNode {
 	// TODO seek
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
