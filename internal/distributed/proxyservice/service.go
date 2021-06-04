@@ -106,10 +106,10 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	defer s.wg.Done()
 
-	log.Debug("proxyservice", zap.Int("network port", grpcPort))
+	log.Debug("ProxyService", zap.Int("network port", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
-		log.Warn("proxyservice", zap.String("GrpcServer:failed to listen", err.Error()))
+		log.Warn("ProxyService", zap.String("GrpcServer:failed to listen", err.Error()))
 		s.grpcErrChan <- err
 		return
 	}
@@ -136,7 +136,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 }
 
 func (s *Server) start() error {
-	log.Debug("proxy ProxyService start ...")
+	log.Debug("ProxyService start ...")
 	if err := s.proxyservice.Start(); err != nil {
 		return err
 	}

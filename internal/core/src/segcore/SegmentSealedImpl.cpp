@@ -403,41 +403,12 @@ SegmentSealedImpl::HasFieldData(FieldId field_id) const {
 }
 
 std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
-SegmentSealedImpl::search_ids(const IdArray& id_array) const {
+SegmentSealedImpl::search_ids(const IdArray& id_array, Timestamp timestamp) const {
     AssertInfo(id_array.has_int_id(), "string ids are not implemented");
     auto arr = id_array.int_id();
     Assert(primary_key_index_);
     return primary_key_index_->do_search_ids(id_array);
 }
-
-// void
-// SegmentSealedImpl::build_index_if_primary_key(FieldId field_id) {
-//     auto create_index = [](const int64_t* data, int64_t size) {
-//         Assert(size);
-//         auto pk_index = std::make_unique<ScalarIndexVector>();
-//         pk_index->append_data(data, size, SegOffset(0));
-//         pk_index->build();
-//         return pk_index;
-//     };
-//
-//     if (SystemProperty::Instance().IsSystem(field_id)) {
-//         Assert(SystemProperty::Instance().GetSystemFieldType(field_id) == SystemFieldType::RowId);
-//         Assert(schema_->get_is_auto_id());
-//         Assert(row_count_opt_.has_value());
-//         auto row_count = row_count_opt_.value();
-//         Assert(row_count == row_ids_.size());
-//         primary_key_index_ = create_index(row_ids_.data(), row_count);
-//
-//     } else if (this->schema_->get_primary_key_offset() == schema_->get_offset(field_id)) {
-//         auto pk_offset = schema_->get_offset(field_id);
-//         auto& field_data = field_datas_[pk_offset.get()];
-//         Assert(row_count_opt_.has_value());
-//         auto row_count = row_count_opt_.value();
-//         Assert(field_data.size() == row_count * sizeof(int64_t));
-//
-//         primary_key_index_ = create_index((const int64_t*)field_data.data(), row_count);
-//     }
-// }
 
 SegmentSealedPtr
 CreateSealedSegment(SchemaPtr schema) {

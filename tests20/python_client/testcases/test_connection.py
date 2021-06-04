@@ -22,14 +22,14 @@ class TestConnectionParams(ApiReq):
         """
 
         # No check for **kwargs
-        res = self.connection.add_connection(_kwargs=[1, 2])
+        res = self.connection_wrap.add_connection(_kwargs=[1, 2])
         log.info(res[0])
 
-        res = self.connection.get_connection_addr(alias='default')
+        res = self.connection_wrap.get_connection_addr(alias='default')
         assert res[0] == {}
 
         # No check for **kwargs
-        res = self.connection.connect(alias=DefaultConfig.DEFAULT_USING, _kwargs=[1, 2])
+        res = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, _kwargs=[1, 2])
         log.info(res[0].args[0])
         assert res[0].args[0] == "Fail connecting to server on localhost:19530. Timeout"
 
@@ -43,7 +43,7 @@ class TestConnectionParams(ApiReq):
         expected: assert response is error
         """
         # No check for alias
-        res = self.connection.connect(alias=alias)
+        res = self.connection_wrap.connect(alias=alias)
         log.info(res[0])
 
     @pytest.mark.skip("No check for alias")
@@ -56,7 +56,7 @@ class TestConnectionParams(ApiReq):
         expected: assert response is error
         """
         # not check for alias
-        res = self.connection.get_connection(alias=alias)
+        res = self.connection_wrap.get_connection(alias=alias)
         log.info(res[0])
 
     @pytest.mark.skip("No check for alias")
@@ -69,7 +69,7 @@ class TestConnectionParams(ApiReq):
         expected: assert response is error
         """
         # not check for alias
-        res = self.connection.get_connection_addr(alias=alias)
+        res = self.connection_wrap.get_connection_addr(alias=alias)
         log.info(res[0])
 
     @pytest.mark.skip("No check for alias")
@@ -83,7 +83,7 @@ class TestConnectionParams(ApiReq):
         """
         # not check for alias
         self._connect()
-        res = self.connection.remove_connection(alias=alias)
+        res = self.connection_wrap.remove_connection(alias=alias)
         log.info(res[0])
 
 
@@ -100,18 +100,18 @@ class TestConnectionOperation(ApiReq):
         method: connection configure twice with the same params
         expected: assert the configuration is successful
         """
-        self.connection.add_connection(default={"host": host, "port": port}, dev={"host": host, "port": port})
-        assert self.connection.list_connections()[0] == [('default', None), ('dev', None)]
-        assert self.connection.get_connection_addr(alias='default')[0] == {"host": host, "port": port}
+        self.connection_wrap.add_connection(default={"host": host, "port": port}, dev={"host": host, "port": port})
+        assert self.connection_wrap.list_connections()[0] == [('default', None), ('dev', None)]
+        assert self.connection_wrap.get_connection_addr(alias='default')[0] == {"host": host, "port": port}
 
-        self.connection.add_connection(default={"host": host, "port": port}, dev={"host": host, "port": port})
-        assert self.connection.list_connections()[0] == [('default', None), ('dev', None)]
+        self.connection_wrap.add_connection(default={"host": host, "port": port}, dev={"host": host, "port": port})
+        assert self.connection_wrap.list_connections()[0] == [('default', None), ('dev', None)]
 
-        self.connection.add_connection(default1={"host": host, "port": port})
-        assert self.connection.list_connections()[0] == [('default', None), ('dev', None), ('default1', None)]
+        self.connection_wrap.add_connection(default1={"host": host, "port": port})
+        assert self.connection_wrap.list_connections()[0] == [('default', None), ('dev', None), ('default1', None)]
 
-        self.connection.add_connection()
-        assert self.connection.list_connections()[0] == [('default', None), ('dev', None), ('default1', None)]
+        self.connection_wrap.add_connection()
+        assert self.connection_wrap.list_connections()[0] == [('default', None), ('dev', None), ('default1', None)]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_connection_remove_connection_not_exist(self):
@@ -122,12 +122,12 @@ class TestConnectionOperation(ApiReq):
                 3、remove connection that is not exist
         expected: assert alias of Not_exist is not exist
         """
-        res = self.connection.remove_connection(alias=Not_Exist, check_res="")
+        res = self.connection_wrap.remove_connection(alias=Not_Exist, check_res="")
         assert res[0].args[0] == "There is no connection with alias '%s'." % Not_Exist
 
         self._connect()
 
-        res = self.connection.remove_connection(alias=Not_Exist, check_res="")
+        res = self.connection_wrap.remove_connection(alias=Not_Exist, check_res="")
         assert res[0].args[0] == "There is no connection with alias '%s'." % Not_Exist
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -139,9 +139,9 @@ class TestConnectionOperation(ApiReq):
         """
         self._connect()
 
-        self.connection.remove_connection(alias='default')
+        self.connection_wrap.remove_connection(alias='default')
 
-        res = self.connection.remove_connection(alias='default', check_res='')
+        res = self.connection_wrap.remove_connection(alias='default', check_res='')
         assert res[0].args[0] == "There is no connection with alias 'default'."
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -151,16 +151,16 @@ class TestConnectionOperation(ApiReq):
         method: remove connection twice
         expected: assert the responses are True
         """
-        self.connection.add_connection(default={"host": host, "port": port}, dev={"host": host, "port": port})
+        self.connection_wrap.add_connection(default={"host": host, "port": port}, dev={"host": host, "port": port})
 
-        self.connection.connect(alias='default')
-        res = self.connection.get_connection_addr(alias='default')
+        self.connection_wrap.connect(alias='default')
+        res = self.connection_wrap.get_connection_addr(alias='default')
         assert res[0]["host"] == host
         assert res[0]["port"] == port
-        self.connection.connect(alias='dev')
+        self.connection_wrap.connect(alias='dev')
 
-        self.connection.remove_connection(alias='default')
-        self.connection.remove_connection(alias='dev')
+        self.connection_wrap.remove_connection(alias='default')
+        self.connection_wrap.remove_connection(alias='dev')
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_connection_remove_connection_100_repeat(self):
@@ -170,10 +170,10 @@ class TestConnectionOperation(ApiReq):
         expected: assert the remaining 99 delete errors
         """
         self._connect()
-        self.connection.remove_connection(alias='default')
+        self.connection_wrap.remove_connection(alias='default')
 
         for i in range(100):
-            res = self.connection.remove_connection(alias='default', check_res='')
+            res = self.connection_wrap.remove_connection(alias='default', check_res='')
             assert res[0].args[0] == "There is no connection with alias 'default'."
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -183,10 +183,10 @@ class TestConnectionOperation(ApiReq):
         method: remove configure alias
         expected: assert res is err
         """
-        self.connection.add_connection(default={"host": host, "port": port})
+        self.connection_wrap.add_connection(default={"host": host, "port": port})
         alias_name = 'default'
 
-        res = self.connection.remove_connection(alias=alias_name, check_res='')
+        res = self.connection_wrap.remove_connection(alias=alias_name, check_res='')
         assert res[0].args[0] == "There is no connection with alias '%s'." % alias_name
 
     @pytest.mark.skip("error res")
@@ -198,9 +198,9 @@ class TestConnectionOperation(ApiReq):
         expected: assert res
         """
         alias_name = "default"
-        self.connection.connect(alias=alias_name, host=host, port=port)
-        self.connection.add_connection()
-        self.connection.get_connection(alias=alias_name)
+        self.connection_wrap.connect(alias=alias_name, host=host, port=port)
+        self.connection_wrap.add_connection()
+        self.connection_wrap.get_connection(alias=alias_name)
 
     @pytest.mark.skip("error res")
     @pytest.mark.tags(CaseLabel.L1)
@@ -211,9 +211,9 @@ class TestConnectionOperation(ApiReq):
         expected: assert res
         """
         alias_name = "default"
-        self.connection.connect(alias=alias_name, host=host, port=port)
-        self.connection.add_connection(default={'host': host, 'port': port})
-        self.connection.get_connection(alias=alias_name)
+        self.connection_wrap.connect(alias=alias_name, host=host, port=port)
+        self.connection_wrap.add_connection(default={'host': host, 'port': port})
+        self.connection_wrap.get_connection(alias=alias_name)
 
     @pytest.mark.skip("res needs to be confirmed")
     @pytest.mark.tags(CaseLabel.L1)
@@ -224,10 +224,10 @@ class TestConnectionOperation(ApiReq):
         expected: assert res
         """
         # error
-        self.connection.add_connection(default={"host": 'host', "port": port})
-        res = self.connection.connect(alias="default", host=host, port=port, check_res='')
+        self.connection_wrap.add_connection(default={"host": 'host', "port": port})
+        res = self.connection_wrap.connect(alias="default", host=host, port=port, check_res='')
         log.info(res[0])
-        res = self.connection.connect(alias="default", host=host, port=port, check_res='')
+        res = self.connection_wrap.connect(alias="default", host=host, port=port, check_res='')
         log.info(res[0])
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -238,10 +238,10 @@ class TestConnectionOperation(ApiReq):
         expected: res is True
         """
         self._connect()
-        self.connection.get_connection(alias='default')
+        self.connection_wrap.get_connection(alias='default')
 
-        self.connection.connect(alias='default', host=host, port=port)
-        self.connection.get_connection(alias='default')
+        self.connection_wrap.connect(alias='default', host=host, port=port)
+        self.connection_wrap.get_connection(alias='default')
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_connection_create_connection_not_exist(self, port):
@@ -250,8 +250,8 @@ class TestConnectionOperation(ApiReq):
         method: create connection with not exist link
         expected: assert res is wrong
         """
-        self.connection.get_connection(alias='default', check_res=CheckParams.false)
-        res = self.connection.connect(alias="default", host='host', port=port, check_res='')
+        self.connection_wrap.get_connection(alias='default', check_res=CheckParams.false)
+        res = self.connection_wrap.connect(alias="default", host='host', port=port, check_res='')
         assert res[0].args[0] == "Fail connecting to server on host:19530. Timeout"
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -262,12 +262,12 @@ class TestConnectionOperation(ApiReq):
         expected: assert res is correct
         """
         alias_name = "default"
-        self.connection.connect(alias=alias_name, host=host, port=port)
-        self.connection.get_connection(alias=alias_name)
-        self.connection.remove_connection(alias=alias_name)
-        self.connection.get_connection(alias=alias_name, check_res=CheckParams.false)
-        self.connection.connect(alias=alias_name, host=host, port=port)
-        self.connection.get_connection(alias=alias_name)
+        self.connection_wrap.connect(alias=alias_name, host=host, port=port)
+        self.connection_wrap.get_connection(alias=alias_name)
+        self.connection_wrap.remove_connection(alias=alias_name)
+        self.connection_wrap.get_connection(alias=alias_name, check_res=CheckParams.false)
+        self.connection_wrap.connect(alias=alias_name, host=host, port=port)
+        self.connection_wrap.get_connection(alias=alias_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_connection_list_configure(self, host, port):
@@ -276,9 +276,9 @@ class TestConnectionOperation(ApiReq):
         method:  list connection of configure
         expected: assert res is correct
         """
-        self.connection.add_connection(default={"host": host, "port": port}, dev={"host": host, "port": port})
-        self.connection.connect(alias="default")
-        assert self.connection.list_connections()[0] == ['default', 'dev']
+        self.connection_wrap.add_connection(default={"host": host, "port": port}, dev={"host": host, "port": port})
+        self.connection_wrap.connect(alias="default")
+        assert self.connection_wrap.list_connections()[0] == ['default', 'dev']
 
     @pytest.mark.skip("Behavior to be determined")
     @pytest.mark.tags(CaseLabel.L1)
@@ -288,10 +288,10 @@ class TestConnectionOperation(ApiReq):
         method:  list connection of configure
         expected: assert res is correct
         """
-        self.connection.connect(alias="default1", host=host, port=port)
-        self.connection.add_connection(default={"host": host, "port": port}, dev={"host": host, "port": port})
-        log.info(self.connection.list_connections()[0])
-        assert self.connection.list_connections()[0] == ['default', 'dev']
+        self.connection_wrap.connect(alias="default1", host=host, port=port)
+        self.connection_wrap.add_connection(default={"host": host, "port": port}, dev={"host": host, "port": port})
+        log.info(self.connection_wrap.list_connections()[0])
+        assert self.connection_wrap.list_connections()[0] == ['default', 'dev']
 
 
 

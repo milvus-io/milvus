@@ -9,6 +9,8 @@ from pymilvus_orm.types import DataType
 from pymilvus_orm.schema import CollectionSchema, FieldSchema
 from common import common_type as ct
 from utils.util_log import test_log as log
+import threading
+import traceback
 
 
 """" Methods of processing data """
@@ -92,13 +94,13 @@ def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim):
 def gen_default_binary_dataframe_data(nb=ct.default_nb, dim=ct.default_dim):
     int_values = pd.Series(data=[i for i in range(nb)])
     float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
-    _, binary_vec_values = gen_binary_vectors(nb, dim)
+    binary_raw_values, binary_vec_values = gen_binary_vectors(nb, dim)
     df = pd.DataFrame({
         ct.default_int64_field_name: int_values,
         ct.default_float_field_name: float_values,
         ct.default_binary_vec_field_name: binary_vec_values
     })
-    return df
+    return df, binary_raw_values
 
 
 def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim):
@@ -180,6 +182,30 @@ def gen_invalid_dataframe():
     ]
     return dfs
 
+def jaccard(x, y):
+    x = np.asarray(x, np.bool)
+    y = np.asarray(y, np.bool)
+    return 1 - np.double(np.bitwise_and(x, y).sum()) / np.double(np.bitwise_or(x, y).sum())
+
+def hamming(x, y):
+    x = np.asarray(x, np.bool)
+    y = np.asarray(y, np.bool)
+    return np.bitwise_xor(x, y).sum()
+
+def tanimoto(x, y):
+    x = np.asarray(x, np.bool)
+    y = np.asarray(y, np.bool)
+    return -np.log2(np.double(np.bitwise_and(x, y).sum()) / np.double(np.bitwise_or(x, y).sum()))
+
+def substructure(x, y):
+    x = np.asarray(x, np.bool)
+    y = np.asarray(y, np.bool)
+    return 1 - np.double(np.bitwise_and(x, y).sum()) / np.count_nonzero(y)
+
+def superstructure(x, y):
+    x = np.asarray(x, np.bool)
+    y = np.asarray(y, np.bool)
+    return 1 - np.double(np.bitwise_and(x, y).sum()) / np.count_nonzero(x)
 
 def modify_file(file_name_list, input_content=""):
     if not isinstance(file_name_list, list):

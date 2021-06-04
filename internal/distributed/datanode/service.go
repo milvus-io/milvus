@@ -211,7 +211,7 @@ func (s *Server) init() error {
 	if s.newDataServiceClient != nil {
 		log.Debug("Data service address", zap.String("address", Params.DataServiceAddress))
 		log.Debug("DataNode Init data service client ...")
-		dataServiceClient := s.newDataServiceClient(Params.DataServiceAddress, dn.Params.MetaRootPath, dn.Params.EtcdAddress, 10)
+		dataServiceClient := s.newDataServiceClient(Params.DataServiceAddress, dn.Params.MetaRootPath, dn.Params.EtcdAddress, 3*time.Second)
 		if err = dataServiceClient.Init(); err != nil {
 			log.Debug("DataNode newDataServiceClient failed", zap.Error(err))
 			panic(err)

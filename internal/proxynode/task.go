@@ -1591,7 +1591,15 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 		}
 
 		availableQueryNodeNum := 0
-		for _, partialRetrieveResult := range retrieveResult {
+		rt.result = &milvuspb.RetrieveResults{
+			Status: &commonpb.Status{
+				ErrorCode: 0,
+			},
+			Ids:        &schemapb.IDs{},
+			FieldsData: make([]*schemapb.FieldData, 0),
+		}
+		for idx, partialRetrieveResult := range retrieveResult {
+			log.Debug("Index-" + strconv.Itoa(idx))
 			if partialRetrieveResult.Ids == nil {
 				reason += "ids is nil\n"
 				continue
@@ -1604,11 +1612,28 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 				}
 
 				if !intOk {
-					rt.result.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data = append(rt.result.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data, intIds.IntId.Data...)
+					if idsStr, ok := rt.result.Ids.IdField.(*schemapb.IDs_StrId); ok {
+						idsStr.StrId.Data = append(idsStr.StrId.Data, strIds.StrId.Data...)
+					} else {
+						rt.result.Ids.IdField = &schemapb.IDs_StrId{
+							StrId: &schemapb.StringArray{
+								Data: strIds.StrId.Data,
+							},
+						}
+					}
 				} else {
-					rt.result.Ids.IdField.(*schemapb.IDs_StrId).StrId.Data = append(rt.result.Ids.IdField.(*schemapb.IDs_StrId).StrId.Data, strIds.StrId.Data...)
-				}
+					if idsInt, ok := rt.result.Ids.IdField.(*schemapb.IDs_IntId); ok {
+						idsInt.IntId.Data = append(idsInt.IntId.Data, intIds.IntId.Data...)
+					} else {
+						rt.result.Ids.IdField = &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{
+								Data: intIds.IntId.Data,
+							},
+						}
+					}
 
+				}
+				rt.result.FieldsData = append(rt.result.FieldsData, partialRetrieveResult.FieldsData...)
 			}
 			availableQueryNodeNum++
 		}
@@ -1623,13 +1648,6 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 				},
 			}
 			return nil
-		}
-
-		rt.result = &milvuspb.RetrieveResults{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    reason,
-			},
 		}
 	}
 
@@ -1964,6 +1982,7 @@ type ShowCollectionsTask struct {
 	*milvuspb.ShowCollectionsRequest
 	ctx           context.Context
 	masterService types.MasterService
+	queryService  types.QueryService
 	result        *milvuspb.ShowCollectionsResponse
 }
 
@@ -2013,14 +2032,64 @@ func (sct *ShowCollectionsTask) PreExecute(ctx context.Context) error {
 
 func (sct *ShowCollectionsTask) Execute(ctx context.Context) error {
 	var err error
-	sct.result, err = sct.masterService.ShowCollections(ctx, sct.ShowCollectionsRequest)
-	if sct.result == nil {
-		return errors.New("get collection statistics resp is nil")
+
+	respFromMaster, err := sct.masterService.ShowCollections(ctx, sct.ShowCollectionsRequest)
+
+	if err != nil {
+		return err
 	}
-	if sct.result.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return errors.New(sct.result.Status.Reason)
+
+	if respFromMaster == nil {
+		return errors.New("failed to show collections")
 	}
-	return err
+
+	if respFromMaster.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(respFromMaster.Status.Reason)
+	}
+
+	if sct.ShowCollectionsRequest.Type == milvuspb.ShowCollectionsType_InMemory {
+		resp, err := sct.queryService.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_ShowCollections,
+				MsgID:     sct.ShowCollectionsRequest.Base.MsgID,
+				Timestamp: sct.ShowCollectionsRequest.Base.Timestamp,
+				SourceID:  sct.ShowCollectionsRequest.Base.SourceID,
+			},
+			//DbID: sct.ShowCollectionsRequest.DbName,
+		})
+
+		if err != nil {
+			return err
+		}
+
+		if resp == nil {
+			return errors.New("failed to show collections")
+		}
+
+		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+			return errors.New(resp.Status.Reason)
+		}
+
+		sct.result = &milvuspb.ShowCollectionsResponse{
+			Status:          resp.Status,
+			CollectionNames: make([]string, 0, len(resp.CollectionIDs)),
+			CollectionIds:   make([]int64, 0, len(resp.CollectionIDs)),
+		}
+
+		idMap := make(map[int64]string)
+		for i, name := range respFromMaster.CollectionNames {
+			idMap[respFromMaster.CollectionIds[i]] = name
+		}
+
+		for _, id := range resp.CollectionIDs {
+			sct.result.CollectionIds = append(sct.result.CollectionIds, id)
+			sct.result.CollectionNames = append(sct.result.CollectionNames, idMap[id])
+		}
+	}
+
+	sct.result = respFromMaster
+
+	return nil
 }
 
 func (sct *ShowCollectionsTask) PostExecute(ctx context.Context) error {

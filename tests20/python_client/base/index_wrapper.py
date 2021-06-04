@@ -38,7 +38,7 @@ def func_req(_list, **kwargs):
     return False, False
 
 
-class ApiIndex:
+class ApiIndexWrapper:
     index = None
 
     def index_init(self, collection, field_name, index_params, name="", check_res=None, check_params=None, **kwargs):

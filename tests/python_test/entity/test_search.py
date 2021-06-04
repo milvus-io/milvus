@@ -6,7 +6,7 @@ from multiprocessing import Pool, Process
 import pytest
 import numpy as np
 
-from milvus import DataType
+from pymilvus import DataType
 from utils import *
 from constants import *
 

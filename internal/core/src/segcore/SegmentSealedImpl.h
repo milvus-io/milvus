@@ -109,8 +109,8 @@ class SegmentSealedImpl : public SegmentSealed {
         return system_ready_count_ == 1;
     }
 
-    virtual std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
-    search_ids(const IdArray& id_array) const;
+    std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    search_ids(const IdArray& id_array, Timestamp timestamp) const override;
 
     //    virtual void
     //    build_index_if_primary_key(FieldId field_id);

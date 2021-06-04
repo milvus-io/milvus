@@ -2,10 +2,10 @@ import copy
 import pytest
 from pymilvus_orm import FieldSchema
 from base.client_request import ApiReq
-from base.collection import ApiCollection
-from base.partition import ApiPartition
-from base.index import ApiIndex
-from base.utility import ApiUtility
+from base.collection_wrapper import ApiCollectionWrapper
+from base.partition_wrapper import ApiPartitionWrapper
+from base.index_wrapper import ApiIndexWrapper
+from base.utility_wrapper import ApiUtilityWrapper
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
@@ -42,7 +42,7 @@ class TestUtilityParams(ApiReq):
         expected: raise exception
         """
         self._connect()
-        ut = ApiUtility()
+        ut = ApiUtilityWrapper()
         c_name = get_invalid_collection_name
         ex, _ = ut.has_collection(c_name)
         log.error(str(ex))
@@ -56,7 +56,7 @@ class TestUtilityParams(ApiReq):
         expected: raise exception
         """
         self._connect()
-        ut = ApiUtility()
+        ut = ApiUtilityWrapper()
         c_name = get_invalid_collection_name
         p_name = cf.gen_unique_str(prefix)
         ex, _ = ut.has_partition(c_name, p_name)
@@ -71,7 +71,7 @@ class TestUtilityParams(ApiReq):
         expected: raise exception
         """
         self._connect()
-        ut = ApiUtility()
+        ut = ApiUtilityWrapper()
         c_name = cf.gen_unique_str(prefix)
         p_name = get_invalid_partition_name
         ex, _ = ut.has_partition(c_name, p_name)
@@ -87,7 +87,7 @@ class TestUtilityParams(ApiReq):
         """
         self._connect()
         using = "empty"
-        ut = ApiUtility(using=using)
+        ut = ApiUtilityWrapper(using=using)
         ex, _ = ut.list_collections()
         log.error(str(ex))
         assert "invalid" or "illegal" in str(ex)
@@ -101,7 +101,7 @@ class TestUtilityParams(ApiReq):
         """
         self._connect()
         c_name = get_invalid_collection_name
-        ut = ApiUtility()
+        ut = ApiUtilityWrapper()
         ex, _ = ut.index_building_progress(c_name)
         log.error(str(ex))
         assert "invalid" or "illegal" in str(ex)
@@ -117,7 +117,7 @@ class TestUtilityParams(ApiReq):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         index_name = get_invalid_index_name
-        ut = ApiUtility()
+        ut = ApiUtilityWrapper()
         ex, _ = ut.index_building_progress(c_name, index_name)
         log.error(str(ex))
         assert "invalid" or "illegal" in str(ex)
@@ -131,7 +131,7 @@ class TestUtilityParams(ApiReq):
         """
         self._connect()
         c_name = get_invalid_collection_name
-        ut = ApiUtility()
+        ut = ApiUtilityWrapper()
         ex, _ = ut.wait_for_index_building_complete(c_name)
         log.error(str(ex))
         assert "invalid" or "illegal" in str(ex)
@@ -146,7 +146,7 @@ class TestUtilityParams(ApiReq):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         index_name = get_invalid_index_name
-        ut = ApiUtility()
+        ut = ApiUtilityWrapper()
         ex, _ = ut.wait_for_index_building_complete(c_name, index_name)
         log.error(str(ex))
         assert "invalid" or "illegal" in str(ex)
@@ -163,7 +163,7 @@ class TestUtilityBase(ApiReq):
         expected: True
         """
         self._connect()
-        ut = ApiUtility()
+        ut = ApiUtilityWrapper()
         c_name = cf.gen_unique_str(prefix)
         self._collection(c_name)
         res, _ = ut.has_collection(c_name)
@@ -177,7 +177,7 @@ class TestUtilityBase(ApiReq):
         expected: False
         """
         self._connect()
-        ut = ApiUtility()
+        ut = ApiUtilityWrapper()
         c_name = cf.gen_unique_str(prefix)
         self._collection()
         res, _ = ut.has_collection(c_name)
@@ -191,12 +191,12 @@ class TestUtilityBase(ApiReq):
         expected: False
         """
         self._connect()
-        ut = ApiUtility()
+        ut = ApiUtilityWrapper()
         c_name = cf.gen_unique_str(prefix)
         self._collection(c_name)
         res, _ = ut.has_collection(c_name)
         assert res is True
-        self.collection.drop()
+        self.collection_wrap.drop()
         res, _ = ut.has_collection(c_name)
         assert res is False
 
@@ -208,11 +208,11 @@ class TestUtilityBase(ApiReq):
         expected: True
         """
         self._connect()
-        ut = ApiUtility()
+        ut = ApiUtilityWrapper()
         c_name = cf.gen_unique_str(prefix)
         p_name = cf.gen_unique_str()
         collection = self._collection(c_name)
-        api_p = ApiPartition()
+        api_p = ApiPartitionWrapper()
         api_p.partition_init(collection, p_name)
         res, _ = ut.has_partition(c_name, p_name)
         assert res is True
@@ -225,7 +225,7 @@ class TestUtilityBase(ApiReq):
         expected: True
         """
         self._connect()
-        ut = ApiUtility()
+        ut = ApiUtilityWrapper()
         c_name = cf.gen_unique_str(prefix)
         p_name = cf.gen_unique_str()
         self._collection(c_name)
@@ -240,11 +240,11 @@ class TestUtilityBase(ApiReq):
         expected: True
         """
         self._connect()
-        ut = ApiUtility()
+        ut = ApiUtilityWrapper()
         c_name = cf.gen_unique_str(prefix)
         p_name = cf.gen_unique_str()
         collection = self._collection(c_name)
-        api_p = ApiPartition()
+        api_p = ApiPartitionWrapper()
         api_p.partition_init(collection, p_name)
         res, _ = ut.has_partition(c_name, p_name)
         assert res is True
@@ -260,7 +260,7 @@ class TestUtilityBase(ApiReq):
         expected: in the result
         """
         self._connect()
-        ut = ApiUtility()
+        ut = ApiUtilityWrapper()
         c_name = cf.gen_unique_str(prefix)
         self._collection(c_name)
         res, _ = ut.list_collections()
@@ -275,7 +275,7 @@ class TestUtilityBase(ApiReq):
         expected: length of the result equals to 0
         """
         self._connect()
-        ut = ApiUtility()
+        ut = ApiUtilityWrapper()
         res, _ = ut.list_collections()
         assert len(res) == 0
 
@@ -288,7 +288,7 @@ class TestUtilityBase(ApiReq):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        ut = ApiUtility()
+        ut = ApiUtilityWrapper()
         ex, _ = ut.index_building_progress(c_name)
         log.error(str(ex))
         assert "exist" in str(ex)
@@ -303,7 +303,7 @@ class TestUtilityBase(ApiReq):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         self._collection(c_name)
-        ut = ApiUtility()
+        ut = ApiUtilityWrapper()
         res, _ = ut.index_building_progress(c_name)
         assert "num_indexed_entities" in res
         assert res["num_indexed_entities"] == 0
@@ -322,8 +322,8 @@ class TestUtilityBase(ApiReq):
         c_name = cf.gen_unique_str(prefix)
         self._collection(c_name)
         data = cf.gen_default_list_data(nb)
-        self.collection.insert(data=data)
-        ut = ApiUtility()
+        self.collection_wrap.insert(data=data)
+        ut = ApiUtilityWrapper()
         res, _ = ut.index_building_progress(c_name)
         assert "num_indexed_entities" in res
         assert res["num_indexed_entities"] == 0
@@ -342,9 +342,9 @@ class TestUtilityBase(ApiReq):
         c_name = cf.gen_unique_str(prefix)
         self._collection(c_name)
         data = cf.gen_default_list_data(nb)
-        self.collection.insert(data=data)
-        self.collection.create_index(default_field_name, default_index_params)
-        ut = ApiUtility()
+        self.collection_wrap.insert(data=data)
+        self.collection_wrap.create_index(default_field_name, default_index_params)
+        ut = ApiUtilityWrapper()
         ut.wait_for_index_building_complete(c_name)
         res, _ = ut.index_building_progress(c_name)
         assert "num_indexed_entities" in res
@@ -364,9 +364,9 @@ class TestUtilityBase(ApiReq):
         c_name = cf.gen_unique_str(prefix)
         self._collection(c_name)
         data = cf.gen_default_list_data(nb)
-        self.collection.insert(data=data)
-        self.collection.create_index(default_field_name, default_index_params)
-        ut = ApiUtility()
+        self.collection_wrap.insert(data=data)
+        self.collection_wrap.create_index(default_field_name, default_index_params)
+        ut = ApiUtilityWrapper()
         ut.wait_for_index_building_complete(c_name)
         res, _ = ut.index_building_progress(c_name)
         assert "num_indexed_entities" in res
@@ -386,9 +386,9 @@ class TestUtilityBase(ApiReq):
         c_name = cf.gen_unique_str(prefix)
         self._collection(c_name)
         data = cf.gen_default_list_data(nb)
-        self.collection.insert(data=data)
-        self.collection.create_index(default_field_name, default_index_params)
-        ut = ApiUtility()
+        self.collection_wrap.insert(data=data)
+        self.collection_wrap.create_index(default_field_name, default_index_params)
+        ut = ApiUtilityWrapper()
         res, _ = ut.index_building_progress(c_name)
         for _ in range(2):
             assert "num_indexed_entities" in res
@@ -406,7 +406,7 @@ class TestUtilityBase(ApiReq):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        ut = ApiUtility()
+        ut = ApiUtilityWrapper()
         ex, _ = ut.wait_for_index_building_complete(c_name)
         log.error(str(ex))
         assert "exist" in str(ex)
@@ -421,7 +421,7 @@ class TestUtilityBase(ApiReq):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         self._collection(c_name)
-        ut = ApiUtility()
+        ut = ApiUtilityWrapper()
         res, _ = ut.wait_for_index_building_complete(c_name)
         assert res is None
 
@@ -437,9 +437,9 @@ class TestUtilityBase(ApiReq):
         c_name = cf.gen_unique_str(prefix)
         self._collection(c_name)
         data = cf.gen_default_list_data(nb)
-        self.collection.insert(data=data)
-        self.collection.create_index(default_field_name, default_index_params)
-        ut = ApiUtility()
+        self.collection_wrap.insert(data=data)
+        self.collection_wrap.create_index(default_field_name, default_index_params)
+        ut = ApiUtilityWrapper()
         res, _ = ut.wait_for_index_building_complete(c_name)
         assert res is None
         res, _ = ut.index_building_progress(c_name)
@@ -457,11 +457,11 @@ class TestUtilityAdvanced(ApiReq):
         expected: True
         """
         self._connect()
-        ut = ApiUtility()
+        ut = ApiUtilityWrapper()
         c_name = cf.gen_unique_str(prefix)
         c_name_2 = cf.gen_unique_str(prefix)
         self._collection(c_name)
-        api_c = ApiCollection()
+        api_c = ApiCollectionWrapper()
         api_c.collection_init(c_name_2)
         for name in [c_name, c_name_2]:
             res, _ = ut.has_collection(name)
@@ -475,11 +475,11 @@ class TestUtilityAdvanced(ApiReq):
         expected: in the result
         """
         self._connect()
-        ut = ApiUtility()
+        ut = ApiUtilityWrapper()
         c_name = cf.gen_unique_str(prefix)
         c_name_2 = cf.gen_unique_str(prefix)
         self._collection(c_name)
-        api_c = ApiCollection()
+        api_c = ApiCollectionWrapper()
         api_c.collection_init(c_name_2)
         res, _ = ut.list_collections()
         for name in [c_name, c_name_2]:

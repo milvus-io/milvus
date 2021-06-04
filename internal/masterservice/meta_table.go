@@ -464,30 +464,26 @@ func (mt *metaTable) GetCollectionBySegmentID(segID typeutil.UniqueID) (*pb.Coll
 	return colCopy.(*pb.CollectionInfo), nil
 }
 
-func (mt *metaTable) ListCollections(ts typeutil.Timestamp) ([]string, error) {
+func (mt *metaTable) ListCollections(ts typeutil.Timestamp) (map[string]typeutil.UniqueID, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 
 	if ts == 0 {
-		colls := make([]string, 0, len(mt.collName2ID))
-		for name := range mt.collName2ID {
-			colls = append(colls, name)
-		}
-		return colls, nil
+		return mt.collName2ID, nil
 	}
 	_, vals, err := mt.client.LoadWithPrefix(CollectionMetaPrefix, ts)
 	if err != nil {
 		log.Debug("load with prefix error", zap.Uint64("timestamp", ts), zap.Error(err))
-		return []string{}, nil
+		return nil, nil
 	}
-	colls := make([]string, 0, len(vals))
+	colls := make(map[string]typeutil.UniqueID)
 	for _, val := range vals {
 		collMeta := pb.CollectionInfo{}
 		err := proto.UnmarshalText(val, &collMeta)
 		if err != nil {
 			log.Debug("unmarshal collection info failed", zap.Error(err))
 		}
-		colls = append(colls, collMeta.Schema.Name)
+		colls[collMeta.Schema.Name] = collMeta.ID
 	}
 	return colls, nil
 }

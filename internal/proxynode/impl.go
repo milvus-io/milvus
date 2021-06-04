@@ -413,6 +413,7 @@ func (node *ProxyNode) ShowCollections(ctx context.Context, request *milvuspb.Sh
 		Condition:              NewTaskCondition(ctx),
 		ShowCollectionsRequest: request,
 		masterService:          node.masterService,
+		queryService:           node.queryService,
 	}
 
 	err := node.sched.DdQueue.Enqueue(sct)
@@ -1272,6 +1273,10 @@ func (node *ProxyNode) Flush(ctx context.Context, request *milvuspb.FlushRequest
 	}
 
 	return ft.result, nil
+}
+
+func (node *ProxyNode) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+	panic("Not implemented yet")
 }
 
 func (node *ProxyNode) GetDdChannel(ctx context.Context, request *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {

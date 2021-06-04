@@ -130,3 +130,30 @@ DeletePlaceholderGroup(CPlaceholderGroup cPlaceholder_group) {
     delete placeHolder_group;
     // std::cout << "delete placeholder" << std::endl;
 }
+
+CStatus
+CreateRetrievePlan(CCollection c_col, CProto retrieve_request, CRetrievePlan* output) {
+    auto col = (milvus::segcore::Collection*)c_col;
+    try {
+        milvus::proto::plan::RetrieveRequest request;
+        request.ParseFromArray(retrieve_request.proto_blob, retrieve_request.proto_size);
+        auto plan = milvus::query::CreateRetrievePlan(*col->get_schema(), std::move(request));
+        *output = plan.release();
+
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
+}
+
+void
+DeleteRetrievePlan(CRetrievePlan c_plan) {
+    auto plan = (milvus::query::RetrievePlan*)c_plan;
+    delete plan;
+}

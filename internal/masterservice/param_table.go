@@ -38,7 +38,7 @@ type ParamTable struct {
 	TimeTickChannel           string
 	DdChannel                 string
 	StatisticsChannel         string
-	DataServiceSegmentChannel string // get from data service, data service create segment, or data node flush segment
+	DataServiceSegmentChannel string // data service create segment, or data node flush segment
 
 	MaxPartitionNum             int64
 	DefaultPartitionName        string
@@ -71,6 +71,7 @@ func (p *ParamTable) Init() {
 		p.initTimeTickChannel()
 		p.initDdChannelName()
 		p.initStatisticsChannelName()
+		p.initSegmentInfoChannelName()
 
 		p.initMaxPartitionNum()
 		p.initMinSegmentSizeToEnableIndex()
@@ -155,6 +156,14 @@ func (p *ParamTable) initStatisticsChannelName() {
 		panic(err)
 	}
 	p.StatisticsChannel = channel
+}
+
+func (p *ParamTable) initSegmentInfoChannelName() {
+	channel, err := p.Load("msgChannel.chanNamePrefix.dataServiceSegmentInfo")
+	if err != nil {
+		panic(err)
+	}
+	p.DataServiceSegmentChannel = channel
 }
 
 func (p *ParamTable) initMaxPartitionNum() {

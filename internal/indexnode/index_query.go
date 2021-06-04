@@ -214,6 +214,7 @@ func (index *CIndexQuery) QueryOnBinaryVecIndex(vectors []byte) (QueryResult, er
 	if err != nil {
 		return nil, err
 	}
+
 	return res, nil
 }
 

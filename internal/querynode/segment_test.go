@@ -22,6 +22,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
 //-------------------------------------------------------------------------------------- constructor and destructor
@@ -101,6 +103,66 @@ func TestSegment_getRowCount(t *testing.T) {
 
 	deleteSegment(segment)
 	deleteCollection(collection)
+}
+
+func TestSegment_retrieve(t *testing.T) {
+	collectionID := UniqueID(0)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
+
+	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
+	assert.Equal(t, collection.ID(), collectionID)
+
+	segmentID := UniqueID(0)
+	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, segmentTypeGrowing)
+	assert.Equal(t, segmentID, segment.segmentID)
+
+	ids := []int64{}
+	timestamps := []Timestamp{}
+	const DIM = 16
+	const N = 100
+	var records []*commonpb.Blob
+	for i := 0; i < N; i++ {
+		ids = append(ids, int64(i))
+		timestamps = append(timestamps, 0)
+		var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+		var rawData []byte
+		for _, ele := range vec {
+			buf := make([]byte, 4)
+			binary.LittleEndian.PutUint32(buf, math.Float32bits(ele+float32(i)*float32(N)))
+			rawData = append(rawData, buf...)
+		}
+		bs := make([]byte, 4)
+		binary.LittleEndian.PutUint32(bs, 1)
+		rawData = append(rawData, bs...)
+		blob := &commonpb.Blob{
+			Value: rawData,
+		}
+		records = append(records, blob)
+	}
+	offset, err := segment.segmentPreInsert(N)
+	assert.Nil(t, err)
+	assert.Equal(t, offset, int64(0))
+	err = segment.segmentInsert(offset, &ids, &timestamps, &records)
+	assert.NoError(t, err)
+
+	reqIds := &planpb.RetrieveRequest{
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: []int64{2, 3, 1},
+				},
+			},
+		},
+		OutputFields: []string{"vec"},
+	}
+	plan, err := createRetrievePlan(collection, reqIds, 100)
+	defer plan.delete()
+	assert.NoError(t, err)
+
+	res, err := segment.segmentGetEntityByIds(plan)
+	assert.NoError(t, err)
+
+	assert.Equal(t, res.Ids.GetIntId().Data, []int64{2, 3, 1})
 }
 
 func TestSegment_getDeletedCount(t *testing.T) {
