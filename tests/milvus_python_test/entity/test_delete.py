@@ -182,8 +182,7 @@ class TestDeleteBase:
         status = connect.delete_entity_by_id(collection, ids[:length], partition_tag=tag)
         assert status.OK()
 
-    # TODO:
-    def _test_delete_vector_from_partition_not_existed(self, connect, collection):
+    def test_delete_vector_from_partition_not_existed(self, connect, collection):
         '''
         target: test.get_entity_by_id with partition params, partition tag not existed
         method: add vector, and delete 
