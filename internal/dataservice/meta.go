@@ -255,6 +255,10 @@ func (m *meta) SaveBinlogAndCheckPoints(segID UniqueID, flushed bool,
 			log.Warn("Failed to find segment", zap.Int64("id", cp.SegmentID))
 			continue
 		}
+		if segment.DmlPosition != nil && segment.DmlPosition.Timestamp >= cp.Position.Timestamp {
+			// segment position in etcd is larger than checkpoint, then dont change it
+			continue
+		}
 		segment.DmlPosition = cp.Position
 		segment.NumOfRows = cp.NumOfRows
 		segBytes := proto.MarshalTextString(segInfo)

@@ -184,9 +184,14 @@ func (s *Server) GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelInfo, e
 		segments := s.meta.GetSegmentsByChannel(vchan.DmlChannel)
 		flushedSegmentIDs := make([]UniqueID, 0)
 		unflushedCheckpoints := make([]*datapb.CheckPoint, 0)
+		var seekPosition *internalpb.MsgPosition
+		var useUnflushedPosition bool
 		for _, s := range segments {
 			if s.State == commonpb.SegmentState_Flushing || s.State == commonpb.SegmentState_Flushed {
 				flushedSegmentIDs = append(flushedSegmentIDs, s.ID)
+				if seekPosition == nil || (!useUnflushedPosition && s.DmlPosition.Timestamp > seekPosition.Timestamp) {
+					seekPosition = s.DmlPosition
+				}
 				continue
 			}
 
@@ -200,13 +205,19 @@ func (s *Server) GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelInfo, e
 				NumOfRows: s.NumOfRows,
 			}
 			unflushedCheckpoints = append(unflushedCheckpoints, cp)
+
+			if seekPosition == nil || (useUnflushedPosition && s.DmlPosition.Timestamp < seekPosition.Timestamp) {
+				useUnflushedPosition = true
+				seekPosition = s.DmlPosition
+			}
 		}
 
 		pairs = append(pairs, &datapb.VchannelInfo{
 			CollectionID:    vchan.CollectionID,
 			ChannelName:     vchan.DmlChannel,
-			FlushedSegments: flushedSegmentIDs,
+			SeekPosition:    seekPosition,
 			CheckPoints:     unflushedCheckpoints,
+			FlushedSegments: flushedSegmentIDs,
 		})
 	}
 	return pairs, nil
