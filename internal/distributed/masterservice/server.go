@@ -92,9 +92,6 @@ func (s *Server) setClient() {
 		if err := dsClient.Start(); err != nil {
 			panic(err)
 		}
-		if err := funcutil.WaitForComponentInitOrHealthy(ctx, dsClient, "DataService", 1000000, 200*time.Millisecond); err != nil {
-			panic(err)
-		}
 		return dsClient
 	}
 	s.newIndexServiceClient = func(metaRootPath, etcdAddress string, timeout time.Duration) types.IndexService {
