@@ -129,7 +129,6 @@ func TestGrpcService(t *testing.T) {
 	cms.Params.KvRootPath = fmt.Sprintf("/%d/test/kv", randVal)
 	cms.Params.MsgChannelSubName = fmt.Sprintf("msgChannel%d", randVal)
 	cms.Params.TimeTickChannel = fmt.Sprintf("timeTick%d", randVal)
-	cms.Params.DdChannel = fmt.Sprintf("ddChannel%d", randVal)
 	cms.Params.StatisticsChannel = fmt.Sprintf("stateChannel%d", randVal)
 	cms.Params.DataServiceSegmentChannel = fmt.Sprintf("segmentChannel%d", randVal)
 
@@ -282,13 +281,6 @@ func TestGrpcService(t *testing.T) {
 	t.Run("get statistics channel", func(t *testing.T) {
 		req := &internalpb.GetStatisticsChannelRequest{}
 		rsp, err := svr.GetStatisticsChannel(ctx, req)
-		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
-	})
-
-	t.Run("get dd channel", func(t *testing.T) {
-		req := &internalpb.GetDdChannelRequest{}
-		rsp, err := svr.GetDdChannel(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 	})
