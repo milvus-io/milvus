@@ -3,44 +3,47 @@ from common.common_type import *
 from pymilvus_orm import Collection, Partition
 
 
-class CheckFunc:
-    def __init__(self, res, func_name, check_res, check_params, check_res_result=True, **kwargs):
-        self.res = res  # response of api request
+class ResponseChecker:
+    def __init__(self, response, func_name, check_items, check_params, expect_succ=True, **kwargs):
+        self.response = response  # response of api request
         self.func_name = func_name
-        self.check_res = check_res
+        self.check_items = check_items
         self.check_params = check_params
-        self.check_res_result = check_res_result
-        self.params = {}
+        self.expect_succ = expect_succ
 
+        # parse **kwargs. not used for now
+        self.params = {}
         for key, value in kwargs.items():
             self.params[key] = value
-
         self.keys = self.params.keys()
 
     def run(self):
-        # log.debug("[Run CheckFunc] Start checking res...")
-        check_result = True
+        """
+        Method: start response checking for milvus API call
+        """
+        result = True
+        if self.check_items is None:
+            result = self.assert_expectation(self.expect_succ, True)
 
-        if self.check_res is None:
-            check_result = self.check_response(self.check_res_result, True)
+        elif self.check_items == CheckParams.err_res:
+            result = self.assert_expectation(self.expect_succ, False)
 
-        elif self.check_res == CheckParams.err_res:
-            check_result = self.check_response(self.check_res_result, False)
+        elif self.check_items == CheckParams.list_count and self.check_params is not None:
+            result = self.check_list_count(self.response, self.func_name, self.check_params)
 
-        elif self.check_res == CheckParams.list_count and self.check_params is not None:
-            check_result = self.check_list_count(self.res, self.func_name, self.check_params)
+        elif self.check_items == CheckParams.collection_property_check:
+            result = self.req_collection_property_check(self.response, self.func_name, self.params)
 
-        elif self.check_res == CheckParams.collection_property_check:
-            check_result = self.req_collection_property_check(self.res, self.func_name, self.params)
+        elif self.check_items == CheckParams.partition_property_check:
+            result = self.partition_property_check(self.response, self.func_name, self.params)
 
-        elif self.check_res == CheckParams.partition_property_check:
-            check_result = self.partition_property_check(self.res, self.func_name, self.params)
+        # Add check_items here if something new need verify
 
-        return check_result
+        return result
 
     @staticmethod
-    def check_response(check_res_result, expect_result):
-        assert check_res_result == expect_result
+    def assert_expectation(expect, actual):
+        assert actual == expect
         return True
 
     @staticmethod

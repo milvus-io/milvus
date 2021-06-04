@@ -4,7 +4,7 @@ import pytest
 import random
 import numpy as np
 
-from base.client_request import ApiReq
+from base.client_base import TestcaseBase
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
@@ -21,7 +21,7 @@ default_search_params = ct.default_search_params
 epsilon = ct.epsilon
 CaseLabel = ct.CaseLabel
 
-class TestCollectionSearch(ApiReq):
+class TestCollectionSearch(TestcaseBase):
     """ Test case of search interface """
 
     def init_data(self, insert_data=False, nb=3000, partition_num=0, multiple=False, is_binary=False):
