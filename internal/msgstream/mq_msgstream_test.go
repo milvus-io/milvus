@@ -191,7 +191,7 @@ func getTimeTickMsg(reqID UniqueID) TsMsg {
 }
 
 // Generate MsgPack contains 'num' msgs, with timestamp in (start, end)
-func getInsertMsgPack(num int, start int, end int) *MsgPack {
+func getRandInsertMsgPack(num int, start int, end int) *MsgPack {
 	Rand := rand.New(rand.NewSource(time.Now().UnixNano()))
 	set := make(map[int]bool)
 	msgPack := MsgPack{}
@@ -202,6 +202,14 @@ func getInsertMsgPack(num int, start int, end int) *MsgPack {
 			set[reqID] = true
 			msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, int64(reqID)))
 		}
+	}
+	return &msgPack
+}
+
+func getInsertMsgPack(ts []int) *MsgPack {
+	msgPack := MsgPack{}
+	for i := 0; i < len(ts); i++ {
+		msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, int64(ts[i])))
 	}
 	return &msgPack
 }
@@ -712,13 +720,29 @@ func TestStream_PulsarTtMsgStream_UnMarshalHeader(t *testing.T) {
 	outputStream.Close()
 }
 
-func createMsgPacks(msgsInPack int, numOfMsgPack int, deltaTs int) []*MsgPack {
+func createRandMsgPacks(msgsInPack int, numOfMsgPack int, deltaTs int) []*MsgPack {
 	msgPacks := make([]*MsgPack, numOfMsgPack)
 
 	// generate MsgPack
 	for i := 0; i < numOfMsgPack; i++ {
 		if i%2 == 0 {
-			msgPacks[i] = getInsertMsgPack(msgsInPack, i/2*deltaTs, (i/2+2)*deltaTs+2)
+			msgPacks[i] = getRandInsertMsgPack(msgsInPack, i/2*deltaTs, (i/2+2)*deltaTs+2)
+		} else {
+			msgPacks[i] = getTimeTickMsgPack(int64((i + 1) / 2 * deltaTs))
+		}
+	}
+	msgPacks = append(msgPacks, nil)
+	msgPacks = append(msgPacks, getTimeTickMsgPack(int64(numOfMsgPack*deltaTs)))
+	return msgPacks
+}
+
+func createMsgPacks(ts [][]int, numOfMsgPack int, deltaTs int) []*MsgPack {
+	msgPacks := make([]*MsgPack, numOfMsgPack)
+
+	// generate MsgPack
+	for i := 0; i < numOfMsgPack; i++ {
+		if i%2 == 0 {
+			msgPacks[i] = getInsertMsgPack(ts[i/2])
 		} else {
 			msgPacks[i] = getTimeTickMsgPack(int64((i + 1) / 2 * deltaTs))
 		}
@@ -774,11 +798,11 @@ func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 	consumerSubName := funcutil.RandomString(8)
 
 	inputStream1 := getPulsarInputStream(pulsarAddr, p1Channels)
-	msgPacks1 := createMsgPacks(3, 10, 10)
+	msgPacks1 := createRandMsgPacks(3, 10, 10)
 	assert.Nil(t, sendMsgPacks(inputStream1, msgPacks1))
 
 	inputStream2 := getPulsarInputStream(pulsarAddr, p2Channels)
-	msgPacks2 := createMsgPacks(5, 10, 10)
+	msgPacks2 := createRandMsgPacks(5, 10, 10)
 	assert.Nil(t, sendMsgPacks(inputStream2, msgPacks2))
 
 	// consume msg
@@ -836,11 +860,11 @@ func TestStream_PulsarTtMsgStream_2(t *testing.T) {
 	consumerSubName := funcutil.RandomString(8)
 
 	inputStream1 := getPulsarInputStream(pulsarAddr, p1Channels)
-	msgPacks1 := createMsgPacks(3, 10, 10)
+	msgPacks1 := createRandMsgPacks(3, 10, 10)
 	assert.Nil(t, sendMsgPacks(inputStream1, msgPacks1))
 
 	inputStream2 := getPulsarInputStream(pulsarAddr, p2Channels)
-	msgPacks2 := createMsgPacks(5, 10, 10)
+	msgPacks2 := createRandMsgPacks(5, 10, 10)
 	assert.Nil(t, sendMsgPacks(inputStream2, msgPacks2))
 
 	// consume msg

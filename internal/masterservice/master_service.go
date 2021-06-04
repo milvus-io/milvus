@@ -709,10 +709,6 @@ func (c *Core) setMsgStreams() error {
 		}
 	}()
 
-	if Params.DataServiceSegmentChannel == "" {
-		return fmt.Errorf("DataServiceSegmentChannel is empty")
-	}
-
 	// data service will put msg into this channel when create segment
 	dsChanName := Params.DataServiceSegmentChannel
 	dsSubName := Params.MsgChannelSubName + "ds"
@@ -755,13 +751,6 @@ func (c *Core) SetNewProxyClient(f func(sess *sessionutil.Session) (types.ProxyN
 }
 
 func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
-	rsp, err := s.GetSegmentInfoChannel(ctx)
-	if err != nil {
-		return err
-	}
-	Params.DataServiceSegmentChannel = rsp.Value
-	log.Debug("data service segment", zap.String("channel name", Params.DataServiceSegmentChannel))
-
 	c.CallGetBinlogFilePathsService = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) (retFiles []string, retErr error) {
 		defer func() {
 			if err := recover(); err != nil {
