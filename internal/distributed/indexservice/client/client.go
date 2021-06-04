@@ -78,8 +78,10 @@ func (c *Client) Init() error {
 	log.Debug("IndexServiceClient Init", zap.Any("c.address", c.address))
 	if c.address != "" {
 		connectGrpcFunc := func() error {
+			ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
+			defer cancelFunc()
 			log.Debug("IndexServiceClient try connect ", zap.String("address", c.address))
-			conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
+			conn, err := grpc.DialContext(ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
 				grpc.WithUnaryInterceptor(
 					otgrpc.OpenTracingClientInterceptor(tracer)),
 				grpc.WithStreamInterceptor(
@@ -120,8 +122,10 @@ func (c *Client) reconnect() error {
 	}
 	log.Debug("IndexServiceClient getIndexServiceAddress success")
 	connectGrpcFunc := func() error {
+		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
+		defer cancelFunc()
 		log.Debug("IndexServiceClient try connect ", zap.String("address", c.address))
-		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
+		conn, err := grpc.DialContext(ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(

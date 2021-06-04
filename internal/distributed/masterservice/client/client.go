@@ -34,6 +34,7 @@ import (
 type GrpcClient struct {
 	grpcClient masterpb.MasterServiceClient
 	conn       *grpc.ClientConn
+	ctx context.Context
 
 	//inner member
 	addr      string
@@ -71,6 +72,7 @@ func NewClient(addr string, metaRoot string, etcdAddr []string, timeout time.Dur
 	return &GrpcClient{
 		grpcClient: nil,
 		conn:       nil,
+		ctx:       context.Background(),
 		addr:       addr,
 		timeout:    timeout,
 		reconnTry:  300,
@@ -87,16 +89,17 @@ func (c *GrpcClient) reconnect() error {
 	}
 	log.Debug("MasterServiceClient getMasterServiceAddr success")
 	tracer := opentracing.GlobalTracer()
-	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
-	defer cancel()
 	for i := 0; i < c.reconnTry; i++ {
+		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
 		if c.conn, err = grpc.DialContext(ctx, addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(
 				otgrpc.OpenTracingStreamClientInterceptor(tracer))); err == nil {
+			cancelFunc()
 			break
 		}
+		cancelFunc()
 	}
 	if err != nil {
 		log.Debug("MasterServiceClient try reconnect failed", zap.Error(err))
@@ -109,19 +112,20 @@ func (c *GrpcClient) reconnect() error {
 
 func (c *GrpcClient) Init() error {
 	tracer := opentracing.GlobalTracer()
-	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
-	defer cancel()
 	var err error
 	log.Debug("MasterServiceClient Init", zap.Any("c.addr", c.addr))
 	if c.addr != "" {
-		for i := 0; i < c.reconnTry; i++ {
+		for i := 0; i < 10000; i++ {
+			ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
 			if c.conn, err = grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 				grpc.WithUnaryInterceptor(
 					otgrpc.OpenTracingClientInterceptor(tracer)),
 				grpc.WithStreamInterceptor(
 					otgrpc.OpenTracingStreamClientInterceptor(tracer))); err == nil {
+				cancelFunc()
 				break
 			}
+			cancelFunc()
 		}
 		if err != nil {
 			log.Debug("MasterServiceClient connect to master failed", zap.Error(err))
