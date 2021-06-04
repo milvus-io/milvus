@@ -183,11 +183,22 @@ SegmentGrowingImpl::do_insert(int64_t reserved_begin,
         record_.get_field_data_base(field_offset)->set_data_raw(reserved_begin, columns_data[fid].data(), size);
     }
 
-    for (int i = 0; i < size; ++i) {
-        auto row_id = row_ids[i];
-        // NOTE: this must be the last step, cannot be put above
-        uid2offset_.insert(std::make_pair(row_id, reserved_begin + i));
+    if (schema_->get_is_auto_id()) {
+        for (int i = 0; i < size; ++i) {
+            auto row_id = row_ids[i];
+            // NOTE: this must be the last step, cannot be put above
+            uid2offset_.insert(std::make_pair(row_id, reserved_begin + i));
+        }
+    } else {
+        auto offset = schema_->get_primary_key_offset().value_or(FieldOffset(-1));
+        Assert(offset.get() != -1);
+        auto& row = columns_data[offset.get()];
+        auto row_ptr = reinterpret_cast<const int64_t*>(row.data());
+        for (int i = 0; i < size; ++i) {
+            uid2offset_.insert(std::make_pair(row_ptr[i], reserved_begin + i));
+        }
     }
+
     record_.ack_responder_.AddSegment(reserved_begin, reserved_begin + size);
     if (!debug_disable_small_index_) {
         indexing_record_.UpdateResourceAck(record_.ack_responder_.GetAck() / segcore_config_.get_size_per_chunk(),
