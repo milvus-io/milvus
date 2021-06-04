@@ -166,14 +166,6 @@ func (c *GrpcClient) GetStatisticsChannel(ctx context.Context) (*milvuspb.String
 	return ret.(*milvuspb.StringResponse), err
 }
 
-//receive ddl from rpc and time tick from proxy service, and put them into this channel
-func (c *GrpcClient) GetDdChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetDdChannel(ctx, &internalpb.GetDdChannelRequest{})
-	})
-	return ret.(*milvuspb.StringResponse), err
-}
-
 //DDL request
 func (c *GrpcClient) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {

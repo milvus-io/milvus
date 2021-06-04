@@ -236,6 +236,9 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	// add dml channel before send dd msg
+	t.core.dmlChannels.AddProducerChannles(chanNames...)
+
 	err = t.core.SendDdCreateCollectionReq(ctx, &ddCollReq)
 	if err != nil {
 		return err
@@ -300,6 +303,9 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	}
 
 	t.core.SendTimeTick(ts)
+
+	// remove dml channel after send dd msg
+	t.core.dmlChannels.RemoveProducerChannels(collMeta.PhysicalChannelNames...)
 
 	//notify query service to release collection
 	go func() {

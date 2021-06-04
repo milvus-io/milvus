@@ -30,7 +30,6 @@ type timetickSync struct {
 	core          *Core
 	lock          sync.Mutex
 	proxyTimeTick map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg
-	chanStream    map[string]msgstream.MsgStream
 	sendChan      chan map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg
 }
 
@@ -39,7 +38,6 @@ func newTimeTickSync(core *Core) *timetickSync {
 		lock:          sync.Mutex{},
 		core:          core,
 		proxyTimeTick: make(map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg),
-		chanStream:    make(map[string]msgstream.MsgStream),
 		sendChan:      make(chan map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg, 16),
 	}
 }
@@ -157,23 +155,7 @@ func (t *timetickSync) SendChannelTimeTick(chanName string, ts typeutil.Timestam
 	}
 	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
 
-	t.lock.Lock()
-	defer t.lock.Unlock()
-
-	// send timetick msg to msg stream
-	var err error
-	var stream msgstream.MsgStream
-	stream, ok := t.chanStream[chanName]
-	if !ok {
-		stream, err = t.core.msFactory.NewMsgStream(t.core.ctx)
-		if err != nil {
-			return err
-		}
-		stream.AsProducer([]string{chanName})
-		t.chanStream[chanName] = stream
-	}
-
-	err = stream.Broadcast(&msgPack)
+	err := t.core.dmlChannels.Broadcast(chanName, &msgPack)
 	if err == nil {
 		metrics.MasterInsertChannelTimeTick.WithLabelValues(chanName).Set(float64(tsoutil.Mod24H(ts)))
 	}
@@ -189,7 +171,5 @@ func (t *timetickSync) GetProxyNodeNum() int {
 
 // GetChanNum return the num of channel
 func (t *timetickSync) GetChanNum() int {
-	t.lock.Lock()
-	defer t.lock.Unlock()
-	return len(t.chanStream)
+	return t.core.dmlChannels.GetNumChannles()
 }
