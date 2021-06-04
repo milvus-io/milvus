@@ -1495,7 +1495,7 @@ func TestMasterService(t *testing.T) {
 		s, _ := core.UpdateChannelTimeTick(ctx, msg0)
 		assert.Equal(t, commonpb.ErrorCode_Success, s.ErrorCode)
 		time.Sleep(100 * time.Millisecond)
-		t.Log(core.chanTimeTick.proxyTimeTick)
+		//t.Log(core.chanTimeTick.proxyTimeTick)
 
 		msg1 := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
