@@ -31,7 +31,7 @@ type TaskQueue struct {
 	taskChan chan int // to block scheduler
 
 	scheduler *TaskScheduler
-	lock      sync.Mutex
+	sync.Mutex
 }
 
 func (queue *TaskQueue) Chan() <-chan int {
@@ -39,8 +39,8 @@ func (queue *TaskQueue) Chan() <-chan int {
 }
 
 func (queue *TaskQueue) taskEmpty() bool {
-	queue.lock.Lock()
-	defer queue.lock.Unlock()
+	queue.Lock()
+	defer queue.Unlock()
 	return queue.tasks.Len() == 0
 }
 
@@ -49,28 +49,24 @@ func (queue *TaskQueue) taskFull() bool {
 }
 
 func (queue *TaskQueue) addTask(tasks []task) {
-	queue.lock.Lock()
-	defer queue.lock.Unlock()
+	queue.Lock()
+	defer queue.Unlock()
 
 	for _, t := range tasks {
 		for e := queue.tasks.Back(); e != nil; e = e.Prev() {
-			if t.taskPriority() > e.Value.(task).taskPriority(){
+			if t.TaskPriority() > e.Value.(task).TaskPriority() {
 				continue
 			}
 			//TODO:: take care of timestamp
 			queue.taskChan <- 1
-			if e != queue.tasks.Back() {
-				queue.tasks.InsertAfter(t, e)
-				continue
-			}
-			queue.tasks.PushBack(t)
+			queue.tasks.InsertAfter(t, e)
 		}
 	}
 }
 
 func (queue *TaskQueue) PopTask() task {
-	queue.lock.Lock()
-	defer queue.lock.Unlock()
+	queue.Lock()
+	defer queue.Unlock()
 
 	if queue.tasks.Len() <= 0 {
 		log.Warn("sorry, but the unissued task list is empty!")
@@ -111,8 +107,8 @@ func (queue *TaskQueue) PopTask() task {
 //}
 
 func (queue *TaskQueue) Enqueue(t []task) {
-	queue.lock.Lock()
-	defer queue.lock.Unlock()
+	queue.Lock()
+	defer queue.Unlock()
 	queue.addTask(t)
 }
 
@@ -127,8 +123,9 @@ func NewTaskQueue(scheduler *TaskScheduler) *TaskQueue {
 
 type TaskScheduler struct {
 	triggerTaskQueue *TaskQueue
-	ActiveTaskQueue   *TaskQueue
-	meta *meta
+	//ActiveTaskQueue  *TaskQueue
+	activateTaskChan chan task
+	meta             *meta
 
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -137,22 +134,24 @@ type TaskScheduler struct {
 
 func NewTaskScheduler(ctx context.Context, meta *meta) *TaskScheduler {
 	ctx1, cancel := context.WithCancel(ctx)
+	taskChan := make(chan task, 1024)
 	s := &TaskScheduler{
-		ctx:    ctx1,
-		cancel: cancel,
-		meta: meta,
+		ctx:              ctx1,
+		cancel:           cancel,
+		meta:             meta,
+		activateTaskChan: taskChan,
 	}
 	s.triggerTaskQueue = NewTaskQueue(s)
-	s.ActiveTaskQueue = NewTaskQueue(s)
+	//s.ActiveTaskQueue = NewTaskQueue(s)
 
 	return s
 }
 
-func (scheduler *TaskScheduler) scheduleTask() task {
-	return scheduler.triggerTaskQueue.PopTask()
-}
+//func (scheduler *TaskScheduler) scheduleTask() task {
+//	return scheduler.triggerTaskQueue.PopTask()
+//}
 
-func (scheduler *TaskScheduler) processTask(t task, q *TaskQueue) {
+func (scheduler *TaskScheduler) processTask(t task) {
 	span, ctx := trace.StartSpanFromContext(t.TraceCtx(),
 		opentracing.Tags{
 			"Type": t.Name(),
@@ -171,13 +170,13 @@ func (scheduler *TaskScheduler) processTask(t task, q *TaskQueue) {
 		return
 	}
 
-	span.LogFields(oplog.Int64("scheduler process AddActiveTask", t.ID()))
-	q.AddActiveTask(t)
-
-	defer func() {
-		span.LogFields(oplog.Int64("scheduler process PopActiveTask", t.ID()))
-		q.PopActiveTask(t.Timestamp())
-	}()
+	//span.LogFields(oplog.Int64("scheduler process AddActiveTask", t.ID()))
+	//q.AddActiveTask(t)
+	//
+	//defer func() {
+	//	span.LogFields(oplog.Int64("scheduler process PopActiveTask", t.ID()))
+	//	q.PopActiveTask(t.Timestamp())
+	//}()
 	span.LogFields(oplog.Int64("scheduler process Execute", t.ID()))
 	err = t.Execute(ctx)
 	if err != nil {
@@ -189,23 +188,52 @@ func (scheduler *TaskScheduler) processTask(t task, q *TaskQueue) {
 	err = t.PostExecute(ctx)
 }
 
-func (scheduler *TaskScheduler) taskScheduleLoop() {
+func (scheduler *TaskScheduler) scheduleLoop() {
 	defer scheduler.wg.Done()
+	var w sync.WaitGroup
 	for {
 		select {
 		case <-scheduler.ctx.Done():
 			return
 		case <-scheduler.triggerTaskQueue.Chan():
-			t := scheduler.scheduleTask()
-			scheduler.processTask(t, scheduler.triggerTaskQueue)
+			t := scheduler.triggerTaskQueue.PopTask()
+			scheduler.processTask(t)
+			//TODO::add active task to etcd
+			for _, childTask := range t.GetChildTask() {
+				if childTask != nil {
+					scheduler.activateTaskChan <- childTask
+				}
+			}
+			scheduler.activateTaskChan <- nil
+
+			w.Add(1)
+			go scheduler.processActivateTask(&w)
+			w.Wait()
+			//TODO:: delete trigger task from etcd
+		}
+	}
+}
+
+
+func (scheduler *TaskScheduler) processActivateTask(wg *sync.WaitGroup) {
+	defer wg.Done()
+	for {
+		select {
+		case <-scheduler.ctx.Done():
+			return
+		case t := <-scheduler.activateTaskChan:
+			if t == nil {
+				return
+			}
+			scheduler.processTask(t)
+			//TODO:: delete active task from etcd
 		}
 	}
 }
 
 func (scheduler *TaskScheduler) Start() error {
 	scheduler.wg.Add(1)
-	go scheduler.taskScheduleLoop()
-
+	go scheduler.scheduleLoop()
 	return nil
 }
 

@@ -102,22 +102,22 @@ func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterN
 	//qs.cluster.nodes[nodeID] = newQueryNode(client)
 
 	//TODO::return init params to queryNodeCluster
-	startParams := []*commonpb.KeyValuePair{
-		{Key: "StatsChannelName", Value: Params.StatsChannelName},
-		{Key: "TimeTickChannelName", Value: Params.TimeTickChannelName},
-	}
-	qs.qcMutex.Lock()
-	for _, queryChannel := range qs.queryChannels {
-		startParams = append(startParams, &commonpb.KeyValuePair{
-			Key:   "SearchChannelName",
-			Value: queryChannel.requestChannel,
-		})
-		startParams = append(startParams, &commonpb.KeyValuePair{
-			Key:   "SearchResultChannelName",
-			Value: queryChannel.responseChannel,
-		})
-	}
-	qs.qcMutex.Unlock()
+	//startParams := []*commonpb.KeyValuePair{
+	//	{Key: "StatsChannelName", Value: Params.StatsChannelName},
+	//	{Key: "TimeTickChannelName", Value: Params.TimeTickChannelName},
+	//}
+	//qs.qcMutex.Lock()
+	//for _, queryChannel := range qs.queryChannels {
+	//	startParams = append(startParams, &commonpb.KeyValuePair{
+	//		Key:   "SearchChannelName",
+	//		Value: queryChannel.requestChannel,
+	//	})
+	//	startParams = append(startParams, &commonpb.KeyValuePair{
+	//		Key:   "SearchResultChannelName",
+	//		Value: queryChannel.responseChannel,
+	//	})
+	//}
+	//qs.qcMutex.Unlock()
 
 	return &querypb.RegisterNodeResponse{
 		Status: &commonpb.Status{
@@ -125,7 +125,7 @@ func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterN
 		},
 		InitParams: &internalpb.InitParams{
 			NodeID:      nodeID,
-			StartParams: startParams,
+			//StartParams: startParams,
 		},
 	}, nil
 }
@@ -166,7 +166,7 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
 
-	hasCollection:= qs.meta.hasCollection(collectionID)
+	hasCollection := qs.meta.hasCollection(collectionID)
 	if !hasCollection {
 		watchNeeded = true
 		err := qs.meta.addCollection(collectionID, schema)
@@ -181,14 +181,14 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 			ctx:       qs.loopCtx,
 			Condition: NewTaskCondition(qs.loopCtx),
 		},
-		LoadCollectionRequest:    req,
-		masterService:            qs.masterServiceClient,
-		dataService:              qs.dataServiceClient,
+		LoadCollectionRequest: req,
+		masterService:         qs.masterServiceClient,
+		dataService:           qs.dataServiceClient,
 		cluster:               qs.cluster,
-		meta:                     qs.meta,
-		toWatchPosition:          make(map[string]*internalpb.MsgPosition),
-		excludeSegment: make(map[string][]UniqueID),
-		watchNeeded:              watchNeeded,
+		meta:                  qs.meta,
+		toWatchPosition:       make(map[string]*internalpb.MsgPosition),
+		excludeSegment:        make(map[string][]UniqueID),
+		watchNeeded:           watchNeeded,
 	}
 	qs.scheduler.triggerTaskQueue.Enqueue([]task{loadCollectionTask})
 
@@ -222,7 +222,7 @@ func (qs *QueryService) ReleaseCollection(ctx context.Context, req *querypb.Rele
 			Condition: NewTaskCondition(ctx),
 		},
 		ReleaseCollectionRequest: req,
-		cluster:               qs.cluster,
+		cluster:                  qs.cluster,
 		meta:                     qs.meta,
 	}
 	qs.scheduler.triggerTaskQueue.Enqueue([]task{releaseCollectionTask})
@@ -278,14 +278,14 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 			ctx:       qs.loopCtx,
 			Condition: NewTaskCondition(qs.loopCtx),
 		},
-		LoadPartitionsRequest:    req,
-		masterService:            qs.masterServiceClient,
-		dataService:              qs.dataServiceClient,
+		LoadPartitionsRequest: req,
+		masterService:         qs.masterServiceClient,
+		dataService:           qs.dataServiceClient,
 		cluster:               qs.cluster,
-		meta:                     qs.meta,
-		toWatchPosition:          make(map[string]*internalpb.MsgPosition),
-		excludeSegment: make(map[string][]UniqueID),
-		watchNeeded:              watchNeeded,
+		meta:                  qs.meta,
+		toWatchPosition:       make(map[string]*internalpb.MsgPosition),
+		excludeSegment:        make(map[string][]UniqueID),
+		watchNeeded:           watchNeeded,
 	}
 	qs.scheduler.triggerTaskQueue.Enqueue([]task{loadPartitionTask})
 
@@ -370,7 +370,7 @@ func (qs *QueryService) ReleasePartitions(ctx context.Context, req *querypb.Rele
 				Condition: NewTaskCondition(ctx),
 			},
 			ReleasePartitionsRequest: req,
-			cluster:               qs.cluster,
+			cluster:                  qs.cluster,
 			meta:                     qs.meta,
 		}
 		qs.scheduler.triggerTaskQueue.Enqueue([]task{releasePartitionTask})
@@ -448,7 +448,7 @@ func (qs *QueryService) GetPartitionStates(ctx context.Context, req *querypb.Get
 		}
 		partitionState := &querypb.PartitionStates{
 			PartitionID: partitionID,
-			State: state,
+			State:       state,
 		}
 		partitionStates = append(partitionStates, partitionState)
 	}

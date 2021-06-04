@@ -55,7 +55,9 @@ type task interface {
 	PostExecute(ctx context.Context) error
 	WaitToFinish() error
 	Notify(err error)
-	taskPriority() querypb.TriggerCondition
+	TaskPriority() querypb.TriggerCondition
+	GetParentTask() task
+	GetChildTask() []task
 }
 
 type BaseTask struct {
@@ -72,21 +74,29 @@ func (bt *BaseTask) TraceCtx() context.Context {
 	return bt.ctx
 }
 
-func (bt *BaseTask) taskPriority() querypb.TriggerCondition {
+func (bt *BaseTask) TaskPriority() querypb.TriggerCondition {
 	return bt.triggerCondition
+}
+
+func (bt *BaseTask) GetParentTask() task {
+	return bt.parentTask
+}
+
+func (bt *BaseTask) GetChildTask() []task {
+	return bt.childTasks
 }
 
 //************************grpcTask***************************//
 type LoadCollectionTask struct {
 	BaseTask
 	*querypb.LoadCollectionRequest
-	masterService            types.MasterService
-	dataService              types.DataService
-	cluster               *queryNodeCluster
-	meta                     *meta
-	toWatchPosition          map[string]*internalpb.MsgPosition
-	excludeSegment           map[string][]UniqueID
-	watchNeeded              bool
+	masterService   types.MasterService
+	dataService     types.DataService
+	cluster         *queryNodeCluster
+	meta            *meta
+	toWatchPosition map[string]*internalpb.MsgPosition
+	excludeSegment  map[string][]UniqueID
+	watchNeeded     bool
 }
 
 func (lct *LoadCollectionTask) ID() UniqueID {
@@ -192,14 +202,14 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 			ctx:       ctx,
 			Condition: NewTaskCondition(ctx),
 		},
-		LoadPartitionsRequest:    loadPartitionsRequest,
-		masterService:            lct.masterService,
-		dataService:              lct.dataService,
+		LoadPartitionsRequest: loadPartitionsRequest,
+		masterService:         lct.masterService,
+		dataService:           lct.dataService,
 		cluster:               lct.cluster,
-		meta:                     lct.meta,
-		toWatchPosition:          lct.toWatchPosition,
-		excludeSegment: lct.excludeSegment,
-		watchNeeded:              false,
+		meta:                  lct.meta,
+		toWatchPosition:       lct.toWatchPosition,
+		excludeSegment:        lct.excludeSegment,
+		watchNeeded:           false,
 	}
 
 	err = loadPartitionTask.PreExecute(ctx)
@@ -251,7 +261,7 @@ type ReleaseCollectionTask struct {
 	BaseTask
 	*querypb.ReleaseCollectionRequest
 	cluster *queryNodeCluster
-	meta       Replica
+	meta    Replica
 }
 
 func (rct *ReleaseCollectionTask) ID() UniqueID {
@@ -325,13 +335,13 @@ func (rct *ReleaseCollectionTask) PostExecute(ctx context.Context) error {
 type LoadPartitionTask struct {
 	BaseTask
 	*querypb.LoadPartitionsRequest
-	masterService            types.MasterService
-	dataService              types.DataService
-	cluster               *queryNodeCluster
-	meta                     *meta
-	toWatchPosition          map[string]*internalpb.MsgPosition
-	excludeSegment           map[string][]UniqueID
-	watchNeeded              bool
+	masterService   types.MasterService
+	dataService     types.DataService
+	cluster         *queryNodeCluster
+	meta            *meta
+	toWatchPosition map[string]*internalpb.MsgPosition
+	excludeSegment  map[string][]UniqueID
+	watchNeeded     bool
 }
 
 func (lpt *LoadPartitionTask) ID() UniqueID {
@@ -391,7 +401,7 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 					Timestamp: lpt.Base.Timestamp,
 					MsgID:     rand.Int63n(10000000000),
 				},
-				DbID: dbID,
+				DbID:         dbID,
 				CollectionID: collectionID,
 				PartitionID:  partitionID,
 				Schema:       schema,
@@ -491,7 +501,7 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 						Timestamp: lpt.Base.Timestamp,
 						MsgID:     rand.Int63n(10000000000),
 					},
-					DbID: dbID,
+					DbID:         dbID,
 					CollectionID: collectionID,
 					PartitionID:  partitionID,
 					SegmentIDs:   assignedSegmentIDs,
@@ -550,7 +560,7 @@ type ReleasePartitionTask struct {
 	BaseTask
 	*querypb.ReleasePartitionsRequest
 	cluster *queryNodeCluster
-	meta       *meta
+	meta    *meta
 }
 
 func (rpt *ReleasePartitionTask) ID() UniqueID {
@@ -639,7 +649,7 @@ type loadBalanceTask struct {
 type LoadSegmentTask struct {
 	BaseTask
 	sourceNode int64
-	dstNode int64
+	dstNode    int64
 	*querypb.LoadSegmentsRequest
 }
 
@@ -714,7 +724,7 @@ func watchDmChannels(ctx context.Context,
 		watchDmChannelsInfo := make([]*querypb.WatchDmChannelInfo, 0)
 		for _, ch := range channels {
 			info := &querypb.WatchDmChannelInfo{
-				ChannelID:        ch,
+				ChannelID: ch,
 				//Pos:              col.dmChannels2Pos[ch],
 				//ExcludedSegments: col.excludeSegmentIds,
 			}

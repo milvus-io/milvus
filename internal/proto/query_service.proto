@@ -7,7 +7,6 @@ option go_package = "github.com/milvus-io/milvus/internal/proto/querypb";
 import "common.proto";
 import "milvus.proto";
 import "internal.proto";
-import "data_service.proto";
 import "schema.proto";
 
 service QueryService {
@@ -154,12 +153,17 @@ message RemoveQueryChannelRequest {
   string result_channelID = 5;
 }
 
+message excludedSegmentInfo {
+  int64 segmentID = 1;
+  internal.MsgPosition pos = 2;
+}
+
 message WatchDmChannelInfo {
   string channelID = 1;
   internal.MsgPosition pos = 2;
-  int64 included_collection = 4;
-  repeated int64 excluded_segments = 3;
-  repeated int64 included_partitions = 5;
+  int64 included_collection = 3;
+  int64 included_partition = 4;
+  repeated excludedSegmentInfo exclude_infos = 5;
 }
 
 message WatchDmChannelsRequest {
@@ -177,16 +181,25 @@ enum TriggerCondition {
   nodeDown = 3;
 }
 
+message fieldBinlogPath {
+  int64 filedID = 1;
+  repeated string binlog_path = 2;
+}
+
+message segmentLoadInfo {
+  int64 segmentID = 1;
+  int64 flush_time = 2;
+  repeated fieldBinlogPath binlog_paths = 3;
+}
+
 message LoadSegmentsRequest {
   common.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
   int64 partitionID = 4;
-  repeated int64 segmentIDs = 5;
-  repeated int64 fieldIDs = 6;
-  repeated data.SegmentStateInfo segment_states = 7;
-  schema.CollectionSchema schema = 8;
-  TriggerCondition load_condition = 9;
+  repeated segmentLoadInfo infos = 5;
+  schema.CollectionSchema schema = 6;
+  TriggerCondition load_condition = 7;
 }
 
 message LoadSegmentsResponse {
@@ -257,6 +270,7 @@ message GetSegmentInfoResponse {
 }
 
 message CreateQueryChannelRequest {
+  int64 collectionID = 1;
 }
 
 message HandOffSegmentRequest {

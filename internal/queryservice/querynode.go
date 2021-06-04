@@ -32,7 +32,8 @@ type queryNode struct {
 	//mu       sync.Mutex // guards segments and channels2Col
 	//nodeMeta *meta
 	sync.RWMutex
-	collectionInfos map[UniqueID]*querypb.CollectionInfo
+	collectionInfos      map[UniqueID]*querypb.CollectionInfo
+	watchedQueryChannels map[UniqueID]*querypb.QueryChannelInfo
 	//segments     map[UniqueID][]UniqueID
 	//channels2Col map[UniqueID][]string
 }
@@ -56,7 +57,7 @@ func newQueryNode(ip string, port int64, id UniqueID) (*queryNode, error) {
 			ip   string
 			port int64
 		}{ip: ip, port: port},
-		client:     client,
+		client:          client,
 		collectionInfos: collectionInfo,
 		//nodeMeta: newMetaReplica(),
 	}, nil
@@ -96,10 +97,10 @@ func (qn *queryNode) addCollection(collectionID UniqueID, schema *schemapb.Colle
 		partitions := make([]UniqueID, 0)
 		channels := make([]*querypb.DmChannelInfo, 0)
 		newCollection := &querypb.CollectionInfo{
-			Id:                collectionID,
-			PartitionIDs:        partitions,
-			ChannelInfos:            channels,
-			Schema:        schema,
+			Id:           collectionID,
+			PartitionIDs: partitions,
+			ChannelInfos: channels,
+			Schema:       schema,
 		}
 		qn.collectionInfos[collectionID] = newCollection
 		return nil
@@ -123,6 +124,31 @@ func (qn *queryNode) addPartition(collectionID UniqueID, partitionID UniqueID) e
 	return errors.New("addPartition: can't find collection when add partition")
 }
 
+func (qn *queryNode) releaseCollection(collectionID UniqueID) {
+	qn.Lock()
+	defer qn.Unlock()
+	if _, ok := qn.collectionInfos[collectionID]; ok {
+		delete(qn.collectionInfos, collectionID)
+	}
+	if _, ok := qn.watchedQueryChannels[collectionID]; ok {
+		delete(qn.watchedQueryChannels, collectionID)
+	}
+}
+
+func (qn *queryNode) releasePartition(collectionID UniqueID, partitionID UniqueID) {
+	qn.Lock()
+	defer qn.Unlock()
+
+	if info, ok := qn.collectionInfos[collectionID]; ok {
+		newPartitionIDs := make([]UniqueID, 0)
+		for _, id := range info.PartitionIDs {
+			if id != partitionID {
+				newPartitionIDs = append(newPartitionIDs, id)
+			}
+		}
+		info.PartitionIDs = newPartitionIDs
+	}
+}
 
 func (qn *queryNode) hasWatchedDmChannel(collectionID UniqueID, channelID string) (bool, error) {
 	qn.RLock()
@@ -180,29 +206,25 @@ func (qn *queryNode) addDmChannel(collectionID UniqueID, channels []string) erro
 		}
 	}
 
-	return errors.New("addDmChannels: can't find collection in collectionInfos")
+	return errors.New("addDmChannels: can't find collection in watchedQueryChannel")
 }
 
-func (qn *queryNode) addQueryChannel(collectionID UniqueID, queryChannel string, queryResultChannel string) error {
+//TODO::removeDmChannels
+
+func (qn *queryNode) addQueryChannel(collectionID UniqueID, queryChannel *querypb.QueryChannelInfo) {
 	qn.Lock()
 	defer qn.Unlock()
 
-	if info, ok := qn.collectionInfos[collectionID]; ok {
-		info.QueryChannelID = queryChannel
-		info.QueryResultChannelID = queryResultChannel
-	}
-
-	return errors.New("addQueryChannel: can't find collection in collectionInfos")
+	qn.watchedQueryChannels[collectionID] = queryChannel
 }
 
 func (qn *queryNode) removeQueryChannel(collectionID UniqueID) error {
 	qn.Lock()
 	defer qn.Unlock()
 
-	if info, ok := qn.collectionInfos[collectionID]; ok {
-		info.QueryChannelID = ""
-		info.QueryResultChannelID = ""
+	if _, ok := qn.watchedQueryChannels[collectionID]; ok {
+		delete(qn.watchedQueryChannels, collectionID)
 	}
 
-	return errors.New("removeQueryChannel: can't find collection in collectionInfos")
+	return errors.New("removeQueryChannel: can't find collection in watchedQueryChannel")
 }

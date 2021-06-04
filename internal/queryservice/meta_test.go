@@ -32,18 +32,14 @@ func TestReplica_Release(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(partitions))
 
-	err = meta.releasePartition(1, 100)
-	assert.NoError(t, err)
+	meta.releasePartition(1, 100)
 	partitions, err = meta.showPartitions(1)
 	assert.NoError(t, err)
 	assert.Equal(t, 0, len(partitions))
-	err = meta.releasePartition(1, 100)
-	assert.Error(t, err)
+	meta.releasePartition(1, 100)
 
-	err = meta.releaseCollection(1)
-	assert.NoError(t, err)
+	meta.releaseCollection(1)
 	collections = meta.showCollections()
 	assert.Equal(t, 0, len(collections))
-	err = meta.releaseCollection(1)
-	assert.Error(t, err)
+	meta.releaseCollection(1)
 }

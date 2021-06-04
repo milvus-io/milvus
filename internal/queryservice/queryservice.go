@@ -14,7 +14,6 @@ package queryservice
 import (
 	"context"
 	"math/rand"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -38,15 +37,15 @@ type QueryService struct {
 	loopCancel context.CancelFunc
 
 	queryServiceID uint64
-	meta        *meta
-	cluster     *queryNodeCluster
+	meta           *meta
+	cluster        *queryNodeCluster
 	scheduler      *TaskScheduler
 
 	dataServiceClient   types.DataService
 	masterServiceClient types.MasterService
 	//queryNodes          map[int64]*queryNodeCluster
-	queryChannels       []*queryChannelInfo
-	qcMutex             *sync.Mutex
+	//queryChannels       []*queryChannelInfo
+	//qcMutex             *sync.Mutex
 
 	session *sessionutil.Session
 
@@ -91,19 +90,19 @@ func (qs *QueryService) UpdateStateCode(code internalpb.StateCode) {
 func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryService, error) {
 	rand.Seed(time.Now().UnixNano())
 	//cluster := newQueryNodeCluster()
-	queryChannels := make([]*queryChannelInfo, 0)
+	//queryChannels := make([]*queryChannelInfo, 0)
 	ctx1, cancel := context.WithCancel(ctx)
 	meta := newMeta()
 	scheduler := NewTaskScheduler(ctx1, meta)
 	service := &QueryService{
-		loopCtx:       ctx1,
-		loopCancel:    cancel,
+		loopCtx:    ctx1,
+		loopCancel: cancel,
 		meta:       meta,
-		scheduler:     scheduler,
+		scheduler:  scheduler,
 		//cluster:    cluster,
-		queryChannels: queryChannels,
-		qcMutex:       &sync.Mutex{},
-		msFactory:     factory,
+		//queryChannels: queryChannels,
+		//qcMutex:       &sync.Mutex{},
+		msFactory: factory,
 	}
 	service.cluster = newQueryNodeCluster(meta)
 

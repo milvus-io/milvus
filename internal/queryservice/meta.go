@@ -23,7 +23,7 @@ type meta struct {
 	sync.RWMutex
 	collectionInfos map[UniqueID]*querypb.CollectionInfo
 	segmentInfos map[UniqueID]*querypb.SegmentInfo
-	queryChannelInfo
+	queryChannelInfos map[UniqueID]*querypb.QueryChannelInfo
 
 	partitionStates map[UniqueID]querypb.PartitionState
 }
@@ -31,10 +31,12 @@ type meta struct {
 func newMeta() *meta {
 	collectionInfos := make(map[UniqueID]*querypb.CollectionInfo)
 	segmentInfos := make(map[UniqueID]*querypb.SegmentInfo)
+	queryChannelInfos := make(map[UniqueID]*querypb.QueryChannelInfo)
 	partitionStates := make(map[UniqueID]querypb.PartitionState)
 	return &meta{
 		collectionInfos: collectionInfos,
 		segmentInfos: segmentInfos,
+		queryChannelInfos: queryChannelInfos,
 		partitionStates: partitionStates,
 	}
 }
@@ -123,15 +125,12 @@ func (m *meta) addPartition(collectionID UniqueID, partitionID UniqueID) error {
 	return errors.New("addPartition: can't find collection when add partition")
 }
 
-func (m *meta) deleteSegmentInfoByID(segmentID UniqueID) error {
+func (m *meta) deleteSegmentInfoByID(segmentID UniqueID) {
 	m.Lock()
 	m.Unlock()
 	if _, ok := m.segmentInfos[segmentID]; ok {
 		delete(m.segmentInfos, segmentID)
-		return nil
 	}
-
-	return errors.New("deleteSegmentInfoByID: can't find segmentID in segmentInfos")
 }
 
 func (m *meta)setSegmentInfo(segmentID UniqueID, info *querypb.SegmentInfo) {
@@ -268,7 +267,7 @@ func (m *meta) getPartitionStateByID(partitionID UniqueID) (querypb.PartitionSta
 	return 0, errors.New("getPartitionStateByID: can't find partition in partitionStates")
 }
 
-func (m *meta) deleteCollection(collectionID UniqueID) error {
+func (m *meta) releaseCollection(collectionID UniqueID) {
 	m.Lock()
 	defer m.Unlock()
 
@@ -276,41 +275,38 @@ func (m *meta) deleteCollection(collectionID UniqueID) error {
 		for _, partitionID := range info.PartitionIDs {
 			delete(m.partitionStates, partitionID)
 		}
-
 		delete(m.collectionInfos, collectionID)
-		for id, info := range m.segmentInfos {
-			if info.CollectionID == collectionID {
-				delete(m.segmentInfos, id)
-			}
+	}
+	for id, info := range m.segmentInfos {
+		if info.CollectionID == collectionID {
+			delete(m.segmentInfos, id)
 		}
 	}
-
-	return errors.New("releaseCollection: can't find collection in collectionInfos")
+	if _, ok := m.queryChannelInfos[collectionID]; ok {
+		delete(m.queryChannelInfos, collectionID)
+	}
 }
 
-func (m *meta) deletePartition(collectionID UniqueID, partitionID UniqueID) error {
+func (m *meta) releasePartition(collectionID UniqueID, partitionID UniqueID) {
 	m.Lock()
 	defer m.Unlock()
 
 	if info, ok := m.collectionInfos[collectionID]; ok {
-		findPartition := false
+		newPartitionIDs := make([]UniqueID, 0)
 		for _, id := range info.PartitionIDs {
 			if id == partitionID {
-				findPartition = true
 				delete(m.partitionStates, partitionID)
+			} else {
+				newPartitionIDs = append(newPartitionIDs, id)
 			}
 		}
-		if !findPartition {
-			return errors.New("releasePartition: can't find partition in partitionInfos")
-		}
-		for id, info := range m.segmentInfos {
-			if info.PartitionID == partitionID {
-				delete(m.segmentInfos, id)
-			}
+		info.PartitionIDs = newPartitionIDs
+	}
+	for id, info := range m.segmentInfos {
+		if info.PartitionID == partitionID {
+			delete(m.segmentInfos, id)
 		}
 	}
-
-	return errors.New("releasePartition: can't find collection in collectionInfos")
 }
 
 func (m *meta) hasWatchedDmChannel(collectionID UniqueID, channelID string) (bool, error) {
@@ -389,16 +385,16 @@ func (m *meta) addDmChannel(collectionID UniqueID, nodeID int64, channels []stri
 	return errors.New("addDmChannels: can't find collection in collectionInfos")
 }
 
-func (m *meta) setQueryChannel(collectionID UniqueID, queryChannel string, queryResultChannel string) error {
+func (m *meta) setQueryChannel(collectionID UniqueID, queryChannel string, queryResultChannel string) {
 	m.Lock()
 	defer m.Unlock()
 
-	if info, ok := m.collectionInfos[collectionID]; ok {
-		info.QueryChannelID = queryChannel
-		info.QueryResultChannelID = queryResultChannel
+	queryChannelInfo := &querypb.QueryChannelInfo{
+		CollectionID: collectionID,
+		QueryChannelID: queryChannel,
+		QueryResultChannelID: queryResultChannel,
 	}
-
-	return errors.New("setQueryChannel: can't find collection in collectionInfos")
+	m.queryChannelInfos[collectionID] = queryChannelInfo
 }
 
 //func (mp *meta) addExcludeSegmentIDs(dbID UniqueID, collectionID UniqueID, excludeSegments []UniqueID) error {
