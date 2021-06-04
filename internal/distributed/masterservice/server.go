@@ -44,7 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
-// grpc wrapper
+// Server grpc wrapper
 type Server struct {
 	masterService types.MasterComponent
 	grpcServer    *grpc.Server
@@ -171,10 +171,10 @@ func (s *Server) init() error {
 	}
 
 	s.masterService.UpdateStateCode(internalpb.StateCode_Initializing)
-
+	log.Debug("MasterService", zap.Any("State", internalpb.StateCode_Initializing))
 	s.masterService.SetNewProxyClient(
 		func(s *sessionutil.Session) (types.ProxyNode, error) {
-			cli := pnc.NewClient(ctx, s.Address, 10)
+			cli := pnc.NewClient(ctx, s.Address, 10*time.Second)
 			if err := cli.Init(); err != nil {
 				return nil, err
 			}
@@ -186,7 +186,7 @@ func (s *Server) init() error {
 	)
 
 	if s.newProxyServiceClient != nil {
-		log.Debug("proxy service", zap.String("address", Params.ProxyServiceAddress))
+		log.Debug("MasterService start to create ProxyService client", zap.String("address", Params.ProxyServiceAddress))
 		proxyService := s.newProxyServiceClient(Params.ProxyServiceAddress)
 		if err := s.masterService.SetProxyService(ctx, proxyService); err != nil {
 			panic(err)
@@ -194,23 +194,23 @@ func (s *Server) init() error {
 		s.proxyService = proxyService
 	}
 	if s.newDataServiceClient != nil {
-		log.Debug("data service", zap.String("address", Params.DataServiceAddress))
-		dataService := s.newDataServiceClient(Params.DataServiceAddress, cms.Params.MetaRootPath, cms.Params.EtcdAddress, 10)
+		log.Debug("MasterService start to create DataService client", zap.String("address", Params.DataServiceAddress))
+		dataService := s.newDataServiceClient(Params.DataServiceAddress, cms.Params.MetaRootPath, cms.Params.EtcdAddress, 10*time.Second)
 		if err := s.masterService.SetDataService(ctx, dataService); err != nil {
 			panic(err)
 		}
 		s.dataService = dataService
 	}
 	if s.newIndexServiceClient != nil {
-		log.Debug("index service", zap.String("address", Params.IndexServiceAddress))
-		indexService := s.newIndexServiceClient(Params.IndexServiceAddress, cms.Params.MetaRootPath, cms.Params.EtcdAddress, 10)
+		log.Debug("MasterService start to create IndexService client", zap.String("address", Params.IndexServiceAddress))
+		indexService := s.newIndexServiceClient(Params.IndexServiceAddress, cms.Params.MetaRootPath, cms.Params.EtcdAddress, 10*time.Second)
 		if err := s.masterService.SetIndexService(indexService); err != nil {
 			panic(err)
 		}
 		s.indexService = indexService
 	}
 	if s.newQueryServiceClient != nil {
-		log.Debug("query service", zap.String("address", Params.QueryServiceAddress))
+		log.Debug("MasterService start to create QueryService client", zap.String("address", Params.QueryServiceAddress))
 		queryService, _ := s.newQueryServiceClient(Params.QueryServiceAddress, cms.Params.MetaRootPath, cms.Params.EtcdAddress)
 		if err := s.masterService.SetQueryService(queryService); err != nil {
 			panic(err)
@@ -312,22 +312,22 @@ func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComp
 	return s.masterService.GetComponentStates(ctx)
 }
 
-//receiver time tick from proxy service, and put it into this channel
+// GetTimeTickChannel receiver time tick from proxy service, and put it into this channel
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.masterService.GetTimeTickChannel(ctx)
 }
 
-//just define a channel, not used currently
+// GetStatisticsChannel just define a channel, not used currently
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.masterService.GetStatisticsChannel(ctx)
 }
 
-//receive ddl from rpc and time tick from proxy service, and put them into this channel
+// GetDdChannel receive ddl from rpc and time tick from proxy service, and put them into this channel
 func (s *Server) GetDdChannel(ctx context.Context, req *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.masterService.GetDdChannel(ctx)
 }
 
-//DDL request
+// CreateCollection DDL request
 func (s *Server) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	return s.masterService.CreateCollection(ctx, in)
 }
@@ -364,7 +364,7 @@ func (s *Server) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitions
 	return s.masterService.ShowPartitions(ctx, in)
 }
 
-//index builder service
+// CreateIndex index builder service
 func (s *Server) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	return s.masterService.CreateIndex(ctx, in)
 }
@@ -377,7 +377,7 @@ func (s *Server) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRe
 	return s.masterService.DescribeIndex(ctx, in)
 }
 
-//global timestamp allocator
+// AllocTimestamp global timestamp allocator
 func (s *Server) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
 	return s.masterService.AllocTimestamp(ctx, in)
 }

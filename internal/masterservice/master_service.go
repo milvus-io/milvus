@@ -81,7 +81,7 @@ func metricProxyNode(v int64) string {
 	return fmt.Sprintf("client_%d", v)
 }
 
-// master core
+// Core master core
 type Core struct {
 	/*
 		ProxyServiceClient Interface:
@@ -150,7 +150,7 @@ type Core struct {
 	//dd request scheduler
 	ddReqQueue chan reqTask //dd request will be push into this chan
 
-	//proxynode manager
+	//ProxyNode manager
 	proxyNodeManager *proxyNodeManager
 
 	// proxy clients
@@ -1155,18 +1155,21 @@ func (c *Core) reSendDdMsg(ctx context.Context) error {
 
 func (c *Core) Start() error {
 	if err := c.checkInit(); err != nil {
+		log.Debug("MasterService Start checkInit failed", zap.Error(err))
 		return err
 	}
 
-	log.Debug("master", zap.Int64("node id", c.session.ServerID))
-	log.Debug("master", zap.String("dd channel name", Params.DdChannel))
-	log.Debug("master", zap.String("time tick channel name", Params.TimeTickChannel))
+	log.Debug("MasterService", zap.Int64("node id", c.session.ServerID))
+	log.Debug("MasterService", zap.String("dd channel name", Params.DdChannel))
+	log.Debug("MasterService", zap.String("time tick channel name", Params.TimeTickChannel))
 
 	c.startOnce.Do(func() {
 		if err := c.proxyNodeManager.WatchProxyNode(); err != nil {
+			log.Debug("MasterService Start WatchProxyNode failed", zap.Error(err))
 			return
 		}
 		if err := c.reSendDdMsg(c.ctx); err != nil {
+			log.Debug("MasterService Start reSendDdMsg failed", zap.Error(err))
 			return
 		}
 		go c.startDdScheduler()
@@ -1178,7 +1181,7 @@ func (c *Core) Start() error {
 		go c.chanTimeTick.StartWatch()
 		c.stateCode.Store(internalpb.StateCode_Healthy)
 	})
-	log.Debug("Master service", zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Healthy)]))
+	log.Debug("MasterService", zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Healthy)]))
 	return nil
 }
 

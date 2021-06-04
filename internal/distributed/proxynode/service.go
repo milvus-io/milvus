@@ -155,15 +155,6 @@ func (s *Server) init() error {
 	log.Debug("proxynode", zap.Int("proxy port", Params.Port))
 	log.Debug("proxynode", zap.String("proxy address", Params.Address))
 
-	defer func() {
-		if err != nil {
-			err2 := s.Stop()
-			if err2 != nil {
-				log.Debug("Init failed, and Stop failed")
-			}
-		}
-	}()
-
 	err = s.proxynode.Register()
 	if err != nil {
 		log.Debug("ProxyNode Register etcd failed ", zap.Error(err))
@@ -212,7 +203,7 @@ func (s *Server) init() error {
 
 	dataServiceAddr := Params.DataServiceAddress
 	log.Debug("ProxyNode", zap.String("data service address", dataServiceAddr))
-	s.dataServiceClient = grpcdataserviceclient.NewClient(dataServiceAddr, proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, 10)
+	s.dataServiceClient = grpcdataserviceclient.NewClient(dataServiceAddr, proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, 10*time.Second)
 	err = s.dataServiceClient.Init()
 	if err != nil {
 		log.Debug("ProxyNode dataServiceClient init failed ", zap.Error(err))
@@ -223,7 +214,7 @@ func (s *Server) init() error {
 
 	indexServiceAddr := Params.IndexServerAddress
 	log.Debug("ProxyNode", zap.String("index server address", indexServiceAddr))
-	s.indexServiceClient = grpcindexserviceclient.NewClient(indexServiceAddr, proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, 10)
+	s.indexServiceClient = grpcindexserviceclient.NewClient(indexServiceAddr, proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, 10*time.Second)
 	err = s.indexServiceClient.Init()
 	if err != nil {
 		log.Debug("ProxyNode indexServiceClient init failed ", zap.Error(err))
