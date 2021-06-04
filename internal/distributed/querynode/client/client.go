@@ -29,11 +29,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	RPCConnectionTimeout = 30 * time.Second
-	Retry                = 3
-)
-
 type Client struct {
 	ctx        context.Context
 	grpcClient querypb.QueryNodeClient
@@ -50,8 +45,9 @@ func NewClient(address string) (*Client, error) {
 		return nil, fmt.Errorf("address is empty")
 	}
 	return &Client{
-		ctx:  context.Background(),
-		addr: address,
+		ctx:     context.Background(),
+		addr:    address,
+		timeout: 3 * time.Second,
 	}, nil
 }
 

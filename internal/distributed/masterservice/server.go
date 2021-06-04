@@ -177,7 +177,7 @@ func (s *Server) init() error {
 	log.Debug("MasterService", zap.Any("State", internalpb.StateCode_Initializing))
 	s.masterService.SetNewProxyClient(
 		func(s *sessionutil.Session) (types.ProxyNode, error) {
-			cli := pnc.NewClient(ctx, s.Address, 10)
+			cli := pnc.NewClient(ctx, s.Address, 10*time.Second)
 			if err := cli.Init(); err != nil {
 				return nil, err
 			}
@@ -198,7 +198,7 @@ func (s *Server) init() error {
 	}
 	if s.newDataServiceClient != nil {
 		log.Debug("MasterService start to create DataService client", zap.String("address", Params.DataServiceAddress))
-		dataService := s.newDataServiceClient(Params.DataServiceAddress, cms.Params.MetaRootPath, cms.Params.EtcdAddress, 10)
+		dataService := s.newDataServiceClient(Params.DataServiceAddress, cms.Params.MetaRootPath, cms.Params.EtcdAddress, 10*time.Second)
 		if err := s.masterService.SetDataService(ctx, dataService); err != nil {
 			panic(err)
 		}
@@ -206,7 +206,7 @@ func (s *Server) init() error {
 	}
 	if s.newIndexServiceClient != nil {
 		log.Debug("MasterService start to create IndexService client", zap.String("address", Params.IndexServiceAddress))
-		indexService := s.newIndexServiceClient(Params.IndexServiceAddress, cms.Params.MetaRootPath, cms.Params.EtcdAddress, 10)
+		indexService := s.newIndexServiceClient(Params.IndexServiceAddress, cms.Params.MetaRootPath, cms.Params.EtcdAddress, 10*time.Second)
 		if err := s.masterService.SetIndexService(indexService); err != nil {
 			panic(err)
 		}

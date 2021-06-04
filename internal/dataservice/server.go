@@ -88,7 +88,7 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 	}
 	s.insertChannels = s.getInsertChannels()
 	s.createDataNodeClient = func(addr string) (types.DataNode, error) {
-		node, err := grpcdatanodeclient.NewClient(addr, 10)
+		node, err := grpcdatanodeclient.NewClient(addr, 10*time.Second)
 		if err != nil {
 			return nil, err
 		}

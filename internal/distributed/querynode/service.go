@@ -167,7 +167,7 @@ func (s *Server) init() error {
 
 	// --- IndexService ---
 	log.Debug("QueryNode start to new IndexServiceClient", zap.Any("IndexServiceAddress", Params.IndexServiceAddress))
-	indexService := isc.NewClient(Params.IndexServiceAddress, qn.Params.MetaRootPath, []string{qn.Params.EtcdAddress}, 10)
+	indexService := isc.NewClient(Params.IndexServiceAddress, qn.Params.MetaRootPath, []string{qn.Params.EtcdAddress}, 10*time.Second)
 
 	if err := indexService.Init(); err != nil {
 		log.Debug("QueryNode IndexServiceClient Init failed", zap.Error(err))
@@ -193,7 +193,7 @@ func (s *Server) init() error {
 
 	// --- DataService ---
 	log.Debug("QueryNode start to new DataServiceClient", zap.Any("DataServiceAddress", Params.DataServiceAddress))
-	dataService := dsc.NewClient(Params.DataServiceAddress, qn.Params.MetaRootPath, []string{qn.Params.EtcdAddress}, 10)
+	dataService := dsc.NewClient(Params.DataServiceAddress, qn.Params.MetaRootPath, []string{qn.Params.EtcdAddress}, 10*time.Second)
 	if err = dataService.Init(); err != nil {
 		log.Debug("QueryNode DataServiceClient Init failed", zap.Error(err))
 		panic(err)

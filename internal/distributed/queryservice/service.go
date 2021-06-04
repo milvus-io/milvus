@@ -140,7 +140,7 @@ func (s *Server) init() error {
 	// --- Data service client ---
 	log.Debug("QueryService try to new DataService client", zap.Any("DataServiceAddress", Params.DataServiceAddress))
 
-	dataService := dsc.NewClient(Params.DataServiceAddress, qs.Params.MetaRootPath, []string{qs.Params.EtcdAddress}, 10)
+	dataService := dsc.NewClient(Params.DataServiceAddress, qs.Params.MetaRootPath, []string{qs.Params.EtcdAddress}, 10*time.Second)
 	if err = dataService.Init(); err != nil {
 		log.Debug("QueryService DataServiceClient Init failed", zap.Error(err))
 		panic(err)
