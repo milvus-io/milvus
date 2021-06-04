@@ -38,7 +38,7 @@ def func_req(_list, **kwargs):
     return False, False
 
 
-class ApiConnections:
+class ApiConnectionsWrapper:
     def __init__(self):
         self.connection = Connections()
 

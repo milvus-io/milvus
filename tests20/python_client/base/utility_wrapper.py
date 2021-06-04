@@ -38,7 +38,7 @@ def func_req(_list, **kwargs):
     return False, False
 
 
-class ApiUtility:
+class ApiUtilityWrapper:
     """ Method of encapsulating utility files """
 
     ut = utility
