@@ -82,8 +82,6 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 }
 
 func (s *Server) setClient() {
-	ctx := context.Background()
-
 	s.newDataServiceClient = func(etcdMetaRoot, etcdAddress string, timeout time.Duration) types.DataService {
 		dsClient := dsc.NewClient(etcdMetaRoot, []string{etcdAddress}, timeout)
 		if err := dsClient.Init(); err != nil {
