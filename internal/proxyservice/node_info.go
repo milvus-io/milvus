@@ -17,6 +17,7 @@ import (
 	"math/rand"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
@@ -86,7 +87,7 @@ func (table *globalNodeInfoTable) createClients() error {
 	for nodeID, info := range table.infos {
 		_, ok := table.ProxyNodes[nodeID]
 		if !ok {
-			table.ProxyNodes[nodeID] = grpcproxynodeclient.NewClient(context.Background(), info.ip+":"+strconv.Itoa(int(info.port)), 10)
+			table.ProxyNodes[nodeID] = grpcproxynodeclient.NewClient(context.Background(), info.ip+":"+strconv.Itoa(int(info.port)), 10*time.Second)
 			var err error
 			err = table.ProxyNodes[nodeID].Init()
 			if err != nil {

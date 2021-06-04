@@ -1,6 +1,6 @@
 import pandas as pd
 import pytest
-from milvus import DataType
+from pymilvus import DataType
 from pymilvus_orm import FieldSchema
 
 from base.client_base import TestcaseBase
@@ -49,9 +49,8 @@ class TestCollectionParams(TestcaseBase):
 
     @pytest.fixture(scope="function", params=ct.get_invalid_strs)
     def get_invalid_type_fields(self, request):
-        skip_param = []
-        if request.param == skip_param:
-            pytest.skip("skip []")
+        if isinstance(request.param, list):
+            pytest.skip("list is valid fields")
         yield request.param
 
     @pytest.fixture(scope="function", params=cf.gen_all_type_fields())
@@ -107,7 +106,6 @@ class TestCollectionParams(TestcaseBase):
         assert "invalid" or "illegal" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(reason="issue #5241 #5367")
     def test_collection_dup_name(self):
         """
         target: test collection with dup name
@@ -125,7 +123,6 @@ class TestCollectionParams(TestcaseBase):
         assert collection.name, _ in self.utility_wrap.list_collections()[0]
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5367")
     def test_collection_dup_name_with_desc(self):
         """
         target: test collection with dup name
@@ -214,7 +211,6 @@ class TestCollectionParams(TestcaseBase):
         assert_default_collection(collection, c_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5241 #5367")
     def test_collection_dup_name_same_schema(self):
         """
         target: test collection with dup name and same schema
@@ -237,8 +233,6 @@ class TestCollectionParams(TestcaseBase):
         expected: two collection object is correct
         """
         conn = self._connect()
-        import os
-        path = os.path.dirname(os.path.abspath(__file__))
         nb = ct.default_nb
         collection = self._collection()
         c_name = collection.name
@@ -250,20 +244,20 @@ class TestCollectionParams(TestcaseBase):
         assert collection.num_entities == nb
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5302")
     def test_collection_dup_name_none_schema_data_list(self):
         """
         target: test collection with dup name and insert data (list-like)
         method: create collection with dup name, none schema, data (list-like)
         expected: two collection object is correct
         """
-        self._connect()
+        conn = self._connect()
         nb = ct.default_nb
         collection = self._collection()
         c_name = collection.name
         assert_default_collection(collection)
         data = cf.gen_default_dataframe_data(nb)
         dup_collection, _ = self.collection_wrap.collection_init(c_name, schema=None, data=data)
+        conn.flush([c_name])
         assert_default_collection(dup_collection, c_name, exp_num=nb)
         assert collection.num_entities == nb
 
@@ -294,7 +288,6 @@ class TestCollectionParams(TestcaseBase):
         assert "schema type must be schema.CollectionSchema" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5331")
     def test_collection_invalid_type_fields(self, get_invalid_type_fields):
         """
         target: test collection with invalid fields type, non-list
@@ -302,12 +295,9 @@ class TestCollectionParams(TestcaseBase):
         expected: exception
         """
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
         fields = get_invalid_type_fields
-        schema = cf.gen_collection_schema(fields=fields)
-        ex, _ = self.collection_wrap.collection_init(c_name, schema=schema,
-                                                     check_res=CheckParams.err_res)
-        log.error(str(ex))
+        with pytest.raises(Exception, match="The fields of schema must be type list"):
+            cf.gen_collection_schema(fields=fields)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_collection_with_unknown_type(self):
@@ -317,7 +307,6 @@ class TestCollectionParams(TestcaseBase):
         expected: raise exception
         """
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
         with pytest.raises(Exception, match="Field type not support <DataType.UNKNOWN: 999"):
             FieldSchema("unknown", DataType.UNKNOWN)
 
@@ -348,14 +337,13 @@ class TestCollectionParams(TestcaseBase):
         expected: raise exception
         """
         self._connect()
-        with pytest.raises(Exception, match="Field type not support"):
+        with pytest.raises(Exception, match="Field type must be of DataType"):
             FieldSchema(name="test", dtype=dtype)
 
-    @pytest.mark.xfail(reason="issue #5317")
-    def test_collection_float_dtype(self):
+    def test_collection_field_float_type(self):
         """
-        target: test collection with float dtype
-        method: create field with float dtype
+        target: test collection with float type
+        method: create field with float type
         expected:
         """
         self._connect()
@@ -411,11 +399,9 @@ class TestCollectionParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         schema = cf.gen_collection_schema(fields=[field])
         collection, _ = self.collection_wrap.collection_init(c_name, schema=schema)
-        log.debug(collection)
         assert_default_collection(collection, c_name, exp_schema=schema)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5345")
     def test_collection_multi_float_vectors(self):
         """
         target: test collection with multi float vectors
@@ -430,7 +416,6 @@ class TestCollectionParams(TestcaseBase):
         assert_default_collection(collection, c_name, exp_schema=schema)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5345")
     def test_collection_mix_vectors(self):
         """
         target: test collection with mix vectors
@@ -472,17 +457,17 @@ class TestCollectionParams(TestcaseBase):
         assert collection.primary_field.name == ct.default_int64_field_name
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5345")
     def test_collection_unsupported_primary_field(self, get_unsupported_primary_field):
         """
-        target: test collection with unsupported parimary field type
+        target: test collection with unsupported primary field type
         method: specify non-int64 as primary field
         expected: raise exception
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         field = get_unsupported_primary_field
-        schema = cf.gen_collection_schema(fields=[field], primary_field=field.name)
+        vec_field = cf.gen_float_vec_field()
+        schema = cf.gen_collection_schema(fields=[field, vec_field], primary_field=field.name)
         ex, _ = self.collection_wrap.collection_init(c_name, schema=schema,
                                                      check_res=CheckParams.err_res)
         assert "the data type of primary key should be int64" in str(ex)
@@ -536,7 +521,6 @@ class TestCollectionParams(TestcaseBase):
         assert collection.schema.auto_id
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5350")
     def test_collection_field_invalid_primary(self, get_invalid_string):
         """
         target: test collection with invalid primary
@@ -551,6 +535,9 @@ class TestCollectionParams(TestcaseBase):
         ex, _ = self.collection_wrap.collection_init(c_name, schema=schema,
                                                      check_res=CheckParams.err_res)
         log.info(str(ex))
+        cf.gen_unique_str(prefix)
+        with pytest.raises(Exception, match="Param is_primary must be bool type"):
+            cf.gen_int64_field(name="int", is_primary=get_invalid_string)
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("dtype", [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR])
@@ -643,33 +630,33 @@ class TestCollectionParams(TestcaseBase):
         assert_default_collection(collection, c_name, exp_schema=schema)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(reason="issue #5302")
     def test_collection_with_dataframe(self):
         """
         target: test collection with dataframe data
         method: create collection and insert with dataframe
         expected: collection num entities equal to nb
         """
-        self._connect()
+        conn = self._connect()
         nb = ct.default_nb
         c_name = cf.gen_unique_str(prefix)
         data = cf.gen_default_dataframe_data(nb)
         collection, _ = self.collection_wrap.collection_init(c_name, schema=default_schema, data=data)
+        conn.flush([c_name])
         assert_default_collection(collection, c_name, exp_num=nb)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(reason="issue #5302")
     def test_collection_with_data_list(self):
         """
         target: test collection with data (list-like)
         method: create collection with data (list-like)
         expected: collection num entities equal to nb
         """
-        self._connect()
+        conn = self._connect()
         nb = ct.default_nb
         c_name = cf.gen_unique_str(prefix)
         data = cf.gen_default_list_data(nb)
         collection, _ = self.collection_wrap.collection_init(c_name, schema=default_schema, data=data)
+        conn.flush([c_name])
         assert_default_collection(collection, c_name, exp_num=nb)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -693,14 +680,16 @@ class TestCollectionParams(TestcaseBase):
         method: create binary collection with dataframe
         expected: collection num entities equal to nb
         """
-        conn = self._connect()
+        self._connect()
         nb = ct.default_nb
         c_name = cf.gen_unique_str(prefix)
         data = cf.gen_default_binary_dataframe_data(3)
-        log.debug(data)
-        collection, _ = self.collection_wrap.collection_init(c_name, schema=default_binary_schema,
+        collection, _ = self.collection_wrap.collection_init(c_name,
+                                                             schema=default_binary_schema,
                                                              data=data)
-        assert_default_collection(collection, c_name, exp_schema=default_binary_schema, exp_num=nb)
+        assert_default_collection(collection, c_name,
+                                  exp_schema=default_binary_schema,
+                                  exp_num=nb)
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(reason="issue #5414")
@@ -778,7 +767,6 @@ class TestCollectionOperation(TestcaseBase):
             assert c_name not in self.utility_wrap.list_collections()
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5367")
     def test_collection_dup_name_drop(self):
         """
         target: test collection with dup name, and drop
@@ -789,7 +777,6 @@ class TestCollectionOperation(TestcaseBase):
         self._connect()
         collection = self._collection()
         assert_default_collection(collection)
-        log.info(collection.schema)
         dup_collection, _ = self.collection_wrap.collection_init(collection.name)
         assert_default_collection(dup_collection, collection.name)
         dup_collection.drop()
@@ -799,23 +786,22 @@ class TestCollectionOperation(TestcaseBase):
             collection.num_entities
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5302")
     def test_collection_created_by_dataframe(self):
         """
         target: test collection with dataframe
         method: create collection with dataframe
         expected: create successfully
         """
-        self._connect()
+        conn = self._connect()
         nb = ct.default_nb
         c_name = cf.gen_unique_str(prefix)
         df = cf.gen_default_dataframe_data(nb)
         schema = cf.gen_default_collection_schema()
         collection, _ = self.collection_wrap.collection_init(name=c_name, data=df)
+        conn.flush([c_name])
         assert_default_collection(collection, exp_name=c_name, exp_num=nb, exp_schema=schema)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(reason="issue #5404")
     def test_collection_created_by_empty_dataframe(self):
         """
         target: test create collection by empty dataframe
@@ -825,9 +811,10 @@ class TestCollectionOperation(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         data = pd.DataFrame()
-        ex, _ = self.collection_wrap.collection_init(name=c_name, schema=None, data=data,
+        ex, _ = self.collection_wrap.collection_init(name=c_name, schema=None,
+                                                     data=data,
                                                      check_res=CheckParams.err_res)
-        # TODO assert
+        assert "The field of the schema cannot be empty" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_collection_created_by_invalid_dataframe(self, get_invalid_df):
@@ -847,7 +834,6 @@ class TestCollectionOperation(TestcaseBase):
         assert message_one or message_two or message_three in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5405")
     def test_collection_created_by_inconsistent_dataframe(self):
         """
         target: test collection with data inconsistent
@@ -859,10 +845,10 @@ class TestCollectionOperation(TestcaseBase):
         # one field different type df
         mix_data = [(1, 2., [0.1, 0.2]), (2, 3., 4)]
         df = pd.DataFrame(data=mix_data, columns=list("ABC"))
-        ex, _ = self.collection_wrap.collection_init(name=c_name, schema=None, data=df,
+        ex, _ = self.collection_wrap.collection_init(name=c_name, schema=None,
+                                                     data=df,
                                                      check_res=CheckParams.err_res)
-        log.info(str(ex))
-        # TODO assert
+        assert "The data in the same column must be of the same type" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_collection_created_by_non_dataframe(self, get_non_df):
@@ -938,4 +924,3 @@ class TestCollectionOperation(TestcaseBase):
         ex, _ = self.collection_wrap.collection_init(name=c_name, schema=None, data=data,
                                                      check_res=CheckParams.err_res)
         assert "Data of not pandas.DataFrame type should bepassed into the schema" in str(ex)
-

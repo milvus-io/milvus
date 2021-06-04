@@ -88,13 +88,14 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 	}
 	s.insertChannels = s.getInsertChannels()
 	s.createDataNodeClient = func(addr string) (types.DataNode, error) {
-		node, err := grpcdatanodeclient.NewClient(addr, 10)
+		node, err := grpcdatanodeclient.NewClient(addr, 10*time.Second)
 		if err != nil {
 			return nil, err
 		}
 		return node, nil
 	}
 	s.UpdateStateCode(internalpb.StateCode_Abnormal)
+	log.Debug("DataService", zap.Any("State", s.state.Load()))
 	return s, nil
 }
 
@@ -135,6 +136,7 @@ func (s *Server) Start() error {
 	}
 
 	if err := s.initMeta(); err != nil {
+		log.Debug("DataService initMeta failed", zap.Error(err))
 		return err
 	}
 
@@ -143,14 +145,17 @@ func (s *Server) Start() error {
 	s.startSegmentAllocator()
 	s.statsHandler = newStatsHandler(s.meta)
 	if err = s.loadMetaFromMaster(); err != nil {
+		log.Debug("DataService loadMetaFromMaster failed", zap.Error(err))
 		return err
 	}
 	if err = s.initMsgProducer(); err != nil {
+		log.Debug("DataService initMsgProducer failed", zap.Error(err))
 		return err
 	}
 	s.startServerLoop()
 	s.UpdateStateCode(internalpb.StateCode_Healthy)
 	log.Debug("start success")
+	log.Debug("DataService", zap.Any("State", s.state.Load()))
 	return nil
 }
 
@@ -163,7 +168,7 @@ func (s *Server) startSegmentAllocator() {
 func (s *Server) initSegmentInfoChannel() msgstream.MsgStream {
 	segmentInfoStream, _ := s.msFactory.NewMsgStream(s.ctx)
 	segmentInfoStream.AsProducer([]string{Params.SegmentInfoChannelName})
-	log.Debug("dataservice AsProducer: " + Params.SegmentInfoChannelName)
+	log.Debug("DataService AsProducer: " + Params.SegmentInfoChannelName)
 	segmentInfoStream.Start()
 	return segmentInfoStream
 }
@@ -343,14 +348,14 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 	defer s.serverLoopWg.Done()
 	statsStream, _ := s.msFactory.NewMsgStream(ctx)
 	statsStream.AsConsumer([]string{Params.StatisticsChannelName}, Params.DataServiceSubscriptionName)
-	log.Debug("dataservice AsConsumer: " + Params.StatisticsChannelName + " : " + Params.DataServiceSubscriptionName)
+	log.Debug("DataService AsConsumer: " + Params.StatisticsChannelName + " : " + Params.DataServiceSubscriptionName)
 	// try to restore last processed pos
 	pos, err := s.loadStreamLastPos(streamTypeStats)
 	if err == nil {
 		err = statsStream.Seek([]*internalpb.MsgPosition{pos})
 		if err != nil {
 			log.Error("Failed to seek to last pos for statsStream",
-				zap.String("StatisChanName", Params.StatisticsChannelName),
+				zap.String("StatisticsChanName", Params.StatisticsChannelName),
 				zap.String("DataServiceSubscriptionName", Params.DataServiceSubscriptionName),
 				zap.Error(err))
 		}
@@ -398,7 +403,7 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 	defer s.serverLoopWg.Done()
 	flushStream, _ := s.msFactory.NewMsgStream(ctx)
 	flushStream.AsConsumer([]string{Params.SegmentInfoChannelName}, Params.DataServiceSubscriptionName)
-	log.Debug("dataservice AsConsumer: " + Params.SegmentInfoChannelName + " : " + Params.DataServiceSubscriptionName)
+	log.Debug("DataService AsConsumer: " + Params.SegmentInfoChannelName + " : " + Params.DataServiceSubscriptionName)
 
 	// try to restore last processed pos
 	pos, err := s.loadStreamLastPos(streamTypeFlush)
@@ -432,7 +437,7 @@ func (s *Server) startSegmentFlushChannel(ctx context.Context) {
 			}
 			fcMsg := msg.(*msgstream.FlushCompletedMsg)
 			err := s.meta.FlushSegment(fcMsg.SegmentID, fcMsg.BeginTimestamp)
-			log.Debug("dataservice flushed segment", zap.Any("segmentID", fcMsg.SegmentID), zap.Error(err))
+			log.Debug("DataService flushed segment", zap.Any("segmentID", fcMsg.SegmentID), zap.Error(err))
 			if err != nil {
 				log.Error("get segment from meta error", zap.Int64("segmentID", fcMsg.SegmentID), zap.Error(err))
 				continue
@@ -517,10 +522,12 @@ func (s *Server) RegisterNode(ctx context.Context, req *datapb.RegisterNodeReque
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
 	}
-	log.Debug("DataService: RegisterNode:", zap.String("IP", req.Address.Ip), zap.Int64("Port", req.Address.Port))
+	log.Debug("DataService: RegisterNode:", zap.String("IP", req.Address.Ip), zap.Int64("Port", req.Address.Port),
+		zap.Any("NodeID", req.Base.SourceID))
 	node, err := s.newDataNode(req.Address.Ip, req.Address.Port, req.Base.SourceID)
 	if err != nil {
 		ret.Status.Reason = err.Error()
+		log.Debug("DataService newDataNode failed", zap.Error(err))
 		return ret, nil
 	}
 

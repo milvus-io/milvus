@@ -51,8 +51,10 @@ func NewClient(ctx context.Context, address string, timeout time.Duration) *Clie
 func (c *Client) Init() error {
 	tracer := opentracing.GlobalTracer()
 	connectGrpcFunc := func() error {
+		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
+		defer cancelFunc()
 		log.Debug("ProxyNodeClient try connect ", zap.String("address", c.address))
-		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
+		conn, err := grpc.DialContext(ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(
@@ -76,8 +78,10 @@ func (c *Client) Init() error {
 func (c *Client) reconnect() error {
 	tracer := opentracing.GlobalTracer()
 	connectGrpcFunc := func() error {
+		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
+		defer cancelFunc()
 		log.Debug("ProxyNodeClient try reconnect ", zap.String("address", c.address))
-		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
+		conn, err := grpc.DialContext(ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(

@@ -14,6 +14,7 @@ package proxyservice
 import (
 	"context"
 	"math/rand"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -30,9 +31,7 @@ type ProxyService struct {
 	sched     *taskScheduler
 	tick      *TimeTick
 	nodeInfos *globalNodeInfoTable
-	stateCode internalpb.StateCode
-
-	//subStates *internalpb.ComponentStates
+	stateCode atomic.Value
 
 	nodeStartParams []*commonpb.KeyValuePair
 
@@ -55,7 +54,7 @@ func NewProxyService(ctx context.Context, factory msgstream.Factory) (*ProxyServ
 	s.sched = newTaskScheduler(ctx1)
 	s.nodeInfos = newGlobalNodeInfoTable()
 	s.UpdateStateCode(internalpb.StateCode_Abnormal)
-	log.Debug("proxyservice", zap.Any("state of proxyservice: ", internalpb.StateCode_Abnormal))
+	log.Debug("ProxyService", zap.Any("State", s.stateCode.Load()))
 
 	return s, nil
 }

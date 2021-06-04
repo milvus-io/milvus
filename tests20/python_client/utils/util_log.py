@@ -31,6 +31,11 @@ class TestLog:
             eh.setFormatter(formatter)
             self.log.addHandler(eh)
 
+            ch = logging.StreamHandler(sys.stdout)
+            ch.setLevel(logging.DEBUG)
+            ch.setFormatter(formatter)
+            self.log.addHandler(ch)
+
         except Exception as e:
             print("Can not use %s or %s to log." % (log_file, log_err))
 
