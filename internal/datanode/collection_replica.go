@@ -45,6 +45,9 @@ type Replica interface {
 	setStartPositions(segmentID UniqueID, startPos []*internalpb.MsgPosition) error
 	setEndPositions(segmentID UniqueID, endPos []*internalpb.MsgPosition) error
 	getSegmentPositions(segID UniqueID) ([]*internalpb.MsgPosition, []*internalpb.MsgPosition)
+	setSegmentCheckPoint(segID UniqueID)
+	listOpenSegmentCheckPoint() map[UniqueID]internalpb.MsgPosition
+	removeSegmentCheckPoint(segID UniqueID)
 }
 
 // Segment is the data structure of segments in data node replica.
@@ -66,9 +69,10 @@ type CollectionSegmentReplica struct {
 	segments    map[UniqueID]*Segment
 	collections map[UniqueID]*Collection
 
-	posMu          sync.Mutex
-	startPositions map[UniqueID][]*internalpb.MsgPosition
-	endPositions   map[UniqueID][]*internalpb.MsgPosition
+	posMu                 sync.Mutex
+	startPositions        map[UniqueID][]*internalpb.MsgPosition
+	endPositions          map[UniqueID][]*internalpb.MsgPosition
+	openSegmentCheckPoint map[UniqueID]internalpb.MsgPosition
 }
 
 var _ Replica = &CollectionSegmentReplica{}
@@ -78,10 +82,11 @@ func newReplica() Replica {
 	collections := make(map[UniqueID]*Collection)
 
 	var replica Replica = &CollectionSegmentReplica{
-		segments:       segments,
-		collections:    collections,
-		startPositions: make(map[UniqueID][]*internalpb.MsgPosition),
-		endPositions:   make(map[UniqueID][]*internalpb.MsgPosition),
+		segments:              segments,
+		collections:           collections,
+		startPositions:        make(map[UniqueID][]*internalpb.MsgPosition),
+		endPositions:          make(map[UniqueID][]*internalpb.MsgPosition),
+		openSegmentCheckPoint: make(map[UniqueID]internalpb.MsgPosition),
 	}
 	return replica
 }
@@ -314,4 +319,24 @@ func (replica *CollectionSegmentReplica) getSegmentPositions(segID UniqueID) ([]
 	startPos := replica.startPositions[segID]
 	endPos := replica.endPositions[segID]
 	return startPos, endPos
+}
+func (replica *CollectionSegmentReplica) setSegmentCheckPoint(segID UniqueID) {
+	replica.posMu.Lock()
+	defer replica.posMu.Unlock()
+	ep := replica.endPositions[segID]
+	if len(ep) != 1 {
+		panic("msgstream's position should be 1")
+	}
+	replica.openSegmentCheckPoint[segID] = *ep[0]
+}
+func (replica *CollectionSegmentReplica) listOpenSegmentCheckPoint() map[UniqueID]internalpb.MsgPosition {
+	replica.posMu.Lock()
+	defer replica.posMu.Unlock()
+	return replica.openSegmentCheckPoint
+}
+
+func (replica *CollectionSegmentReplica) removeSegmentCheckPoint(segID UniqueID) {
+	replica.posMu.Lock()
+	defer replica.posMu.Unlock()
+	delete(replica.openSegmentCheckPoint, segID)
 }
