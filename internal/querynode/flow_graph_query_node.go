@@ -24,11 +24,13 @@ import (
 )
 
 type queryNodeFlowGraph struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	channel   VChannel
-	flowGraph *flowgraph.TimeTickedFlowGraph
-	dmlStream msgstream.MsgStream
+	ctx          context.Context
+	cancel       context.CancelFunc
+	collectionID UniqueID
+	partitionID  UniqueID
+	channel      VChannel
+	flowGraph    *flowgraph.TimeTickedFlowGraph
+	dmlStream    msgstream.MsgStream
 }
 
 func newQueryNodeFlowGraph(ctx context.Context,
@@ -43,16 +45,18 @@ func newQueryNodeFlowGraph(ctx context.Context,
 	ctx1, cancel := context.WithCancel(ctx)
 
 	q := &queryNodeFlowGraph{
-		ctx:       ctx1,
-		cancel:    cancel,
-		channel:   channel,
-		flowGraph: flowgraph.NewTimeTickedFlowGraph(ctx1),
+		ctx:          ctx1,
+		cancel:       cancel,
+		collectionID: collectionID,
+		partitionID:  partitionID,
+		channel:      channel,
+		flowGraph:    flowgraph.NewTimeTickedFlowGraph(ctx1),
 	}
 
 	var dmStreamNode node = q.newDmInputNode(ctx1, factory)
 	var filterDmNode node = newFilteredDmNode(streamingReplica, flowGraphType, collectionID, partitionID)
 	var insertNode node = newInsertNode(streamingReplica)
-	var serviceTimeNode node = newServiceTimeNode(ctx1, tSafeReplica, channel, factory)
+	var serviceTimeNode node = newServiceTimeNode(ctx1, tSafeReplica, collectionID, channel, factory)
 
 	q.flowGraph.AddNode(dmStreamNode)
 	q.flowGraph.AddNode(filterDmNode)
@@ -130,4 +134,9 @@ func (q *queryNodeFlowGraph) seekQueryNodeFlowGraph(position *internalpb.MsgPosi
 func (q *queryNodeFlowGraph) close() {
 	q.cancel()
 	q.flowGraph.Close()
+	log.Debug("stop query node flow graph",
+		zap.Any("collectionID", q.collectionID),
+		zap.Any("partitionID", q.partitionID),
+		zap.Any("channel", q.channel),
+	)
 }

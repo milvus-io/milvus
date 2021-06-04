@@ -133,7 +133,7 @@ func (s *searchCollection) waitNewTSafe() Timestamp {
 	// block until any vChannel updating tSafe
 	_, _, recvOK := reflect.Select(s.watcherSelectCase)
 	if !recvOK {
-		log.Error("tSafe has been closed")
+		log.Error("tSafe has been closed", zap.Any("collectionID", s.collectionID))
 		return invalidTimestamp
 	}
 	t := Timestamp(math.MaxInt64)
@@ -154,6 +154,12 @@ func (s *searchCollection) getServiceableTime() Timestamp {
 
 func (s *searchCollection) setServiceableTime(t Timestamp) {
 	s.serviceableTimeMutex.Lock()
+	defer s.serviceableTimeMutex.Unlock()
+
+	if t < s.serviceableTime {
+		return
+	}
+
 	gracefulTimeInMilliSecond := Params.GracefulTime
 	if gracefulTimeInMilliSecond > 0 {
 		gracefulTime := tsoutil.ComposeTS(gracefulTimeInMilliSecond, 0)
@@ -161,7 +167,6 @@ func (s *searchCollection) setServiceableTime(t Timestamp) {
 	} else {
 		s.serviceableTime = t
 	}
-	s.serviceableTimeMutex.Unlock()
 }
 
 func (s *searchCollection) emptySearch(searchMsg *msgstream.SearchMsg) {

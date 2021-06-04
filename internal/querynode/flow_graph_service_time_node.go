@@ -25,6 +25,7 @@ import (
 
 type serviceTimeNode struct {
 	baseNode
+	collectionID      UniqueID
 	vChannel          VChannel
 	tSafeReplica      TSafeReplicaInterface
 	timeTickMsgStream msgstream.MsgStream
@@ -59,7 +60,9 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	// update service time
 	stNode.tSafeReplica.setTSafe(stNode.vChannel, serviceTimeMsg.timeRange.timestampMax)
 	//log.Debug("update tSafe:",
-	//	zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)))
+	//	zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)),
+	//	zap.Any("collectionID", stNode.collectionID),
+	//)
 
 	if err := stNode.sendTimeTick(serviceTimeMsg.timeRange.timestampMax); err != nil {
 		log.Error("Error: send time tick into pulsar channel failed", zap.Error(err))
@@ -95,6 +98,7 @@ func (stNode *serviceTimeNode) sendTimeTick(ts Timestamp) error {
 
 func newServiceTimeNode(ctx context.Context,
 	tSafeReplica TSafeReplicaInterface,
+	collectionID UniqueID,
 	channel VChannel,
 	factory msgstream.Factory) *serviceTimeNode {
 
@@ -115,6 +119,7 @@ func newServiceTimeNode(ctx context.Context,
 
 	return &serviceTimeNode{
 		baseNode:          baseNode,
+		collectionID:      collectionID,
 		vChannel:          channel,
 		tSafeReplica:      tSafeReplica,
 		timeTickMsgStream: timeTimeMsgStream,
