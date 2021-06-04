@@ -3,10 +3,10 @@ package dataservice
 import (
 	"errors"
 	"path"
-	"sort"
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
@@ -174,42 +174,39 @@ func (s *Server) getDDLBinlogMeta(collID UniqueID) (metas []*datapb.DDLBinlogMet
 }
 
 // GetVChanPositions get vchannel latest postitions with provided dml channel names
-func (s *Server) GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelPair, error) {
+func (s *Server) GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelInfo, error) {
 	if s.kvClient == nil {
 		return nil, errNilKvClient
 	}
-	pairs := make([]*datapb.VchannelPair, 0, len(vchans))
+	pairs := make([]*datapb.VchannelInfo, 0, len(vchans))
 
 	for _, vchan := range vchans {
 		segments := s.meta.GetSegmentsByChannel(vchan.DmlChannel)
-		sort.Slice(segments, func(i, j int) bool {
-			return segments[i].ID < segments[j].ID
-		})
-
-		dmlPos := &datapb.PositionPair{}
-		ddlPos := &datapb.PositionPair{}
-
-		zp := zeroPos(vchan.DmlChannel)
-		dmlPos.StartPosition = &zp
-		dmlPos.EndPosition = &zp
-		ddlPos.StartPosition = &zp
-		ddlPos.EndPosition = &zp
-
-		// find the last segment with not-nil position
-		for i := 0; i < len(segments); i++ {
-			if segments[i].DmlPosition == nil {
-				break
+		flushedSegmentIDs := make([]UniqueID, 0)
+		unflushedCheckpoints := make([]*datapb.CheckPoint, 0)
+		for _, s := range segments {
+			if s.State == commonpb.SegmentState_Flushing || s.State == commonpb.SegmentState_Flushed {
+				flushedSegmentIDs = append(flushedSegmentIDs, s.ID)
+				continue
 			}
-			dmlPos = segments[i].DmlPosition
-			ddlPos = segments[i].DdlPosition
+
+			if s.DmlPosition == nil {
+				continue
+			}
+
+			cp := &datapb.CheckPoint{
+				SegmentID: s.ID,
+				Position:  s.DmlPosition,
+				NumOfRows: s.NumOfRows,
+			}
+			unflushedCheckpoints = append(unflushedCheckpoints, cp)
 		}
 
-		pairs = append(pairs, &datapb.VchannelPair{
+		pairs = append(pairs, &datapb.VchannelInfo{
 			CollectionID:    vchan.CollectionID,
-			DmlVchannelName: vchan.DmlChannel,
-			DdlVchannelName: vchan.DdlChannel,
-			DdlPosition:     ddlPos,
-			DmlPosition:     dmlPos,
+			ChannelName:     vchan.DmlChannel,
+			FlushedSegments: flushedSegmentIDs,
+			CheckPoints:     unflushedCheckpoints,
 		})
 	}
 	return pairs, nil

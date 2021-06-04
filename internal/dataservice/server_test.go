@@ -241,7 +241,7 @@ func TestGetSegmentStates(t *testing.T) {
 		CollectionID:  100,
 		PartitionID:   0,
 		InsertChannel: "",
-		NumRows:       0,
+		NumOfRows:     0,
 		State:         commonpb.SegmentState_Growing,
 	})
 	assert.Nil(t, err)
@@ -496,6 +496,19 @@ func TestSaveBinlogPaths(t *testing.T) {
 					TsBinlogPath:  "/by-dev/test/0/ts/Allo8",
 				},
 			},
+			CheckPoints: []*datapb.CheckPoint{
+				{
+					SegmentID: 0,
+					Position: &internalpb.MsgPosition{
+						ChannelName: "ch1",
+						MsgID:       []byte{1, 2, 3},
+						MsgGroup:    "",
+						Timestamp:   0,
+					},
+					NumOfRows: 10,
+				},
+			},
+			Flushed: false,
 		})
 		assert.Nil(t, err)
 		assert.EqualValues(t, resp.ErrorCode, commonpb.ErrorCode_Success)
@@ -527,6 +540,11 @@ func TestSaveBinlogPaths(t *testing.T) {
 			assert.EqualValues(t, "/by-dev/test/0/ddl/Allo9", collMetas[1].DdlBinlogPath)
 		}
 
+		segmentInfo, err := svr.meta.GetSegment(0)
+		assert.Nil(t, err)
+		assert.EqualValues(t, segmentInfo.DmlPosition.ChannelName, "ch1")
+		assert.EqualValues(t, segmentInfo.DmlPosition.MsgID, []byte{1, 2, 3})
+		assert.EqualValues(t, segmentInfo.NumOfRows, 10)
 	})
 	t.Run("Abnormal SaveRequest", func(t *testing.T) {
 		ctx := context.Background()
@@ -660,6 +678,7 @@ func TestGetVChannelPos(t *testing.T) {
 		CollectionID:  0,
 		PartitionID:   0,
 		InsertChannel: "ch1",
+		State:         commonpb.SegmentState_Flushed,
 	})
 	assert.Nil(t, err)
 	err = svr.meta.AddSegment(&datapb.SegmentInfo{
@@ -667,32 +686,35 @@ func TestGetVChannelPos(t *testing.T) {
 		CollectionID:  0,
 		PartitionID:   0,
 		InsertChannel: "ch1",
+		State:         commonpb.SegmentState_Growing,
+		DmlPosition: &internalpb.MsgPosition{
+			ChannelName: "ch1",
+			MsgID:       []byte{1, 2, 3},
+			MsgGroup:    "",
+			Timestamp:   0,
+		},
 	})
 	assert.Nil(t, err)
-	req := &datapb.SaveBinlogPathsRequest{
-		SegmentID:         1,
-		CollectionID:      0,
-		Field2BinlogPaths: []*datapb.ID2PathList{},
-		DdlBinlogPaths:    []*datapb.DDLBinlogMeta{},
-	}
-	status, err := svr.SaveBinlogPaths(context.TODO(), req)
+	err = svr.meta.AddSegment(&datapb.SegmentInfo{
+		ID:            3,
+		CollectionID:  0,
+		PartitionID:   0,
+		InsertChannel: "ch1",
+		State:         commonpb.SegmentState_Growing,
+	})
 	assert.Nil(t, err)
-	assert.EqualValues(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
 	t.Run("get unexisted channel", func(t *testing.T) {
 		pair, err := svr.GetVChanPositions([]vchannel{
 			{
 				CollectionID: 0,
 				DmlChannel:   "chx1",
-				DdlChannel:   "chx2",
 			},
 		})
 		assert.Nil(t, err)
 		assert.EqualValues(t, 1, len(pair))
-		assert.Nil(t, pair[0].DmlPosition.StartPosition.MsgID)
-		assert.Nil(t, pair[0].DmlPosition.EndPosition.MsgID)
-		assert.Nil(t, pair[0].DdlPosition.StartPosition.MsgID)
-		assert.Nil(t, pair[0].DdlPosition.EndPosition.MsgID)
+		assert.Empty(t, pair[0].CheckPoints)
+		assert.Empty(t, pair[0].FlushedSegments)
 	})
 
 	t.Run("get existed channel", func(t *testing.T) {
@@ -706,10 +728,11 @@ func TestGetVChannelPos(t *testing.T) {
 		assert.Nil(t, err)
 		assert.EqualValues(t, 1, len(pair))
 		assert.EqualValues(t, 0, pair[0].CollectionID)
-		// assert.EqualValues(t, []byte{1, 2, 3}, pair[0].DmlPosition.StartPosition.MsgID)
-		// assert.EqualValues(t, []byte{3, 4, 5}, pair[0].DmlPosition.EndPosition.MsgID)
-		// assert.EqualValues(t, []byte{1, 2, 3}, pair[0].DdlPosition.StartPosition.MsgID)
-		// assert.EqualValues(t, []byte{3, 4, 5}, pair[0].DdlPosition.EndPosition.MsgID)
+		assert.EqualValues(t, 1, len(pair[0].FlushedSegments))
+		assert.EqualValues(t, 1, pair[0].FlushedSegments[0])
+		assert.EqualValues(t, 1, len(pair[0].CheckPoints))
+		assert.EqualValues(t, 2, pair[0].CheckPoints[0].SegmentID)
+		assert.EqualValues(t, []byte{1, 2, 3}, pair[0].CheckPoints[0].Position.MsgID)
 	})
 }
 
