@@ -44,7 +44,7 @@ func (c *Client) Init() error {
 	tracer := opentracing.GlobalTracer()
 	log.Debug("ProxyServiceClient try connect ", zap.String("address", c.address))
 	connectGrpcFunc := func() error {
-		ctx, cancelFunc := context.WithTimeout(c.ctx, time.Second * 3)
+		ctx, cancelFunc := context.WithTimeout(c.ctx, time.Second*3)
 		defer cancelFunc()
 		conn, err := grpc.DialContext(ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(

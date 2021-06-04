@@ -34,7 +34,7 @@ import (
 type GrpcClient struct {
 	grpcClient masterpb.MasterServiceClient
 	conn       *grpc.ClientConn
-	ctx context.Context
+	ctx        context.Context
 
 	//inner member
 	addr      string
@@ -72,7 +72,7 @@ func NewClient(addr string, metaRoot string, etcdAddr []string, timeout time.Dur
 	return &GrpcClient{
 		grpcClient: nil,
 		conn:       nil,
-		ctx:       context.Background(),
+		ctx:        context.Background(),
 		addr:       addr,
 		timeout:    timeout,
 		reconnTry:  300,
