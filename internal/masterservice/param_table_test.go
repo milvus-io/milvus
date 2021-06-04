@@ -38,9 +38,6 @@ func TestParamTable(t *testing.T) {
 	assert.NotEqual(t, Params.TimeTickChannel, "")
 	t.Logf("master time tick channel = %s", Params.TimeTickChannel)
 
-	assert.NotEqual(t, Params.DdChannel, "")
-	t.Logf("master dd channel = %s", Params.DdChannel)
-
 	assert.NotEqual(t, Params.StatisticsChannel, "")
 	t.Logf("master statistics channel = %s", Params.StatisticsChannel)
 

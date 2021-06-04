@@ -35,7 +35,6 @@ type ParamTable struct {
 	KvRootPath                string
 	MsgChannelSubName         string
 	TimeTickChannel           string
-	DdChannel                 string
 	StatisticsChannel         string
 	DataServiceSegmentChannel string // data service create segment, or data node flush segment
 
@@ -68,7 +67,6 @@ func (p *ParamTable) Init() {
 
 		p.initMsgChannelSubName()
 		p.initTimeTickChannel()
-		p.initDdChannelName()
 		p.initStatisticsChannelName()
 		p.initSegmentInfoChannelName()
 
@@ -139,14 +137,6 @@ func (p *ParamTable) initTimeTickChannel() {
 		panic(err)
 	}
 	p.TimeTickChannel = channel
-}
-
-func (p *ParamTable) initDdChannelName() {
-	channel, err := p.Load("msgChannel.chanNamePrefix.dataDefinition")
-	if err != nil {
-		panic(err)
-	}
-	p.DdChannel = channel
 }
 
 func (p *ParamTable) initStatisticsChannelName() {

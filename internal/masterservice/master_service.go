@@ -143,6 +143,9 @@ type Core struct {
 	//dd request scheduler
 	ddReqQueue chan reqTask //dd request will be push into this chan
 
+	//dml channels
+	dmlChannels *dmlChannels
+
 	//ProxyNode manager
 	proxyNodeManager *proxyNodeManager
 
@@ -528,14 +531,6 @@ func (c *Core) setMsgStreams() error {
 	timeTickStream.AsProducer([]string{Params.TimeTickChannel})
 	log.Debug("masterservice AsProducer: " + Params.TimeTickChannel)
 
-	// master dd channel
-	if Params.DdChannel == "" {
-		return fmt.Errorf("DdChannel is empty")
-	}
-	ddStream, _ := c.msFactory.NewMsgStream(c.ctx)
-	ddStream.AsProducer([]string{Params.DdChannel})
-	log.Debug("masterservice AsProducer: " + Params.DdChannel)
-
 	c.SendTimeTick = func(t typeutil.Timestamp) error {
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
@@ -559,11 +554,25 @@ func (c *Core) setMsgStreams() error {
 		if err := timeTickStream.Broadcast(&msgPack); err != nil {
 			return err
 		}
-		if err := ddStream.Broadcast(&msgPack); err != nil {
-			return err
-		}
 		metrics.MasterDDChannelTimeTick.Set(float64(tsoutil.Mod24H(t)))
-		return nil
+
+		c.dmlChannels.BroadcastAll(&msgPack)
+		pc := c.MetaTable.ListCollectionPhysicalChannels()
+		pt := make([]uint64, len(pc))
+		for i := 0; i < len(pt); i++ {
+			pt[i] = t
+		}
+		ttMsg := internalpb.ChannelTimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_TimeTick,
+				MsgID:     0, //TODO
+				Timestamp: t,
+				SourceID:  c.session.ServerID,
+			},
+			ChannelNames: pc,
+			Timestamps:   pt,
+		}
+		return c.chanTimeTick.UpdateTimeTick(&ttMsg)
 	}
 
 	c.SendDdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest) error {
@@ -574,14 +583,12 @@ func (c *Core) setMsgStreams() error {
 			EndTimestamp:   req.Base.Timestamp,
 			HashValues:     []uint32{0},
 		}
-		collMsg := &ms.CreateCollectionMsg{
+		msg := &ms.CreateCollectionMsg{
 			BaseMsg:                 baseMsg,
 			CreateCollectionRequest: *req,
 		}
-		msgPack.Msgs = append(msgPack.Msgs, collMsg)
-		if err := ddStream.Broadcast(&msgPack); err != nil {
-			return err
-		}
+		msgPack.Msgs = append(msgPack.Msgs, msg)
+		c.dmlChannels.BroadcastAll(&msgPack)
 		return nil
 	}
 
@@ -593,14 +600,12 @@ func (c *Core) setMsgStreams() error {
 			EndTimestamp:   req.Base.Timestamp,
 			HashValues:     []uint32{0},
 		}
-		collMsg := &ms.DropCollectionMsg{
+		msg := &ms.DropCollectionMsg{
 			BaseMsg:               baseMsg,
 			DropCollectionRequest: *req,
 		}
-		msgPack.Msgs = append(msgPack.Msgs, collMsg)
-		if err := ddStream.Broadcast(&msgPack); err != nil {
-			return err
-		}
+		msgPack.Msgs = append(msgPack.Msgs, msg)
+		c.dmlChannels.BroadcastAll(&msgPack)
 		return nil
 	}
 
@@ -612,14 +617,12 @@ func (c *Core) setMsgStreams() error {
 			EndTimestamp:   req.Base.Timestamp,
 			HashValues:     []uint32{0},
 		}
-		collMsg := &ms.CreatePartitionMsg{
+		msg := &ms.CreatePartitionMsg{
 			BaseMsg:                baseMsg,
 			CreatePartitionRequest: *req,
 		}
-		msgPack.Msgs = append(msgPack.Msgs, collMsg)
-		if err := ddStream.Broadcast(&msgPack); err != nil {
-			return err
-		}
+		msgPack.Msgs = append(msgPack.Msgs, msg)
+		c.dmlChannels.BroadcastAll(&msgPack)
 		return nil
 	}
 
@@ -631,14 +634,12 @@ func (c *Core) setMsgStreams() error {
 			EndTimestamp:   req.Base.Timestamp,
 			HashValues:     []uint32{0},
 		}
-		collMsg := &ms.DropPartitionMsg{
+		msg := &ms.DropPartitionMsg{
 			BaseMsg:              baseMsg,
 			DropPartitionRequest: *req,
 		}
-		msgPack.Msgs = append(msgPack.Msgs, collMsg)
-		if err := ddStream.Broadcast(&msgPack); err != nil {
-			return err
-		}
+		msgPack.Msgs = append(msgPack.Msgs, msg)
+		c.dmlChannels.BroadcastAll(&msgPack)
 		return nil
 	}
 
@@ -968,7 +969,13 @@ func (c *Core) Init() error {
 		if initError = c.msFactory.SetParams(m); initError != nil {
 			return
 		}
+
+		c.dmlChannels = newDMLChannels(c)
+		pc := c.MetaTable.ListCollectionPhysicalChannels()
+		c.dmlChannels.AddProducerChannles(pc...)
+
 		c.chanTimeTick = newTimeTickSync(c)
+		c.chanTimeTick.AddProxyNode(c.session)
 		c.proxyClientManager = newProxyClientManager(c)
 
 		c.proxyNodeManager, initError = newProxyNodeManager(
@@ -1096,7 +1103,6 @@ func (c *Core) Start() error {
 	}
 
 	log.Debug("MasterService", zap.Int64("node id", c.session.ServerID))
-	log.Debug("MasterService", zap.String("dd channel name", Params.DdChannel))
 	log.Debug("MasterService", zap.String("time tick channel name", Params.TimeTickChannel))
 
 	c.startOnce.Do(func() {
@@ -1160,16 +1166,6 @@ func (c *Core) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse
 			Reason:    "",
 		},
 		Value: Params.TimeTickChannel,
-	}, nil
-}
-
-func (c *Core) GetDdChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
-		Value: Params.DdChannel,
 	}, nil
 }
 

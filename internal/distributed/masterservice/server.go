@@ -296,12 +296,7 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 	return s.masterService.GetStatisticsChannel(ctx)
 }
 
-// GetDdChannel receive ddl from rpc and time tick from proxy service, and put them into this channel
-func (s *Server) GetDdChannel(ctx context.Context, req *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.masterService.GetDdChannel(ctx)
-}
-
-// CreateCollection DDL request
+//DDL request
 func (s *Server) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	return s.masterService.CreateCollection(ctx, in)
 }
