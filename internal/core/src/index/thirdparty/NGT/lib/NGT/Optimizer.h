@@ -663,7 +663,7 @@ namespace NGT {
       size_t actualResultSize = 0;
       std::vector<MeasuredValue> accuracies = evaluate(gtStream, resultStream, type, actualResultSize);
       size_t size;
-      double distanceCount, visitCount, time;
+      double distanceCount = 0, visitCount = 0, time = 0;
       calculateMeanValues(accuracies, accuracyRange.first, accuracyRange.second, size, distanceCount, visitCount, time);
       if (distanceCount == 0) {
 	std::stringstream msg;
