@@ -63,7 +63,9 @@ func (c *Client) Init() error {
 	tracer := opentracing.GlobalTracer()
 	connectGrpcFunc := func() error {
 		log.Debug("DataNodeClient try connect ", zap.String("address", c.address))
-		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
+		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
+		defer cancelFunc()
+		conn, err := grpc.DialContext(ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(
