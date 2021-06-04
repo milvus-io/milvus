@@ -93,10 +93,10 @@ func (c *Client) Init() error {
 			log.Debug("DataServiceClient connect failed", zap.Error(err))
 			return err
 		}
-		log.Debug("DataServiceClient connect success")
 	} else {
 		return c.reconnect()
 	}
+	log.Debug("DataServiceClient connect success")
 	c.grpcClient = datapb.NewDataServiceClient(c.conn)
 
 	return nil

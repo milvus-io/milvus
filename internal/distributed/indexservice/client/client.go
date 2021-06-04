@@ -50,10 +50,12 @@ func getIndexServiceAddress(sess *sessionutil.Session) (string, error) {
 	key := typeutil.IndexServiceRole
 	msess, _, err := sess.GetSessions(key)
 	if err != nil {
+		log.Debug("IndexServiceClient GetSessions failed", zap.Any("key", key), zap.Error(err))
 		return "", err
 	}
 	ms, ok := msess[key]
 	if !ok {
+		log.Debug("IndexServiceClient msess key not existed", zap.Any("key", key), zap.Any("len of msess", len(msess)))
 		return "", fmt.Errorf("number of master service is incorrect, %d", len(msess))
 	}
 	return ms.Address, nil
@@ -73,9 +75,10 @@ func NewClient(address, metaRoot string, etcdAddr []string, timeout time.Duratio
 
 func (c *Client) Init() error {
 	tracer := opentracing.GlobalTracer()
+	log.Debug("IndexServiceClient Init", zap.Any("c.address", c.address))
 	if c.address != "" {
 		connectGrpcFunc := func() error {
-			log.Debug("indexservice connect ", zap.String("address", c.address))
+			log.Debug("IndexServiceClient try connect ", zap.String("address", c.address))
 			conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
 				grpc.WithUnaryInterceptor(
 					otgrpc.OpenTracingClientInterceptor(tracer)),
@@ -91,9 +94,11 @@ func (c *Client) Init() error {
 		if err != nil {
 			return err
 		}
+		log.Debug("IndexServiceClient try connect failed", zap.Error(err))
 	} else {
 		return c.reconnect()
 	}
+	log.Debug("IndexServiceClient try connect success")
 	c.grpcClient = indexpb.NewIndexServiceClient(c.conn)
 	return nil
 }
@@ -110,10 +115,12 @@ func (c *Client) reconnect() error {
 	}
 	err = retry.Retry(c.reconnTry, 3*time.Second, getIndexServiceAddressFn)
 	if err != nil {
+		log.Debug("IndexServiceClient getIndexServiceAddress failed", zap.Error(err))
 		return err
 	}
+	log.Debug("IndexServiceClient getIndexServiceAddress success")
 	connectGrpcFunc := func() error {
-		log.Debug("IndexService connect ", zap.String("address", c.address))
+		log.Debug("IndexServiceClient try connect ", zap.String("address", c.address))
 		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
@@ -128,8 +135,10 @@ func (c *Client) reconnect() error {
 
 	err = retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
 	if err != nil {
+		log.Debug("IndexServiceClient try connect failed", zap.Error(err))
 		return err
 	}
+	log.Debug("IndexServiceClient connect success")
 	c.grpcClient = indexpb.NewIndexServiceClient(c.conn)
 	return nil
 }

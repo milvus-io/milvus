@@ -108,9 +108,10 @@ func (s *ProxyService) fillNodeInitParams() error {
 func (s *ProxyService) Init() error {
 	err := s.fillNodeInitParams()
 	if err != nil {
+		log.Debug("ProxyService fillNodeInitParams failed", zap.Error(err))
 		return err
 	}
-	log.Debug("fill node init params ...")
+	log.Debug("ProxyService fillNodeInitParams success ...")
 
 	m := map[string]interface{}{
 		"PulsarAddress":  Params.PulsarAddress,
@@ -123,8 +124,7 @@ func (s *ProxyService) Init() error {
 
 	serviceTimeTickMsgStream, _ := s.msFactory.NewTtMsgStream(s.ctx)
 	serviceTimeTickMsgStream.AsProducer([]string{Params.ServiceTimeTickChannel})
-	log.Debug("proxyservice", zap.Strings("proxyservice AsProducer", []string{Params.ServiceTimeTickChannel}))
-	log.Debug("proxyservice", zap.Strings("create service time tick producer channel", []string{Params.ServiceTimeTickChannel}))
+	log.Debug("ProxyService AsProducer", zap.Strings("channels", []string{Params.ServiceTimeTickChannel}))
 
 	channels := make([]string, Params.InsertChannelNum)
 	var i int64 = 0
@@ -133,27 +133,26 @@ func (s *ProxyService) Init() error {
 	}
 	insertTickMsgStream, _ := s.msFactory.NewMsgStream(s.ctx)
 	insertTickMsgStream.AsProducer(channels)
-	log.Debug("proxyservice", zap.Strings("create insert time tick producer channels", channels))
+	log.Debug("ProxyService", zap.Strings("create insert time tick producer channels", channels))
 
 	nodeTimeTickMsgStream, _ := s.msFactory.NewMsgStream(s.ctx)
-	nodeTimeTickMsgStream.AsConsumer(Params.NodeTimeTickChannel,
-		"proxyservicesub") // TODO: add config
-	log.Debug("proxyservice", zap.Strings("create node time tick consumer channel", Params.NodeTimeTickChannel))
+	nodeTimeTickMsgStream.AsConsumer(Params.NodeTimeTickChannel, "proxyservicesub") // TODO: add config
+	log.Debug("ProxyService", zap.Strings("NodeTimeTickChannel", Params.NodeTimeTickChannel))
 
 	ttBarrier := timesync.NewSoftTimeTickBarrier(s.ctx, nodeTimeTickMsgStream, []UniqueID{1}, 10)
-	log.Debug("create soft time tick barrier ...")
+	log.Debug("ProxyService create soft time tick barrier ...")
 	s.tick = newTimeTick(s.ctx, ttBarrier, serviceTimeTickMsgStream, insertTickMsgStream)
-	log.Debug("create time tick ...")
+	log.Debug("ProxyService create time tick ...")
 
 	return nil
 }
 
 func (s *ProxyService) Start() error {
 	s.sched.Start()
-	log.Debug("start scheduler ...")
+	log.Debug("ProxyService start scheduler ...")
 	defer func() {
 		s.UpdateStateCode(internalpb.StateCode_Healthy)
-		log.Debug("proxyservice", zap.Any("state of proxyservice", internalpb.StateCode_Healthy))
+		log.Debug("ProxyService", zap.Any("State", s.stateCode.Load()))
 	}()
 	return s.tick.Start()
 }
@@ -179,7 +178,7 @@ func (s *ProxyService) GetComponentStates(ctx context.Context) (*internalpb.Comp
 	stateInfo := &internalpb.ComponentInfo{
 		NodeID:    UniqueID(0),
 		Role:      "ProxyService",
-		StateCode: s.stateCode,
+		StateCode: s.stateCode.Load().(internalpb.StateCode),
 	}
 
 	ret := &internalpb.ComponentStates{
@@ -193,7 +192,7 @@ func (s *ProxyService) GetComponentStates(ctx context.Context) (*internalpb.Comp
 }
 
 func (s *ProxyService) UpdateStateCode(code internalpb.StateCode) {
-	s.stateCode = code
+	s.stateCode.Store(code)
 }
 
 func (s *ProxyService) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
@@ -210,7 +209,7 @@ func (s *ProxyService) GetStatisticsChannel(ctx context.Context) (*milvuspb.Stri
 }
 
 func (s *ProxyService) RegisterLink(ctx context.Context) (*milvuspb.RegisterLinkResponse, error) {
-	log.Debug("register link")
+	log.Debug("ProxyService RegisterLink")
 
 	t := &registerLinkTask{
 		ctx:       ctx,
@@ -222,6 +221,7 @@ func (s *ProxyService) RegisterLink(ctx context.Context) (*milvuspb.RegisterLink
 
 	err = s.sched.RegisterLinkTaskQueue.Enqueue(t)
 	if err != nil {
+		log.Debug("ProxyService RegisterLink Enqueue failed", zap.Error(err))
 		return &milvuspb.RegisterLinkResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -233,6 +233,7 @@ func (s *ProxyService) RegisterLink(ctx context.Context) (*milvuspb.RegisterLink
 
 	err = t.WaitToFinish()
 	if err != nil {
+		log.Debug("ProxyService RegisterLink WaitToFinish failed", zap.Error(err))
 		return &milvuspb.RegisterLinkResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -241,12 +242,12 @@ func (s *ProxyService) RegisterLink(ctx context.Context) (*milvuspb.RegisterLink
 			Address: nil,
 		}, nil
 	}
-
+	log.Debug("ProxyService rRegisterLink WaitToFinish failed", zap.Error(err))
 	return t.response, nil
 }
 
 func (s *ProxyService) RegisterNode(ctx context.Context, request *proxypb.RegisterNodeRequest) (*proxypb.RegisterNodeResponse, error) {
-	log.Debug("proxyservice receive RegisterNode request",
+	log.Debug("ProxyService receive RegisterNode request",
 		zap.String("ip", request.Address.Ip),
 		zap.Int64("port", request.Address.Port))
 
@@ -263,6 +264,7 @@ func (s *ProxyService) RegisterNode(ctx context.Context, request *proxypb.Regist
 
 	err = s.sched.RegisterNodeTaskQueue.Enqueue(t)
 	if err != nil {
+		log.Debug("ProxyService RegisterNode Enqueue failed", zap.Error(err))
 		return &proxypb.RegisterNodeResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -274,6 +276,7 @@ func (s *ProxyService) RegisterNode(ctx context.Context, request *proxypb.Regist
 
 	err = t.WaitToFinish()
 	if err != nil {
+		log.Debug("ProxyService RegisterNode WaitToFinish failed", zap.Error(err))
 		return &proxypb.RegisterNodeResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -287,7 +290,7 @@ func (s *ProxyService) RegisterNode(ctx context.Context, request *proxypb.Regist
 }
 
 func (s *ProxyService) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-	log.Debug("proxyservice receive InvalidateCollectionMetaCache request",
+	log.Debug("ProxyService receive InvalidateCollectionMetaCache request",
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
 
