@@ -306,17 +306,15 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	searchResults := make([]*SearchResult, 0)
 	matchedSegments := make([]*Segment, 0)
 
-	//log.Debug("search msg's partitionID = ", partitionIDsInQuery)
-	partitionIDsInHistoricalCol, err1 := s.historicalReplica.getPartitionIDs(collectionID)
-	partitionIDsInStreamingCol, err2 := s.streamingReplica.getPartitionIDs(collectionID)
-
-	if err1 != nil && err2 != nil {
-		return err2
-	}
 	var searchPartitionIDsInHistorical []UniqueID
 	var searchPartitionIDsInStreaming []UniqueID
 	partitionIDsInQuery := searchMsg.PartitionIDs
 	if len(partitionIDsInQuery) == 0 {
+		partitionIDsInHistoricalCol, err1 := s.historicalReplica.getPartitionIDs(collectionID)
+		partitionIDsInStreamingCol, err2 := s.streamingReplica.getPartitionIDs(collectionID)
+		if err1 != nil && err2 != nil {
+			return err2
+		}
 		if len(partitionIDsInHistoricalCol) == 0 {
 			return errors.New("none of this collection's partition has been loaded")
 		}
@@ -324,11 +322,11 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 		searchPartitionIDsInStreaming = partitionIDsInStreamingCol
 	} else {
 		for _, id := range partitionIDsInQuery {
-			_, err1 = s.historicalReplica.getPartitionByID(id)
+			_, err1 := s.historicalReplica.getPartitionByID(id)
 			if err1 == nil {
 				searchPartitionIDsInHistorical = append(searchPartitionIDsInHistorical, id)
 			}
-			_, err2 = s.streamingReplica.getPartitionByID(id)
+			_, err2 := s.streamingReplica.getPartitionByID(id)
 			if err2 == nil {
 				searchPartitionIDsInStreaming = append(searchPartitionIDsInStreaming, id)
 			}

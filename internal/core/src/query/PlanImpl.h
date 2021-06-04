@@ -80,6 +80,11 @@ struct Placeholder {
     }
 };
 
+struct RetrievePlan {
+    std::unique_ptr<proto::schema::IDs> ids_;
+    std::vector<FieldOffset> field_offsets_;
+};
+
 using PlanPtr = std::unique_ptr<Plan>;
 
 struct PlaceholderGroup : std::vector<Placeholder> {

@@ -14,6 +14,7 @@
 #include <string_view>
 #include <string>
 #include "common/Schema.h"
+#include "pb/plan.pb.h"
 
 namespace milvus::query {
 // NOTE: APIs for C wrapper
@@ -21,6 +22,7 @@ namespace milvus::query {
 // Incomplete Definition, shouldn't be instantiated
 struct Plan;
 struct PlaceholderGroup;
+struct RetrievePlan;
 
 std::unique_ptr<Plan>
 CreatePlan(const Schema& schema, const std::string& dsl);
@@ -34,6 +36,9 @@ ParsePlaceholderGroup(const Plan* plan, const std::string& placeholder_group_blo
 
 int64_t
 GetNumOfQueries(const PlaceholderGroup*);
+
+std::unique_ptr<RetrievePlan>
+CreateRetrievePlan(const Schema& schema, proto::plan::RetrieveRequest&& request);
 
 // Query Overall TopK from Plan
 // Used to alloc result memory at Go side

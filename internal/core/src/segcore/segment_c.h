@@ -44,6 +44,9 @@ Search(CSegmentInterface c_segment,
        int num_groups,
        CQueryResult* result);
 
+CProtoResult
+GetEntityByIds(CSegmentInterface c_segment, CRetrievePlan plan, uint64_t timestamp);
+
 CStatus
 FillTargetEntry(CSegmentInterface c_segment, CPlan c_plan, CQueryResult result);
 
