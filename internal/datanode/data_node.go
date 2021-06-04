@@ -188,10 +188,10 @@ func (node *DataNode) Init() error {
 }
 
 // NewDataSyncService adds a new dataSyncService for new dmlVchannel and starts dataSyncService.
-func (node *DataNode) NewDataSyncService(vchanPair *datapb.VchannelPair) error {
+func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 	node.chanMut.Lock()
 	defer node.chanMut.Unlock()
-	if _, ok := node.vchan2SyncService[vchanPair.GetDmlVchannelName()]; ok {
+	if _, ok := node.vchan2SyncService[vchan.GetChannelName()]; ok {
 		return nil
 	}
 
@@ -201,10 +201,10 @@ func (node *DataNode) NewDataSyncService(vchanPair *datapb.VchannelPair) error {
 	metaService := newMetaService(node.ctx, replica, node.masterService)
 
 	flushChan := make(chan *flushMsg, 100)
-	dataSyncService := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchanPair)
+	dataSyncService := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchan)
 	// TODO metaService using timestamp in DescribeCollection
-	node.vchan2SyncService[vchanPair.GetDmlVchannelName()] = dataSyncService
-	node.vchan2FlushCh[vchanPair.GetDmlVchannelName()] = flushChan
+	node.vchan2SyncService[vchan.GetChannelName()] = dataSyncService
+	node.vchan2FlushCh[vchan.GetChannelName()] = flushChan
 
 	metaService.init()
 	go dataSyncService.start()

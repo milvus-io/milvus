@@ -41,17 +41,15 @@ func TestDataNode(t *testing.T) {
 	t.Run("Test WatchDmChannels", func(t *testing.T) {
 		node1 := newIDLEDataNodeMock()
 		node1.Start()
-		vchannels := []*datapb.VchannelPair{}
+		vchannels := []*datapb.VchannelInfo{}
 		for _, ch := range Params.InsertChannelNames {
 			log.Debug("InsertChannels", zap.String("name", ch))
-			vpair := &datapb.VchannelPair{
-				CollectionID:    1,
-				DmlVchannelName: ch,
-				DdlVchannelName: Params.DDChannelNames[0],
-				DdlPosition:     &datapb.PositionPair{},
-				DmlPosition:     &datapb.PositionPair{},
+			vchan := &datapb.VchannelInfo{
+				CollectionID: 1,
+				ChannelName:  ch,
+				CheckPoints:  []*datapb.CheckPoint{},
 			}
-			vchannels = append(vchannels, vpair)
+			vchannels = append(vchannels, vchan)
 		}
 		req := &datapb.WatchDmChannelsRequest{
 			Base: &commonpb.MsgBase{
@@ -92,24 +90,22 @@ func TestDataNode(t *testing.T) {
 		node2 := newIDLEDataNodeMock()
 		node2.Start()
 		dmChannelName := "fake-dm-channel-test-NewDataSyncService"
-		ddChannelName := "fake-dd-channel-test-NewDataSyncService"
-		vpair := &datapb.VchannelPair{
-			CollectionID:    1,
-			DmlVchannelName: dmChannelName,
-			DdlVchannelName: ddChannelName,
-			DdlPosition:     &datapb.PositionPair{},
-			DmlPosition:     &datapb.PositionPair{},
+
+		vchan := &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  dmChannelName,
+			CheckPoints:  []*datapb.CheckPoint{},
 		}
 
 		require.Equal(t, 0, len(node2.vchan2FlushCh))
 		require.Equal(t, 0, len(node2.vchan2SyncService))
 
-		err := node2.NewDataSyncService(vpair)
+		err := node2.NewDataSyncService(vchan)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(node2.vchan2FlushCh))
 		assert.Equal(t, 1, len(node2.vchan2SyncService))
 
-		err = node2.NewDataSyncService(vpair)
+		err = node2.NewDataSyncService(vchan)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(node2.vchan2FlushCh))
 		assert.Equal(t, 1, len(node2.vchan2SyncService))
