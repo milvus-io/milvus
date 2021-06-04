@@ -42,7 +42,7 @@ class TestInsertParams(ApiReq):
         nb = ct.default_nb
         collection = self._collection()
         df = cf.gen_default_dataframe_data(nb)
-        self.collection.insert(data=df)
+        self.collection_wrap.insert(data=df)
         assert collection.num_entities == nb
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -57,8 +57,8 @@ class TestInsertParams(ApiReq):
         nb = ct.default_nb
         collection = self._collection()
         data = cf.gen_default_list_data(nb)
-        self.collection.insert(data=data)
-        self.connection.connection.get_connection().flush([collection.name])
+        self.collection_wrap.insert(data=data)
+        self.connection_wrap.connection.get_connection().flush([collection.name])
         assert collection.num_entities == nb
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -69,7 +69,7 @@ class TestInsertParams(ApiReq):
         expected: raise exception
         """
         self._collection()
-        ex, _ = self.collection.insert(data=get_non_data_type)
+        ex, _ = self.collection_wrap.insert(data=get_non_data_type)
         assert "Datas must be list" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -81,7 +81,7 @@ class TestInsertParams(ApiReq):
         expected: raise exception
         """
         self._collection()
-        ex, _ = self.collection.insert(data=data)
+        ex, _ = self.collection_wrap.insert(data=data)
         assert "Column cnt not match with schema" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -94,7 +94,7 @@ class TestInsertParams(ApiReq):
         self._collection()
         columns = [ct.default_int64_field_name, ct.default_float_vec_field_name]
         df = pd.DataFrame(columns=columns)
-        ex, _ = self.collection.insert(data=df)
+        ex, _ = self.collection_wrap.insert(data=df)
         assert "Cannot infer schema from empty dataframe" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -108,7 +108,7 @@ class TestInsertParams(ApiReq):
         self._collection()
         df = cf.gen_default_dataframe_data(10)
         df.rename(columns={ct.default_int64_field_name: ' '}, inplace=True)
-        ex, _ = self.collection.insert(data=df)
+        ex, _ = self.collection_wrap.insert(data=df)
         assert "Field name should not be empty" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -123,7 +123,7 @@ class TestInsertParams(ApiReq):
         df = cf.gen_default_dataframe_data(10)
         df.rename(columns={ct.default_int64_field_name: get_invalid_field_name}, inplace=True)
         log.info(df)
-        ex, _ = self.collection.insert(data=df)
+        ex, _ = self.collection_wrap.insert(data=df)
         log.error(str(ex))
 
     def test_insert_dataframe_nan_value(self):
@@ -151,7 +151,7 @@ class TestInsertParams(ApiReq):
         expected: raise exception
         """
         self._collection()
-        ex, _ = self.collection.insert(data=None)
+        ex, _ = self.collection_wrap.insert(data=None)
         log.info(str(ex))
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -166,7 +166,7 @@ class TestInsertParams(ApiReq):
         nb = 10
         self._collection()
         data = cf.gen_numpy_data(nb)
-        ex, _ = self.collection.insert(data=data)
+        ex, _ = self.collection_wrap.insert(data=data)
         log.error(str(ex))
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -181,7 +181,7 @@ class TestInsertParams(ApiReq):
         nb = ct.default_nb
         collection = self._collection(schema=default_binary_schema)
         df = cf.gen_default_binary_dataframe_data(nb)
-        self.collection.insert(data=df)
+        self.collection_wrap.insert(data=df)
         assert collection.num_entities == nb
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -196,7 +196,7 @@ class TestInsertParams(ApiReq):
         nb = ct.default_nb
         collection = self._collection(schema=default_binary_schema)
         data = cf.gen_default_binary_list_data(nb)
-        self.collection.insert(data=data)
+        self.collection_wrap.insert(data=data)
         assert collection.num_entities == nb
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -210,7 +210,7 @@ class TestInsertParams(ApiReq):
         conn = self._connect()
         collection = self._collection()
         data = cf.gen_default_list_data(nb=1)
-        self.collection.insert(data=data)
+        self.collection_wrap.insert(data=data)
         conn.flush([collection.name])
         assert collection.num_entities == 1
 
@@ -225,7 +225,7 @@ class TestInsertParams(ApiReq):
         nb = ct.default_nb
         self._collection()
         df = cf.gen_default_dataframe_data(nb, dim=129)
-        ex, _ = self.collection.insert(data=df)
+        ex, _ = self.collection_wrap.insert(data=df)
         message = "Collection field dim is {},but entities field dim is {}".format(ct.default_dim, 129)
         assert message in str(ex)
 
@@ -240,7 +240,7 @@ class TestInsertParams(ApiReq):
         nb = ct.default_nb
         self._collection(schema=cf.gen_default_binary_collection_schema())
         df = cf.gen_default_binary_dataframe_data(nb, dim=120)
-        ex, _ = self.collection.insert(data=df)
+        ex, _ = self.collection_wrap.insert(data=df)
         message = "Collection field dim is {},but entities field dim is {}".format(ct.default_dim, 129)
         assert message in str(ex)
 
@@ -256,7 +256,7 @@ class TestInsertParams(ApiReq):
         df = cf.gen_default_dataframe_data(10)
         df.rename(columns={ct.default_float_field_name: "int"}, inplace=True)
         log.info(df)
-        ex, _ = self.collection.insert(data=df)
+        ex, _ = self.collection_wrap.insert(data=df)
         log.error(str(ex))
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -271,7 +271,7 @@ class TestInsertParams(ApiReq):
         df = cf.gen_default_dataframe_data(nb)
         new_float_value = pd.Series(data=[float(i) for i in range(nb)], dtype="float64")
         df.iloc[:, 1] = new_float_value
-        ex, _ = self.collection.insert(data=df)
+        ex, _ = self.collection_wrap.insert(data=df)
         assert "The types of schema and data do not match" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -288,7 +288,7 @@ class TestInsertParams(ApiReq):
         float_values = [np.float32(i) for i in range(nb)]
         float_vec_values = cf.gen_vectors(nb, ct.default_dim)
         data = [int_values, float_values, float_vec_values]
-        ids, _ = self.collection.insert(data=data)
+        ids, _ = self.collection_wrap.insert(data=data)
         log.info(ids)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -305,7 +305,7 @@ class TestInsertParams(ApiReq):
         float_values = [np.float32(i) for i in range(nb)]
         float_vec_values = cf.gen_vectors(nb-1, ct.default_dim)
         data = [int_values, float_values, float_vec_values]
-        ex, _ = self.collection.insert(data=data)
+        ex, _ = self.collection_wrap.insert(data=data)
         log.info(str(ex))
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -320,7 +320,7 @@ class TestInsertParams(ApiReq):
         df = cf.gen_default_dataframe_data(nb)
         new_values = [i for i in range(nb)]
         df.insert(3, 'new', new_values)
-        ex, _ = self.collection.insert(data=df)
+        ex, _ = self.collection_wrap.insert(data=df)
         assert "Column cnt not match with schema" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -334,7 +334,7 @@ class TestInsertParams(ApiReq):
         nb = ct.default_nb
         df = cf.gen_default_dataframe_data(nb)
         df.drop(ct.default_float_vec_field_name, axis=1, inplace=True)
-        ex, _ = self.collection.insert(data=df)
+        ex, _ = self.collection_wrap.insert(data=df)
         assert "Column cnt not match with schema" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -350,7 +350,7 @@ class TestInsertParams(ApiReq):
         float_values = [np.float32(i) for i in range(nb)]
         float_vec_values = cf.gen_vectors(nb, ct.default_dim)
         data = [float_values, int_values, float_vec_values]
-        ex, _ = self.collection.insert(data=data)
+        ex, _ = self.collection_wrap.insert(data=data)
         assert "The types of schema and data do not match" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -370,7 +370,7 @@ class TestInsertParams(ApiReq):
             ct.default_float_vec_field_name: float_vec_values,
             ct.default_int64_field_name: int_values
         })
-        ex, _ = self.collection.insert(data=df)
+        ex, _ = self.collection_wrap.insert(data=df)
         assert "The types of schema and data do not match" in str(ex)
 
 
@@ -382,8 +382,8 @@ class TestInsertOperation(ApiReq):
     """
 
     def teardown_method(self):
-        if self.collection is not None and self.collection.collection is not None:
-            self.collection.drop()
+        if self.collection_wrap is not None and self.collection_wrap.collection is not None:
+            self.collection_wrap.drop()
 
     def setup_method(self):
         pass
@@ -396,11 +396,11 @@ class TestInsertOperation(ApiReq):
         expected: raise exception
         """
         self._collection()
-        self.connection.remove_connection(ct.default_alias)
-        res_list, _ = self.connection.list_connections()
+        self.connection_wrap.remove_connection(ct.default_alias)
+        res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
         data = cf.gen_default_list_data(10)
-        ex, _ = self.collection.insert(data=data)
+        ex, _ = self.collection_wrap.insert(data=data)
         assert "There is no connection with alias '{}'".format(ct.default_alias) in str(ex)
 
     def test_insert_drop_collection(self):
@@ -410,10 +410,10 @@ class TestInsertOperation(ApiReq):
         expected: verify collection if exist
         """
         collection = self._collection()
-        collection_list, _ = self.utility.list_collections()
+        collection_list, _ = self.utility_wrap.list_collections()
         assert collection.name in collection_list
-        self.collection.drop()
-        collection_list, _ = self.utility.list_collections()
+        self.collection_wrap.drop()
+        collection_list, _ = self.utility_wrap.list_collections()
         assert collection.name not in collection_list
 
     def test_insert_create_index(self):
@@ -467,7 +467,7 @@ class TestInsertOperation(ApiReq):
         assert not collection.auto_id
         assert collection.primary_field.name == ct.default_int64_field_name
         data = cf.gen_default_list_data(ct.default_nb)
-        self.collection.insert(data=data)
+        self.collection_wrap.insert(data=data)
         time.sleep(1)
         assert collection.num_entities == ct.default_nb
         # TODO assert ids
@@ -516,8 +516,8 @@ class TestInsertOperation(ApiReq):
         collection = self._collection()
         for _ in range(ct.default_nb):
             df = cf.gen_default_dataframe_data(1)
-            self.collection.insert(data=df)
-        self.connection.connection.get_connection().flush([collection.name])
+            self.collection_wrap.insert(data=df)
+        self.connection_wrap.connection.get_connection().flush([collection.name])
         # conn.flush([collection.name])
         assert collection.num_entities == ct.default_nb
 
