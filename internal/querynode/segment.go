@@ -165,10 +165,13 @@ func (s *Segment) getRowCount() int64 {
 		long int
 		getRowCount(CSegmentInterface c_segment);
 	*/
+	segmentPtrIsNil := s.segmentPtr == nil
+	log.Debug("QueryNode::Segment::getRowCount", zap.Any("segmentPtrIsNil", segmentPtrIsNil))
 	if s.segmentPtr == nil {
 		return -1
 	}
 	var rowCount = C.GetRowCount(s.segmentPtr)
+	log.Debug("QueryNode::Segment::getRowCount", zap.Any("rowCount", rowCount))
 	return int64(rowCount)
 }
 
@@ -452,9 +455,12 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 		           int sizeof_per_row,
 		           signed long int count);
 	*/
+	log.Debug("QueryNode::Segment::segmentInsert:", zap.Any("segmentType", s.segmentType))
+	log.Debug("QueryNode::Segment::segmentInsert:", zap.Any("enableLoadBinLog", s.enableLoadBinLog))
 	if s.segmentType != segmentTypeGrowing || s.enableLoadBinLog {
 		return nil
 	}
+	log.Debug("QueryNode::Segment::segmentInsert:", zap.Any("s.sgmentPtr", s.segmentPtr))
 
 	if s.segmentPtr == nil {
 		return errors.New("null seg core pointer")
@@ -478,7 +484,7 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 	var cTimestampsPtr = (*C.ulong)(&(*timestamps)[0])
 	var cSizeofPerRow = C.int(sizeofPerRow)
 	var cRawDataVoidPtr = unsafe.Pointer(&rawData[0])
-
+	log.Debug("QueryNode::Segment::InsertBegin", zap.Any("cNumOfRows", cNumOfRows))
 	var status = C.Insert(s.segmentPtr,
 		cOffset,
 		cNumOfRows,
@@ -489,11 +495,14 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 		cNumOfRows)
 
 	errorCode := status.error_code
+	log.Debug("QueryNode::Segment::InsertEnd", zap.Any("errorCode", errorCode))
 
 	if errorCode != 0 {
 		errorMsg := C.GoString(status.error_msg)
 		defer C.free(unsafe.Pointer(status.error_msg))
-		return errors.New("Insert failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+		err := errors.New("Insert failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+		log.Debug("QueryNode::Segment::InsertEnd failed", zap.Error(err))
+		return err
 	}
 
 	s.setRecentlyModified(true)

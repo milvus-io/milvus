@@ -376,7 +376,7 @@ func (it *InsertTask) transferColumnBasedRequestToRowBasedData() error {
 				log.Warn("unsupported data type")
 			}
 		}
-
+		log.Debug("ProxyNode, transform", zap.Any("BlobLen", len(blob.Value)), zap.Any("Dtypes", dTypes))
 		it.RowData = append(it.RowData, blob)
 	}
 
@@ -618,6 +618,7 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 func (it *InsertTask) Execute(ctx context.Context) error {
 	collectionName := it.BaseInsertTask.CollectionName
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
+	log.Debug("ProxyNode Insert", zap.Any("collSchema", collSchema))
 	if err != nil {
 		return err
 	}
