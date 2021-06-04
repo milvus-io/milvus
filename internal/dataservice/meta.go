@@ -16,6 +16,8 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -141,7 +143,7 @@ func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) (int64, error) {
 	var ret int64 = 0
 	for _, info := range m.segments {
 		if info.CollectionID == collectionID {
-			ret += info.NumRows
+			ret += info.NumOfRows
 		}
 	}
 	return ret, nil
@@ -167,7 +169,7 @@ func (m *meta) UpdateSegmentStatistic(stats *internalpb.SegmentStatisticsUpdates
 	if !ok {
 		return newErrSegmentNotFound(stats.SegmentID)
 	}
-	seg.NumRows = stats.NumRows
+	seg.NumOfRows = stats.NumRows
 	if err := m.saveSegmentInfo(seg); err != nil {
 		return err
 	}
@@ -231,27 +233,34 @@ func (m *meta) SealSegment(segID UniqueID) error {
 	return nil
 }
 
-func (m *meta) FlushSegmentWithBinlogAndPos(segID UniqueID,
-	dmlPositionPair *datapb.PositionPair,
-	ddlPositionPair *datapb.PositionPair,
-	binlogMeta map[string]string) error {
+func (m *meta) SaveBinlogAndCheckPoints(segID UniqueID, flushed bool,
+	binlogs map[string]string, checkpoints []*datapb.CheckPoint) error {
 	m.Lock()
 	defer m.Unlock()
-
 	segInfo, ok := m.segments[segID]
 	if !ok {
 		return newErrSegmentNotFound(segID)
 	}
 	kv := make(map[string]string)
-	for k, v := range binlogMeta {
+	for k, v := range binlogs {
 		kv[k] = v
 	}
-	segInfo.State = commonpb.SegmentState_Flushing
-	segInfo.DmlPosition = dmlPositionPair
-	segInfo.DdlPosition = ddlPositionPair
-	segBytes := proto.MarshalTextString(segInfo)
-	key := m.prepareSegmentPath(segInfo)
-	kv[key] = segBytes
+	if flushed {
+		segInfo.State = commonpb.SegmentState_Flushing
+	}
+
+	for _, cp := range checkpoints {
+		segment, ok := m.segments[cp.SegmentID]
+		if !ok {
+			log.Warn("Failed to find segment", zap.Int64("id", cp.SegmentID))
+			continue
+		}
+		segment.DmlPosition = cp.Position
+		segment.NumOfRows = cp.NumOfRows
+		segBytes := proto.MarshalTextString(segInfo)
+		key := m.prepareSegmentPath(segInfo)
+		kv[key] = segBytes
+	}
 
 	if err := m.saveKvTxn(kv); err != nil {
 		return err
@@ -382,7 +391,7 @@ func (m *meta) GetNumRowsOfPartition(collectionID UniqueID, partitionID UniqueID
 	var ret int64 = 0
 	for _, info := range m.segments {
 		if info.CollectionID == collectionID && info.PartitionID == partitionID {
-			ret += info.NumRows
+			ret += info.NumOfRows
 		}
 	}
 	return ret, nil
@@ -440,7 +449,7 @@ func BuildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueI
 		CollectionID:  collectionID,
 		PartitionID:   partitionID,
 		InsertChannel: channelName,
-		NumRows:       0,
+		NumOfRows:     0,
 		State:         commonpb.SegmentState_Growing,
 	}, nil
 }

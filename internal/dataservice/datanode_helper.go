@@ -23,24 +23,21 @@ type vchannel struct {
 
 // positionProvider provides vchannel pair related position pairs
 type positionProvider interface {
-	GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelPair, error)
+	GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelInfo, error)
 	GetDdlChannel() string
 }
 
 type dummyPosProvider struct{}
 
 //GetVChanPositions implements positionProvider
-func (dp dummyPosProvider) GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelPair, error) {
-	pairs := make([]*datapb.VchannelPair, len(vchans))
+func (dp dummyPosProvider) GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelInfo, error) {
+	pairs := make([]*datapb.VchannelInfo, len(vchans))
 	for _, vchan := range vchans {
-		dmlPos := &datapb.PositionPair{}
-		ddlPos := &datapb.PositionPair{}
-		pairs = append(pairs, &datapb.VchannelPair{
+		pairs = append(pairs, &datapb.VchannelInfo{
 			CollectionID:    vchan.CollectionID,
-			DmlVchannelName: vchan.DmlChannel,
-			DdlVchannelName: vchan.DmlChannel,
-			DdlPosition:     ddlPos,
-			DmlPosition:     dmlPos,
+			ChannelName:     vchan.DmlChannel,
+			FlushedSegments: []int64{},
+			CheckPoints:     []*datapb.CheckPoint{},
 		})
 	}
 	return pairs, nil

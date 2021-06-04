@@ -165,8 +165,8 @@ func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 			state.Status.ErrorCode = commonpb.ErrorCode_Success
 			state.State = segmentInfo.State
 			if segmentInfo.DmlPosition != nil {
-				state.StartPosition = segmentInfo.DmlPosition.StartPosition
-				state.EndPosition = segmentInfo.DmlPosition.EndPosition
+				state.StartPosition = segmentInfo.DmlPosition
+				// FIXME no need this rpc
 			} else {
 
 			}
@@ -295,10 +295,6 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		resp.Reason = "server is closed"
 		return resp, nil
 	}
-	if s.flushMsgStream == nil {
-		resp.Reason = "flush msg stream nil"
-		return resp, nil
-	}
 
 	// check segment id & collection id matched
 	_, err := s.meta.GetCollection(req.GetCollectionID())
@@ -308,26 +304,26 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		return resp, nil
 	}
 
-	meta, err := s.prepareBinlog(req)
+	binlogs, err := s.prepareBinlog(req)
 	if err != nil {
 		log.Error("prepare binlog meta failed", zap.Error(err))
 		resp.Reason = err.Error()
 		return resp, nil
 	}
 
-	// set segment to SegmentState_Flushing
-	err = s.meta.FlushSegmentWithBinlogAndPos(req.SegmentID, nil,
-		nil, meta)
+	// set segment to SegmentState_Flushing and save binlogs and checkpoints
+	err = s.meta.SaveBinlogAndCheckPoints(req.SegmentID, req.Flushed, binlogs, req.CheckPoints)
 	if err != nil {
 		resp.Reason = err.Error()
 		return resp, nil
 	}
 	log.Debug("flush segment with meta", zap.Int64("id", req.SegmentID),
-		zap.Any("meta", meta))
+		zap.Any("meta", binlogs))
 
-	s.segmentManager.DropSegment(ctx, req.SegmentID)
-
-	s.flushCh <- req.SegmentID
+	if req.Flushed {
+		s.segmentManager.DropSegment(ctx, req.SegmentID)
+		s.flushCh <- req.SegmentID
+	}
 	resp.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }

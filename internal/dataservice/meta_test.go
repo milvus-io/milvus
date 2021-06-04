@@ -204,7 +204,7 @@ func TestMeta_Basic(t *testing.T) {
 		assert.Nil(t, err)
 		segInfo0, err := BuildSegment(collID, partID0, segID0, channelName)
 		assert.Nil(t, err)
-		segInfo0.NumRows = rowCount0
+		segInfo0.NumOfRows = rowCount0
 		err = meta.AddSegment(segInfo0)
 		assert.Nil(t, err)
 
@@ -213,7 +213,7 @@ func TestMeta_Basic(t *testing.T) {
 		assert.Nil(t, err)
 		segInfo1, err := BuildSegment(collID, partID0, segID1, channelName)
 		assert.Nil(t, err)
-		segInfo1.NumRows = rowCount1
+		segInfo1.NumOfRows = rowCount1
 		err = meta.AddSegment(segInfo1)
 		assert.Nil(t, err)
 
