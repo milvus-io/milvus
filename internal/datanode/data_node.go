@@ -326,6 +326,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 	}
 
 	log.Debug("FlushSegments ...", zap.Int("num", len(req.SegmentIDs)))
+	dmlFlushedCh := make(chan []*datapb.ID2PathList, len(req.SegmentIDs))
 	for _, id := range req.SegmentIDs {
 		chanName := node.getChannelName(id)
 		log.Info("vchannel", zap.String("name", chanName))
@@ -343,8 +344,6 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 			return status, nil
 		}
 
-		dmlFlushedCh := make(chan []*datapb.ID2PathList)
-
 		flushmsg := &flushMsg{
 			msgID:        req.Base.MsgID,
 			timestamp:    req.Base.Timestamp,
@@ -352,66 +351,22 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 			collectionID: req.CollectionID,
 			dmlFlushedCh: dmlFlushedCh,
 		}
+		flushCh <- flushmsg
 
-		waitReceive := func(wg *sync.WaitGroup, flushedCh interface{}, req *datapb.SaveBinlogPathsRequest) {
-			defer wg.Done()
-			log.Debug("Inside waitReceive")
-			switch Ch := flushedCh.(type) {
-			case chan []*datapb.ID2PathList:
-				select {
-				case <-time.After(300 * time.Second):
-					return
-				case meta := <-Ch:
-					if meta == nil {
-						log.Info("Dml messages flush failed!")
-						// Modify req to confirm failure
-						return
-					}
-
-					// Modify req with valid dml binlog paths
-					req.Field2BinlogPaths = meta
-					log.Info("Insert messeges flush done!", zap.Any("Binlog paths", meta))
-				}
-			default:
-				log.Error("Not supported type")
-			}
+	}
+	failedSegments := ""
+	for range req.SegmentIDs {
+		msg := <-dmlFlushedCh
+		if len(msg) != 1 {
+			panic("flush size expect to 1")
 		}
-
-		req := &datapb.SaveBinlogPathsRequest{
-			Base:         &commonpb.MsgBase{},
-			SegmentID:    id,
-			CollectionID: req.CollectionID,
+		if msg[0].Paths == nil {
+			failedSegments += fmt.Sprintf(" %d", msg[0].ID)
 		}
-
-		// TODO Set start_positions and end_positions
-
-		log.Info("Waiting for flush completed", zap.Int64("segmentID", id))
-
-		go func() {
-			flushCh <- flushmsg
-
-			var wg sync.WaitGroup
-			wg.Add(1)
-			go waitReceive(&wg, dmlFlushedCh, req)
-			wg.Wait()
-
-			log.Info("Notify DataService BinlogPaths and Positions")
-			status, err := node.dataService.SaveBinlogPaths(node.ctx, req)
-			if err != nil {
-				log.Error("DataNode or DataService abnormal, restarting DataNode")
-				// TODO restart
-				return
-			}
-
-			if status.ErrorCode != commonpb.ErrorCode_Success {
-				log.Error("Save paths failed, resending request",
-					zap.String("error message", status.GetReason()))
-				// TODO resend
-				return
-			}
-
-		}()
-
+	}
+	if len(failedSegments) != 0 {
+		status.Reason = fmt.Sprintf("flush failed segment list = %s", failedSegments)
+		return status, nil
 	}
 
 	status.ErrorCode = commonpb.ErrorCode_Success

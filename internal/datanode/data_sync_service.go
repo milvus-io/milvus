@@ -85,7 +85,14 @@ func (dsService *dataSyncService) initNodes(vchanPair *datapb.VchannelInfo) {
 
 	var dmStreamNode Node = newDmInputNode(dsService.ctx, dsService.msFactory, vchanPair.GetChannelName(), vchanPair.GetCheckPoints())
 	var ddNode Node = newDDNode()
-	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, dsService.replica, dsService.msFactory, dsService.idAllocator, dsService.flushChan)
+	var insertBufferNode Node = newInsertBufferNode(
+		dsService.ctx,
+		dsService.replica,
+		dsService.msFactory,
+		dsService.idAllocator,
+		dsService.flushChan,
+		nil, //TODO,=================== call data service save binlog =========
+	)
 
 	dsService.fg.AddNode(dmStreamNode)
 	dsService.fg.AddNode(ddNode)

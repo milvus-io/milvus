@@ -37,18 +37,8 @@ import (
 )
 
 func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
-	const ctxTimeInMillisecond = 2000
-	const closeWithDeadline = false
-	var ctx context.Context
-
-	if closeWithDeadline {
-		var cancel context.CancelFunc
-		d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-		ctx, cancel = context.WithDeadline(context.Background(), d)
-		defer cancel()
-	} else {
-		ctx = context.Background()
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 
 	testPath := "/test/datanode/root/meta"
 	err := clearEtcd(testPath)
@@ -72,10 +62,15 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
 
-	flushChan := make(chan *flushMsg, 100)
-	iBNode := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan)
+	saveBinlog := func(fu *autoFlushUnit) error {
+		t.Log(fu)
+		return nil
+	}
 
-	dmlFlushedCh := make(chan []*datapb.ID2PathList)
+	flushChan := make(chan *flushMsg, 100)
+	iBNode := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog)
+
+	dmlFlushedCh := make(chan []*datapb.ID2PathList, 1)
 
 	flushChan <- &flushMsg{
 		msgID:        1,
@@ -137,8 +132,10 @@ func TestFlushSegment(t *testing.T) {
 
 	collMeta := genCollectionMeta(collectionID, "test_flush_segment_txn")
 	flushMap := sync.Map{}
+	replica := newReplica()
+	replica.setEndPositions(segmentID, []*internalpb.MsgPosition{{ChannelName: "TestChannel"}})
 
-	finishCh := make(chan map[UniqueID]string)
+	finishCh := make(chan autoFlushUnit, 1)
 
 	insertData := &InsertData{
 		Data: make(map[storage.FieldID]storage.FieldData),
@@ -157,11 +154,6 @@ func TestFlushSegment(t *testing.T) {
 	}
 	flushMap.Store(segmentID, insertData)
 
-	go func(wait <-chan map[UniqueID]string) {
-		field2Path := <-wait
-		assert.NotNil(t, field2Path)
-	}(finishCh)
-
 	flushSegment(collMeta,
 		segmentID,
 		partitionID,
@@ -169,7 +161,13 @@ func TestFlushSegment(t *testing.T) {
 		&flushMap,
 		mockMinIO,
 		finishCh,
+		nil,
+		replica,
 		idAllocMock)
+
+	fu := <-finishCh
+	assert.NotNil(t, fu.field2Path)
+	assert.Equal(t, fu.segID, segmentID)
 
 	k, _ := idAllocMock.genKey(false, collectionID, partitionID, segmentID, 0)
 	key := path.Join(Params.StatsBinlogRootPath, k)
