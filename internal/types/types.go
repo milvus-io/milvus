@@ -111,8 +111,6 @@ type MasterService interface {
 	//segment
 	DescribeSegment(ctx context.Context, req *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
 	ShowSegments(ctx context.Context, req *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error)
-
-	GetDdChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 }
 
 // MasterComponent is used by grpc server of master service

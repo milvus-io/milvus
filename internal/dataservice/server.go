@@ -117,9 +117,6 @@ func (s *Server) Start() error {
 	if err = s.initMasterClient(); err != nil {
 		return err
 	}
-	if err = s.getDDChannelFromMaster(); err != nil {
-		return err
-	}
 
 	if err = s.initMeta(); err != nil {
 		return err
@@ -233,15 +230,6 @@ func (s *Server) initFlushMsgStream() error {
 	log.Debug("dataservice AsProducer:" + Params.SegmentInfoChannelName)
 	s.flushMsgStream.Start()
 
-	return nil
-}
-
-func (s *Server) getDDChannelFromMaster() error {
-	resp, err := s.masterClient.GetDdChannel(s.ctx)
-	if err = VerifyResponse(resp, err); err != nil {
-		return err
-	}
-	s.ddChannelName = resp.Value
 	return nil
 }
 

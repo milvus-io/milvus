@@ -174,7 +174,7 @@ func (idx *indexMock) getFileArray() []string {
 	return ret
 }
 
-func consumeMsgChan(timeout time.Duration, targetChan <-chan *msgstream.MsgPack) {
+func clearMsgChan(timeout time.Duration, targetChan <-chan *msgstream.MsgPack) {
 	ch := time.After(timeout)
 	for {
 		select {
@@ -232,6 +232,27 @@ func GenFlushedSegMsgPack(segID typeutil.UniqueID) *msgstream.MsgPack {
 	return &msgPack
 }
 
+func getNotTtMsg(ctx context.Context, n int, ch <-chan *msgstream.MsgPack) []msgstream.TsMsg {
+	ret := make([]msgstream.TsMsg, 0, n)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case msg, ok := <-ch:
+			if ok {
+				for _, v := range msg.Msgs {
+					if _, ok := v.(*msgstream.TimeTickMsg); !ok {
+						ret = append(ret, v)
+					}
+				}
+				if len(ret) >= n {
+					return ret
+				}
+			}
+		}
+	}
+}
+
 func TestMasterService(t *testing.T) {
 	const (
 		dbName   = "testDb"
@@ -250,7 +271,6 @@ func TestMasterService(t *testing.T) {
 	randVal := rand.Int()
 
 	Params.TimeTickChannel = fmt.Sprintf("master-time-tick-%d", randVal)
-	Params.DdChannel = fmt.Sprintf("master-dd-%d", randVal)
 	Params.StatisticsChannel = fmt.Sprintf("master-statistics-%d", randVal)
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
@@ -322,17 +342,15 @@ func TestMasterService(t *testing.T) {
 	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
 	timeTickStream.Start()
 
-	ddStream, _ := tmpFactory.NewMsgStream(ctx)
-	ddStream.AsConsumer([]string{Params.DdChannel}, Params.MsgChannelSubName)
-	ddStream.Start()
+	dmlStream, _ := tmpFactory.NewMsgStream(ctx)
 
 	// test dataServiceSegmentStream seek
 	dataNodeSubName := Params.MsgChannelSubName + "dn"
 	flushedSegStream, _ := tmpFactory.NewMsgStream(ctx)
 	flushedSegStream.AsConsumer([]string{Params.DataServiceSegmentChannel}, dataNodeSubName)
 	flushedSegStream.Start()
-	msgPack := GenFlushedSegMsgPack(9999)
-	err = dataServiceSegmentStream.Produce(msgPack)
+	msgPackTmp := GenFlushedSegMsgPack(9999)
+	err = dataServiceSegmentStream.Produce(msgPackTmp)
 	assert.Nil(t, err)
 
 	flushedSegMsgPack := flushedSegStream.Consume()
@@ -360,27 +378,6 @@ func TestMasterService(t *testing.T) {
 
 	time.Sleep(time.Second)
 
-	getNotTtMsg := func(n int, ch <-chan *msgstream.MsgPack) []msgstream.TsMsg {
-		ret := make([]msgstream.TsMsg, 0, n)
-		for {
-			select {
-			case <-ctx.Done():
-				return nil
-			case msg, ok := <-ch:
-				if ok {
-					for _, v := range msg.Msgs {
-						if _, ok := v.(*msgstream.TimeTickMsg); !ok {
-							ret = append(ret, v)
-						}
-					}
-					if len(ret) >= n {
-						return ret
-					}
-				}
-			}
-		}
-	}
-
 	t.Run("time tick", func(t *testing.T) {
 		ttmsg, ok := <-timeTickStream.Chan()
 		assert.True(t, ok)
@@ -397,14 +394,6 @@ func TestMasterService(t *testing.T) {
 		assert.True(t, ok)
 		assert.Greater(t, ttm2.Base.Timestamp, uint64(0))
 		assert.Equal(t, ttm2.Base.Timestamp, ttm.Base.Timestamp+1)
-
-		ddmsg, ok := <-ddStream.Chan()
-		assert.True(t, ok)
-		assert.Equal(t, 1, len(ddmsg.Msgs))
-		ddm, ok := (ddmsg.Msgs[0]).(*msgstream.TimeTickMsg)
-		assert.True(t, ok)
-		assert.Greater(t, ddm.Base.Timestamp, uint64(0))
-		assert.Equal(t, ttm.Base.Timestamp, ddm.Base.Timestamp)
 	})
 
 	t.Run("create collection", func(t *testing.T) {
@@ -446,10 +435,17 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-		msgs := getNotTtMsg(2, ddStream.Chan())
-		assert.Equal(t, 2, len(msgs))
+		assert.Equal(t, 2, len(core.MetaTable.vChan2Chan))
+		assert.Equal(t, 2, len(core.dmlChannels.dml))
 
-		createMsg, ok := (msgs[0]).(*msgstream.CreateCollectionMsg)
+		pChan := core.MetaTable.ListCollectionPhysicalChannels()
+		dmlStream.AsConsumer([]string{pChan[0]}, Params.MsgChannelSubName)
+		dmlStream.Start()
+
+		// get CreateCollectionMsg
+		msgPack, ok := <-dmlStream.Chan()
+		assert.True(t, ok)
+		createMsg, ok := (msgPack.Msgs[0]).(*msgstream.CreateCollectionMsg)
 		assert.True(t, ok)
 		createMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
@@ -463,11 +459,23 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, createMeta.PhysicalChannelNames[0], chanName)
 
-		createPart, ok := (msgs[1]).(*msgstream.CreatePartitionMsg)
+		// get CreatePartitionMsg
+		msgPack, ok = <-dmlStream.Chan()
+		assert.True(t, ok)
+		createPart, ok := (msgPack.Msgs[0]).(*msgstream.CreatePartitionMsg)
 		assert.True(t, ok)
 		assert.Equal(t, collName, createPart.CollectionName)
 		assert.Equal(t, createMeta.PartitionIDs[0], createPart.PartitionID)
 
+		// get TimeTickMsg
+		msgPack, ok = <-dmlStream.Chan()
+		assert.True(t, ok)
+		assert.Equal(t, 1, len(msgPack.Msgs))
+		ddm, ok := (msgPack.Msgs[0]).(*msgstream.TimeTickMsg)
+		assert.True(t, ok)
+		assert.Greater(t, ddm.Base.Timestamp, uint64(0))
+
+		// check invalid operation
 		req.Base.MsgID = 101
 		req.Base.Timestamp = 101
 		req.Base.SourceID = 101
@@ -494,7 +502,7 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-		msgs = getNotTtMsg(1, ddStream.Chan())
+		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
 		createMsg, ok = (msgs[0]).(*msgstream.CreateCollectionMsg)
 		assert.True(t, ok)
 		createMeta, err = core.MetaTable.GetCollectionByName("testColl-again", 0)
@@ -623,7 +631,7 @@ func TestMasterService(t *testing.T) {
 			CollectionName: collName,
 			PartitionName:  partName,
 		}
-		consumeMsgChan(time.Second, ddStream.Chan())
+		clearMsgChan(10*time.Millisecond, dmlStream.Chan())
 		status, err := core.CreatePartition(ctx, req)
 		assert.Nil(t, err)
 		t.Log(status.Reason)
@@ -635,7 +643,7 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, partName, partMeta.PartitionName)
 
-		msgs := getNotTtMsg(1, ddStream.Chan())
+		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
 		assert.Equal(t, 1, len(msgs))
 		partMsg, ok := (msgs[0]).(*msgstream.CreatePartitionMsg)
 		assert.True(t, ok)
@@ -989,7 +997,7 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, Params.DefaultPartitionName, partMeta.PartitionName)
 
-		msgs := getNotTtMsg(1, ddStream.Chan())
+		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
 		assert.Equal(t, 1, len(msgs))
 		dmsg, ok := (msgs[0]).(*msgstream.DropPartitionMsg)
 		assert.True(t, ok)
@@ -1038,7 +1046,7 @@ func TestMasterService(t *testing.T) {
 		_, err = core.MetaTable.GetChanNameByVirtualChan(vChanName)
 		assert.NotNil(t, err)
 
-		msgs := getNotTtMsg(1, ddStream.Chan())
+		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
 		assert.Equal(t, 1, len(msgs))
 		dmsg, ok := (msgs[0]).(*msgstream.DropCollectionMsg)
 		assert.True(t, ok)
@@ -1067,7 +1075,6 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 		time.Sleep(time.Second)
-		//assert.Zero(t, len(ddStream.Chan()))
 		collArray = pnm.GetCollArray()
 		assert.Equal(t, 3, len(collArray))
 		assert.Equal(t, collName, collArray[2])
@@ -1441,8 +1448,6 @@ func TestMasterService(t *testing.T) {
 	t.Run("get_channels", func(t *testing.T) {
 		_, err := core.GetTimeTickChannel(ctx)
 		assert.Nil(t, err)
-		_, err = core.GetDdChannel(ctx)
-		assert.Nil(t, err)
 		_, err = core.GetStatisticsChannel(ctx)
 		assert.Nil(t, err)
 	})
@@ -1490,7 +1495,7 @@ func TestMasterService(t *testing.T) {
 		s, _ := core.UpdateChannelTimeTick(ctx, msg0)
 		assert.Equal(t, commonpb.ErrorCode_Success, s.ErrorCode)
 		time.Sleep(100 * time.Millisecond)
-		t.Log(core.chanTimeTick.proxyTimeTick)
+		//t.Log(core.chanTimeTick.proxyTimeTick)
 
 		msg1 := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
@@ -1514,8 +1519,11 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, s.ErrorCode)
 		time.Sleep(1 * time.Second)
 
-		assert.Equal(t, 2, core.chanTimeTick.GetProxyNodeNum())
-		assert.Equal(t, 3, core.chanTimeTick.GetChanNum())
+		// 2 proxy nodes, 1 master
+		assert.Equal(t, 3, core.chanTimeTick.GetProxyNodeNum())
+
+		// 3 proxy node channels, 2 master channels
+		assert.Equal(t, 5, core.chanTimeTick.GetChanNum())
 	})
 
 	err = core.Stop()
@@ -1734,7 +1742,6 @@ func TestMasterService2(t *testing.T) {
 	randVal := rand.Int()
 
 	Params.TimeTickChannel = fmt.Sprintf("master-time-tick-%d", randVal)
-	Params.DdChannel = fmt.Sprintf("master-dd-%d", randVal)
 	Params.StatisticsChannel = fmt.Sprintf("master-statistics-%d", randVal)
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
@@ -1788,27 +1795,7 @@ func TestMasterService2(t *testing.T) {
 	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
 	timeTickStream.Start()
 
-	ddStream, _ := msFactory.NewMsgStream(ctx)
-	ddStream.AsConsumer([]string{Params.DdChannel}, Params.MsgChannelSubName)
-	ddStream.Start()
-
 	time.Sleep(time.Second)
-
-	getNotTTMsg := func(ch <-chan *msgstream.MsgPack, n int) []msgstream.TsMsg {
-		msg := make([]msgstream.TsMsg, 0, n)
-		for {
-			m, ok := <-ch
-			assert.True(t, ok)
-			for _, m := range m.Msgs {
-				if _, ok := (m).(*msgstream.TimeTickMsg); !ok {
-					msg = append(msg, m)
-				}
-			}
-			if len(msg) >= n {
-				return msg
-			}
-		}
-	}
 
 	t.Run("time tick", func(t *testing.T) {
 		ttmsg, ok := <-timeTickStream.Chan()
@@ -1817,13 +1804,6 @@ func TestMasterService2(t *testing.T) {
 		ttm, ok := (ttmsg.Msgs[0]).(*msgstream.TimeTickMsg)
 		assert.True(t, ok)
 		assert.Greater(t, ttm.Base.Timestamp, typeutil.Timestamp(0))
-
-		ddmsg, ok := <-ddStream.Chan()
-		assert.True(t, ok)
-		assert.Equal(t, 1, len(ddmsg.Msgs))
-		ddm, ok := (ddmsg.Msgs[0]).(*msgstream.TimeTickMsg)
-		assert.True(t, ok)
-		assert.Greater(t, ddm.Base.Timestamp, typeutil.Timestamp(0))
 	})
 
 	t.Run("create collection", func(t *testing.T) {
@@ -1847,11 +1827,17 @@ func TestMasterService2(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-		msg := getNotTTMsg(ddStream.Chan(), 2)
-		assert.GreaterOrEqual(t, len(msg), 2)
-		m1, ok := (msg[0]).(*msgstream.CreateCollectionMsg)
+		pChan := core.MetaTable.ListCollectionPhysicalChannels()
+		dmlStream, _ := msFactory.NewMsgStream(ctx)
+		dmlStream.AsConsumer(pChan, Params.MsgChannelSubName)
+		dmlStream.Start()
+
+		msgs := getNotTtMsg(ctx, 2, dmlStream.Chan())
+		assert.Equal(t, 2, len(msgs))
+
+		m1, ok := (msgs[0]).(*msgstream.CreateCollectionMsg)
 		assert.True(t, ok)
-		m2, ok := (msg[1]).(*msgstream.CreatePartitionMsg)
+		m2, ok := (msgs[1]).(*msgstream.CreatePartitionMsg)
 		assert.True(t, ok)
 		assert.Equal(t, m1.Base.Timestamp, m2.Base.Timestamp)
 		t.Log("time tick", m1.Base.Timestamp)
