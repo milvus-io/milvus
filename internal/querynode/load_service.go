@@ -172,7 +172,7 @@ func (s *loadService) loadSegmentInternal(collectionID UniqueID, segment *Segmen
 	for _, vecFieldID := range vectorFieldIDs {
 		err = s.segLoader.indexLoader.setIndexInfo(collectionID, segment, vecFieldID)
 		if err != nil {
-			log.Warn(err.Error())
+			log.Warn("QueryNode load_service", zap.Any("SegmentID", segment.segmentID), zap.Error(err))
 			continue
 		}
 		loadIndexFieldIDs = append(loadIndexFieldIDs, vecFieldID)

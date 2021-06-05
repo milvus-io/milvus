@@ -305,6 +305,7 @@ class TestSearchBase:
             assert res[0]._distances[0] > res[0]._distances[default_top_k - 1]
         else:
             with pytest.raises(Exception) as e:
+                print("DDDDD", query)
                 res = connect.search(collection, query)
 
     @pytest.mark.level(2)

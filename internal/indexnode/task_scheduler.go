@@ -70,7 +70,7 @@ func (queue *BaseTaskQueue) addUnissuedTask(t task) error {
 	defer queue.utLock.Unlock()
 
 	if queue.utFull() {
-		return errors.New("task queue is full")
+		return errors.New("IndexNode task queue is full")
 	}
 	queue.unissuedTasks.PushBack(t)
 	queue.utBufChan <- 1
@@ -82,7 +82,7 @@ func (queue *BaseTaskQueue) FrontUnissuedTask() task {
 	defer queue.utLock.Unlock()
 
 	if queue.unissuedTasks.Len() <= 0 {
-		log.Debug("FrontUnissuedTask sorry, but the unissued task list is empty!")
+		log.Debug("IndexNode FrontUnissuedTask sorry, but the unissued task list is empty!")
 		return nil
 	}
 
@@ -94,7 +94,7 @@ func (queue *BaseTaskQueue) PopUnissuedTask() task {
 	defer queue.utLock.Unlock()
 
 	if queue.unissuedTasks.Len() <= 0 {
-		log.Debug("PopUnissued task sorry, but the unissued task list is empty!")
+		log.Debug("IndexNode PopUnissued task sorry, but the unissued task list is empty!")
 		return nil
 	}
 
@@ -111,7 +111,7 @@ func (queue *BaseTaskQueue) AddActiveTask(t task) {
 	tID := t.ID()
 	_, ok := queue.activeTasks[tID]
 	if ok {
-		log.Debug("indexnode", zap.Int64("task with ID %v already in active task list!", tID))
+		log.Debug("IndexNode task already in activate task list", zap.Any("TaskID", tID))
 	}
 
 	queue.activeTasks[tID] = t
@@ -126,7 +126,7 @@ func (queue *BaseTaskQueue) PopActiveTask(tID UniqueID) task {
 		delete(queue.activeTasks, tID)
 		return t
 	}
-	log.Debug("indexnode", zap.Int64("sorry, but the ID was not found in the active task list!", tID))
+	log.Debug("IndexNode the task was not found in the active task list", zap.Any("TaskID", tID))
 	return nil
 }
 
@@ -201,7 +201,7 @@ func NewTaskScheduler(ctx context.Context,
 
 func (sched *TaskScheduler) setParallelism(parallel int) {
 	if parallel <= 0 {
-		log.Debug("can not set parallelism to less than zero!")
+		log.Debug("IndexNode can not set parallelism to less than zero!")
 		return
 	}
 	sched.buildParallel = parallel
@@ -258,7 +258,7 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 }
 
 func (sched *TaskScheduler) indexBuildLoop() {
-	log.Debug("index build loop ...")
+	log.Debug("IndexNode TaskScheduler start build loop ...")
 	defer sched.wg.Done()
 	for {
 		select {
