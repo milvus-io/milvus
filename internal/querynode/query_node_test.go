@@ -132,7 +132,7 @@ func initTestMeta(t *testing.T, node *QueryNode, collectionID UniqueID, segmentI
 	err = node.historical.replica.addPartition(collection.ID(), collectionMeta.PartitionIDs[0])
 	assert.NoError(t, err)
 
-	err = node.historical.replica.addSegment(segmentID, collectionMeta.PartitionIDs[0], collectionID, segmentTypeGrowing)
+	err = node.historical.replica.addSegment(segmentID, collectionMeta.PartitionIDs[0], collectionID, "", segmentTypeGrowing)
 	assert.NoError(t, err)
 }
 

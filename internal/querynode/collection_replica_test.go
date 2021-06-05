@@ -172,7 +172,7 @@ func TestCollectionReplica_addSegment(t *testing.T) {
 
 	const segmentNum = 3
 	for i := 0; i < segmentNum; i++ {
-		err := node.historical.replica.addSegment(UniqueID(i), defaultPartitionID, collectionID, segmentTypeGrowing)
+		err := node.historical.replica.addSegment(UniqueID(i), defaultPartitionID, collectionID, "", segmentTypeGrowing)
 		assert.NoError(t, err)
 		targetSeg, err := node.historical.replica.getSegmentByID(UniqueID(i))
 		assert.NoError(t, err)
@@ -191,7 +191,7 @@ func TestCollectionReplica_removeSegment(t *testing.T) {
 	const segmentNum = 3
 
 	for i := 0; i < segmentNum; i++ {
-		err := node.historical.replica.addSegment(UniqueID(i), defaultPartitionID, collectionID, segmentTypeGrowing)
+		err := node.historical.replica.addSegment(UniqueID(i), defaultPartitionID, collectionID, "", segmentTypeGrowing)
 		assert.NoError(t, err)
 		targetSeg, err := node.historical.replica.getSegmentByID(UniqueID(i))
 		assert.NoError(t, err)
@@ -212,7 +212,7 @@ func TestCollectionReplica_getSegmentByID(t *testing.T) {
 	const segmentNum = 3
 
 	for i := 0; i < segmentNum; i++ {
-		err := node.historical.replica.addSegment(UniqueID(i), defaultPartitionID, collectionID, segmentTypeGrowing)
+		err := node.historical.replica.addSegment(UniqueID(i), defaultPartitionID, collectionID, "", segmentTypeGrowing)
 		assert.NoError(t, err)
 		targetSeg, err := node.historical.replica.getSegmentByID(UniqueID(i))
 		assert.NoError(t, err)
@@ -231,7 +231,7 @@ func TestCollectionReplica_hasSegment(t *testing.T) {
 	const segmentNum = 3
 
 	for i := 0; i < segmentNum; i++ {
-		err := node.historical.replica.addSegment(UniqueID(i), defaultPartitionID, collectionID, segmentTypeGrowing)
+		err := node.historical.replica.addSegment(UniqueID(i), defaultPartitionID, collectionID, "", segmentTypeGrowing)
 		assert.NoError(t, err)
 		targetSeg, err := node.historical.replica.getSegmentByID(UniqueID(i))
 		assert.NoError(t, err)
@@ -266,7 +266,7 @@ func TestReplaceGrowingSegmentBySealedSegment(t *testing.T) {
 
 	collection, err := node.historical.replica.getCollectionByID(collectionID)
 	assert.NoError(t, err)
-	ns := newSegment(collection, segmentID, defaultPartitionID, collectionID, segmentTypeSealed)
+	ns := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeSealed)
 	err = node.historical.replica.replaceGrowingSegmentBySealedSegment(ns)
 	assert.NoError(t, err)
 	err = node.historical.replica.setSegmentEnableIndex(segmentID, true)
