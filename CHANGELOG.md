@@ -10,10 +10,12 @@ Please mark all change in change log and use the issue from GitHub
 -   \#5574 IVF_SQ8 and IVF_PQ cannot be built on multiple GPUs
 
 ## Feature
+-   \#1434 Storage: enabling s3 storage support (implemented by Unisinsight)
+-   \#5142 Support keeping index in GPU memory
 
 ## Improvement
--   \#5142 Enable Gpu cache
 -   \#5204 Improve IVF query on GPU when no entity deleted
+-   \#5544 Support the limitation of index_file_size to 128GB
 
 ## Task
 
