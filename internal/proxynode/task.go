@@ -1481,8 +1481,22 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 		zap.Any("requestID", rt.Base.MsgID), zap.Any("requestType", "retrieve"))
 
 	rt.Base.MsgType = commonpb.MsgType_Retrieve
+	if rt.retrieve.Ids == nil {
+		errMsg := "Retrieve ids is nil"
+		return errors.New(errMsg)
+	}
 	rt.Ids = rt.retrieve.Ids
-	rt.OutputFields = rt.retrieve.OutputFields
+	if len(rt.retrieve.OutputFields) == 0 {
+		schema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
+		if err != nil {
+			return err
+		}
+		for _, field := range schema.Fields {
+			rt.OutputFields = append(rt.OutputFields, field.Name)
+		}
+	} else {
+		rt.OutputFields = rt.retrieve.OutputFields
+	}
 
 	rt.ResultChannelID = Params.RetrieveChannelNames[0]
 	rt.DbID = 0 // todo(yukun)

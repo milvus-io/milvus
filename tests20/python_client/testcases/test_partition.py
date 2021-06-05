@@ -1,9 +1,8 @@
 import threading
 import pytest
-from base.partition import ApiPartitionWrapper
 
 from pymilvus_orm import Partition
-from base.client_request import ApiReq
+from base.client_base import TestcaseBase
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
@@ -12,7 +11,7 @@ from common.common_type import CaseLabel, CheckParams
 prefix = "partition_"
 
 
-class TestPartitionParams(ApiReq):
+class TestPartitionParams(TestcaseBase):
     """ Test case of partition interface in parameters"""
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -284,7 +283,7 @@ class TestPartitionParams(ApiReq):
         assert self.partition_wrap.num_entities == (nums + nums)
 
 
-class TestPartitionOperations(ApiReq):
+class TestPartitionOperations(TestcaseBase):
     """ Test case of partition interface in operations """
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -377,7 +376,8 @@ class TestPartitionOperations(ApiReq):
         for t in threads:
             t.join()
         p_name = cf.gen_unique_str()
-        ex, _ = self.partition_wrap.partition_init(m_collection, p_name)
+        ex, _ = self.partition_wrap.partition_init(m_collection, p_name,
+                                                   check_res=CheckParams.err_res)
         assert ex.code == 1
         assert "maximum partition's number should be limit to 4096" in ex.message
 
@@ -640,29 +640,6 @@ class TestPartitionOperations(ApiReq):
         self.partition_wrap.release()
         # TODO assert release successfully
 
-        # m_collection = self._collection()
-        # p_name = cf.gen_unique_str(prefix)
-        # m_partition, _ = self.partition_wrap.partition_init(m_collection, p_name)
-        # assert m_collection.has_partition(p_name)
-        # m_partition.insert(cf.gen_default_list_data())
-        # m_partition.load()
-        # search_vec = cf.gen_vectors(1, ct.default_dim)
-        # result = m_partition.search(data=search_vec,
-        #                             anns_field=ct.default_float_vec_field_name,
-        #                             params={"nprobe": 32},
-        #                             limit=1
-        #                             )
-        # assert len(result) == 1
-        # m_collection.release()
-        # result = m_partition.search(data=search_vec,
-        #                             anns_field=ct.default_float_vec_field_name,
-        #                             params={"nprobe": 32},
-        #                             limit=1
-        #                             )
-        # assert len(result) == 0
-        # m_partition.release()
-        # # TODO assert release successfully
-
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="issue #5302")
     @pytest.mark.parametrize("partition_name, data", [(ct.default_partition_name, cf.gen_default_dataframe_data())])
@@ -733,7 +710,7 @@ class TestPartitionOperations(ApiReq):
         log.error(res)
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.xfail(reason="issue #5302")
+    @pytest.mark.xfail(reason="issue #5302")
     def test_partition_insert_maximum_size_data(self, data):
         """
         target: verify insert maximum size data(256M?) a time
@@ -751,6 +728,7 @@ class TestPartitionOperations(ApiReq):
         # insert data to partition
         max_size = 100000  # TODO: clarify the max size of data
         self.partition_wrap.insert(cf.gen_default_dataframe_data(max_size))
+        # TODO: need a flush for #5302
         assert self.partition_wrap.num_entities == max_size
 
     @pytest.mark.tags(CaseLabel.L1)
