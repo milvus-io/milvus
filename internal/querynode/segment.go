@@ -52,11 +52,14 @@ type Segment struct {
 	segmentID    UniqueID
 	partitionID  UniqueID
 	collectionID UniqueID
+
+	onService bool
+
 	lastMemSize  int64
 	lastRowCount int64
 
-	once             sync.Once // guards enableIndex
-	enableIndex      bool
+	once        sync.Once // guards enableIndex
+	enableIndex bool
 
 	rmMutex          sync.Mutex // guards recentlyModified
 	recentlyModified bool
@@ -109,7 +112,15 @@ func (s *Segment) getType() segmentType {
 	return s.segmentType
 }
 
-func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, collectionID UniqueID, segType segmentType) *Segment {
+func (s *Segment) getOnService() bool {
+	return s.onService
+}
+
+func (s *Segment) setOnService(onService bool) {
+	s.onService = onService
+}
+
+func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, collectionID UniqueID, segType segmentType, onService bool) *Segment {
 	/*
 		CSegmentInterface
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
@@ -132,12 +143,13 @@ func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, c
 	log.Debug("create segment", zap.Int64("segmentID", segmentID))
 
 	var newSegment = &Segment{
-		segmentPtr:       segmentPtr,
-		segmentType:      segType,
-		segmentID:        segmentID,
-		partitionID:      partitionID,
-		collectionID:     collectionID,
-		indexInfos:       indexInfos,
+		segmentPtr:   segmentPtr,
+		segmentType:  segType,
+		segmentID:    segmentID,
+		partitionID:  partitionID,
+		collectionID: collectionID,
+		onService:    onService,
+		indexInfos:   indexInfos,
 	}
 
 	return newSegment

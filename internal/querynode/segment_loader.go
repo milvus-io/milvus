@@ -45,11 +45,18 @@ func (loader *segmentLoader) loadSegmentOfConditionHandOff(req *queryPb.LoadSegm
 }
 
 func (loader *segmentLoader) loadSegmentOfConditionLoadBalance(req *queryPb.LoadSegmentsRequest) error {
-	// sendQueryNodeStats
-	return loader.indexLoader.sendQueryNodeStats()
+	return loader.loadSegment(req, false)
 }
 
 func (loader *segmentLoader) loadSegmentOfConditionGRPC(req *queryPb.LoadSegmentsRequest) error {
+	return loader.loadSegment(req, true)
+}
+
+func (loader *segmentLoader) loadSegmentOfConditionNodeDown(req *queryPb.LoadSegmentsRequest) error {
+	return loader.loadSegment(req, true)
+}
+
+func (loader *segmentLoader) loadSegment(req *queryPb.LoadSegmentsRequest, onService bool) error {
 	collectionID := req.CollectionID
 	partitionID := req.PartitionID
 
@@ -82,7 +89,7 @@ func (loader *segmentLoader) loadSegmentOfConditionGRPC(req *queryPb.LoadSegment
 			log.Warn(err.Error())
 			continue
 		}
-		segment := newSegment(collection, segmentID, partitionID, collectionID, segmentTypeSealed)
+		segment := newSegment(collection, segmentID, partitionID, collectionID, segmentTypeSealed, onService)
 		err = loader.loadSegmentInternal(collectionID, segment, info.BinlogPaths)
 		if err != nil {
 			deleteSegment(segment)
@@ -98,11 +105,6 @@ func (loader *segmentLoader) loadSegmentOfConditionGRPC(req *queryPb.LoadSegment
 
 	// sendQueryNodeStats
 	return loader.indexLoader.sendQueryNodeStats()
-}
-
-func (loader *segmentLoader) loadSegmentOfConditionNodeDown(req *queryPb.LoadSegmentsRequest) error {
-	// same as condition GRPC
-	return loader.loadSegmentOfConditionGRPC(req)
 }
 
 func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID,
