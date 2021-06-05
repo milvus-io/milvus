@@ -68,7 +68,7 @@ type ReplicaInterface interface {
 	disablePartition(partitionID UniqueID) error
 
 	// segment
-	addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, segType segmentType) error
+	addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID VChannel, segType segmentType) error
 	setSegment(segment *Segment) error
 	removeSegment(segmentID UniqueID) error
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
@@ -381,15 +381,15 @@ func (colReplica *collectionReplica) getEnabledPartitionIDsPrivate() []UniqueID 
 }
 
 //----------------------------------------------------------------------------------------------------- segment
-func (colReplica *collectionReplica) addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, segType segmentType) error {
+func (colReplica *collectionReplica) addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID VChannel, segType segmentType) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
 		return err
 	}
-	var newSegment = newSegment(collection, segmentID, partitionID, collectionID, segType)
-	return colReplica.addSegmentPrivate(segmentID, partitionID, newSegment)
+	seg := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segType)
+	return colReplica.addSegmentPrivate(segmentID, partitionID, seg)
 }
 
 func (colReplica *collectionReplica) addSegmentPrivate(segmentID UniqueID, partitionID UniqueID, segment *Segment) error {
