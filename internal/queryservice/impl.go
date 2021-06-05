@@ -387,49 +387,51 @@ func (qs *QueryService) ReleasePartitions(ctx context.Context, req *querypb.Rele
 	return status, nil
 }
 
-func (qs *QueryService) CreateQueryChannel(ctx context.Context) (*querypb.CreateQueryChannelResponse, error) {
-	channelID := len(qs.queryChannels)
-	searchPrefix := Params.SearchChannelPrefix
-	searchResultPrefix := Params.SearchResultChannelPrefix
-	allocatedQueryChannel := searchPrefix + "-" + strconv.FormatInt(int64(channelID), 10)
-	allocatedQueryResultChannel := searchResultPrefix + "-" + strconv.FormatInt(int64(channelID), 10)
+func (qs *QueryService) CreateQueryChannel(ctx context.Context, req *querypb.CreateQueryChannelRequest) (*querypb.CreateQueryChannelResponse, error) {
+	collectionID :=req.CollectionID
+	var queryChannel string
+	var queryResultChannel string
+	if info, ok := qs.meta.queryChannelInfos[collectionID]; ok {
+		queryChannel = info.QueryChannelID
+		queryResultChannel = info.QueryResultChannelID
+	} else {
+		searchPrefix := Params.SearchChannelPrefix
+		searchResultPrefix := Params.SearchResultChannelPrefix
+		allocatedQueryChannel := searchPrefix + "-" + strconv.FormatInt(collectionID, 10)
+		allocatedQueryResultChannel := searchResultPrefix + "-" + strconv.FormatInt(collectionID, 10)
 
-	qs.qcMutex.Lock()
-	qs.queryChannels = append(qs.queryChannels, &queryChannelInfo{
-		requestChannel:  allocatedQueryChannel,
-		responseChannel: allocatedQueryResultChannel,
-	})
+		qs.meta.setQueryChannel(collectionID, allocatedQueryChannel, allocatedQueryResultChannel)
 
-	addQueryChannelsRequest := &querypb.AddQueryChannelRequest{
-		RequestChannelID: allocatedQueryChannel,
-		ResultChannelID:  allocatedQueryResultChannel,
-	}
-	log.Debug("query service create query channel", zap.String("queryChannelName", allocatedQueryChannel))
-	for nodeID := range qs.cluster.nodes {
-		log.Debug("node watch query channel", zap.String("nodeID", fmt.Sprintln(nodeID)))
-		fn := func() error {
-			_, err := qs.cluster.AddQueryChannel(ctx, nodeID, addQueryChannelsRequest)
-			return err
+		addQueryChannelsRequest := &querypb.AddQueryChannelRequest{
+			CollectionID: collectionID,
+			RequestChannelID: allocatedQueryChannel,
+			ResultChannelID:  allocatedQueryResultChannel,
 		}
-		err := retry.Retry(10, time.Millisecond*200, fn)
-		if err != nil {
-			qs.qcMutex.Unlock()
-			return &querypb.CreateQueryChannelResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    err.Error(),
-				},
-			}, err
+		log.Debug("query service create query channel", zap.String("queryChannelName", allocatedQueryChannel))
+		for nodeID := range qs.cluster.nodes {
+			log.Debug("node watch query channel", zap.String("nodeID", fmt.Sprintln(nodeID)))
+			fn := func() error {
+				_, err := qs.cluster.AddQueryChannel(ctx, nodeID, addQueryChannelsRequest)
+				return err
+			}
+			err := retry.Retry(10, time.Millisecond*200, fn)
+			if err != nil {
+				return &querypb.CreateQueryChannelResponse{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_UnexpectedError,
+						Reason:    err.Error(),
+					},
+				}, err
+			}
 		}
 	}
-	qs.qcMutex.Unlock()
 
 	return &querypb.CreateQueryChannelResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		RequestChannel: allocatedQueryChannel,
-		ResultChannel:  allocatedQueryResultChannel,
+		RequestChannel: queryChannel,
+		ResultChannel:  queryResultChannel,
 	}, nil
 }
 

@@ -13,6 +13,7 @@ package queryservice
 
 import (
 	"context"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"math/rand"
 	"sync/atomic"
 	"time"
@@ -35,6 +36,7 @@ type queryChannelInfo struct {
 type QueryService struct {
 	loopCtx    context.Context
 	loopCancel context.CancelFunc
+	kvBase  *etcdkv.EtcdKV
 
 	queryServiceID uint64
 	meta           *meta
@@ -93,17 +95,19 @@ func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryServ
 	//queryChannels := make([]*queryChannelInfo, 0)
 	ctx1, cancel := context.WithCancel(ctx)
 	meta := newMeta()
-	scheduler := NewTaskScheduler(ctx1, meta)
+	//scheduler := NewTaskScheduler(ctx1, meta)
 	service := &QueryService{
 		loopCtx:    ctx1,
 		loopCancel: cancel,
 		meta:       meta,
-		scheduler:  scheduler,
+		//scheduler:  scheduler,
 		//cluster:    cluster,
 		//queryChannels: queryChannels,
 		//qcMutex:       &sync.Mutex{},
 		msFactory: factory,
 	}
+	//TODO::set etcd kvbase
+	service.scheduler = NewTaskScheduler(ctx1, meta, service.kvBase)
 	service.cluster = newQueryNodeCluster(meta)
 
 	service.UpdateStateCode(internalpb.StateCode_Abnormal)

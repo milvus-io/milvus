@@ -47,6 +47,7 @@ const (
 type task interface {
 	TraceCtx() context.Context
 	ID() UniqueID // return ReqId
+	SetID(id UniqueID)
 	Name() string
 	Type() commonpb.MsgType
 	Timestamp() Timestamp
@@ -69,6 +70,8 @@ type BaseTask struct {
 	parentTask       task
 	childTasks       []task
 }
+
+func (bt *BaseTask) SetID(id UniqueID) {}
 
 func (bt *BaseTask) TraceCtx() context.Context {
 	return bt.ctx

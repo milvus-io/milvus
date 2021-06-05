@@ -14,6 +14,8 @@ package queryservice
 import (
 	"container/list"
 	"context"
+	"github.com/milvus-io/milvus/internal/allocator"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"sync"
 
 	"github.com/opentracing/opentracing-go"
@@ -79,38 +81,7 @@ func (queue *TaskQueue) PopTask() task {
 	return ft.Value.(task)
 }
 
-//func (queue *TaskQueue) AddActiveTask(t task) {
-//	queue.lock.Lock()
-//	defer queue.lock.Unlock()
-//
-//	ts := t.Timestamp()
-//	_, ok := queue.tasks[ts]
-//	if ok {
-//		log.Debug("queryService", zap.Uint64("task with timestamp ts already in active task list! ts:", ts))
-//	}
-//
-//	queue.activeTasks[ts] = t
-//}
 
-//func (queue *TaskQueue) PopActiveTask(ts Timestamp) task {
-//	queue.atLock.Lock()
-//	defer queue.atLock.Unlock()
-//
-//	t, ok := queue.activeTasks[ts]
-//	if ok {
-//		log.Debug("queryService", zap.Uint64("task with timestamp ts has been deleted in active task list! ts:", ts))
-//		delete(queue.activeTasks, ts)
-//		return t
-//	}
-//
-//	return nil
-//}
-
-func (queue *TaskQueue) Enqueue(t []task) {
-	queue.Lock()
-	defer queue.Unlock()
-	queue.addTask(t)
-}
 
 func NewTaskQueue(scheduler *TaskScheduler) *TaskQueue {
 	return &TaskQueue{
@@ -126,13 +97,15 @@ type TaskScheduler struct {
 	//ActiveTaskQueue  *TaskQueue
 	activateTaskChan chan task
 	meta             *meta
+	taskIDAllocator func() (UniqueID, error)
+	kvBase  *etcdkv.EtcdKV
 
 	wg     sync.WaitGroup
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-func NewTaskScheduler(ctx context.Context, meta *meta) *TaskScheduler {
+func NewTaskScheduler(ctx context.Context, meta *meta, kv *etcdkv.EtcdKV) *TaskScheduler {
 	ctx1, cancel := context.WithCancel(ctx)
 	taskChan := make(chan task, 1024)
 	s := &TaskScheduler{
@@ -140,8 +113,13 @@ func NewTaskScheduler(ctx context.Context, meta *meta) *TaskScheduler {
 		cancel:           cancel,
 		meta:             meta,
 		activateTaskChan: taskChan,
+		kvBase: kv,
 	}
 	s.triggerTaskQueue = NewTaskQueue(s)
+	idAllocator := allocator.NewGlobalIDAllocator("queryService taskID", s.kvBase)
+	s.taskIDAllocator = func() (UniqueID, error) {
+		return idAllocator.AllocOne()
+	}
 	//s.ActiveTaskQueue = NewTaskQueue(s)
 
 	return s
@@ -150,6 +128,19 @@ func NewTaskScheduler(ctx context.Context, meta *meta) *TaskScheduler {
 //func (scheduler *TaskScheduler) scheduleTask() task {
 //	return scheduler.triggerTaskQueue.PopTask()
 //}
+
+func (scheduler *TaskScheduler) Enqueue(tasks []task) {
+	scheduler.triggerTaskQueue.Lock()
+	defer scheduler.triggerTaskQueue.Unlock()
+	for _, t := range tasks {
+		id, err := scheduler.taskIDAllocator()
+		if err != nil {
+			log.Error(err.Error())
+		}
+		t.SetID(id)
+	}
+	scheduler.triggerTaskQueue.addTask(tasks)
+}
 
 func (scheduler *TaskScheduler) processTask(t task) {
 	span, ctx := trace.StartSpanFromContext(t.TraceCtx(),
@@ -170,13 +161,6 @@ func (scheduler *TaskScheduler) processTask(t task) {
 		return
 	}
 
-	//span.LogFields(oplog.Int64("scheduler process AddActiveTask", t.ID()))
-	//q.AddActiveTask(t)
-	//
-	//defer func() {
-	//	span.LogFields(oplog.Int64("scheduler process PopActiveTask", t.ID()))
-	//	q.PopActiveTask(t.Timestamp())
-	//}()
 	span.LogFields(oplog.Int64("scheduler process Execute", t.ID()))
 	err = t.Execute(ctx)
 	if err != nil {
@@ -199,14 +183,8 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 			t := scheduler.triggerTaskQueue.PopTask()
 			scheduler.processTask(t)
 			//TODO::add active task to etcd
-			for _, childTask := range t.GetChildTask() {
-				if childTask != nil {
-					scheduler.activateTaskChan <- childTask
-				}
-			}
-			scheduler.activateTaskChan <- nil
-
-			w.Add(1)
+			w.Add(2)
+			go scheduler.addActivateTask(&w, t)
 			go scheduler.processActivateTask(&w)
 			w.Wait()
 			//TODO:: delete trigger task from etcd
@@ -214,6 +192,15 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 	}
 }
 
+func (scheduler *TaskScheduler) addActivateTask(wg *sync.WaitGroup, t task) {
+	defer wg.Done()
+	for _, childTask := range t.GetChildTask() {
+		if childTask != nil {
+			scheduler.activateTaskChan <- childTask
+		}
+	}
+	scheduler.activateTaskChan <- nil
+}
 
 func (scheduler *TaskScheduler) processActivateTask(wg *sync.WaitGroup) {
 	defer wg.Done()
