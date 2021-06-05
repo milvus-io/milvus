@@ -1,5 +1,4 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.//
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
@@ -37,7 +36,6 @@ type ParamTable struct {
 	SegmentDmlPosSubPath    string
 	SegmentDdlPosSubPath    string
 	DmlChannelPosSubPath    string
-	DdlChannelPosSubPath    string
 
 	// --- Pulsar ---
 	PulsarAddress string
@@ -105,9 +103,7 @@ func (p *ParamTable) Init() {
 		p.initFlushStreamPosSubPath()
 		p.initStatsStreamPosSubPath()
 		p.initSegmentDmlPosSubPath()
-		p.initSegmentDdlPosSubPath()
 		p.initDmlChannelPosSubPath()
-		p.initDdlChannelPosSubPath()
 	})
 }
 
@@ -324,26 +320,10 @@ func (p *ParamTable) initSegmentDmlPosSubPath() {
 	p.SegmentDmlPosSubPath = subPath
 }
 
-func (p *ParamTable) initSegmentDdlPosSubPath() {
-	subPath, err := p.Load("etcd.segmentDdlPosSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.SegmentDdlPosSubPath = subPath
-}
-
 func (p *ParamTable) initDmlChannelPosSubPath() {
 	subPath, err := p.Load("etcd.dmlChanPosSubPath")
 	if err != nil {
 		panic(err)
 	}
 	p.DmlChannelPosSubPath = subPath
-}
-
-func (p *ParamTable) initDdlChannelPosSubPath() {
-	subPath, err := p.Load("etcd.ddlChanPosSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.DdlChannelPosSubPath = subPath
 }

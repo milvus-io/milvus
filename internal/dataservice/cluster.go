@@ -113,7 +113,6 @@ func (c *cluster) watch(nodes []*datapb.DataNodeInfo) []*datapb.DataNodeInfo {
 				uncompletes = append(uncompletes, vchannel{
 					CollectionID: ch.CollectionID,
 					DmlChannel:   ch.Name,
-					DdlChannel:   c.posProvider.GetDdlChannel(),
 				})
 			}
 		}

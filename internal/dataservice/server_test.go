@@ -722,7 +722,6 @@ func TestGetVChannelPos(t *testing.T) {
 			{
 				CollectionID: 0,
 				DmlChannel:   "ch1",
-				DdlChannel:   "ch2",
 			},
 		})
 		assert.Nil(t, err)
@@ -733,6 +732,131 @@ func TestGetVChannelPos(t *testing.T) {
 		assert.EqualValues(t, 1, len(pair[0].CheckPoints))
 		assert.EqualValues(t, 2, pair[0].CheckPoints[0].SegmentID)
 		assert.EqualValues(t, []byte{1, 2, 3}, pair[0].CheckPoints[0].Position.MsgID)
+	})
+}
+
+func TestGetRecoveryInfo(t *testing.T) {
+	svr := newTestServer(t, nil)
+	defer closeTestServer(t, svr)
+
+	svr.masterClientCreator = func(addr string) (types.MasterService, error) {
+		return newMockMasterService(), nil
+	}
+
+	t.Run("test get recovery info with no segments", func(t *testing.T) {
+		req := &datapb.GetRecoveryInfoRequest{
+			CollectionID: 0,
+			PartitionID:  0,
+		}
+		resp, err := svr.GetRecoveryInfo(context.TODO(), req)
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, 0, len(resp.GetBinlogs()))
+		assert.EqualValues(t, 1, len(resp.GetChannels()))
+		assert.Nil(t, resp.GetChannels()[0].SeekPosition)
+	})
+
+	createSegment := func(id, collectionID, partitionID, numOfRows int64, posTs uint64,
+		channel string, state commonpb.SegmentState) *datapb.SegmentInfo {
+		return &datapb.SegmentInfo{
+			ID:            id,
+			CollectionID:  collectionID,
+			PartitionID:   partitionID,
+			InsertChannel: channel,
+			NumOfRows:     numOfRows,
+			State:         state,
+			DmlPosition: &internalpb.MsgPosition{
+				ChannelName: channel,
+				MsgID:       []byte{},
+				Timestamp:   posTs,
+			},
+		}
+	}
+
+	t.Run("test get largest position of flushed segments as seek position", func(t *testing.T) {
+		seg1 := createSegment(0, 0, 0, 100, 10, "vchan1", commonpb.SegmentState_Flushed)
+		seg2 := createSegment(1, 0, 0, 100, 20, "vchan1", commonpb.SegmentState_Flushed)
+		err := svr.meta.AddSegment(seg1)
+		assert.Nil(t, err)
+		err = svr.meta.AddSegment(seg2)
+		assert.Nil(t, err)
+
+		req := &datapb.GetRecoveryInfoRequest{
+			CollectionID: 0,
+			PartitionID:  0,
+		}
+		resp, err := svr.GetRecoveryInfo(context.TODO(), req)
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, 1, len(resp.GetChannels()))
+		assert.EqualValues(t, 0, len(resp.GetChannels()[0].GetCheckPoints()))
+		assert.EqualValues(t, []UniqueID{0, 1}, resp.GetChannels()[0].GetFlushedSegments())
+		assert.EqualValues(t, 20, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
+	})
+
+	t.Run("test get smallest position of unflushed segments as seek position", func(t *testing.T) {
+		seg1 := createSegment(3, 0, 0, 100, 30, "vchan1", commonpb.SegmentState_Growing)
+		seg2 := createSegment(4, 0, 0, 100, 40, "vchan1", commonpb.SegmentState_Growing)
+		err := svr.meta.AddSegment(seg1)
+		assert.Nil(t, err)
+		err = svr.meta.AddSegment(seg2)
+		assert.Nil(t, err)
+		expectedCps := make(map[UniqueID]*datapb.SegmentInfo)
+		expectedCps[3] = seg1
+		expectedCps[4] = seg2
+
+		req := &datapb.GetRecoveryInfoRequest{
+			CollectionID: 0,
+			PartitionID:  0,
+		}
+		resp, err := svr.GetRecoveryInfo(context.TODO(), req)
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, 1, len(resp.GetChannels()))
+		assert.EqualValues(t, 2, len(resp.GetChannels()[0].GetCheckPoints()))
+		assert.EqualValues(t, []UniqueID{0, 1}, resp.GetChannels()[0].GetFlushedSegments())
+		assert.EqualValues(t, 30, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
+		cps := resp.GetChannels()[0].GetCheckPoints()
+		for _, cp := range cps {
+			seg, ok := expectedCps[cp.GetSegmentID()]
+			assert.True(t, ok)
+			assert.EqualValues(t, seg.GetDmlPosition().GetTimestamp(), cp.GetPosition().GetTimestamp())
+			assert.EqualValues(t, seg.GetNumOfRows(), cp.GetNumOfRows())
+		}
+	})
+
+	t.Run("test get binlogs", func(t *testing.T) {
+		binlogReq := &datapb.SaveBinlogPathsRequest{
+			SegmentID:    0,
+			CollectionID: 0,
+			Field2BinlogPaths: []*datapb.ID2PathList{
+				{
+					ID: 1,
+					Paths: []string{
+						"/binlog/file1",
+						"/binlog/file2",
+					},
+				},
+			},
+			DdlBinlogPaths: []*datapb.DDLBinlogMeta{},
+		}
+		meta, err := svr.prepareBinlog(binlogReq)
+		assert.Nil(t, err)
+		err = svr.kvClient.MultiSave(meta)
+		assert.Nil(t, err)
+
+		req := &datapb.GetRecoveryInfoRequest{
+			CollectionID: 0,
+			PartitionID:  0,
+		}
+		resp, err := svr.GetRecoveryInfo(context.TODO(), req)
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, 1, len(resp.GetBinlogs()))
+		assert.EqualValues(t, 0, resp.GetBinlogs()[0].GetSegmentID())
+		assert.EqualValues(t, 1, len(resp.GetBinlogs()[0].GetFieldBinlogs()))
+		assert.EqualValues(t, 1, resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetFieldID())
+		assert.EqualValues(t, []string{"/binlog/file1", "/binlog/file2"}, resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetBinlogs())
 	})
 }
 
