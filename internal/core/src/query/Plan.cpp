@@ -479,6 +479,16 @@ GetNumOfQueries(const PlaceholderGroup* group) {
     return group->at(0).num_of_queries_;
 }
 
+[[maybe_unused]] std::unique_ptr<RetrievePlan>
+CreateRetrievePlan(const Schema& schema, proto::plan::RetrieveRequest&& request) {
+    auto plan = std::make_unique<RetrievePlan>();
+    plan->ids_ = std::unique_ptr<proto::schema::IDs>(request.release_ids());
+    for (auto& field_name : request.output_fields()) {
+        plan->field_offsets_.push_back(schema.get_offset(FieldName(field_name)));
+    }
+    return plan;
+}
+
 void
 Plan::check_identical(Plan& other) {
     Assert(&schema_ == &other.schema_);

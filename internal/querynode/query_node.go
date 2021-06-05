@@ -57,7 +57,8 @@ type QueryNode struct {
 	streaming  *streaming
 
 	// internal services
-	searchService *searchService
+	searchService   *searchService
+	retrieveService *retrieveService
 
 	// clients
 	masterService types.MasterService
@@ -79,6 +80,7 @@ func NewQueryNode(ctx context.Context, queryNodeID UniqueID, factory msgstream.F
 		queryNodeLoopCancel: cancel,
 		QueryNodeID:         queryNodeID,
 		searchService:       nil,
+		retrieveService:     nil,
 		msFactory:           factory,
 	}
 
@@ -94,6 +96,7 @@ func NewQueryNodeWithoutID(ctx context.Context, factory msgstream.Factory) *Quer
 		queryNodeLoopCtx:    ctx1,
 		queryNodeLoopCancel: cancel,
 		searchService:       nil,
+		retrieveService:     nil,
 		msFactory:           factory,
 	}
 
@@ -134,11 +137,14 @@ func (node *QueryNode) Init() error {
 
 	resp, err := node.queryService.RegisterNode(ctx, registerReq)
 	if err != nil {
+		log.Debug("QueryNode RegisterNode failed", zap.Error(err))
 		panic(err)
 	}
 	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		log.Debug("QueryNode RegisterNode failed", zap.Any("Reason", resp.Status.Reason))
 		panic(resp.Status.Reason)
 	}
+	log.Debug("QueryNode RegisterNode success")
 
 	for _, kv := range resp.InitParams.StartParams {
 		switch kv.Key {
@@ -155,7 +161,7 @@ func (node *QueryNode) Init() error {
 		}
 	}
 
-	log.Debug("", zap.Int64("QueryNodeID", Params.QueryNodeID))
+	log.Debug("QueryNode Init ", zap.Int64("QueryNodeID", Params.QueryNodeID), zap.Any("searchChannelNames", Params.SearchChannelNames))
 
 	if node.masterService == nil {
 		log.Error("null master service detected")
@@ -185,13 +191,25 @@ func (node *QueryNode) Start() error {
 
 	// init services and manager
 	// TODO: pass node.streaming.replica to search service
-	node.searchService = newSearchService(node.queryNodeLoopCtx, node.historical.replica, node.streaming.replica, node.msFactory)
+	node.searchService = newSearchService(node.queryNodeLoopCtx,
+		node.historical.replica,
+		node.streaming.replica,
+		node.streaming.tSafeReplica,
+		node.msFactory)
+
+	node.retrieveService = newRetrieveService(node.queryNodeLoopCtx,
+		node.historical.replica,
+		node.streaming.replica,
+		node.streaming.tSafeReplica,
+		node.msFactory,
+	)
 
 	// start task scheduler
 	go node.scheduler.Start()
 
 	// start services
 	go node.searchService.start()
+	go node.retrieveService.start()
 	go node.historical.start()
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
 	return nil
@@ -210,6 +228,9 @@ func (node *QueryNode) Stop() error {
 	}
 	if node.searchService != nil {
 		node.searchService.close()
+	}
+	if node.retrieveService != nil {
+		node.retrieveService.close()
 	}
 	return nil
 }

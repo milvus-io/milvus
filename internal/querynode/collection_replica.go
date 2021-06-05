@@ -90,26 +90,16 @@ type ReplicaInterface interface {
 	getSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID)
 	replaceGrowingSegmentBySealedSegment(segment *Segment) error
 
-	//channels
-	addWatchedDmChannels(channels []string)
-	getWatchedDmChannels() []string
-
-	getTSafe(collectionID UniqueID) tSafer
-	addTSafe(collectionID UniqueID)
-	removeTSafe(collectionID UniqueID)
 	freeAll()
 }
 
 type collectionReplica struct {
-	tSafes map[UniqueID]tSafer // map[collectionID]tSafer
-
 	mu          sync.RWMutex // guards all
 	collections map[UniqueID]*Collection
 	partitions  map[UniqueID]*Partition
 	segments    map[UniqueID]*Segment
 
 	excludedSegments map[UniqueID][]UniqueID // map[collectionID]segmentIDs
-	watchedChannels  []string
 }
 
 //----------------------------------------------------------------------------------------------------- collection
@@ -648,31 +638,6 @@ func (colReplica *collectionReplica) getExcludedSegments(collectionID UniqueID) 
 	return colReplica.excludedSegments[collectionID], nil
 }
 
-//-----------------------------------------------------------------------------------------------------
-func (colReplica *collectionReplica) getTSafe(collectionID UniqueID) tSafer {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-	return colReplica.getTSafePrivate(collectionID)
-}
-
-func (colReplica *collectionReplica) getTSafePrivate(collectionID UniqueID) tSafer {
-	return colReplica.tSafes[collectionID]
-}
-
-func (colReplica *collectionReplica) addTSafe(collectionID UniqueID) {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-	colReplica.tSafes[collectionID] = newTSafe()
-}
-
-func (colReplica *collectionReplica) removeTSafe(collectionID UniqueID) {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-	ts := colReplica.getTSafePrivate(collectionID)
-	ts.close()
-	delete(colReplica.tSafes, collectionID)
-}
-
 func (colReplica *collectionReplica) freeAll() {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
@@ -712,20 +677,11 @@ func (colReplica *collectionReplica) getSegmentsToLoadBySegmentType(segType segm
 	return targetCollectionIDs, targetPartitionIDs, targetSegmentIDs
 }
 
-func (colReplica *collectionReplica) addWatchedDmChannels(channels []string) {
-	colReplica.watchedChannels = append(colReplica.watchedChannels, channels...)
-}
-
-func (colReplica *collectionReplica) getWatchedDmChannels() []string {
-	return colReplica.watchedChannels
-}
-
 func newCollectionReplica() ReplicaInterface {
 	collections := make(map[UniqueID]*Collection)
 	partitions := make(map[UniqueID]*Partition)
 	segments := make(map[UniqueID]*Segment)
 	excludedSegments := make(map[UniqueID][]UniqueID)
-	watchedChannels := make([]string, 0)
 
 	var replica ReplicaInterface = &collectionReplica{
 		collections: collections,
@@ -733,9 +689,6 @@ func newCollectionReplica() ReplicaInterface {
 		segments:    segments,
 
 		excludedSegments: excludedSegments,
-		watchedChannels:  watchedChannels,
-
-		tSafes: make(map[UniqueID]tSafer),
 	}
 
 	return replica

@@ -14,7 +14,9 @@ def collection_catch():
     def wrapper(func):
         def inner_wrapper(*args, **kwargs):
             try:
-                return func(*args, **kwargs), True
+                res = func(*args, **kwargs)
+                log.debug("(func_res) Response : %s " % str(res))
+                return res, True
             except Exception as e:
                 log.error("[Collection API Exception]%s: %s" % (str(func), str(e)))
                 return e, False
@@ -31,11 +33,12 @@ def func_req(_list, **kwargs):
             if len(_list) > 1:
                 for a in _list[1:]:
                     arg.append(a)
+            # log.debug("(func_req)[%s] Parameters ars arg: %s, kwargs: %s" % (str(func), str(arg), str(kwargs)))
             return func(*arg, **kwargs)
     return False, False
 
 
-class ApiCollection:
+class ApiCollectionWrapper:
     collection = None
 
     def collection_init(self, name, data=None, schema=None, check_res=None, check_params=None, **kwargs):
@@ -43,68 +46,80 @@ class ApiCollection:
         func_name = sys._getframe().f_code.co_name
         res, check = func_req([Collection, name, data, schema], **kwargs)
         self.collection = res if check is True else None
-        check_result = CheckFunc(res, func_name, check_res, check_params, name=name, data=data, schema=schema, **kwargs).run()
+        check_result = CheckFunc(res, func_name, check_res, check_params, check, name=name, data=data, schema=schema, **kwargs).run()
         return res, check_result
 
+    @property
     def schema(self, check_res=None, check_params=None):
-        func_name = sys._getframe().f_code.co_name
-        res, check = func_req([self.collection.schema])
-        check_result = CheckFunc(res, func_name, check_res, check_params).run()
-        return res, check_result
+        return self.collection.schema
+        # func_name = sys._getframe().f_code.co_name
+        # res, check = func_req([self.collection.schema])
+        # check_result = CheckFunc(res, func_name, check_res, check_params, check).run()
+        # return res, check_result
 
+    @property
     def description(self, check_res=None, check_params=None):
-        func_name = sys._getframe().f_code.co_name
-        res, check = func_req([self.collection.description])
-        check_result = CheckFunc(res, func_name, check_res, check_params).run()
-        return res, check_result
+        return self.collection.description
+        # func_name = sys._getframe().f_code.co_name
+        # res, check = func_req([self.collection.description])
+        # check_result = CheckFunc(res, func_name, check_res, check_params, check).run()
+        # return res, check_result
 
+    @property
     def name(self, check_res=None, check_params=None):
-        func_name = sys._getframe().f_code.co_name
-        res, check = func_req([self.collection.name])
-        check_result = CheckFunc(res, func_name, check_res, check_params).run()
-        return res, check_result
+        return self.collection.name
+        # func_name = sys._getframe().f_code.co_name
+        # res, check = func_req([self.collection.name])
+        # check_result = CheckFunc(res, func_name, check_res, check_params, check).run()
+        # return res, check_result
 
+    @property
     def is_empty(self, check_res=None, check_params=None):
-        func_name = sys._getframe().f_code.co_name
-        res, check = func_req([self.collection.is_empty])
-        check_result = CheckFunc(res, func_name, check_res, check_params).run()
-        return res, check_result
+        return self.collection.is_empty
+        # func_name = sys._getframe().f_code.co_name
+        # res, check = func_req([self.collection.is_empty])
+        # check_result = CheckFunc(res, func_name, check_res, check_params, check).run()
+        # return res, check_result
 
+    @property
     def num_entities(self, check_res=None, check_params=None):
-        func_name = sys._getframe().f_code.co_name
-        res, check = func_req([self.collection.num_entities])
-        check_result = CheckFunc(res, func_name, check_res, check_params).run()
-        return res, check_result
+        return self.collection.num_entities
+        # func_name = sys._getframe().f_code.co_name
+        # res, check = func_req([self.collection.num_entities])
+        # check_result = CheckFunc(res, func_name, check_res, check_params, check).run()
+        # return res, check_result
 
+    @property
     def primary_field(self, check_res=None, check_params=None):
-        func_name = sys._getframe().f_code.co_name
-        res, check = func_req([self.collection.primary_field])
-        check_result = CheckFunc(res, func_name, check_res, check_params).run()
-        return res, check_result
+        return self.collection.primary_field
+        # func_name = sys._getframe().f_code.co_name
+        # res, check = func_req([self.collection.primary_field])
+        # check_result = CheckFunc(res, func_name, check_res, check_params, check).run()
+        # return res, check_result
 
     def drop(self, check_res=None, check_params=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, check = func_req([self.collection.drop], **kwargs)
-        check_result = CheckFunc(res, func_name, check_res, check_params, **kwargs).run()
+        check_result = CheckFunc(res, func_name, check_res, check_params, check, **kwargs).run()
         return res, check_result
 
     def load(self, field_names=None, index_names=None, partition_names=None, check_res=None, check_params=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, check = func_req([self.collection.load, field_names, index_names, partition_names], **kwargs)
-        check_result = CheckFunc(res, func_name, check_res, check_params, field_names=field_names, index_names=index_names,
+        check_result = CheckFunc(res, func_name, check_res, check_params, check, field_names=field_names, index_names=index_names,
                                  partition_names=partition_names, **kwargs).run()
         return res, check_result
 
     def release(self, check_res=None, check_params=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, check = func_req([self.collection.release], **kwargs)
-        check_result = CheckFunc(res, func_name, check_res, check_params, **kwargs).run()
+        check_result = CheckFunc(res, func_name, check_res, check_params, check, **kwargs).run()
         return res, check_result
 
     def insert(self, data, partition_name=None, check_res=None, check_params=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, check = func_req([self.collection.insert, data, partition_name], **kwargs)
-        check_result = CheckFunc(res, func_name, check_res, check_params, dat=data, partition_name=partition_name, **kwargs).run()
+        check_result = CheckFunc(res, func_name, check_res, check_params, check, data=data, partition_name=partition_name, **kwargs).run()
         return res, check_result
 
     def search(self, data, anns_field, param, limit, expression, partition_names=None, output_fields=None, timeout=None,
@@ -112,62 +127,66 @@ class ApiCollection:
         func_name = sys._getframe().f_code.co_name
         res, check = func_req([self.collection.search, data, anns_field, param, limit, expression, partition_names,
                                output_fields, timeout], **kwargs)
-        check_result = CheckFunc(res, func_name, check_res, check_params, data=data, anns_field=anns_field, param=param, limit=limit,
+        check_result = CheckFunc(res, func_name, check_res, check_params, check, data=data, anns_field=anns_field, param=param, limit=limit,
                                  expression=expression, partition_names=partition_names, output_fields=output_fields,
                                  timeout=timeout, **kwargs).run()
         return res, check_result
 
+    @property
     def partitions(self, check_res=None, check_params=None):
-        func_name = sys._getframe().f_code.co_name
-        res, check = func_req([self.collection.partitions])
-        check_result = CheckFunc(res, func_name, check_res, check_params).run()
-        return res, check_result
+        return self.collection.partitions
+        # func_name = sys._getframe().f_code.co_name
+        # res, check = func_req([self.collection.partitions])
+        # check_result = CheckFunc(res, func_name, check_res, check_params, check).run()
+        # return res, check_result
 
     def partition(self, partition_name, check_res=None, check_params=None):
         func_name = sys._getframe().f_code.co_name
         res, check = func_req([self.collection.partition, partition_name])
-        check_result = CheckFunc(res, func_name, check_res, check_params, partition_name=partition_name).run()
+        check_result = CheckFunc(res, func_name, check_res, check_params, check, partition_name=partition_name).run()
         return res, check_result
 
     def has_partition(self, partition_name, check_res=None, check_params=None):
         func_name = sys._getframe().f_code.co_name
         res, check = func_req([self.collection.has_partition, partition_name])
-        check_result = CheckFunc(res, func_name, check_res, check_params, partition_name=partition_name).run()
+        check_result = CheckFunc(res, func_name, check_res, check_params, check, partition_name=partition_name).run()
         return res, check_result
 
     def drop_partition(self, partition_name, check_res=None, check_params=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, check = func_req([self.collection.drop_partition, partition_name], **kwargs)
-        check_result = CheckFunc(res, func_name, check_res, check_params, partition_name=partition_name, **kwargs).run()
+        check_result = CheckFunc(res, func_name, check_res, check_params, check, partition_name=partition_name, **kwargs).run()
         return res, check_result
 
+    @property
     def indexes(self, check_res=None, check_params=None):
-        func_name = sys._getframe().f_code.co_name
-        res, check = func_req([self.collection.indexes])
-        check_result = CheckFunc(res, func_name, check_res, check_params).run()
-        return res, check_result
+        return self.collection.indexes
+        # func_name = sys._getframe().f_code.co_name
+        # res, check = func_req([self.collection.indexes])
+        # check_result = CheckFunc(res, func_name, check_res, check_params, check).run()
+        # return res, check_result
 
     def index(self, index_name="", check_res=None, check_params=None):
         func_name = sys._getframe().f_code.co_name
         res, check = func_req([self.collection.index, index_name])
-        check_result = CheckFunc(res, func_name, check_res, check_params, index_name=index_name).run()
+        check_result = CheckFunc(res, func_name, check_res, check_params, check, index_name=index_name).run()
         return res, check_result
 
     def create_index(self, field_name, index_params, index_name="", check_res=None, check_params=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, check = func_req([self.collection.create_index, field_name, index_params, index_name], **kwargs)
-        check_result = CheckFunc(res, func_name, check_res, check_params, field_name=field_name, index_params=index_params,
+        check_result = CheckFunc(res, func_name, check_res, check_params, check, field_name=field_name, index_params=index_params,
                                  index_name=index_name, **kwargs).run()
         return res, check_result
 
     def has_index(self, index_name="", check_res=None, check_params=None):
         func_name = sys._getframe().f_code.co_name
         res, check = func_req([self.collection.has_index, index_name])
-        check_result = CheckFunc(res, func_name, check_res, check_params, index_name=index_name).run()
+        check_result = CheckFunc(res, func_name, check_res, check_params, check, index_name=index_name).run()
         return res, check_result
 
     def drop_index(self, index_name="", check_res=None, check_params=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, check = func_req([self.collection.drop_index, index_name], **kwargs)
-        check_result = CheckFunc(res, func_name, check_res, check_params, index_name=index_name, **kwargs).run()
+        check_result = CheckFunc(res, func_name, check_res, check_params, check, index_name=index_name, **kwargs).run()
         return res, check_result

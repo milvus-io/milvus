@@ -155,17 +155,9 @@ func (s *Server) init() error {
 	log.Debug("proxynode", zap.Int("proxy port", Params.Port))
 	log.Debug("proxynode", zap.String("proxy address", Params.Address))
 
-	defer func() {
-		if err != nil {
-			err2 := s.Stop()
-			if err2 != nil {
-				log.Debug("Init failed, and Stop failed")
-			}
-		}
-	}()
-
 	err = s.proxynode.Register()
 	if err != nil {
+		log.Debug("ProxyNode Register etcd failed ", zap.Error(err))
 		return err
 	}
 
@@ -181,69 +173,77 @@ func (s *Server) init() error {
 	s.proxyServiceClient = grpcproxyserviceclient.NewClient(Params.ProxyServiceAddress)
 	err = s.proxyServiceClient.Init()
 	if err != nil {
+		log.Debug("ProxyNode proxyServiceClient init failed ", zap.Error(err))
 		return err
 	}
 	s.proxynode.SetProxyServiceClient(s.proxyServiceClient)
 	log.Debug("set proxy service client ...")
 
 	masterServiceAddr := Params.MasterAddress
-	log.Debug("proxynode", zap.String("master address", masterServiceAddr))
+	log.Debug("ProxyNode", zap.String("master address", masterServiceAddr))
 	timeout := 3 * time.Second
 	s.masterServiceClient, err = grpcmasterserviceclient.NewClient(masterServiceAddr, proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, timeout)
 	if err != nil {
+		log.Debug("ProxyNode new masterServiceClient failed ", zap.Error(err))
 		return err
 	}
 	err = s.masterServiceClient.Init()
 	if err != nil {
+		log.Debug("ProxyNode new masterServiceClient Init ", zap.Error(err))
 		return err
 	}
 	err = funcutil.WaitForComponentHealthy(ctx, s.masterServiceClient, "MasterService", 1000000, time.Millisecond*200)
 
 	if err != nil {
+		log.Debug("ProxyNode WaitForComponentHealthy master service failed ", zap.Error(err))
 		panic(err)
 	}
 	s.proxynode.SetMasterClient(s.masterServiceClient)
 	log.Debug("set master client ...")
 
 	dataServiceAddr := Params.DataServiceAddress
-	log.Debug("proxynode", zap.String("data service address", dataServiceAddr))
-	s.dataServiceClient = grpcdataserviceclient.NewClient(dataServiceAddr, proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, 10)
+	log.Debug("ProxyNode", zap.String("data service address", dataServiceAddr))
+	s.dataServiceClient = grpcdataserviceclient.NewClient(dataServiceAddr, proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, 10*time.Second)
 	err = s.dataServiceClient.Init()
 	if err != nil {
+		log.Debug("ProxyNode dataServiceClient init failed ", zap.Error(err))
 		return err
 	}
 	s.proxynode.SetDataServiceClient(s.dataServiceClient)
 	log.Debug("set data service address ...")
 
 	indexServiceAddr := Params.IndexServerAddress
-	log.Debug("proxynode", zap.String("index server address", indexServiceAddr))
-	s.indexServiceClient = grpcindexserviceclient.NewClient(indexServiceAddr, proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, 10)
+	log.Debug("ProxyNode", zap.String("index server address", indexServiceAddr))
+	s.indexServiceClient = grpcindexserviceclient.NewClient(indexServiceAddr, proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, 10*time.Second)
 	err = s.indexServiceClient.Init()
 	if err != nil {
+		log.Debug("ProxyNode indexServiceClient init failed ", zap.Error(err))
 		return err
 	}
 	s.proxynode.SetIndexServiceClient(s.indexServiceClient)
 	log.Debug("set index service client ...")
 
 	queryServiceAddr := Params.QueryServiceAddress
-	log.Debug("proxynode", zap.String("query server address", queryServiceAddr))
+	log.Debug("ProxyNode", zap.String("query server address", queryServiceAddr))
 	s.queryServiceClient, err = grpcqueryserviceclient.NewClient(ctx, queryServiceAddr, proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, timeout)
 	if err != nil {
+		log.Debug("ProxyNode new queryServiceClient failed ", zap.Error(err))
 		return err
 	}
 	err = s.queryServiceClient.Init()
 	if err != nil {
+		log.Debug("ProxyNode queryServiceClient Init failed ", zap.Error(err))
 		return err
 	}
 	s.proxynode.SetQueryServiceClient(s.queryServiceClient)
 	log.Debug("set query service client ...")
 
 	s.proxynode.UpdateStateCode(internalpb.StateCode_Initializing)
-	log.Debug("proxynode",
-		zap.Any("state of proxynode", internalpb.StateCode_Initializing))
+	log.Debug("ProxyNode state",
+		zap.Any("State", internalpb.StateCode_Initializing))
 
 	if err := s.proxynode.Init(); err != nil {
-		log.Debug("proxynode", zap.String("proxynode init error", err.Error()))
+		log.Debug("ProxyNode init failed", zap.Error(err))
 		return err
 	}
 
@@ -384,6 +384,10 @@ func (s *Server) Retrieve(ctx context.Context, request *milvuspb.RetrieveRequest
 
 func (s *Server) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*commonpb.Status, error) {
 	return s.proxynode.Flush(ctx, request)
+}
+
+func (s *Server) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+	return s.proxynode.Query(ctx, request)
 }
 
 func (s *Server) GetDdChannel(ctx context.Context, request *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {

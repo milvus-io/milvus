@@ -9,6 +9,9 @@ default_drop_interval = 3
 default_dim = 128
 default_nb = 1200
 default_top_k = 10
+default_nq = 2
+default_limit = 10
+default_search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
 max_top_k = 16384
 max_partition_num = 4096  # 256
 default_segment_row_limit = 1000
@@ -29,6 +32,8 @@ int_field_desc = "int64 type field"
 float_field_desc = "float type field"
 float_vec_field_desc = "float vector type field"
 binary_vec_field_desc = "binary vector type field"
+
+Not_Exist = "Not_Exist"
 
 
 """" List of parameters used to pass """
@@ -68,6 +73,8 @@ structure_metrics = ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
 
 class CheckParams:
     """ The name of the method used to check the result """
+    false = False
+    err_res = "error_response"
     cname_param_check = "collection_name_param_check"
     pname_param_check = "partition_name_param_check"
     list_count = "check_list_count"

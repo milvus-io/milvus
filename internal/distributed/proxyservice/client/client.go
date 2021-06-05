@@ -42,9 +42,11 @@ func NewClient(address string) *Client {
 
 func (c *Client) Init() error {
 	tracer := opentracing.GlobalTracer()
-	log.Debug("proxyservice connect ", zap.String("address", c.address))
+	log.Debug("ProxyServiceClient try connect ", zap.String("address", c.address))
 	connectGrpcFunc := func() error {
-		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
+		ctx, cancelFunc := context.WithTimeout(c.ctx, time.Second*3)
+		defer cancelFunc()
+		conn, err := grpc.DialContext(ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(
@@ -57,8 +59,10 @@ func (c *Client) Init() error {
 	}
 	err := retry.Retry(100000, time.Millisecond*200, connectGrpcFunc)
 	if err != nil {
+		log.Debug("ProxyServiceClient try connect failed", zap.Error(err))
 		return err
 	}
+	log.Debug("ProxyServiceClient try connect success")
 	return nil
 }
 

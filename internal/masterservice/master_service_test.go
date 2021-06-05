@@ -199,11 +199,58 @@ func consumeMsgChan(timeout time.Duration, targetChan <-chan *msgstream.MsgPack)
 	}
 }
 
+func GenSegInfoMsgPack(seg *datapb.SegmentInfo) *msgstream.MsgPack {
+	msgPack := msgstream.MsgPack{}
+	baseMsg := msgstream.BaseMsg{
+		BeginTimestamp: 0,
+		EndTimestamp:   0,
+		HashValues:     []uint32{0},
+	}
+	segMsg := &msgstream.SegmentInfoMsg{
+		BaseMsg: baseMsg,
+		SegmentMsg: datapb.SegmentMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_SegmentInfo,
+				MsgID:     0,
+				Timestamp: 0,
+				SourceID:  0,
+			},
+			Segment: seg,
+		},
+	}
+	msgPack.Msgs = append(msgPack.Msgs, segMsg)
+	return &msgPack
+}
+
+func GenFlushedSegMsgPack(segID typeutil.UniqueID) *msgstream.MsgPack {
+	msgPack := msgstream.MsgPack{}
+	baseMsg := msgstream.BaseMsg{
+		BeginTimestamp: 0,
+		EndTimestamp:   0,
+		HashValues:     []uint32{0},
+	}
+	segMsg := &msgstream.FlushCompletedMsg{
+		BaseMsg: baseMsg,
+		SegmentFlushCompletedMsg: internalpb.SegmentFlushCompletedMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_SegmentFlushDone,
+				MsgID:     0,
+				Timestamp: 0,
+				SourceID:  0,
+			},
+			SegmentID: segID,
+		},
+	}
+	msgPack.Msgs = append(msgPack.Msgs, segMsg)
+	return &msgPack
+}
+
 func TestMasterService(t *testing.T) {
 	const (
 		dbName   = "testDb"
 		collName = "testColl"
 		partName = "testPartition"
+		segID    = 1001
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -215,15 +262,15 @@ func TestMasterService(t *testing.T) {
 	assert.Nil(t, err)
 	randVal := rand.Int()
 
-	err = core.Register()
-	assert.Nil(t, err)
-
 	Params.TimeTickChannel = fmt.Sprintf("master-time-tick-%d", randVal)
 	Params.DdChannel = fmt.Sprintf("master-dd-%d", randVal)
 	Params.StatisticsChannel = fmt.Sprintf("master-statistics-%d", randVal)
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+
+	err = core.Register()
+	assert.Nil(t, err)
 
 	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second})
 	assert.Nil(t, err)
@@ -278,15 +325,9 @@ func TestMasterService(t *testing.T) {
 	err = core.SetQueryService(qm)
 	assert.Nil(t, err)
 
-	err = core.Init()
-	assert.Nil(t, err)
-
-	err = core.Start()
-	assert.Nil(t, err)
-
 	m := map[string]interface{}{
-		"receiveBufSize": 1024,
 		"pulsarAddress":  Params.PulsarAddress,
+		"receiveBufSize": 1024,
 		"pulsarBufSize":  1024}
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
@@ -304,6 +345,26 @@ func TestMasterService(t *testing.T) {
 	ddStream, _ := msFactory.NewMsgStream(ctx)
 	ddStream.AsConsumer([]string{Params.DdChannel}, Params.MsgChannelSubName)
 	ddStream.Start()
+
+	// test dataServiceSegmentStream seek
+	dataNodeSubName := Params.MsgChannelSubName + "dn"
+	flushedSegStream, _ := msFactory.NewMsgStream(ctx)
+	flushedSegStream.AsConsumer([]string{Params.DataServiceSegmentChannel}, dataNodeSubName)
+	flushedSegStream.Start()
+	msgPack := GenFlushedSegMsgPack(9999)
+	err = dataServiceSegmentStream.Produce(msgPack)
+	assert.Nil(t, err)
+	flushedSegMsgPack := flushedSegStream.Consume()
+	flushedSegStream.Close()
+	flushedSegPosStr, _ := EncodeMsgPositions(flushedSegMsgPack.EndPositions)
+	_, err = etcdCli.Put(ctx, path.Join(Params.MetaRootPath, FlushedSegMsgEndPosPrefix), flushedSegPosStr)
+	assert.Nil(t, err)
+
+	err = core.Init()
+	assert.Nil(t, err)
+
+	err = core.Start()
+	assert.Nil(t, err)
 
 	time.Sleep(time.Second)
 
@@ -458,7 +519,7 @@ func TestMasterService(t *testing.T) {
 		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
 		assert.Nil(t, err)
 		var ddOp DdOperation
-		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
+		err = DecodeDdOperation(ddOpStr, &ddOp)
 		assert.Nil(t, err)
 		assert.Equal(t, CreateCollectionDDType, ddOp.Type)
 
@@ -602,7 +663,7 @@ func TestMasterService(t *testing.T) {
 		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
 		assert.Nil(t, err)
 		var ddOp DdOperation
-		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
+		err = DecodeDdOperation(ddOpStr, &ddOp)
 		assert.Nil(t, err)
 		assert.Equal(t, CreatePartitionDDType, ddOp.Type)
 
@@ -665,27 +726,8 @@ func TestMasterService(t *testing.T) {
 			CollectionID: coll.ID,
 			PartitionID:  part.PartitionID,
 		}
-
-		msgPack := msgstream.MsgPack{}
-		baseMsg := msgstream.BaseMsg{
-			BeginTimestamp: 0,
-			EndTimestamp:   0,
-			HashValues:     []uint32{0},
-		}
-		segMsg := &msgstream.SegmentInfoMsg{
-			BaseMsg: baseMsg,
-			SegmentMsg: datapb.SegmentMsg{
-				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_SegmentInfo,
-					MsgID:     0,
-					Timestamp: 0,
-					SourceID:  0,
-				},
-				Segment: seg,
-			},
-		}
-		msgPack.Msgs = append(msgPack.Msgs, segMsg)
-		err = dataServiceSegmentStream.Broadcast(&msgPack)
+		segInfoMsgPack := GenSegInfoMsgPack(seg)
+		err = dataServiceSegmentStream.Broadcast(segInfoMsgPack)
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
 
@@ -821,31 +863,12 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, 1, len(part.SegmentIDs))
 
 		seg := &datapb.SegmentInfo{
-			ID:           1001,
+			ID:           segID,
 			CollectionID: coll.ID,
 			PartitionID:  part.PartitionID,
 		}
-
-		msgPack := msgstream.MsgPack{}
-		baseMsg := msgstream.BaseMsg{
-			BeginTimestamp: 0,
-			EndTimestamp:   0,
-			HashValues:     []uint32{0},
-		}
-		segMsg := &msgstream.SegmentInfoMsg{
-			BaseMsg: baseMsg,
-			SegmentMsg: datapb.SegmentMsg{
-				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_SegmentInfo,
-					MsgID:     0,
-					Timestamp: 0,
-					SourceID:  0,
-				},
-				Segment: seg,
-			},
-		}
-		msgPack.Msgs = append(msgPack.Msgs, segMsg)
-		err = dataServiceSegmentStream.Broadcast(&msgPack)
+		segInfoMsgPack := GenSegInfoMsgPack(seg)
+		err = dataServiceSegmentStream.Broadcast(segInfoMsgPack)
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
 
@@ -853,20 +876,8 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, 2, len(part.SegmentIDs))
 
-		flushMsg := &msgstream.FlushCompletedMsg{
-			BaseMsg: baseMsg,
-			SegmentFlushCompletedMsg: internalpb.SegmentFlushCompletedMsg{
-				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_SegmentFlushDone,
-					MsgID:     0,
-					Timestamp: 0,
-					SourceID:  0,
-				},
-				SegmentID: 1001,
-			},
-		}
-		msgPack.Msgs = []msgstream.TsMsg{flushMsg}
-		err = dataServiceSegmentStream.Broadcast(&msgPack)
+		flushedSegMsgPack := GenFlushedSegMsgPack(segID)
+		err = dataServiceSegmentStream.Broadcast(flushedSegMsgPack)
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
 
@@ -1007,7 +1018,7 @@ func TestMasterService(t *testing.T) {
 		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
 		assert.Nil(t, err)
 		var ddOp DdOperation
-		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
+		err = DecodeDdOperation(ddOpStr, &ddOp)
 		assert.Nil(t, err)
 		assert.Equal(t, DropPartitionDDType, ddOp.Type)
 
@@ -1081,7 +1092,7 @@ func TestMasterService(t *testing.T) {
 		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
 		assert.Nil(t, err)
 		var ddOp DdOperation
-		err = json.Unmarshal([]byte(ddOpStr), &ddOp)
+		err = DecodeDdOperation(ddOpStr, &ddOp)
 		assert.Nil(t, err)
 		assert.Equal(t, DropCollectionDDType, ddOp.Type)
 
@@ -1736,15 +1747,15 @@ func TestMasterService2(t *testing.T) {
 	assert.Nil(t, err)
 	randVal := rand.Int()
 
-	err = core.Register()
-	assert.Nil(t, err)
-
 	Params.TimeTickChannel = fmt.Sprintf("master-time-tick-%d", randVal)
 	Params.DdChannel = fmt.Sprintf("master-dd-%d", randVal)
 	Params.StatisticsChannel = fmt.Sprintf("master-statistics-%d", randVal)
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+
+	err = core.Register()
+	assert.Nil(t, err)
 
 	pm := &proxyMock{
 		randVal: randVal,

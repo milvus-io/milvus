@@ -15,11 +15,12 @@ import "C"
 import (
 	"context"
 	"errors"
+	"strconv"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"go.uber.org/zap"
-	"strconv"
 )
 
 type searchService struct {
@@ -28,6 +29,7 @@ type searchService struct {
 
 	historicalReplica ReplicaInterface
 	streamingReplica  ReplicaInterface
+	tSafeReplica      TSafeReplicaInterface
 
 	searchMsgStream       msgstream.MsgStream
 	searchResultMsgStream msgstream.MsgStream
@@ -40,12 +42,15 @@ type searchService struct {
 func newSearchService(ctx context.Context,
 	historicalReplica ReplicaInterface,
 	streamingReplica ReplicaInterface,
+	tSafeReplica TSafeReplicaInterface,
 	factory msgstream.Factory) *searchService {
+
 	searchStream, _ := factory.NewQueryMsgStream(ctx)
 	searchResultStream, _ := factory.NewQueryMsgStream(ctx)
+	log.Debug("newSearchService", zap.Any("SearchChannelNames", Params.SearchChannelNames), zap.Any("SearchResultChannels", Params.SearchResultChannelNames))
 
 	if len(Params.SearchChannelNames) > 0 && len(Params.SearchResultChannelNames) > 0 {
-		// query node need to consumer search channels and produce search result channels when init.
+		// query node need to consume search channels and produce search result channels when init.
 		consumeChannels := Params.SearchChannelNames
 		consumeSubName := Params.MsgChannelSubName
 		searchStream.AsConsumer(consumeChannels, consumeSubName)
@@ -62,6 +67,7 @@ func newSearchService(ctx context.Context,
 
 		historicalReplica: historicalReplica,
 		streamingReplica:  streamingReplica,
+		tSafeReplica:      tSafeReplica,
 
 		searchMsgStream:       searchStream,
 		searchResultMsgStream: searchResultStream,
@@ -97,14 +103,24 @@ func (s *searchService) consumeSearch() {
 		default:
 			msgPack := s.searchMsgStream.Consume()
 			if msgPack == nil || len(msgPack.Msgs) <= 0 {
+				msgPackNil := msgPack == nil
+				msgPackEmpty := true
+				if msgPack != nil {
+					msgPackEmpty = len(msgPack.Msgs) <= 0
+				}
+				log.Debug("consume search message failed", zap.Any("msgPack is Nil", msgPackNil),
+					zap.Any("msgPackEmpty", msgPackEmpty))
+
 				continue
 			}
 			for _, msg := range msgPack.Msgs {
-				log.Debug("consume search message", zap.Int64("msgID", msg.ID()))
 				sm, ok := msg.(*msgstream.SearchMsg)
 				if !ok {
 					continue
 				}
+				log.Debug("consume search message",
+					zap.Int64("msgID", msg.ID()),
+					zap.Any("collectionID", sm.CollectionID))
 				sp, ctx := trace.StartSpanFromContext(sm.TraceCtx())
 				sm.SetTraceCtx(ctx)
 				err := s.collectionCheck(sm.CollectionID)
@@ -144,14 +160,26 @@ func (s *searchService) close() {
 
 func (s *searchService) startSearchCollection(collectionID UniqueID) {
 	ctx1, cancel := context.WithCancel(s.ctx)
-	sc := newSearchCollection(ctx1, cancel, collectionID, s.historicalReplica, s.streamingReplica, s.searchResultMsgStream)
+	sc := newSearchCollection(ctx1,
+		cancel,
+		collectionID,
+		s.historicalReplica,
+		s.streamingReplica,
+		s.tSafeReplica,
+		s.searchResultMsgStream)
 	s.searchCollections[collectionID] = sc
 	sc.start()
 }
 
 func (s *searchService) startEmptySearchCollection() {
 	ctx1, cancel := context.WithCancel(s.ctx)
-	sc := newSearchCollection(ctx1, cancel, UniqueID(-1), s.historicalReplica, s.streamingReplica, s.searchResultMsgStream)
+	sc := newSearchCollection(ctx1,
+		cancel,
+		UniqueID(-1),
+		s.historicalReplica,
+		s.streamingReplica,
+		s.tSafeReplica,
+		s.searchResultMsgStream)
 	s.emptySearchCollection = sc
 	sc.start()
 }

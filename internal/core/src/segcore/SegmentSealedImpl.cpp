@@ -13,6 +13,7 @@
 #include "query/SearchOnSealed.h"
 #include "query/ScalarIndex.h"
 #include "query/SearchBruteForce.h"
+
 namespace milvus::segcore {
 
 static inline void
@@ -57,6 +58,14 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
     auto field_id = FieldId(info.field_id);
     Assert(info.blob);
     Assert(info.row_count > 0);
+    auto create_index = [](const int64_t* data, int64_t size) {
+        Assert(size);
+        auto pk_index = std::make_unique<ScalarIndexVector>();
+        pk_index->append_data(data, size, SegOffset(0));
+        pk_index->build();
+        return pk_index;
+    };
+
     if (SystemProperty::Instance().IsSystem(field_id)) {
         auto system_field_type = SystemProperty::Instance().GetSystemFieldType(field_id);
         Assert(system_field_type == SystemFieldType::RowId);
@@ -65,14 +74,15 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
         // prepare data
         aligned_vector<idx_t> vec_data(info.row_count);
         std::copy_n(src_ptr, info.row_count, vec_data.data());
+        auto pk_index = create_index(vec_data.data(), vec_data.size());
 
         // write data under lock
         std::unique_lock lck(mutex_);
         update_row_count(info.row_count);
         AssertInfo(row_ids_.empty(), "already exists");
         row_ids_ = std::move(vec_data);
+        primary_key_index_ = std::move(pk_index);
         ++system_ready_count_;
-
     } else {
         // prepare data
         auto field_offset = schema_->get_offset(field_id);
@@ -90,6 +100,11 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
             index = query::generate_scalar_index(span, field_meta.get_data_type());
         }
 
+        std::unique_ptr<ScalarIndexBase> pk_index_;
+        if (schema_->get_primary_key_offset() == field_offset) {
+            pk_index_ = create_index((const int64_t*)vec_data.data(), info.row_count);
+        }
+
         // write data under lock
         std::unique_lock lck(mutex_);
         update_row_count(info.row_count);
@@ -102,6 +117,9 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
             AssertInfo(!scalar_indexings_[field_offset.get()], "scalar indexing not cleared");
             field_datas_[field_offset.get()] = std::move(vec_data);
             scalar_indexings_[field_offset.get()] = std::move(index);
+        }
+        if (schema_->get_primary_key_offset() == field_offset) {
+            primary_key_index_ = std::move(pk_index_);
         }
 
         set_bit(field_data_ready_bitset_, field_offset, true);
@@ -135,6 +153,7 @@ SegmentSealedImpl::chunk_data_impl(FieldOffset field_offset, int64_t chunk_id) c
 
 const knowhere::Index*
 SegmentSealedImpl::chunk_index_impl(FieldOffset field_offset, int64_t chunk_id) const {
+    Assert(chunk_id == 0);
     // TODO: support scalar index
     auto ptr = scalar_indexings_[field_offset.get()].get();
     Assert(ptr);
@@ -305,7 +324,7 @@ SegmentSealedImpl::bulk_subscript_impl(
         auto offset = seg_offsets[i];
         auto dst = dst_vec + i * element_sizeof;
         const char* src;
-        if (offset != 0) {
+        if (offset != -1) {
             src = src_vec + element_sizeof * offset;
         } else {
             src = none.data();
@@ -381,6 +400,14 @@ SegmentSealedImpl::HasFieldData(FieldId field_id) const {
         auto field_offset = schema_->get_offset(field_id);
         return get_bit(field_data_ready_bitset_, field_offset);
     }
+}
+
+std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+SegmentSealedImpl::search_ids(const IdArray& id_array, Timestamp timestamp) const {
+    AssertInfo(id_array.has_int_id(), "string ids are not implemented");
+    auto arr = id_array.int_id();
+    Assert(primary_key_index_);
+    return primary_key_index_->do_search_ids(id_array);
 }
 
 SegmentSealedPtr

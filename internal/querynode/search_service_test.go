@@ -141,7 +141,11 @@ func TestSearch_Search(t *testing.T) {
 	assert.NoError(t, err)
 
 	// start dataSync
-	newDS := newDataSyncService(node.queryNodeLoopCtx, node.streaming.replica, msFactory, collectionID)
+	newDS := newDataSyncService(node.queryNodeLoopCtx,
+		node.streaming.replica,
+		node.streaming.tSafeReplica,
+		msFactory,
+		collectionID)
 	err = node.streaming.addDataSyncService(collectionID, newDS)
 	assert.NoError(t, err)
 	ds, err := node.streaming.getDataSyncService(collectionID)
@@ -149,13 +153,17 @@ func TestSearch_Search(t *testing.T) {
 	go ds.start()
 
 	// start search service
-	node.searchService = newSearchService(node.queryNodeLoopCtx, node.historical.replica, node.streaming.replica, msFactory)
+	node.searchService = newSearchService(node.queryNodeLoopCtx,
+		node.historical.replica,
+		node.streaming.replica,
+		node.streaming.tSafeReplica,
+		msFactory)
 	go node.searchService.start()
 	node.searchService.startSearchCollection(collectionID)
 
-	tSafe := node.streaming.replica.getTSafe(collectionID)
-	assert.NotNil(t, tSafe)
-	tSafe.set(1000)
+	// TODO: remove and use vChannel
+	vChannel := collectionIDToChannel(collectionID)
+	node.streaming.tSafeReplica.setTSafe(vChannel, 1000)
 
 	// load segment
 	err = node.historical.replica.addSegment(segmentID, defaultPartitionID, collectionID, segmentTypeSealed)
@@ -189,7 +197,11 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	assert.NoError(t, err)
 
 	// start dataSync
-	newDS := newDataSyncService(node.queryNodeLoopCtx, node.streaming.replica, msFactory, collectionID)
+	newDS := newDataSyncService(node.queryNodeLoopCtx,
+		node.streaming.replica,
+		node.streaming.tSafeReplica,
+		msFactory,
+		collectionID)
 	err = node.streaming.addDataSyncService(collectionID, newDS)
 	assert.NoError(t, err)
 	ds, err := node.streaming.getDataSyncService(collectionID)
@@ -197,13 +209,17 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	go ds.start()
 
 	// start search service
-	node.searchService = newSearchService(node.queryNodeLoopCtx, node.streaming.replica, node.streaming.replica, msFactory)
+	node.searchService = newSearchService(node.queryNodeLoopCtx,
+		node.streaming.replica,
+		node.streaming.replica,
+		node.streaming.tSafeReplica,
+		msFactory)
 	go node.searchService.start()
 	node.searchService.startSearchCollection(collectionID)
 
-	tSafe := node.streaming.replica.getTSafe(collectionID)
-	assert.NotNil(t, tSafe)
-	tSafe.set(1000)
+	// TODO: remove and use vChannel
+	vChannel := collectionIDToChannel(collectionID)
+	node.streaming.tSafeReplica.setTSafe(vChannel, 1000)
 
 	// load segments
 	err = node.historical.replica.addSegment(segmentID1, defaultPartitionID, collectionID, segmentTypeSealed)

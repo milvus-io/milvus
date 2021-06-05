@@ -19,6 +19,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -67,10 +68,10 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	defer s.loopWg.Done()
 
-	log.Debug("indexnode", zap.Int("network port: ", grpcPort))
+	log.Debug("IndexNode", zap.Int("network port: ", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
-		log.Warn("indexnode", zap.String("GrpcServer:failed to listen", err.Error()))
+		log.Warn("IndexNode", zap.String("GrpcServer:failed to listen", err.Error()))
 		s.grpcErrChan <- err
 		return
 	}
@@ -118,15 +119,17 @@ func (s *Server) init() error {
 		if err != nil {
 			err = s.Stop()
 			if err != nil {
-				log.Debug("Init failed, and Stop failed")
+				log.Debug("IndexNode Init failed, and Stop failed")
 			}
 		}
 	}()
 
 	err = s.indexnode.Register()
 	if err != nil {
+		log.Debug("IndexNode Register etcd failed", zap.Error(err))
 		return err
 	}
+	log.Debug("IndexNode Register etcd success")
 
 	s.loopWg.Add(1)
 	go s.startGrpcLoop(Params.Port)
@@ -137,17 +140,19 @@ func (s *Server) init() error {
 	}
 
 	indexServiceAddr := Params.IndexServerAddress
-	s.indexServiceClient = grpcindexserviceclient.NewClient(indexServiceAddr, indexnode.Params.MetaRootPath, []string{indexnode.Params.EtcdAddress}, 10)
+	s.indexServiceClient = grpcindexserviceclient.NewClient(indexServiceAddr, indexnode.Params.MetaRootPath, []string{indexnode.Params.EtcdAddress}, 10*time.Second)
 	err = s.indexServiceClient.Init()
 	if err != nil {
+		log.Debug("IndexNode indexSerticeClient init failed", zap.Error(err))
 		return err
 	}
 	s.indexnode.SetIndexServiceClient(s.indexServiceClient)
 
 	s.indexnode.UpdateStateCode(internalpb.StateCode_Initializing)
-
+	log.Debug("IndexNode", zap.Any("State", internalpb.StateCode_Initializing))
 	err = s.indexnode.Init()
 	if err != nil {
+		log.Debug("IndexNode  Init failed", zap.Error(err))
 		return err
 	}
 	return nil

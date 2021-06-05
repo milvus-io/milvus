@@ -15,8 +15,12 @@ import (
 	"context"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"math/rand"
+	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -67,6 +71,7 @@ func (qs *QueryService) Register() error {
 }
 
 func (qs *QueryService) Init() error {
+
 	return nil
 }
 
@@ -93,6 +98,19 @@ func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryServ
 	rand.Seed(time.Now().UnixNano())
 	//cluster := newQueryNodeCluster()
 	//queryChannels := make([]*queryChannelInfo, 0)
+	nodes := make(map[int64]*queryNodeInfo)
+	queryChannels := make([]*queryChannelInfo, 0)
+	channelID := len(queryChannels)
+	searchPrefix := Params.SearchChannelPrefix
+	searchResultPrefix := Params.SearchResultChannelPrefix
+	allocatedQueryChannel := searchPrefix + "-" + strconv.FormatInt(int64(channelID), 10)
+	allocatedQueryResultChannel := searchResultPrefix + "-" + strconv.FormatInt(int64(channelID), 10)
+
+	queryChannels = append(queryChannels, &queryChannelInfo{
+		requestChannel:  allocatedQueryChannel,
+		responseChannel: allocatedQueryResultChannel,
+	})
+
 	ctx1, cancel := context.WithCancel(ctx)
 	meta := newMeta()
 	//scheduler := NewTaskScheduler(ctx1, meta)
@@ -111,6 +129,7 @@ func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryServ
 	service.cluster = newQueryNodeCluster(meta)
 
 	service.UpdateStateCode(internalpb.StateCode_Abnormal)
+	log.Debug("QueryService", zap.Any("queryChannels", queryChannels))
 	return service, nil
 }
 

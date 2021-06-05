@@ -51,8 +51,10 @@ func NewClient(ctx context.Context, address string, timeout time.Duration) *Clie
 func (c *Client) Init() error {
 	tracer := opentracing.GlobalTracer()
 	connectGrpcFunc := func() error {
-		log.Debug("proxynode connect ", zap.String("address", c.address))
-		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
+		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
+		defer cancelFunc()
+		log.Debug("ProxyNodeClient try connect ", zap.String("address", c.address))
+		conn, err := grpc.DialContext(ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(
@@ -65,8 +67,10 @@ func (c *Client) Init() error {
 	}
 	err := retry.Retry(c.reconnTry, time.Millisecond*200, connectGrpcFunc)
 	if err != nil {
+		log.Debug("ProxyNodeClient connect failed", zap.Error(err))
 		return err
 	}
+	log.Debug("ProxyNodeClient connect success", zap.String("address", c.address))
 	c.grpcClient = proxypb.NewProxyNodeServiceClient(c.conn)
 	return nil
 }
@@ -74,8 +78,10 @@ func (c *Client) Init() error {
 func (c *Client) reconnect() error {
 	tracer := opentracing.GlobalTracer()
 	connectGrpcFunc := func() error {
-		log.Debug("ProxyNode connect ", zap.String("address", c.address))
-		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
+		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
+		defer cancelFunc()
+		log.Debug("ProxyNodeClient try reconnect ", zap.String("address", c.address))
+		conn, err := grpc.DialContext(ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(
@@ -89,8 +95,10 @@ func (c *Client) reconnect() error {
 
 	err := retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
 	if err != nil {
+		log.Debug("ProxyNodeClient try reconnect failed", zap.Error(err))
 		return err
 	}
+	log.Debug("ProxyNodeClient reconnect success")
 	c.grpcClient = proxypb.NewProxyNodeServiceClient(c.conn)
 	return nil
 }

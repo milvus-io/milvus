@@ -93,33 +93,42 @@ func (s *Server) init() error {
 
 	err := s.dataService.Register()
 	if err != nil {
+		log.Debug("DataService Register etcd failed", zap.Error(err))
 		return err
 	}
+	log.Debug("DataService Register etcd success")
 
 	err = s.startGrpc()
 	if err != nil {
+		log.Debug("DataService startGrpc failed", zap.Error(err))
 		return err
 	}
 
 	s.dataService.UpdateStateCode(internalpb.StateCode_Initializing)
+	log.Debug("DataService", zap.Any("State", internalpb.StateCode_Initializing))
 
 	if s.newMasterServiceClient != nil {
-		log.Debug("master service", zap.String("address", Params.MasterAddress))
+		log.Debug("DataService try to new master service client", zap.String("address", Params.MasterAddress))
 		masterServiceClient, err := s.newMasterServiceClient(Params.MasterAddress)
 		if err != nil {
+			log.Debug("DataService new master service client failed", zap.Error(err))
 			panic(err)
 		}
-		log.Debug("master service client created")
 
 		if err = masterServiceClient.Init(); err != nil {
+			log.Debug("DataService masterServiceClient Init failed", zap.Error(err))
 			panic(err)
 		}
 		if err = masterServiceClient.Start(); err != nil {
+			log.Debug("DataService masterServiceClient Start failed", zap.Error(err))
 			panic(err)
 		}
+		log.Debug("DataService start to wait for MasterService ready")
 		if err = funcutil.WaitForComponentInitOrHealthy(ctx, masterServiceClient, "MasterService", 1000000, 200*time.Millisecond); err != nil {
+			log.Debug("DataService wait for MasterService Ready failed", zap.Error(err))
 			panic(err)
 		}
+		log.Debug("DataService report MasterService is ready")
 		s.dataService.SetMasterClient(masterServiceClient)
 	}
 
@@ -200,7 +209,7 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Debug("dataservice init done ...")
+	log.Debug("DataService init done ...")
 
 	if err := s.start(); err != nil {
 		return err

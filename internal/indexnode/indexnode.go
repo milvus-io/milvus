@@ -17,6 +17,7 @@ import (
 	"io"
 	"math/rand"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/util/retry"
@@ -38,15 +39,11 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-const (
-	reqTimeoutInterval = time.Second * 10
-)
-
 type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
 type IndexNode struct {
-	stateCode internalpb.StateCode
+	stateCode atomic.Value
 
 	loopCtx    context.Context
 	loopCancel func()
@@ -102,36 +99,44 @@ func (i *IndexNode) Init() error {
 	}
 	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
 	if err != nil {
+		log.Debug("IndexNode try connect etcd failed", zap.Error(err))
 		return err
 	}
+	log.Debug("IndexNode try connect etcd success")
+	log.Debug("IndexNode start to wait for IndexService ready")
 
 	err = funcutil.WaitForComponentHealthy(ctx, i.serviceClient, "IndexService", 1000000, time.Millisecond*200)
 	if err != nil {
+		log.Debug("IndexNode wait for IndexService ready failed", zap.Error(err))
 		return err
 	}
+	log.Debug("IndexNode report IndexService is ready")
 	request := &indexpb.RegisterNodeRequest{
 		Base: nil,
 		Address: &commonpb.Address{
 			Ip:   Params.IP,
 			Port: int64(Params.Port),
 		},
-		ServerID: i.session.ServerID,
+		NodeID: i.session.ServerID,
 	}
 
 	resp, err2 := i.serviceClient.RegisterNode(ctx, request)
 	if err2 != nil {
-		log.Debug("indexnode", zap.String("Index NodeImpl connect to IndexService failed", err.Error()))
+		log.Debug("IndexNode RegisterNode failed", zap.Error(err2))
 		return err2
 	}
 
 	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		log.Debug("IndexNode RegisterNode failed", zap.String("Reason", resp.Status.Reason))
 		return errors.New(resp.Status.Reason)
 	}
 
 	err = Params.LoadConfigFromInitParams(resp.InitParams)
 	if err != nil {
+		log.Debug("IndexNode LoadConfigFromInitParams failed", zap.Error(err))
 		return err
 	}
+	log.Debug("IndexNode LoadConfigFromInitParams success")
 
 	option := &miniokv.Option{
 		Address:           Params.MinIOAddress,
@@ -143,11 +148,13 @@ func (i *IndexNode) Init() error {
 	}
 	i.kv, err = miniokv.NewMinIOKV(i.loopCtx, option)
 	if err != nil {
+		log.Debug("IndexNode NewMinIOKV failed", zap.Error(err))
 		return err
 	}
+	log.Debug("IndexNode NewMinIOKV success")
 
 	i.UpdateStateCode(internalpb.StateCode_Healthy)
-
+	log.Debug("IndexNode", zap.Any("State", i.stateCode.Load()))
 	return nil
 }
 
@@ -161,7 +168,7 @@ func (i *IndexNode) Start() error {
 	return nil
 }
 
-// Close closes the server.
+// Stop Close closes the server.
 func (i *IndexNode) Stop() error {
 	i.loopCancel()
 	if i.sched != nil {
@@ -175,7 +182,7 @@ func (i *IndexNode) Stop() error {
 }
 
 func (i *IndexNode) UpdateStateCode(code internalpb.StateCode) {
-	i.stateCode = code
+	i.stateCode.Store(code)
 }
 
 func (i *IndexNode) SetIndexServiceClient(serviceClient types.IndexService) {
@@ -183,7 +190,7 @@ func (i *IndexNode) SetIndexServiceClient(serviceClient types.IndexService) {
 }
 
 func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
-	log.Debug("indexnode building index ...",
+	log.Debug("IndexNode building index ...",
 		zap.Int64("IndexBuildID", request.IndexBuildID),
 		zap.String("Indexname", request.IndexName),
 		zap.Int64("IndexID", request.IndexID),
@@ -231,11 +238,11 @@ func (i *IndexNode) AddCloseCallback(callbacks ...func()) {
 }
 
 func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	log.Debug("get indexnode components states ...")
+	log.Debug("get IndexNode components states ...")
 	stateInfo := &internalpb.ComponentInfo{
 		NodeID:    Params.NodeID,
 		Role:      "NodeImpl",
-		StateCode: i.stateCode,
+		StateCode: i.stateCode.Load().(internalpb.StateCode),
 	}
 
 	ret := &internalpb.ComponentStates{
@@ -246,7 +253,7 @@ func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb.Compone
 		},
 	}
 
-	log.Debug("indexnode compoents states",
+	log.Debug("IndexNode compoents states",
 		zap.Any("State", ret.State),
 		zap.Any("Status", ret.Status),
 		zap.Any("SubcomponentStates", ret.SubcomponentStates))

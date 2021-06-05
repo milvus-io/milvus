@@ -16,10 +16,12 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
@@ -170,7 +172,12 @@ func (t *timetickSync) SendChannelTimeTick(chanName string, ts typeutil.Timestam
 		stream.AsProducer([]string{chanName})
 		t.chanStream[chanName] = stream
 	}
-	return stream.Broadcast(&msgPack)
+
+	err = stream.Broadcast(&msgPack)
+	if err == nil {
+		metrics.MasterInsertChannelTimeTick.WithLabelValues(chanName).Set(float64(tsoutil.Mod24H(ts)))
+	}
+	return err
 }
 
 // GetProxyNodeNum return the num of detected proxy node
