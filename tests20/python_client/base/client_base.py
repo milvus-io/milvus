@@ -14,34 +14,6 @@ from common import common_func as cf
 from common import common_type as ct
 
 
-def request_catch():
-    def wrapper(func):
-        def inner_wrapper(*args, **kwargs):
-            try:
-                res = func(*args, **kwargs)
-                log.debug("(func_res) Response : %s " % str(res))
-                return res, True
-            except Exception as e:
-                log.error("[ClientRequest API Exception]%s: %s" % (str(func), str(e)))
-                return e, False
-        return inner_wrapper
-    return wrapper
-
-
-@request_catch()
-def func_req(_list, **kwargs):
-    if isinstance(_list, list):
-        func = _list[0]
-        if callable(func):
-            arg = []
-            if len(_list) > 1:
-                for a in _list[1:]:
-                    arg.append(a)
-            log.debug("(func_req)[%s] Parameters ars arg: %s, kwargs: %s" % (str(func), str(arg), str(kwargs)))
-            return func(*arg, **kwargs)
-    return False, False
-
-
 class ParamInfo:
     def __init__(self):
         self.param_host = ""
@@ -113,7 +85,7 @@ class Base:
         param_info.prepare_param_info(host, port, handler)
 
 
-class ApiReq(Base):
+class TestcaseBase(Base):
     """
     Additional methods;
     Public methods that can be used to add cases.
@@ -130,7 +102,7 @@ class ApiReq(Base):
     def _connect(self):
         """ Add an connection and create the connect """
         self.connection_wrap.add_connection(default={"host": param_info.param_host, "port": param_info.param_port})
-        res = self.connection_wrap.connect(alias='default')
+        res, _ = self.connection_wrap.connect(alias='default')
         return res
 
     def _collection(self, name=None, data=None, schema=None, check_res=None, c_object=None, **kwargs):
@@ -170,4 +142,3 @@ class ApiReq(Base):
             self.partition_mul += (par, )
         log.debug("[_partition_object_multiple] All objects of partition are : %s" % str(self.partition_mul))
         return self.partition_mul
-

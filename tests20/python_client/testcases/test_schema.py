@@ -1,10 +1,10 @@
 import pytest
-from base.client_request import ApiReq
+from base.client_base import TestcaseBase
 from utils.util_log import test_log as log
 from common.common_type import *
 
 
-class TestSchema(ApiReq):
+class TestSchema(TestcaseBase):
     """ Test case of schema interface """
 
     @pytest.mark.tags(CaseLabel.L3)

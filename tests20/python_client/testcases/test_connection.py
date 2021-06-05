@@ -1,12 +1,12 @@
 import pytest
 
 from pymilvus_orm.default_config import DefaultConfig
-from base.client_request import ApiReq
+from base.client_base import TestcaseBase
 from utils.util_log import test_log as log
 from common.common_type import *
 
 
-class TestConnectionParams(ApiReq):
+class TestConnectionParams(TestcaseBase):
     """
     Test case of connections interface
     The author ： Ting.Wang
@@ -87,7 +87,7 @@ class TestConnectionParams(ApiReq):
         log.info(res[0])
 
 
-class TestConnectionOperation(ApiReq):
+class TestConnectionOperation(TestcaseBase):
     """
     Test case of connections interface
     The author ： Ting.Wang

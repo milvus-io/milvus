@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from base.client_request import ApiReq
+from base.client_base import TestcaseBase
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
@@ -15,7 +15,7 @@ default_schema = cf.gen_default_collection_schema()
 default_binary_schema = cf.gen_default_binary_collection_schema()
 
 
-class TestInsertParams(ApiReq):
+class TestInsertParams(TestcaseBase):
     """ Test case of Insert interface """
 
     def teardown_method(self):
@@ -375,7 +375,7 @@ class TestInsertParams(ApiReq):
         assert "The types of schema and data do not match" in str(ex)
 
 
-class TestInsertOperation(ApiReq):
+class TestInsertOperation(TestcaseBase):
     """
     ******************************************************************
       The following cases are used to test insert interface operations
@@ -521,7 +521,7 @@ class TestInsertOperation(ApiReq):
         assert collection.num_entities == ct.default_nb
 
 
-class TestInsertAsync(ApiReq):
+class TestInsertAsync(TestcaseBase):
     """
     ******************************************************************
       The following cases are used to test insert async

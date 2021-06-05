@@ -1,7 +1,7 @@
 import copy
 import pytest
 from pymilvus_orm import FieldSchema
-from base.client_request import ApiReq
+from base.client_base import TestcaseBase
 from base.collection_wrapper import ApiCollectionWrapper
 from base.partition_wrapper import ApiPartitionWrapper
 from base.index_wrapper import ApiIndexWrapper
@@ -17,7 +17,7 @@ default_field_name = ct.default_float_vec_field_name
 default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
 
 
-class TestUtilityParams(ApiReq):
+class TestUtilityParams(TestcaseBase):
     """ Test case of index interface """
 
     @pytest.fixture(
@@ -152,7 +152,7 @@ class TestUtilityParams(ApiReq):
         assert "invalid" or "illegal" in str(ex)
 
 
-class TestUtilityBase(ApiReq):
+class TestUtilityBase(TestcaseBase):
     """ Test case of index interface """
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -446,7 +446,7 @@ class TestUtilityBase(ApiReq):
         assert res["num_indexed_entities"] == nb
 
 
-class TestUtilityAdvanced(ApiReq):
+class TestUtilityAdvanced(TestcaseBase):
     """ Test case of index interface """
 
     @pytest.mark.tags(CaseLabel.L2)
