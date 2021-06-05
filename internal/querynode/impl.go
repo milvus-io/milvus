@@ -301,11 +301,17 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseS
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
 	for _, id := range in.SegmentIDs {
-		err2 := node.historical.loadService.segLoader.replica.removeSegment(id)
-		if err2 != nil {
+		err := node.historical.replica.removeSegment(id)
+		if err != nil {
 			// not return, try to release all segments
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			status.Reason = err2.Error()
+			status.Reason = err.Error()
+		}
+		err = node.streaming.replica.removeSegment(id)
+		if err != nil {
+			// not return, try to release all segments
+			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			status.Reason = err.Error()
 		}
 	}
 	return status, nil

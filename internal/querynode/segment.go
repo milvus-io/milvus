@@ -57,7 +57,6 @@ type Segment struct {
 
 	once             sync.Once // guards enableIndex
 	enableIndex      bool
-	enableLoadBinLog bool
 
 	rmMutex          sync.Mutex // guards recentlyModified
 	recentlyModified bool
@@ -139,7 +138,6 @@ func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, c
 		partitionID:      partitionID,
 		collectionID:     collectionID,
 		indexInfos:       indexInfos,
-		enableLoadBinLog: false,
 	}
 
 	return newSegment
@@ -412,7 +410,7 @@ func (s *Segment) segmentPreInsert(numOfRecords int) (int64, error) {
 		long int
 		PreInsert(CSegmentInterface c_segment, long int size);
 	*/
-	if s.segmentType != segmentTypeGrowing || s.enableLoadBinLog {
+	if s.segmentType != segmentTypeGrowing {
 		return 0, nil
 	}
 	var offset int64
@@ -451,7 +449,7 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 		           int sizeof_per_row,
 		           signed long int count);
 	*/
-	if s.segmentType != segmentTypeGrowing || s.enableLoadBinLog {
+	if s.segmentType != segmentTypeGrowing {
 		return nil
 	}
 
@@ -719,8 +717,4 @@ func (s *Segment) dropSegmentIndex(fieldID int64) error {
 	log.Debug("dropSegmentIndex done", zap.Int64("fieldID", fieldID), zap.Int64("segmentID", s.ID()))
 
 	return nil
-}
-
-func (s *Segment) setLoadBinLogEnable(enable bool) {
-	s.enableLoadBinLog = enable
 }
