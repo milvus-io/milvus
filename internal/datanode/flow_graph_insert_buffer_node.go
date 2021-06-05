@@ -504,21 +504,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			log.Debug("segment is empty")
 			continue
 		}
-		fu.openSegCheckpoints = ibNode.replica.listOpenSegmentCheckPoint()
-		fu.numRows = make(map[UniqueID]int64)
-		for k := range fu.openSegCheckpoints {
-			segStat, err := ibNode.replica.getSegmentStatisticsUpdates(k)
-			if err != nil {
-				log.Debug("getSegmentStatisticsUpdates failed", zap.Error(err))
-				fu.numRows = nil
-				break
-			}
-			fu.numRows[k] = segStat.NumRows
-		}
-		if fu.numRows == nil {
-			log.Debug("failed on get segment num rows")
-			break
-		}
+		fu.openSegCheckpoints, fu.numRows = ibNode.replica.listOpenSegmentCheckPointAndNumRows()
 		fu.flushed = false
 		if err := ibNode.dsSaveBinlog(&fu); err != nil {
 			log.Debug("data service save bin log path failed", zap.Error(err))
@@ -532,32 +518,18 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		currentSegID := fmsg.segmentID
 		log.Debug(". Receiving flush message", zap.Int64("segmentID", currentSegID))
 
-		checkPoints := ibNode.replica.listOpenSegmentCheckPoint()
-		numRows := make(map[UniqueID]int64)
-		for k := range checkPoints {
-			segStat, err := ibNode.replica.getSegmentStatisticsUpdates(k)
-			if err != nil {
-				log.Debug("getSegmentStatisticsUpdates failed", zap.Error(err))
-				numRows = nil
-				break
-			}
-			numRows[k] = segStat.NumRows
-		}
-		if numRows == nil {
-			log.Debug("failed on get segment num rows")
-			break
-		}
-
 		if ibNode.insertBuffer.size(currentSegID) <= 0 {
 			log.Debug(".. Buffer empty ...")
+			c, n := ibNode.replica.listOpenSegmentCheckPointAndNumRows()
 			ibNode.dsSaveBinlog(&autoFlushUnit{
 				collID:             fmsg.collectionID,
 				segID:              currentSegID,
-				numRows:            numRows,
+				numRows:            n,
 				field2Path:         map[UniqueID]string{},
-				openSegCheckpoints: checkPoints,
+				openSegCheckpoints: c,
 				flushed:            true,
 			})
+			ibNode.replica.removeSegmentCheckPoint(fmsg.segmentID)
 			fmsg.dmlFlushedCh <- []*datapb.ID2PathList{{ID: currentSegID, Paths: []string{}}}
 		} else {
 			log.Debug(".. Buffer not empty, flushing ..")
@@ -601,8 +573,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			fu := <-finishCh
 			close(finishCh)
 			if fu.field2Path != nil {
-				fu.numRows = numRows
-				fu.openSegCheckpoints = checkPoints
+				fu.openSegCheckpoints, fu.numRows = ibNode.replica.listOpenSegmentCheckPointAndNumRows()
 				fu.flushed = true
 				if ibNode.dsSaveBinlog(&fu) != nil {
 					log.Debug("data service save bin log path failed", zap.Error(err))

@@ -46,7 +46,7 @@ type Replica interface {
 	setEndPositions(segmentID UniqueID, endPos []*internalpb.MsgPosition) error
 	getSegmentPositions(segID UniqueID) ([]*internalpb.MsgPosition, []*internalpb.MsgPosition)
 	setSegmentCheckPoint(segID UniqueID)
-	listOpenSegmentCheckPoint() map[UniqueID]internalpb.MsgPosition
+	listOpenSegmentCheckPointAndNumRows() (map[UniqueID]internalpb.MsgPosition, map[UniqueID]int64)
 	removeSegmentCheckPoint(segID UniqueID)
 }
 
@@ -329,10 +329,16 @@ func (replica *CollectionSegmentReplica) setSegmentCheckPoint(segID UniqueID) {
 	}
 	replica.openSegmentCheckPoint[segID] = *ep[0]
 }
-func (replica *CollectionSegmentReplica) listOpenSegmentCheckPoint() map[UniqueID]internalpb.MsgPosition {
+func (replica *CollectionSegmentReplica) listOpenSegmentCheckPointAndNumRows() (map[UniqueID]internalpb.MsgPosition, map[UniqueID]int64) {
 	replica.posMu.Lock()
 	defer replica.posMu.Unlock()
-	return replica.openSegmentCheckPoint
+	r1 := make(map[UniqueID]internalpb.MsgPosition)
+	r2 := make(map[UniqueID]int64)
+	for k, v := range replica.openSegmentCheckPoint {
+		r1[k] = v
+		r2[k] = replica.segments[k].numRows
+	}
+	return r1, r2
 }
 
 func (replica *CollectionSegmentReplica) removeSegmentCheckPoint(segID UniqueID) {
