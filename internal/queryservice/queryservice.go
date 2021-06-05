@@ -16,7 +16,6 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"math/rand"
 	"strconv"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -98,7 +97,7 @@ func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryServ
 	rand.Seed(time.Now().UnixNano())
 	//cluster := newQueryNodeCluster()
 	//queryChannels := make([]*queryChannelInfo, 0)
-	nodes := make(map[int64]*queryNodeInfo)
+	//nodes := make(map[int64]*queryNodeInfo)
 	queryChannels := make([]*queryChannelInfo, 0)
 	channelID := len(queryChannels)
 	searchPrefix := Params.SearchChannelPrefix

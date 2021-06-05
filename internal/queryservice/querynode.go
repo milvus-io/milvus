@@ -97,7 +97,7 @@ func (qn *queryNode) addCollection(collectionID UniqueID, schema *schemapb.Colle
 		partitions := make([]UniqueID, 0)
 		channels := make([]*querypb.DmChannelInfo, 0)
 		newCollection := &querypb.CollectionInfo{
-			Id:           collectionID,
+			CollectionID: collectionID,
 			PartitionIDs: partitions,
 			ChannelInfos: channels,
 			Schema:       schema,

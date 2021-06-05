@@ -62,7 +62,8 @@ func (c *queryNodeCluster) LoadSegments(ctx context.Context, nodeID int64, in *q
 	defer c.Unlock()
 	if node, ok := c.nodes[nodeID]; ok {
 		//TODO::etcd
-		for _, segmentID := range in.SegmentIDs {
+		for _, info := range in.Infos {
+			segmentID := info.SegmentID
 			if info, ok := c.clusterMeta.segmentInfos[segmentID]; ok {
 				info.SegmentState = querypb.SegmentState_sealing
 			}
@@ -88,7 +89,8 @@ func (c *queryNodeCluster) LoadSegments(ctx context.Context, nodeID int64, in *q
 			node.addPartition(in.CollectionID, in.PartitionID)
 			return status, err
 		}
-		for _, segmentID := range in.SegmentIDs {
+		for _, info := range in.Infos {
+			segmentID := info.SegmentID
 			c.clusterMeta.deleteSegmentInfoByID(segmentID)
 		}
 		return status, err
