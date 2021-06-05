@@ -38,10 +38,9 @@ GPUIVFPQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
         int32_t m = config[IndexParams::m];
         int32_t nbits = config[IndexParams::nbits];
         faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
-        auto device_index =
-            new faiss::gpu::GpuIndexIVFPQ(gpu_res->faiss_res.get(), dim, nlist, m, nbits, metric_type, idx_config);
-        device_index->train(rows, (float*)p_data);
-        index_.reset(device_index);
+        index_ = std::make_shared<faiss::gpu::GpuIndexIVFPQ>(gpu_res->faiss_res.get(), dim, nlist, m, nbits,
+                                                             metric_type, idx_config);
+        index_->train(rows, (float*)p_data);
         res_ = gpu_res;
     } else {
         KNOWHERE_THROW_MSG("Build IVFPQ can't get gpu resource");
