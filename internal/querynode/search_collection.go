@@ -14,13 +14,12 @@ package querynode
 import (
 	"context"
 	"errors"
-	"math"
-	"reflect"
-	"sync"
-
 	"github.com/golang/protobuf/proto"
 	oplog "github.com/opentracing/opentracing-go/log"
 	"go.uber.org/zap"
+	"math"
+	"reflect"
+	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -245,14 +244,16 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 			log.Debug("stop searchCollection's doUnsolvedMsgSearch", zap.Int64("collectionID", s.collectionID))
 			return
 		default:
+			//time.Sleep(10 * time.Millisecond)
 			serviceTime := s.waitNewTSafe()
+			log.Debug("get tSafe from flow graph",
+				zap.Int64("collectionID", s.collectionID),
+				zap.Uint64("tSafe", serviceTime))
+
 			s.setServiceableTime(serviceTime)
 			log.Debug("query node::doUnsolvedMsgSearch: setServiceableTime",
 				zap.Any("serviceTime", serviceTime),
 			)
-			log.Debug("get tSafe from flow graph",
-				zap.Int64("collectionID", s.collectionID),
-				zap.Uint64("tSafe", serviceTime))
 
 			searchMsg := make([]*msgstream.SearchMsg, 0)
 			tempMsg := s.popAllUnsolvedMsg()
