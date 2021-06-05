@@ -301,6 +301,7 @@ func (it *InsertTask) transferColumnBasedRequestToRowBasedData() error {
 	l := len(dTypes)
 	// TODO(dragondriver): big endian or little endian?
 	endian := binary.LittleEndian
+	printed := false
 	for i := 0; i < rowNum; i++ {
 		blob := &commonpb.Blob{
 			Value: make([]byte, 0),
@@ -376,7 +377,10 @@ func (it *InsertTask) transferColumnBasedRequestToRowBasedData() error {
 				log.Warn("unsupported data type")
 			}
 		}
-
+		if !printed {
+			log.Debug("ProxyNode, transform", zap.Any("ID", it.ID()), zap.Any("BlobLen", len(blob.Value)), zap.Any("dTypes", dTypes))
+			printed = true
+		}
 		it.RowData = append(it.RowData, blob)
 	}
 
@@ -618,6 +622,7 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 func (it *InsertTask) Execute(ctx context.Context) error {
 	collectionName := it.BaseInsertTask.CollectionName
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
+	log.Debug("ProxyNode Insert", zap.Any("collSchema", collSchema))
 	if err != nil {
 		return err
 	}
