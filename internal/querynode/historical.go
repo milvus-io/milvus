@@ -20,7 +20,7 @@ import (
 
 type historical struct {
 	replica      ReplicaInterface
-	loadService  *loadService
+	loader       *segmentLoader
 	statsService *statsService
 }
 
@@ -30,23 +30,21 @@ func newHistorical(ctx context.Context,
 	indexService types.IndexService,
 	factory msgstream.Factory) *historical {
 	replica := newCollectionReplica()
-	ls := newLoadService(ctx, masterService, dataService, indexService, replica)
-	ss := newStatsService(ctx, replica, ls.segLoader.indexLoader.fieldStatsChan, factory)
+	loader := newSegmentLoader(ctx, masterService, indexService, dataService, replica)
+	ss := newStatsService(ctx, replica, loader.indexLoader.fieldStatsChan, factory)
 
 	return &historical{
 		replica:      replica,
-		loadService:  ls,
+		loader:       loader,
 		statsService: ss,
 	}
 }
 
 func (h *historical) start() {
-	h.loadService.start()
 	h.statsService.start()
 }
 
 func (h *historical) close() {
-	h.loadService.close()
 	h.statsService.close()
 
 	// free collectionReplica

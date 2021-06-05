@@ -64,9 +64,6 @@ type ReplicaInterface interface {
 	getPartitionNum() int
 	getSegmentIDs(partitionID UniqueID) ([]UniqueID, error)
 
-	enablePartition(partitionID UniqueID) error
-	disablePartition(partitionID UniqueID) error
-
 	// segment
 	addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, segType segmentType) error
 	setSegment(segment *Segment) error
@@ -85,7 +82,6 @@ type ReplicaInterface interface {
 	addExcludedSegments(collectionID UniqueID, segmentIDs []UniqueID) error
 	getExcludedSegments(collectionID UniqueID) ([]UniqueID, error)
 
-	getEnabledSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID)
 	getSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID)
 	replaceGrowingSegmentBySealedSegment(segment *Segment) error
 
@@ -344,42 +340,6 @@ func (colReplica *collectionReplica) getSegmentIDsPrivate(partitionID UniqueID) 
 	return partition.segmentIDs, nil
 }
 
-func (colReplica *collectionReplica) enablePartition(partitionID UniqueID) error {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-
-	partition, err := colReplica.getPartitionByIDPrivate(partitionID)
-	if err != nil {
-		return err
-	}
-
-	partition.enable = true
-	return nil
-}
-
-func (colReplica *collectionReplica) disablePartition(partitionID UniqueID) error {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-
-	partition, err := colReplica.getPartitionByIDPrivate(partitionID)
-	if err != nil {
-		return err
-	}
-
-	partition.enable = false
-	return nil
-}
-
-func (colReplica *collectionReplica) getEnabledPartitionIDsPrivate() []UniqueID {
-	partitionIDs := make([]UniqueID, 0)
-	for _, partition := range colReplica.partitions {
-		if partition.enable {
-			partitionIDs = append(partitionIDs, partition.partitionID)
-		}
-	}
-	return partitionIDs
-}
-
 //----------------------------------------------------------------------------------------------------- segment
 func (colReplica *collectionReplica) addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, segType segmentType) error {
 	colReplica.mu.Lock()
@@ -497,35 +457,6 @@ func (colReplica *collectionReplica) getSegmentStatistics() []*internalpb.Segmen
 	}
 
 	return statisticData
-}
-
-func (colReplica *collectionReplica) getEnabledSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID) {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-
-	targetCollectionIDs := make([]UniqueID, 0)
-	targetPartitionIDs := make([]UniqueID, 0)
-	targetSegmentIDs := make([]UniqueID, 0)
-
-	for _, partitionID := range colReplica.getEnabledPartitionIDsPrivate() {
-		segmentIDs, err := colReplica.getSegmentIDsPrivate(partitionID)
-		if err != nil {
-			continue
-		}
-		for _, segmentID := range segmentIDs {
-			segment, err := colReplica.getSegmentByIDPrivate(segmentID)
-			if err != nil {
-				continue
-			}
-			if segment.getType() == segType {
-				targetCollectionIDs = append(targetCollectionIDs, segment.collectionID)
-				targetPartitionIDs = append(targetPartitionIDs, segment.partitionID)
-				targetSegmentIDs = append(targetSegmentIDs, segment.segmentID)
-			}
-		}
-	}
-
-	return targetCollectionIDs, targetPartitionIDs, targetSegmentIDs
 }
 
 func (colReplica *collectionReplica) getSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID) {

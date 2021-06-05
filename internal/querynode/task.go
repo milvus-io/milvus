@@ -109,14 +109,22 @@ func (w *watchDmChannelsTask) PreExecute(ctx context.Context) error {
 }
 
 func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
-	log.Debug("starting WatchDmChannels ...", zap.String("ChannelIDs", fmt.Sprintln(w.req.ChannelIDs)))
-	// TODO: pass load type, col or partition
+	// TODO: use excludedInfo's position
 
-	// 1. init channels in collection meta
 	collectionID := w.req.CollectionID
+	log.Debug("starting WatchDmChannels ...", zap.String("ChannelIDs", fmt.Sprintln(w.req.ChannelIDs)))
+
+	// 1. init replica
+	hasCollectionInStreaming := w.node.streaming.replica.hasCollection(collectionID)
+	if !hasCollectionInStreaming {
+		err := w.node.streaming.replica.addCollection(collectionID, w.req.Schema)
+		if err != nil {
+			return err
+		}
+	}
+	w.node.streaming.replica.initExcludedSegments(collectionID)
 	collection, err := w.node.streaming.replica.getCollectionByID(collectionID)
 	if err != nil {
-		log.Error(err.Error())
 		return err
 	}
 	collection.addWatchedDmChannels(w.req.ChannelIDs)
@@ -140,8 +148,13 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		info.Pos.MsgGroup = consumeSubName
 		toSeekInfo = append(toSeekInfo, info.Pos)
 
-		log.Debug("prevent inserting segments", zap.String("segmentIDs", fmt.Sprintln(info.ExcludedSegments)))
-		err := w.node.streaming.replica.addExcludedSegments(collectionID, info.ExcludedSegments)
+		excludedSegment := make([]UniqueID, 0)
+		for _, ei := range info.ExcludeInfos {
+			excludedSegment = append(excludedSegment, ei.SegmentID)
+		}
+
+		log.Debug("prevent inserting segments", zap.String("segmentIDs", fmt.Sprintln(excludedSegment)))
+		err := w.node.streaming.replica.addExcludedSegments(collectionID, excludedSegment)
 		if err != nil {
 			log.Error(err.Error())
 			return err
@@ -230,61 +243,26 @@ func (l *loadSegmentsTask) PreExecute(ctx context.Context) error {
 
 func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 	// TODO: support db
-	collectionID := l.req.CollectionID
-	partitionID := l.req.PartitionID
-	segmentIDs := l.req.SegmentIDs
-	fieldIDs := l.req.FieldIDs
-	schema := l.req.Schema
-
 	log.Debug("query node load segment", zap.String("loadSegmentRequest", fmt.Sprintln(l.req)))
+	var err error
 
-	hasCollectionInHistorical := l.node.historical.replica.hasCollection(collectionID)
-	hasPartitionInHistorical := l.node.historical.replica.hasPartition(partitionID)
-	if !hasCollectionInHistorical {
-		// loading init
-		err := l.node.historical.replica.addCollection(collectionID, schema)
-		if err != nil {
-			return err
-		}
-
-		hasCollectionInStreaming := l.node.streaming.replica.hasCollection(collectionID)
-		if !hasCollectionInStreaming {
-			err = l.node.streaming.replica.addCollection(collectionID, schema)
-			if err != nil {
-				return err
-			}
-		}
-		l.node.streaming.replica.initExcludedSegments(collectionID)
+	switch l.req.LoadCondition {
+	case queryPb.TriggerCondition_handoff:
+		err = l.node.historical.loader.loadSegmentOfConditionHandOff(l.req)
+	case queryPb.TriggerCondition_loadBalance:
+		err = l.node.historical.loader.loadSegmentOfConditionLoadBalance(l.req)
+	case queryPb.TriggerCondition_grpcLoad:
+		err = l.node.historical.loader.loadSegmentOfConditionGRPC(l.req)
+	case queryPb.TriggerCondition_nodeDown:
+		err = l.node.historical.loader.loadSegmentOfConditionNodeDown(l.req)
 	}
-	if !hasPartitionInHistorical {
-		err := l.node.historical.replica.addPartition(collectionID, partitionID)
-		if err != nil {
-			return err
-		}
 
-		hasPartitionInStreaming := l.node.streaming.replica.hasPartition(partitionID)
-		if !hasPartitionInStreaming {
-			err = l.node.streaming.replica.addPartition(collectionID, partitionID)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	err := l.node.streaming.replica.enablePartition(partitionID)
 	if err != nil {
+		log.Error(err.Error())
 		return err
 	}
 
-	if len(segmentIDs) == 0 {
-		return nil
-	}
-
-	err = l.node.historical.loadService.loadSegmentPassively(collectionID, partitionID, segmentIDs, fieldIDs)
-	if err != nil {
-		return err
-	}
-
-	log.Debug("LoadSegments done", zap.String("segmentIDs", fmt.Sprintln(l.req.SegmentIDs)))
+	log.Debug("LoadSegments done", zap.String("SegmentLoadInfos", fmt.Sprintln(l.req.Infos)))
 	return nil
 }
 
