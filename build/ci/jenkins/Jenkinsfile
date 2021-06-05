@@ -1,17 +1,10 @@
 #!/usr/bin/env groovy
 
-String cron_timezone = "TZ=Asia/Shanghai"
-String cron_string = BRANCH_NAME == "master" ? "50 20,22,0,6,11,16 * * * " : ""
-
 pipeline {
     agent none
-    triggers {
-        cron """${cron_timezone}
-            ${cron_string}"""
-    }
     options {
         timestamps()
-        timeout(time: 1, unit: 'HOURS')
+        timeout(time: 30, unit: 'MINUTES')
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         // parallelsAlwaysFailFast()
     }
@@ -41,9 +34,6 @@ pipeline {
                     IMAGE_REPO = "dockerhub-mirror-sh.zilliz.cc/milvusdb"
                     DOCKER_BUILDKIT = 1
                     ARTIFACTS = "${env.WORKSPACE}/artifacts"
-                    DOCKER_CREDENTIALS_ID = "ba070c98-c8cc-4f7c-b657-897715f359fc"
-                    DOKCER_REGISTRY_URL = "registry.zilliz.com"
-                    TARGET_REPO = "${DOKCER_REGISTRY_URL}/milvus"
                 }
                 stages {
                     stage('Test') {
@@ -56,12 +46,7 @@ pipeline {
                                             standaloneEnabled = "false"
                                         }
 
-                                        if (isTimeTriggeredBuild()) {
-                                            echo "This is Cron Job!"
-                                            sh "MILVUS_STANDALONE_ENABLED=${standaloneEnabled} ./e2e-k8s.sh --node-image registry.zilliz.com/kindest/node:v1.20.2"
-                                        } else {
-                                            sh "MILVUS_STANDALONE_ENABLED=${standaloneEnabled} ./e2e-k8s.sh --node-image registry.zilliz.com/kindest/node:v1.20.2 --test-extra-arg \"--tags=smoke\""
-                                        }
+                                        sh "MILVUS_STANDALONE_ENABLED=${standaloneEnabled} ./e2e-k8s.sh --node-image registry.zilliz.com/kindest/node:v1.20.2 --test-extra-arg \"--tags=smoke\""
                                     }
                                 }
                             }
@@ -69,27 +54,6 @@ pipeline {
                     }
                 }
                 post {
-                    success {
-                        container('main') {
-                            script {
-                                if ( env.CHANGE_ID == null ){
-                                    def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
-                                    def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
-
-                                    withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
-                                        sh 'docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD} ${DOKCER_REGISTRY_URL}'
-                                        sh """
-                                            docker tag localhost:5000/milvus:latest ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-${date}-${gitShortCommit}
-                                            docker tag localhost:5000/milvus:latest ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-latest
-                                            docker push ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-${date}-${gitShortCommit}
-                                            docker push ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-latest
-                                        """
-                                        sh 'docker logout ${DOKCER_REGISTRY_URL}'
-                                    }
-                                }
-                            }
-                        }
-                    }
                     always {
                         container('main') {
                             script {
@@ -107,8 +71,4 @@ pipeline {
             }
         }
     }
-}
-
-boolean isTimeTriggeredBuild() {
-    return (currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').size() != 0) ? true : false;
 }
