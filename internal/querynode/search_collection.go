@@ -389,6 +389,9 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 			if err != nil {
 				return err
 			}
+			if !segment.getOnService() {
+				continue
+			}
 			searchResult, err := segment.segmentSearch(plan, searchRequests, []Timestamp{searchTimestamp})
 
 			if err != nil {
@@ -410,6 +413,9 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 			segment, err := s.streamingReplica.getSegmentByID(segmentID)
 			if err != nil {
 				return err
+			}
+			if !segment.getOnService() {
+				continue
 			}
 			searchResult, err := segment.segmentSearch(plan, searchRequests, []Timestamp{searchTimestamp})
 
