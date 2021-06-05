@@ -16,7 +16,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -25,7 +24,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
 func (qs *QueryService) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
@@ -64,11 +62,10 @@ func (qs *QueryService) GetStatisticsChannel(ctx context.Context) (*milvuspb.Str
 }
 
 func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
-	// TODO:: add mutex
 	nodeID := req.Base.SourceID
 	log.Debug("register query node", zap.Any("QueryNodeID", nodeID), zap.String("address", req.Address.String()))
 
-	if _, ok := qs.queryNodes[nodeID]; ok {
+	if _, ok := qs.cluster.nodes[nodeID]; ok {
 		err := errors.New("nodeID already exists")
 		log.Debug("register query node Failed nodeID already exist", zap.Any("QueryNodeID", nodeID), zap.String("address", req.Address.String()))
 
@@ -81,90 +78,16 @@ func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterN
 	}
 
 	err := qs.cluster.RegisterNode(req.Address.Ip, req.Address.Port, req.Base.SourceID)
-	//registerNodeAddress := req.Address.Ip + ":" + strconv.FormatInt(req.Address.Port, 10)
-	//client, err := nodeclient.NewClient(registerNodeAddress)
 	if err != nil {
 		log.Debug("register query node new NodeClient failed", zap.Any("QueryNodeID", nodeID), zap.String("address", req.Address.String()))
-
 		return &querypb.RegisterNodeResponse{
 			Status: &commonpb.Status{
-<<<<<<< HEAD
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-=======
-				ErrorCode: commonpb.ErrorCode_Success,
 			},
-			InitParams: new(internalpb.InitParams),
 		}, err
 	}
-	if err := client.Init(); err != nil {
-		log.Debug("register query node client init failed", zap.Any("QueryNodeID", nodeID), zap.String("address", req.Address.String()))
 
-		return &querypb.RegisterNodeResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
->>>>>>> 3434ad57e83858604864b0e6d8f3f8407903b0e3
-			},
-			//InitParams: new(internalpb.InitParams),
-		}, err
-	}
-<<<<<<< HEAD
-	//if err := client.Init(); err != nil {
-	//	return &querypb.RegisterNodeResponse{
-	//		Status: &commonpb.Status{
-	//			ErrorCode: commonpb.ErrorCode_Success,
-	//		},
-	//		InitParams: new(internalpb.InitParams),
-	//	}, err
-	//}
-	//if err := client.Start(); err != nil {
-	//	return nil, err
-	//}
-	//qs.cluster.nodes[nodeID] = newQueryNode(client)
-
-	//TODO::return init params to queryNodeCluster
-	//startParams := []*commonpb.KeyValuePair{
-	//	{Key: "StatsChannelName", Value: Params.StatsChannelName},
-	//	{Key: "TimeTickChannelName", Value: Params.TimeTickChannelName},
-	//}
-	//qs.qcMutex.Lock()
-	//for _, queryChannel := range qs.queryChannels {
-	//	startParams = append(startParams, &commonpb.KeyValuePair{
-	//		Key:   "SearchChannelName",
-	//		Value: queryChannel.requestChannel,
-	//	})
-	//	startParams = append(startParams, &commonpb.KeyValuePair{
-	//		Key:   "SearchResultChannelName",
-	//		Value: queryChannel.responseChannel,
-	//	})
-	//}
-	//qs.qcMutex.Unlock()
-=======
-	if err := client.Start(); err != nil {
-		log.Debug("register query node client start failed", zap.Any("QueryNodeID", nodeID), zap.String("address", req.Address.String()))
-		return nil, err
-	}
-	qs.queryNodes[nodeID] = newQueryNodeInfo(client)
-
-	//TODO::return init params to queryNode
-	startParams := []*commonpb.KeyValuePair{
-		{Key: "StatsChannelName", Value: Params.StatsChannelName},
-		{Key: "TimeTickChannelName", Value: Params.TimeTickChannelName},
-	}
-	qs.qcMutex.Lock()
-	for _, queryChannel := range qs.queryChannels {
-		startParams = append(startParams, &commonpb.KeyValuePair{
-			Key:   "SearchChannelName",
-			Value: queryChannel.requestChannel,
-		})
-		startParams = append(startParams, &commonpb.KeyValuePair{
-			Key:   "SearchResultChannelName",
-			Value: queryChannel.responseChannel,
-		})
-	}
-	qs.qcMutex.Unlock()
-	log.Debug("register query node success", zap.Any("QueryNodeID", nodeID), zap.String("address", req.Address.String()), zap.Any("StartParams", startParams))
->>>>>>> 3434ad57e83858604864b0e6d8f3f8407903b0e3
-
+	log.Debug("register query node success", zap.Any("QueryNodeID", nodeID), zap.String("address", req.Address.String()))
 	return &querypb.RegisterNodeResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -180,18 +103,6 @@ func (qs *QueryService) ShowCollections(ctx context.Context, req *querypb.ShowCo
 	dbID := req.DbID
 	log.Debug("show collection start, dbID = ", zap.String("dbID", strconv.FormatInt(dbID, 10)))
 	collectionIDs := qs.meta.showCollections()
-	//collectionIDs := make([]UniqueID, 0)
-	//for _, collection := range collections {
-	//	collectionIDs = append(collectionIDs, collection.id)
-	//}
-	//if err != nil {
-	//	return &querypb.ShowCollectionsResponse{
-	//		Status: &commonpb.Status{
-	//			ErrorCode: commonpb.ErrorCode_Success,
-	//			Reason:    err.Error(),
-	//		},
-	//	}, err
-	//}
 	log.Debug("show collection end")
 	return &querypb.ShowCollectionsResponse{
 		Status: &commonpb.Status{
@@ -202,7 +113,6 @@ func (qs *QueryService) ShowCollections(ctx context.Context, req *querypb.ShowCo
 }
 
 func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
-	//dbID := req.DbID
 	collectionID := req.CollectionID
 	schema := req.Schema
 	watchNeeded := false
@@ -215,12 +125,7 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 	hasCollection := qs.meta.hasCollection(collectionID)
 	if !hasCollection {
 		watchNeeded = true
-		err := qs.meta.addCollection(collectionID, schema)
-		log.Error(err.Error())
-		//if err != nil {
-		//	status.Reason = err.Error()
-		//	return status, err
-		//}
+		qs.meta.addCollection(collectionID, schema)
 	}
 	loadCollectionTask := &LoadCollectionTask{
 		BaseTask: BaseTask{

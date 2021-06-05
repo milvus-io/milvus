@@ -30,25 +30,11 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 )
 
-const (
-	LoadCollectionTaskName    = "LoadCollectionTask"
-	LoadPartitionTaskName     = "LoadPartitionTask"
-	LoadSegmentTaskName       = "LoadSegmentTask"
-	ReleaseCollectionTaskName = "ReleaseCollectionTask"
-	ReleasePartitionTaskName  = "ReleasePartitionTask"
-	ReleaseSegmentTaskName    = "ReleaseSegmentTask"
-	WatchDmChannelTaskName    = "WatchDmChannelTask"
-	AddQueryChannelTaskName   = "AddQueryChannelTask"
-	HandoffSegmentTaskName    = "HandoffSegmentTask"
-	NodeDownTaskName          = "NodeDownTask"
-	LoadBalanceTaskName       = "LoadBalanceTask"
-)
 
 type task interface {
 	TraceCtx() context.Context
 	ID() UniqueID // return ReqId
 	SetID(id UniqueID)
-	Name() string
 	Type() commonpb.MsgType
 	Timestamp() Timestamp
 	PreExecute(ctx context.Context) error
@@ -57,8 +43,6 @@ type task interface {
 	WaitToFinish() error
 	Notify(err error)
 	TaskPriority() querypb.TriggerCondition
-	GetParentTask() task
-	GetChildTask() []task
 }
 
 type BaseTask struct {
@@ -66,12 +50,20 @@ type BaseTask struct {
 	ctx              context.Context
 	cancel           context.CancelFunc
 	result           *commonpb.Status
+
+	taskID UniqueID
 	triggerCondition querypb.TriggerCondition
 	parentTask       task
 	childTasks       []task
 }
 
-func (bt *BaseTask) SetID(id UniqueID) {}
+func (bt *BaseTask) ID() UniqueID {
+	return bt.taskID
+}
+
+func (bt *BaseTask) SetID(id UniqueID) {
+	bt.taskID = id
+}
 
 func (bt *BaseTask) TraceCtx() context.Context {
 	return bt.ctx
@@ -79,14 +71,6 @@ func (bt *BaseTask) TraceCtx() context.Context {
 
 func (bt *BaseTask) TaskPriority() querypb.TriggerCondition {
 	return bt.triggerCondition
-}
-
-func (bt *BaseTask) GetParentTask() task {
-	return bt.parentTask
-}
-
-func (bt *BaseTask) GetChildTask() []task {
-	return bt.childTasks
 }
 
 //************************grpcTask***************************//
@@ -112,10 +96,6 @@ func (lct *LoadCollectionTask) Type() commonpb.MsgType {
 
 func (lct *LoadCollectionTask) Timestamp() Timestamp {
 	return lct.Base.Timestamp
-}
-
-func (lct *LoadCollectionTask) Name() string {
-	return LoadCollectionTaskName
 }
 
 func (lct *LoadCollectionTask) PreExecute(ctx context.Context) error {
@@ -279,10 +259,6 @@ func (rct *ReleaseCollectionTask) Timestamp() Timestamp {
 	return rct.Base.Timestamp
 }
 
-func (rct *ReleaseCollectionTask) Name() string {
-	return ReleaseCollectionTaskName
-}
-
 func (rct *ReleaseCollectionTask) PreExecute(ctx context.Context) error {
 	collectionID := rct.CollectionID
 	log.Debug("start do ReleaseCollectionTask",
@@ -357,10 +333,6 @@ func (lpt *LoadPartitionTask) Type() commonpb.MsgType {
 
 func (lpt *LoadPartitionTask) Timestamp() Timestamp {
 	return lpt.Base.Timestamp
-}
-
-func (lpt *LoadPartitionTask) Name() string {
-	return LoadPartitionTaskName
 }
 
 func (lpt *LoadPartitionTask) PreExecute(ctx context.Context) error {
@@ -576,10 +548,6 @@ func (rpt *ReleasePartitionTask) Type() commonpb.MsgType {
 
 func (rpt *ReleasePartitionTask) Timestamp() Timestamp {
 	return rpt.Base.Timestamp
-}
-
-func (rpt *ReleasePartitionTask) Name() string {
-	return ReleasePartitionTaskName
 }
 
 func (rpt *ReleasePartitionTask) PreExecute(ctx context.Context) error {

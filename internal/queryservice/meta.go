@@ -97,7 +97,7 @@ func (m *meta) addCollection(collectionID UniqueID, schema *schemapb.CollectionS
 		partitions := make([]UniqueID, 0)
 		channels := make([]*querypb.DmChannelInfo, 0)
 		newCollection := &querypb.CollectionInfo{
-			Id:                collectionID,
+			CollectionID:                collectionID,
 			PartitionIDs:        partitions,
 			ChannelInfos:            channels,
 			Schema:        schema,
@@ -162,87 +162,6 @@ func (m *meta)getSegmentInfoByID(segmentID UniqueID) (*querypb.SegmentInfo, erro
 
 	return nil, errors.New("getSegmentInfoByID: can't find segmentID in segmentInfos")
 }
-
-
-//func (m *meta) getCollections(dbID UniqueID) ([]*collection, error) {
-//	m.RLock()
-//	defer m.RUnlock()
-//	if collections, ok := m.db2collections[dbID]; ok {
-//		return collections, nil
-//	}
-//
-//	return nil, errors.New("getCollections: can't find collectionID")
-//}
-//
-//func (m *meta) getPartitions(dbID UniqueID, collectionID UniqueID) ([]*partition, error) {
-//	m.RLock()
-//	defer m.RUnlock()
-//	if collections, ok := m.db2collections[dbID]; ok {
-//		for _, collection := range collections {
-//			if collectionID == collection.id {
-//				partitions := make([]*partition, 0)
-//				for _, partition := range collection.partitions {
-//					partitions = append(partitions, partition)
-//				}
-//				return partitions, nil
-//			}
-//		}
-//	}
-//
-//	return nil, errors.New("getPartitions: can't find partitionIDs")
-//}
-//
-//func (m *meta) getSegments(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) ([]UniqueID, error) {
-//	m.RLock()
-//	defer m.RUnlock()
-//	if collections, ok := m.db2collections[dbID]; ok {
-//		for _, collection := range collections {
-//			if collectionID == collection.id {
-//				if partition, ok := collection.partitions[partitionID]; ok {
-//					segments := make([]UniqueID, 0)
-//					segments = append(segments, partition.sealedSegments...)
-//					segments = append(segments, partition.growingSegments...)
-//					//for _, segment := range partition.segments {
-//					//	segments = append(segments, segment)
-//					//}
-//					return segments, nil
-//				}
-//			}
-//		}
-//	}
-//	return nil, errors.New("getSegments: can't find segmentID")
-//}
-//
-//func (m *meta) getCollectionByID(dbID UniqueID, collectionID UniqueID) (*collection, error) {
-//	m.RLock()
-//	defer m.RUnlock()
-//	if collections, ok := m.db2collections[dbID]; ok {
-//		for _, collection := range collections {
-//			if collectionID == collection.id {
-//				return collection, nil
-//			}
-//		}
-//	}
-//
-//	return nil, errors.New("getCollectionByID: can't find collectionID")
-//}
-//
-//func (m *meta) getPartitionByID(dbID UniqueID, collectionID UniqueID, partitionID UniqueID) (*partition, error) {
-//	m.RLock()
-//	defer m.RUnlock()
-//	if collections, ok := m.db2collections[dbID]; ok {
-//		for _, collection := range collections {
-//			if collectionID == collection.id {
-//				partitions := collection.partitions
-//				if partition, ok := partitions[partitionID]; ok {
-//					return partition, nil
-//				}
-//			}
-//		}
-//	}
-//
-//	return nil, errors.New("getPartitionByID: can't find partitionID")
-//}
 
 func (m *meta) updatePartitionState(partitionID UniqueID, state querypb.PartitionState) error {
 	m.Lock()
@@ -396,15 +315,3 @@ func (m *meta) setQueryChannel(collectionID UniqueID, queryChannel string, query
 	}
 	m.queryChannelInfos[collectionID] = queryChannelInfo
 }
-
-//func (mp *meta) addExcludeSegmentIDs(dbID UniqueID, collectionID UniqueID, excludeSegments []UniqueID) error {
-//	if collections, ok := mp.db2collections[dbID]; ok {
-//		for _, collection := range collections {
-//			if collectionID == collection.id {
-//				collection.excludeSegmentIds = append(collection.excludeSegmentIds, excludeSegments...)
-//				return nil
-//			}
-//		}
-//	}
-//	return errors.New("addExcludeSegmentIDs: can't find dbID or collectionID")
-//}

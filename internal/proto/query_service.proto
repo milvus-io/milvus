@@ -42,10 +42,9 @@ service QueryNode {
   rpc ReleasePartitions(ReleasePartitionsRequest) returns (common.Status) {}
   rpc ReleaseSegments(ReleaseSegmentsRequest) returns (common.Status) {}
   rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
-
-  rpc HandOffSegment(HandOffSegmentRequest) returns (common.Status) {}
 }
-//
+
+//--------------------query service proto------------------
 message RegisterNodeRequest {
   common.MsgBase base = 1;
   common.Address address = 2;
@@ -66,19 +65,6 @@ message ShowCollectionsResponse {
   repeated int64 collectionIDs = 2;
 }
 
-message LoadCollectionRequest {
-  common.MsgBase base = 1;
-  int64 dbID = 2;
-  int64 collectionID = 3;
-  schema.CollectionSchema schema = 4;
-}
-
-message ReleaseCollectionRequest {
-  common.MsgBase base = 1;
-  int64 dbID = 2;
-  int64 collectionID = 3;
-}
-
 message ShowPartitionsRequest {
   common.MsgBase base = 1;
   int64 dbID = 2;
@@ -90,31 +76,17 @@ message ShowPartitionsResponse {
   repeated int64 partitionIDs = 2;
 }
 
-enum PartitionState {
-  NotExist = 0;
-  NotPresent = 1;
-  OnDisk = 2;
-  PartialInMemory = 3;
-  InMemory = 4;
-  PartialInGPU = 5;
-  InGPU = 6;
-}
-
-message PartitionStates {
-  int64 partitionID = 1;
-  PartitionState state = 2;
-}
-
-message GetPartitionStatesRequest {
+message LoadCollectionRequest {
   common.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
-  repeated int64 partitionIDs = 4;
+  schema.CollectionSchema schema = 4;
 }
 
-message GetPartitionStatesResponse {
-  common.Status status = 1;
-  repeated PartitionStates partition_descriptions = 2;
+message ReleaseCollectionRequest {
+  common.MsgBase base = 1;
+  int64 dbID = 2;
+  int64 collectionID = 3;
 }
 
 message LoadPartitionsRequest {
@@ -142,16 +114,68 @@ message CreateQueryChannelResponse {
   string result_channel = 3;
 }
 
+message GetPartitionStatesRequest {
+  common.MsgBase base = 1;
+  int64 dbID = 2;
+  int64 collectionID = 3;
+  repeated int64 partitionIDs = 4;
+}
+
+enum PartitionState {
+  NotExist = 0;
+  NotPresent = 1;
+  OnDisk = 2;
+  PartialInMemory = 3;
+  InMemory = 4;
+  PartialInGPU = 5;
+  InGPU = 6;
+}
+
+message PartitionStates {
+  int64 partitionID = 1;
+  PartitionState state = 2;
+}
+
+message GetPartitionStatesResponse {
+  common.Status status = 1;
+  repeated PartitionStates partition_descriptions = 2;
+}
+
+message GetSegmentInfoRequest {
+  common.MsgBase base = 1;
+  repeated int64 segmentIDs = 2;
+}
+
+message SegmentInfo {
+  int64 segmentID = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
+  int64 nodeID = 4;
+  int64 mem_size = 5;
+  int64 num_rows = 6;
+  string index_name = 7;
+  int64 indexID = 8;
+  string channelID = 9;
+  SegmentState segment_state = 10;
+}
+
+message GetSegmentInfoResponse {
+  common.Status status = 1;
+  repeated SegmentInfo infos = 2;
+}
+
+//-----------------query node proto----------------
 message AddQueryChannelRequest {
   common.MsgBase base = 1;
-  int64 collectionID = 2;
-  string request_channelID = 3;
-  string result_channelID = 4;
+  int64 nodeID = 2;
+  int64 collectionID = 3;
+  string request_channelID = 4;
+  string result_channelID = 5;
 }
 
 message RemoveQueryChannelRequest {
-  common.Status status = 1;
-  common.MsgBase base = 2;
+  common.MsgBase base = 1;
+  int64 nodeID = 2;
   int64 collectionID = 3;
   string request_channelID = 4;
   string result_channelID = 5;
@@ -172,10 +196,11 @@ message WatchDmChannelInfo {
 
 message WatchDmChannelsRequest {
   common.MsgBase base = 1;
-  int64 collectionID = 2;
-  repeated string channelIDs = 3;
-  repeated WatchDmChannelInfo infos = 4;
-  schema.CollectionSchema schema = 5;
+  int64 nodeID = 2;
+  int64 collectionID = 3;
+  repeated string channelIDs = 4;
+  repeated WatchDmChannelInfo infos = 5;
+  schema.CollectionSchema schema = 6;
 }
 
 enum TriggerCondition {
@@ -185,64 +210,47 @@ enum TriggerCondition {
   nodeDown = 3;
 }
 
-message fieldBinlogPath {
+message FieldBinlogPath {
   int64 filedID = 1;
   repeated string binlog_path = 2;
 }
 
-message segmentLoadInfo {
+//used for handoff task
+message SegmentLoadInfo {
   int64 segmentID = 1;
-  int64 flush_time = 2;
-  repeated fieldBinlogPath binlog_paths = 3;
+  int64 partitionID = 2;
+  int64 collectionID = 3;
+  int64 flush_time = 4;
+  repeated FieldBinlogPath binlog_paths = 5;
 }
 
 message LoadSegmentsRequest {
   common.MsgBase base = 1;
-  int64 dbID = 2;
-  int64 collectionID = 3;
-  int64 partitionID = 4;
-  repeated segmentLoadInfo infos = 5;
-  schema.CollectionSchema schema = 6;
-  TriggerCondition load_condition = 7;
-}
-
-message LoadSegmentsResponse {
-  common.MsgBase base = 1;
-  internal.MsgPosition pos = 2;
+  int64 nodeID = 2;
+  int64 dbID = 3;
+  int64 collectionID = 4;
+  int64 partitionID = 5;
+  repeated SegmentLoadInfo infos = 6;
+  schema.CollectionSchema schema = 7;
+  TriggerCondition load_condition = 8;
 }
 
 message ReleaseSegmentsRequest {
   common.MsgBase base = 1;
-  int64 dbID = 2;
-  int64 collectionID = 3;
-  repeated int64 partitionIDs = 4;
-  repeated int64 segmentIDs = 5;
+  int64 nodeID = 2;
+  int64 dbID = 3;
+  int64 collectionID = 4;
+  repeated int64 partitionIDs = 5;
+  repeated int64 segmentIDs = 6;
 }
 
+//----------------etcd-----------------
 enum SegmentState {
   None = 0;
   Growing = 1;
   Frozen = 2;
   sealing = 3;
   sealed = 4;
-}
-
-message SegmentInfo {
-  int64 segmentID = 1;
-  int64 collectionID = 2;
-  int64 partitionID = 3;
-  int64 nodeID = 4;
-  int64 mem_size = 5;
-  int64 num_rows = 6;
-  string index_name = 7;
-  int64 indexID = 8;
-  string channelID = 9;
-  SegmentState segment_state = 10;
-}
-
-message PartitionInfo {
-  int64 id = 1;
-  repeated int64 segmentID = 2;
 }
 
 message DmChannelInfo {
@@ -257,25 +265,32 @@ message QueryChannelInfo {
 }
 
 message CollectionInfo {
-  int64 id = 1;
+  int64 collectionID = 1;
   repeated int64 partitionIDs = 2;
   repeated DmChannelInfo channel_infos = 3;
   schema.CollectionSchema schema = 6;
 }
 
-message GetSegmentInfoRequest {
+message HandoffSegments {
   common.MsgBase base = 1;
-  repeated int64 segmentIDs = 2;
+  repeated SegmentLoadInfo infos = 2;
 }
 
-message GetSegmentInfoResponse {
-  common.Status status = 1;
-  repeated SegmentInfo infos = 2;
-}
-
-
-
-message HandOffSegmentRequest {
+message LoadBalanceSegmentInfo {
   int64 segmentID = 1;
-  int64 sealed_time = 2;
+  int64 partitionID = 2;
+  int64 collectionID = 3;
+  int64 source_nodeID = 4;
+  int64 dst_nodeID = 5;
+  bool source_done = 6;
+  bool dst_done = 7;
+  bool valid_info = 8;
 }
+
+message LoadBalanceSegments {
+  common.MsgBase base = 1;
+  repeated LoadBalanceSegmentInfo infos = 2;
+}
+
+
+
