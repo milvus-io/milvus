@@ -1063,7 +1063,7 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 			SearchParams: searchParams,
 		}
 
-		plan, err := CreateQueryPlan(schema, &st.query.Dsl, annsField, queryInfo)
+		plan, err := CreateQueryPlan(schema, st.query.Dsl, annsField, queryInfo)
 		if err != nil {
 			return errors.New("invalid expression: " + st.query.Dsl)
 		}
