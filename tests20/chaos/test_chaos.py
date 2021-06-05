@@ -5,10 +5,10 @@ import sys
 import threading
 from time import sleep
 
-from base.client_request import ApiReq
+from base.client_base import TestcaseBase
 from pymilvus_orm import connections
 from checker import CreateChecker, SearchChecker, InsertChecker
-from base.client_request import ApiCollection
+from base.client_base import ApiCollectionWrapper
 from common import common_func as cf
 from common import common_type as ct
 from utils.util_log import test_log as log
@@ -21,7 +21,7 @@ class TestsChaos:
         res = connections.create_connection(alias='default')
         if res is None:
             raise Exception("no connections")
-        c_wrapper = ApiCollection()
+        c_wrapper = ApiCollectionWrapper()
         c_wrapper.collection_init(name=cf.gen_unique_str(),
                                   schema=cf.gen_default_collection_schema(),
                                   check_res="check_nothing")
@@ -33,7 +33,7 @@ class TestsChaos:
         res = connections.create_connection(alias='default')
         if res is None:
             raise Exception("no connections")
-        c_wrapper = ApiCollection()
+        c_wrapper = ApiCollectionWrapper()
         _, result = c_wrapper.collection_init(name=cf.gen_unique_str(),
                                   schema=cf.gen_default_collection_schema(),
                                   check_res="check_nothing")

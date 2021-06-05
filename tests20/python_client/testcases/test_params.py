@@ -3,11 +3,11 @@ from milvus import DataType
 
 from common.common_type import *
 from common.common_func import *
-from base.client_request import ApiReq
+from base.client_base import TestcaseBase
 from utils.util_log import test_log as log
 
 
-class TestParams(ApiReq):
+class TestParams(TestcaseBase):
     def test_1(self):
         self.connection.configure(check_res='', default={"host": "192.168.1.240", "port": "19530"})
         res_ = self.connection.get_connection(alias='default')
