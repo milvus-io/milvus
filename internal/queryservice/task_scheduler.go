@@ -145,7 +145,7 @@ func (scheduler *TaskScheduler) Enqueue(tasks []task) {
 func (scheduler *TaskScheduler) processTask(t task) {
 	span, ctx := trace.StartSpanFromContext(t.TraceCtx(),
 		opentracing.Tags{
-			"Type": t.Name(),
+			"Type": t.Type(),
 			"ID":   t.ID(),
 		})
 	defer span.Finish()
@@ -185,6 +185,7 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 			//TODO::add active task to etcd
 			w.Add(2)
 			go scheduler.addActivateTask(&w, t)
+			//TODO::handle active task return error, maybe node down...
 			go scheduler.processActivateTask(&w)
 			w.Wait()
 			//TODO:: delete trigger task from etcd

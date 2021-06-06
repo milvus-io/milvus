@@ -98,6 +98,23 @@ func (c *queryNodeCluster) LoadSegments(ctx context.Context, nodeID int64, in *q
 	return nil, errors.New("Can't find query node by nodeID ")
 }
 
+func (c *queryNodeCluster) ReleaseSegments(ctx context.Context, nodeID int64, in *querypb.ReleaseSegmentsRequest)(*commonpb.Status, error) {
+	c.Lock()
+	defer c.Unlock()
+
+	if node, ok := c.nodes[nodeID]; ok {
+		status, err := node.client.ReleaseSegments(ctx, in)
+		if err == nil && status.ErrorCode == commonpb.ErrorCode_Success {
+			for _, segmentID := range in.SegmentIDs {
+				c.clusterMeta.deleteSegmentInfoByID(segmentID)
+			}
+		}
+		return status, err
+	}
+
+	return nil, errors.New("Can't find query node by nodeID ")
+}
+
 func (c *queryNodeCluster) WatchDmChannels(ctx context.Context, nodeID int64, in *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	c.Lock()
 	defer c.Unlock()
@@ -165,6 +182,7 @@ func (c *queryNodeCluster) releaseCollection(ctx context.Context, nodeID int64, 
 		status, err := node.client.ReleaseCollection(ctx, in)
 		if err == nil && status.ErrorCode == commonpb.ErrorCode_Success {
 			node.releaseCollection(in.CollectionID)
+			c.clusterMeta.releaseCollection(in.CollectionID)
 		}
 		return status, err
 	}
@@ -181,6 +199,7 @@ func (c *queryNodeCluster) releasePartitions(ctx context.Context, nodeID int64, 
 		if err == nil && status.ErrorCode == commonpb.ErrorCode_Success {
 			for _, partitionID := range in.PartitionIDs {
 				node.releasePartition(in.CollectionID, partitionID)
+				c.clusterMeta.releasePartition(in.CollectionID, partitionID)
 			}
 		}
 		return status, err
