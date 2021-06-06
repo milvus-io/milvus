@@ -14,10 +14,13 @@ package querynode
 import (
 	"context"
 	"errors"
-	"sync"
-
 	"github.com/golang/protobuf/proto"
+	oplog "github.com/opentracing/opentracing-go/log"
 	"go.uber.org/zap"
+	"math"
+	"reflect"
+	"strconv"
+	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -26,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	oplog "github.com/opentracing/opentracing-go/log"
 )
 
 type searchCollection struct {
@@ -42,12 +44,13 @@ type searchCollection struct {
 	unsolvedMsgMu sync.Mutex // guards unsolvedMsg
 	unsolvedMsg   []*msgstream.SearchMsg
 
-	tSafeMutex   sync.Mutex
-	tSafeWatcher *tSafeWatcher
+	tSafeWatchers     map[VChannel]*tSafeWatcher
+	watcherSelectCase []reflect.SelectCase
 
 	serviceableTimeMutex sync.Mutex // guards serviceableTime
 	serviceableTime      Timestamp
 
+	searchMsgStream       msgstream.MsgStream
 	searchResultMsgStream msgstream.MsgStream
 }
 
@@ -59,10 +62,14 @@ func newSearchCollection(releaseCtx context.Context,
 	historicalReplica ReplicaInterface,
 	streamingReplica ReplicaInterface,
 	tSafeReplica TSafeReplicaInterface,
-	searchResultStream msgstream.MsgStream) *searchCollection {
+	factory msgstream.Factory) *searchCollection {
+
 	receiveBufSize := Params.SearchReceiveBufSize
 	msgBuffer := make(chan *msgstream.SearchMsg, receiveBufSize)
 	unsolvedMsg := make([]*msgstream.SearchMsg, 0)
+
+	searchStream, _ := factory.NewQueryMsgStream(releaseCtx)
+	searchResultStream, _ := factory.NewQueryMsgStream(releaseCtx)
 
 	sc := &searchCollection{
 		releaseCtx: releaseCtx,
@@ -73,29 +80,55 @@ func newSearchCollection(releaseCtx context.Context,
 		streamingReplica:  streamingReplica,
 		tSafeReplica:      tSafeReplica,
 
+		tSafeWatchers: make(map[VChannel]*tSafeWatcher),
+
 		msgBuffer:   msgBuffer,
 		unsolvedMsg: unsolvedMsg,
 
+		searchMsgStream:       searchStream,
 		searchResultMsgStream: searchResultStream,
 	}
 
-	sc.register(collectionID)
+	sc.register()
 	return sc
 }
 
 func (s *searchCollection) start() {
-	go s.receiveSearchMsg()
+	go s.searchMsgStream.Start()
+	go s.searchResultMsgStream.Start()
+	go s.consumeSearch()
 	go s.doUnsolvedMsgSearch()
 }
 
-func (s *searchCollection) register(collectionID UniqueID) {
-	// TODO: remove and use vChannel
-	vChannel := collectionIDToChannel(collectionID)
-	s.tSafeReplica.addTSafe(vChannel)
-	s.tSafeMutex.Lock()
-	s.tSafeWatcher = newTSafeWatcher()
-	s.tSafeMutex.Unlock()
-	s.tSafeReplica.registerTSafeWatcher(vChannel, s.tSafeWatcher)
+func (s *searchCollection) close() {
+	if s.searchMsgStream != nil {
+		s.searchMsgStream.Close()
+	}
+	if s.searchResultMsgStream != nil {
+		s.searchResultMsgStream.Close()
+	}
+}
+
+func (s *searchCollection) register() {
+	collection, err := s.streamingReplica.getCollectionByID(s.collectionID)
+	if err != nil {
+		log.Error(err.Error())
+		return
+	}
+
+	s.watcherSelectCase = make([]reflect.SelectCase, 0)
+	log.Debug("register tSafe watcher and init watcher select case",
+		zap.Any("dml channels", collection.getWatchedDmChannels()),
+		zap.Any("collectionID", collection.ID()))
+	for _, channel := range collection.getWatchedDmChannels() {
+		s.tSafeReplica.addTSafe(channel)
+		s.tSafeWatchers[channel] = newTSafeWatcher()
+		s.tSafeReplica.registerTSafeWatcher(channel, s.tSafeWatchers[channel])
+		s.watcherSelectCase = append(s.watcherSelectCase, reflect.SelectCase{
+			Dir:  reflect.SelectRecv,
+			Chan: reflect.ValueOf(s.tSafeWatchers[channel].watcherChan()),
+		})
+	}
 }
 
 func (s *searchCollection) addToUnsolvedMsg(msg *msgstream.SearchMsg) {
@@ -113,12 +146,20 @@ func (s *searchCollection) popAllUnsolvedMsg() []*msgstream.SearchMsg {
 }
 
 func (s *searchCollection) waitNewTSafe() Timestamp {
-	// TODO: remove and use vChannel
-	vChannel := collectionIDToChannel(s.collectionID)
-	// block until dataSyncService updating tSafe
-	s.tSafeWatcher.hasUpdate()
-	ts := s.tSafeReplica.getTSafe(vChannel)
-	return ts
+	// block until any vChannel updating tSafe
+	_, _, recvOK := reflect.Select(s.watcherSelectCase)
+	if !recvOK {
+		log.Error("tSafe has been closed", zap.Any("collectionID", s.collectionID))
+		return invalidTimestamp
+	}
+	t := Timestamp(math.MaxInt64)
+	for channel := range s.tSafeWatchers {
+		ts := s.tSafeReplica.getTSafe(channel)
+		if ts <= t {
+			t = ts
+		}
+	}
+	return t
 }
 
 func (s *searchCollection) getServiceableTime() Timestamp {
@@ -129,6 +170,12 @@ func (s *searchCollection) getServiceableTime() Timestamp {
 
 func (s *searchCollection) setServiceableTime(t Timestamp) {
 	s.serviceableTimeMutex.Lock()
+	defer s.serviceableTimeMutex.Unlock()
+
+	if t < s.serviceableTime {
+		return
+	}
+
 	gracefulTimeInMilliSecond := Params.GracefulTime
 	if gracefulTimeInMilliSecond > 0 {
 		gracefulTime := tsoutil.ComposeTS(gracefulTimeInMilliSecond, 0)
@@ -136,7 +183,6 @@ func (s *searchCollection) setServiceableTime(t Timestamp) {
 	} else {
 		s.serviceableTime = t
 	}
-	s.serviceableTimeMutex.Unlock()
 }
 
 func (s *searchCollection) emptySearch(searchMsg *msgstream.SearchMsg) {
@@ -153,58 +199,133 @@ func (s *searchCollection) emptySearch(searchMsg *msgstream.SearchMsg) {
 	}
 }
 
-func (s *searchCollection) receiveSearchMsg() {
+func (s *searchCollection) collectionCheck(collectionID UniqueID) error {
+	// check if collection exists
+	if ok := s.historicalReplica.hasCollection(collectionID); !ok {
+		err := errors.New("no collection found, collectionID = " + strconv.FormatInt(collectionID, 10))
+		log.Error(err.Error())
+		return err
+	}
+
+	return nil
+}
+
+func (s *searchCollection) consumeSearch() {
 	for {
 		select {
 		case <-s.releaseCtx.Done():
 			log.Debug("stop searchCollection's receiveSearchMsg", zap.Int64("collectionID", s.collectionID))
 			return
-		case sm := <-s.msgBuffer:
-			sp, ctx := trace.StartSpanFromContext(sm.TraceCtx())
-			sm.SetTraceCtx(ctx)
-			log.Debug("get search message from msgBuffer",
-				zap.Int64("msgID", sm.ID()),
-				zap.Int64("collectionID", sm.CollectionID))
-			serviceTime := s.getServiceableTime()
-			if sm.BeginTs() > serviceTime {
-				bt, _ := tsoutil.ParseTS(sm.BeginTs())
-				st, _ := tsoutil.ParseTS(serviceTime)
-				log.Debug("querynode::receiveSearchMsg: add to unsolvedMsgs",
-					zap.Any("sm.BeginTs", bt),
-					zap.Any("serviceTime", st),
-					zap.Any("delta seconds", (sm.BeginTs()-serviceTime)/(1000*1000*1000)),
-					zap.Any("collectionID", s.collectionID),
-				)
-				s.addToUnsolvedMsg(sm)
-				sp.LogFields(
-					oplog.String("send to unsolved buffer", "send to unsolved buffer"),
-					oplog.Object("begin ts", bt),
-					oplog.Object("serviceTime", st),
-					oplog.Float64("delta seconds", float64(sm.BeginTs()-serviceTime)/(1000.0*1000.0*1000.0)),
-				)
-				sp.Finish()
+		default:
+			msgPack := s.searchMsgStream.Consume()
+			if msgPack == nil || len(msgPack.Msgs) <= 0 {
+				msgPackNil := msgPack == nil
+				msgPackEmpty := true
+				if msgPack != nil {
+					msgPackEmpty = len(msgPack.Msgs) <= 0
+				}
+				log.Debug("consume search message failed", zap.Any("msgPack is Nil", msgPackNil),
+					zap.Any("msgPackEmpty", msgPackEmpty))
 				continue
 			}
-			log.Debug("doing search in receiveSearchMsg...",
-				zap.Int64("msgID", sm.ID()),
-				zap.Int64("collectionID", sm.CollectionID))
-			err := s.search(sm)
-			if err != nil {
-				log.Error(err.Error())
-				log.Debug("do search failed in receiveSearchMsg, prepare to publish failed search result",
-					zap.Int64("msgID", sm.ID()),
-					zap.Int64("collectionID", sm.CollectionID))
-				err2 := s.publishFailedSearchResult(sm, err.Error())
-				if err2 != nil {
-					log.Error("publish FailedSearchResult failed", zap.Error(err2))
+			for _, msg := range msgPack.Msgs {
+				switch sm := msg.(type) {
+				case *msgstream.SearchMsg:
+					s.receiveSearch(sm)
+				case *msgstream.LoadBalanceSegmentsMsg:
+					s.loadBalance(sm)
+				default:
+					log.Warn("unsupported msg type in search channel", zap.Any("msg", sm))
 				}
 			}
-			log.Debug("do search done in receiveSearchMsg",
-				zap.Int64("msgID", sm.ID()),
-				zap.Int64("collectionID", sm.CollectionID))
-			sp.Finish()
 		}
 	}
+}
+
+func (s *searchCollection) loadBalance(msg *msgstream.LoadBalanceSegmentsMsg) {
+	log.Debug("consume load balance message",
+		zap.Int64("msgID", msg.ID()))
+	nodeID := Params.QueryNodeID
+	for _, info := range msg.Infos {
+		segmentID := info.SegmentID
+		if nodeID == info.SourceNodeID {
+			err := s.historicalReplica.removeSegment(segmentID)
+			if err != nil {
+				log.Error("loadBalance failed when remove segment",
+					zap.Error(err),
+					zap.Any("segmentID", segmentID))
+			}
+		}
+		if nodeID == info.DstNodeID {
+			segment, err := s.historicalReplica.getSegmentByID(segmentID)
+			if err != nil {
+				log.Error("loadBalance failed when making segment on service",
+					zap.Error(err),
+					zap.Any("segmentID", segmentID))
+				continue // not return, try to load balance all segment
+			}
+			segment.setOnService(true)
+		}
+	}
+	log.Debug("load balance done",
+		zap.Int64("msgID", msg.ID()),
+		zap.Int("num of segment", len(msg.Infos)))
+}
+
+func (s *searchCollection) receiveSearch(msg *msgstream.SearchMsg) {
+	log.Debug("consume search message",
+		zap.Int64("msgID", msg.ID()),
+		zap.Any("collectionID", msg.CollectionID))
+	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+	msg.SetTraceCtx(ctx)
+	err := s.collectionCheck(msg.CollectionID)
+	if err != nil {
+		//s.emptySearchCollection.emptySearch(msg)
+		log.Debug("cannot found collection, do empty search done",
+			zap.Int64("msgID", msg.ID()),
+			zap.Int64("collectionID", msg.CollectionID))
+		return
+	}
+
+	serviceTime := s.getServiceableTime()
+	if msg.BeginTs() > serviceTime {
+		bt, _ := tsoutil.ParseTS(msg.BeginTs())
+		st, _ := tsoutil.ParseTS(serviceTime)
+		log.Debug("querynode::receiveSearchMsg: add to unsolvedMsgs",
+			zap.Any("sm.BeginTs", bt),
+			zap.Any("serviceTime", st),
+			zap.Any("delta seconds", (msg.BeginTs()-serviceTime)/(1000*1000*1000)),
+			zap.Any("collectionID", s.collectionID),
+			zap.Any("msgID", msg.ID()),
+		)
+		s.addToUnsolvedMsg(msg)
+		sp.LogFields(
+			oplog.String("send to unsolved buffer", "send to unsolved buffer"),
+			oplog.Object("begin ts", bt),
+			oplog.Object("serviceTime", st),
+			oplog.Float64("delta seconds", float64(msg.BeginTs()-serviceTime)/(1000.0*1000.0*1000.0)),
+		)
+		sp.Finish()
+		return
+	}
+	log.Debug("doing search in receiveSearchMsg...",
+		zap.Int64("msgID", msg.ID()),
+		zap.Int64("collectionID", msg.CollectionID))
+	err = s.search(msg)
+	if err != nil {
+		log.Error(err.Error())
+		log.Debug("do search failed in receiveSearchMsg, prepare to publish failed search result",
+			zap.Int64("msgID", msg.ID()),
+			zap.Int64("collectionID", msg.CollectionID))
+		err2 := s.publishFailedSearchResult(msg, err.Error())
+		if err2 != nil {
+			log.Error("publish FailedSearchResult failed", zap.Error(err2))
+		}
+	}
+	log.Debug("do search done in receiveSearch",
+		zap.Int64("msgID", msg.ID()),
+		zap.Int64("collectionID", msg.CollectionID))
+	sp.Finish()
 }
 
 func (s *searchCollection) doUnsolvedMsgSearch() {
@@ -214,14 +335,16 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 			log.Debug("stop searchCollection's doUnsolvedMsgSearch", zap.Int64("collectionID", s.collectionID))
 			return
 		default:
+			//time.Sleep(10 * time.Millisecond)
 			serviceTime := s.waitNewTSafe()
-			s.setServiceableTime(serviceTime)
-			log.Debug("querynode::doUnsolvedMsgSearch: setServiceableTime",
-				zap.Any("serviceTime", serviceTime),
-			)
 			log.Debug("get tSafe from flow graph",
 				zap.Int64("collectionID", s.collectionID),
 				zap.Uint64("tSafe", serviceTime))
+
+			s.setServiceableTime(serviceTime)
+			log.Debug("query node::doUnsolvedMsgSearch: setServiceableTime",
+				zap.Any("serviceTime", serviceTime),
+			)
 
 			searchMsg := make([]*msgstream.SearchMsg, 0)
 			tempMsg := s.popAllUnsolvedMsg()
@@ -357,6 +480,9 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 			if err != nil {
 				return err
 			}
+			if !segment.getOnService() {
+				continue
+			}
 			searchResult, err := segment.segmentSearch(plan, searchRequests, []Timestamp{searchTimestamp})
 
 			if err != nil {
@@ -378,6 +504,9 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 			segment, err := s.streamingReplica.getSegmentByID(segmentID)
 			if err != nil {
 				return err
+			}
+			if !segment.getOnService() {
+				continue
 			}
 			searchResult, err := segment.segmentSearch(plan, searchRequests, []Timestamp{searchTimestamp})
 

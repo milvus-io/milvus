@@ -122,7 +122,7 @@ func (node *QueryNode) Init() error {
 		node.dataService,
 		node.indexService,
 		node.msFactory)
-	node.streaming = newStreaming()
+	node.streaming = newStreaming(node.queryNodeLoopCtx, node.msFactory)
 
 	C.SegcoreInit()
 	registerReq := &queryPb.RegisterNodeRequest{
@@ -208,7 +208,6 @@ func (node *QueryNode) Start() error {
 	go node.scheduler.Start()
 
 	// start services
-	go node.searchService.start()
 	go node.retrieveService.start()
 	go node.historical.start()
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
