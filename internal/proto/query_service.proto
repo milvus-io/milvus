@@ -189,24 +189,23 @@ message excludedSegmentInfo {
 message WatchDmChannelInfo {
   string channelID = 1;
   internal.MsgPosition pos = 2;
-  int64 included_collection = 3;
-  int64 included_partition = 4;
-  repeated excludedSegmentInfo exclude_infos = 5;
 }
 
 message WatchDmChannelsRequest {
   common.MsgBase base = 1;
   int64 nodeID = 2;
   int64 collectionID = 3;
-  repeated string channelIDs = 4;
-  repeated WatchDmChannelInfo infos = 5;
-  schema.CollectionSchema schema = 6;
+  int64 partitionID = 4;
+  repeated string channelIDs = 5;
+  repeated WatchDmChannelInfo infos = 6;
+  schema.CollectionSchema schema = 7;
+  repeated excludedSegmentInfo exclude_infos = 8;
 }
 
 enum TriggerCondition {
   handoff = 0;
   loadBalance = 1;
-  grpcLoad = 2;
+  grpcRequest = 2;
   nodeDown = 3;
 }
 
@@ -292,5 +291,41 @@ message LoadBalanceSegments {
   repeated LoadBalanceSegmentInfo infos = 2;
 }
 
+//--------------temp used, delete after data_service.proto update-----
+message CheckPoint {
+  int64 segmentID = 1;
+  internal.MsgPosition position = 2;
+  int64 num_of_rows = 3;
+}
+
+message VchannelInfo {
+  int64 collectionID = 1;
+  string channelName = 2;
+  internal.MsgPosition seek_position = 3;
+  repeated CheckPoint checkPoints = 4;
+  repeated int64 flushedSegments = 5;
+}
+
+message SegmentBinlogs {
+  int64 segmentID = 1;
+  repeated FieldBinlog fieldBinlogs = 2;
+}
+
+message FieldBinlog{
+  int64 fieldID = 1;
+  repeated string binlogs = 2;
+}
+
+message GetRecoveryInfoResponse {
+  common.MsgBase base = 1;
+  repeated VchannelInfo channels = 2;
+  repeated SegmentBinlogs binlogs = 3;
+}
+
+message GetRecoveryInfoRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
+}
 
 
