@@ -87,18 +87,18 @@ func (dsService *dataSyncService) initNodes(vchanPair *datapb.VchannelInfo) {
 		panic(err)
 	}
 
-	saveBinlog := func(fu *autoFlushUnit) error {
+	saveBinlog := func(fu *segmentFlushUnit) error {
 		id2path := []*datapb.ID2PathList{}
 		checkPoints := []*datapb.CheckPoint{}
 		for k, v := range fu.field2Path {
 			id2path = append(id2path, &datapb.ID2PathList{ID: k, Paths: []string{v}})
 		}
-		for k, v := range fu.openSegCheckpoints {
+		for k, v := range fu.checkPoint {
 			v := v
 			checkPoints = append(checkPoints, &datapb.CheckPoint{
 				SegmentID: k,
-				NumOfRows: fu.numRows[k],
-				Position:  &v,
+				NumOfRows: v.numRows,
+				Position:  &v.pos,
 			})
 		}
 
