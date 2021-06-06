@@ -65,7 +65,7 @@ type IndexNode struct {
 }
 
 func NewIndexNode(ctx context.Context) (*IndexNode, error) {
-	log.Debug("new index node ...")
+	log.Debug("New IndexNode ...")
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	b := &IndexNode{
@@ -181,7 +181,7 @@ func (i *IndexNode) SetIndexServiceClient(serviceClient types.IndexService) {
 func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	log.Debug("indexnode building index ...",
 		zap.Int64("IndexBuildID", request.IndexBuildID),
-		zap.String("Indexname", request.IndexName),
+		zap.String("IndexName", request.IndexName),
 		zap.Int64("IndexID", request.IndexID),
 		zap.Int64("Version", request.Version),
 		zap.String("MetaPath", request.MetaPath),
@@ -242,7 +242,7 @@ func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb.Compone
 		},
 	}
 
-	log.Debug("indexnode compoents states",
+	log.Debug("IndexNode Component states",
 		zap.Any("State", ret.State),
 		zap.Any("Status", ret.Status),
 		zap.Any("SubcomponentStates", ret.SubcomponentStates))
@@ -250,7 +250,7 @@ func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb.Compone
 }
 
 func (i *IndexNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	log.Debug("get indexnode time tick channel ...")
+	log.Debug("get IndexNode time tick channel ...")
 
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
@@ -260,7 +260,7 @@ func (i *IndexNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRes
 }
 
 func (i *IndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	log.Debug("get indexnode statistics channel ...")
+	log.Debug("get IndexNode statistics channel ...")
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
