@@ -218,19 +218,17 @@ message SegmentLoadInfo {
   int64 segmentID = 1;
   int64 partitionID = 2;
   int64 collectionID = 3;
-  int64 flush_time = 4;
-  repeated FieldBinlog binlog_paths = 5;
+  int64 dbID = 4;
+  int64 flush_time = 5;
+  repeated FieldBinlog binlog_paths = 6;
 }
 
 message LoadSegmentsRequest {
   common.MsgBase base = 1;
   int64 nodeID = 2;
-  int64 dbID = 3;
-  int64 collectionID = 4;
-  int64 partitionID = 5;
-  repeated SegmentLoadInfo infos = 6;
-  schema.CollectionSchema schema = 7;
-  TriggerCondition load_condition = 8;
+  repeated SegmentLoadInfo infos = 3;
+  schema.CollectionSchema schema = 4;
+  TriggerCondition load_condition = 5;
 }
 
 message ReleaseSegmentsRequest {
@@ -307,7 +305,9 @@ message VchannelInfo {
 
 message SegmentBinlogs {
   int64 segmentID = 1;
-  repeated FieldBinlog fieldBinlogs = 2;
+  int64 partitionID = 2;
+  int64 collectionID = 3;
+  repeated FieldBinlog fieldBinlogs = 4;
 }
 
 message FieldBinlog{

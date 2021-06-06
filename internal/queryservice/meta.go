@@ -13,6 +13,9 @@ package queryservice
 
 import (
 	"errors"
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
+	"strconv"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -21,8 +24,8 @@ import (
 
 type meta struct {
 	sync.RWMutex
-	collectionInfos map[UniqueID]*querypb.CollectionInfo
-	segmentInfos map[UniqueID]*querypb.SegmentInfo
+	collectionInfos   map[UniqueID]*querypb.CollectionInfo
+	segmentInfos      map[UniqueID]*querypb.SegmentInfo
 	queryChannelInfos map[UniqueID]*querypb.QueryChannelInfo
 
 	partitionStates map[UniqueID]querypb.PartitionState
@@ -34,10 +37,10 @@ func newMeta() *meta {
 	queryChannelInfos := make(map[UniqueID]*querypb.QueryChannelInfo)
 	partitionStates := make(map[UniqueID]querypb.PartitionState)
 	return &meta{
-		collectionInfos: collectionInfos,
-		segmentInfos: segmentInfos,
+		collectionInfos:   collectionInfos,
+		segmentInfos:      segmentInfos,
 		queryChannelInfos: queryChannelInfos,
-		partitionStates: partitionStates,
+		partitionStates:   partitionStates,
 	}
 }
 
@@ -97,10 +100,10 @@ func (m *meta) addCollection(collectionID UniqueID, schema *schemapb.CollectionS
 		partitions := make([]UniqueID, 0)
 		channels := make([]*querypb.DmChannelInfo, 0)
 		newCollection := &querypb.CollectionInfo{
-			CollectionID:                collectionID,
-			PartitionIDs:        partitions,
-			ChannelInfos:            channels,
-			Schema:        schema,
+			CollectionID: collectionID,
+			PartitionIDs: partitions,
+			ChannelInfos: channels,
+			Schema:       schema,
 		}
 		m.collectionInfos[collectionID] = newCollection
 		return nil
@@ -133,7 +136,7 @@ func (m *meta) deleteSegmentInfoByID(segmentID UniqueID) {
 	}
 }
 
-func (m *meta)setSegmentInfo(segmentID UniqueID, info *querypb.SegmentInfo) {
+func (m *meta) setSegmentInfo(segmentID UniqueID, info *querypb.SegmentInfo) {
 	m.Lock()
 	defer m.Unlock()
 
@@ -142,7 +145,7 @@ func (m *meta)setSegmentInfo(segmentID UniqueID, info *querypb.SegmentInfo) {
 
 func (m *meta) getSegmentInfos(segmentIDs []UniqueID) ([]*querypb.SegmentInfo, error) {
 	segmentInfos := make([]*querypb.SegmentInfo, 0)
-	for _,segmentID := range segmentIDs {
+	for _, segmentID := range segmentIDs {
 		if info, ok := m.segmentInfos[segmentID]; ok {
 			segmentInfos = append(segmentInfos, info)
 			continue
@@ -152,7 +155,7 @@ func (m *meta) getSegmentInfos(segmentIDs []UniqueID) ([]*querypb.SegmentInfo, e
 	return segmentInfos, nil
 }
 
-func (m *meta)getSegmentInfoByID(segmentID UniqueID) (*querypb.SegmentInfo, error) {
+func (m *meta) getSegmentInfoByID(segmentID UniqueID) (*querypb.SegmentInfo, error) {
 	m.Lock()
 	defer m.Unlock()
 
@@ -177,7 +180,6 @@ func (m *meta) updatePartitionState(partitionID UniqueID, state querypb.Partitio
 func (m *meta) getPartitionStateByID(partitionID UniqueID) (querypb.PartitionState, error) {
 	m.RLock()
 	defer m.RUnlock()
-
 
 	if state, ok := m.partitionStates[partitionID]; ok {
 		return state, nil
@@ -304,14 +306,25 @@ func (m *meta) addDmChannel(collectionID UniqueID, nodeID int64, channels []stri
 	return errors.New("addDmChannels: can't find collection in collectionInfos")
 }
 
-func (m *meta) setQueryChannel(collectionID UniqueID, queryChannel string, queryResultChannel string) {
+func (m *meta) GetQueryChannel(collectionID UniqueID) (string, string) {
 	m.Lock()
 	defer m.Unlock()
 
+	if info, ok := m.queryChannelInfos[collectionID]; ok {
+		return info.QueryChannelID, info.QueryResultChannelID
+	}
+
+	searchPrefix := Params.SearchChannelPrefix
+	searchResultPrefix := Params.SearchResultChannelPrefix
+	allocatedQueryChannel := searchPrefix + "-" + strconv.FormatInt(collectionID, 10)
+	allocatedQueryResultChannel := searchResultPrefix + "-" + strconv.FormatInt(collectionID, 10)
+	log.Debug("query service create query channel", zap.String("queryChannelName", allocatedQueryChannel), zap.String("queryResultChannelName", allocatedQueryResultChannel))
+
 	queryChannelInfo := &querypb.QueryChannelInfo{
-		CollectionID: collectionID,
-		QueryChannelID: queryChannel,
-		QueryResultChannelID: queryResultChannel,
+		CollectionID:         collectionID,
+		QueryChannelID:       allocatedQueryChannel,
+		QueryResultChannelID: allocatedQueryResultChannel,
 	}
 	m.queryChannelInfos[collectionID] = queryChannelInfo
+	return allocatedQueryChannel, allocatedQueryResultChannel
 }

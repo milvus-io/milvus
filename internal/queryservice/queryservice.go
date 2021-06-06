@@ -39,7 +39,7 @@ type queryChannelInfo struct {
 type QueryService struct {
 	loopCtx    context.Context
 	loopCancel context.CancelFunc
-	kvBase  *etcdkv.EtcdKV
+	kvBase     *etcdkv.EtcdKV
 
 	queryServiceID uint64
 	meta           *meta
@@ -48,9 +48,6 @@ type QueryService struct {
 
 	dataServiceClient   types.DataService
 	masterServiceClient types.MasterService
-	//queryNodes          map[int64]*queryNodeCluster
-	//queryChannels       []*queryChannelInfo
-	//qcMutex             *sync.Mutex
 
 	session *sessionutil.Session
 
@@ -95,9 +92,6 @@ func (qs *QueryService) UpdateStateCode(code internalpb.StateCode) {
 
 func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryService, error) {
 	rand.Seed(time.Now().UnixNano())
-	//cluster := newQueryNodeCluster()
-	//queryChannels := make([]*queryChannelInfo, 0)
-	//nodes := make(map[int64]*queryNodeInfo)
 	queryChannels := make([]*queryChannelInfo, 0)
 	channelID := len(queryChannels)
 	searchPrefix := Params.SearchChannelPrefix
@@ -112,16 +106,11 @@ func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryServ
 
 	ctx1, cancel := context.WithCancel(ctx)
 	meta := newMeta()
-	//scheduler := NewTaskScheduler(ctx1, meta)
 	service := &QueryService{
 		loopCtx:    ctx1,
 		loopCancel: cancel,
 		meta:       meta,
-		//scheduler:  scheduler,
-		//cluster:    cluster,
-		//queryChannels: queryChannels,
-		//qcMutex:       &sync.Mutex{},
-		msFactory: factory,
+		msFactory:  factory,
 	}
 	//TODO::set etcd kvbase
 	service.scheduler = NewTaskScheduler(ctx1, meta, service.kvBase)

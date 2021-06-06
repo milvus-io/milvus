@@ -92,7 +92,7 @@ func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterN
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 		InitParams: &internalpb.InitParams{
-			NodeID:      nodeID,
+			NodeID: nodeID,
 			//StartParams: startParams,
 		},
 	}, nil
@@ -114,7 +114,6 @@ func (qs *QueryService) ShowCollections(ctx context.Context, req *querypb.ShowCo
 func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
 	collectionID := req.CollectionID
 	schema := req.Schema
-	watchNeeded := false
 	log.Debug("LoadCollectionRequest received", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID),
 		zap.Stringer("schema", req.Schema))
 	status := &commonpb.Status{
@@ -123,8 +122,11 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 
 	hasCollection := qs.meta.hasCollection(collectionID)
 	if !hasCollection {
-		watchNeeded = true
-		qs.meta.addCollection(collectionID, schema)
+		err := qs.meta.addCollection(collectionID, schema)
+		if err != nil {
+			log.Error(err.Error())
+			return status, err
+		}
 	}
 	loadCollectionTask := &LoadCollectionTask{
 		BaseTask: BaseTask{
@@ -138,9 +140,6 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 		dataService:           qs.dataServiceClient,
 		cluster:               qs.cluster,
 		meta:                  qs.meta,
-		toWatchPosition:       make(map[string]*internalpb.MsgPosition),
-		excludeSegment:        make(map[string][]UniqueID),
-		watchNeeded:           watchNeeded,
 	}
 	qs.scheduler.Enqueue([]task{loadCollectionTask})
 
@@ -216,7 +215,7 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 	collectionID := req.CollectionID
 	partitionIDs := req.PartitionIDs
 	log.Debug("LoadPartitionRequest received", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
-	status, watchNeeded, err := LoadPartitionMetaCheck(qs.meta, req)
+	status, err := LoadPartitionMetaCheck(qs.meta, req)
 	if err != nil {
 		return status, err
 	}
@@ -233,9 +232,6 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 		dataService:           qs.dataServiceClient,
 		cluster:               qs.cluster,
 		meta:                  qs.meta,
-		toWatchPosition:       make(map[string]*internalpb.MsgPosition),
-		excludeSegment:        make(map[string][]UniqueID),
-		watchNeeded:           watchNeeded,
 	}
 	qs.scheduler.Enqueue([]task{loadPartitionTask})
 
@@ -250,12 +246,11 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 	return status, nil
 }
 
-func LoadPartitionMetaCheck(meta *meta, req *querypb.LoadPartitionsRequest) (*commonpb.Status, bool, error) {
+func LoadPartitionMetaCheck(meta *meta, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
 	//dbID := req.DbID
 	collectionID := req.CollectionID
 	partitionIDs := req.PartitionIDs
 	schema := req.Schema
-	watchNeeded := false
 
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -264,36 +259,34 @@ func LoadPartitionMetaCheck(meta *meta, req *querypb.LoadPartitionsRequest) (*co
 	if len(partitionIDs) == 0 {
 		err := errors.New("partitionIDs are empty")
 		status.Reason = err.Error()
-		return status, watchNeeded, err
+		return status, err
 	}
 
 	hasCollection := meta.hasCollection(collectionID)
 	if !hasCollection {
 		err := meta.addCollection(collectionID, schema)
-		log.Error(err.Error())
-		//if err != nil {
-		//	status.Reason = err.Error()
-		//	return status, watchNeeded, err
-		//}
-		watchNeeded = true
+		if err != nil {
+			status.Reason = err.Error()
+			return status, err
+		}
 	}
 
+	partitionIDsToLoad := make([]UniqueID, 0)
 	for _, partitionID := range partitionIDs {
 		hasPartition := meta.hasPartition(collectionID, partitionID)
-		//if err == nil {
-		//	continue
-		//}
 		if !hasPartition {
 			err := meta.addPartition(collectionID, partitionID)
 			if err != nil {
 				status.Reason = err.Error()
-				return status, watchNeeded, err
+				return status, err
 			}
+			partitionIDsToLoad = append(partitionIDsToLoad, partitionID)
 		}
 	}
+	req.PartitionIDs = partitionIDsToLoad
 
 	status.ErrorCode = commonpb.ErrorCode_Success
-	return status, watchNeeded, nil
+	return status, nil
 }
 
 func (qs *QueryService) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
@@ -339,43 +332,8 @@ func (qs *QueryService) ReleasePartitions(ctx context.Context, req *querypb.Rele
 }
 
 func (qs *QueryService) CreateQueryChannel(ctx context.Context, req *querypb.CreateQueryChannelRequest) (*querypb.CreateQueryChannelResponse, error) {
-	collectionID :=req.CollectionID
-	var queryChannel string
-	var queryResultChannel string
-	if info, ok := qs.meta.queryChannelInfos[collectionID]; ok {
-		queryChannel = info.QueryChannelID
-		queryResultChannel = info.QueryResultChannelID
-	} else {
-		searchPrefix := Params.SearchChannelPrefix
-		searchResultPrefix := Params.SearchResultChannelPrefix
-		allocatedQueryChannel := searchPrefix + "-" + strconv.FormatInt(collectionID, 10)
-		allocatedQueryResultChannel := searchResultPrefix + "-" + strconv.FormatInt(collectionID, 10)
-		log.Debug("query service create query channel", zap.String("queryChannelName", allocatedQueryChannel))
-		qs.meta.setQueryChannel(collectionID, allocatedQueryChannel, allocatedQueryResultChannel)
-
-		//TODO::queryNode watch queryChannels when load new collection's segment
-		//addQueryChannelsRequest := &querypb.AddQueryChannelRequest{
-		//	CollectionID: collectionID,
-		//	RequestChannelID: allocatedQueryChannel,
-		//	ResultChannelID:  allocatedQueryResultChannel,
-		//}
-		//for nodeID := range qs.cluster.nodes {
-		//	log.Debug("node watch query channel", zap.String("nodeID", fmt.Sprintln(nodeID)))
-		//	fn := func() error {
-		//		_, err := qs.cluster.AddQueryChannel(ctx, nodeID, addQueryChannelsRequest)
-		//		return err
-		//	}
-		//	err := retry.Retry(10, time.Millisecond*200, fn)
-		//	if err != nil {
-		//		return &querypb.CreateQueryChannelResponse{
-		//			Status: &commonpb.Status{
-		//				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		//				Reason:    err.Error(),
-		//			},
-		//		}, err
-		//	}
-		//}
-	}
+	collectionID := req.CollectionID
+	queryChannel, queryResultChannel := qs.meta.GetQueryChannel(collectionID)
 
 	return &querypb.CreateQueryChannelResponse{
 		Status: &commonpb.Status{

@@ -211,6 +211,17 @@ func (qn *queryNode) addDmChannel(collectionID UniqueID, channels []string) erro
 
 //TODO::removeDmChannels
 
+func (qn *queryNode) hasWatchedQueryChannel(collectionID UniqueID) bool {
+	qn.RLock()
+	defer qn.RUnlock()
+
+	if _, ok := qn.watchedQueryChannels[collectionID]; ok {
+		return true
+	}
+
+	return false
+}
+
 func (qn *queryNode) addQueryChannel(collectionID UniqueID, queryChannel *querypb.QueryChannelInfo) {
 	qn.Lock()
 	defer qn.Unlock()

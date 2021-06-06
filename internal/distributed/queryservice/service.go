@@ -272,7 +272,7 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 }
 
 func (s *Server) CreateQueryChannel(ctx context.Context, req *querypb.CreateQueryChannelRequest) (*querypb.CreateQueryChannelResponse, error) {
-	return s.queryservice.CreateQueryChannel(ctx)
+	return s.queryservice.CreateQueryChannel(ctx, req)
 }
 
 func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {

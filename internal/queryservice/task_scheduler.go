@@ -14,7 +14,6 @@ package queryservice
 import (
 	"container/list"
 	"context"
-	"github.com/milvus-io/milvus/internal/allocator"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"sync"
 
@@ -81,8 +80,6 @@ func (queue *TaskQueue) PopTask() task {
 	return ft.Value.(task)
 }
 
-
-
 func NewTaskQueue(scheduler *TaskScheduler) *TaskQueue {
 	return &TaskQueue{
 		tasks:     list.New(),
@@ -94,11 +91,10 @@ func NewTaskQueue(scheduler *TaskScheduler) *TaskQueue {
 
 type TaskScheduler struct {
 	triggerTaskQueue *TaskQueue
-	//ActiveTaskQueue  *TaskQueue
 	activateTaskChan chan task
 	meta             *meta
-	taskIDAllocator func() (UniqueID, error)
-	kvBase  *etcdkv.EtcdKV
+	taskIDAllocator  func() (UniqueID, error)
+	kvBase           *etcdkv.EtcdKV
 
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -113,32 +109,29 @@ func NewTaskScheduler(ctx context.Context, meta *meta, kv *etcdkv.EtcdKV) *TaskS
 		cancel:           cancel,
 		meta:             meta,
 		activateTaskChan: taskChan,
-		kvBase: kv,
+		kvBase:           kv,
 	}
 	s.triggerTaskQueue = NewTaskQueue(s)
-	idAllocator := allocator.NewGlobalIDAllocator("queryService taskID", s.kvBase)
-	s.taskIDAllocator = func() (UniqueID, error) {
-		return idAllocator.AllocOne()
-	}
-	//s.ActiveTaskQueue = NewTaskQueue(s)
+	//TODO::add etcd
+	//idAllocator := allocator.NewGlobalIDAllocator("queryService taskID", s.kvBase)
+	//s.taskIDAllocator = func() (UniqueID, error) {
+	//	return idAllocator.AllocOne()
+	//}
 
 	return s
 }
 
-//func (scheduler *TaskScheduler) scheduleTask() task {
-//	return scheduler.triggerTaskQueue.PopTask()
-//}
-
 func (scheduler *TaskScheduler) Enqueue(tasks []task) {
 	scheduler.triggerTaskQueue.Lock()
 	defer scheduler.triggerTaskQueue.Unlock()
-	for _, t := range tasks {
-		id, err := scheduler.taskIDAllocator()
-		if err != nil {
-			log.Error(err.Error())
-		}
-		t.SetID(id)
-	}
+	//TODO::open when add etcd
+	//for _, t := range tasks {
+	//	id, err := scheduler.taskIDAllocator()
+	//	if err != nil {
+	//		log.Error(err.Error())
+	//	}
+	//	t.SetID(id)
+	//}
 	scheduler.triggerTaskQueue.addTask(tasks)
 }
 

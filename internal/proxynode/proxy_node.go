@@ -14,6 +14,7 @@ package proxynode
 import (
 	"context"
 	"errors"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -159,7 +160,7 @@ func (node *ProxyNode) Init() error {
 	}
 
 	if node.queryService != nil {
-		resp, err := node.queryService.CreateQueryChannel(ctx)
+		resp, err := node.queryService.CreateQueryChannel(ctx, &querypb.CreateQueryChannelRequest{})
 		if err != nil {
 			log.Debug("ProxyNode CreateQueryChannel failed", zap.Error(err))
 			return err
