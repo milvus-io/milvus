@@ -75,8 +75,8 @@ type ReplicaInterface interface {
 	// excluded segments
 	initExcludedSegments(collectionID UniqueID)
 	removeExcludedSegments(collectionID UniqueID)
-	addExcludedSegments(collectionID UniqueID, segmentInfos []*querypb.ExcludedSegmentInfo) error
-	getExcludedSegments(collectionID UniqueID) ([]*querypb.ExcludedSegmentInfo, error)
+	addExcludedSegments(collectionID UniqueID, segmentInfos []*querypb.CheckPoint) error
+	getExcludedSegments(collectionID UniqueID) ([]*querypb.CheckPoint, error)
 
 	getSegmentsBySegmentType(segType segmentType) ([]UniqueID, []UniqueID, []UniqueID)
 	replaceGrowingSegmentBySealedSegment(segment *Segment) error
@@ -90,7 +90,7 @@ type collectionReplica struct {
 	partitions  map[UniqueID]*Partition
 	segments    map[UniqueID]*Segment
 
-	excludedSegments map[UniqueID][]*querypb.ExcludedSegmentInfo // map[collectionID]segmentIDs
+	excludedSegments map[UniqueID][]*querypb.CheckPoint // map[collectionID]segmentIDs
 }
 
 //----------------------------------------------------------------------------------------------------- collection
@@ -488,7 +488,7 @@ func (colReplica *collectionReplica) initExcludedSegments(collectionID UniqueID)
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
-	colReplica.excludedSegments[collectionID] = make([]*querypb.ExcludedSegmentInfo, 0)
+	colReplica.excludedSegments[collectionID] = make([]*querypb.CheckPoint, 0)
 }
 
 func (colReplica *collectionReplica) removeExcludedSegments(collectionID UniqueID) {
@@ -498,7 +498,7 @@ func (colReplica *collectionReplica) removeExcludedSegments(collectionID UniqueI
 	delete(colReplica.excludedSegments, collectionID)
 }
 
-func (colReplica *collectionReplica) addExcludedSegments(collectionID UniqueID, segmentInfos []*querypb.ExcludedSegmentInfo) error {
+func (colReplica *collectionReplica) addExcludedSegments(collectionID UniqueID, segmentInfos []*querypb.CheckPoint) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
@@ -510,7 +510,7 @@ func (colReplica *collectionReplica) addExcludedSegments(collectionID UniqueID, 
 	return nil
 }
 
-func (colReplica *collectionReplica) getExcludedSegments(collectionID UniqueID) ([]*querypb.ExcludedSegmentInfo, error) {
+func (colReplica *collectionReplica) getExcludedSegments(collectionID UniqueID) ([]*querypb.CheckPoint, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
 
@@ -538,7 +538,7 @@ func newCollectionReplica() ReplicaInterface {
 	collections := make(map[UniqueID]*Collection)
 	partitions := make(map[UniqueID]*Partition)
 	segments := make(map[UniqueID]*Segment)
-	excludedSegments := make(map[UniqueID][]*querypb.ExcludedSegmentInfo)
+	excludedSegments := make(map[UniqueID][]*querypb.CheckPoint)
 
 	var replica ReplicaInterface = &collectionReplica{
 		collections: collections,

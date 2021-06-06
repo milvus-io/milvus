@@ -111,10 +111,15 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	collectionID := w.req.CollectionID
 	partitionID := w.req.PartitionID
 	loadPartition := partitionID != 0
-	consumeChannels := w.req.ChannelIDs
-	log.Debug("starting WatchDmChannels ...", zap.String("ChannelIDs", fmt.Sprintln(consumeChannels)))
 
-	// 1. init replica
+	// get all channels
+	vChannels := make([]string, 0)
+	for _, info := range w.req.Infos {
+		vChannels = append(vChannels, info.ChannelName)
+	}
+	log.Debug("starting WatchDmChannels ...", zap.String("ChannelIDs", fmt.Sprintln(vChannels)))
+
+	// init replica
 	if hasCollectionInStreaming := w.node.streaming.replica.hasCollection(collectionID); !hasCollectionInStreaming {
 		err := w.node.streaming.replica.addCollection(collectionID, w.req.Schema)
 		if err != nil {
@@ -125,7 +130,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		collection.addWatchedDmChannels(w.req.ChannelIDs)
+		collection.addWatchedDmChannels(vChannels)
 	}
 	if loadPartition {
 		if hasPartitionInStreaming := w.node.streaming.replica.hasPartition(partitionID); !hasPartitionInStreaming {
@@ -136,54 +141,53 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	// 2. get subscription name
+	// get subscription name
 	getUniqueSubName := func() string {
 		prefixName := Params.MsgChannelSubName
 		return prefixName + "-" + strconv.FormatInt(collectionID, 10)
 	}
 	consumeSubName := getUniqueSubName()
 
-	// 3. group channels by to seeking or consuming
+	// group channels by to seeking or consuming
 	toSeekChannels := make([]*internalpb.MsgPosition, 0)
 	toSubChannels := make([]string, 0)
 	for _, info := range w.req.Infos {
-		if len(info.Pos.MsgID) == 0 {
-			toSubChannels = append(toSubChannels, info.ChannelID)
+		if len(info.SeekPosition.MsgID) == 0 {
+			toSubChannels = append(toSubChannels, info.ChannelName)
 			continue
 		}
-		info.Pos.MsgGroup = consumeSubName
-		toSeekChannels = append(toSeekChannels, info.Pos)
+		info.SeekPosition.MsgGroup = consumeSubName
+		toSeekChannels = append(toSeekChannels, info.SeekPosition)
 	}
 
-	// 4. add excluded info
-	err := w.node.streaming.replica.addExcludedSegments(collectionID, w.req.ExcludeInfos)
+	// add check points info
+	checkPointInfos := make([]*queryPb.CheckPoint, 0)
+	for _, info := range w.req.Infos {
+		checkPointInfos = append(checkPointInfos, info.CheckPoints...)
+	}
+	err := w.node.streaming.replica.addExcludedSegments(collectionID, checkPointInfos)
 	if err != nil {
 		log.Error(err.Error())
 		return err
 	}
-	excludedSegment := make([]UniqueID, 0) // for logging
-	for _, ei := range w.req.ExcludeInfos {
-		excludedSegment = append(excludedSegment, ei.SegmentID)
-	}
-	log.Debug("prevent inserting segments", zap.String("segmentIDs", fmt.Sprintln(excludedSegment)))
 
-	// 4. add flow graph
+	// add flow graph
 	if loadPartition {
-		err = w.node.streaming.dataSyncService.addPartitionFlowGraph(collectionID, partitionID, consumeChannels)
+		err = w.node.streaming.dataSyncService.addPartitionFlowGraph(collectionID, partitionID, vChannels)
 		if err != nil {
 			return err
 		}
-		log.Debug("query node add partition flow graphs", zap.Any("channels", consumeChannels))
+		log.Debug("query node add partition flow graphs", zap.Any("channels", vChannels))
 	} else {
-		err = w.node.streaming.dataSyncService.addCollectionFlowGraph(collectionID, consumeChannels)
+		err = w.node.streaming.dataSyncService.addCollectionFlowGraph(collectionID, vChannels)
 		if err != nil {
 			return err
 		}
-		log.Debug("query node add collection flow graphs", zap.Any("channels", consumeChannels))
+		log.Debug("query node add collection flow graphs", zap.Any("channels", vChannels))
 	}
 
 
-	// 5. channels as consumer
+	// channels as consumer
 	var nodeFGs []*queryNodeFlowGraph
 	if loadPartition {
 		nodeFGs, err = w.node.streaming.dataSyncService.getPartitionFlowGraphs(partitionID)
@@ -208,9 +212,9 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 			}
 		}
 	}
-	log.Debug("as consumer channels", zap.Any("channels", consumeChannels))
+	log.Debug("as consumer channels", zap.Any("channels", vChannels))
 
-	// 6. seek channel
+	// seek channel
 	for _, pos := range toSeekChannels {
 		for _, fg := range nodeFGs {
 			if fg.channel == pos.ChannelName {
@@ -224,11 +228,11 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	// 7. add search collection
+	// add search collection
 	w.node.searchService.addSearchCollection(collectionID)
 	log.Debug("add search collection", zap.Any("collectionID", collectionID))
 
-	// 8. start flow graphs
+	// start flow graphs
 	if loadPartition {
 		err = w.node.streaming.dataSyncService.startPartitionFlowGraph(partitionID)
 		if err != nil {
@@ -241,7 +245,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	log.Debug("WatchDmChannels done", zap.String("ChannelIDs", fmt.Sprintln(w.req.ChannelIDs)))
+	log.Debug("WatchDmChannels done", zap.String("ChannelIDs", fmt.Sprintln(vChannels)))
 	return nil
 }
 

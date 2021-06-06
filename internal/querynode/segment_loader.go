@@ -109,7 +109,7 @@ func (loader *segmentLoader) loadSegment(req *queryPb.LoadSegmentsRequest, onSer
 
 func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID,
 	segment *Segment,
-	binlogPaths []*queryPb.FieldBinlogPath) error {
+	binlogPaths []*queryPb.FieldBinlog) error {
 
 	vectorFieldIDs, err := loader.historicalReplica.getVecFieldIDsByCollectionID(collectionID)
 	if err != nil {
@@ -164,8 +164,8 @@ func (loader *segmentLoader) GetSegmentStates(segmentID UniqueID) (*datapb.GetSe
 	return statesResponse, nil
 }
 
-func (loader *segmentLoader) filterOutVectorFields(binlogPaths []*queryPb.FieldBinlogPath,
-	vectorFields []int64) []*queryPb.FieldBinlogPath {
+func (loader *segmentLoader) filterOutVectorFields(binlogPaths []*queryPb.FieldBinlog,
+	vectorFields []int64) []*queryPb.FieldBinlog {
 
 	containsFunc := func(s []int64, e int64) bool {
 		for _, a := range s {
@@ -175,16 +175,16 @@ func (loader *segmentLoader) filterOutVectorFields(binlogPaths []*queryPb.FieldB
 		}
 		return false
 	}
-	targetFields := make([]*queryPb.FieldBinlogPath, 0)
+	targetFields := make([]*queryPb.FieldBinlog, 0)
 	for _, path := range binlogPaths {
-		if !containsFunc(vectorFields, path.FiledID) {
+		if !containsFunc(vectorFields, path.FieldID) {
 			targetFields = append(targetFields, path)
 		}
 	}
 	return targetFields
 }
 
-func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, binlogPaths []*queryPb.FieldBinlogPath) error {
+func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, binlogPaths []*queryPb.FieldBinlog) error {
 	iCodec := storage.InsertCodec{}
 	defer func() {
 		err := iCodec.Close()
@@ -194,13 +194,13 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, binlogPaths
 	}()
 	blobs := make([]*storage.Blob, 0)
 	for _, binlogPath := range binlogPaths {
-		fieldID := binlogPath.FiledID
+		fieldID := binlogPath.FieldID
 		if fieldID == timestampFieldID {
 			// seg core doesn't need timestamp field
 			continue
 		}
 
-		paths := binlogPath.BinlogPath
+		paths := binlogPath.Binlogs
 		log.Debug("load segment fields data",
 			zap.Int64("segmentID", segment.segmentID),
 			zap.Any("fieldID", fieldID),
