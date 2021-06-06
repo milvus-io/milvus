@@ -152,9 +152,8 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		for _, ei := range info.ExcludeInfos {
 			excludedSegment = append(excludedSegment, ei.SegmentID)
 		}
-
 		log.Debug("prevent inserting segments", zap.String("segmentIDs", fmt.Sprintln(excludedSegment)))
-		err := w.node.streaming.replica.addExcludedSegments(collectionID, excludedSegment)
+		err := w.node.streaming.replica.addExcludedSegments(collectionID, info.ExcludeInfos)
 		if err != nil {
 			log.Error(err.Error())
 			return err

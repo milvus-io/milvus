@@ -13,7 +13,6 @@ package querynode
 
 import (
 	"errors"
-
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
@@ -108,15 +107,16 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 		return nil
 	}
 
-	// check if the segment is in excluded segments
+	// Check if the segment is in excluded segments,
+	// messages after seekPosition may contain the redundant data from flushed slice of segment,
+	// so we need to compare the endTimestamp of received messages and position's timestamp.
 	excludedSegments, err := fdmNode.replica.getExcludedSegments(fdmNode.collectionID)
-	//log.Debug("excluded segments", zap.String("segmentIDs", fmt.Sprintln(excludedSegments)))
 	if err != nil {
 		log.Error(err.Error())
 		return nil
 	}
-	for _, id := range excludedSegments {
-		if msg.SegmentID == id {
+	for _, segmentInfo := range excludedSegments {
+		if msg.SegmentID == segmentInfo.SegmentID && msg.EndTs() < segmentInfo.Pos.Timestamp {
 			return nil
 		}
 	}
