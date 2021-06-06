@@ -198,6 +198,11 @@ func (s *searchService) close() {
 }
 
 func (s *searchService) startSearchCollection(collectionID UniqueID) {
+	if _, ok := s.searchCollections[collectionID]; ok {
+		log.Warn("search collection already exists", zap.Any("collectionID", collectionID))
+		return
+	}
+
 	ctx1, cancel := context.WithCancel(s.ctx)
 	sc := newSearchCollection(ctx1,
 		cancel,

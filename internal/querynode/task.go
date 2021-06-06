@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -109,14 +108,14 @@ func (w *watchDmChannelsTask) PreExecute(ctx context.Context) error {
 }
 
 func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
-	// TODO: use excludedInfo's position
-
 	collectionID := w.req.CollectionID
-	log.Debug("starting WatchDmChannels ...", zap.String("ChannelIDs", fmt.Sprintln(w.req.ChannelIDs)))
+	partitionID := w.req.PartitionID
+	loadPartition := partitionID != 0
+	consumeChannels := w.req.ChannelIDs
+	log.Debug("starting WatchDmChannels ...", zap.String("ChannelIDs", fmt.Sprintln(consumeChannels)))
 
 	// 1. init replica
-	hasCollectionInStreaming := w.node.streaming.replica.hasCollection(collectionID)
-	if !hasCollectionInStreaming {
+	if hasCollectionInStreaming := w.node.streaming.replica.hasCollection(collectionID); !hasCollectionInStreaming {
 		err := w.node.streaming.replica.addCollection(collectionID, w.req.Schema)
 		if err != nil {
 			return err
@@ -128,6 +127,14 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		}
 		collection.addWatchedDmChannels(w.req.ChannelIDs)
 	}
+	if loadPartition {
+		if hasPartitionInStreaming := w.node.streaming.replica.hasPartition(partitionID); !hasPartitionInStreaming {
+			err := w.node.streaming.replica.addPartition(collectionID, partitionID)
+			if err != nil {
+				return err
+			}
+		}
+	}
 
 	// 2. get subscription name
 	getUniqueSubName := func() string {
@@ -137,42 +144,59 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	consumeSubName := getUniqueSubName()
 
 	// 3. group channels by to seeking or consuming
-	consumeChannels := w.req.ChannelIDs
-	toSeekInfo := make([]*internalpb.MsgPosition, 0)
-	toDirSubChannels := make([]string, 0)
+	toSeekChannels := make([]*internalpb.MsgPosition, 0)
+	toSubChannels := make([]string, 0)
 	for _, info := range w.req.Infos {
 		if len(info.Pos.MsgID) == 0 {
-			toDirSubChannels = append(toDirSubChannels, info.ChannelID)
+			toSubChannels = append(toSubChannels, info.ChannelID)
 			continue
 		}
 		info.Pos.MsgGroup = consumeSubName
-		toSeekInfo = append(toSeekInfo, info.Pos)
+		toSeekChannels = append(toSeekChannels, info.Pos)
+	}
 
-		excludedSegment := make([]UniqueID, 0)
-		for _, ei := range info.ExcludeInfos {
-			excludedSegment = append(excludedSegment, ei.SegmentID)
-		}
-		log.Debug("prevent inserting segments", zap.String("segmentIDs", fmt.Sprintln(excludedSegment)))
-		err := w.node.streaming.replica.addExcludedSegments(collectionID, info.ExcludeInfos)
+	// 4. add excluded info
+	err := w.node.streaming.replica.addExcludedSegments(collectionID, w.req.ExcludeInfos)
+	if err != nil {
+		log.Error(err.Error())
+		return err
+	}
+	excludedSegment := make([]UniqueID, 0) // for logging
+	for _, ei := range w.req.ExcludeInfos {
+		excludedSegment = append(excludedSegment, ei.SegmentID)
+	}
+	log.Debug("prevent inserting segments", zap.String("segmentIDs", fmt.Sprintln(excludedSegment)))
+
+	// 4. add flow graph
+	if loadPartition {
+		err = w.node.streaming.dataSyncService.addPartitionFlowGraph(collectionID, partitionID, consumeChannels)
 		if err != nil {
-			log.Error(err.Error())
+			return err
+		}
+		log.Debug("query node add partition flow graphs", zap.Any("channels", consumeChannels))
+	} else {
+		err = w.node.streaming.dataSyncService.addCollectionFlowGraph(collectionID, consumeChannels)
+		if err != nil {
+			return err
+		}
+		log.Debug("query node add collection flow graphs", zap.Any("channels", consumeChannels))
+	}
+
+
+	// 5. channels as consumer
+	var nodeFGs []*queryNodeFlowGraph
+	if loadPartition {
+		nodeFGs, err = w.node.streaming.dataSyncService.getPartitionFlowGraphs(partitionID)
+		if err != nil {
+			return err
+		}
+	} else {
+		nodeFGs, err = w.node.streaming.dataSyncService.getCollectionFlowGraphs(collectionID)
+		if err != nil {
 			return err
 		}
 	}
-
-	// 4. add flow graph
-	err := w.node.streaming.dataSyncService.addCollectionFlowGraph(collectionID, consumeChannels)
-	if err != nil {
-		return err
-	}
-	log.Debug("query node add flow graphs, channels = " + strings.Join(consumeChannels, ", "))
-
-	// 5. channels as consumer
-	nodeFGs, err := w.node.streaming.dataSyncService.getCollectionFlowGraphs(collectionID)
-	if err != nil {
-		return err
-	}
-	for _, channel := range toDirSubChannels {
+	for _, channel := range toSubChannels {
 		for _, fg := range nodeFGs {
 			if fg.channel == channel {
 				err := fg.consumerFlowGraph(channel, consumeSubName)
@@ -187,7 +211,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	log.Debug("as consumer channels", zap.Any("channels", consumeChannels))
 
 	// 6. seek channel
-	for _, pos := range toSeekInfo {
+	for _, pos := range toSeekChannels {
 		for _, fg := range nodeFGs {
 			if fg.channel == pos.ChannelName {
 				err := fg.seekQueryNodeFlowGraph(pos)
@@ -205,9 +229,16 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	log.Debug("start search collection", zap.Any("collectionID", collectionID))
 
 	// 8. start flow graphs
-	err = w.node.streaming.dataSyncService.startCollectionFlowGraph(collectionID)
-	if err != nil {
-		return err
+	if loadPartition {
+		err = w.node.streaming.dataSyncService.startPartitionFlowGraph(partitionID)
+		if err != nil {
+			return err
+		}
+	} else {
+		err = w.node.streaming.dataSyncService.startCollectionFlowGraph(collectionID)
+		if err != nil {
+			return err
+		}
 	}
 
 	log.Debug("WatchDmChannels done", zap.String("ChannelIDs", fmt.Sprintln(w.req.ChannelIDs)))
@@ -250,7 +281,7 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 		err = l.node.historical.loader.loadSegmentOfConditionHandOff(l.req)
 	case queryPb.TriggerCondition_loadBalance:
 		err = l.node.historical.loader.loadSegmentOfConditionLoadBalance(l.req)
-	case queryPb.TriggerCondition_grpcLoad:
+	case queryPb.TriggerCondition_grpcRequest:
 		err = l.node.historical.loader.loadSegmentOfConditionGRPC(l.req)
 	case queryPb.TriggerCondition_nodeDown:
 		err = l.node.historical.loader.loadSegmentOfConditionNodeDown(l.req)
