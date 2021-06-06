@@ -112,38 +112,74 @@ func (s *searchService) consumeSearch() {
 				}
 				log.Debug("consume search message failed", zap.Any("msgPack is Nil", msgPackNil),
 					zap.Any("msgPackEmpty", msgPackEmpty))
-
 				continue
 			}
 			for _, msg := range msgPack.Msgs {
-				sm, ok := msg.(*msgstream.SearchMsg)
-				if !ok {
-					continue
+				switch sm := msg.(type) {
+				case *msgstream.SearchMsg:
+					s.search(sm)
+				case *msgstream.LoadBalanceSegmentsMsg:
+					s.loadBalance(sm)
+				default:
+					log.Warn("unsupported msg type in search channel", zap.Any("msg", sm))
 				}
-				log.Debug("consume search message",
-					zap.Int64("msgID", msg.ID()),
-					zap.Any("collectionID", sm.CollectionID))
-				sp, ctx := trace.StartSpanFromContext(sm.TraceCtx())
-				sm.SetTraceCtx(ctx)
-				err := s.collectionCheck(sm.CollectionID)
-				if err != nil {
-					s.emptySearchCollection.emptySearch(sm)
-					log.Debug("cannot found collection, do empty search done",
-						zap.Int64("msgID", sm.ID()),
-						zap.Int64("collectionID", sm.CollectionID))
-					continue
-				}
-				_, ok = s.searchCollections[sm.CollectionID]
-				if !ok {
-					s.startSearchCollection(sm.CollectionID)
-					log.Debug("new search collection, start search collection service",
-						zap.Int64("collectionID", sm.CollectionID))
-				}
-				s.searchCollections[sm.CollectionID].msgBuffer <- sm
-				sp.Finish()
 			}
 		}
 	}
+}
+
+func (s *searchService) search(msg *msgstream.SearchMsg) {
+	log.Debug("consume search message",
+		zap.Int64("msgID", msg.ID()),
+		zap.Any("collectionID", msg.CollectionID))
+	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+	msg.SetTraceCtx(ctx)
+	err := s.collectionCheck(msg.CollectionID)
+	if err != nil {
+		s.emptySearchCollection.emptySearch(msg)
+		log.Debug("cannot found collection, do empty search done",
+			zap.Int64("msgID", msg.ID()),
+			zap.Int64("collectionID", msg.CollectionID))
+		return
+	}
+	_, ok := s.searchCollections[msg.CollectionID]
+	if !ok {
+		s.startSearchCollection(msg.CollectionID)
+		log.Debug("new search collection, start search collection service",
+			zap.Int64("collectionID", msg.CollectionID))
+	}
+	s.searchCollections[msg.CollectionID].msgBuffer <- msg
+	sp.Finish()
+}
+
+func (s *searchService) loadBalance(msg *msgstream.LoadBalanceSegmentsMsg) {
+	log.Debug("consume load balance message",
+		zap.Int64("msgID", msg.ID()))
+	nodeID := Params.QueryNodeID
+	for _, info := range msg.Infos {
+		segmentID := info.SegmentID
+		if nodeID == info.SourceNodeID {
+			err := s.historicalReplica.removeSegment(segmentID)
+			if err != nil {
+				log.Error("loadBalance failed when remove segment",
+					zap.Error(err),
+					zap.Any("segmentID", segmentID))
+			}
+		}
+		if nodeID == info.DstNodeID {
+			segment, err := s.historicalReplica.getSegmentByID(segmentID)
+			if err != nil {
+				log.Error("loadBalance failed when making segment on service",
+					zap.Error(err),
+					zap.Any("segmentID", segmentID))
+				continue // not return, try to load balance all segment
+			}
+			segment.setOnService(true)
+		}
+	}
+	log.Debug("load balance done",
+		zap.Int64("msgID", msg.ID()),
+		zap.Int("num of segment", len(msg.Infos)))
 }
 
 func (s *searchService) close() {
