@@ -116,7 +116,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 		return nil
 	}
 	for _, segmentInfo := range excludedSegments {
-		if msg.SegmentID == segmentInfo.SegmentID && msg.EndTs() < segmentInfo.Pos.Timestamp {
+		if msg.SegmentID == segmentInfo.SegmentID && msg.EndTs() < segmentInfo.Position.Timestamp {
 			return nil
 		}
 	}
