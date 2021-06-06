@@ -192,6 +192,7 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, binlogPaths
 			log.Error(err.Error())
 		}
 	}()
+	blobs := make([]*storage.Blob, 0)
 	for _, binlogPath := range binlogPaths {
 		fieldID := binlogPath.FiledID
 		if fieldID == timestampFieldID {
@@ -200,78 +201,75 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, binlogPaths
 		}
 
 		paths := binlogPath.BinlogPath
-		blobs := make([]*storage.Blob, 0)
 		log.Debug("load segment fields data",
 			zap.Int64("segmentID", segment.segmentID),
 			zap.Any("fieldID", fieldID),
-			zap.String("path", fmt.Sprintln(paths)),
+			zap.String("paths", fmt.Sprintln(paths)),
 		)
+		blob := &storage.Blob{
+			Key: strconv.FormatInt(fieldID, 10),
+			Value: make([]byte, 0),
+		}
 		for _, path := range paths {
 			binLog, err := loader.kv.Load(path)
 			if err != nil {
 				// TODO: return or continue?
 				return err
 			}
-			blobs = append(blobs, &storage.Blob{
-				Key:   strconv.FormatInt(fieldID, 10), // TODO: key???
-				Value: []byte(binLog),
-			})
+			blob.Value = append(blob.Value, []byte(binLog)...)
 		}
-		_, _, insertData, err := iCodec.Deserialize(blobs)
+		blobs = append(blobs, blob)
+	}
+
+	_, _, insertData, err := iCodec.Deserialize(blobs)
+	if err != nil {
+		log.Error(err.Error())
+		return err
+	}
+	for fieldID, value := range insertData.Data {
+		var numRows int
+		var data interface{}
+		switch fieldData := value.(type) {
+		case *storage.BoolFieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.Int8FieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.Int16FieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.Int32FieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.Int64FieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.FloatFieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.DoubleFieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case storage.StringFieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.FloatVectorFieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.BinaryVectorFieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		default:
+			return errors.New("unexpected field data type")
+		}
+		err = segment.segmentLoadFieldData(fieldID, numRows, data)
 		if err != nil {
-			// TODO: return or continue
+			// TODO: return or continue?
 			return err
 		}
-		if len(insertData.Data) != 1 {
-			return errors.New("we expect only one field in deserialized insert data")
-		}
-
-		for _, value := range insertData.Data {
-			var numRows int
-			var data interface{}
-
-			switch fieldData := value.(type) {
-			case *storage.BoolFieldData:
-				numRows = fieldData.NumRows
-				data = fieldData.Data
-			case *storage.Int8FieldData:
-				numRows = fieldData.NumRows
-				data = fieldData.Data
-			case *storage.Int16FieldData:
-				numRows = fieldData.NumRows
-				data = fieldData.Data
-			case *storage.Int32FieldData:
-				numRows = fieldData.NumRows
-				data = fieldData.Data
-			case *storage.Int64FieldData:
-				numRows = fieldData.NumRows
-				data = fieldData.Data
-			case *storage.FloatFieldData:
-				numRows = fieldData.NumRows
-				data = fieldData.Data
-			case *storage.DoubleFieldData:
-				numRows = fieldData.NumRows
-				data = fieldData.Data
-			case storage.StringFieldData:
-				numRows = fieldData.NumRows
-				data = fieldData.Data
-			case *storage.FloatVectorFieldData:
-				numRows = fieldData.NumRows
-				data = fieldData.Data
-			case *storage.BinaryVectorFieldData:
-				numRows = fieldData.NumRows
-				data = fieldData.Data
-			default:
-				return errors.New("unexpected field data type")
-			}
-			// TODO: can segCore load multiple data of the same field?
-			err = segment.segmentLoadFieldData(fieldID, numRows, data)
-			if err != nil {
-				// TODO: return or continue?
-				return err
-			}
-		}
 	}
+
 	return nil
 }
 
