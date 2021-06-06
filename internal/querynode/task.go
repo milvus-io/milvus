@@ -392,6 +392,7 @@ func (r *releasePartitionsTask) PreExecute(ctx context.Context) error {
 
 func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 	for _, id := range r.req.PartitionIDs {
+		r.node.streaming.dataSyncService.removePartitionFlowGraph(id)
 		hasPartitionInHistorical := r.node.historical.replica.hasPartition(id)
 		if hasPartitionInHistorical {
 			err := r.node.historical.replica.removePartition(id)
