@@ -795,7 +795,9 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		info.EnableIndex = true
+		if info.BuildID != 0 {
+			info.EnableIndex = true
+		}
 		segIdxInfos = append(segIdxInfos, &info)
 	}
 
