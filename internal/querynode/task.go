@@ -224,9 +224,9 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	// 7. start search collection
-	w.node.searchService.startSearchCollection(collectionID)
-	log.Debug("start search collection", zap.Any("collectionID", collectionID))
+	// 7. add search collection
+	w.node.searchService.addSearchCollection(collectionID)
+	log.Debug("add search collection", zap.Any("collectionID", collectionID))
 
 	// 8. start flow graphs
 	if loadPartition {

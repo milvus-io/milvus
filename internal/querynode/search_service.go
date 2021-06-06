@@ -14,14 +14,11 @@ package querynode
 import "C"
 import (
 	"context"
-	"errors"
-	"strconv"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
 type searchService struct {
@@ -32,12 +29,10 @@ type searchService struct {
 	streamingReplica  ReplicaInterface
 	tSafeReplica      TSafeReplicaInterface
 
-	searchMsgStream       msgstream.MsgStream
-	searchResultMsgStream msgstream.MsgStream
+	queryNodeID       UniqueID
+	searchCollections map[UniqueID]*searchCollection
 
-	queryNodeID           UniqueID
-	searchCollections     map[UniqueID]*searchCollection
-	emptySearchCollection *searchCollection
+	factory msgstream.Factory
 }
 
 func newSearchService(ctx context.Context,
@@ -45,21 +40,6 @@ func newSearchService(ctx context.Context,
 	streamingReplica ReplicaInterface,
 	tSafeReplica TSafeReplicaInterface,
 	factory msgstream.Factory) *searchService {
-
-	searchStream, _ := factory.NewQueryMsgStream(ctx)
-	searchResultStream, _ := factory.NewQueryMsgStream(ctx)
-	log.Debug("newSearchService", zap.Any("SearchChannelNames", Params.SearchChannelNames), zap.Any("SearchResultChannels", Params.SearchResultChannelNames))
-
-	if len(Params.SearchChannelNames) > 0 && len(Params.SearchResultChannelNames) > 0 {
-		// query node need to consume search channels and produce search result channels when init.
-		consumeChannels := Params.SearchChannelNames
-		consumeSubName := Params.MsgChannelSubName
-		searchStream.AsConsumer(consumeChannels, consumeSubName)
-		log.Debug("query node AsConsumer", zap.Any("searchChannels", consumeChannels), zap.Any("consumeSubName", consumeSubName))
-		producerChannels := Params.SearchResultChannelNames
-		searchResultStream.AsProducer(producerChannels)
-		log.Debug("query node AsProducer", zap.Any("searchResultChannels", producerChannels))
-	}
 
 	searchServiceCtx, searchServiceCancel := context.WithCancel(ctx)
 	return &searchService{
@@ -70,126 +50,16 @@ func newSearchService(ctx context.Context,
 		streamingReplica:  streamingReplica,
 		tSafeReplica:      tSafeReplica,
 
-		searchMsgStream:       searchStream,
-		searchResultMsgStream: searchResultStream,
-
 		queryNodeID:       Params.QueryNodeID,
 		searchCollections: make(map[UniqueID]*searchCollection),
-	}
-}
 
-func (s *searchService) start() {
-	log.Debug("start search service")
-	s.searchMsgStream.Start()
-	s.searchResultMsgStream.Start()
-	s.startEmptySearchCollection()
-	s.consumeSearch()
-}
-
-func (s *searchService) collectionCheck(collectionID UniqueID) error {
-	// check if collection exists
-	if ok := s.historicalReplica.hasCollection(collectionID); !ok {
-		err := errors.New("no collection found, collectionID = " + strconv.FormatInt(collectionID, 10))
-		log.Error(err.Error())
-		return err
+		factory: factory,
 	}
-
-	return nil
-}
-
-func (s *searchService) consumeSearch() {
-	for {
-		select {
-		case <-s.ctx.Done():
-			return
-		default:
-			msgPack := s.searchMsgStream.Consume()
-			if msgPack == nil || len(msgPack.Msgs) <= 0 {
-				msgPackNil := msgPack == nil
-				msgPackEmpty := true
-				if msgPack != nil {
-					msgPackEmpty = len(msgPack.Msgs) <= 0
-				}
-				log.Debug("consume search message failed", zap.Any("msgPack is Nil", msgPackNil),
-					zap.Any("msgPackEmpty", msgPackEmpty))
-				continue
-			}
-			for _, msg := range msgPack.Msgs {
-				switch sm := msg.(type) {
-				case *msgstream.SearchMsg:
-					s.search(sm)
-				case *msgstream.LoadBalanceSegmentsMsg:
-					s.loadBalance(sm)
-				default:
-					log.Warn("unsupported msg type in search channel", zap.Any("msg", sm))
-				}
-			}
-		}
-	}
-}
-
-func (s *searchService) search(msg *msgstream.SearchMsg) {
-	log.Debug("consume search message",
-		zap.Int64("msgID", msg.ID()),
-		zap.Any("collectionID", msg.CollectionID))
-	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
-	msg.SetTraceCtx(ctx)
-	err := s.collectionCheck(msg.CollectionID)
-	if err != nil {
-		s.emptySearchCollection.emptySearch(msg)
-		log.Debug("cannot found collection, do empty search done",
-			zap.Int64("msgID", msg.ID()),
-			zap.Int64("collectionID", msg.CollectionID))
-		return
-	}
-	_, ok := s.searchCollections[msg.CollectionID]
-	if !ok {
-		s.startSearchCollection(msg.CollectionID)
-		log.Debug("new search collection, start search collection service",
-			zap.Int64("collectionID", msg.CollectionID))
-	}
-	s.searchCollections[msg.CollectionID].msgBuffer <- msg
-	sp.Finish()
-}
-
-func (s *searchService) loadBalance(msg *msgstream.LoadBalanceSegmentsMsg) {
-	log.Debug("consume load balance message",
-		zap.Int64("msgID", msg.ID()))
-	nodeID := Params.QueryNodeID
-	for _, info := range msg.Infos {
-		segmentID := info.SegmentID
-		if nodeID == info.SourceNodeID {
-			err := s.historicalReplica.removeSegment(segmentID)
-			if err != nil {
-				log.Error("loadBalance failed when remove segment",
-					zap.Error(err),
-					zap.Any("segmentID", segmentID))
-			}
-		}
-		if nodeID == info.DstNodeID {
-			segment, err := s.historicalReplica.getSegmentByID(segmentID)
-			if err != nil {
-				log.Error("loadBalance failed when making segment on service",
-					zap.Error(err),
-					zap.Any("segmentID", segmentID))
-				continue // not return, try to load balance all segment
-			}
-			segment.setOnService(true)
-		}
-	}
-	log.Debug("load balance done",
-		zap.Int64("msgID", msg.ID()),
-		zap.Int("num of segment", len(msg.Infos)))
 }
 
 func (s *searchService) close() {
 	log.Debug("search service closed")
-	if s.searchMsgStream != nil {
-		s.searchMsgStream.Close()
-	}
-	if s.searchResultMsgStream != nil {
-		s.searchResultMsgStream.Close()
-	}
+
 	for collectionID := range s.searchCollections {
 		s.stopSearchCollection(collectionID)
 	}
@@ -197,7 +67,7 @@ func (s *searchService) close() {
 	s.cancel()
 }
 
-func (s *searchService) startSearchCollection(collectionID UniqueID) {
+func (s *searchService) addSearchCollection(collectionID UniqueID) {
 	if _, ok := s.searchCollections[collectionID]; ok {
 		log.Warn("search collection already exists", zap.Any("collectionID", collectionID))
 		return
@@ -210,22 +80,8 @@ func (s *searchService) startSearchCollection(collectionID UniqueID) {
 		s.historicalReplica,
 		s.streamingReplica,
 		s.tSafeReplica,
-		s.searchResultMsgStream)
+		s.factory)
 	s.searchCollections[collectionID] = sc
-	sc.start()
-}
-
-func (s *searchService) startEmptySearchCollection() {
-	ctx1, cancel := context.WithCancel(s.ctx)
-	sc := newSearchCollection(ctx1,
-		cancel,
-		UniqueID(-1),
-		s.historicalReplica,
-		s.streamingReplica,
-		s.tSafeReplica,
-		s.searchResultMsgStream)
-	s.emptySearchCollection = sc
-	sc.start()
 }
 
 func (s *searchService) hasSearchCollection(collectionID UniqueID) bool {
@@ -238,6 +94,7 @@ func (s *searchService) stopSearchCollection(collectionID UniqueID) {
 	if !ok {
 		log.Error("stopSearchCollection failed, collection doesn't exist", zap.Int64("collectionID", collectionID))
 	}
+	sc.close()
 	sc.cancel()
 	delete(s.searchCollections, collectionID)
 }

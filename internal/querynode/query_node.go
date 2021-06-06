@@ -208,7 +208,6 @@ func (node *QueryNode) Start() error {
 	go node.scheduler.Start()
 
 	// start services
-	go node.searchService.start()
 	go node.retrieveService.start()
 	go node.historical.start()
 	node.UpdateStateCode(internalpb.StateCode_Healthy)

@@ -146,8 +146,7 @@ func TestSearch_Search(t *testing.T) {
 		node.streaming.replica,
 		node.streaming.tSafeReplica,
 		msFactory)
-	go node.searchService.start()
-	node.searchService.startSearchCollection(collectionID)
+	node.searchService.addSearchCollection(collectionID)
 
 	// load segment
 	err = node.historical.replica.addSegment(segmentID, defaultPartitionID, collectionID, segmentTypeSealed, true)
@@ -186,8 +185,7 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 		node.streaming.replica,
 		node.streaming.tSafeReplica,
 		msFactory)
-	go node.searchService.start()
-	node.searchService.startSearchCollection(collectionID)
+	node.searchService.addSearchCollection(collectionID)
 
 	// load segments
 	err = node.historical.replica.addSegment(segmentID1, defaultPartitionID, collectionID, segmentTypeSealed, true)
