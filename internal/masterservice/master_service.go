@@ -435,7 +435,7 @@ func (c *Core) startDataNodeFlushedSegmentLoop() {
 						EnableIndex: false,
 					}
 					info.BuildID, err = c.BuildIndex(segID, fieldSch, idxInfo, true)
-					if err == nil {
+					if err == nil && info.BuildID != 0 {
 						info.EnableIndex = true
 					} else {
 						log.Error("build index fail", zap.String("error", err.Error()))

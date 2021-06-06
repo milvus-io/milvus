@@ -297,6 +297,7 @@ func (loader *indexLoader) setIndexInfo(collectionID UniqueID, segment *Segment,
 	if err != nil {
 		return err
 	}
+	log.Debug("QueryNode IndexLoader setIndexInfo", zap.Any("Req", req), zap.Any("response", response))
 	if response.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(response.Status.Reason)
 	}
