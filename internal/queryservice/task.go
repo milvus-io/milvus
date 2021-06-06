@@ -14,12 +14,9 @@ package queryservice
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
-	"golang.org/x/text/currency"
 	"math/rand"
 	"sort"
-	"strconv"
 
 	"go.uber.org/zap"
 
@@ -341,6 +338,10 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
 
+	segment2BingLog := make(map[UniqueID]*querypb.SegmentLoadInfo)
+	channelsToWatch := make([]string, 0)
+	watchRequests := make([]*querypb.WatchDmChannelsRequest, 0)
+	partitionID2channelInfo := make(map[UniqueID][]*querypb.VchannelInfo)
 	for _, partitionID := range partitionIDs {
 		getRecoveryInfoRequest := &querypb.GetRecoveryInfoRequest{
 			Base: lpt.Base,
@@ -354,7 +355,6 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 			return err
 		}
 
-		segment2BingLog := make(map[UniqueID]*querypb.SegmentLoadInfo)
 		for _, segmentBingLog := range recoveryInfo.Binlogs {
 			segmentID := segmentBingLog.SegmentID
 			segmentLoadInfo := &querypb.SegmentLoadInfo{
@@ -373,6 +373,15 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 			}
 			segment2BingLog[segmentID] = segmentLoadInfo
 		}
+
+		for _, info := range recoveryInfo.Channels {
+
+		}
+		if _, ok := partitionID2channelInfo[partitionID]; !ok {
+			partitionID2channelInfo[partitionID] = make([]*querypb.VchannelInfo, 0)
+		}
+		partitionID2channelInfo[partitionID] = append(partitionID2channelInfo[partitionID], recoveryInfo.Channels...)
+
 	}
 
 	for _, partitionID := range partitionIDs {
