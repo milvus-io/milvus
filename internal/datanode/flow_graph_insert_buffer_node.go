@@ -60,18 +60,22 @@ type insertBufferNode struct {
 	timeTickStream          msgstream.MsgStream
 	segmentStatisticsStream msgstream.MsgStream
 
-	dsSaveBinlog func(fu *autoFlushUnit) error
-	openSegList  map[UniqueID]bool
-	openSegLock  sync.Mutex
+	dsSaveBinlog          func(fu *segmentFlushUnit) error
+	segmentCheckPoints    map[UniqueID]segmentCheckPoint
+	segmentCheckPointLock sync.Mutex
 }
 
-type autoFlushUnit struct {
-	collID             UniqueID
-	segID              UniqueID
-	field2Path         map[UniqueID]string
-	openSegCheckpoints map[UniqueID]internalpb.MsgPosition
-	numRows            map[UniqueID]int64
-	flushed            bool
+type segmentCheckPoint struct {
+	numRows int64
+	pos     internalpb.MsgPosition
+}
+
+type segmentFlushUnit struct {
+	collID     UniqueID
+	segID      UniqueID
+	field2Path map[UniqueID]string
+	checkPoint map[UniqueID]segmentCheckPoint
+	flushed    bool
 }
 
 type insertBuffer struct {
@@ -155,6 +159,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			// this position is the start position of current segment, not start position of current MsgPack
 			// so setStartPositions will only call once when meet new segment
 			ibNode.replica.setStartPositions(currentSegID, iMsg.startPositions)
+			ibNode.setSegmentCheckPoint(currentSegID, segmentCheckPoint{0, *iMsg.startPositions[0]})
 		}
 
 		segNum := uniqueSeg[currentSegID]
@@ -471,7 +476,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		}
 	}
 
-	finishCh := make(chan autoFlushUnit, len(segToUpdate))
+	finishCh := make(chan segmentFlushUnit, len(segToUpdate))
 	finishCnt := sync.WaitGroup{}
 	for _, segToFlush := range segToUpdate {
 		// If full, auto flush
@@ -506,7 +511,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			log.Debug("segment is empty")
 			continue
 		}
-		fu.openSegCheckpoints, fu.numRows = ibNode.listOpenSegmentCheckPointAndNumRows()
+		fu.checkPoint = ibNode.listSegmentCheckPoints()
 		fu.flushed = false
 		if err := ibNode.dsSaveBinlog(&fu); err != nil {
 			log.Debug("data service save bin log path failed", zap.Error(err))
@@ -522,25 +527,23 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 		if ibNode.insertBuffer.size(currentSegID) <= 0 {
 			log.Debug(".. Buffer empty ...")
-			c, n := ibNode.listOpenSegmentCheckPointAndNumRows()
-			ibNode.dsSaveBinlog(&autoFlushUnit{
-				collID:             fmsg.collectionID,
-				segID:              currentSegID,
-				numRows:            n,
-				field2Path:         map[UniqueID]string{},
-				openSegCheckpoints: c,
-				flushed:            true,
+			ibNode.dsSaveBinlog(&segmentFlushUnit{
+				collID:     fmsg.collectionID,
+				segID:      currentSegID,
+				field2Path: map[UniqueID]string{},
+				checkPoint: ibNode.listSegmentCheckPoints(),
+				flushed:    true,
 			})
 			ibNode.removeSegmentCheckPoint(fmsg.segmentID)
 			fmsg.dmlFlushedCh <- []*datapb.ID2PathList{{ID: currentSegID, Paths: []string{}}}
 		} else {
 			log.Debug(".. Buffer not empty, flushing ..")
-			finishCh := make(chan autoFlushUnit, 1)
+			finishCh := make(chan segmentFlushUnit, 1)
 
 			ibNode.flushMap.Store(currentSegID, ibNode.insertBuffer.insertData[currentSegID])
 			delete(ibNode.insertBuffer.insertData, currentSegID)
 			clearFn := func() {
-				finishCh <- autoFlushUnit{field2Path: nil}
+				finishCh <- segmentFlushUnit{field2Path: nil}
 				log.Debug(".. Clearing flush Buffer ..")
 				ibNode.flushMap.Delete(currentSegID)
 				close(finishCh)
@@ -575,7 +578,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			fu := <-finishCh
 			close(finishCh)
 			if fu.field2Path != nil {
-				fu.openSegCheckpoints, fu.numRows = ibNode.listOpenSegmentCheckPointAndNumRows()
+				fu.checkPoint = ibNode.listSegmentCheckPoints()
 				fu.flushed = true
 				if ibNode.dsSaveBinlog(&fu) != nil {
 					log.Debug("data service save bin log path failed", zap.Error(err))
@@ -603,7 +606,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 }
 
 func flushSegment(collMeta *etcdpb.CollectionMeta, segID, partitionID, collID UniqueID,
-	insertData *sync.Map, kv kv.BaseKV, flushUnit chan<- autoFlushUnit, wgFinish *sync.WaitGroup,
+	insertData *sync.Map, kv kv.BaseKV, flushUnit chan<- segmentFlushUnit, wgFinish *sync.WaitGroup,
 	ibNode *insertBufferNode, idAllocator allocatorInterface) {
 	if wgFinish != nil {
 		defer wgFinish.Done()
@@ -611,7 +614,7 @@ func flushSegment(collMeta *etcdpb.CollectionMeta, segID, partitionID, collID Un
 
 	clearFn := func(isSuccess bool) {
 		if !isSuccess {
-			flushUnit <- autoFlushUnit{field2Path: nil}
+			flushUnit <- segmentFlushUnit{field2Path: nil}
 		}
 
 		log.Debug(".. Clearing flush Buffer ..")
@@ -695,29 +698,31 @@ func flushSegment(collMeta *etcdpb.CollectionMeta, segID, partitionID, collID Un
 		return
 	}
 
-	ibNode.setSegmentCheckPoint(segID)
-	flushUnit <- autoFlushUnit{collID: collID, segID: segID, field2Path: field2Path}
+	_, ep := ibNode.replica.getSegmentPositions(segID)
+	sta, _ := ibNode.replica.getSegmentStatisticsUpdates(segID)
+	ibNode.setSegmentCheckPoint(segID, segmentCheckPoint{sta.NumRows, *ep[0]})
+	flushUnit <- segmentFlushUnit{collID: collID, segID: segID, field2Path: field2Path}
 	clearFn(true)
 }
 
-func (ibNode *insertBufferNode) setSegmentCheckPoint(segID UniqueID) {
-	ibNode.openSegLock.Lock()
-	defer ibNode.openSegLock.Unlock()
-	ibNode.openSegList[segID] = true
+func (ibNode *insertBufferNode) setSegmentCheckPoint(segID UniqueID, chk segmentCheckPoint) {
+	ibNode.segmentCheckPointLock.Lock()
+	defer ibNode.segmentCheckPointLock.Unlock()
+	ibNode.segmentCheckPoints[segID] = chk
 }
 func (ibNode *insertBufferNode) removeSegmentCheckPoint(segID UniqueID) {
-	ibNode.openSegLock.Lock()
-	defer ibNode.openSegLock.Unlock()
-	delete(ibNode.openSegList, segID)
+	ibNode.segmentCheckPointLock.Lock()
+	defer ibNode.segmentCheckPointLock.Unlock()
+	delete(ibNode.segmentCheckPoints, segID)
 }
-func (ibNode *insertBufferNode) listOpenSegmentCheckPointAndNumRows() (map[UniqueID]internalpb.MsgPosition, map[UniqueID]int64) {
-	ibNode.openSegLock.Lock()
-	defer ibNode.openSegLock.Unlock()
-	segs := make([]UniqueID, 0, len(ibNode.openSegList))
-	for k := range ibNode.openSegList {
-		segs = append(segs, k)
+func (ibNode *insertBufferNode) listSegmentCheckPoints() map[UniqueID]segmentCheckPoint {
+	ibNode.segmentCheckPointLock.Lock()
+	defer ibNode.segmentCheckPointLock.Unlock()
+	segs := make(map[UniqueID]segmentCheckPoint)
+	for k, v := range ibNode.segmentCheckPoints {
+		segs[k] = v
 	}
-	return ibNode.replica.listOpenSegmentCheckPointAndNumRows(segs)
+	return segs
 }
 
 func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
@@ -816,7 +821,7 @@ func newInsertBufferNode(
 	factory msgstream.Factory,
 	idAllocator allocatorInterface,
 	flushCh <-chan *flushMsg,
-	saveBinlog func(*autoFlushUnit) error,
+	saveBinlog func(*segmentFlushUnit) error,
 ) *insertBufferNode {
 
 	maxQueueLength := Params.FlowGraphMaxQueueLength
@@ -869,11 +874,11 @@ func newInsertBufferNode(
 		timeTickStream:          wTtMsgStream,
 		segmentStatisticsStream: segStatisticsMsgStream,
 
-		replica:      replica,
-		flushMap:     sync.Map{},
-		flushChan:    flushCh,
-		idAllocator:  idAllocator,
-		dsSaveBinlog: saveBinlog,
-		openSegList:  make(map[UniqueID]bool),
+		replica:            replica,
+		flushMap:           sync.Map{},
+		flushChan:          flushCh,
+		idAllocator:        idAllocator,
+		dsSaveBinlog:       saveBinlog,
+		segmentCheckPoints: make(map[UniqueID]segmentCheckPoint),
 	}
 }

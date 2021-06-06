@@ -62,7 +62,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
 
-	saveBinlog := func(fu *autoFlushUnit) error {
+	saveBinlog := func(fu *segmentFlushUnit) error {
 		t.Log(fu)
 		return nil
 	}
@@ -135,9 +135,13 @@ func TestFlushSegment(t *testing.T) {
 	collMeta := genCollectionMeta(collectionID, "test_flush_segment_txn")
 	flushMap := sync.Map{}
 	replica := newReplica()
+	err := replica.addCollection(collMeta.ID, collMeta.Schema)
+	require.NoError(t, err)
+	err = replica.addSegment(segmentID, collMeta.ID, 0, Params.InsertChannelNames[0])
+	require.NoError(t, err)
 	replica.setEndPositions(segmentID, []*internalpb.MsgPosition{{ChannelName: "TestChannel"}})
 
-	finishCh := make(chan autoFlushUnit, 1)
+	finishCh := make(chan segmentFlushUnit, 1)
 
 	insertData := &InsertData{
 		Data: make(map[storage.FieldID]storage.FieldData),
@@ -161,10 +165,10 @@ func TestFlushSegment(t *testing.T) {
 		"receiveBufSize": 1024,
 		"pulsarAddress":  Params.PulsarAddress,
 		"pulsarBufSize":  1024}
-	err := msFactory.SetParams(m)
+	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
 	flushChan := make(chan *flushMsg, 100)
-	saveBinlog := func(*autoFlushUnit) error {
+	saveBinlog := func(*segmentFlushUnit) error {
 		return nil
 	}
 	ibNode := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog)
@@ -263,8 +267,6 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	}
 	err = colRep.addCollection(collMeta.ID, collMeta.Schema)
 	require.NoError(t, err)
-	err = colRep.addSegment(1, collMeta.ID, 0, Params.InsertChannelNames[0])
-	require.NoError(t, err)
 
 	msFactory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
@@ -274,8 +276,8 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
 
-	flushUnit := []autoFlushUnit{}
-	saveBinlog := func(fu *autoFlushUnit) error {
+	flushUnit := []segmentFlushUnit{}
+	saveBinlog := func(fu *segmentFlushUnit) error {
 		flushUnit = append(flushUnit, *fu)
 		return nil
 	}
@@ -289,6 +291,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	for i := range inMsg.insertMessages {
 		inMsg.insertMessages[i].SegmentID = int64(i%2) + 1
 	}
+	inMsg.startPositions = []*internalpb.MsgPosition{{Timestamp: 100}}
 	inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 123}}
 
 	var iMsg flowgraph.Msg = &inMsg
@@ -296,27 +299,44 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	assert.Equal(t, len(colRep.endPositions), 2)
 	assert.Equal(t, colRep.endPositions[1][0].Timestamp, Timestamp(123))
 	assert.Equal(t, colRep.endPositions[2][0].Timestamp, Timestamp(123))
-	assert.Equal(t, len(iBNode.openSegList), 0)
+	assert.Equal(t, len(iBNode.segmentCheckPoints), 2)
+	assert.Equal(t, iBNode.segmentCheckPoints[1].numRows, int64(0))
+	assert.Equal(t, iBNode.segmentCheckPoints[2].numRows, int64(0))
+	assert.Equal(t, iBNode.segmentCheckPoints[1].pos.Timestamp, Timestamp(100))
+	assert.Equal(t, iBNode.segmentCheckPoints[2].pos.Timestamp, Timestamp(100))
 	assert.Equal(t, len(iBNode.insertBuffer.insertData), 2)
 	assert.Equal(t, iBNode.insertBuffer.size(1), int32(50+16000))
 	assert.Equal(t, iBNode.insertBuffer.size(2), int32(50+16000))
+	assert.Equal(t, len(flushUnit), 0)
 
 	for i := range inMsg.insertMessages {
 		inMsg.insertMessages[i].SegmentID = int64(i%2) + 2
 	}
+	inMsg.startPositions = []*internalpb.MsgPosition{{Timestamp: 123}}
 	inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 234}}
 	iBNode.Operate([]flowgraph.Msg{iMsg})
 	assert.Equal(t, len(colRep.endPositions), 3)
 	assert.Equal(t, colRep.endPositions[1][0].Timestamp, Timestamp(123))
 	assert.Equal(t, colRep.endPositions[2][0].Timestamp, Timestamp(234))
 	assert.Equal(t, colRep.endPositions[3][0].Timestamp, Timestamp(234))
-	assert.Equal(t, iBNode.openSegList, map[UniqueID]bool{2: true})
+	assert.Equal(t, len(iBNode.segmentCheckPoints), 3)
+	assert.Equal(t, iBNode.segmentCheckPoints[1].numRows, int64(0))
+	assert.Equal(t, iBNode.segmentCheckPoints[2].numRows, int64(100+32000))
+	assert.Equal(t, iBNode.segmentCheckPoints[3].numRows, int64(0))
+	assert.Equal(t, iBNode.segmentCheckPoints[1].pos.Timestamp, Timestamp(100))
+	assert.Equal(t, iBNode.segmentCheckPoints[2].pos.Timestamp, Timestamp(234))
+	assert.Equal(t, iBNode.segmentCheckPoints[3].pos.Timestamp, Timestamp(123))
+
 	assert.Equal(t, len(flushUnit), 1)
 	assert.Equal(t, flushUnit[0].segID, int64(2))
-	assert.Equal(t, len(flushUnit[0].numRows), 1)
-	assert.Equal(t, flushUnit[0].numRows[2], int64(100+32000))
-	assert.Equal(t, len(flushUnit[0].openSegCheckpoints), 1)
-	assert.Equal(t, flushUnit[0].openSegCheckpoints[2].Timestamp, Timestamp(234))
+	assert.Equal(t, len(flushUnit[0].checkPoint), 3)
+	assert.Equal(t, flushUnit[0].checkPoint[1].numRows, int64(0))
+	assert.Equal(t, flushUnit[0].checkPoint[2].numRows, int64(100+32000))
+	assert.Equal(t, flushUnit[0].checkPoint[3].numRows, int64(0))
+	assert.Equal(t, flushUnit[0].checkPoint[1].pos.Timestamp, Timestamp(100))
+	assert.Equal(t, flushUnit[0].checkPoint[2].pos.Timestamp, Timestamp(234))
+	assert.Equal(t, flushUnit[0].checkPoint[3].pos.Timestamp, Timestamp(123))
+
 	assert.Greater(t, len(flushUnit[0].field2Path), 0)
 	assert.False(t, flushUnit[0].flushed)
 	assert.Equal(t, len(iBNode.insertBuffer.insertData), 2)
@@ -326,21 +346,30 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	for i := range inMsg.insertMessages {
 		inMsg.insertMessages[i].SegmentID = 1
 	}
+	inMsg.startPositions = []*internalpb.MsgPosition{{Timestamp: 234}}
 	inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 345}}
 	iBNode.Operate([]flowgraph.Msg{iMsg})
 	assert.Equal(t, len(colRep.endPositions), 3)
 	assert.Equal(t, colRep.endPositions[1][0].Timestamp, Timestamp(345))
 	assert.Equal(t, colRep.endPositions[2][0].Timestamp, Timestamp(234))
 	assert.Equal(t, colRep.endPositions[3][0].Timestamp, Timestamp(234))
-	assert.Equal(t, iBNode.openSegList, map[UniqueID]bool{1: true, 2: true})
+	assert.Equal(t, len(iBNode.segmentCheckPoints), 3)
+	assert.Equal(t, iBNode.segmentCheckPoints[1].numRows, int64(50+16000+100+32000))
+	assert.Equal(t, iBNode.segmentCheckPoints[2].numRows, int64(100+32000))
+	assert.Equal(t, iBNode.segmentCheckPoints[3].numRows, int64(0))
+	assert.Equal(t, iBNode.segmentCheckPoints[1].pos.Timestamp, Timestamp(345))
+	assert.Equal(t, iBNode.segmentCheckPoints[2].pos.Timestamp, Timestamp(234))
+	assert.Equal(t, iBNode.segmentCheckPoints[3].pos.Timestamp, Timestamp(123))
+
 	assert.Equal(t, len(flushUnit), 2)
 	assert.Equal(t, flushUnit[1].segID, int64(1))
-	assert.Equal(t, len(flushUnit[1].numRows), 2)
-	assert.Equal(t, flushUnit[1].numRows[2], int64(100+32000))
-	assert.Equal(t, flushUnit[1].numRows[1], int64(50+16000+100+32000))
-	assert.Equal(t, len(flushUnit[1].openSegCheckpoints), 2)
-	assert.Equal(t, flushUnit[1].openSegCheckpoints[1].Timestamp, Timestamp(345))
-	assert.Equal(t, flushUnit[1].openSegCheckpoints[2].Timestamp, Timestamp(234))
+	assert.Equal(t, len(flushUnit[1].checkPoint), 3)
+	assert.Equal(t, flushUnit[1].checkPoint[1].numRows, int64(50+16000+100+32000))
+	assert.Equal(t, flushUnit[1].checkPoint[2].numRows, int64(100+32000))
+	assert.Equal(t, flushUnit[1].checkPoint[3].numRows, int64(0))
+	assert.Equal(t, flushUnit[1].checkPoint[1].pos.Timestamp, Timestamp(345))
+	assert.Equal(t, flushUnit[1].checkPoint[2].pos.Timestamp, Timestamp(234))
+	assert.Equal(t, flushUnit[1].checkPoint[3].pos.Timestamp, Timestamp(123))
 	assert.False(t, flushUnit[1].flushed)
 	assert.Greater(t, len(flushUnit[1].field2Path), 0)
 	assert.Equal(t, len(iBNode.insertBuffer.insertData), 1)
@@ -357,6 +386,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	}
 
 	inMsg.insertMessages = []*msgstream.InsertMsg{}
+	inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 345}}
 	inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 456}}
 	iBNode.Operate([]flowgraph.Msg{iMsg})
 
@@ -369,19 +399,26 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	assert.Equal(t, colRep.endPositions[1][0].Timestamp, Timestamp(345))
 	assert.Equal(t, colRep.endPositions[2][0].Timestamp, Timestamp(234))
 	assert.Equal(t, colRep.endPositions[3][0].Timestamp, Timestamp(234))
-	assert.Equal(t, iBNode.openSegList, map[UniqueID]bool{2: true})
+	assert.Equal(t, len(iBNode.segmentCheckPoints), 2)
+	assert.Equal(t, iBNode.segmentCheckPoints[2].numRows, int64(100+32000))
+	assert.Equal(t, iBNode.segmentCheckPoints[3].numRows, int64(0))
+	assert.Equal(t, iBNode.segmentCheckPoints[2].pos.Timestamp, Timestamp(234))
+	assert.Equal(t, iBNode.segmentCheckPoints[3].pos.Timestamp, Timestamp(123))
+
 	assert.Equal(t, len(flushUnit), 3)
 	assert.Equal(t, flushUnit[2].segID, int64(1))
-	assert.Equal(t, len(flushUnit[2].numRows), 2)
-	assert.Equal(t, flushUnit[2].numRows[2], int64(100+32000))
-	assert.Equal(t, flushUnit[2].numRows[1], int64(50+16000+100+32000))
-	t.Log(flushUnit[2].openSegCheckpoints)
-	assert.Equal(t, len(flushUnit[2].openSegCheckpoints), 2)
-	assert.Equal(t, flushUnit[2].openSegCheckpoints[1].Timestamp, Timestamp(345))
-	assert.Equal(t, flushUnit[2].openSegCheckpoints[2].Timestamp, Timestamp(234))
+	assert.Equal(t, len(flushUnit[2].checkPoint), 3)
+	assert.Equal(t, flushUnit[2].checkPoint[1].numRows, int64(50+16000+100+32000))
+	assert.Equal(t, flushUnit[2].checkPoint[2].numRows, int64(100+32000))
+	assert.Equal(t, flushUnit[2].checkPoint[3].numRows, int64(0))
+	assert.Equal(t, flushUnit[2].checkPoint[1].pos.Timestamp, Timestamp(345))
+	assert.Equal(t, flushUnit[2].checkPoint[2].pos.Timestamp, Timestamp(234))
+	assert.Equal(t, flushUnit[2].checkPoint[3].pos.Timestamp, Timestamp(123))
 	assert.Equal(t, len(flushUnit[2].field2Path), 0)
 	assert.NotNil(t, flushUnit[2].field2Path)
 	assert.True(t, flushUnit[2].flushed)
+	assert.Equal(t, len(iBNode.insertBuffer.insertData), 1)
+	assert.Equal(t, iBNode.insertBuffer.size(3), int32(50+16000))
 
 	flushChan <- &flushMsg{
 		msgID:        4,
@@ -400,12 +437,16 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	assert.Equal(t, colRep.endPositions[1][0].Timestamp, Timestamp(345))
 	assert.Equal(t, colRep.endPositions[2][0].Timestamp, Timestamp(234))
 	assert.Equal(t, colRep.endPositions[3][0].Timestamp, Timestamp(234))
-	assert.Equal(t, iBNode.openSegList, map[UniqueID]bool{2: true})
+	assert.Equal(t, len(iBNode.segmentCheckPoints), 1)
+	assert.Equal(t, iBNode.segmentCheckPoints[2].numRows, int64(100+32000))
+	assert.Equal(t, iBNode.segmentCheckPoints[2].pos.Timestamp, Timestamp(234))
 	assert.Equal(t, len(flushUnit), 4)
 	assert.Equal(t, flushUnit[3].segID, int64(3))
-	assert.Equal(t, len(flushUnit[3].numRows), 2)
-	assert.Equal(t, flushUnit[3].numRows[3], int64(50+16000))
-	assert.Equal(t, flushUnit[3].numRows[2], int64(100+32000))
+	assert.Equal(t, len(flushUnit[3].checkPoint), 2)
+	assert.Equal(t, flushUnit[3].checkPoint[3].numRows, int64(50+16000))
+	assert.Equal(t, flushUnit[3].checkPoint[2].numRows, int64(100+32000))
+	assert.Equal(t, flushUnit[3].checkPoint[3].pos.Timestamp, Timestamp(234))
+	assert.Equal(t, flushUnit[3].checkPoint[2].pos.Timestamp, Timestamp(234))
 	assert.Greater(t, len(flushUnit[3].field2Path), 0)
 	assert.NotNil(t, flushUnit[3].field2Path)
 	assert.True(t, flushUnit[3].flushed)
