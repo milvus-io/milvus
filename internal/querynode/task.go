@@ -121,13 +121,13 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		w.node.streaming.replica.initExcludedSegments(collectionID)
+		collection, err := w.node.streaming.replica.getCollectionByID(collectionID)
+		if err != nil {
+			return err
+		}
+		collection.addWatchedDmChannels(w.req.ChannelIDs)
 	}
-	w.node.streaming.replica.initExcludedSegments(collectionID)
-	collection, err := w.node.streaming.replica.getCollectionByID(collectionID)
-	if err != nil {
-		return err
-	}
-	collection.addWatchedDmChannels(w.req.ChannelIDs)
 
 	// 2. get subscription name
 	getUniqueSubName := func() string {
@@ -161,7 +161,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	}
 
 	// 4. add flow graph
-	err = w.node.streaming.dataSyncService.addCollectionFlowGraph(collectionID, consumeChannels)
+	err := w.node.streaming.dataSyncService.addCollectionFlowGraph(collectionID, consumeChannels)
 	if err != nil {
 		return err
 	}
