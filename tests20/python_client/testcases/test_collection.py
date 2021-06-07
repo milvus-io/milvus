@@ -7,7 +7,7 @@ from base.client_base import TestcaseBase
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
-from common.common_type import CaseLabel, CheckParams
+from common.common_type import CaseLabel, CheckTasks
 
 
 prefix = "collection"
@@ -88,7 +88,7 @@ class TestCollectionParams(TestcaseBase):
         self._connect()
         c_name = ""
         ex, check = self.collection_wrap.collection_init(c_name, schema=default_schema,
-                                                         check_res=CheckParams.err_res)
+                                                         check_task=CheckTasks.err_res)
         assert "value  is illegal" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -101,7 +101,7 @@ class TestCollectionParams(TestcaseBase):
         self._connect()
         c_name = get_invalid_string
         ex, check = self.collection_wrap.collection_init(c_name, schema=default_schema,
-                                                         check_res=CheckParams.err_res)
+                                                         check_task=CheckTasks.err_res)
 
         assert "invalid" or "illegal" in str(ex)
 
@@ -153,7 +153,7 @@ class TestCollectionParams(TestcaseBase):
         fields = [cf.gen_int64_field()]
         schema = cf.gen_collection_schema(fields=fields)
         ex, _ = self.collection_wrap.collection_init(c_name, schema=schema,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         assert "The collection already exist, but the schema isnot the same as the passed in" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -170,7 +170,7 @@ class TestCollectionParams(TestcaseBase):
         assert_default_collection(collection)
         schema = cf.gen_default_collection_schema(primary_field=ct.default_int64_field_name)
         ex, _ = self.collection_wrap.collection_init(c_name, schema=schema,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         assert "The collection already exist, but the schema isnot the same as the passed in" in str(ex)
         assert collection.primary_field is None
 
@@ -190,7 +190,7 @@ class TestCollectionParams(TestcaseBase):
         new_fields = cf.gen_float_vec_field(dim=new_dim)
         schema.fields[-1] = new_fields
         ex, _ = self.collection_wrap.collection_init(c_name, schema=schema,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         assert "The collection already exist, but the schema isnot the same as the passed in" in str(ex)
         assert collection.primary_field is None
 
@@ -206,7 +206,7 @@ class TestCollectionParams(TestcaseBase):
         c_name = collection.name
         assert_default_collection(collection)
         ex, _ = self.collection_wrap.collection_init(c_name, schema=get_invalid_type_schema,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         assert "schema type must be schema.CollectionSchema" in str(ex)
         assert_default_collection(collection, c_name)
 
@@ -271,7 +271,7 @@ class TestCollectionParams(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         ex, _ = self.collection_wrap.collection_init(c_name, schema=None,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         assert "Collection missing schema" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -284,7 +284,7 @@ class TestCollectionParams(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         ex, _ = self.collection_wrap.collection_init(c_name, schema=get_invalid_type_schema,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         assert "schema type must be schema.CollectionSchema" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -322,7 +322,7 @@ class TestCollectionParams(TestcaseBase):
         field = FieldSchema(name=get_invalid_string, dtype=5)
         schema = cf.gen_collection_schema(fields=[field])
         ex, _ = self.collection_wrap.collection_init(c_name, schema=schema,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         message_one = "but expected one of: bytes, unicode"
         message_two = "You should specify the name of field"
         message_three = "Invalid field name"
@@ -352,7 +352,7 @@ class TestCollectionParams(TestcaseBase):
         vec_field = cf.gen_float_vec_field()
         schema = cf.gen_collection_schema(fields=[field, vec_field])
         ex, _ = self.collection_wrap.collection_init(c_name, schema=schema,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         assert "Field type must be of DataType" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -366,7 +366,7 @@ class TestCollectionParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         schema = cf.gen_collection_schema(fields=[])
         ex, _ = self.collection_wrap.collection_init(c_name, schema=schema,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         assert "The field of the schema cannot be empty" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -382,7 +382,7 @@ class TestCollectionParams(TestcaseBase):
         field_two = cf.gen_int64_field()
         schema = cf.gen_collection_schema(fields=[field_one, field_two])
         ex, _ = self.collection_wrap.collection_init(c_name, schema=schema,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         assert "duplicated field name" in str(ex)
         has, _ = self.utility_wrap.has_collection(c_name)
         assert not has
@@ -440,7 +440,7 @@ class TestCollectionParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         schema = cf.gen_collection_schema([cf.gen_int64_field()])
         ex, _ = self.collection_wrap.collection_init(c_name, schema=schema,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         assert "The schema must have vector column" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -469,7 +469,7 @@ class TestCollectionParams(TestcaseBase):
         vec_field = cf.gen_float_vec_field()
         schema = cf.gen_collection_schema(fields=[field, vec_field], primary_field=field.name)
         ex, _ = self.collection_wrap.collection_init(c_name, schema=schema,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         assert "the data type of primary key should be int64" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -485,7 +485,7 @@ class TestCollectionParams(TestcaseBase):
         float_vec_field = cf.gen_float_vec_field(is_primary=True)
         schema = cf.gen_collection_schema(fields=[int_field, float_vec_field])
         ex, _ = self.collection_wrap.collection_init(c_name, schema=schema,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         assert "there are more than one primary key" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -501,7 +501,7 @@ class TestCollectionParams(TestcaseBase):
         float_vec_field = cf.gen_float_vec_field(name="vec")
         schema = cf.gen_collection_schema(fields=[int_field, float_vec_field], primary_field="vec")
         ex, _ = self.collection_wrap.collection_init(c_name, schema=schema,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         assert "there are more than one primary key" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -533,7 +533,7 @@ class TestCollectionParams(TestcaseBase):
         float_vec_field = cf.gen_float_vec_field()
         schema = cf.gen_collection_schema(fields=[int_field, float_vec_field])
         ex, _ = self.collection_wrap.collection_init(c_name, schema=schema,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         log.info(str(ex))
         cf.gen_unique_str(prefix)
         with pytest.raises(Exception, match="Param is_primary must be bool type"):
@@ -552,7 +552,7 @@ class TestCollectionParams(TestcaseBase):
         float_vec_field = FieldSchema(name="vec", dtype=dtype)
         schema = cf.gen_collection_schema(fields=[float_vec_field])
         ex, _ = self.collection_wrap.collection_init(c_name, schema=schema,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         assert "dimension is not defined in field type params" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -567,7 +567,7 @@ class TestCollectionParams(TestcaseBase):
         float_vec_field = cf.gen_float_vec_field(dim=get_invalid_dim)
         schema = cf.gen_collection_schema(fields=[float_vec_field])
         ex, _ = self.collection_wrap.collection_init(c_name, schema=schema,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         assert "dim must be of int" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -583,7 +583,7 @@ class TestCollectionParams(TestcaseBase):
         float_vec_field = cf.gen_float_vec_field(dim=dim)
         schema = cf.gen_collection_schema(fields=[float_vec_field])
         ex, _ = self.collection_wrap.collection_init(c_name, schema=schema,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         assert "invalid dimension: {}. should be in range 1 ~ 32768".format(dim) in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -705,7 +705,7 @@ class TestCollectionParams(TestcaseBase):
         data = cf.gen_default_binary_list_data(nb)
         ex, _ = self.collection_wrap.collection_init(c_name, schema=default_binary_schema,
                                                      data=data,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         log.debug(str(ex))
 
 
@@ -746,7 +746,7 @@ class TestCollectionOperation(TestcaseBase):
         res_list = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
         ex, check = self.collection_wrap.collection_init(c_name, schema=default_schema,
-                                                         check_res=CheckParams.err_res)
+                                                         check_task=CheckTasks.err_res)
         assert "There is no connection with alias '{}'".format(ct.default_alias) in str(ex)
         assert self.collection_wrap.collection is None
 
@@ -780,7 +780,7 @@ class TestCollectionOperation(TestcaseBase):
         dup_collection, _ = self.collection_wrap.collection_init(collection.name)
         assert_default_collection(dup_collection, collection.name)
         dup_collection.drop()
-        has, _ = self.utility_wrap.has_collection(collection.name, check_res=CheckParams.err_res)
+        has, _ = self.utility_wrap.has_collection(collection.name, check_res=CheckTasks.err_res)
         assert not has
         with pytest.raises(Exception, match="can't find collection"):
             collection.num_entities
@@ -811,9 +811,9 @@ class TestCollectionOperation(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         data = pd.DataFrame()
-        ex, _ = self.collection_wrap.collection_init(name=c_name, schema=None,
+        ex, _ = self.collection_wrap.init_collection(name=c_name, schema=None,
                                                      data=data,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         assert "The field of the schema cannot be empty" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -827,7 +827,7 @@ class TestCollectionOperation(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         ex, _ = self.collection_wrap.collection_init(name=c_name, schema=None,
                                                      data=get_invalid_df,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         message_one = "Cannot infer schema from empty dataframe"
         message_two = "Field name should not be empty"
         message_three = "Invalid field name"
@@ -847,7 +847,7 @@ class TestCollectionOperation(TestcaseBase):
         df = pd.DataFrame(data=mix_data, columns=list("ABC"))
         ex, _ = self.collection_wrap.collection_init(name=c_name, schema=None,
                                                      data=df,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         assert "The data in the same column must be of the same type" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -861,7 +861,7 @@ class TestCollectionOperation(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         ex, _ = self.collection_wrap.collection_init(name=c_name, schema=None,
                                                      data=get_non_df,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         assert "Data of not pandas.DataFrame type should bepassed into the schema" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -876,7 +876,7 @@ class TestCollectionOperation(TestcaseBase):
         data = cf.gen_default_list_data(nb=100)
         ex, _ = self.collection_wrap.collection_init(name=c_name, schema=None,
                                                      data=data,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         assert "Data of not pandas.DataFrame type should bepassed into the schema" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -922,5 +922,5 @@ class TestCollectionOperation(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         data = cf.gen_default_binary_list_data(nb=100)
         ex, _ = self.collection_wrap.collection_init(name=c_name, schema=None, data=data,
-                                                     check_res=CheckParams.err_res)
+                                                     check_task=CheckTasks.err_res)
         assert "Data of not pandas.DataFrame type should bepassed into the schema" in str(ex)

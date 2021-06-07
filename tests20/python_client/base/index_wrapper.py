@@ -4,7 +4,7 @@ from pymilvus_orm import Index
 sys.path.append("..")
 from check.param_check import *
 from check.func_check import *
-from base.api_request import api_request
+from utils.api_request import api_request
 
 
 class ApiIndexWrapper:

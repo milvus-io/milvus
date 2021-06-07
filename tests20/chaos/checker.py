@@ -39,7 +39,7 @@ class SearchChecker(Checker):
                 data=search_vec,
                 params={"nprobe": 32},
                 limit=1,
-                check_res="nothing"
+                check_task="nothing"
             )
             if result is True:
                 self._succ += 1
@@ -56,7 +56,7 @@ class InsertChecker(Checker):
         while self._running is True:
             sleep(1)
             _, result = self.c_wrapper.insert(data=cf.gen_default_list_data(),
-                                              check_res="nothing")
+                                              check_task="nothing")
             if result is True:
                 self._succ += 1
             else:
@@ -72,11 +72,11 @@ class CreateChecker(Checker):
     def keep_creating(self):
         while self._running is True:
             collection, result = self.c_wrapper.collection_init(name=cf.gen_unique_str(),
-                                                       schema=cf.gen_default_collection_schema(),
-                                                       check_res="check_nothing")
+                                                                schema=cf.gen_default_collection_schema(),
+                                                                check_task="check_nothing")
             if result is True:
                 self._succ += 1
-                self.c_wrapper.drop(check_res="check_nothing")
+                self.c_wrapper.drop(check_task="check_nothing")
             else:
                 self._fail += 1
 

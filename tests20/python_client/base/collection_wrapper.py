@@ -1,25 +1,20 @@
-from pymilvus_orm import Collection
-from pymilvus_orm.types import DataType
-from pymilvus_orm.default_config import DefaultConfig
 import sys
 
 sys.path.append("..")
 from check.param_check import *
 from check.func_check import *
-from utils.util_log import test_log as log
-from common.common_type import *
-from base.api_request import api_request
+from utils.api_request import api_request
 
 
 class ApiCollectionWrapper:
     collection = None
 
-    def collection_init(self, name, data=None, schema=None, check_res=None, check_params=None, **kwargs):
+    def collection_init(self, name, data=None, schema=None, check_task=None, check_params=None, **kwargs):
         """ In order to distinguish the same name of collection """
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([Collection, name, data, schema], **kwargs)
-        self.collection = res if check is True else None
-        check_result = ResponseChecker(res, func_name, check_res, check_params, check, name=name, data=data, schema=schema, **kwargs).run()
+        res, is_succ = api_request([Collection, name, data, schema], **kwargs)
+        self.collection = res if is_succ else None
+        check_result = ResponseChecker(res, func_name, check_task, check_params, is_succ, name=name, data=data, schema=schema, **kwargs).run()
         return res, check_result
 
     @property
@@ -119,16 +114,18 @@ class ApiCollectionWrapper:
         # check_result = CheckFunc(res, func_name, check_res, check_params, check).run()
         # return res, check_result
 
-    def partition(self, partition_name, check_res=None, check_params=None):
+    def partition(self, partition_name, check_task=None, check_params=None):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.collection.partition, partition_name])
-        check_result = ResponseChecker(res, func_name, check_res, check_params, check, partition_name=partition_name).run()
+        res, succ = api_request([self.collection.partition, partition_name])
+        check_result = ResponseChecker(res, func_name, check_task, check_params,
+                                       succ, partition_name=partition_name).run()
         return res, check_result
 
-    def has_partition(self, partition_name, check_res=None, check_params=None):
+    def has_partition(self, partition_name, check_task=None, check_params=None):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.collection.has_partition, partition_name])
-        check_result = ResponseChecker(res, func_name, check_res, check_params, check, partition_name=partition_name).run()
+        res, succ = api_request([self.collection.has_partition, partition_name])
+        check_result = ResponseChecker(res, func_name, check_task, check_params,
+                                       succ, partition_name=partition_name).run()
         return res, check_result
 
     def drop_partition(self, partition_name, check_res=None, check_params=None, **kwargs):
