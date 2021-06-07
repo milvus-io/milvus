@@ -54,6 +54,16 @@ pipeline {
                     }
                 }
                 post {
+                    unsuccessful {
+                        container('jnlp') {
+                            script {
+                                emailext subject: '$DEFAULT_SUBJECT',
+                                body: '$DEFAULT_CONTENT',
+                                recipientProviders: [developers(), requestor()],
+                                replyTo: '$DEFAULT_REPLYTO'
+                            }
+                        }
+                    }
                     always {
                         container('main') {
                             script {
