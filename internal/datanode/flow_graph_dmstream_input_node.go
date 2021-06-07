@@ -34,8 +34,6 @@ func newDmInputNode(ctx context.Context, factory msgstream.Factory, vchannelName
 		log.Debug("datanode Seek: " + vchannelName)
 	}
 
-	insertStream.Start()
-
 	var stream msgstream.MsgStream = insertStream
 	node := flowgraph.NewInputNode(&stream, "dmInputNode", maxQueueLength, maxParallelism)
 	return node

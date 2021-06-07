@@ -70,7 +70,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	}
 
 	flushChan := make(chan *flushMsg, 100)
-	iBNode := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog)
+	iBNode := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
 
 	dmlFlushedCh := make(chan []*datapb.ID2PathList, 1)
 
@@ -174,7 +174,7 @@ func TestFlushSegment(t *testing.T) {
 	saveBinlog := func(*segmentFlushUnit) error {
 		return nil
 	}
-	ibNode := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog)
+	ibNode := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
 
 	flushSegment(collMeta,
 		segmentID,
@@ -286,7 +286,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	}
 
 	flushChan := make(chan *flushMsg, 100)
-	iBNode := newInsertBufferNode(ctx, colRep, msFactory, NewAllocatorFactory(), flushChan, saveBinlog)
+	iBNode := newInsertBufferNode(ctx, colRep, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
 
 	inMsg := genInsertMsg("datanode-03-test-autoflush")
 	inMsg.insertMessages = dataFactory.GetMsgStreamInsertMsgs(100)

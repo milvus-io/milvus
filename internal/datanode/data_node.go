@@ -155,13 +155,15 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 	metaService := newMetaService(node.ctx, replica, node.masterService)
 
 	flushChan := make(chan *flushMsg, 100)
-	dataSyncService := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchan, node.clearSignal)
+	dataSyncService := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataService)
 	// TODO metaService using timestamp in DescribeCollection
 	node.vchan2SyncService[vchan.GetChannelName()] = dataSyncService
 	node.vchan2FlushCh[vchan.GetChannelName()] = flushChan
 
 	metaService.init()
 	go dataSyncService.start()
+
+	log.Info("New dataSyncService started!")
 
 	return nil
 }
@@ -249,10 +251,15 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 
 	default:
 		for _, chanInfo := range in.GetVchannels() {
+			log.Info("DataNode new dataSyncService",
+				zap.String("channel name", chanInfo.ChannelName),
+				zap.Any("channal Info", chanInfo),
+			)
 			node.NewDataSyncService(chanInfo)
 		}
 
 		status.ErrorCode = commonpb.ErrorCode_Success
+		log.Debug("DataNode WatchDmChannels Done")
 		return status, nil
 	}
 }

@@ -40,6 +40,9 @@ func (ddn *ddNode) Name() string {
 }
 
 func (ddn *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
+
+	log.Debug("DDNode Operating")
+
 	if len(in) != 1 {
 		log.Error("Invalid operate message input in ddNode", zap.Int("input length", len(in)))
 		// TODO: add error handling
@@ -77,7 +80,12 @@ func (ddn *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				log.Info("Destroying current flowgraph")
 			}
 		case commonpb.MsgType_Insert:
+			log.Debug("DDNode with insert messages")
 			if msg.EndTs() < FilterThreshold {
+				log.Info("Filtering Insert Messages",
+					zap.Uint64("Message endts", msg.EndTs()),
+					zap.Uint64("FilterThreshold", FilterThreshold),
+				)
 				resMsg := ddn.filterFlushedSegmentInsertMessages(msg.(*msgstream.InsertMsg))
 				if resMsg != nil {
 					iMsg.insertMessages = append(iMsg.insertMessages, resMsg)

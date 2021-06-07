@@ -49,6 +49,7 @@ type (
 )
 type insertBufferNode struct {
 	BaseNode
+	channelName  string
 	insertBuffer *insertBuffer
 	replica      Replica
 	idAllocator  allocatorInterface
@@ -119,6 +120,8 @@ func (ibNode *insertBufferNode) Name() string {
 
 func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
+	log.Debug("InsertBufferNode Operating")
+
 	if len(in) != 1 {
 		log.Error("Invalid operate message input in insertBufferNode", zap.Int("input length", len(in)))
 		// TODO: add error handling
@@ -148,6 +151,8 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		currentSegID := msg.GetSegmentID()
 		collID := msg.GetCollectionID()
 		partitionID := msg.GetPartitionID()
+
+		log.Debug("InsertBufferNode Operating Segment", zap.Int64("ID", currentSegID))
 
 		if !ibNode.replica.hasSegment(currentSegID) {
 			err := ibNode.replica.addSegment(currentSegID, collID, partitionID, msg.GetChannelID())
@@ -727,19 +732,21 @@ func (ibNode *insertBufferNode) listSegmentCheckPoints() map[UniqueID]segmentChe
 
 func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 	msgPack := msgstream.MsgPack{}
-	timeTickMsg := msgstream.TimeTickMsg{
+	timeTickMsg := msgstream.DataNodeTtMsg{
+		// timeTickMsg := msgstream.TimeTickMsg{
 		BaseMsg: msgstream.BaseMsg{
 			BeginTimestamp: ts,
 			EndTimestamp:   ts,
 			HashValues:     []uint32{0},
 		},
-		TimeTickMsg: internalpb.TimeTickMsg{
+		DataNodeTtMsg: datapb.DataNodeTtMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_TimeTick,
-				MsgID:     0,  // GOOSE TODO
-				Timestamp: ts, // GOOSE TODO
-				SourceID:  Params.NodeID,
+				MsgID:     0,
+				Timestamp: ts,
 			},
+			ChannelName: "", // TODO
+			Timestamp:   ts,
 		},
 	}
 	msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
@@ -822,6 +829,7 @@ func newInsertBufferNode(
 	idAllocator allocatorInterface,
 	flushCh <-chan *flushMsg,
 	saveBinlog func(*segmentFlushUnit) error,
+	channelName string,
 ) *insertBufferNode {
 
 	maxQueueLength := Params.FlowGraphMaxQueueLength
@@ -870,6 +878,7 @@ func newInsertBufferNode(
 		BaseNode:     baseNode,
 		insertBuffer: iBuffer,
 		minIOKV:      minIOKV,
+		channelName:  channelName,
 
 		timeTickStream:          wTtMsgStream,
 		segmentStatisticsStream: segStatisticsMsgStream,

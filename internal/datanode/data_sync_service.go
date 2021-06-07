@@ -45,6 +45,7 @@ func newDataSyncService(ctx context.Context,
 	factory msgstream.Factory,
 	vchan *datapb.VchannelInfo,
 	clearSignal chan<- UniqueID,
+	dataService types.DataService,
 
 ) *dataSyncService {
 
@@ -69,6 +70,7 @@ func (dsService *dataSyncService) start() {
 	if dsService.fg != nil {
 		log.Debug("Data Sync Service starting flowgraph")
 		dsService.fg.Start()
+		log.Debug("Data Sync Service starting flowgraph Done")
 	} else {
 		log.Debug("Data Sync Service flowgraph nil")
 	}
@@ -149,6 +151,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) {
 		dsService.idAllocator,
 		dsService.flushChan,
 		saveBinlog,
+		vchanInfo.GetChannelName(),
 	)
 
 	dsService.fg.AddNode(dmStreamNode)
