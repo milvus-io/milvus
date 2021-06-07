@@ -21,9 +21,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.etcd.io/etcd/clientv3"
-	"go.uber.org/zap"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/allocator"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -46,6 +43,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 )
 
 //  internalpb -> internalpb
@@ -1842,6 +1841,12 @@ func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.Channel
 	if in.Base.MsgType != commonpb.MsgType_TimeTick {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = fmt.Sprintf("UpdateChannelTimeTick receive invalid message %d", in.Base.GetMsgType())
+		return status, nil
+	}
+	if !c.dmlChannels.HasChannel(in.ChannelNames...) {
+		log.Debug("update time tick wit unkonw channel", zap.Strings("input channels", in.ChannelNames))
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = fmt.Sprintf("update time tick with unknown channel name, input channels = %v", in.ChannelNames)
 		return status, nil
 	}
 	err := c.chanTimeTick.UpdateTimeTick(in)
