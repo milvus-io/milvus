@@ -1,4 +1,5 @@
 import pytest
+import os
 
 from pymilvus_orm.default_config import DefaultConfig
 from base.client_base import TestcaseBase
@@ -292,7 +293,3 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.add_connection(default={"host": host, "port": port}, dev={"host": host, "port": port})
         log.info(self.connection_wrap.list_connections()[0])
         assert self.connection_wrap.list_connections()[0] == ['default', 'dev']
-
-
-
-

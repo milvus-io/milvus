@@ -10,12 +10,13 @@ def pytest_addoption(parser):
     parser.addoption("--handler", action="store", default="GRPC", help="handler of request")
     parser.addoption("--tag", action="store", default="all", help="only run tests matching the tag.")
     parser.addoption('--dry_run', action='store_true', default=False, help="")
-    parser.addoption('--partition_name', action='store_true', default="partition_name", help="name of partition")
-    parser.addoption('--descriptions', action='store_true', default="partition_des", help="descriptions of partition")
-    parser.addoption('--collection_name', action='store_true', default="collection_name", help="name of collection")
-    parser.addoption('--search_vectors', action='store_true', default="search_vectors", help="vectors of search")
-    parser.addoption('--index_param', action='store_true', default="index_param", help="index_param of index")
-    parser.addoption('--data', action='store_true', default="data", help="data of request")
+    parser.addoption('--partition_name', action='store', default="partition_name", help="name of partition")
+    parser.addoption('--descriptions', action='store', default="partition_des", help="descriptions of partition")
+    parser.addoption('--collection_name', action='store', default="collection_name", help="name of collection")
+    parser.addoption('--search_vectors', action='store', default="search_vectors", help="vectors of search")
+    parser.addoption('--index_param', action='store', default="index_param", help="index_param of index")
+    parser.addoption('--data', action='store', default="data", help="data of request")
+    parser.addoption('--log_path', action='store', default="/tmp/ci_logs/", help="log path of ci test")
 
 
 @pytest.fixture
@@ -86,3 +87,8 @@ def index_param(request):
 @pytest.fixture
 def data(request):
     return request.config.getoption("--data")
+
+
+@pytest.fixture
+def log_path(request):
+    return request.config.getoption("--log_path")
