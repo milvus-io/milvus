@@ -790,7 +790,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
 		assert.EqualValues(t, 0, len(resp.GetChannels()[0].GetCheckPoints()))
-		assert.EqualValues(t, []UniqueID{0, 1}, resp.GetChannels()[0].GetFlushedSegments())
+		assert.ElementsMatch(t, []UniqueID{0, 1}, resp.GetChannels()[0].GetFlushedSegments())
 		assert.EqualValues(t, 20, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
 	})
 
@@ -814,7 +814,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
 		assert.EqualValues(t, 2, len(resp.GetChannels()[0].GetCheckPoints()))
-		assert.EqualValues(t, []UniqueID{0, 1}, resp.GetChannels()[0].GetFlushedSegments())
+		assert.ElementsMatch(t, []UniqueID{0, 1}, resp.GetChannels()[0].GetFlushedSegments())
 		assert.EqualValues(t, 30, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
 		cps := resp.GetChannels()[0].GetCheckPoints()
 		for _, cp := range cps {
@@ -856,7 +856,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.EqualValues(t, 0, resp.GetBinlogs()[0].GetSegmentID())
 		assert.EqualValues(t, 1, len(resp.GetBinlogs()[0].GetFieldBinlogs()))
 		assert.EqualValues(t, 1, resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetFieldID())
-		assert.EqualValues(t, []string{"/binlog/file1", "/binlog/file2"}, resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetBinlogs())
+		assert.ElementsMatch(t, []string{"/binlog/file1", "/binlog/file2"}, resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetBinlogs())
 	})
 }
 
