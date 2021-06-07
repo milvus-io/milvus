@@ -67,7 +67,7 @@ func (ddn *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		case commonpb.MsgType_DropCollection:
 			if msg.(*msgstream.DropCollectionMsg).GetCollectionID() == ddn.collectionID {
 				ddn.clearSignal <- ddn.collectionID
-				log.Info("Destorying current flowgraph")
+				log.Info("Destroying current flowgraph")
 			}
 		case commonpb.MsgType_Insert:
 			resMsg := ddn.filterFlushedSegmentInsertMessages(msg.(*msgstream.InsertMsg))
