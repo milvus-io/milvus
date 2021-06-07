@@ -13,7 +13,6 @@ package querynode
 
 import (
 	"context"
-	"errors"
 	"math"
 	"reflect"
 	"sync"
@@ -35,10 +34,9 @@ type searchCollection struct {
 	releaseCtx context.Context
 	cancel     context.CancelFunc
 
-	collectionID      UniqueID
-	historicalReplica ReplicaInterface
-	streamingReplica  ReplicaInterface
-	tSafeReplica      TSafeReplicaInterface
+	collectionID UniqueID
+	historical   *historical
+	streaming    *streaming
 
 	msgBuffer     chan *msgstream.SearchMsg
 	unsolvedMsgMu sync.Mutex // guards unsolvedMsg
@@ -58,9 +56,8 @@ type ResultEntityIds []UniqueID
 func newSearchCollection(releaseCtx context.Context,
 	cancel context.CancelFunc,
 	collectionID UniqueID,
-	historicalReplica ReplicaInterface,
-	streamingReplica ReplicaInterface,
-	tSafeReplica TSafeReplicaInterface,
+	historical *historical,
+	streaming *streaming,
 	searchResultStream msgstream.MsgStream) *searchCollection {
 
 	receiveBufSize := Params.SearchReceiveBufSize
@@ -71,10 +68,9 @@ func newSearchCollection(releaseCtx context.Context,
 		releaseCtx: releaseCtx,
 		cancel:     cancel,
 
-		collectionID:      collectionID,
-		historicalReplica: historicalReplica,
-		streamingReplica:  streamingReplica,
-		tSafeReplica:      tSafeReplica,
+		collectionID: collectionID,
+		historical:   historical,
+		streaming:    streaming,
 
 		tSafeWatchers: make(map[VChannel]*tSafeWatcher),
 
@@ -94,7 +90,7 @@ func (s *searchCollection) start() {
 }
 
 func (s *searchCollection) register() {
-	collection, err := s.streamingReplica.getCollectionByID(s.collectionID)
+	collection, err := s.streaming.replica.getCollectionByID(s.collectionID)
 	if err != nil {
 		log.Error(err.Error())
 		return
@@ -105,9 +101,9 @@ func (s *searchCollection) register() {
 		zap.Any("dml channels", collection.getWatchedDmChannels()),
 		zap.Any("collectionID", collection.ID()))
 	for _, channel := range collection.getWatchedDmChannels() {
-		s.tSafeReplica.addTSafe(channel)
+		s.streaming.tSafeReplica.addTSafe(channel)
 		s.tSafeWatchers[channel] = newTSafeWatcher()
-		s.tSafeReplica.registerTSafeWatcher(channel, s.tSafeWatchers[channel])
+		s.streaming.tSafeReplica.registerTSafeWatcher(channel, s.tSafeWatchers[channel])
 		s.watcherSelectCase = append(s.watcherSelectCase, reflect.SelectCase{
 			Dir:  reflect.SelectRecv,
 			Chan: reflect.ValueOf(s.tSafeWatchers[channel].watcherChan()),
@@ -138,7 +134,7 @@ func (s *searchCollection) waitNewTSafe() Timestamp {
 	}
 	t := Timestamp(math.MaxInt64)
 	for channel := range s.tSafeWatchers {
-		ts := s.tSafeReplica.getTSafe(channel)
+		ts := s.streaming.tSafeReplica.getTSafe(channel)
 		if ts <= t {
 			t = ts
 		}
@@ -307,7 +303,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	searchTimestamp := searchMsg.Base.Timestamp
 
 	collectionID := searchMsg.CollectionID
-	collection, err := s.historicalReplica.getCollectionByID(collectionID)
+	collection, err := s.historical.replica.getCollectionByID(collectionID)
 	if err != nil {
 		return err
 	}
@@ -337,32 +333,38 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	searchResults := make([]*SearchResult, 0)
 	matchedSegments := make([]*Segment, 0)
 
-	var searchPartitionIDsInHistorical []UniqueID
-	var searchPartitionIDsInStreaming []UniqueID
 	partitionIDsInQuery := searchMsg.PartitionIDs
+
+	// get historical partition ids
+	var searchPartitionIDsInHistorical []UniqueID
 	if len(partitionIDsInQuery) == 0 {
-		partitionIDsInHistoricalCol, err1 := s.historicalReplica.getPartitionIDs(collectionID)
-		partitionIDsInStreamingCol, err2 := s.streamingReplica.getPartitionIDs(collectionID)
-		if err1 != nil && err2 != nil {
-			return err2
-		}
-		if len(partitionIDsInHistoricalCol) == 0 {
-			return errors.New("none of this collection's partition has been loaded")
+		partitionIDsInHistoricalCol, err1 := s.historical.replica.getPartitionIDs(collectionID)
+		if err1 != nil {
+			return err1
 		}
 		searchPartitionIDsInHistorical = partitionIDsInHistoricalCol
-		searchPartitionIDsInStreaming = partitionIDsInStreamingCol
 	} else {
 		for _, id := range partitionIDsInQuery {
-			_, err1 := s.historicalReplica.getPartitionByID(id)
+			_, err1 := s.historical.replica.getPartitionByID(id)
 			if err1 == nil {
 				searchPartitionIDsInHistorical = append(searchPartitionIDsInHistorical, id)
 			}
-			_, err2 := s.streamingReplica.getPartitionByID(id)
+		}
+	}
+
+	// get streaming partition ids
+	var searchPartitionIDsInStreaming []UniqueID
+	if len(partitionIDsInQuery) == 0 {
+		partitionIDsInStreamingCol, err2 := s.streaming.replica.getPartitionIDs(collectionID)
+		if err2 != nil {
+			return err2
+		}
+		searchPartitionIDsInStreaming = partitionIDsInStreamingCol
+	} else {
+		for _, id := range partitionIDsInQuery {
+			_, err2 := s.streaming.replica.getPartitionByID(id)
 			if err2 == nil {
 				searchPartitionIDsInStreaming = append(searchPartitionIDsInStreaming, id)
-			}
-			if err1 != nil && err2 != nil {
-				return err2
 			}
 		}
 	}
@@ -379,12 +381,12 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 
 	sealedSegmentSearched := make([]UniqueID, 0)
 	for _, partitionID := range searchPartitionIDsInHistorical {
-		segmentIDs, err := s.historicalReplica.getSegmentIDs(partitionID)
+		segmentIDs, err := s.historical.replica.getSegmentIDs(partitionID)
 		if err != nil {
 			return err
 		}
 		for _, segmentID := range segmentIDs {
-			segment, err := s.historicalReplica.getSegmentByID(segmentID)
+			segment, err := s.historical.replica.getSegmentByID(segmentID)
 			if err != nil {
 				return err
 			}
@@ -401,12 +403,12 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 
 	//TODO:: get searched channels
 	for _, partitionID := range searchPartitionIDsInStreaming {
-		segmentIDs, err := s.streamingReplica.getSegmentIDs(partitionID)
+		segmentIDs, err := s.streaming.replica.getSegmentIDs(partitionID)
 		if err != nil {
 			return err
 		}
 		for _, segmentID := range segmentIDs {
-			segment, err := s.streamingReplica.getSegmentByID(segmentID)
+			segment, err := s.streaming.replica.getSegmentByID(segmentID)
 			if err != nil {
 				return err
 			}
