@@ -336,38 +336,38 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	partitionIDsInQuery := searchMsg.PartitionIDs
 
 	// get historical partition ids
-	var searchPartitionIDsInHistorical []UniqueID
-	if len(partitionIDsInQuery) == 0 {
-		partitionIDsInHistoricalCol, err1 := s.historical.replica.getPartitionIDs(collectionID)
-		if err1 != nil {
-			return err1
-		}
-		searchPartitionIDsInHistorical = partitionIDsInHistoricalCol
-	} else {
-		for _, id := range partitionIDsInQuery {
-			_, err1 := s.historical.replica.getPartitionByID(id)
-			if err1 == nil {
-				searchPartitionIDsInHistorical = append(searchPartitionIDsInHistorical, id)
-			}
-		}
-	}
+	//var searchPartitionIDsInHistorical []UniqueID
+	//if len(partitionIDsInQuery) == 0 {
+	//	partitionIDsInHistoricalCol, err1 := s.historical.replica.getPartitionIDs(collectionID)
+	//	if err1 != nil {
+	//		return err1
+	//	}
+	//	searchPartitionIDsInHistorical = partitionIDsInHistoricalCol
+	//} else {
+	//	for _, id := range partitionIDsInQuery {
+	//		_, err1 := s.historical.replica.getPartitionByID(id)
+	//		if err1 == nil {
+	//			searchPartitionIDsInHistorical = append(searchPartitionIDsInHistorical, id)
+	//		}
+	//	}
+	//}
 
 	// get streaming partition ids
-	var searchPartitionIDsInStreaming []UniqueID
-	if len(partitionIDsInQuery) == 0 {
-		partitionIDsInStreamingCol, err2 := s.streaming.replica.getPartitionIDs(collectionID)
-		if err2 != nil {
-			return err2
-		}
-		searchPartitionIDsInStreaming = partitionIDsInStreamingCol
-	} else {
-		for _, id := range partitionIDsInQuery {
-			_, err2 := s.streaming.replica.getPartitionByID(id)
-			if err2 == nil {
-				searchPartitionIDsInStreaming = append(searchPartitionIDsInStreaming, id)
-			}
-		}
-	}
+	//var searchPartitionIDsInStreaming []UniqueID
+	//if len(partitionIDsInQuery) == 0 {
+	//	partitionIDsInStreamingCol, err2 := s.streaming.replica.getPartitionIDs(collectionID)
+	//	if err2 != nil {
+	//		return err2
+	//	}
+	//	searchPartitionIDsInStreaming = partitionIDsInStreamingCol
+	//} else {
+	//	for _, id := range partitionIDsInQuery {
+	//		_, err2 := s.streaming.replica.getPartitionByID(id)
+	//		if err2 == nil {
+	//			searchPartitionIDsInStreaming = append(searchPartitionIDsInStreaming, id)
+	//		}
+	//	}
+	//}
 
 	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
 		sp.LogFields(oplog.String("statistical time", "stats start"),
@@ -380,47 +380,63 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	}
 
 	sealedSegmentSearched := make([]UniqueID, 0)
-	for _, partitionID := range searchPartitionIDsInHistorical {
-		segmentIDs, err := s.historical.replica.getSegmentIDs(partitionID)
-		if err != nil {
-			return err
-		}
-		for _, segmentID := range segmentIDs {
-			segment, err := s.historical.replica.getSegmentByID(segmentID)
-			if err != nil {
-				return err
-			}
-			searchResult, err := segment.segmentSearch(plan, searchRequests, []Timestamp{searchTimestamp})
+	//for _, partitionID := range searchPartitionIDsInHistorical {
+	//	segmentIDs, err := s.historical.replica.getSegmentIDs(partitionID)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	for _, segmentID := range segmentIDs {
+	//		segment, err := s.historical.replica.getSegmentByID(segmentID)
+	//		if err != nil {
+	//			return err
+	//		}
+	//		searchResult, err := segment.segmentSearch(plan, searchRequests, []Timestamp{searchTimestamp})
+	//
+	//		if err != nil {
+	//			return err
+	//		}
+	//		searchResults = append(searchResults, searchResult)
+	//		matchedSegments = append(matchedSegments, segment)
+	//		sealedSegmentSearched = append(sealedSegmentSearched, segmentID)
+	//	}
+	//}
+	hisSearchResults, hisSegmentResults, err := s.historical.search(searchRequests, collectionID, partitionIDsInQuery, plan, searchTimestamp)
+	if err != nil {
+		return err
+	}
 
-			if err != nil {
-				return err
-			}
-			searchResults = append(searchResults, searchResult)
-			matchedSegments = append(matchedSegments, segment)
-			sealedSegmentSearched = append(sealedSegmentSearched, segmentID)
-		}
+	searchResults = append(searchResults, hisSearchResults...)
+	matchedSegments = append(matchedSegments, hisSegmentResults...)
+	for _, seg := range hisSegmentResults {
+		sealedSegmentSearched = append(sealedSegmentSearched, seg.segmentID)
 	}
 
 	//TODO:: get searched channels
-	for _, partitionID := range searchPartitionIDsInStreaming {
-		segmentIDs, err := s.streaming.replica.getSegmentIDs(partitionID)
-		if err != nil {
-			return err
-		}
-		for _, segmentID := range segmentIDs {
-			segment, err := s.streaming.replica.getSegmentByID(segmentID)
-			if err != nil {
-				return err
-			}
-			searchResult, err := segment.segmentSearch(plan, searchRequests, []Timestamp{searchTimestamp})
-
-			if err != nil {
-				return err
-			}
-			searchResults = append(searchResults, searchResult)
-			matchedSegments = append(matchedSegments, segment)
-		}
+	//for _, partitionID := range searchPartitionIDsInStreaming {
+	//	segmentIDs, err := s.streaming.replica.getSegmentIDs(partitionID)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	for _, segmentID := range segmentIDs {
+	//		segment, err := s.streaming.replica.getSegmentByID(segmentID)
+	//		if err != nil {
+	//			return err
+	//		}
+	//		searchResult, err := segment.segmentSearch(plan, searchRequests, []Timestamp{searchTimestamp})
+	//
+	//		if err != nil {
+	//			return err
+	//		}
+	//		searchResults = append(searchResults, searchResult)
+	//		matchedSegments = append(matchedSegments, segment)
+	//	}
+	//}
+	strSearchResults, strSegmentResults, err := s.streaming.search(searchRequests, collectionID, partitionIDsInQuery, plan, searchTimestamp)
+	if err != nil {
+		return err
 	}
+	searchResults = append(searchResults, strSearchResults...)
+	matchedSegments = append(matchedSegments, strSegmentResults...)
 
 	sp.LogFields(oplog.String("statistical time", "segment search end"))
 	if len(searchResults) <= 0 {

@@ -52,3 +52,47 @@ func (s *streaming) close() {
 	// free collectionReplica
 	s.replica.freeAll()
 }
+
+func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, plan *Plan, ts Timestamp) ([]*SearchResult, []*Segment, error) {
+	searchResults := make([]*SearchResult, 0)
+	segmentResults := make([]*Segment, 0)
+
+	// get streaming partition ids
+	var searchPartitionIDsInStreaming []UniqueID
+	if len(partIDs) == 0 {
+		partitionIDsInStreamingCol, err := s.replica.getPartitionIDs(collID)
+		if err != nil {
+			return searchResults, segmentResults, err
+		}
+		searchPartitionIDsInStreaming = partitionIDsInStreamingCol
+	} else {
+		for _, id := range partIDs {
+			_, err2 := s.replica.getPartitionByID(id)
+			if err2 == nil {
+				searchPartitionIDsInStreaming = append(searchPartitionIDsInStreaming, id)
+			}
+		}
+	}
+
+	//TODO:: get searched channels
+	for _, partitionID := range searchPartitionIDsInStreaming {
+		segmentIDs, err := s.replica.getSegmentIDs(partitionID)
+		if err != nil {
+			return searchResults, segmentResults, err
+		}
+		for _, segmentID := range segmentIDs {
+			segment, err := s.replica.getSegmentByID(segmentID)
+			if err != nil {
+				return searchResults, segmentResults, err
+			}
+			searchResult, err := segment.segmentSearch(plan, searchReqs, []Timestamp{ts})
+			if err != nil {
+				return searchResults, segmentResults, err
+			}
+			searchResults = append(searchResults, searchResult)
+			segmentResults = append(segmentResults, segment)
+		}
+	}
+
+	return searchResults, segmentResults, nil
+}
