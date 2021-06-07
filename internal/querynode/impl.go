@@ -295,7 +295,7 @@ func (node *QueryNode) ReleasePartitions(ctx context.Context, in *queryPb.Releas
 	return status, nil
 }
 
-// deprecated
+// ReleaseSegments deprecated
 func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -337,20 +337,27 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 	}
 	// get info from historical
 	for _, id := range in.SegmentIDs {
+		log.Debug("QueryNode::Impl::GetSegmentInfo for historical", zap.Any("SegmentID", id))
 		segment, err := node.historical.replica.getSegmentByID(id)
 		if err != nil {
+			log.Debug("QueryNode::Impl::GetSegmentInfo, for historical segmentID not exist", zap.Any("SegmentID", id))
 			continue
 		}
 		info := getSegmentInfo(segment)
+		log.Debug("QueryNode::Impl::GetSegmentInfo for historical", zap.Any("SegmentID", id), zap.Any("info", info))
+
 		infos = append(infos, info)
 	}
 	// get info from streaming
 	for _, id := range in.SegmentIDs {
+		log.Debug("QueryNode::Impl::GetSegmentInfo for streaming", zap.Any("SegmentID", id))
 		segment, err := node.streaming.replica.getSegmentByID(id)
 		if err != nil {
+			log.Debug("QueryNode::Impl::GetSegmentInfo, for streaming segmentID not exist", zap.Any("SegmentID", id))
 			continue
 		}
 		info := getSegmentInfo(segment)
+		log.Debug("QueryNode::Impl::GetSegmentInfo for streaming", zap.Any("SegmentID", id), zap.Any("info", info))
 		infos = append(infos, info)
 	}
 	return &queryPb.GetSegmentInfoResponse{

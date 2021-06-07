@@ -697,6 +697,8 @@ func (t *DescribeSegmentReqTask) Execute(ctx context.Context) error {
 	}
 	//TODO, get filed_id and index_name from request
 	segIdxInfo, err := t.core.MetaTable.GetSegmentIndexInfoByID(t.Req.SegmentID, -1, "")
+	log.Debug("MasterService DescribeSegmentReqTask, MetaTable.GetSegmentIndexInfoByID", zap.Any("SegmentID", t.Req.SegmentID),
+		zap.Any("segIdxInfo", segIdxInfo), zap.Error(err))
 	if err != nil {
 		return err
 	}
@@ -793,10 +795,14 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		if info.BuildID != 0 {
+			info.EnableIndex = true
+		}
 		segIdxInfos = append(segIdxInfos, &info)
 	}
 
 	_, err = t.core.MetaTable.AddIndex(segIdxInfos, "", "")
+	log.Debug("MasterService CreateIndexReq", zap.Any("segIdxInfos", segIdxInfos), zap.Error(err))
 	return err
 }
 
