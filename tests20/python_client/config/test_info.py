@@ -12,7 +12,7 @@ class TestInfo:
             log_path = os.environ[var]
             return str(log_path)
         except Exception as e:
-            log_path = "/tmp/log"
+            log_path = "/tmp/ci_logs"
             print("Failed to get environment variables : %s, Use default path : %s" % (str(e), log_path))
             return log_path
 
