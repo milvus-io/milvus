@@ -336,11 +336,11 @@ func (mgr *singleTypeChannelsMgr) createMsgStream(collectionID UniqueID) error {
 	repack := func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
 		// after assigning segment id to msg, tsMsgs was already re-bucketed
 		pack := make(map[int32]*msgstream.MsgPack)
-		for _, msg := range tsMsgs {
-			if len(msg.HashKeys()) <= 0 {
+		for idx, msg := range tsMsgs {
+			if len(hashKeys[idx]) <= 0 {
 				continue
 			}
-			key := int32(msg.HashKeys()[0])
+			key := hashKeys[idx][0]
 			_, ok := pack[key]
 			if !ok {
 				pack[key] = &msgstream.MsgPack{}
