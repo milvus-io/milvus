@@ -538,9 +538,6 @@ func (s *Server) prepareBinlog(req *datapb.SaveBinlogPathsRequest) (map[string]s
 	return meta, nil
 }
 
-func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
-	panic("implement me")
-}
 
 func composeSegmentFlushMsgPack(segmentID UniqueID) msgstream.MsgPack {
 	msgPack := msgstream.MsgPack{
