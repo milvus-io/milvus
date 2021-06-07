@@ -44,7 +44,8 @@ func TestDataNode(t *testing.T) {
 		node1 := newIDLEDataNodeMock()
 		node1.Start()
 		vchannels := []*datapb.VchannelInfo{}
-		for _, ch := range Params.InsertChannelNames {
+		for _, ch := range []string{"datanode-01-test-WatchDmChannel",
+			"datanode-02-test-WatchDmChannels"} {
 			log.Debug("InsertChannels", zap.String("name", ch))
 			vchan := &datapb.VchannelInfo{
 				CollectionID: 1,
@@ -67,7 +68,7 @@ func TestDataNode(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, node1.vchan2FlushCh)
 		assert.NotNil(t, node1.vchan2SyncService)
-		sync, ok := node1.vchan2SyncService[Params.InsertChannelNames[0]]
+		sync, ok := node1.vchan2SyncService["datanode-01-test-WatchDmChannel"]
 		assert.True(t, ok)
 		assert.NotNil(t, sync)
 		assert.Equal(t, UniqueID(1), sync.collectionID)

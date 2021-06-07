@@ -132,57 +132,11 @@ func (node *DataNode) Register() error {
 }
 
 // Init function supposes data service is in INITIALIZING state.
-//
-// In Init process, data node will register itself to data service with its node id
-// and address. Therefore, `SetDataServiceInterface()` must be called before this func.
-// Registering return several channel names data node need.
-//
-// At last, data node initializes its `dataSyncService` and `metaService`.
 func (node *DataNode) Init() error {
-	ctx := context.Background()
-
-	req := &datapb.RegisterNodeRequest{
-		Base: &commonpb.MsgBase{
-			SourceID: node.NodeID,
-		},
-		Address: &commonpb.Address{
-			Ip:   Params.IP,
-			Port: int64(Params.Port),
-		},
-	}
-
-	resp, err := node.dataService.RegisterNode(ctx, req)
-	if err != nil {
-		err = fmt.Errorf("Register node failed: %v", err)
-		log.Debug("DataNode RegisterNode failed", zap.Error(err))
-		return err
-	}
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		err = fmt.Errorf("Receive error when registering data node, msg: %s", resp.Status.Reason)
-		log.Debug("DataNode RegisterNode failed", zap.Error(err))
-		return err
-	}
-
-	if resp.InitParams != nil {
-		for _, kv := range resp.InitParams.StartParams {
-			switch kv.Key {
-			case "DDChannelName":
-				Params.DDChannelNames = []string{kv.Value}
-			case "SegmentStatisticsChannelName":
-				Params.SegmentStatisticsChannelName = kv.Value
-			case "TimeTickChannelName":
-				Params.TimeTickChannelName = kv.Value
-			case "CompleteFlushChannelName":
-				Params.CompleteFlushChannelName = kv.Value
-			default:
-				return fmt.Errorf("Invalid key: %v", kv.Key)
-			}
-		}
-	}
-	log.Debug("DataNode Init", zap.Any("DDChannelName", Params.DDChannelNames),
+	log.Debug("DataNode Init",
 		zap.Any("SegmentStatisticsChannelName", Params.SegmentStatisticsChannelName),
 		zap.Any("TimeTickChannelName", Params.TimeTickChannelName),
-		zap.Any("CompleteFlushChannelName", Params.TimeTickChannelName))
+	)
 
 	return nil
 }
