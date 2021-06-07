@@ -118,56 +118,77 @@ func (lct *LoadCollectionTask) PreExecute(ctx context.Context) error {
 
 func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 	collectionID := lct.CollectionID
-
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
 
-	segmentsToLoad := make([]UniqueID, 0)
-	segment2BingLog := make(map[UniqueID]*querypb.SegmentLoadInfo)
-	channelsToWatch := make([]string, 0)
-	watchRequests := make([]*querypb.WatchDmChannelsRequest, 0)
-	getRecoveryInfoRequest := &querypb.GetRecoveryInfoRequest{
-		Base:         lct.Base,
+	showPartitionRequest := &milvuspb.ShowPartitionsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_ShowPartitions,
+		},
 		CollectionID: collectionID,
 	}
-	recoveryInfo, err := mockGetRecoveryInfo(lct.ctx, lct.masterService, lct.dataService, getRecoveryInfoRequest)
+	showPartitionResponse, err := lct.masterService.ShowPartitions(ctx, showPartitionRequest)
 	if err != nil {
 		status.Reason = err.Error()
 		lct.result = status
 		return err
 	}
+
 	log.Debug("loadCollectionTask: get recovery info")
-
-	for _, segmentBingLog := range recoveryInfo.Binlogs {
-		segmentID := segmentBingLog.SegmentID
-		segmentLoadInfo := &querypb.SegmentLoadInfo{
-			SegmentID:    segmentBingLog.SegmentID,
-			PartitionID:  segmentBingLog.PartitionID,
-			CollectionID: segmentBingLog.CollectionID,
-			BinlogPaths:  make([]*querypb.FieldBinlog, 0),
-		}
-		for _, fieldBinLog := range segmentBingLog.FieldBinlogs {
-			segmentLoadInfo.BinlogPaths = append(segmentLoadInfo.BinlogPaths, fieldBinLog)
-		}
-		segmentsToLoad = append(segmentsToLoad, segmentID)
-		segment2BingLog[segmentID] = segmentLoadInfo
-	}
-
-	for _, info := range recoveryInfo.Channels {
-		channel := info.ChannelName
-		watchRequest := &querypb.WatchDmChannelsRequest{
+	segment2Binlog := make(map[UniqueID]*querypb.SegmentLoadInfo)
+	watchRequests := make(map[string]*querypb.WatchDmChannelsRequest)
+	channelsToWatch := make([]string, 0)
+	segmentsToLoad := make([]UniqueID, 0)
+	partitionIDs := showPartitionResponse.PartitionIDs
+	for _, partitionID := range partitionIDs {
+		getRecoveryInfoRequest := &querypb.GetRecoveryInfoRequest{
 			Base:         lct.Base,
 			CollectionID: collectionID,
-			Infos:        []*querypb.VchannelInfo{info},
-			Schema:       lct.Schema,
+			PartitionID: partitionID,
 		}
-		channelsToWatch = append(channelsToWatch, channel)
-		watchRequests = append(watchRequests, watchRequest)
+		recoveryInfo, err := mockGetRecoveryInfoFromDataService(lct.ctx, lct.masterService, lct.dataService, getRecoveryInfoRequest)
+		if err != nil {
+			status.Reason = err.Error()
+			lct.result = status
+			return err
+		}
+
+		for _, segmentBingLog := range recoveryInfo.Binlogs {
+			segmentID := segmentBingLog.SegmentID
+			segmentLoadInfo := &querypb.SegmentLoadInfo{
+				SegmentID:    segmentBingLog.SegmentID,
+				PartitionID:  partitionID,
+				CollectionID: collectionID,
+				BinlogPaths:  make([]*querypb.FieldBinlog, 0),
+			}
+			for _, fieldBinLog := range segmentBingLog.FieldBinlogs {
+				segmentLoadInfo.BinlogPaths = append(segmentLoadInfo.BinlogPaths, fieldBinLog)
+			}
+			segmentsToLoad = append(segmentsToLoad, segmentID)
+			segment2Binlog[segmentID] = segmentLoadInfo
+		}
+
+		for _, info := range recoveryInfo.Channels {
+			channel := info.ChannelName
+			if _, ok := watchRequests[channel]; !ok {
+				watchRequest := &querypb.WatchDmChannelsRequest{
+					Base:         lct.Base,
+					CollectionID: collectionID,
+					Infos:        []*querypb.VchannelInfo{info},
+					Schema:       lct.Schema,
+				}
+				watchRequests[channel] = watchRequest
+				channelsToWatch = append(channelsToWatch, channel)
+				continue
+			}
+			oldInfo := watchRequests[channel].Infos[0]
+			newInfo := mergeVChannelInfo(oldInfo, info)
+			watchRequests[channel].Infos = []*querypb.VchannelInfo{newInfo}
+		}
 	}
 
 	log.Debug("loadCollectionTask: segments and channels are ready to load or watch")
-
 	segment2Nodes := shuffleSegmentsToQueryNode(segmentsToLoad, lct.cluster)
 	watchRequest2Nodes := shuffleChannelsToQueryNode(channelsToWatch, lct.cluster)
 
@@ -177,7 +198,7 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 		if _, ok := node2Segments[nodeID]; !ok {
 			node2Segments[nodeID] = make([]*querypb.SegmentLoadInfo, 0)
 		}
-		node2Segments[nodeID] = append(node2Segments[nodeID], segment2BingLog[segmentID])
+		node2Segments[nodeID] = append(node2Segments[nodeID], segment2Binlog[segmentID])
 		if lct.cluster.hasWatchedQueryChannel(lct.ctx, nodeID, collectionID) {
 			watchQueryChannelInfo[nodeID] = true
 			continue
@@ -242,9 +263,8 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 		log.Debug("add a loadSegmentTask to loadCollectionTask's childTask")
 	}
 
-	for _, nodeID := range watchRequest2Nodes {
-		index := 0
-		watchRequests[index].NodeID = nodeID
+	for channel, nodeID := range watchRequest2Nodes {
+		watchRequests[channel].NodeID = nodeID
 		watchDmChannelTask := &WatchDmChannelTask{
 			BaseTask: BaseTask{
 				ctx:       lct.ctx,
@@ -252,12 +272,12 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
-			WatchDmChannelsRequest: watchRequests[index],
+			WatchDmChannelsRequest: watchRequests[channel],
 			cluster:                lct.cluster,
 		}
-		lct.AddChildTask(watchDmChannelTask)
-		log.Debug("add a watchDmChannelTask to loadCollectionTask's childTask")
-		index++
+		//TODO::open when queryNode watchDmChannel work
+		//lct.AddChildTask(watchDmChannelTask)
+		log.Debug("add a watchDmChannelTask to loadCollectionTask's childTask", zap.Any("task", watchDmChannelTask))
 	}
 
 	log.Debug("LoadCollection execute done",
@@ -371,7 +391,7 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 			CollectionID: collectionID,
 			PartitionID:  partitionID,
 		}
-		recoveryInfo, err := mockGetRecoveryInfo(lpt.ctx, lpt.masterService, lpt.dataService, getRecoveryInfoRequest)
+		recoveryInfo, err := mockGetRecoveryInfoFromDataService(lpt.ctx, lpt.masterService, lpt.dataService, getRecoveryInfoRequest)
 		if err != nil {
 			status.Reason = err.Error()
 			lpt.result = status
@@ -728,44 +748,24 @@ func (aqt *WatchQueryChannelTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-func mockGetRecoveryInfo(ctx context.Context,
+func mockGetRecoveryInfoFromDataService(ctx context.Context,
 	master types.MasterService,
 	dataService types.DataService,
 	req *querypb.GetRecoveryInfoRequest) (*querypb.GetRecoveryInfoResponse, error) {
-
-	partitionIDs := make([]UniqueID, 0)
-	if req.PartitionID <= 0 {
-		showPartitionRequest := &milvuspb.ShowPartitionsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_ShowPartitions,
-			},
-			CollectionID: req.CollectionID,
-		}
-		showPartitionResponse, err := master.ShowPartitions(ctx, showPartitionRequest)
-		if err != nil {
-			return nil, err
-		}
-		partitionIDs = append(partitionIDs, showPartitionResponse.PartitionIDs...)
-	} else {
-		partitionIDs = append(partitionIDs, req.PartitionID)
-	}
-
 	segmentIDs := make([]UniqueID, 0)
-	for _, partitionID := range partitionIDs {
-		showSegmentRequest := &milvuspb.ShowSegmentsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_ShowSegments,
-			},
-			CollectionID: req.CollectionID,
-			PartitionID:  partitionID,
-		}
-
-		showSegmentsResponse, err := master.ShowSegments(ctx, showSegmentRequest)
-		if err != nil {
-			return nil, err
-		}
-		segmentIDs = append(segmentIDs, showSegmentsResponse.SegmentIDs...)
+	showSegmentRequest := &milvuspb.ShowSegmentsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_ShowSegments,
+		},
+		CollectionID: req.CollectionID,
+		PartitionID:  req.PartitionID,
 	}
+
+	showSegmentsResponse, err := master.ShowSegments(ctx, showSegmentRequest)
+	if err != nil {
+		return nil, err
+	}
+	segmentIDs = append(segmentIDs, showSegmentsResponse.SegmentIDs...)
 	getSegmentStatesResponse, err := dataService.GetSegmentStates(ctx, &datapb.GetSegmentStatesRequest{
 		SegmentIDs: segmentIDs,
 	})
@@ -811,12 +811,9 @@ func mockGetRecoveryInfo(ctx context.Context,
 					Position:  segmentStates[id].StartPosition,
 				}
 				channelInfo.CheckPoints = append(channelInfo.CheckPoints, checkpoint)
-			}
-
-		}
-		for _, checkpoint := range channelInfo.CheckPoints {
-			if checkpoint.Position.Timestamp < channelInfo.SeekPosition.Timestamp {
-				channelInfo.SeekPosition = checkpoint.Position
+				if checkpoint.Position.Timestamp < channelInfo.SeekPosition.Timestamp {
+					channelInfo.SeekPosition = checkpoint.Position
+				}
 			}
 		}
 		channelInfos = append(channelInfos, channelInfo)
@@ -844,6 +841,12 @@ func mockGetRecoveryInfo(ctx context.Context,
 					Binlogs: pathResponse.Paths[index].Values,
 				}
 				segmentBinlog.FieldBinlogs = append(segmentBinlog.FieldBinlogs, fieldBingLog)
+				log.Debug("get binlog path from data service",
+					zap.Int64("collectionID", req.CollectionID),
+					zap.Int64("partitionID", req.PartitionID),
+					zap.Int64("segmentID", id),
+					zap.Int64("fieldID", fieldID),
+					zap.Strings("binlogPath", pathResponse.Paths[index].Values))
 			}
 			segmentBinlogs = append(segmentBinlogs, segmentBinlog)
 		}
@@ -854,7 +857,6 @@ func mockGetRecoveryInfo(ctx context.Context,
 		Channels: channelInfos,
 		Binlogs:  segmentBinlogs,
 	}, nil
-
 }
 
 func shuffleChannelsToQueryNode(dmChannels []string, cluster *queryNodeCluster) map[string]int64 {
@@ -943,6 +945,31 @@ func shuffleSegmentsToQueryNode(segmentIDs []UniqueID, cluster *queryNodeCluster
 		if lastOffset == offset {
 			loopAll = true
 		}
+	}
+}
+
+func mergeVChannelInfo(info1 *querypb.VchannelInfo, info2 *querypb.VchannelInfo) *querypb.VchannelInfo {
+	collectionID := info1.CollectionID
+	channelName := info1.ChannelName
+	seekPosition  := info1.SeekPosition
+	if info1.SeekPosition.Timestamp > info2.SeekPosition.Timestamp {
+		seekPosition = info2.SeekPosition
+	}
+
+	checkPoints := make([]*querypb.CheckPoint, 0)
+	checkPoints = append(checkPoints, info1.CheckPoints...)
+	checkPoints = append(checkPoints, info2.CheckPoints...)
+
+	flushedSegments := make([]UniqueID, 0)
+	flushedSegments = append(flushedSegments, info1.FlushedSegments...)
+	flushedSegments = append(flushedSegments, info2.FlushedSegments...)
+
+	return &querypb.VchannelInfo{
+		CollectionID: collectionID,
+		ChannelName: channelName,
+		SeekPosition: seekPosition,
+		CheckPoints: checkPoints,
+		FlushedSegments: flushedSegments,
 	}
 }
 
