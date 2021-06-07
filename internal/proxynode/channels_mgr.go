@@ -154,12 +154,7 @@ func (mgr *singleTypeChannelsMgr) getAllVIDs(collectionID UniqueID) ([]int, erro
 	mgr.collMtx.RLock()
 	defer mgr.collMtx.RUnlock()
 
-	ids, ok := mgr.collectionID2VIDs[collectionID]
-	if !ok {
-		return nil, fmt.Errorf("collection %d not found", collectionID)
-	}
-
-	return ids, nil
+	return mgr.collectionID2VIDs[collectionID], nil
 }
 
 func (mgr *singleTypeChannelsMgr) getVChansByVID(vid int) ([]vChan, error) {
