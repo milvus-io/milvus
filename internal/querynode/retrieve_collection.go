@@ -13,16 +13,21 @@ package querynode
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
+
+	"github.com/golang/protobuf/proto"
+	oplog "github.com/opentracing/opentracing-go/log"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	oplog "github.com/opentracing/opentracing-go/log"
-	"go.uber.org/zap"
 )
 
 type retrieveCollection struct {
@@ -288,8 +293,132 @@ func (rc *retrieveCollection) doUnsolvedMsgRetrieve() {
 	}
 }
 
+func mergeRetrieveResults(dataArr []*planpb.RetrieveResults) (*planpb.RetrieveResults, error) {
+	var final *planpb.RetrieveResults
+	for _, data := range dataArr {
+		if data == nil {
+			continue
+		}
+
+		if final == nil {
+			final = proto.Clone(data).(*planpb.RetrieveResults)
+			continue
+		}
+
+		proto.Merge(final.Ids, data.Ids)
+		if len(final.FieldsData) != len(data.FieldsData) {
+			return nil, fmt.Errorf("mismatch FieldData in RetrieveResults")
+		}
+
+		for i := range final.FieldsData {
+			proto.Merge(final.FieldsData[i], data.FieldsData[i])
+		}
+	}
+
+	return final, nil
+}
+
 func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error {
 	// TODO(yukun)
+	// step 1: get retrieve object and defer destruction
+	// step 2: for each segment, call retrieve to get ids proto buffer
+	// step 3: merge all proto in go
+	// step 4: publish results
+	// retrieveProtoBlob, err := proto.Marshal(&retrieveMsg.RetrieveRequest)
+	sp, ctx := trace.StartSpanFromContext(retrieveMsg.TraceCtx())
+	defer sp.Finish()
+	retrieveMsg.SetTraceCtx(ctx)
+	timestamp := retrieveMsg.Base.Timestamp
+
+	collectionID := retrieveMsg.CollectionID
+	collection, err := rc.historicalReplica.getCollectionByID(collectionID)
+	if err != nil {
+		return err
+	}
+
+	req := &planpb.RetrieveRequest{
+		Ids:          retrieveMsg.Ids,
+		OutputFields: retrieveMsg.OutputFields,
+	}
+
+	plan, err := createRetrievePlan(collection, req, timestamp)
+	if err != nil {
+		return err
+	}
+	defer plan.delete()
+
+	var partitionIDsInHistorical []UniqueID
+	var partitionIDsInStreaming []UniqueID
+	partitionIDsInQuery := retrieveMsg.PartitionIDs
+	if len(partitionIDsInQuery) == 0 {
+		partitionIDsInHistoricalCol, err1 := rc.historicalReplica.getPartitionIDs(collectionID)
+		partitionIDsInStreamingCol, err2 := rc.streamingReplica.getPartitionIDs(collectionID)
+		if err1 != nil && err2 != nil {
+			return err2
+		}
+		if len(partitionIDsInHistoricalCol) == 0 {
+			return errors.New("none of this collection's partition has been loaded")
+		}
+		partitionIDsInHistorical = partitionIDsInHistoricalCol
+		partitionIDsInStreaming = partitionIDsInStreamingCol
+	} else {
+		for _, id := range partitionIDsInQuery {
+			_, err1 := rc.historicalReplica.getPartitionByID(id)
+			if err1 == nil {
+				partitionIDsInHistorical = append(partitionIDsInHistorical, id)
+			}
+			_, err2 := rc.streamingReplica.getPartitionByID(id)
+			if err2 == nil {
+				partitionIDsInStreaming = append(partitionIDsInStreaming, id)
+			}
+			if err1 != nil && err2 != nil {
+				return err2
+			}
+		}
+	}
+
+	var mergeList []*planpb.RetrieveResults
+	for _, partitionID := range partitionIDsInHistorical {
+		segmentIDs, err := rc.historicalReplica.getSegmentIDs(partitionID)
+		if err != nil {
+			return err
+		}
+		for _, segmentID := range segmentIDs {
+			segment, err := rc.historicalReplica.getSegmentByID(segmentID)
+			if err != nil {
+				return err
+			}
+			result, err := segment.segmentGetEntityByIds(plan)
+			if err != nil {
+				return err
+			}
+			mergeList = append(mergeList, result)
+		}
+	}
+
+	for _, partitionID := range partitionIDsInStreaming {
+		segmentIDs, err := rc.streamingReplica.getSegmentIDs(partitionID)
+		if err != nil {
+			return err
+		}
+		for _, segmentID := range segmentIDs {
+			segment, err := rc.streamingReplica.getSegmentByID(segmentID)
+			if err != nil {
+				return err
+			}
+			result, err := segment.segmentGetEntityByIds(plan)
+			if err != nil {
+				return err
+			}
+			mergeList = append(mergeList, result)
+		}
+	}
+
+	result, err := mergeRetrieveResults(mergeList)
+	if err != nil {
+		return err
+	}
+
 	resultChannelInt := 0
 	retrieveResultMsg := &msgstream.RetrieveResultMsg{
 		BaseMsg: msgstream.BaseMsg{Ctx: retrieveMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}},
@@ -300,12 +429,14 @@ func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error
 				SourceID: retrieveMsg.Base.SourceID,
 			},
 			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Ids:             result.Ids,
+			FieldsData:      result.FieldsData,
 			ResultChannelID: retrieveMsg.ResultChannelID,
 		},
 	}
-	err := rc.publishRetrieveResult(retrieveResultMsg, retrieveMsg.CollectionID)
-	if err != nil {
-		return err
+	err3 := rc.publishRetrieveResult(retrieveResultMsg, retrieveMsg.CollectionID)
+	if err3 != nil {
+		return err3
 	}
 	return nil
 }

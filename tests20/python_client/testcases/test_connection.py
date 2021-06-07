@@ -2,12 +2,12 @@ import pytest
 import os
 
 from pymilvus_orm.default_config import DefaultConfig
-from base.client_request import ApiReq
+from base.client_base import TestcaseBase
 from utils.util_log import test_log as log
 from common.common_type import *
 
 
-class TestConnectionParams(ApiReq):
+class TestConnectionParams(TestcaseBase):
     """
     Test case of connections interface
     The author ： Ting.Wang
@@ -88,7 +88,7 @@ class TestConnectionParams(ApiReq):
         log.info(res[0])
 
 
-class TestConnectionOperation(ApiReq):
+class TestConnectionOperation(TestcaseBase):
     """
     Test case of connections interface
     The author ： Ting.Wang
@@ -251,7 +251,7 @@ class TestConnectionOperation(ApiReq):
         method: create connection with not exist link
         expected: assert res is wrong
         """
-        self.connection_wrap.get_connection(alias='default', check_res=CheckParams.false)
+        self.connection_wrap.get_connection(alias='default', check_res=CheckTasks.false)
         res = self.connection_wrap.connect(alias="default", host='host', port=port, check_res='')
         assert res[0].args[0] == "Fail connecting to server on host:19530. Timeout"
 
@@ -266,7 +266,7 @@ class TestConnectionOperation(ApiReq):
         self.connection_wrap.connect(alias=alias_name, host=host, port=port)
         self.connection_wrap.get_connection(alias=alias_name)
         self.connection_wrap.remove_connection(alias=alias_name)
-        self.connection_wrap.get_connection(alias=alias_name, check_res=CheckParams.false)
+        self.connection_wrap.get_connection(alias=alias_name, check_res=CheckTasks.false)
         self.connection_wrap.connect(alias=alias_name, host=host, port=port)
         self.connection_wrap.get_connection(alias=alias_name)
 

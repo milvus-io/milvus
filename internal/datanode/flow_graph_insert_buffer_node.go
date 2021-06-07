@@ -210,6 +210,17 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		collSchema := collection.schema
 		// 1.2 Get Fields
 		var pos int = 0 // Record position of blob
+		log.Debug("DataNode flow_graph_insert_buffer_node", zap.Any("Fields", collSchema.Fields))
+		var fieldIDs []int64
+		var fieldTypes []schemapb.DataType
+		for _, field := range collSchema.Fields {
+			fieldIDs = append(fieldIDs, field.FieldID)
+			fieldTypes = append(fieldTypes, field.DataType)
+		}
+
+		log.Debug("DataNode flow_graph_insert_buffer_node", zap.Any("FieldIDs", fieldIDs))
+		log.Debug("DataNode flow_graph_insert_buffer_node", zap.Any("fieldTypes", fieldTypes))
+
 		for _, field := range collSchema.Fields {
 			switch field.DataType {
 			case schemapb.DataType_FloatVector:

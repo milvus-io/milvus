@@ -301,6 +301,7 @@ func (it *InsertTask) transferColumnBasedRequestToRowBasedData() error {
 	l := len(dTypes)
 	// TODO(dragondriver): big endian or little endian?
 	endian := binary.LittleEndian
+	printed := false
 	for i := 0; i < rowNum; i++ {
 		blob := &commonpb.Blob{
 			Value: make([]byte, 0),
@@ -376,7 +377,10 @@ func (it *InsertTask) transferColumnBasedRequestToRowBasedData() error {
 				log.Warn("unsupported data type")
 			}
 		}
-
+		if !printed {
+			log.Debug("ProxyNode, transform", zap.Any("ID", it.ID()), zap.Any("BlobLen", len(blob.Value)), zap.Any("dTypes", dTypes))
+			printed = true
+		}
 		it.RowData = append(it.RowData, blob)
 	}
 
@@ -618,6 +622,7 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 func (it *InsertTask) Execute(ctx context.Context) error {
 	collectionName := it.BaseInsertTask.CollectionName
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
+	log.Debug("ProxyNode Insert", zap.Any("collSchema", collSchema))
 	if err != nil {
 		return err
 	}
@@ -1063,7 +1068,7 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 			SearchParams: searchParams,
 		}
 
-		plan, err := CreateQueryPlan(schema, &st.query.Dsl, annsField, queryInfo)
+		plan, err := CreateQueryPlan(schema, st.query.Dsl, annsField, queryInfo)
 		if err != nil {
 			return errors.New("invalid expression: " + st.query.Dsl)
 		}
@@ -1481,8 +1486,22 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 		zap.Any("requestID", rt.Base.MsgID), zap.Any("requestType", "retrieve"))
 
 	rt.Base.MsgType = commonpb.MsgType_Retrieve
+	if rt.retrieve.Ids == nil {
+		errMsg := "Retrieve ids is nil"
+		return errors.New(errMsg)
+	}
 	rt.Ids = rt.retrieve.Ids
-	rt.OutputFields = rt.retrieve.OutputFields
+	if len(rt.retrieve.OutputFields) == 0 {
+		schema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
+		if err != nil {
+			return err
+		}
+		for _, field := range schema.Fields {
+			rt.OutputFields = append(rt.OutputFields, field.Name)
+		}
+	} else {
+		rt.OutputFields = rt.retrieve.OutputFields
+	}
 
 	rt.ResultChannelID = Params.RetrieveChannelNames[0]
 	rt.DbID = 0 // todo(yukun)

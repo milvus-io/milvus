@@ -183,11 +183,22 @@ SegmentGrowingImpl::do_insert(int64_t reserved_begin,
         record_.get_field_data_base(field_offset)->set_data_raw(reserved_begin, columns_data[fid].data(), size);
     }
 
-    for (int i = 0; i < size; ++i) {
-        auto row_id = row_ids[i];
-        // NOTE: this must be the last step, cannot be put above
-        uid2offset_.insert(std::make_pair(row_id, reserved_begin + i));
+    if (schema_->get_is_auto_id()) {
+        for (int i = 0; i < size; ++i) {
+            auto row_id = row_ids[i];
+            // NOTE: this must be the last step, cannot be put above
+            uid2offset_.insert(std::make_pair(row_id, reserved_begin + i));
+        }
+    } else {
+        auto offset = schema_->get_primary_key_offset().value_or(FieldOffset(-1));
+        Assert(offset.get() != -1);
+        auto& row = columns_data[offset.get()];
+        auto row_ptr = reinterpret_cast<const int64_t*>(row.data());
+        for (int i = 0; i < size; ++i) {
+            uid2offset_.insert(std::make_pair(row_ptr[i], reserved_begin + i));
+        }
     }
+
     record_.ack_responder_.AddSegment(reserved_begin, reserved_begin + size);
     if (!debug_disable_small_index_) {
         indexing_record_.UpdateResourceAck(record_.ack_responder_.GetAck() / segcore_config_.get_size_per_chunk(),
@@ -447,6 +458,32 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         columns_data.emplace_back(std::move(column));
     }
     do_insert(reserved_offset, size, row_ids.data(), timestamps.data(), columns_data);
+}
+
+std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+SegmentGrowingImpl::search_ids(const IdArray& id_array, Timestamp timestamp) const {
+    Assert(id_array.has_int_id());
+    auto& src_int_arr = id_array.int_id();
+    auto res_id_arr = std::make_unique<IdArray>();
+    auto res_int_id_arr = res_id_arr->mutable_int_id();
+    std::vector<SegOffset> res_offsets;
+    for (auto uid : src_int_arr.data()) {
+        auto [iter_b, iter_e] = uid2offset_.equal_range(uid);
+        SegOffset the_offset(-1);
+        for (auto iter = iter_b; iter != iter_e; ++iter) {
+            auto offset = SegOffset(iter->second);
+            if (record_.timestamps_[offset.get()] < timestamp) {
+                the_offset = std::max(the_offset, offset);
+            }
+        }
+        // if not found, skip
+        if (the_offset == SegOffset(-1)) {
+            continue;
+        }
+        res_int_id_arr->add_data(uid);
+        res_offsets.push_back(the_offset);
+    }
+    return {std::move(res_id_arr), std::move(res_offsets)};
 }
 
 }  // namespace milvus::segcore

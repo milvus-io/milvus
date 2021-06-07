@@ -68,7 +68,7 @@ TEST(GetEntityByIds, AUTOID) {
     req_ids_arr->add_data(-1);
 
     std::vector<FieldOffset> target_offsets{FieldOffset(0), FieldOffset(1)};
-    auto retrieve_results = segment->GetEntityById(target_offsets, *req_ids);
+    auto retrieve_results = segment->GetEntityById(target_offsets, *req_ids, 0);
     auto ids = retrieve_results->ids().int_id();
     Assert(retrieve_results->fields_data_size() == target_offsets.size());
     FieldOffset field_offset(0);
@@ -126,7 +126,7 @@ TEST(GetEntityByIds, PrimaryKey) {
     req_ids_arr->add_data(-1);
 
     std::vector<FieldOffset> target_offsets{FieldOffset(0), FieldOffset(1)};
-    auto retrieve_results = segment->GetEntityById(target_offsets, *req_ids);
+    auto retrieve_results = segment->GetEntityById(target_offsets, *req_ids, 0);
     auto ids = retrieve_results->ids().int_id();
     Assert(retrieve_results->fields_data_size() == target_offsets.size());
     FieldOffset field_offset(0);

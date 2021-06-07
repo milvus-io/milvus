@@ -21,9 +21,9 @@ package querynode
 */
 import "C"
 import (
-	"unsafe"
-
 	"errors"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"unsafe"
 )
 
 type Plan struct {
@@ -102,4 +102,28 @@ func (pg *searchRequest) getNumOfQuery() int64 {
 
 func (pg *searchRequest) delete() {
 	C.DeletePlaceholderGroup(pg.cPlaceholderGroup)
+}
+
+type RetrievePlan struct {
+	RetrievePlanPtr C.CRetrievePlan
+	Timestamp       uint64
+}
+
+func createRetrievePlan(col *Collection, msg *planpb.RetrieveRequest, timestamp uint64) (*RetrievePlan, error) {
+	protoCGo, err := MarshalForCGo(msg)
+	if err != nil {
+		return nil, err
+	}
+	plan := new(RetrievePlan)
+	plan.Timestamp = timestamp
+	status := C.CreateRetrievePlan(col.collectionPtr, protoCGo.CProto, &plan.RetrievePlanPtr)
+	err2 := HandleCStatus(&status, "create retrieve plan failed")
+	if err2 != nil {
+		return nil, err2
+	}
+	return plan, nil
+}
+
+func (plan *RetrievePlan) delete() {
+	C.DeleteRetrievePlan(plan.RetrievePlanPtr)
 }
