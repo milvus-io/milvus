@@ -645,6 +645,8 @@ class ColumnInfo :
   enum : int {
     kFieldIdFieldNumber = 1,
     kDataTypeFieldNumber = 2,
+    kIsPrimaryKeyFieldNumber = 3,
+    kIsAutoIDFieldNumber = 4,
   };
   // int64 field_id = 1;
   void clear_field_id();
@@ -656,6 +658,16 @@ class ColumnInfo :
   ::milvus::proto::schema::DataType data_type() const;
   void set_data_type(::milvus::proto::schema::DataType value);
 
+  // bool is_primary_key = 3;
+  void clear_is_primary_key();
+  bool is_primary_key() const;
+  void set_is_primary_key(bool value);
+
+  // bool is_autoID = 4;
+  void clear_is_autoid();
+  bool is_autoid() const;
+  void set_is_autoid(bool value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.plan.ColumnInfo)
  private:
   class _Internal;
@@ -663,6 +675,8 @@ class ColumnInfo :
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::int64 field_id_;
   int data_type_;
+  bool is_primary_key_;
+  bool is_autoid_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_plan_2eproto;
 };
@@ -2430,6 +2444,34 @@ inline void ColumnInfo::set_data_type(::milvus::proto::schema::DataType value) {
   
   data_type_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.plan.ColumnInfo.data_type)
+}
+
+// bool is_primary_key = 3;
+inline void ColumnInfo::clear_is_primary_key() {
+  is_primary_key_ = false;
+}
+inline bool ColumnInfo::is_primary_key() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.ColumnInfo.is_primary_key)
+  return is_primary_key_;
+}
+inline void ColumnInfo::set_is_primary_key(bool value) {
+  
+  is_primary_key_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.plan.ColumnInfo.is_primary_key)
+}
+
+// bool is_autoID = 4;
+inline void ColumnInfo::clear_is_autoid() {
+  is_autoid_ = false;
+}
+inline bool ColumnInfo::is_autoid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.ColumnInfo.is_autoID)
+  return is_autoid_;
+}
+inline void ColumnInfo::set_is_autoid(bool value) {
+  
+  is_autoid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.plan.ColumnInfo.is_autoID)
 }
 
 // -------------------------------------------------------------------
