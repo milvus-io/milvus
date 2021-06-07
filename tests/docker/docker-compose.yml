@@ -15,8 +15,3 @@ services:
     volumes:
       - ../../:/milvus:delegated
     working_dir: "/milvus"
-
-networks:
-  default:
-    external:
-      name: ${PRE_EXIST_NETWORK}

@@ -53,9 +53,6 @@ fi
 
 pushd "${ROOT}/tests/docker"
   docker-compose pull --ignore-pull-failures pytest
-  if [[ "${TEST_ENV:-}" =~ ^kind*  ]]; then
-    export PRE_EXIST_NETWORK="kind"
-  fi
 
   export SERVICE_IP="${SERVICE_IP:-127.0.0.1}"
   export SERVICE_PORT="${SERVICE_PORT:-19530}"
