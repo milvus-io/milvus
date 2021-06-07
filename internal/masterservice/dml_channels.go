@@ -100,13 +100,13 @@ func (d *dmlChannels) Broadcast(name string, pack *msgstream.MsgPack) error {
 	return ms.Broadcast(pack)
 }
 
-func (d *dmlChannels) AddProducerChannles(names ...string) {
+func (d *dmlChannels) AddProducerChannels(names ...string) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
 	var err error
 	for _, name := range names {
-		log.Debug("add dml channle", zap.String("channel name", name))
+		log.Debug("add dml channel", zap.String("channel name", name))
 		ms, ok := d.dml[name]
 		if !ok {
 			ms, err = d.core.msFactory.NewMsgStream(d.core.ctx)

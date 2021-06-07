@@ -960,7 +960,7 @@ func (c *Core) Init() error {
 
 		c.dmlChannels = newDMLChannels(c)
 		pc := c.MetaTable.ListCollectionPhysicalChannels()
-		c.dmlChannels.AddProducerChannles(pc...)
+		c.dmlChannels.AddProducerChannels(pc...)
 
 		c.chanTimeTick = newTimeTickSync(c)
 		c.chanTimeTick.AddProxyNode(c.session)

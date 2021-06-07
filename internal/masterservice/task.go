@@ -237,7 +237,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	}
 
 	// add dml channel before send dd msg
-	t.core.dmlChannels.AddProducerChannles(chanNames...)
+	t.core.dmlChannels.AddProducerChannels(chanNames...)
 
 	err = t.core.SendDdCreateCollectionReq(ctx, &ddCollReq)
 	if err != nil {
