@@ -107,7 +107,7 @@ func (c *cluster) startup(dataNodes []*datapb.DataNodeInfo) error {
 
 func (c *cluster) watch(nodes []*datapb.DataNodeInfo) []*datapb.DataNodeInfo {
 	for _, n := range nodes {
-		uncompletes := make([]vchannel, 0, len(nodes))
+		uncompletes := make([]vchannel, 0, len(n.Channels))
 		for _, ch := range n.Channels {
 			if ch.State == datapb.ChannelWatchState_Uncomplete {
 				uncompletes = append(uncompletes, vchannel{
@@ -115,6 +115,9 @@ func (c *cluster) watch(nodes []*datapb.DataNodeInfo) []*datapb.DataNodeInfo {
 					DmlChannel:   ch.Name,
 				})
 			}
+		}
+		if len(uncompletes) == 0 {
+			continue
 		}
 		vchanInfos, err := c.posProvider.GetVChanPositions(uncompletes)
 		if err != nil {

@@ -320,9 +320,9 @@ func (node *ProxyNode) sendChannelsTimeTickLoop() {
 
 				req := &internalpb.ChannelTimeTickMsg{
 					Base: &commonpb.MsgBase{
-						MsgType:   commonpb.MsgType_Undefined, // todo
-						MsgID:     0,                          // todo
-						Timestamp: 0,                          // todo
+						MsgType:   commonpb.MsgType_TimeTick, // todo
+						MsgID:     0,                         // todo
+						Timestamp: 0,                         // todo
 						SourceID:  node.session.ServerID,
 					},
 					ChannelNames: channels,
