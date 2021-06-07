@@ -57,41 +57,38 @@ func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partID
 	segmentResults := make([]*Segment, 0)
 
 	// get historical partition ids
-	var searchPartitionIDsInHistorical []UniqueID
+	var searchPartIDs []UniqueID
 	if len(partIDs) == 0 {
-		partitionIDsInHistoricalCol, err := h.replica.getPartitionIDs(collID)
+		hisPartIDs, err := h.replica.getPartitionIDs(collID)
 		if err != nil {
 			return searchResults, segmentResults, err
 		}
-		searchPartitionIDsInHistorical = partitionIDsInHistoricalCol
+		searchPartIDs = hisPartIDs
 	} else {
 		for _, id := range partIDs {
 			_, err1 := h.replica.getPartitionByID(id)
 			if err1 == nil {
-				searchPartitionIDsInHistorical = append(searchPartitionIDsInHistorical, id)
+				searchPartIDs = append(searchPartIDs, id)
 			}
 		}
 	}
 
-	sealedSegmentSearched := make([]UniqueID, 0)
-	for _, partitionID := range searchPartitionIDsInHistorical {
-		segmentIDs, err := h.replica.getSegmentIDs(partitionID)
+	for _, partID := range searchPartIDs {
+		segIDs, err := h.replica.getSegmentIDs(partID)
 		if err != nil {
 			return searchResults, segmentResults, err
 		}
-		for _, segmentID := range segmentIDs {
-			segment, err := h.replica.getSegmentByID(segmentID)
+		for _, segID := range segIDs {
+			seg, err := h.replica.getSegmentByID(segID)
 			if err != nil {
 				return searchResults, segmentResults, err
 			}
-
-			searchResult, err := segment.segmentSearch(plan, searchReqs, []Timestamp{ts})
+			searchResult, err := seg.segmentSearch(plan, searchReqs, []Timestamp{ts})
 			if err != nil {
 				return searchResults, segmentResults, err
 			}
 			searchResults = append(searchResults, searchResult)
-			segmentResults = append(segmentResults, segment)
-			sealedSegmentSearched = append(sealedSegmentSearched, segment.segmentID)
+			segmentResults = append(segmentResults, seg)
 		}
 	}
 
