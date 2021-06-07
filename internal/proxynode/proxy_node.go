@@ -315,8 +315,10 @@ func (node *ProxyNode) sendChannelsTimeTickLoop() {
 					continue
 				}
 
-				channels := make([]pChan, len(stats))
-				tss := make([]Timestamp, len(stats))
+				log.Debug("send timestamp statistics of pchan", zap.Any("statistics", stats))
+
+				channels := make([]pChan, 0, len(stats))
+				tss := make([]Timestamp, 0, len(stats))
 
                 for channel, ts := range stats {
                     channels = append(channels, channel)
