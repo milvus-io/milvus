@@ -15,6 +15,7 @@ import (
 	"math"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -116,9 +117,8 @@ func TestDataNode(t *testing.T) {
 
 	t.Run("Test FlushSegments", func(t *testing.T) {
 		dmChannelName := "fake-dm-channel-test-HEALTHDataNodeMock"
-		ddChannelName := "fake-dd-channel-test-HEALTHDataNodeMock"
 
-		node1 := newHEALTHDataNodeMock(dmChannelName, ddChannelName)
+		node1 := newHEALTHDataNodeMock(dmChannelName)
 
 		sync, ok := node1.vchan2SyncService[dmChannelName]
 		assert.True(t, ok)
@@ -166,23 +166,13 @@ func TestDataNode(t *testing.T) {
 		insertStream, _ := msFactory.NewMsgStream(node1.ctx)
 		insertStream.AsProducer([]string{dmChannelName})
 
-		ddStream, _ := msFactory.NewMsgStream(node1.ctx)
-		ddStream.AsProducer([]string{ddChannelName})
-
 		var insertMsgStream msgstream.MsgStream = insertStream
 		insertMsgStream.Start()
 
-		var ddMsgStream msgstream.MsgStream = ddStream
-		ddMsgStream.Start()
-
 		err = insertMsgStream.Broadcast(&timeTickMsgPack)
-		assert.NoError(t, err)
-		err = ddMsgStream.Broadcast(&timeTickMsgPack)
 		assert.NoError(t, err)
 
 		err = insertMsgStream.Broadcast(&timeTickMsgPack)
-		assert.NoError(t, err)
-		err = ddMsgStream.Broadcast(&timeTickMsgPack)
 		assert.NoError(t, err)
 
 		_, err = sync.replica.getSegmentByID(0)
@@ -202,6 +192,64 @@ func TestDataNode(t *testing.T) {
 	t.Run("Test GetStatisticsChannel", func(t *testing.T) {
 		_, err := node.GetStatisticsChannel(node.ctx)
 		assert.NoError(t, err)
+	})
+
+	t.Run("Test ReleaseDataSyncService", func(t *testing.T) {
+		dmChannelName := "fake-dm-channel-test-NewDataSyncService"
+
+		vchan := &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  dmChannelName,
+			CheckPoints:  []*datapb.CheckPoint{},
+		}
+
+		err := node.NewDataSyncService(vchan)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(node.vchan2FlushCh))
+		assert.Equal(t, 1, len(node.vchan2SyncService))
+		time.Sleep(time.Second)
+
+		node.ReleaseDataSyncService(dmChannelName)
+		assert.Equal(t, 0, len(node.vchan2FlushCh))
+		assert.Equal(t, 0, len(node.vchan2SyncService))
+
+		s, ok := node.vchan2SyncService[dmChannelName]
+		assert.False(t, ok)
+		assert.Nil(t, s)
+
+	})
+
+	t.Run("Test BackGroundGC", func(t *testing.T) {
+		collIDCh := make(chan UniqueID)
+		go node.BackGroundGC(collIDCh)
+
+		dmChannelName := "fake-dm-channel-test-BackGroundGC"
+
+		vchan := &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  dmChannelName,
+			CheckPoints:  []*datapb.CheckPoint{},
+		}
+		require.Equal(t, 0, len(node.vchan2FlushCh))
+		require.Equal(t, 0, len(node.vchan2SyncService))
+
+		err := node.NewDataSyncService(vchan)
+		require.NoError(t, err)
+		time.Sleep(time.Second)
+
+		require.Equal(t, 1, len(node.vchan2FlushCh))
+		require.Equal(t, 1, len(node.vchan2SyncService))
+
+		collIDCh <- 1
+		assert.Eventually(t, func() bool {
+			return len(node.vchan2FlushCh) == 0
+		}, time.Second*4, time.Millisecond)
+
+		assert.Equal(t, 0, len(node.vchan2SyncService))
+
+		s, ok := node.vchan2SyncService[dmChannelName]
+		assert.False(t, ok)
+		assert.Nil(t, s)
 	})
 
 	<-node.ctx.Done()

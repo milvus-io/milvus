@@ -64,8 +64,9 @@ type DataNode struct {
 	watchDm chan struct{}
 
 	chanMut           sync.RWMutex
-	vchan2SyncService map[string]*dataSyncService
-	vchan2FlushCh     map[string]chan<- *flushMsg
+	vchan2SyncService map[string]*dataSyncService // vchannel name
+	vchan2FlushCh     map[string]chan<- *flushMsg // vchannel name
+	clearSignal       chan UniqueID               // collection ID
 
 	masterService types.MasterService
 	dataService   types.DataService
@@ -93,6 +94,7 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 
 		vchan2SyncService: make(map[string]*dataSyncService),
 		vchan2FlushCh:     make(map[string]chan<- *flushMsg),
+		clearSignal:       make(chan UniqueID, 100),
 	}
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return node
@@ -201,7 +203,7 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 	metaService := newMetaService(node.ctx, replica, node.masterService)
 
 	flushChan := make(chan *flushMsg, 100)
-	dataSyncService := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchan)
+	dataSyncService := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchan, node.clearSignal)
 	// TODO metaService using timestamp in DescribeCollection
 	node.vchan2SyncService[vchan.GetChannelName()] = dataSyncService
 	node.vchan2FlushCh[vchan.GetChannelName()] = flushChan
@@ -212,8 +214,44 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 	return nil
 }
 
+// BackGroundGC runs in background to release datanode resources
+func (node *DataNode) BackGroundGC(collIDCh <-chan UniqueID) {
+	log.Info("DataNode Background GC Start")
+	for {
+		select {
+		case collID := <-collIDCh:
+			log.Info("GC collection", zap.Int64("ID", collID))
+			for _, vchanName := range node.getChannelNamesbyCollectionID(collID) {
+				node.ReleaseDataSyncService(vchanName)
+			}
+		case <-node.ctx.Done():
+			return
+		}
+	}
+}
+
+// ReleaseDataSyncService release flowgraph resources for a vchanName
+func (node *DataNode) ReleaseDataSyncService(vchanName string) {
+	log.Info("Release flowgraph resources begin", zap.String("Vchannel", vchanName))
+
+	node.chanMut.Lock()
+	if dss, ok := node.vchan2SyncService[vchanName]; ok {
+		dss.close()
+	}
+
+	delete(node.vchan2SyncService, vchanName)
+	node.chanMut.Unlock()
+
+	node.chanMut.Lock()
+	delete(node.vchan2FlushCh, vchanName)
+	node.chanMut.Unlock()
+
+	log.Debug("Release flowgraph resources end", zap.String("Vchannel", vchanName))
+}
+
 // Start will update DataNode state to HEALTHY
 func (node *DataNode) Start() error {
+	go node.BackGroundGC(node.clearSignal)
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
 	return nil
 }
@@ -263,7 +301,7 @@ func (node *DataNode) GetComponentStates(ctx context.Context) (*internalpb.Compo
 	return states, nil
 }
 
-func (node *DataNode) getChannelName(segID UniqueID) string {
+func (node *DataNode) getChannelNamebySegmentID(segID UniqueID) string {
 	node.chanMut.RLock()
 	defer node.chanMut.RUnlock()
 	for name, dataSync := range node.vchan2SyncService {
@@ -272,6 +310,19 @@ func (node *DataNode) getChannelName(segID UniqueID) string {
 		}
 	}
 	return ""
+}
+
+func (node *DataNode) getChannelNamesbyCollectionID(collID UniqueID) []string {
+	node.chanMut.RLock()
+	defer node.chanMut.RUnlock()
+
+	channels := make([]string, 0, len(node.vchan2SyncService))
+	for name, dataSync := range node.vchan2SyncService {
+		if dataSync.collectionID == collID {
+			channels = append(channels, name)
+		}
+	}
+	return channels
 }
 
 // ReadyToFlush tells wether DataNode is ready for flushing
@@ -328,7 +379,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 	log.Debug("FlushSegments ...", zap.Int("num", len(req.SegmentIDs)))
 	dmlFlushedCh := make(chan []*datapb.ID2PathList, len(req.SegmentIDs))
 	for _, id := range req.SegmentIDs {
-		chanName := node.getChannelName(id)
+		chanName := node.getChannelNamebySegmentID(id)
 		log.Info("vchannel", zap.String("name", chanName))
 		if len(chanName) == 0 {
 			status.Reason = fmt.Sprintf("DataNode not find segment %d!", id)
