@@ -22,6 +22,8 @@ message QueryInfo {
 message ColumnInfo {
   int64 field_id = 1;
   schema.DataType data_type = 2;
+  bool is_primary_key = 3;
+  bool is_autoID = 4;
 }
 
 message RangeExpr {
