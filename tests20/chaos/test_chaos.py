@@ -24,7 +24,7 @@ class TestsChaos:
         c_wrapper = ApiCollectionWrapper()
         c_wrapper.collection_init(name=cf.gen_unique_str(),
                                   schema=cf.gen_default_collection_schema(),
-                                  check_res="check_nothing")
+                                  check_task="check_nothing")
         return c_wrapper
 
     @pytest.fixture(scope="function", autouse=True)
@@ -35,8 +35,8 @@ class TestsChaos:
             raise Exception("no connections")
         c_wrapper = ApiCollectionWrapper()
         _, result = c_wrapper.collection_init(name=cf.gen_unique_str(),
-                                  schema=cf.gen_default_collection_schema(),
-                                  check_res="check_nothing")
+                                              schema=cf.gen_default_collection_schema(),
+                                              check_task="check_nothing")
         if result is False:
             log.log("result: ")
         # for _ in range(10):

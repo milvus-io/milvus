@@ -213,7 +213,7 @@ class TestUtilityBase(TestcaseBase):
         p_name = cf.gen_unique_str()
         collection = self._collection(c_name)
         api_p = ApiPartitionWrapper()
-        api_p.partition_init(collection, p_name)
+        api_p.init_partition(collection, p_name)
         res, _ = ut.has_partition(c_name, p_name)
         assert res is True
 
@@ -245,7 +245,7 @@ class TestUtilityBase(TestcaseBase):
         p_name = cf.gen_unique_str()
         collection = self._collection(c_name)
         api_p = ApiPartitionWrapper()
-        api_p.partition_init(collection, p_name)
+        api_p.init_partition(collection, p_name)
         res, _ = ut.has_partition(c_name, p_name)
         assert res is True
         api_p.drop()

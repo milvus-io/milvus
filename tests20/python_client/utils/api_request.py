@@ -15,8 +15,7 @@ def api_request_catch():
                 log.debug("(func_res) Response : %s " % str(res))
                 return res, True
             except Exception as e:
-                # log.info("exception: %s", e)
-                log.error("[Partition API Exception]%s: %s" % (str(func), str(e)))
+                log.error("[Milvus API Exception]%s: %s" % (str(func), str(e)))
                 return Error(e), False
         return inner_wrapper
     return wrapper

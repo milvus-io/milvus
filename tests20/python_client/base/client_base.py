@@ -36,8 +36,6 @@ class Base:
     partition_wrap = None
     index_wrap = None
     utility_wrap = None
-    partition_mul = None
-    collection_mul = None
 
     def setup_class(self):
         log.info("[setup_class] Start setup class...")
@@ -52,8 +50,6 @@ class Base:
         self.partition_wrap = ApiPartitionWrapper()
         self.index_wrap = ApiIndexWrapper()
         self.utility_wrap = ApiUtilityWrapper()
-        self.partition_mul = ()
-        self.collection_mul = ()
 
     def teardown(self):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
@@ -105,40 +101,32 @@ class TestcaseBase(Base):
         res, _ = self.connection_wrap.connect(alias='default')
         return res
 
-    def _collection(self, name=None, data=None, schema=None, check_res=None, c_object=None, **kwargs):
+    def _collection(self, **kwargs):
         """ Init a collection and return the object of collection """
-        name = cf.gen_unique_str("ApiReq") if name is None else name
+        name = cf.gen_unique_str()
+        schema = cf.gen_default_collection_schema()
+        if self.connection_wrap.get_connection(alias='default') is None:
+            self._connect()
+        res, cr = self.collection_wrap.collection_init(name=name, schema=schema, **kwargs)
+        return res
+
+    def init_collection_wrap(self, name=None, data=None, schema=None, check_task=None, **kwargs):
+        name = cf.gen_unique_str('coll_') if name is None else name
         schema = cf.gen_default_collection_schema() if schema is None else schema
-        c_object = self.collection_wrap if c_object is None else c_object
+        if self.connection_wrap.get_connection(alias='default')[0] is None:
+            self._connect()
+        collection_w = ApiCollectionWrapper()
+        collection_w.collection_init(name=name, data=data, schema=schema,
+                                     check_task=check_task, **kwargs)
+        return collection_w
 
-        self._connect()
-
-        res, cr = c_object.collection_init(name=name, data=data, schema=schema, check_res=check_res, **kwargs)
-        assert name == c_object.name
-        return res
-
-    def _partition(self, c_object=None, p_object=None, name=None, descriptions=None, **kwargs):
-        """ Init a partition in a collection and return the object of partition """
-        c_object = self.collection_wrap.collection if c_object is None else c_object
-        p_object = self.partition_wrap if p_object is None else p_object
+    def init_partition_wrap(self, collection_wrap, name=None, description=None,
+                            negative=False, check_task=None, **kwargs):
         name = cf.gen_unique_str("partition_") if name is None else name
-        descriptions = cf.gen_unique_str("partition_des_") if descriptions is None else descriptions
-
-        res, cr = p_object.partition_init(c_object, name, description=descriptions, **kwargs)
-        return res
-
-    def _collection_object_multiple(self, mul_number=2):
-        """ Initialize multiple objects of collection and return the list of objects """
-        for i in range(int(mul_number)):
-            par = ApiCollectionWrapper()
-            self.collection_mul += (par, )
-        log.debug("[_collection_object_multiple] All objects of collection are : %s" % str(self.collection_mul))
-        return self.collection_mul
-
-    def _partition_object_multiple(self, mul_number=2):
-        """ Initialize multiple objects of partition in a collection and return the list of objects """
-        for i in range(int(mul_number)):
-            par = ApiPartitionWrapper()
-            self.partition_mul += (par, )
-        log.debug("[_partition_object_multiple] All objects of partition are : %s" % str(self.partition_mul))
-        return self.partition_mul
+        description = cf.gen_unique_str("partition_des_") if description is None else description
+        collection_wrap = self.init_collection_wrap() if collection_wrap is None else collection_wrap
+        partition_wrap = ApiPartitionWrapper()
+        partition_wrap.init_partition(collection_wrap.collection, name,
+                                      description=description,
+                                      check_task=check_task, **kwargs)
+        return partition_wrap

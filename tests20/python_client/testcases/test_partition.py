@@ -1,12 +1,11 @@
 import threading
 import pytest
 
-from pymilvus_orm import Partition
+from base.partition_wrapper import ApiPartitionWrapper
 from base.client_base import TestcaseBase
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
-from common.common_type import CaseLabel, CheckParams
+from common.common_type import CaseLabel, CheckTasks
 
 prefix = "partition_"
 
@@ -15,23 +14,24 @@ class TestPartitionParams(TestcaseBase):
     """ Test case of partition interface in parameters"""
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("partition_name, descriptions", [(cf.gen_unique_str(prefix), cf.gen_unique_str("desc_"))])
-    def test_partition_default(self, partition_name, descriptions):
+    @pytest.mark.parametrize("partition_name, description",
+                             [(cf.gen_unique_str(prefix), cf.gen_unique_str("desc_"))])
+    def test_partition_default(self, partition_name, description):
         """
         target: verify create a partition
         method: 1. create a partition
         expected: 1. create successfully
         """
-
         # create collection
-        self._collection()
+        collection_w = self.init_collection_wrap()
 
-        # init partition
-        self.partition_wrap.partition_init(self.collection_wrap.collection, partition_name, description=descriptions,
-                                           check_res=CheckParams.partition_property_check)
+        # create partition
+        self.init_partition_wrap(collection_w, partition_name,
+                                 description=description,
+                                 check_task=CheckTasks.check_partition_property)
 
         # check that the partition has been created
-        self.collection_wrap.has_partition(partition_name)
+        assert collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("partition_name", [""])
@@ -41,81 +41,78 @@ class TestPartitionParams(TestcaseBase):
         method: 1. create a partition empty none name
         expected: 1. raise exception
         """
+        self.collection_wrap.collection_init()
 
-        # create collection
-        self._collection()
+        # create a collection
+        collection_w = self.init_collection_wrap()
 
-        # init partition
-        res, cr = self.partition_wrap.partition_init(self.collection_wrap.collection, partition_name, check_res=CheckParams.err_res)
-        # waiting to be extracted as a public method
-        assert res.code == 1
-        assert "Partition tag should not be empty" in res.message
+        # create partition
+        self.partition_wrap.init_partition(collection_w.collection, partition_name,
+                                           check_task=CheckTasks.err_res,
+                                           err_code=1, err_msg="Partition tag should not be empty")
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("partition_name, descriptions", [(cf.gen_unique_str(prefix), "")])
-    def test_partition_empty_description(self, partition_name, descriptions):
+    @pytest.mark.parametrize("partition_name, description", [(cf.gen_unique_str(prefix), "")])
+    def test_partition_empty_description(self, partition_name, description):
         """
         target: verify create a partition with empty description
         method: 1. create a partition with empty description
         expected: 1. create successfully
         """
-
         # create collection
-        self._collection()
+        collection_w = self.init_collection_wrap()
 
         # init partition
-        self.partition_wrap.partition_init(self.collection_wrap.collection, partition_name, description=descriptions,
-                                           check_res=CheckParams.partition_property_check)
+        self.init_partition_wrap(collection_w, partition_name,
+                                 description=description,
+                                 check_task=CheckTasks.check_partition_property)
 
         # check that the partition has been created
-        self.collection_wrap.has_partition(partition_name)
+        assert collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("collection_name, partition_name, descriptions",
+    @pytest.mark.parametrize("collection_name, partition_name, description",
                              [(cf.gen_unique_str(), cf.gen_unique_str(prefix), cf.gen_unique_str())])
-    def test_partition_dup_name(self, collection_name, partition_name, descriptions):
+    def test_partition_dup_name(self, collection_name, partition_name, description):
         """
         target: verify create partitions with duplicate name
         method: 1. create partitions with duplicate name
         expected: 1. create successfully
                   2. the same partition returned with diff object id
         """
+        # create a collection
+        collection_w = self.init_collection_wrap()
 
-        # create collection
-        self._collection(name=collection_name)
-
-        # init two objects of partition
-        self._partition_object_multiple(mul_number=2)
-        self.partition_mul[0].partition_init(self.collection_wrap.collection, partition_name, descriptions)
-        self.partition_mul[1].partition_init(self.collection_wrap.collection, partition_name, descriptions)
+        # create two partitions
+        partition_w1 = self.init_partition_wrap(collection_w, partition_name, description)
+        partition_w2 = self.init_partition_wrap(collection_w, partition_name, description)
 
         # public check func to be extracted
-        assert (id(self.partition_mul[0]) != id(self.partition_mul[1]))
-        assert self.partition_mul[0].name == self.partition_mul[1].name
-        assert self.partition_mul[0].description == self.partition_mul[1].description
+        assert id(partition_w1.partition) != id(partition_w2.partition)
+        assert partition_w1.name == partition_w2.name
+        assert partition_w1.description == partition_w2.description
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("descriptions", ct.get_invalid_strs)
+    @pytest.mark.parametrize("description", ct.get_invalid_strs)
     @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
-    def test_partition_special_chars_description(self, partition_name, descriptions):
+    def test_partition_special_chars_description(self, partition_name, description):
         """
         target: verify create a partition with special characters in description
         method: 1. create a partition with special characters in description
         expected: 1. create successfully
         """
-
         # create collection
-        self._collection()
+        collection_w = self.init_collection_wrap()
 
-        # init partition
-        self.partition_wrap.partition_init(self.collection_wrap.collection, partition_name, description=descriptions,
-                                           check_res=CheckParams.partition_property_check)
-
-        self.collection_wrap.has_partition(partition_name)
-        assert self.partition_wrap.description == descriptions
+        # create partition
+        self.init_partition_wrap(collection_w, partition_name,
+                                 description=description,
+                                 check_task=CheckTasks.check_partition_property)
+        assert collection_w.has_partition(partition_name)[0]
+        assert collection_w.description == description
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5373")
+    # @pytest.mark.xfail(reason="issue #5373")
     def test_partition_default_name(self):
         """
         target: verify create a partition with default name
@@ -123,23 +120,18 @@ class TestPartitionParams(TestcaseBase):
                 2. create a partition with _default name
         expected: 1. the same partition returned
         """
-
         # create collection
-        self._collection()
+        collection_w = self.init_collection_wrap()
 
         # check that the default partition exists
-        self.collection_wrap.has_partition(ct.default_partition_name)
+        assert collection_w.has_partition(ct.default_partition_name)[0]
 
-        res_mp, cr = self.collection_wrap.partition(ct.default_partition_name)
-        self.partition_wrap.partition_init(self.collection_wrap.collection, ct.default_partition_name)
+        # check that can get the _default partition
+        collection, _ = collection_w.partition(ct.default_partition_name)
 
-        assert id(self.partition_wrap.partition) == id(res_mp)
-
-        # m_collection = self._collection()
-        # assert m_collection.has_partition(ct.default_partition_name)
-        # m_partition = m_collection.partition(ct.default_partition_name)
-        # m_partition2, _ = self.partition_wrap.partition_init(m_collection, ct.default_partition_name)
-        # assert (id(m_partition2) == id(m_partition))
+        # check that init the _default partition object
+        partition_w = self.init_partition_wrap(collection_w, ct.default_partition_name)
+        assert collection.name == partition_w.name
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("partition_name", ct.get_invalid_strs)
@@ -149,16 +141,15 @@ class TestPartitionParams(TestcaseBase):
         method: 1. create a partition with invalid names
         expected: 1. raise exception
         """
-
         # create collection
-        self._collection()
+        self.init_collection_wrap()
 
-        # init partition
-        res, cr = self.partition_wrap.partition_init(self.collection_wrap.collection, partition_name,
-                                                     check_res=CheckParams.err_res)
-
+        # create partition
+        self.partition_wrap.init_partition(self.collection_wrap.collection, partition_name,
+                                           check_task=CheckTasks.err_res,
+                                           check_params={'err_code':1, 'err_msg':"is illegal"}
+                                           )
         # TODO: need an error code issue #5144 and assert independently
-        assert "is illegal" in res.message or res.code == 1
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
@@ -168,10 +159,10 @@ class TestPartitionParams(TestcaseBase):
         method: 1. create a partition with none collection
         expected: 1. raise exception
         """
-
-        # init partition with collection is None
-        res, cr = self.partition_wrap.partition_init(collection=None, name=partition_name, check_res=CheckParams.err_res)
-        assert "'NoneType' object has no attribute" in res.message
+        # create partition with collection is None
+        self.partition_wrap.init_partition(collection=None, name=partition_name,
+                                           check_task=CheckTasks.err_res,
+                                           err_code=1, err_msg="'NoneType' object has no attribute")
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
@@ -182,22 +173,20 @@ class TestPartitionParams(TestcaseBase):
                 2. drop the partition
         expected: 1. drop successfully
         """
-
         # create collection
-        self._collection()
+        collection_w = self.init_collection_wrap()
 
-        # init partition
-        self.partition_wrap.partition_init(self.collection_wrap.collection, partition_name)
+        # create partition
+        partition_w = self.init_partition_wrap(collection_w, partition_name)
 
         # check that the partition exists
-        self.collection_wrap.has_partition(partition_name)
+        assert collection_w.has_partition(partition_name)[0]
 
         # drop partition
-        self.partition_wrap.drop()
+        partition_w.drop()
 
         # check that the partition not exists
-        res, cr = self.collection_wrap.has_partition(partition_name)
-        assert res is False
+        assert not collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="issue #5384")
@@ -213,49 +202,49 @@ class TestPartitionParams(TestcaseBase):
         expected: 1. the released partition is released
                   2. the other partition is not released
         """
-
         # create collection
-        self._collection()
+        collection_w = self.init_collection_wrap()
 
-        # init two objects of partition
-        self._partition_object_multiple(mul_number=2)
-
-        # init two partitions
-        self._partition(p_object=self.partition_mul[0])
-        self._partition(p_object=self.partition_mul[1])
+        # create two partitions
+        partition_w1 = self.init_partition_wrap(collection_w)
+        partition_w2 = self.init_partition_wrap(collection_w)
 
         # insert data to two partition
-        self.partition_mul[0].insert(cf.gen_default_list_data())
-        self.partition_mul[1].insert(cf.gen_default_list_data())
+        partition_w1.insert(cf.gen_default_list_data())
+        partition_w2.insert(cf.gen_default_list_data())
 
         # load two partitions
-        self.partition_mul[0].load()
-        self.partition_mul[1].load()
+        partition_w1.load()
+        partition_w2.load()
 
         # search two partitions
-        res0, cr0 = self.partition_mul[0].search(data=search_vectors, anns_field=ct.default_float_vec_field_name,
-                                                 params={"nprobe": 32}, limit=1)
-        res1, cr1 = self.partition_mul[1].search(data=search_vectors, anns_field=ct.default_float_vec_field_name,
-                                                 params={"nprobe": 32}, limit=1)
-        assert len(res0) == 1 and len(res1) == 1
+        res1, _ = partition_w1.search(data=search_vectors,
+                                      anns_field=ct.default_float_vec_field_name,
+                                      params={"nprobe": 32}, limit=1)
+        res2, _ = partition_w2.search(data=search_vectors,
+                                      anns_field=ct.default_float_vec_field_name,
+                                      params={"nprobe": 32}, limit=1)
+        assert len(res1) == 1 and len(res2) == 1
 
-        # release the first one of partition
-        for _ in range(2):
-            self.partition_mul[0].release()
+        # release the first partition
+        partition_w1.release()
 
-            # check result
-            res0, cr0 = self.partition_mul[0].search(data=search_vectors, anns_field=ct.default_float_vec_field_name,
-                                                     params={"nprobe": 32}, limit=1)
-            res1, cr1 = self.partition_mul[1].search(data=search_vectors, anns_field=ct.default_float_vec_field_name,
-                                                     params={"nprobe": 32}, limit=1)
-            assert len(res0) == 0 and len(res1) == 1
+        # check result
+        res1, _ = partition_w1.search(data=search_vectors,
+                                      anns_field=ct.default_float_vec_field_name,
+                                      params={"nprobe": 32}, limit=1)
+        res2, _ = partition_w2.search(data=search_vectors,
+                                      anns_field=ct.default_float_vec_field_name,
+                                      params={"nprobe": 32}, limit=1)
+        assert len(res1) == 0 and len(res2) == 1
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="issue #5302")
+    @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     @pytest.mark.parametrize("data, nums", [(cf.gen_default_dataframe_data(10), 10),
                                             (cf.gen_default_list_data(1), 1),
                                             (cf.gen_default_tuple_data(10), 10)])
-    def test_partition_insert(self, data, nums):
+    def test_partition_insert(self, partition_name, data, nums):
         """
         target: verify insert multi entities by dataFrame
         method: 1. create a collection and a partition
@@ -263,24 +252,25 @@ class TestPartitionParams(TestcaseBase):
                 3. insert data again
         expected: 1. insert data successfully
         """
-
         # create collection
-        self._collection()
+        collection_w = self.init_collection_wrap()
 
-        # init partition
-        self._partition()
-        assert self.partition_wrap.is_empty
-        assert self.partition_wrap.num_entities == 0
-
-        # insert data
-        self.partition_wrap.insert(data)  # TODO: add ndarray type data
-        assert self.partition_wrap.is_empty is False
-        assert self.partition_wrap.num_entities == nums
+        # create partition
+        partition_w = self.init_partition_wrap(collection_w, partition_name,
+                                               check_task=CheckTasks.check_partition_property,
+                                               is_empty=True, num_entities=0)
 
         # insert data
-        self.partition_wrap.insert(data)
-        assert self.partition_wrap.is_empty is False
-        assert self.partition_wrap.num_entities == (nums + nums)
+        partition_w.insert(data)
+        # TODO need a flush before assert
+        assert not partition_w.is_empty
+        assert partition_w.num_entities == nums
+
+        # insert data
+        partition_w.insert(data)
+        # TODO need a flush before assert
+        assert not partition_w.is_empty
+        assert partition_w.num_entities == (nums + nums)
 
 
 class TestPartitionOperations(TestcaseBase):
@@ -296,43 +286,37 @@ class TestPartitionOperations(TestcaseBase):
                 3. create partition in collection1
         expected: 1. raise exception
         """
-
         # create collection
-        self._collection()
+        collection_w = self.init_collection_wrap()
 
         # drop collection
-        self.collection_wrap.drop()
+        collection_w.drop()
 
-        # init partition failed
-        res, cr = self.partition_wrap.partition_init(self.collection_wrap.collection, partition_name,
-                                                     check_res=CheckParams.err_res)
-
-        assert res.code == 1 and "can't find collection" in res.message
+        # create partition failed
+        self.partition_wrap.init_partition(collection_w.collection, partition_name,
+                                           check_task=CheckTasks.err_res,
+                                           err_code=1, err_msg="can't find collection")
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_same_name_in_diff_collections(self, partition_name):
         """
-        target: verify create partitions with sanme name in diff collections
+        target: verify create partitions with same name in diff collections
         method: 1. create a partition in collection1
                 2. create a partition in collection2
         expected: 1. create successfully
         """
-
-        # init two objects of collection
-        self._collection_object_multiple(mul_number=2)
-
         # create two collections
-        for c in self.collection_mul:
-            self._collection(c_object=c)
+        collection_w1 = self.init_collection_wrap()
+        collection_w2 = self.init_collection_wrap()
 
-        # init partition
-        for c in self.collection_mul:
-            self.partition_wrap.partition_init(c.collection, partition_name)
+        # create 2 partitions in 2 diff collections
+        self.init_partition_wrap(collection_wrap=collection_w1, name=partition_name)
+        self.init_partition_wrap(collection_wrap=collection_w2, name=partition_name)
 
         # check result
-        for c in self.collection_mul:
-            c.has_partition(partition_name)
+        assert collection_w1.has_partition(partition_name)[0]
+        assert collection_w2.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_partition_multi_partitions_in_collection(self):
@@ -342,14 +326,13 @@ class TestPartitionOperations(TestcaseBase):
         expected: 1. create successfully
         """
         # create collection
-        self._collection()
+        collection_w = self.init_collection_wrap()
 
         for _ in range(10):
             partition_name = cf.gen_unique_str(prefix)
-
-            # init partition with different name and check partition is exists
-            self.partition_wrap.partition_init(self.collection_wrap.collection, partition_name)
-            self.collection_wrap.has_partition(partition_name)
+            # create partition with different names and check the partition exists
+            self.init_partition_wrap(collection_w, partition_name)
+            assert collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_partition_maximum_partitions(self):
@@ -366,9 +349,10 @@ class TestPartitionOperations(TestcaseBase):
         def create_partition(collection, threads_n):
             for _ in range(ct.max_partition_num // threads_n):
                 name = cf.gen_unique_str(prefix)
-                Partition(collection, name)
+                par_wrap = ApiPartitionWrapper()
+                par_wrap.init_partition(collection, name)
 
-        m_collection = self._collection()
+        m_collection = self.init_collection_wrap()
         for _ in range(threads_num):
             t = threading.Thread(target=create_partition, args=(m_collection, threads_num))
             threads.append(t)
@@ -376,10 +360,10 @@ class TestPartitionOperations(TestcaseBase):
         for t in threads:
             t.join()
         p_name = cf.gen_unique_str()
-        ex, _ = self.partition_wrap.partition_init(m_collection, p_name,
-                                                   check_res=CheckParams.err_res)
-        assert ex.code == 1
-        assert "maximum partition's number should be limit to 4096" in ex.message
+        self.partition_wrap.init_partition(m_collection, p_name,
+                                           check_task=CheckTasks.err_res,
+                                           err_code=1,
+                                           err_msg="maximum partition's number should be limit to 4096")
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="issue #5302")
@@ -390,23 +374,14 @@ class TestPartitionOperations(TestcaseBase):
         method: 1. drop the _default partition
         expected: 1. raise exception
         """
-
         # create collection
-        self._collection()
+        collection_w = self.init_collection_wrap()
 
         # init partition
-        res_mp, cr = self.collection_wrap.partition(ct.default_partition_name)
+        partition_w = collection_w.partition(ct.default_partition_name)
 
-        # insert data
-        res_mp.insert(cf.gen_default_list_data())
-
-        # TODO need a flush?
-        assert res_mp.is_empty is False
-
-        # drop partition
-        with pytest.raises(Exception) as e:
-            res_mp.drop()
-            log.error(e)
+        # verify that drop partition with error
+        partition_w.drop(check_task=CheckTasks.err_res, err_code=1, err_msg="not")
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
@@ -418,20 +393,19 @@ class TestPartitionOperations(TestcaseBase):
                 3. drop the same partition again
         expected: raise exception when 2nd time
         """
-
         # create collection
-        self._collection()
+        collection_w = self.init_collection_wrap()
 
-        # init partition
-        self.partition_wrap.partition_init(self.collection_wrap.collection, partition_name)
-        self.collection_wrap.has_partition(partition_name)
+        # create partition
+        partition_w = self.init_partition_wrap(collection_w, partition_name)
+        collection_w.has_partition(partition_name)
 
         # drop partition
-        self.partition_wrap.drop()
-        assert not self.collection_wrap.has_partition(partition_name)[0]
+        partition_w.drop()
+        assert not collection_w.has_partition(partition_name)
 
-        # drop partition again
-        self.partition_wrap.drop(check_res=CheckParams.err_res)
+        # verify that drop the partition again with exception
+        partition_w.drop(check_task=CheckTasks.err_res, err_code=1, err_msg="None Type")
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
@@ -443,19 +417,18 @@ class TestPartitionOperations(TestcaseBase):
                 3. loop #1 and #2 for times
         expected: create and drop successfully
         """
-
         # create collection
-        self._collection()
+        collection_w = self.init_collection_wrap()
 
         # range for 5 times
         for i in range(5):
-            # init partition and check that the partition exists
-            self.partition_wrap.partition_init(self.collection_wrap.collection, partition_name)
-            assert self.collection_wrap.has_partition(partition_name)[0] is True
+            # create partition and check that the partition exists
+            partition_w = self.init_partition_wrap(collection_w, partition_name)
+            assert collection_w.has_partition(partition_name)[0]
 
             # drop partition and check that the partition not exists
-            self.partition_wrap.drop()
-            assert self.collection_wrap.has_partition(partition_name)[0] is False
+            partition_w.drop()
+            assert not collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("flush", [True, False])
@@ -469,16 +442,15 @@ class TestPartitionOperations(TestcaseBase):
                 3. drop the partition
         expected: drop successfully
         """
-
         # create collection
-        self._collection()
+        collection_w = self.init_collection_wrap()
 
-        # init partition
-        self.partition_wrap.partition_init(self.collection_wrap.collection, partition_name)
-        assert self.collection_wrap.has_partition(partition_name)[0] is True
+        # create partition
+        partition_w = self.init_partition_wrap(collection_w, partition_name)
+        assert collection_w.has_partition(partition_name)[0]
 
         # insert data to partition
-        self.partition_wrap.insert(cf.gen_default_dataframe_data())
+        partition_w.insert(cf.gen_default_dataframe_data())
 
         # flush
         if flush:
@@ -486,8 +458,8 @@ class TestPartitionOperations(TestcaseBase):
             pass
 
         # drop partition
-        self.partition_wrap.drop()
-        assert self.collection_wrap.has_partition(partition_name)[0] is False
+        partition_w.drop()
+        assert not collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("flush", [True, False])
@@ -503,19 +475,18 @@ class TestPartitionOperations(TestcaseBase):
                 5. drop the partition
         expected: drop successfully
         """
-
         # create collection
-        self._collection()
+        collection_w = self._collection()
 
-        # init partition
-        self.partition_wrap.partition_init(self.collection_wrap.collection, partition_name)
-        assert self.collection_wrap.has_partition(partition_name)[0] is True
+        # create partition
+        partition_w = self.init_partition_wrap(collection_w, partition_name)
+        assert collection_w.has_partition(partition_name)
 
         # insert data to partition
         self.partition_wrap.insert(data)
 
         # create index of collection
-        self.collection_wrap.create_index(ct.default_float_vec_field_name, index_param)
+        collection_w.create_index(ct.default_float_vec_field_name, index_param)
 
         # flush
         if flush:
@@ -523,8 +494,8 @@ class TestPartitionOperations(TestcaseBase):
             pass
 
         # drop partition
-        self.partition_wrap.drop()
-        assert self.collection_wrap.has_partition(partition_name)[0] is False
+        partition_w.drop()
+        assert not collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_release_empty_partition(self):
@@ -534,16 +505,12 @@ class TestPartitionOperations(TestcaseBase):
                 2. release the partition
         expected: release successfully
         """
-
-        # create collection
-        self._collection()
-
-        # init partition
-        self._partition()
-        assert self.partition_wrap.is_empty
+        # create partition
+        partition_w = self.init_partition_wrap()
+        assert partition_w.is_empty
 
         # release partition
-        self.partition_wrap.release()
+        partition_w.release()
         # TODO: assert no more memory consumed
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -555,20 +522,14 @@ class TestPartitionOperations(TestcaseBase):
                 2. release the partition
         expected: raise exception
         """
-
-        # create collection
-        self._collection()
-
-        # init partition
-        self._partition()
+        # create partition
+        partition_w = self.init_partition_wrap()
 
         # drop partition
-        self.partition_wrap.drop()
+        partition_w.drop()
 
-        # release partition and check err res
-        res, cr = self.partition_wrap.release(check_res=CheckParams.err_res)
-        # TODO assert the error code
-        log.error(res)
+        # release the dropped partition and check err response
+        partition_w.release(check_task=CheckTasks.err_res, err_code=1, err_msg="None Type")
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
@@ -580,21 +541,18 @@ class TestPartitionOperations(TestcaseBase):
                 2. release the partition
         expected: raise exception
         """
-
         # create collection
-        self._collection()
+        collection_w = self.init_collection_wrap()
 
-        # init partition
-        self.partition_wrap.partition_init(self.collection_wrap.collection, partition_name)
-        assert self.collection_wrap.has_partition(partition_name)[0] is True
+        # create partition
+        partition_w = self.init_partition_wrap(collection_w, partition_name)
+        assert collection_w.has_partition(partition_name)[0]
 
         # drop collection
-        self.collection_wrap.drop()
+        collection_w.drop()
 
-        # release partition and check err res
-        res, cr = self.partition_wrap.release(check_res=CheckParams.err_res)
-        # TODO assert the error code
-        log.error(res)
+        # release the partition and check err response
+        partition_w.release(check_task=CheckTasks.err_res, err_code=1, err_msg="None Type")
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="issue #5384")
@@ -609,36 +567,36 @@ class TestPartitionOperations(TestcaseBase):
                 2. release the partition
         expected: partition released successfully
         """
-
         # create collection
-        self._collection()
+        collection_w = self.init_collection_wrap()
 
-        # init partition
-        self.partition_wrap.partition_init(self.collection_wrap.collection, partition_name)
-        assert self.collection_wrap.has_partition(partition_name)[0] is True
+        # create partition
+        partition_w = self.init_partition_wrap(collection_w, partition_name)
+        assert collection_w.has_partition(partition_name)[0]
 
         # insert data to partition
-        self.partition_wrap.insert(cf.gen_default_list_data())
+        partition_w.insert(cf.gen_default_list_data())
 
         # load partition
-        self.partition_wrap.load()
+        partition_w.load()
 
         # search of partition
-        res_1, cr = self.partition_wrap.search(data=search_vectors, anns_field=ct.default_float_vec_field_name,
-                                               params={"nprobe": 32}, limit=1)
+        res_1, _ = partition_w.search(data=search_vectors,
+                                      anns_field=ct.default_float_vec_field_name,
+                                      params={"nprobe": 32}, limit=1)
         assert len(res_1) == 1
 
         # release collection
-        self.collection_wrap.release()
+        collection_w.release()
 
         # search of partition
-        res_2, cr = self.partition_wrap.search(data=search_vectors, anns_field=ct.default_float_vec_field_name,
-                                               params={"nprobe": 32}, limit=1)
+        res_2, _ = partition_w.search(data=search_vectors,
+                                      anns_field=ct.default_float_vec_field_name,
+                                      params={"nprobe": 32}, limit=1)
         assert len(res_2) == 0
 
         # release partition
-        self.partition_wrap.release()
-        # TODO assert release successfully
+        partition_w.release()
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="issue #5302")
@@ -650,16 +608,16 @@ class TestPartitionOperations(TestcaseBase):
                 2. insert some data into _default partition
         expected: insert successfully
         """
-
         # create collection
-        self._collection()
+        collection_w = self.init_collection_wrap()
 
-        # init partition
-        res_mp, cr = self.collection_wrap.partition(partition_name)
+        # get the default partition
+        assert collection_w.has_partition(partition_name)[0]
+        partition_w = self.init_partition_wrap(collection_w, partition_name)
 
         # insert data to partition
-        res_mp.insert(data)
-        assert res_mp.num_entities == len(data)
+        partition_w.insert(data)
+        assert partition_w.num_entities == len(data)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_insert_dropped_partition(self):
@@ -669,20 +627,16 @@ class TestPartitionOperations(TestcaseBase):
                 2. insert some data into dropped partition
         expected: raise exception
         """
-
-        # create collection
-        self._collection()
-
-        # init partition
-        self._partition()
+        # create partition
+        partition_w = self.init_partition_wrap()
 
         # drop partition
-        self.partition_wrap.drop()
+        partition_w.drop()
 
         # insert data to partition
-        res, cr = self.partition_wrap.insert(cf.gen_default_dataframe_data(), check_res=CheckParams.err_res)
-        # TODO: assert the error code
-        log.error(res)
+        partition_w.insert(cf.gen_default_dataframe_data(),
+                           check_task=CheckTasks.err_res, err_code=1, err_msg="not")
+        # TODO: update the assert error
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
@@ -693,21 +647,19 @@ class TestPartitionOperations(TestcaseBase):
                 2. insert some data into dropped collection
         expected: raise exception
         """
-
         # create collection
-        self._collection()
+        collection_w = self.init_collection_wrap()
 
-        # init partition
-        self.partition_wrap.partition_init(self.collection_wrap.collection, partition_name)
-        assert self.collection_wrap.has_partition(partition_name)[0] is True
+        # create partition
+        partition_w = self.init_partition_wrap(collection_w, partition_name)
+        assert collection_w.has_partition(partition_name)[0]
 
         # drop collection
-        self.collection_wrap.drop()
+        collection_w.drop()
 
         # insert data to partition
-        res, cr = self.partition_wrap.insert(cf.gen_default_dataframe_data(), check_res=CheckParams.err_res)
-        # TODO: assert the error code
-        log.error(res)
+        partition_w.insert(cf.gen_default_dataframe_data(), check_task=CheckTasks.err_res,
+                           err_code=1, err_msg="None Type")
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="issue #5302")
@@ -718,18 +670,14 @@ class TestPartitionOperations(TestcaseBase):
                 2. insert maximum size data
         expected: insert successfully
         """
-
-        # create collection
-        self._collection()
-
-        # init partition
-        self._partition()
+        # create partition
+        partition_w = self.init_partition_wrap()
 
         # insert data to partition
         max_size = 100000  # TODO: clarify the max size of data
-        self.partition_wrap.insert(cf.gen_default_dataframe_data(max_size))
+        partition_w.insert(cf.gen_default_dataframe_data(max_size))
         # TODO: need a flush for #5302
-        assert self.partition_wrap.num_entities == max_size
+        assert partition_w.num_entities == max_size
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("dim, expected_err",
@@ -742,18 +690,12 @@ class TestPartitionOperations(TestcaseBase):
                 2. insert dismatch dim data
         expected: raise exception
         """
-
-        # create collection
-        self._collection()
-
-        # init partition
-        self.partition_wrap.partition_init(self.collection_wrap.collection, partition_name)
+        # create partition
+        partition_w = self.init_partition_wrap(partition_name)
 
         data = cf.gen_default_list_data(nb=10, dim=dim)
         # insert data to partition
-        res, cr = self.partition_wrap.insert(data, check_res=CheckParams.err_res)
-        # TODO: assert expected_err in error code
-        log.error(res)
+        partition_w.insert(data, check_task=CheckTasks.err_res, err_code=1, err_msg="blabla")
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("sync", [True, False])

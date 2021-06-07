@@ -1,12 +1,11 @@
 from pymilvus_orm import Connections
-from pymilvus_orm.types import DataType
 from pymilvus_orm.default_config import DefaultConfig
 import sys
 
 sys.path.append("..")
 from check.param_check import *
 from check.func_check import *
-from base.api_request import api_request
+from utils.api_request import api_request
 
 
 class ApiConnectionsWrapper:
