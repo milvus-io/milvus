@@ -1,6 +1,5 @@
 import threading
 import pytest
-from base.partition import ApiPartitionWrapper
 
 from pymilvus_orm import Partition
 from base.client_request import ApiReq

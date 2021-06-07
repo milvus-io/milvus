@@ -1,4 +1,5 @@
 import pytest
+import os
 
 from pymilvus_orm.default_config import DefaultConfig
 from base.client_request import ApiReq
@@ -293,6 +294,8 @@ class TestConnectionOperation(ApiReq):
         log.info(self.connection_wrap.list_connections()[0])
         assert self.connection_wrap.list_connections()[0] == ['default', 'dev']
 
+    def test_wt(self):
+        log.error(os.environ["HOME"])
 
 
 
