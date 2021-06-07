@@ -275,6 +275,7 @@ func TestMasterService(t *testing.T) {
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+	Params.DataServiceSegmentChannel = fmt.Sprintf("data-service-segment-%d", randVal)
 
 	err = core.Register()
 	assert.Nil(t, err)
