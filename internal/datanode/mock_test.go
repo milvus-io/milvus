@@ -523,6 +523,14 @@ func (m *MasterServiceFactory) AllocID(ctx context.Context, in *masterpb.AllocID
 	return resp, nil
 }
 
+func (m *MasterServiceFactory) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
+	resp := &masterpb.AllocTimestampResponse{
+		Status:    &commonpb.Status{},
+		Timestamp: 1000,
+	}
+	return resp, nil
+}
+
 func (m *MasterServiceFactory) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	resp := &milvuspb.ShowCollectionsResponse{
 		Status:          &commonpb.Status{},
