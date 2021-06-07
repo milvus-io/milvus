@@ -1,5 +1,7 @@
 #!/usr/bin/env groovy
 
+// When you include either a [cronjob] tag within the commit message,
+// scheduling a job that gets automatically triggered by changes.
 String cron_timezone = "TZ=Asia/Shanghai"
 String cron_string = BRANCH_NAME == "master" ? "50 20,22,0,6,11,16 * * * " : ""
 
