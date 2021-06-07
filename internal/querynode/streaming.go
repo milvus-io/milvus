@@ -13,6 +13,7 @@ package querynode
 
 import (
 	"context"
+
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
@@ -53,7 +54,7 @@ func (s *streaming) close() {
 	s.replica.freeAll()
 }
 
-func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, plan *Plan, ts Timestamp) ([]*SearchResult, []*Segment, error) {
+func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, plan *Plan, searchTs Timestamp) ([]*SearchResult, []*Segment, error) {
 	searchResults := make([]*SearchResult, 0)
 	segmentResults := make([]*Segment, 0)
 
@@ -67,8 +68,8 @@ func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs
 		searchPartIDs = strPartIDs
 	} else {
 		for _, id := range partIDs {
-			_, err2 := s.replica.getPartitionByID(id)
-			if err2 == nil {
+			_, err := s.replica.getPartitionByID(id)
+			if err == nil {
 				searchPartIDs = append(searchPartIDs, id)
 			}
 		}
@@ -84,7 +85,14 @@ func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs
 			if err != nil {
 				return searchResults, segmentResults, err
 			}
-			searchResult, err := seg.segmentSearch(plan, searchReqs, []Timestamp{ts})
+
+			// TSafe less than searchTs means this vChannel is not available
+			ts := s.tSafeReplica.getTSafe(seg.vChannelID)
+			if ts < searchTs {
+				continue
+			}
+
+			searchResult, err := seg.segmentSearch(plan, searchReqs, []Timestamp{searchTs})
 			if err != nil {
 				return searchResults, segmentResults, err
 			}

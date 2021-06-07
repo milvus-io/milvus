@@ -13,6 +13,7 @@ package querynode
 
 import (
 	"context"
+
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
 )
@@ -52,7 +53,7 @@ func (h *historical) close() {
 	h.replica.freeAll()
 }
 
-func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, plan *Plan, ts Timestamp) ([]*SearchResult, []*Segment, error) {
+func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, plan *Plan, searchTs Timestamp) ([]*SearchResult, []*Segment, error) {
 	searchResults := make([]*SearchResult, 0)
 	segmentResults := make([]*Segment, 0)
 
@@ -66,8 +67,8 @@ func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partID
 		searchPartIDs = hisPartIDs
 	} else {
 		for _, id := range partIDs {
-			_, err1 := h.replica.getPartitionByID(id)
-			if err1 == nil {
+			_, err := h.replica.getPartitionByID(id)
+			if err == nil {
 				searchPartIDs = append(searchPartIDs, id)
 			}
 		}
@@ -83,7 +84,7 @@ func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partID
 			if err != nil {
 				return searchResults, segmentResults, err
 			}
-			searchResult, err := seg.segmentSearch(plan, searchReqs, []Timestamp{ts})
+			searchResult, err := seg.segmentSearch(plan, searchReqs, []Timestamp{searchTs})
 			if err != nil {
 				return searchResults, segmentResults, err
 			}
