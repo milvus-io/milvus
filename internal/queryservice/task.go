@@ -836,6 +836,9 @@ func mockGetRecoveryInfoFromDataService(ctx context.Context,
 			}
 
 			for index, fieldID := range pathResponse.FieldIDs {
+				if len(pathResponse.Paths[index].Values) == 0 {
+					continue
+				}
 				fieldBingLog := &querypb.FieldBinlog{
 					FieldID: fieldID,
 					Binlogs: pathResponse.Paths[index].Values,

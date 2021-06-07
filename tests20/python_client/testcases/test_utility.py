@@ -1,7 +1,7 @@
 import copy
 import pytest
 from pymilvus_orm import FieldSchema
-from base.client_request import ApiReq
+from base.client_base import TestcaseBase
 from base.collection_wrapper import ApiCollectionWrapper
 from base.partition_wrapper import ApiPartitionWrapper
 from base.index_wrapper import ApiIndexWrapper
@@ -17,7 +17,7 @@ default_field_name = ct.default_float_vec_field_name
 default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
 
 
-class TestUtilityParams(ApiReq):
+class TestUtilityParams(TestcaseBase):
     """ Test case of index interface """
 
     @pytest.fixture(
@@ -152,7 +152,7 @@ class TestUtilityParams(ApiReq):
         assert "invalid" or "illegal" in str(ex)
 
 
-class TestUtilityBase(ApiReq):
+class TestUtilityBase(TestcaseBase):
     """ Test case of index interface """
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -213,7 +213,7 @@ class TestUtilityBase(ApiReq):
         p_name = cf.gen_unique_str()
         collection = self._collection(c_name)
         api_p = ApiPartitionWrapper()
-        api_p.partition_init(collection, p_name)
+        api_p.init_partition(collection, p_name)
         res, _ = ut.has_partition(c_name, p_name)
         assert res is True
 
@@ -245,7 +245,7 @@ class TestUtilityBase(ApiReq):
         p_name = cf.gen_unique_str()
         collection = self._collection(c_name)
         api_p = ApiPartitionWrapper()
-        api_p.partition_init(collection, p_name)
+        api_p.init_partition(collection, p_name)
         res, _ = ut.has_partition(c_name, p_name)
         assert res is True
         api_p.drop()
@@ -446,7 +446,7 @@ class TestUtilityBase(ApiReq):
         assert res["num_indexed_entities"] == nb
 
 
-class TestUtilityAdvanced(ApiReq):
+class TestUtilityAdvanced(TestcaseBase):
     """ Test case of index interface """
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -462,7 +462,7 @@ class TestUtilityAdvanced(ApiReq):
         c_name_2 = cf.gen_unique_str(prefix)
         self._collection(c_name)
         api_c = ApiCollectionWrapper()
-        api_c.collection_init(c_name_2)
+        api_c.init_collection(c_name_2)
         for name in [c_name, c_name_2]:
             res, _ = ut.has_collection(name)
             assert res is True
@@ -480,7 +480,7 @@ class TestUtilityAdvanced(ApiReq):
         c_name_2 = cf.gen_unique_str(prefix)
         self._collection(c_name)
         api_c = ApiCollectionWrapper()
-        api_c.collection_init(c_name_2)
+        api_c.init_collection(c_name_2)
         res, _ = ut.list_collections()
         for name in [c_name, c_name_2]:
             assert name in res

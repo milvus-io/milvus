@@ -37,11 +37,11 @@ class TestLog:
             self.log.addHandler(ch)
 
         except Exception as e:
-            print("Can not use %s or %s to log." % (log_file, log_err))
+            print("Can not use %s or %s or %s to log. error : %s" % (log_debug, log_file, log_err, str(e)))
 
 
 """All modules share this unified log"""
 log_debug = test_info.log_debug
 log_info = test_info.log_info
 log_err = test_info.log_err
-test_log = TestLog('refactor_test', log_debug, log_info, log_err).log
+test_log = TestLog('ci_test', log_debug, log_info, log_err).log

@@ -187,38 +187,54 @@ def jaccard(x, y):
     y = np.asarray(y, np.bool)
     return 1 - np.double(np.bitwise_and(x, y).sum()) / np.double(np.bitwise_or(x, y).sum())
 
+
 def hamming(x, y):
     x = np.asarray(x, np.bool)
     y = np.asarray(y, np.bool)
     return np.bitwise_xor(x, y).sum()
+
 
 def tanimoto(x, y):
     x = np.asarray(x, np.bool)
     y = np.asarray(y, np.bool)
     return -np.log2(np.double(np.bitwise_and(x, y).sum()) / np.double(np.bitwise_or(x, y).sum()))
 
+
 def substructure(x, y):
     x = np.asarray(x, np.bool)
     y = np.asarray(y, np.bool)
     return 1 - np.double(np.bitwise_and(x, y).sum()) / np.count_nonzero(y)
+
 
 def superstructure(x, y):
     x = np.asarray(x, np.bool)
     y = np.asarray(y, np.bool)
     return 1 - np.double(np.bitwise_and(x, y).sum()) / np.count_nonzero(x)
 
-def modify_file(file_name_list, input_content=""):
-    if not isinstance(file_name_list, list):
+
+def modify_file(file_path_list, is_modify=False, input_content=""):
+    """
+    file_path_list : file list -> list[<file_path>]
+    is_modify : does the file need to be reset
+    input_content ：the content that need to insert to the file
+    """
+    if not isinstance(file_path_list, list):
         log.error("[modify_file] file is not a list.")
 
-    for file_name in file_name_list:
-        if not os.path.isfile(file_name):
-            log.error("[modify_file] file(%s) is not exist." % file_name)
+    for file_path in file_path_list:
+        folder_path, file_name = os.path.split(file_path)
+        if not os.path.isdir(folder_path):
+            log.debug("[modify_file] folder(%s) is not exist." % folder_path)
+            os.makedirs(folder_path)
 
-        with open(file_name, "r+") as f:
-            f.seek(0)
-            f.truncate()
-            f.write(input_content)
-            f.close()
-
-    log.info("[modify_file] File(%s) modification is complete." % file_name_list)
+        if not os.path.isfile(file_path):
+            log.error("[modify_file] file(%s) is not exist." % file_path)
+        else:
+            if is_modify is True:
+                log.debug("[modify_file] start modifying file(%s)..." % file_path)
+                with open(file_path, "r+") as f:
+                    f.seek(0)
+                    f.truncate()
+                    f.write(input_content)
+                    f.close()
+                log.info("[modify_file] File(%s) modification is complete." % file_path_list)
