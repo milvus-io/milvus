@@ -15,3 +15,8 @@ services:
     volumes:
       - ../../:/milvus:delegated
     working_dir: "/milvus"
+
+networks:
+  default:
+    external: ${PRE_EXIST_NETWORK:-false}
+    name: ${PYTEST_NETWORK:-pytest}
