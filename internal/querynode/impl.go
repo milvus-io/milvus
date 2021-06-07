@@ -82,13 +82,19 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 		return status, errors.New(errMsg)
 	}
 
-	if _, ok := node.searchService.searchCollections[in.CollectionID]; !ok {
-		errMsg := "null search collection, collectionID = " + fmt.Sprintln(collectionID)
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    errMsg,
-		}
-		return status, errors.New(errMsg)
+	//if _, ok := node.searchService.searchCollections[in.CollectionID]; !ok {
+	//	errMsg := "null search collection, collectionID = " + fmt.Sprintln(collectionID)
+	//	status := &commonpb.Status{
+	//		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	//		Reason:    errMsg,
+	//	}
+	//	return status, errors.New(errMsg)
+	//}
+
+	// add search collection
+	if !node.searchService.hasSearchCollection(collectionID) {
+		node.searchService.addSearchCollection(collectionID)
+		log.Debug("add search collection", zap.Any("collectionID", collectionID))
 	}
 
 	// add request channel
@@ -220,7 +226,11 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 		log.Error(err.Error())
 		return status, err
 	}
-	log.Debug("loadSegmentsTask Enqueue done", zap.Any("collectionID", in.CollectionID))
+	segmentIDs := make([]UniqueID, 0)
+	for _, info := range in.Infos {
+		segmentIDs = append(segmentIDs, info.SegmentID)
+	}
+	log.Debug("loadSegmentsTask Enqueue done", zap.Int64s("segmentIDs", segmentIDs))
 
 	func() {
 		err = dct.WaitToFinish()
@@ -228,7 +238,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 			log.Error(err.Error())
 			return
 		}
-		log.Debug("loadSegmentsTask WaitToFinish done", zap.Any("collectionID", in.CollectionID))
+		log.Debug("loadSegmentsTask WaitToFinish done", zap.Int64s("segmentIDs", segmentIDs))
 	}()
 
 	status := &commonpb.Status{

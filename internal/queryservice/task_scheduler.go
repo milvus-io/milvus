@@ -54,6 +54,11 @@ func (queue *TaskQueue) addTask(tasks []task) {
 	defer queue.Unlock()
 
 	for _, t := range tasks {
+		if queue.tasks.Len() == 0 {
+			queue.taskChan <- 1
+			queue.tasks.PushBack(t)
+			continue
+		}
 		for e := queue.tasks.Back(); e != nil; e = e.Prev() {
 			if t.TaskPriority() > e.Value.(task).TaskPriority() {
 				continue
@@ -122,8 +127,6 @@ func NewTaskScheduler(ctx context.Context, meta *meta, kv *etcdkv.EtcdKV) *TaskS
 }
 
 func (scheduler *TaskScheduler) Enqueue(tasks []task) {
-	scheduler.triggerTaskQueue.Lock()
-	defer scheduler.triggerTaskQueue.Unlock()
 	//TODO::open when add etcd
 	//for _, t := range tasks {
 	//	id, err := scheduler.taskIDAllocator()
@@ -174,6 +177,7 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 			return
 		case <-scheduler.triggerTaskQueue.Chan():
 			t := scheduler.triggerTaskQueue.PopTask()
+			log.Debug("pop a triggerTask from triggerTaskQueue")
 			scheduler.processTask(t)
 			//TODO::add active task to etcd
 			w.Add(2)
@@ -188,12 +192,26 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 
 func (scheduler *TaskScheduler) addActivateTask(wg *sync.WaitGroup, t task) {
 	defer wg.Done()
+	var activeTaskWg sync.WaitGroup
 	for _, childTask := range t.GetChildTask() {
 		if childTask != nil {
+			log.Debug("add a activate task to activateChan")
 			scheduler.activateTaskChan <- childTask
+			activeTaskWg.Add(1)
+			go scheduler.waitActivateTaskDone(&activeTaskWg, childTask)
 		}
 	}
-	scheduler.activateTaskChan <- nil
+	activeTaskWg.Wait()
+}
+
+func (scheduler *TaskScheduler) waitActivateTaskDone( wg *sync.WaitGroup, t task) {
+	defer wg.Done()
+	err := t.WaitToFinish()
+	if err != nil {
+		//TODO:: redo task
+		log.Error("waitActivateTaskDone: activate task return err")
+	}
+	log.Debug("one activate task done")
 }
 
 func (scheduler *TaskScheduler) processActivateTask(wg *sync.WaitGroup) {
@@ -203,9 +221,7 @@ func (scheduler *TaskScheduler) processActivateTask(wg *sync.WaitGroup) {
 		case <-scheduler.ctx.Done():
 			return
 		case t := <-scheduler.activateTaskChan:
-			if t == nil {
-				return
-			}
+			log.Debug("pop a activate task from activateChan")
 			scheduler.processTask(t)
 			//TODO:: delete active task from etcd
 		}

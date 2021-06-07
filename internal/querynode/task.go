@@ -140,6 +140,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 			}
 		}
 	}
+	log.Debug("watchDMChannel, init replica done", zap.Any("collectionID", collectionID))
 
 	// get subscription name
 	getUniqueSubName := func() string {
@@ -159,6 +160,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		info.SeekPosition.MsgGroup = consumeSubName
 		toSeekChannels = append(toSeekChannels, info.SeekPosition)
 	}
+	log.Debug("watchDMChannel, group channels done", zap.Any("collectionID", collectionID))
 
 	// add check points info
 	checkPointInfos := make([]*queryPb.CheckPoint, 0)
@@ -170,6 +172,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		log.Error(err.Error())
 		return err
 	}
+	log.Debug("watchDMChannel, add check points info done", zap.Any("collectionID", collectionID))
 
 	// add flow graph
 	if loadPartition {
@@ -229,8 +232,10 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	}
 
 	// add search collection
-	w.node.searchService.addSearchCollection(collectionID)
-	log.Debug("add search collection", zap.Any("collectionID", collectionID))
+	if !w.node.searchService.hasSearchCollection(collectionID) {
+		w.node.searchService.addSearchCollection(collectionID)
+		log.Debug("add search collection", zap.Any("collectionID", collectionID))
+	}
 
 	// start flow graphs
 	if loadPartition {
@@ -256,7 +261,7 @@ func (w *watchDmChannelsTask) PostExecute(ctx context.Context) error {
 // loadSegmentsTask
 func (l *loadSegmentsTask) Timestamp() Timestamp {
 	if l.req.Base == nil {
-		log.Error("nil base req in loadSegmentsTask", zap.Any("collectionID", l.req.CollectionID))
+		log.Error("nil base req in loadSegmentsTask")
 		return 0
 	}
 	return l.req.Base.Timestamp

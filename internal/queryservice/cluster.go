@@ -125,7 +125,9 @@ func (c *queryNodeCluster) WatchDmChannels(ctx context.Context, nodeID int64, in
 		for _, info := range in.Infos {
 			channels = append(channels, info.ChannelName)
 		}
+		log.Debug("wait queryNode watch dm channel")
 		status, err := node.client.WatchDmChannels(ctx, in)
+		log.Debug("queryNode watch dm channel done")
 		if err == nil && status.ErrorCode == commonpb.ErrorCode_Success {
 			collectionID := in.CollectionID
 			if !c.clusterMeta.hasCollection(collectionID) {
@@ -219,6 +221,22 @@ func (c *queryNodeCluster) releasePartitions(ctx context.Context, nodeID int64, 
 	}
 
 	return nil, errors.New("can't find query node by nodeID")
+}
+
+func (c *queryNodeCluster) getSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) ([]*querypb.SegmentInfo, error) {
+	c.Lock()
+	defer c.Unlock()
+
+	segmentInfos := make([]*querypb.SegmentInfo, 0)
+	for _, node := range c.nodes {
+		res, err := node.client.GetSegmentInfo(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		segmentInfos = append(segmentInfos, res.Infos...)
+	}
+
+	return segmentInfos, nil
 }
 
 func (c *queryNodeCluster) getNumDmChannels(nodeID int64) (int, error) {

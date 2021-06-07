@@ -57,25 +57,6 @@ func (loader *segmentLoader) loadSegmentOfConditionNodeDown(req *queryPb.LoadSeg
 }
 
 func (loader *segmentLoader) loadSegment(req *queryPb.LoadSegmentsRequest, onService bool) error {
-	collectionID := req.CollectionID
-	partitionID := req.PartitionID
-
-	// init replica
-	hasCollectionInHistorical := loader.historicalReplica.hasCollection(collectionID)
-	hasPartitionInHistorical := loader.historicalReplica.hasPartition(partitionID)
-	if !hasCollectionInHistorical {
-		err := loader.historicalReplica.addCollection(collectionID, req.Schema)
-		if err != nil {
-			return err
-		}
-	}
-	if !hasPartitionInHistorical {
-		err := loader.historicalReplica.addPartition(collectionID, partitionID)
-		if err != nil {
-			return err
-		}
-	}
-
 	// no segment needs to load, return
 	if len(req.Infos) == 0 {
 		return nil
@@ -84,6 +65,25 @@ func (loader *segmentLoader) loadSegment(req *queryPb.LoadSegmentsRequest, onSer
 	// start to load
 	for _, info := range req.Infos {
 		segmentID := info.SegmentID
+		partitionID := info.PartitionID
+		collectionID := info.CollectionID
+
+		// init replica
+		hasCollectionInHistorical := loader.historicalReplica.hasCollection(collectionID)
+		hasPartitionInHistorical := loader.historicalReplica.hasPartition(partitionID)
+		if !hasCollectionInHistorical {
+			err := loader.historicalReplica.addCollection(collectionID, req.Schema)
+			if err != nil {
+				return err
+			}
+		}
+		if !hasPartitionInHistorical {
+			err := loader.historicalReplica.addPartition(collectionID, partitionID)
+			if err != nil {
+				return err
+			}
+		}
+
 		collection, err := loader.historicalReplica.getCollectionByID(collectionID)
 		if err != nil {
 			log.Warn(err.Error())

@@ -137,6 +137,7 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 		lct.result = status
 		return err
 	}
+	log.Debug("loadCollectionTask: get recovery info")
 
 	for _, segmentBingLog := range recoveryInfo.Binlogs {
 		segmentID := segmentBingLog.SegmentID
@@ -165,18 +166,34 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 		watchRequests = append(watchRequests, watchRequest)
 	}
 
+	log.Debug("loadCollectionTask: segments and channels are ready to load or watch")
+
 	segment2Nodes := shuffleSegmentsToQueryNode(segmentsToLoad, lct.cluster)
 	watchRequest2Nodes := shuffleChannelsToQueryNode(channelsToWatch, lct.cluster)
+
+	watchQueryChannelInfo := make(map[int64]bool)
 	node2Segments := make(map[int64][]*querypb.SegmentLoadInfo)
 	for segmentID, nodeID := range segment2Nodes {
 		if _, ok := node2Segments[nodeID]; !ok {
 			node2Segments[nodeID] = make([]*querypb.SegmentLoadInfo, 0)
 		}
 		node2Segments[nodeID] = append(node2Segments[nodeID], segment2BingLog[segmentID])
+		if lct.cluster.hasWatchedQueryChannel(lct.ctx, nodeID, collectionID) {
+			watchQueryChannelInfo[nodeID] = true
+			continue
+		}
+		watchQueryChannelInfo[nodeID] = false
+	}
+	for _, nodeID := range watchRequest2Nodes {
+		if lct.cluster.hasWatchedQueryChannel(lct.ctx, nodeID, collectionID) {
+			watchQueryChannelInfo[nodeID] = true
+			continue
+		}
+		watchQueryChannelInfo[nodeID] = false
 	}
 
-	for nodeID, segmentInfos := range node2Segments {
-		if !lct.cluster.hasWatchedQueryChannel(lct.ctx, nodeID, collectionID) {
+	for nodeID, watched := range watchQueryChannelInfo {
+		if !watched {
 			queryChannel, queryResultChannel := lct.meta.GetQueryChannel(collectionID)
 
 			addQueryChannelRequest := &querypb.AddQueryChannelRequest{
@@ -198,7 +215,11 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 				cluster:                lct.cluster,
 			}
 			lct.AddChildTask(watchQueryChannelTask)
+			log.Debug("add a watchQueryChannelTask to loadCollectionTask's childTask")
 		}
+	}
+
+	for nodeID, segmentInfos := range node2Segments {
 		loadSegmentsRequest := &querypb.LoadSegmentsRequest{
 			Base:          lct.Base,
 			NodeID:        nodeID,
@@ -218,32 +239,10 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 			cluster:             lct.cluster,
 		}
 		lct.AddChildTask(loadSegmentTask)
+		log.Debug("add a loadSegmentTask to loadCollectionTask's childTask")
 	}
 
 	for _, nodeID := range watchRequest2Nodes {
-		if !lct.cluster.hasWatchedQueryChannel(lct.ctx, nodeID, collectionID) {
-			queryChannel, queryResultChannel := lct.meta.GetQueryChannel(collectionID)
-
-			addQueryChannelRequest := &querypb.AddQueryChannelRequest{
-				Base:             lct.Base,
-				NodeID:           nodeID,
-				CollectionID:     collectionID,
-				RequestChannelID: queryChannel,
-				ResultChannelID:  queryResultChannel,
-			}
-			watchQueryChannelTask := &WatchQueryChannelTask{
-				BaseTask: BaseTask{
-					ctx:       lct.ctx,
-					Condition: NewTaskCondition(lct.ctx),
-
-					triggerCondition: querypb.TriggerCondition_grpcRequest,
-				},
-
-				AddQueryChannelRequest: addQueryChannelRequest,
-				cluster:                lct.cluster,
-			}
-			lct.AddChildTask(watchQueryChannelTask)
-		}
 		index := 0
 		watchRequests[index].NodeID = nodeID
 		watchDmChannelTask := &WatchDmChannelTask{
@@ -257,6 +256,7 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 			cluster:                lct.cluster,
 		}
 		lct.AddChildTask(watchDmChannelTask)
+		log.Debug("add a watchDmChannelTask to loadCollectionTask's childTask")
 		index++
 	}
 
@@ -409,16 +409,30 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 
 	segment2Nodes := shuffleSegmentsToQueryNode(segmentsToLoad, lpt.cluster)
 	watchRequest2Nodes := shuffleChannelsToQueryNode(channelsToWatch, lpt.cluster)
+
+	watchQueryChannelInfo := make(map[int64]bool)
 	node2Segments := make(map[int64][]*querypb.SegmentLoadInfo)
 	for segmentID, nodeID := range segment2Nodes {
 		if _, ok := node2Segments[nodeID]; !ok {
 			node2Segments[nodeID] = make([]*querypb.SegmentLoadInfo, 0)
 		}
 		node2Segments[nodeID] = append(node2Segments[nodeID], segment2BingLog[segmentID])
+		if lpt.cluster.hasWatchedQueryChannel(lpt.ctx, nodeID, collectionID) {
+			watchQueryChannelInfo[nodeID] = true
+			continue
+		}
+		watchQueryChannelInfo[nodeID] = false
+	}
+	for _, nodeID := range watchRequest2Nodes {
+		if lpt.cluster.hasWatchedQueryChannel(lpt.ctx, nodeID, collectionID) {
+			watchQueryChannelInfo[nodeID] = true
+			continue
+		}
+		watchQueryChannelInfo[nodeID] = false
 	}
 
-	for nodeID, segmentInfos := range node2Segments {
-		if !lpt.cluster.hasWatchedQueryChannel(lpt.ctx, nodeID, collectionID) {
+	for nodeID, watched := range watchQueryChannelInfo {
+		if !watched {
 			queryChannel, queryResultChannel := lpt.meta.GetQueryChannel(collectionID)
 
 			addQueryChannelRequest := &querypb.AddQueryChannelRequest{
@@ -440,7 +454,11 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 				cluster:                lpt.cluster,
 			}
 			lpt.AddChildTask(watchQueryChannelTask)
+			log.Debug("add a watchQueryChannelTask to loadPartitionTask's childTask")
 		}
+	}
+
+	for nodeID, segmentInfos := range node2Segments {
 		loadSegmentsRequest := &querypb.LoadSegmentsRequest{
 			Base:          lpt.Base,
 			NodeID:        nodeID,
@@ -460,32 +478,10 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 			cluster:             lpt.cluster,
 		}
 		lpt.AddChildTask(loadSegmentTask)
+		log.Debug("add a loadSegmentTask to loadPartitionTask's childTask")
 	}
 
 	for _, nodeID := range watchRequest2Nodes {
-		if !lpt.cluster.hasWatchedQueryChannel(lpt.ctx, nodeID, collectionID) {
-			queryChannel, queryResultChannel := lpt.meta.GetQueryChannel(collectionID)
-
-			addQueryChannelRequest := &querypb.AddQueryChannelRequest{
-				Base:             lpt.Base,
-				NodeID:           nodeID,
-				CollectionID:     collectionID,
-				RequestChannelID: queryChannel,
-				ResultChannelID:  queryResultChannel,
-			}
-			watchQueryChannelTask := &WatchQueryChannelTask{
-				BaseTask: BaseTask{
-					ctx:       lpt.ctx,
-					Condition: NewTaskCondition(lpt.ctx),
-
-					triggerCondition: querypb.TriggerCondition_grpcRequest,
-				},
-
-				AddQueryChannelRequest: addQueryChannelRequest,
-				cluster:                lpt.cluster,
-			}
-			lpt.AddChildTask(watchQueryChannelTask)
-		}
 		index := 0
 		watchRequests[index].NodeID = nodeID
 		watchDmChannelTask := &WatchDmChannelTask{
@@ -499,6 +495,7 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 			cluster:                lpt.cluster,
 		}
 		lpt.AddChildTask(watchDmChannelTask)
+		log.Debug("add a watchDmChannelTask to loadPartitionTask's childTask")
 		index++
 	}
 

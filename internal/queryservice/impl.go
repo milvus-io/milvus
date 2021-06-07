@@ -128,6 +128,7 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 			return status, err
 		}
 	}
+
 	loadCollectionTask := &LoadCollectionTask{
 		BaseTask: BaseTask{
 			ctx:       qs.loopCtx,
@@ -374,8 +375,10 @@ func (qs *QueryService) GetPartitionStates(ctx context.Context, req *querypb.Get
 
 func (qs *QueryService) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	totalMemSize := int64(0)
-	segmentIDs := req.SegmentIDs
-	segmentInfos, err := qs.meta.getSegmentInfos(segmentIDs)
+	//TODO::get segment infos from meta
+	//segmentIDs := req.SegmentIDs
+	//segmentInfos, err := qs.meta.getSegmentInfos(segmentIDs)
+	segmentInfos, err := qs.cluster.getSegmentInfo(ctx, req)
 	if err != nil {
 		return &querypb.GetSegmentInfoResponse{
 			Status: &commonpb.Status{

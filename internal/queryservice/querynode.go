@@ -51,14 +51,16 @@ func newQueryNode(ip string, port int64, id UniqueID) (*queryNode, error) {
 		return nil, err
 	}
 	collectionInfo := make(map[UniqueID]*querypb.CollectionInfo)
+	watchedChannels := make(map[UniqueID]*querypb.QueryChannelInfo)
 	return &queryNode{
 		id: id,
 		address: struct {
 			ip   string
 			port int64
 		}{ip: ip, port: port},
-		client:          client,
-		collectionInfos: collectionInfo,
+		client:               client,
+		collectionInfos:      collectionInfo,
+		watchedQueryChannels: watchedChannels,
 		//nodeMeta: newMetaReplica(),
 	}, nil
 }

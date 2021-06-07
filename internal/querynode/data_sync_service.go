@@ -46,9 +46,11 @@ type dataSyncService struct {
 func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, vChannels []string) error {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
-
+	log.Debug("adding collection flow graph", zap.Any("collectionID", collectionID), zap.Any("channels", vChannels))
 	if _, ok := dsService.collectionFlowGraphs[collectionID]; ok {
-		return errors.New("collection flow graph has been existed, collectionID = " + fmt.Sprintln(collectionID))
+		log.Warn("collection flow graph has been existed", zap.Any("collectionID", collectionID))
+		return nil
+		//return errors.New("collection flow graph has been existed, collectionID = " + fmt.Sprintln(collectionID))
 	}
 	dsService.collectionFlowGraphs[collectionID] = make([]*queryNodeFlowGraph, 0)
 	for _, vChannel := range vChannels {
@@ -113,7 +115,10 @@ func (dsService *dataSyncService) removeCollectionFlowGraph(collectionID UniqueI
 func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID, partitionID UniqueID, vChannels []string) error {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
-
+	log.Debug("adding partition flow graph",
+		zap.Any("collectionID", collectionID),
+		zap.Any("partitionID", partitionID),
+		zap.Any("channels", vChannels))
 	if _, ok := dsService.partitionFlowGraphs[partitionID]; ok {
 		return errors.New("partition flow graph has been existed, partitionID = " + fmt.Sprintln(partitionID))
 	}
