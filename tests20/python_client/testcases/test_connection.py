@@ -226,9 +226,9 @@ class TestConnectionOperation(TestcaseBase):
         """
         # error
         self.connection_wrap.add_connection(default={"host": 'host', "port": port})
-        res = self.connection_wrap.connect(alias="default", host=host, port=port, check_res='')
+        res = self.connection_wrap.connect(alias="default", host=host, port=port, check_task='')
         log.info(res[0])
-        res = self.connection_wrap.connect(alias="default", host=host, port=port, check_res='')
+        res = self.connection_wrap.connect(alias="default", host=host, port=port, check_task='')
         log.info(res[0])
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -252,7 +252,7 @@ class TestConnectionOperation(TestcaseBase):
         expected: assert res is wrong
         """
         self.connection_wrap.get_connection(alias='default', check_res=CheckTasks.false)
-        res = self.connection_wrap.connect(alias="default", host='host', port=port, check_res='')
+        res = self.connection_wrap.connect(alias="default", host='host', port=port, check_task='')
         assert res[0].args[0] == "Fail connecting to server on host:19530. Timeout"
 
     @pytest.mark.tags(CaseLabel.L1)

@@ -30,10 +30,10 @@ class ApiConnectionsWrapper:
         check_result = ResponseChecker(res, func_name, check_res, check_params, check, alias=alias).run()
         return res, check_result
 
-    def connect(self, alias=DefaultConfig.DEFAULT_USING, check_res=None, check_params=None, **kwargs):
+    def connect(self, alias=DefaultConfig.DEFAULT_USING, check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.connection.connect, alias], **kwargs)
-        check_result = ResponseChecker(res, func_name, check_res, check_params, check, alias=alias, **kwargs).run()
+        res, succ = api_request([self.connection.connect, alias], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, succ, alias=alias, **kwargs).run()
         return res, check_result
 
     def get_connection(self, alias=DefaultConfig.DEFAULT_USING, check_res=None, check_params=None):
