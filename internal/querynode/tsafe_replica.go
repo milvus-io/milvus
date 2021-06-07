@@ -68,8 +68,10 @@ func (t *tSafeReplica) getTSaferPrivate(vChannel VChannel) (tSafer, error) {
 func (t *tSafeReplica) addTSafe(vChannel VChannel) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.tSafes[vChannel] = newTSafe()
-	log.Debug("add tSafe done", zap.Any("channel", vChannel))
+	if _, ok := t.tSafes[vChannel]; !ok {
+		t.tSafes[vChannel] = newTSafe()
+		log.Debug("add tSafe done", zap.Any("channel", vChannel))
+	}
 }
 
 func (t *tSafeReplica) removeTSafe(vChannel VChannel) {
