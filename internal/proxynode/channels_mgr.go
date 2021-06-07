@@ -8,7 +8,9 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"go.uber.org/zap"
 )
 
 type vChan = string
@@ -314,7 +316,7 @@ func (mgr *singleTypeChannelsMgr) getVChannels(collectionID UniqueID) ([]vChan, 
 
 func (mgr *singleTypeChannelsMgr) createMsgStream(collectionID UniqueID) error {
 	channels, err := mgr.getChannelsFunc(collectionID)
-    log.Debug("singleTypeChannelsMgr", zap.Any("createMsgStream.getChannels", channels))
+	log.Debug("singleTypeChannelsMgr", zap.Any("createMsgStream.getChannels", channels))
 	if err != nil {
 		return err
 	}
@@ -331,9 +333,9 @@ func (mgr *singleTypeChannelsMgr) createMsgStream(collectionID UniqueID) error {
 	}
 	pchans := getAllValues(channels)
 	stream.AsProducer(pchans)
-    // repack := func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
+	// repack := func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
 	// 	// TODO(dragondriver): use new repack function later
-    //     return nil, nil
+	//     return nil, nil
 	// }
 	// stream.SetRepackFunc(repack)
 	runtime.SetFinalizer(stream, func(stream msgstream.MsgStream) {
