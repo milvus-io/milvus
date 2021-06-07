@@ -26,7 +26,7 @@ pipeline {
                 }
                 agent {
                     kubernetes {
-                        label "milvus-e2e-test-kind-cronjob"
+                        label "milvus-e2e-test-kind-nightly"
                         inheritFrom 'default'
                         defaultContainer 'main'
                         yamlFile "build/ci/jenkins/pod/krte.yaml"
@@ -62,6 +62,20 @@ pipeline {
                     }
                 }
                 post {
+                    unsuccessful {
+                        container('jnlp') {
+                            script {
+                                emailext subject: '$DEFAULT_SUBJECT',
+                                body: '$DEFAULT_CONTENT',
+                                recipientProviders: [
+                                    [$class: 'DevelopersRecipientProvider'],
+                                    [$class: 'RequesterRecipientProvider']
+                                ],
+                                replyTo: '$DEFAULT_REPLYTO',
+                                to: 'qa@zilliz.com'
+                            }
+                        }
+                    }
                     success {
                         container('main') {
                             script {
@@ -87,8 +101,11 @@ pipeline {
                         container('main') {
                             script {
                                 dir("${env.ARTIFACTS}") {
-                                    sh "find ./kind -path '*/history/*' -type f | xargs tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-e2e-cronjob-logs.tar.gz --transform='s:^[^/]*/[^/]*/[^/]*/[^/]*/::g' || true"
+                                    sh "find ./kind -path '*/history/*' -type f | xargs tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-e2e-nightly-logs.tar.gz --transform='s:^[^/]*/[^/]*/[^/]*/[^/]*/::g' || true"
                                     archiveArtifacts artifacts: "**.tar.gz", allowEmptyArchive: true
+                                    sh 'rm -rf ./*'
+                                    sh 'docker rm -f \$(docker network inspect -f \'{{ range \$key, \$value := .Containers }}{{ printf "%s " \$key}}{{ end }}\' kind) || true'
+                                    sh 'docker network rm kind 2>&1 > /dev/null || true'
                                 }
                             }
                         }
