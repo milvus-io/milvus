@@ -1,6 +1,6 @@
 #!/usr/bin/env groovy
 
-// When scheduling a job that gets automatically triggered by changes
+// When scheduling a job that gets automatically triggered by changes,
 // you need to include either a [cronjob] tag within the commit message.
 String cron_timezone = "TZ=Asia/Shanghai"
 String cron_string = BRANCH_NAME == "master" ? "50 20,22,0,6,11,16 * * * " : ""
