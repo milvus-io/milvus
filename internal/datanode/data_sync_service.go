@@ -27,6 +27,7 @@ import (
 
 type dataSyncService struct {
 	ctx          context.Context
+	cancelFn     context.CancelFunc
 	fg           *flowgraph.TimeTickedFlowGraph
 	flushChan    <-chan *flushMsg
 	replica      Replica
@@ -34,6 +35,7 @@ type dataSyncService struct {
 	msFactory    msgstream.Factory
 	collectionID UniqueID
 	dataService  types.DataService
+	clearSignal  chan<- UniqueID
 }
 
 func newDataSyncService(ctx context.Context,
@@ -41,10 +43,16 @@ func newDataSyncService(ctx context.Context,
 	replica Replica,
 	alloc allocatorInterface,
 	factory msgstream.Factory,
-	vchan *datapb.VchannelInfo) *dataSyncService {
+	vchan *datapb.VchannelInfo,
+	clearSignal chan<- UniqueID,
+
+) *dataSyncService {
+
+	ctx1, cancel := context.WithCancel(ctx)
 
 	service := &dataSyncService{
-		ctx:          ctx,
+		ctx:          ctx1,
+		cancelFn:     cancel,
 		fg:           nil,
 		flushChan:    flushChan,
 		replica:      replica,
@@ -58,8 +66,8 @@ func newDataSyncService(ctx context.Context,
 }
 
 func (dsService *dataSyncService) start() {
-	log.Debug("Data Sync Service Start Successfully")
 	if dsService.fg != nil {
+		log.Debug("Data Sync Service starting flowgraph")
 		dsService.fg.Start()
 	} else {
 		log.Debug("Data Sync Service flowgraph nil")
@@ -68,11 +76,14 @@ func (dsService *dataSyncService) start() {
 
 func (dsService *dataSyncService) close() {
 	if dsService.fg != nil {
+		log.Debug("Data Sync Service closing flowgraph")
 		dsService.fg.Close()
 	}
+
+	dsService.cancelFn()
 }
 
-func (dsService *dataSyncService) initNodes(vchanPair *datapb.VchannelInfo) {
+func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) {
 	// TODO: add delete pipeline support
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
 
@@ -124,8 +135,9 @@ func (dsService *dataSyncService) initNodes(vchanPair *datapb.VchannelInfo) {
 		}
 		return nil
 	}
-	var dmStreamNode Node = newDmInputNode(dsService.ctx, dsService.msFactory, vchanPair.GetChannelName(), vchanPair.GetCheckPoints())
-	var ddNode Node = newDDNode()
+
+	var dmStreamNode Node = newDmInputNode(dsService.ctx, dsService.msFactory, vchanInfo.GetChannelName(), vchanInfo.GetCheckPoints())
+	var ddNode Node = newDDNode(dsService.clearSignal, dsService.collectionID)
 	var insertBufferNode Node = newInsertBufferNode(
 		dsService.ctx,
 		dsService.replica,

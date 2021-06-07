@@ -74,7 +74,7 @@ func newIDLEDataNodeMock() *DataNode {
 	return node
 }
 
-func newHEALTHDataNodeMock(dmChannelName, ddChannelName string) *DataNode {
+func newHEALTHDataNodeMock(dmChannelName string) *DataNode {
 	var ctx context.Context
 
 	if debug {
