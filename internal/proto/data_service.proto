@@ -272,18 +272,6 @@ message DataNodeTtMsg {
     uint64 timestamp = 3;
 }
 
-
-
-message SegmentBinlogs {
-  int64 segmentID = 1;
-  repeated FieldBinlog fieldBinlogs = 2;
-}
-
-message FieldBinlog{
-  int64 fieldID = 1;
-  repeated string binlogs = 2;
-}
-
 enum ChannelWatchState {
   Uncomplete = 0;
   Complete = 1;
@@ -301,8 +289,18 @@ message DataNodeInfo {
   repeated ChannelStatus channels = 3;
 }
 
+message SegmentBinlogs {
+  int64 segmentID = 1;
+  repeated FieldBinlog fieldBinlogs = 2;
+}
+
+message FieldBinlog{
+  int64 fieldID = 1;
+  repeated string binlogs = 2;
+}
+
 message GetRecoveryInfoResponse {
-  common.MsgBase base = 1;
+  common.Status status = 1;
   repeated VchannelInfo channels = 2;
   repeated SegmentBinlogs binlogs = 3;
 }
@@ -312,6 +310,4 @@ message GetRecoveryInfoRequest {
   int64 collectionID = 2;
   int64 partitionID = 3;
 }
-
-
 
