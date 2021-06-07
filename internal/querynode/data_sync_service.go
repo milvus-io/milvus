@@ -34,8 +34,8 @@ type dataSyncService struct {
 	ctx context.Context
 
 	mu                   sync.Mutex                         // guards FlowGraphs
-	collectionFlowGraphs map[UniqueID][]*queryNodeFlowGraph // map[collectionID]flowGraphs
-	partitionFlowGraphs  map[UniqueID][]*queryNodeFlowGraph // map[partitionID]flowGraphs
+	collectionFlowGraphs map[UniqueID]map[VChannel]*queryNodeFlowGraph // map[collectionID]flowGraphs
+	partitionFlowGraphs  map[UniqueID]map[VChannel]*queryNodeFlowGraph // map[partitionID]flowGraphs
 
 	streamingReplica ReplicaInterface
 	tSafeReplica     TSafeReplicaInterface
@@ -47,10 +47,9 @@ func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, 
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
-	if _, ok := dsService.collectionFlowGraphs[collectionID]; ok {
-		return errors.New("collection flow graph has been existed, collectionID = " + fmt.Sprintln(collectionID))
+	if _, ok := dsService.collectionFlowGraphs[collectionID]; !ok {
+		dsService.collectionFlowGraphs[collectionID] = make(map[VChannel]*queryNodeFlowGraph)
 	}
-	dsService.collectionFlowGraphs[collectionID] = make([]*queryNodeFlowGraph, 0)
 	for _, vChannel := range vChannels {
 		// collection flow graph doesn't need partition id
 		partitionID := UniqueID(0)
@@ -62,7 +61,7 @@ func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, 
 			dsService.tSafeReplica,
 			vChannel,
 			dsService.msFactory)
-		dsService.collectionFlowGraphs[collectionID] = append(dsService.collectionFlowGraphs[collectionID], newFlowGraph)
+		dsService.collectionFlowGraphs[collectionID][vChannel] = newFlowGraph
 		log.Debug("add collection flow graph",
 			zap.Any("collectionID", collectionID),
 			zap.Any("channel", vChannel))
@@ -70,7 +69,7 @@ func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, 
 	return nil
 }
 
-func (dsService *dataSyncService) getCollectionFlowGraphs(collectionID UniqueID) ([]*queryNodeFlowGraph, error) {
+func (dsService *dataSyncService) getCollectionFlowGraphs(collectionID UniqueID) (map[VChannel]*queryNodeFlowGraph, error) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
@@ -114,10 +113,9 @@ func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID, p
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
-	if _, ok := dsService.partitionFlowGraphs[partitionID]; ok {
-		return errors.New("partition flow graph has been existed, partitionID = " + fmt.Sprintln(partitionID))
+	if _, ok := dsService.partitionFlowGraphs[partitionID]; !ok {
+		dsService.partitionFlowGraphs[partitionID] = make(map[VChannel]*queryNodeFlowGraph)
 	}
-	dsService.partitionFlowGraphs[partitionID] = make([]*queryNodeFlowGraph, 0)
 	for _, vChannel := range vChannels {
 		newFlowGraph := newQueryNodeFlowGraph(dsService.ctx,
 			flowGraphTypePartition,
@@ -127,12 +125,12 @@ func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID, p
 			dsService.tSafeReplica,
 			vChannel,
 			dsService.msFactory)
-		dsService.partitionFlowGraphs[partitionID] = append(dsService.partitionFlowGraphs[partitionID], newFlowGraph)
+		dsService.partitionFlowGraphs[partitionID][vChannel] = newFlowGraph
 	}
 	return nil
 }
 
-func (dsService *dataSyncService) getPartitionFlowGraphs(partitionID UniqueID) ([]*queryNodeFlowGraph, error) {
+func (dsService *dataSyncService) getPartitionFlowGraphs(partitionID UniqueID) (map[VChannel]*queryNodeFlowGraph, error) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
@@ -177,8 +175,8 @@ func newDataSyncService(ctx context.Context,
 
 	return &dataSyncService{
 		ctx:                  ctx,
-		collectionFlowGraphs: make(map[UniqueID][]*queryNodeFlowGraph),
-		partitionFlowGraphs:  make(map[UniqueID][]*queryNodeFlowGraph),
+		collectionFlowGraphs: make(map[UniqueID]map[VChannel]*queryNodeFlowGraph),
+		partitionFlowGraphs:  make(map[UniqueID]map[VChannel]*queryNodeFlowGraph),
 		streamingReplica:     streamingReplica,
 		tSafeReplica:         tSafeReplica,
 		msFactory:            factory,
@@ -200,6 +198,6 @@ func (dsService *dataSyncService) close() {
 			}
 		}
 	}
-	dsService.collectionFlowGraphs = make(map[UniqueID][]*queryNodeFlowGraph)
-	dsService.partitionFlowGraphs = make(map[UniqueID][]*queryNodeFlowGraph)
+	dsService.collectionFlowGraphs = make(map[UniqueID]map[VChannel]*queryNodeFlowGraph)
+	dsService.partitionFlowGraphs = make(map[UniqueID]map[VChannel]*queryNodeFlowGraph)
 }
