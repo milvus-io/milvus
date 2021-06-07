@@ -42,7 +42,7 @@ class TestCollectionSearch(TestcaseBase):
             default_schema = cf.gen_default_collection_schema()
         else:
             default_schema = cf.gen_default_binary_collection_schema()
-        collection, _ = self.collection_wrap.collection_init(default_collection_name,
+        collection, _ = self.collection_wrap.init_collection(default_collection_name,
                                                              data=None, schema=default_schema)
         # 2 add extra partition if specified (default is 1 partition named "_default")
         if partition_num > 0:
@@ -126,7 +126,7 @@ class TestCollectionSearch(TestcaseBase):
         res_list, _ = self.utility_wrap.list_collections()
         count = 0
         for res in res_list:
-            collection, _ = self.collection_wrap.collection_init(name=res)
+            collection, _ = self.collection_wrap.init_collection(name=res)
             if "search_collection" in res:
                 self.clear_data(collection)
                 count = count + 1

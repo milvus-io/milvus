@@ -462,7 +462,7 @@ class TestUtilityAdvanced(TestcaseBase):
         c_name_2 = cf.gen_unique_str(prefix)
         self._collection(c_name)
         api_c = ApiCollectionWrapper()
-        api_c.collection_init(c_name_2)
+        api_c.init_collection(c_name_2)
         for name in [c_name, c_name_2]:
             res, _ = ut.has_collection(name)
             assert res is True
@@ -480,7 +480,7 @@ class TestUtilityAdvanced(TestcaseBase):
         c_name_2 = cf.gen_unique_str(prefix)
         self._collection(c_name)
         api_c = ApiCollectionWrapper()
-        api_c.collection_init(c_name_2)
+        api_c.init_collection(c_name_2)
         res, _ = ut.list_collections()
         for name in [c_name, c_name_2]:
             assert name in res

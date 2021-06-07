@@ -9,7 +9,7 @@ from utils.api_request import api_request
 class ApiCollectionWrapper:
     collection = None
 
-    def collection_init(self, name, data=None, schema=None, check_task=None, check_params=None, **kwargs):
+    def init_collection(self, name, data=None, schema=None, check_task=None, check_params=None, **kwargs):
         """ In order to distinguish the same name of collection """
         func_name = sys._getframe().f_code.co_name
         res, is_succ = api_request([Collection, name, data, schema], **kwargs)

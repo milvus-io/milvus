@@ -71,7 +71,7 @@ class CreateChecker(Checker):
 
     def keep_creating(self):
         while self._running is True:
-            collection, result = self.c_wrapper.collection_init(name=cf.gen_unique_str(),
+            collection, result = self.c_wrapper.init_collection(name=cf.gen_unique_str(),
                                                                 schema=cf.gen_default_collection_schema(),
                                                                 check_task="check_nothing")
             if result is True:
