@@ -23,6 +23,9 @@ import (
 
 type ddNode struct {
 	BaseNode
+
+	clearSignal  chan<- UniqueID
+	collectionID UniqueID
 }
 
 func (ddn *ddNode) Name() string {
@@ -62,8 +65,10 @@ func (ddn *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	for _, msg := range msMsg.TsMessages() {
 		switch msg.Type() {
 		case commonpb.MsgType_DropCollection:
-			// TODO distroy dataSyncService and nodify datanode
-			log.Error("Distorying current flowgraph")
+			if msg.(*msgstream.DropCollectionMsg).GetCollectionID() == ddn.collectionID {
+				ddn.clearSignal <- ddn.collectionID
+				log.Info("Destroying current flowgraph")
+			}
 		case commonpb.MsgType_Insert:
 			resMsg := ddn.filterFlushedSegmentInsertMessages(msg.(*msgstream.InsertMsg))
 			if resMsg != nil {
@@ -85,11 +90,13 @@ func (ddn *ddNode) filterFlushedSegmentInsertMessages(msg *msgstream.InsertMsg) 
 	return msg
 }
 
-func newDDNode() *ddNode {
+func newDDNode(clearSignal chan<- UniqueID, collID UniqueID) *ddNode {
 	baseNode := BaseNode{}
 	baseNode.SetMaxParallelism(Params.FlowGraphMaxQueueLength)
 
 	return &ddNode{
-		BaseNode: baseNode,
+		BaseNode:     baseNode,
+		clearSignal:  clearSignal,
+		collectionID: collID,
 	}
 }

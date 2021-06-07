@@ -61,7 +61,8 @@ func TestDataSyncService_Start(t *testing.T) {
 		FlushedSegments: []int64{},
 	}
 
-	sync := newDataSyncService(ctx, flushChan, replica, allocFactory, msFactory, vchan)
+	signalCh := make(chan UniqueID, 100)
+	sync := newDataSyncService(ctx, flushChan, replica, allocFactory, msFactory, vchan, signalCh)
 
 	sync.replica.addCollection(collMeta.ID, collMeta.Schema)
 	go sync.start()
