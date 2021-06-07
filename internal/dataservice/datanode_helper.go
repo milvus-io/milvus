@@ -18,7 +18,6 @@ import (
 type vchannel struct {
 	CollectionID UniqueID
 	DmlChannel   string
-	DdlChannel   string
 }
 
 // positionProvider provides vchannel pair related position pairs

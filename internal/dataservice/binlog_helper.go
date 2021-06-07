@@ -206,7 +206,7 @@ func (s *Server) GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelInfo, e
 			}
 			unflushedCheckpoints = append(unflushedCheckpoints, cp)
 
-			if seekPosition == nil || (useUnflushedPosition && s.DmlPosition.Timestamp < seekPosition.Timestamp) {
+			if seekPosition == nil || !useUnflushedPosition || s.DmlPosition.Timestamp < seekPosition.Timestamp {
 				useUnflushedPosition = true
 				seekPosition = s.DmlPosition
 			}

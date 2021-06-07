@@ -353,6 +353,87 @@ func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 	return resp, nil
 }
 
+func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
+	collectionID := req.GetCollectionID()
+	partitionID := req.GetPartitionID()
+	log.Info("Receive get recovery info request", zap.Int64("collectionID", collectionID),
+		zap.Int64("partitionID", partitionID))
+	resp := &datapb.GetRecoveryInfoResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
+	}
+	segmentIDs := s.meta.GetSegmentsOfPartition(collectionID, partitionID)
+	segment2Binlogs := make(map[UniqueID][]*datapb.FieldBinlog)
+	for _, id := range segmentIDs {
+		meta, err := s.getSegmentBinlogMeta(id)
+		if err != nil {
+			log.Error("Get segment binlog meta failed", zap.Int64("segmentID", id))
+			resp.Status.Reason = err.Error()
+			return resp, nil
+		}
+		field2Binlog := make(map[UniqueID][]string)
+		for _, m := range meta {
+			field2Binlog[m.FieldID] = append(field2Binlog[m.FieldID], m.BinlogPath)
+		}
+
+		for f, paths := range field2Binlog {
+			fieldBinlogs := &datapb.FieldBinlog{
+				FieldID: f,
+				Binlogs: paths,
+			}
+			segment2Binlogs[id] = append(segment2Binlogs[id], fieldBinlogs)
+		}
+	}
+
+	binlogs := make([]*datapb.SegmentBinlogs, 0, len(segment2Binlogs))
+	for segmentID, fieldBinlogs := range segment2Binlogs {
+		sbl := &datapb.SegmentBinlogs{
+			SegmentID:    segmentID,
+			FieldBinlogs: fieldBinlogs,
+		}
+		binlogs = append(binlogs, sbl)
+	}
+
+	dresp, err := s.masterClient.DescribeCollection(s.ctx, &milvuspb.DescribeCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:  commonpb.MsgType_DescribeCollection,
+			SourceID: Params.NodeID,
+		},
+		CollectionID: collectionID,
+	})
+	if err = VerifyResponse(dresp, err); err != nil {
+		log.Error("Get collection info from master failed",
+			zap.Int64("collectionID", collectionID),
+			zap.Error(err))
+
+		resp.Status.Reason = err.Error()
+		return resp, nil
+	}
+
+	channels := dresp.GetVirtualChannelNames()
+	vchans := make([]vchannel, 0, len(channels))
+	for _, c := range channels {
+		vchans = append(vchans, vchannel{
+			CollectionID: collectionID,
+			DmlChannel:   c,
+		})
+	}
+
+	channelInfos, err := s.GetVChanPositions(vchans)
+	if err != nil {
+		log.Error("Get channel positions failed", zap.Strings("channels", channels),
+			zap.Error(err))
+		resp.Status.Reason = err.Error()
+		return resp, nil
+	}
+
+	resp.Binlogs = binlogs
+	resp.Channels = channelInfos
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
+	return resp, nil
+}
+
 func (s *Server) RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
 	return &datapb.RegisterNodeResponse{
 		Status: &commonpb.Status{
