@@ -750,6 +750,7 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 		return err
 	}
 	for _, pchan := range pchans {
+		log.Debug("add pchan to time ticker", zap.Any("pchan", pchan))
 		_ = it.chTicker.addPChan(pchan)
 	}
 
