@@ -27,7 +27,7 @@ class ResponseChecker:
             result = self.assert_succ(self.succ, True)
 
         elif self.check_task == CheckTasks.err_res:
-            result = self.assert_exception(self.response, self.succ, self.kwargs_dict)
+            result = self.assert_exception(self.response, self.succ, self.check_items)
 
         elif self.check_task == CheckTasks.check_list_count and self.check_items is not None:
             result = self.check_list_count(self.response, self.func_name, self.check_items)
