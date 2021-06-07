@@ -293,9 +293,3 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.add_connection(default={"host": host, "port": port}, dev={"host": host, "port": port})
         log.info(self.connection_wrap.list_connections()[0])
         assert self.connection_wrap.list_connections()[0] == ['default', 'dev']
-
-    def test_wt(self):
-        log.error(os.environ["HOME"])
-
-
-

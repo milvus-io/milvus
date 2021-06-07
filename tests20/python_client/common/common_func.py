@@ -187,20 +187,24 @@ def jaccard(x, y):
     y = np.asarray(y, np.bool)
     return 1 - np.double(np.bitwise_and(x, y).sum()) / np.double(np.bitwise_or(x, y).sum())
 
+
 def hamming(x, y):
     x = np.asarray(x, np.bool)
     y = np.asarray(y, np.bool)
     return np.bitwise_xor(x, y).sum()
+
 
 def tanimoto(x, y):
     x = np.asarray(x, np.bool)
     y = np.asarray(y, np.bool)
     return -np.log2(np.double(np.bitwise_and(x, y).sum()) / np.double(np.bitwise_or(x, y).sum()))
 
+
 def substructure(x, y):
     x = np.asarray(x, np.bool)
     y = np.asarray(y, np.bool)
     return 1 - np.double(np.bitwise_and(x, y).sum()) / np.count_nonzero(y)
+
 
 def superstructure(x, y):
     x = np.asarray(x, np.bool)
@@ -208,9 +212,10 @@ def superstructure(x, y):
     return 1 - np.double(np.bitwise_and(x, y).sum()) / np.count_nonzero(x)
 
 
-def modify_file(file_path_list, input_content=""):
+def modify_file(file_path_list, is_modify=False, input_content=""):
     """
     file_path_list : file list -> list[<file_path>]
+    is_modify : does the file need to be reset
     input_content ：the content that need to insert to the file
     """
     if not isinstance(file_path_list, list):
@@ -225,10 +230,11 @@ def modify_file(file_path_list, input_content=""):
         if not os.path.isfile(file_path):
             log.error("[modify_file] file(%s) is not exist." % file_path)
         else:
-            log.debug("[modify_file] start modifying file(%s)..." % file_path)
-            with open(file_path, "r+") as f:
-                f.seek(0)
-                f.truncate()
-                f.write(input_content)
-                f.close()
-            log.info("[modify_file] File(%s) modification is complete." % file_path_list)
+            if is_modify is True:
+                log.debug("[modify_file] start modifying file(%s)..." % file_path)
+                with open(file_path, "r+") as f:
+                    f.seek(0)
+                    f.truncate()
+                    f.write(input_content)
+                    f.close()
+                log.info("[modify_file] File(%s) modification is complete." % file_path_list)
