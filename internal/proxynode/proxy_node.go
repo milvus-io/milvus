@@ -318,6 +318,11 @@ func (node *ProxyNode) sendChannelsTimeTickLoop() {
 				channels := make([]pChan, len(stats))
 				tss := make([]Timestamp, len(stats))
 
+                for channel, ts := range stats {
+                    channels = append(channels, channel)
+                    tss = append(tss, ts)
+                }
+
 				req := &internalpb.ChannelTimeTickMsg{
 					Base: &commonpb.MsgBase{
 						MsgType:   commonpb.MsgType_TimeTick, // todo
