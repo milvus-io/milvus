@@ -18,5 +18,5 @@ services:
 
 networks:
   default:
-    external:
-      name: ${PRE_EXIST_NETWORK}
+    external: ${PRE_EXIST_NETWORK:-false}
+    name: ${PYTEST_NETWORK:-pytest}
