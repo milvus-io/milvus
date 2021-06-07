@@ -1320,6 +1320,7 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
 	}
+	// log.Debug("describe collection", zap.Any("schema", t.Rsp.Schema))
 	return t.Rsp, nil
 }
 
@@ -1844,7 +1845,7 @@ func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.Channel
 		return status, nil
 	}
 	if !c.dmlChannels.HasChannel(in.ChannelNames...) {
-		log.Debug("update time tick with unkonw channel", zap.Strings("input channels", in.ChannelNames))
+		log.Debug("update time tick with unkonw channel", zap.Int("input channel size", len(in.ChannelNames)), zap.Strings("input channels", in.ChannelNames))
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = fmt.Sprintf("update time tick with unknown channel name, input channels = %v", in.ChannelNames)
 		return status, nil

@@ -139,6 +139,7 @@ func (d *dmlChannels) HasChannel(names ...string) bool {
 
 	for _, name := range names {
 		if _, ok := d.dml[name]; !ok {
+			log.Debug("unknown channel", zap.String("channel name", name))
 			return false
 		}
 	}
