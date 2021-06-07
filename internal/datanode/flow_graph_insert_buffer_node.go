@@ -741,11 +741,11 @@ func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 		},
 		DataNodeTtMsg: datapb.DataNodeTtMsg{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_TimeTick,
+				MsgType:   commonpb.MsgType_DataNodeTt,
 				MsgID:     0,
 				Timestamp: ts,
 			},
-			ChannelName: "", // TODO
+			ChannelName: ibNode.channelName,
 			Timestamp:   ts,
 		},
 	}

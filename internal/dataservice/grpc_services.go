@@ -39,6 +39,7 @@ func (s *Server) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 }
 
 func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error) {
+	log.Debug("Receive flush request", zap.Int64("dbID", req.GetDbID()), zap.Int64("collectionID", req.GetCollectionID()))
 	resp := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
@@ -76,6 +77,12 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 	}
 
 	for _, r := range req.SegmentIDRequests {
+		log.Debug("Handle assign segment request",
+			zap.Int64("collectionID", r.GetCollectionID()),
+			zap.Int64("partitionID", r.GetPartitionID()),
+			zap.String("channelName", r.GetChannelName()),
+			zap.Uint32("count", r.GetCount()))
+
 		if !s.meta.HasCollection(r.CollectionID) {
 			if err := s.loadCollectionFromMaster(ctx, r.CollectionID); err != nil {
 				errMsg := fmt.Sprintf("can not load collection %d", r.CollectionID)
@@ -102,6 +109,9 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			appendFailedAssignment(errMsg)
 			continue
 		}
+
+		log.Debug("Assign segment success", zap.Int64("segmentID", segmentID),
+			zap.Uint64("expireTs", expireTs))
 
 		result := &datapb.SegmentIDAssignment{
 			SegID:        segmentID,

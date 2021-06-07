@@ -305,7 +305,8 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 	log.Debug("dataservice: estimateTotalRows: ",
 		zap.Int64("CollectionID", segmentInfo.CollectionID),
 		zap.Int64("SegmentID", segmentInfo.ID),
-		zap.Int("Rows", totalRows))
+		zap.Int("Rows", totalRows),
+		zap.String("channel", segmentInfo.InsertChannel))
 
 	s.helper.afterCreateSegment(segmentInfo)
 
@@ -334,15 +335,13 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, status := range s.stats {
-		if status.collectionID == collectionID {
-			if status.sealed {
-				continue
-			}
-			if err := s.meta.SealSegment(status.id); err != nil {
-				return err
-			}
-			status.sealed = true
+		if status.sealed || status.collectionID != collectionID {
+			continue
 		}
+		if err := s.meta.SealSegment(status.id); err != nil {
+			return err
+		}
+		status.sealed = true
 	}
 	return nil
 }
