@@ -135,9 +135,13 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) {
 		}
 		return nil
 	}
-
-	var dmStreamNode Node = newDmInputNode(dsService.ctx, dsService.msFactory, vchanInfo.GetChannelName(), vchanInfo.GetCheckPoints())
-	var ddNode Node = newDDNode(dsService.clearSignal, dsService.collectionID)
+	var dmStreamNode Node = newDmInputNode(
+		dsService.ctx,
+		dsService.msFactory,
+		vchanInfo.GetChannelName(),
+		vchanInfo.GetSeekPosition(),
+	)
+	var ddNode Node = newDDNode(dsService.clearSignal, dsService.collectionID, vchanInfo)
 	var insertBufferNode Node = newInsertBufferNode(
 		dsService.ctx,
 		dsService.replica,

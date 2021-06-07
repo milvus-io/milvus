@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
@@ -249,8 +250,27 @@ func (node *DataNode) ReleaseDataSyncService(vchanName string) {
 	log.Debug("Release flowgraph resources end", zap.String("Vchannel", vchanName))
 }
 
+var FilterThreshold Timestamp
+
 // Start will update DataNode state to HEALTHY
 func (node *DataNode) Start() error {
+
+	rep, err := node.masterService.AllocTimestamp(node.ctx, &masterpb.AllocTimestampRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_RequestTSO,
+			MsgID:     0,
+			Timestamp: 0,
+			SourceID:  node.NodeID,
+		},
+		Count: 1,
+	})
+
+	if rep.Status.ErrorCode != commonpb.ErrorCode_Success || err != nil {
+		return errors.New("DataNode fail to start")
+	}
+
+	FilterThreshold = rep.GetTimestamp()
+
 	go node.BackGroundGC(node.clearSignal)
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
 	return nil
@@ -277,8 +297,8 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 		return status, errors.New(status.GetReason())
 
 	default:
-		for _, chanPair := range in.GetVchannels() {
-			node.NewDataSyncService(chanPair)
+		for _, chanInfo := range in.GetVchannels() {
+			node.NewDataSyncService(chanInfo)
 		}
 
 		status.ErrorCode = commonpb.ErrorCode_Success
