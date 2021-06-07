@@ -208,14 +208,32 @@ type DmTaskQueue struct {
 }
 
 func (queue *DmTaskQueue) getPChanStatistics(pchan pChan) (pChanStatistics, error) {
-	queue.atLock.RLock()
-	defer queue.atLock.RUnlock()
-
 	stats := pChanStatistics{
 		minTs:   0,
 		maxTs:   ^uint64(0),
 		invalid: true,
 	}
+
+	queue.utLock.RLock()
+	defer queue.utLock.RUnlock()
+
+	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
+		dmlT := e.Value.(task).(dmlTask)
+		stat, err := dmlT.getStatistics(pchan)
+		if err != nil {
+			return pChanStatistics{invalid: true}, nil
+		}
+		if stat.minTs < stats.minTs {
+			stats.minTs = stat.minTs
+		}
+		if stat.maxTs > stats.maxTs {
+			stats.maxTs = stat.maxTs
+		}
+		stats.invalid = false
+	}
+
+	queue.atLock.RLock()
+	defer queue.atLock.RUnlock()
 
 	for _, t := range queue.activeTasks {
 		dmlT, _ := t.(dmlTask)
