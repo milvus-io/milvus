@@ -61,6 +61,7 @@ pipeline {
                                 body: '$DEFAULT_CONTENT',
                                 recipientProviders: [developers(), requestor()],
                                 replyTo: '$DEFAULT_REPLYTO'
+                                to: 'test@zilliz.com'
                             }
                         }
                     }
