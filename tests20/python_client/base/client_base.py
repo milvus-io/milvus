@@ -100,15 +100,16 @@ class TestcaseBase(Base):
         self.connection_wrap.add_connection(default={"host": param_info.param_host, "port": param_info.param_port})
         res, _ = self.connection_wrap.connect(alias='default')
         return res
-
+    '''
     def _collection(self, **kwargs):
         """ Init a collection and return the object of collection """
         name = cf.gen_unique_str()
         schema = cf.gen_default_collection_schema()
         if self.connection_wrap.get_connection(alias='default') is None:
             self._connect()
-        res, cr = self.collection_wrap.collection_init(name=name, schema=schema, **kwargs)
+        res, cr = self.collection_wrap.init_collection(name=name, schema=schema, **kwargs)
         return res
+    '''
 
     def init_collection_wrap(self, name=None, data=None, schema=None, check_task=None, **kwargs):
         name = cf.gen_unique_str('coll_') if name is None else name
@@ -116,7 +117,7 @@ class TestcaseBase(Base):
         if self.connection_wrap.get_connection(alias='default')[0] is None:
             self._connect()
         collection_w = ApiCollectionWrapper()
-        collection_w.collection_init(name=name, data=data, schema=schema,
+        collection_w.init_collection(name=name, data=data, schema=schema,
                                      check_task=check_task, **kwargs)
         return collection_w
 

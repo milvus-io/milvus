@@ -41,7 +41,7 @@ class TestPartitionParams(TestcaseBase):
         method: 1. create a partition empty none name
         expected: 1. raise exception
         """
-        self.collection_wrap.collection_init()
+        self.collection_wrap.init_collection()
 
         # create a collection
         collection_w = self.init_collection_wrap()

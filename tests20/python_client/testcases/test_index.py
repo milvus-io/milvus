@@ -336,7 +336,7 @@ class TestIndexAdvanced(TestcaseBase):
         collection = self._collection(c_name)
         api_collection_2 = ApiCollectionWrapper()
         api_index_2 = ApiIndexWrapper()
-        collection_2 = api_collection_2.collection_init(c_name_2)
+        collection_2 = api_collection_2.init_collection(c_name_2)
         self.index_wrap.index_init(collection, default_field_name, default_index_params, name=index_name)
         index_2, _ = api_index_2.index_init(collection_2, default_field_name, default_index_params, name=index_name)
         self.index_wrap.drop()

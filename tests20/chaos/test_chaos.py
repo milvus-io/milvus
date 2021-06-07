@@ -22,7 +22,7 @@ class TestsChaos:
         if res is None:
             raise Exception("no connections")
         c_wrapper = ApiCollectionWrapper()
-        c_wrapper.collection_init(name=cf.gen_unique_str(),
+        c_wrapper.init_collection(name=cf.gen_unique_str(),
                                   schema=cf.gen_default_collection_schema(),
                                   check_task="check_nothing")
         return c_wrapper
@@ -34,7 +34,7 @@ class TestsChaos:
         if res is None:
             raise Exception("no connections")
         c_wrapper = ApiCollectionWrapper()
-        _, result = c_wrapper.collection_init(name=cf.gen_unique_str(),
+        _, result = c_wrapper.init_collection(name=cf.gen_unique_str(),
                                               schema=cf.gen_default_collection_schema(),
                                               check_task="check_nothing")
         if result is False:
