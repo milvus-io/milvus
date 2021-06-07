@@ -3,7 +3,7 @@ from utils.util_log import test_log as log
 
 class Error:
     def __init__(self, error):
-        self.code = getattr(error, 'code', 99999)
+        self.code = getattr(error, 'code', -1)
         self.message = getattr(error, 'message', str(error))
 
 

@@ -1,17 +1,27 @@
-import json
+import os
 
 
 class TestInfo:
     def __init__(self):
         self.get_default_config()
 
+    @staticmethod
+    def get_env_variable(var="CI_LOG_PATH"):
+        """ get log path of testing """
+        try:
+            log_path = os.environ[var]
+            return str(log_path)
+        except Exception as e:
+            log_path = "/tmp/log"
+            print("Failed to get environment variables : %s, Use default path : %s" % (str(e), log_path))
+            return log_path
+
     def get_default_config(self):
         """ Make sure the path exists """
-        self.home_dir = "/tmp/"
-        self.log_dir = self.home_dir + "log/"
-        self.log_debug = "%s/refactor_test.debug" % self.log_dir
-        self.log_info = "%s/refactor_test.log" % self.log_dir
-        self.log_err = "%s/refactor_test.err" % self.log_dir
+        self.log_dir = self.get_env_variable()
+        self.log_debug = "%s/ci_test_log.debug" % self.log_dir
+        self.log_info = "%s/ci_test_log.log" % self.log_dir
+        self.log_err = "%s/ci_test_log.err" % self.log_dir
 
 
 test_info = TestInfo()

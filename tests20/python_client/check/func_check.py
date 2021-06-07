@@ -1,5 +1,6 @@
 from utils.util_log import test_log as log
 from common.common_type import *
+from common.code_mapping import ErrorCode, ErrorMessage
 from pymilvus_orm import Collection, Partition
 from utils.api_request import Error
 
@@ -28,8 +29,8 @@ class ResponseChecker:
         elif self.check_task == CheckTasks.err_res:
             result = self.assert_exception(self.response, self.succ, self.kwargs_dict)
 
-        elif self.check_task == CheckTasks.check_list_count and self.check_params is not None:
-            result = self.check_list_count(self.response, self.func_name, self.check_params)
+        elif self.check_task == CheckTasks.check_list_count and self.check_items is not None:
+            result = self.check_list_count(self.response, self.func_name, self.check_items)
 
         elif self.check_task == CheckTasks.check_collection_property:
             result = self.check_collection_property(self.response, self.func_name, self.kwargs_dict)
@@ -51,8 +52,9 @@ class ResponseChecker:
         assert actual is False
         assert len(error_dict) > 0
         if isinstance(res, Error):
-            assert res.code == error_dict["err_code"] \
-                   or error_dict["err_msg"] in res.message
+            err_code = error_dict["err_code"]
+            assert res.code == err_code or ErrorMessage[err_code] in res.message
+            # assert res.code == error_dict["err_code"] or error_dict["err_msg"] in res.message
         else:
             log.error("[CheckFunc] Response of API is not an error: %s" % str(res))
             assert False
