@@ -12,11 +12,14 @@
 package datanode
 
 import (
+	"sync"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
@@ -26,6 +29,10 @@ type ddNode struct {
 
 	clearSignal  chan<- UniqueID
 	collectionID UniqueID
+
+	mu        sync.RWMutex
+	seg2cp    map[UniqueID]*datapb.CheckPoint // Segment ID
+	vchanInfo *datapb.VchannelInfo
 }
 
 func (ddn *ddNode) Name() string {
@@ -70,10 +77,14 @@ func (ddn *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				log.Info("Destroying current flowgraph")
 			}
 		case commonpb.MsgType_Insert:
-			resMsg := ddn.filterFlushedSegmentInsertMessages(msg.(*msgstream.InsertMsg))
-			if resMsg != nil {
-				iMsg.insertMessages = append(iMsg.insertMessages, resMsg)
+			if msg.EndTs() < FilterThreshold {
+				resMsg := ddn.filterFlushedSegmentInsertMessages(msg.(*msgstream.InsertMsg))
+				if resMsg != nil {
+					iMsg.insertMessages = append(iMsg.insertMessages, resMsg)
+				}
 			}
+
+			iMsg.insertMessages = append(iMsg.insertMessages, msg.(*msgstream.InsertMsg))
 		}
 	}
 
@@ -86,17 +97,49 @@ func (ddn *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 }
 
 func (ddn *ddNode) filterFlushedSegmentInsertMessages(msg *msgstream.InsertMsg) *msgstream.InsertMsg {
-	// TODO fileter insert messages of flushed segments
+	ddn.mu.Lock()
+	defer ddn.mu.Unlock()
+
+	if ddn.isFlushed(msg.GetSegmentID()) {
+		return nil
+	}
+
+	if cp, ok := ddn.seg2cp[msg.GetSegmentID()]; ok {
+		if msg.EndTs() > cp.GetPosition().GetTimestamp() {
+			return nil
+		}
+		delete(ddn.seg2cp, msg.GetSegmentID())
+	}
+
 	return msg
 }
 
-func newDDNode(clearSignal chan<- UniqueID, collID UniqueID) *ddNode {
+func (ddn *ddNode) isFlushed(segmentID UniqueID) bool {
+	ddn.mu.Lock()
+	defer ddn.mu.Unlock()
+
+	for _, id := range ddn.vchanInfo.GetFlushedSegments() {
+		if id == segmentID {
+			return true
+		}
+	}
+	return false
+}
+
+func newDDNode(clearSignal chan<- UniqueID, collID UniqueID, vchanInfo *datapb.VchannelInfo) *ddNode {
 	baseNode := BaseNode{}
 	baseNode.SetMaxParallelism(Params.FlowGraphMaxQueueLength)
+
+	cp := make(map[UniqueID]*datapb.CheckPoint)
+	for _, c := range vchanInfo.GetCheckPoints() {
+		cp[c.GetSegmentID()] = c
+	}
 
 	return &ddNode{
 		BaseNode:     baseNode,
 		clearSignal:  clearSignal,
 		collectionID: collID,
+		seg2cp:       cp,
+		vchanInfo:    vchanInfo,
 	}
 }
