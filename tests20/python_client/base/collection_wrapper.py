@@ -33,7 +33,7 @@ def func_req(_list, **kwargs):
             if len(_list) > 1:
                 for a in _list[1:]:
                     arg.append(a)
-            log.debug("(func_req)[%s] Parameters ars arg: %s, kwargs: %s" % (str(func), str(arg), str(kwargs)))
+            # log.debug("(func_req)[%s] Parameters ars arg: %s, kwargs: %s" % (str(func), str(arg), str(kwargs)))
             return func(*arg, **kwargs)
     return False, False
 
@@ -119,7 +119,7 @@ class ApiCollectionWrapper:
     def insert(self, data, partition_name=None, check_res=None, check_params=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, check = func_req([self.collection.insert, data, partition_name], **kwargs)
-        check_result = CheckFunc(res, func_name, check_res, check_params, check, dat=data, partition_name=partition_name, **kwargs).run()
+        check_result = CheckFunc(res, func_name, check_res, check_params, check, data=data, partition_name=partition_name, **kwargs).run()
         return res, check_result
 
     def search(self, data, anns_field, param, limit, expression, partition_names=None, output_fields=None, timeout=None,

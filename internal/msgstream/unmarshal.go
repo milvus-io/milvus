@@ -63,6 +63,7 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	flushCompletedMsg := FlushCompletedMsg{}
 	queryNodeSegStatsMsg := QueryNodeStatsMsg{}
 	segmentStatisticsMsg := SegmentStatisticsMsg{}
+	loadBalanceSegmentsMsg := LoadBalanceSegmentsMsg{}
 
 	p := &ProtoUnmarshalDispatcher{}
 	p.TempMap = make(map[commonpb.MsgType]UnmarshalFunc)
@@ -80,6 +81,7 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	p.TempMap[commonpb.MsgType_SegmentInfo] = segmentInfoMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_SegmentFlushDone] = flushCompletedMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_SegmentStatistics] = segmentStatisticsMsg.Unmarshal
+	p.TempMap[commonpb.MsgType_LoadBalanceSegments] = loadBalanceSegmentsMsg.Unmarshal
 
 	return p
 }

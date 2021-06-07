@@ -31,7 +31,8 @@ func TestQueryService_Init(t *testing.T) {
 	service.Start()
 
 	t.Run("Test create channel", func(t *testing.T) {
-		response, err := service.CreateQueryChannel(ctx)
+		request := &querypb.CreateQueryChannelRequest{}
+		response, err := service.CreateQueryChannel(ctx, request)
 		assert.Nil(t, err)
 		assert.Equal(t, response.RequestChannel, "query-0")
 		assert.Equal(t, response.ResultChannel, "queryResult-0")

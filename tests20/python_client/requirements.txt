@@ -6,4 +6,4 @@ pandas
 numpy
 pytest-html==3.1.1
 git+https://github.com/Projectplace/pytest-tags
-pymilvus-orm==2.0a1.dev8
+pymilvus-orm==2.0a1.dev17

@@ -77,7 +77,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	for _, task := range iMsg.insertMessages {
 		// check if segment exists, if not, create this segment
 		if !iNode.replica.hasSegment(task.SegmentID) {
-			err := iNode.replica.addSegment(task.SegmentID, task.PartitionID, task.CollectionID, segmentTypeGrowing)
+			err := iNode.replica.addSegment(task.SegmentID, task.PartitionID, task.CollectionID, segmentTypeGrowing, true)
 			if err != nil {
 				log.Error(err.Error())
 				continue

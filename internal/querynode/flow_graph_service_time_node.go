@@ -62,6 +62,7 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	//log.Debug("update tSafe:",
 	//	zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)),
 	//	zap.Any("collectionID", stNode.collectionID),
+	//	zap.Any("channel", stNode.vChannel),
 	//)
 
 	if err := stNode.sendTimeTick(serviceTimeMsg.timeRange.timestampMax); err != nil {
@@ -113,8 +114,10 @@ func newServiceTimeNode(ctx context.Context,
 	if err != nil {
 		log.Error(err.Error())
 	} else {
-		timeTimeMsgStream.AsProducer([]string{Params.QueryTimeTickChannelName})
-		log.Debug("query node AsProducer: " + Params.QueryTimeTickChannelName)
+		// TODO: use param table
+		timeTickChannel := "query-node-time-tick-0"
+		timeTimeMsgStream.AsProducer([]string{timeTickChannel})
+		log.Debug("query node AsProducer: " + timeTickChannel)
 	}
 
 	return &serviceTimeNode{
