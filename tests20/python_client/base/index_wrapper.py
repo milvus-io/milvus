@@ -10,7 +10,7 @@ from utils.api_request import api_request
 class ApiIndexWrapper:
     index = None
 
-    def index_init(self, collection, field_name, index_params, name="", check_res=None, check_params=None, **kwargs):
+    def init_index(self, collection, field_name, index_params, name="", check_res=None, check_params=None, **kwargs):
         """ In order to distinguish the same name of index """
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([Index, collection, field_name, index_params, name], **kwargs)
