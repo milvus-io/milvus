@@ -37,7 +37,7 @@ import (
 )
 
 func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	testPath := "/test/datanode/root/meta"
@@ -121,7 +121,7 @@ func genInsertMsg() insertMsg {
 }
 
 func TestFlushSegment(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	idAllocMock := NewAllocatorFactory(1)
 	mockMinIO := memkv.NewMemoryKV()
@@ -247,7 +247,7 @@ func genCollectionMeta(collectionID UniqueID, collectionName string) *etcdpb.Col
 }
 
 func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	testPath := "/test/datanode/root/meta"
