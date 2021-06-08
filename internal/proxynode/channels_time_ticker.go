@@ -34,6 +34,7 @@ type channelsTimeTicker interface {
 	start() error
 	close() error
 	addPChan(pchan pChan) error
+    removePChan(pchan pChan) error
 	getLastTick(pchan pChan) (Timestamp, error)
 	getMinTsStatistics() (map[pChan]Timestamp, error)
 }
@@ -96,6 +97,7 @@ func (ticker *channelsTimeTickerImpl) tick() error {
 
 		stats, err := ticker.getStatisticsFunc(pchan)
 		if err != nil {
+            log.Warn("failed to get statistics from scheduler", zap.Error(err))
 			continue
 		}
 
@@ -104,9 +106,15 @@ func (ticker *channelsTimeTickerImpl) tick() error {
 			ticker.currents[pchan] = getTs(current+Timestamp(ticker.interval), stats.maxTs, func(ts1, ts2 Timestamp) bool {
 				return ts1 > ts2
 			})
-			//} else if stats.invalid {
-			//	ticker.minTsStatistics[pchan] = current
-			//	ticker.currents[pchan] = current + Timestamp(ticker.interval)
+        } else if stats.invalid {
+            ticker.minTsStatistics[pchan] = current
+            // ticker.currents[pchan] = current + Timestamp(ticker.interval)
+            t, err := ticker.tso.AllocOne()
+            if err != nil {
+                log.Warn("failed to get ts from tso", zap.Error(err))
+                continue
+            }
+            ticker.currents[pchan] = t
 		}
 	}
 
@@ -162,6 +170,19 @@ func (ticker *channelsTimeTickerImpl) addPChan(pchan pChan) error {
 	}
 
 	ticker.minTsStatistics[pchan] = 0
+
+	return nil
+}
+
+func (ticker *channelsTimeTickerImpl) removePChan(pchan pChan) error {
+	ticker.statisticsMtx.Lock()
+	defer ticker.statisticsMtx.Unlock()
+
+	if _, ok := ticker.minTsStatistics[pchan]; !ok {
+		return fmt.Errorf("pChan %v don't exist", pchan)
+	}
+
+	delete(ticker.minTsStatistics, pchan)
 
 	return nil
 }

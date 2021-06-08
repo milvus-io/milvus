@@ -903,6 +903,7 @@ type DropCollectionTask struct {
 	masterService types.MasterService
 	result        *commonpb.Status
 	chMgr         channelsMgr
+    chTicker      channelsTimeTicker
 }
 
 func (dct *DropCollectionTask) TraceCtx() context.Context {
@@ -963,10 +964,12 @@ func (dct *DropCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	err = dct.chMgr.removeDMLStream(collID)
-	if err != nil {
-		return err
-	}
+    pchans, _ := dct.chMgr.getChannels(collID)
+    for _, pchan := range pchans {
+        _ = dct.chTicker.removePChan(pchan)
+    }
+
+	_ = dct.chMgr.removeDMLStream(collID)
 
 	return nil
 }
