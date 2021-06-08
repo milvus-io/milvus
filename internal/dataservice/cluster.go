@@ -74,7 +74,7 @@ func defaultUnregisterPolicy() dataNodeUnregisterPolicy {
 }
 
 func defaultAssignPolicy() channelAssignPolicy {
-	return newAssignAllPolicy()
+	return newBalancedAssignPolicy()
 }
 
 func newCluster(ctx context.Context, dataManager *clusterNodeManager, sessionManager sessionManager, posProvider positionProvider, opts ...clusterOption) *cluster {

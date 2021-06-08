@@ -12,6 +12,7 @@ package dataservice
 
 import (
 	"crypto/rand"
+	"math"
 	"math/big"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -156,5 +157,33 @@ func (p *assignAllPolicy) apply(cluster map[string]*datapb.DataNodeInfo, channel
 		ret = append(ret, node)
 	}
 
+	return ret
+}
+
+type balancedAssignPolicy struct{}
+
+func newBalancedAssignPolicy() channelAssignPolicy {
+	return &balancedAssignPolicy{}
+}
+
+func (p *balancedAssignPolicy) apply(cluster map[string]*datapb.DataNodeInfo, channel string, collectionID UniqueID) []*datapb.DataNodeInfo {
+	if len(cluster) == 0 {
+		return []*datapb.DataNodeInfo{}
+	}
+	target, min := "", math.MaxInt32
+	for k, v := range cluster {
+		if len(v.GetChannels()) < min {
+			target = k
+			min = len(v.GetChannels())
+		}
+	}
+
+	ret := make([]*datapb.DataNodeInfo, 0)
+	cluster[target].Channels = append(cluster[target].Channels, &datapb.ChannelStatus{
+		Name:         channel,
+		State:        datapb.ChannelWatchState_Uncomplete,
+		CollectionID: collectionID,
+	})
+	ret = append(ret, cluster[target])
 	return ret
 }
