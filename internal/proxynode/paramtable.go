@@ -42,7 +42,7 @@ type ParamTable struct {
 	IP             string
 	NetworkAddress string
 
-	EtcdAddress   string
+	EtcdAddress   []string
 	MetaRootPath  string
 	MasterAddress string
 	PulsarAddress string
@@ -375,7 +375,7 @@ func (pt *ParamTable) initEtcdAddress() {
 	if err != nil {
 		panic(err)
 	}
-	pt.EtcdAddress = addr
+	pt.EtcdAddress = strings.Split(addr, ",")
 }
 
 func (pt *ParamTable) initMetaRootPath() {
