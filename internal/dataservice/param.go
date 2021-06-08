@@ -58,8 +58,7 @@ type ParamTable struct {
 	K2SChannelNames             []string
 	ProxyTimeTickChannelName    string
 
-	SegmentFlushMetaPath string
-	Log                  log.Config
+	Log log.Config
 }
 
 var Params ParamTable
@@ -96,7 +95,6 @@ func (p *ParamTable) Init() {
 		p.initSegmentInfoChannelName()
 		p.initDataServiceSubscriptionName()
 		p.initK2SChannelNames()
-		p.initSegmentFlushMetaPath()
 		p.initLogCfg()
 		p.initProxyServiceTimeTickChannelName()
 
@@ -243,14 +241,6 @@ func (p *ParamTable) initK2SChannelNames() {
 		ret = append(ret, prefix+strconv.Itoa(ID))
 	}
 	p.K2SChannelNames = ret
-}
-
-func (p *ParamTable) initSegmentFlushMetaPath() {
-	subPath, err := p.Load("etcd.segFlushMetaSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.SegmentFlushMetaPath = subPath
 }
 
 func (p *ParamTable) initLogCfg() {

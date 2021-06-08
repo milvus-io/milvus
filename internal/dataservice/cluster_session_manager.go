@@ -25,7 +25,7 @@ type sessionManager interface {
 }
 
 type clusterSessionManager struct {
-	mu                sync.RWMutex
+	sync.RWMutex
 	sessions          map[string]types.DataNode
 	dataClientCreator func(addr string) (types.DataNode, error)
 }
@@ -37,36 +37,49 @@ func newClusterSessionManager(dataClientCreator func(addr string) (types.DataNod
 	}
 }
 
-func (m *clusterSessionManager) createSession(addr string) error {
+// lock acquired
+func (m *clusterSessionManager) createSession(addr string) (types.DataNode, error) {
 	cli, err := m.dataClientCreator(addr)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := cli.Init(); err != nil {
-		return err
+		return nil, err
 	}
 	if err := cli.Start(); err != nil {
-		return err
+		return nil, err
 	}
 	m.sessions[addr] = cli
-	return nil
+	return cli, nil
 }
 
+// entry function
 func (m *clusterSessionManager) getOrCreateSession(addr string) (types.DataNode, error) {
-	if !m.hasSession(addr) {
-		if err := m.createSession(addr); err != nil {
-			return nil, err
-		}
+	m.RLock()
+	dn, has := m.sessions[addr]
+	m.RUnlock()
+	if has {
+		return dn, nil
 	}
-	return m.sessions[addr], nil
+	m.Lock()
+	defer m.Unlock()
+	dn, has = m.sessions[addr]
+	if has {
+		return dn, nil
+	}
+	dn, err := m.createSession(addr)
+	return dn, err
 }
 
-func (m *clusterSessionManager) hasSession(addr string) bool {
-	_, ok := m.sessions[addr]
-	return ok
-}
+// // lock acquired
+// func (m *clusterSessionManager) hasSession(addr string) bool {
+// 	_, ok := m.sessions[addr]
+// 	return ok
+// }
 
 func (m *clusterSessionManager) releaseSession(addr string) {
+	m.Lock()
+	defer m.Unlock()
 	cli, ok := m.sessions[addr]
 	if !ok {
 		return
@@ -76,7 +89,10 @@ func (m *clusterSessionManager) releaseSession(addr string) {
 }
 
 func (m *clusterSessionManager) release() {
+	m.Lock()
+	defer m.Unlock()
 	for _, cli := range m.sessions {
 		_ = cli.Stop()
 	}
+	m.sessions = map[string]types.DataNode{}
 }

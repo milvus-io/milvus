@@ -21,9 +21,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.etcd.io/etcd/clientv3"
-	"go.uber.org/zap"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/allocator"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -46,6 +43,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 )
 
 //  internalpb -> internalpb
@@ -316,8 +315,15 @@ func (c *Core) startDataServiceSegmentLoop() {
 				if msg.Type() != commonpb.MsgType_SegmentInfo {
 					continue
 				}
-				segInfoMsg := msg.(*ms.SegmentInfoMsg)
-				segInfos = append(segInfos, segInfoMsg.Segment)
+				segInfoMsg, ok := msg.(*ms.SegmentInfoMsg)
+				if !ok {
+					log.Debug("input msg is not SegmentInfoMsg")
+					continue
+				}
+				if segInfoMsg.Segment != nil {
+					segInfos = append(segInfos, segInfoMsg.Segment)
+					log.Debug("open segment", zap.Int64("segmentID", segInfoMsg.Segment.ID))
+				}
 			}
 			if len(segInfos) > 0 {
 				startPosStr, err := EncodeMsgPositions(segMsg.StartPositions)
@@ -371,7 +377,11 @@ func (c *Core) startDataNodeFlushedSegmentLoop() {
 				if msg.Type() != commonpb.MsgType_SegmentFlushDone {
 					continue
 				}
-				flushMsg := msg.(*ms.FlushCompletedMsg)
+				flushMsg, ok := msg.(*ms.FlushCompletedMsg)
+				if !ok {
+					log.Debug("input msg is not FlushCompletedMsg")
+					continue
+				}
 				segID := flushMsg.SegmentID
 				log.Debug("flush segment", zap.Int64("id", segID))
 
@@ -384,6 +394,10 @@ func (c *Core) startDataNodeFlushedSegmentLoop() {
 				if err != nil {
 					log.Warn("AddFlushedSegment error", zap.Error(err))
 					continue
+				}
+
+				if len(coll.FieldIndexes) == 0 {
+					log.Debug("no index params on collection", zap.String("collection_name", coll.Schema.Name))
 				}
 
 				for _, f := range coll.FieldIndexes {
@@ -972,7 +986,7 @@ func (c *Core) Init() error {
 
 		c.dmlChannels = newDMLChannels(c)
 		pc := c.MetaTable.ListCollectionPhysicalChannels()
-		c.dmlChannels.AddProducerChannles(pc...)
+		c.dmlChannels.AddProducerChannels(pc...)
 
 		c.chanTimeTick = newTimeTickSync(c)
 		c.chanTimeTick.AddProxyNode(c.session)
@@ -1335,6 +1349,7 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
 	}
+	// log.Debug("describe collection", zap.Any("schema", t.Rsp.Schema))
 	return t.Rsp, nil
 }
 
@@ -1856,6 +1871,12 @@ func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.Channel
 	if in.Base.MsgType != commonpb.MsgType_TimeTick {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = fmt.Sprintf("UpdateChannelTimeTick receive invalid message %d", in.Base.GetMsgType())
+		return status, nil
+	}
+	if !c.dmlChannels.HasChannel(in.ChannelNames...) {
+		log.Debug("update time tick with unkonw channel", zap.Int("input channel size", len(in.ChannelNames)), zap.Strings("input channels", in.ChannelNames))
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = fmt.Sprintf("update time tick with unknown channel name, input channels = %v", in.ChannelNames)
 		return status, nil
 	}
 	err := c.chanTimeTick.UpdateTimeTick(in)

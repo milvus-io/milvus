@@ -45,7 +45,7 @@ var (
 	errNilSegmentInfo = errors.New("nil segment info")
 )
 
-//SaveBinLogMetaTxn saves segment-field2Path, collection-tsPath/ddlPath into kv store in transcation
+//SaveBinLogMetaTxn saves segment-field2Path, collection-tsPath into kv store in transcation
 func (s *Server) SaveBinLogMetaTxn(meta map[string]string) error {
 	if s.kvClient == nil {
 		return errNilKvClient
@@ -75,30 +75,6 @@ func (s *Server) prepareField2PathMeta(segID UniqueID, field2Paths *datapb.ID2Pa
 		result[path.Join(Params.SegmentBinlogSubPath, key)] = binlogPath
 	}
 	return result, err
-}
-
-// prepareDDLBinlogMeta parses Coll2DdlBinlogPaths & Coll2TsBinlogPaths
-//		into key-value for kv store
-func (s *Server) prepareDDLBinlogMeta(collID UniqueID, ddlMetas []*datapb.DDLBinlogMeta) (result map[string]string, err error) {
-	if ddlMetas == nil {
-		return nil, errNilID2Paths
-	}
-
-	result = make(map[string]string, len(ddlMetas))
-
-	for _, ddlMeta := range ddlMetas {
-		if ddlMeta == nil {
-			continue
-		}
-		uniqueKey, err := s.genKey(true, collID)
-		if err != nil {
-			return nil, err
-		}
-		binlogPathPair := proto.MarshalTextString(ddlMeta)
-
-		result[path.Join(Params.CollectionBinlogSubPath, uniqueKey)] = binlogPathPair
-	}
-	return result, nil
 }
 
 // getFieldBinlogMeta querys field binlog meta from kv store
@@ -151,28 +127,6 @@ func (s *Server) getSegmentBinlogMeta(segmentID UniqueID) (metas []*datapb.Segme
 	return
 }
 
-func (s *Server) getDDLBinlogMeta(collID UniqueID) (metas []*datapb.DDLBinlogMeta, err error) {
-	prefix, err := s.genKey(false, collID)
-	if err != nil {
-		return nil, err
-	}
-
-	_, vs, err := s.kvClient.LoadWithPrefix(path.Join(Params.CollectionBinlogSubPath, prefix))
-	if err != nil {
-		return nil, err
-	}
-
-	for _, blob := range vs {
-		m := &datapb.DDLBinlogMeta{}
-		if err = proto.UnmarshalText(blob, m); err != nil {
-			return nil, err
-		}
-
-		metas = append(metas, m)
-	}
-	return
-}
-
 // GetVChanPositions get vchannel latest postitions with provided dml channel names
 func (s *Server) GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelInfo, error) {
 	if s.kvClient == nil {
@@ -183,7 +137,7 @@ func (s *Server) GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelInfo, e
 	for _, vchan := range vchans {
 		segments := s.meta.GetSegmentsByChannel(vchan.DmlChannel)
 		flushedSegmentIDs := make([]UniqueID, 0)
-		unflushedCheckpoints := make([]*datapb.CheckPoint, 0)
+		unflushed := make([]*datapb.SegmentInfo, 0)
 		var seekPosition *internalpb.MsgPosition
 		var useUnflushedPosition bool
 		for _, s := range segments {
@@ -199,12 +153,7 @@ func (s *Server) GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelInfo, e
 				continue
 			}
 
-			cp := &datapb.CheckPoint{
-				SegmentID: s.ID,
-				Position:  s.DmlPosition,
-				NumOfRows: s.NumOfRows,
-			}
-			unflushedCheckpoints = append(unflushedCheckpoints, cp)
+			unflushed = append(unflushed, s)
 
 			if seekPosition == nil || !useUnflushedPosition || s.DmlPosition.Timestamp < seekPosition.Timestamp {
 				useUnflushedPosition = true
@@ -213,11 +162,11 @@ func (s *Server) GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelInfo, e
 		}
 
 		pairs = append(pairs, &datapb.VchannelInfo{
-			CollectionID:    vchan.CollectionID,
-			ChannelName:     vchan.DmlChannel,
-			SeekPosition:    seekPosition,
-			CheckPoints:     unflushedCheckpoints,
-			FlushedSegments: flushedSegmentIDs,
+			CollectionID:      vchan.CollectionID,
+			ChannelName:       vchan.DmlChannel,
+			SeekPosition:      seekPosition,
+			UnflushedSegments: unflushed,
+			FlushedSegments:   flushedSegmentIDs,
 		})
 	}
 	return pairs, nil

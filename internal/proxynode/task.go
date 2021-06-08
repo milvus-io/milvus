@@ -750,6 +750,7 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 		return err
 	}
 	for _, pchan := range pchans {
+		log.Debug("add pchan to time ticker", zap.Any("pchan", pchan))
 		_ = it.chTicker.addPChan(pchan)
 	}
 
@@ -902,6 +903,7 @@ type DropCollectionTask struct {
 	masterService types.MasterService
 	result        *commonpb.Status
 	chMgr         channelsMgr
+	chTicker      channelsTimeTicker
 }
 
 func (dct *DropCollectionTask) TraceCtx() context.Context {
@@ -962,10 +964,12 @@ func (dct *DropCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	err = dct.chMgr.removeDMLStream(collID)
-	if err != nil {
-		return err
+	pchans, _ := dct.chMgr.getChannels(collID)
+	for _, pchan := range pchans {
+		_ = dct.chTicker.removePChan(pchan)
 	}
+
+	_ = dct.chMgr.removeDMLStream(collID)
 
 	return nil
 }
@@ -1846,13 +1850,51 @@ func (dct *DescribeCollectionTask) PreExecute(ctx context.Context) error {
 
 func (dct *DescribeCollectionTask) Execute(ctx context.Context) error {
 	var err error
-	dct.result, err = dct.masterService.DescribeCollection(ctx, dct.DescribeCollectionRequest)
-	if dct.result == nil {
+	dct.result = &milvuspb.DescribeCollectionResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		Schema: &schemapb.CollectionSchema{
+			Name:        "",
+			Description: "",
+			AutoID:      false,
+			Fields:      make([]*schemapb.FieldSchema, 0),
+		},
+		CollectionID:         0,
+		VirtualChannelNames:  nil,
+		PhysicalChannelNames: nil,
+	}
+
+	result, err := dct.masterService.DescribeCollection(ctx, dct.DescribeCollectionRequest)
+
+	if result == nil {
 		return errors.New("has collection resp is nil")
 	}
-	if dct.result.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if result.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(dct.result.Status.Reason)
 	}
+
+	dct.result.Schema.Name = result.Schema.Name
+	dct.result.Schema.Description = result.Schema.Description
+	dct.result.Schema.AutoID = result.Schema.AutoID
+	dct.result.CollectionID = result.CollectionID
+	dct.result.VirtualChannelNames = result.VirtualChannelNames
+	dct.result.PhysicalChannelNames = result.PhysicalChannelNames
+
+	for _, field := range result.Schema.Fields {
+		if field.FieldID >= 100 { // TODO(dragondriver): use StartOfUserFieldID replacing 100
+			dct.result.Schema.Fields = append(dct.result.Schema.Fields, &schemapb.FieldSchema{
+				FieldID:      field.FieldID,
+				Name:         field.Name,
+				IsPrimaryKey: field.IsPrimaryKey,
+				Description:  field.Description,
+				DataType:     field.DataType,
+				TypeParams:   field.TypeParams,
+				IndexParams:  field.IndexParams,
+			})
+		}
+	}
+
 	return err
 }
 

@@ -132,60 +132,11 @@ func (node *DataNode) Register() error {
 }
 
 // Init function supposes data service is in INITIALIZING state.
-//
-// In Init process, data node will register itself to data service with its node id
-// and address. Therefore, `SetDataServiceInterface()` must be called before this func.
-// Registering return several channel names data node need.
-//
-// At last, data node initializes its `dataSyncService` and `metaService`.
 func (node *DataNode) Init() error {
-	ctx := context.Background()
-
-	node.session = sessionutil.NewSession(ctx, Params.MetaRootPath, []string{Params.EtcdAddress})
-	node.session.Init(typeutil.DataNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
-
-	req := &datapb.RegisterNodeRequest{
-		Base: &commonpb.MsgBase{
-			SourceID: node.NodeID,
-		},
-		Address: &commonpb.Address{
-			Ip:   Params.IP,
-			Port: int64(Params.Port),
-		},
-	}
-
-	resp, err := node.dataService.RegisterNode(ctx, req)
-	if err != nil {
-		err = fmt.Errorf("Register node failed: %v", err)
-		log.Debug("DataNode RegisterNode failed", zap.Error(err))
-		return err
-	}
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		err = fmt.Errorf("Receive error when registering data node, msg: %s", resp.Status.Reason)
-		log.Debug("DataNode RegisterNode failed", zap.Error(err))
-		return err
-	}
-
-	if resp.InitParams != nil {
-		for _, kv := range resp.InitParams.StartParams {
-			switch kv.Key {
-			case "DDChannelName":
-				Params.DDChannelNames = []string{kv.Value}
-			case "SegmentStatisticsChannelName":
-				Params.SegmentStatisticsChannelName = kv.Value
-			case "TimeTickChannelName":
-				Params.TimeTickChannelName = kv.Value
-			case "CompleteFlushChannelName":
-				Params.CompleteFlushChannelName = kv.Value
-			default:
-				return fmt.Errorf("Invalid key: %v", kv.Key)
-			}
-		}
-	}
-	log.Debug("DataNode Init", zap.Any("DDChannelName", Params.DDChannelNames),
+	log.Debug("DataNode Init",
 		zap.Any("SegmentStatisticsChannelName", Params.SegmentStatisticsChannelName),
 		zap.Any("TimeTickChannelName", Params.TimeTickChannelName),
-		zap.Any("CompleteFlushChannelName", Params.TimeTickChannelName))
+	)
 
 	return nil
 }
@@ -198,19 +149,26 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 		return nil
 	}
 
-	replica := newReplica()
+	var initTs Timestamp = 0
+	if vchan.SeekPosition != nil {
+		initTs = vchan.SeekPosition.Timestamp
+	}
+
+	replica := newReplica(node.masterService, vchan.CollectionID)
+	if err := replica.init(initTs); err != nil {
+		return err
+	}
 
 	var alloc allocatorInterface = newAllocator(node.masterService)
-	metaService := newMetaService(node.ctx, replica, node.masterService)
 
 	flushChan := make(chan *flushMsg, 100)
-	dataSyncService := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchan, node.clearSignal)
-	// TODO metaService using timestamp in DescribeCollection
+	dataSyncService := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataService)
 	node.vchan2SyncService[vchan.GetChannelName()] = dataSyncService
 	node.vchan2FlushCh[vchan.GetChannelName()] = flushChan
 
-	metaService.init()
 	go dataSyncService.start()
+
+	log.Info("New dataSyncService started!")
 
 	return nil
 }
@@ -298,10 +256,15 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 
 	default:
 		for _, chanInfo := range in.GetVchannels() {
+			log.Info("DataNode new dataSyncService",
+				zap.String("channel name", chanInfo.ChannelName),
+				zap.Any("channal Info", chanInfo),
+			)
 			node.NewDataSyncService(chanInfo)
 		}
 
 		status.ErrorCode = commonpb.ErrorCode_Success
+		log.Debug("DataNode WatchDmChannels Done")
 		return status, nil
 	}
 }
@@ -396,7 +359,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		return status, nil
 	}
 
-	log.Debug("FlushSegments ...", zap.Int("num", len(req.SegmentIDs)))
+	log.Debug("FlushSegments ...", zap.Int("num", len(req.SegmentIDs)), zap.Int64s("segments", req.SegmentIDs))
 	dmlFlushedCh := make(chan []*datapb.ID2PathList, len(req.SegmentIDs))
 	for _, id := range req.SegmentIDs {
 		chanName := node.getChannelNamebySegmentID(id)
@@ -439,6 +402,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		status.Reason = fmt.Sprintf("flush failed segment list = %s", failedSegments)
 		return status, nil
 	}
+	log.Debug("FlushSegments Done")
 
 	status.ErrorCode = commonpb.ErrorCode_Success
 	return status, nil
