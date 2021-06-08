@@ -34,8 +34,8 @@ MergeLayeredStrategy::RegroupFiles(meta::FilesHolder& files_holder, MergeFilesGr
         {1UL << 28, meta::SegmentsSchema()},  // 256MB
         {1UL << 30, meta::SegmentsSchema()},  // 1GB
         {1UL << 32, meta::SegmentsSchema()},  // 4GB
-        {1UL << 32, meta::SegmentsSchema()},  // 16GB
-        {1UL << 34, meta::SegmentsSchema()},  // 64GB
+        {1UL << 34, meta::SegmentsSchema()},  // 16GB
+        {1UL << 36, meta::SegmentsSchema()},  // 64GB
     };
 
     meta::SegmentsSchema sort_files = files_holder.HoldFiles();
