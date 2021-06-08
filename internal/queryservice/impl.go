@@ -170,8 +170,8 @@ func (qs *QueryService) ReleaseCollection(ctx context.Context, req *querypb.Rele
 
 	releaseCollectionTask := &ReleaseCollectionTask{
 		BaseTask: BaseTask{
-			ctx:       ctx,
-			Condition: NewTaskCondition(ctx),
+			ctx:       qs.loopCtx,
+			Condition: NewTaskCondition(qs.loopCtx),
 
 			triggerCondition: querypb.TriggerCondition_grpcRequest,
 		},
@@ -310,8 +310,8 @@ func (qs *QueryService) ReleasePartitions(ctx context.Context, req *querypb.Rele
 		req.PartitionIDs = toReleasedPartitionID
 		releasePartitionTask := &ReleasePartitionTask{
 			BaseTask: BaseTask{
-				ctx:       ctx,
-				Condition: NewTaskCondition(ctx),
+				ctx:       qs.loopCtx,
+				Condition: NewTaskCondition(qs.loopCtx),
 
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
@@ -375,6 +375,7 @@ func (qs *QueryService) GetPartitionStates(ctx context.Context, req *querypb.Get
 
 func (qs *QueryService) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	totalMemSize := int64(0)
+	totalNumRows := int64(0)
 	//TODO::get segment infos from meta
 	//segmentIDs := req.SegmentIDs
 	//segmentInfos, err := qs.meta.getSegmentInfos(segmentIDs)
@@ -388,9 +389,10 @@ func (qs *QueryService) GetSegmentInfo(ctx context.Context, req *querypb.GetSegm
 		}, err
 	}
 	for _, info := range segmentInfos {
-		totalMemSize = totalMemSize + info.MemSize
+		totalNumRows += info.NumRows
+		totalMemSize += info.MemSize
 	}
-	log.Debug("getSegmentInfo", zap.Int64("memory size", totalMemSize))
+	log.Debug("getSegmentInfo", zap.Int64("num rows", totalNumRows), zap.Int64("memory size", totalMemSize))
 	return &querypb.GetSegmentInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
