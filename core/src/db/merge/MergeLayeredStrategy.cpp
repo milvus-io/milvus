@@ -21,7 +21,7 @@
 namespace milvus {
 namespace engine {
 
-const int64_t FORCE_MERGE_THREASHOLD = 30;  // force merge files older this time(in second)
+const int64_t FORCE_MERGE_THREASHOLD = 300;  // force merge files older this time(in second)
 
 Status
 MergeLayeredStrategy::RegroupFiles(meta::FilesHolder& files_holder, MergeFilesGroups& files_groups) {
