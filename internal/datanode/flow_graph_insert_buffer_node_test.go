@@ -40,6 +40,8 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
+	insertChannelName := "datanode-01-test-flowgraphinsertbuffernode-operate"
+
 	testPath := "/test/datanode/root/meta"
 	err := clearEtcd(testPath)
 	require.NoError(t, err)
@@ -47,11 +49,13 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
+	mockMaster := &MasterServiceFactory{}
 
-	replica := newReplica()
-	err = replica.addCollection(collMeta.ID, collMeta.Schema)
+	replica := newReplica(mockMaster, collMeta.ID)
+	err = replica.init(0)
 	require.NoError(t, err)
-	err = replica.addSegment(1, collMeta.ID, 0, Params.InsertChannelNames[0])
+
+	err = replica.addSegment(1, collMeta.ID, 0, insertChannelName)
 	require.NoError(t, err)
 
 	msFactory := msgstream.NewPmsFactory()
@@ -68,7 +72,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	}
 
 	flushChan := make(chan *flushMsg, 100)
-	iBNode := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog)
+	iBNode := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
 
 	dmlFlushedCh := make(chan []*datapb.ID2PathList, 1)
 
@@ -80,7 +84,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 		dmlFlushedCh: dmlFlushedCh,
 	}
 
-	inMsg := genInsertMsg()
+	inMsg := genInsertMsg(insertChannelName)
 	var iMsg flowgraph.Msg = &inMsg
 	iBNode.Operate([]flowgraph.Msg{iMsg})
 	isflushed := <-dmlFlushedCh
@@ -88,7 +92,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	log.Debug("DML binlog paths", zap.Any("paths", isflushed))
 }
 
-func genInsertMsg() insertMsg {
+func genInsertMsg(insertChannelName string) insertMsg {
 
 	timeRange := TimeRange{
 		timestampMin: 0,
@@ -97,7 +101,7 @@ func genInsertMsg() insertMsg {
 
 	startPos := []*internalpb.MsgPosition{
 		{
-			ChannelName: Params.InsertChannelNames[0],
+			ChannelName: insertChannelName,
 			MsgID:       make([]byte, 0),
 			Timestamp:   0,
 		},
@@ -125,6 +129,7 @@ func TestFlushSegment(t *testing.T) {
 	defer cancel()
 	idAllocMock := NewAllocatorFactory(1)
 	mockMinIO := memkv.NewMemoryKV()
+	insertChannelName := "datanode-02-test-flushsegment"
 
 	segmentID, _ := idAllocMock.allocID()
 	partitionID, _ := idAllocMock.allocID()
@@ -134,10 +139,13 @@ func TestFlushSegment(t *testing.T) {
 
 	collMeta := genCollectionMeta(collectionID, "test_flush_segment_txn")
 	flushMap := sync.Map{}
-	replica := newReplica()
-	err := replica.addCollection(collMeta.ID, collMeta.Schema)
+	mockMaster := &MasterServiceFactory{}
+
+	replica := newReplica(mockMaster, collMeta.ID)
+	err := replica.init(0)
 	require.NoError(t, err)
-	err = replica.addSegment(segmentID, collMeta.ID, 0, Params.InsertChannelNames[0])
+
+	err = replica.addSegment(segmentID, collMeta.ID, 0, insertChannelName)
 	require.NoError(t, err)
 	replica.setEndPositions(segmentID, []*internalpb.MsgPosition{{ChannelName: "TestChannel"}})
 
@@ -171,7 +179,7 @@ func TestFlushSegment(t *testing.T) {
 	saveBinlog := func(*segmentFlushUnit) error {
 		return nil
 	}
-	ibNode := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog)
+	ibNode := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
 
 	flushSegment(collMeta,
 		segmentID,
@@ -259,13 +267,17 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
 	dataFactory := NewDataFactory()
 
+	mockMaster := &MasterServiceFactory{}
+
 	colRep := &CollectionSegmentReplica{
 		segments:       make(map[UniqueID]*Segment),
-		collections:    make(map[UniqueID]*Collection),
+		collection:     &Collection{id: collMeta.ID},
 		startPositions: make(map[UniqueID][]*internalpb.MsgPosition),
 		endPositions:   make(map[UniqueID][]*internalpb.MsgPosition),
 	}
-	err = colRep.addCollection(collMeta.ID, collMeta.Schema)
+
+	colRep.metaService = newMetaService(mockMaster, collMeta.ID)
+	err = colRep.init(0)
 	require.NoError(t, err)
 
 	msFactory := msgstream.NewPmsFactory()
@@ -283,9 +295,9 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	}
 
 	flushChan := make(chan *flushMsg, 100)
-	iBNode := newInsertBufferNode(ctx, colRep, msFactory, NewAllocatorFactory(), flushChan, saveBinlog)
+	iBNode := newInsertBufferNode(ctx, colRep, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
 
-	inMsg := genInsertMsg()
+	inMsg := genInsertMsg("datanode-03-test-autoflush")
 	inMsg.insertMessages = dataFactory.GetMsgStreamInsertMsgs(100)
 	inMsg.insertMessages = append(inMsg.insertMessages, dataFactory.GetMsgStreamInsertMsgs(32000)...)
 	for i := range inMsg.insertMessages {

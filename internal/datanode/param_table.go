@@ -32,7 +32,6 @@ type ParamTable struct {
 	FlowGraphMaxParallelism int32
 	FlushInsertBufferSize   int32
 	InsertBinlogRootPath    string
-	DdlBinlogRootPath       string
 	StatsBinlogRootPath     string
 	Log                     log.Config
 
@@ -40,20 +39,11 @@ type ParamTable struct {
 	// --- Pulsar ---
 	PulsarAddress string
 
-	// - insert channel -
-	InsertChannelNames []string
-
-	// - dd channel -
-	DDChannelNames []string
-
 	// - seg statistics channel -
 	SegmentStatisticsChannelName string
 
 	// - timetick channel -
 	TimeTickChannelName string
-
-	// - complete flush channel -
-	CompleteFlushChannelName string
 
 	// - channel subname -
 	MsgChannelSubName string
@@ -87,7 +77,6 @@ func (p *ParamTable) Init() {
 		p.initFlowGraphMaxParallelism()
 		p.initFlushInsertBufferSize()
 		p.initInsertBinlogRootPath()
-		p.initDdlBinlogRootPath()
 		p.initStatsBinlogRootPath()
 		p.initLogCfg()
 
@@ -95,11 +84,11 @@ func (p *ParamTable) Init() {
 		// --- Pulsar ---
 		p.initPulsarAddress()
 
-		// - insert channel -
-		p.initInsertChannelNames()
+		// - seg statistics channel -
+		p.initSegmentStatisticsChannelName()
 
-		// - dd channel -
-		p.initDDChannelNames()
+		// - timetick channel -
+		p.initTimeTickChannelName()
 
 		// - channel subname -
 		p.initMsgChannelSubName()
@@ -155,15 +144,6 @@ func (p *ParamTable) initInsertBinlogRootPath() {
 	p.InsertBinlogRootPath = path.Join(rootPath, "insert_log")
 }
 
-func (p *ParamTable) initDdlBinlogRootPath() {
-	// GOOSE TODO: rootPath change to  TenentID
-	rootPath, err := p.Load("etcd.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	p.DdlBinlogRootPath = path.Join(rootPath, "data_definition_log")
-}
-
 func (p *ParamTable) initStatsBinlogRootPath() {
 	rootPath, err := p.Load("etcd.rootPath")
 	if err != nil {
@@ -181,13 +161,21 @@ func (p *ParamTable) initPulsarAddress() {
 	p.PulsarAddress = url
 }
 
-// - insert channel -
-func (p *ParamTable) initInsertChannelNames() {
-	p.InsertChannelNames = make([]string, 0)
+func (p *ParamTable) initSegmentStatisticsChannelName() {
+
+	path, err := p.Load("msgChannel.chanNamePrefix.dataServiceStatistic")
+	if err != nil {
+		panic(err)
+	}
+	p.SegmentStatisticsChannelName = path
 }
 
-func (p *ParamTable) initDDChannelNames() {
-	p.DDChannelNames = make([]string, 0)
+func (p *ParamTable) initTimeTickChannelName() {
+	path, err := p.Load("msgChannel.chanNamePrefix.dataServiceTimeTick")
+	if err != nil {
+		panic(err)
+	}
+	p.TimeTickChannelName = path
 }
 
 // - msg channel subname -
@@ -220,6 +208,7 @@ func (p *ParamTable) initMetaRootPath() {
 	p.MetaRootPath = path.Join(rootPath, subPath)
 }
 
+// --- MinIO ---
 func (p *ParamTable) initMinioAddress() {
 	endpoint, err := p.Load("_MinioAddress")
 	if err != nil {

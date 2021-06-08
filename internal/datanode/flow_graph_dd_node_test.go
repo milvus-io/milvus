@@ -16,6 +16,12 @@ import (
 )
 
 func TestFlowGraphDDNode_Operate(t *testing.T) {
+	// clearSignal := make(chan UniqueID)
+	// collectionID := UniqueID(1)
+	// vchanInfo := &datapb.VchannelInfo{
+	//     CollectionID: collectionID,
+	// }
+	// ddNode := newDDNode(clearSignal)
 	// ddNode := newDDNode()
 
 	// var inMsg Msg = msgStream

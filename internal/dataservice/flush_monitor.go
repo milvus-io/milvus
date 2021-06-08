@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
+// flushMonitor check segments / channels meet the provided flush policy
 type flushMonitor struct {
 	meta          *meta
 	segmentPolicy SegmentFlushPolicy
@@ -48,7 +49,7 @@ func defaultFlushMonitor(meta *meta) flushMonitor {
 	}
 }
 
-// CheckSegments check segemnt sizes
+// CheckSegments check segments meet flush policy, returns segment id needs to flush
 func (f flushMonitor) CheckSegments(segments []*datapb.SegmentInfo) []UniqueID {
 	if f.segmentPolicy == nil {
 		return []UniqueID{}
@@ -62,7 +63,7 @@ func (f flushMonitor) CheckSegments(segments []*datapb.SegmentInfo) []UniqueID {
 	return result
 }
 
-// CheckChannels check channels changed
+// CheckChannels check channels changed, apply `ChannelPolicy`
 func (f flushMonitor) CheckChannels(channels []string, latest *internalpb.MsgPosition) []UniqueID {
 	segHits := make(map[UniqueID]struct{})
 	for _, channel := range channels {
@@ -94,6 +95,7 @@ func (f flushMonitor) CheckChannels(channels []string, latest *internalpb.MsgPos
 	return result
 }
 
+// deprecated
 func estSegmentSizePolicy(rowSize, limit int64) SegmentFlushPolicy {
 	return func(seg *datapb.SegmentInfo) bool {
 		if seg == nil {
@@ -106,6 +108,9 @@ func estSegmentSizePolicy(rowSize, limit int64) SegmentFlushPolicy {
 	}
 }
 
+// channelSizeEpochPolicy policy check channel sizes and segment life time
+// segmentMax is the max number of segment allowed in the channel
+// epochDuration is the max live time segment has
 func channelSizeEpochPolicy(segmentMax int, epochDuration uint64) ChannelFlushPolicy {
 	return func(channel string, segments []*datapb.SegmentInfo, latest *internalpb.MsgPosition) []UniqueID {
 		if len(segments) < segmentMax && latest == nil {
@@ -120,7 +125,7 @@ func channelSizeEpochPolicy(segmentMax int, epochDuration uint64) ChannelFlushPo
 				continue
 			}
 			if latest != nil {
-				if segment.DmlPosition == nil || latest.Timestamp-segment.DmlPosition.Timestamp > uint64(time.Hour) {
+				if segment.DmlPosition == nil || latest.Timestamp-segment.DmlPosition.Timestamp > epochDuration {
 					result = append(result, segment.ID)
 					continue
 				}
@@ -131,6 +136,7 @@ func channelSizeEpochPolicy(segmentMax int, epochDuration uint64) ChannelFlushPo
 	}
 }
 
+// sortSegmentsByDmlPos sorts input segments in ascending order by `DmlPosition.Timestamp`, nil value is less than 0
 func sortSegmentsByDmlPos(segments []*datapb.SegmentInfo) {
 	sort.Slice(segments, func(i, j int) bool {
 		if segments[i].DmlPosition == nil {

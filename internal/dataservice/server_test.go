@@ -1,5 +1,4 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.//
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
@@ -486,16 +485,6 @@ func TestSaveBinlogPaths(t *testing.T) {
 					},
 				},
 			},
-			DdlBinlogPaths: []*datapb.DDLBinlogMeta{
-				{
-					DdlBinlogPath: "/by-dev/test/0/ddl/Allo7",
-					TsBinlogPath:  "/by-dev/test/0/ts/Allo5",
-				},
-				{
-					DdlBinlogPath: "/by-dev/test/0/ddl/Allo9",
-					TsBinlogPath:  "/by-dev/test/0/ts/Allo8",
-				},
-			},
 			CheckPoints: []*datapb.CheckPoint{
 				{
 					SegmentID: 0,
@@ -531,15 +520,6 @@ func TestSaveBinlogPaths(t *testing.T) {
 			assert.EqualValues(t, "/by-dev/test/0/1/2/1/Allo2", metas[1].BinlogPath)
 		}
 
-		collMetas, err := svr.getDDLBinlogMeta(0)
-		assert.Nil(t, err)
-		if assert.EqualValues(t, 2, len(collMetas)) {
-			assert.EqualValues(t, "/by-dev/test/0/ts/Allo5", collMetas[0].TsBinlogPath)
-			assert.EqualValues(t, "/by-dev/test/0/ddl/Allo7", collMetas[0].DdlBinlogPath)
-			assert.EqualValues(t, "/by-dev/test/0/ts/Allo8", collMetas[1].TsBinlogPath)
-			assert.EqualValues(t, "/by-dev/test/0/ddl/Allo9", collMetas[1].DdlBinlogPath)
-		}
-
 		segmentInfo, err := svr.meta.GetSegment(0)
 		assert.Nil(t, err)
 		assert.EqualValues(t, segmentInfo.DmlPosition.ChannelName, "ch1")
@@ -555,16 +535,6 @@ func TestSaveBinlogPaths(t *testing.T) {
 				{
 					ID:    1,
 					Paths: []string{"/by-dev/test/0/1/2/1/Allo1", "/by-dev/test/0/1/2/1/Allo2"},
-				},
-			},
-			DdlBinlogPaths: []*datapb.DDLBinlogMeta{
-				{
-					DdlBinlogPath: "/by-dev/test/0/ddl/Allo7",
-					TsBinlogPath:  "/by-dev/test/0/ts/Allo5",
-				},
-				{
-					DdlBinlogPath: "/by-dev/test/0/ddl/Allo9",
-					TsBinlogPath:  "/by-dev/test/0/ts/Allo8",
 				},
 			},
 		})
@@ -713,7 +683,7 @@ func TestGetVChannelPos(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.EqualValues(t, 1, len(pair))
-		assert.Empty(t, pair[0].CheckPoints)
+		assert.Empty(t, pair[0].UnflushedSegments)
 		assert.Empty(t, pair[0].FlushedSegments)
 	})
 
@@ -729,9 +699,9 @@ func TestGetVChannelPos(t *testing.T) {
 		assert.EqualValues(t, 0, pair[0].CollectionID)
 		assert.EqualValues(t, 1, len(pair[0].FlushedSegments))
 		assert.EqualValues(t, 1, pair[0].FlushedSegments[0])
-		assert.EqualValues(t, 1, len(pair[0].CheckPoints))
-		assert.EqualValues(t, 2, pair[0].CheckPoints[0].SegmentID)
-		assert.EqualValues(t, []byte{1, 2, 3}, pair[0].CheckPoints[0].Position.MsgID)
+		assert.EqualValues(t, 1, len(pair[0].UnflushedSegments))
+		assert.EqualValues(t, 2, pair[0].UnflushedSegments[0].ID)
+		assert.EqualValues(t, []byte{1, 2, 3}, pair[0].UnflushedSegments[0].DmlPosition.MsgID)
 	})
 }
 
@@ -789,7 +759,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
-		assert.EqualValues(t, 0, len(resp.GetChannels()[0].GetCheckPoints()))
+		assert.EqualValues(t, 0, len(resp.GetChannels()[0].GetUnflushedSegments()))
 		assert.ElementsMatch(t, []UniqueID{0, 1}, resp.GetChannels()[0].GetFlushedSegments())
 		assert.EqualValues(t, 20, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
 	})
@@ -813,14 +783,14 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
-		assert.EqualValues(t, 2, len(resp.GetChannels()[0].GetCheckPoints()))
+		assert.EqualValues(t, 2, len(resp.GetChannels()[0].GetUnflushedSegments()))
 		assert.ElementsMatch(t, []UniqueID{0, 1}, resp.GetChannels()[0].GetFlushedSegments())
 		assert.EqualValues(t, 30, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
-		cps := resp.GetChannels()[0].GetCheckPoints()
+		cps := resp.GetChannels()[0].GetUnflushedSegments()
 		for _, cp := range cps {
-			seg, ok := expectedCps[cp.GetSegmentID()]
+			seg, ok := expectedCps[cp.GetID()]
 			assert.True(t, ok)
-			assert.EqualValues(t, seg.GetDmlPosition().GetTimestamp(), cp.GetPosition().GetTimestamp())
+			assert.EqualValues(t, seg.GetDmlPosition().GetTimestamp(), cp.GetDmlPosition().GetTimestamp())
 			assert.EqualValues(t, seg.GetNumOfRows(), cp.GetNumOfRows())
 		}
 	})
@@ -838,7 +808,6 @@ func TestGetRecoveryInfo(t *testing.T) {
 					},
 				},
 			},
-			DdlBinlogPaths: []*datapb.DDLBinlogMeta{},
 		}
 		meta, err := svr.prepareBinlog(binlogReq)
 		assert.Nil(t, err)

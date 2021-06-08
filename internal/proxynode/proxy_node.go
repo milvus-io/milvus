@@ -20,8 +20,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -29,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -314,14 +313,21 @@ func (node *ProxyNode) sendChannelsTimeTickLoop() {
 					continue
 				}
 
-				channels := make([]pChan, len(stats))
-				tss := make([]Timestamp, len(stats))
+				log.Debug("send timestamp statistics of pchan", zap.Any("statistics", stats))
+
+				channels := make([]pChan, 0, len(stats))
+				tss := make([]Timestamp, 0, len(stats))
+
+				for channel, ts := range stats {
+					channels = append(channels, channel)
+					tss = append(tss, ts)
+				}
 
 				req := &internalpb.ChannelTimeTickMsg{
 					Base: &commonpb.MsgBase{
-						MsgType:   commonpb.MsgType_Undefined, // todo
-						MsgID:     0,                          // todo
-						Timestamp: 0,                          // todo
+						MsgType:   commonpb.MsgType_TimeTick, // todo
+						MsgID:     0,                         // todo
+						Timestamp: 0,                         // todo
 						SourceID:  node.session.ServerID,
 					},
 					ChannelNames: channels,

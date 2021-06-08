@@ -33,10 +33,10 @@ func (dp dummyPosProvider) GetVChanPositions(vchans []vchannel) ([]*datapb.Vchan
 	pairs := make([]*datapb.VchannelInfo, len(vchans))
 	for _, vchan := range vchans {
 		pairs = append(pairs, &datapb.VchannelInfo{
-			CollectionID:    vchan.CollectionID,
-			ChannelName:     vchan.DmlChannel,
-			FlushedSegments: []int64{},
-			CheckPoints:     []*datapb.CheckPoint{},
+			CollectionID:      vchan.CollectionID,
+			ChannelName:       vchan.DmlChannel,
+			FlushedSegments:   []int64{},
+			UnflushedSegments: []*datapb.SegmentInfo{},
 		})
 	}
 	return pairs, nil

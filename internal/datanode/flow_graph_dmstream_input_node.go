@@ -21,17 +21,18 @@ import (
 )
 
 func newDmInputNode(ctx context.Context, factory msgstream.Factory, vchannelName string, seekPos *internalpb.MsgPosition) *flowgraph.InputNode {
-	// TODO seek
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
-	// consumeSubName := Params.MsgChannelSubName
-
+	consumeSubName := Params.MsgChannelSubName
 	insertStream, _ := factory.NewTtMsgStream(ctx)
-	insertStream.Seek([]*internalpb.MsgPosition{seekPos})
 
-	// insertStream.AsConsumer([]string{vchannelName}, consumeSubName)
-	// log.Debug("datanode AsConsumer: " + vchannelName + " : " + consumeSubName)
-	log.Debug("datanode Seek: " + vchannelName)
+	insertStream.AsConsumer([]string{vchannelName}, consumeSubName)
+	log.Debug("datanode AsConsumer: " + vchannelName + " : " + consumeSubName)
+
+	if seekPos != nil {
+		insertStream.Seek([]*internalpb.MsgPosition{seekPos})
+		log.Debug("datanode Seek: " + vchannelName)
+	}
 
 	var stream msgstream.MsgStream = insertStream
 	node := flowgraph.NewInputNode(&stream, "dmInputNode", maxQueueLength, maxParallelism)

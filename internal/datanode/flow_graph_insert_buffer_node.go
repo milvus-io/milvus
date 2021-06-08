@@ -49,6 +49,7 @@ type (
 )
 type insertBufferNode struct {
 	BaseNode
+	channelName  string
 	insertBuffer *insertBuffer
 	replica      Replica
 	idAllocator  allocatorInterface
@@ -119,6 +120,8 @@ func (ibNode *insertBufferNode) Name() string {
 
 func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
+	// log.Debug("InsertBufferNode Operating")
+
 	if len(in) != 1 {
 		log.Error("Invalid operate message input in insertBufferNode", zap.Int("input length", len(in)))
 		// TODO: add error handling
@@ -148,6 +151,8 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		currentSegID := msg.GetSegmentID()
 		collID := msg.GetCollectionID()
 		partitionID := msg.GetPartitionID()
+
+		log.Debug("InsertBufferNode Operating Segment", zap.Int64("ID", currentSegID))
 
 		if !ibNode.replica.hasSegment(currentSegID) {
 			err := ibNode.replica.addSegment(currentSegID, collID, partitionID, msg.GetChannelID())
@@ -201,26 +206,21 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		}
 
 		// 1.1 Get CollectionMeta
-		collection, err := ibNode.replica.getCollectionByID(collectionID)
+		collSchema, err := ibNode.getCollectionSchemaByID(collectionID, msg.EndTs())
 		if err != nil {
 			// GOOSE TODO add error handler
-			log.Error("Get meta wrong:", zap.Error(err))
+			log.Error("Get schema wrong:", zap.Error(err))
 			continue
 		}
 
-		collSchema := collection.schema
 		// 1.2 Get Fields
 		var pos int = 0 // Record position of blob
-		log.Debug("DataNode flow_graph_insert_buffer_node", zap.Any("Fields", collSchema.Fields))
 		var fieldIDs []int64
 		var fieldTypes []schemapb.DataType
 		for _, field := range collSchema.Fields {
 			fieldIDs = append(fieldIDs, field.FieldID)
 			fieldTypes = append(fieldTypes, field.DataType)
 		}
-
-		log.Debug("DataNode flow_graph_insert_buffer_node", zap.Any("FieldIDs", fieldIDs))
-		log.Debug("DataNode flow_graph_insert_buffer_node", zap.Any("fieldTypes", fieldTypes))
 
 		for _, field := range collSchema.Fields {
 			switch field.DataType {
@@ -484,7 +484,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			log.Debug(". Insert Buffer full, auto flushing ",
 				zap.Int32("num of rows", ibNode.insertBuffer.size(segToFlush)))
 
-			collMeta, err := ibNode.getCollMetabySegID(segToFlush)
+			collMeta, err := ibNode.getCollMetabySegID(segToFlush, iMsg.timeRange.timestampMax)
 			if err != nil {
 				log.Error("Auto flush failed .. cannot get collection meta ..", zap.Error(err))
 				continue
@@ -523,7 +523,10 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	select {
 	case fmsg := <-ibNode.flushChan:
 		currentSegID := fmsg.segmentID
-		log.Debug(". Receiving flush message", zap.Int64("segmentID", currentSegID))
+		log.Debug(". Receiving flush message",
+			zap.Int64("segmentID", currentSegID),
+			zap.Int64("collectionID", fmsg.collectionID),
+		)
 
 		if ibNode.insertBuffer.size(currentSegID) <= 0 {
 			log.Debug(".. Buffer empty ...")
@@ -560,7 +563,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				// TODO add error handling
 			}
 
-			collSch, err = ibNode.getCollectionSchemaByID(seg.collectionID)
+			collSch, err = ibNode.getCollectionSchemaByID(seg.collectionID, iMsg.timeRange.timestampMax)
 			if err != nil {
 				log.Error("Flush failed .. cannot get collection schema ..", zap.Error(err))
 				clearFn()
@@ -580,8 +583,8 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			if fu.field2Path != nil {
 				fu.checkPoint = ibNode.listSegmentCheckPoints()
 				fu.flushed = true
-				if ibNode.dsSaveBinlog(&fu) != nil {
-					log.Debug("data service save bin log path failed", zap.Error(err))
+				if err := ibNode.dsSaveBinlog(&fu); err != nil {
+					log.Debug("Data service save binlog path failed", zap.Error(err))
 				} else {
 					// this segment has flushed, so it's not `open segment`, so remove from the check point
 					ibNode.removeSegmentCheckPoint(fu.segID)
@@ -727,19 +730,21 @@ func (ibNode *insertBufferNode) listSegmentCheckPoints() map[UniqueID]segmentChe
 
 func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 	msgPack := msgstream.MsgPack{}
-	timeTickMsg := msgstream.TimeTickMsg{
+	timeTickMsg := msgstream.DataNodeTtMsg{
+		// timeTickMsg := msgstream.TimeTickMsg{
 		BaseMsg: msgstream.BaseMsg{
 			BeginTimestamp: ts,
 			EndTimestamp:   ts,
 			HashValues:     []uint32{0},
 		},
-		TimeTickMsg: internalpb.TimeTickMsg{
+		DataNodeTtMsg: datapb.DataNodeTtMsg{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_TimeTick,
-				MsgID:     0,  // GOOSE TODO
-				Timestamp: ts, // GOOSE TODO
-				SourceID:  Params.NodeID,
+				MsgType:   commonpb.MsgType_DataNodeTt,
+				MsgID:     0,
+				Timestamp: ts,
 			},
+			ChannelName: ibNode.channelName,
+			Timestamp:   ts,
 		},
 	}
 	msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
@@ -781,27 +786,29 @@ func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID) error {
 	return ibNode.segmentStatisticsStream.Produce(&msgPack)
 }
 
-func (ibNode *insertBufferNode) getCollectionSchemaByID(collectionID UniqueID) (*schemapb.CollectionSchema, error) {
-	ret, err := ibNode.replica.getCollectionByID(collectionID)
+func (ibNode *insertBufferNode) getCollectionSchemaByID(collectionID UniqueID, ts Timestamp) (*schemapb.CollectionSchema, error) {
+	ret, err := ibNode.replica.getCollectionByID(collectionID, ts)
 	if err != nil {
 		return nil, err
 	}
 	return ret.schema, nil
 }
 
-func (ibNode *insertBufferNode) getCollMetabySegID(segmentID UniqueID) (meta *etcdpb.CollectionMeta, err error) {
+func (ibNode *insertBufferNode) getCollMetabySegID(segmentID UniqueID, ts Timestamp) (meta *etcdpb.CollectionMeta, err error) {
 	ret, err := ibNode.replica.getSegmentByID(segmentID)
 	if err != nil {
 		return
 	}
-	meta = &etcdpb.CollectionMeta{}
-	meta.ID = ret.collectionID
 
-	coll, err := ibNode.replica.getCollectionByID(ret.collectionID)
+	coll, err := ibNode.replica.getCollectionByID(ret.collectionID, ts)
 	if err != nil {
 		return
 	}
-	meta.Schema = coll.GetSchema()
+
+	meta = &etcdpb.CollectionMeta{
+		ID:     ret.collectionID,
+		Schema: coll.GetSchema(),
+	}
 	return
 }
 
@@ -822,6 +829,7 @@ func newInsertBufferNode(
 	idAllocator allocatorInterface,
 	flushCh <-chan *flushMsg,
 	saveBinlog func(*segmentFlushUnit) error,
+	channelName string,
 ) *insertBufferNode {
 
 	maxQueueLength := Params.FlowGraphMaxQueueLength
@@ -870,6 +878,7 @@ func newInsertBufferNode(
 		BaseNode:     baseNode,
 		insertBuffer: iBuffer,
 		minIOKV:      minIOKV,
+		channelName:  channelName,
 
 		timeTickStream:          wTtMsgStream,
 		segmentStatisticsStream: segStatisticsMsgStream,

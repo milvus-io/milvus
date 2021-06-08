@@ -30,9 +30,9 @@ type ddNode struct {
 	clearSignal  chan<- UniqueID
 	collectionID UniqueID
 
-	mu        sync.RWMutex
-	seg2cp    map[UniqueID]*datapb.CheckPoint // Segment ID
-	vchanInfo *datapb.VchannelInfo
+	mu          sync.RWMutex
+	seg2SegInfo map[UniqueID]*datapb.SegmentInfo // Segment ID to UnFlushed Segment
+	vchanInfo   *datapb.VchannelInfo
 }
 
 func (ddn *ddNode) Name() string {
@@ -40,6 +40,9 @@ func (ddn *ddNode) Name() string {
 }
 
 func (ddn *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
+
+	// log.Debug("DDNode Operating")
+
 	if len(in) != 1 {
 		log.Error("Invalid operate message input in ddNode", zap.Int("input length", len(in)))
 		// TODO: add error handling
@@ -77,7 +80,12 @@ func (ddn *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				log.Info("Destroying current flowgraph")
 			}
 		case commonpb.MsgType_Insert:
+			log.Debug("DDNode with insert messages")
 			if msg.EndTs() < FilterThreshold {
+				log.Info("Filtering Insert Messages",
+					zap.Uint64("Message endts", msg.EndTs()),
+					zap.Uint64("FilterThreshold", FilterThreshold),
+				)
 				resMsg := ddn.filterFlushedSegmentInsertMessages(msg.(*msgstream.InsertMsg))
 				if resMsg != nil {
 					iMsg.insertMessages = append(iMsg.insertMessages, resMsg)
@@ -97,20 +105,19 @@ func (ddn *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 }
 
 func (ddn *ddNode) filterFlushedSegmentInsertMessages(msg *msgstream.InsertMsg) *msgstream.InsertMsg {
-	ddn.mu.Lock()
-	defer ddn.mu.Unlock()
-
 	if ddn.isFlushed(msg.GetSegmentID()) {
 		return nil
 	}
 
-	if cp, ok := ddn.seg2cp[msg.GetSegmentID()]; ok {
-		if msg.EndTs() > cp.GetPosition().GetTimestamp() {
+	ddn.mu.Lock()
+	if si, ok := ddn.seg2SegInfo[msg.GetSegmentID()]; ok {
+		if msg.EndTs() > si.GetDmlPosition().GetTimestamp() {
+			delete(ddn.seg2SegInfo, msg.GetSegmentID())
 			return nil
 		}
-		delete(ddn.seg2cp, msg.GetSegmentID())
 	}
 
+	ddn.mu.Unlock()
 	return msg
 }
 
@@ -130,16 +137,16 @@ func newDDNode(clearSignal chan<- UniqueID, collID UniqueID, vchanInfo *datapb.V
 	baseNode := BaseNode{}
 	baseNode.SetMaxParallelism(Params.FlowGraphMaxQueueLength)
 
-	cp := make(map[UniqueID]*datapb.CheckPoint)
-	for _, c := range vchanInfo.GetCheckPoints() {
-		cp[c.GetSegmentID()] = c
+	si := make(map[UniqueID]*datapb.SegmentInfo)
+	for _, us := range vchanInfo.GetUnflushedSegments() {
+		si[us.GetID()] = us
 	}
 
 	return &ddNode{
 		BaseNode:     baseNode,
 		clearSignal:  clearSignal,
 		collectionID: collID,
-		seg2cp:       cp,
+		seg2SegInfo:  si,
 		vchanInfo:    vchanInfo,
 	}
 }

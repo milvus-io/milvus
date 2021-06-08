@@ -304,7 +304,7 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 		}
 		for _, msg := range msgPack.Msgs {
 			if msg.Type() != commonpb.MsgType_DataNodeTt {
-				log.Warn("receive unexpected msg type from tt channel",
+				log.Warn("Receive unexpected msg type from tt channel",
 					zap.Stringer("msgType", msg.Type()))
 				continue
 			}
@@ -312,13 +312,18 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 
 			ch := ttMsg.ChannelName
 			ts := ttMsg.Timestamp
+			log.Debug("Receive datanode timetick msg", zap.String("channel", ch),
+				zap.Any("ts", ts))
 			segments, err := s.segmentManager.GetFlushableSegments(ctx, ch, ts)
 			if err != nil {
 				log.Warn("get flushable segments failed", zap.Error(err))
 				continue
 			}
 
-			log.Debug("flushable segments", zap.Any("segments", segments))
+			if len(segments) == 0 {
+				continue
+			}
+			log.Debug("Flush segments", zap.Int64s("segmentIDs", segments))
 			segmentInfos := make([]*datapb.SegmentInfo, 0, len(segments))
 			for _, id := range segments {
 				sInfo, err := s.meta.GetSegment(id)
@@ -329,8 +334,9 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 				}
 				segmentInfos = append(segmentInfos, sInfo)
 			}
-
-			s.cluster.flush(segmentInfos)
+			if len(segmentInfos) > 0 {
+				s.cluster.flush(segmentInfos)
+			}
 		}
 	}
 }
@@ -351,8 +357,14 @@ func (s *Server) startWatchService(ctx context.Context) {
 			}
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:
+				log.Info("Received datanode register",
+					zap.String("address", datanode.Address),
+					zap.Int64("serverID", datanode.Version))
 				s.cluster.register(datanode)
 			case sessionutil.SessionDelEvent:
+				log.Info("Received datanode unregister",
+					zap.String("address", datanode.Address),
+					zap.Int64("serverID", datanode.Version))
 				s.cluster.unregister(datanode)
 			default:
 				log.Warn("receive unknown service event type",
@@ -528,13 +540,6 @@ func (s *Server) prepareBinlog(req *datapb.SaveBinlogPathsRequest) (map[string]s
 		}
 	}
 
-	ddlMeta, err := s.prepareDDLBinlogMeta(req.CollectionID, req.GetDdlBinlogPaths())
-	if err != nil {
-		return nil, err
-	}
-	for k, v := range ddlMeta {
-		meta[k] = v
-	}
 	return meta, nil
 }
 
