@@ -19,99 +19,32 @@ import (
 )
 
 func TestReplica_Collection(t *testing.T) {
-	Factory := &MetaFactory{}
 	collID := UniqueID(100)
-	collMetaMock := Factory.CollectionMetaFactory(collID, "test-coll-name-0")
-
-	t.Run("get_collection_num", func(t *testing.T) {
-		replica := newReplica()
-		assert.Zero(t, replica.getCollectionNum())
-
-		replica = new(CollectionSegmentReplica)
-		assert.Zero(t, replica.getCollectionNum())
-
-		replica = &CollectionSegmentReplica{
-			collections: map[UniqueID]*Collection{
-				0: {id: 0},
-				1: {id: 1},
-				2: {id: 2},
-			},
-		}
-		assert.Equal(t, 3, replica.getCollectionNum())
-	})
-
-	t.Run("add_collection", func(t *testing.T) {
-		replica := newReplica()
-		require.Zero(t, replica.getCollectionNum())
-
-		err := replica.addCollection(collID, nil)
-		assert.Error(t, err)
-		assert.Zero(t, replica.getCollectionNum())
-
-		err = replica.addCollection(collID, collMetaMock.Schema)
-		assert.NoError(t, err)
-		assert.Equal(t, 1, replica.getCollectionNum())
-		assert.True(t, replica.hasCollection(collID))
-		coll, err := replica.getCollectionByID(collID)
-		assert.NoError(t, err)
-		assert.NotNil(t, coll)
-		assert.Equal(t, collID, coll.GetID())
-		assert.Equal(t, collMetaMock.Schema.GetName(), coll.GetName())
-		assert.Equal(t, collMetaMock.Schema, coll.GetSchema())
-
-		sameID := collID
-		otherSchema := Factory.CollectionMetaFactory(sameID, "test-coll-name-1").GetSchema()
-		err = replica.addCollection(sameID, otherSchema)
-		assert.Error(t, err)
-
-	})
-
-	t.Run("remove_collection", func(t *testing.T) {
-		replica := newReplica()
-		require.False(t, replica.hasCollection(collID))
-		require.Zero(t, replica.getCollectionNum())
-
-		err := replica.removeCollection(collID)
-		assert.NoError(t, err)
-
-		err = replica.addCollection(collID, collMetaMock.Schema)
-		require.NoError(t, err)
-		require.True(t, replica.hasCollection(collID))
-		require.Equal(t, 1, replica.getCollectionNum())
-
-		err = replica.removeCollection(collID)
-		assert.NoError(t, err)
-		assert.False(t, replica.hasCollection(collID))
-		assert.Zero(t, replica.getCollectionNum())
-		err = replica.removeCollection(collID)
-		assert.NoError(t, err)
-	})
 
 	t.Run("get_collection_by_id", func(t *testing.T) {
-		replica := newReplica()
+		mockMaster := &MasterServiceFactory{}
+		replica := newReplica(mockMaster, collID)
 		require.False(t, replica.hasCollection(collID))
 
-		coll, err := replica.getCollectionByID(collID)
-		assert.Error(t, err)
-		assert.Nil(t, coll)
+		coll, err := replica.getCollectionByID(collID, 0)
+		assert.NoError(t, err)
+		assert.NotNil(t, coll)
+		assert.NotNil(t, coll.GetSchema())
+		assert.True(t, replica.hasCollection(collID))
 
-		err = replica.addCollection(collID, collMetaMock.Schema)
-		require.NoError(t, err)
-		require.True(t, replica.hasCollection(collID))
-		require.Equal(t, 1, replica.getCollectionNum())
-
-		coll, err = replica.getCollectionByID(collID)
+		coll, err = replica.getCollectionByID(collID, 0)
 		assert.NoError(t, err)
 		assert.NotNil(t, coll)
 		assert.Equal(t, collID, coll.GetID())
-		assert.Equal(t, collMetaMock.Schema.GetName(), coll.GetName())
-		assert.Equal(t, collMetaMock.Schema, coll.GetSchema())
 	})
 }
 
 func TestReplica_Segment(t *testing.T) {
+	mockMaster := &MasterServiceFactory{}
+	collID := UniqueID(1)
+
 	t.Run("Test segment", func(t *testing.T) {
-		replica := newReplica()
+		replica := newReplica(mockMaster, collID)
 		assert.False(t, replica.hasSegment(0))
 
 		err := replica.addSegment(0, 1, 2, "insert-01")
@@ -162,7 +95,7 @@ func TestReplica_Segment(t *testing.T) {
 	})
 
 	t.Run("Test errors", func(t *testing.T) {
-		replica := newReplica()
+		replica := newReplica(mockMaster, collID)
 		require.False(t, replica.hasSegment(0))
 
 		seg, err := replica.getSegmentByID(0)

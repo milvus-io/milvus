@@ -206,14 +206,13 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		}
 
 		// 1.1 Get CollectionMeta
-		collection, err := ibNode.replica.getCollectionByID(collectionID)
+		collSchema, err := ibNode.getCollectionSchemaByID(collectionID, msg.EndTs())
 		if err != nil {
 			// GOOSE TODO add error handler
-			log.Error("Get meta wrong:", zap.Error(err))
+			log.Error("Get schema wrong:", zap.Error(err))
 			continue
 		}
 
-		collSchema := collection.schema
 		// 1.2 Get Fields
 		var pos int = 0 // Record position of blob
 		var fieldIDs []int64
@@ -485,7 +484,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			log.Debug(". Insert Buffer full, auto flushing ",
 				zap.Int32("num of rows", ibNode.insertBuffer.size(segToFlush)))
 
-			collMeta, err := ibNode.getCollMetabySegID(segToFlush)
+			collMeta, err := ibNode.getCollMetabySegID(segToFlush, iMsg.timeRange.timestampMax)
 			if err != nil {
 				log.Error("Auto flush failed .. cannot get collection meta ..", zap.Error(err))
 				continue
@@ -564,7 +563,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				// TODO add error handling
 			}
 
-			collSch, err = ibNode.getCollectionSchemaByID(seg.collectionID)
+			collSch, err = ibNode.getCollectionSchemaByID(seg.collectionID, iMsg.timeRange.timestampMax)
 			if err != nil {
 				log.Error("Flush failed .. cannot get collection schema ..", zap.Error(err))
 				clearFn()
@@ -787,27 +786,29 @@ func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID) error {
 	return ibNode.segmentStatisticsStream.Produce(&msgPack)
 }
 
-func (ibNode *insertBufferNode) getCollectionSchemaByID(collectionID UniqueID) (*schemapb.CollectionSchema, error) {
-	ret, err := ibNode.replica.getCollectionByID(collectionID)
+func (ibNode *insertBufferNode) getCollectionSchemaByID(collectionID UniqueID, ts Timestamp) (*schemapb.CollectionSchema, error) {
+	ret, err := ibNode.replica.getCollectionByID(collectionID, ts)
 	if err != nil {
 		return nil, err
 	}
 	return ret.schema, nil
 }
 
-func (ibNode *insertBufferNode) getCollMetabySegID(segmentID UniqueID) (meta *etcdpb.CollectionMeta, err error) {
+func (ibNode *insertBufferNode) getCollMetabySegID(segmentID UniqueID, ts Timestamp) (meta *etcdpb.CollectionMeta, err error) {
 	ret, err := ibNode.replica.getSegmentByID(segmentID)
 	if err != nil {
 		return
 	}
-	meta = &etcdpb.CollectionMeta{}
-	meta.ID = ret.collectionID
 
-	coll, err := ibNode.replica.getCollectionByID(ret.collectionID)
+	coll, err := ibNode.replica.getCollectionByID(ret.collectionID, ts)
 	if err != nil {
 		return
 	}
-	meta.Schema = coll.GetSchema()
+
+	meta = &etcdpb.CollectionMeta{
+		ID:     ret.collectionID,
+		Schema: coll.GetSchema(),
+	}
 	return
 }
 

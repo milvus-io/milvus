@@ -149,18 +149,23 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 		return nil
 	}
 
-	replica := newReplica()
+	var initTs Timestamp = 0
+	if vchan.SeekPosition != nil {
+		initTs = vchan.SeekPosition.Timestamp
+	}
+
+	replica := newReplica(node.masterService, vchan.CollectionID)
+	if err := replica.init(initTs); err != nil {
+		return err
+	}
 
 	var alloc allocatorInterface = newAllocator(node.masterService)
-	metaService := newMetaService(node.ctx, replica, node.masterService)
 
 	flushChan := make(chan *flushMsg, 100)
 	dataSyncService := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataService)
-	// TODO metaService using timestamp in DescribeCollection
 	node.vchan2SyncService[vchan.GetChannelName()] = dataSyncService
 	node.vchan2FlushCh[vchan.GetChannelName()] = flushChan
 
-	metaService.init()
 	go dataSyncService.start()
 
 	log.Info("New dataSyncService started!")

@@ -20,8 +20,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -29,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -320,10 +319,10 @@ func (node *ProxyNode) sendChannelsTimeTickLoop() {
 				channels := make([]pChan, 0, len(stats))
 				tss := make([]Timestamp, 0, len(stats))
 
-                for channel, ts := range stats {
-                    channels = append(channels, channel)
-                    tss = append(tss, ts)
-                }
+				for channel, ts := range stats {
+					channels = append(channels, channel)
+					tss = append(tss, ts)
+				}
 
 				req := &internalpb.ChannelTimeTickMsg{
 					Base: &commonpb.MsgBase{
