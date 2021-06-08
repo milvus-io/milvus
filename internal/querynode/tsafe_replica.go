@@ -14,9 +14,8 @@ package querynode
 import (
 	"context"
 	"errors"
-	"sync"
-
 	"go.uber.org/zap"
+	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
 )
@@ -71,9 +70,9 @@ func (t *tSafeReplica) addTSafe(vChannel VChannel) {
 	defer t.mu.Unlock()
 	ctx := context.Background()
 	if _, ok := t.tSafes[vChannel]; !ok {
-		t.tSafes[vChannel] = newTSafe(ctx)
+		t.tSafes[vChannel] = newTSafe(ctx, vChannel)
 		t.tSafes[vChannel].start()
-		log.Debug("add tSafe done", zap.Any("channel", vChannel))
+		//log.Debug("add tSafe done", zap.Any("channel", vChannel))
 	}
 }
 

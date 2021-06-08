@@ -152,6 +152,7 @@ func (s *searchCollection) waitNewTSafe() Timestamp {
 		log.Error("tSafe has been closed", zap.Any("collectionID", s.collectionID))
 		return invalidTimestamp
 	}
+	//log.Debug("wait new tSafe", zap.Any("collectionID", s.collectionID))
 	t := Timestamp(math.MaxInt64)
 	for channel := range s.tSafeWatchers {
 		ts := s.tSafeReplica.getTSafe(channel)
@@ -329,6 +330,7 @@ func (s *searchCollection) receiveSearch(msg *msgstream.SearchMsg) {
 }
 
 func (s *searchCollection) doUnsolvedMsgSearch() {
+	log.Debug("starting doUnsolvedMsgSearch...", zap.Any("collectionID", s.collectionID))
 	for {
 		select {
 		case <-s.releaseCtx.Done():

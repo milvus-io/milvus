@@ -31,6 +31,7 @@ func newTSafeWatcher() *tSafeWatcher {
 func (watcher *tSafeWatcher) notify() {
 	if len(watcher.notifyChan) == 0 {
 		watcher.notifyChan <- true
+		//log.Debug("tSafe watcher notify done")
 	}
 }
 
@@ -59,6 +60,7 @@ type tSafeMsg struct {
 type tSafe struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
+	channel     VChannel
 	tSafeMu     sync.Mutex // guards all fields
 	tSafe       Timestamp
 	watcherList []*tSafeWatcher
@@ -66,13 +68,14 @@ type tSafe struct {
 	tSafeRecord map[UniqueID]Timestamp
 }
 
-func newTSafe(ctx context.Context) tSafer {
+func newTSafe(ctx context.Context, channel VChannel) tSafer {
 	ctx1, cancel := context.WithCancel(ctx)
 	const channelSize = 4096
 
 	var t tSafer = &tSafe{
 		ctx:         ctx1,
 		cancel:      cancel,
+		channel:     channel,
 		watcherList: make([]*tSafeWatcher, 0),
 		tSafeChan:   make(chan tSafeMsg, channelSize),
 		tSafeRecord: make(map[UniqueID]Timestamp),
@@ -82,24 +85,27 @@ func newTSafe(ctx context.Context) tSafer {
 
 func (ts *tSafe) start() {
 	go func() {
-		select {
-		case <-ts.ctx.Done():
-			log.Debug("tSafe context done")
-			return
-		case m := <-ts.tSafeChan:
-			ts.tSafeMu.Lock()
-			ts.tSafeRecord[m.id] = m.t
-			var tmpT Timestamp = math.MaxUint64
-			for _, t := range ts.tSafeRecord {
-				if t <= tmpT {
-					tmpT = t
+		for {
+			select {
+			case <-ts.ctx.Done():
+				log.Debug("tSafe context done")
+				return
+			case m := <-ts.tSafeChan:
+				ts.tSafeMu.Lock()
+				ts.tSafeRecord[m.id] = m.t
+				var tmpT Timestamp = math.MaxUint64
+				for _, t := range ts.tSafeRecord {
+					if t <= tmpT {
+						tmpT = t
+					}
 				}
+				ts.tSafe = tmpT
+				for _, watcher := range ts.watcherList {
+					watcher.notify()
+				}
+				//log.Debug("set tSafe done", zap.Any("id", m.id), zap.Any("t", m.t))
+				ts.tSafeMu.Unlock()
 			}
-			ts.tSafe = tmpT
-			for _, watcher := range ts.watcherList {
-				watcher.notify()
-			}
-			ts.tSafeMu.Unlock()
 		}
 	}()
 }
