@@ -96,7 +96,7 @@ func (gp *BaseTable) tryloadFromEnv() {
 
 	etcdAddress := os.Getenv("ETCD_ADDRESS")
 	if etcdAddress == "" {
-		etcdHost, err := gp.Load("etcd.address")
+		etcdHosts, err := gp.Load("etcd.address")
 		if err != nil {
 			panic(err)
 		}
@@ -104,7 +104,14 @@ func (gp *BaseTable) tryloadFromEnv() {
 		if err != nil {
 			panic(err)
 		}
-		etcdAddress = etcdHost + ":" + port
+		for _, host := range strings.Split(etcdHosts, ",") {
+			addr := host + ":" + port
+			if etcdAddress == "" {
+				etcdAddress = addr
+			} else {
+				etcdAddress = etcdAddress + "," + addr
+			}
+		}
 	}
 	err = gp.Save("_EtcdAddress", etcdAddress)
 	if err != nil {

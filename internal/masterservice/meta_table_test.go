@@ -172,7 +172,7 @@ func TestMetaTable(t *testing.T) {
 		return vtso
 	}
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: etcdAddr})
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	skv, err := newMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7, ftso)
@@ -1093,7 +1093,7 @@ func TestMetaWithTimestamp(t *testing.T) {
 		return vtso
 	}
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: etcdAddr})
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 

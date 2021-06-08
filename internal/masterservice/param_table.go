@@ -14,6 +14,7 @@ package masterservice
 import (
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -30,7 +31,7 @@ type ParamTable struct {
 	Port    int
 
 	PulsarAddress             string
-	EtcdAddress               string
+	EtcdAddress               []string
 	MetaRootPath              string
 	KvRootPath                string
 	MsgChannelSubName         string
@@ -96,7 +97,7 @@ func (p *ParamTable) initEtcdAddress() {
 	if err != nil {
 		panic(err)
 	}
-	p.EtcdAddress = addr
+	p.EtcdAddress = strings.Split(addr, ",")
 }
 
 func (p *ParamTable) initMetaRootPath() {
