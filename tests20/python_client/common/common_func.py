@@ -222,3 +222,16 @@ def modify_file(file_name_list, input_content=""):
             f.close()
 
     log.info("[modify_file] File(%s) modification is complete." % file_name_list)
+
+
+def index_to_dict(index):
+    return {
+        "collection_name": index.collection_name,
+        "field_name": index.field_name,
+        # "name": index.name,
+        "params": index.params
+    }
+
+
+def assert_equal_index(index_1, index_2):
+    return index_to_dict(index_1) == index_to_dict(index_2)
