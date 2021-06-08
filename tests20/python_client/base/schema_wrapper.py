@@ -9,12 +9,12 @@ from pymilvus_orm import CollectionSchema, FieldSchema
 class ApiCollectionSchemaWrapper:
     collection_schema = None
 
-    def init_collection_schema(self, fields, description="", check_task=None, check_params=None, **kwargs):
+    def init_collection_schema(self, fields, description="", check_task=None, check_items=None, **kwargs):
         """In order to distinguish the same name of CollectionSchema"""
         func_name = sys._getframe().f_code.co_name
         response, is_succ = api_request([CollectionSchema, fields, description], **kwargs)
         self.collection_schema = response if is_succ else None
-        check_result = ResponseChecker(response, func_name, check_task, check_params, is_succ, fields=fields,
+        check_result = ResponseChecker(response, func_name, check_task, check_items, is_succ=is_succ, fields=fields,
                                        description=description, **kwargs).run()
         return response, check_result
 
@@ -38,12 +38,12 @@ class ApiCollectionSchemaWrapper:
 class ApiFieldSchemaWrapper:
     field_schema = None
 
-    def init_field_schema(self, name, dtype, description="", check_task=None, check_params=None, **kwargs):
+    def init_field_schema(self, name, dtype, description="", check_task=None, check_items=None, **kwargs):
         """In order to distinguish the same name of FieldSchema"""
         func_name = sys._getframe().f_code.co_name
         response, is_succ = api_request([FieldSchema, name, dtype, description], **kwargs)
         self.field_schema = response if is_succ else None
-        check_result = ResponseChecker(response, func_name, check_task, check_params, is_succ, name=name, dtype=dtype,
+        check_result = ResponseChecker(response, func_name, check_task, check_items, is_succ, name=name, dtype=dtype,
                                        description=description, **kwargs).run()
         return response, check_result
 

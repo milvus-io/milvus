@@ -34,7 +34,8 @@ float_vec_field_desc = "float vector type field"
 binary_vec_field_desc = "binary vector type field"
 
 Not_Exist = "Not_Exist"
-
+err_code = "err_code"
+err_msg = "err_msg"
 
 """" List of parameters used to pass """
 get_invalid_strs = [
