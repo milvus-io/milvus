@@ -11,6 +11,7 @@
 package dataservice
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -107,18 +108,27 @@ func (c *cluster) startup(dataNodes []*datapb.DataNodeInfo) error {
 
 func (c *cluster) watch(nodes []*datapb.DataNodeInfo) []*datapb.DataNodeInfo {
 	for _, n := range nodes {
+		logMsg := fmt.Sprintf("Begin to watch channels for node %s:", n.Address)
 		uncompletes := make([]vchannel, 0, len(n.Channels))
 		for _, ch := range n.Channels {
 			if ch.State == datapb.ChannelWatchState_Uncomplete {
+				if len(uncompletes) == 0 {
+					logMsg += ch.Name
+				} else {
+					logMsg += "," + ch.Name
+				}
 				uncompletes = append(uncompletes, vchannel{
 					CollectionID: ch.CollectionID,
 					DmlChannel:   ch.Name,
 				})
 			}
 		}
+
 		if len(uncompletes) == 0 {
 			continue
 		}
+		log.Debug(logMsg)
+
 		vchanInfos, err := c.posProvider.GetVChanPositions(uncompletes)
 		if err != nil {
 			log.Warn("get vchannel position failed", zap.Error(err))

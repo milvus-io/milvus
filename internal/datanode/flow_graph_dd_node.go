@@ -105,20 +105,19 @@ func (ddn *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 }
 
 func (ddn *ddNode) filterFlushedSegmentInsertMessages(msg *msgstream.InsertMsg) *msgstream.InsertMsg {
-	ddn.mu.Lock()
-	defer ddn.mu.Unlock()
-
 	if ddn.isFlushed(msg.GetSegmentID()) {
 		return nil
 	}
 
+	ddn.mu.Lock()
 	if cp, ok := ddn.seg2cp[msg.GetSegmentID()]; ok {
 		if msg.EndTs() > cp.GetPosition().GetTimestamp() {
+			delete(ddn.seg2cp, msg.GetSegmentID())
 			return nil
 		}
-		delete(ddn.seg2cp, msg.GetSegmentID())
 	}
 
+	ddn.mu.Unlock()
 	return msg
 }
 

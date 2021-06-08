@@ -355,8 +355,14 @@ func (s *Server) startWatchService(ctx context.Context) {
 			}
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:
+				log.Info("Received datanode register",
+					zap.String("address", datanode.Address),
+					zap.Int64("serverID", datanode.Version))
 				s.cluster.register(datanode)
 			case sessionutil.SessionDelEvent:
+				log.Info("Received datanode unregister",
+					zap.String("address", datanode.Address),
+					zap.Int64("serverID", datanode.Version))
 				s.cluster.unregister(datanode)
 			default:
 				log.Warn("receive unknown service event type",

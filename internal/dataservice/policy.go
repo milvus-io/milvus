@@ -170,6 +170,14 @@ func (p *balancedAssignPolicy) apply(cluster map[string]*datapb.DataNodeInfo, ch
 	if len(cluster) == 0 {
 		return []*datapb.DataNodeInfo{}
 	}
+	// filter existed channel
+	for _, node := range cluster {
+		for _, c := range node.GetChannels() {
+			if c.GetName() == channel && c.GetCollectionID() == collectionID {
+				return nil
+			}
+		}
+	}
 	target, min := "", math.MaxInt32
 	for k, v := range cluster {
 		if len(v.GetChannels()) < min {
