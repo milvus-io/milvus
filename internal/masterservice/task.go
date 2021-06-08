@@ -237,7 +237,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	}
 
 	// add dml channel before send dd msg
-	t.core.dmlChannels.AddProducerChannles(chanNames...)
+	t.core.dmlChannels.AddProducerChannels(chanNames...)
 
 	err = t.core.SendDdCreateCollectionReq(ctx, &ddCollReq)
 	if err != nil {
@@ -393,13 +393,13 @@ func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
 
 	t.Rsp.Schema = proto.Clone(collInfo.Schema).(*schemapb.CollectionSchema)
 	t.Rsp.CollectionID = collInfo.ID
-	var newField []*schemapb.FieldSchema
-	for _, field := range t.Rsp.Schema.Fields {
-		if field.FieldID >= StartOfUserFieldID {
-			newField = append(newField, field)
-		}
-	}
-	t.Rsp.Schema.Fields = newField
+	//var newField []*schemapb.FieldSchema
+	//for _, field := range t.Rsp.Schema.Fields {
+	//	if field.FieldID >= StartOfUserFieldID {
+	//		newField = append(newField, field)
+	//	}
+	//}
+	//t.Rsp.Schema.Fields = newField
 
 	t.Rsp.VirtualChannelNames = collInfo.VirtualChannelNames
 	t.Rsp.PhysicalChannelNames = collInfo.PhysicalChannelNames

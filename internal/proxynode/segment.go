@@ -292,8 +292,6 @@ func (sa *SegIDAssigner) syncSegments() (bool, error) {
 		return true, nil
 	}
 	sa.reduceSegReqs()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 	req := &datapb.AssignSegmentIDRequest{
 		NodeID:            sa.PeerID,
 		PeerRole:          typeutil.ProxyNodeRole,
@@ -301,7 +299,7 @@ func (sa *SegIDAssigner) syncSegments() (bool, error) {
 	}
 
 	sa.segReqs = []*datapb.SegmentIDRequest{}
-	resp, err := sa.dataService.AssignSegmentID(ctx, req)
+	resp, err := sa.dataService.AssignSegmentID(context.Background(), req)
 
 	if err != nil {
 		return false, fmt.Errorf("syncSegmentID Failed:%w", err)

@@ -18,7 +18,6 @@ import (
 	"net"
 	"strconv"
 	"sync"
-	"time"
 
 	"github.com/milvus-io/milvus/internal/logutil"
 
@@ -28,7 +27,6 @@ import (
 
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/milvus-io/milvus/internal/dataservice"
-	msc "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
@@ -54,8 +52,6 @@ type Server struct {
 	grpcServer    *grpc.Server
 	masterService types.MasterService
 
-	newMasterServiceClient func() (types.MasterService, error)
-
 	closer io.Closer
 }
 
@@ -68,9 +64,6 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		ctx:         ctx1,
 		cancel:      cancel,
 		grpcErrChan: make(chan error),
-		newMasterServiceClient: func() (types.MasterService, error) {
-			return msc.NewClient(dataservice.Params.MetaRootPath, []string{dataservice.Params.EtcdAddress}, 3*time.Second)
-		},
 	}
 	s.dataService, err = dataservice.CreateServer(s.ctx, factory)
 	if err != nil {
@@ -82,8 +75,6 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 func (s *Server) init() error {
 	Params.Init()
 	Params.LoadFromEnv()
-
-	ctx := context.Background()
 
 	closer := trace.InitTracing("data_service")
 	s.closer = closer
@@ -100,25 +91,6 @@ func (s *Server) init() error {
 	err = s.startGrpc()
 	if err != nil {
 		return err
-	}
-
-	if s.newMasterServiceClient != nil {
-		log.Debug("master service", zap.String("address", Params.MasterAddress))
-		masterServiceClient, err := s.newMasterServiceClient()
-		if err != nil {
-			panic(err)
-		}
-		log.Debug("master service client created")
-
-		if err = masterServiceClient.Init(); err != nil {
-			panic(err)
-		}
-		if err = masterServiceClient.Start(); err != nil {
-			panic(err)
-		}
-		if err = funcutil.WaitForComponentInitOrHealthy(ctx, masterServiceClient, "MasterService", 1000000, 200*time.Millisecond); err != nil {
-			panic(err)
-		}
 	}
 
 	if err := s.dataService.Init(); err != nil {

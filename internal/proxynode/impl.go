@@ -143,6 +143,7 @@ func (node *ProxyNode) DropCollection(ctx context.Context, request *milvuspb.Dro
 		DropCollectionRequest: request,
 		masterService:         node.masterService,
 		chMgr:                 node.chMgr,
+		chTicker:              node.chTicker,
 	}
 
 	err := node.sched.DdQueue.Enqueue(dct)

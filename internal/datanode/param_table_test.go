@@ -45,32 +45,17 @@ func TestParamTable_DataNode(t *testing.T) {
 		log.Println("InsertBinlogRootPath:", path)
 	})
 
-	t.Run("Test DdlBinlogRootPath", func(t *testing.T) {
-		path := Params.DdlBinlogRootPath
-		log.Println("DdBinlogRootPath:", path)
-	})
-
 	t.Run("Test PulsarAddress", func(t *testing.T) {
 		address := Params.PulsarAddress
 		log.Println("PulsarAddress:", address)
 	})
 
-	t.Run("Test insertChannelNames", func(t *testing.T) {
-		names := Params.InsertChannelNames
-		log.Println("InsertChannelNames:", names)
-	})
-
-	t.Run("Test ddChannelNames", func(t *testing.T) {
-		names := Params.DDChannelNames
-		log.Println("DDChannelNames:", names)
-	})
-
 	t.Run("Test SegmentStatisticsChannelName", func(t *testing.T) {
-		name := Params.SegmentStatisticsChannelName
-		log.Println("SegmentStatisticsChannelName:", name)
+		path := Params.SegmentStatisticsChannelName
+		log.Println("SegmentStatisticsChannelName:", path)
 	})
 
-	t.Run("Test timeTickChannelName", func(t *testing.T) {
+	t.Run("Test TimeTickChannelName", func(t *testing.T) {
 		name := Params.TimeTickChannelName
 		log.Println("TimeTickChannelName:", name)
 	})

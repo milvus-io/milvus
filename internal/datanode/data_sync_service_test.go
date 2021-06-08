@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -39,32 +40,37 @@ func TestDataSyncService_Start(t *testing.T) {
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
+	mockMaster := &MasterServiceFactory{}
+	collectionID := UniqueID(1)
 
 	flushChan := make(chan *flushMsg, 100)
-	replica := newReplica()
+	replica := newReplica(mockMaster, collectionID)
+	err := replica.init(0)
+	require.NoError(t, err)
+
 	allocFactory := NewAllocatorFactory(1)
 	msFactory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
 		"pulsarAddress":  pulsarURL,
 		"receiveBufSize": 1024,
 		"pulsarBufSize":  1024}
-	err := msFactory.SetParams(m)
+	err = msFactory.SetParams(m)
 
 	insertChannelName := "data_sync_service_test_dml"
 	ddlChannelName := "data_sync_service_test_ddl"
 	Params.FlushInsertBufferSize = 1
 
 	vchan := &datapb.VchannelInfo{
-		CollectionID:    collMeta.GetID(),
-		ChannelName:     insertChannelName,
-		CheckPoints:     []*datapb.CheckPoint{},
-		FlushedSegments: []int64{},
+		CollectionID:      collMeta.GetID(),
+		ChannelName:       insertChannelName,
+		UnflushedSegments: []*datapb.SegmentInfo{},
+		FlushedSegments:   []int64{},
 	}
 
 	signalCh := make(chan UniqueID, 100)
-	sync := newDataSyncService(ctx, flushChan, replica, allocFactory, msFactory, vchan, signalCh)
+	sync := newDataSyncService(ctx, flushChan, replica, allocFactory, msFactory, vchan, signalCh, &DataServiceFactory{})
 
-	sync.replica.addCollection(collMeta.ID, collMeta.Schema)
+	// sync.replica.addCollection(collMeta.ID, collMeta.Schema)
 	go sync.start()
 
 	timeRange := TimeRange{

@@ -173,14 +173,14 @@ enum SegmentState : int {
   NotExist = 1,
   Growing = 2,
   Sealed = 3,
-  Flushing = 4,
-  Flushed = 5,
+  Flushed = 4,
+  Flushing = 5,
   SegmentState_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   SegmentState_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool SegmentState_IsValid(int value);
 constexpr SegmentState SegmentState_MIN = SegmentStateNone;
-constexpr SegmentState SegmentState_MAX = Flushed;
+constexpr SegmentState SegmentState_MAX = Flushing;
 constexpr int SegmentState_ARRAYSIZE = SegmentState_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* SegmentState_descriptor();

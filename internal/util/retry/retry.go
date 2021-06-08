@@ -12,8 +12,10 @@
 package retry
 
 import (
-	"log"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
 )
 
 // Reference: https://blog.cyeam.com/golang/2018/08/27/retry
@@ -25,7 +27,7 @@ func Impl(attempts int, sleep time.Duration, fn func() error, maxSleepTime time.
 		}
 
 		if attempts--; attempts > 0 {
-			log.Printf("retry func error: %s. attempts #%d after %s.", err.Error(), attempts, sleep)
+			log.Debug("retry func error", zap.Int("attempts", attempts), zap.Duration("sleep", sleep), zap.Error(err))
 			time.Sleep(sleep)
 			if sleep < maxSleepTime {
 				return Impl(attempts, 2*sleep, fn, maxSleepTime)
