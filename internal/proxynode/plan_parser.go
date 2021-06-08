@@ -45,8 +45,9 @@ func parseQueryExprAdvanced(schema *typeutil.SchemaHelper, exprStr string) (*pla
 
 func (context *ParserContext) createColumnInfo(field *schemapb.FieldSchema) *planpb.ColumnInfo {
 	return &planpb.ColumnInfo{
-		FieldId:  field.FieldID,
-		DataType: field.DataType,
+		FieldId:      field.FieldID,
+		DataType:     field.DataType,
+		IsPrimaryKey: field.IsPrimaryKey,
 	}
 }
 
