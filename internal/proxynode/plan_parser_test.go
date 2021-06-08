@@ -54,7 +54,7 @@ func TestParseQueryExpr_Naive(t *testing.T) {
 	schemaPb := newTestSchema()
 	schema, err := typeutil.CreateSchemaHelper(schemaPb)
 	assert.Nil(t, err)
-	exprProto, err := parseQueryExpr(schema, &exprStr)
+	exprProto, err := parseQueryExpr(schema, exprStr)
 	assert.Nil(t, err)
 	str := proto.MarshalTextString(exprProto)
 	println(str)
@@ -82,7 +82,7 @@ func TestParsePlanNode_Naive(t *testing.T) {
 	// TODO: change it to better solution
 	for offset, exprStr := range exprStrs {
 		fmt.Printf("case %d: %s\n", offset, exprStr)
-		planProto, err := CreateQueryPlan(schema, &exprStr, "FloatVectorField", queryInfo)
+		planProto, err := CreateQueryPlan(schema, exprStr, "FloatVectorField", queryInfo)
 		assert.Nil(t, err)
 		dbgStr := proto.MarshalTextString(planProto)
 		println(dbgStr)
@@ -118,7 +118,7 @@ func TestExprPlan_Str(t *testing.T) {
 	}
 
 	// without filter
-	planProto, err := CreateQueryPlan(schema, nil, "fakevec", queryInfo)
+	planProto, err := CreateQueryPlan(schema, "", "fakevec", queryInfo)
 	assert.Nil(t, err)
 	dbgStr := proto.MarshalTextString(planProto)
 	println(dbgStr)
@@ -130,7 +130,7 @@ func TestExprPlan_Str(t *testing.T) {
 
 	for offset, exprStr := range exprStrs {
 		fmt.Printf("case %d: %s\n", offset, exprStr)
-		planProto, err := CreateQueryPlan(schema, &exprStr, "fakevec", queryInfo)
+		planProto, err := CreateQueryPlan(schema, exprStr, "fakevec", queryInfo)
 		assert.Nil(t, err)
 		dbgStr := proto.MarshalTextString(planProto)
 		println(dbgStr)

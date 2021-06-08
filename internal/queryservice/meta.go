@@ -310,6 +310,8 @@ func (m *meta) GetQueryChannel(collectionID UniqueID) (string, string) {
 	m.Lock()
 	defer m.Unlock()
 
+	//TODO::to remove
+	collectionID = 0
 	if info, ok := m.queryChannelInfos[collectionID]; ok {
 		return info.QueryChannelID, info.QueryResultChannelID
 	}
@@ -326,5 +328,6 @@ func (m *meta) GetQueryChannel(collectionID UniqueID) (string, string) {
 		QueryResultChannelID: allocatedQueryResultChannel,
 	}
 	m.queryChannelInfos[collectionID] = queryChannelInfo
+	//TODO::return channel according collectionID
 	return allocatedQueryChannel, allocatedQueryResultChannel
 }

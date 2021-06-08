@@ -33,11 +33,13 @@ GPUIVFSQ::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     auto gpu_res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
     if (gpu_res != nullptr) {
         ResScope rs(gpu_res, gpu_id_, true);
-        auto device_index = new faiss::gpu::GpuIndexIVFScalarQuantizer(
-            gpu_res->faiss_res.get(), dim, config[IndexParams::nlist].get<int64_t>(), faiss::QuantizerType::QT_8bit,
-            GetMetricType(config[Metric::TYPE].get<std::string>()));
-        device_index->train(rows, reinterpret_cast<const float*>(p_data));
-        index_.reset(device_index);
+        faiss::gpu::GpuIndexIVFScalarQuantizerConfig idx_config;
+        idx_config.device = static_cast<int32_t>(gpu_id_);
+        int32_t nlist = config[IndexParams::nlist];
+        faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+        index_ = std::make_shared<faiss::gpu::GpuIndexIVFScalarQuantizer>(
+            gpu_res->faiss_res.get(), dim, nlist, faiss::QuantizerType::QT_8bit, metric_type, true, idx_config);
+        index_->train(rows, (float*)p_data);
         res_ = gpu_res;
     } else {
         KNOWHERE_THROW_MSG("Build IVFSQ can't get gpu resource");

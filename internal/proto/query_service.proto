@@ -305,9 +305,7 @@ message VchannelInfo {
 
 message SegmentBinlogs {
   int64 segmentID = 1;
-  int64 partitionID = 2;
-  int64 collectionID = 3;
-  repeated FieldBinlog fieldBinlogs = 4;
+  repeated FieldBinlog fieldBinlogs = 2;
 }
 
 message FieldBinlog{

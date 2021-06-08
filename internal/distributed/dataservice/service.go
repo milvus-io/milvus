@@ -277,3 +277,7 @@ func (s *Server) GetSegmentInfoChannel(ctx context.Context, req *datapb.GetSegme
 func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
 	return s.dataService.SaveBinlogPaths(ctx, req)
 }
+
+func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
+	return s.dataService.GetRecoveryInfo(ctx, req)
+}

@@ -193,6 +193,7 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 func (scheduler *TaskScheduler) addActivateTask(wg *sync.WaitGroup, t task) {
 	defer wg.Done()
 	var activeTaskWg sync.WaitGroup
+	log.Debug("num of child task", zap.Int("num child task", len(t.GetChildTask())))
 	for _, childTask := range t.GetChildTask() {
 		if childTask != nil {
 			log.Debug("add a activate task to activateChan")
@@ -201,6 +202,7 @@ func (scheduler *TaskScheduler) addActivateTask(wg *sync.WaitGroup, t task) {
 			go scheduler.waitActivateTaskDone(&activeTaskWg, childTask)
 		}
 	}
+	scheduler.activateTaskChan <- nil
 	activeTaskWg.Wait()
 }
 
@@ -221,6 +223,9 @@ func (scheduler *TaskScheduler) processActivateTask(wg *sync.WaitGroup) {
 		case <-scheduler.ctx.Done():
 			return
 		case t := <-scheduler.activateTaskChan:
+			if t == nil {
+				return
+			}
 			log.Debug("pop a activate task from activateChan")
 			scheduler.processTask(t)
 			//TODO:: delete active task from etcd

@@ -279,6 +279,8 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_plan_2eproto::offsets[] PROTOB
   ~0u,  // no _weak_field_map_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::ColumnInfo, field_id_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::ColumnInfo, data_type_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::ColumnInfo, is_primary_key_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::ColumnInfo, is_autoid_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::RangeExpr, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -355,15 +357,15 @@ static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOB
   { 0, -1, sizeof(::milvus::proto::plan::GenericValue)},
   { 9, -1, sizeof(::milvus::proto::plan::QueryInfo)},
   { 17, -1, sizeof(::milvus::proto::plan::ColumnInfo)},
-  { 24, -1, sizeof(::milvus::proto::plan::RangeExpr)},
-  { 32, -1, sizeof(::milvus::proto::plan::TermExpr)},
-  { 39, -1, sizeof(::milvus::proto::plan::UnaryExpr)},
-  { 46, -1, sizeof(::milvus::proto::plan::BinaryExpr)},
-  { 54, -1, sizeof(::milvus::proto::plan::Expr)},
-  { 64, -1, sizeof(::milvus::proto::plan::VectorANNS)},
-  { 74, -1, sizeof(::milvus::proto::plan::PlanNode)},
-  { 81, -1, sizeof(::milvus::proto::plan::RetrieveRequest)},
-  { 88, -1, sizeof(::milvus::proto::plan::RetrieveResults)},
+  { 26, -1, sizeof(::milvus::proto::plan::RangeExpr)},
+  { 34, -1, sizeof(::milvus::proto::plan::TermExpr)},
+  { 41, -1, sizeof(::milvus::proto::plan::UnaryExpr)},
+  { 48, -1, sizeof(::milvus::proto::plan::BinaryExpr)},
+  { 56, -1, sizeof(::milvus::proto::plan::Expr)},
+  { 66, -1, sizeof(::milvus::proto::plan::VectorANNS)},
+  { 76, -1, sizeof(::milvus::proto::plan::PlanNode)},
+  { 83, -1, sizeof(::milvus::proto::plan::RetrieveRequest)},
+  { 90, -1, sizeof(::milvus::proto::plan::RetrieveResults)},
 };
 
 static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] = {
@@ -387,45 +389,46 @@ const char descriptor_table_protodef_plan_2eproto[] PROTOBUF_SECTION_VARIABLE(pr
   "\000\022\023\n\tint64_val\030\002 \001(\003H\000\022\023\n\tfloat_val\030\003 \001("
   "\001H\000B\005\n\003val\"E\n\tQueryInfo\022\014\n\004topk\030\001 \001(\003\022\023\n"
   "\013metric_type\030\003 \001(\t\022\025\n\rsearch_params\030\004 \001("
-  "\t\"P\n\nColumnInfo\022\020\n\010field_id\030\001 \001(\003\0220\n\tdat"
+  "\t\"{\n\nColumnInfo\022\020\n\010field_id\030\001 \001(\003\0220\n\tdat"
   "a_type\030\002 \001(\0162\035.milvus.proto.schema.DataT"
-  "ype\"\222\002\n\tRangeExpr\0222\n\013column_info\030\001 \001(\0132\035"
-  ".milvus.proto.plan.ColumnInfo\0220\n\003ops\030\002 \003"
-  "(\0162#.milvus.proto.plan.RangeExpr.OpType\022"
-  "/\n\006values\030\003 \003(\0132\037.milvus.proto.plan.Gene"
-  "ricValue\"n\n\006OpType\022\013\n\007Invalid\020\000\022\017\n\013Great"
-  "erThan\020\001\022\020\n\014GreaterEqual\020\002\022\014\n\010LessThan\020\003"
-  "\022\r\n\tLessEqual\020\004\022\t\n\005Equal\020\005\022\014\n\010NotEqual\020\006"
-  "\"o\n\010TermExpr\0222\n\013column_info\030\001 \001(\0132\035.milv"
-  "us.proto.plan.ColumnInfo\022/\n\006values\030\002 \003(\013"
-  "2\037.milvus.proto.plan.GenericValue\"\206\001\n\tUn"
-  "aryExpr\0220\n\002op\030\001 \001(\0162$.milvus.proto.plan."
-  "UnaryExpr.UnaryOp\022&\n\005child\030\002 \001(\0132\027.milvu"
-  "s.proto.plan.Expr\"\037\n\007UnaryOp\022\013\n\007Invalid\020"
-  "\000\022\007\n\003Not\020\001\"\307\001\n\nBinaryExpr\0222\n\002op\030\001 \001(\0162&."
-  "milvus.proto.plan.BinaryExpr.BinaryOp\022%\n"
-  "\004left\030\002 \001(\0132\027.milvus.proto.plan.Expr\022&\n\005"
-  "right\030\003 \001(\0132\027.milvus.proto.plan.Expr\"6\n\010"
-  "BinaryOp\022\013\n\007Invalid\020\000\022\016\n\nLogicalAnd\020\001\022\r\n"
-  "\tLogicalOr\020\002\"\336\001\n\004Expr\0222\n\nrange_expr\030\001 \001("
-  "\0132\034.milvus.proto.plan.RangeExprH\000\0220\n\tter"
-  "m_expr\030\002 \001(\0132\033.milvus.proto.plan.TermExp"
-  "rH\000\0222\n\nunary_expr\030\003 \001(\0132\034.milvus.proto.p"
-  "lan.UnaryExprH\000\0224\n\013binary_expr\030\004 \001(\0132\035.m"
-  "ilvus.proto.plan.BinaryExprH\000B\006\n\004expr\"\251\001"
-  "\n\nVectorANNS\022\021\n\tis_binary\030\001 \001(\010\022\020\n\010field"
-  "_id\030\002 \001(\003\022+\n\npredicates\030\003 \001(\0132\027.milvus.p"
-  "roto.plan.Expr\0220\n\nquery_info\030\004 \001(\0132\034.mil"
-  "vus.proto.plan.QueryInfo\022\027\n\017placeholder_"
-  "tag\030\005 \001(\t\"H\n\010PlanNode\0224\n\013vector_anns\030\001 \001"
-  "(\0132\035.milvus.proto.plan.VectorANNSH\000B\006\n\004n"
-  "ode\"O\n\017RetrieveRequest\022%\n\003ids\030\001 \001(\0132\030.mi"
-  "lvus.proto.schema.IDs\022\025\n\routput_fields\030\002"
-  " \003(\t\"m\n\017RetrieveResults\022%\n\003ids\030\001 \001(\0132\030.m"
-  "ilvus.proto.schema.IDs\0223\n\013fields_data\030\002 "
-  "\003(\0132\036.milvus.proto.schema.FieldDataB3Z1g"
-  "ithub.com/milvus-io/milvus/internal/prot"
-  "o/planpbb\006proto3"
+  "ype\022\026\n\016is_primary_key\030\003 \001(\010\022\021\n\tis_autoID"
+  "\030\004 \001(\010\"\222\002\n\tRangeExpr\0222\n\013column_info\030\001 \001("
+  "\0132\035.milvus.proto.plan.ColumnInfo\0220\n\003ops\030"
+  "\002 \003(\0162#.milvus.proto.plan.RangeExpr.OpTy"
+  "pe\022/\n\006values\030\003 \003(\0132\037.milvus.proto.plan.G"
+  "enericValue\"n\n\006OpType\022\013\n\007Invalid\020\000\022\017\n\013Gr"
+  "eaterThan\020\001\022\020\n\014GreaterEqual\020\002\022\014\n\010LessTha"
+  "n\020\003\022\r\n\tLessEqual\020\004\022\t\n\005Equal\020\005\022\014\n\010NotEqua"
+  "l\020\006\"o\n\010TermExpr\0222\n\013column_info\030\001 \001(\0132\035.m"
+  "ilvus.proto.plan.ColumnInfo\022/\n\006values\030\002 "
+  "\003(\0132\037.milvus.proto.plan.GenericValue\"\206\001\n"
+  "\tUnaryExpr\0220\n\002op\030\001 \001(\0162$.milvus.proto.pl"
+  "an.UnaryExpr.UnaryOp\022&\n\005child\030\002 \001(\0132\027.mi"
+  "lvus.proto.plan.Expr\"\037\n\007UnaryOp\022\013\n\007Inval"
+  "id\020\000\022\007\n\003Not\020\001\"\307\001\n\nBinaryExpr\0222\n\002op\030\001 \001(\016"
+  "2&.milvus.proto.plan.BinaryExpr.BinaryOp"
+  "\022%\n\004left\030\002 \001(\0132\027.milvus.proto.plan.Expr\022"
+  "&\n\005right\030\003 \001(\0132\027.milvus.proto.plan.Expr\""
+  "6\n\010BinaryOp\022\013\n\007Invalid\020\000\022\016\n\nLogicalAnd\020\001"
+  "\022\r\n\tLogicalOr\020\002\"\336\001\n\004Expr\0222\n\nrange_expr\030\001"
+  " \001(\0132\034.milvus.proto.plan.RangeExprH\000\0220\n\t"
+  "term_expr\030\002 \001(\0132\033.milvus.proto.plan.Term"
+  "ExprH\000\0222\n\nunary_expr\030\003 \001(\0132\034.milvus.prot"
+  "o.plan.UnaryExprH\000\0224\n\013binary_expr\030\004 \001(\0132"
+  "\035.milvus.proto.plan.BinaryExprH\000B\006\n\004expr"
+  "\"\251\001\n\nVectorANNS\022\021\n\tis_binary\030\001 \001(\010\022\020\n\010fi"
+  "eld_id\030\002 \001(\003\022+\n\npredicates\030\003 \001(\0132\027.milvu"
+  "s.proto.plan.Expr\0220\n\nquery_info\030\004 \001(\0132\034."
+  "milvus.proto.plan.QueryInfo\022\027\n\017placehold"
+  "er_tag\030\005 \001(\t\"H\n\010PlanNode\0224\n\013vector_anns\030"
+  "\001 \001(\0132\035.milvus.proto.plan.VectorANNSH\000B\006"
+  "\n\004node\"O\n\017RetrieveRequest\022%\n\003ids\030\001 \001(\0132\030"
+  ".milvus.proto.schema.IDs\022\025\n\routput_field"
+  "s\030\002 \003(\t\"m\n\017RetrieveResults\022%\n\003ids\030\001 \001(\0132"
+  "\030.milvus.proto.schema.IDs\0223\n\013fields_data"
+  "\030\002 \003(\0132\036.milvus.proto.schema.FieldDataB3"
+  "Z1github.com/milvus-io/milvus/internal/p"
+  "roto/planpbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_plan_2eproto_deps[1] = {
   &::descriptor_table_schema_2eproto,
@@ -445,7 +448,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_pla
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_plan_2eproto_once;
 static bool descriptor_table_plan_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_plan_2eproto = {
-  &descriptor_table_plan_2eproto_initialized, descriptor_table_protodef_plan_2eproto, "plan.proto", 1736,
+  &descriptor_table_plan_2eproto_initialized, descriptor_table_protodef_plan_2eproto, "plan.proto", 1779,
   &descriptor_table_plan_2eproto_once, descriptor_table_plan_2eproto_sccs, descriptor_table_plan_2eproto_deps, 10, 1,
   schemas, file_default_instances, TableStruct_plan_2eproto::offsets,
   file_level_metadata_plan_2eproto, 12, file_level_enum_descriptors_plan_2eproto, file_level_service_descriptors_plan_2eproto,
@@ -1314,15 +1317,15 @@ ColumnInfo::ColumnInfo(const ColumnInfo& from)
       _internal_metadata_(nullptr) {
   _internal_metadata_.MergeFrom(from._internal_metadata_);
   ::memcpy(&field_id_, &from.field_id_,
-    static_cast<size_t>(reinterpret_cast<char*>(&data_type_) -
-    reinterpret_cast<char*>(&field_id_)) + sizeof(data_type_));
+    static_cast<size_t>(reinterpret_cast<char*>(&is_autoid_) -
+    reinterpret_cast<char*>(&field_id_)) + sizeof(is_autoid_));
   // @@protoc_insertion_point(copy_constructor:milvus.proto.plan.ColumnInfo)
 }
 
 void ColumnInfo::SharedCtor() {
   ::memset(&field_id_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&data_type_) -
-      reinterpret_cast<char*>(&field_id_)) + sizeof(data_type_));
+      reinterpret_cast<char*>(&is_autoid_) -
+      reinterpret_cast<char*>(&field_id_)) + sizeof(is_autoid_));
 }
 
 ColumnInfo::~ColumnInfo() {
@@ -1349,8 +1352,8 @@ void ColumnInfo::Clear() {
   (void) cached_has_bits;
 
   ::memset(&field_id_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&data_type_) -
-      reinterpret_cast<char*>(&field_id_)) + sizeof(data_type_));
+      reinterpret_cast<char*>(&is_autoid_) -
+      reinterpret_cast<char*>(&field_id_)) + sizeof(is_autoid_));
   _internal_metadata_.Clear();
 }
 
@@ -1375,6 +1378,20 @@ const char* ColumnInfo::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID:
           ::PROTOBUF_NAMESPACE_ID::uint64 val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
           CHK_(ptr);
           set_data_type(static_cast<::milvus::proto::schema::DataType>(val));
+        } else goto handle_unusual;
+        continue;
+      // bool is_primary_key = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 24)) {
+          is_primary_key_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      // bool is_autoID = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 32)) {
+          is_autoid_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
+          CHK_(ptr);
         } else goto handle_unusual;
         continue;
       default: {
@@ -1434,6 +1451,32 @@ bool ColumnInfo::MergePartialFromCodedStream(
         break;
       }
 
+      // bool is_primary_key = 3;
+      case 3: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (24 & 0xFF)) {
+
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
+                   bool, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_BOOL>(
+                 input, &is_primary_key_)));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      // bool is_autoID = 4;
+      case 4: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (32 & 0xFF)) {
+
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
+                   bool, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_BOOL>(
+                 input, &is_autoid_)));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
       default: {
       handle_unusual:
         if (tag == 0) {
@@ -1472,6 +1515,16 @@ void ColumnInfo::SerializeWithCachedSizes(
       2, this->data_type(), output);
   }
 
+  // bool is_primary_key = 3;
+  if (this->is_primary_key() != 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBool(3, this->is_primary_key(), output);
+  }
+
+  // bool is_autoID = 4;
+  if (this->is_autoid() != 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBool(4, this->is_autoid(), output);
+  }
+
   if (_internal_metadata_.have_unknown_fields()) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFields(
         _internal_metadata_.unknown_fields(), output);
@@ -1494,6 +1547,16 @@ void ColumnInfo::SerializeWithCachedSizes(
   if (this->data_type() != 0) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnumToArray(
       2, this->data_type(), target);
+  }
+
+  // bool is_primary_key = 3;
+  if (this->is_primary_key() != 0) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBoolToArray(3, this->is_primary_key(), target);
+  }
+
+  // bool is_autoID = 4;
+  if (this->is_autoid() != 0) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBoolToArray(4, this->is_autoid(), target);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -1530,6 +1593,16 @@ size_t ColumnInfo::ByteSizeLong() const {
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->data_type());
   }
 
+  // bool is_primary_key = 3;
+  if (this->is_primary_key() != 0) {
+    total_size += 1 + 1;
+  }
+
+  // bool is_autoID = 4;
+  if (this->is_autoid() != 0) {
+    total_size += 1 + 1;
+  }
+
   int cached_size = ::PROTOBUF_NAMESPACE_ID::internal::ToCachedSize(total_size);
   SetCachedSize(cached_size);
   return total_size;
@@ -1563,6 +1636,12 @@ void ColumnInfo::MergeFrom(const ColumnInfo& from) {
   if (from.data_type() != 0) {
     set_data_type(from.data_type());
   }
+  if (from.is_primary_key() != 0) {
+    set_is_primary_key(from.is_primary_key());
+  }
+  if (from.is_autoid() != 0) {
+    set_is_autoid(from.is_autoid());
+  }
 }
 
 void ColumnInfo::CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) {
@@ -1588,6 +1667,8 @@ void ColumnInfo::InternalSwap(ColumnInfo* other) {
   _internal_metadata_.Swap(&other->_internal_metadata_);
   swap(field_id_, other->field_id_);
   swap(data_type_, other->data_type_);
+  swap(is_primary_key_, other->is_primary_key_);
+  swap(is_autoid_, other->is_autoid_);
 }
 
 ::PROTOBUF_NAMESPACE_ID::Metadata ColumnInfo::GetMetadata() const {

@@ -110,6 +110,7 @@ func (s *searchCollection) close() {
 }
 
 func (s *searchCollection) register() {
+	//TODO::add collection when collection not exist
 	collection, err := s.streamingReplica.getCollectionByID(s.collectionID)
 	if err != nil {
 		log.Error(err.Error())

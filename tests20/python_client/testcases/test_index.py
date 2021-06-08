@@ -2,7 +2,7 @@ import copy
 import pytest
 from pymilvus_orm import FieldSchema
 
-from base.client_request import ApiReq
+from base.client_base import TestcaseBase
 from base.index_wrapper import ApiIndexWrapper
 from base.collection_wrapper import ApiCollectionWrapper
 from utils.util_log import test_log as log
@@ -16,7 +16,7 @@ default_field_name = ct.default_float_vec_field_name
 default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
 
 
-class TestIndexParams(ApiReq):
+class TestIndexParams(TestcaseBase):
     """ Test case of index interface """
 
     @pytest.fixture(
@@ -174,7 +174,7 @@ class TestIndexParams(ApiReq):
         assert "invalid" or "illegal" in str(ex)
 
 
-class TestIndexBase(ApiReq):
+class TestIndexBase(TestcaseBase):
     """ Test case of index interface """
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -319,7 +319,7 @@ class TestIndexBase(ApiReq):
         assert "error" in ex
 
 
-class TestIndexAdvanced(ApiReq):
+class TestIndexAdvanced(TestcaseBase):
     """ Test case of index interface """
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -336,7 +336,7 @@ class TestIndexAdvanced(ApiReq):
         collection = self._collection(c_name)
         api_collection_2 = ApiCollectionWrapper()
         api_index_2 = ApiIndexWrapper()
-        collection_2 = api_collection_2.collection_init(c_name_2)
+        collection_2 = api_collection_2.init_collection(c_name_2)
         self.index_wrap.index_init(collection, default_field_name, default_index_params, name=index_name)
         index_2, _ = api_index_2.index_init(collection_2, default_field_name, default_index_params, name=index_name)
         self.index_wrap.drop()

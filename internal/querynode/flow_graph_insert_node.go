@@ -128,6 +128,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 }
 
 func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *sync.WaitGroup) {
+	log.Debug("QueryNode::iNode::insert", zap.Any("SegmentID", segmentID))
 	var targetSegment, err = iNode.replica.getSegmentByID(segmentID)
 	if targetSegment.segmentType != segmentTypeGrowing {
 		wg.Done()
@@ -152,7 +153,7 @@ func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *syn
 
 	err = targetSegment.segmentInsert(offsets, &ids, &timestamps, &records)
 	if err != nil {
-		log.Error(err.Error())
+		log.Debug("QueryNode: targetSegmentInsert failed", zap.Error(err))
 		// TODO: add error handling
 		wg.Done()
 		return

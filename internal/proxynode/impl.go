@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -1276,7 +1277,124 @@ func (node *ProxyNode) Flush(ctx context.Context, request *milvuspb.FlushRequest
 }
 
 func (node *ProxyNode) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
-	panic("Not implemented yet")
+	schemaPb, err := globalMetaCache.GetCollectionSchema(ctx, request.CollectionName)
+	if err != nil { // err is not nil if collection not exists
+		return nil, err
+	}
+	schema, err := typeutil.CreateSchemaHelper(schemaPb)
+	if err != nil {
+		return nil, err
+	}
+
+	parseRetrieveTask := func(exprString string) (bool, []int64) {
+		expr, err := parseQueryExpr(schema, exprString)
+		if err != nil {
+			return false, nil
+		}
+
+		switch xExpr := expr.Expr.(type) {
+		case *planpb.Expr_TermExpr:
+			var ids []int64
+			for _, value := range xExpr.TermExpr.Values {
+				switch v := value.Val.(type) {
+				case *planpb.GenericValue_Int64Val:
+					ids = append(ids, v.Int64Val)
+				default:
+					return false, nil
+				}
+			}
+			return xExpr.TermExpr.ColumnInfo.IsPrimaryKey, ids
+		default:
+			return false, nil
+		}
+	}
+
+	isRetrieveTask, ids := parseRetrieveTask(request.Expr)
+
+	if isRetrieveTask {
+		retrieveRequest := &milvuspb.RetrieveRequest{
+			DbName:         request.DbName,
+			CollectionName: request.CollectionName,
+			PartitionNames: request.PartitionNames,
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: ids,
+					},
+				},
+			},
+			OutputFields: request.OutputFields,
+		}
+
+		rt := &RetrieveTask{
+			ctx:       ctx,
+			Condition: NewTaskCondition(ctx),
+			RetrieveRequest: &internalpb.RetrieveRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Retrieve,
+					SourceID: Params.ProxyID,
+				},
+				ResultChannelID: strconv.FormatInt(Params.ProxyID, 10),
+			},
+			queryMsgStream: node.queryMsgStream,
+			resultBuf:      make(chan []*internalpb.RetrieveResults),
+			retrieve:       retrieveRequest,
+		}
+
+		err := node.sched.DqQueue.Enqueue(rt)
+		if err != nil {
+			return &milvuspb.QueryResults{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+			}, nil
+		}
+
+		log.Debug("Retrieve",
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", rt.Base.MsgID),
+			zap.Uint64("timestamp", rt.Base.Timestamp),
+			zap.String("db", retrieveRequest.DbName),
+			zap.String("collection", retrieveRequest.CollectionName),
+			zap.Any("partitions", retrieveRequest.PartitionNames),
+			zap.Any("len(Ids)", len(retrieveRequest.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data)))
+		defer func() {
+			log.Debug("Retrieve Done",
+				zap.Error(err),
+				zap.String("role", Params.RoleName),
+				zap.Int64("msgID", rt.Base.MsgID),
+				zap.Uint64("timestamp", rt.Base.Timestamp),
+				zap.String("db", retrieveRequest.DbName),
+				zap.String("collection", retrieveRequest.CollectionName),
+				zap.Any("partitions", retrieveRequest.PartitionNames),
+				zap.Any("len(Ids)", len(retrieveRequest.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data)))
+		}()
+
+		err = rt.WaitToFinish()
+		if err != nil {
+			return &milvuspb.QueryResults{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+			}, nil
+		}
+
+		return &milvuspb.QueryResults{
+			Status:     rt.result.Status,
+			FieldsData: rt.result.FieldsData,
+		}, nil
+	}
+
+	err = errors.New("Not implemented")
+	return &milvuspb.QueryResults{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		},
+	}, nil
+
 }
 
 func (node *ProxyNode) GetDdChannel(ctx context.Context, request *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {

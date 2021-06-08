@@ -148,6 +148,8 @@ func (c *queryNodeCluster) hasWatchedQueryChannel(ctx context.Context, nodeID in
 	c.Lock()
 	defer c.Unlock()
 
+	//TODO::should reopen
+	collectionID = 0
 	return c.nodes[nodeID].hasWatchedQueryChannel(collectionID)
 }
 
@@ -157,7 +159,9 @@ func (c *queryNodeCluster) AddQueryChannel(ctx context.Context, nodeID int64, in
 	if node, ok := c.nodes[nodeID]; ok {
 		status, err := node.client.AddQueryChannel(ctx, in)
 		if err == nil && status.ErrorCode == commonpb.ErrorCode_Success {
-			collectionID := in.CollectionID
+			//TODO::should reopen
+			//collectionID := in.CollectionID
+			collectionID := int64(0)
 			if queryChannelInfo, ok := c.clusterMeta.queryChannelInfos[collectionID]; ok {
 				node.addQueryChannel(collectionID, queryChannelInfo)
 				return status, err
@@ -176,7 +180,9 @@ func (c *queryNodeCluster) removeQueryChannel(ctx context.Context, nodeID int64,
 	if node, ok := c.nodes[nodeID]; ok {
 		status, err := node.client.RemoveQueryChannel(ctx, in)
 		if err == nil && status.ErrorCode == commonpb.ErrorCode_Success {
-			collectionID := in.CollectionID
+			//TODO::should reopen
+			//collectionID := in.CollectionID
+			collectionID := int64(0)
 			if _, ok = node.watchedQueryChannels[collectionID]; ok {
 				node.removeQueryChannel(collectionID)
 				return status, err
