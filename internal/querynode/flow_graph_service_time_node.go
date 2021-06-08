@@ -13,6 +13,7 @@ package querynode
 
 import (
 	"context"
+	"strconv"
 
 	"go.uber.org/zap"
 
@@ -66,12 +67,13 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	} else {
 		id = stNode.collectionID
 	}
-	stNode.tSafeReplica.setTSafe(stNode.vChannel, id, serviceTimeMsg.timeRange.timestampMax)
+	channelTmp := stNode.vChannel + strconv.FormatInt(stNode.collectionID, 10)
+	stNode.tSafeReplica.setTSafe(channelTmp, id, serviceTimeMsg.timeRange.timestampMax)
 	log.Debug("update tSafe:",
 		zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)),
 		zap.Any("collectionID", stNode.collectionID),
 		zap.Any("id", id),
-		zap.Any("channel", stNode.vChannel),
+		zap.Any("channel", channelTmp),
 	)
 
 	if err := stNode.sendTimeTick(serviceTimeMsg.timeRange.timestampMax); err != nil {

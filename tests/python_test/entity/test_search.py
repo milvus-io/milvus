@@ -275,10 +275,10 @@ class TestSearchBase:
         query, vecs = gen_query_vectors(field_name, entities, top_k, nq, search_params=search_param)
         if top_k > max_top_k:
             with pytest.raises(Exception) as e:
-                res = connect.search(collection, query)
+                res = connect.search(collection, query, timeout=60)
         else:
             connect.load_collection(collection)
-            res = connect.search(collection, query)
+            res = connect.search(collection, query, timeout=60)
             assert len(res) == nq
             assert len(res[0]) >= top_k
             assert res[0]._distances[0] < epsilon

@@ -14,6 +14,7 @@ package querynode
 import (
 	"context"
 	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
 	"math"
 	"sync"
 )
@@ -103,7 +104,14 @@ func (ts *tSafe) start() {
 				for _, watcher := range ts.watcherList {
 					watcher.notify()
 				}
-				//log.Debug("set tSafe done", zap.Any("id", m.id), zap.Any("t", m.t))
+
+				// TODO: remove
+				ts.tSafe = m.t
+
+				log.Debug("set tSafe done",
+					zap.Any("id", m.id),
+					zap.Any("t", m.t),
+					zap.Any("tSafe", ts.tSafe))
 				ts.tSafeMu.Unlock()
 			}
 		}

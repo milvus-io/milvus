@@ -352,9 +352,13 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 			tempMsg := s.popAllUnsolvedMsg()
 
 			for _, sm := range tempMsg {
+				bt, _ := tsoutil.ParseTS(sm.EndTs())
+				st, _ := tsoutil.ParseTS(serviceTime)
 				log.Debug("get search message from unsolvedMsg",
 					zap.Int64("msgID", sm.ID()),
-					zap.Int64("collectionID", sm.CollectionID))
+					zap.Int64("collectionID", sm.CollectionID),
+					zap.Any("reqTime", bt),
+					zap.Any("serviceTime", st))
 				if sm.EndTs() <= serviceTime {
 					searchMsg = append(searchMsg, sm)
 					continue

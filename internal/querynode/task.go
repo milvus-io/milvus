@@ -114,8 +114,11 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 
 	// get all channels
 	vChannels := make([]string, 0)
+	// TODO: remove tmp
+	vChannelsTmp := make([]string, 0)
 	for _, info := range w.req.Infos {
 		vChannels = append(vChannels, info.ChannelName)
+		vChannelsTmp = append(vChannelsTmp, info.ChannelName + strconv.FormatInt(collectionID, 10))
 	}
 	log.Debug("starting WatchDmChannels ...", zap.String("ChannelIDs", fmt.Sprintln(vChannels)))
 
@@ -130,7 +133,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		collection.addWatchedDmChannels(vChannels)
+		collection.addWatchedDmChannels(vChannelsTmp)
 	}
 	if loadPartition {
 		if hasPartitionInStreaming := w.node.streaming.replica.hasPartition(partitionID); !hasPartitionInStreaming {
@@ -175,7 +178,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	log.Debug("watchDMChannel, add check points info done", zap.Any("collectionID", collectionID))
 
 	// create tSafe
-	for _, channel := range vChannels {
+	for _, channel := range vChannelsTmp {
 		w.node.streaming.tSafeReplica.addTSafe(channel)
 	}
 
