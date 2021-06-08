@@ -52,9 +52,9 @@ class ResponseChecker:
         assert actual is False
         assert len(error_dict) > 0
         if isinstance(res, Error):
-            err_code = error_dict["err_code"]
-            assert res.code == err_code or ErrorMessage[err_code] in res.message
-            # assert res.code == error_dict["err_code"] or error_dict["err_msg"] in res.message
+            # err_code = error_dict["err_code"]
+            # assert res.code == err_code or ErrorMessage[err_code] in res.message
+            assert res.code == error_dict["err_code"] or error_dict["err_msg"] in res.message
         else:
             log.error("[CheckFunc] Response of API is not an error: %s" % str(res))
             assert False
@@ -83,9 +83,13 @@ class ResponseChecker:
             log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
         if not isinstance(collection, Collection):
             raise Exception("The result to check isn't collection type object")
-        assert collection.name == check_items["name"]
-        assert collection.description == check_items["schema"].description
-        assert collection.schema == check_items["schema"]
+        if len(check_items) == 0:
+            raise Exception("No expect values found in the check task")
+        if check_items.get("name", None):
+            assert collection.name == check_items["name"]
+        if check_items.get("schema", None):
+            assert collection.description == check_items["schema"].description
+            assert collection.schema == check_items["schema"]
         return True
 
     @staticmethod
@@ -97,13 +101,13 @@ class ResponseChecker:
             raise Exception("The result to check isn't partition type object")
         if len(check_items) == 0:
             raise Exception("No expect values found in the check task")
-        if check_items["name"]:
+        if check_items.get("name", None):
             assert partition.name == check_items["name"]
-        if check_items["description"]:
+        if check_items.get("description", None):
             assert partition.description == check_items["description"]
-        if check_items["is_empty"]:
+        if check_items.get("is_empty", None):
             assert partition.is_empty == check_items["is_empty"]
-        if check_items["num_entities"]:
+        if check_items.get("num_entities", None):
             assert partition.num_entities == check_items["num_entities"]
         return True
 
