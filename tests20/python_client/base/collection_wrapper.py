@@ -135,6 +135,13 @@ class ApiCollectionWrapper:
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, partition_name=partition_name, **kwargs).run()
         return res, check_result
 
+    def create_partition(self, partition_name, check_res=None, check_params=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.collection.create_partition, partition_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_res, check_params, check,
+                                       partition_name=partition_name, **kwargs).run()
+        return res, check_result
+
     @property
     def indexes(self, check_task=None, check_items=None):
         return self.collection.indexes
