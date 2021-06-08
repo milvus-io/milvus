@@ -97,18 +97,18 @@ func NewIndexService(ctx context.Context) (*IndexService, error) {
 
 // Register register index service at etcd
 func (i *IndexService) Register() error {
-	i.session = sessionutil.NewSession(i.loopCtx, Params.MetaRootPath, []string{Params.EtcdAddress})
+	i.session = sessionutil.NewSession(i.loopCtx, Params.MetaRootPath, Params.EtcdAddress)
 	i.session.Init(typeutil.IndexServiceRole, Params.Address, true)
 	i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, 0)
 	return nil
 }
 
 func (i *IndexService) Init() error {
-	log.Debug("indexservice", zap.String("etcd address", Params.EtcdAddress))
+	log.Debug("indexservice", zap.Any("etcd address", Params.EtcdAddress))
 
 	i.assignChan = make(chan []UniqueID, 1024)
 	connectEtcdFn := func() error {
-		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
+		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdAddress})
 		if err != nil {
 			return err
 		}
@@ -127,7 +127,7 @@ func (i *IndexService) Init() error {
 
 	//init idAllocator
 	kvRootPath := Params.KvRootPath
-	i.idAllocator = allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{Params.EtcdAddress}, kvRootPath, "index_gid"))
+	i.idAllocator = allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(Params.EtcdAddress, kvRootPath, "index_gid"))
 	if err := i.idAllocator.Initialize(); err != nil {
 		return err
 	}

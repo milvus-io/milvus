@@ -14,6 +14,7 @@ package indexservice
 import (
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -28,7 +29,7 @@ type ParamTable struct {
 
 	MasterAddress string
 
-	EtcdAddress  string
+	EtcdAddress  []string
 	KvRootPath   string
 	MetaRootPath string
 
@@ -65,7 +66,7 @@ func (pt *ParamTable) initEtcdAddress() {
 	if err != nil {
 		panic(err)
 	}
-	pt.EtcdAddress = addr
+	pt.EtcdAddress = strings.Split(addr, ",")
 }
 
 func (pt *ParamTable) initMetaRootPath() {
