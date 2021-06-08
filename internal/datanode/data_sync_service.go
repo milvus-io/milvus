@@ -60,6 +60,7 @@ func newDataSyncService(ctx context.Context,
 		idAllocator:  alloc,
 		msFactory:    factory,
 		collectionID: vchan.GetCollectionID(),
+		dataService:  dataService,
 	}
 
 	service.initNodes(vchan)
