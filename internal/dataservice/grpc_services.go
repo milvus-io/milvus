@@ -194,7 +194,7 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
 	}
-	p := path.Join(Params.SegmentBinlogSubPath, strconv.FormatInt(req.SegmentID, 10))
+	p := path.Join(Params.SegmentBinlogSubPath, strconv.FormatInt(req.SegmentID, 10)) + "/" // prefix/id/ instead of prefix/id
 	_, values, err := s.kvClient.LoadWithPrefix(p)
 	if err != nil {
 		resp.Status.Reason = err.Error()

@@ -30,7 +30,7 @@ type cluster struct {
 	startupPolicy    clusterStartupPolicy
 	registerPolicy   dataNodeRegisterPolicy
 	unregisterPolicy dataNodeUnregisterPolicy
-	assginPolicy     channelAssignPolicy
+	assignPolicy     channelAssignPolicy
 }
 
 type clusterOption struct {
@@ -57,7 +57,7 @@ func withUnregistorPolicy(p dataNodeUnregisterPolicy) clusterOption {
 
 func withAssignPolicy(p channelAssignPolicy) clusterOption {
 	return clusterOption{
-		apply: func(c *cluster) { c.assginPolicy = p },
+		apply: func(c *cluster) { c.assignPolicy = p },
 	}
 }
 
@@ -86,7 +86,7 @@ func newCluster(ctx context.Context, dataManager *clusterNodeManager, sessionMan
 		startupPolicy:    defaultStartupPolicy(),
 		registerPolicy:   defaultRegisterPolicy(),
 		unregisterPolicy: defaultUnregisterPolicy(),
-		assginPolicy:     defaultAssignPolicy(),
+		assignPolicy:     defaultAssignPolicy(),
 	}
 	for _, opt := range opts {
 		opt.apply(c)
@@ -180,7 +180,7 @@ func (c *cluster) watchIfNeeded(channel string, collectionID UniqueID) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	cNodes := c.dataManager.getDataNodes(true)
-	rets := c.assginPolicy.apply(cNodes, channel, collectionID)
+	rets := c.assignPolicy.apply(cNodes, channel, collectionID)
 	c.dataManager.updateDataNodes(rets)
 	rets = c.watch(rets)
 	c.dataManager.updateDataNodes(rets)
