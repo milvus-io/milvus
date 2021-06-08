@@ -1485,6 +1485,8 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
 
+		core.dmlChannels.AddProducerChannels("c0", "c1", "c2")
+
 		msg0 := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_TimeTick,
