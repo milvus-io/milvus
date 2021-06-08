@@ -1,9 +1,22 @@
 --extra-index-url https://test.pypi.org/simple/
-pytest==5.3.4
-sklearn==0.0
+grpcio==1.26.0
+grpcio-tools==1.26.0
 numpy==1.18.1
-pandas
-numpy
-pytest-html==3.1.1
+pytest-cov==2.8.1
+sklearn==0.0
+pytest==6.2.2
+pytest-timeout==1.3.3
+pytest-repeat==0.8.0
+allure-pytest==2.7.0
+pytest-print==0.2.1
+pytest-level==0.1.1
+pytest-xdist==2.2.1
+pymilvus==2.0a1.dev22
+pytest-rerunfailures==9.1.1
 git+https://github.com/Projectplace/pytest-tags
+ndg-httpsclient
+pyopenssl
+pyasn1
+pandas
+pytest-html==3.1.1
 pymilvus-orm==2.0a1.dev17
