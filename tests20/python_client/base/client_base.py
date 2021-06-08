@@ -98,8 +98,11 @@ class TestcaseBase(Base):
     def _connect(self):
         """ Add an connection and create the connect """
         self.connection_wrap.add_connection(default={"host": param_info.param_host, "port": param_info.param_port})
-        res, _ = self.connection_wrap.connect(alias='default')
+        res, is_succ = self.connection_wrap.connect(alias='default')
+        if not is_succ:
+            raise res
         return res
+
     '''
     def _collection(self, **kwargs):
         """ Init a collection and return the object of collection """
@@ -121,7 +124,7 @@ class TestcaseBase(Base):
                                      check_task=check_task, **kwargs)
         return collection_w
 
-    def init_partition_wrap(self, collection_wrap, name=None, description=None,
+    def init_partition_wrap(self, collection_wrap=None, name=None, description=None,
                             check_task=None, check_items=None, **kwargs):
         name = cf.gen_unique_str("partition_") if name is None else name
         description = cf.gen_unique_str("partition_des_") if description is None else description

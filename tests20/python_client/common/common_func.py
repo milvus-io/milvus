@@ -22,6 +22,10 @@ def gen_unique_str(str_value=None):
     return "test_" + prefix if str_value is None else str_value + "_" + prefix
 
 
+def gen_str_by_length(length=8):
+    return "".join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
+
+
 def gen_int64_field(name=ct.default_int64_field_name, is_primary=False, description=ct.default_desc):
     int64_field = FieldSchema(name=name, dtype=DataType.INT64, description=description, is_primary=is_primary)
     return int64_field
