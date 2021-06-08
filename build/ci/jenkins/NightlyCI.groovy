@@ -25,6 +25,10 @@ pipeline {
                         name 'MILVUS_SERVER_TYPE'
                         values 'standalone', 'distributed'
                     }
+                    axis {
+                        name 'MILVUS_CLIENT'
+                        values 'pymilvus', 'pymilvus-orm'
+                    }
                 }
                 agent {
                     kubernetes {
@@ -41,6 +45,7 @@ pipeline {
                     IMAGE_REPO = "dockerhub-mirror-sh.zilliz.cc/milvusdb"
                     DOCKER_BUILDKIT = 1
                     ARTIFACTS = "${env.WORKSPACE}/artifacts"
+                    MILVUS_PYTEST_LOG_PATH = "/milvus/artifacts/pytest_logs"
                     DOCKER_CREDENTIALS_ID = "ba070c98-c8cc-4f7c-b657-897715f359fc"
                     DOKCER_REGISTRY_URL = "registry.zilliz.com"
                     TARGET_REPO = "${DOKCER_REGISTRY_URL}/milvus"
@@ -56,7 +61,13 @@ pipeline {
                                             standaloneEnabled = "false"
                                         }
 
-                                        sh "MILVUS_STANDALONE_ENABLED=${standaloneEnabled} ./e2e-k8s.sh --node-image registry.zilliz.com/kindest/node:v1.20.2"
+                                        if ("${MILVUS_CLIENT}" == "pymilvus") {
+                                            sh "MILVUS_STANDALONE_ENABLED=${standaloneEnabled} ./e2e-k8s.sh --node-image registry.zilliz.com/kindest/node:v1.20.2"
+                                        } else if ("${MILVUS_CLIENT}" == "pymilvus-orm") {
+                                            sh "MILVUS_STANDALONE_ENABLED=${standaloneEnabled} ./e2e-k8s.sh --node-image registry.zilliz.com/kindest/node:v1.20.2 --test-extra-arg \"--tags L2\""
+                                        } else {
+                                            error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"
+                                        }
                                     }
                                 }
                             }
@@ -95,6 +106,7 @@ pipeline {
                                 dir("${env.ARTIFACTS}") {
                                     sh "find ./kind -path '*/history/*' -type f | xargs tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-e2e-nightly-logs.tar.gz --transform='s:^[^/]*/[^/]*/[^/]*/[^/]*/::g' || true"
                                     archiveArtifacts artifacts: "**.tar.gz", allowEmptyArchive: true
+                                    archiveArtifacts artifacts: "pytest_logs/**", allowEmptyArchive: true
                                     sh 'rm -rf ./*'
                                     sh 'docker rm -f \$(docker network inspect -f \'{{ range \$key, \$value := .Containers }}{{ printf "%s " \$key}}{{ end }}\' kind) || true'
                                     sh 'docker network rm kind 2>&1 > /dev/null || true'

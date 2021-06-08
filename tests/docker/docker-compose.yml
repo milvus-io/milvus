@@ -10,11 +10,12 @@ services:
         - ${IMAGE_REPO}/pytest:latest
     shm_size: 2G
     environment:
-      SERVICE_IP: ${SERVICE_IP}
-      SERVICE_PORT: ${SERVICE_PORT}
+      MILVUS_SERVICE_IP: ${MILVUS_SERVICE_IP}
+      MILVUS_SERVICE_PORT: ${MILVUS_SERVICE_PORT}
+      CI_LOG_PATH: ${MILVUS_PYTEST_LOG_PATH}
     volumes:
       - ../../:/milvus:delegated
-    working_dir: "/milvus"
+    working_dir: ${MILVUS_PYTEST_WORKSPACE}
 
 networks:
   default:
