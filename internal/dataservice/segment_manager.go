@@ -190,9 +190,10 @@ func newSegmentManager(meta *meta, allocator allocator, opts ...allocOption) *Se
 }
 
 func (s *SegmentManager) loadSegmentsFromMeta() {
-	// load unflushed segments from meta
 	segments := s.meta.GetUnFlushedSegments()
+	ids := make([]UniqueID, 0, len(segments))
 	for _, seg := range segments {
+		ids = append(ids, seg.ID)
 		stat := &segmentStatus{
 			id:             seg.ID,
 			collectionID:   seg.CollectionID,
@@ -205,6 +206,7 @@ func (s *SegmentManager) loadSegmentsFromMeta() {
 		}
 		s.stats[seg.ID] = stat
 	}
+	log.Debug("Restore segment allocation", zap.Int64s("segments", ids))
 }
 func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID,
 	partitionID UniqueID, channelName string, requestRows int64) (segID UniqueID, retCount int64, expireTime Timestamp, err error) {

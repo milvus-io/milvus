@@ -53,14 +53,14 @@ type dataNodeRegisterPolicy interface {
 	apply(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo) []*datapb.DataNodeInfo
 }
 
-type doNothingRegisterPolicy struct {
+type emptyRegisterPolicy struct {
 }
 
-func newDoNothingRegisterPolicy() dataNodeRegisterPolicy {
-	return &doNothingRegisterPolicy{}
+func newEmptyRegisterPolicy() dataNodeRegisterPolicy {
+	return &emptyRegisterPolicy{}
 }
 
-func (p *doNothingRegisterPolicy) apply(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo) []*datapb.DataNodeInfo {
+func (p *emptyRegisterPolicy) apply(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo) []*datapb.DataNodeInfo {
 	return []*datapb.DataNodeInfo{session}
 }
 
@@ -69,14 +69,14 @@ type dataNodeUnregisterPolicy interface {
 	apply(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo) []*datapb.DataNodeInfo
 }
 
-type doNothingUnregisterPolicy struct {
+type emptyUnregisterPolicy struct {
 }
 
-func newDoNothingUnregisterPolicy() dataNodeUnregisterPolicy {
-	return &doNothingUnregisterPolicy{}
+func newEmptyUnregisterPolicy() dataNodeUnregisterPolicy {
+	return &emptyUnregisterPolicy{}
 }
 
-func (p *doNothingUnregisterPolicy) apply(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo) []*datapb.DataNodeInfo {
+func (p *emptyUnregisterPolicy) apply(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo) []*datapb.DataNodeInfo {
 	return nil
 }
 

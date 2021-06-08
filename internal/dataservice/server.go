@@ -532,13 +532,6 @@ func (s *Server) prepareBinlog(req *datapb.SaveBinlogPathsRequest) (map[string]s
 		}
 	}
 
-	//ddlMeta, err := s.prepareDDLBinlogMeta(req.CollectionID, req.GetDdlBinlogPaths())
-	//if err != nil {
-	//return nil, err
-	//}
-	//for k, v := range ddlMeta {
-	//meta[k] = v
-	//}
 	return meta, nil
 }
 

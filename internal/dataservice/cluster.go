@@ -66,11 +66,11 @@ func defaultStartupPolicy() clusterStartupPolicy {
 }
 
 func defaultRegisterPolicy() dataNodeRegisterPolicy {
-	return newDoNothingRegisterPolicy()
+	return newEmptyRegisterPolicy()
 }
 
 func defaultUnregisterPolicy() dataNodeUnregisterPolicy {
-	return newDoNothingUnregisterPolicy()
+	return newEmptyUnregisterPolicy()
 }
 
 func defaultAssignPolicy() channelAssignPolicy {

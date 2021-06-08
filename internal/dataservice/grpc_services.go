@@ -372,7 +372,8 @@ func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
 	collectionID := req.GetCollectionID()
 	partitionID := req.GetPartitionID()
-	log.Info("Receive get recovery info request", zap.Int64("collectionID", collectionID),
+	log.Info("Receive get recovery info request",
+		zap.Int64("collectionID", collectionID),
 		zap.Int64("partitionID", partitionID))
 	resp := &datapb.GetRecoveryInfoResponse{
 		Status: &commonpb.Status{
@@ -438,7 +439,8 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 
 	channelInfos, err := s.GetVChanPositions(vchans)
 	if err != nil {
-		log.Error("Get channel positions failed", zap.Strings("channels", channels),
+		log.Error("Get channel positions failed",
+			zap.Strings("channels", channels),
 			zap.Error(err))
 		resp.Status.Reason = err.Error()
 		return resp, nil
