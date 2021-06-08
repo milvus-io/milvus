@@ -21,6 +21,10 @@ def gen_unique_str(str_value=None):
     return "test_" + prefix if str_value is None else str_value + "_" + prefix
 
 
+def gen_str_by_length(length=8):
+    return "".join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
+
+
 def gen_int64_field(name=ct.default_int64_field_name, is_primary=False, description=ct.default_desc):
     int64_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.INT64, description=description,
                                                                is_primary=is_primary)
@@ -230,4 +234,4 @@ def modify_file(file_path_list, is_modify=False, input_content=""):
                     f.truncate()
                     f.write(input_content)
                     f.close()
-                log.info("[modify_file] File(%s) modification is complete." % file_path_list)
+                log.info("[modify_file] file(%s) modification is complete." % file_path_list)
