@@ -65,6 +65,7 @@ func (sService *statsService) start() {
 	for {
 		select {
 		case <-sService.ctx.Done():
+			log.Debug("stats service closed")
 			return
 		case <-time.After(time.Duration(sleepTimeInterval) * time.Millisecond):
 			sService.publicStatistic(nil)

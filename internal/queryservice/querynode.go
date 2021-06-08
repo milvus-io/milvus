@@ -132,6 +132,8 @@ func (qn *queryNode) releaseCollection(collectionID UniqueID) {
 	if _, ok := qn.collectionInfos[collectionID]; ok {
 		delete(qn.collectionInfos, collectionID)
 	}
+	//TODO::should reopen
+	collectionID = 0
 	if _, ok := qn.watchedQueryChannels[collectionID]; ok {
 		delete(qn.watchedQueryChannels, collectionID)
 	}

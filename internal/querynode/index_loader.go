@@ -297,7 +297,6 @@ func (loader *indexLoader) setIndexInfo(collectionID UniqueID, segment *Segment,
 	if err != nil {
 		return err
 	}
-	log.Debug("QueryNode IndexLoader setIndexInfo", zap.Any("Req", req), zap.Any("response", response))
 	if response.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(response.Status.Reason)
 	}
@@ -377,7 +376,7 @@ func newIndexLoader(ctx context.Context, masterService types.MasterService, inde
 		replica: replica,
 
 		fieldIndexes:   make(map[string][]*internalpb.IndexStats),
-		fieldStatsChan: make(chan []*internalpb.FieldStats, 1),
+		fieldStatsChan: make(chan []*internalpb.FieldStats, 1024),
 
 		masterService: masterService,
 		indexService:  indexService,
