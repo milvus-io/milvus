@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 
 	"go.uber.org/zap"
@@ -42,7 +43,7 @@ type ParamTable struct {
 
 	MasterAddress string
 
-	EtcdAddress  string
+	EtcdAddress  []string
 	MetaRootPath string
 
 	MinIOAddress         string
@@ -164,7 +165,7 @@ func (pt *ParamTable) initEtcdAddress() {
 	if err != nil {
 		panic(err)
 	}
-	pt.EtcdAddress = addr
+	pt.EtcdAddress = strings.Split(addr, ",")
 }
 
 func (pt *ParamTable) initMetaRootPath() {
