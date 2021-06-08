@@ -16,6 +16,7 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -26,7 +27,7 @@ type ParamTable struct {
 	paramtable.BaseTable
 
 	PulsarAddress string
-	EtcdAddress   string
+	EtcdAddress   []string
 	MetaRootPath  string
 
 	QueryNodeIP              string
@@ -235,11 +236,11 @@ func (p *ParamTable) initSearchResultReceiveBufSize() {
 }
 
 func (p *ParamTable) initEtcdAddress() {
-	EtcdAddress, err := p.Load("_EtcdAddress")
+	addr, err := p.Load("_EtcdAddress")
 	if err != nil {
 		panic(err)
 	}
-	p.EtcdAddress = EtcdAddress
+	p.EtcdAddress = strings.Split(addr, ",")
 }
 
 func (p *ParamTable) initMetaRootPath() {
