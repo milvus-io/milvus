@@ -122,7 +122,7 @@ func (p *ParamTable) Init() {
 		p.initSearchResultReceiveBufSize()
 
 		p.initStatsPublishInterval()
-		//p.initStatsChannelName()
+		p.initStatsChannelName()
 
 		p.initLogCfg()
 	})
