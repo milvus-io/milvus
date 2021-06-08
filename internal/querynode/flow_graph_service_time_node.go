@@ -18,8 +18,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
@@ -28,7 +26,7 @@ type serviceTimeNode struct {
 	collectionID      UniqueID
 	vChannel          VChannel
 	tSafeReplica      TSafeReplicaInterface
-	timeTickMsgStream msgstream.MsgStream
+	//timeTickMsgStream msgstream.MsgStream
 }
 
 func (stNode *serviceTimeNode) Name() string {
@@ -36,7 +34,7 @@ func (stNode *serviceTimeNode) Name() string {
 }
 
 func (stNode *serviceTimeNode) Close() {
-	stNode.timeTickMsgStream.Close()
+	//stNode.timeTickMsgStream.Close()
 }
 
 func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
@@ -64,9 +62,9 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	//	zap.Any("collectionID", stNode.collectionID),
 	//)
 
-	if err := stNode.sendTimeTick(serviceTimeMsg.timeRange.timestampMax); err != nil {
-		log.Error("Error: send time tick into pulsar channel failed", zap.Error(err))
-	}
+	//if err := stNode.sendTimeTick(serviceTimeMsg.timeRange.timestampMax); err != nil {
+	//	log.Error("Error: send time tick into pulsar channel failed", zap.Error(err))
+	//}
 
 	var res Msg = &gcMsg{
 		gcRecord:  serviceTimeMsg.gcRecord,
@@ -75,26 +73,26 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	return []Msg{res}
 }
 
-func (stNode *serviceTimeNode) sendTimeTick(ts Timestamp) error {
-	msgPack := msgstream.MsgPack{}
-	timeTickMsg := msgstream.TimeTickMsg{
-		BaseMsg: msgstream.BaseMsg{
-			BeginTimestamp: ts,
-			EndTimestamp:   ts,
-			HashValues:     []uint32{0},
-		},
-		TimeTickMsg: internalpb.TimeTickMsg{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_TimeTick,
-				MsgID:     0,
-				Timestamp: ts,
-				SourceID:  Params.QueryNodeID,
-			},
-		},
-	}
-	msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
-	return stNode.timeTickMsgStream.Produce(&msgPack)
-}
+//func (stNode *serviceTimeNode) sendTimeTick(ts Timestamp) error {
+//	msgPack := msgstream.MsgPack{}
+//	timeTickMsg := msgstream.TimeTickMsg{
+//		BaseMsg: msgstream.BaseMsg{
+//			BeginTimestamp: ts,
+//			EndTimestamp:   ts,
+//			HashValues:     []uint32{0},
+//		},
+//		TimeTickMsg: internalpb.TimeTickMsg{
+//			Base: &commonpb.MsgBase{
+//				MsgType:   commonpb.MsgType_TimeTick,
+//				MsgID:     0,
+//				Timestamp: ts,
+//				SourceID:  Params.QueryNodeID,
+//			},
+//		},
+//	}
+//	msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
+//	return stNode.timeTickMsgStream.Produce(&msgPack)
+//}
 
 func newServiceTimeNode(ctx context.Context,
 	tSafeReplica TSafeReplicaInterface,
@@ -109,19 +107,19 @@ func newServiceTimeNode(ctx context.Context,
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
-	timeTimeMsgStream, err := factory.NewMsgStream(ctx)
-	if err != nil {
-		log.Error(err.Error())
-	} else {
-		timeTimeMsgStream.AsProducer([]string{Params.QueryTimeTickChannelName})
-		log.Debug("query node AsProducer: " + Params.QueryTimeTickChannelName)
-	}
+	//timeTimeMsgStream, err := factory.NewMsgStream(ctx)
+	//if err != nil {
+	//	log.Error(err.Error())
+	//} else {
+	//	timeTimeMsgStream.AsProducer([]string{Params.QueryTimeTickChannelName})
+	//	log.Debug("query node AsProducer: " + Params.QueryTimeTickChannelName)
+	//}
 
 	return &serviceTimeNode{
 		baseNode:          baseNode,
 		collectionID:      collectionID,
 		vChannel:          channel,
 		tSafeReplica:      tSafeReplica,
-		timeTickMsgStream: timeTimeMsgStream,
+		//timeTickMsgStream: timeTimeMsgStream,
 	}
 }
