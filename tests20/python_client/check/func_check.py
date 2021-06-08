@@ -6,14 +6,14 @@ from utils.api_request import Error
 
 
 class ResponseChecker:
-    def __init__(self, response, func_name, check_task, check_params, is_succ=True, **kwargs):
+    def __init__(self, response, func_name, check_task, check_items, is_succ=True, **kwargs):
         self.response = response            # response of api request
         self.func_name = func_name          # api function name
         self.check_task = check_task        # task to check response of the api request
-        self.check_items = check_params    # check items and expectations that to be checked in check task
+        self.check_items = check_items    # check items and expectations that to be checked in check task
         self.succ = is_succ                 # api responses successful or not
 
-        self.kwargs_dict = {}       # not used for now, just for extantion
+        self.kwargs_dict = {}       # not used for now, just for extension
         for key, value in kwargs.items():
             self.kwargs_dict[key] = value
         self.keys = self.kwargs_dict.keys()
@@ -33,10 +33,10 @@ class ResponseChecker:
             result = self.check_list_count(self.response, self.func_name, self.check_items)
 
         elif self.check_task == CheckTasks.check_collection_property:
-            result = self.check_collection_property(self.response, self.func_name, self.kwargs_dict)
+            result = self.check_collection_property(self.response, self.func_name, self.check_items)
 
         elif self.check_task == CheckTasks.check_partition_property:
-            result = self.check_partition_property(self.response, self.func_name, self.kwargs_dict)
+            result = self.check_partition_property(self.response, self.func_name, self.check_items)
 
         # Add check_items here if something new need verify
 
@@ -52,9 +52,9 @@ class ResponseChecker:
         assert actual is False
         assert len(error_dict) > 0
         if isinstance(res, Error):
-            err_code = error_dict["err_code"]
-            assert res.code == err_code or ErrorMessage[err_code] in res.message
-            # assert res.code == error_dict["err_code"] or error_dict["err_msg"] in res.message
+            # err_code = error_dict["err_code"]
+            # assert res.code == err_code or ErrorMessage[err_code] in res.message
+            assert res.code == error_dict["err_code"] or error_dict["err_msg"] in res.message
         else:
             log.error("[CheckFunc] Response of API is not an error: %s" % str(res))
             assert False
@@ -77,33 +77,37 @@ class ResponseChecker:
         return True
 
     @staticmethod
-    def check_collection_property(collection, func_name, params):
+    def check_collection_property(collection, func_name, check_items):
         exp_func_name = "collection_init"
         if func_name != exp_func_name:
             log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
         if not isinstance(collection, Collection):
             raise Exception("The result to check isn't collection type object")
-        assert collection.name == params["name"]
-        assert collection.description == params["schema"].description
-        assert collection.schema == params["schema"]
+        if len(check_items) == 0:
+            raise Exception("No expect values found in the check task")
+        if check_items.get("name", None):
+            assert collection.name == check_items["name"]
+        if check_items.get("schema", None):
+            assert collection.description == check_items["schema"].description
+            assert collection.schema == check_items["schema"]
         return True
 
     @staticmethod
-    def check_partition_property(partition, func_name, params):
+    def check_partition_property(partition, func_name, check_items):
         exp_func_name = "_init_partition"
         if func_name != exp_func_name:
             log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
         if not isinstance(partition, Partition):
             raise Exception("The result to check isn't partition type object")
-        if len(params) == 0:
+        if len(check_items) == 0:
             raise Exception("No expect values found in the check task")
-        if params["name"]:
-            assert partition.name == params["name"]
-        if params["description"]:
-            assert partition.description == params["description"]
-        if params["is_empty"]:
-            assert partition.is_empty == params["is_empty"]
-        if params["num_entities"]:
-            assert partition.num_entities == params["num_entities"]
+        if check_items.get("name", None):
+            assert partition.name == check_items["name"]
+        if check_items.get("description", None):
+            assert partition.description == check_items["description"]
+        if check_items.get("is_empty", None):
+            assert partition.is_empty == check_items["is_empty"]
+        if check_items.get("num_entities", None):
+            assert partition.num_entities == check_items["num_entities"]
         return True
 
