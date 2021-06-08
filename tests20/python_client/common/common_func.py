@@ -186,6 +186,7 @@ def gen_invalid_dataframe():
     ]
     return dfs
 
+
 def jaccard(x, y):
     x = np.asarray(x, np.bool)
     y = np.asarray(y, np.bool)
@@ -241,4 +242,4 @@ def modify_file(file_path_list, is_modify=False, input_content=""):
                     f.truncate()
                     f.write(input_content)
                     f.close()
-                log.info("[modify_file] File(%s) modification is complete." % file_path_list)
+                log.info("[modify_file] file(%s) modification is complete." % file_path_list)

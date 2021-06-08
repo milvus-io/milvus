@@ -16,7 +16,7 @@ def pytest_addoption(parser):
     parser.addoption('--search_vectors', action='store', default="search_vectors", help="vectors of search")
     parser.addoption('--index_param', action='store', default="index_param", help="index_param of index")
     parser.addoption('--data', action='store', default="data", help="data of request")
-    parser.addoption('--log_path', action='store', default="/tmp/ci_logs/", help="log path of ci test")
+    parser.addoption('--clean_log', action='store_true', default=False, help="clean log before testing")
 
 
 @pytest.fixture
@@ -90,5 +90,5 @@ def data(request):
 
 
 @pytest.fixture
-def log_path(request):
-    return request.config.getoption("--log_path")
+def clean_log(request):
+    return request.config.getoption("--clean_log")
