@@ -124,7 +124,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) {
 				SourceID:  Params.NodeID,
 			},
 			SegmentID:         fu.segID,
-			CollectionID:      0, //TODO
+			CollectionID:      vchanInfo.GetCollectionID(),
 			Field2BinlogPaths: id2path,
 			CheckPoints:       checkPoints,
 			Flushed:           fu.flushed,

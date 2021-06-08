@@ -305,6 +305,9 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		resp.Reason = "server is closed"
 		return resp, nil
 	}
+	log.Debug("Receive SaveBinlogPaths request",
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64("segmentID", req.GetSegmentID()))
 
 	// check segment id & collection id matched
 	_, err := s.meta.GetCollection(req.GetCollectionID())
@@ -316,7 +319,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 
 	binlogs, err := s.prepareBinlog(req)
 	if err != nil {
-		log.Error("prepare binlog meta failed", zap.Error(err))
+		log.Error("Prepare binlog meta failed", zap.Error(err))
 		resp.Reason = err.Error()
 		return resp, nil
 	}
@@ -324,10 +327,13 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	// set segment to SegmentState_Flushing and save binlogs and checkpoints
 	err = s.meta.SaveBinlogAndCheckPoints(req.SegmentID, req.Flushed, binlogs, req.CheckPoints)
 	if err != nil {
+		log.Error("Save binlog and checkpoints failed",
+			zap.Int64("segmentID", req.GetSegmentID()),
+			zap.Error(err))
 		resp.Reason = err.Error()
 		return resp, nil
 	}
-	log.Debug("flush segment with meta", zap.Int64("id", req.SegmentID),
+	log.Debug("Flush segment with meta", zap.Int64("id", req.SegmentID),
 		zap.Any("meta", binlogs))
 
 	if req.Flushed {

@@ -187,7 +187,6 @@ func (c *cluster) watchIfNeeded(channel string, collectionID UniqueID) {
 }
 
 func (c *cluster) flush(segments []*datapb.SegmentInfo) {
-	log.Debug("prepare to flush", zap.Any("segments", segments))
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
