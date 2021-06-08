@@ -354,7 +354,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		return status, nil
 	}
 
-	log.Debug("FlushSegments ...", zap.Int("num", len(req.SegmentIDs)))
+	log.Debug("FlushSegments ...", zap.Int("num", len(req.SegmentIDs)), zap.Int64s("segments", req.SegmentIDs))
 	dmlFlushedCh := make(chan []*datapb.ID2PathList, len(req.SegmentIDs))
 	for _, id := range req.SegmentIDs {
 		chanName := node.getChannelNamebySegmentID(id)
@@ -397,6 +397,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		status.Reason = fmt.Sprintf("flush failed segment list = %s", failedSegments)
 		return status, nil
 	}
+	log.Debug("FlushSegments Done")
 
 	status.ErrorCode = commonpb.ErrorCode_Success
 	return status, nil
