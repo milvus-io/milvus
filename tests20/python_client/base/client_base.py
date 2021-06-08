@@ -12,6 +12,7 @@ from config.test_info import test_info
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
+from check.param_check import ip_check, number_check
 
 
 class ParamInfo:
@@ -72,12 +73,19 @@ class Base:
     @pytest.fixture(scope="module", autouse=True)
     def initialize_env(self, request):
         """ clean log before testing """
-        cf.modify_file([test_info.log_debug, test_info.log_info, test_info.log_err])
-        log.info("[initialize_milvus] Log cleaned up, start testing...")
-
         host = request.config.getoption("--host")
         port = request.config.getoption("--port")
         handler = request.config.getoption("--handler")
+        clean_log = request.config.getoption("--clean_log")
+
+        """ params check """
+        assert ip_check(host) and number_check(port)
+
+        """ modify log files """
+        cf.modify_file(file_path_list=[test_info.log_debug, test_info.log_info, test_info.log_err], is_modify=clean_log)
+
+        log.info("#" * 80)
+        log.info("[initialize_milvus] Log cleaned up, start testing...")
         param_info.prepare_param_info(host, port, handler)
 
 
