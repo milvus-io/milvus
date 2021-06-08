@@ -317,6 +317,9 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 			}
 
 			log.Debug("flushable segments", zap.Any("segments", segments))
+			if len(segments) == 0 {
+				continue
+			}
 			segmentInfos := make([]*datapb.SegmentInfo, 0, len(segments))
 			for _, id := range segments {
 				sInfo, err := s.meta.GetSegment(id)
@@ -327,8 +330,9 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 				}
 				segmentInfos = append(segmentInfos, sInfo)
 			}
-
-			s.cluster.flush(segmentInfos)
+			if len(segmentInfos) > 0 {
+				s.cluster.flush(segmentInfos)
+			}
 		}
 	}
 }
