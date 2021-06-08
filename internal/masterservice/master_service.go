@@ -315,9 +315,14 @@ func (c *Core) startDataServiceSegmentLoop() {
 				if msg.Type() != commonpb.MsgType_SegmentInfo {
 					continue
 				}
-				segInfoMsg := msg.(*ms.SegmentInfoMsg)
+				segInfoMsg, ok := msg.(*ms.SegmentInfoMsg)
+				if !ok {
+					log.Debug("input msg is not SegmentInfoMsg")
+					continue
+				}
 				if segInfoMsg.Segment != nil {
 					segInfos = append(segInfos, segInfoMsg.Segment)
+					log.Debug("open segment", zap.Int64("segmentID", segInfoMsg.Segment.ID))
 				}
 			}
 			if len(segInfos) > 0 {
@@ -372,7 +377,11 @@ func (c *Core) startDataNodeFlushedSegmentLoop() {
 				if msg.Type() != commonpb.MsgType_SegmentFlushDone {
 					continue
 				}
-				flushMsg := msg.(*ms.FlushCompletedMsg)
+				flushMsg, ok := msg.(*ms.FlushCompletedMsg)
+				if !ok {
+					log.Debug("input msg is not FlushCompletedMsg")
+					continue
+				}
 				segID := flushMsg.SegmentID
 				log.Debug("flush segment", zap.Int64("id", segID))
 
@@ -385,6 +394,10 @@ func (c *Core) startDataNodeFlushedSegmentLoop() {
 				if err != nil {
 					log.Warn("AddFlushedSegment error", zap.Error(err))
 					continue
+				}
+
+				if len(coll.FieldIndexes) == 0 {
+					log.Debug("no index params on collection", zap.String("collection_name", coll.Schema.Name))
 				}
 
 				for _, f := range coll.FieldIndexes {
