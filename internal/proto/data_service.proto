@@ -255,9 +255,8 @@ message SaveBinlogPathsRequest {
   int64 segmentID = 2;
   int64 collectionID = 3;
   repeated ID2PathList field2BinlogPaths = 4;
-  repeated DDLBinlogMeta ddlBinlogPaths = 5;
-  repeated CheckPoint checkPoints = 6;
-  bool flushed = 7;
+  repeated CheckPoint checkPoints = 5;
+  bool flushed = 6;
 }
 
 message CheckPoint {

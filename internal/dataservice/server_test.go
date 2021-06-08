@@ -486,16 +486,6 @@ func TestSaveBinlogPaths(t *testing.T) {
 					},
 				},
 			},
-			DdlBinlogPaths: []*datapb.DDLBinlogMeta{
-				{
-					DdlBinlogPath: "/by-dev/test/0/ddl/Allo7",
-					TsBinlogPath:  "/by-dev/test/0/ts/Allo5",
-				},
-				{
-					DdlBinlogPath: "/by-dev/test/0/ddl/Allo9",
-					TsBinlogPath:  "/by-dev/test/0/ts/Allo8",
-				},
-			},
 			CheckPoints: []*datapb.CheckPoint{
 				{
 					SegmentID: 0,
@@ -531,15 +521,6 @@ func TestSaveBinlogPaths(t *testing.T) {
 			assert.EqualValues(t, "/by-dev/test/0/1/2/1/Allo2", metas[1].BinlogPath)
 		}
 
-		collMetas, err := svr.getDDLBinlogMeta(0)
-		assert.Nil(t, err)
-		if assert.EqualValues(t, 2, len(collMetas)) {
-			assert.EqualValues(t, "/by-dev/test/0/ts/Allo5", collMetas[0].TsBinlogPath)
-			assert.EqualValues(t, "/by-dev/test/0/ddl/Allo7", collMetas[0].DdlBinlogPath)
-			assert.EqualValues(t, "/by-dev/test/0/ts/Allo8", collMetas[1].TsBinlogPath)
-			assert.EqualValues(t, "/by-dev/test/0/ddl/Allo9", collMetas[1].DdlBinlogPath)
-		}
-
 		segmentInfo, err := svr.meta.GetSegment(0)
 		assert.Nil(t, err)
 		assert.EqualValues(t, segmentInfo.DmlPosition.ChannelName, "ch1")
@@ -555,16 +536,6 @@ func TestSaveBinlogPaths(t *testing.T) {
 				{
 					ID:    1,
 					Paths: []string{"/by-dev/test/0/1/2/1/Allo1", "/by-dev/test/0/1/2/1/Allo2"},
-				},
-			},
-			DdlBinlogPaths: []*datapb.DDLBinlogMeta{
-				{
-					DdlBinlogPath: "/by-dev/test/0/ddl/Allo7",
-					TsBinlogPath:  "/by-dev/test/0/ts/Allo5",
-				},
-				{
-					DdlBinlogPath: "/by-dev/test/0/ddl/Allo9",
-					TsBinlogPath:  "/by-dev/test/0/ts/Allo8",
 				},
 			},
 		})
@@ -838,7 +809,6 @@ func TestGetRecoveryInfo(t *testing.T) {
 					},
 				},
 			},
-			DdlBinlogPaths: []*datapb.DDLBinlogMeta{},
 		}
 		meta, err := svr.prepareBinlog(binlogReq)
 		assert.Nil(t, err)

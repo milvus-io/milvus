@@ -316,7 +316,9 @@ func (c *Core) startDataServiceSegmentLoop() {
 					continue
 				}
 				segInfoMsg := msg.(*ms.SegmentInfoMsg)
-				segInfos = append(segInfos, segInfoMsg.Segment)
+				if segInfoMsg.Segment != nil {
+					segInfos = append(segInfos, segInfoMsg.Segment)
+				}
 			}
 			if len(segInfos) > 0 {
 				startPosStr, err := EncodeMsgPositions(segMsg.StartPositions)

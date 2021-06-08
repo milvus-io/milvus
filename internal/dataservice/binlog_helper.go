@@ -45,7 +45,7 @@ var (
 	errNilSegmentInfo = errors.New("nil segment info")
 )
 
-//SaveBinLogMetaTxn saves segment-field2Path, collection-tsPath/ddlPath into kv store in transcation
+//SaveBinLogMetaTxn saves segment-field2Path, collection-tsPath into kv store in transcation
 func (s *Server) SaveBinLogMetaTxn(meta map[string]string) error {
 	if s.kvClient == nil {
 		return errNilKvClient
@@ -75,30 +75,6 @@ func (s *Server) prepareField2PathMeta(segID UniqueID, field2Paths *datapb.ID2Pa
 		result[path.Join(Params.SegmentBinlogSubPath, key)] = binlogPath
 	}
 	return result, err
-}
-
-// prepareDDLBinlogMeta parses Coll2DdlBinlogPaths & Coll2TsBinlogPaths
-//		into key-value for kv store
-func (s *Server) prepareDDLBinlogMeta(collID UniqueID, ddlMetas []*datapb.DDLBinlogMeta) (result map[string]string, err error) {
-	if ddlMetas == nil {
-		return nil, errNilID2Paths
-	}
-
-	result = make(map[string]string, len(ddlMetas))
-
-	for _, ddlMeta := range ddlMetas {
-		if ddlMeta == nil {
-			continue
-		}
-		uniqueKey, err := s.genKey(true, collID)
-		if err != nil {
-			return nil, err
-		}
-		binlogPathPair := proto.MarshalTextString(ddlMeta)
-
-		result[path.Join(Params.CollectionBinlogSubPath, uniqueKey)] = binlogPathPair
-	}
-	return result, nil
 }
 
 // getFieldBinlogMeta querys field binlog meta from kv store
@@ -142,28 +118,6 @@ func (s *Server) getSegmentBinlogMeta(segmentID UniqueID) (metas []*datapb.Segme
 
 	for _, blob := range vs {
 		m := &datapb.SegmentFieldBinlogMeta{}
-		if err = proto.UnmarshalText(blob, m); err != nil {
-			return nil, err
-		}
-
-		metas = append(metas, m)
-	}
-	return
-}
-
-func (s *Server) getDDLBinlogMeta(collID UniqueID) (metas []*datapb.DDLBinlogMeta, err error) {
-	prefix, err := s.genKey(false, collID)
-	if err != nil {
-		return nil, err
-	}
-
-	_, vs, err := s.kvClient.LoadWithPrefix(path.Join(Params.CollectionBinlogSubPath, prefix))
-	if err != nil {
-		return nil, err
-	}
-
-	for _, blob := range vs {
-		m := &datapb.DDLBinlogMeta{}
 		if err = proto.UnmarshalText(blob, m); err != nil {
 			return nil, err
 		}
