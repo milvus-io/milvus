@@ -41,7 +41,7 @@ func (ddn *ddNode) Name() string {
 
 func (ddn *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
-	log.Debug("DDNode Operating")
+	// log.Debug("DDNode Operating")
 
 	if len(in) != 1 {
 		log.Error("Invalid operate message input in ddNode", zap.Int("input length", len(in)))

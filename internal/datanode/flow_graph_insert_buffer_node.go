@@ -120,7 +120,7 @@ func (ibNode *insertBufferNode) Name() string {
 
 func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
-	log.Debug("InsertBufferNode Operating")
+	// log.Debug("InsertBufferNode Operating")
 
 	if len(in) != 1 {
 		log.Error("Invalid operate message input in insertBufferNode", zap.Int("input length", len(in)))
@@ -216,16 +216,12 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		collSchema := collection.schema
 		// 1.2 Get Fields
 		var pos int = 0 // Record position of blob
-		log.Debug("DataNode flow_graph_insert_buffer_node", zap.Any("Fields", collSchema.Fields))
 		var fieldIDs []int64
 		var fieldTypes []schemapb.DataType
 		for _, field := range collSchema.Fields {
 			fieldIDs = append(fieldIDs, field.FieldID)
 			fieldTypes = append(fieldTypes, field.DataType)
 		}
-
-		log.Debug("DataNode flow_graph_insert_buffer_node", zap.Any("FieldIDs", fieldIDs))
-		log.Debug("DataNode flow_graph_insert_buffer_node", zap.Any("fieldTypes", fieldTypes))
 
 		for _, field := range collSchema.Fields {
 			switch field.DataType {
@@ -528,7 +524,10 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	select {
 	case fmsg := <-ibNode.flushChan:
 		currentSegID := fmsg.segmentID
-		log.Debug(". Receiving flush message", zap.Int64("segmentID", currentSegID))
+		log.Debug(". Receiving flush message",
+			zap.Int64("segmentID", currentSegID),
+			zap.Int64("collectionID", fmsg.collectionID),
+		)
 
 		if ibNode.insertBuffer.size(currentSegID) <= 0 {
 			log.Debug(".. Buffer empty ...")
@@ -585,8 +584,8 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			if fu.field2Path != nil {
 				fu.checkPoint = ibNode.listSegmentCheckPoints()
 				fu.flushed = true
-				if ibNode.dsSaveBinlog(&fu) != nil {
-					log.Debug("data service save bin log path failed", zap.Error(err))
+				if err := ibNode.dsSaveBinlog(&fu); err != nil {
+					log.Debug("Data service save binlog path failed", zap.Error(err))
 				} else {
 					// this segment has flushed, so it's not `open segment`, so remove from the check point
 					ibNode.removeSegmentCheckPoint(fu.segID)

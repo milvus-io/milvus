@@ -115,23 +115,28 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) {
 				Position:  &v.pos,
 			})
 		}
+		log.Debug("SaveBinlogPath",
+			zap.Int64("SegmentID", fu.segID),
+			zap.Int64("CollectionID", fu.collID),
+			zap.Int("Length of Field2BinlogPaths", len(id2path)),
+		)
 
 		req := &datapb.SaveBinlogPathsRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   0, //TOD msg type
-				MsgID:     0, //TODO,msg id
-				Timestamp: 0, //TODO, time stamp
+				MsgType:   0, //TODO msg type
+				MsgID:     0, //TODO msg id
+				Timestamp: 0, //TODO time stamp
 				SourceID:  Params.NodeID,
 			},
 			SegmentID:         fu.segID,
-			CollectionID:      vchanInfo.GetCollectionID(),
+			CollectionID:      fu.collID,
 			Field2BinlogPaths: id2path,
 			CheckPoints:       checkPoints,
 			Flushed:           fu.flushed,
 		}
 		rsp, err := dsService.dataService.SaveBinlogPaths(dsService.ctx, req)
 		if err != nil {
-			return fmt.Errorf("data service save bin log path failed, err = %w", err)
+			return fmt.Errorf(err.Error())
 		}
 		if rsp.ErrorCode != commonpb.ErrorCode_Success {
 			return fmt.Errorf("data service save bin log path failed, reason = %s", rsp.Reason)
