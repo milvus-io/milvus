@@ -903,10 +903,10 @@ func closeTestServer(t *testing.T, svr *Server) {
 	assert.Nil(t, err)
 }
 
-func initEtcd(etcdAddress string) (*clientv3.Client, error) {
+func initEtcd(etcdAddress []string) (*clientv3.Client, error) {
 	var etcdCli *clientv3.Client
 	connectEtcdFn := func() error {
-		etcd, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}, DialTimeout: 5 * time.Second})
+		etcd, err := clientv3.New(clientv3.Config{Endpoints: etcdAddress, DialTimeout: 5 * time.Second})
 		if err != nil {
 			return err
 		}
