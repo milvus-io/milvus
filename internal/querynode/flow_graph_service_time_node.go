@@ -25,7 +25,9 @@ import (
 
 type serviceTimeNode struct {
 	baseNode
+	graphType         flowGraphType
 	collectionID      UniqueID
+	partitionID       UniqueID
 	vChannel          VChannel
 	tSafeReplica      TSafeReplicaInterface
 	timeTickMsgStream msgstream.MsgStream
@@ -58,7 +60,13 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 
 	// update service time
-	stNode.tSafeReplica.setTSafe(stNode.vChannel, serviceTimeMsg.timeRange.timestampMax)
+	var id UniqueID
+	if stNode.graphType == flowGraphTypePartition {
+		id = stNode.partitionID
+	} else {
+		id = stNode.collectionID
+	}
+	stNode.tSafeReplica.setTSafe(stNode.vChannel, id, serviceTimeMsg.timeRange.timestampMax)
 	//log.Debug("update tSafe:",
 	//	zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)),
 	//	zap.Any("collectionID", stNode.collectionID),
@@ -99,7 +107,9 @@ func (stNode *serviceTimeNode) sendTimeTick(ts Timestamp) error {
 
 func newServiceTimeNode(ctx context.Context,
 	tSafeReplica TSafeReplicaInterface,
+	graphType flowGraphType,
 	collectionID UniqueID,
+	partitionID UniqueID,
 	channel VChannel,
 	factory msgstream.Factory) *serviceTimeNode {
 
@@ -122,7 +132,9 @@ func newServiceTimeNode(ctx context.Context,
 
 	return &serviceTimeNode{
 		baseNode:          baseNode,
+		graphType:         graphType,
 		collectionID:      collectionID,
+		partitionID:       partitionID,
 		vChannel:          channel,
 		tSafeReplica:      tSafeReplica,
 		timeTickMsgStream: timeTimeMsgStream,

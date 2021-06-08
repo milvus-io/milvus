@@ -12,6 +12,7 @@
 package querynode
 
 import (
+	"context"
 	"errors"
 	"sync"
 
@@ -23,7 +24,7 @@ import (
 // TSafeReplicaInterface is the interface wrapper of tSafeReplica
 type TSafeReplicaInterface interface {
 	getTSafe(vChannel VChannel) Timestamp
-	setTSafe(vChannel VChannel, timestamp Timestamp)
+	setTSafe(vChannel VChannel, id UniqueID, timestamp Timestamp)
 	addTSafe(vChannel VChannel)
 	removeTSafe(vChannel VChannel)
 	registerTSafeWatcher(vChannel VChannel, watcher *tSafeWatcher)
@@ -45,7 +46,7 @@ func (t *tSafeReplica) getTSafe(vChannel VChannel) Timestamp {
 	return safer.get()
 }
 
-func (t *tSafeReplica) setTSafe(vChannel VChannel, timestamp Timestamp) {
+func (t *tSafeReplica) setTSafe(vChannel VChannel, id UniqueID, timestamp Timestamp) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	safer, err := t.getTSaferPrivate(vChannel)
@@ -53,7 +54,7 @@ func (t *tSafeReplica) setTSafe(vChannel VChannel, timestamp Timestamp) {
 		log.Error("set tSafe failed", zap.Error(err))
 		return
 	}
-	safer.set(timestamp)
+	safer.set(id, timestamp)
 }
 
 func (t *tSafeReplica) getTSaferPrivate(vChannel VChannel) (tSafer, error) {
@@ -68,8 +69,10 @@ func (t *tSafeReplica) getTSaferPrivate(vChannel VChannel) (tSafer, error) {
 func (t *tSafeReplica) addTSafe(vChannel VChannel) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	ctx := context.Background()
 	if _, ok := t.tSafes[vChannel]; !ok {
-		t.tSafes[vChannel] = newTSafe()
+		t.tSafes[vChannel] = newTSafe(ctx)
+		t.tSafes[vChannel].start()
 		log.Debug("add tSafe done", zap.Any("channel", vChannel))
 	}
 }
