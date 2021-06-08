@@ -137,8 +137,8 @@ func refreshChannelNames() {
 
 func clearEtcd(rootPath string) error {
 	etcdAddr := Params.EtcdAddress
-	log.Info("etcd tests address", zap.String("address", etcdAddr))
-	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	log.Info("etcd tests address", zap.Any("address", etcdAddr))
+	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: etcdAddr})
 	if err != nil {
 		return err
 	}

@@ -56,7 +56,7 @@ type Server struct {
 	dataService   types.DataService
 
 	newMasterServiceClient func() (types.MasterService, error)
-	newDataServiceClient   func(string, string, time.Duration) types.DataService
+	newDataServiceClient   func(string, []string, time.Duration) types.DataService
 
 	closer io.Closer
 }
@@ -70,10 +70,10 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		msFactory:   factory,
 		grpcErrChan: make(chan error),
 		newMasterServiceClient: func() (types.MasterService, error) {
-			return msc.NewClient(dn.Params.MetaRootPath, []string{dn.Params.EtcdAddress}, 3*time.Second)
+			return msc.NewClient(dn.Params.MetaRootPath, dn.Params.EtcdAddress, 3*time.Second)
 		},
-		newDataServiceClient: func(etcdMetaRoot, etcdAddress string, timeout time.Duration) types.DataService {
-			return dsc.NewClient(etcdMetaRoot, []string{etcdAddress}, timeout)
+		newDataServiceClient: func(etcdMetaRoot string, etcdAddress []string, timeout time.Duration) types.DataService {
+			return dsc.NewClient(etcdMetaRoot, etcdAddress, timeout)
 		},
 	}
 
