@@ -48,9 +48,9 @@ func TestDataNode(t *testing.T) {
 			"datanode-02-test-WatchDmChannels"} {
 			log.Debug("InsertChannels", zap.String("name", ch))
 			vchan := &datapb.VchannelInfo{
-				CollectionID: 1,
-				ChannelName:  ch,
-				CheckPoints:  []*datapb.CheckPoint{},
+				CollectionID:      1,
+				ChannelName:       ch,
+				UnflushedSegments: []*datapb.SegmentInfo{},
 			}
 			vchannels = append(vchannels, vchan)
 		}
@@ -95,9 +95,9 @@ func TestDataNode(t *testing.T) {
 		dmChannelName := "fake-dm-channel-test-NewDataSyncService"
 
 		vchan := &datapb.VchannelInfo{
-			CollectionID: 1,
-			ChannelName:  dmChannelName,
-			CheckPoints:  []*datapb.CheckPoint{},
+			CollectionID:      1,
+			ChannelName:       dmChannelName,
+			UnflushedSegments: []*datapb.SegmentInfo{},
 		}
 
 		require.Equal(t, 0, len(node2.vchan2FlushCh))
@@ -199,9 +199,9 @@ func TestDataNode(t *testing.T) {
 		dmChannelName := "fake-dm-channel-test-NewDataSyncService"
 
 		vchan := &datapb.VchannelInfo{
-			CollectionID: 1,
-			ChannelName:  dmChannelName,
-			CheckPoints:  []*datapb.CheckPoint{},
+			CollectionID:      1,
+			ChannelName:       dmChannelName,
+			UnflushedSegments: []*datapb.SegmentInfo{},
 		}
 
 		err := node.NewDataSyncService(vchan)
@@ -227,9 +227,9 @@ func TestDataNode(t *testing.T) {
 		dmChannelName := "fake-dm-channel-test-BackGroundGC"
 
 		vchan := &datapb.VchannelInfo{
-			CollectionID: 1,
-			ChannelName:  dmChannelName,
-			CheckPoints:  []*datapb.CheckPoint{},
+			CollectionID:      1,
+			ChannelName:       dmChannelName,
+			UnflushedSegments: []*datapb.SegmentInfo{},
 		}
 		require.Equal(t, 0, len(node.vchan2FlushCh))
 		require.Equal(t, 0, len(node.vchan2SyncService))

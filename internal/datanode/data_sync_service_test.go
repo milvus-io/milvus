@@ -61,10 +61,10 @@ func TestDataSyncService_Start(t *testing.T) {
 	Params.FlushInsertBufferSize = 1
 
 	vchan := &datapb.VchannelInfo{
-		CollectionID:    collMeta.GetID(),
-		ChannelName:     insertChannelName,
-		CheckPoints:     []*datapb.CheckPoint{},
-		FlushedSegments: []int64{},
+		CollectionID:      collMeta.GetID(),
+		ChannelName:       insertChannelName,
+		UnflushedSegments: []*datapb.SegmentInfo{},
+		FlushedSegments:   []int64{},
 	}
 
 	signalCh := make(chan UniqueID, 100)

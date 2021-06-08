@@ -31,7 +31,7 @@ type Replica interface {
 	hasCollection(collectionID UniqueID) bool
 
 	// segment
-	addSegment(segmentID UniqueID, collID UniqueID, partitionID UniqueID, channelName string) error
+	addSegment(segmentID, collID, partitionID UniqueID, channelName string) error
 	removeSegment(segmentID UniqueID) error
 	hasSegment(segmentID UniqueID) bool
 	updateStatistics(segmentID UniqueID, numRows int64) error

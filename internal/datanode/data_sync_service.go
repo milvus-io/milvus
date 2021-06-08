@@ -160,6 +160,17 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) {
 		vchanInfo.GetChannelName(),
 	)
 
+	// recover segment checkpoints
+	for _, us := range vchanInfo.GetUnflushedSegments() {
+		if us.CollectionID != dsService.collectionID ||
+			us.GetInsertChannel() != vchanInfo.ChannelName {
+			continue
+		}
+
+		dsService.replica.addSegment(us.GetID(), us.CollectionID, us.PartitionID, us.GetInsertChannel())
+		dsService.replica.updateStatistics(us.GetID(), us.GetNumOfRows())
+	}
+
 	dsService.fg.AddNode(dmStreamNode)
 	dsService.fg.AddNode(ddNode)
 	dsService.fg.AddNode(insertBufferNode)

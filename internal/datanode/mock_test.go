@@ -104,10 +104,10 @@ func newHEALTHDataNodeMock(dmChannelName string) *DataNode {
 	node.SetDataServiceInterface(ds)
 
 	vchan := &datapb.VchannelInfo{
-		CollectionID:    1,
-		ChannelName:     dmChannelName,
-		CheckPoints:     []*datapb.CheckPoint{},
-		FlushedSegments: []int64{},
+		CollectionID:      1,
+		ChannelName:       dmChannelName,
+		UnflushedSegments: []*datapb.SegmentInfo{},
+		FlushedSegments:   []int64{},
 	}
 	node.Start()
 

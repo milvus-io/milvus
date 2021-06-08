@@ -30,9 +30,9 @@ type ddNode struct {
 	clearSignal  chan<- UniqueID
 	collectionID UniqueID
 
-	mu        sync.RWMutex
-	seg2cp    map[UniqueID]*datapb.CheckPoint // Segment ID
-	vchanInfo *datapb.VchannelInfo
+	mu          sync.RWMutex
+	seg2SegInfo map[UniqueID]*datapb.SegmentInfo // Segment ID to UnFlushed Segment
+	vchanInfo   *datapb.VchannelInfo
 }
 
 func (ddn *ddNode) Name() string {
@@ -110,9 +110,9 @@ func (ddn *ddNode) filterFlushedSegmentInsertMessages(msg *msgstream.InsertMsg) 
 	}
 
 	ddn.mu.Lock()
-	if cp, ok := ddn.seg2cp[msg.GetSegmentID()]; ok {
-		if msg.EndTs() > cp.GetPosition().GetTimestamp() {
-			delete(ddn.seg2cp, msg.GetSegmentID())
+	if si, ok := ddn.seg2SegInfo[msg.GetSegmentID()]; ok {
+		if msg.EndTs() > si.GetDmlPosition().GetTimestamp() {
+			delete(ddn.seg2SegInfo, msg.GetSegmentID())
 			return nil
 		}
 	}
@@ -137,16 +137,16 @@ func newDDNode(clearSignal chan<- UniqueID, collID UniqueID, vchanInfo *datapb.V
 	baseNode := BaseNode{}
 	baseNode.SetMaxParallelism(Params.FlowGraphMaxQueueLength)
 
-	cp := make(map[UniqueID]*datapb.CheckPoint)
-	for _, c := range vchanInfo.GetCheckPoints() {
-		cp[c.GetSegmentID()] = c
+	si := make(map[UniqueID]*datapb.SegmentInfo)
+	for _, us := range vchanInfo.GetUnflushedSegments() {
+		si[us.GetID()] = us
 	}
 
 	return &ddNode{
 		BaseNode:     baseNode,
 		clearSignal:  clearSignal,
 		collectionID: collID,
-		seg2cp:       cp,
+		seg2SegInfo:  si,
 		vchanInfo:    vchanInfo,
 	}
 }
