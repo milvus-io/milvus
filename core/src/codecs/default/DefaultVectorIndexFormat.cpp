@@ -107,7 +107,7 @@ DefaultVectorIndexFormat::read(const storage::FSHandlerPtr& fs_ptr, const std::s
                                segment::VectorIndexPtr& vector_index) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
-    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
+    auto& dir_path = fs_ptr->operation_ptr_->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
         LOG_ENGINE_ERROR_ << err_msg;

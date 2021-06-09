@@ -76,7 +76,7 @@ void
 DefaultVectorsFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::VectorsPtr& vectors_read) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
-    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
+    auto& dir_path = fs_ptr->operation_ptr_->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
         LOG_ENGINE_ERROR_ << err_msg;
@@ -102,7 +102,7 @@ void
 DefaultVectorsFormat::write(const storage::FSHandlerPtr& fs_ptr, const segment::VectorsPtr& vectors) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
-    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
+    auto& dir_path = fs_ptr->operation_ptr_->GetDirectory();
 
     const std::string rv_file_path = dir_path + "/" + vectors->GetName() + raw_vector_extension_;
     const std::string uid_file_path = dir_path + "/" + vectors->GetName() + user_id_extension_;
@@ -139,7 +139,7 @@ void
 DefaultVectorsFormat::read_uids(const storage::FSHandlerPtr& fs_ptr, std::vector<segment::doc_id_t>& uids) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
-    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
+    auto& dir_path = fs_ptr->operation_ptr_->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
         LOG_ENGINE_ERROR_ << err_msg;
@@ -161,7 +161,7 @@ DefaultVectorsFormat::read_vectors(const storage::FSHandlerPtr& fs_ptr, off_t of
                                    std::vector<uint8_t>& raw_vectors) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
-    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
+    auto& dir_path = fs_ptr->operation_ptr_->GetDirectory();
     if (!boost::filesystem::is_directory(dir_path)) {
         std::string err_msg = "Directory: " + dir_path + "does not exist";
         LOG_ENGINE_ERROR_ << err_msg;
