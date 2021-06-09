@@ -1612,7 +1612,7 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 		availableQueryNodeNum := 0
 		rt.result = &milvuspb.RetrieveResults{
 			Status: &commonpb.Status{
-				ErrorCode: 0,
+				ErrorCode: commonpb.ErrorCode_Success,
 			},
 			Ids:        &schemapb.IDs{},
 			FieldsData: make([]*schemapb.FieldData, 0),
@@ -1650,8 +1650,8 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 							},
 						}
 					}
-
 				}
+
 				rt.result.FieldsData = append(rt.result.FieldsData, partialRetrieveResult.FieldsData...)
 			}
 			availableQueryNodeNum++
@@ -1667,6 +1667,19 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 				},
 			}
 			return nil
+		}
+
+		schema, err := globalMetaCache.GetCollectionSchema(ctx, rt.retrieve.CollectionName)
+		if err != nil {
+			return err
+		}
+		for i := 0; i < len(rt.result.FieldsData); i++ {
+			for _, field := range schema.Fields {
+				if field.Name == rt.OutputFields[i] {
+					rt.result.FieldsData[i].FieldName = field.Name
+					rt.result.FieldsData[i].Type = field.DataType
+				}
+			}
 		}
 	}
 

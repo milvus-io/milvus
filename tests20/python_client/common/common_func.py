@@ -6,12 +6,11 @@ import pandas as pd
 from sklearn import preprocessing
 
 from pymilvus_orm.types import DataType
-from pymilvus_orm.schema import CollectionSchema, FieldSchema
+from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
 from common import common_type as ct
 from utils.util_log import test_log as log
 import threading
 import traceback
-
 
 """" Methods of processing data """
 l2 = lambda x, y: np.linalg.norm(np.array(x) - np.array(y))
@@ -27,43 +26,51 @@ def gen_str_by_length(length=8):
 
 
 def gen_int64_field(name=ct.default_int64_field_name, is_primary=False, description=ct.default_desc):
-    int64_field = FieldSchema(name=name, dtype=DataType.INT64, description=description, is_primary=is_primary)
+    int64_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.INT64, description=description,
+                                                               is_primary=is_primary)
     return int64_field
 
 
 def gen_float_field(name=ct.default_float_field_name, is_primary=False, description=ct.default_desc):
-    float_field = FieldSchema(name=name, dtype=DataType.FLOAT, description=description, is_primary=is_primary)
+    float_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.FLOAT, description=description,
+                                                               is_primary=is_primary)
     return float_field
 
 
 def gen_float_vec_field(name=ct.default_float_vec_field_name, is_primary=False, dim=ct.default_dim,
                         description=ct.default_desc):
-    float_vec_field = FieldSchema(name=name, dtype=DataType.FLOAT_VECTOR, description=description, dim=dim,
-                                  is_primary=is_primary)
+    float_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.FLOAT_VECTOR,
+                                                                   description=description, dim=dim,
+                                                                   is_primary=is_primary)
     return float_vec_field
 
 
 def gen_binary_vec_field(name=ct.default_binary_vec_field_name, is_primary=False, dim=ct.default_dim,
                          description=ct.default_desc):
-    binary_vec_field = FieldSchema(name=name, dtype=DataType.BINARY_VECTOR, description=description, dim=dim,
-                                   is_primary=is_primary)
+    binary_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.BINARY_VECTOR,
+                                                                    description=description, dim=dim,
+                                                                    is_primary=is_primary)
     return binary_vec_field
 
 
 def gen_default_collection_schema(description=ct.default_desc, primary_field=None):
     fields = [gen_int64_field(), gen_float_field(), gen_float_vec_field()]
-    schema = CollectionSchema(fields=fields, description=description, primary_field=primary_field)
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
+                                                                    primary_field=primary_field)
+    log.error(schema)
     return schema
 
 
 def gen_collection_schema(fields, primary_field=None, description=ct.default_desc):
-    schema = CollectionSchema(fields=fields, primary_field=primary_field, description=description)
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, primary_field=primary_field,
+                                                                    description=description)
     return schema
 
 
 def gen_default_binary_collection_schema(description=ct.default_desc, primary_field=None):
     fields = [gen_int64_field(), gen_float_field(), gen_binary_vec_field()]
-    binary_schema = CollectionSchema(fields=fields, description=description, primary_field=primary_field)
+    binary_schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
+                                                                           primary_field=primary_field)
     return binary_schema
 
 
@@ -134,9 +141,9 @@ def gen_numpy_data(nb=ct.default_nb, dim=ct.default_dim):
 def gen_default_binary_list_data(nb=ct.default_nb, dim=ct.default_dim):
     int_values = [i for i in range(nb)]
     float_values = [np.float32(i) for i in range(nb)]
-    _, binary_vec_values = gen_binary_vectors(nb, dim)
+    binary_raw_values, binary_vec_values = gen_binary_vectors(nb, dim)
     data = [int_values, float_values, binary_vec_values]
-    return data
+    return data, binary_raw_values
 
 
 def gen_simple_index():
@@ -167,24 +174,9 @@ def gen_all_type_fields():
     fields = []
     for k, v in DataType.__members__.items():
         if v != DataType.UNKNOWN:
-            field = FieldSchema(name=k.lower(), dtype=v)
+            field, _ = ApiFieldSchemaWrapper().init_field_schema(name=k.lower(), dtype=v)
             fields.append(field)
     return fields
-
-
-def gen_invalid_dataframe():
-    vec = gen_vectors(3, 2)
-    dfs = [
-        # just columns df
-        pd.DataFrame(columns=[ct.default_int64_field_name, ct.default_float_vec_field_name]),
-        # no column just data df
-        pd.DataFrame({' ': vec}),
-        # datetime df
-        pd.DataFrame({"date": pd.date_range('20210101', periods=3)}),
-        # invalid column df
-        pd.DataFrame({'%$#': vec}),
-    ]
-    return dfs
 
 
 def jaccard(x, y):
