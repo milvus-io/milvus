@@ -282,7 +282,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		}()
 
 		if in != nil {
-			in.Stop()
+			defer in.Stop()
 		}
 
 		metrics.RegisterIndexNode()
