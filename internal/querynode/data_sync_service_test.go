@@ -118,7 +118,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	channels := []VChannel{"0"}
 	err = node.streaming.dataSyncService.addCollectionFlowGraph(collectionID, channels)
 	assert.NoError(t, err)
-	err = node.streaming.dataSyncService.startCollectionFlowGraph(collectionID)
+	err = node.streaming.dataSyncService.startCollectionFlowGraph(collectionID, channels)
 	assert.NoError(t, err)
 
 	<-node.queryNodeLoopCtx.Done()

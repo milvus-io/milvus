@@ -1017,6 +1017,7 @@ func doInsert(ctx context.Context, collectionID UniqueID, partitionID UniqueID, 
 
 	return nil
 }
+
 //
 //func TestSegmentLoad_Search_Vector(t *testing.T) {
 //	collectionID := UniqueID(0)

@@ -25,9 +25,8 @@ type searchService struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	historicalReplica ReplicaInterface
-	streamingReplica  ReplicaInterface
-	tSafeReplica      TSafeReplicaInterface
+	historical *historical
+	streaming  *streaming
 
 	queryNodeID       UniqueID
 	searchCollections map[UniqueID]*searchCollection
@@ -36,9 +35,8 @@ type searchService struct {
 }
 
 func newSearchService(ctx context.Context,
-	historicalReplica ReplicaInterface,
-	streamingReplica ReplicaInterface,
-	tSafeReplica TSafeReplicaInterface,
+	historical *historical,
+	streaming *streaming,
 	factory msgstream.Factory) *searchService {
 
 	searchServiceCtx, searchServiceCancel := context.WithCancel(ctx)
@@ -46,9 +44,8 @@ func newSearchService(ctx context.Context,
 		ctx:    searchServiceCtx,
 		cancel: searchServiceCancel,
 
-		historicalReplica: historicalReplica,
-		streamingReplica:  streamingReplica,
-		tSafeReplica:      tSafeReplica,
+		historical: historical,
+		streaming:  streaming,
 
 		queryNodeID:       Params.QueryNodeID,
 		searchCollections: make(map[UniqueID]*searchCollection),
@@ -59,7 +56,6 @@ func newSearchService(ctx context.Context,
 
 func (s *searchService) close() {
 	log.Debug("search service closed")
-
 	for collectionID := range s.searchCollections {
 		s.stopSearchCollection(collectionID)
 	}
@@ -77,9 +73,8 @@ func (s *searchService) addSearchCollection(collectionID UniqueID) {
 	sc := newSearchCollection(ctx1,
 		cancel,
 		collectionID,
-		s.historicalReplica,
-		s.streamingReplica,
-		s.tSafeReplica,
+		s.historical,
+		s.streaming,
 		s.factory)
 	s.searchCollections[collectionID] = sc
 }

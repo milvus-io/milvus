@@ -12,13 +12,14 @@
 package querynode
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestTSafe_GetAndSet(t *testing.T) {
-	tSafe := newTSafe()
+	tSafe := newTSafe(context.Background(), "TestTSafe-channel")
 	watcher := newTSafeWatcher()
 	tSafe.registerTSafeWatcher(watcher)
 
@@ -28,5 +29,5 @@ func TestTSafe_GetAndSet(t *testing.T) {
 		assert.Equal(t, timestamp, Timestamp(1000))
 	}()
 
-	tSafe.set(Timestamp(1000))
+	tSafe.set(UniqueID(1), Timestamp(1000))
 }

@@ -53,3 +53,59 @@ func (s *streaming) close() {
 	// free collectionReplica
 	s.replica.freeAll()
 }
+
+func (s *streaming) search(searchReqs []*searchRequest,
+	collID UniqueID,
+	partIDs []UniqueID,
+	vChannel VChannel,
+	plan *Plan,
+	searchTs Timestamp) ([]*SearchResult, []*Segment, error) {
+
+	searchResults := make([]*SearchResult, 0)
+	segmentResults := make([]*Segment, 0)
+
+	// get streaming partition ids
+	var searchPartIDs []UniqueID
+	if len(partIDs) == 0 {
+		strPartIDs, err := s.replica.getPartitionIDs(collID)
+		if err != nil {
+			return searchResults, segmentResults, err
+		}
+		searchPartIDs = strPartIDs
+	} else {
+		for _, id := range partIDs {
+			_, err := s.replica.getPartitionByID(id)
+			if err == nil {
+				searchPartIDs = append(searchPartIDs, id)
+			}
+		}
+	}
+
+	for _, partID := range searchPartIDs {
+		segIDs, err := s.replica.getSegmentIDsByVChannel(partID, vChannel)
+		if err != nil {
+			return searchResults, segmentResults, err
+		}
+		for _, segID := range segIDs {
+			seg, err := s.replica.getSegmentByID(segID)
+			if err != nil {
+				return searchResults, segmentResults, err
+			}
+
+			// TSafe less than searchTs means this vChannel is not available
+			ts := s.tSafeReplica.getTSafe(seg.vChannelID)
+			if ts < searchTs {
+				continue
+			}
+
+			searchResult, err := seg.segmentSearch(plan, searchReqs, []Timestamp{searchTs})
+			if err != nil {
+				return searchResults, segmentResults, err
+			}
+			searchResults = append(searchResults, searchResult)
+			segmentResults = append(segmentResults, seg)
+		}
+	}
+
+	return searchResults, segmentResults, nil
+}

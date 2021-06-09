@@ -13,19 +13,20 @@ package querynode
 
 import (
 	"context"
+	"strconv"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
 type serviceTimeNode struct {
 	baseNode
+	graphType         flowGraphType
 	collectionID      UniqueID
+	partitionID       UniqueID
 	vChannel          VChannel
 	tSafeReplica      TSafeReplicaInterface
 	timeTickMsgStream msgstream.MsgStream
@@ -36,7 +37,7 @@ func (stNode *serviceTimeNode) Name() string {
 }
 
 func (stNode *serviceTimeNode) Close() {
-	stNode.timeTickMsgStream.Close()
+	//stNode.timeTickMsgStream.Close()
 }
 
 func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
@@ -58,16 +59,24 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 
 	// update service time
-	stNode.tSafeReplica.setTSafe(stNode.vChannel, serviceTimeMsg.timeRange.timestampMax)
-	//log.Debug("update tSafe:",
-	//	zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)),
-	//	zap.Any("collectionID", stNode.collectionID),
-	//	zap.Any("channel", stNode.vChannel),
-	//)
-
-	if err := stNode.sendTimeTick(serviceTimeMsg.timeRange.timestampMax); err != nil {
-		log.Error("Error: send time tick into pulsar channel failed", zap.Error(err))
+	var id UniqueID
+	if stNode.graphType == flowGraphTypePartition {
+		id = stNode.partitionID
+	} else {
+		id = stNode.collectionID
 	}
+	channelTmp := stNode.vChannel + strconv.FormatInt(stNode.collectionID, 10)
+	stNode.tSafeReplica.setTSafe(channelTmp, id, serviceTimeMsg.timeRange.timestampMax)
+	log.Debug("update tSafe:",
+		zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)),
+		zap.Any("collectionID", stNode.collectionID),
+		zap.Any("id", id),
+		zap.Any("channel", channelTmp),
+	)
+
+	//if err := stNode.sendTimeTick(serviceTimeMsg.timeRange.timestampMax); err != nil {
+	//	log.Error("Error: send time tick into pulsar channel failed", zap.Error(err))
+	//}
 
 	var res Msg = &gcMsg{
 		gcRecord:  serviceTimeMsg.gcRecord,
@@ -76,30 +85,32 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	return []Msg{res}
 }
 
-func (stNode *serviceTimeNode) sendTimeTick(ts Timestamp) error {
-	msgPack := msgstream.MsgPack{}
-	timeTickMsg := msgstream.TimeTickMsg{
-		BaseMsg: msgstream.BaseMsg{
-			BeginTimestamp: ts,
-			EndTimestamp:   ts,
-			HashValues:     []uint32{0},
-		},
-		TimeTickMsg: internalpb.TimeTickMsg{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_TimeTick,
-				MsgID:     0,
-				Timestamp: ts,
-				SourceID:  Params.QueryNodeID,
-			},
-		},
-	}
-	msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
-	return stNode.timeTickMsgStream.Produce(&msgPack)
-}
+//func (stNode *serviceTimeNode) sendTimeTick(ts Timestamp) error {
+//	msgPack := msgstream.MsgPack{}
+//	timeTickMsg := msgstream.TimeTickMsg{
+//		BaseMsg: msgstream.BaseMsg{
+//			BeginTimestamp: ts,
+//			EndTimestamp:   ts,
+//			HashValues:     []uint32{0},
+//		},
+//		TimeTickMsg: internalpb.TimeTickMsg{
+//			Base: &commonpb.MsgBase{
+//				MsgType:   commonpb.MsgType_TimeTick,
+//				MsgID:     0,
+//				Timestamp: ts,
+//				SourceID:  Params.QueryNodeID,
+//			},
+//		},
+//	}
+//	msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
+//	return stNode.timeTickMsgStream.Produce(&msgPack)
+//}
 
 func newServiceTimeNode(ctx context.Context,
 	tSafeReplica TSafeReplicaInterface,
+	graphType flowGraphType,
 	collectionID UniqueID,
+	partitionID UniqueID,
 	channel VChannel,
 	factory msgstream.Factory) *serviceTimeNode {
 
@@ -122,7 +133,9 @@ func newServiceTimeNode(ctx context.Context,
 
 	return &serviceTimeNode{
 		baseNode:          baseNode,
+		graphType:         graphType,
 		collectionID:      collectionID,
+		partitionID:       partitionID,
 		vChannel:          channel,
 		tSafeReplica:      tSafeReplica,
 		timeTickMsgStream: timeTimeMsgStream,

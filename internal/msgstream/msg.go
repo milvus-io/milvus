@@ -14,12 +14,13 @@ package msgstream
 import (
 	"context"
 	"errors"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 
 	"github.com/golang/protobuf/proto"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
 type MsgType = commonpb.MsgType

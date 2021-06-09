@@ -89,7 +89,7 @@ func (loader *segmentLoader) loadSegment(req *queryPb.LoadSegmentsRequest, onSer
 			log.Warn(err.Error())
 			continue
 		}
-		segment := newSegment(collection, segmentID, partitionID, collectionID, segmentTypeSealed, onService)
+		segment := newSegment(collection, segmentID, partitionID, collectionID, "", segmentTypeSealed, onService)
 		err = loader.loadSegmentInternal(collectionID, segment, info.BinlogPaths)
 		if err != nil {
 			deleteSegment(segment)
@@ -207,7 +207,7 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, binlogPaths
 			zap.String("paths", fmt.Sprintln(paths)),
 		)
 		blob := &storage.Blob{
-			Key: strconv.FormatInt(fieldID, 10),
+			Key:   strconv.FormatInt(fieldID, 10),
 			Value: make([]byte, 0),
 		}
 		for _, path := range paths {

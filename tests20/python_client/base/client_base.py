@@ -7,11 +7,13 @@ from base.collection_wrapper import ApiCollectionWrapper
 from base.partition_wrapper import ApiPartitionWrapper
 from base.index_wrapper import ApiIndexWrapper
 from base.utility_wrapper import ApiUtilityWrapper
+from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
 
 from config.test_info import test_info
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
+from check.param_check import ip_check, number_check
 
 
 class ParamInfo:
@@ -36,6 +38,8 @@ class Base:
     partition_wrap = None
     index_wrap = None
     utility_wrap = None
+    collection_schema_wrap = None
+    field_schema_wrap = None
 
     def setup_class(self):
         log.info("[setup_class] Start setup class...")
@@ -50,6 +54,8 @@ class Base:
         self.partition_wrap = ApiPartitionWrapper()
         self.index_wrap = ApiIndexWrapper()
         self.utility_wrap = ApiUtilityWrapper()
+        self.collection_schema_wrap = ApiCollectionSchemaWrapper()
+        self.field_schema_wrap = ApiFieldSchemaWrapper()
 
     def teardown(self):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
@@ -72,12 +78,19 @@ class Base:
     @pytest.fixture(scope="module", autouse=True)
     def initialize_env(self, request):
         """ clean log before testing """
-        cf.modify_file([test_info.log_debug, test_info.log_info, test_info.log_err])
-        log.info("[initialize_milvus] Log cleaned up, start testing...")
-
         host = request.config.getoption("--host")
         port = request.config.getoption("--port")
         handler = request.config.getoption("--handler")
+        clean_log = request.config.getoption("--clean_log")
+
+        """ params check """
+        assert ip_check(host) and number_check(port)
+
+        """ modify log files """
+        cf.modify_file(file_path_list=[test_info.log_debug, test_info.log_info, test_info.log_err], is_modify=clean_log)
+
+        log.info("#" * 80)
+        log.info("[initialize_milvus] Log cleaned up, start testing...")
         param_info.prepare_param_info(host, port, handler)
 
 
@@ -98,8 +111,11 @@ class TestcaseBase(Base):
     def _connect(self):
         """ Add an connection and create the connect """
         self.connection_wrap.add_connection(default={"host": param_info.param_host, "port": param_info.param_port})
-        res, _ = self.connection_wrap.connect(alias='default')
+        res, is_succ = self.connection_wrap.connect(alias='default')
+        if not is_succ:
+            raise res
         return res
+
     '''
     def _collection(self, **kwargs):
         """ Init a collection and return the object of collection """
@@ -121,7 +137,7 @@ class TestcaseBase(Base):
                                      check_task=check_task, **kwargs)
         return collection_w
 
-    def init_partition_wrap(self, collection_wrap, name=None, description=None,
+    def init_partition_wrap(self, collection_wrap=None, name=None, description=None,
                             check_task=None, check_items=None, **kwargs):
         name = cf.gen_unique_str("partition_") if name is None else name
         description = cf.gen_unique_str("partition_des_") if description is None else description
