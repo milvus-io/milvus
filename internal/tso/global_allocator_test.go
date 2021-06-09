@@ -13,6 +13,7 @@ package tso
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,12 +26,13 @@ import (
 var gTestTsoAllocator *GlobalTSOAllocator
 
 func TestGlobalTSOAllocator_All(t *testing.T) {
-	etcdAddress := os.Getenv("ETCD_ADDRESS")
-	if etcdAddress == "" {
+	endpoints := os.Getenv("ETCD_ENDPOINTS")
+	if endpoints == "" {
 		ip := funcutil.GetLocalIP()
-		etcdAddress = ip + ":2379"
+		endpoints = ip + ":2379"
 	}
-	gTestTsoAllocator = NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase([]string{etcdAddress}, "/test/root/kv", "tsoTest"))
+	etcdEndpoints := strings.Split(endpoints, ",")
+	gTestTsoAllocator = NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase(etcdEndpoints, "/test/root/kv", "tsoTest"))
 	t.Run("Initialize", func(t *testing.T) {
 		err := gTestTsoAllocator.Initialize()
 		assert.Nil(t, err)

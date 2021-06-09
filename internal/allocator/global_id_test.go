@@ -13,6 +13,7 @@ package allocator
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -24,12 +25,13 @@ import (
 var gTestIDAllocator *GlobalIDAllocator
 
 func TestGlobalTSOAllocator_All(t *testing.T) {
-	etcdAddress := os.Getenv("ETCD_ADDRESS")
-	if etcdAddress == "" {
+	endpoints := os.Getenv("ETCD_ENDPOINTS")
+	if endpoints == "" {
 		ip := funcutil.GetLocalIP()
-		etcdAddress = ip + ":2379"
+		endpoints = ip + ":2379"
 	}
-	gTestIDAllocator = NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{etcdAddress}, "/test/root/kv", "gidTest"))
+	etcdEndpoints := strings.Split(endpoints, ",")
+	gTestIDAllocator = NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(etcdEndpoints, "/test/root/kv", "gidTest"))
 
 	t.Run("Initialize", func(t *testing.T) {
 		err := gTestIDAllocator.Initialize()

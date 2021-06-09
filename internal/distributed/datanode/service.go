@@ -72,8 +72,8 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		newMasterServiceClient: func() (types.MasterService, error) {
 			return msc.NewClient(dn.Params.MetaRootPath, dn.Params.EtcdEndpoints, 3*time.Second)
 		},
-		newDataServiceClient: func(etcdMetaRoot string, etcdAddress []string, timeout time.Duration) types.DataService {
-			return dsc.NewClient(etcdMetaRoot, etcdAddress, timeout)
+		newDataServiceClient: func(etcdMetaRoot string, etcdEndpoints []string, timeout time.Duration) types.DataService {
+			return dsc.NewClient(etcdMetaRoot, etcdEndpoints, timeout)
 		},
 	}
 

@@ -56,8 +56,8 @@ func getDataServiceAddress(sess *sessionutil.Session) (string, error) {
 	return ms.Address, nil
 }
 
-func NewClient(metaRoot string, etcdAddr []string, timeout time.Duration) *Client {
-	sess := sessionutil.NewSession(context.Background(), metaRoot, etcdAddr)
+func NewClient(metaRoot string, etcdEndpoints []string, timeout time.Duration) *Client {
+	sess := sessionutil.NewSession(context.Background(), metaRoot, etcdEndpoints)
 	return &Client{
 		sess:      sess,
 		timeout:   timeout,
