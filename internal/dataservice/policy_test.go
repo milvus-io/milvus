@@ -51,7 +51,7 @@ func TestWatchRestartsPolicy(t *testing.T) {
 		restarts: []string{"localhost:2222"},
 	}
 
-	nodes := p.apply(c, dchange)
+	nodes, _ := p.apply(c, dchange, []*datapb.ChannelStatus{})
 	assert.EqualValues(t, 1, len(nodes))
 	assert.EqualValues(t, datapb.ChannelWatchState_Uncomplete, nodes[0].Channels[0].State)
 }

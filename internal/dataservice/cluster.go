@@ -67,7 +67,7 @@ func defaultStartupPolicy() clusterStartupPolicy {
 }
 
 func defaultRegisterPolicy() dataNodeRegisterPolicy {
-	return newEmptyRegisterPolicy()
+	return newAssiggBufferRegisterPolicy()
 }
 
 func defaultUnregisterPolicy() dataNodeUnregisterPolicy {
@@ -98,11 +98,12 @@ func newCluster(ctx context.Context, dataManager *clusterNodeManager, sessionMan
 
 func (c *cluster) startup(dataNodes []*datapb.DataNodeInfo) error {
 	deltaChange := c.dataManager.updateCluster(dataNodes)
-	nodes := c.dataManager.getDataNodes(false)
-	rets := c.startupPolicy.apply(nodes, deltaChange)
-	c.dataManager.updateDataNodes(rets)
+	nodes, chanBuffer := c.dataManager.getDataNodes(false)
+	var rets []*datapb.DataNodeInfo
+	rets, chanBuffer = c.startupPolicy.apply(nodes, deltaChange, chanBuffer)
+	c.dataManager.updateDataNodes(rets, chanBuffer)
 	rets = c.watch(rets)
-	c.dataManager.updateDataNodes(rets)
+	c.dataManager.updateDataNodes(rets, chanBuffer)
 	return nil
 }
 
@@ -167,11 +168,12 @@ func (c *cluster) register(n *datapb.DataNodeInfo) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.dataManager.register(n)
-	cNodes := c.dataManager.getDataNodes(true)
-	rets := c.registerPolicy.apply(cNodes, n)
-	c.dataManager.updateDataNodes(rets)
+	cNodes, chanBuffer := c.dataManager.getDataNodes(true)
+	var rets []*datapb.DataNodeInfo
+	rets, chanBuffer = c.registerPolicy.apply(cNodes, n, chanBuffer)
+	c.dataManager.updateDataNodes(rets, chanBuffer)
 	rets = c.watch(rets)
-	c.dataManager.updateDataNodes(rets)
+	c.dataManager.updateDataNodes(rets, chanBuffer)
 }
 
 func (c *cluster) unregister(n *datapb.DataNodeInfo) {
@@ -179,21 +181,38 @@ func (c *cluster) unregister(n *datapb.DataNodeInfo) {
 	defer c.mu.Unlock()
 	c.sessionManager.releaseSession(n.Address)
 	c.dataManager.unregister(n)
-	cNodes := c.dataManager.getDataNodes(true)
-	rets := c.unregisterPolicy.apply(cNodes, n)
-	c.dataManager.updateDataNodes(rets)
+	cNodes, chanBuffer := c.dataManager.getDataNodes(true)
+	var rets []*datapb.DataNodeInfo
+	if len(cNodes) == 0 {
+		for _, chStat := range n.Channels {
+			chStat.State = datapb.ChannelWatchState_Uncomplete
+			chanBuffer = append(chanBuffer, chStat)
+		}
+	} else {
+		rets = c.unregisterPolicy.apply(cNodes, n)
+	}
+	c.dataManager.updateDataNodes(rets, chanBuffer)
 	rets = c.watch(rets)
-	c.dataManager.updateDataNodes(rets)
+	c.dataManager.updateDataNodes(rets, chanBuffer)
 }
 
 func (c *cluster) watchIfNeeded(channel string, collectionID UniqueID) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	cNodes := c.dataManager.getDataNodes(true)
-	rets := c.assignPolicy.apply(cNodes, channel, collectionID)
-	c.dataManager.updateDataNodes(rets)
+	cNodes, chanBuffer := c.dataManager.getDataNodes(true)
+	var rets []*datapb.DataNodeInfo
+	if len(cNodes) == 0 { // no nodes to assign, put into buffer
+		chanBuffer = append(chanBuffer, &datapb.ChannelStatus{
+			Name:         channel,
+			CollectionID: collectionID,
+			State:        datapb.ChannelWatchState_Uncomplete,
+		})
+	} else {
+		rets = c.assignPolicy.apply(cNodes, channel, collectionID)
+	}
+	c.dataManager.updateDataNodes(rets, chanBuffer)
 	rets = c.watch(rets)
-	c.dataManager.updateDataNodes(rets)
+	c.dataManager.updateDataNodes(rets, chanBuffer)
 }
 
 func (c *cluster) flush(segments []*datapb.SegmentInfo) {
@@ -210,7 +229,7 @@ func (c *cluster) flush(segments []*datapb.SegmentInfo) {
 		m[seg.InsertChannel][seg.CollectionID] = append(m[seg.InsertChannel][seg.CollectionID], seg.ID)
 	}
 
-	dataNodes := c.dataManager.getDataNodes(true)
+	dataNodes, _ := c.dataManager.getDataNodes(true)
 
 	channel2Node := make(map[string]string)
 	for _, node := range dataNodes {
