@@ -158,13 +158,14 @@ func (c *clusterNodeManager) register(n *datapb.DataNodeInfo) {
 	c.updateMetrics()
 }
 
-func (c *clusterNodeManager) unregister(n *datapb.DataNodeInfo) {
+func (c *clusterNodeManager) unregister(n *datapb.DataNodeInfo) *datapb.DataNodeInfo {
 	node, ok := c.dataNodes[n.Address]
 	if !ok {
-		return
+		return nil
 	}
 	node.status = offline
 	c.updateMetrics()
+	return node.info
 }
 
 func (c *clusterNodeManager) updateMetrics() {
