@@ -116,17 +116,6 @@ class TestcaseBase(Base):
             raise res
         return res
 
-    '''
-    def _collection(self, **kwargs):
-        """ Init a collection and return the object of collection """
-        name = cf.gen_unique_str()
-        schema = cf.gen_default_collection_schema()
-        if self.connection_wrap.get_connection(alias='default') is None:
-            self._connect()
-        res, cr = self.collection_wrap.init_collection(name=name, schema=schema, **kwargs)
-        return res
-    '''
-
     def init_collection_wrap(self, name=None, data=None, schema=None, check_task=None, **kwargs):
         name = cf.gen_unique_str('coll_') if name is None else name
         schema = cf.gen_default_collection_schema() if schema is None else schema
