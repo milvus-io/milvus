@@ -184,6 +184,7 @@ func (node *DataNode) BackGroundGC(collIDCh <-chan UniqueID) {
 				node.ReleaseDataSyncService(vchanName)
 			}
 		case <-node.ctx.Done():
+			log.Info("DataNode ctx done")
 			return
 		}
 	}
