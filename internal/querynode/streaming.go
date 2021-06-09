@@ -54,7 +54,13 @@ func (s *streaming) close() {
 	s.replica.freeAll()
 }
 
-func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, plan *Plan, searchTs Timestamp) ([]*SearchResult, []*Segment, error) {
+func (s *streaming) search(searchReqs []*searchRequest,
+	collID UniqueID,
+	partIDs []UniqueID,
+	vChannel VChannel,
+	plan *Plan,
+	searchTs Timestamp) ([]*SearchResult, []*Segment, error) {
+
 	searchResults := make([]*SearchResult, 0)
 	segmentResults := make([]*Segment, 0)
 
@@ -76,7 +82,7 @@ func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs
 	}
 
 	for _, partID := range searchPartIDs {
-		segIDs, err := s.replica.getSegmentIDs(partID)
+		segIDs, err := s.replica.getSegmentIDsByVChannel(partID, vChannel)
 		if err != nil {
 			return searchResults, segmentResults, err
 		}

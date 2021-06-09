@@ -455,12 +455,14 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	}
 
 	// streaming search
-	strSearchResults, strSegmentResults, err := s.streaming.search(searchRequests, collectionID, searchMsg.PartitionIDs, plan, searchTimestamp)
-	if err != nil {
-		return err
+	for _, channel := range collection.getWatchedDmChannels() {
+		strSearchResults, strSegmentResults, err := s.streaming.search(searchRequests, collectionID, searchMsg.PartitionIDs, channel, plan, searchTimestamp)
+		if err != nil {
+			return err
+		}
+		searchResults = append(searchResults, strSearchResults...)
+		matchedSegments = append(matchedSegments, strSegmentResults...)
 	}
-	searchResults = append(searchResults, strSearchResults...)
-	matchedSegments = append(matchedSegments, strSegmentResults...)
 
 	sp.LogFields(oplog.String("statistical time", "segment search end"))
 	if len(searchResults) <= 0 {

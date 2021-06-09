@@ -62,6 +62,7 @@ type ReplicaInterface interface {
 	hasPartition(partitionID UniqueID) bool
 	getPartitionNum() int
 	getSegmentIDs(partitionID UniqueID) ([]UniqueID, error)
+	getSegmentIDsByVChannel(partitionID UniqueID, vChannel VChannel) ([]UniqueID, error)
 
 	// segment
 	addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID VChannel, segType segmentType, onService bool) error
@@ -306,6 +307,27 @@ func (colReplica *collectionReplica) getSegmentIDs(partitionID UniqueID) ([]Uniq
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
 	return colReplica.getSegmentIDsPrivate(partitionID)
+}
+
+func (colReplica *collectionReplica) getSegmentIDsByVChannel(partitionID UniqueID, vChannel VChannel) ([]UniqueID, error) {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+	segmentIDs, err := colReplica.getSegmentIDsPrivate(partitionID)
+	if err != nil {
+		return nil, err
+	}
+	segmentIDsTmp := make([]UniqueID, 0)
+	for _, segmentID := range segmentIDs {
+		segment, err := colReplica.getSegmentByIDPrivate(segmentID)
+		if err != nil {
+			return nil, err
+		}
+		if segment.vChannelID == vChannel {
+			segmentIDsTmp = append(segmentIDsTmp, segment.ID())
+		}
+	}
+
+	return segmentIDsTmp, nil
 }
 
 func (colReplica *collectionReplica) getSegmentIDsPrivate(partitionID UniqueID) ([]UniqueID, error) {
