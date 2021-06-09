@@ -173,14 +173,17 @@ func newQueryNodeMock() *QueryNode {
 		}()
 	}
 
-	msFactory := msgstream.NewPmsFactory()
+	msFactory, err := newMessageStreamFactory()
+	if err != nil {
+		panic(err)
+	}
 	svr := NewQueryNode(ctx, Params.QueryNodeID, msFactory)
-	err := svr.SetQueryService(&queryServiceMock{})
+	err = svr.SetQueryService(&queryServiceMock{})
 	if err != nil {
 		panic(err)
 	}
 	svr.historical = newHistorical(svr.queryNodeLoopCtx, nil, nil, nil, svr.msFactory)
-	svr.streaming = newStreaming()
+	svr.streaming = newStreaming(ctx, msFactory)
 
 	return svr
 }

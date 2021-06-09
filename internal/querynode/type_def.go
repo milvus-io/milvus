@@ -20,6 +20,8 @@ const (
 	timestampFieldID = 1
 )
 
+const invalidTimestamp = Timestamp(0)
+
 type (
 	UniqueID = typeutil.UniqueID
 	// Timestamp is timestamp
