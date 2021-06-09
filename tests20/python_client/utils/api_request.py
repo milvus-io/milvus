@@ -1,3 +1,4 @@
+import traceback
 from utils.util_log import test_log as log
 
 
@@ -18,6 +19,7 @@ def api_request_catch():
                 log.debug("(api_res) Response : %s " % str(res)[0:log_row_length])
                 return res, True
             except Exception as e:
+                log.error(traceback.format_exc())
                 log.error("[Milvus API Exception]%s: %s" % (str(func), str(e)[0:log_row_length]))
                 return Error(e), False
 
