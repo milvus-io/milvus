@@ -155,7 +155,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	toSeekChannels := make([]*internalpb.MsgPosition, 0)
 	toSubChannels := make([]string, 0)
 	for _, info := range w.req.Infos {
-		if len(info.SeekPosition.MsgID) == 0 {
+		if info.SeekPosition == nil || len(info.SeekPosition.MsgID) == 0 {
 			toSubChannels = append(toSubChannels, info.ChannelName)
 			continue
 		}

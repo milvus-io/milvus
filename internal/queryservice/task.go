@@ -141,11 +141,12 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 	channelsToWatch := make([]string, 0)
 	segmentsToLoad := make([]UniqueID, 0)
 	partitionIDs := showPartitionResponse.PartitionIDs
+	log.Debug("partitionIDs", zap.Int64s("partitionIDs", partitionIDs))
 	for _, partitionID := range partitionIDs {
 		getRecoveryInfoRequest := &querypb.GetRecoveryInfoRequest{
 			Base:         lct.Base,
 			CollectionID: collectionID,
-			PartitionID: partitionID,
+			PartitionID:  partitionID,
 		}
 		recoveryInfo, err := mockGetRecoveryInfoFromDataService(lct.ctx, lct.masterService, lct.dataService, getRecoveryInfoRequest)
 		if err != nil {
@@ -297,7 +298,7 @@ func (lct *LoadCollectionTask) PostExecute(ctx context.Context) error {
 type ReleaseCollectionTask struct {
 	BaseTask
 	*querypb.ReleaseCollectionRequest
-	nodeID int64
+	nodeID  int64
 	cluster *queryNodeCluster
 }
 
@@ -326,14 +327,14 @@ func (rct *ReleaseCollectionTask) Execute(ctx context.Context) error {
 		for nodeID := range rct.cluster.nodes {
 			releaseCollectionTask := &ReleaseCollectionTask{
 				BaseTask: BaseTask{
-					ctx: rct.ctx,
-					Condition: NewTaskCondition(rct.ctx),
+					ctx:              rct.ctx,
+					Condition:        NewTaskCondition(rct.ctx),
 					triggerCondition: querypb.TriggerCondition_grpcRequest,
 				},
 
 				ReleaseCollectionRequest: rct.ReleaseCollectionRequest,
-				nodeID: nodeID,
-				cluster: rct.cluster,
+				nodeID:                   nodeID,
+				cluster:                  rct.cluster,
 			}
 			rct.AddChildTask(releaseCollectionTask)
 			log.Debug("add a releaseCollectionTask to releaseCollectionTask's childTask")
@@ -561,7 +562,7 @@ func (lpt *LoadPartitionTask) PostExecute(ctx context.Context) error {
 type ReleasePartitionTask struct {
 	BaseTask
 	*querypb.ReleasePartitionsRequest
-	nodeID int64
+	nodeID  int64
 	cluster *queryNodeCluster
 }
 
@@ -591,14 +592,14 @@ func (rpt *ReleasePartitionTask) Execute(ctx context.Context) error {
 		for nodeID := range rpt.cluster.nodes {
 			releasePartitionTask := &ReleasePartitionTask{
 				BaseTask: BaseTask{
-					ctx: rpt.ctx,
-					Condition: rpt.Condition,
+					ctx:              rpt.ctx,
+					Condition:        rpt.Condition,
 					triggerCondition: querypb.TriggerCondition_grpcRequest,
 				},
 
 				ReleasePartitionsRequest: rpt.ReleasePartitionsRequest,
-				nodeID: nodeID,
-				cluster: rpt.cluster,
+				nodeID:                   nodeID,
+				cluster:                  rpt.cluster,
 			}
 			rpt.AddChildTask(releasePartitionTask)
 			log.Debug("add a releasePartitionTask to releasePartitionTask's childTask")
@@ -810,12 +811,15 @@ func mockGetRecoveryInfoFromDataService(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-
+	log.Debug("get segmentStates from dataService", zap.Any("states", getSegmentStatesResponse))
 	segmentStates := make(map[UniqueID]*datapb.SegmentStateInfo)
 	channel2Segments := make(map[string][]UniqueID)
 	for _, state := range getSegmentStatesResponse.States {
 		segmentID := state.SegmentID
 		segmentStates[segmentID] = state
+		if state.StartPosition == nil || len(state.StartPosition.ChannelName) == 0 {
+			continue
+		}
 		channelName := state.StartPosition.ChannelName
 		if _, ok := channel2Segments[channelName]; !ok {
 			segments := make([]UniqueID, 0)
@@ -829,8 +833,11 @@ func mockGetRecoveryInfoFromDataService(ctx context.Context,
 	segmentBinlogs := make([]*querypb.SegmentBinlogs, 0)
 	for channel, segmentIDs := range channel2Segments {
 		channelInfo := &querypb.VchannelInfo{
-			CollectionID:    req.CollectionID,
-			ChannelName:     channel,
+			CollectionID: req.CollectionID,
+			ChannelName:  channel,
+			SeekPosition: &internalpb.MsgPosition{
+				ChannelName: channel,
+			},
 			CheckPoints:     make([]*querypb.CheckPoint, 0),
 			FlushedSegments: make([]UniqueID, 0),
 		}
@@ -849,7 +856,7 @@ func mockGetRecoveryInfoFromDataService(ctx context.Context,
 					Position:  segmentStates[id].StartPosition,
 				}
 				channelInfo.CheckPoints = append(channelInfo.CheckPoints, checkpoint)
-				if checkpoint.Position.Timestamp < channelInfo.SeekPosition.Timestamp {
+				if checkpoint.Position.Timestamp < channelInfo.SeekPosition.Timestamp || channelInfo.SeekPosition.Timestamp == 0{
 					channelInfo.SeekPosition = checkpoint.Position
 				}
 			}
@@ -890,6 +897,25 @@ func mockGetRecoveryInfoFromDataService(ctx context.Context,
 					zap.Strings("binlogPath", pathResponse.Paths[index].Values))
 			}
 			segmentBinlogs = append(segmentBinlogs, segmentBinlog)
+		}
+	}
+	if len(channelInfos) == 0 {
+		getInsertChannelsRequest := &datapb.GetInsertChannelsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_Insert,
+			},
+			CollectionID: req.CollectionID,
+		}
+		res, err := dataService.GetInsertChannels(ctx, getInsertChannelsRequest)
+		if err != nil {
+			return nil, err
+		}
+		for _, channel := range res.Values {
+			channelInfo := &querypb.VchannelInfo{
+				CollectionID: req.CollectionID,
+				ChannelName: channel,
+			}
+			channelInfos = append(channelInfos, channelInfo)
 		}
 	}
 
@@ -992,7 +1018,7 @@ func shuffleSegmentsToQueryNode(segmentIDs []UniqueID, cluster *queryNodeCluster
 func mergeVChannelInfo(info1 *querypb.VchannelInfo, info2 *querypb.VchannelInfo) *querypb.VchannelInfo {
 	collectionID := info1.CollectionID
 	channelName := info1.ChannelName
-	seekPosition  := info1.SeekPosition
+	seekPosition := info1.SeekPosition
 	if info1.SeekPosition.Timestamp > info2.SeekPosition.Timestamp {
 		seekPosition = info2.SeekPosition
 	}
@@ -1006,10 +1032,10 @@ func mergeVChannelInfo(info1 *querypb.VchannelInfo, info2 *querypb.VchannelInfo)
 	flushedSegments = append(flushedSegments, info2.FlushedSegments...)
 
 	return &querypb.VchannelInfo{
-		CollectionID: collectionID,
-		ChannelName: channelName,
-		SeekPosition: seekPosition,
-		CheckPoints: checkPoints,
+		CollectionID:    collectionID,
+		ChannelName:     channelName,
+		SeekPosition:    seekPosition,
+		CheckPoints:     checkPoints,
 		FlushedSegments: flushedSegments,
 	}
 }
