@@ -254,6 +254,11 @@ func getPulsarTtOutputStreamAndSeek(pulsarAddress string, positions []*MsgPositi
 	factory := ProtoUDFactory{}
 	pulsarClient, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
 	outputStream, _ := NewMqTtMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+	consumerName := []string{}
+	for _, c := range positions {
+		consumerName = append(consumerName, c.ChannelName)
+	}
+	outputStream.AsConsumer(consumerName, positions[0].MsgGroup)
 	outputStream.Seek(positions)
 	outputStream.Start()
 	return outputStream
