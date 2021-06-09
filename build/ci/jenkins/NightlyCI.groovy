@@ -8,7 +8,7 @@ String cron_string = BRANCH_NAME == "master" ? "50 20,22,0,6,11,16 * * * " : ""
 pipeline {
     agent none
     triggers {
-        pollSCM ignorePostCommitHooks: true, scmpoll_spec: """${cron_timezone}
+        cron """${cron_timezone}
             ${cron_string}"""
     }
     options {
