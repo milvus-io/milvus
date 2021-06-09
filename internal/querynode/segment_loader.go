@@ -89,7 +89,7 @@ func (loader *segmentLoader) loadSegment(req *queryPb.LoadSegmentsRequest, onSer
 			log.Warn(err.Error())
 			continue
 		}
-		segment := newSegment(collection, segmentID, partitionID, collectionID, segmentTypeSealed, onService)
+		segment := newSegment(collection, segmentID, partitionID, collectionID, "", segmentTypeSealed, onService)
 		err = loader.loadSegmentInternal(collectionID, segment, info.BinlogPaths)
 		if err != nil {
 			deleteSegment(segment)
