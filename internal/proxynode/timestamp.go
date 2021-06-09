@@ -52,6 +52,9 @@ func (ta *TimestampAllocator) Alloc(count uint32) ([]Timestamp, error) {
 	if err != nil {
 		return nil, fmt.Errorf("syncTimestamp Failed:%w", err)
 	}
+	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return nil, fmt.Errorf("syncTimeStamp Failed:%s", resp.Status.Reason)
+	}
 	start, cnt := resp.Timestamp, resp.Count
 	var ret []Timestamp
 	for i := uint32(0); i < cnt; i++ {
