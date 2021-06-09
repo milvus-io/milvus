@@ -82,8 +82,8 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 }
 
 func (s *Server) setClient() {
-	s.newDataServiceClient = func(etcdMetaRoot string, etcdAddress []string, timeout time.Duration) types.DataService {
-		dsClient := dsc.NewClient(etcdMetaRoot, etcdAddress, timeout)
+	s.newDataServiceClient = func(etcdMetaRoot string, etcdEndpoints []string, timeout time.Duration) types.DataService {
+		dsClient := dsc.NewClient(etcdMetaRoot, etcdEndpoints, timeout)
 		if err := dsClient.Init(); err != nil {
 			panic(err)
 		}
@@ -92,8 +92,8 @@ func (s *Server) setClient() {
 		}
 		return dsClient
 	}
-	s.newIndexServiceClient = func(metaRootPath string, etcdAddress []string, timeout time.Duration) types.IndexService {
-		isClient := isc.NewClient(metaRootPath, etcdAddress, timeout)
+	s.newIndexServiceClient = func(metaRootPath string, etcdEndpoints []string, timeout time.Duration) types.IndexService {
+		isClient := isc.NewClient(metaRootPath, etcdEndpoints, timeout)
 		if err := isClient.Init(); err != nil {
 			panic(err)
 		}
@@ -102,8 +102,8 @@ func (s *Server) setClient() {
 		}
 		return isClient
 	}
-	s.newQueryServiceClient = func(metaRootPath string, etcdAddress []string, timeout time.Duration) types.QueryService {
-		qsClient, err := qsc.NewClient(metaRootPath, etcdAddress, timeout)
+	s.newQueryServiceClient = func(metaRootPath string, etcdEndpoints []string, timeout time.Duration) types.QueryService {
+		qsClient, err := qsc.NewClient(metaRootPath, etcdEndpoints, timeout)
 		if err != nil {
 			panic(err)
 		}

@@ -22,16 +22,11 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	ctx := context.Background()
 	Params.Init()
 
+	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 	endpoints, err := Params.Load("_EtcdEndpoints")
 	if err != nil {
 		panic(err)
 	}
-
-	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-	if err != nil {
-		panic(err)
-	}
-
 	etcdEndpoints := strings.Split(endpoints, ",")
 	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
 	assert.Nil(t, err)
@@ -175,5 +170,4 @@ func TestUpdateSessions(t *testing.T) {
 	assert.Equal(t, len(sessionEvents), 20)
 	assert.Equal(t, addEventLen, 10)
 	assert.Equal(t, delEventLen, 10)
-
 }

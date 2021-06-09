@@ -30,14 +30,17 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func TestEtcdKV_Load(t *testing.T) {
+func newEtcdClient() (*clientv3.Client, error) {
 	endpoints, err := Params.Load("_EtcdEndpoints")
 	if err != nil {
 		panic(err)
 	}
-
 	etcdEndpoints := strings.Split(endpoints, ",")
-	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
+	return clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
+}
+
+func TestEtcdKV_Load(t *testing.T) {
+	cli, err := newEtcdClient()
 	assert.Nil(t, err)
 	rootPath := "/etcd/test/root"
 	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
@@ -89,13 +92,7 @@ func TestEtcdKV_Load(t *testing.T) {
 }
 
 func TestEtcdKV_MultiSave(t *testing.T) {
-	endpoints, err := Params.Load("_EtcdEndpoints")
-	if err != nil {
-		panic(err)
-	}
-
-	etcdEndpoints := strings.Split(endpoints, ",")
-	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
+	cli, err := newEtcdClient()
 	assert.Nil(t, err)
 	rootPath := "/etcd/test/root"
 	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
@@ -120,13 +117,7 @@ func TestEtcdKV_MultiSave(t *testing.T) {
 }
 
 func TestEtcdKV_Remove(t *testing.T) {
-	endpoints, err := Params.Load("_EtcdEndpoints")
-	if err != nil {
-		panic(err)
-	}
-
-	etcdEndpoints := strings.Split(endpoints, ",")
-	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
+	cli, err := newEtcdClient()
 	assert.Nil(t, err)
 	rootPath := "/etcd/test/root"
 	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
@@ -191,13 +182,7 @@ func TestEtcdKV_Remove(t *testing.T) {
 }
 
 func TestEtcdKV_MultiSaveAndRemove(t *testing.T) {
-	endpoints, err := Params.Load("_EtcdEndpoints")
-	if err != nil {
-		panic(err)
-	}
-
-	etcdEndpoints := strings.Split(endpoints, ",")
-	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
+	cli, err := newEtcdClient()
 	assert.Nil(t, err)
 	rootPath := "/etcd/test/root"
 	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
@@ -233,13 +218,7 @@ func TestEtcdKV_MultiSaveAndRemove(t *testing.T) {
 }
 
 func TestEtcdKV_MultiRemoveWithPrefix(t *testing.T) {
-	endpoints, err := Params.Load("_EtcdEndpoints")
-	if err != nil {
-		panic(err)
-	}
-
-	etcdEndpoints := strings.Split(endpoints, ",")
-	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
+	cli, err := newEtcdClient()
 	assert.Nil(t, err)
 	rootPath := "/etcd/test/root"
 	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
@@ -265,13 +244,7 @@ func TestEtcdKV_MultiRemoveWithPrefix(t *testing.T) {
 }
 
 func TestEtcdKV_MultiSaveAndRemoveWithPrefix(t *testing.T) {
-	endpoints, err := Params.Load("_EtcdEndpoints")
-	if err != nil {
-		panic(err)
-	}
-
-	etcdEndpoints := strings.Split(endpoints, ",")
-	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
+	cli, err := newEtcdClient()
 	assert.Nil(t, err)
 	rootPath := "/etcd/test/root"
 	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
@@ -306,13 +279,7 @@ func TestEtcdKV_MultiSaveAndRemoveWithPrefix(t *testing.T) {
 }
 
 func TestEtcdKV_Watch(t *testing.T) {
-	endpoints, err := Params.Load("_EtcdEndpoints")
-	if err != nil {
-		panic(err)
-	}
-
-	etcdEndpoints := strings.Split(endpoints, ",")
-	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
+	cli, err := newEtcdClient()
 	assert.Nil(t, err)
 	rootPath := "/etcd/test/root"
 	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
@@ -327,13 +294,7 @@ func TestEtcdKV_Watch(t *testing.T) {
 }
 
 func TestEtcdKV_WatchPrefix(t *testing.T) {
-	endpoints, err := Params.Load("_EtcdEndpoints")
-	if err != nil {
-		panic(err)
-	}
-
-	etcdEndpoints := strings.Split(endpoints, ",")
-	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
+	cli, err := newEtcdClient()
 	assert.Nil(t, err)
 	rootPath := "/etcd/test/root"
 	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
@@ -348,13 +309,7 @@ func TestEtcdKV_WatchPrefix(t *testing.T) {
 }
 
 func TestEtcdKV_CompareAndSwap(t *testing.T) {
-	endpoints, err := Params.Load("_EtcdEndpoints")
-	if err != nil {
-		panic(err)
-	}
-
-	etcdEndpoints := strings.Split(endpoints, ",")
-	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
+	cli, err := newEtcdClient()
 	assert.Nil(t, err)
 	rootPath := "/etcd/test/root"
 	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
