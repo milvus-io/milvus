@@ -61,6 +61,7 @@ func newDataSyncService(ctx context.Context,
 		msFactory:    factory,
 		collectionID: vchan.GetCollectionID(),
 		dataService:  dataService,
+		clearSignal:  clearSignal,
 	}
 
 	service.initNodes(vchan)
@@ -71,7 +72,6 @@ func (dsService *dataSyncService) start() {
 	if dsService.fg != nil {
 		log.Debug("Data Sync Service starting flowgraph")
 		dsService.fg.Start()
-		log.Debug("Data Sync Service starting flowgraph Done")
 	} else {
 		log.Debug("Data Sync Service flowgraph nil")
 	}

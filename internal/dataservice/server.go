@@ -269,6 +269,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 					zap.Stringer("msgType", msg.Type()))
 				continue
 			}
+			log.Debug("Receive DataNode segment statistics update")
 			ssMsg := msg.(*msgstream.SegmentStatisticsMsg)
 			for _, stat := range ssMsg.SegStats {
 				s.segmentManager.UpdateSegmentStats(stat)
