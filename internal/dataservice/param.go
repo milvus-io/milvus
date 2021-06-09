@@ -29,7 +29,7 @@ type ParamTable struct {
 	Port int
 
 	// --- ETCD ---
-	EtcdAddress             []string
+	EtcdEndpoints           []string
 	MetaRootPath            string
 	KvRootPath              string
 	SegmentBinlogSubPath    string
@@ -111,11 +111,11 @@ func (p *ParamTable) initNodeID() {
 }
 
 func (p *ParamTable) initEtcdAddress() {
-	addr, err := p.Load("_EtcdAddress")
+	endpoints, err := p.Load("_EtcdEndpoints")
 	if err != nil {
 		panic(err)
 	}
-	p.EtcdAddress = strings.Split(addr, ",")
+	p.EtcdEndpoints = strings.Split(endpoints, ",")
 }
 
 func (p *ParamTable) initPulsarAddress() {

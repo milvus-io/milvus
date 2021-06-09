@@ -841,7 +841,7 @@ func newTestServer(t *testing.T, receiveCh chan interface{}) *Server {
 	err = factory.SetParams(m)
 	assert.Nil(t, err)
 
-	etcdCli, err := initEtcd(Params.EtcdAddress)
+	etcdCli, err := initEtcd(Params.EtcdEndpoints)
 	assert.Nil(t, err)
 	sessKey := path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
