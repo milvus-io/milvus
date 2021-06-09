@@ -748,7 +748,7 @@ class TestPartitionOperations(TestcaseBase):
         data = cf.gen_default_list_data(nb=10, dim=dim)
         # insert data to partition
         partition_w.insert(data, check_task=CheckTasks.err_res,
-                           check_items={"err_code": 1, "err_msg": "Field type doesn't match"})
+                           check_items={"err_code": 1, "err_msg": "but entities field dim"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("sync", [True, False])
