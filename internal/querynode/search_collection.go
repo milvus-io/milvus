@@ -14,6 +14,7 @@ package querynode
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"reflect"
 	"sync"
@@ -190,10 +191,7 @@ func (s *searchCollection) emptySearch(searchMsg *msgstream.SearchMsg) {
 	err := s.search(searchMsg)
 	if err != nil {
 		log.Error(err.Error())
-		err2 := s.publishFailedSearchResult(searchMsg, err.Error())
-		if err2 != nil {
-			log.Error("publish FailedSearchResult failed", zap.Error(err2))
-		}
+		s.publishFailedSearchResult(searchMsg, err.Error())
 	}
 }
 
@@ -285,6 +283,23 @@ func (s *searchCollection) receiveSearch(msg *msgstream.SearchMsg) {
 		return
 	}
 
+	// check if collection has been released
+	collection, err := s.historical.replica.getCollectionByID(msg.CollectionID)
+	if err != nil {
+		log.Error(err.Error())
+		s.publishFailedSearchResult(msg, err.Error())
+		return
+	}
+	if msg.BeginTs() >= collection.getReleaseTime() {
+		err := errors.New("search failed, collection has been released, msgID = " +
+			fmt.Sprintln(msg.ID()) +
+			", collectionID = " +
+			fmt.Sprintln(msg.CollectionID))
+		log.Error(err.Error())
+		s.publishFailedSearchResult(msg, err.Error())
+		return
+	}
+
 	serviceTime := s.getServiceableTime()
 	if msg.BeginTs() > serviceTime {
 		bt, _ := tsoutil.ParseTS(msg.BeginTs())
@@ -315,10 +330,7 @@ func (s *searchCollection) receiveSearch(msg *msgstream.SearchMsg) {
 		log.Debug("do search failed in receiveSearchMsg, prepare to publish failed search result",
 			zap.Int64("msgID", msg.ID()),
 			zap.Int64("collectionID", msg.CollectionID))
-		err2 := s.publishFailedSearchResult(msg, err.Error())
-		if err2 != nil {
-			log.Error("publish FailedSearchResult failed", zap.Error(err2))
-		}
+		s.publishFailedSearchResult(msg, err.Error())
 	}
 	log.Debug("do search done in receiveSearch",
 		zap.Int64("msgID", msg.ID()),
@@ -378,10 +390,7 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 					log.Debug("do search failed in doUnsolvedMsgSearch, prepare to publish failed search result",
 						zap.Int64("msgID", sm.ID()),
 						zap.Int64("collectionID", sm.CollectionID))
-					err2 := s.publishFailedSearchResult(sm, err.Error())
-					if err2 != nil {
-						log.Error("publish FailedSearchResult failed", zap.Error(err2))
-					}
+					s.publishFailedSearchResult(sm, err.Error())
 				}
 				sp.Finish()
 				log.Debug("do search done in doUnsolvedMsgSearch",
@@ -625,7 +634,7 @@ func (s *searchCollection) publishSearchResult(msg msgstream.TsMsg, collectionID
 	return err
 }
 
-func (s *searchCollection) publishFailedSearchResult(searchMsg *msgstream.SearchMsg, errMsg string) error {
+func (s *searchCollection) publishFailedSearchResult(searchMsg *msgstream.SearchMsg, errMsg string) {
 	span, ctx := trace.StartSpanFromContext(searchMsg.TraceCtx())
 	defer span.Finish()
 	searchMsg.SetTraceCtx(ctx)
@@ -651,8 +660,6 @@ func (s *searchCollection) publishFailedSearchResult(searchMsg *msgstream.Search
 	msgPack.Msgs = append(msgPack.Msgs, searchResultMsg)
 	err := s.searchResultMsgStream.Produce(&msgPack)
 	if err != nil {
-		return err
+		log.Error("publish FailedSearchResult failed" + err.Error())
 	}
-
-	return nil
 }

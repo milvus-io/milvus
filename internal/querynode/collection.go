@@ -23,6 +23,8 @@ package querynode
 */
 import "C"
 import (
+	"math"
+	"sync"
 	"unsafe"
 
 	"go.uber.org/zap"
@@ -38,6 +40,9 @@ type Collection struct {
 	partitionIDs    []UniqueID
 	schema          *schemapb.CollectionSchema
 	watchedChannels []VChannel
+
+	releaseMu   sync.RWMutex // guards releaseTime
+	releaseTime Timestamp
 }
 
 func (c *Collection) ID() UniqueID {
@@ -73,6 +78,18 @@ func (c *Collection) getWatchedDmChannels() []VChannel {
 	return c.watchedChannels
 }
 
+func (c *Collection) setReleaseTime(t Timestamp) {
+	c.releaseMu.Lock()
+	defer c.releaseMu.Unlock()
+	c.releaseTime = t
+}
+
+func (c *Collection) getReleaseTime() Timestamp {
+	c.releaseMu.RLock()
+	defer c.releaseMu.RUnlock()
+	return c.releaseTime
+}
+
 func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Collection {
 	/*
 		CCollection
@@ -93,6 +110,7 @@ func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Co
 
 	log.Debug("create collection", zap.Int64("collectionID", collectionID))
 
+	newCollection.setReleaseTime(Timestamp(math.MaxUint64))
 	return newCollection
 }
 

@@ -344,21 +344,22 @@ func (r *releaseCollectionTask) PreExecute(ctx context.Context) error {
 
 func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 	log.Debug("receive release collection task", zap.Any("collectionID", r.req.CollectionID))
+	collection, err := r.node.historical.replica.getCollectionByID(r.req.CollectionID)
+	if err != nil {
+		log.Error(err.Error())
+		return err
+	}
+	collection.setReleaseTime(r.req.Base.Timestamp)
 
 	const gracefulReleaseTime = 10
 	go func() {
-		time.Sleep(gracefulReleaseTime * time.Second)
 		errMsg := "release collection failed, collectionID = " + strconv.FormatInt(r.req.CollectionID, 10) + ", err = "
+		time.Sleep(gracefulReleaseTime * time.Second)
 
 		r.node.streaming.dataSyncService.removeCollectionFlowGraph(r.req.CollectionID)
-		collection, err := r.node.historical.replica.getCollectionByID(r.req.CollectionID)
-		if err != nil {
-			log.Error(errMsg + err.Error())
-		} else {
-			// remove all tSafes of the target collection
-			for _, channel := range collection.getWatchedDmChannels() {
-				r.node.streaming.tSafeReplica.removeTSafe(channel)
-			}
+		// remove all tSafes of the target collection
+		for _, channel := range collection.getWatchedDmChannels() {
+			r.node.streaming.tSafeReplica.removeTSafe(channel)
 		}
 
 		r.node.streaming.replica.removeExcludedSegments(r.req.CollectionID)
