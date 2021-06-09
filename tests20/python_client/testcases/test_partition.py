@@ -95,7 +95,6 @@ class TestPartitionParams(TestcaseBase):
                                               "is_empty": True}
                                  )
 
-
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("collection_name, partition_name, description",
                              [(cf.gen_unique_str(), cf.gen_unique_str(prefix), cf.gen_unique_str())])
@@ -208,7 +207,7 @@ class TestPartitionParams(TestcaseBase):
                                            check_task=CheckTasks.err_res,
                                            check_items={"err_code": 1, "err_msg": "'NoneType' object has no attribute"})
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_drop(self, partition_name):
         """
