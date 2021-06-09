@@ -95,7 +95,7 @@ class TestIndexParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         self.index_wrap.init_index(collection_w.collection, f_name, default_index_params, name=index_name, check_task=CheckTasks.err_res,
-                                           err_code=1, err_msg="must be str")
+                                            check_items={"err_code": 1, "err_msg": "must be str"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_field_name_not_existed(self):
@@ -109,7 +109,7 @@ class TestIndexParams(TestcaseBase):
         index_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         self.index_wrap.init_index(collection_w.collection, f_name, default_index_params, name=index_name, check_task=CheckTasks.err_res,
-                                           err_code=1, err_msg="CreateIndex failed")
+                                           check_items={"err_code": 1, "err_msg": "CreateIndex failed"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_type_invalid(self, get_invalid_index_type):
@@ -124,7 +124,7 @@ class TestIndexParams(TestcaseBase):
         index_params = copy.deepcopy(default_index_params)
         index_params["index_type"] = get_invalid_index_type
         self.index_wrap.init_index(collection_w.collection, default_field_name, index_params, name=index_name, check_task=CheckTasks.err_res,
-                                        err_code=1, err_msg="must be str")
+                                        check_items={"err_code": 1, "err_msg": "must be str"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_type_not_supported(self):
@@ -139,7 +139,7 @@ class TestIndexParams(TestcaseBase):
         index_params = copy.deepcopy(default_index_params)
         index_params["index_type"] = "IVFFFFFFF"
         self.index_wrap.init_index(collection_w.collection, default_field_name, index_params, name=index_name, check_task=CheckTasks.err_res,
-                                        err_code=1, err_msg="")
+                                        check_items={"err_code": 1, "err_msg": ""})
 
     @pytest.mark.xfail(reason="issue #5653")
     @pytest.mark.tags(CaseLabel.L1)
@@ -154,7 +154,7 @@ class TestIndexParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         index_params = get_invalid_index_params
         self.index_wrap.init_index(collection_w.collection, default_field_name, index_params, name=index_name, check_task=CheckTasks.err_res,
-                                        err_code=1, err_msg="")
+                                        check_items={"err_code": 1, "err_msg": ""})
 
     # TODO: not supported
     @pytest.mark.tags(CaseLabel.L1)
@@ -168,7 +168,7 @@ class TestIndexParams(TestcaseBase):
         index_name = get_invalid_index_name
         collection_w = self.init_collection_wrap(name=c_name)
         self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params, name=index_name, check_task=CheckTasks.err_res,
-                                        err_code=1, err_msg="")
+                                        check_items={"err_code": 1, "err_msg": ""})
 
 
 class TestIndexBase(TestcaseBase):
@@ -216,7 +216,7 @@ class TestIndexBase(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         collection_w.collection.create_index(default_field_name, default_index_params, index_name=index_name)
         self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params, name=index_name, check_task=CheckTasks.err_res,
-                                        err_code=1, err_msg="")
+                                        check_items={"err_code": 1, "err_msg": ""})
 
     # TODO: server not supported
     @pytest.mark.tags(CaseLabel.L1)
@@ -310,7 +310,7 @@ class TestIndexBase(TestcaseBase):
         _, _ = self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params, name=index_name)
         self.index_wrap.drop()
         self.index_wrap.drop(check_task=CheckTasks.err_res,
-                                        err_code=1, err_msg="Index doesn't exist")
+                                        check_items={"err_code": 1, "err_msg": "Index doesn't exist"})
 
 
 class TestIndexAdvanced(TestcaseBase):
