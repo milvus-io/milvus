@@ -12,6 +12,7 @@
 package datanode
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -20,20 +21,17 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/types"
 )
 
 type Replica interface {
+	init(initTs Timestamp) error
 
-	// collection
-	getCollectionNum() int
-	addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error
-	removeCollection(collectionID UniqueID) error
-	getCollectionByID(collectionID UniqueID) (*Collection, error)
+	getCollectionByID(collectionID UniqueID, ts Timestamp) (*Collection, error)
 	hasCollection(collectionID UniqueID) bool
 
 	// segment
-	addSegment(segmentID UniqueID, collID UniqueID, partitionID UniqueID, channelName string) error
+	addSegment(segmentID, collID, partitionID UniqueID, channelName string) error
 	removeSegment(segmentID UniqueID) error
 	hasSegment(segmentID UniqueID) bool
 	updateStatistics(segmentID UniqueID, numRows int64) error
@@ -64,8 +62,9 @@ type Segment struct {
 // It implements `Replica` interface.
 type CollectionSegmentReplica struct {
 	mu          sync.RWMutex
+	collection  *Collection
 	segments    map[UniqueID]*Segment
-	collections map[UniqueID]*Collection
+	metaService *metaService
 
 	posMu          sync.Mutex
 	startPositions map[UniqueID][]*internalpb.MsgPosition
@@ -74,17 +73,31 @@ type CollectionSegmentReplica struct {
 
 var _ Replica = &CollectionSegmentReplica{}
 
-func newReplica() Replica {
+func newReplica(ms types.MasterService, collectionID UniqueID) Replica {
+	metaService := newMetaService(ms, collectionID)
 	segments := make(map[UniqueID]*Segment)
-	collections := make(map[UniqueID]*Collection)
 
 	var replica Replica = &CollectionSegmentReplica{
 		segments:       segments,
-		collections:    collections,
+		collection:     &Collection{id: collectionID},
+		metaService:    metaService,
 		startPositions: make(map[UniqueID][]*internalpb.MsgPosition),
 		endPositions:   make(map[UniqueID][]*internalpb.MsgPosition),
 	}
 	return replica
+}
+
+func (replica *CollectionSegmentReplica) init(initTs Timestamp) error {
+	log.Debug("Initing replica ...")
+	ctx := context.Background()
+	schema, err := replica.metaService.getCollectionSchema(ctx, replica.collection.GetID(), initTs)
+	if err != nil {
+		log.Error("Replica init fail", zap.Error(err))
+		return err
+	}
+
+	replica.collection.schema = schema
+	return nil
 }
 
 func (replica *CollectionSegmentReplica) getChannelName(segID UniqueID) (string, error) {
@@ -226,59 +239,38 @@ func (replica *CollectionSegmentReplica) getSegmentStatisticsUpdates(segmentID U
 }
 
 // --- collection ---
-func (replica *CollectionSegmentReplica) getCollectionNum() int {
-	replica.mu.RLock()
-	defer replica.mu.RUnlock()
-
-	return len(replica.collections)
-}
-
-func (replica *CollectionSegmentReplica) addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error {
+// getCollectionByID will get collection schema from masterservice if not exist.
+// If you want the latest collection schema, ts should be 0
+func (replica *CollectionSegmentReplica) getCollectionByID(collectionID UniqueID, ts Timestamp) (*Collection, error) {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
 
-	if _, ok := replica.collections[collectionID]; ok {
-		return fmt.Errorf("Create an existing collection=%s", schema.GetName())
+	if collectionID != replica.collection.GetID() {
+		return nil, fmt.Errorf("Not supported collection %v", collectionID)
 	}
 
-	newCollection, err := newCollection(collectionID, schema)
-	if err != nil {
-		return err
+	if replica.collection.GetSchema() == nil {
+		sch, err := replica.metaService.getCollectionSchema(context.Background(), collectionID, ts)
+		if err != nil {
+			return nil, err
+		}
+		replica.collection.schema = sch
 	}
 
-	replica.collections[collectionID] = newCollection
-	log.Debug("Create collection", zap.String("collection name", newCollection.GetName()))
-
-	return nil
-}
-
-func (replica *CollectionSegmentReplica) removeCollection(collectionID UniqueID) error {
-	replica.mu.Lock()
-	defer replica.mu.Unlock()
-
-	delete(replica.collections, collectionID)
-
-	return nil
-}
-
-func (replica *CollectionSegmentReplica) getCollectionByID(collectionID UniqueID) (*Collection, error) {
-	replica.mu.RLock()
-	defer replica.mu.RUnlock()
-
-	coll, ok := replica.collections[collectionID]
-	if !ok {
-		return nil, fmt.Errorf("Cannot get collection %d by ID: not exist", collectionID)
-	}
-
-	return coll, nil
+	return replica.collection, nil
 }
 
 func (replica *CollectionSegmentReplica) hasCollection(collectionID UniqueID) bool {
 	replica.mu.RLock()
 	defer replica.mu.RUnlock()
 
-	_, ok := replica.collections[collectionID]
-	return ok
+	if replica.collection != nil &&
+		collectionID == replica.collection.GetID() &&
+		replica.collection.schema != nil {
+		return true
+	}
+
+	return false
 }
 
 // getSegmentsCheckpoints get current open segments checkpoints

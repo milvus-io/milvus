@@ -11,6 +11,7 @@
 package dataservice
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -30,7 +31,7 @@ type cluster struct {
 	startupPolicy    clusterStartupPolicy
 	registerPolicy   dataNodeRegisterPolicy
 	unregisterPolicy dataNodeUnregisterPolicy
-	assginPolicy     channelAssignPolicy
+	assignPolicy     channelAssignPolicy
 }
 
 type clusterOption struct {
@@ -57,7 +58,7 @@ func withUnregistorPolicy(p dataNodeUnregisterPolicy) clusterOption {
 
 func withAssignPolicy(p channelAssignPolicy) clusterOption {
 	return clusterOption{
-		apply: func(c *cluster) { c.assginPolicy = p },
+		apply: func(c *cluster) { c.assignPolicy = p },
 	}
 }
 
@@ -66,15 +67,15 @@ func defaultStartupPolicy() clusterStartupPolicy {
 }
 
 func defaultRegisterPolicy() dataNodeRegisterPolicy {
-	return newDoNothingRegisterPolicy()
+	return newEmptyRegisterPolicy()
 }
 
 func defaultUnregisterPolicy() dataNodeUnregisterPolicy {
-	return newDoNothingUnregisterPolicy()
+	return newEmptyUnregisterPolicy()
 }
 
 func defaultAssignPolicy() channelAssignPolicy {
-	return newAssignAllPolicy()
+	return newBalancedAssignPolicy()
 }
 
 func newCluster(ctx context.Context, dataManager *clusterNodeManager, sessionManager sessionManager, posProvider positionProvider, opts ...clusterOption) *cluster {
@@ -86,7 +87,7 @@ func newCluster(ctx context.Context, dataManager *clusterNodeManager, sessionMan
 		startupPolicy:    defaultStartupPolicy(),
 		registerPolicy:   defaultRegisterPolicy(),
 		unregisterPolicy: defaultUnregisterPolicy(),
-		assginPolicy:     defaultAssignPolicy(),
+		assignPolicy:     defaultAssignPolicy(),
 	}
 	for _, opt := range opts {
 		opt.apply(c)
@@ -107,15 +108,27 @@ func (c *cluster) startup(dataNodes []*datapb.DataNodeInfo) error {
 
 func (c *cluster) watch(nodes []*datapb.DataNodeInfo) []*datapb.DataNodeInfo {
 	for _, n := range nodes {
-		uncompletes := make([]vchannel, 0, len(nodes))
+		logMsg := fmt.Sprintf("Begin to watch channels for node %s:", n.Address)
+		uncompletes := make([]vchannel, 0, len(n.Channels))
 		for _, ch := range n.Channels {
 			if ch.State == datapb.ChannelWatchState_Uncomplete {
+				if len(uncompletes) == 0 {
+					logMsg += ch.Name
+				} else {
+					logMsg += "," + ch.Name
+				}
 				uncompletes = append(uncompletes, vchannel{
 					CollectionID: ch.CollectionID,
 					DmlChannel:   ch.Name,
 				})
 			}
 		}
+
+		if len(uncompletes) == 0 {
+			continue
+		}
+		log.Debug(logMsg)
+
 		vchanInfos, err := c.posProvider.GetVChanPositions(uncompletes)
 		if err != nil {
 			log.Warn("get vchannel position failed", zap.Error(err))
@@ -177,14 +190,13 @@ func (c *cluster) watchIfNeeded(channel string, collectionID UniqueID) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	cNodes := c.dataManager.getDataNodes(true)
-	rets := c.assginPolicy.apply(cNodes, channel, collectionID)
+	rets := c.assignPolicy.apply(cNodes, channel, collectionID)
 	c.dataManager.updateDataNodes(rets)
 	rets = c.watch(rets)
 	c.dataManager.updateDataNodes(rets)
 }
 
 func (c *cluster) flush(segments []*datapb.SegmentInfo) {
-	log.Debug("prepare to flush", zap.Any("segments", segments))
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

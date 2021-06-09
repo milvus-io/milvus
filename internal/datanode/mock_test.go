@@ -104,10 +104,10 @@ func newHEALTHDataNodeMock(dmChannelName string) *DataNode {
 	node.SetDataServiceInterface(ds)
 
 	vchan := &datapb.VchannelInfo{
-		CollectionID:    1,
-		ChannelName:     dmChannelName,
-		CheckPoints:     []*datapb.CheckPoint{},
-		FlushedSegments: []int64{},
+		CollectionID:      1,
+		ChannelName:       dmChannelName,
+		UnflushedSegments: []*datapb.SegmentInfo{},
+		FlushedSegments:   []int64{},
 	}
 	node.Start()
 
@@ -125,14 +125,8 @@ func makeNewChannelNames(names []string, suffix string) []string {
 }
 
 func refreshChannelNames() {
-	Params.DDChannelNames = []string{"datanode-test"}
-	Params.SegmentStatisticsChannelName = "segment-statistics"
-	Params.CompleteFlushChannelName = "flush-completed"
-	Params.InsertChannelNames = []string{"intsert-a-1", "insert-b-1"}
-	Params.TimeTickChannelName = "hard-timetick"
-	suffix := "-test-data-node" + strconv.FormatInt(rand.Int63n(100), 10)
-	Params.DDChannelNames = makeNewChannelNames(Params.DDChannelNames, suffix)
-	Params.InsertChannelNames = makeNewChannelNames(Params.InsertChannelNames, suffix)
+	Params.SegmentStatisticsChannelName = "datanode-refresh-segment-statistics"
+	Params.TimeTickChannelName = "datanode-refresh-hard-timetick"
 }
 
 func clearEtcd(rootPath string) error {

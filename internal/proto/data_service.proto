@@ -174,7 +174,7 @@ message VchannelInfo {
   int64 collectionID = 1;
   string channelName = 2;
   internal.MsgPosition seek_position = 3;
-  repeated CheckPoint checkPoints = 4;
+  repeated SegmentInfo unflushedSegments = 4;
   repeated int64 flushedSegments = 5;
 }
 
@@ -255,15 +255,15 @@ message SaveBinlogPathsRequest {
   int64 segmentID = 2;
   int64 collectionID = 3;
   repeated ID2PathList field2BinlogPaths = 4;
-  repeated DDLBinlogMeta ddlBinlogPaths = 5;
-  repeated CheckPoint checkPoints = 6;
-  bool flushed = 7;
+  repeated CheckPoint checkPoints = 5;
+  bool flushed = 6;
 }
 
 message CheckPoint {
   int64 segmentID = 1;
   internal.MsgPosition position = 2;
   int64 num_of_rows = 3;
+  
 }
 
 message DataNodeTtMsg {

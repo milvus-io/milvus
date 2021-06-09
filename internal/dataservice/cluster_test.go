@@ -39,7 +39,7 @@ func TestClusterCreate(t *testing.T) {
 
 func TestRegister(t *testing.T) {
 	cPolicy := newMockStartupPolicy()
-	registerPolicy := newDoNothingRegisterPolicy()
+	registerPolicy := newEmptyRegisterPolicy()
 	cluster := createCluster(t, nil, withStartupPolicy(cPolicy), withRegisterPolicy(registerPolicy))
 	addr := "localhost:8080"
 
@@ -57,7 +57,7 @@ func TestRegister(t *testing.T) {
 
 func TestUnregister(t *testing.T) {
 	cPolicy := newMockStartupPolicy()
-	unregisterPolicy := newDoNothingUnregisterPolicy()
+	unregisterPolicy := newEmptyUnregisterPolicy()
 	cluster := createCluster(t, nil, withStartupPolicy(cPolicy), withUnregistorPolicy(unregisterPolicy))
 	addr := "localhost:8080"
 	nodes := []*datapb.DataNodeInfo{

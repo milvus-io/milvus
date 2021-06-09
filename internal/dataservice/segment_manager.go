@@ -7,6 +7,7 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
+
 package dataservice
 
 import (
@@ -80,8 +81,10 @@ type SegmentManager struct {
 
 	estimatePolicy calUpperLimitPolicy
 	allocPolicy    allocatePolicy
-	sealPolicy     sealPolicy
-	flushPolicy    flushPolicy
+	// sealPolicy     sealPolicy
+	segmentSealPolicies []segmentSealPolicy
+	channelSealPolicies []channelSealPolicy
+	flushPolicy         flushPolicy
 }
 
 type allocHelper struct {
@@ -116,9 +119,27 @@ func withAllocPolicy(policy allocatePolicy) allocOption {
 	}
 }
 
-func withSealPolicy(policy sealPolicy) allocOption {
+// func withSealPolicy(policy sealPolicy) allocOption {
+// 	return allocOption{
+// 		apply: func(manager *SegmentManager) { manager.sealPolicy = policy },
+// 	}
+// }
+
+func withSegmentSealPolices(policies ...segmentSealPolicy) allocOption {
 	return allocOption{
-		apply: func(manager *SegmentManager) { manager.sealPolicy = policy },
+		apply: func(manager *SegmentManager) {
+			// do override instead of append, to override default options
+			manager.segmentSealPolicies = policies
+		},
+	}
+}
+
+func withChannelSealPolices(policies ...channelSealPolicy) allocOption {
+	return allocOption{
+		apply: func(manager *SegmentManager) {
+			// do override instead of append, to override default options
+			manager.channelSealPolicies = policies
+		},
 	}
 }
 
@@ -140,6 +161,10 @@ func defaultSealPolicy() sealPolicy {
 	return newSealPolicyV1()
 }
 
+func defaultSegmentSealPolicy() segmentSealPolicy {
+	return getSegmentCapacityPolicy(Params.SegmentSizeFactor)
+}
+
 func defaultFlushPolicy() flushPolicy {
 	return newFlushPolicyV1()
 }
@@ -151,10 +176,11 @@ func newSegmentManager(meta *meta, allocator allocator, opts ...allocOption) *Se
 		helper:    defaultAllocHelper(),
 		stats:     make(map[UniqueID]*segmentStatus),
 
-		estimatePolicy: defaultCalUpperLimitPolicy(),
-		allocPolicy:    defaultAlocatePolicy(),
-		sealPolicy:     defaultSealPolicy(),
-		flushPolicy:    defaultFlushPolicy(),
+		estimatePolicy:      defaultCalUpperLimitPolicy(),
+		allocPolicy:         defaultAlocatePolicy(),
+		segmentSealPolicies: []segmentSealPolicy{defaultSegmentSealPolicy()}, // default only segment size policy
+		channelSealPolicies: []channelSealPolicy{},                           // no default channel seal policy
+		flushPolicy:         defaultFlushPolicy(),
 	}
 	for _, opt := range opts {
 		opt.apply(manager)
@@ -164,9 +190,10 @@ func newSegmentManager(meta *meta, allocator allocator, opts ...allocOption) *Se
 }
 
 func (s *SegmentManager) loadSegmentsFromMeta() {
-	// load unflushed segments from meta
 	segments := s.meta.GetUnFlushedSegments()
+	ids := make([]UniqueID, 0, len(segments))
 	for _, seg := range segments {
+		ids = append(ids, seg.ID)
 		stat := &segmentStatus{
 			id:             seg.ID,
 			collectionID:   seg.CollectionID,
@@ -179,6 +206,7 @@ func (s *SegmentManager) loadSegmentsFromMeta() {
 		}
 		s.stats[seg.ID] = stat
 	}
+	log.Debug("Restore segment allocation", zap.Int64s("segments", ids))
 }
 func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID,
 	partitionID UniqueID, channelName string, requestRows int64) (segID UniqueID, retCount int64, expireTime Timestamp, err error) {
@@ -305,7 +333,8 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 	log.Debug("dataservice: estimateTotalRows: ",
 		zap.Int64("CollectionID", segmentInfo.CollectionID),
 		zap.Int64("SegmentID", segmentInfo.ID),
-		zap.Int("Rows", totalRows))
+		zap.Int("Rows", totalRows),
+		zap.String("channel", segmentInfo.InsertChannel))
 
 	s.helper.afterCreateSegment(segmentInfo)
 
@@ -334,15 +363,13 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, status := range s.stats {
-		if status.collectionID == collectionID {
-			if status.sealed {
-				continue
-			}
-			if err := s.meta.SealSegment(status.id); err != nil {
-				return err
-			}
-			status.sealed = true
+		if status.sealed || status.collectionID != collectionID {
+			continue
 		}
+		if err := s.meta.SealSegment(status.id); err != nil {
+			return err
+		}
+		status.sealed = true
 	}
 	return nil
 }
@@ -353,7 +380,7 @@ func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel strin
 	defer s.mu.Unlock()
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
-	if err := s.tryToSealSegment(); err != nil {
+	if err := s.tryToSealSegment(t); err != nil {
 		return nil, err
 	}
 
@@ -380,35 +407,51 @@ func (s *SegmentManager) UpdateSegmentStats(stat *internalpb.SegmentStatisticsUp
 	segment.currentRows = stat.NumRows
 }
 
-func (s *SegmentManager) tryToSealSegment() error {
+// tryToSealSegment applies segment & channel seal policies
+func (s *SegmentManager) tryToSealSegment(ts Timestamp) error {
+	channelInfo := make(map[string][]*segmentStatus)
 	for _, segStatus := range s.stats {
+		channelInfo[segStatus.insertChannel] = append(channelInfo[segStatus.insertChannel], segStatus)
 		if segStatus.sealed {
 			continue
 		}
-		sealed, err := s.shouldSeal(segStatus)
-		if err != nil {
-			return err
+		// change shouldSeal to segment seal policy logic
+		for _, policy := range s.segmentSealPolicies {
+			if policy(segStatus, ts) {
+				if err := s.meta.SealSegment(segStatus.id); err != nil {
+					return err
+				}
+				segStatus.sealed = true
+				break
+			}
 		}
-		if !sealed {
-			continue
-		}
-		if err := s.meta.SealSegment(segStatus.id); err != nil {
-			return err
-		}
-		segStatus.sealed = true
-	}
 
+	}
+	for channel, segs := range channelInfo {
+		for _, policy := range s.channelSealPolicies {
+			vs := policy(channel, segs, ts)
+			for _, seg := range vs {
+				if seg.sealed {
+					continue
+				}
+				if err := s.meta.SealSegment(seg.id); err != nil {
+					return err
+				}
+				seg.sealed = true
+			}
+		}
+	}
 	return nil
 }
 
-func (s *SegmentManager) shouldSeal(segStatus *segmentStatus) (bool, error) {
-	var allocSize int64
-	for _, allocation := range segStatus.allocations {
-		allocSize += allocation.rowNums
-	}
-	ret := s.sealPolicy.apply(segStatus.total, segStatus.currentRows, allocSize)
-	return ret, nil
-}
+// func (s *SegmentManager) shouldSeal(segStatus *segmentStatus) (bool, error) {
+// 	var allocSize int64
+// 	for _, allocation := range segStatus.allocations {
+// 		allocSize += allocation.rowNums
+// 	}
+// 	ret := s.sealPolicy.apply(segStatus.total, segStatus.currentRows, allocSize)
+// 	return ret, nil
+// }
 
 // only for test
 func (s *SegmentManager) SealSegment(ctx context.Context, segmentID UniqueID) error {

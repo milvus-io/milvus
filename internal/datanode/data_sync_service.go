@@ -45,6 +45,7 @@ func newDataSyncService(ctx context.Context,
 	factory msgstream.Factory,
 	vchan *datapb.VchannelInfo,
 	clearSignal chan<- UniqueID,
+	dataService types.DataService,
 
 ) *dataSyncService {
 
@@ -59,6 +60,7 @@ func newDataSyncService(ctx context.Context,
 		idAllocator:  alloc,
 		msFactory:    factory,
 		collectionID: vchan.GetCollectionID(),
+		dataService:  dataService,
 	}
 
 	service.initNodes(vchan)
@@ -69,6 +71,7 @@ func (dsService *dataSyncService) start() {
 	if dsService.fg != nil {
 		log.Debug("Data Sync Service starting flowgraph")
 		dsService.fg.Start()
+		log.Debug("Data Sync Service starting flowgraph Done")
 	} else {
 		log.Debug("Data Sync Service flowgraph nil")
 	}
@@ -112,23 +115,28 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) {
 				Position:  &v.pos,
 			})
 		}
+		log.Debug("SaveBinlogPath",
+			zap.Int64("SegmentID", fu.segID),
+			zap.Int64("CollectionID", fu.collID),
+			zap.Int("Length of Field2BinlogPaths", len(id2path)),
+		)
 
 		req := &datapb.SaveBinlogPathsRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   0, //TOD msg type
-				MsgID:     0, //TODO,msg id
-				Timestamp: 0, //TODO, time stamp
+				MsgType:   0, //TODO msg type
+				MsgID:     0, //TODO msg id
+				Timestamp: 0, //TODO time stamp
 				SourceID:  Params.NodeID,
 			},
 			SegmentID:         fu.segID,
-			CollectionID:      0, //TODO
+			CollectionID:      fu.collID,
 			Field2BinlogPaths: id2path,
 			CheckPoints:       checkPoints,
 			Flushed:           fu.flushed,
 		}
 		rsp, err := dsService.dataService.SaveBinlogPaths(dsService.ctx, req)
 		if err != nil {
-			return fmt.Errorf("data service save bin log path failed, err = %w", err)
+			return fmt.Errorf(err.Error())
 		}
 		if rsp.ErrorCode != commonpb.ErrorCode_Success {
 			return fmt.Errorf("data service save bin log path failed, reason = %s", rsp.Reason)
@@ -149,7 +157,19 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) {
 		dsService.idAllocator,
 		dsService.flushChan,
 		saveBinlog,
+		vchanInfo.GetChannelName(),
 	)
+
+	// recover segment checkpoints
+	for _, us := range vchanInfo.GetUnflushedSegments() {
+		if us.CollectionID != dsService.collectionID ||
+			us.GetInsertChannel() != vchanInfo.ChannelName {
+			continue
+		}
+
+		dsService.replica.addSegment(us.GetID(), us.CollectionID, us.PartitionID, us.GetInsertChannel())
+		dsService.replica.updateStatistics(us.GetID(), us.GetNumOfRows())
+	}
 
 	dsService.fg.AddNode(dmStreamNode)
 	dsService.fg.AddNode(ddNode)

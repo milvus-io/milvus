@@ -169,12 +169,7 @@ func (s *Server) init() error {
 	addr := Params.IP + ":" + strconv.Itoa(Params.Port)
 	log.Debug("DataNode address", zap.String("address", addr))
 
-	err := s.datanode.Register()
-	if err != nil {
-		log.Debug("DataNode Register etcd failed", zap.Error(err))
-		return err
-	}
-	err = s.startGrpc()
+	err := s.startGrpc()
 	if err != nil {
 		return err
 	}
@@ -243,7 +238,15 @@ func (s *Server) init() error {
 }
 
 func (s *Server) start() error {
-	return s.datanode.Start()
+	if err := s.datanode.Start(); err != nil {
+		return err
+	}
+	err := s.datanode.Register()
+	if err != nil {
+		log.Debug("DataNode Register etcd failed", zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {

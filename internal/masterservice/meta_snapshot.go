@@ -393,7 +393,7 @@ func (ms *metaSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, re
 		}
 	}
 	for _, key := range removals {
-		ops = append(ops, clientv3.OpDelete(path.Join(ms.root, key)))
+		ops = append(ops, clientv3.OpDelete(path.Join(ms.root, key), clientv3.WithPrefix()))
 	}
 	ops = append(ops, clientv3.OpPut(path.Join(ms.root, ms.tsKey), strTs))
 	resp, err := ms.cli.Txn(ctx).If().Then(ops...).Commit()

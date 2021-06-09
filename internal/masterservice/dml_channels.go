@@ -84,6 +84,9 @@ func (d *dmlChannels) Broadcast(name string, pack *msgstream.MsgPack) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
+	if len(name) == 0 {
+		return fmt.Errorf("channel name is empty")
+	}
 	var err error
 	ms, ok := d.dml[name]
 	if !ok {
@@ -97,12 +100,13 @@ func (d *dmlChannels) Broadcast(name string, pack *msgstream.MsgPack) error {
 	return ms.Broadcast(pack)
 }
 
-func (d *dmlChannels) AddProducerChannles(names ...string) {
+func (d *dmlChannels) AddProducerChannels(names ...string) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
 	var err error
 	for _, name := range names {
+		log.Debug("add dml channel", zap.String("channel name", name))
 		ms, ok := d.dml[name]
 		if !ok {
 			ms, err = d.core.msFactory.NewMsgStream(d.core.ctx)
@@ -121,9 +125,23 @@ func (d *dmlChannels) RemoveProducerChannels(names ...string) {
 	defer d.lock.Unlock()
 
 	for _, name := range names {
+		log.Debug("delete dml channel", zap.String("channel name", name))
 		if ms, ok := d.dml[name]; ok {
 			ms.Close()
 			delete(d.dml, name)
 		}
 	}
+}
+
+func (d *dmlChannels) HasChannel(names ...string) bool {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+
+	for _, name := range names {
+		if _, ok := d.dml[name]; !ok {
+			log.Debug("unknown channel", zap.String("channel name", name))
+			return false
+		}
+	}
+	return true
 }

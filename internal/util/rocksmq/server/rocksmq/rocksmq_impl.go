@@ -32,7 +32,7 @@ type UniqueID = typeutil.UniqueID
 
 const (
 	DefaultMessageID        = "-1"
-	FixedChannelNameLen     = 32
+	FixedChannelNameLen     = 320
 	RocksDBLRUCacheCapacity = 3 << 30
 )
 
