@@ -23,11 +23,10 @@ package querynode
 */
 import "C"
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
-
-	"errors"
 
 	"go.uber.org/zap"
 

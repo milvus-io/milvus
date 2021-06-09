@@ -15,18 +15,18 @@ import (
 	"context"
 	"sync"
 
+	"github.com/opentracing/opentracing-go"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/opentracing/opentracing-go"
-	"go.uber.org/zap"
 )
 
 type insertNode struct {
 	baseNode
-	collectionID UniqueID
-	replica      ReplicaInterface
+	replica ReplicaInterface
 }
 
 type InsertData struct {
@@ -84,15 +84,6 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			}
 		}
 
-		segment, err := iNode.replica.getSegmentByID(task.SegmentID)
-		if err != nil {
-			log.Error(err.Error())
-			continue
-		}
-		if segment.enableLoadBinLog {
-			continue
-		}
-
 		insertData.insertIDs[task.SegmentID] = append(insertData.insertIDs[task.SegmentID], task.RowIDs...)
 		insertData.insertTimestamps[task.SegmentID] = append(insertData.insertTimestamps[task.SegmentID], task.Timestamps...)
 		insertData.insertRecords[task.SegmentID] = append(insertData.insertRecords[task.SegmentID], task.RowData...)
@@ -132,20 +123,14 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	for _, sp := range spans {
 		sp.Finish()
 	}
+
 	return []Msg{res}
 }
 
 func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *sync.WaitGroup) {
 	log.Debug("QueryNode::iNode::insert", zap.Any("SegmentID", segmentID))
 	var targetSegment, err = iNode.replica.getSegmentByID(segmentID)
-	log.Debug("QueryNode::iNode::insert", zap.Any("SegmentID", segmentID),
-		zap.Any("targetSegment", targetSegment),
-		zap.Error(err),
-		zap.Any("SegmentType", targetSegment.segmentType),
-		zap.Any("enableLoadBinLog", targetSegment.enableLoadBinLog),
-	)
-
-	if targetSegment.segmentType != segmentTypeGrowing || targetSegment.enableLoadBinLog {
+	if targetSegment.segmentType != segmentTypeGrowing {
 		wg.Done()
 		return
 	}
@@ -175,12 +160,11 @@ func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *syn
 	}
 
 	log.Debug("Do insert done", zap.Int("len", len(insertData.insertIDs[segmentID])),
-		zap.Int64("segmentID", segmentID),
-		zap.Int64("collectionID", iNode.collectionID))
+		zap.Int64("segmentID", segmentID))
 	wg.Done()
 }
 
-func newInsertNode(replica ReplicaInterface, collectionID UniqueID) *insertNode {
+func newInsertNode(replica ReplicaInterface) *insertNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 
@@ -189,8 +173,7 @@ func newInsertNode(replica ReplicaInterface, collectionID UniqueID) *insertNode 
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &insertNode{
-		baseNode:     baseNode,
-		collectionID: collectionID,
-		replica:      replica,
+		baseNode: baseNode,
+		replica:  replica,
 	}
 }

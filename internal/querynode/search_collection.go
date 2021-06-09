@@ -14,9 +14,12 @@ package querynode
 import (
 	"context"
 	"errors"
+	"math"
+	"reflect"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
+	oplog "github.com/opentracing/opentracing-go/log"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -26,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	oplog "github.com/opentracing/opentracing-go/log"
 )
 
 type searchCollection struct {
@@ -42,8 +44,8 @@ type searchCollection struct {
 	unsolvedMsgMu sync.Mutex // guards unsolvedMsg
 	unsolvedMsg   []*msgstream.SearchMsg
 
-	tSafeMutex   sync.Mutex
-	tSafeWatcher *tSafeWatcher
+	tSafeWatchers     map[VChannel]*tSafeWatcher
+	watcherSelectCase []reflect.SelectCase
 
 	serviceableTimeMutex sync.Mutex // guards serviceableTime
 	serviceableTime      Timestamp
@@ -60,6 +62,7 @@ func newSearchCollection(releaseCtx context.Context,
 	streamingReplica ReplicaInterface,
 	tSafeReplica TSafeReplicaInterface,
 	searchResultStream msgstream.MsgStream) *searchCollection {
+
 	receiveBufSize := Params.SearchReceiveBufSize
 	msgBuffer := make(chan *msgstream.SearchMsg, receiveBufSize)
 	unsolvedMsg := make([]*msgstream.SearchMsg, 0)
@@ -73,13 +76,15 @@ func newSearchCollection(releaseCtx context.Context,
 		streamingReplica:  streamingReplica,
 		tSafeReplica:      tSafeReplica,
 
+		tSafeWatchers: make(map[VChannel]*tSafeWatcher),
+
 		msgBuffer:   msgBuffer,
 		unsolvedMsg: unsolvedMsg,
 
 		searchResultMsgStream: searchResultStream,
 	}
 
-	sc.register(collectionID)
+	sc.register()
 	return sc
 }
 
@@ -88,14 +93,25 @@ func (s *searchCollection) start() {
 	go s.doUnsolvedMsgSearch()
 }
 
-func (s *searchCollection) register(collectionID UniqueID) {
-	// TODO: remove and use vChannel
-	vChannel := collectionIDToChannel(collectionID)
-	s.tSafeReplica.addTSafe(vChannel)
-	s.tSafeMutex.Lock()
-	s.tSafeWatcher = newTSafeWatcher()
-	s.tSafeMutex.Unlock()
-	s.tSafeReplica.registerTSafeWatcher(vChannel, s.tSafeWatcher)
+func (s *searchCollection) register() {
+	collection, err := s.streamingReplica.getCollectionByID(s.collectionID)
+	if err != nil {
+		log.Error(err.Error())
+		return
+	}
+
+	s.watcherSelectCase = make([]reflect.SelectCase, 0)
+	log.Debug("register tSafe watcher and init watcher select case",
+		zap.Any("dml channels", collection.getWatchedDmChannels()),
+		zap.Any("collectionID", collection.ID()))
+	for _, channel := range collection.getWatchedDmChannels() {
+		s.tSafeWatchers[channel] = newTSafeWatcher()
+		s.tSafeReplica.registerTSafeWatcher(channel, s.tSafeWatchers[channel])
+		s.watcherSelectCase = append(s.watcherSelectCase, reflect.SelectCase{
+			Dir:  reflect.SelectRecv,
+			Chan: reflect.ValueOf(s.tSafeWatchers[channel].watcherChan()),
+		})
+	}
 }
 
 func (s *searchCollection) addToUnsolvedMsg(msg *msgstream.SearchMsg) {
@@ -113,12 +129,20 @@ func (s *searchCollection) popAllUnsolvedMsg() []*msgstream.SearchMsg {
 }
 
 func (s *searchCollection) waitNewTSafe() Timestamp {
-	// TODO: remove and use vChannel
-	vChannel := collectionIDToChannel(s.collectionID)
-	// block until dataSyncService updating tSafe
-	s.tSafeWatcher.hasUpdate()
-	ts := s.tSafeReplica.getTSafe(vChannel)
-	return ts
+	// block until any vChannel updating tSafe
+	_, _, recvOK := reflect.Select(s.watcherSelectCase)
+	if !recvOK {
+		log.Error("tSafe has been closed", zap.Any("collectionID", s.collectionID))
+		return invalidTimestamp
+	}
+	t := Timestamp(math.MaxInt64)
+	for channel := range s.tSafeWatchers {
+		ts := s.tSafeReplica.getTSafe(channel)
+		if ts <= t {
+			t = ts
+		}
+	}
+	return t
 }
 
 func (s *searchCollection) getServiceableTime() Timestamp {
@@ -129,6 +153,12 @@ func (s *searchCollection) getServiceableTime() Timestamp {
 
 func (s *searchCollection) setServiceableTime(t Timestamp) {
 	s.serviceableTimeMutex.Lock()
+	defer s.serviceableTimeMutex.Unlock()
+
+	if t < s.serviceableTime {
+		return
+	}
+
 	gracefulTimeInMilliSecond := Params.GracefulTime
 	if gracefulTimeInMilliSecond > 0 {
 		gracefulTime := tsoutil.ComposeTS(gracefulTimeInMilliSecond, 0)
@@ -136,7 +166,6 @@ func (s *searchCollection) setServiceableTime(t Timestamp) {
 	} else {
 		s.serviceableTime = t
 	}
-	s.serviceableTimeMutex.Unlock()
 }
 
 func (s *searchCollection) emptySearch(searchMsg *msgstream.SearchMsg) {
@@ -174,6 +203,7 @@ func (s *searchCollection) receiveSearchMsg() {
 					zap.Any("serviceTime", st),
 					zap.Any("delta seconds", (sm.BeginTs()-serviceTime)/(1000*1000*1000)),
 					zap.Any("collectionID", s.collectionID),
+					zap.Any("msgID", sm.ID()),
 				)
 				s.addToUnsolvedMsg(sm)
 				sp.LogFields(
@@ -216,7 +246,7 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 		default:
 			serviceTime := s.waitNewTSafe()
 			s.setServiceableTime(serviceTime)
-			log.Debug("querynode::doUnsolvedMsgSearch: setServiceableTime",
+			log.Debug("query node::doUnsolvedMsgSearch: setServiceableTime",
 				zap.Any("serviceTime", serviceTime),
 			)
 			log.Debug("get tSafe from flow graph",

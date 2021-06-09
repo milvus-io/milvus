@@ -23,11 +23,13 @@ package querynode
 */
 import "C"
 import (
+	"unsafe"
+
+	"go.uber.org/zap"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	"go.uber.org/zap"
-	"unsafe"
 )
 
 type Collection struct {
@@ -61,6 +63,9 @@ func (c *Collection) removePartitionID(partitionID UniqueID) {
 }
 
 func (c *Collection) addWatchedDmChannels(channels []VChannel) {
+	log.Debug("add watch dm channels to collection",
+		zap.Any("channels", channels),
+		zap.Any("collectionID", c.ID()))
 	c.watchedChannels = append(c.watchedChannels, channels...)
 }
 
@@ -79,9 +84,10 @@ func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Co
 	collection := C.NewCollection(cSchemaBlob)
 
 	var newCollection = &Collection{
-		collectionPtr: collection,
-		id:            collectionID,
-		schema:        schema,
+		collectionPtr:   collection,
+		id:              collectionID,
+		schema:          schema,
+		watchedChannels: make([]VChannel, 0),
 	}
 	C.free(unsafe.Pointer(cSchemaBlob))
 
