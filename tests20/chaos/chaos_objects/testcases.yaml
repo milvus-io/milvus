@@ -1,19 +1,31 @@
 # Testcases All-in-one
+#   pod kill
+#     standalone
+#       3 pods(standalone-ha-blabla, etcd, minio)
+#     cluster-1-node
+#       11 pods(proxy, master, query node, query service, data node, data service,
+#               index node, index service, pulsar, etcd, minio)
+#     cluster-n-nodes
+#       11 pods* n: kill one and kill all
+
 Collections:
   -
     testcase: test_querynode_podkill
       chaos: chaos_querynode_podkill.yaml
       expectation:
-          single:
+          standalone:
             create: succ   # succ by default if not specified
-            drop: succ
-            query: fail
             insert: succ
+            flush: succ
             index: succ
+            search: fail
+            query: fail
           cluster_1_node:
+            search: fail
             query: fail
           cluster_n_nodes:
-            query: degrade    # keep functional, but performance degraded
+            search: degrade    # keep functional, but performance degraded
+            query: degrade
   -
     testcase: test_queryservice_podkill
       chaos: chaos_queryservice_podkill.yaml
@@ -21,7 +33,7 @@ Collections:
     testcase: test_datanode_podkill
       chaos: chaos_datanode_podkill.yaml
       expectation:
-        single:
+        standalone:
           insert: fail
         cluster_1_node:
           insert: fail

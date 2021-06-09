@@ -7,6 +7,7 @@ from common import common_type as ct
 
 nums = 0
 
+
 class Checker:
     def __init__(self):
         self._succ = 0
@@ -32,35 +33,58 @@ class SearchChecker(Checker):
         super().__init__()
         self.c_wrapper = collection_wrapper
 
-    def keep_searching(self):
+    def keep_running(self):
         while self._running is True:
             search_vec = cf.gen_vectors(5, ct.default_dim)
             _, result = self.c_wrapper.search(
-                data=search_vec,
-                params={"nprobe": 32},
-                limit=1,
-                check_task="nothing"
-            )
+                                data=search_vec,
+                                params={"nprobe": 32},
+                                limit=1,
+                                check_task="nothing"
+                            )
             if result is True:
                 self._succ += 1
             else:
                 self._fail += 1
 
 
-class InsertChecker(Checker):
+class InsertAndFlushChecker(Checker):
     def __init__(self, collection_wrapper):
         super().__init__()
+        self._flush_succ = 0
+        self._flush_fail = 0
         self.c_wrapper = collection_wrapper
 
-    def keep_inserting(self):
+    def keep_running(self):
         while self._running is True:
             sleep(1)
-            _, result = self.c_wrapper.insert(data=cf.gen_default_list_data(),
-                                              check_task="nothing")
-            if result is True:
+            _, insert_result = self.c_wrapper.insert(
+                                    data=cf.gen_default_list_data(nb=ct.default_nb),
+                                    check_task="nothing")
+
+            if insert_result is True:
                 self._succ += 1
+                num_entities = self.c_wrapper.num_entities
+                self.connection.flush([self.c_wrapper.collection.name])
+                if self.c_wrapper.num_entities == (num_entities + ct.default_nb):
+                    self._flush_succ += 1
+                else:
+                    self._flush_fail += 1
             else:
                 self._fail += 1
+                self._flush_fail += 1
+
+    def insert_statics(self):
+        return self.statics()
+
+    def flush_statics(self):
+        return self._flush_succ / self.total() if self.total() != 0 else 0
+
+    def reset(self):
+        self._succ = 0
+        self._fail = 0
+        self._flush_succ = 0
+        self._flush_fail = 0
 
 
 class CreateChecker(Checker):
@@ -69,11 +93,13 @@ class CreateChecker(Checker):
         self.c_wrapper = collection_wrapper
         self.num = 0
 
-    def keep_creating(self):
+    def keep_running(self):
         while self._running is True:
-            collection, result = self.c_wrapper.init_collection(name=cf.gen_unique_str(),
-                                                                schema=cf.gen_default_collection_schema(),
-                                                                check_task="check_nothing")
+            collection, result = self.c_wrapper.init_collection(
+                                    name=cf.gen_unique_str(),
+                                    schema=cf.gen_default_collection_schema(),
+                                    check_task="check_nothing"
+                                )
             if result is True:
                 self._succ += 1
                 self.c_wrapper.drop(check_task="check_nothing")
@@ -85,15 +111,15 @@ class IndexChecker(Checker):
     def __init__(self):
         super().__init__()
 
-    def keep_indexing(self):
+    def keep_running(self):
         pass
 
 
-class DropChecker(Checker):
+class QueryChecker(Checker):
     def __init__(self):
         super().__init__()
 
-    def keep_dropping(self):
+    def keep_running(self):
         pass
 
 
@@ -101,6 +127,6 @@ class FlushChecker(Checker):
     def __init__(self):
         super().__init__()
 
-    def keep_flushing(self):
+    def keep_running(self):
         pass
 
