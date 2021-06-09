@@ -105,7 +105,6 @@ func (s *searchCollection) register() {
 		zap.Any("dml channels", collection.getWatchedDmChannels()),
 		zap.Any("collectionID", collection.ID()))
 	for _, channel := range collection.getWatchedDmChannels() {
-		s.tSafeReplica.addTSafe(channel)
 		s.tSafeWatchers[channel] = newTSafeWatcher()
 		s.tSafeReplica.registerTSafeWatcher(channel, s.tSafeWatchers[channel])
 		s.watcherSelectCase = append(s.watcherSelectCase, reflect.SelectCase{

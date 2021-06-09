@@ -114,12 +114,19 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 
 	// 1. init channels in collection meta
 	collectionID := w.req.CollectionID
+
+	// TODO: Remove this and use unique vChannel
+	channelTmp := make([]string, 0)
+	for _, channel := range w.req.ChannelIDs {
+		channelTmp = append(channelTmp, channel+strconv.FormatInt(collectionID, 10))
+	}
+
 	collection, err := w.node.streaming.replica.getCollectionByID(collectionID)
 	if err != nil {
 		log.Error(err.Error())
 		return err
 	}
-	collection.addWatchedDmChannels(w.req.ChannelIDs)
+	collection.addWatchedDmChannels(channelTmp)
 
 	// 2. get subscription name
 	getUniqueSubName := func() string {
@@ -186,6 +193,11 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 				}
 			}
 		}
+	}
+
+	// add tSafe
+	for _, channel := range channelTmp {
+		w.node.streaming.tSafeReplica.addTSafe(channel)
 	}
 
 	// 7. start search collection

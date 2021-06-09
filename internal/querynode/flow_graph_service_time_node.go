@@ -13,6 +13,7 @@ package querynode
 
 import (
 	"context"
+	"strconv"
 
 	"go.uber.org/zap"
 
@@ -23,9 +24,9 @@ import (
 
 type serviceTimeNode struct {
 	baseNode
-	collectionID      UniqueID
-	vChannel          VChannel
-	tSafeReplica      TSafeReplicaInterface
+	collectionID UniqueID
+	vChannel     VChannel
+	tSafeReplica TSafeReplicaInterface
 	//timeTickMsgStream msgstream.MsgStream
 }
 
@@ -56,7 +57,8 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 
 	// update service time
-	stNode.tSafeReplica.setTSafe(stNode.vChannel, serviceTimeMsg.timeRange.timestampMax)
+	channel := stNode.vChannel + strconv.FormatInt(stNode.collectionID, 10)
+	stNode.tSafeReplica.setTSafe(channel, serviceTimeMsg.timeRange.timestampMax)
 	//log.Debug("update tSafe:",
 	//	zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)),
 	//	zap.Any("collectionID", stNode.collectionID),
@@ -116,10 +118,10 @@ func newServiceTimeNode(ctx context.Context,
 	//}
 
 	return &serviceTimeNode{
-		baseNode:          baseNode,
-		collectionID:      collectionID,
-		vChannel:          channel,
-		tSafeReplica:      tSafeReplica,
+		baseNode:     baseNode,
+		collectionID: collectionID,
+		vChannel:     channel,
+		tSafeReplica: tSafeReplica,
 		//timeTickMsgStream: timeTimeMsgStream,
 	}
 }
