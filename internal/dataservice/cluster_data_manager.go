@@ -18,6 +18,7 @@ import (
 )
 
 const clusterPrefix = "cluster-prefix/"
+const clusterBuffer = "cluster-buffer"
 
 type dataNodeStatus int8
 
@@ -32,14 +33,16 @@ type dataNodeInfo struct {
 }
 
 type clusterNodeManager struct {
-	kv        kv.TxnKV
-	dataNodes map[string]*dataNodeInfo
+	kv         kv.TxnKV
+	dataNodes  map[string]*dataNodeInfo
+	chanBuffer []*datapb.ChannelStatus //Unwatched channels buffer
 }
 
 func newClusterNodeManager(kv kv.TxnKV) (*clusterNodeManager, error) {
 	c := &clusterNodeManager{
-		kv:        kv,
-		dataNodes: make(map[string]*dataNodeInfo),
+		kv:         kv,
+		dataNodes:  make(map[string]*dataNodeInfo),
+		chanBuffer: []*datapb.ChannelStatus{},
 	}
 	return c, c.loadFromKv()
 }
@@ -62,6 +65,15 @@ func (c *clusterNodeManager) loadFromKv() error {
 		}
 		c.dataNodes[info.Address] = node
 	}
+	dn, _ := c.kv.Load(clusterBuffer)
+	//TODO add not value error check
+	if dn != "" {
+		info := &datapb.DataNodeInfo{}
+		if err := proto.UnmarshalText(dn, info); err != nil {
+			return err
+		}
+		c.chanBuffer = info.Channels
+	}
 
 	return nil
 }
@@ -71,7 +83,9 @@ func (c *clusterNodeManager) updateCluster(dataNodes []*datapb.DataNodeInfo) *cl
 	offlines := make([]string, 0)
 	restarts := make([]string, 0)
 	var onCnt, offCnt float64
+	currentOnline := make(map[string]struct{})
 	for _, n := range dataNodes {
+		currentOnline[n.Address] = struct{}{}
 		onCnt++
 		node, ok := c.dataNodes[n.Address]
 
@@ -96,7 +110,9 @@ func (c *clusterNodeManager) updateCluster(dataNodes []*datapb.DataNodeInfo) *cl
 	}
 
 	for nAddr, node := range c.dataNodes {
-		if node.status == offline {
+		_, has := currentOnline[nAddr]
+		if !has && node.status == online {
+			node.status = offline
 			offCnt++
 			offlines = append(offlines, nAddr)
 		}
@@ -110,22 +126,22 @@ func (c *clusterNodeManager) updateCluster(dataNodes []*datapb.DataNodeInfo) *cl
 	}
 }
 
-func (c *clusterNodeManager) updateDataNodes(dataNodes []*datapb.DataNodeInfo) error {
+func (c *clusterNodeManager) updateDataNodes(dataNodes []*datapb.DataNodeInfo, buffer []*datapb.ChannelStatus) error {
 	for _, node := range dataNodes {
 		c.dataNodes[node.Address].info = node
 	}
 
-	return c.txnSaveNodes(dataNodes)
+	return c.txnSaveNodes(dataNodes, buffer)
 }
 
-func (c *clusterNodeManager) getDataNodes(onlyOnline bool) map[string]*datapb.DataNodeInfo {
+func (c *clusterNodeManager) getDataNodes(onlyOnline bool) (map[string]*datapb.DataNodeInfo, []*datapb.ChannelStatus) {
 	ret := make(map[string]*datapb.DataNodeInfo)
 	for k, v := range c.dataNodes {
 		if !onlyOnline || v.status == online {
 			ret[k] = proto.Clone(v.info).(*datapb.DataNodeInfo)
 		}
 	}
-	return ret
+	return ret, c.chanBuffer
 }
 
 func (c *clusterNodeManager) register(n *datapb.DataNodeInfo) {
@@ -164,8 +180,8 @@ func (c *clusterNodeManager) updateMetrics() {
 	metrics.DataServiceDataNodeList.WithLabelValues("offline").Set(offCnt)
 }
 
-func (c *clusterNodeManager) txnSaveNodes(nodes []*datapb.DataNodeInfo) error {
-	if len(nodes) == 0 {
+func (c *clusterNodeManager) txnSaveNodes(nodes []*datapb.DataNodeInfo, buffer []*datapb.ChannelStatus) error {
+	if len(nodes) == 0 && len(buffer) == 0 {
 		return nil
 	}
 	data := make(map[string]string)
@@ -175,5 +191,12 @@ func (c *clusterNodeManager) txnSaveNodes(nodes []*datapb.DataNodeInfo) error {
 		value := proto.MarshalTextString(n)
 		data[key] = value
 	}
+	c.chanBuffer = buffer
+
+	// short cut, reusing datainfo to store array of channel status
+	bufNode := &datapb.DataNodeInfo{
+		Channels: buffer,
+	}
+	data[clusterBuffer] = proto.MarshalTextString(bufNode)
 	return c.kv.MultiSave(data)
 }

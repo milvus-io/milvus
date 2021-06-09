@@ -27,7 +27,7 @@ type clusterDeltaChange struct {
 }
 type clusterStartupPolicy interface {
 	// apply accept all nodes and new/offline/restarts nodes and returns datanodes whose status need to be changed
-	apply(oldCluster map[string]*datapb.DataNodeInfo, delta *clusterDeltaChange) []*datapb.DataNodeInfo
+	apply(oldCluster map[string]*datapb.DataNodeInfo, delta *clusterDeltaChange, buffer []*datapb.ChannelStatus) ([]*datapb.DataNodeInfo, []*datapb.ChannelStatus)
 }
 
 type watchRestartsStartupPolicy struct {
@@ -37,7 +37,8 @@ func newWatchRestartsStartupPolicy() clusterStartupPolicy {
 	return &watchRestartsStartupPolicy{}
 }
 
-func (p *watchRestartsStartupPolicy) apply(cluster map[string]*datapb.DataNodeInfo, delta *clusterDeltaChange) []*datapb.DataNodeInfo {
+func (p *watchRestartsStartupPolicy) apply(cluster map[string]*datapb.DataNodeInfo, delta *clusterDeltaChange,
+	buffer []*datapb.ChannelStatus) ([]*datapb.DataNodeInfo, []*datapb.ChannelStatus) {
 	ret := make([]*datapb.DataNodeInfo, 0)
 	for _, addr := range delta.restarts {
 		node := cluster[addr]
@@ -46,12 +47,52 @@ func (p *watchRestartsStartupPolicy) apply(cluster map[string]*datapb.DataNodeIn
 		}
 		ret = append(ret, node)
 	}
-	return ret
+	// put all channels from offline into buffer first
+	for _, addr := range delta.offlines {
+		node := cluster[addr]
+		for _, ch := range node.Channels {
+			ch.State = datapb.ChannelWatchState_Uncomplete
+			buffer = append(buffer, ch)
+		}
+	}
+	// try new nodes first
+	if len(delta.newNodes) > 0 && len(buffer) > 0 {
+		idx := 0
+		for len(buffer) > 0 {
+			node := cluster[delta.newNodes[idx%len(delta.newNodes)]]
+			node.Channels = append(node.Channels, buffer[0])
+			buffer = buffer[1:]
+			if idx < len(delta.newNodes) {
+				ret = append(ret, node)
+			}
+			idx++
+		}
+	}
+	// try online nodes if buffer is not empty
+	if len(buffer) > 0 {
+		online := make([]*datapb.DataNodeInfo, 0, len(cluster))
+		for _, node := range cluster {
+			online = append(online, node)
+		}
+		if len(online) > 0 {
+			idx := 0
+			for len(buffer) > 0 {
+				node := online[idx%len(online)]
+				node.Channels = append(node.Channels, buffer[0])
+				buffer = buffer[1:]
+				if idx < len(online) {
+					ret = append(ret, node)
+				}
+				idx++
+			}
+		}
+	}
+	return ret, buffer
 }
 
 type dataNodeRegisterPolicy interface {
 	// apply accept all online nodes and new created node, returns nodes needed to be changed
-	apply(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo) []*datapb.DataNodeInfo
+	apply(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo, buffer []*datapb.ChannelStatus) ([]*datapb.DataNodeInfo, []*datapb.ChannelStatus)
 }
 
 type emptyRegisterPolicy struct {
@@ -61,8 +102,21 @@ func newEmptyRegisterPolicy() dataNodeRegisterPolicy {
 	return &emptyRegisterPolicy{}
 }
 
-func (p *emptyRegisterPolicy) apply(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo) []*datapb.DataNodeInfo {
-	return []*datapb.DataNodeInfo{session}
+func (p *emptyRegisterPolicy) apply(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo,
+	buffer []*datapb.ChannelStatus) ([]*datapb.DataNodeInfo, []*datapb.ChannelStatus) {
+	return []*datapb.DataNodeInfo{session}, buffer
+}
+
+type assignBufferRegisterPolicy struct{}
+
+func newAssiggBufferRegisterPolicy() dataNodeRegisterPolicy {
+	return &assignBufferRegisterPolicy{}
+}
+
+func (p *assignBufferRegisterPolicy) apply(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo,
+	buffer []*datapb.ChannelStatus) ([]*datapb.DataNodeInfo, []*datapb.ChannelStatus) {
+	session.Channels = append(session.Channels, buffer...)
+	return []*datapb.DataNodeInfo{session}, []*datapb.ChannelStatus{}
 }
 
 type dataNodeUnregisterPolicy interface {

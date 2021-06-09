@@ -298,8 +298,8 @@ func newMockStartupPolicy() clusterStartupPolicy {
 	return &mockStartupPolicy{}
 }
 
-func (p *mockStartupPolicy) apply(oldCluster map[string]*datapb.DataNodeInfo, delta *clusterDeltaChange) []*datapb.DataNodeInfo {
-	return nil
+func (p *mockStartupPolicy) apply(oldCluster map[string]*datapb.DataNodeInfo, delta *clusterDeltaChange, buffer []*datapb.ChannelStatus) ([]*datapb.DataNodeInfo, []*datapb.ChannelStatus) {
+	return nil, nil
 }
 
 type mockSessionManager struct {
