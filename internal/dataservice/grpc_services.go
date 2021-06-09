@@ -194,6 +194,10 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
 	}
+	if s.isClosed() {
+		resp.Status.Reason = "server is initializing"
+		return resp, nil
+	}
 	p := path.Join(Params.SegmentBinlogSubPath, strconv.FormatInt(req.SegmentID, 10)) + "/" // prefix/id/ instead of prefix/id
 	_, values, err := s.kvClient.LoadWithPrefix(p)
 	if err != nil {
@@ -237,6 +241,10 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
 	}
+	if s.isClosed() {
+		resp.Status.Reason = "server is initializing"
+		return resp, nil
+	}
 	nums, err := s.meta.GetNumRowsOfCollection(req.CollectionID)
 	if err != nil {
 		resp.Status.Reason = err.Error()
@@ -252,6 +260,10 @@ func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
+	}
+	if s.isClosed() {
+		resp.Status.Reason = "server is initializing"
+		return resp, nil
 	}
 	nums, err := s.meta.GetNumRowsOfPartition(req.CollectionID, req.PartitionID)
 	if err != nil {
@@ -379,6 +391,10 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
+	}
+	if s.isClosed() {
+		resp.Status.Reason = "server is initializing"
+		return resp, nil
 	}
 	segmentIDs := s.meta.GetSegmentsOfPartition(collectionID, partitionID)
 	segment2Binlogs := make(map[UniqueID][]*datapb.FieldBinlog)
