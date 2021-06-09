@@ -136,3 +136,34 @@ class TestcaseBase(Base):
                                       check_task=check_task, check_items=check_items,
                                       **kwargs)
         return partition_wrap
+
+    def init_collection_general(self, prefix, insert_data=False, nb=3000, partition_num=0, is_binary=False):
+        """
+        target: create specified collections
+        method: 1. create collections (binary/non-binary)
+                2. create partitions if specified
+                3. insert specified binary/non-binary data
+                   into each partition if any
+        expected: return collection and raw data
+        """
+        log.info("Test case of search interface: initialize before test case")
+        self._connect()
+        collection_name = cf.gen_unique_str(prefix)
+        vectors = []
+        binary_raw_vectors = []
+        # 1 create collection
+        if is_binary:
+            default_schema = cf.gen_default_binary_collection_schema()
+        else:
+            default_schema = cf.gen_default_collection_schema()
+        log.info("init_data: collection creation")
+        collection_w = self.init_collection_wrap(name=collection_name,
+                                                 schema=default_schema)
+        # 2 add extra partitions if specified (default is 1 partition named "_default")
+        if partition_num > 0:
+            cf.gen_partitions(collection_w, partition_num)
+        # 3 insert data if specified
+        if insert_data:
+            collection_w, vectors, binary_raw_vectors = cf.insert_data(collection_w, nb, is_binary)
+
+        return collection_w, vectors, binary_raw_vectors
