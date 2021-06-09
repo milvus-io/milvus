@@ -65,9 +65,9 @@ func TestParamTable_DataNode(t *testing.T) {
 		log.Println("MsgChannelSubName:", name)
 	})
 
-	t.Run("Test EtcdAddress", func(t *testing.T) {
-		addr := Params.EtcdAddress
-		log.Println("EtcdAddress:", addr)
+	t.Run("Test EtcdEndpoints", func(t *testing.T) {
+		endpoints := Params.EtcdEndpoints
+		log.Println("EtcdEndpoints:", endpoints)
 	})
 
 	t.Run("Test MetaRootPath", func(t *testing.T) {

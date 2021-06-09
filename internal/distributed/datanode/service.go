@@ -70,7 +70,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		msFactory:   factory,
 		grpcErrChan: make(chan error),
 		newMasterServiceClient: func() (types.MasterService, error) {
-			return msc.NewClient(dn.Params.MetaRootPath, dn.Params.EtcdAddress, 3*time.Second)
+			return msc.NewClient(dn.Params.MetaRootPath, dn.Params.EtcdEndpoints, 3*time.Second)
 		},
 		newDataServiceClient: func(etcdMetaRoot string, etcdAddress []string, timeout time.Duration) types.DataService {
 			return dsc.NewClient(etcdMetaRoot, etcdAddress, timeout)
@@ -206,7 +206,7 @@ func (s *Server) init() error {
 	if s.newDataServiceClient != nil {
 		log.Debug("Data service address", zap.String("address", Params.DataServiceAddress))
 		log.Debug("DataNode Init data service client ...")
-		dataServiceClient := s.newDataServiceClient(dn.Params.MetaRootPath, dn.Params.EtcdAddress, 10*time.Second)
+		dataServiceClient := s.newDataServiceClient(dn.Params.MetaRootPath, dn.Params.EtcdEndpoints, 10*time.Second)
 		if err = dataServiceClient.Init(); err != nil {
 			log.Debug("DataNode newDataServiceClient failed", zap.Error(err))
 			panic(err)
