@@ -760,6 +760,12 @@ func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID) error {
 			log.Error("get segment statistics updates wrong", zap.Int64("segmentID", segID), zap.Error(err))
 			continue
 		}
+
+		log.Debug("Segment Statistics to Update",
+			zap.Int64("Segment ID", updates.GetSegmentID()),
+			zap.Int64("NumOfRows", updates.GetNumRows()),
+		)
+
 		statsUpdates = append(statsUpdates, updates)
 	}
 
