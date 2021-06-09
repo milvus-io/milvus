@@ -42,7 +42,7 @@ type ParamTable struct {
 	IP             string
 	NetworkAddress string
 
-	EtcdAddress   []string
+	EtcdEndpoints []string
 	MetaRootPath  string
 	MasterAddress string
 	PulsarAddress string
@@ -133,7 +133,7 @@ func (pt *ParamTable) Init() {
 		pt.BaseTable.Init()
 		pt.initLogCfg()
 
-		pt.initEtcdAddress()
+		pt.initEtcdEndpoints()
 		pt.initMetaRootPath()
 		// err := pt.LoadYaml("advanced/proxy_node.yaml")
 		// if err != nil {
@@ -370,12 +370,12 @@ func (pt *ParamTable) initRoleName() {
 	pt.RoleName = fmt.Sprintf("%s-%d", "ProxyNode", pt.ProxyID)
 }
 
-func (pt *ParamTable) initEtcdAddress() {
-	addr, err := pt.Load("_EtcdAddress")
+func (pt *ParamTable) initEtcdEndpoints() {
+	endpoints, err := pt.Load("_EtcdEndpoints")
 	if err != nil {
 		panic(err)
 	}
-	pt.EtcdAddress = strings.Split(addr, ",")
+	pt.EtcdEndpoints = strings.Split(endpoints, ",")
 }
 
 func (pt *ParamTable) initMetaRootPath() {
