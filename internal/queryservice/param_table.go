@@ -48,8 +48,8 @@ type ParamTable struct {
 	SearchResultChannelPrefix string
 
 	// --- ETCD ---
-	EtcdAddress  []string
-	MetaRootPath string
+	EtcdEndpoints []string
+	MetaRootPath  string
 }
 
 var Params ParamTable
@@ -84,7 +84,7 @@ func (p *ParamTable) Init() {
 		p.initSearchResultChannelPrefix()
 
 		// --- ETCD ---
-		p.initEtcdAddress()
+		p.initEtcdEndpoints()
 		p.initMetaRootPath()
 	})
 }
@@ -175,12 +175,12 @@ func (p *ParamTable) initSearchResultChannelPrefix() {
 	p.SearchResultChannelPrefix = channelName
 }
 
-func (p *ParamTable) initEtcdAddress() {
-	addr, err := p.Load("_EtcdAddress")
+func (p *ParamTable) initEtcdEndpoints() {
+	endpoints, err := p.Load("_EtcdEndpoints")
 	if err != nil {
 		panic(err)
 	}
-	p.EtcdAddress = strings.Split(addr, ",")
+	p.EtcdEndpoints = strings.Split(endpoints, ",")
 }
 
 func (p *ParamTable) initMetaRootPath() {
