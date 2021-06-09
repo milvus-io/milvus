@@ -1,4 +1,5 @@
 import copy
+import pdb
 import pytest
 from pymilvus_orm import FieldSchema
 from base.client_base import TestcaseBase
@@ -9,7 +10,7 @@ from base.utility_wrapper import ApiUtilityWrapper
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
-from common.common_type import CaseLabel
+from common.common_type import CaseLabel, CheckTasks
 
 prefix = "utility"
 default_schema = cf.gen_default_collection_schema()
@@ -41,12 +42,8 @@ class TestUtilityParams(TestcaseBase):
         method: input invalid name
         expected: raise exception
         """
-        self._connect()
-        ut = ApiUtilityWrapper()
         c_name = get_invalid_collection_name
-        ex, _ = ut.has_collection(c_name)
-        log.error(str(ex))
-        assert "invalid" or "illegal" in str(ex)
+        self.utility_wrap.has_collection(c_name, check_task=CheckTasks.err_res, check_items={"err_code": 1, "err_msg": "NoneType"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_has_partition_collection_name_invalid(self, get_invalid_collection_name):
@@ -55,13 +52,9 @@ class TestUtilityParams(TestcaseBase):
         method: input invalid name
         expected: raise exception
         """
-        self._connect()
-        ut = ApiUtilityWrapper()
         c_name = get_invalid_collection_name
         p_name = cf.gen_unique_str(prefix)
-        ex, _ = ut.has_partition(c_name, p_name)
-        log.error(str(ex))
-        assert "invalid" or "illegal" in str(ex)
+        self.utility_wrap.has_partition(c_name, p_name, check_task=CheckTasks.err_res, check_items={"err_code": 1, "err_msg": "NoneType"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_has_partition_name_invalid(self, get_invalid_partition_name):
@@ -162,11 +155,8 @@ class TestUtilityBase(TestcaseBase):
         method: input collection name created before
         expected: True
         """
-        self._connect()
-        ut = ApiUtilityWrapper()
-        c_name = cf.gen_unique_str(prefix)
-        self._collection(c_name)
-        res, _ = ut.has_collection(c_name)
+        cw = self.init_collection_wrap()
+        res, _ = self.utility_wrap.has_collection(cw.name)
         assert res is True
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -176,11 +166,9 @@ class TestUtilityBase(TestcaseBase):
         method: input random collection name
         expected: False
         """
-        self._connect()
-        ut = ApiUtilityWrapper()
         c_name = cf.gen_unique_str(prefix)
-        self._collection()
-        res, _ = ut.has_collection(c_name)
+        _ = self.init_collection_wrap()
+        res, _ = self.utility_wrap.has_collection(c_name)
         assert res is False
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -190,14 +178,12 @@ class TestUtilityBase(TestcaseBase):
         method: input random collection name
         expected: False
         """
-        self._connect()
-        ut = ApiUtilityWrapper()
         c_name = cf.gen_unique_str(prefix)
-        self._collection(c_name)
-        res, _ = ut.has_collection(c_name)
+        cw = self.init_collection_wrap(name=c_name)
+        res, _ = self.utility_wrap.has_collection(c_name)
         assert res is True
-        self.collection_wrap.drop()
-        res, _ = ut.has_collection(c_name)
+        cw.drop()
+        res, _ = self.utility_wrap.has_collection(c_name)
         assert res is False
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -207,14 +193,11 @@ class TestUtilityBase(TestcaseBase):
         method: input collection name and partition name created before
         expected: True
         """
-        self._connect()
-        ut = ApiUtilityWrapper()
         c_name = cf.gen_unique_str(prefix)
-        p_name = cf.gen_unique_str()
-        collection = self._collection(c_name)
-        api_p = ApiPartitionWrapper()
-        api_p.init_partition(collection, p_name)
-        res, _ = ut.has_partition(c_name, p_name)
+        p_name = cf.gen_unique_str(prefix)
+        cw = self.init_collection_wrap(name=c_name)
+        self.init_partition_wrap(cw, p_name)
+        res, _ = self.utility_wrap.has_partition(c_name, p_name)
         assert res is True
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -224,12 +207,10 @@ class TestUtilityBase(TestcaseBase):
         method: input collection name, and partition name not created before
         expected: True
         """
-        self._connect()
-        ut = ApiUtilityWrapper()
         c_name = cf.gen_unique_str(prefix)
         p_name = cf.gen_unique_str()
-        self._collection(c_name)
-        res, _ = ut.has_partition(c_name, p_name)
+        self.init_collection_wrap(name=c_name)
+        res, _ = self.utility_wrap.has_partition(c_name, p_name)
         assert res is False
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -239,19 +220,17 @@ class TestUtilityBase(TestcaseBase):
         method: input collection name, and partition name dropped
         expected: True
         """
-        self._connect()
-        ut = ApiUtilityWrapper()
         c_name = cf.gen_unique_str(prefix)
         p_name = cf.gen_unique_str()
-        collection = self._collection(c_name)
-        api_p = ApiPartitionWrapper()
-        api_p.init_partition(collection, p_name)
-        res, _ = ut.has_partition(c_name, p_name)
+        cw = self.init_collection_wrap(name=c_name)
+        pw = self.init_partition_wrap(cw, p_name)
+        res, _ = self.utility_wrap.has_partition(c_name, p_name)
         assert res is True
-        api_p.drop()
-        res, _ = ut.has_partition(c_name, p_name)
+        pw.drop()
+        res, _ = self.utility_wrap.has_partition(c_name, p_name)
         assert res is False
 
+    @pytest.mark.xfail(reason="issue #5667")
     @pytest.mark.tags(CaseLabel.L1)
     def test_list_collections(self):
         """
@@ -259,11 +238,9 @@ class TestUtilityBase(TestcaseBase):
         method: create collection, list_collections
         expected: in the result
         """
-        self._connect()
-        ut = ApiUtilityWrapper()
         c_name = cf.gen_unique_str(prefix)
-        self._collection(c_name)
-        res, _ = ut.list_collections()
+        self.init_collection_wrap(name=c_name)
+        res, _ = self.utility_wrap.list_collections()
         assert c_name in res
 
     # TODO: make sure all collections deleted
@@ -275,8 +252,7 @@ class TestUtilityBase(TestcaseBase):
         expected: length of the result equals to 0
         """
         self._connect()
-        ut = ApiUtilityWrapper()
-        res, _ = ut.list_collections()
+        res, _ = self.utility_wrap.list_collections()
         assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -288,11 +264,9 @@ class TestUtilityBase(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        ut = ApiUtilityWrapper()
-        ex, _ = ut.index_building_progress(c_name)
-        log.error(str(ex))
-        assert "exist" in str(ex)
+        self.utility_wrap.index_building_progress(c_name, check_task=CheckTasks.err_res, check_items={"err_code": 1, "err_msg": "can't find collection"})
 
+    @pytest.mark.xfail(reason="issue #5673")
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_process_collection_empty(self):
         """
@@ -300,16 +274,15 @@ class TestUtilityBase(TestcaseBase):
         method: input empty collection
         expected: no exception raised
         """
-        self._connect()
         c_name = cf.gen_unique_str(prefix)
-        self._collection(c_name)
-        ut = ApiUtilityWrapper()
-        res, _ = ut.index_building_progress(c_name)
-        assert "num_indexed_entities" in res
-        assert res["num_indexed_entities"] == 0
-        assert "num_total_entities" in res
-        assert res["num_total_entities"] == 0
+        self.init_collection_wrap(name=c_name)
+        res, _ = self.utility_wrap.index_building_progress(c_name)
+        assert "indexed_rows" in res
+        assert res["indexed_rows"] == 0
+        assert "total_rows" in res
+        assert res["total_rows"] == 0
 
+    @pytest.mark.xfail(reason="issue #5674")
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_process_collection_insert_no_index(self):
         """
@@ -318,40 +291,17 @@ class TestUtilityBase(TestcaseBase):
         expected: no exception raised
         """
         nb = 1
-        self._connect()
         c_name = cf.gen_unique_str(prefix)
-        self._collection(c_name)
+        cw = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(nb)
-        self.collection_wrap.insert(data=data)
-        ut = ApiUtilityWrapper()
-        res, _ = ut.index_building_progress(c_name)
-        assert "num_indexed_entities" in res
-        assert res["num_indexed_entities"] == 0
-        assert "num_total_entities" in res
-        assert res["num_total_entities"] == nb
+        cw.insert(data=data)
+        res, _ = self.utility_wrap.index_building_progress(c_name)
+        assert "indexed_rows" in res
+        assert res["indexed_rows"] == 0
+        assert "total_rows" in res
+        assert res["total_rows"] == nb
 
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_index_process_collection_insert_index_not_enough(self):
-        """
-        target: test building_process
-        method: insert 1 entity, no index created
-        expected: no exception raised
-        """
-        nb = 1
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        self._collection(c_name)
-        data = cf.gen_default_list_data(nb)
-        self.collection_wrap.insert(data=data)
-        self.collection_wrap.create_index(default_field_name, default_index_params)
-        ut = ApiUtilityWrapper()
-        ut.wait_for_index_building_complete(c_name)
-        res, _ = ut.index_building_progress(c_name)
-        assert "num_indexed_entities" in res
-        assert res["num_indexed_entities"] == 0
-        assert "num_total_entities" in res
-        assert res["num_total_entities"] == nb
-
+    @pytest.mark.xfail(reason="issue #5674")
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_process_collection_index(self):
         """
@@ -360,19 +310,15 @@ class TestUtilityBase(TestcaseBase):
         expected: 1200 entity indexed
         """
         nb = 1200
-        self._connect()
         c_name = cf.gen_unique_str(prefix)
-        self._collection(c_name)
+        cw = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(nb)
-        self.collection_wrap.insert(data=data)
-        self.collection_wrap.create_index(default_field_name, default_index_params)
-        ut = ApiUtilityWrapper()
-        ut.wait_for_index_building_complete(c_name)
-        res, _ = ut.index_building_progress(c_name)
-        assert "num_indexed_entities" in res
-        assert res["num_indexed_entities"] == nb
-        assert "num_total_entities" in res
-        assert res["num_total_entities"] == nb
+        cw.insert(data=data)
+        res, _ = self.utility_wrap.index_building_progress(c_name)
+        assert "indexed_rows" in res
+        assert res["indexed_rows"] == nb
+        assert "total_rows" in res
+        assert res["total_rows"] == nb
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_process_collection_indexing(self):
@@ -382,20 +328,18 @@ class TestUtilityBase(TestcaseBase):
         expected: 1200 entity indexed
         """
         nb = 1200
-        self._connect()
         c_name = cf.gen_unique_str(prefix)
-        self._collection(c_name)
+        cw = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(nb)
-        self.collection_wrap.insert(data=data)
-        self.collection_wrap.create_index(default_field_name, default_index_params)
-        ut = ApiUtilityWrapper()
-        res, _ = ut.index_building_progress(c_name)
+        cw.insert(data=data)
+        cw.create_index(default_field_name, default_index_params)
+        res, _ = self.utility_wrap.index_building_progress(c_name)
         for _ in range(2):
-            assert "num_indexed_entities" in res
-            assert res["num_indexed_entities"] <= nb
-            assert res["num_indexed_entities"] >= 0
-            assert "num_total_entities" in res
-            assert res["num_total_entities"] == nb
+            assert "indexed_rows" in res
+            assert res["indexed_rows"] <= nb
+            assert res["indexed_rows"] >= 0
+            assert "total_rows" in res
+            assert res["total_rows"] == nb
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_wait_index_collection_not_existed(self):
@@ -406,10 +350,7 @@ class TestUtilityBase(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        ut = ApiUtilityWrapper()
-        ex, _ = ut.wait_for_index_building_complete(c_name)
-        log.error(str(ex))
-        assert "exist" in str(ex)
+        self.utility_wrap.wait_for_index_building_complete(c_name, check_task=CheckTasks.err_res, check_items={"err_code": 1, "err_msg": "can't find collection"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_wait_index_collection_empty(self):
@@ -420,9 +361,8 @@ class TestUtilityBase(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        self._collection(c_name)
-        ut = ApiUtilityWrapper()
-        res, _ = ut.wait_for_index_building_complete(c_name)
+        self.init_collection_wrap(name=c_name)
+        res, _ = self.utility_wrap.wait_for_index_building_complete(c_name)
         assert res is None
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -433,17 +373,15 @@ class TestUtilityBase(TestcaseBase):
         expected: 1200 entity indexed
         """
         nb = 1200
-        self._connect()
         c_name = cf.gen_unique_str(prefix)
-        self._collection(c_name)
+        cw = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(nb)
-        self.collection_wrap.insert(data=data)
-        self.collection_wrap.create_index(default_field_name, default_index_params)
-        ut = ApiUtilityWrapper()
-        res, _ = ut.wait_for_index_building_complete(c_name)
+        cw.insert(data=data)
+        cw.create_index(default_field_name, default_index_params)
+        res, _ = self.utility_wrap.wait_for_index_building_complete(c_name)
         assert res is None
-        res, _ = ut.index_building_progress(c_name)
-        assert res["num_indexed_entities"] == nb
+        res, _ = self.utility_wrap.index_building_progress(c_name)
+        assert res["indexed_rows"] == nb
 
 
 class TestUtilityAdvanced(TestcaseBase):
@@ -456,15 +394,12 @@ class TestUtilityAdvanced(TestcaseBase):
         method: input collection name created before
         expected: True
         """
-        self._connect()
-        ut = ApiUtilityWrapper()
         c_name = cf.gen_unique_str(prefix)
         c_name_2 = cf.gen_unique_str(prefix)
-        self._collection(c_name)
-        api_c = ApiCollectionWrapper()
-        api_c.init_collection(c_name_2)
+        self.init_collection_wrap(name=c_name)
+        self.init_collection_wrap(name=c_name_2)
         for name in [c_name, c_name_2]:
-            res, _ = ut.has_collection(name)
+            res, _ = self.utility_wrap.has_collection(name)
             assert res is True
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -474,13 +409,10 @@ class TestUtilityAdvanced(TestcaseBase):
         method: create collection, list_collections
         expected: in the result
         """
-        self._connect()
-        ut = ApiUtilityWrapper()
         c_name = cf.gen_unique_str(prefix)
         c_name_2 = cf.gen_unique_str(prefix)
-        self._collection(c_name)
-        api_c = ApiCollectionWrapper()
-        api_c.init_collection(c_name_2)
-        res, _ = ut.list_collections()
+        self.init_collection_wrap(name=c_name)
+        self.init_collection_wrap(name=c_name_2)
+        res, _ = self.utility_wrap.list_collections()
         for name in [c_name, c_name_2]:
             assert name in res

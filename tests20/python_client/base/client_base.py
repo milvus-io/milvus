@@ -9,7 +9,7 @@ from base.index_wrapper import ApiIndexWrapper
 from base.utility_wrapper import ApiUtilityWrapper
 from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
 
-from config.test_info import test_info
+from config.log_config import log_config
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
@@ -87,7 +87,7 @@ class Base:
         assert ip_check(host) and number_check(port)
 
         """ modify log files """
-        cf.modify_file(file_path_list=[test_info.log_debug, test_info.log_info, test_info.log_err], is_modify=clean_log)
+        cf.modify_file(file_path_list=[log_config.log_debug, log_config.log_info, log_config.log_err], is_modify=clean_log)
 
         log.info("#" * 80)
         log.info("[initialize_milvus] Log cleaned up, start testing...")
@@ -115,17 +115,6 @@ class TestcaseBase(Base):
         if not is_succ:
             raise res
         return res
-
-    '''
-    def _collection(self, **kwargs):
-        """ Init a collection and return the object of collection """
-        name = cf.gen_unique_str()
-        schema = cf.gen_default_collection_schema()
-        if self.connection_wrap.get_connection(alias='default') is None:
-            self._connect()
-        res, cr = self.collection_wrap.init_collection(name=name, schema=schema, **kwargs)
-        return res
-    '''
 
     def init_collection_wrap(self, name=None, data=None, schema=None, check_task=None, **kwargs):
         name = cf.gen_unique_str('coll_') if name is None else name

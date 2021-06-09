@@ -95,7 +95,6 @@ class TestPartitionParams(TestcaseBase):
                                               "is_empty": True}
                                  )
 
-
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("collection_name, partition_name, description",
                              [(cf.gen_unique_str(), cf.gen_unique_str(prefix), cf.gen_unique_str())])
@@ -208,7 +207,7 @@ class TestPartitionParams(TestcaseBase):
                                            check_task=CheckTasks.err_res,
                                            check_items={"err_code": 1, "err_msg": "'NoneType' object has no attribute"})
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_drop(self, partition_name):
         """
@@ -749,7 +748,7 @@ class TestPartitionOperations(TestcaseBase):
         data = cf.gen_default_list_data(nb=10, dim=dim)
         # insert data to partition
         partition_w.insert(data, check_task=CheckTasks.err_res,
-                           check_items={"err_code": 1, "err_msg": "Field type doesn't match"})
+                           check_items={"err_code": 1, "err_msg": "but entities field dim"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("sync", [True, False])

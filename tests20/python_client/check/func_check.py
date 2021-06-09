@@ -8,13 +8,13 @@ from utils.api_request import Error
 
 class ResponseChecker:
     def __init__(self, response, func_name, check_task, check_items, is_succ=True, **kwargs):
-        self.response = response            # response of api request
-        self.func_name = func_name          # api function name
-        self.check_task = check_task        # task to check response of the api request
-        self.check_items = check_items    # check items and expectations that to be checked in check task
-        self.succ = is_succ                 # api responses successful or not
+        self.response = response  # response of api request
+        self.func_name = func_name  # api function name
+        self.check_task = check_task  # task to check response of the api request
+        self.check_items = check_items  # check items and expectations that to be checked in check task
+        self.succ = is_succ  # api responses successful or not
 
-        self.kwargs_dict = {}       # not used for now, just for extension
+        self.kwargs_dict = {}  # not used for now, just for extension
         for key, value in kwargs.items():
             self.kwargs_dict[key] = value
         self.keys = self.kwargs_dict.keys()
@@ -78,18 +78,25 @@ class ResponseChecker:
 
     @staticmethod
     def check_collection_property(collection, func_name, check_items):
-        exp_func_name = "collection_init"
+        exp_func_name = "init_collection"
         if func_name != exp_func_name:
             log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
         if not isinstance(collection, Collection):
             raise Exception("The result to check isn't collection type object")
         if len(check_items) == 0:
             raise Exception("No expect values found in the check task")
-        if check_items.get("name", None):
-            assert collection.name == check_items["name"]
-        if check_items.get("schema", None):
-            assert collection.description == check_items["schema"].description
-            assert collection.schema == check_items["schema"]
+        name = check_items.get("name", None)
+        schema = check_items.get("schema", None)
+        num_entities = check_items.get("num_entities", 0)
+        primary = check_items.get("primary", None)
+        if name:
+            assert collection.name == name
+        if schema:
+            assert collection.schema == schema
+        if num_entities == 0:
+            assert collection.is_empty
+        assert collection.num_entities == num_entities
+        assert collection.primary_field == primary
         return True
 
     @staticmethod
@@ -110,4 +117,3 @@ class ResponseChecker:
         if check_items.get("num_entities", None):
             assert partition.num_entities == check_items["num_entities"]
         return True
-
