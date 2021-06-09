@@ -59,7 +59,6 @@ func newSearchService(ctx context.Context,
 
 func (s *searchService) close() {
 	log.Debug("search service closed")
-
 	for collectionID := range s.searchCollections {
 		s.stopSearchCollection(collectionID)
 	}

@@ -14,10 +14,9 @@ package querynode
 import (
 	"context"
 	"errors"
+	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 	"sync"
-
-	"github.com/milvus-io/milvus/internal/log"
 )
 
 // TSafeReplicaInterface is the interface wrapper of tSafeReplica
@@ -59,7 +58,7 @@ func (t *tSafeReplica) setTSafe(vChannel VChannel, id UniqueID, timestamp Timest
 func (t *tSafeReplica) getTSaferPrivate(vChannel VChannel) (tSafer, error) {
 	if _, ok := t.tSafes[vChannel]; !ok {
 		err := errors.New("cannot found tSafer, vChannel = " + vChannel)
-		log.Error(err.Error())
+		//log.Error(err.Error())
 		return nil, err
 	}
 	return t.tSafes[vChannel], nil

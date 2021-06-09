@@ -19,8 +19,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
@@ -39,7 +37,7 @@ func (stNode *serviceTimeNode) Name() string {
 }
 
 func (stNode *serviceTimeNode) Close() {
-	stNode.timeTickMsgStream.Close()
+	//stNode.timeTickMsgStream.Close()
 }
 
 func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
@@ -76,9 +74,9 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		zap.Any("channel", channelTmp),
 	)
 
-	if err := stNode.sendTimeTick(serviceTimeMsg.timeRange.timestampMax); err != nil {
-		log.Error("Error: send time tick into pulsar channel failed", zap.Error(err))
-	}
+	//if err := stNode.sendTimeTick(serviceTimeMsg.timeRange.timestampMax); err != nil {
+	//	log.Error("Error: send time tick into pulsar channel failed", zap.Error(err))
+	//}
 
 	var res Msg = &gcMsg{
 		gcRecord:  serviceTimeMsg.gcRecord,
@@ -87,26 +85,26 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	return []Msg{res}
 }
 
-func (stNode *serviceTimeNode) sendTimeTick(ts Timestamp) error {
-	msgPack := msgstream.MsgPack{}
-	timeTickMsg := msgstream.TimeTickMsg{
-		BaseMsg: msgstream.BaseMsg{
-			BeginTimestamp: ts,
-			EndTimestamp:   ts,
-			HashValues:     []uint32{0},
-		},
-		TimeTickMsg: internalpb.TimeTickMsg{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_TimeTick,
-				MsgID:     0,
-				Timestamp: ts,
-				SourceID:  Params.QueryNodeID,
-			},
-		},
-	}
-	msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
-	return stNode.timeTickMsgStream.Produce(&msgPack)
-}
+//func (stNode *serviceTimeNode) sendTimeTick(ts Timestamp) error {
+//	msgPack := msgstream.MsgPack{}
+//	timeTickMsg := msgstream.TimeTickMsg{
+//		BaseMsg: msgstream.BaseMsg{
+//			BeginTimestamp: ts,
+//			EndTimestamp:   ts,
+//			HashValues:     []uint32{0},
+//		},
+//		TimeTickMsg: internalpb.TimeTickMsg{
+//			Base: &commonpb.MsgBase{
+//				MsgType:   commonpb.MsgType_TimeTick,
+//				MsgID:     0,
+//				Timestamp: ts,
+//				SourceID:  Params.QueryNodeID,
+//			},
+//		},
+//	}
+//	msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
+//	return stNode.timeTickMsgStream.Produce(&msgPack)
+//}
 
 func newServiceTimeNode(ctx context.Context,
 	tSafeReplica TSafeReplicaInterface,
