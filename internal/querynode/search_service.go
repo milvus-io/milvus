@@ -73,8 +73,8 @@ func (s *searchService) addSearchCollection(collectionID UniqueID) {
 	sc := newSearchCollection(ctx1,
 		cancel,
 		collectionID,
-s.historical,
-s.streaming,
+		s.historical,
+		s.streaming,
 		s.factory)
 	s.searchCollections[collectionID] = sc
 }

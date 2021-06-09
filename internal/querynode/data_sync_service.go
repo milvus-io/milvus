@@ -33,7 +33,7 @@ const (
 type dataSyncService struct {
 	ctx context.Context
 
-	mu                   sync.Mutex                         // guards FlowGraphs
+	mu                   sync.Mutex                                    // guards FlowGraphs
 	collectionFlowGraphs map[UniqueID]map[VChannel]*queryNodeFlowGraph // map[collectionID]flowGraphs
 	partitionFlowGraphs  map[UniqueID]map[VChannel]*queryNodeFlowGraph // map[partitionID]flowGraphs
 

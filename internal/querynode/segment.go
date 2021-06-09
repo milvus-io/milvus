@@ -149,7 +149,7 @@ func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, c
 		segmentID:    segmentID,
 		partitionID:  partitionID,
 		collectionID: collectionID,
-		vChannelID:       vChannelID,
+		vChannelID:   vChannelID,
 		onService:    onService,
 		indexInfos:   indexInfos,
 	}
