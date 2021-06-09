@@ -52,6 +52,7 @@ type Segment struct {
 	segmentID    UniqueID
 	partitionID  UniqueID
 	collectionID UniqueID
+	vChannelID   VChannel
 	lastMemSize  int64
 	lastRowCount int64
 
@@ -110,7 +111,7 @@ func (s *Segment) getType() segmentType {
 	return s.segmentType
 }
 
-func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, collectionID UniqueID, segType segmentType) *Segment {
+func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, collectionID UniqueID, vChannelID VChannel, segType segmentType) *Segment {
 	/*
 		CSegmentInterface
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
@@ -138,6 +139,7 @@ func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, c
 		segmentID:        segmentID,
 		partitionID:      partitionID,
 		collectionID:     collectionID,
+		vChannelID:       vChannelID,
 		indexInfos:       indexInfos,
 		enableLoadBinLog: false,
 	}

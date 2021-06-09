@@ -72,7 +72,7 @@ func (s *loadService) loadSegmentActively(wg *sync.WaitGroup) {
 			log.Error(err.Error())
 			continue
 		}
-		segment := newSegment(collection, segmentIDs[i], partitionIDs[i], collectionIDs[i], segmentTypeSealed)
+		segment := newSegment(collection, segmentIDs[i], partitionIDs[i], collectionIDs[i], "", segmentTypeSealed)
 		segment.setLoadBinLogEnable(true)
 		err = s.loadSegmentInternal(collectionIDs[i], segment, fieldIDs)
 		if err == nil {
@@ -115,7 +115,7 @@ func (s *loadService) loadSegmentPassively(collectionID UniqueID, partitionID Un
 			return err
 		}
 
-		segment := newSegment(collection, segmentID, partitionID, collectionID, segmentTypeSealed)
+		segment := newSegment(collection, segmentID, partitionID, collectionID, "", segmentTypeSealed)
 		segment.setLoadBinLogEnable(true)
 		err = s.loadSegmentInternal(collectionID, segment, fieldIDs)
 		if err == nil {
@@ -137,7 +137,7 @@ func (s *loadService) addSegmentToLoadBuffer(segment *Segment) error {
 	partitionID := segment.partitionID
 	collectionID := segment.collectionID
 	deleteSegment(segment)
-	err := s.segLoader.replica.addSegment(segmentID, partitionID, collectionID, segmentTypeGrowing)
+	err := s.segLoader.replica.addSegment(segmentID, partitionID, collectionID, "", segmentTypeGrowing)
 	if err != nil {
 		return err
 	}

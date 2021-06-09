@@ -13,7 +13,6 @@ package querynode
 
 import (
 	"context"
-	"errors"
 	"math"
 	"reflect"
 	"sync"
@@ -35,10 +34,9 @@ type searchCollection struct {
 	releaseCtx context.Context
 	cancel     context.CancelFunc
 
-	collectionID      UniqueID
-	historicalReplica ReplicaInterface
-	streamingReplica  ReplicaInterface
-	tSafeReplica      TSafeReplicaInterface
+	collectionID UniqueID
+	historical   *historical
+	streaming    *streaming
 
 	msgBuffer     chan *msgstream.SearchMsg
 	unsolvedMsgMu sync.Mutex // guards unsolvedMsg
@@ -58,9 +56,8 @@ type ResultEntityIds []UniqueID
 func newSearchCollection(releaseCtx context.Context,
 	cancel context.CancelFunc,
 	collectionID UniqueID,
-	historicalReplica ReplicaInterface,
-	streamingReplica ReplicaInterface,
-	tSafeReplica TSafeReplicaInterface,
+	historical *historical,
+	streaming *streaming,
 	searchResultStream msgstream.MsgStream) *searchCollection {
 
 	receiveBufSize := Params.SearchReceiveBufSize
@@ -71,10 +68,9 @@ func newSearchCollection(releaseCtx context.Context,
 		releaseCtx: releaseCtx,
 		cancel:     cancel,
 
-		collectionID:      collectionID,
-		historicalReplica: historicalReplica,
-		streamingReplica:  streamingReplica,
-		tSafeReplica:      tSafeReplica,
+		collectionID: collectionID,
+		historical:   historical,
+		streaming:    streaming,
 
 		tSafeWatchers: make(map[VChannel]*tSafeWatcher),
 
@@ -94,7 +90,7 @@ func (s *searchCollection) start() {
 }
 
 func (s *searchCollection) register() {
-	collection, err := s.streamingReplica.getCollectionByID(s.collectionID)
+	collection, err := s.streaming.replica.getCollectionByID(s.collectionID)
 	if err != nil {
 		log.Error(err.Error())
 		return
@@ -105,9 +101,9 @@ func (s *searchCollection) register() {
 		zap.Any("dml channels", collection.getWatchedDmChannels()),
 		zap.Any("collectionID", collection.ID()))
 	for _, channel := range collection.getWatchedDmChannels() {
-		s.tSafeReplica.addTSafe(channel)
+		s.streaming.tSafeReplica.addTSafe(channel)
 		s.tSafeWatchers[channel] = newTSafeWatcher()
-		s.tSafeReplica.registerTSafeWatcher(channel, s.tSafeWatchers[channel])
+		s.streaming.tSafeReplica.registerTSafeWatcher(channel, s.tSafeWatchers[channel])
 		s.watcherSelectCase = append(s.watcherSelectCase, reflect.SelectCase{
 			Dir:  reflect.SelectRecv,
 			Chan: reflect.ValueOf(s.tSafeWatchers[channel].watcherChan()),
@@ -138,7 +134,7 @@ func (s *searchCollection) waitNewTSafe() Timestamp {
 	}
 	t := Timestamp(math.MaxInt64)
 	for channel := range s.tSafeWatchers {
-		ts := s.tSafeReplica.getTSafe(channel)
+		ts := s.streaming.tSafeReplica.getTSafe(channel)
 		if ts <= t {
 			t = ts
 		}
@@ -307,7 +303,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	searchTimestamp := searchMsg.Base.Timestamp
 
 	collectionID := searchMsg.CollectionID
-	collection, err := s.historicalReplica.getCollectionByID(collectionID)
+	collection, err := s.historical.replica.getCollectionByID(collectionID)
 	if err != nil {
 		return err
 	}
@@ -334,39 +330,6 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	searchRequests := make([]*searchRequest, 0)
 	searchRequests = append(searchRequests, searchReq)
 
-	searchResults := make([]*SearchResult, 0)
-	matchedSegments := make([]*Segment, 0)
-
-	var searchPartitionIDsInHistorical []UniqueID
-	var searchPartitionIDsInStreaming []UniqueID
-	partitionIDsInQuery := searchMsg.PartitionIDs
-	if len(partitionIDsInQuery) == 0 {
-		partitionIDsInHistoricalCol, err1 := s.historicalReplica.getPartitionIDs(collectionID)
-		partitionIDsInStreamingCol, err2 := s.streamingReplica.getPartitionIDs(collectionID)
-		if err1 != nil && err2 != nil {
-			return err2
-		}
-		if len(partitionIDsInHistoricalCol) == 0 {
-			return errors.New("none of this collection's partition has been loaded")
-		}
-		searchPartitionIDsInHistorical = partitionIDsInHistoricalCol
-		searchPartitionIDsInStreaming = partitionIDsInStreamingCol
-	} else {
-		for _, id := range partitionIDsInQuery {
-			_, err1 := s.historicalReplica.getPartitionByID(id)
-			if err1 == nil {
-				searchPartitionIDsInHistorical = append(searchPartitionIDsInHistorical, id)
-			}
-			_, err2 := s.streamingReplica.getPartitionByID(id)
-			if err2 == nil {
-				searchPartitionIDsInStreaming = append(searchPartitionIDsInStreaming, id)
-			}
-			if err1 != nil && err2 != nil {
-				return err2
-			}
-		}
-	}
-
 	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
 		sp.LogFields(oplog.String("statistical time", "stats start"),
 			oplog.Object("nq", queryNum),
@@ -377,48 +340,28 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 			oplog.Object("dsl", searchMsg.Dsl))
 	}
 
+	searchResults := make([]*SearchResult, 0)
+	matchedSegments := make([]*Segment, 0)
 	sealedSegmentSearched := make([]UniqueID, 0)
-	for _, partitionID := range searchPartitionIDsInHistorical {
-		segmentIDs, err := s.historicalReplica.getSegmentIDs(partitionID)
-		if err != nil {
-			return err
-		}
-		for _, segmentID := range segmentIDs {
-			segment, err := s.historicalReplica.getSegmentByID(segmentID)
-			if err != nil {
-				return err
-			}
-			searchResult, err := segment.segmentSearch(plan, searchRequests, []Timestamp{searchTimestamp})
 
-			if err != nil {
-				return err
-			}
-			searchResults = append(searchResults, searchResult)
-			matchedSegments = append(matchedSegments, segment)
-			sealedSegmentSearched = append(sealedSegmentSearched, segmentID)
-		}
+	// historical search
+	hisSearchResults, hisSegmentResults, err := s.historical.search(searchRequests, collectionID, searchMsg.PartitionIDs, plan, searchTimestamp)
+	if err != nil {
+		return err
+	}
+	searchResults = append(searchResults, hisSearchResults...)
+	matchedSegments = append(matchedSegments, hisSegmentResults...)
+	for _, seg := range hisSegmentResults {
+		sealedSegmentSearched = append(sealedSegmentSearched, seg.segmentID)
 	}
 
-	//TODO:: get searched channels
-	for _, partitionID := range searchPartitionIDsInStreaming {
-		segmentIDs, err := s.streamingReplica.getSegmentIDs(partitionID)
-		if err != nil {
-			return err
-		}
-		for _, segmentID := range segmentIDs {
-			segment, err := s.streamingReplica.getSegmentByID(segmentID)
-			if err != nil {
-				return err
-			}
-			searchResult, err := segment.segmentSearch(plan, searchRequests, []Timestamp{searchTimestamp})
-
-			if err != nil {
-				return err
-			}
-			searchResults = append(searchResults, searchResult)
-			matchedSegments = append(matchedSegments, segment)
-		}
+	// streaming search
+	strSearchResults, strSegmentResults, err := s.streaming.search(searchRequests, collectionID, searchMsg.PartitionIDs, plan, searchTimestamp)
+	if err != nil {
+		return err
 	}
+	searchResults = append(searchResults, strSearchResults...)
+	matchedSegments = append(matchedSegments, strSegmentResults...)
 
 	sp.LogFields(oplog.String("statistical time", "segment search end"))
 	if len(searchResults) <= 0 {

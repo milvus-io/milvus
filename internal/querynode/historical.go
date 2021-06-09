@@ -52,3 +52,46 @@ func (h *historical) close() {
 	// free collectionReplica
 	h.replica.freeAll()
 }
+
+func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, plan *Plan, searchTs Timestamp) ([]*SearchResult, []*Segment, error) {
+	searchResults := make([]*SearchResult, 0)
+	segmentResults := make([]*Segment, 0)
+
+	// get historical partition ids
+	var searchPartIDs []UniqueID
+	if len(partIDs) == 0 {
+		hisPartIDs, err := h.replica.getPartitionIDs(collID)
+		if err != nil {
+			return searchResults, segmentResults, err
+		}
+		searchPartIDs = hisPartIDs
+	} else {
+		for _, id := range partIDs {
+			_, err := h.replica.getPartitionByID(id)
+			if err == nil {
+				searchPartIDs = append(searchPartIDs, id)
+			}
+		}
+	}
+
+	for _, partID := range searchPartIDs {
+		segIDs, err := h.replica.getSegmentIDs(partID)
+		if err != nil {
+			return searchResults, segmentResults, err
+		}
+		for _, segID := range segIDs {
+			seg, err := h.replica.getSegmentByID(segID)
+			if err != nil {
+				return searchResults, segmentResults, err
+			}
+			searchResult, err := seg.segmentSearch(plan, searchReqs, []Timestamp{searchTs})
+			if err != nil {
+				return searchResults, segmentResults, err
+			}
+			searchResults = append(searchResults, searchResult)
+			segmentResults = append(segmentResults, seg)
+		}
+	}
+
+	return searchResults, segmentResults, nil
+}

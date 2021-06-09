@@ -28,9 +28,8 @@ type searchService struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	historicalReplica ReplicaInterface
-	streamingReplica  ReplicaInterface
-	tSafeReplica      TSafeReplicaInterface
+	historical *historical
+	streaming  *streaming
 
 	searchMsgStream       msgstream.MsgStream
 	searchResultMsgStream msgstream.MsgStream
@@ -41,9 +40,8 @@ type searchService struct {
 }
 
 func newSearchService(ctx context.Context,
-	historicalReplica ReplicaInterface,
-	streamingReplica ReplicaInterface,
-	tSafeReplica TSafeReplicaInterface,
+	historical *historical,
+	streaming *streaming,
 	factory msgstream.Factory) *searchService {
 
 	searchStream, _ := factory.NewQueryMsgStream(ctx)
@@ -66,9 +64,8 @@ func newSearchService(ctx context.Context,
 		ctx:    searchServiceCtx,
 		cancel: searchServiceCancel,
 
-		historicalReplica: historicalReplica,
-		streamingReplica:  streamingReplica,
-		tSafeReplica:      tSafeReplica,
+		historical: historical,
+		streaming:  streaming,
 
 		searchMsgStream:       searchStream,
 		searchResultMsgStream: searchResultStream,
@@ -88,7 +85,7 @@ func (s *searchService) start() {
 
 func (s *searchService) collectionCheck(collectionID UniqueID) error {
 	// check if collection exists
-	if ok := s.historicalReplica.hasCollection(collectionID); !ok {
+	if ok := s.historical.replica.hasCollection(collectionID); !ok {
 		err := errors.New("no collection found, collectionID = " + strconv.FormatInt(collectionID, 10))
 		log.Error(err.Error())
 		return err
@@ -166,9 +163,8 @@ func (s *searchService) startSearchCollection(collectionID UniqueID) {
 	sc := newSearchCollection(ctx1,
 		cancel,
 		collectionID,
-		s.historicalReplica,
-		s.streamingReplica,
-		s.tSafeReplica,
+		s.historical,
+		s.streaming,
 		s.searchResultMsgStream)
 	s.searchCollections[collectionID] = sc
 	sc.start()
@@ -179,9 +175,8 @@ func (s *searchService) startEmptySearchCollection() {
 	sc := newSearchCollection(ctx1,
 		cancel,
 		UniqueID(-1),
-		s.historicalReplica,
-		s.streamingReplica,
-		s.tSafeReplica,
+		s.historical,
+		s.streaming,
 		s.searchResultMsgStream)
 	s.emptySearchCollection = sc
 	sc.start()
