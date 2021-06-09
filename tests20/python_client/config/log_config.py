@@ -1,8 +1,11 @@
 import os
 
 
-class TestInfo:
+class LogConfig:
     def __init__(self):
+        self.log_debug = ""
+        self.log_err = ""
+        self.log_info = ""
         self.get_default_config()
 
     @staticmethod
@@ -25,12 +28,12 @@ class TestInfo:
 
     def get_default_config(self):
         """ Make sure the path exists """
-        self.log_dir = self.get_env_variable()
-        self.log_debug = "%s/ci_test_log.debug" % self.log_dir
-        self.log_info = "%s/ci_test_log.log" % self.log_dir
-        self.log_err = "%s/ci_test_log.err" % self.log_dir
+        log_dir = self.get_env_variable()
+        self.log_debug = "%s/ci_test_log.debug" % log_dir
+        self.log_info = "%s/ci_test_log.log" % log_dir
+        self.log_err = "%s/ci_test_log.err" % log_dir
 
-        self.create_path(self.log_dir)
+        self.create_path(log_dir)
 
 
-test_info = TestInfo()
+log_config = LogConfig()
