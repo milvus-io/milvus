@@ -67,7 +67,7 @@ func defaultStartupPolicy() clusterStartupPolicy {
 }
 
 func defaultRegisterPolicy() dataNodeRegisterPolicy {
-	return newEmptyRegisterPolicy()
+	return newAssiggBufferRegisterPolicy()
 }
 
 func defaultUnregisterPolicy() dataNodeUnregisterPolicy {
