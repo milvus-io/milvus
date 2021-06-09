@@ -95,7 +95,7 @@ func (p *ParamTable) Init() {
 		p.initMsgChannelSubName()
 
 		// --- ETCD ---
-		p.initEtcdAddress()
+		p.initEtcdEndpoints()
 		p.initMetaRootPath()
 
 		// --- MinIO ---
@@ -189,7 +189,7 @@ func (p *ParamTable) initMsgChannelSubName() {
 }
 
 // --- ETCD ---
-func (p *ParamTable) initEtcdAddress() {
+func (p *ParamTable) initEtcdEndpoints() {
 	endpoints, err := p.Load("_EtcdEndpoints")
 	if err != nil {
 		panic(err)

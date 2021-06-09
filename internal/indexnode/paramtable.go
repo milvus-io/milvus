@@ -72,7 +72,7 @@ func (pt *ParamTable) initParams() {
 	pt.initMinIOSecretAccessKey()
 	pt.initMinIOUseSSL()
 	pt.initMinioBucketName()
-	pt.initEtcdAddress()
+	pt.initEtcdEndpoints()
 	pt.initMetaRootPath()
 }
 
@@ -160,7 +160,7 @@ func (pt *ParamTable) initMinIOUseSSL() {
 	}
 }
 
-func (pt *ParamTable) initEtcdAddress() {
+func (pt *ParamTable) initEtcdEndpoints() {
 	endpoints, err := pt.Load("_EtcdEndpoints")
 	if err != nil {
 		panic(err)

@@ -62,7 +62,7 @@ func (p *ParamTable) Init() {
 		}
 
 		p.initPulsarAddress()
-		p.initEtcdAddress()
+		p.initEtcdEndpoints()
 		p.initMetaRootPath()
 		p.initKvRootPath()
 
@@ -92,7 +92,7 @@ func (p *ParamTable) initPulsarAddress() {
 	p.PulsarAddress = addr
 }
 
-func (p *ParamTable) initEtcdAddress() {
+func (p *ParamTable) initEtcdEndpoints() {
 	endpoints, err := p.Load("_EtcdEndpoints")
 	if err != nil {
 		panic(err)

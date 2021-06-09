@@ -77,7 +77,7 @@ func (p *ParamTable) Init() {
 		// set members
 		p.initNodeID()
 
-		p.initEtcdAddress()
+		p.initEtcdEndpoints()
 		p.initMetaRootPath()
 		p.initKvRootPath()
 		p.initSegmentBinlogSubPath()
@@ -110,7 +110,7 @@ func (p *ParamTable) initNodeID() {
 	p.NodeID = p.ParseInt64("dataservice.nodeID")
 }
 
-func (p *ParamTable) initEtcdAddress() {
+func (p *ParamTable) initEtcdEndpoints() {
 	endpoints, err := p.Load("_EtcdEndpoints")
 	if err != nil {
 		panic(err)
