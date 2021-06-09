@@ -12,11 +12,10 @@
 package querynode
 
 import (
-	"github.com/milvus-io/milvus/internal/util/flowgraph"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
 type gcNode struct {

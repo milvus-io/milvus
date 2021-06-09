@@ -13,11 +13,7 @@ package querynode
 
 import (
 	"errors"
-	"fmt"
-	"strconv"
 	"sync"
-
-	"github.com/milvus-io/milvus/internal/log"
 )
 
 // TSafeReplicaInterface is the interface wrapper of tSafeReplica
@@ -39,6 +35,7 @@ func (t *tSafeReplica) getTSafe(vChannel VChannel) Timestamp {
 	defer t.mu.Unlock()
 	safer, err := t.getTSaferPrivate(vChannel)
 	if err != nil {
+		//log.Error("get tSafe failed", zap.Error(err))
 		return 0
 	}
 	return safer.get()
@@ -49,6 +46,7 @@ func (t *tSafeReplica) setTSafe(vChannel VChannel, timestamp Timestamp) {
 	defer t.mu.Unlock()
 	safer, err := t.getTSaferPrivate(vChannel)
 	if err != nil {
+		//log.Error("set tSafe failed", zap.Error(err))
 		return
 	}
 	safer.set(timestamp)
@@ -57,7 +55,7 @@ func (t *tSafeReplica) setTSafe(vChannel VChannel, timestamp Timestamp) {
 func (t *tSafeReplica) getTSaferPrivate(vChannel VChannel) (tSafer, error) {
 	if _, ok := t.tSafes[vChannel]; !ok {
 		err := errors.New("cannot found tSafer, vChannel = " + vChannel)
-		log.Error(err.Error())
+		//log.Error(err.Error())
 		return nil, err
 	}
 	return t.tSafes[vChannel], nil
@@ -67,6 +65,7 @@ func (t *tSafeReplica) addTSafe(vChannel VChannel) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.tSafes[vChannel] = newTSafe()
+	//log.Debug("add tSafe done", zap.Any("channel", vChannel))
 }
 
 func (t *tSafeReplica) removeTSafe(vChannel VChannel) {
@@ -85,23 +84,10 @@ func (t *tSafeReplica) registerTSafeWatcher(vChannel VChannel, watcher *tSafeWat
 	defer t.mu.Unlock()
 	safer, err := t.getTSaferPrivate(vChannel)
 	if err != nil {
+		//log.Error("register tSafe watcher failed", zap.Error(err))
 		return
 	}
 	safer.registerTSafeWatcher(watcher)
-}
-
-// TODO: remove and use real vChannel
-func collectionIDToChannel(collectionID UniqueID) VChannel {
-	return fmt.Sprintln(collectionID)
-}
-
-// TODO: remove and use real vChannel
-func channelTOCollectionID(channel VChannel) UniqueID {
-	collectionID, err := strconv.ParseInt(channel, 10, 64)
-	if err != nil {
-		return 0
-	}
-	return collectionID
 }
 
 func newTSafeReplica() TSafeReplicaInterface {

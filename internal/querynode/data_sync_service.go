@@ -13,127 +13,193 @@ package querynode
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"sync"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/flowgraph"
+)
+
+type flowGraphType = int32
+
+const (
+	flowGraphTypeCollection = 0
+	flowGraphTypePartition  = 1
 )
 
 type dataSyncService struct {
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx context.Context
 
-	collectionID UniqueID
-	fg           *flowgraph.TimeTickedFlowGraph
+	mu                   sync.Mutex                         // guards FlowGraphs
+	collectionFlowGraphs map[UniqueID][]*queryNodeFlowGraph // map[collectionID]flowGraphs
+	partitionFlowGraphs  map[UniqueID][]*queryNodeFlowGraph // map[partitionID]flowGraphs
 
-	dmStream  msgstream.MsgStream
-	msFactory msgstream.Factory
+	streamingReplica ReplicaInterface
+	tSafeReplica     TSafeReplicaInterface
+	msFactory        msgstream.Factory
+}
 
-	replica      ReplicaInterface
-	tSafeReplica TSafeReplicaInterface
+// collection flow graph
+func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, vChannels []string) error {
+	dsService.mu.Lock()
+	defer dsService.mu.Unlock()
+
+	if _, ok := dsService.collectionFlowGraphs[collectionID]; ok {
+		return errors.New("collection flow graph has been existed, collectionID = " + fmt.Sprintln(collectionID))
+	}
+	dsService.collectionFlowGraphs[collectionID] = make([]*queryNodeFlowGraph, 0)
+	for _, vChannel := range vChannels {
+		// collection flow graph doesn't need partition id
+		partitionID := UniqueID(0)
+		newFlowGraph := newQueryNodeFlowGraph(dsService.ctx,
+			flowGraphTypeCollection,
+			collectionID,
+			partitionID,
+			dsService.streamingReplica,
+			dsService.tSafeReplica,
+			vChannel,
+			dsService.msFactory)
+		dsService.collectionFlowGraphs[collectionID] = append(dsService.collectionFlowGraphs[collectionID], newFlowGraph)
+		log.Debug("add collection flow graph",
+			zap.Any("collectionID", collectionID),
+			zap.Any("channel", vChannel))
+	}
+	return nil
+}
+
+func (dsService *dataSyncService) getCollectionFlowGraphs(collectionID UniqueID) ([]*queryNodeFlowGraph, error) {
+	dsService.mu.Lock()
+	defer dsService.mu.Unlock()
+
+	if _, ok := dsService.collectionFlowGraphs[collectionID]; !ok {
+		return nil, errors.New("collection flow graph doesn't existed, collectionID = " + fmt.Sprintln(collectionID))
+	}
+	return dsService.collectionFlowGraphs[collectionID], nil
+}
+
+func (dsService *dataSyncService) startCollectionFlowGraph(collectionID UniqueID) error {
+	dsService.mu.Lock()
+	defer dsService.mu.Unlock()
+
+	if _, ok := dsService.collectionFlowGraphs[collectionID]; !ok {
+		return errors.New("collection flow graph doesn't existed, collectionID = " + fmt.Sprintln(collectionID))
+	}
+	for _, fg := range dsService.collectionFlowGraphs[collectionID] {
+		// start flow graph
+		log.Debug("start flow graph", zap.Any("channel", fg.channel))
+		go fg.flowGraph.Start()
+	}
+	return nil
+}
+
+func (dsService *dataSyncService) removeCollectionFlowGraph(collectionID UniqueID) {
+	dsService.mu.Lock()
+	defer dsService.mu.Unlock()
+
+	if _, ok := dsService.collectionFlowGraphs[collectionID]; ok {
+		for _, nodeFG := range dsService.collectionFlowGraphs[collectionID] {
+			// close flow graph
+			nodeFG.close()
+		}
+		dsService.collectionFlowGraphs[collectionID] = nil
+	}
+	delete(dsService.collectionFlowGraphs, collectionID)
+}
+
+// partition flow graph
+func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID, partitionID UniqueID, vChannels []string) error {
+	dsService.mu.Lock()
+	defer dsService.mu.Unlock()
+
+	if _, ok := dsService.partitionFlowGraphs[partitionID]; ok {
+		return errors.New("partition flow graph has been existed, partitionID = " + fmt.Sprintln(partitionID))
+	}
+	dsService.partitionFlowGraphs[partitionID] = make([]*queryNodeFlowGraph, 0)
+	for _, vChannel := range vChannels {
+		newFlowGraph := newQueryNodeFlowGraph(dsService.ctx,
+			flowGraphTypePartition,
+			collectionID,
+			partitionID,
+			dsService.streamingReplica,
+			dsService.tSafeReplica,
+			vChannel,
+			dsService.msFactory)
+		dsService.partitionFlowGraphs[partitionID] = append(dsService.partitionFlowGraphs[partitionID], newFlowGraph)
+	}
+	return nil
+}
+
+func (dsService *dataSyncService) getPartitionFlowGraphs(partitionID UniqueID) ([]*queryNodeFlowGraph, error) {
+	dsService.mu.Lock()
+	defer dsService.mu.Unlock()
+
+	if _, ok := dsService.partitionFlowGraphs[partitionID]; !ok {
+		return nil, errors.New("partition flow graph doesn't existed, partitionID = " + fmt.Sprintln(partitionID))
+	}
+	return dsService.partitionFlowGraphs[partitionID], nil
+}
+
+func (dsService *dataSyncService) startPartitionFlowGraph(partitionID UniqueID) error {
+	dsService.mu.Lock()
+	defer dsService.mu.Unlock()
+
+	if _, ok := dsService.partitionFlowGraphs[partitionID]; !ok {
+		return errors.New("partition flow graph doesn't existed, partitionID = " + fmt.Sprintln(partitionID))
+	}
+	for _, fg := range dsService.partitionFlowGraphs[partitionID] {
+		// start flow graph
+		go fg.flowGraph.Start()
+	}
+	return nil
+}
+
+func (dsService *dataSyncService) removePartitionFlowGraph(partitionID UniqueID) {
+	dsService.mu.Lock()
+	defer dsService.mu.Unlock()
+
+	if _, ok := dsService.partitionFlowGraphs[partitionID]; ok {
+		for _, nodeFG := range dsService.partitionFlowGraphs[partitionID] {
+			// close flow graph
+			nodeFG.close()
+		}
+		dsService.partitionFlowGraphs[partitionID] = nil
+	}
+	delete(dsService.partitionFlowGraphs, partitionID)
 }
 
 func newDataSyncService(ctx context.Context,
-	replica ReplicaInterface,
+	streamingReplica ReplicaInterface,
 	tSafeReplica TSafeReplicaInterface,
-	factory msgstream.Factory,
-	collectionID UniqueID) *dataSyncService {
+	factory msgstream.Factory) *dataSyncService {
 
-	ctx1, cancel := context.WithCancel(ctx)
-
-	service := &dataSyncService{
-		ctx:          ctx1,
-		cancel:       cancel,
-		collectionID: collectionID,
-		fg:           nil,
-		replica:      replica,
-		tSafeReplica: tSafeReplica,
-		msFactory:    factory,
+	return &dataSyncService{
+		ctx:                  ctx,
+		collectionFlowGraphs: make(map[UniqueID][]*queryNodeFlowGraph),
+		partitionFlowGraphs:  make(map[UniqueID][]*queryNodeFlowGraph),
+		streamingReplica:     streamingReplica,
+		tSafeReplica:         tSafeReplica,
+		msFactory:            factory,
 	}
-
-	service.initNodes()
-	return service
-}
-
-func (dsService *dataSyncService) start() {
-	dsService.fg.Start()
 }
 
 func (dsService *dataSyncService) close() {
-	dsService.cancel()
-	if dsService.fg != nil {
-		dsService.fg.Close()
+	for _, nodeFGs := range dsService.collectionFlowGraphs {
+		for _, nodeFG := range nodeFGs {
+			if nodeFG != nil {
+				nodeFG.flowGraph.Close()
+			}
+		}
 	}
-	log.Debug("dataSyncService closed", zap.Int64("collectionID", dsService.collectionID))
-}
-
-func (dsService *dataSyncService) initNodes() {
-	// TODO: add delete pipeline support
-
-	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
-
-	var dmStreamNode node = dsService.newDmInputNode(dsService.ctx)
-
-	var filterDmNode node = newFilteredDmNode(dsService.replica, dsService.collectionID)
-
-	var insertNode node = newInsertNode(dsService.replica, dsService.collectionID)
-	var serviceTimeNode node = newServiceTimeNode(dsService.ctx,
-		dsService.replica,
-		dsService.tSafeReplica,
-		dsService.msFactory,
-		dsService.collectionID)
-
-	dsService.fg.AddNode(dmStreamNode)
-
-	dsService.fg.AddNode(filterDmNode)
-
-	dsService.fg.AddNode(insertNode)
-	dsService.fg.AddNode(serviceTimeNode)
-
-	// dmStreamNode
-	var err = dsService.fg.SetEdges(dmStreamNode.Name(),
-		[]string{},
-		[]string{filterDmNode.Name()},
-	)
-	if err != nil {
-		log.Error("set edges failed in node:", zap.String("node name", dmStreamNode.Name()))
+	for _, nodeFGs := range dsService.partitionFlowGraphs {
+		for _, nodeFG := range nodeFGs {
+			if nodeFG != nil {
+				nodeFG.flowGraph.Close()
+			}
+		}
 	}
-
-	// filterDmNode
-	err = dsService.fg.SetEdges(filterDmNode.Name(),
-		[]string{dmStreamNode.Name()},
-		[]string{insertNode.Name()},
-	)
-	if err != nil {
-		log.Error("set edges failed in node:", zap.String("node name", filterDmNode.Name()))
-	}
-
-	// insertNode
-	err = dsService.fg.SetEdges(insertNode.Name(),
-		[]string{filterDmNode.Name()},
-		[]string{serviceTimeNode.Name()},
-	)
-	if err != nil {
-		log.Error("set edges failed in node:", zap.String("node name", insertNode.Name()))
-	}
-
-	// serviceTimeNode
-	err = dsService.fg.SetEdges(serviceTimeNode.Name(),
-		[]string{insertNode.Name()},
-		[]string{},
-	)
-	if err != nil {
-		log.Error("set edges failed in node:", zap.String("node name", serviceTimeNode.Name()))
-	}
-}
-
-func (dsService *dataSyncService) seekSegment(position *internalpb.MsgPosition) error {
-	err := dsService.dmStream.Seek([]*internalpb.MsgPosition{position})
-	if err != nil {
-		return err
-	}
-	return nil
+	dsService.collectionFlowGraphs = make(map[UniqueID][]*queryNodeFlowGraph)
+	dsService.partitionFlowGraphs = make(map[UniqueID][]*queryNodeFlowGraph)
 }

@@ -15,6 +15,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"reflect"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
@@ -43,8 +45,8 @@ type retrieveCollection struct {
 	unsolvedMsgMu sync.Mutex
 	unsolvedMsg   []*msgstream.RetrieveMsg
 
-	tSafeMutex   sync.Mutex
-	tSafeWatcher *tSafeWatcher
+	tSafeWatchers     map[VChannel]*tSafeWatcher
+	watcherSelectCase []reflect.SelectCase
 
 	serviceableTimeMutex sync.Mutex
 	serviceableTime      Timestamp
@@ -72,13 +74,15 @@ func newRetrieveCollection(releaseCtx context.Context,
 		streamingReplica:  streamingReplica,
 		tSafeReplica:      tSafeReplica,
 
+		tSafeWatchers: make(map[VChannel]*tSafeWatcher),
+
 		msgBuffer:   msgBuffer,
 		unsolvedMsg: unsolvedMsg,
 
 		retrieveResultMsgStream: retrieveResultStream,
 	}
 
-	rc.register(collectionID)
+	rc.register()
 	return rc
 }
 
@@ -101,13 +105,20 @@ func (rc *retrieveCollection) setServiceableTime(t Timestamp) {
 }
 
 func (rc *retrieveCollection) waitNewTSafe() Timestamp {
-	// block until dataSyncService updating tSafe
-	// TODO: remove and use vChannel
-	vChannel := collectionIDToChannel(rc.collectionID)
-	// block until dataSyncService updating tSafe
-	rc.tSafeWatcher.hasUpdate()
-	ts := rc.tSafeReplica.getTSafe(vChannel)
-	return ts
+	// block until any vChannel updating tSafe
+	_, _, recvOK := reflect.Select(rc.watcherSelectCase)
+	if !recvOK {
+		log.Error("tSafe has been closed")
+		return invalidTimestamp
+	}
+	t := Timestamp(math.MaxInt64)
+	for channel := range rc.tSafeWatchers {
+		ts := rc.tSafeReplica.getTSafe(channel)
+		if ts <= t {
+			t = ts
+		}
+	}
+	return t
 }
 
 func (rc *retrieveCollection) start() {
@@ -115,13 +126,24 @@ func (rc *retrieveCollection) start() {
 	go rc.doUnsolvedMsgRetrieve()
 }
 
-func (rc *retrieveCollection) register(collectionID UniqueID) {
-	vChannel := collectionIDToChannel(collectionID)
-	rc.tSafeReplica.addTSafe(vChannel)
-	rc.tSafeMutex.Lock()
-	rc.tSafeWatcher = newTSafeWatcher()
-	rc.tSafeMutex.Unlock()
-	rc.tSafeReplica.registerTSafeWatcher(vChannel, rc.tSafeWatcher)
+func (rc *retrieveCollection) register() {
+	// register tSafe watcher and init watcher select case
+	collection, err := rc.historicalReplica.getCollectionByID(rc.collectionID)
+	if err != nil {
+		log.Error(err.Error())
+		return
+	}
+
+	rc.watcherSelectCase = make([]reflect.SelectCase, 0)
+	for _, channel := range collection.getWatchedDmChannels() {
+		rc.tSafeReplica.addTSafe(channel)
+		rc.tSafeWatchers[channel] = newTSafeWatcher()
+		rc.tSafeReplica.registerTSafeWatcher(channel, rc.tSafeWatchers[channel])
+		rc.watcherSelectCase = append(rc.watcherSelectCase, reflect.SelectCase{
+			Dir:  reflect.SelectRecv,
+			Chan: reflect.ValueOf(rc.tSafeWatchers[channel].watcherChan()),
+		})
+	}
 }
 
 func (rc *retrieveCollection) addToUnsolvedMsg(msg *msgstream.RetrieveMsg) {
