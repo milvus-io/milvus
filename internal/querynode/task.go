@@ -15,11 +15,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go.uber.org/zap"
 	"math/rand"
 	"strconv"
 	"time"
-
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -118,7 +117,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	vChannelsTmp := make([]string, 0)
 	for _, info := range w.req.Infos {
 		vChannels = append(vChannels, info.ChannelName)
-		vChannelsTmp = append(vChannelsTmp, info.ChannelName + strconv.FormatInt(collectionID, 10))
+		vChannelsTmp = append(vChannelsTmp, info.ChannelName+strconv.FormatInt(collectionID, 10))
 	}
 	log.Debug("starting WatchDmChannels ...", zap.String("ChannelIDs", fmt.Sprintln(vChannels)))
 
@@ -345,43 +344,50 @@ func (r *releaseCollectionTask) PreExecute(ctx context.Context) error {
 
 func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 	log.Debug("receive release collection task", zap.Any("collectionID", r.req.CollectionID))
-	r.node.streaming.dataSyncService.removeCollectionFlowGraph(r.req.CollectionID)
-	collection, err := r.node.historical.replica.getCollectionByID(r.req.CollectionID)
-	if err != nil {
-		log.Error(err.Error())
-	} else {
-		// remove all tSafes of the target collection
-		for _, channel := range collection.getWatchedDmChannels() {
-			r.node.streaming.tSafeReplica.removeTSafe(channel)
-		}
-	}
 
-	r.node.streaming.replica.removeExcludedSegments(r.req.CollectionID)
+	const gracefulReleaseTime = 10
+	go func() {
+		time.Sleep(gracefulReleaseTime * time.Second)
+		errMsg := "release collection failed, collectionID = " + strconv.FormatInt(r.req.CollectionID, 10) + ", err = "
 
-	if r.node.searchService.hasSearchCollection(r.req.CollectionID) {
-		r.node.searchService.stopSearchCollection(r.req.CollectionID)
-	}
-
-	hasCollectionInHistorical := r.node.historical.replica.hasCollection(r.req.CollectionID)
-	if hasCollectionInHistorical {
-		err := r.node.historical.replica.removeCollection(r.req.CollectionID)
+		r.node.streaming.dataSyncService.removeCollectionFlowGraph(r.req.CollectionID)
+		collection, err := r.node.historical.replica.getCollectionByID(r.req.CollectionID)
 		if err != nil {
-			return err
+			log.Error(errMsg + err.Error())
+		} else {
+			// remove all tSafes of the target collection
+			for _, channel := range collection.getWatchedDmChannels() {
+				r.node.streaming.tSafeReplica.removeTSafe(channel)
+			}
 		}
-	}
 
-	hasCollectionInStreaming := r.node.streaming.replica.hasCollection(r.req.CollectionID)
-	if hasCollectionInStreaming {
-		err := r.node.streaming.replica.removeCollection(r.req.CollectionID)
-		if err != nil {
-			return err
+		r.node.streaming.replica.removeExcludedSegments(r.req.CollectionID)
+
+		if r.node.searchService.hasSearchCollection(r.req.CollectionID) {
+			r.node.searchService.stopSearchCollection(r.req.CollectionID)
 		}
-	}
 
-	// TODO: for debugging, remove this
-	time.Sleep(2 * time.Second)
+		hasCollectionInHistorical := r.node.historical.replica.hasCollection(r.req.CollectionID)
+		if hasCollectionInHistorical {
+			err := r.node.historical.replica.removeCollection(r.req.CollectionID)
+			if err != nil {
+				log.Error(errMsg + err.Error())
+				return
+			}
+		}
 
-	log.Debug("ReleaseCollection done", zap.Int64("collectionID", r.req.CollectionID))
+		hasCollectionInStreaming := r.node.streaming.replica.hasCollection(r.req.CollectionID)
+		if hasCollectionInStreaming {
+			err := r.node.streaming.replica.removeCollection(r.req.CollectionID)
+			if err != nil {
+				log.Error(errMsg + err.Error())
+				return
+			}
+		}
+
+		log.Debug("ReleaseCollection done", zap.Int64("collectionID", r.req.CollectionID))
+	}()
+
 	return nil
 }
 
