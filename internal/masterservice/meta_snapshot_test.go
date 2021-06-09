@@ -29,11 +29,11 @@ func TestMetaSnapshot(t *testing.T) {
 	randVal := rand.Int()
 
 	Params.Init()
-	etcdAddr := Params.EtcdAddress
+	etcdEndpoints := Params.EtcdEndpoints
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: etcdAddr})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
@@ -168,12 +168,12 @@ func TestGetRevOnEtcd(t *testing.T) {
 	randVal := rand.Int()
 
 	Params.Init()
-	etcdAddr := Params.EtcdAddress
+	etcdEndpoints := Params.EtcdEndpoints
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 	key := path.Join(rootPath, tsKey)
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: etcdAddr})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
@@ -214,11 +214,11 @@ func TestLoad(t *testing.T) {
 	randVal := rand.Int()
 
 	Params.Init()
-	etcdAddr := Params.EtcdAddress
+	etcdEndpoints := Params.EtcdEndpoints
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: etcdAddr})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
@@ -262,11 +262,11 @@ func TestMultiSave(t *testing.T) {
 	randVal := rand.Int()
 
 	Params.Init()
-	etcdAddr := Params.EtcdAddress
+	etcdEndpoints := Params.EtcdEndpoints
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: etcdAddr})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
@@ -326,11 +326,11 @@ func TestMultiSaveAndRemoveWithPrefix(t *testing.T) {
 	randVal := rand.Int()
 
 	Params.Init()
-	etcdAddr := Params.EtcdAddress
+	etcdEndpoints := Params.EtcdEndpoints
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: etcdAddr})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
 	assert.Nil(t, err)
 
 	var vtso typeutil.Timestamp

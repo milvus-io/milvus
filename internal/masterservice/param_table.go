@@ -31,7 +31,7 @@ type ParamTable struct {
 	Port    int
 
 	PulsarAddress             string
-	EtcdAddress               []string
+	EtcdEndpoints             []string
 	MetaRootPath              string
 	KvRootPath                string
 	MsgChannelSubName         string
@@ -93,11 +93,11 @@ func (p *ParamTable) initPulsarAddress() {
 }
 
 func (p *ParamTable) initEtcdAddress() {
-	addr, err := p.Load("_EtcdAddress")
+	endpoints, err := p.Load("_EtcdEndpoints")
 	if err != nil {
 		panic(err)
 	}
-	p.EtcdAddress = strings.Split(addr, ",")
+	p.EtcdEndpoints = strings.Split(endpoints, ",")
 }
 
 func (p *ParamTable) initMetaRootPath() {

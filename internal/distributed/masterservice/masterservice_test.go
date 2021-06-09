@@ -148,7 +148,7 @@ func TestGrpcService(t *testing.T) {
 	assert.Nil(t, err)
 	svr.masterService.UpdateStateCode(internalpb.StateCode_Initializing)
 
-	etcdCli, err := initEtcd(cms.Params.EtcdAddress)
+	etcdCli, err := initEtcd(cms.Params.EtcdEndpoints)
 	assert.Nil(t, err)
 	sessKey := path.Join(cms.Params.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
@@ -255,7 +255,7 @@ func TestGrpcService(t *testing.T) {
 
 	svr.masterService.UpdateStateCode(internalpb.StateCode_Healthy)
 
-	cli, err := grpcmasterserviceclient.NewClient(cms.Params.MetaRootPath, cms.Params.EtcdAddress, 3*time.Second)
+	cli, err := grpcmasterserviceclient.NewClient(cms.Params.MetaRootPath, cms.Params.EtcdEndpoints, 3*time.Second)
 	assert.Nil(t, err)
 
 	err = cli.Init()
@@ -941,7 +941,7 @@ func TestRun(t *testing.T) {
 	cms.Params.Init()
 	cms.Params.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
 
-	etcdCli, err := initEtcd(cms.Params.EtcdAddress)
+	etcdCli, err := initEtcd(cms.Params.EtcdEndpoints)
 	assert.Nil(t, err)
 	sessKey := path.Join(cms.Params.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())

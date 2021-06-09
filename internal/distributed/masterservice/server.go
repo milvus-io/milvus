@@ -169,7 +169,7 @@ func (s *Server) init() error {
 
 	if s.newDataServiceClient != nil {
 		log.Debug("data service", zap.String("address", Params.DataServiceAddress))
-		dataService := s.newDataServiceClient(cms.Params.MetaRootPath, cms.Params.EtcdAddress, 3*time.Second)
+		dataService := s.newDataServiceClient(cms.Params.MetaRootPath, cms.Params.EtcdEndpoints, 3*time.Second)
 		if err := s.masterService.SetDataService(ctx, dataService); err != nil {
 			panic(err)
 		}
@@ -177,7 +177,7 @@ func (s *Server) init() error {
 	}
 	if s.newIndexServiceClient != nil {
 		log.Debug("index service", zap.String("address", Params.IndexServiceAddress))
-		indexService := s.newIndexServiceClient(cms.Params.MetaRootPath, cms.Params.EtcdAddress, 3*time.Second)
+		indexService := s.newIndexServiceClient(cms.Params.MetaRootPath, cms.Params.EtcdEndpoints, 3*time.Second)
 		if err := s.masterService.SetIndexService(indexService); err != nil {
 			panic(err)
 		}
@@ -185,7 +185,7 @@ func (s *Server) init() error {
 	}
 	if s.newQueryServiceClient != nil {
 		log.Debug("query service", zap.String("address", Params.QueryServiceAddress))
-		queryService := s.newQueryServiceClient(cms.Params.MetaRootPath, cms.Params.EtcdAddress, 3*time.Second)
+		queryService := s.newQueryServiceClient(cms.Params.MetaRootPath, cms.Params.EtcdEndpoints, 3*time.Second)
 		if err := s.masterService.SetQueryService(queryService); err != nil {
 			panic(err)
 		}

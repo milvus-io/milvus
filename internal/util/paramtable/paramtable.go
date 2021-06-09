@@ -94,26 +94,14 @@ func (gp *BaseTable) tryloadFromEnv() {
 		panic(err)
 	}
 
-	etcdAddress := os.Getenv("ETCD_ADDRESS")
-	if etcdAddress == "" {
-		etcdHosts, err := gp.Load("etcd.address")
+	etcdEndpoints := os.Getenv("ETCD_ENDPOINTS")
+	if etcdEndpoints == "" {
+		etcdEndpoints, err = gp.Load("etcd.endpoints")
 		if err != nil {
 			panic(err)
-		}
-		port, err := gp.Load("etcd.port")
-		if err != nil {
-			panic(err)
-		}
-		for _, host := range strings.Split(etcdHosts, ",") {
-			addr := host + ":" + port
-			if etcdAddress == "" {
-				etcdAddress = addr
-			} else {
-				etcdAddress = etcdAddress + "," + addr
-			}
 		}
 	}
-	err = gp.Save("_EtcdAddress", etcdAddress)
+	err = gp.Save("_EtcdEndpoints", etcdEndpoints)
 	if err != nil {
 		panic(err)
 	}

@@ -163,7 +163,7 @@ func TestMetaTable(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
 	Params.Init()
-	etcdAddr := Params.EtcdAddress
+	etcdEndpoints := Params.EtcdEndpoints
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 
 	var vtso typeutil.Timestamp
@@ -172,7 +172,7 @@ func TestMetaTable(t *testing.T) {
 		return vtso
 	}
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: etcdAddr})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	skv, err := newMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7, ftso)
@@ -1083,7 +1083,7 @@ func TestMetaWithTimestamp(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
 	Params.Init()
-	etcdAddr := Params.EtcdAddress
+	etcdEndpoints := Params.EtcdEndpoints
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 
 	var tsoStart typeutil.Timestamp = 100
@@ -1093,7 +1093,7 @@ func TestMetaWithTimestamp(t *testing.T) {
 		return vtso
 	}
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: etcdAddr})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 

@@ -901,7 +901,7 @@ func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, 
 
 // Register register master service at etcd
 func (c *Core) Register() error {
-	c.session = sessionutil.NewSession(c.ctx, Params.MetaRootPath, Params.EtcdAddress)
+	c.session = sessionutil.NewSession(c.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
 	if c.session == nil {
 		return fmt.Errorf("session is nil, maybe the etcd client connection fails")
 	}
@@ -913,7 +913,7 @@ func (c *Core) Init() error {
 	var initError error = nil
 	c.initOnce.Do(func() {
 		connectEtcdFn := func() error {
-			if c.etcdCli, initError = clientv3.New(clientv3.Config{Endpoints: Params.EtcdAddress, DialTimeout: 5 * time.Second}); initError != nil {
+			if c.etcdCli, initError = clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints, DialTimeout: 5 * time.Second}); initError != nil {
 				return initError
 			}
 			tsAlloc := func() typeutil.Timestamp {
@@ -943,7 +943,7 @@ func (c *Core) Init() error {
 			return
 		}
 
-		idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(Params.EtcdAddress, Params.KvRootPath, "gid"))
+		idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "gid"))
 		if initError = idAllocator.Initialize(); initError != nil {
 			return
 		}
@@ -954,7 +954,7 @@ func (c *Core) Init() error {
 			return idAllocator.UpdateID()
 		}
 
-		tsoAllocator := tso.NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase(Params.EtcdAddress, Params.KvRootPath, "tso"))
+		tsoAllocator := tso.NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "tso"))
 		if initError = tsoAllocator.Initialize(); initError != nil {
 			return
 		}
@@ -983,7 +983,7 @@ func (c *Core) Init() error {
 
 		c.proxyNodeManager, initError = newProxyNodeManager(
 			c.ctx,
-			Params.EtcdAddress,
+			Params.EtcdEndpoints,
 			c.chanTimeTick.GetProxyNodes,
 			c.proxyClientManager.GetProxyClients,
 		)
