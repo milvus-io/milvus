@@ -157,6 +157,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 
 	ds.dmStream.AsConsumer(toDirSubChannels, consumeSubName)
 	for _, pos := range toSeekInfo {
+		ds.dmStream.AsConsumer([]string{pos.ChannelName}, consumeSubName)
 		err := ds.dmStream.Seek([]*internalpb.MsgPosition{pos})
 		if err != nil {
 			errMsg := "msgStream seek error :" + err.Error()
