@@ -1,19 +1,20 @@
 import pytest
+import os
 
 from pymilvus_orm.default_config import DefaultConfig
-from base.client_request import ApiReq
+from base.client_base import TestcaseBase
 from utils.util_log import test_log as log
 from common.common_type import *
 
 
-class TestConnectionParams(ApiReq):
+class TestConnectionParams(TestcaseBase):
     """
     Test case of connections interface
     The author ： Ting.Wang
     """
 
     @pytest.mark.skip("No check for **kwargs")
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L3)
     def test_connection_kwargs_param_check(self):
         """
         target: test **kwargs of connection
@@ -34,7 +35,7 @@ class TestConnectionParams(ApiReq):
         assert res[0].args[0] == "Fail connecting to server on localhost:19530. Timeout"
 
     @pytest.mark.skip("No check for alias")
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("alias", get_invalid_strs)
     def test_connection_create_alias_param_check(self, alias):
         """
@@ -48,7 +49,7 @@ class TestConnectionParams(ApiReq):
 
     @pytest.mark.skip("No check for alias")
     @pytest.mark.parametrize("alias", get_invalid_strs)
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L3)
     def test_connection_get_alias_param_check(self, alias):
         """
         target: test get connection with wrong params of alias
@@ -61,7 +62,7 @@ class TestConnectionParams(ApiReq):
 
     @pytest.mark.skip("No check for alias")
     @pytest.mark.parametrize("alias", get_invalid_strs)
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L3)
     def test_connection_get_addr_alias_param_check(self, alias):
         """
         target: test get connection addr with wrong params of alias
@@ -74,7 +75,7 @@ class TestConnectionParams(ApiReq):
 
     @pytest.mark.skip("No check for alias")
     @pytest.mark.parametrize("alias", get_invalid_strs)
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L3)
     def test_connection_remove_alias_param_check(self, alias):
         """
         target: test remove connection with wrong params of alias
@@ -87,13 +88,13 @@ class TestConnectionParams(ApiReq):
         log.info(res[0])
 
 
-class TestConnectionOperation(ApiReq):
+class TestConnectionOperation(TestcaseBase):
     """
     Test case of connections interface
     The author ： Ting.Wang
     """
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L3)
     def test_connection_configure_repeat(self, host, port):
         """
         target: test connection configure four times
@@ -113,7 +114,7 @@ class TestConnectionOperation(ApiReq):
         self.connection_wrap.add_connection()
         assert self.connection_wrap.list_connections()[0] == [('default', None), ('dev', None), ('default1', None)]
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L3)
     def test_connection_remove_connection_not_exist(self):
         """
         target: test remove connection that is not exist
@@ -130,7 +131,7 @@ class TestConnectionOperation(ApiReq):
         res = self.connection_wrap.remove_connection(alias=Not_Exist, check_res="")
         assert res[0].args[0] == "There is no connection with alias '%s'." % Not_Exist
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L3)
     def test_connection_remove_connection_repeat(self):
         """
         target: test remove connection twice
@@ -144,7 +145,7 @@ class TestConnectionOperation(ApiReq):
         res = self.connection_wrap.remove_connection(alias='default', check_res='')
         assert res[0].args[0] == "There is no connection with alias 'default'."
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L3)
     def test_connection_normal_remove_connection_repeat(self, host, port):
         """
         target: test remove connection twice
@@ -162,7 +163,7 @@ class TestConnectionOperation(ApiReq):
         self.connection_wrap.remove_connection(alias='default')
         self.connection_wrap.remove_connection(alias='dev')
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L3)
     def test_connection_remove_connection_100_repeat(self):
         """
         target: test delete the same connection 100 times
@@ -176,7 +177,7 @@ class TestConnectionOperation(ApiReq):
             res = self.connection_wrap.remove_connection(alias='default', check_res='')
             assert res[0].args[0] == "There is no connection with alias 'default'."
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L3)
     def test_connection_configure_remove_connection(self, host, port):
         """
         target: test remove configure alias
@@ -190,7 +191,7 @@ class TestConnectionOperation(ApiReq):
         assert res[0].args[0] == "There is no connection with alias '%s'." % alias_name
 
     @pytest.mark.skip("error res")
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L3)
     def test_connection_create_connection_remove_configure(self, host, port):
         """
         target: test create connection before remove configure
@@ -203,7 +204,7 @@ class TestConnectionOperation(ApiReq):
         self.connection_wrap.get_connection(alias=alias_name)
 
     @pytest.mark.skip("error res")
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L3)
     def test_connection_create_connection_reset_configure(self, host, port):
         """
         target: test params of create connection are different with configure
@@ -216,7 +217,7 @@ class TestConnectionOperation(ApiReq):
         self.connection_wrap.get_connection(alias=alias_name)
 
     @pytest.mark.skip("res needs to be confirmed")
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L3)
     def test_connection_create_connection_diff_configure(self, host, port):
         """
         target: test params of create connection are different with configure
@@ -225,12 +226,12 @@ class TestConnectionOperation(ApiReq):
         """
         # error
         self.connection_wrap.add_connection(default={"host": 'host', "port": port})
-        res = self.connection_wrap.connect(alias="default", host=host, port=port, check_res='')
+        res = self.connection_wrap.connect(alias="default", host=host, port=port, check_task='')
         log.info(res[0])
-        res = self.connection_wrap.connect(alias="default", host=host, port=port, check_res='')
+        res = self.connection_wrap.connect(alias="default", host=host, port=port, check_task='')
         log.info(res[0])
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L3)
     def test_connection_create_connection_repeat(self, host, port):
         """
         target: test create connection twice
@@ -243,18 +244,18 @@ class TestConnectionOperation(ApiReq):
         self.connection_wrap.connect(alias='default', host=host, port=port)
         self.connection_wrap.get_connection(alias='default')
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L3)
     def test_connection_create_connection_not_exist(self, port):
         """
         target: test create connection is not exist
         method: create connection with not exist link
         expected: assert res is wrong
         """
-        self.connection_wrap.get_connection(alias='default', check_res=CheckParams.false)
-        res = self.connection_wrap.connect(alias="default", host='host', port=port, check_res='')
+        self.connection_wrap.get_connection(alias='default', check_res=CheckTasks.false)
+        res = self.connection_wrap.connect(alias="default", host='host', port=port, check_task='')
         assert res[0].args[0] == "Fail connecting to server on host:19530. Timeout"
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L3)
     def test_connection_create_remove(self, host, port):
         """
         target: test create and remove connection twice
@@ -265,11 +266,11 @@ class TestConnectionOperation(ApiReq):
         self.connection_wrap.connect(alias=alias_name, host=host, port=port)
         self.connection_wrap.get_connection(alias=alias_name)
         self.connection_wrap.remove_connection(alias=alias_name)
-        self.connection_wrap.get_connection(alias=alias_name, check_res=CheckParams.false)
+        self.connection_wrap.get_connection(alias=alias_name, check_res=CheckTasks.false)
         self.connection_wrap.connect(alias=alias_name, host=host, port=port)
         self.connection_wrap.get_connection(alias=alias_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L3)
     def test_connection_list_configure(self, host, port):
         """
         target: test list connection of configure
@@ -281,7 +282,7 @@ class TestConnectionOperation(ApiReq):
         assert self.connection_wrap.list_connections()[0] == ['default', 'dev']
 
     @pytest.mark.skip("Behavior to be determined")
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L3)
     def test_connection_list_create_configure(self, host, port):
         """
         target: test list connection of configure
@@ -292,7 +293,3 @@ class TestConnectionOperation(ApiReq):
         self.connection_wrap.add_connection(default={"host": host, "port": port}, dev={"host": host, "port": port})
         log.info(self.connection_wrap.list_connections()[0])
         assert self.connection_wrap.list_connections()[0] == ['default', 'dev']
-
-
-
-

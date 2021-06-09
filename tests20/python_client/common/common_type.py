@@ -34,7 +34,8 @@ float_vec_field_desc = "float vector type field"
 binary_vec_field_desc = "binary vector type field"
 
 Not_Exist = "Not_Exist"
-
+err_code = "err_code"
+err_msg = "err_msg"
 
 """" List of parameters used to pass """
 get_invalid_strs = [
@@ -71,15 +72,13 @@ binary_metrics = ["JACCARD", "HAMMING", "TANIMOTO", "SUBSTRUCTURE", "SUPERSTRUCT
 structure_metrics = ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
 
 
-class CheckParams:
+class CheckTasks:
     """ The name of the method used to check the result """
     false = False
     err_res = "error_response"
-    cname_param_check = "collection_name_param_check"
-    pname_param_check = "partition_name_param_check"
-    list_count = "check_list_count"
-    collection_property_check = "collection_property_check"
-    partition_property_check = "partition_property_check"
+    check_list_count = "check_list_count"
+    check_collection_property = "check_collection_property"
+    check_partition_property = "check_partition_property"
 
 
 class CaseLabel:

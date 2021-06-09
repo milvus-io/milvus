@@ -16,17 +16,16 @@ import (
 
 	ant_ast "github.com/antonmedv/expr/ast"
 	ant_parser "github.com/antonmedv/expr/parser"
-
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-func parseQueryExpr(schema *typeutil.SchemaHelper, exprStrNullable *string) (*planpb.Expr, error) {
-	if exprStrNullable == nil {
+func parseQueryExpr(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, error) {
+	if exprStr == "" {
 		return nil, nil
 	}
-	exprStr := *exprStrNullable
+
 	return parseQueryExprAdvanced(schema, exprStr)
 }
 
@@ -46,8 +45,9 @@ func parseQueryExprAdvanced(schema *typeutil.SchemaHelper, exprStr string) (*pla
 
 func (context *ParserContext) createColumnInfo(field *schemapb.FieldSchema) *planpb.ColumnInfo {
 	return &planpb.ColumnInfo{
-		FieldId:  field.FieldID,
-		DataType: field.DataType,
+		FieldId:      field.FieldID,
+		DataType:     field.DataType,
+		IsPrimaryKey: field.IsPrimaryKey,
 	}
 }
 
@@ -325,13 +325,13 @@ func (context *ParserContext) handleExpr(nodeRaw *ant_ast.Node) (*planpb.Expr, e
 	}
 }
 
-func CreateQueryPlan(schemaPb *schemapb.CollectionSchema, exprStrNullable *string, vectorFieldName string, queryInfo *planpb.QueryInfo) (*planpb.PlanNode, error) {
+func CreateQueryPlan(schemaPb *schemapb.CollectionSchema, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo) (*planpb.PlanNode, error) {
 	schema, err := typeutil.CreateSchemaHelper(schemaPb)
 	if err != nil {
 		return nil, err
 	}
 
-	expr, err := parseQueryExpr(schema, exprStrNullable)
+	expr, err := parseQueryExpr(schema, exprStr)
 	if err != nil {
 		return nil, err
 	}

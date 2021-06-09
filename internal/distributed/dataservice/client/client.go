@@ -271,3 +271,10 @@ func (c *Client) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	})
 	return ret.(*datapb.GetSegmentInfoResponse), err
 }
+
+func (c *Client) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
+	ret, err := c.recall(func() (interface{}, error) {
+		return c.grpcClient.GetRecoveryInfo(ctx, req)
+	})
+	return ret.(*datapb.GetRecoveryInfoResponse), err
+}

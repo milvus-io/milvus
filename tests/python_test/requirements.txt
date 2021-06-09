@@ -17,3 +17,6 @@ git+https://github.com/Projectplace/pytest-tags
 ndg-httpsclient
 pyopenssl
 pyasn1
+pandas
+pytest-html==3.1.1
+pymilvus-orm==2.0a1.dev17

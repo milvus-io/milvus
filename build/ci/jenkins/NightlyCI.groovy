@@ -1,10 +1,19 @@
 #!/usr/bin/env groovy
 
+// When scheduling a job that gets automatically triggered by changes,
+// you need to include a [cronjob] tag within the commit message.
+String cron_timezone = "TZ=Asia/Shanghai"
+String cron_string = BRANCH_NAME == "master" ? "50 20,22,0,6,11,16 * * * " : ""
+
 pipeline {
     agent none
+    triggers {
+        pollSCM ignorePostCommitHooks: true, scmpoll_spec: """${cron_timezone}
+            ${cron_string}"""
+    }
     options {
         timestamps()
-        timeout(time: 30, unit: 'MINUTES')
+        timeout(time: 1, unit: 'HOURS')
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         // parallelsAlwaysFailFast()
     }
@@ -19,13 +28,11 @@ pipeline {
                 }
                 agent {
                     kubernetes {
-                        label "milvus-e2e-test-kind"
+                        label "milvus-e2e-test-kind-nightly"
+                        inheritFrom 'default'
                         defaultContainer 'main'
                         yamlFile "build/ci/jenkins/pod/krte.yaml"
                         customWorkspace '/home/jenkins/agent/workspace'
-                        // We allow this pod to remain active for a while, later jobs can
-                        // reuse cache in previous created nodes.
-                        idleMinutes 120
                     }
                 }
                 environment {
@@ -34,6 +41,9 @@ pipeline {
                     IMAGE_REPO = "dockerhub-mirror-sh.zilliz.cc/milvusdb"
                     DOCKER_BUILDKIT = 1
                     ARTIFACTS = "${env.WORKSPACE}/artifacts"
+                    DOCKER_CREDENTIALS_ID = "ba070c98-c8cc-4f7c-b657-897715f359fc"
+                    DOKCER_REGISTRY_URL = "registry.zilliz.com"
+                    TARGET_REPO = "${DOKCER_REGISTRY_URL}/milvus"
                 }
                 stages {
                     stage('Test') {
@@ -46,7 +56,7 @@ pipeline {
                                             standaloneEnabled = "false"
                                         }
 
-                                        sh "MILVUS_STANDALONE_ENABLED=${standaloneEnabled} ./e2e-k8s.sh --node-image registry.zilliz.com/kindest/node:v1.20.2 --test-extra-arg \"--tags=smoke\""
+                                        sh "MILVUS_STANDALONE_ENABLED=${standaloneEnabled} ./e2e-k8s.sh --node-image registry.zilliz.com/kindest/node:v1.20.2"
                                     }
                                 }
                             }
@@ -57,12 +67,32 @@ pipeline {
                     unsuccessful {
                         container('jnlp') {
                             script {
-                                def authorEmail = sh returnStdout: true, script: 'git --no-pager show -s --format=\'%ae\' HEAD~1'
                                 emailext subject: '$DEFAULT_SUBJECT',
                                 body: '$DEFAULT_CONTENT',
-                                recipientProviders: [developers(), culprits()],
+                                recipientProviders: [requestor()],
                                 replyTo: '$DEFAULT_REPLYTO',
-                                to: "${authorEmail}"
+                                to: 'qa@zilliz.com'
+                            }
+                        }
+                    }
+                    success {
+                        container('main') {
+                            script {
+                                if ( env.CHANGE_ID == null ){
+                                    def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
+                                    def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+
+                                    withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
+                                        sh 'docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD} ${DOKCER_REGISTRY_URL}'
+                                        sh """
+                                            docker tag localhost:5000/milvus:latest ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-${date}-${gitShortCommit}
+                                            docker tag localhost:5000/milvus:latest ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-latest
+                                            docker push ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-${date}-${gitShortCommit}
+                                            docker push ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-latest
+                                        """
+                                        sh 'docker logout ${DOKCER_REGISTRY_URL}'
+                                    }
+                                }
                             }
                         }
                     }
@@ -70,7 +100,7 @@ pipeline {
                         container('main') {
                             script {
                                 dir("${env.ARTIFACTS}") {
-                                    sh "find ./kind -path '*/history/*' -type f | xargs tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-e2e-logs.tar.gz --transform='s:^[^/]*/[^/]*/[^/]*/[^/]*/::g' || true"
+                                    sh "find ./kind -path '*/history/*' -type f | xargs tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-e2e-nightly-logs.tar.gz --transform='s:^[^/]*/[^/]*/[^/]*/[^/]*/::g' || true"
                                     archiveArtifacts artifacts: "**.tar.gz", allowEmptyArchive: true
                                     sh 'rm -rf ./*'
                                     sh 'docker rm -f \$(docker network inspect -f \'{{ range \$key, \$value := .Containers }}{{ printf "%s " \$key}}{{ end }}\' kind) || true'
