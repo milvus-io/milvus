@@ -7,6 +7,7 @@ from base.collection_wrapper import ApiCollectionWrapper
 from base.partition_wrapper import ApiPartitionWrapper
 from base.index_wrapper import ApiIndexWrapper
 from base.utility_wrapper import ApiUtilityWrapper
+from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
 
 from config.test_info import test_info
 from utils.util_log import test_log as log
@@ -37,6 +38,8 @@ class Base:
     partition_wrap = None
     index_wrap = None
     utility_wrap = None
+    collection_schema_wrap = None
+    field_schema_wrap = None
 
     def setup_class(self):
         log.info("[setup_class] Start setup class...")
@@ -51,6 +54,8 @@ class Base:
         self.partition_wrap = ApiPartitionWrapper()
         self.index_wrap = ApiIndexWrapper()
         self.utility_wrap = ApiUtilityWrapper()
+        self.collection_schema_wrap = ApiCollectionSchemaWrapper()
+        self.field_schema_wrap = ApiFieldSchemaWrapper()
 
     def teardown(self):
         log.info(("*" * 35) + " teardown " + ("*" * 35))

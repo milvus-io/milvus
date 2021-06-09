@@ -1,6 +1,7 @@
 from utils.util_log import test_log as log
-from common.common_type import *
-from common.code_mapping import ErrorCode, ErrorMessage
+from common import common_type as ct
+from common.common_type import CheckTasks
+# from common.code_mapping import ErrorCode, ErrorMessage
 from pymilvus_orm import Collection, Partition
 from utils.api_request import Error
 
@@ -52,9 +53,8 @@ class ResponseChecker:
         assert actual is False
         assert len(error_dict) > 0
         if isinstance(res, Error):
-            # err_code = error_dict["err_code"]
-            # assert res.code == err_code or ErrorMessage[err_code] in res.message
-            assert res.code == error_dict["err_code"] or error_dict["err_msg"] in res.message
+            error_code = error_dict[ct.err_code]
+            assert res.code == error_code or error_dict[ct.err_msg] in res.message
         else:
             log.error("[CheckFunc] Response of API is not an error: %s" % str(res))
             assert False
