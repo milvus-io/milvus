@@ -43,8 +43,8 @@ type ParamTable struct {
 
 	MasterAddress string
 
-	EtcdAddress  []string
-	MetaRootPath string
+	EtcdEndpoints []string
+	MetaRootPath  string
 
 	MinIOAddress         string
 	MinIOAccessKeyID     string
@@ -161,11 +161,11 @@ func (pt *ParamTable) initMinIOUseSSL() {
 }
 
 func (pt *ParamTable) initEtcdAddress() {
-	addr, err := pt.Load("_EtcdAddress")
+	endpoints, err := pt.Load("_EtcdEndpoints")
 	if err != nil {
 		panic(err)
 	}
-	pt.EtcdAddress = strings.Split(addr, ",")
+	pt.EtcdEndpoints = strings.Split(endpoints, ",")
 }
 
 func (pt *ParamTable) initMetaRootPath() {
