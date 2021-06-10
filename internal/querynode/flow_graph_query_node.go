@@ -127,6 +127,7 @@ func (q *queryNodeFlowGraph) consumerFlowGraph(channel VChannel, subName Consume
 }
 
 func (q *queryNodeFlowGraph) seekQueryNodeFlowGraph(position *internalpb.MsgPosition) error {
+	q.dmlStream.AsConsumer([]string{position.ChannelName}, position.MsgGroup)
 	err := q.dmlStream.Seek([]*internalpb.MsgPosition{position})
 	return err
 }
