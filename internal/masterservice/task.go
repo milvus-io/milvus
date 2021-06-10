@@ -292,12 +292,12 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		return EncodeDdOperation(&ddReq, nil, DropCollectionDDType)
 	}
 
-	ts, err := t.core.MetaTable.DeleteCollection(collMeta.ID, ddOp)
+	err = t.core.SendDdDropCollectionReq(ctx, &ddReq)
 	if err != nil {
 		return err
 	}
 
-	err = t.core.SendDdDropCollectionReq(ctx, &ddReq)
+	ts, err := t.core.MetaTable.DeleteCollection(collMeta.ID, ddOp)
 	if err != nil {
 		return err
 	}

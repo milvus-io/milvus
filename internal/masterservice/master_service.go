@@ -602,8 +602,7 @@ func (c *Core) setMsgStreams() error {
 			CreateCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		c.dmlChannels.BroadcastAll(&msgPack)
-		return nil
+		return c.dmlChannels.BroadcastMany(req.PhysicalChannelNames, &msgPack)
 	}
 
 	c.SendDdDropCollectionReq = func(ctx context.Context, req *internalpb.DropCollectionRequest) error {
@@ -619,8 +618,12 @@ func (c *Core) setMsgStreams() error {
 			DropCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		c.dmlChannels.BroadcastAll(&msgPack)
-		return nil
+
+		collInfo, err := c.MetaTable.GetCollectionByID(req.CollectionID, 0)
+		if err != nil {
+			return err
+		}
+		return c.dmlChannels.BroadcastMany(collInfo.PhysicalChannelNames, &msgPack)
 	}
 
 	c.SendDdCreatePartitionReq = func(ctx context.Context, req *internalpb.CreatePartitionRequest) error {
@@ -636,8 +639,12 @@ func (c *Core) setMsgStreams() error {
 			CreatePartitionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		c.dmlChannels.BroadcastAll(&msgPack)
-		return nil
+
+		collInfo, err := c.MetaTable.GetCollectionByID(req.CollectionID, 0)
+		if err != nil {
+			return err
+		}
+		return c.dmlChannels.BroadcastMany(collInfo.PhysicalChannelNames, &msgPack)
 	}
 
 	c.SendDdDropPartitionReq = func(ctx context.Context, req *internalpb.DropPartitionRequest) error {
@@ -653,8 +660,12 @@ func (c *Core) setMsgStreams() error {
 			DropPartitionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		c.dmlChannels.BroadcastAll(&msgPack)
-		return nil
+
+		collInfo, err := c.MetaTable.GetCollectionByID(req.CollectionID, 0)
+		if err != nil {
+			return err
+		}
+		return c.dmlChannels.BroadcastMany(collInfo.PhysicalChannelNames, &msgPack)
 	}
 
 	if Params.DataServiceSegmentChannel == "" {
