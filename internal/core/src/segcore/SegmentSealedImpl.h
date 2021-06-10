@@ -17,6 +17,7 @@
 #include <vector>
 #include <memory>
 #include <utility>
+#include <string>
 
 namespace milvus::segcore {
 class SegmentSealedImpl : public SegmentSealed {
@@ -56,6 +57,9 @@ class SegmentSealedImpl : public SegmentSealed {
     // return size_per_chunk for each chunk, renaming against confusion
     int64_t
     size_per_chunk() const override;
+
+    std::string
+    debug() const override;
 
  protected:
     // blob and row_count

@@ -20,6 +20,7 @@
 #include <knowhere/index/vector_index/VecIndexFactory.h>
 #include <faiss/utils/distances.h>
 #include <query/SearchOnSealed.h>
+#include <iostream>
 #include "query/generated/ExecPlanNodeVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "query/PlanNode.h"
@@ -484,6 +485,11 @@ SegmentGrowingImpl::search_ids(const IdArray& id_array, Timestamp timestamp) con
         res_offsets.push_back(the_offset);
     }
     return {std::move(res_id_arr), std::move(res_offsets)};
+}
+
+std::string
+SegmentGrowingImpl::debug() const {
+    return "Growing\n";
 }
 
 }  // namespace milvus::segcore

@@ -197,6 +197,13 @@ SegmentInternalInterface::GetEntityById(const std::vector<FieldOffset>& field_of
     auto results = std::make_unique<proto::plan::RetrieveResults>();
 
     auto [ids_, seg_offsets] = search_ids(id_array, timestamp);
+
+    // std::string dbg_log;
+    // dbg_log += "id_array:" + id_array.DebugString() + "\n";
+    // dbg_log += "ids:" + ids_->DebugString() + "\n";
+    // dbg_log += "segment_info:" + this->debug();
+    // std::cout << dbg_log << std::endl;
+
     results->set_allocated_ids(ids_.release());
 
     auto fields_data = results->mutable_fields_data();
