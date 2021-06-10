@@ -31,6 +31,7 @@
 #include "Utils.h"
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
+#include "codecs/default/DefaultCodec.h"
 #include "db/IDGenerator.h"
 #include "db/merge/MergeManagerFactory.h"
 #include "engine/EngineFactory.h"
@@ -1389,18 +1390,50 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
         if (temp_ids.empty()) {
             break;  // all vectors found, no need to continue
         }
-        // Load bloom filter
+
+        // SegmentReader
         std::string segment_dir;
         engine::utils::GetParentPath(file.location_, segment_dir);
         segment::SegmentReader segment_reader(segment_dir);
+
+        // uids_ptr
+        std::shared_ptr<std::vector<segment::doc_id_t>> uids_ptr = nullptr;
+        auto LoadUid = [&]() {
+            auto index = cache::CpuCacheMgr::GetInstance()->GetItem(file.location_);
+            if (index != nullptr) {
+                uids_ptr = std::static_pointer_cast<knowhere::VecIndex>(index)->GetUids();
+                return Status::OK();
+            }
+
+            return segment_reader.LoadUids(uids_ptr);
+        };
+
+        // deleted_docs_ptr
+        segment::DeletedDocsPtr deleted_docs_ptr = nullptr;
+        auto LoadDeleteDoc = [&]() { return segment_reader.LoadDeletedDocs(deleted_docs_ptr); };
+
+        // id_bloom_filter_ptr
         segment::IdBloomFilterPtr id_bloom_filter_ptr;
         auto status = segment_reader.LoadBloomFilter(id_bloom_filter_ptr, false);
+        fiu_do_on("DBImpl.GetVectorsByIdHelper.FailedToLoadBloomFilter",
+                  (status = Status(DB_ERROR, ""), id_bloom_filter_ptr = nullptr));
         if (!status.ok()) {
-            return status;
-        }
+            // Some accidents may cause the bloom filter file destroyed.
+            // If failed to load bloom filter, just to create a new one.
+            if (!(status = LoadUid()).ok()) {
+                return status;
+            }
+            if (!(status = LoadDeleteDoc()).ok()) {
+                return status;
+            }
 
-        std::shared_ptr<std::vector<segment::doc_id_t>> uids_ptr = nullptr;
-        segment::DeletedDocsPtr deleted_docs_ptr = nullptr;
+            codec::DefaultCodec default_codec;
+            default_codec.GetIdBloomFilterFormat()->create(uids_ptr->size(), id_bloom_filter_ptr);
+            id_bloom_filter_ptr->Add(*uids_ptr, deleted_docs_ptr->GetMutableDeletedDocs());
+
+            segment::SegmentWriter segment_writer(segment_dir);
+            segment_writer.WriteBloomFilter(id_bloom_filter_ptr);
+        }
 
         for (size_t i = 0; i < temp_ids.size();) {
             // each id must has a VectorsData
@@ -1411,16 +1444,8 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
             // Check if the id is present in bloom filter.
             if (id_bloom_filter_ptr->Check(vector_id)) {
                 // Load uids and check if the id is indeed present. If yes, find its offset.
-                if (uids_ptr == nullptr) {
-                    auto index = cache::CpuCacheMgr::GetInstance()->GetItem(file.location_);
-                    if (index != nullptr) {
-                        uids_ptr = std::static_pointer_cast<knowhere::VecIndex>(index)->GetUids();
-                    } else {
-                        status = segment_reader.LoadUids(uids_ptr);
-                        if (!status.ok()) {
-                            return status;
-                        }
-                    }
+                if (uids_ptr == nullptr && !(status = LoadUid()).ok()) {
+                    return status;
                 }
 
                 auto found = std::find(uids_ptr->begin(), uids_ptr->end(), vector_id);
@@ -1428,7 +1453,7 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
                     auto offset = std::distance(uids_ptr->begin(), found);
 
                     // Check whether the id has been deleted
-                    if (!deleted_docs_ptr && !(status = segment_reader.LoadDeletedDocs(deleted_docs_ptr)).ok()) {
+                    if (!deleted_docs_ptr && !(status = LoadDeleteDoc()).ok()) {
                         LOG_ENGINE_ERROR_ << status.message();
                         return status;
                     }
