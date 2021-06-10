@@ -74,7 +74,12 @@ func NewClient(metaRoot string, etcdAddr []string, timeout time.Duration) *Clien
 }
 
 func (c *Client) Init() error {
-	return c.connect()
+	// for now, we must try many times in Init Stage
+	initFunc := func() error {
+		return c.connect()
+	}
+	err := retry.Retry(10000, 3*time.Second, initFunc)
+	return err
 }
 
 func (c *Client) connect() error {

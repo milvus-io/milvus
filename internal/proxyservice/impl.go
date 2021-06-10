@@ -18,9 +18,6 @@ import (
 	"path"
 	"runtime"
 	"strconv"
-	"time"
-
-	"github.com/milvus-io/milvus/internal/timesync"
 
 	"go.uber.org/zap"
 
@@ -29,10 +26,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/timesync"
 )
 
 const (
-	timeoutInterval      = time.Second * 10
 	StartParamsKey       = "START_PARAMS"
 	ChannelYamlContent   = "advanced/channel.yaml"
 	CommonYamlContent    = "advanced/common.yaml"
@@ -86,22 +83,6 @@ func (s *ProxyService) fillNodeInitParams() error {
 	appendContent(ProxyNodeYamlContent, proxyNodeYamlContent)
 	appendContent(QueryNodeYamlContent, queryNodeYamlContent)
 	appendContent(MilvusYamlContent, milvusYamlContent)
-
-	// var allContent []byte
-	// allContent = append(allContent, channelYamlContent...)
-	// allContent = append(allContent, commonYamlContent...)
-	// allContent = append(allContent, dataNodeYamlContent...)
-	// allContent = append(allContent, masterYamlContent...)
-	// allContent = append(allContent, proxyNodeYamlContent...)
-	// allContent = append(allContent, queryNodeYamlContent...)
-	// allContent = append(allContent, writeNodeYamlContent...)
-	// allContent = append(allContent, milvusYamlContent...)
-
-	// s.nodeStartParams = append(s.nodeStartParams, &commonpb.KeyValuePair{
-	// 	Key:   StartParamsKey,
-	// 	Value: string(allContent),
-	// })
-
 	return nil
 }
 

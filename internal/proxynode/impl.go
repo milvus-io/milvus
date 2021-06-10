@@ -1167,6 +1167,17 @@ func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchReque
 	}()
 
 	err = qt.WaitToFinish()
+	log.Debug("Search Finished",
+		zap.Error(err),
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", qt.Base.MsgID),
+		zap.Uint64("timestamp", qt.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.Any("partitions", request.PartitionNames),
+		zap.Any("dsl", request.Dsl),
+		zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)))
+
 	if err != nil {
 		return &milvuspb.SearchResults{
 			Status: &commonpb.Status{
