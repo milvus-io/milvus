@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/milvus-io/milvus/internal/datanode"
@@ -76,8 +77,11 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	if mr.EnableMaster {
 		var ms *components.MasterService
+		var wg sync.WaitGroup
 
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			masterservice.Params.Init()
 			logutil.SetupLogger(&masterservice.Params.Log)
 			defer log.Sync()
@@ -91,6 +95,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			_ = ms.Run()
 		}()
 
+		wg.Wait()
 		if ms != nil {
 			defer ms.Stop()
 		}
@@ -100,8 +105,11 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	if mr.EnableProxyService {
 		var ps *components.ProxyService
+		var wg sync.WaitGroup
 
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			proxyservice.Params.Init()
 			logutil.SetupLogger(&proxyservice.Params.Log)
 			defer log.Sync()
@@ -115,6 +123,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			_ = ps.Run()
 		}()
 
+		wg.Wait()
 		if ps != nil {
 			defer ps.Stop()
 		}
@@ -124,8 +133,11 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	if mr.EnableProxyNode {
 		var pn *components.ProxyNode
+		var wg sync.WaitGroup
 
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			proxynode.Params.Init()
 			logutil.SetupLogger(&proxynode.Params.Log)
 			defer log.Sync()
@@ -139,6 +151,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			_ = pn.Run()
 		}()
 
+		wg.Wait()
 		if pn != nil {
 			defer pn.Stop()
 		}
@@ -148,8 +161,11 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	if mr.EnableQueryService {
 		var qs *components.QueryService
+		var wg sync.WaitGroup
 
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			queryservice.Params.Init()
 			logutil.SetupLogger(&queryservice.Params.Log)
 			defer log.Sync()
@@ -163,6 +179,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			_ = qs.Run()
 		}()
 
+		wg.Wait()
 		if qs != nil {
 			defer qs.Stop()
 		}
@@ -172,8 +189,11 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	if mr.EnableQueryNode {
 		var qn *components.QueryNode
+		var wg sync.WaitGroup
 
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			querynode.Params.Init()
 			logutil.SetupLogger(&querynode.Params.Log)
 			defer log.Sync()
@@ -187,6 +207,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			_ = qn.Run()
 		}()
 
+		wg.Wait()
 		if qn != nil {
 			defer qn.Stop()
 		}
@@ -196,8 +217,11 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	if mr.EnableDataService {
 		var ds *components.DataService
+		var wg sync.WaitGroup
 
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			dataservice.Params.Init()
 			logutil.SetupLogger(&dataservice.Params.Log)
 			defer log.Sync()
@@ -211,6 +235,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			_ = ds.Run()
 		}()
 
+		wg.Wait()
 		if ds != nil {
 			defer ds.Stop()
 		}
@@ -220,8 +245,11 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	if mr.EnableDataNode {
 		var dn *components.DataNode
+		var wg sync.WaitGroup
 
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			datanode.Params.Init()
 			logutil.SetupLogger(&datanode.Params.Log)
 			defer log.Sync()
@@ -235,6 +263,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			_ = dn.Run()
 		}()
 
+		wg.Wait()
 		if dn != nil {
 			defer dn.Stop()
 		}
@@ -244,8 +273,11 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	if mr.EnableIndexService {
 		var is *components.IndexService
+		var wg sync.WaitGroup
 
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			indexservice.Params.Init()
 			logutil.SetupLogger(&indexservice.Params.Log)
 			defer log.Sync()
@@ -258,6 +290,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			_ = is.Run()
 		}()
 
+		wg.Wait()
 		if is != nil {
 			defer is.Stop()
 		}
@@ -267,8 +300,11 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	if mr.EnableIndexNode {
 		var in *components.IndexNode
+		var wg sync.WaitGroup
 
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			indexnode.Params.Init()
 			logutil.SetupLogger(&indexnode.Params.Log)
 			defer log.Sync()
@@ -281,6 +317,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			_ = in.Run()
 		}()
 
+		wg.Wait()
 		if in != nil {
 			defer in.Stop()
 		}
@@ -290,8 +327,11 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	if mr.EnableMsgStreamService {
 		var mss *components.MsgStream
+		var wg sync.WaitGroup
 
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			var err error
 			mss, err = components.NewMsgStreamService(ctx)
 			if err != nil {
@@ -300,6 +340,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			_ = mss.Run()
 		}()
 
+		wg.Wait()
 		if mss != nil {
 			defer mss.Stop()
 		}
