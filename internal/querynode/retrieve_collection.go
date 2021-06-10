@@ -130,7 +130,7 @@ func (rc *retrieveCollection) start() {
 
 func (rc *retrieveCollection) register() {
 	// register tSafe watcher and init watcher select case
-	collection, err := rc.streamingReplica.getCollectionByID(rc.collectionID)
+	collection, err := rc.streaming.replica.getCollectionByID(rc.collectionID)
 	if err != nil {
 		log.Error(err.Error())
 		return
