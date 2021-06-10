@@ -617,12 +617,12 @@ func watchDmChannels(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	if len(resp.VirtualChannelNames) == 0 {
+	if len(resp.PhysicalChannelNames) == 0 {
 		err = errors.New("haven't assign dm channel to collection")
 		return err
 	}
 
-	dmChannels := resp.VirtualChannelNames
+	dmChannels := resp.PhysicalChannelNames
 	channelsWithoutPos := make([]string, 0)
 	for _, channel := range dmChannels {
 		findChannel := false
