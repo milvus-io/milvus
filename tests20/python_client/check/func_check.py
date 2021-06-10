@@ -1,9 +1,10 @@
 from utils.util_log import test_log as log
 from common import common_type as ct
-from common.common_type import CheckTasks
+from common.common_type import CheckTasks, Connect_Object_Name
 # from common.code_mapping import ErrorCode, ErrorMessage
 from pymilvus_orm import Collection, Partition
 from utils.api_request import Error
+import check.param_check as pc
 
 
 class ResponseChecker:
@@ -30,8 +31,8 @@ class ResponseChecker:
         elif self.check_task == CheckTasks.err_res:
             result = self.assert_exception(self.response, self.succ, self.check_items)
 
-        elif self.check_task == CheckTasks.check_list_count and self.check_items is not None:
-            result = self.check_list_count(self.response, self.func_name, self.check_items)
+        elif self.check_task == CheckTasks.check_connection_result:
+            result = self.check_value_equal(self.response, self.func_name, self.check_items)
 
         elif self.check_task == CheckTasks.check_collection_property:
             result = self.check_collection_property(self.response, self.func_name, self.check_items)
@@ -64,18 +65,35 @@ class ResponseChecker:
         return True
 
     @staticmethod
-    def check_list_count(res, func_name, params):
-        if not isinstance(res, list):
-            log.error("[CheckFunc] Response of API is not a list: %s" % str(res))
-            assert False
+    def check_value_equal(res, func_name, params):
+        """ check response of connection interface that result is normal """
 
         if func_name == "list_connections":
-            list_count = params.get("list_count", None)
-            if not str(list_count).isdigit():
-                log.error("[CheckFunc] Check param of list_count is not a number: %s" % str(list_count))
+            if not isinstance(res, list):
+                log.error("[CheckFunc] Response of list_connections is not a list: %s" % str(res))
                 assert False
 
-            assert len(res) == int(list_count)
+            list_content = params.get("list_content", None)
+            if not isinstance(list_content, list):
+                log.error("[CheckFunc] Check param of list_content is not a list: %s" % str(list_content))
+                assert False
+
+            new_res = pc.get_connect_object_name(res)
+            assert pc.list_equal_check(new_res, list_content)
+
+        if func_name == "get_connection_addr":
+            dict_content = params.get("dict_content", None)
+            assert pc.dict_equal_check(res, dict_content)
+
+        if func_name == "connect":
+            class_obj = Connect_Object_Name
+            res_obj = type(res).__name__
+            assert res_obj == class_obj
+
+        if func_name == "get_connection":
+            value_content = params.get("value_content", None)
+            res_obj = type(res).__name__ if res is not None else None
+            assert res_obj == value_content
 
         return True
 
