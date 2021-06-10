@@ -46,7 +46,7 @@ func NewClient(addr string, timeout time.Duration) (*Client, error) {
 		return nil, fmt.Errorf("address is empty")
 	}
 	return &Client{
-		addr:   addr,
+		addr:      addr,
 		ctx:       context.Background(),
 		timeout:   timeout,
 		recallTry: 3,
