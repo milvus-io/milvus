@@ -209,7 +209,7 @@ func (lct *LoadCollectionTask) PostExecute(ctx context.Context) error {
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
 	if lct.watchNeeded {
-		err := watchDmChannels(ctx, lct.dataService, lct.queryNodes, lct.meta, dbID, collectionID, lct.Base)
+		err := watchDmChannels(ctx, lct.masterService, lct.queryNodes, lct.meta, dbID, collectionID, lct.Base)
 		if err != nil {
 			log.Debug("watchDmChannels failed", zap.Int64("msgID", lct.ID()), zap.Int64("collectionID", collectionID), zap.Error(err))
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
@@ -502,7 +502,7 @@ func (lpt *LoadPartitionTask) PostExecute(ctx context.Context) error {
 	collectionID := lpt.CollectionID
 	partitionIDs := lpt.PartitionIDs
 	if lpt.watchNeeded {
-		err := watchDmChannels(ctx, lpt.dataService, lpt.queryNodes, lpt.meta, dbID, collectionID, lpt.Base)
+		err := watchDmChannels(ctx, lpt.masterService, lpt.queryNodes, lpt.meta, dbID, collectionID, lpt.Base)
 		if err != nil {
 			log.Debug("watchDmChannels failed", zap.Int64("msgID", lpt.ID()), zap.Int64s("partitionIDs", partitionIDs), zap.Error(err))
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
@@ -597,7 +597,7 @@ func (rpt *ReleasePartitionTask) PostExecute(ctx context.Context) error {
 }
 
 func watchDmChannels(ctx context.Context,
-	dataService types.DataService,
+	masterService types.MasterService,
 	queryNodes map[int64]*queryNodeInfo,
 	meta Replica,
 	dbID UniqueID,
@@ -607,20 +607,22 @@ func watchDmChannels(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	channelRequest := datapb.GetInsertChannelsRequest{
-		DbID:         dbID,
+	describeCollectionRequest := &milvuspb.DescribeCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_DescribeCollection,
+		},
 		CollectionID: collectionID,
 	}
-	resp, err := dataService.GetInsertChannels(ctx, &channelRequest)
+	resp, err := masterService.DescribeCollection(ctx, describeCollectionRequest)
 	if err != nil {
 		return err
 	}
-	if len(resp.Values) == 0 {
+	if len(resp.VirtualChannelNames) == 0 {
 		err = errors.New("haven't assign dm channel to collection")
 		return err
 	}
 
-	dmChannels := resp.Values
+	dmChannels := resp.VirtualChannelNames
 	channelsWithoutPos := make([]string, 0)
 	for _, channel := range dmChannels {
 		findChannel := false
