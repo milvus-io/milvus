@@ -31,7 +31,7 @@ class ResponseChecker:
         elif self.check_task == CheckTasks.err_res:
             result = self.assert_exception(self.response, self.succ, self.check_items)
 
-        elif self.check_task == CheckTasks.check_normal:
+        elif self.check_task == CheckTasks.check_connection_result:
             result = self.check_value_equal(self.response, self.func_name, self.check_items)
 
         elif self.check_task == CheckTasks.check_collection_property:

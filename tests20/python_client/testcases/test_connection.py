@@ -30,7 +30,7 @@ class TestConnectionParams(TestcaseBase):
         self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING)
 
         # list all connections and check the response
-        self.connection_wrap.list_connections(check_task=CheckTasks.check_normal,
+        self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
                                               check_items={"list_content": [(DefaultConfig.DEFAULT_USING, None)]})
 
     @pytest.mark.xfail(reason="Issue #5723")
@@ -144,19 +144,19 @@ class TestConnectionOperation(TestcaseBase):
                                             testing={"": ""})
 
         # list all connections and check the response
-        self.connection_wrap.list_connections(check_task=CheckTasks.check_normal,
+        self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
                                               check_items={"list_content": [(DefaultConfig.DEFAULT_USING, None), 
                                                                             ('alias1', None), ('alias2', None), 
                                                                             ('testing', None)]})
 
         # get all addr of alias and check the response
-        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {'host': 'localhost', 'port': '19530'}})
-        self.connection_wrap.get_connection_addr(alias="alias1", check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias="alias1", check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {"host": "localhost", "port": "1"}})
-        self.connection_wrap.get_connection_addr(alias="alias2", check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias="alias2", check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {"host": "hostlocal", "port": "-1"}})
-        self.connection_wrap.get_connection_addr(alias="testing", check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias="testing", check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {"": ""}})
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -172,20 +172,20 @@ class TestConnectionOperation(TestcaseBase):
                                             alias2={"host": "192.168.1.1", "port": "123"})
 
         # get the object of alias
-        self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result,
                                             check_items={"value_content": None})
 
         # list all connections and check the response
-        self.connection_wrap.list_connections(check_task=CheckTasks.check_normal,
+        self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
                                               check_items={"list_content": [(DefaultConfig.DEFAULT_USING, None), 
                                                                             ('alias1', None), ('alias2', None)]})
 
         # get all addr of alias and check the response
-        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {'host': 'localhost', 'port': '19530'}})
-        self.connection_wrap.get_connection_addr(alias="alias1", check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias="alias1", check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {"host": "localhost", "port": "1"}})
-        self.connection_wrap.get_connection_addr(alias="alias2", check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias="alias2", check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {"host": "192.168.1.1", "port": "123"}})
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -201,16 +201,16 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.add_connection(alias2={"host": "192.168.1.1", "port": "123"})
 
         # list all connections and check the response
-        self.connection_wrap.list_connections(check_task=CheckTasks.check_normal,
+        self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
                                               check_items={"list_content": [(DefaultConfig.DEFAULT_USING, None),
                                                                             ('alias1', None), ('alias2', None)]})
 
         # get all addr of alias and check the response
-        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {'host': 'localhost', 'port': '19530'}})
-        self.connection_wrap.get_connection_addr(alias="alias1", check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias="alias1", check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {"host": "localhost", "port": "1"}})
-        self.connection_wrap.get_connection_addr(alias="alias2", check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias="alias2", check_task=CheckTasks.check_connection_result,
                                                  check_items={
                                                      "dict_content": {"host": "192.168.1.1", "port": "123"}})
 
@@ -227,11 +227,11 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.add_connection(default={'port': '19530', 'host': 'localhost'})
 
         # list all connections and check the response
-        self.connection_wrap.list_connections(check_task=CheckTasks.check_normal,
+        self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
                                               check_items={"list_content": [(DefaultConfig.DEFAULT_USING, None)]})
 
         # get all addr of alias and check the response
-        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {'host': 'localhost', 'port': '19530'}})
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -243,18 +243,18 @@ class TestConnectionOperation(TestcaseBase):
         """
 
         # get all addr of default alias and check the response
-        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {'host': 'localhost', 'port': '19530'}})
 
         # add connections
         self.connection_wrap.add_connection(default={'host': '192.168.1.1', 'port': '12345'})
 
         # list all connections and check the response
-        self.connection_wrap.list_connections(check_task=CheckTasks.check_normal,
+        self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
                                               check_items={"list_content": [(DefaultConfig.DEFAULT_USING, None)]})
 
         # get all addr of alias and check the response
-        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {'host': '192.168.1.1', 'port': '12345'}})
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -266,7 +266,7 @@ class TestConnectionOperation(TestcaseBase):
         """
 
         # get an addr that not exist and return {}
-        self.connection_wrap.get_connection_addr(alias=Not_Exist, check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias=Not_Exist, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {}})
 
     @pytest.mark.skip("The maximum number of add_connection is not set")
@@ -285,7 +285,7 @@ class TestConnectionOperation(TestcaseBase):
         """
 
         # create connection that param of alias is not exist
-        self.connection_wrap.connect(alias="test_alias_name", host=host, port=port, check_task=CheckTasks.check_normal)
+        self.connection_wrap.connect(alias="test_alias_name", host=host, port=port, check_task=CheckTasks.check_connection_result)
 
         # add connection with diff params after that alias has been created
         err_msg = "alias of 'test_alias_name' already creating connections, "\
@@ -306,7 +306,7 @@ class TestConnectionOperation(TestcaseBase):
         """
         # create connection that param of alias is default
         self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=host, port=port,
-                                     check_task=CheckTasks.check_normal)
+                                     check_task=CheckTasks.check_connection_result)
 
         # add connection after that alias has been created
         err_msg = "alias of 'test_alias_name' already creating connections, " \
@@ -327,20 +327,20 @@ class TestConnectionOperation(TestcaseBase):
         """
 
         # create connection that param of alias is not exist
-        self.connection_wrap.connect(alias="test_alias_name", host=host, port=port, check_task=CheckTasks.check_normal)
+        self.connection_wrap.connect(alias="test_alias_name", host=host, port=port, check_task=CheckTasks.check_connection_result)
 
         # disconnect alias is exist
         self.connection_wrap.disconnect(alias="test_alias_name")
 
         # get an addr that is exist
-        self.connection_wrap.get_connection_addr(alias="test_alias_name", check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias="test_alias_name", check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {"host": host, "port": port}})
 
         # add connection after that alias has been disconnected
         self.connection_wrap.add_connection(test_alias_name={"host": "localhost", "port": "1"})
 
         # get an addr that is exist
-        self.connection_wrap.get_connection_addr(alias="test_alias_name", check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias="test_alias_name", check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {"host": "localhost", "port": "1"}})
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -352,20 +352,20 @@ class TestConnectionOperation(TestcaseBase):
         """
 
         # create connection that param of alias is not exist
-        self.connection_wrap.connect(alias="test_alias_name", host=host, port=port, check_task=CheckTasks.check_normal)
+        self.connection_wrap.connect(alias="test_alias_name", host=host, port=port, check_task=CheckTasks.check_connection_result)
 
         # disconnect alias is exist
         self.connection_wrap.remove_connection(alias="test_alias_name")
 
         # get an addr that is not exist
-        self.connection_wrap.get_connection_addr(alias="test_alias_name", check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias="test_alias_name", check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {}})
 
         # add connection after that alias has been disconnected
         self.connection_wrap.add_connection(test_alias_name={"host": "localhost", "port": "1"})
 
         # get an addr that is exist
-        self.connection_wrap.get_connection_addr(alias="test_alias_name", check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias="test_alias_name", check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {"host": "localhost", "port": "1"}})
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -382,11 +382,11 @@ class TestConnectionOperation(TestcaseBase):
                                                                                                   "err_msg": err_msg})
 
         # list all connections and check the response
-        self.connection_wrap.list_connections(check_task=CheckTasks.check_normal,
+        self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
                                               check_items={"list_content": [(DefaultConfig.DEFAULT_USING, None)]})
 
         # get all addr of alias and check the response
-        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {'host': "localhost", 'port': "19530"}})
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -406,11 +406,11 @@ class TestConnectionOperation(TestcaseBase):
                                      check_items={"err_code": -1, "err_msg": err_msg})
 
         # list all connections and check the response
-        self.connection_wrap.list_connections(check_task=CheckTasks.check_normal,
+        self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
                                               check_items={"list_content": [(DefaultConfig.DEFAULT_USING, None)]})
 
         # get all addr of alias and check the response
-        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {'host': "host", 'port': port}})
 
     @ pytest.mark.tags(CaseLabel.L3)
@@ -425,15 +425,15 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.add_connection(default={'host': host, 'port': port})
 
         # successfully created default connection
-        self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_normal)
+        self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result)
 
         # list all connections and check the response
-        self.connection_wrap.list_connections(check_task=CheckTasks.check_normal,
+        self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
                                               check_items={"list_content": [(DefaultConfig.DEFAULT_USING,
                                                                              Connect_Object_Name)]})
 
         # get all addr of alias and check the response
-        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {'host': host, 'port': port}})
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -449,18 +449,18 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.add_connection(default={'host': host, 'port': port})
 
         # successfully created default connection
-        self.connection_wrap.connect(alias=connect_name, check_task=CheckTasks.check_normal)
+        self.connection_wrap.connect(alias=connect_name, check_task=CheckTasks.check_connection_result)
 
         # get the object of alias
-        res_obj1 = self.connection_wrap.get_connection(alias=connect_name, check_task=CheckTasks.check_normal,
+        res_obj1 = self.connection_wrap.get_connection(alias=connect_name, check_task=CheckTasks.check_connection_result,
                                                        check_items={"value_content": Connect_Object_Name})[0]
 
         # connect twice with the same params
         self.connection_wrap.connect(alias=connect_name, host=host, port=port,
-                                     check_task=CheckTasks.check_normal)
+                                     check_task=CheckTasks.check_connection_result)
 
         # get the object of alias
-        res_obj2 = self.connection_wrap.get_connection(alias=connect_name, check_task=CheckTasks.check_normal,
+        res_obj2 = self.connection_wrap.get_connection(alias=connect_name, check_task=CheckTasks.check_connection_result,
                                                        check_items={"value_content": Connect_Object_Name})[0]
 
         # check the response of the same alias is equal
@@ -482,20 +482,20 @@ class TestConnectionOperation(TestcaseBase):
         """
 
         # successfully created default connection
-        self.connection_wrap.connect(alias=connect_name, host=host, port=port, check_task=CheckTasks.check_normal)
+        self.connection_wrap.connect(alias=connect_name, host=host, port=port, check_task=CheckTasks.check_connection_result)
 
         # get the object of alias
-        self.connection_wrap.get_connection(alias=connect_name, check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection(alias=connect_name, check_task=CheckTasks.check_connection_result,
                                             check_items={"value_content": Connect_Object_Name})
 
         # list all connections and check the response
         list_content = [(connect_name, Connect_Object_Name)] if connect_name is DefaultConfig.DEFAULT_USING else\
             [(DefaultConfig.DEFAULT_USING, None), (connect_name, Connect_Object_Name)]
-        self.connection_wrap.list_connections(check_task=CheckTasks.check_normal,
+        self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
                                               check_items={"list_content": list_content})
 
         # get all addr of alias and check the response
-        self.connection_wrap.get_connection_addr(alias=connect_name, check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias=connect_name, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {'host': host, 'port': port}})
 
     @pytest.mark.xfail(reason="5697")
@@ -514,12 +514,12 @@ class TestConnectionOperation(TestcaseBase):
                                                   "err_msg": "Param is not complete. Please invoke as follow:"})
 
         # list all connections and check the response
-        self.connection_wrap.list_connections(check_task=CheckTasks.check_normal,
+        self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
                                               check_items={"list_content": [(DefaultConfig.DEFAULT_USING, None)]})
 
         # get all addr of alias and check the response
         dict_content = {'host': host, 'port': port} if connect_name == DefaultConfig.DEFAULT_USING else {}
-        self.connection_wrap.get_connection_addr(alias=connect_name, check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias=connect_name, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": dict_content})
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -532,17 +532,17 @@ class TestConnectionOperation(TestcaseBase):
         """
 
         # list all connections and check the response
-        self.connection_wrap.list_connections(check_task=CheckTasks.check_normal,
+        self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
                                               check_items={"list_content": [(DefaultConfig.DEFAULT_USING, None)]})
         # disconnect alias is not exist
         self.connection_wrap.disconnect(alias=connect_name)
 
         # list all connections and check the response
-        self.connection_wrap.list_connections(check_task=CheckTasks.check_normal,
+        self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
                                               check_items={"list_content": [(DefaultConfig.DEFAULT_USING, None)]})
 
         # get all addr of alias and check the response
-        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {"host": "localhost", "port": "19530"}})
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -557,28 +557,28 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.add_connection(default={'host': host, 'port': port})
 
         # successfully created default connection
-        self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_normal)
+        self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result)
 
         # get the object of alias
-        self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result,
                                             check_items={"value_content": Connect_Object_Name})
 
         # disconnect alias is exist
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
 
         # get the object of alias
-        self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result,
                                             check_items={"value_content": None})
 
         # disconnect twice
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
 
         # list all connections and check the response
-        self.connection_wrap.list_connections(check_task=CheckTasks.check_normal,
+        self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
                                               check_items={"list_content": [(DefaultConfig.DEFAULT_USING, None)]})
 
         # get all addr of alias and check the response
-        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {'host': host, 'port': port}})
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -594,27 +594,28 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.add_connection(test_alias_name={'host': host, 'port': port})
 
         # successfully created default connection
-        self.connection_wrap.connect(alias=test_alias_name, host=host, port=port, check_task=CheckTasks.check_normal)
+        self.connection_wrap.connect(alias=test_alias_name, host=host, port=port,
+                                     check_task=CheckTasks.check_connection_result)
 
         # list all connections and check the response
-        self.connection_wrap.list_connections(check_task=CheckTasks.check_normal,
+        self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
                                               check_items={"list_content": [(DefaultConfig.DEFAULT_USING, None),
                                                                             (test_alias_name, Connect_Object_Name)]})
 
         # get all addr of alias and check the response
-        self.connection_wrap.get_connection_addr(alias=test_alias_name, check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias=test_alias_name, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {'host': host, 'port': port}})
 
         # disconnect alias is exist
         self.connection_wrap.disconnect(alias=test_alias_name)
 
         # list all connections and check the response
-        self.connection_wrap.list_connections(check_task=CheckTasks.check_normal,
+        self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
                                               check_items={"list_content": [(DefaultConfig.DEFAULT_USING, None),
                                                                             (test_alias_name, None)]})
 
         # get all addr of alias and check the response
-        self.connection_wrap.get_connection_addr(alias=test_alias_name, check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection_addr(alias=test_alias_name, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {'host': host, 'port': port}})
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -629,7 +630,7 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.remove_connection(alias=Not_Exist)
 
         # list all connections and check the response
-        self.connection_wrap.list_connections(check_task=CheckTasks.check_normal,
+        self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
                                               check_items={"list_content": [(DefaultConfig.DEFAULT_USING, None)]})
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -644,7 +645,8 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.remove_connection(alias=DefaultConfig.DEFAULT_USING)
 
         # list all connections and check the response
-        self.connection_wrap.list_connections(check_task=CheckTasks.check_normal, check_items={"list_content": []})
+        self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
+                                              check_items={"list_content": []})
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING, "test_alias_name"])
@@ -656,18 +658,20 @@ class TestConnectionOperation(TestcaseBase):
         """
 
         # successfully created default connection
-        self.connection_wrap.connect(alias=connect_name, host=host, port=port, check_task=CheckTasks.check_normal)
+        self.connection_wrap.connect(alias=connect_name, host=host, port=port,
+                                     check_task=CheckTasks.check_connection_result)
 
         # remove the connection that is not exist
         self.connection_wrap.remove_connection(alias=connect_name)
 
         # get the object of alias
-        self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_normal,
+        self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING,
+                                            check_task=CheckTasks.check_connection_result,
                                             check_items={"value_content": None})
 
         # list all connections and check the response
         list_content = [] if connect_name == DefaultConfig.DEFAULT_USING else [(DefaultConfig.DEFAULT_USING, None)]
-        self.connection_wrap.list_connections(check_task=CheckTasks.check_normal,
+        self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
                                               check_items={"list_content": list_content})
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -680,7 +684,8 @@ class TestConnectionOperation(TestcaseBase):
         """
 
         # successfully created default connection
-        self.connection_wrap.connect(alias=connect_name, host=host, port=port, check_task=CheckTasks.check_normal)
+        self.connection_wrap.connect(alias=connect_name, host=host, port=port,
+                                     check_task=CheckTasks.check_connection_result)
 
         # disconnect alias is exist
         self.connection_wrap.disconnect(alias=connect_name)
@@ -693,5 +698,5 @@ class TestConnectionOperation(TestcaseBase):
 
         # list all connections and check the response
         list_content = [] if connect_name == DefaultConfig.DEFAULT_USING else [(DefaultConfig.DEFAULT_USING, None)]
-        self.connection_wrap.list_connections(check_task=CheckTasks.check_normal,
+        self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
                                               check_items={"list_content": list_content})
