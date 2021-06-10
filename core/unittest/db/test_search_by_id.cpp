@@ -474,6 +474,15 @@ TEST_F(GetVectorByIdTest, WITH_DELETE_TEST) {
     for (auto& vector : vectors) {
         ASSERT_EQ(vector.vector_count_, 0);
     }
+
+    fiu_init(0);
+    fiu_enable("DBImpl.GetVectorsByIdHelper.FailedToLoadBloomFilter", 1, NULL, 0);
+    stat = db_->GetVectorsByID(collection_info, "", ids_to_search, vectors);
+    ASSERT_TRUE(stat.ok());
+    for (auto& vector : vectors) {
+        ASSERT_EQ(vector.vector_count_, 0);
+    }
+    fiu_disable("DBImpl.GetVectorsByIdHelper.FailedToLoadBloomFilter");
 }
 
 TEST_F(SearchByIdTest, BINARY_TEST) {

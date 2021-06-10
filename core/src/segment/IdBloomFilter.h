@@ -23,6 +23,7 @@
 
 #include "cache/DataObj.h"
 #include "dablooms/dablooms.h"
+#include "segment/DeletedDocs.h"
 #include "utils/Status.h"
 
 namespace milvus {
@@ -44,6 +45,9 @@ class IdBloomFilter : public cache::DataObj {
 
     Status
     Add(const std::vector<doc_id_t>& uids);
+
+    Status
+    Add(const std::vector<doc_id_t>& uids, std::vector<offset_t>& delete_docs);
 
     Status
     Remove(doc_id_t uid);
