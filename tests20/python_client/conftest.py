@@ -11,6 +11,7 @@ def pytest_addoption(parser):
     parser.addoption("--tag", action="store", default="all", help="only run tests matching the tag.")
     parser.addoption('--dry_run', action='store_true', default=False, help="")
     parser.addoption('--partition_name', action='store', default="partition_name", help="name of partition")
+    parser.addoption('--connect_name', action='store', default="connect_name", help="name of connect")
     parser.addoption('--descriptions', action='store', default="partition_des", help="descriptions of partition")
     parser.addoption('--collection_name', action='store', default="collection_name", help="name of collection")
     parser.addoption('--search_vectors', action='store', default="search_vectors", help="vectors of search")
@@ -57,6 +58,11 @@ def tag(request):
 @pytest.fixture
 def dry_run(request):
     return request.config.getoption("--dry_run")
+
+
+@pytest.fixture
+def connect_name(request):
+    return request.config.getoption("--connect_name")
 
 
 @pytest.fixture

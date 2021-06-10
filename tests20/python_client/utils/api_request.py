@@ -15,7 +15,7 @@ def api_request_catch():
                 log.debug("(api_res) Response : %s " % str(res))
                 return res, True
             except Exception as e:
-                log.error("[Milvus API Exception]%s: %s" % (str(func), str(e)))
+                log.error("(api_res) [Milvus API Exception] %s: %s" % (str(func), str(e)))
                 return Error(e), False
         return inner_wrapper
     return wrapper
@@ -30,6 +30,6 @@ def api_request(_list, **kwargs):
             if len(_list) > 1:
                 for a in _list[1:]:
                     arg.append(a)
-            log.debug("(api_req)[%s] Parameters ars arg: %s, kwargs: %s" % (str(func), str(arg), str(kwargs)))
+            log.info("(api_req)[%s] Parameters ars arg: %s, kwargs: %s" % (str(func), str(arg), str(kwargs)))
             return func(*arg, **kwargs)
     return False, False

@@ -34,6 +34,7 @@ float_vec_field_desc = "float vector type field"
 binary_vec_field_desc = "binary vector type field"
 
 Not_Exist = "Not_Exist"
+Connect_Object_Name = "Milvus"
 
 
 """" List of parameters used to pass """
@@ -75,7 +76,7 @@ class CheckTasks:
     """ The name of the method used to check the result """
     false = False
     err_res = "error_response"
-    check_list_count = "check_list_count"
+    check_normal = "check_normal_result"
     check_collection_property = "check_collection_property"
     check_partition_property = "check_partition_property"
 
