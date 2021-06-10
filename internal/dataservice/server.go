@@ -544,7 +544,6 @@ func (s *Server) prepareBinlog(req *datapb.SaveBinlogPathsRequest) (map[string]s
 	return meta, nil
 }
 
-
 func composeSegmentFlushMsgPack(segmentID UniqueID) msgstream.MsgPack {
 	msgPack := msgstream.MsgPack{
 		Msgs: make([]msgstream.TsMsg, 0, 1),

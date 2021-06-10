@@ -51,7 +51,7 @@ func NewClient(addr string, timeout time.Duration) (*Client, error) {
 	return &Client{
 		grpc:      nil,
 		conn:      nil,
-		addr:	   addr,
+		addr:      addr,
 		ctx:       context.Background(),
 		timeout:   timeout,
 		recallTry: 3,
