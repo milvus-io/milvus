@@ -236,7 +236,6 @@ def modify_file(file_path_list, is_modify=False, input_content=""):
                     f.close()
                 log.info("[modify_file] file(%s) modification is complete." % file_path_list)
 
-
 def index_to_dict(index):
     return {
         "collection_name": index.collection_name,
@@ -245,6 +244,47 @@ def index_to_dict(index):
         "params": index.params
     }
 
-
 def assert_equal_index(index_1, index_2):
     return index_to_dict(index_1) == index_to_dict(index_2)
+
+def gen_partitions(collection_w, partition_num=1):
+    """
+    target: create extra partitions except for _default
+    method: create more than one partitions
+    expected: return collection and raw data
+    """
+    log.info("gen_partitions: creating partitions")
+    for i in range(partition_num):
+        partition_name = "search_partition_" + str(i)
+        collection_w.create_partition(partition_name=partition_name,
+                                      description="search partition")
+    par = collection_w.partitions
+    assert len(par) == (partition_num + 1)
+    log.info("gen_partitions: created partitions %s" % par)
+
+def insert_data(collection_w, nb=3000, is_binary=False):
+    """
+    target: insert non-binary/binary data
+    method: insert non-binary/binary data into partitions if any
+    expected: return collection and raw data
+    """
+    par = collection_w.partitions
+    num = len(par)
+    vectors = []
+    binary_raw_vectors = []
+    log.info("insert_data: inserting data into collection %s (num_entities: %s)"
+             % (collection_w.name, nb))
+    for i in range(num):
+        if is_binary:
+            default_data, binary_raw_data = gen_default_binary_dataframe_data(nb // num)
+            binary_raw_vectors.extend(binary_raw_data)
+        else:
+            default_data = gen_default_dataframe_data(nb // num)
+        collection_w.insert(default_data, par[i].name)
+        vectors.extend(default_data)
+    log.info("insert_data: inserted data into collection %s (num_entities: %s)"
+             % (collection_w.name, nb))
+    collection_w.load()
+    assert collection_w.is_empty == False
+    assert collection_w.num_entities == nb
+    return collection_w, vectors, binary_raw_vectors
