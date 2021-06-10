@@ -229,6 +229,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	for _, pos := range toSeekChannels {
 		for _, fg := range nodeFGs {
 			if fg.channel == pos.ChannelName {
+				pos.MsgGroup = consumeSubName
 				err := fg.seekQueryNodeFlowGraph(pos)
 				if err != nil {
 					errMsg := "msgStream seek error :" + err.Error()
