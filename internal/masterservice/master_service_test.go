@@ -476,6 +476,28 @@ func TestMasterService(t *testing.T) {
 		assert.True(t, ok)
 		assert.Greater(t, ddm.Base.Timestamp, uint64(0))
 
+		// check DD operation info
+		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix, 0)
+		assert.Nil(t, err)
+		assert.Equal(t, "true", flag)
+		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
+		assert.Nil(t, err)
+		var ddOp DdOperation
+		err = DecodeDdOperation(ddOpStr, &ddOp)
+		assert.Nil(t, err)
+		assert.Equal(t, CreateCollectionDDType, ddOp.Type)
+
+		var ddCollReq = internalpb.CreateCollectionRequest{}
+		err = proto.UnmarshalText(ddOp.Body, &ddCollReq)
+		assert.Nil(t, err)
+		assert.Equal(t, createMeta.ID, ddCollReq.CollectionID)
+
+		var ddPartReq = internalpb.CreatePartitionRequest{}
+		err = proto.UnmarshalText(ddOp.Body1, &ddPartReq)
+		assert.Nil(t, err)
+		assert.Equal(t, createMeta.ID, ddPartReq.CollectionID)
+		assert.Equal(t, createMeta.PartitionIDs[0], ddPartReq.PartitionID)
+
 		// check invalid operation
 		req.Base.MsgID = 101
 		req.Base.Timestamp = 101
@@ -502,35 +524,6 @@ func TestMasterService(t *testing.T) {
 		status, err = core.CreateCollection(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
-
-		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
-		createMsg, ok = (msgs[0]).(*msgstream.CreateCollectionMsg)
-		assert.True(t, ok)
-		createMeta, err = core.MetaTable.GetCollectionByName("testColl-again", 0)
-		assert.Nil(t, err)
-		assert.Equal(t, createMeta.ID, createMsg.CollectionID)
-
-		// check DD operation info
-		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix, 0)
-		assert.Nil(t, err)
-		assert.Equal(t, "true", flag)
-		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
-		assert.Nil(t, err)
-		var ddOp DdOperation
-		err = DecodeDdOperation(ddOpStr, &ddOp)
-		assert.Nil(t, err)
-		assert.Equal(t, CreateCollectionDDType, ddOp.Type)
-
-		var ddCollReq = internalpb.CreateCollectionRequest{}
-		err = proto.UnmarshalText(ddOp.Body, &ddCollReq)
-		assert.Nil(t, err)
-		assert.Equal(t, createMeta.ID, ddCollReq.CollectionID)
-
-		var ddPartReq = internalpb.CreatePartitionRequest{}
-		err = proto.UnmarshalText(ddOp.Body1, &ddPartReq)
-		assert.Nil(t, err)
-		assert.Equal(t, createMeta.ID, ddPartReq.CollectionID)
-		assert.Equal(t, createMeta.PartitionIDs[0], ddPartReq.PartitionID)
 	})
 
 	t.Run("has collection", func(t *testing.T) {
