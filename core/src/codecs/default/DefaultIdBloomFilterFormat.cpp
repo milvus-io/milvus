@@ -17,7 +17,12 @@
 
 #include "codecs/default/DefaultIdBloomFilterFormat.h"
 
+#include <fcntl.h>
 #include <fiu-local.h>
+
+#define BOOST_NO_CXX11_SCOPED_ENUMS
+#include <boost/filesystem.hpp>
+#undef BOOST_NO_CXX11_SCOPED_ENUMS
 
 #include <memory>
 #include <string>
@@ -39,7 +44,7 @@ void
 DefaultIdBloomFilterFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
-    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
+    auto& dir_path = fs_ptr->operation_ptr_->GetDirectory();
     const std::string bloom_filter_file_path = dir_path + "/" + bloom_filter_filename_;
     scaling_bloom_t* bloom_filter{nullptr};
     do {
@@ -94,13 +99,18 @@ DefaultIdBloomFilterFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::I
 void
 DefaultIdBloomFilterFormat::write(const storage::FSHandlerPtr& fs_ptr,
                                   const segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
-    const std::lock_guard<std::mutex> lock(mutex_);
-
-    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
+    auto& dir_path = fs_ptr->operation_ptr_->GetDirectory();
     const std::string bloom_filter_file_path = dir_path + "/" + bloom_filter_filename_;
-    if (!fs_ptr->writer_ptr_->open(bloom_filter_file_path)) {
-        std::string err_msg =
-            "Failed to write bloom filter to file: " + bloom_filter_file_path + ". " + std::strerror(errno);
+    const std::string temp_bloom_filter_file_path = dir_path + "/" + "temp_bloom";
+
+    fs_ptr->operation_ptr_->CacheGet(bloom_filter_file_path);
+
+    bool exists = boost::filesystem::exists(bloom_filter_file_path);
+    const std::string* file_path = exists ? &temp_bloom_filter_file_path : &bloom_filter_file_path;
+
+    int del_fd = open(file_path->c_str(), O_RDWR | O_CREAT, 00664);
+    if (del_fd == -1) {
+        std::string err_msg = "Failed to write bloom filter to file: " + *file_path + ". " + std::strerror(errno);
         LOG_ENGINE_ERROR_ << err_msg;
         throw Exception(SERVER_UNEXPECTED_ERROR, err_msg);
     }
@@ -108,12 +118,25 @@ DefaultIdBloomFilterFormat::write(const storage::FSHandlerPtr& fs_ptr,
     auto bloom_filter = id_bloom_filter_ptr->GetBloomFilter();
 
     int64_t magic_num = BLOOM_FILTER_MAGIC_NUM;
-    fs_ptr->writer_ptr_->write(&magic_num, sizeof(magic_num));
-    fs_ptr->writer_ptr_->write(&bloom_filter->capacity, sizeof(bloom_filter->capacity));
-    fs_ptr->writer_ptr_->write(&bloom_filter->error_rate, sizeof(bloom_filter->error_rate));
-    fs_ptr->writer_ptr_->write(&bloom_filter->bitmap->bytes, sizeof(bloom_filter->bitmap->bytes));
-    fs_ptr->writer_ptr_->write(bloom_filter->bitmap->array, bloom_filter->bitmap->bytes);
-    fs_ptr->writer_ptr_->close();
+    ::write(del_fd, &magic_num, sizeof(magic_num));
+    ::write(del_fd, &bloom_filter->capacity, sizeof(bloom_filter->capacity));
+    ::write(del_fd, &bloom_filter->error_rate, sizeof(bloom_filter->error_rate));
+    ::write(del_fd, &bloom_filter->bitmap->bytes, sizeof(bloom_filter->bitmap->bytes));
+    ::write(del_fd, bloom_filter->bitmap->array, bloom_filter->bitmap->bytes);
+
+    if (::close(del_fd) == -1) {
+        std::string err_msg = "Failed to close file: " + *file_path + ", error: " + std::strerror(errno);
+        LOG_ENGINE_ERROR_ << err_msg;
+        throw Exception(SERVER_WRITE_ERROR, err_msg);
+    }
+
+    // Move temp file to bloom filter file
+    if (exists) {
+        const std::lock_guard<std::mutex> lock(mutex_);
+        boost::filesystem::rename(temp_bloom_filter_file_path, bloom_filter_file_path);
+    }
+
+    fs_ptr->operation_ptr_->CachePut(bloom_filter_file_path);
 }
 
 void
