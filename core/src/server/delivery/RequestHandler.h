@@ -17,7 +17,6 @@
 #include <utility>
 #include <vector>
 
-#include "context/HybridSearchContext.h"
 #include "query/BooleanQuery.h"
 #include "server/delivery/request/BaseRequest.h"
 #include "utils/Status.h"

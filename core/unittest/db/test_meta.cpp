@@ -394,34 +394,6 @@ TEST_F(MetaTest, COLLECTION_FILE_TEST) {
     ASSERT_EQ(table_file.file_type_, new_file_type);
 }
 
-TEST_F(MetaTest, HYBRID_COLLECTION_TEST) {
-    auto collection_id = "meta_test_hybrid";
-
-    milvus::engine::meta::CollectionSchema collection;
-    collection.collection_id_ = collection_id;
-    collection.dimension_ = 128;
-    milvus::engine::meta::hybrid::FieldsSchema fields_schema;
-    fields_schema.fields_schema_.resize(2);
-    fields_schema.fields_schema_[0].collection_id_ = collection_id;
-    fields_schema.fields_schema_[0].field_name_ = "field_0";
-    fields_schema.fields_schema_[0].field_type_ = (int32_t)milvus::engine::meta::hybrid::DataType::INT64;
-    fields_schema.fields_schema_[0].field_params_ = "";
-
-    fields_schema.fields_schema_[1].collection_id_ = collection_id;
-    fields_schema.fields_schema_[1].field_name_ = "field_1";
-    fields_schema.fields_schema_[1].field_type_ = (int32_t)milvus::engine::meta::hybrid::DataType::VECTOR;
-    fields_schema.fields_schema_[1].field_params_ = "";
-
-    auto status = impl_->CreateHybridCollection(collection, fields_schema);
-    ASSERT_TRUE(status.ok());
-    milvus::engine::meta::CollectionSchema describe_collection;
-    milvus::engine::meta::hybrid::FieldsSchema describe_fields;
-    describe_collection.collection_id_ = collection_id;
-    status = impl_->DescribeHybridCollection(describe_collection, describe_fields);
-    ASSERT_TRUE(status.ok());
-    ASSERT_EQ(describe_fields.fields_schema_.size(), 2);
-}
-
 TEST_F(MetaTest, COLLECTION_FILE_ROW_COUNT_TEST) {
     auto collection_id = "row_count_test_table";
 

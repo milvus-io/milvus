@@ -151,19 +151,6 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     DropIndex(const std::string& collection_id) override;
 
     Status
-    CreateHybridCollection(meta::CollectionSchema& collection_schema,
-                           meta::hybrid::FieldsSchema& fields_schema) override;
-
-    Status
-    DescribeHybridCollection(meta::CollectionSchema& collection_schema,
-                             meta::hybrid::FieldsSchema& fields_schema) override;
-
-    Status
-    InsertEntities(const std::string& collection_name, const std::string& partition_tag,
-                   const std::vector<std::string>& field_names, engine::Entity& entity,
-                   std::unordered_map<std::string, meta::hybrid::DataType>& field_types) override;
-
-    Status
     QueryByIDs(const std::shared_ptr<server::Context>& context, const std::string& collection_id,
                const std::vector<std::string>& partition_tags, uint64_t k, const milvus::json& extra_params,
                const IDNumbers& id_array, ResultIds& result_ids, ResultDistances& result_distances) override;
@@ -227,9 +214,6 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
 
     void
     BackgroundMerge(std::set<std::string> collection_ids, bool force_merge_all);
-
-    //    Status
-    //    MergeHybridFiles(const std::string& table_id, meta::FilesHolder& files_holder);
 
     void
     StartBuildIndexTask();
