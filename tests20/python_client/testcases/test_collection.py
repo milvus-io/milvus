@@ -762,7 +762,6 @@ class TestCollectionOperation(TestcaseBase):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5671")
     def test_collection_without_connection(self):
         """
         target: test collection without connection
@@ -774,7 +773,7 @@ class TestCollectionOperation(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        error = {ct.err_code: 0, ct.err_msg: "There is no connection with alias '{}'".format(ct.default_alias)}
+        error = {ct.err_code: 0, ct.err_msg: 'should create connect first'}
         self.collection_wrap.init_collection(c_name, schema=default_schema,
                                              check_task=CheckTasks.err_res, check_items=error)
         assert self.collection_wrap.collection is None
