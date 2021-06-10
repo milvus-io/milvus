@@ -116,6 +116,7 @@ func (m *meta) addPartition(collectionID UniqueID, partitionID UniqueID) error {
 	m.Lock()
 	defer m.Unlock()
 	if col, ok := m.collectionInfos[collectionID]; ok {
+		log.Debug("add a  partition to meta...", zap.Int64s("partitionIDs", col.PartitionIDs))
 		for _, id := range col.PartitionIDs {
 			if id == partitionID {
 				return errors.New("addPartition: partition already exists in collectionInfos")
@@ -123,6 +124,7 @@ func (m *meta) addPartition(collectionID UniqueID, partitionID UniqueID) error {
 		}
 		col.PartitionIDs = append(col.PartitionIDs, partitionID)
 		m.partitionStates[partitionID] = querypb.PartitionState_NotPresent
+		log.Debug("add a  partition to meta", zap.Int64s("partitionIDs", col.PartitionIDs))
 		return nil
 	}
 	return errors.New("addPartition: can't find collection when add partition")

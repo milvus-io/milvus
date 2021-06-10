@@ -351,7 +351,7 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 	}
 	collection.setReleaseTime(r.req.Base.Timestamp)
 
-	const gracefulReleaseTime = 10
+	const gracefulReleaseTime = 5
 	go func() {
 		errMsg := "release collection failed, collectionID = " + strconv.FormatInt(r.req.CollectionID, 10) + ", err = "
 		time.Sleep(gracefulReleaseTime * time.Second)
@@ -419,6 +419,10 @@ func (r *releasePartitionsTask) PreExecute(ctx context.Context) error {
 }
 
 func (r *releasePartitionsTask) Execute(ctx context.Context) error {
+	log.Debug("receive release partition task",
+		zap.Any("collectionID", r.req.CollectionID),
+		zap.Any("partitionIDs", r.req.PartitionIDs))
+
 	for _, id := range r.req.PartitionIDs {
 		r.node.streaming.dataSyncService.removePartitionFlowGraph(id)
 		hasPartitionInHistorical := r.node.historical.replica.hasPartition(id)
@@ -438,6 +442,10 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 			}
 		}
 	}
+
+	log.Debug("release partition task done",
+		zap.Any("collectionID", r.req.CollectionID),
+		zap.Any("partitionIDs", r.req.PartitionIDs))
 	return nil
 }
 

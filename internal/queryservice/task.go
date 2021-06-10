@@ -135,7 +135,7 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	log.Debug("loadCollectionTask: get recovery info")
+	log.Debug("loadCollectionTask: get recovery info", zap.Int64s("partitionIDs", showPartitionResponse.PartitionIDs))
 	segment2Binlog := make(map[UniqueID]*querypb.SegmentLoadInfo)
 	watchRequests := make(map[string]*querypb.WatchDmChannelsRequest)
 	channelsToWatch := make([]string, 0)
@@ -234,7 +234,7 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 			cluster:             lct.cluster,
 		}
 		lct.AddChildTask(loadSegmentTask)
-		log.Debug("add a loadSegmentTask to loadCollectionTask's childTask")
+		log.Debug("add a loadSegmentTask to loadCollectionTask's childTask",  zap.Any("load segment Task", loadSegmentTask))
 	}
 
 	for channel, nodeID := range watchRequest2Nodes {

@@ -13,6 +13,8 @@ package querynode
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
@@ -79,6 +81,13 @@ func (s *streaming) search(searchReqs []*searchRequest,
 				searchPartIDs = append(searchPartIDs, id)
 			}
 		}
+	}
+
+	if len(searchPartIDs) == 0 {
+		return nil, nil, errors.New("no search partition found in streaming, collectionID = " +
+			fmt.Sprintln(collID) +
+			"target partitionIDs = " +
+			fmt.Sprintln(partIDs))
 	}
 
 	for _, partID := range searchPartIDs {

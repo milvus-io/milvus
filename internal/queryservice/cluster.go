@@ -62,6 +62,7 @@ func (c *queryNodeCluster) LoadSegments(ctx context.Context, nodeID int64, in *q
 	defer c.Unlock()
 	if node, ok := c.nodes[nodeID]; ok {
 		//TODO::etcd
+		log.Debug("load segment infos", zap.Any("infos", in))
 		for _, info := range in.Infos {
 			segmentID := info.SegmentID
 			if info, ok := c.clusterMeta.segmentInfos[segmentID]; ok {
@@ -82,14 +83,15 @@ func (c *queryNodeCluster) LoadSegments(ctx context.Context, nodeID int64, in *q
 				if !c.clusterMeta.hasCollection(info.CollectionID) {
 					c.clusterMeta.addCollection(info.CollectionID, in.Schema)
 				}
+
 				c.clusterMeta.addPartition(info.CollectionID, info.PartitionID)
 
 				if !node.hasCollection(info.CollectionID) {
 					node.addCollection(info.CollectionID, in.Schema)
 				}
 				node.addPartition(info.CollectionID, info.PartitionID)
-				return status, err
 			}
+			return status, err
 		}
 		for _, info := range in.Infos {
 			segmentID := info.SegmentID
