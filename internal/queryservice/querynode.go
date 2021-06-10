@@ -14,11 +14,12 @@ package queryservice
 import (
 	"errors"
 	"fmt"
+	"sync"
+
 	nodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
-	"sync"
 )
 
 type queryNode struct {
@@ -129,14 +130,10 @@ func (qn *queryNode) addPartition(collectionID UniqueID, partitionID UniqueID) e
 func (qn *queryNode) releaseCollection(collectionID UniqueID) {
 	qn.Lock()
 	defer qn.Unlock()
-	if _, ok := qn.collectionInfos[collectionID]; ok {
-		delete(qn.collectionInfos, collectionID)
-	}
+	delete(qn.collectionInfos, collectionID)
 	//TODO::should reopen
 	collectionID = 0
-	if _, ok := qn.watchedQueryChannels[collectionID]; ok {
-		delete(qn.watchedQueryChannels, collectionID)
-	}
+	delete(qn.watchedQueryChannels, collectionID)
 }
 
 func (qn *queryNode) releasePartition(collectionID UniqueID, partitionID UniqueID) {
@@ -237,9 +234,6 @@ func (qn *queryNode) removeQueryChannel(collectionID UniqueID) error {
 	qn.Lock()
 	defer qn.Unlock()
 
-	if _, ok := qn.watchedQueryChannels[collectionID]; ok {
-		delete(qn.watchedQueryChannels, collectionID)
-	}
-
-	return errors.New("removeQueryChannel: can't find collection in watchedQueryChannel")
+	delete(qn.watchedQueryChannels, collectionID)
+	return nil
 }

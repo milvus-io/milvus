@@ -13,7 +13,6 @@ package queryservice
 
 import (
 	"context"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"math/rand"
 	"strconv"
 	"sync/atomic"
@@ -21,6 +20,7 @@ import (
 
 	"go.uber.org/zap"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"

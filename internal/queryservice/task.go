@@ -163,9 +163,7 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 				CollectionID: collectionID,
 				BinlogPaths:  make([]*querypb.FieldBinlog, 0),
 			}
-			for _, fieldBinLog := range segmentBingLog.FieldBinlogs {
-				segmentLoadInfo.BinlogPaths = append(segmentLoadInfo.BinlogPaths, fieldBinLog)
-			}
+			segmentLoadInfo.BinlogPaths = append(segmentLoadInfo.BinlogPaths, segmentBingLog.FieldBinlogs...)
 			segmentsToLoad = append(segmentsToLoad, segmentID)
 			segment2Binlog[segmentID] = segmentLoadInfo
 		}
@@ -234,7 +232,7 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 			cluster:             lct.cluster,
 		}
 		lct.AddChildTask(loadSegmentTask)
-		log.Debug("add a loadSegmentTask to loadCollectionTask's childTask",  zap.Any("load segment Task", loadSegmentTask))
+		log.Debug("add a loadSegmentTask to loadCollectionTask's childTask", zap.Any("load segment Task", loadSegmentTask))
 	}
 
 	for channel, nodeID := range watchRequest2Nodes {
@@ -426,9 +424,7 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 				CollectionID: collectionID,
 				BinlogPaths:  make([]*querypb.FieldBinlog, 0),
 			}
-			for _, fieldBinLog := range segmentBingLog.FieldBinlogs {
-				segmentLoadInfo.BinlogPaths = append(segmentLoadInfo.BinlogPaths, fieldBinLog)
-			}
+			segmentLoadInfo.BinlogPaths = append(segmentLoadInfo.BinlogPaths, segmentBingLog.FieldBinlogs...)
 			segmentsToLoad = append(segmentsToLoad, segmentID)
 			segment2BingLog[segmentID] = segmentLoadInfo
 		}
@@ -856,7 +852,7 @@ func mockGetRecoveryInfoFromDataService(ctx context.Context,
 					Position:  segmentStates[id].StartPosition,
 				}
 				channelInfo.CheckPoints = append(channelInfo.CheckPoints, checkpoint)
-				if checkpoint.Position.Timestamp < channelInfo.SeekPosition.Timestamp || channelInfo.SeekPosition.Timestamp == 0{
+				if checkpoint.Position.Timestamp < channelInfo.SeekPosition.Timestamp || channelInfo.SeekPosition.Timestamp == 0 {
 					channelInfo.SeekPosition = checkpoint.Position
 				}
 			}
@@ -913,7 +909,7 @@ func mockGetRecoveryInfoFromDataService(ctx context.Context,
 		for _, channel := range res.Values {
 			channelInfo := &querypb.VchannelInfo{
 				CollectionID: req.CollectionID,
-				ChannelName: channel,
+				ChannelName:  channel,
 			}
 			channelInfos = append(channelInfos, channelInfo)
 		}

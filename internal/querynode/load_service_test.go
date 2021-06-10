@@ -15,6 +15,11 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
+	"math/rand"
+	"path"
+	"strconv"
+
 	"github.com/milvus-io/milvus/internal/indexnode"
 	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -23,10 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"math"
-	"math/rand"
-	"path"
-	"strconv"
 )
 
 //func TestLoadService_LoadIndex_FloatVector(t *testing.T) {

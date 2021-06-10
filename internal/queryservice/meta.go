@@ -13,11 +13,12 @@ package queryservice
 
 import (
 	"errors"
-	"github.com/milvus-io/milvus/internal/log"
-	"go.uber.org/zap"
 	"strconv"
 	"sync"
 
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
@@ -133,9 +134,7 @@ func (m *meta) addPartition(collectionID UniqueID, partitionID UniqueID) error {
 func (m *meta) deleteSegmentInfoByID(segmentID UniqueID) {
 	m.Lock()
 	m.Unlock()
-	if _, ok := m.segmentInfos[segmentID]; ok {
-		delete(m.segmentInfos, segmentID)
-	}
+	delete(m.segmentInfos, segmentID)
 }
 
 func (m *meta) setSegmentInfo(segmentID UniqueID, info *querypb.SegmentInfo) {
@@ -205,9 +204,7 @@ func (m *meta) releaseCollection(collectionID UniqueID) {
 			delete(m.segmentInfos, id)
 		}
 	}
-	if _, ok := m.queryChannelInfos[collectionID]; ok {
-		delete(m.queryChannelInfos, collectionID)
-	}
+	delete(m.queryChannelInfos, collectionID)
 }
 
 func (m *meta) releasePartition(collectionID UniqueID, partitionID UniqueID) {

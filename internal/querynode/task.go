@@ -15,10 +15,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go.uber.org/zap"
 	"math/rand"
 	"strconv"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -119,7 +120,10 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		vChannels = append(vChannels, info.ChannelName)
 		vChannelsTmp = append(vChannelsTmp, info.ChannelName+strconv.FormatInt(collectionID, 10))
 	}
-	log.Debug("starting WatchDmChannels ...", zap.String("ChannelIDs", fmt.Sprintln(vChannels)))
+	log.Debug("starting WatchDmChannels ...",
+		zap.Any("collectionName", w.req.Schema.Name),
+		zap.Any("collectionID", collectionID),
+		zap.String("ChannelIDs", fmt.Sprintln(vChannels)))
 
 	// init replica
 	if hasCollectionInStreaming := w.node.streaming.replica.hasCollection(collectionID); !hasCollectionInStreaming {

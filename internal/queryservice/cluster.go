@@ -15,10 +15,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/log"
-	"go.uber.org/zap"
 	"sync"
 
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -294,5 +295,5 @@ func (c *queryNodeCluster) RegisterNode(ip string, port int64, id UniqueID) erro
 		c.nodes[id] = node
 		return nil
 	}
-	return errors.New(fmt.Sprintf("node %d alredy exists in cluster", id))
+	return fmt.Errorf("node %d alredy exists in cluster", id)
 }

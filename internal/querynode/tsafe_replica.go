@@ -14,9 +14,11 @@ package querynode
 import (
 	"context"
 	"errors"
-	"github.com/milvus-io/milvus/internal/log"
-	"go.uber.org/zap"
 	"sync"
+
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 )
 
 // TSafeReplicaInterface is the interface wrapper of tSafeReplica
@@ -71,7 +73,7 @@ func (t *tSafeReplica) addTSafe(vChannel VChannel) {
 	if _, ok := t.tSafes[vChannel]; !ok {
 		t.tSafes[vChannel] = newTSafe(ctx, vChannel)
 		t.tSafes[vChannel].start()
-		//log.Debug("add tSafe done", zap.Any("channel", vChannel))
+		log.Debug("add tSafe done", zap.Any("channel", vChannel))
 	}
 }
 

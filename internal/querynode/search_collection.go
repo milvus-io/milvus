@@ -257,8 +257,9 @@ func (s *searchCollection) loadBalance(msg *msgstream.LoadBalanceSegmentsMsg) {
 
 func (s *searchCollection) receiveSearch(msg *msgstream.SearchMsg) {
 	log.Debug("consume search message",
+		zap.Any("collectionID", msg.CollectionID),
 		zap.Int64("msgID", msg.ID()),
-		zap.Any("collectionID", msg.CollectionID))
+	)
 	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 	msg.SetTraceCtx(ctx)
 
@@ -284,10 +285,10 @@ func (s *searchCollection) receiveSearch(msg *msgstream.SearchMsg) {
 		bt, _ := tsoutil.ParseTS(msg.BeginTs())
 		st, _ := tsoutil.ParseTS(serviceTime)
 		log.Debug("querynode::receiveSearchMsg: add to unsolvedMsgs",
+			zap.Any("collectionID", s.collectionID),
 			zap.Any("sm.BeginTs", bt),
 			zap.Any("serviceTime", st),
 			zap.Any("delta seconds", (msg.BeginTs()-serviceTime)/(1000*1000*1000)),
-			zap.Any("collectionID", s.collectionID),
 			zap.Any("msgID", msg.ID()),
 		)
 		s.addToUnsolvedMsg(msg)
@@ -301,19 +302,22 @@ func (s *searchCollection) receiveSearch(msg *msgstream.SearchMsg) {
 		return
 	}
 	log.Debug("doing search in receiveSearchMsg...",
+		zap.Int64("collectionID", msg.CollectionID),
 		zap.Int64("msgID", msg.ID()),
-		zap.Int64("collectionID", msg.CollectionID))
+	)
 	err = s.search(msg)
 	if err != nil {
 		log.Error(err.Error())
 		log.Debug("do search failed in receiveSearchMsg, prepare to publish failed search result",
+			zap.Int64("collectionID", msg.CollectionID),
 			zap.Int64("msgID", msg.ID()),
-			zap.Int64("collectionID", msg.CollectionID))
+		)
 		s.publishFailedSearchResult(msg, err.Error())
 	}
 	log.Debug("do search done in receiveSearch",
+		zap.Int64("collectionID", msg.CollectionID),
 		zap.Int64("msgID", msg.ID()),
-		zap.Int64("collectionID", msg.CollectionID))
+	)
 	sp.Finish()
 }
 
@@ -343,8 +347,8 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 				bt, _ := tsoutil.ParseTS(sm.EndTs())
 				st, _ := tsoutil.ParseTS(serviceTime)
 				log.Debug("get search message from unsolvedMsg",
-					zap.Int64("msgID", sm.ID()),
 					zap.Int64("collectionID", sm.CollectionID),
+					zap.Int64("msgID", sm.ID()),
 					zap.Any("reqTime", bt),
 					zap.Any("serviceTime", st))
 				if sm.EndTs() <= serviceTime {
@@ -361,20 +365,23 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 				sp, ctx := trace.StartSpanFromContext(sm.TraceCtx())
 				sm.SetTraceCtx(ctx)
 				log.Debug("doing search in doUnsolvedMsgSearch...",
+					zap.Int64("collectionID", sm.CollectionID),
 					zap.Int64("msgID", sm.ID()),
-					zap.Int64("collectionID", sm.CollectionID))
+				)
 				err := s.search(sm)
 				if err != nil {
 					log.Error(err.Error())
 					log.Debug("do search failed in doUnsolvedMsgSearch, prepare to publish failed search result",
+						zap.Int64("collectionID", sm.CollectionID),
 						zap.Int64("msgID", sm.ID()),
-						zap.Int64("collectionID", sm.CollectionID))
+					)
 					s.publishFailedSearchResult(sm, err.Error())
 				}
 				sp.Finish()
 				log.Debug("do search done in doUnsolvedMsgSearch",
+					zap.Int64("collectionID", sm.CollectionID),
 					zap.Int64("msgID", sm.ID()),
-					zap.Int64("collectionID", sm.CollectionID))
+				)
 			}
 			log.Debug("doUnsolvedMsgSearch, do search done", zap.Int("num of searchMsg", len(searchMsg)))
 		}
@@ -397,13 +404,13 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	var plan *Plan
 	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
 		expr := searchMsg.SerializedExprPlan
-		plan, err = createPlanByExpr(*collection, expr)
+		plan, err = createPlanByExpr(collection, expr)
 		if err != nil {
 			return err
 		}
 	} else {
 		dsl := searchMsg.Dsl
-		plan, err = createPlan(*collection, dsl)
+		plan, err = createPlan(collection, dsl)
 		if err != nil {
 			return err
 		}
@@ -595,8 +602,9 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 
 func (s *searchCollection) publishSearchResult(msg msgstream.TsMsg, collectionID UniqueID) error {
 	log.Debug("publishing search result...",
+		zap.Int64("collectionID", collectionID),
 		zap.Int64("msgID", msg.ID()),
-		zap.Int64("collectionID", collectionID))
+	)
 	span, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 	defer span.Finish()
 	msg.SetTraceCtx(ctx)
@@ -607,8 +615,9 @@ func (s *searchCollection) publishSearchResult(msg msgstream.TsMsg, collectionID
 		log.Error(err.Error())
 	} else {
 		log.Debug("publish search result done",
+			zap.Int64("collectionID", collectionID),
 			zap.Int64("msgID", msg.ID()),
-			zap.Int64("collectionID", collectionID))
+		)
 	}
 	return err
 }

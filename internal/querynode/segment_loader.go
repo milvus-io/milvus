@@ -15,7 +15,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"strconv"
 
 	"go.uber.org/zap"
@@ -25,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 )

@@ -14,12 +14,12 @@ package queryservice
 import (
 	"container/list"
 	"context"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"sync"
 
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	oplog "github.com/opentracing/opentracing-go/log"
@@ -54,19 +54,23 @@ func (queue *TaskQueue) addTask(tasks []task) {
 	defer queue.Unlock()
 
 	for _, t := range tasks {
-		if queue.tasks.Len() == 0 {
-			queue.taskChan <- 1
-			queue.tasks.PushBack(t)
-			continue
-		}
-		for e := queue.tasks.Back(); e != nil; e = e.Prev() {
-			if t.TaskPriority() > e.Value.(task).TaskPriority() {
-				continue
-			}
-			//TODO:: take care of timestamp
-			queue.taskChan <- 1
-			queue.tasks.InsertAfter(t, e)
-		}
+		// TODO: check TaskPriority
+		queue.taskChan <- 1
+		queue.tasks.PushBack(t)
+
+		//if queue.tasks.Len() == 0 {
+		//	queue.taskChan <- 1
+		//	queue.tasks.PushBack(t)
+		//	continue
+		//}
+		//for e := queue.tasks.Back(); e != nil; e = e.Prev() {
+		//	if t.TaskPriority() > e.Value.(task).TaskPriority() {
+		//		continue
+		//	}
+		//	//TODO:: take care of timestamp
+		//	queue.taskChan <- 1
+		//	queue.tasks.InsertAfter(t, e)
+		//}
 	}
 }
 
@@ -206,7 +210,7 @@ func (scheduler *TaskScheduler) addActivateTask(wg *sync.WaitGroup, t task) {
 	activeTaskWg.Wait()
 }
 
-func (scheduler *TaskScheduler) waitActivateTaskDone( wg *sync.WaitGroup, t task) {
+func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task) {
 	defer wg.Done()
 	err := t.WaitToFinish()
 	if err != nil {

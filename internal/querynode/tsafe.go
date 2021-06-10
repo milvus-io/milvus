@@ -13,10 +13,12 @@ package querynode
 
 import (
 	"context"
-	"github.com/milvus-io/milvus/internal/log"
-	"go.uber.org/zap"
 	"math"
 	"sync"
+
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 )
 
 type tSafeWatcher struct {
@@ -110,6 +112,7 @@ func (ts *tSafe) start() {
 
 				log.Debug("set tSafe done",
 					zap.Any("id", m.id),
+					zap.Any("channel", ts.channel),
 					zap.Any("t", m.t),
 					zap.Any("tSafe", ts.tSafe))
 				ts.tSafeMu.Unlock()
