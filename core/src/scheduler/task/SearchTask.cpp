@@ -127,7 +127,7 @@ XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, Segmen
         }
 
         index_engine_ = EngineFactory::Build(file_->dimension_, file_->location_, engine_type,
-                                             (MetricType)file_->metric_type_, json_params);
+                                             (MetricType)file_->metric_type_, json_params, file_->updated_time_);
     }
 }
 
@@ -143,7 +143,7 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
     try {
         fiu_do_on("XSearchTask.Load.throw_std_exception", throw std::exception());
         if (type == LoadType::DISK2CPU) {
-            stat = index_engine_->Load();
+            stat = index_engine_->Load(true);
             type_str = "DISK2CPU";
         } else if (type == LoadType::CPU2GPU) {
             bool hybrid = false;

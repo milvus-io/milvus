@@ -13,6 +13,7 @@
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
 #include "config/Config.h"
+#include "db/Utils.h"
 #include "utils/Log.h"
 
 #include <dirent.h>
@@ -264,8 +265,12 @@ CommonUtil::EraseFromCache(const std::string& item_key) {
         return;
     }
 
+    std::string segment_dir;
+    engine::utils::GetParentPath(item_key, segment_dir);
+
     cache::CpuCacheMgr::GetInstance()->EraseItem(item_key);
-    cache::CpuCacheMgr::GetInstance()->EraseItem(item_key + cache::BloomFilter_Suffix);
+    cache::CpuCacheMgr::GetInstance()->EraseItem(segment_dir + cache::BloomFilter_Suffix);
+    cache::CpuCacheMgr::GetInstance()->EraseItem(segment_dir + cache::Blacklist_Suffix);
 
 #ifdef MILVUS_GPU_VERSION
     server::Config& config = server::Config::GetInstance();
@@ -281,7 +286,6 @@ CommonUtil::EraseFromCache(const std::string& item_key) {
 
 #ifdef MILVUS_FPGA_VERSION
     cache::FpgaCacheMgr::GetInstance()->EraseItem(item_key);
-    cache::FpgaCacheMgr::GetInstance()->EraseItem(item_key + cache::BloomFilter_Suffix);
 #endif
 }
 

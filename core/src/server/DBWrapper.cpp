@@ -82,7 +82,6 @@ DBWrapper::StartService() {
     }
     opt.insert_buffer_size_ = insert_buffer_size;
 
-#if 1
     bool cluster_enable = false;
     std::string cluster_role;
     STATUS_CHECK(config.GetClusterConfigEnable(cluster_enable));
@@ -97,27 +96,6 @@ DBWrapper::StartService() {
         std::cerr << "Error: cluster.role is not one of rw and ro." << std::endl;
         kill(0, SIGUSR1);
     }
-
-#else
-    std::string mode;
-    s = config.GetServerConfigDeployMode(mode);
-    if (!s.ok()) {
-        std::cerr << s.ToString() << std::endl;
-        return s;
-    }
-
-    if (mode == "single") {
-        opt.mode_ = engine::DBOptions::MODE::SINGLE;
-    } else if (mode == "cluster_readonly") {
-        opt.mode_ = engine::DBOptions::MODE::CLUSTER_READONLY;
-    } else if (mode == "cluster_writable") {
-        opt.mode_ = engine::DBOptions::MODE::CLUSTER_WRITABLE;
-    } else {
-        std::cerr << "Error: server_config.deploy_mode in server_config.yaml is not one of "
-                  << "single, cluster_readonly, and cluster_writable." << std::endl;
-        kill(0, SIGUSR1);
-    }
-#endif
 
     // get wal configurations
     s = config.GetWalConfigEnable(opt.wal_enable_);
@@ -163,7 +141,6 @@ DBWrapper::StartService() {
 
     if (omp_thread > 0) {
         omp_set_num_threads(omp_thread);
-        LOG_SERVER_DEBUG_ << "Specify openmp thread number: " << omp_thread;
     } else {
         int64_t sys_thread_cnt = 8;
         if (CommonUtil::GetSystemAvailableThreads(sys_thread_cnt)) {
@@ -171,6 +148,7 @@ DBWrapper::StartService() {
             omp_set_num_threads(omp_thread);
         }
     }
+    LOG_SERVER_DEBUG_ << "Specify openmp thread number: " << omp_thread;
 
     // init faiss global variable
     int64_t use_blas_threshold;
@@ -208,29 +186,15 @@ DBWrapper::StartService() {
     // create db root folder
     s = CommonUtil::CreateDirectory(opt.meta_.path_);
     if (!s.ok()) {
-        std::cerr << "Error: Failed to create database primary path: " << path
-                  << ". Possible reason: db_config.primary_path is wrong in server_config.yaml or not available."
-                  << std::endl;
+        std::cerr << "Error: Failed to create database path: " << path << std::endl;
         kill(0, SIGUSR1);
-    }
-
-    for (auto& path : opt.meta_.slave_paths_) {
-        s = CommonUtil::CreateDirectory(path);
-        if (!s.ok()) {
-            std::cerr << "Error: Failed to create database secondary path: " << path
-                      << ". Possible reason: db_config.secondary_path is wrong in server_config.yaml or not available."
-                      << std::endl;
-            kill(0, SIGUSR1);
-        }
     }
 
     // create db instance
     try {
         db_ = engine::DBFactory::Build(opt);
     } catch (std::exception& ex) {
-        std::cerr << "Error: failed to open database: " << ex.what()
-                  << ". Possible reason: out of storage, meta schema is damaged "
-                  << "or created by in-compatible Milvus version." << std::endl;
+        std::cerr << "Error: Failed to open database: " << ex.what() << std::endl;
         kill(0, SIGUSR1);
     }
 

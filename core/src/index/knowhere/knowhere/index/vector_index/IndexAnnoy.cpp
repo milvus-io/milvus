@@ -108,7 +108,7 @@ IndexAnnoy::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config) {
+IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config, faiss::ConcurrentBitsetPtr blacklist) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -119,7 +119,6 @@ IndexAnnoy::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     auto all_num = rows * k;
     auto p_id = (int64_t*)malloc(all_num * sizeof(int64_t));
     auto p_dist = (float*)malloc(all_num * sizeof(float));
-    faiss::ConcurrentBitsetPtr blacklist = GetBlacklist();
 
 #pragma omp parallel for
     for (unsigned int i = 0; i < rows; ++i) {

@@ -55,29 +55,25 @@ DeleteByIDRequest::OnExecute() {
             return status;
         }
 
-        // step 2: check collection existence
-        engine::meta::CollectionSchema collection_schema;
-        collection_schema.collection_id_ = collection_name_;
-        status = DBWrapper::DB()->DescribeCollection(collection_schema);
-        if (!status.ok()) {
-            if (status.code() == DB_NOT_FOUND) {
-                return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
-            } else {
+        if (!partition_tag_.empty()) {
+            status = ValidationUtil::ValidatePartitionTags({partition_tag_});
+            if (!status.ok()) {
                 return status;
-            }
-        } else {
-            if (!collection_schema.owner_collection_.empty()) {
-                return Status(SERVER_INVALID_COLLECTION_NAME, CollectionNotExistMsg(collection_name_));
             }
         }
 
-        // Check collection's index type supports delete
-        if (collection_schema.engine_type_ == (int32_t)engine::EngineType::SPTAG_BKT ||
-            collection_schema.engine_type_ == (int32_t)engine::EngineType::SPTAG_KDT) {
-            std::string err_msg =
-                "Index type " + std::to_string(collection_schema.engine_type_) + " does not support delete operation";
-            LOG_SERVER_ERROR_ << err_msg;
-            return Status(SERVER_UNSUPPORTED_ERROR, err_msg);
+        // step 2: check collection and partition existence
+        bool has_or_not;
+        DBWrapper::DB()->HasNativeCollection(collection_name_, has_or_not);
+        if (!has_or_not) {
+            return Status(SERVER_COLLECTION_NOT_EXIST, CollectionNotExistMsg(collection_name_));
+        }
+
+        if (!partition_tag_.empty()) {
+            DBWrapper::DB()->HasPartition(collection_name_, partition_tag_, has_or_not);
+            if (!has_or_not) {
+                return Status(SERVER_INVALID_PARTITION_TAG, PartitionNotExistMsg(collection_name_, partition_tag_));
+            }
         }
 
         rc.RecordSection("check validation");

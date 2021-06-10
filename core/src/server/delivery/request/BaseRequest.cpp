@@ -148,6 +148,13 @@ BaseRequest::CollectionNotExistMsg(const std::string& collection_name) {
            "You also can check whether the collection name exists.";
 }
 
+std::string
+BaseRequest::PartitionNotExistMsg(const std::string& collection_name, const std::string& partition_tag) {
+    return "Collection " + collection_name + " partition_tag " + partition_tag +
+           " does not exist. Use milvus.partition to verify whether the partition exists. "
+           "You also can check whether the partition name exists.";
+}
+
 Status
 BaseRequest::WaitToFinish() {
     std::unique_lock<std::mutex> lock(finish_mtx_);

@@ -55,13 +55,28 @@ SegmentReader::Load() {
 }
 
 Status
-SegmentReader::LoadVectors(off_t offset, size_t num_bytes, std::vector<uint8_t>& raw_vectors) {
+SegmentReader::LoadsVectors(VectorsPtr& vectors_ptr) {
+    codec::DefaultCodec default_codec;
+    try {
+        fs_ptr_->operation_ptr_->CreateDirectory();
+        vectors_ptr = std::make_shared<Vectors>();
+        default_codec.GetVectorsFormat()->read(fs_ptr_, vectors_ptr);
+    } catch (std::exception& e) {
+        std::string err_msg = "Failed to load raw vectors: " + std::string(e.what());
+        LOG_ENGINE_ERROR_ << err_msg;
+        return Status(DB_ERROR, e.what());
+    }
+    return Status::OK();
+}
+
+Status
+SegmentReader::LoadsSingleVector(off_t offset, size_t num_bytes, std::vector<uint8_t>& raw_vectors) {
     codec::DefaultCodec default_codec;
     try {
         fs_ptr_->operation_ptr_->CreateDirectory();
         default_codec.GetVectorsFormat()->read_vectors(fs_ptr_, offset, num_bytes, raw_vectors);
     } catch (std::exception& e) {
-        std::string err_msg = "Failed to load raw vectors: " + std::string(e.what());
+        std::string err_msg = "Failed to load single vector: " + std::string(e.what());
         LOG_ENGINE_ERROR_ << err_msg;
         return Status(DB_ERROR, err_msg);
     }
@@ -104,7 +119,7 @@ SegmentReader::LoadVectorIndex(const std::string& location, segment::VectorIndex
 }
 
 Status
-SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
+SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr, bool cache_force) {
     codec::DefaultCodec default_codec;
     try {
         // load id_bloom_filter from cache
@@ -117,7 +132,11 @@ SegmentReader::LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr) {
             default_codec.GetIdBloomFilterFormat()->read(fs_ptr_, id_bloom_filter_ptr);
 
             // add id_bloom_filter into cache
-            cache::CpuCacheMgr::GetInstance()->InsertItem(cache_key, id_bloom_filter_ptr);
+            if (cache_force) {
+                cache::CpuCacheMgr::GetInstance()->InsertItem(cache_key, id_bloom_filter_ptr);
+            } else {
+                cache::CpuCacheMgr::GetInstance()->InsertItemIfNotExist(cache_key, id_bloom_filter_ptr);
+            }
         }
     } catch (std::exception& e) {
         std::string err_msg = "Failed to load bloom filter: " + std::string(e.what());

@@ -38,14 +38,12 @@ GPUIVF::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     if (gpu_res != nullptr) {
         ResScope rs(gpu_res, gpu_id_, true);
         faiss::gpu::GpuIndexIVFFlatConfig idx_config;
-        idx_config.device = gpu_id_;
+        idx_config.device = static_cast<int32_t>(gpu_id_);
         int32_t nlist = config[IndexParams::nlist];
         faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
-        auto device_index =
-            new faiss::gpu::GpuIndexIVFFlat(gpu_res->faiss_res.get(), dim, nlist, metric_type, idx_config);
-        device_index->train(rows, (float*)p_data);
-
-        index_.reset(device_index);
+        index_ = std::make_shared<faiss::gpu::GpuIndexIVFFlat>(gpu_res->faiss_res.get(), dim, nlist, metric_type,
+                                                               idx_config);
+        index_->train(rows, (float*)p_data);
         res_ = gpu_res;
     } else {
         KNOWHERE_THROW_MSG("Build IVF can't get gpu resource");
@@ -133,7 +131,8 @@ GPUIVF::LoadImpl(const BinarySet& binary_set, const IndexType& type) {
 }
 
 void
-GPUIVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
+GPUIVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config,
+                  faiss::ConcurrentBitsetPtr blacklist) {
     auto device_index = std::dynamic_pointer_cast<faiss::gpu::GpuIndexIVF>(index_);
     fiu_do_on("GPUIVF.search_impl.invald_index", device_index = nullptr);
     if (device_index) {
@@ -145,8 +144,7 @@ GPUIVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int
         int64_t dim = device_index->d;
         for (int64_t i = 0; i < n; i += block_size) {
             int64_t search_size = (n - i > block_size) ? block_size : (n - i);
-            device_index->search(search_size, (float*)data + i * dim, k, distances + i * k, labels + i * k,
-                                 GetBlacklist());
+            device_index->search(search_size, (float*)data + i * dim, k, distances + i * k, labels + i * k, blacklist);
         }
     } else {
         KNOWHERE_THROW_MSG("Not a GpuIndexIVF type.");

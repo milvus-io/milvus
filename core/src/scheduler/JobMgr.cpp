@@ -98,7 +98,7 @@ JobMgr::worker_function() {
                     engine::utils::GetParentPath(location, segment_dir);
                     segment::SegmentReader segment_reader(segment_dir);
                     segment::IdBloomFilterPtr id_bloom_filter_ptr;
-                    segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
+                    segment_reader.LoadBloomFilter(id_bloom_filter_ptr, false);
 
                     // Check if the id is present.
                     bool pass = true;

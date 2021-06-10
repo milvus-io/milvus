@@ -39,7 +39,7 @@ void
 DefaultDeletedDocsFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::DeletedDocsPtr& deleted_docs) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
-    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
+    auto& dir_path = fs_ptr->operation_ptr_->GetDirectory();
     const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
     fs_ptr->operation_ptr_->CacheGet(del_file_path);
 
@@ -78,7 +78,7 @@ DefaultDeletedDocsFormat::read(const storage::FSHandlerPtr& fs_ptr, segment::Del
 
 void
 DefaultDeletedDocsFormat::write(const storage::FSHandlerPtr& fs_ptr, const segment::DeletedDocsPtr& deleted_docs) {
-    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
+    auto& dir_path = fs_ptr->operation_ptr_->GetDirectory();
     const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
 
     // Create a temporary file from the existing file
@@ -153,7 +153,7 @@ void
 DefaultDeletedDocsFormat::readSize(const storage::FSHandlerPtr& fs_ptr, size_t& size) {
     const std::lock_guard<std::mutex> lock(mutex_);
 
-    std::string dir_path = fs_ptr->operation_ptr_->GetDirectory();
+    auto& dir_path = fs_ptr->operation_ptr_->GetDirectory();
     const std::string del_file_path = dir_path + "/" + deleted_docs_filename_;
     fs_ptr->operation_ptr_->CacheGet(del_file_path);
 

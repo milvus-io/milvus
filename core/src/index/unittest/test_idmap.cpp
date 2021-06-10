@@ -73,7 +73,7 @@ TEST_P(IDMAPTest, idmap_basic) {
     // null faiss index
     {
         ASSERT_ANY_THROW(index_->Serialize());
-        ASSERT_ANY_THROW(index_->Query(query_dataset, conf));
+        ASSERT_ANY_THROW(index_->Query(query_dataset, conf, nullptr));
         ASSERT_ANY_THROW(index_->AddWithoutIds(nullptr, conf));
     }
 
@@ -82,7 +82,7 @@ TEST_P(IDMAPTest, idmap_basic) {
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
     ASSERT_TRUE(index_->GetRawVectors() != nullptr);
-    auto result = index_->Query(query_dataset, conf);
+    auto result = index_->Query(query_dataset, conf, nullptr);
     AssertAnns(result, nq, k);
     //    PrintResult(result, nq, k);
     ReleaseQueryResult(result);
@@ -97,7 +97,7 @@ TEST_P(IDMAPTest, idmap_basic) {
     auto binaryset = index_->Serialize();
     auto new_index = std::make_shared<milvus::knowhere::IDMAP>();
     new_index->Load(binaryset);
-    auto result2 = new_index->Query(query_dataset, conf);
+    auto result2 = new_index->Query(query_dataset, conf, nullptr);
     AssertAnns(result2, nq, k);
     //    PrintResult(re_result, nq, k);
     ReleaseQueryResult(result2);
@@ -114,9 +114,8 @@ TEST_P(IDMAPTest, idmap_basic) {
     for (int64_t i = 0; i < nq; ++i) {
         concurrent_bitset_ptr->set(i);
     }
-    index_->SetBlacklist(concurrent_bitset_ptr);
 
-    auto result_bs_1 = index_->Query(query_dataset, conf);
+    auto result_bs_1 = index_->Query(query_dataset, conf, concurrent_bitset_ptr);
     AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
     ReleaseQueryResult(result_bs_1);
 
@@ -154,7 +153,7 @@ TEST_P(IDMAPTest, idmap_serialize) {
 #endif
         }
 
-        auto re_result = index_->Query(query_dataset, conf);
+        auto re_result = index_->Query(query_dataset, conf, nullptr);
         AssertAnns(re_result, nq, k);
         //        PrintResult(re_result, nq, k);
         ReleaseQueryResult(re_result);
@@ -174,7 +173,7 @@ TEST_P(IDMAPTest, idmap_serialize) {
         index_->Load(binaryset);
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dim(), dim);
-        auto result = index_->Query(query_dataset, conf);
+        auto result = index_->Query(query_dataset, conf, nullptr);
         AssertAnns(result, nq, k);
         //        PrintResult(result, nq, k);
         ReleaseQueryResult(result);
@@ -194,7 +193,7 @@ TEST_P(IDMAPTest, idmap_copy) {
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
     ASSERT_TRUE(index_->GetRawVectors() != nullptr);
-    auto result = index_->Query(query_dataset, conf);
+    auto result = index_->Query(query_dataset, conf, nullptr);
     AssertAnns(result, nq, k);
     // PrintResult(result, nq, k);
     ReleaseQueryResult(result);
@@ -210,7 +209,7 @@ TEST_P(IDMAPTest, idmap_copy) {
         // cpu to gpu
         ASSERT_ANY_THROW(milvus::knowhere::cloner::CopyCpuToGpu(index_, -1, conf));
         auto clone_index = milvus::knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, conf);
-        auto clone_result = clone_index->Query(query_dataset, conf);
+        auto clone_result = clone_index->Query(query_dataset, conf, nullptr);
         AssertAnns(clone_result, nq, k);
         ReleaseQueryResult(clone_result);
         ASSERT_THROW({ std::static_pointer_cast<milvus::knowhere::GPUIDMAP>(clone_index)->GetRawVectors(); },
@@ -223,7 +222,7 @@ TEST_P(IDMAPTest, idmap_copy) {
 
         auto binary = clone_index->Serialize();
         clone_index->Load(binary);
-        auto new_result = clone_index->Query(query_dataset, conf);
+        auto new_result = clone_index->Query(query_dataset, conf, nullptr);
         AssertAnns(new_result, nq, k);
         ReleaseQueryResult(new_result);
 
@@ -233,7 +232,7 @@ TEST_P(IDMAPTest, idmap_copy) {
 
         // gpu to cpu
         auto host_index = milvus::knowhere::cloner::CopyGpuToCpu(clone_index, conf);
-        auto host_result = host_index->Query(query_dataset, conf);
+        auto host_result = host_index->Query(query_dataset, conf, nullptr);
         AssertAnns(host_result, nq, k);
         ReleaseQueryResult(host_result);
         ASSERT_TRUE(std::static_pointer_cast<milvus::knowhere::IDMAP>(host_index)->GetRawVectors() != nullptr);
@@ -242,7 +241,7 @@ TEST_P(IDMAPTest, idmap_copy) {
         auto device_index = milvus::knowhere::cloner::CopyCpuToGpu(index_, DEVICEID, conf);
         auto new_device_index =
             std::static_pointer_cast<milvus::knowhere::GPUIDMAP>(device_index)->CopyGpuToGpu(DEVICEID, conf);
-        auto device_result = new_device_index->Query(query_dataset, conf);
+        auto device_result = new_device_index->Query(query_dataset, conf, nullptr);
         AssertAnns(device_result, nq, k);
         ReleaseQueryResult(device_result);
     }

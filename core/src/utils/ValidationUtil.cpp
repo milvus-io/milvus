@@ -19,6 +19,7 @@
 #include "utils/StringHelpFunctions.h"
 
 #include <arpa/inet.h>
+#include <netdb.h>
 
 #ifdef MILVUS_GPU_VERSION
 
@@ -43,7 +44,7 @@ constexpr int64_t COLLECTION_DIMENSION_LIMIT = 32768;
 #ifdef MILVUS_FPGA_VERSION
 constexpr int32_t INDEX_FILE_SIZE_LIMIT = 65536;  // due to max size memory of fpga is 64G
 #else
-constexpr int32_t INDEX_FILE_SIZE_LIMIT = 4096;  // index trigger size max = 4096 MB
+constexpr int32_t INDEX_FILE_SIZE_LIMIT = 131072;  // index trigger size max = 128G
 #endif
 constexpr int64_t M_BYTE = 1024 * 1024;
 constexpr int64_t MAX_INSERT_DATA_SIZE = 256 * M_BYTE;
@@ -397,7 +398,7 @@ ValidationUtil::ValidateCollectionIndexFileSize(int64_t index_file_size) {
     if (index_file_size <= 0 || index_file_size > INDEX_FILE_SIZE_LIMIT) {
         std::string msg = "Invalid index file size: " + std::to_string(index_file_size) + ". " +
                           "The index file size must be within the range of 1 ~ " +
-                          std::to_string(INDEX_FILE_SIZE_LIMIT) + ".";
+                          std::to_string(INDEX_FILE_SIZE_LIMIT) + "(MB).";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_INDEX_FILE_SIZE, msg);
     }
@@ -554,6 +555,18 @@ ValidationUtil::ValidateIpAddress(const std::string& ip_address) {
             return Status(SERVER_UNEXPECTED_ERROR, msg);
         }
     }
+}
+
+Status
+ValidationUtil::ValidateHostname(const std::string& hostname) {
+    struct hostent* hent = gethostbyname(hostname.c_str());
+    fiu_do_on("ValidationUtil.ValidateHostname.invalid_hostname", hent = nullptr);
+    if (!hent) {
+        std::string msg = "Unresolvable hostname: " + hostname;
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
 }
 
 Status

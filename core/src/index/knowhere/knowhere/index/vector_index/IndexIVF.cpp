@@ -85,7 +85,7 @@ IVF::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-IVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
+IVF::Query(const DatasetPtr& dataset_ptr, const Config& config, faiss::ConcurrentBitsetPtr blacklist) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -103,7 +103,7 @@ IVF::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         auto p_id = (int64_t*)malloc(p_id_size);
         auto p_dist = (float*)malloc(p_dist_size);
 
-        QueryImpl(rows, (float*)p_data, k, p_dist, p_id, config);
+        QueryImpl(rows, (float*)p_data, k, p_dist, p_id, config, blacklist);
         MapOffsetToUid(p_id, static_cast<size_t>(elems));
 
         auto ret_ds = std::make_shared<Dataset>();
@@ -272,7 +272,7 @@ IVF::GenGraph(const float* data, const int64_t k, GraphType& graph, const Config
         res.resize(K * b_size);
 
         auto xq = data + batch_size * dim * i;
-        QueryImpl(b_size, (float*)xq, K, res_dis.data(), res.data(), config);
+        QueryImpl(b_size, (float*)xq, K, res_dis.data(), res.data(), config, nullptr);
 
         for (int j = 0; j < b_size; ++j) {
             auto& node = graph[batch_size * i + j];
@@ -294,7 +294,8 @@ IVF::GenParams(const Config& config) {
 }
 
 void
-IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
+IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config,
+               faiss::ConcurrentBitsetPtr blacklist) {
     auto params = GenParams(config);
     auto ivf_index = dynamic_cast<faiss::IndexIVF*>(index_.get());
     ivf_index->nprobe = std::min(params->nprobe, ivf_index->invlists->nlist);
@@ -304,7 +305,7 @@ IVF::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_
     } else {
         ivf_index->parallel_mode = 0;
     }
-    ivf_index->search(n, (float*)data, k, distances, labels, GetBlacklist());
+    ivf_index->search(n, (float*)data, k, distances, labels, blacklist);
     stdclock::time_point after = stdclock::now();
     double search_cost = (std::chrono::duration<double, std::micro>(after - before)).count();
     LOG_KNOWHERE_DEBUG_ << "IVF search cost: " << search_cost

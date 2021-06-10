@@ -12,8 +12,7 @@
 
 #include <faiss/IndexSQHybrid.h>
 #include <faiss/gpu/GpuCloner.h>
-#include <faiss/gpu/GpuIndexIVF.h>
-#include <faiss/index_factory.h>
+#include <faiss/gpu/GpuIndexIVFSQHybrid.h>
 #include <fiu-local.h>
 #include <string>
 #include <utility>
@@ -34,28 +33,22 @@ IVFSQHybrid::Train(const DatasetPtr& dataset_ptr, const Config& config) {
     GETTENSOR(dataset_ptr)
     gpu_id_ = config[knowhere::meta::DEVICEID];
 
-    std::stringstream index_type;
-    index_type << "IVF" << config[IndexParams::nlist] << ","
-               << "SQ8Hybrid";
-    auto build_index =
-        faiss::index_factory(dim, index_type.str().c_str(), GetMetricType(config[Metric::TYPE].get<std::string>()));
-
     auto gpu_res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id_);
     if (gpu_res != nullptr) {
         ResScope rs(gpu_res, gpu_id_, true);
-        auto device_index = faiss::gpu::index_cpu_to_gpu(gpu_res->faiss_res.get(), gpu_id_, build_index);
-        device_index->train(rows, (float*)p_data);
-
-        index_.reset(device_index);
+        faiss::gpu::GpuIndexIVFSQHybridConfig idx_config;
+        idx_config.device = static_cast<int32_t>(gpu_id_);
+        int32_t nlist = config[IndexParams::nlist];
+        faiss::MetricType metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
+        index_ = std::make_shared<faiss::gpu::GpuIndexIVFSQHybrid>(
+            gpu_res->faiss_res.get(), dim, nlist, faiss::QuantizerType::QT_8bit, metric_type, true, idx_config);
+        index_->train(rows, reinterpret_cast<const float*>(p_data));
         res_ = gpu_res;
         gpu_mode_ = 2;
         index_mode_ = IndexMode::MODE_GPU;
     } else {
-        delete build_index;
         KNOWHERE_THROW_MSG("Build IVFSQHybrid can't get gpu resource");
     }
-
-    delete build_index;
 }
 
 VecIndexPtr
@@ -243,21 +236,21 @@ IVFSQHybrid::LoadImpl(const BinarySet& binary_set, const IndexType& type) {
 }
 
 void
-IVFSQHybrid::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels,
-                       const Config& config) {
+IVFSQHybrid::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config,
+                       faiss::ConcurrentBitsetPtr blacklist) {
     if (gpu_mode_ == 2) {
-        GPUIVF::QueryImpl(n, data, k, distances, labels, config);
+        GPUIVF::QueryImpl(n, data, k, distances, labels, config, blacklist);
         //        index_->search(n, (float*)data, k, distances, labels);
     } else if (gpu_mode_ == 1) {  // hybrid
         auto gpu_id = quantizer_->gpu_id;
         if (auto res = FaissGpuResourceMgr::GetInstance().GetRes(gpu_id)) {
             ResScope rs(res, gpu_id, true);
-            IVF::QueryImpl(n, data, k, distances, labels, config);
+            IVF::QueryImpl(n, data, k, distances, labels, config, blacklist);
         } else {
             KNOWHERE_THROW_MSG("Hybrid Search Error, can't get gpu: " + std::to_string(gpu_id) + "resource");
         }
     } else if (gpu_mode_ == 0) {
-        IVF::QueryImpl(n, data, k, distances, labels, config);
+        IVF::QueryImpl(n, data, k, distances, labels, config, blacklist);
     }
 }
 

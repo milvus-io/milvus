@@ -110,7 +110,7 @@ IndexHNSW::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
+IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config, faiss::ConcurrentBitsetPtr blacklist) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -124,7 +124,6 @@ IndexHNSW::Query(const DatasetPtr& dataset_ptr, const Config& config) {
 
     index_->setEf(config[IndexParams::ef]);
 
-    faiss::ConcurrentBitsetPtr blacklist = GetBlacklist();
     bool transform = (index_->metric_type_ == 1);  // InnerProduct: 1
 
 #pragma omp parallel for

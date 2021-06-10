@@ -232,7 +232,7 @@ MemTable::ApplyDeletes() {
         utils::GetParentPath(file.location_, segment_dir);
 
         segment::SegmentReader segment_reader(segment_dir);
-        segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
+        segment_reader.LoadBloomFilter(id_bloom_filter_ptr, true);
 
         for (auto& id : doc_ids_to_delete_) {
             if (id_bloom_filter_ptr->Check(id)) {
@@ -263,42 +263,28 @@ MemTable::ApplyDeletes() {
 
         TimeRecorder rec("handle segment " + file.segment_id_);
 
-        auto& segment_id = file.segment_id_;
+        // prepare segment_files
         meta::FilesHolder segment_holder;
-        status = meta_->GetCollectionFilesBySegmentId(segment_id, segment_holder);
+        status = meta_->GetCollectionFilesBySegmentId(file.segment_id_, segment_holder);
         if (!status.ok()) {
             break;
         }
-
-        segment::UidsPtr uids_ptr = nullptr;
-
-        // Get all index that contains blacklist in cache
-        std::vector<knowhere::VecIndexPtr> indexes;
-        std::vector<faiss::ConcurrentBitsetPtr> blacklists;
         milvus::engine::meta::SegmentsSchema& segment_files = segment_holder.HoldFiles();
+
+        // prepare segment dir
+        std::string segment_dir;
+        utils::GetParentPath(file.location_, segment_dir);
+
+        // load uids
+        segment::UidsPtr uids_ptr = nullptr;
         for (auto& segment_file : segment_files) {
             auto data_obj_ptr = cache::CpuCacheMgr::GetInstance()->GetItem(segment_file.location_);
             auto index = std::static_pointer_cast<knowhere::VecIndex>(data_obj_ptr);
             if (index != nullptr) {
-                faiss::ConcurrentBitsetPtr blacklist = index->GetBlacklist();
-                if (blacklist == nullptr) {
-                    // to update and set the blacklist
-                    blacklist = std::make_shared<faiss::ConcurrentBitset>(index->Count());
-                    indexes.emplace_back(index);
-                    blacklists.emplace_back(blacklist);
-                } else {
-                    // just to update the blacklist
-                    indexes.emplace_back(nullptr);
-                    blacklists.emplace_back(blacklist);
-                }
-
-                // load uids from cache
                 uids_ptr = index->GetUids();
+                break;
             }
         }
-
-        std::string segment_dir;
-        utils::GetParentPath(file.location_, segment_dir);
         if (uids_ptr == nullptr) {
             // load uids from disk
             segment::SegmentReader segment_reader(segment_dir);
@@ -308,9 +294,7 @@ MemTable::ApplyDeletes() {
             }
         }
 
-        segment::DeletedDocsPtr deleted_docs = std::make_shared<segment::DeletedDocs>();
-
-        rec.RecordSection("Loading uids and deleted docs");
+        rec.RecordSection("Loading uids");
 
         std::sort(ids_to_check.begin(), ids_to_check.end());
 
@@ -319,6 +303,7 @@ MemTable::ApplyDeletes() {
         auto find_diff = std::chrono::duration<double>::zero();
         auto set_diff = std::chrono::duration<double>::zero();
 
+        segment::DeletedDocsPtr deleted_docs = std::make_shared<segment::DeletedDocs>();
         for (size_t i = 0; i < uids_ptr->size(); ++i) {
             auto find_start = std::chrono::high_resolution_clock::now();
 
@@ -333,9 +318,6 @@ MemTable::ApplyDeletes() {
                 deleted_docs->AddDeletedDoc(i);
                 id_bloom_filter_ptr->Remove((*uids_ptr)[i]);
 
-                for (auto& blacklist : blacklists) {
-                    blacklist->set(i);
-                }
                 auto set_end = std::chrono::high_resolution_clock::now();
                 set_diff += (set_end - set_start);
             }
@@ -350,12 +332,6 @@ MemTable::ApplyDeletes() {
         if (deleted_docs->GetSize() == 0) {
             LOG_ENGINE_DEBUG_ << "deleted_docs does not need to be updated";
             continue;
-        }
-
-        for (size_t i = 0; i < indexes.size(); ++i) {
-            if (indexes[i]) {
-                indexes[i]->SetBlacklist(blacklists[i]);
-            }
         }
 
         segment::Segment tmp_segment;

@@ -81,6 +81,9 @@ class ValidationUtil {
     ValidateIpAddress(const std::string& ip_address);
 
     static Status
+    ValidateHostname(const std::string& hostname);
+
+    static Status
     ValidateStringIsNumber(const std::string& str);
 
     static Status

@@ -50,7 +50,7 @@ TEST_P(HNSWTest, HNSW_basic) {
     // null faiss index
     {
         ASSERT_ANY_THROW(index_->Serialize());
-        ASSERT_ANY_THROW(index_->Query(query_dataset, conf));
+        ASSERT_ANY_THROW(index_->Query(query_dataset, conf, nullptr));
         ASSERT_ANY_THROW(index_->AddWithoutIds(nullptr, conf));
         ASSERT_ANY_THROW(index_->Count());
         ASSERT_ANY_THROW(index_->Dim());
@@ -61,7 +61,7 @@ TEST_P(HNSWTest, HNSW_basic) {
     EXPECT_EQ(index_->Count(), nb);
     EXPECT_EQ(index_->Dim(), dim);
 
-    auto result = index_->Query(query_dataset, conf);
+    auto result = index_->Query(query_dataset, conf, nullptr);
     AssertAnns(result, nq, k);
     ReleaseQueryResult(result);
 
@@ -70,7 +70,7 @@ TEST_P(HNSWTest, HNSW_basic) {
     base_dataset->Set(milvus::knowhere::meta::ROWS, rows);
     index_->Train(base_dataset, conf);
     index_->AddWithoutIds(base_dataset, conf);
-    auto result2 = index_->Query(query_dataset, conf);
+    auto result2 = index_->Query(query_dataset, conf, nullptr);
     auto res_ids = result2->Get<int64_t*>(milvus::knowhere::meta::IDS);
     for (int64_t i = 0; i < nq; i++) {
         for (int64_t j = rows; j < k; j++) {
@@ -92,12 +92,11 @@ TEST_P(HNSWTest, HNSW_delete) {
     for (auto i = 0; i < nq; ++i) {
         bitset->set(i);
     }
-    auto result1 = index_->Query(query_dataset, conf);
+    auto result1 = index_->Query(query_dataset, conf, nullptr);
     AssertAnns(result1, nq, k);
     ReleaseQueryResult(result1);
 
-    index_->SetBlacklist(bitset);
-    auto result2 = index_->Query(query_dataset, conf);
+    auto result2 = index_->Query(query_dataset, conf, bitset);
     AssertAnns(result2, nq, k, CheckMode::CHECK_NOT_EQUAL);
     ReleaseQueryResult(result2);
 
@@ -151,7 +150,7 @@ TEST_P(HNSWTest, HNSW_serialize) {
         index_->Load(binaryset);
         EXPECT_EQ(index_->Count(), nb);
         EXPECT_EQ(index_->Dim(), dim);
-        auto result = index_->Query(query_dataset, conf);
+        auto result = index_->Query(query_dataset, conf, nullptr);
         AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
         ReleaseQueryResult(result);
     }

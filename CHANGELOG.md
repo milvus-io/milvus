@@ -4,11 +4,20 @@ Please mark all change in change log and use the issue from GitHub
 
 # Milvus 1.1.1 (TBD)
 ## Bug
+-   \#4897 Query results contain some deleted ids
+-   \#5164 Exception should be raised if insert or delete entity on the none-existed partition
+-   \#5191 Mishards throw "index out of range" error after continually search/insert for a period of time
+-   \#5574 IVF_SQ8 and IVF_PQ cannot be built on multiple GPUs
 
 ## Feature
+-   \#1434 Storage: enabling s3 storage support (implemented by Unisinsight)
+-   \#5142 Support keeping index in GPU memory
 
 ## Improvement
--   \#5161 Enable Gpu cache 
+-   \#5204 Improve IVF query on GPU when no entity deleted
+-   \#5544 Support the limitation of index_file_size to 128GB
+
+## Task
 
 # Milvus 1.1.0 (2021-05-07)
 ## Bug

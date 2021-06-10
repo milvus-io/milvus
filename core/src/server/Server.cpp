@@ -71,8 +71,8 @@ Server::Start() {
         std::string meta_uri;
         STATUS_CHECK(config.GetGeneralConfigMetaURI(meta_uri));
         if (meta_uri.length() > 6 && strcasecmp("sqlite", meta_uri.substr(0, 6).c_str()) == 0) {
-            std::cout << "WARNNING: You are using SQLite as the meta data management, "
-                         "which can't be used in production. Please change it to MySQL!"
+            std::cout << "NOTICE: You are using SQLite as the meta data management, "
+                         "We recommend change it to MySQL."
                       << std::endl;
         }
 

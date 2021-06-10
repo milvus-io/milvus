@@ -234,10 +234,15 @@ DBImpl::CreateCollection(meta::CollectionSchema& collection_schema) {
     meta::CollectionSchema temp_schema = collection_schema;
     temp_schema.index_file_size_ *= MB;  // store as MB
     if (options_.wal_enable_) {
-        temp_schema.flush_lsn_ = wal_mgr_->CreateCollection(collection_schema.collection_id_);
+        temp_schema.flush_lsn_ = wal_mgr_->GetLastAppliedLsn();
     }
 
-    return meta_ptr_->CreateCollection(temp_schema);
+    auto status = meta_ptr_->CreateCollection(temp_schema);
+    if (options_.wal_enable_ && status.ok()) {
+        wal_mgr_->CreateCollection(collection_schema.collection_id_);
+    }
+
+    return status;
 }
 
 Status
@@ -479,8 +484,8 @@ DBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const
         }
 
         auto json = milvus::json::parse(file.index_params_);
-        ExecutionEnginePtr engine =
-            EngineFactory::Build(file.dimension_, file.location_, engine_type, (MetricType)file.metric_type_, json);
+        ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, engine_type,
+                                                         (MetricType)file.metric_type_, json, file.updated_time_);
         fiu_do_on("DBImpl.PreloadCollection.null_engine", engine = nullptr);
         if (engine == nullptr) {
             LOG_ENGINE_ERROR_ << "Invalid engine type";
@@ -493,7 +498,7 @@ DBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const
             fiu_do_on("DBImpl.PreloadCollection.engine_throw_exception", throw std::exception());
             std::string msg = "Pre-loaded file: " + file.file_id_ + " size: " + std::to_string(file.file_size_);
             TimeRecorderAuto rc_1(msg);
-            status = engine->Load(true);
+            status = engine->Load(false, true);
             if (!status.ok()) {
                 return status;
             }
@@ -552,8 +557,8 @@ DBImpl::ReleaseCollection(const std::shared_ptr<server::Context>& context, const
         }
 
         auto json = milvus::json::parse(file.index_params_);
-        ExecutionEnginePtr engine =
-            EngineFactory::Build(file.dimension_, file.location_, engine_type, (MetricType)file.metric_type_, json);
+        ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, engine_type,
+                                                         (MetricType)file.metric_type_, json, file.updated_time_);
 
         if (engine == nullptr) {
             LOG_ENGINE_ERROR_ << "Invalid engine type";
@@ -574,7 +579,7 @@ DBImpl::ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::v
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
-
+#if 0  // todo
     meta::FilesHolder files_holder;
     std::vector<size_t> file_ids;
     for (auto& id : segment_ids) {
@@ -624,7 +629,7 @@ DBImpl::ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::v
             blacklist->set(i);
         }
     }
-
+#endif
     return Status::OK();
 }
 
@@ -655,11 +660,16 @@ DBImpl::CreatePartition(const std::string& collection_id, const std::string& par
 
     uint64_t lsn = 0;
     if (options_.wal_enable_) {
-        lsn = wal_mgr_->CreatePartition(collection_id, partition_tag);
+        lsn = wal_mgr_->GetLastAppliedLsn();
     } else {
         meta_ptr_->GetCollectionFlushLSN(collection_id, lsn);
     }
-    return meta_ptr_->CreatePartition(collection_id, partition_name, partition_tag, lsn);
+
+    auto status = meta_ptr_->CreatePartition(collection_id, partition_name, partition_tag, lsn);
+    if (options_.wal_enable_ && status.ok()) {
+        wal_mgr_->CreatePartition(collection_id, partition_tag);
+    }
+    return status;
 }
 
 Status
@@ -1502,7 +1512,7 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
         engine::utils::GetParentPath(file.location_, segment_dir);
         segment::SegmentReader segment_reader(segment_dir);
         segment::IdBloomFilterPtr id_bloom_filter_ptr;
-        auto status = segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
+        auto status = segment_reader.LoadBloomFilter(id_bloom_filter_ptr, false);
         if (!status.ok()) {
             return status;
         }
@@ -1546,8 +1556,8 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
                     if (deleted == deleted_docs.end()) {
                         // Load raw vector
                         std::vector<uint8_t> raw_vector;
-                        status =
-                            segment_reader.LoadVectors(offset * single_vector_bytes, single_vector_bytes, raw_vector);
+                        status = segment_reader.LoadsSingleVector(offset * single_vector_bytes, single_vector_bytes,
+                                                                  raw_vector);
                         if (!status.ok()) {
                             LOG_ENGINE_ERROR_ << status.message();
                             return status;

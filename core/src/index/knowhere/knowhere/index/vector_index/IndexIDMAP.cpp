@@ -68,7 +68,7 @@ IDMAP::AddWithoutIds(const DatasetPtr& dataset_ptr, const Config& config) {
 }
 
 DatasetPtr
-IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
+IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config, faiss::ConcurrentBitsetPtr blacklist) {
     if (!index_) {
         KNOWHERE_THROW_MSG("index not initialize");
     }
@@ -81,7 +81,7 @@ IDMAP::Query(const DatasetPtr& dataset_ptr, const Config& config) {
     auto p_id = (int64_t*)malloc(p_id_size);
     auto p_dist = (float*)malloc(p_dist_size);
 
-    QueryImpl(rows, (float*)p_data, k, p_dist, p_id, config);
+    QueryImpl(rows, (float*)p_data, k, p_dist, p_id, config, blacklist);
     MapOffsetToUid(p_id, static_cast<size_t>(elems));
 
     auto ret_ds = std::make_shared<Dataset>();
@@ -135,11 +135,12 @@ IDMAP::GetRawVectors() {
 }
 
 void
-IDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
+IDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config,
+                 faiss::ConcurrentBitsetPtr blacklist) {
     auto default_type = index_->metric_type;
     if (config.contains(Metric::TYPE))
         index_->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
-    index_->search(n, (float*)data, k, distances, labels, GetBlacklist());
+    index_->search(n, (float*)data, k, distances, labels, blacklist);
     index_->metric_type = default_type;
 }
 
