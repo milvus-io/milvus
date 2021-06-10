@@ -1217,7 +1217,7 @@ func (node *ProxyNode) Retrieve(ctx context.Context, request *milvuspb.RetrieveR
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
 			zap.Any("partitions", request.PartitionNames),
-			zap.Any("len(Ids)", len(request.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data)))
+			zap.Any("len(Ids)", len(rt.result.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data)))
 	}()
 
 	err = rt.WaitToFinish()
@@ -1368,7 +1368,7 @@ func (node *ProxyNode) Query(ctx context.Context, request *milvuspb.QueryRequest
 				zap.String("db", retrieveRequest.DbName),
 				zap.String("collection", retrieveRequest.CollectionName),
 				zap.Any("partitions", retrieveRequest.PartitionNames),
-				zap.Any("len(Ids)", len(retrieveRequest.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data)))
+				zap.Any("len(Ids)", len(rt.result.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data)))
 		}()
 
 		err = rt.WaitToFinish()
