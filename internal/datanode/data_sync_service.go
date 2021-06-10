@@ -164,9 +164,20 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) {
 	for _, us := range vchanInfo.GetUnflushedSegments() {
 		if us.CollectionID != dsService.collectionID ||
 			us.GetInsertChannel() != vchanInfo.ChannelName {
+			log.Warn("Collection ID or ChannelName not compact",
+				zap.Int64("Wanted ID", dsService.collectionID),
+				zap.Int64("Actual ID", us.CollectionID),
+				zap.String("Wanted Channel Name", vchanInfo.ChannelName),
+				zap.String("Actual Channel Name", us.GetInsertChannel()),
+			)
 			continue
 		}
 
+		log.Info("Recover Segment NumOfRows form checkpoints",
+			zap.String("InsertChannel", us.GetInsertChannel()),
+			zap.Int64("SegmentID", us.GetID()),
+			zap.Int64("NumOfRows", us.GetNumOfRows()),
+		)
 		dsService.replica.addSegment(us.GetID(), us.CollectionID, us.PartitionID, us.GetInsertChannel())
 		dsService.replica.updateStatistics(us.GetID(), us.GetNumOfRows())
 	}
