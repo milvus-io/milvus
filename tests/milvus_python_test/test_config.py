@@ -483,7 +483,7 @@ class TestGPUConfig:
         '''
         if str(connect._cmd("mode")[1]) == "CPU":
             pytest.skip("Only support GPU mode")
-        status, config_value = connect.get_config("gpu", "cache.enabled")
+        status, config_value = connect.get_config("gpu", "cache.enable")
         assert status.OK()
         assert config_value == "true" or config_value == "false"
 
