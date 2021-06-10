@@ -19,7 +19,6 @@
 #include <utility>
 #include <vector>
 
-#include "context/HybridSearchContext.h"
 #include "query/BinaryQuery.h"
 #include "server/context/ConnectionContext.h"
 #include "tracing/TextMapCarrier.h"
@@ -78,13 +77,9 @@ ErrorMap(ErrorCode code) {
 std::string
 RequestMap(BaseRequest::RequestType request_type) {
     static const std::unordered_map<BaseRequest::RequestType, std::string> request_map = {
-        {BaseRequest::kInsert, "Insert"},
-        {BaseRequest::kCreateIndex, "CreateIndex"},
-        {BaseRequest::kSearch, "Search"},
-        {BaseRequest::kSearchByID, "SearchByID"},
-        {BaseRequest::kHybridSearch, "HybridSearch"},
-        {BaseRequest::kFlush, "Flush"},
-        {BaseRequest::kCompact, "Compact"},
+        {BaseRequest::kInsert, "Insert"}, {BaseRequest::kCreateIndex, "CreateIndex"},
+        {BaseRequest::kSearch, "Search"}, {BaseRequest::kSearchByID, "SearchByID"},
+        {BaseRequest::kFlush, "Flush"},   {BaseRequest::kCompact, "Compact"},
     };
 
     if (request_map.find(request_type) != request_map.end()) {
