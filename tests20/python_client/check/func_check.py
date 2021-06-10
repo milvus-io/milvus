@@ -1,10 +1,10 @@
 from utils.util_log import test_log as log
 from common import common_type as ct
-from common.common_type import CheckTasks
+from common.common_type import CheckTasks, Connect_Object_Name
 # from common.code_mapping import ErrorCode, ErrorMessage
 from pymilvus_orm import Collection, Partition
 from utils.api_request import Error
-from check.param_check import *
+import check.param_check as pc
 
 
 class ResponseChecker:
@@ -78,12 +78,12 @@ class ResponseChecker:
                 log.error("[CheckFunc] Check param of list_content is not a list: %s" % str(list_content))
                 assert False
 
-            new_res = get_connect_object_name(res)
-            assert list_equal_check(new_res, list_content)
+            new_res = pc.get_connect_object_name(res)
+            assert pc.list_equal_check(new_res, list_content)
 
         if func_name == "get_connection_addr":
             dict_content = params.get("dict_content", None)
-            assert dict_equal_check(res, dict_content)
+            assert pc.dict_equal_check(res, dict_content)
 
         if func_name == "connect":
             class_obj = Connect_Object_Name
