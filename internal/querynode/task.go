@@ -183,6 +183,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 
 	// 6. seek channel
 	for _, pos := range toSeekInfo {
+		pos.MsgGroup = getUniqueSubName()
 		for _, fg := range nodeFGs {
 			if fg.channel == pos.ChannelName {
 				err := fg.seekQueryNodeFlowGraph(pos)
