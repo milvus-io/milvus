@@ -67,16 +67,26 @@ class ApiCollectionWrapper:
         # return res, check_result
 
     def drop(self, check_task=None, check_items=None, **kwargs):
+        log.info("Dropping collection")
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.drop], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        if check_result:
+            log.info("Dropped collection")
+        else:
+            log.info("Dropping collection failed")
         return res, check_result
 
     def load(self, field_names=None, index_names=None, partition_names=None, check_task=None, check_items=None, **kwargs):
+        log.info("loading data")
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.load, field_names, index_names, partition_names], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, field_names=field_names, index_names=index_names,
                                        partition_names=partition_names, **kwargs).run()
+        if check_result:
+            log.info("loaded data")
+        else:
+            log.info("loading failed")
         return res, check_result
 
     def release(self, check_task=None, check_items=None, **kwargs):
@@ -133,6 +143,13 @@ class ApiCollectionWrapper:
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.drop_partition, partition_name], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, partition_name=partition_name, **kwargs).run()
+        return res, check_result
+
+    def create_partition(self, partition_name, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.collection.create_partition, partition_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       partition_name=partition_name, **kwargs).run()
         return res, check_result
 
     @property

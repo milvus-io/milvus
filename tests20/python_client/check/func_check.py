@@ -39,6 +39,9 @@ class ResponseChecker:
         elif self.check_task == CheckTasks.check_partition_property:
             result = self.check_partition_property(self.response, self.func_name, self.check_items)
 
+        elif self.check_task == CheckTasks.check_search_results:
+            result = self.check_search_results(self.response, self.check_items)
+
         # Add check_items here if something new need verify
 
         return result
@@ -117,3 +120,32 @@ class ResponseChecker:
         if check_items.get("num_entities", None):
             assert partition.num_entities == check_items["num_entities"]
         return True
+
+    @staticmethod
+    def check_search_results(search_res, check_items):
+        """
+        target: check the search results
+        method: 1. check the query number
+                2. check the limit(topK)
+                3. check the distance
+        expected: check the search is ok
+        """
+        log.info("search_results_check: checking the searching results")
+        if len(search_res) != check_items["nq"]:
+            log.error("search_results_check: Numbers of query searched (%d) "
+                      "is not equal with expected (%d)"
+                      % (len(search_res), check_items["nq"]))
+            assert len(search_res) == check_items["nq"]
+        else:
+            log.info("search_results_check: Numbers of query searched is correct")
+        for hits in search_res:
+            if len(hits) != check_items["limit"]:
+                log.error("search_results_check: limit(topK) searched (%d) "
+                          "is not equal with expected (%d)"
+                          % (len(hits), check_items["limit"]))
+                assert len(hits) == check_items["limit"]
+                assert len(hits.ids) == check_items["limit"]
+            else:
+                log.info("search_results_check: limit (topK) "
+                         "searched for each query is correct")
+        log.info("search_results_check: search_results_check: checked the searching results")

@@ -80,6 +80,7 @@ class CheckTasks:
     check_list_count = "check_list_count"
     check_collection_property = "check_collection_property"
     check_partition_property = "check_partition_property"
+    check_search_results = "check_search_results"
 
 
 class CaseLabel:

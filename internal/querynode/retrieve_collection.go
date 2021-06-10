@@ -91,6 +91,12 @@ func (rc *retrieveCollection) getServiceableTime() Timestamp {
 
 func (rc *retrieveCollection) setServiceableTime(t Timestamp) {
 	rc.serviceableTimeMutex.Lock()
+	defer rc.serviceableTimeMutex.Unlock()
+
+	if t < rc.serviceableTime {
+		return
+	}
+
 	gracefulTimeInMilliSecond := Params.GracefulTime
 	if gracefulTimeInMilliSecond > 0 {
 		gracefulTime := tsoutil.ComposeTS(gracefulTimeInMilliSecond, 0)
@@ -98,7 +104,6 @@ func (rc *retrieveCollection) setServiceableTime(t Timestamp) {
 	} else {
 		rc.serviceableTime = t
 	}
-	rc.serviceableTimeMutex.Unlock()
 }
 
 func (rc *retrieveCollection) waitNewTSafe() Timestamp {
@@ -125,7 +130,7 @@ func (rc *retrieveCollection) start() {
 
 func (rc *retrieveCollection) register() {
 	// register tSafe watcher and init watcher select case
-	collection, err := rc.historical.replica.getCollectionByID(rc.collectionID)
+	collection, err := rc.streamingReplica.getCollectionByID(rc.collectionID)
 	if err != nil {
 		log.Error(err.Error())
 		return
