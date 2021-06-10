@@ -26,6 +26,7 @@ default_tag = "1970_01_01"
 row_count = "row_count"
 default_desc = ""
 default_collection_desc = "default collection"
+default_index_name = "default_index_name"
 default_binary_desc = "default binary collection"
 collection_desc = "collection"
 int_field_desc = "int64 type field"
@@ -36,6 +37,8 @@ binary_vec_field_desc = "binary vector type field"
 Not_Exist = "Not_Exist"
 Connect_Object_Name = "Milvus"
 
+err_code = "err_code"
+err_msg = "err_msg"
 
 """" List of parameters used to pass """
 get_invalid_strs = [
@@ -79,6 +82,7 @@ class CheckTasks:
     check_normal = "check_normal_result"
     check_collection_property = "check_collection_property"
     check_partition_property = "check_partition_property"
+    check_search_results = "check_search_results"
 
 
 class CaseLabel:

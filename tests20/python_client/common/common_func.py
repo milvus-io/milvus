@@ -6,12 +6,11 @@ import pandas as pd
 from sklearn import preprocessing
 
 from pymilvus_orm.types import DataType
-from pymilvus_orm.schema import CollectionSchema, FieldSchema
+from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
 from common import common_type as ct
 from utils.util_log import test_log as log
 import threading
 import traceback
-
 
 """" Methods of processing data """
 l2 = lambda x, y: np.linalg.norm(np.array(x) - np.array(y))
@@ -27,43 +26,51 @@ def gen_str_by_length(length=8):
 
 
 def gen_int64_field(name=ct.default_int64_field_name, is_primary=False, description=ct.default_desc):
-    int64_field = FieldSchema(name=name, dtype=DataType.INT64, description=description, is_primary=is_primary)
+    int64_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.INT64, description=description,
+                                                               is_primary=is_primary)
     return int64_field
 
 
 def gen_float_field(name=ct.default_float_field_name, is_primary=False, description=ct.default_desc):
-    float_field = FieldSchema(name=name, dtype=DataType.FLOAT, description=description, is_primary=is_primary)
+    float_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.FLOAT, description=description,
+                                                               is_primary=is_primary)
     return float_field
 
 
 def gen_float_vec_field(name=ct.default_float_vec_field_name, is_primary=False, dim=ct.default_dim,
                         description=ct.default_desc):
-    float_vec_field = FieldSchema(name=name, dtype=DataType.FLOAT_VECTOR, description=description, dim=dim,
-                                  is_primary=is_primary)
+    float_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.FLOAT_VECTOR,
+                                                                   description=description, dim=dim,
+                                                                   is_primary=is_primary)
     return float_vec_field
 
 
 def gen_binary_vec_field(name=ct.default_binary_vec_field_name, is_primary=False, dim=ct.default_dim,
                          description=ct.default_desc):
-    binary_vec_field = FieldSchema(name=name, dtype=DataType.BINARY_VECTOR, description=description, dim=dim,
-                                   is_primary=is_primary)
+    binary_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.BINARY_VECTOR,
+                                                                    description=description, dim=dim,
+                                                                    is_primary=is_primary)
     return binary_vec_field
 
 
 def gen_default_collection_schema(description=ct.default_desc, primary_field=None):
     fields = [gen_int64_field(), gen_float_field(), gen_float_vec_field()]
-    schema = CollectionSchema(fields=fields, description=description, primary_field=primary_field)
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
+                                                                    primary_field=primary_field)
+    log.error(schema)
     return schema
 
 
 def gen_collection_schema(fields, primary_field=None, description=ct.default_desc):
-    schema = CollectionSchema(fields=fields, primary_field=primary_field, description=description)
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, primary_field=primary_field,
+                                                                    description=description)
     return schema
 
 
 def gen_default_binary_collection_schema(description=ct.default_desc, primary_field=None):
     fields = [gen_int64_field(), gen_float_field(), gen_binary_vec_field()]
-    binary_schema = CollectionSchema(fields=fields, description=description, primary_field=primary_field)
+    binary_schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
+                                                                           primary_field=primary_field)
     return binary_schema
 
 
@@ -134,9 +141,9 @@ def gen_numpy_data(nb=ct.default_nb, dim=ct.default_dim):
 def gen_default_binary_list_data(nb=ct.default_nb, dim=ct.default_dim):
     int_values = [i for i in range(nb)]
     float_values = [np.float32(i) for i in range(nb)]
-    _, binary_vec_values = gen_binary_vectors(nb, dim)
+    binary_raw_values, binary_vec_values = gen_binary_vectors(nb, dim)
     data = [int_values, float_values, binary_vec_values]
-    return data
+    return data, binary_raw_values
 
 
 def gen_simple_index():
@@ -167,24 +174,9 @@ def gen_all_type_fields():
     fields = []
     for k, v in DataType.__members__.items():
         if v != DataType.UNKNOWN:
-            field = FieldSchema(name=k.lower(), dtype=v)
+            field, _ = ApiFieldSchemaWrapper().init_field_schema(name=k.lower(), dtype=v)
             fields.append(field)
     return fields
-
-
-def gen_invalid_dataframe():
-    vec = gen_vectors(3, 2)
-    dfs = [
-        # just columns df
-        pd.DataFrame(columns=[ct.default_int64_field_name, ct.default_float_vec_field_name]),
-        # no column just data df
-        pd.DataFrame({' ': vec}),
-        # datetime df
-        pd.DataFrame({"date": pd.date_range('20210101', periods=3)}),
-        # invalid column df
-        pd.DataFrame({'%$#': vec}),
-    ]
-    return dfs
 
 
 def jaccard(x, y):
@@ -243,3 +235,56 @@ def modify_file(file_path_list, is_modify=False, input_content=""):
                     f.write(input_content)
                     f.close()
                 log.info("[modify_file] file(%s) modification is complete." % file_path_list)
+
+def index_to_dict(index):
+    return {
+        "collection_name": index.collection_name,
+        "field_name": index.field_name,
+        # "name": index.name,
+        "params": index.params
+    }
+
+def assert_equal_index(index_1, index_2):
+    return index_to_dict(index_1) == index_to_dict(index_2)
+
+def gen_partitions(collection_w, partition_num=1):
+    """
+    target: create extra partitions except for _default
+    method: create more than one partitions
+    expected: return collection and raw data
+    """
+    log.info("gen_partitions: creating partitions")
+    for i in range(partition_num):
+        partition_name = "search_partition_" + str(i)
+        collection_w.create_partition(partition_name=partition_name,
+                                      description="search partition")
+    par = collection_w.partitions
+    assert len(par) == (partition_num + 1)
+    log.info("gen_partitions: created partitions %s" % par)
+
+def insert_data(collection_w, nb=3000, is_binary=False):
+    """
+    target: insert non-binary/binary data
+    method: insert non-binary/binary data into partitions if any
+    expected: return collection and raw data
+    """
+    par = collection_w.partitions
+    num = len(par)
+    vectors = []
+    binary_raw_vectors = []
+    log.info("insert_data: inserting data into collection %s (num_entities: %s)"
+             % (collection_w.name, nb))
+    for i in range(num):
+        if is_binary:
+            default_data, binary_raw_data = gen_default_binary_dataframe_data(nb // num)
+            binary_raw_vectors.extend(binary_raw_data)
+        else:
+            default_data = gen_default_dataframe_data(nb // num)
+        collection_w.insert(default_data, par[i].name)
+        vectors.extend(default_data)
+    log.info("insert_data: inserted data into collection %s (num_entities: %s)"
+             % (collection_w.name, nb))
+    collection_w.load()
+    assert collection_w.is_empty == False
+    assert collection_w.num_entities == nb
+    return collection_w, vectors, binary_raw_vectors

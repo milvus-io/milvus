@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-# Absolute path to the toplevel milvus distributed directory.
+# Absolute path to the toplevel milvus directory.
 toplevel=$(dirname "$(cd "$(dirname "${0}")"; pwd)")
 
 pushd "${toplevel}"

@@ -8,8 +8,9 @@ from base.collection_wrapper import ApiCollectionWrapper
 from base.partition_wrapper import ApiPartitionWrapper
 from base.index_wrapper import ApiIndexWrapper
 from base.utility_wrapper import ApiUtilityWrapper
+from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
 
-from config.test_info import test_info
+from config.log_config import log_config
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
@@ -38,6 +39,8 @@ class Base:
     partition_wrap = None
     index_wrap = None
     utility_wrap = None
+    collection_schema_wrap = None
+    field_schema_wrap = None
 
     def setup_class(self):
         log.info("[setup_class] Start setup class...")
@@ -52,6 +55,8 @@ class Base:
         self.partition_wrap = ApiPartitionWrapper()
         self.index_wrap = ApiIndexWrapper()
         self.utility_wrap = ApiUtilityWrapper()
+        self.collection_schema_wrap = ApiCollectionSchemaWrapper()
+        self.field_schema_wrap = ApiFieldSchemaWrapper()
 
     def teardown(self):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
@@ -87,7 +92,7 @@ class Base:
         assert ip_check(host) and number_check(port)
 
         """ modify log files """
-        cf.modify_file(file_path_list=[test_info.log_debug, test_info.log_info, test_info.log_err], is_modify=clean_log)
+        cf.modify_file(file_path_list=[log_config.log_debug, log_config.log_info, log_config.log_err], is_modify=clean_log)
 
         log.info("#" * 80)
         log.info("[initialize_milvus] Log cleaned up, start testing...")
@@ -116,17 +121,6 @@ class TestcaseBase(Base):
             raise res
         return res
 
-    '''
-    def _collection(self, **kwargs):
-        """ Init a collection and return the object of collection """
-        name = cf.gen_unique_str()
-        schema = cf.gen_default_collection_schema()
-        if self.connection_wrap.get_connection(alias='default') is None:
-            self._connect()
-        res, cr = self.collection_wrap.init_collection(name=name, schema=schema, **kwargs)
-        return res
-    '''
-
     def init_collection_wrap(self, name=None, data=None, schema=None, check_task=None, **kwargs):
         name = cf.gen_unique_str('coll_') if name is None else name
         schema = cf.gen_default_collection_schema() if schema is None else schema
@@ -147,3 +141,34 @@ class TestcaseBase(Base):
                                       check_task=check_task, check_items=check_items,
                                       **kwargs)
         return partition_wrap
+
+    def init_collection_general(self, prefix, insert_data=False, nb=3000, partition_num=0, is_binary=False):
+        """
+        target: create specified collections
+        method: 1. create collections (binary/non-binary)
+                2. create partitions if specified
+                3. insert specified binary/non-binary data
+                   into each partition if any
+        expected: return collection and raw data
+        """
+        log.info("Test case of search interface: initialize before test case")
+        self._connect()
+        collection_name = cf.gen_unique_str(prefix)
+        vectors = []
+        binary_raw_vectors = []
+        # 1 create collection
+        if is_binary:
+            default_schema = cf.gen_default_binary_collection_schema()
+        else:
+            default_schema = cf.gen_default_collection_schema()
+        log.info("init_data: collection creation")
+        collection_w = self.init_collection_wrap(name=collection_name,
+                                                 schema=default_schema)
+        # 2 add extra partitions if specified (default is 1 partition named "_default")
+        if partition_num > 0:
+            cf.gen_partitions(collection_w, partition_num)
+        # 3 insert data if specified
+        if insert_data:
+            collection_w, vectors, binary_raw_vectors = cf.insert_data(collection_w, nb, is_binary)
+
+        return collection_w, vectors, binary_raw_vectors

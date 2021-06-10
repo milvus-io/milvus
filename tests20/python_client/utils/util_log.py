@@ -1,7 +1,7 @@
 import logging
 import sys
 
-from config.test_info import test_info
+from config.log_config import log_config
 
 
 class TestLog:
@@ -41,7 +41,7 @@ class TestLog:
 
 
 """All modules share this unified log"""
-log_debug = test_info.log_debug
-log_info = test_info.log_info
-log_err = test_info.log_err
+log_debug = log_config.log_debug
+log_info = log_config.log_info
+log_err = log_config.log_err
 test_log = TestLog('ci_test', log_debug, log_info, log_err).log
