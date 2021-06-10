@@ -536,6 +536,7 @@ func (i *IndexService) watchNodeLoop() {
 				log.Debug("IndexService watchNodeLoop SessionAddEvent", zap.Any("serverID", serverID))
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
+				i.removeNode(serverID)
 				log.Debug("IndexService watchNodeLoop SessionDelEvent ", zap.Any("serverID", serverID))
 				indexBuildIDs := i.nodeTasks.getTasksByNodeID(serverID)
 				i.assignChan <- indexBuildIDs
