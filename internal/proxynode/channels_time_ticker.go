@@ -57,7 +57,12 @@ func (ticker *channelsTimeTickerImpl) getMinTsStatistics() (map[pChan]Timestamp,
 	ticker.statisticsMtx.RLock()
 	defer ticker.statisticsMtx.RUnlock()
 
-	return ticker.minTsStatistics, nil
+	ret := make(map[pChan]Timestamp)
+	for k, v := range ticker.minTsStatistics {
+		ret[k] = v
+	}
+
+	return ret, nil
 }
 
 func (ticker *channelsTimeTickerImpl) initStatistics() {
