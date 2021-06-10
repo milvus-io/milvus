@@ -70,6 +70,10 @@ func (s *streaming) search(searchReqs []*searchRequest,
 	var searchPartIDs []UniqueID
 	if len(partIDs) == 0 {
 		strPartIDs, err := s.replica.getPartitionIDs(collID)
+		if len(strPartIDs) == 0 {
+			// no partitions in collection, do empty search
+			return nil, nil, nil
+		}
 		if err != nil {
 			return searchResults, segmentResults, err
 		}
@@ -83,8 +87,9 @@ func (s *streaming) search(searchReqs []*searchRequest,
 		}
 	}
 
+	// all partitions have been released
 	if len(searchPartIDs) == 0 {
-		return nil, nil, errors.New("no search partition found in streaming, collectionID = " +
+		return nil, nil, errors.New("partitions have been released , collectionID = " +
 			fmt.Sprintln(collID) +
 			"target partitionIDs = " +
 			fmt.Sprintln(partIDs))

@@ -20,10 +20,6 @@ import (
 	"sync"
 
 	"github.com/golang/protobuf/proto"
-	oplog "github.com/opentracing/opentracing-go/log"
-	"go.uber.org/zap"
-	"strconv"
-
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -31,6 +27,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	oplog "github.com/opentracing/opentracing-go/log"
+	"go.uber.org/zap"
 )
 
 type searchCollection struct {
@@ -195,17 +193,6 @@ func (s *searchCollection) emptySearch(searchMsg *msgstream.SearchMsg) {
 	}
 }
 
-func (s *searchCollection) collectionCheck(collectionID UniqueID) error {
-	// check if collection exists
-	if ok := s.historical.replica.hasCollection(collectionID); !ok {
-		err := errors.New("no collection found, collectionID = " + strconv.FormatInt(collectionID, 10))
-		log.Error(err.Error())
-		return err
-	}
-
-	return nil
-}
-
 func (s *searchCollection) consumeSearch() {
 	for {
 		select {
@@ -274,14 +261,6 @@ func (s *searchCollection) receiveSearch(msg *msgstream.SearchMsg) {
 		zap.Any("collectionID", msg.CollectionID))
 	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 	msg.SetTraceCtx(ctx)
-	err := s.collectionCheck(msg.CollectionID)
-	if err != nil {
-		//s.emptySearchCollection.emptySearch(msg)
-		log.Debug("cannot found collection, do empty search done",
-			zap.Int64("msgID", msg.ID()),
-			zap.Int64("collectionID", msg.CollectionID))
-		return
-	}
 
 	// check if collection has been released
 	collection, err := s.historical.replica.getCollectionByID(msg.CollectionID)

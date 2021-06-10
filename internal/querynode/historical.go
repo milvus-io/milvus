@@ -66,6 +66,10 @@ func (h *historical) search(searchReqs []*searchRequest,
 	var searchPartIDs []UniqueID
 	if len(partIDs) == 0 {
 		hisPartIDs, err := h.replica.getPartitionIDs(collID)
+		if len(hisPartIDs) == 0 {
+			// no partitions in collection, do empty search
+			return nil, nil, nil
+		}
 		if err != nil {
 			return searchResults, segmentResults, err
 		}
@@ -79,8 +83,9 @@ func (h *historical) search(searchReqs []*searchRequest,
 		}
 	}
 
+	// all partitions have been released
 	if len(searchPartIDs) == 0 {
-		return nil, nil, errors.New("no search partition found in historical, collectionID = " +
+		return nil, nil, errors.New("partitions have been released , collectionID = " +
 			fmt.Sprintln(collID) +
 			"target partitionIDs = " +
 			fmt.Sprintln(partIDs))

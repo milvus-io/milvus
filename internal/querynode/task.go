@@ -134,9 +134,21 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		}
 		collection.addWatchedDmChannels(vChannelsTmp)
 	}
+	if hasCollectionInHistorical := w.node.historical.replica.hasCollection(collectionID); !hasCollectionInHistorical {
+		err := w.node.historical.replica.addCollection(collectionID, w.req.Schema)
+		if err != nil {
+			return err
+		}
+	}
 	if loadPartition {
 		if hasPartitionInStreaming := w.node.streaming.replica.hasPartition(partitionID); !hasPartitionInStreaming {
 			err := w.node.streaming.replica.addPartition(collectionID, partitionID)
+			if err != nil {
+				return err
+			}
+		}
+		if hasPartitionInHistorical := w.node.historical.replica.hasPartition(partitionID); !hasPartitionInHistorical {
+			err := w.node.historical.replica.addPartition(collectionID, partitionID)
 			if err != nil {
 				return err
 			}
