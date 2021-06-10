@@ -215,3 +215,154 @@ func TestPulsarClient(t *testing.T) {
 
 	log.Info("main done")
 }
+
+func Consume21(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, subName string, c chan MessageID, total *int) {
+	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
+		Topic:                       topic,
+		SubscriptionName:            subName,
+		Type:                        pulsar.KeyShared,
+		SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
+	})
+	assert.Nil(t, err)
+	assert.NotNil(t, consumer)
+	defer consumer.Close()
+
+	log.Info("Consume1 start")
+
+	// get random number between 1 ~ 5
+	rand.Seed(time.Now().UnixNano())
+	cnt := 1 + rand.Int()%5
+
+	var msg pulsar.ConsumerMessage
+	for i := 0; i < cnt; i++ {
+		select {
+		case <-ctx.Done():
+			log.Info("Consume1 channel closed")
+			return
+		case msg = <-consumer.Chan():
+			consumer.Ack(msg)
+			v := BytesToInt(msg.Payload())
+			log.Info("RECV", zap.Any("v", v))
+			(*total)++
+			//log.Debug("total", zap.Int("val", *total))
+		}
+	}
+	c <- msg.ID()
+
+	log.Info("Consume1 randomly RECV", zap.Any("number", cnt))
+	log.Info("Consume1 done")
+}
+
+// Consume2 will consume messages from specified MessageID
+func Consume22(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, subName string, msgID MessageID, total *int) {
+	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
+		Topic:                       topic,
+		SubscriptionName:            subName,
+		Type:                        pulsar.KeyShared,
+		SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
+	})
+	assert.Nil(t, err)
+	assert.NotNil(t, consumer)
+	defer consumer.Close()
+
+	err = consumer.Seek(msgID)
+	assert.Nil(t, err)
+
+	// skip the last received message
+	mm := <-consumer.Chan()
+	consumer.Ack(mm)
+
+	log.Info("Consume2 start")
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("Consume2 channel closed")
+			return
+		case msg := <-consumer.Chan():
+			consumer.Ack(msg)
+			v := BytesToInt(msg.Payload())
+			log.Info("RECV", zap.Any("v", v))
+			(*total)++
+			//log.Debug("total", zap.Int("val", *total))
+		}
+	}
+}
+
+func Consume23(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, subName string, total *int) {
+	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
+		Topic:                       topic,
+		SubscriptionName:            subName,
+		Type:                        pulsar.KeyShared,
+		SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
+	})
+	assert.Nil(t, err)
+	assert.NotNil(t, consumer)
+	defer consumer.Close()
+
+	log.Info("Consume3 start")
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("Consume3 channel closed")
+			return
+		case msg := <-consumer.Chan():
+			consumer.Ack(msg)
+			v := BytesToInt(msg.Payload())
+			log.Info("RECV", zap.Any("v", v))
+			(*total)++
+			//log.Debug("total", zap.Int("val", *total))
+		}
+	}
+}
+
+func TestPulsarClient2(t *testing.T) {
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pc, err := NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	defer pc.Close()
+	assert.NoError(t, err)
+	assert.NotNil(t, pc)
+	rand.Seed(time.Now().UnixNano())
+
+	topic := fmt.Sprintf("test-topic-%d", rand.Int())
+	subName := fmt.Sprintf("test-subname-%d", rand.Int())
+	arr := []int{111, 222, 333, 444, 555, 666, 777}
+	c := make(chan MessageID, 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	var total1 int
+	var total2 int
+	var total3 int
+
+	// launch produce
+	Produce(ctx, t, pc, topic, arr)
+	time.Sleep(1 * time.Second)
+
+	// launch consume1
+	ctx1, cancel1 := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel1()
+	Consume21(ctx1, t, pc, topic, subName, c, &total1)
+
+	// record the last received message id
+	lastMsgID := <-c
+	log.Info("msg", zap.Any("lastMsgID", lastMsgID))
+
+	// launch consume2
+	ctx2, cancel2 := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel2()
+	Consume22(ctx2, t, pc, topic, subName, lastMsgID, &total2)
+
+	// launch consume3
+	ctx3, cancel3 := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel3()
+	Consume23(ctx3, t, pc, topic, subName, &total3)
+
+	// stop Consume2
+	cancel()
+	assert.Equal(t, len(arr), total1+total2)
+	assert.Equal(t, 0, total3)
+
+	log.Info("main done")
+}
