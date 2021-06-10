@@ -3,7 +3,7 @@
 // When scheduling a job that gets automatically triggered by changes,
 // you need to include a [cronjob] tag within the commit message.
 String cron_timezone = "TZ=Asia/Shanghai"
-String cron_string = BRANCH_NAME == "master" ? "50 20,22,0,6,11,16 * * * " : ""
+String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
 
 pipeline {
     agent none
@@ -75,30 +75,23 @@ pipeline {
                             }
                         }
                     }
-                    success {
-                        container('main') {
-                            script {
-                                if ( env.CHANGE_ID == null ){
-                                    def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
-                                    def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
-
-                                    withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
-                                        sh 'docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD} ${DOKCER_REGISTRY_URL}'
-                                        sh """
-                                            docker tag localhost:5000/milvus:latest ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-${date}-${gitShortCommit}
-                                            docker tag localhost:5000/milvus:latest ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-latest
-                                            docker push ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-${date}-${gitShortCommit}
-                                            docker push ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-latest
-                                        """
-                                        sh 'docker logout ${DOKCER_REGISTRY_URL}'
-                                    }
-                                }
-                            }
-                        }
-                    }
                     always {
                         container('main') {
                             script {
+                                def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
+                                def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+
+                                withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
+                                    sh 'docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD} ${DOKCER_REGISTRY_URL}'
+                                    sh """
+                                        docker tag localhost:5000/milvus:latest ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-${date}-${gitShortCommit}
+                                        docker tag localhost:5000/milvus:latest ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-latest
+                                        docker push ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-${date}-${gitShortCommit}
+                                        docker push ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-latest
+                                    """
+                                    sh 'docker logout ${DOKCER_REGISTRY_URL}'
+                                }
+
                                 dir("${env.ARTIFACTS}") {
                                     sh "find ./kind -path '*/history/*' -type f | xargs tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-e2e-nightly-logs.tar.gz --transform='s:^[^/]*/[^/]*/[^/]*/[^/]*/::g' || true"
                                     archiveArtifacts artifacts: "**.tar.gz", allowEmptyArchive: true
