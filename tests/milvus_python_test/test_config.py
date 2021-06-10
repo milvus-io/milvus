@@ -474,6 +474,19 @@ class TestGPUConfig:
         assert status.OK()
         assert config_value == "true" or config_value == "false"
 
+    @pytest.mark.timeout(CONFIG_TIMEOUT)
+    def test_get_gpu_cache_enable_valid(self, connect, collection):
+        '''
+        target: get gpu_cache
+        method: call get_config correctly
+        expected: status ok
+        '''
+        if str(connect._cmd("mode")[1]) == "CPU":
+            pytest.skip("Only support GPU mode")
+        status, config_value = connect.get_config("gpu", "cache.enabled")
+        assert status.OK()
+        assert config_value == "true" or config_value == "false"
+
     @pytest.mark.level(2)
     def test_get_cache_size_invalid_parent_key(self, connect, collection):
         '''
