@@ -236,8 +236,6 @@ def modify_file(file_path_list, is_modify=False, input_content=""):
                     f.close()
                 log.info("[modify_file] file(%s) modification is complete." % file_path_list)
 
-<<<<<<< Updated upstream
-
 def index_to_dict(index):
     return {
         "collection_name": index.collection_name,
@@ -246,10 +244,9 @@ def index_to_dict(index):
         "params": index.params
     }
 
-
 def assert_equal_index(index_1, index_2):
     return index_to_dict(index_1) == index_to_dict(index_2)
-=======
+
 def gen_partitions(collection_w, partition_num=1):
     """
     target: create extra partitions except for _default
@@ -291,4 +288,3 @@ def insert_data(collection_w, nb=3000, is_binary=False):
     assert collection_w.is_empty == False
     assert collection_w.num_entities == nb
     return collection_w, vectors, binary_raw_vectors
->>>>>>> Stashed changes

@@ -503,6 +503,7 @@ class TestCollectionSearch(TestcaseBase):
                                                   "limit": 0})
 
     @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.xfail(reason="distance not accurate yet")
     def test_search_binary_jaccard_flat_index(self):
         """
         target: search binary_collection, and check the result: distance
@@ -524,7 +525,7 @@ class TestCollectionSearch(TestcaseBase):
         search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
         res, _ = collection_w.search(binary_vectors[:default_nq], "binary_vector",
                                      search_params, default_limit, "int64 >= 0")
-        assert abs(res[0]._distances[0] - min(distance_0, distance_1)) >= epsilon
+        assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_search_binary_flat_with_L2(self):
@@ -546,6 +547,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "err_msg": "Search failed"})
 
     @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.xfail(reason="distance not accurate yet")
     def test_search_binary_hamming_flat_index(self):
         """
         target: search binary_collection, and check the result: distance
@@ -567,9 +569,10 @@ class TestCollectionSearch(TestcaseBase):
         search_params = {"metric_type": "HAMMING", "params": {"nprobe": 10}}
         res, _ = collection_w.search(binary_vectors[:default_nq], "binary_vector",
                                      search_params, default_limit, "int64 >= 0")
-        assert abs(res[0]._distances[0] - min(distance_0, distance_1)) >= epsilon
+        assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.xfail(reason="distance not accurate yet")
     def test_search_binary_tanimoto_flat_index(self):
         """
         target: search binary_collection, and check the result: distance
@@ -590,7 +593,7 @@ class TestCollectionSearch(TestcaseBase):
         search_params = {"metric_type": "TANIMOTO", "params": {"nprobe": 10}}
         res, _ = collection_w.search(binary_vectors[:default_nq], "binary_vector",
                                      search_params, default_limit, "int64 >= 0")
-        assert abs(res[0]._distances[0] - min(distance_0, distance_1)) >= epsilon
+        assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_search_multi_collections(self):

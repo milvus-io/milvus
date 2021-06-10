@@ -120,8 +120,6 @@ class ResponseChecker:
         if check_items.get("num_entities", None):
             assert partition.num_entities == check_items["num_entities"]
         return True
-<<<<<<< Updated upstream
-=======
 
     @staticmethod
     def check_search_results(search_res, check_items):
@@ -151,4 +149,3 @@ class ResponseChecker:
                 log.info("search_results_check: limit (topK) "
                          "searched for each query is correct")
         log.info("search_results_check: search_results_check: checked the searching results")
->>>>>>> Stashed changes
