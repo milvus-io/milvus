@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"math/rand"
 	"testing"
 	"time"
@@ -61,7 +62,7 @@ func Produce(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, 
 }
 
 // Consume1 will consume random messages and record the last MessageID it received
-func Consume1(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, subName string, c chan MessageID) {
+func Consume1(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, subName string, c chan MessageID, total *int) {
 	consumer, err := pc.Subscribe(ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            subName,
@@ -89,6 +90,8 @@ func Consume1(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 			//consumer.Ack(msg)
 			v := BytesToInt(msg.Payload())
 			log.Info("RECV", zap.Any("v", v))
+			(*total)++
+			//log.Debug("total", zap.Int("val", *total))
 		}
 	}
 	c <- msg.ID()
@@ -98,7 +101,7 @@ func Consume1(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 }
 
 // Consume2 will consume messages from specified MessageID
-func Consume2(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, subName string, msgID MessageID) {
+func Consume2(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, subName string, msgID MessageID, total *int) {
 	consumer, err := pc.Subscribe(ConsumerOptions{
 		Topic:                       topic,
 		SubscriptionName:            subName,
@@ -127,6 +130,37 @@ func Consume2(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 			//consumer.Ack(msg)
 			v := BytesToInt(msg.Payload())
 			log.Info("RECV", zap.Any("v", v))
+			(*total)++
+			//log.Debug("total", zap.Int("val", *total))
+		}
+	}
+}
+
+func Consume3(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, subName string, total *int) {
+	consumer, err := pc.Subscribe(ConsumerOptions{
+		Topic:                       topic,
+		SubscriptionName:            subName,
+		BufSize:                     1024,
+		Type:                        KeyShared,
+		SubscriptionInitialPosition: SubscriptionPositionEarliest,
+	})
+	assert.Nil(t, err)
+	assert.NotNil(t, consumer)
+	defer consumer.Close()
+
+	log.Info("Consume3 start")
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("Consume3 channel closed")
+			return
+		case msg := <-consumer.Chan():
+			//consumer.Ack(msg)
+			v := BytesToInt(msg.Payload())
+			log.Info("RECV", zap.Any("v", v))
+			(*total)++
+			//log.Debug("total", zap.Int("val", *total))
 		}
 	}
 }
@@ -137,32 +171,46 @@ func TestPulsarClient(t *testing.T) {
 	defer pc.Close()
 	assert.NoError(t, err)
 	assert.NotNil(t, pc)
+	rand.Seed(time.Now().UnixNano())
 
-	topic := "test"
-	subName := "subName"
+	topic := fmt.Sprintf("test-topic-%d", rand.Int())
+	subName := fmt.Sprintf("test-subname-%d", rand.Int())
 	arr := []int{111, 222, 333, 444, 555, 666, 777}
-	c := make(chan MessageID)
+	c := make(chan MessageID, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// launch consume1
-	go Consume1(ctx, t, pc, topic, subName, c)
-	time.Sleep(1 * time.Second)
+	var total1 int
+	var total2 int
+	var total3 int
 
 	// launch produce
-	go Produce(ctx, t, pc, topic, arr)
+	Produce(ctx, t, pc, topic, arr)
 	time.Sleep(1 * time.Second)
+
+	// launch consume1
+	ctx1, cancel1 := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel1()
+	Consume1(ctx1, t, pc, topic, subName, c, &total1)
 
 	// record the last received message id
 	lastMsgID := <-c
 	log.Info("msg", zap.Any("lastMsgID", lastMsgID))
 
 	// launch consume2
-	go Consume2(ctx, t, pc, topic, subName, lastMsgID)
-	time.Sleep(1 * time.Second)
+	ctx2, cancel2 := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel2()
+	Consume2(ctx2, t, pc, topic, subName, lastMsgID, &total2)
+
+	// launch consume3
+	ctx3, cancel3 := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel3()
+	Consume3(ctx3, t, pc, topic, subName, &total3)
 
 	// stop Consume2
 	cancel()
+	assert.Equal(t, len(arr), total1+total2)
+	assert.Equal(t, len(arr), total3)
 
 	log.Info("main done")
 }
