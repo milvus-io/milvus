@@ -87,7 +87,7 @@ func Consume1(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 			log.Info("Consume1 channel closed")
 			return
 		case msg = <-consumer.Chan():
-			//consumer.Ack(msg)
+			consumer.Ack(msg)
 			v := BytesToInt(msg.Payload())
 			log.Info("RECV", zap.Any("v", v))
 			(*total)++
@@ -117,7 +117,8 @@ func Consume2(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 	assert.Nil(t, err)
 
 	// skip the last received message
-	<-consumer.Chan()
+	mm := <-consumer.Chan()
+	consumer.Ack(mm)
 
 	log.Info("Consume2 start")
 
@@ -127,7 +128,7 @@ func Consume2(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 			log.Info("Consume2 channel closed")
 			return
 		case msg := <-consumer.Chan():
-			//consumer.Ack(msg)
+			consumer.Ack(msg)
 			v := BytesToInt(msg.Payload())
 			log.Info("RECV", zap.Any("v", v))
 			(*total)++
@@ -156,7 +157,7 @@ func Consume3(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 			log.Info("Consume3 channel closed")
 			return
 		case msg := <-consumer.Chan():
-			//consumer.Ack(msg)
+			consumer.Ack(msg)
 			v := BytesToInt(msg.Payload())
 			log.Info("RECV", zap.Any("v", v))
 			(*total)++
