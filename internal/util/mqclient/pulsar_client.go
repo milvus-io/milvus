@@ -58,6 +58,8 @@ func (pc *pulsarClient) Subscribe(options ConsumerOptions) (Consumer, error) {
 	if err != nil {
 		return nil, err
 	}
+	//consumer.Seek(pulsar.EarliestMessageID())
+	//consumer.SeekByTime(time.Unix(0, 0))
 	pConsumer := &pulsarConsumer{c: consumer}
 
 	return pConsumer, nil

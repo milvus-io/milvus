@@ -12,6 +12,8 @@
 package mqclient
 
 import (
+	"time"
+
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/milvus-io/milvus/internal/log"
 )
@@ -19,6 +21,7 @@ import (
 type pulsarConsumer struct {
 	c          pulsar.Consumer
 	msgChannel chan ConsumerMessage
+	hasSeek    bool
 }
 
 func (pc *pulsarConsumer) Subscription() string {
@@ -28,6 +31,9 @@ func (pc *pulsarConsumer) Subscription() string {
 func (pc *pulsarConsumer) Chan() <-chan ConsumerMessage {
 	if pc.msgChannel == nil {
 		pc.msgChannel = make(chan ConsumerMessage)
+		if !pc.hasSeek {
+			pc.c.SeekByTime(time.Unix(0, 0))
+		}
 		go func() {
 			for { //nolint:gosimple
 				select {
@@ -47,7 +53,11 @@ func (pc *pulsarConsumer) Chan() <-chan ConsumerMessage {
 
 func (pc *pulsarConsumer) Seek(id MessageID) error {
 	messageID := id.(*pulsarID).messageID
-	return pc.c.Seek(messageID)
+	err := pc.c.Seek(messageID)
+	if err == nil {
+		pc.hasSeek = true
+	}
+	return err
 }
 
 func (pc *pulsarConsumer) Ack(message ConsumerMessage) {
