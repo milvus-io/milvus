@@ -26,7 +26,7 @@ import (
 
 func TestProxyNodeManager(t *testing.T) {
 	Params.Init()
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
+	cli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
 	assert.Nil(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -60,7 +60,7 @@ func TestProxyNodeManager(t *testing.T) {
 		t.Log("get sessions", sess[0], sess[1])
 	}
 
-	pm, err := newProxyNodeManager(ctx, []string{Params.EtcdAddress}, f1)
+	pm, err := newProxyNodeManager(ctx, Params.EtcdEndpoints, f1)
 	assert.Nil(t, err)
 	fa := func(sess *sessionutil.Session) {
 		assert.Equal(t, int64(101), sess.ServerID)

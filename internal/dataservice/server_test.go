@@ -846,7 +846,7 @@ func newTestServer(t *testing.T, receiveCh chan interface{}) *Server {
 	err = factory.SetParams(m)
 	assert.Nil(t, err)
 
-	etcdCli, err := initEtcd(Params.EtcdAddress)
+	etcdCli, err := initEtcd(Params.EtcdEndpoints)
 	assert.Nil(t, err)
 	sessKey := path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
@@ -877,10 +877,10 @@ func closeTestServer(t *testing.T, svr *Server) {
 	assert.Nil(t, err)
 }
 
-func initEtcd(etcdAddress string) (*clientv3.Client, error) {
+func initEtcd(etcdEndpoints []string) (*clientv3.Client, error) {
 	var etcdCli *clientv3.Client
 	connectEtcdFn := func() error {
-		etcd, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}, DialTimeout: 5 * time.Second})
+		etcd, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints, DialTimeout: 5 * time.Second})
 		if err != nil {
 			return err
 		}

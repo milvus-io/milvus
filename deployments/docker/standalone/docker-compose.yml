@@ -25,7 +25,7 @@ services:
     image: registry.zilliz.com/milvus/milvus:master-release
     command: ["/milvus/bin/standalone"]
     environment:
-      ETCD_ADDRESS: etcd:2379
+      ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
     ports:
       - "19530:19530"
