@@ -5,54 +5,56 @@ import sys
 import threading
 from time import sleep
 
-from base.client_base import TestcaseBase
-from pymilvus_orm import connections
-from checker import CreateChecker, SearchChecker, InsertChecker
-from base.client_base import ApiCollectionWrapper
+from pymilvus_orm import connections, utility
+from checker import CreateChecker, SearchChecker, InsertAndFlushChecker
+from base.collection_wrapper import ApiCollectionWrapper
 from common import common_func as cf
-from common import common_type as ct
 from utils.util_log import test_log as log
+from checker import Op
+
+
+def reset_counting(checkers={}):
+    for ch in checkers.values():
+        ch.reset()
 
 
 class TestsChaos:
     @pytest.fixture(scope="function", autouse=True)
-    def coll_wrapper_4_insert(self):
-        connections.configure(default={"host": "192.168.1.239", "port": 19530})
-        res = connections.create_connection(alias='default')
-        if res is None:
+    def connection(self):
+        connections.add_connection(default={"host": "192.168.1.239", "port": 19530})
+        conn = connections.connect(alias='default')
+        if conn is None:
             raise Exception("no connections")
-        c_wrapper = ApiCollectionWrapper()
-        c_wrapper.init_collection(name=cf.gen_unique_str(),
-                                  schema=cf.gen_default_collection_schema(),
-                                  check_task="check_nothing")
-        return c_wrapper
+        return conn
 
     @pytest.fixture(scope="function", autouse=True)
-    def coll_wrapper_4_search(self):
-        connections.configure(default={"host": "192.168.1.239", "port": 19530})
-        res = connections.create_connection(alias='default')
-        if res is None:
-            raise Exception("no connections")
-        c_wrapper = ApiCollectionWrapper()
-        _, result = c_wrapper.init_collection(name=cf.gen_unique_str(),
-                                              schema=cf.gen_default_collection_schema(),
-                                              check_task="check_nothing")
+    def collection_wrap_4_insert(self, connection):
+        c_wrap = ApiCollectionWrapper()
+        c_wrap.init_collection(name=cf.gen_unique_str("collection_4_insert"),
+                               schema=cf.gen_default_collection_schema(),
+                               check_task="check_nothing")
+        return c_wrap
+
+    @pytest.fixture(scope="function", autouse=True)
+    def collection_wrap_4_search(self, connection):
+        c_wrap = ApiCollectionWrapper()
+        _, result = c_wrap.init_collection(name=cf.gen_unique_str("collection_4_search_"),
+                                           schema=cf.gen_default_collection_schema(),
+                                           check_task="check_nothing")
         if result is False:
             log.log("result: ")
-        # for _ in range(10):
-        #     c_wrapper.insert(data=cf.gen_default_list_data(nb=ct.default_nb*10),
-        #                     check_res="check_nothing")
-        return c_wrapper
+        return c_wrap
 
     @pytest.fixture(scope="function", autouse=True)
-    def health_checkers(self, coll_wrapper_4_insert, coll_wrapper_4_search):
+    def h_chk(self, connection, collection_wrap_4_insert, collection_wrap_4_search):
         checkers = {}
-        # search_ch = SearchChecker(collection_wrapper=coll_wrapper_4_search)
+        # search_ch = SearchChecker(collection_wrap=collection_wrap_4_search)
         # checkers["search"] = search_ch
-        # insert_ch = InsertChecker(collection_wrapper=coll_wrapper_4_insert)
-        # checkers["insert"] = insert_ch
-        create_ch = CreateChecker(collection_wrapper=coll_wrapper_4_insert)
-        checkers["create"] = create_ch
+        insert_n_flush_ch = InsertAndFlushChecker(connection=connection,
+                                                  collection_wrap=collection_wrap_4_insert)
+        checkers[Op.insert_n_flush] = insert_n_flush_ch
+        create_ch = CreateChecker()
+        checkers[Op.create] = create_ch
 
         return checkers
 
@@ -63,41 +65,61 @@ class TestsChaos:
         pass
     '''
 
-    def test_chaos(self, health_checkers):
-        # query_t = threading.Thread(target=health_checkers['create'].keep_searching, args=())
-        # query_t.start()
-        # insert_t = threading.Thread(target=health_checkers['create'].keep_inserting, args=())
-        # insert_t.start()
-        create_t = threading.Thread(target=health_checkers['create'].keep_creating, args=())
-        create_t.start()
+    def test_chaos(self, h_chk):
+        # start the monitor threads to check the milvus ops
+        for k in h_chk.keys():
+            v = h_chk[k]
+            t = threading.Thread(target=v.keep_running, args=())
+            t.start()
+            log.debug("checker %s start..." % k)
 
         # parse chaos object
         # find the testcase by chaos ops in testcases
         # parse the test expectations
         # wait 120s
-        print("test_chaos starting...")
-        sleep(2)
-        print(f"succ count1: {health_checkers['create']._succ}")
-        print(f"succ rate1: {health_checkers['create'].statics()}")
+        log.debug("test_chaos starting...")
+        sleep(10)
+        log.debug("create succ/total count1: %s, %s "
+                  % (str(h_chk[Op.create]._succ), str(h_chk[Op.create].total())))
+        log.debug("insert succ/total count1: %s, %s "
+                  % (str(h_chk[Op.insert_n_flush]._succ),
+                     str(h_chk[Op.insert_n_flush].total())))
+        log.debug("flush succ/total count1: %s, %s "
+                  % (str(h_chk[Op.insert_n_flush]._flush_succ),
+                     str(h_chk[Op.insert_n_flush].flush_total())))
         # assert statistic:all ops 100% succ
         # reset counting
         # apply chaos object
         # wait 300s (varies by chaos)
-        health_checkers["create"].reset()
-        print(f"succ count2: {health_checkers['create']._succ}")
-        print(f"succ rate2: {health_checkers['create'].statics()}")
-        sleep(2)
-        print(f"succ count3: {health_checkers['create']._succ}")
-        print(f"succ rate3: {health_checkers['create'].statics()}")
+        reset_counting(h_chk)
+        log.debug("reset !!!!!!!")
+        log.debug("create succ/total count2: %s, %s "
+                  % (str(h_chk[Op.create]._succ), str(h_chk[Op.create].total())))
+        log.debug("insert succ/total count2: %s, %s "
+                  % (str(h_chk[Op.insert_n_flush]._succ), str(h_chk[Op.insert_n_flush].total())))
+        log.debug("flush succ/total count2: %s, %s "
+                  % (str(h_chk[Op.insert_n_flush]._flush_succ), str(h_chk[Op.insert_n_flush].flush_total())))
+        sleep(10)
+        log.debug("after a few seconds....")
+        log.debug("create succ/total count3: %s, %s "
+                  % (str(h_chk[Op.create]._succ), str(h_chk[Op.create].total())))
+        log.debug("insert succ/total count3: %s, %s "
+                  % (str(h_chk[Op.insert_n_flush]._succ), str(h_chk[Op.insert_n_flush].total())))
+        log.debug("flush succ/total count3: %s, %s "
+                  % (str(h_chk[Op.insert_n_flush]._flush_succ), str(h_chk[Op.insert_n_flush].flush_total())))
 
         # assert statistic: the target ops succ <50% and the other keep 100% succ
         # delete chaos
         # wait 300s (varies by feature)
         # assert statistic: the target ops succ >90% and the other keep 100% succ
         # terminate thread
-        for ch in health_checkers.values():
+        for ch in h_chk.values():
             ch.terminate()
+        log.debug("Test Completed.")
+        '''
+        for c_name in utility.list_collections():
+            if "CreateChecker_" in c_name:
+                c_wrap = ApiCollectionWrapper()
+                c_wrap.init_collection(c_name).drop()
         pass
-
-
-
+        '''
