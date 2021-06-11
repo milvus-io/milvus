@@ -282,7 +282,6 @@ class TestPartitionParams(TestcaseBase):
         assert len(res1) == 0 and len(res2) == 1
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5302")
     @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     @pytest.mark.parametrize("data, nums", [(cf.gen_default_dataframe_data(10), 10),
                                             (cf.gen_default_list_data(1), 1),
@@ -307,13 +306,13 @@ class TestPartitionParams(TestcaseBase):
 
         # insert data
         partition_w.insert(data)
-        # TODO need a flush before assert
+        self._connect().flush([collection_w.name])
         assert not partition_w.is_empty
         assert partition_w.num_entities == nums
 
         # insert data
         partition_w.insert(data)
-        # TODO need a flush before assert
+        self._connect().flush([collection_w.name])
         assert not partition_w.is_empty
         assert partition_w.num_entities == (nums + nums)
 
@@ -503,8 +502,7 @@ class TestPartitionOperations(TestcaseBase):
 
         # flush
         if flush:
-            # TODO: self.partition_wrap.flush()
-            pass
+            self._connect().flush([collection_w.name])
 
         # drop partition
         partition_w.drop()
@@ -539,8 +537,7 @@ class TestPartitionOperations(TestcaseBase):
 
         # flush
         if flush:
-            # TODO: self.partition_wrap.flush()
-            pass
+            self._connect().flush([collection_w.name])
 
         # drop partition
         partition_w.drop()
@@ -650,7 +647,6 @@ class TestPartitionOperations(TestcaseBase):
         partition_w.release()
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5302")
     @pytest.mark.parametrize("partition_name, data", [(ct.default_partition_name, cf.gen_default_dataframe_data())])
     def test_partition_insert_default_partition(self, partition_name, data):
         """
@@ -668,7 +664,7 @@ class TestPartitionOperations(TestcaseBase):
 
         # insert data to partition
         partition_w.insert(data)
-        # TODO: need a flush here
+        self._connect().flush([collection_w.name])
         assert partition_w.num_entities == len(data)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -716,7 +712,6 @@ class TestPartitionOperations(TestcaseBase):
                            check_items={"err_code": 1, "err_msg": "None Type"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5302")
     def test_partition_insert_maximum_size_data(self, data):
         """
         target: verify insert maximum size data(256M?) a time
@@ -724,13 +719,16 @@ class TestPartitionOperations(TestcaseBase):
                 2. insert maximum size data
         expected: insert successfully
         """
+        # create collection
+        collection_w = self.init_collection_wrap()
+
         # create partition
-        partition_w = self.init_partition_wrap()
+        partition_w = self.init_partition_wrap(collection_w)
 
         # insert data to partition
         max_size = 100000  # TODO: clarify the max size of data
         partition_w.insert(cf.gen_default_dataframe_data(max_size))
-        # TODO: need a flush for #5302
+        self._connect().flush([collection_w.name])
         assert partition_w.num_entities == max_size
 
     @pytest.mark.tags(CaseLabel.L1)

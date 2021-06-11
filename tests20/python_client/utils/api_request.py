@@ -16,15 +16,14 @@ def api_request_catch():
         def inner_wrapper(*args, **kwargs):
             try:
                 res = func(*args, **kwargs)
-                log.debug("(api_res) Response : %s " % str(res)[0:log_row_length])
+                log.debug("(api_response) Response : %s " % str(res)[0:log_row_length])
                 return res, True
             except Exception as e:
                 log.error(traceback.format_exc())
-                log.error("(api_res) [Milvus API Exception]%s: %s" % (str(func), str(e)[0:log_row_length]))
+                log.error("(api_response) [Milvus API Exception]%s: %s"
+                          % (str(func), str(e)[0:log_row_length]))
                 return Error(e), False
-
         return inner_wrapper
-
     return wrapper
 
 
@@ -37,6 +36,8 @@ def api_request(_list, **kwargs):
             if len(_list) > 1:
                 for a in _list[1:]:
                     arg.append(a)
-            log.info("(api_req)[%s] Parameters ars arg: %s, kwargs: %s" % (str(func), str(arg), str(kwargs)))
+            log.debug("(api_request) Request: [%s] args: %s, kwargs: %s"
+                      % (str(func), str(arg)[0:log_row_length], str(kwargs)))
             return func(*arg, **kwargs)
     return False, False
+
