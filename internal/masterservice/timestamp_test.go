@@ -24,29 +24,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/stretchr/testify/assert"
 )
-
-type tbp struct {
-	types.ProxyService
-}
-
-func (*tbp) GetTimeTickChannel(context.Context) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Value: fmt.Sprintf("tbp-%d", rand.Int()),
-	}, nil
-}
-
-func (*tbp) InvalidateCollectionMetaCache(context.Context, *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
 
 type tbd struct {
 	types.DataService

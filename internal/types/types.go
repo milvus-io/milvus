@@ -164,14 +164,6 @@ type ProxyNode interface {
 	*/
 }
 
-type ProxyService interface {
-	Component
-	TimeTickProvider
-
-	RegisterNode(ctx context.Context, req *proxypb.RegisterNodeRequest) (*proxypb.RegisterNodeResponse, error)
-	InvalidateCollectionMetaCache(ctx context.Context, req *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
-}
-
 type QueryNode interface {
 	Component
 	TimeTickProvider

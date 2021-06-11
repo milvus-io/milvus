@@ -820,9 +820,6 @@ type mockCore struct {
 
 func (m *mockCore) UpdateStateCode(internalpb.StateCode) {
 }
-func (m *mockCore) SetProxyService(context.Context, types.ProxyService) error {
-	return nil
-}
 func (m *mockCore) SetDataService(context.Context, types.DataService) error {
 	return nil
 }
