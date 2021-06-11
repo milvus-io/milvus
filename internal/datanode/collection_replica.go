@@ -20,6 +20,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
 )
@@ -42,6 +43,7 @@ type Replica interface {
 	getChannelName(segID UniqueID) (string, error)
 	setStartPositions(segmentID UniqueID, startPos []*internalpb.MsgPosition) error
 	setEndPositions(segmentID UniqueID, endPos []*internalpb.MsgPosition) error
+	getAllStartPositions() []*datapb.SegmentStartPosition
 	getSegmentPositions(segID UniqueID) ([]*internalpb.MsgPosition, []*internalpb.MsgPosition)
 	listOpenSegmentCheckPointAndNumRows(segs []UniqueID) (map[UniqueID]internalpb.MsgPosition, map[UniqueID]int64)
 }
@@ -183,6 +185,32 @@ func (replica *CollectionSegmentReplica) addSegment(
 
 	replica.segments[segmentID] = seg
 	return nil
+}
+
+func (replica *CollectionSegmentReplica) getAllStartPositions() []*datapb.SegmentStartPosition {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
+
+	result := make([]*datapb.SegmentStartPosition, 0, len(replica.segments))
+	for id, seg := range replica.segments {
+
+		if seg.isNew.Load().(bool) {
+
+			pos, ok := replica.startPositions[id]
+			if !ok {
+				log.Warn("Segment has no start positions")
+				continue
+			}
+
+			result = append(result, &datapb.SegmentStartPosition{
+				SegmentID:     id,
+				StartPosition: pos[0],
+			})
+			seg.isNew.Store(false)
+		}
+
+	}
+	return result
 }
 
 func (replica *CollectionSegmentReplica) removeSegment(segmentID UniqueID) error {

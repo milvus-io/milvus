@@ -72,11 +72,12 @@ type segmentCheckPoint struct {
 }
 
 type segmentFlushUnit struct {
-	collID     UniqueID
-	segID      UniqueID
-	field2Path map[UniqueID]string
-	checkPoint map[UniqueID]segmentCheckPoint
-	flushed    bool
+	collID         UniqueID
+	segID          UniqueID
+	field2Path     map[UniqueID]string
+	checkPoint     map[UniqueID]segmentCheckPoint
+	startPositions []*datapb.SegmentStartPosition
+	flushed        bool
 }
 
 type insertBuffer struct {
@@ -714,7 +715,9 @@ func flushSegment(
 	_, ep := ibNode.replica.getSegmentPositions(segID)
 	sta, _ := ibNode.replica.getSegmentStatisticsUpdates(segID)
 	ibNode.setSegmentCheckPoint(segID, segmentCheckPoint{sta.NumRows, *ep[0]})
-	flushUnit <- segmentFlushUnit{collID: collID, segID: segID, field2Path: field2Path}
+
+	startPos := ibNode.replica.getAllStartPositions()
+	flushUnit <- segmentFlushUnit{collID: collID, segID: segID, field2Path: field2Path, startPositions: startPos}
 	clearFn(true)
 }
 
