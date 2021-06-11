@@ -47,7 +47,11 @@ constexpr int32_t INDEX_FILE_SIZE_LIMIT = 65536;  // due to max size memory of f
 constexpr int32_t INDEX_FILE_SIZE_LIMIT = 131072;  // index trigger size max = 128G
 #endif
 constexpr int64_t M_BYTE = 1024 * 1024;
+constexpr int64_t G_BYTE = M_BYTE * 1024;
 constexpr int64_t MAX_INSERT_DATA_SIZE = 256 * M_BYTE;
+// search result size limited by grpc message size
+// consider the result struct contains members such as row_count/status, subtract 1MB
+constexpr int64_t MAX_SEARCH_RESULT_SIZE = 2 * G_BYTE - M_BYTE;
 
 Status
 CheckParameterRange(const milvus::json& json_params, const std::string& param_name, int64_t min, int64_t max,
@@ -420,8 +424,22 @@ ValidationUtil::ValidateCollectionIndexMetricType(int32_t metric_type) {
 Status
 ValidationUtil::ValidateSearchTopk(int64_t top_k) {
     if (top_k <= 0 || top_k > QUERY_MAX_TOPK) {
-        std::string msg =
-            "Invalid topk: " + std::to_string(top_k) + ". " + "The topk must be within the range of 1 ~ 16384.";
+        std::string msg = "Invalid topk: " + std::to_string(top_k) + ". " +
+                          "The topk must be within the range of 1 ~ " + std::to_string(QUERY_MAX_TOPK) + ".";
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_TOPK, msg);
+    }
+
+    return Status::OK();
+}
+
+Status
+ValidationUtil::ValidateResultSize(int64_t vector_count, int64_t top_k) {
+    // each id-distance pair is 12 bytes (sizeof(int64) + sizeof(float))
+    int64_t result_size = vector_count * top_k * 12;
+    if (result_size >= MAX_SEARCH_RESULT_SIZE) {
+        std::string msg = "Invalid nq " + std::to_string(vector_count) + " topk " + std::to_string(top_k) +
+                          ". The search result size may exceed the RPC transmission limit.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_TOPK, msg);
     }
