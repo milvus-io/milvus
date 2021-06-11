@@ -16,6 +16,7 @@
 
 #include <memory>
 #include <vector>
+#include <string>
 #include <utility>
 
 namespace milvus::segcore {
@@ -25,6 +26,8 @@ class ScalarIndexBase {
     virtual std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
     do_search_ids(const IdArray& ids) const = 0;
     virtual ~ScalarIndexBase() = default;
+    virtual std::string
+    debug() const = 0;
 };
 
 class ScalarIndexVector : public ScalarIndexBase {
@@ -40,6 +43,15 @@ class ScalarIndexVector : public ScalarIndexBase {
 
     std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
     do_search_ids(const IdArray& ids) const override;
+
+    std::string
+    debug() const override {
+        std::string dbg_str;
+        for (auto pr : mapping_) {
+            dbg_str += "<" + std::to_string(pr.first) + "->" + std::to_string(pr.second.get()) + ">";
+        }
+        return dbg_str;
+    }
 
  private:
     std::vector<std::pair<T, SegOffset>> mapping_;

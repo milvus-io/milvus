@@ -22,6 +22,7 @@
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include "common/Types.h"
 #include "common/CGoHelper.h"
+#include <iostream>
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CSegmentInterface

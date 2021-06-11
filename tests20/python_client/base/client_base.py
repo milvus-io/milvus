@@ -1,5 +1,6 @@
 import pytest
 import sys
+from pymilvus_orm.default_config import DefaultConfig
 
 sys.path.append("..")
 from base.connections_wrapper import ApiConnectionsWrapper
@@ -72,6 +73,10 @@ class Base:
             res = self.connection_wrap.list_connections()
             for i in res[0]:
                 self.connection_wrap.remove_connection(i[0])
+
+            # because the connection is in singleton mode, it needs to be restored to the original state after teardown
+            self.connection_wrap.add_connection(default={"host": DefaultConfig.DEFAULT_HOST,
+                                                         "port": DefaultConfig.DEFAULT_PORT})
         except Exception as e:
             pass
 
