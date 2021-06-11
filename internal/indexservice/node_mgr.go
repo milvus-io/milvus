@@ -13,7 +13,6 @@ package indexservice
 
 import (
 	"context"
-	"errors"
 	"strconv"
 	"time"
 
@@ -37,8 +36,8 @@ func (i *IndexService) addNode(nodeID UniqueID, req *indexpb.RegisterNodeRequest
 	defer i.nodeLock.Unlock()
 
 	if i.nodeClients.CheckAddressExist(req.Address) {
-		errMsg := "Register IndexNode fatal, address conflict with nodeID:%d 's address" + strconv.FormatInt(nodeID, 10)
-		return errors.New(errMsg)
+		log.Debug("IndexService", zap.Any("Node client already exist with ID:", nodeID))
+		return nil
 	}
 
 	nodeAddress := req.Address.Ip + ":" + strconv.FormatInt(req.Address.Port, 10)
