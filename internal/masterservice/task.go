@@ -239,11 +239,11 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	// add dml channel before send dd msg
 	t.core.dmlChannels.AddProducerChannels(chanNames...)
 
-	err = t.core.SendDdCreateCollectionReq(ctx, &ddCollReq)
+	err = t.core.SendDdCreateCollectionReq(ctx, &ddCollReq, chanNames)
 	if err != nil {
 		return err
 	}
-	err = t.core.SendDdCreatePartitionReq(ctx, &ddPartReq)
+	err = t.core.SendDdCreatePartitionReq(ctx, &ddPartReq, chanNames)
 	if err != nil {
 		return err
 	}
@@ -297,7 +297,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	err = t.core.SendDdDropCollectionReq(ctx, &ddReq)
+	err = t.core.SendDdDropCollectionReq(ctx, &ddReq, collMeta.PhysicalChannelNames)
 	if err != nil {
 		return err
 	}
@@ -483,7 +483,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	err = t.core.SendDdCreatePartitionReq(ctx, &ddReq)
+	err = t.core.SendDdCreatePartitionReq(ctx, &ddReq, collMeta.PhysicalChannelNames)
 	if err != nil {
 		return err
 	}
@@ -555,7 +555,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	err = t.core.SendDdDropPartitionReq(ctx, &ddReq)
+	err = t.core.SendDdDropPartitionReq(ctx, &ddReq, collInfo.PhysicalChannelNames)
 	if err != nil {
 		return err
 	}
