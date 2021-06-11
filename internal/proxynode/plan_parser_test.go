@@ -126,6 +126,7 @@ func TestExprPlan_Str(t *testing.T) {
 	exprStrs := []string{
 		"age >= 420000 && age < 420010", // range
 		"age == 420000 || age == 420001 || age == 420002 || age == 420003 || age == 420004", // term
+		"age not in [1, 2, 3]",
 	}
 
 	for offset, exprStr := range exprStrs {
