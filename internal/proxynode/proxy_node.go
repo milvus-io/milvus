@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -53,7 +52,6 @@ type ProxyNode struct {
 	masterService types.MasterService
 	indexService  types.IndexService
 	dataService   types.DataService
-	proxyService  types.ProxyService
 	queryService  types.QueryService
 
 	chMgr channelsMgr
@@ -100,37 +98,7 @@ func (node *ProxyNode) Register() error {
 }
 
 func (node *ProxyNode) Init() error {
-	// todo wait for proxyservice state changed to Healthy
 	ctx := context.Background()
-
-	err := funcutil.WaitForComponentHealthy(ctx, node.proxyService, "ProxyService", 1000000, time.Millisecond*200)
-	if err != nil {
-		return err
-	}
-	log.Debug("ProxyService is ready ...")
-
-	request := &proxypb.RegisterNodeRequest{
-		Address: &commonpb.Address{
-			Ip:   Params.IP,
-			Port: int64(Params.NetworkPort),
-		},
-	}
-
-	response, err := node.proxyService.RegisterNode(ctx, request)
-	if err != nil {
-		log.Debug("ProxyNode RegisterNode failed", zap.Error(err))
-		return err
-	}
-	if response.Status.ErrorCode != commonpb.ErrorCode_Success {
-		log.Debug("ProxyNode RegisterNode failed", zap.String("Reason", response.Status.Reason))
-		return errors.New(response.Status.Reason)
-	}
-
-	err = Params.LoadConfigFromInitParams(response.InitParams)
-	if err != nil {
-		log.Debug("ProxyNode LoadConfigFromInitParams failed", zap.Error(err))
-		return err
-	}
 
 	// wait for dataservice state changed to Healthy
 	if node.dataService != nil {
@@ -197,7 +165,7 @@ func (node *ProxyNode) Init() error {
 	m := map[string]interface{}{
 		"PulsarAddress": Params.PulsarAddress,
 		"PulsarBufSize": 1024}
-	err = node.msFactory.SetParams(m)
+	err := node.msFactory.SetParams(m)
 	if err != nil {
 		return err
 	}
@@ -443,10 +411,6 @@ func (node *ProxyNode) SetIndexServiceClient(cli types.IndexService) {
 
 func (node *ProxyNode) SetDataServiceClient(cli types.DataService) {
 	node.dataService = cli
-}
-
-func (node *ProxyNode) SetProxyServiceClient(cli types.ProxyService) {
-	node.proxyService = cli
 }
 
 func (node *ProxyNode) SetQueryServiceClient(cli types.QueryService) {

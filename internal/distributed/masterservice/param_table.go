@@ -26,7 +26,6 @@ type ParamTable struct {
 	Address string // ip:port
 	Port    int
 
-	ProxyServiceAddress string
 	IndexServiceAddress string
 	QueryServiceAddress string
 	DataServiceAddress  string
@@ -41,7 +40,6 @@ func (p *ParamTable) Init() {
 		}
 		p.initAddress()
 		p.initPort()
-		p.initProxyServiceAddress()
 		p.initIndexServiceAddress()
 		p.initQueryServiceAddress()
 		p.initDataServiceAddress()
@@ -59,14 +57,6 @@ func (p *ParamTable) initAddress() {
 
 func (p *ParamTable) initPort() {
 	p.Port = p.ParseInt("master.port")
-}
-
-func (p *ParamTable) initProxyServiceAddress() {
-	ret, err := p.Load("_PROXY_SERVICE_ADDRESS")
-	if err != nil {
-		panic(err)
-	}
-	p.ProxyServiceAddress = ret
 }
 
 func (p *ParamTable) initIndexServiceAddress() {

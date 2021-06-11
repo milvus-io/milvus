@@ -34,7 +34,4 @@ func TestParamTable(t *testing.T) {
 
 	assert.NotEqual(t, Params.QueryServiceAddress, "")
 	t.Logf("QueryServiceAddress:%s", Params.QueryServiceAddress)
-
-	assert.NotEqual(t, Params.ProxyServiceAddress, "")
-	t.Logf("ProxyServiceAddress:%s", Params.ProxyServiceAddress)
 }

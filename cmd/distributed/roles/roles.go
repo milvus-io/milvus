@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/masterservice"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proxynode"
-	"github.com/milvus-io/milvus/internal/proxyservice"
 	"github.com/milvus-io/milvus/internal/querynode"
 	"github.com/milvus-io/milvus/internal/queryservice"
 
@@ -46,7 +45,6 @@ func newMsgFactory(localMsg bool) msgstream.Factory {
 
 type MilvusRoles struct {
 	EnableMaster           bool `env:"ENABLE_MASTER"`
-	EnableProxyService     bool `env:"ENABLE_PROXY_SERVICE"`
 	EnableProxyNode        bool `env:"ENABLE_PROXY_NODE"`
 	EnableQueryService     bool `env:"ENABLE_QUERY_SERVICE"`
 	EnableQueryNode        bool `env:"ENABLE_QUERY_NODE"`
@@ -96,30 +94,6 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		}
 
 		metrics.RegisterMaster()
-	}
-
-	if mr.EnableProxyService {
-		var ps *components.ProxyService
-
-		go func() {
-			proxyservice.Params.Init()
-			logutil.SetupLogger(&proxyservice.Params.Log)
-			defer log.Sync()
-
-			factory := newMsgFactory(localMsg)
-			var err error
-			ps, err = components.NewProxyService(ctx, factory)
-			if err != nil {
-				panic(err)
-			}
-			_ = ps.Run()
-		}()
-
-		if ps != nil {
-			defer ps.Stop()
-		}
-
-		metrics.RegisterProxyService()
 	}
 
 	if mr.EnableProxyNode {
