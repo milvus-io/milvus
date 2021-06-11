@@ -16,6 +16,7 @@ import (
 	"errors"
 	"math/rand"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -586,6 +587,26 @@ func (i *IndexService) assignTasksServerStart() error {
 	sessions, _, err := i.session.GetSessions(typeutil.IndexNodeRole)
 	if err != nil {
 		return err
+	}
+	for _, session := range sessions {
+		addrs := strings.Split(session.Address, ":")
+		ip := addrs[0]
+		port, err := strconv.ParseInt(addrs[1], 10, 64)
+		if err != nil {
+			return err
+		}
+
+		req := &indexpb.RegisterNodeRequest{
+			Address: &commonpb.Address{
+				Ip:   ip,
+				Port: port,
+			},
+			NodeID: session.ServerID,
+		}
+		if err = i.addNode(session.ServerID, req); err != nil {
+			log.Debug("IndexService", zap.Any("IndexService start find node fatal, err = ", err))
+		}
+
 	}
 	var serverIDs []int64
 	for _, session := range sessions {
