@@ -27,7 +27,6 @@ import (
 	grpcdataserviceclient "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
 	grpcindexserviceclient "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
 	grpcmasterserviceclient "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
-	grpcproxyserviceclient "github.com/milvus-io/milvus/internal/distributed/proxyservice/client"
 	grpcqueryserviceclient "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
 	otgrpc "github.com/opentracing-contrib/go-grpc"
 
@@ -55,7 +54,6 @@ type Server struct {
 
 	grpcErrChan chan error
 
-	proxyServiceClient  *grpcproxyserviceclient.Client
 	masterServiceClient *grpcmasterserviceclient.GrpcClient
 	dataServiceClient   *grpcdataserviceclient.Client
 	queryServiceClient  *grpcqueryserviceclient.Client
@@ -169,15 +167,6 @@ func (s *Server) init() error {
 	if err != nil {
 		return err
 	}
-
-	s.proxyServiceClient = grpcproxyserviceclient.NewClient(Params.ProxyServiceAddress)
-	err = s.proxyServiceClient.Init()
-	if err != nil {
-		log.Debug("ProxyNode proxyServiceClient init failed ", zap.Error(err))
-		return err
-	}
-	s.proxynode.SetProxyServiceClient(s.proxyServiceClient)
-	log.Debug("set proxy service client ...")
 
 	masterServiceAddr := Params.MasterAddress
 	log.Debug("ProxyNode", zap.String("master address", masterServiceAddr))

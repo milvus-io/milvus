@@ -7,31 +7,12 @@ import "common.proto";
 import "internal.proto";
 import "milvus.proto";
 
-service ProxyService {
-  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
-  rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
-  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
-
-  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
-  rpc InvalidateCollectionMetaCache(InvalidateCollMetaCacheRequest) returns (common.Status) {}
-}
-
 service ProxyNodeService {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
 
   rpc InvalidateCollectionMetaCache(InvalidateCollMetaCacheRequest) returns (common.Status) {}
   rpc GetDdChannel(internal.GetDdChannelRequest) returns (milvus.StringResponse) {}
-}
-
-message RegisterNodeRequest {
-  common.MsgBase base = 1;
-  common.Address address = 2;
-}
-
-message RegisterNodeResponse {
-  internal.InitParams init_params = 1;
-  common.Status status = 2;
 }
 
 message InvalidateCollMetaCacheRequest {

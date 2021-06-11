@@ -118,7 +118,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	// TODO: Remove this and use unique vChannel
 	channelTmp := make([]string, 0)
 	for _, channel := range w.req.ChannelIDs {
-		channelTmp = append(channelTmp, channel+strconv.FormatInt(collectionID, 10))
+		channelTmp = append(channelTmp, channel+"#"+strconv.FormatInt(collectionID, 10))
 	}
 
 	collection, err := w.node.streaming.replica.getCollectionByID(collectionID)

@@ -92,7 +92,7 @@ func NewIndexService(ctx context.Context) (*IndexService, error) {
 		nodeClients: &PriorityQueue{},
 		nodeTasks:   &nodeTasks{},
 	}
-
+	i.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return i, nil
 }
 
