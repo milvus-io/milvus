@@ -15,6 +15,7 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -49,8 +50,8 @@ type ParamTable struct {
 	MsgChannelSubName string
 
 	// --- ETCD ---
-	EtcdAddress  string
-	MetaRootPath string
+	EtcdEndpoints []string
+	MetaRootPath  string
 
 	// --- MinIO ---
 	MinioAddress         string
@@ -94,7 +95,7 @@ func (p *ParamTable) Init() {
 		p.initMsgChannelSubName()
 
 		// --- ETCD ---
-		p.initEtcdAddress()
+		p.initEtcdEndpoints()
 		p.initMetaRootPath()
 
 		// --- MinIO ---
@@ -188,12 +189,12 @@ func (p *ParamTable) initMsgChannelSubName() {
 }
 
 // --- ETCD ---
-func (p *ParamTable) initEtcdAddress() {
-	addr, err := p.Load("_EtcdAddress")
+func (p *ParamTable) initEtcdEndpoints() {
+	endpoints, err := p.Load("_EtcdEndpoints")
 	if err != nil {
 		panic(err)
 	}
-	p.EtcdAddress = addr
+	p.EtcdEndpoints = strings.Split(endpoints, ",")
 }
 
 func (p *ParamTable) initMetaRootPath() {

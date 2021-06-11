@@ -56,7 +56,7 @@ type Server struct {
 	dataService   types.DataService
 
 	newMasterServiceClient func() (types.MasterService, error)
-	newDataServiceClient   func(string, string, time.Duration) types.DataService
+	newDataServiceClient   func(string, []string, time.Duration) types.DataService
 
 	closer io.Closer
 }
@@ -70,10 +70,10 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		msFactory:   factory,
 		grpcErrChan: make(chan error),
 		newMasterServiceClient: func() (types.MasterService, error) {
-			return msc.NewClient(dn.Params.MetaRootPath, []string{dn.Params.EtcdAddress}, 3*time.Second)
+			return msc.NewClient(dn.Params.MetaRootPath, dn.Params.EtcdEndpoints, 3*time.Second)
 		},
-		newDataServiceClient: func(etcdMetaRoot, etcdAddress string, timeout time.Duration) types.DataService {
-			return dsc.NewClient(etcdMetaRoot, []string{etcdAddress}, timeout)
+		newDataServiceClient: func(etcdMetaRoot string, etcdEndpoints []string, timeout time.Duration) types.DataService {
+			return dsc.NewClient(etcdMetaRoot, etcdEndpoints, timeout)
 		},
 	}
 
@@ -206,7 +206,7 @@ func (s *Server) init() error {
 	if s.newDataServiceClient != nil {
 		log.Debug("Data service address", zap.String("address", Params.DataServiceAddress))
 		log.Debug("DataNode Init data service client ...")
-		dataServiceClient := s.newDataServiceClient(dn.Params.MetaRootPath, dn.Params.EtcdAddress, 10*time.Second)
+		dataServiceClient := s.newDataServiceClient(dn.Params.MetaRootPath, dn.Params.EtcdEndpoints, 10*time.Second)
 		if err = dataServiceClient.Init(); err != nil {
 			log.Debug("DataNode newDataServiceClient failed", zap.Error(err))
 			panic(err)
