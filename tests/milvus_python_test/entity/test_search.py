@@ -155,6 +155,20 @@ class TestSearchBase:
         else:
             assert not status.OK()
 
+    @pytest.mark.level(2)
+    def test_search_top_max_nq(self, connect, collection):
+        '''
+        target: test basic search fuction, assert fail if nq * topk is larger than max_value
+        method: search with the given vectors, topk * nq * 12 > 2GB
+        expected: search failed
+        '''
+        nq = 12000
+        vectors, ids = self.init_data(connect, collection, nb=100000)
+        query_vec = [vectors[0] for i in range(nq)]
+        top_k = 16384
+        status, result = connect.search(collection, top_k, query_vec)
+        assert not status.OK()
+
     def test_search_top_k_flat_index_metric_type(self, connect, collection):
         '''
         target: test basic search fuction, all the search params is corrent, change top-k value
