@@ -161,6 +161,11 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 
 	var alloc allocatorInterface = newAllocator(node.masterService)
 
+	log.Debug("Received Vchannel Info",
+		zap.Int("Unflushed Segment Number", len(vchan.GetUnflushedSegments())),
+		zap.Int("Flushed Segment Number", len(vchan.GetFlushedSegments())),
+	)
+
 	flushChan := make(chan *flushMsg, 100)
 	dataSyncService := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataService)
 	node.vchan2SyncService[vchan.GetChannelName()] = dataSyncService
