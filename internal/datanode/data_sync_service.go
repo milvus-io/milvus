@@ -119,6 +119,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) {
 			zap.Int64("SegmentID", fu.segID),
 			zap.Int64("CollectionID", fu.collID),
 			zap.Int("Length of Field2BinlogPaths", len(id2path)),
+			zap.Any("Start Positions", fu.startPositions),
 		)
 
 		req := &datapb.SaveBinlogPathsRequest{
@@ -132,6 +133,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) {
 			CollectionID:      fu.collID,
 			Field2BinlogPaths: id2path,
 			CheckPoints:       checkPoints,
+			StartPositions:    fu.startPositions,
 			Flushed:           fu.flushed,
 		}
 		rsp, err := dsService.dataService.SaveBinlogPaths(dsService.ctx, req)

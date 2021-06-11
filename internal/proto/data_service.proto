@@ -245,9 +245,9 @@ message ID2PathList {
   repeated string Paths = 2;
 }
 
-message PositionPair {
+message SegmentStartPosition {
   internal.MsgPosition start_position = 1;
-  internal.MsgPosition end_position = 2;
+  int64 segmentID = 2;
 }
 
 message SaveBinlogPathsRequest {
@@ -256,7 +256,8 @@ message SaveBinlogPathsRequest {
   int64 collectionID = 3;
   repeated ID2PathList field2BinlogPaths = 4;
   repeated CheckPoint checkPoints = 5;
-  bool flushed = 6;
+  repeated SegmentStartPosition start_positions = 6;
+  bool flushed = 7;
 }
 
 message CheckPoint {
