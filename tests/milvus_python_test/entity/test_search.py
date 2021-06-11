@@ -147,13 +147,10 @@ class TestSearchBase:
         query_vec = [vectors[0]]
         top_k = get_top_k
         status, result = connect.search(collection, top_k, query_vec)
-        if top_k <= 16384:
-            assert status.OK()
-            assert len(result[0]) == min(len(vectors), top_k)
-            assert result[0][0].distance <= epsilon
-            assert check_result(result[0], ids[0])
-        else:
-            assert not status.OK()
+        assert status.OK()
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert result[0][0].distance <= epsilon
+        assert check_result(result[0], ids[0])
 
     @pytest.mark.level(1)
     def test_search_top_max_nq(self, connect, collection):
@@ -211,14 +208,11 @@ class TestSearchBase:
         search_param = get_search_param(index_type)
         status, result = connect.search(collection, top_k, query_vec, params=search_param)
         logging.getLogger().info(result)
-        if top_k <= 1024:
-            assert status.OK()
-            assert len(result[0]) == min(len(vectors), top_k)
-            assert check_result(result[0], ids[0])
-            assert result[0][0].distance < result[0][1].distance
-            assert result[1][0].distance < result[1][1].distance
-        else:
-            assert not status.OK()
+        assert status.OK()
+        assert len(result[0]) == min(len(vectors), top_k)
+        assert check_result(result[0], ids[0])
+        assert result[0][0].distance < result[0][1].distance
+        assert result[1][0].distance < result[1][1].distance
 
     def test_search_l2_large_nq_index_params(self, connect, collection, get_simple_index):
         '''
