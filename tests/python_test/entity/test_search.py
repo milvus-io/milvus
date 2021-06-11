@@ -1828,7 +1828,7 @@ class TestSearchWithExpression(object):
         nq = 10
         query_data = entities[2]["values"][:nq]
         res = connect.search_with_expression(collection, query_data, default_float_vec_field_name, search_params,
-                                             limit, expression, timeout=30)
+                                             limit, expression)
         assert len(res) == nq
         for topk_results in res:
             assert len(topk_results) <= limit

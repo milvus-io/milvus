@@ -259,12 +259,6 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		zap.Any("collectionID", collectionID),
 		zap.Any("toSeekChannels", toSeekChannels))
 
-	// add search collection
-	if !w.node.searchService.hasSearchCollection(collectionID) {
-		w.node.searchService.addSearchCollection(collectionID)
-		log.Debug("add search collection", zap.Any("collectionID", collectionID))
-	}
-
 	// start flow graphs
 	if loadPartition {
 		err = w.node.streaming.dataSyncService.startPartitionFlowGraph(partitionID, vChannels)

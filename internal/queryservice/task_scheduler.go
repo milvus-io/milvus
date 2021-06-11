@@ -54,23 +54,26 @@ func (queue *TaskQueue) addTask(tasks []task) {
 	defer queue.Unlock()
 
 	for _, t := range tasks {
-		// TODO: check TaskPriority
-		queue.taskChan <- 1
-		queue.tasks.PushBack(t)
+		if queue.tasks.Len() == 0 {
+			queue.taskChan <- 1
+			queue.tasks.PushBack(t)
+			continue
+		}
 
-		//if queue.tasks.Len() == 0 {
-		//	queue.taskChan <- 1
-		//	queue.tasks.PushBack(t)
-		//	continue
-		//}
-		//for e := queue.tasks.Back(); e != nil; e = e.Prev() {
-		//	if t.TaskPriority() > e.Value.(task).TaskPriority() {
-		//		continue
-		//	}
-		//	//TODO:: take care of timestamp
-		//	queue.taskChan <- 1
-		//	queue.tasks.InsertAfter(t, e)
-		//}
+		for e := queue.tasks.Back(); e != nil; e = e.Prev() {
+			if t.TaskPriority() > e.Value.(task).TaskPriority() {
+				if e.Prev() == nil {
+					queue.taskChan <- 1
+					queue.tasks.InsertBefore(t, e)
+					break
+				}
+				continue
+			}
+			//TODO:: take care of timestamp
+			queue.taskChan <- 1
+			queue.tasks.InsertAfter(t, e)
+			break
+		}
 	}
 }
 

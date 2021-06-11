@@ -101,6 +101,7 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 	sc := node.searchService.searchCollections[in.CollectionID]
 	consumeChannels := []string{in.RequestChannelID}
 	consumeSubName := Params.MsgChannelSubName
+	//consumeSubName := Params.MsgChannelSubName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
 	sc.searchMsgStream.AsConsumer(consumeChannels, consumeSubName)
 	node.retrieveService.retrieveMsgStream.AsConsumer(consumeChannels, "RetrieveSubName")
 	log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
@@ -112,6 +113,11 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 	log.Debug("querynode AsProducer: " + strings.Join(producerChannels, ", "))
 
 	// message stream need to asConsumer before start
+	// add search collection
+	if !node.searchService.hasSearchCollection(collectionID) {
+		node.searchService.addSearchCollection(collectionID)
+		log.Debug("add search collection", zap.Any("collectionID", collectionID))
+	}
 	sc.start()
 	log.Debug("start search collection", zap.Any("collectionID", collectionID))
 

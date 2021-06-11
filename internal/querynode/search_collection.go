@@ -115,8 +115,9 @@ func (s *searchCollection) register() {
 
 	s.watcherSelectCase = make([]reflect.SelectCase, 0)
 	log.Debug("register tSafe watcher and init watcher select case",
+		zap.Any("collectionID", collection.ID()),
 		zap.Any("dml channels", collection.getWatchedDmChannels()),
-		zap.Any("collectionID", collection.ID()))
+	)
 	for _, channel := range collection.getWatchedDmChannels() {
 		s.tSafeWatchers[channel] = newTSafeWatcher()
 		s.streaming.tSafeReplica.registerTSafeWatcher(channel, s.tSafeWatchers[channel])
@@ -256,6 +257,14 @@ func (s *searchCollection) loadBalance(msg *msgstream.LoadBalanceSegmentsMsg) {
 }
 
 func (s *searchCollection) receiveSearch(msg *msgstream.SearchMsg) {
+	//if msg.CollectionID != s.collectionID {
+	//	log.Debug("not target collection search request",
+	//		zap.Any("collectionID", msg.CollectionID),
+	//		zap.Int64("msgID", msg.ID()),
+	//	)
+	//	return
+	//}
+
 	log.Debug("consume search message",
 		zap.Any("collectionID", msg.CollectionID),
 		zap.Int64("msgID", msg.ID()),
@@ -284,7 +293,7 @@ func (s *searchCollection) receiveSearch(msg *msgstream.SearchMsg) {
 	if msg.BeginTs() > serviceTime {
 		bt, _ := tsoutil.ParseTS(msg.BeginTs())
 		st, _ := tsoutil.ParseTS(serviceTime)
-		log.Debug("querynode::receiveSearchMsg: add to unsolvedMsgs",
+		log.Debug("query node::receiveSearchMsg: add to unsolvedMsg",
 			zap.Any("collectionID", s.collectionID),
 			zap.Any("sm.BeginTs", bt),
 			zap.Any("serviceTime", st),
@@ -331,13 +340,14 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 		default:
 			//time.Sleep(10 * time.Millisecond)
 			serviceTime := s.waitNewTSafe()
+			st, _ := tsoutil.ParseTS(serviceTime)
 			log.Debug("get tSafe from flow graph",
 				zap.Int64("collectionID", s.collectionID),
-				zap.Uint64("tSafe", serviceTime))
+				zap.Any("tSafe", st))
 
 			s.setServiceableTime(serviceTime)
 			log.Debug("query node::doUnsolvedMsgSearch: setServiceableTime",
-				zap.Any("serviceTime", serviceTime),
+				zap.Any("serviceTime", st),
 			)
 
 			searchMsg := make([]*msgstream.SearchMsg, 0)
@@ -345,16 +355,26 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 
 			for _, sm := range tempMsg {
 				bt, _ := tsoutil.ParseTS(sm.EndTs())
-				st, _ := tsoutil.ParseTS(serviceTime)
+				st, _ = tsoutil.ParseTS(serviceTime)
 				log.Debug("get search message from unsolvedMsg",
 					zap.Int64("collectionID", sm.CollectionID),
 					zap.Int64("msgID", sm.ID()),
-					zap.Any("reqTime", bt),
-					zap.Any("serviceTime", st))
+					zap.Any("reqTime_p", bt),
+					zap.Any("serviceTime_p", st),
+					zap.Any("reqTime_l", sm.EndTs()),
+					zap.Any("serviceTime_l", serviceTime),
+				)
 				if sm.EndTs() <= serviceTime {
 					searchMsg = append(searchMsg, sm)
 					continue
 				}
+				log.Debug("query node::doUnsolvedMsgSearch: add to unsolvedMsg",
+					zap.Any("collectionID", s.collectionID),
+					zap.Any("sm.BeginTs", bt),
+					zap.Any("serviceTime", st),
+					zap.Any("delta seconds", (sm.BeginTs()-serviceTime)/(1000*1000*1000)),
+					zap.Any("msgID", sm.ID()),
+				)
 				s.addToUnsolvedMsg(sm)
 			}
 
@@ -612,7 +632,10 @@ func (s *searchCollection) publishSearchResult(msg msgstream.TsMsg, collectionID
 	msgPack.Msgs = append(msgPack.Msgs, msg)
 	err := s.searchResultMsgStream.Produce(&msgPack)
 	if err != nil {
-		log.Error(err.Error())
+		log.Error("publishing search result failed, err = "+err.Error(),
+			zap.Int64("collectionID", collectionID),
+			zap.Int64("msgID", msg.ID()),
+		)
 	} else {
 		log.Debug("publish search result done",
 			zap.Int64("collectionID", collectionID),

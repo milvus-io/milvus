@@ -74,6 +74,8 @@ func (t *tSafeReplica) addTSafe(vChannel VChannel) {
 		t.tSafes[vChannel] = newTSafe(ctx, vChannel)
 		t.tSafes[vChannel].start()
 		log.Debug("add tSafe done", zap.Any("channel", vChannel))
+	} else {
+		log.Error("tSafe has been existed", zap.Any("channel", vChannel))
 	}
 }
 

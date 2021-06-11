@@ -107,9 +107,6 @@ func (ts *tSafe) start() {
 					watcher.notify()
 				}
 
-				// TODO: remove
-				ts.tSafe = m.t
-
 				log.Debug("set tSafe done",
 					zap.Any("id", m.id),
 					zap.Any("channel", ts.channel),

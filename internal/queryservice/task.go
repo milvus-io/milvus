@@ -440,11 +440,13 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 			}
 			channelsToWatch = append(channelsToWatch, channel)
 			watchRequests = append(watchRequests, watchRequest)
+			log.Debug("set watchDmChannelsRequests", zap.Any("request", watchRequest), zap.Int64("collectionID", collectionID))
 		}
 	}
 
 	segment2Nodes := shuffleSegmentsToQueryNode(segmentsToLoad, lpt.cluster)
 	watchRequest2Nodes := shuffleChannelsToQueryNode(channelsToWatch, lpt.cluster)
+	log.Debug("watch request to node", zap.Any("request map", watchRequest2Nodes), zap.Int64("collectionID", collectionID))
 
 	watchQueryChannelInfo := make(map[int64]bool)
 	node2Segments := make(map[int64][]*querypb.SegmentLoadInfo)
@@ -490,8 +492,8 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 		log.Debug("add a loadSegmentTask to loadPartitionTask's childTask")
 	}
 
+	index := 0
 	for _, nodeID := range watchRequest2Nodes {
-		index := 0
 		watchRequests[index].NodeID = nodeID
 		watchDmChannelTask := &WatchDmChannelTask{
 			BaseTask: BaseTask{
