@@ -493,6 +493,7 @@ func (i *IndexService) assignmentTasksLoop() {
 					i.assignChan <- []UniqueID{indexBuildID}
 					continue
 				}
+				i.nodeTasks.assignTask(nodeID, indexBuildID)
 				req := &indexpb.CreateIndexRequest{
 					IndexBuildID: indexBuildID,
 					IndexName:    meta.indexMeta.Req.IndexName,
@@ -506,9 +507,11 @@ func (i *IndexService) assignmentTasksLoop() {
 				resp, err := builderClient.CreateIndex(ctx, req)
 				if err != nil {
 					log.Debug("IndexService assignmentTasksLoop builderClient.CreateIndex failed", zap.Error(err))
+					continue
 				}
 				if resp.ErrorCode != commonpb.ErrorCode_Success {
 					log.Debug("IndexService assignmentTasksLoop builderClient.CreateIndex failed", zap.String("Reason", resp.Reason))
+					continue
 				}
 				if err = i.metaTable.BuildIndex(indexBuildID, nodeID); err != nil {
 					log.Debug("IndexService assignmentTasksLoop metaTable.BuildIndex failed", zap.Error(err))
@@ -537,8 +540,10 @@ func (i *IndexService) watchNodeLoop() {
 				log.Debug("IndexService watchNodeLoop SessionAddEvent", zap.Any("serverID", serverID))
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
+				i.removeNode(serverID)
 				log.Debug("IndexService watchNodeLoop SessionDelEvent ", zap.Any("serverID", serverID))
 				indexBuildIDs := i.nodeTasks.getTasksByNodeID(serverID)
+				log.Debug("IndexNode crashed", zap.Any("IndexNode ID", serverID), zap.Any("task IDs", indexBuildIDs))
 				i.assignChan <- indexBuildIDs
 				i.nodeTasks.delete(serverID)
 			}
