@@ -171,7 +171,7 @@ func (s *Server) init() error {
 	masterServiceAddr := Params.MasterAddress
 	log.Debug("ProxyNode", zap.String("master address", masterServiceAddr))
 	timeout := 3 * time.Second
-	s.masterServiceClient, err = grpcmasterserviceclient.NewClient(proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, timeout)
+	s.masterServiceClient, err = grpcmasterserviceclient.NewClient(proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
 	if err != nil {
 		log.Debug("ProxyNode new masterServiceClient failed ", zap.Error(err))
 		return err
@@ -192,7 +192,7 @@ func (s *Server) init() error {
 
 	dataServiceAddr := Params.DataServiceAddress
 	log.Debug("ProxyNode", zap.String("data service address", dataServiceAddr))
-	s.dataServiceClient = grpcdataserviceclient.NewClient(proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, timeout)
+	s.dataServiceClient = grpcdataserviceclient.NewClient(proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
 	err = s.dataServiceClient.Init()
 	if err != nil {
 		log.Debug("ProxyNode dataServiceClient init failed ", zap.Error(err))
@@ -203,7 +203,7 @@ func (s *Server) init() error {
 
 	indexServiceAddr := Params.IndexServerAddress
 	log.Debug("ProxyNode", zap.String("index server address", indexServiceAddr))
-	s.indexServiceClient = grpcindexserviceclient.NewClient(proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, timeout)
+	s.indexServiceClient = grpcindexserviceclient.NewClient(proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
 	err = s.indexServiceClient.Init()
 	if err != nil {
 		log.Debug("ProxyNode indexServiceClient init failed ", zap.Error(err))
@@ -214,7 +214,7 @@ func (s *Server) init() error {
 
 	queryServiceAddr := Params.QueryServiceAddress
 	log.Debug("ProxyNode", zap.String("query server address", queryServiceAddr))
-	s.queryServiceClient, err = grpcqueryserviceclient.NewClient(proxynode.Params.MetaRootPath, []string{proxynode.Params.EtcdAddress}, timeout)
+	s.queryServiceClient, err = grpcqueryserviceclient.NewClient(proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
 	if err != nil {
 		return err
 	}
