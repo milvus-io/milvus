@@ -21,8 +21,6 @@ import (
 type ParamTable struct {
 	paramtable.BaseTable
 
-	ProxyServicePort int
-
 	IndexServerAddress string
 	MasterAddress      string
 
@@ -53,16 +51,11 @@ func (pt *ParamTable) LoadFromEnv() {
 }
 
 func (pt *ParamTable) initParams() {
-	pt.initPoxyServicePort()
 	pt.initPort()
 	pt.initMasterAddress()
 	pt.initIndexServerAddress()
 	pt.initDataServiceAddress()
 	pt.initQueryServiceAddress()
-}
-
-func (pt *ParamTable) initPoxyServicePort() {
-	pt.ProxyServicePort = pt.ParseInt("proxyService.port")
 }
 
 // todo remove and use load from env
