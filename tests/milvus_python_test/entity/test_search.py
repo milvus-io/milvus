@@ -155,7 +155,7 @@ class TestSearchBase:
         else:
             assert not status.OK()
 
-    @pytest.mark.level(2)
+    @pytest.mark.level(1)
     def test_search_top_max_nq(self, connect, collection):
         '''
         target: test basic search fuction, assert fail if nq * topk is larger than max_value
