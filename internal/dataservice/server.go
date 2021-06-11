@@ -84,8 +84,7 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 		return datanodeclient.NewClient(addr, 3*time.Second)
 	}
 	s.masterClientCreator = func(addr string) (types.MasterService, error) {
-		return masterclient.NewClient(Params.MetaRootPath,
-			[]string{Params.EtcdAddress}, masterClientTimout)
+		return masterclient.NewClient(Params.MetaRootPath, Params.EtcdEndpoints, masterClientTimout)
 	}
 
 	return s, nil
@@ -93,7 +92,7 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 
 // Register register data service at etcd
 func (s *Server) Register() error {
-	s.session = sessionutil.NewSession(s.ctx, Params.MetaRootPath, []string{Params.EtcdAddress})
+	s.session = sessionutil.NewSession(s.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
 	s.activeCh = s.session.Init(typeutil.DataServiceRole, Params.IP, true)
 	Params.NodeID = s.session.ServerID
 	return nil
@@ -203,9 +202,7 @@ func (s *Server) initSegmentInfoChannel() error {
 
 func (s *Server) initMeta() error {
 	connectEtcdFn := func() error {
-		etcdClient, err := clientv3.New(clientv3.Config{
-			Endpoints: []string{Params.EtcdAddress},
-		})
+		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
 		if err != nil {
 			return err
 		}
