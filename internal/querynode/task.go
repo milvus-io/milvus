@@ -125,6 +125,29 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		zap.Any("collectionID", collectionID),
 		zap.String("ChannelIDs", fmt.Sprintln(vChannels)))
 
+	//// get physical channels
+	//desColReq := &milvuspb.DescribeCollectionRequest{
+	//	CollectionID: collectionID,
+	//}
+	//desColRsp, err := w.node.masterService.DescribeCollection(ctx, desColReq)
+	//if err != nil {
+	//	log.Error("get physical channels failed, err = " + err.Error())
+	//	return err
+	//}
+	//VPChannels := make(map[string]string) // map[vChannel]pChannel
+	//for _, ch := range vChannels {
+	//	for i := range desColRsp.VirtualChannelNames {
+	//		if desColRsp.VirtualChannelNames[i] == ch {
+	//			VPChannels[ch] = desColRsp.PhysicalChannelNames[i]
+	//			break
+	//		}
+	//	}
+	//}
+	//if len(VPChannels) != len(vChannels) {
+	//	return errors.New("get physical channels failed, illegal channel length, collectionID = " + fmt.Sprintln(collectionID))
+	//}
+	//log.Debug("get physical channels done", zap.Any("collectionID", collectionID))
+
 	// init replica
 	if hasCollectionInStreaming := w.node.streaming.replica.hasCollection(collectionID); !hasCollectionInStreaming {
 		err := w.node.streaming.replica.addCollection(collectionID, w.req.Schema)
