@@ -15,6 +15,7 @@ import (
 	"container/list"
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"sync"
 
@@ -443,6 +444,7 @@ func (sched *TaskScheduler) queryLoop() {
 
 type searchResultBuf struct {
 	usedVChans                  map[interface{}]struct{} // set of vChan
+	usedChans                   map[interface{}]struct{} // set of Chan todo
 	receivedVChansSet           map[interface{}]struct{} // set of vChan
 	receivedSealedSegmentIDsSet map[interface{}]struct{} // set of UniqueID
 	receivedGlobalSegmentIDsSet map[interface{}]struct{} // set of UniqueID
@@ -452,6 +454,7 @@ type searchResultBuf struct {
 func newSearchResultBuf() *searchResultBuf {
 	return &searchResultBuf{
 		usedVChans:                  make(map[interface{}]struct{}),
+		usedChans:                   make(map[interface{}]struct{}),
 		receivedVChansSet:           make(map[interface{}]struct{}),
 		receivedSealedSegmentIDsSet: make(map[interface{}]struct{}),
 		receivedGlobalSegmentIDsSet: make(map[interface{}]struct{}),
@@ -460,12 +463,16 @@ func newSearchResultBuf() *searchResultBuf {
 }
 
 func setContain(m1, m2 map[interface{}]struct{}) bool {
+	log.Debug("ProxyNode task_scheduler setContain", zap.Any("len(m1)", len(m1)),
+		zap.Any("len(m2)", len(m2)))
 	if len(m1) < len(m2) {
 		return false
 	}
 
 	for k2 := range m2 {
 		_, ok := m1[k2]
+		log.Debug("ProxyNode task_scheduler setContain", zap.Any("k2", fmt.Sprintf("%v", k2)),
+			zap.Any("ok", ok))
 		if !ok {
 			return false
 		}
@@ -475,11 +482,49 @@ func setContain(m1, m2 map[interface{}]struct{}) bool {
 }
 
 func (sr *searchResultBuf) readyToReduce() bool {
-	if !setContain(sr.receivedVChansSet, sr.usedVChans) {
-		return false
+
+	usedChansSetStrMap := make(map[string]int)
+	for x := range sr.usedChans {
+		usedChansSetStrMap[x.(string)] = 1
 	}
 
-	return setContain(sr.receivedSealedSegmentIDsSet, sr.receivedGlobalSegmentIDsSet)
+	receivedVChansSetStrMap := make(map[string]int)
+
+	for x := range sr.receivedVChansSet {
+		receivedVChansSetStrMap[x.(string)] = 1
+	}
+
+	usedVChansSetStrMap := make(map[string]int)
+	for x := range sr.usedVChans {
+		usedVChansSetStrMap[x.(string)] = 1
+	}
+
+	sealedSegmentIDsStrMap := make(map[int64]int)
+
+	for x := range sr.receivedSealedSegmentIDsSet {
+		sealedSegmentIDsStrMap[x.(int64)] = 1
+	}
+
+	sealedGlobalSegmentIDsStrMap := make(map[int64]int)
+	for x := range sr.receivedGlobalSegmentIDsSet {
+		sealedGlobalSegmentIDsStrMap[x.(int64)] = 1
+	}
+
+	ret1 := setContain(sr.receivedVChansSet, sr.usedVChans)
+	ret2 := setContain(sr.receivedVChansSet, sr.usedChans)
+	log.Debug("ProxyNode searchResultBuf readyToReduce", zap.Any("receivedVChansSet", receivedVChansSetStrMap),
+		zap.Any("usedVChans", usedVChansSetStrMap),
+		zap.Any("usedChans", usedChansSetStrMap),
+		zap.Any("receivedSealedSegmentIDsSet", sealedSegmentIDsStrMap),
+		zap.Any("receivedGlobalSegmentIDsSet", sealedGlobalSegmentIDsStrMap),
+		zap.Any("ret1", ret1),
+		zap.Any("ret2", ret2))
+	if !ret1 && !ret2 {
+		return false
+	}
+	ret := setContain(sr.receivedSealedSegmentIDsSet, sr.receivedGlobalSegmentIDsSet)
+	log.Debug("ProxyNode searchResultBuf readyToReduce", zap.Any("ret", ret))
+	return ret
 }
 
 func (sr *searchResultBuf) addPartialResult(result *internalpb.SearchResults) {
@@ -503,8 +548,8 @@ func (sched *TaskScheduler) queryResultLoop() {
 
 	queryResultMsgStream, _ := sched.msFactory.NewQueryMsgStream(sched.ctx)
 	queryResultMsgStream.AsConsumer(Params.SearchResultChannelNames, Params.ProxySubName)
-	log.Debug("proxynode", zap.Strings("search result channel names", Params.SearchResultChannelNames))
-	log.Debug("proxynode", zap.String("proxySubName", Params.ProxySubName))
+	log.Debug("ProxyNode", zap.Strings("SearchResultChannelNames", Params.SearchResultChannelNames),
+		zap.Any("ProxySubName", Params.ProxySubName))
 
 	queryNodeNum := Params.QueryNodeNum
 
@@ -518,7 +563,7 @@ func (sched *TaskScheduler) queryResultLoop() {
 		select {
 		case msgPack, ok := <-queryResultMsgStream.Chan():
 			if !ok {
-				log.Debug("buf chan closed")
+				log.Debug("ProxyNode queryResultLoop exit Chan closed")
 				return
 			}
 			if msgPack == nil {
@@ -531,14 +576,16 @@ func (sched *TaskScheduler) queryResultLoop() {
 					reqID := searchResultMsg.Base.MsgID
 					reqIDStr := strconv.FormatInt(reqID, 10)
 					t := sched.getTaskByReqID(reqID)
+					log.Debug("ProxyNode queryResultLoop Got a SearchResultMsg", zap.Any("ReqID", reqID), zap.Any("t", t))
 					if t == nil {
-						log.Debug("proxynode", zap.String("QueryResult GetTaskByReqID failed, reqID = ", reqIDStr))
+						log.Debug("ProxyNode queryResultLoop GetTaskByReqID failed", zap.String("reqID", reqIDStr))
 						delete(queryResultBuf, reqID)
 						continue
 					}
 
 					st, ok := t.(*SearchTask)
 					if !ok {
+						log.Debug("ProxyNode queryResultLoop type assert t as SearchTask failed", zap.Any("t", t))
 						delete(queryResultBuf, reqID)
 						continue
 					}
@@ -547,6 +594,8 @@ func (sched *TaskScheduler) queryResultLoop() {
 					if !ok {
 						queryResultBuf[reqID] = newSearchResultBuf()
 						vchans, err := st.getVChannels()
+						log.Debug("ProxyNode queryResultLoop, first receive", zap.Any("reqID", reqID), zap.Any("vchans", vchans),
+							zap.Error(err))
 						if err != nil {
 							delete(queryResultBuf, reqID)
 							continue
@@ -554,16 +603,27 @@ func (sched *TaskScheduler) queryResultLoop() {
 						for _, vchan := range vchans {
 							queryResultBuf[reqID].usedVChans[vchan] = struct{}{}
 						}
+						pchans, err := st.getChannels()
+						log.Debug("ProxyNode queryResultLoop, first receive", zap.Any("reqID", reqID), zap.Any("pchans", pchans),
+							zap.Error(err))
+						if err != nil {
+							delete(queryResultBuf, reqID)
+							continue
+						}
+						for _, pchan := range pchans {
+							queryResultBuf[reqID].usedChans[pchan] = struct{}{}
+						}
 					}
 					queryResultBuf[reqID].addPartialResult(&searchResultMsg.SearchResults)
 
 					//t := sched.getTaskByReqID(reqID)
 					{
 						colName := t.(*SearchTask).query.CollectionName
-						log.Debug("Getcollection", zap.String("collection name", colName), zap.String("reqID", reqIDStr), zap.Int("answer cnt", len(queryResultBuf[reqID].resultBuf)))
+						log.Debug("ProxyNode queryResultLoop", zap.String("collection name", colName), zap.String("reqID", reqIDStr), zap.Int("answer cnt", len(queryResultBuf[reqID].resultBuf)))
 					}
 
 					if queryResultBuf[reqID].readyToReduce() {
+						log.Debug("ProxyNode queryResultLoop readyToReduce and assign to reduce")
 						st.resultBuf <- queryResultBuf[reqID].resultBuf
 					}
 

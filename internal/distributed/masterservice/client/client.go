@@ -122,7 +122,12 @@ func (c *GrpcClient) connect() error {
 }
 
 func (c *GrpcClient) Init() error {
-	return c.connect()
+	// for now, we must try many times in Init Stage
+	initFunc := func() error {
+		return c.connect()
+	}
+	err := retry.Retry(10000, 3*time.Second, initFunc)
+	return err
 }
 
 func (c *GrpcClient) Start() error {

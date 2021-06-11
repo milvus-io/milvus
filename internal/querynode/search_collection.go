@@ -16,6 +16,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"strings"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
@@ -306,7 +307,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	searchTimestamp := searchMsg.Base.Timestamp
 
 	collectionID := searchMsg.CollectionID
-	collection, err := s.historicalReplica.getCollectionByID(collectionID)
+	collection, err := s.streamingReplica.getCollectionByID(collectionID)
 	if err != nil {
 		return err
 	}
@@ -514,6 +515,16 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 			offset += len
 		}
 		resultChannelInt := 0
+		fakedDmChannels := collection.getWatchedDmChannels()
+		var realDmChannels []string
+		for _, dmChan := range fakedDmChannels {
+			parts := strings.Split(dmChan, "#")
+			realDmChannels = append(realDmChannels, parts[0])
+		}
+		log.Debug("QueryNode searchCollection search, realDmChannels", zap.Any("fakedDmChannels", fakedDmChannels),
+			zap.Any("realDmChannels", realDmChannels), zap.Any("collectionID", collection.ID()),
+			zap.Any("sealedSegmentSearched", sealedSegmentSearched))
+
 		searchResultMsg := &msgstream.SearchResultMsg{
 			BaseMsg: msgstream.BaseMsg{Ctx: searchMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}},
 			SearchResults: internalpb.SearchResults{
@@ -528,7 +539,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 				Hits:                     hits,
 				MetricType:               plan.getMetricType(),
 				SealedSegmentIDsSearched: sealedSegmentSearched,
-				ChannelIDsSearched:       collection.getWatchedDmChannels(),
+				ChannelIDsSearched:       realDmChannels,
 				//TODO:: get global sealed segment from etcd
 				GlobalSealedSegmentIDs: sealedSegmentSearched,
 			},
