@@ -13,8 +13,11 @@ import (
 	"context"
 	"math"
 	"path"
+	"strconv"
 	"testing"
 	"time"
+
+	"math/rand"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -831,6 +834,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 
 func newTestServer(t *testing.T, receiveCh chan interface{}) *Server {
 	Params.Init()
+	Params.TimeTickChannelName += strconv.Itoa(rand.Int())
+	Params.StatisticsChannelName += strconv.Itoa(rand.Int())
 	var err error
 	factory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
