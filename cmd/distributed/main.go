@@ -24,7 +24,6 @@ import (
 
 const (
 	roleMaster       = "master"
-	roleProxyService = "proxyservice"
 	roleQueryService = "queryservice"
 	roleIndexService = "indexservice"
 	roleDataService  = "dataservice"
@@ -136,9 +135,8 @@ func main() {
 	var svrAlias string
 	flags.StringVar(&svrAlias, "alias", "", "set alias")
 
-	var enableMaster, enableProxyService, enableQueryService, enableIndexService, enableDataService bool
+	var enableMaster, enableQueryService, enableIndexService, enableDataService bool
 	flags.BoolVar(&enableMaster, roleMaster, false, "enable master")
-	flags.BoolVar(&enableProxyService, roleProxyService, false, "enable proxy service")
 	flags.BoolVar(&enableQueryService, roleQueryService, false, "enable query service")
 	flags.BoolVar(&enableIndexService, roleIndexService, false, "enable index service")
 	flags.BoolVar(&enableDataService, roleDataService, false, "enable data service")
@@ -151,8 +149,6 @@ func main() {
 	switch serverType {
 	case roleMaster:
 		role.EnableMaster = true
-	case roleProxyService:
-		role.EnableProxyService = true
 	case roleProxyNode:
 		role.EnableProxyNode = true
 	case roleQueryService:
@@ -169,7 +165,6 @@ func main() {
 		role.EnableIndexNode = true
 	case roleMixture:
 		role.EnableMaster = enableMaster
-		role.EnableProxyService = enableProxyService
 		role.EnableQueryService = enableQueryService
 		role.EnableDataService = enableDataService
 		role.EnableIndexService = enableIndexService

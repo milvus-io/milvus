@@ -3,9 +3,6 @@ cd ../build/docker/deploy/
 echo "starting master docker"
 nohup docker-compose -p milvus up master > ~/master_docker.log 2>&1 &
 
-echo "starting proxyservice docker"
-nohup docker-compose -p milvus up  proxyservice > ~/proxyservice_docker.log 2>&1 &
-
 echo "starting proxynode docker"
 nohup docker-compose -p milvus up  proxynode > ~/proxynode_docker.log 2>&1 &
 
