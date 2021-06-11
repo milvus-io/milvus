@@ -214,11 +214,6 @@ func RegisterMaster() {
 	//prometheus.MustRegister(PanicCounter)
 }
 
-//RegisterProxyService register ProxyService metrics
-func RegisterProxyService() {
-
-}
-
 //RegisterProxyNode register ProxyNode metrics
 func RegisterProxyNode() {
 

@@ -12,7 +12,6 @@ func TestRegisterMetrics(t *testing.T) {
 	RegisterIndexNode()
 	RegisterIndexService()
 	RegisterProxyNode()
-	RegisterProxyService()
 	RegisterQueryNode()
 	RegisterQueryService()
 	RegisterMsgStreamService()

@@ -17,7 +17,6 @@ type UniqueID = int64
 
 const (
 	MasterServiceRole = "MasterService"
-	ProxyServiceRole  = "ProxyService"
 	ProxyNodeRole     = "ProxyNode"
 	QueryServiceRole  = "QueryService"
 	QueryNodeRole     = "QueryNode"

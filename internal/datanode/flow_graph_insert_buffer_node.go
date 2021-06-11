@@ -152,7 +152,10 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		collID := msg.GetCollectionID()
 		partitionID := msg.GetPartitionID()
 
-		log.Debug("InsertBufferNode Operating Segment", zap.Int64("ID", currentSegID))
+		// log.Debug("InsertBufferNode Operating Segment",
+		//     zap.Int64("ID", currentSegID),
+		//     zap.Int("NumOfRows", len(msg.RowIDs)),
+		// )
 
 		if !ibNode.replica.hasSegment(currentSegID) {
 			err := ibNode.replica.addSegment(currentSegID, collID, partitionID, msg.GetChannelID())

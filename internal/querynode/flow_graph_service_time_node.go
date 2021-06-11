@@ -57,7 +57,7 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 
 	// update service time
-	channel := stNode.vChannel + strconv.FormatInt(stNode.collectionID, 10)
+	channel := stNode.vChannel + "#" + strconv.FormatInt(stNode.collectionID, 10)
 	stNode.tSafeReplica.setTSafe(channel, serviceTimeMsg.timeRange.timestampMax)
 	//log.Debug("update tSafe:",
 	//	zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)),
