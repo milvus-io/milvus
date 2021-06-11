@@ -42,20 +42,7 @@ import (
 const ctxTimeInMillisecond = 5000
 const debug = false
 
-func newIDLEDataNodeMock() *DataNode {
-	var ctx context.Context
-
-	if debug {
-		ctx = context.Background()
-	} else {
-		var cancel context.CancelFunc
-		d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-		ctx, cancel = context.WithDeadline(context.Background(), d)
-		go func() {
-			<-ctx.Done()
-			cancel()
-		}()
-	}
+func newIDLEDataNodeMock(ctx context.Context) *DataNode {
 
 	msFactory := msgstream.NewPmsFactory()
 	node := NewDataNode(ctx, msFactory)

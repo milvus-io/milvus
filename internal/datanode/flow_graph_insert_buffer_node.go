@@ -611,9 +611,16 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	return nil
 }
 
-func flushSegment(collMeta *etcdpb.CollectionMeta, segID, partitionID, collID UniqueID,
-	insertData *sync.Map, kv kv.BaseKV, flushUnit chan<- segmentFlushUnit, wgFinish *sync.WaitGroup,
-	ibNode *insertBufferNode, idAllocator allocatorInterface) {
+func flushSegment(
+	collMeta *etcdpb.CollectionMeta,
+	segID, partitionID, collID UniqueID,
+	insertData *sync.Map,
+	kv kv.BaseKV,
+	flushUnit chan<- segmentFlushUnit,
+	wgFinish *sync.WaitGroup,
+	ibNode *insertBufferNode,
+	idAllocator allocatorInterface) {
+
 	if wgFinish != nil {
 		defer wgFinish.Done()
 	}
