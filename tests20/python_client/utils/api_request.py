@@ -20,11 +20,10 @@ def api_request_catch():
                 return res, True
             except Exception as e:
                 log.error(traceback.format_exc())
-                log.error("[Milvus API Exception]%s: %s" % (str(func), str(e)))
+                log.error("(api_response) [Milvus API Exception]%s: %s"
+                          % (str(func), str(e)[0:log_row_length]))
                 return Error(e), False
-
         return inner_wrapper
-
     return wrapper
 
 

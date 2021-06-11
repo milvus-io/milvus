@@ -31,6 +31,7 @@
 #include "InsertRecord.h"
 #include <utility>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace milvus::segcore {
@@ -68,6 +69,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     int64_t
     GetMemoryUsageInBytes() const override;
+
+    std::string
+    debug() const override;
 
  public:
     const InsertRecord&

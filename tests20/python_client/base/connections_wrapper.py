@@ -12,44 +12,44 @@ class ApiConnectionsWrapper:
     def __init__(self):
         self.connection = Connections()
 
-    def add_connection(self, check_res=None, check_params=None, **kwargs):
+    def add_connection(self, check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.connection.add_connection], **kwargs)
-        check_result = ResponseChecker(res, func_name, check_res, check_params, check, **kwargs).run()
-        return res, check_result
+        response, is_succ = api_request([self.connection.add_connection], **kwargs)
+        check_result = ResponseChecker(response, func_name, check_task, check_items, is_succ, **kwargs).run()
+        return response, check_result
 
-    def disconnect(self, alias, check_res=None, check_params=None):
+    def disconnect(self, alias, check_task=None, check_items=None):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.connection.disconnect, alias])
-        check_result = ResponseChecker(res, func_name, check_res, check_params, check, alias=alias).run()
-        return res, check_result
+        response, is_succ = api_request([self.connection.disconnect, alias])
+        check_result = ResponseChecker(response, func_name, check_task, check_items, is_succ, alias=alias).run()
+        return response, check_result
 
-    def remove_connection(self, alias, check_res=None, check_params=None):
+    def remove_connection(self, alias, check_task=None, check_items=None):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.connection.remove_connection, alias])
-        check_result = ResponseChecker(res, func_name, check_res, check_params, check, alias=alias).run()
-        return res, check_result
+        response, is_succ = api_request([self.connection.remove_connection, alias])
+        check_result = ResponseChecker(response, func_name, check_task, check_items, is_succ, alias=alias).run()
+        return response, check_result
 
     def connect(self, alias=DefaultConfig.DEFAULT_USING, check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, succ = api_request([self.connection.connect, alias], **kwargs)
-        check_result = ResponseChecker(res, func_name, check_task, check_items, succ, alias=alias, **kwargs).run()
-        return res, check_result
+        response, succ = api_request([self.connection.connect, alias], **kwargs)
+        check_result = ResponseChecker(response, func_name, check_task, check_items, succ, alias=alias, **kwargs).run()
+        return response, check_result
 
-    def get_connection(self, alias=DefaultConfig.DEFAULT_USING, check_res=None, check_params=None):
+    def get_connection(self, alias=DefaultConfig.DEFAULT_USING, check_task=None, check_items=None):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.connection.get_connection, alias])
-        check_result = ResponseChecker(res, func_name, check_res, check_params, check, alias=alias).run()
-        return res, check_result
+        response, is_succ = api_request([self.connection.get_connection, alias])
+        check_result = ResponseChecker(response, func_name, check_task, check_items, is_succ, alias=alias).run()
+        return response, check_result
 
-    def list_connections(self, check_res=None, check_params=None):
+    def list_connections(self, check_task=None, check_items=None):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.connection.list_connections])
-        check_result = ResponseChecker(res, func_name, check_res, check_params, check).run()
-        return res, check_result
+        response, is_succ = api_request([self.connection.list_connections])
+        check_result = ResponseChecker(response, func_name, check_task, check_items, is_succ).run()
+        return response, check_result
 
-    def get_connection_addr(self, alias, check_res=None, check_params=None):
+    def get_connection_addr(self, alias, check_task=None, check_items=None):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.connection.get_connection_addr, alias])
-        check_result = ResponseChecker(res, func_name, check_res, check_params, check, alias=alias).run()
-        return res, check_result
+        response, is_succ = api_request([self.connection.get_connection_addr, alias])
+        check_result = ResponseChecker(response, func_name, check_task, check_items, is_succ, alias=alias).run()
+        return response, check_result

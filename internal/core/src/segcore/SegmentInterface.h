@@ -22,6 +22,7 @@
 #include <memory>
 #include <vector>
 #include <utility>
+#include <string>
 
 namespace milvus::segcore {
 
@@ -92,6 +93,9 @@ class SegmentInternalInterface : public SegmentInterface {
     GetEntityById(const std::vector<FieldOffset>& field_offsets,
                   const IdArray& id_array,
                   Timestamp timestamp) const override;
+
+    virtual std::string
+    debug() const = 0;
 
  public:
     virtual void
