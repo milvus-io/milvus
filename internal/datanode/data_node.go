@@ -11,7 +11,7 @@
 
 // Package datanode implements data persistence logic.
 //
-// Data node persists definition language (ddl) strings and insert logs into persistent storage like minIO/S3.
+// Data node persists insert logs into persistent storage like minIO/S3.
 package datanode
 
 import (
@@ -68,6 +68,7 @@ type DataNode struct {
 	vchan2SyncService map[string]*dataSyncService // vchannel name
 	vchan2FlushCh     map[string]chan<- *flushMsg // vchannel name
 	clearSignal       chan UniqueID               // collection ID
+	segmentCache      *Cache
 
 	masterService types.MasterService
 	dataService   types.DataService
@@ -92,6 +93,7 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 		masterService: nil,
 		dataService:   nil,
 		msFactory:     factory,
+		segmentCache:  newCache(),
 
 		vchan2SyncService: make(map[string]*dataSyncService),
 		vchan2FlushCh:     make(map[string]chan<- *flushMsg),
@@ -200,16 +202,13 @@ func (node *DataNode) ReleaseDataSyncService(vchanName string) {
 	log.Info("Release flowgraph resources begin", zap.String("Vchannel", vchanName))
 
 	node.chanMut.Lock()
+	defer node.chanMut.Unlock()
 	if dss, ok := node.vchan2SyncService[vchanName]; ok {
 		dss.close()
 	}
 
 	delete(node.vchan2SyncService, vchanName)
-	node.chanMut.Unlock()
-
-	node.chanMut.Lock()
 	delete(node.vchan2FlushCh, vchanName)
-	node.chanMut.Unlock()
 
 	log.Debug("Release flowgraph resources end", zap.String("Vchannel", vchanName))
 }
@@ -325,14 +324,14 @@ func (node *DataNode) ReadyToFlush() error {
 	if len(node.vchan2SyncService) == 0 && len(node.vchan2FlushCh) == 0 {
 		// Healthy but Idle
 		msg := "DataNode HEALTHY but IDLE, please try WatchDmChannels to make it work"
-		log.Info(msg)
+		log.Warn(msg)
 		return errors.New(msg)
 	}
 
 	if len(node.vchan2SyncService) != len(node.vchan2FlushCh) {
 		// TODO restart
 		msg := "DataNode HEALTHY but abnormal inside, restarting..."
-		log.Info(msg)
+		log.Warn(msg)
 		return errors.New(msg)
 	}
 	return nil
@@ -365,6 +364,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		return status, nil
 	}
 
+	numOfFlushingSeg := len(req.SegmentIDs)
 	log.Debug("FlushSegments ...", zap.Int("num", len(req.SegmentIDs)), zap.Int64s("segments", req.SegmentIDs))
 	dmlFlushedCh := make(chan []*datapb.ID2PathList, len(req.SegmentIDs))
 	for _, id := range req.SegmentIDs {
@@ -374,6 +374,15 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 			status.Reason = fmt.Sprintf("DataNode not find segment %d!", id)
 			return status, errors.New(status.GetReason())
 		}
+
+		if node.segmentCache.checkIfCached(id) {
+			// Segment in flushing or flushed, ignore
+			log.Info("Segment in flushing, ignore it", zap.Int64("ID", id))
+			numOfFlushingSeg--
+			continue
+		}
+
+		node.segmentCache.Cache(id)
 
 		node.chanMut.RLock()
 		flushCh, ok := node.vchan2FlushCh[chanName]
@@ -394,8 +403,9 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		flushCh <- flushmsg
 
 	}
+
 	failedSegments := ""
-	for range req.SegmentIDs {
+	for i := 0; i < numOfFlushingSeg; i++ {
 		msg := <-dmlFlushedCh
 		if len(msg) != 1 {
 			panic("flush size expect to 1")
