@@ -74,14 +74,23 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
         // prepare data
         aligned_vector<idx_t> vec_data(info.row_count);
         std::copy_n(src_ptr, info.row_count, vec_data.data());
-        auto pk_index = create_index(vec_data.data(), vec_data.size());
+
+        std::unique_ptr<ScalarIndexBase> pk_index_;
+        // fix unintentional index update
+        if (schema_->get_is_auto_id()) {
+            pk_index_ = create_index(vec_data.data(), vec_data.size());
+        }
 
         // write data under lock
         std::unique_lock lck(mutex_);
         update_row_count(info.row_count);
         AssertInfo(row_ids_.empty(), "already exists");
         row_ids_ = std::move(vec_data);
-        primary_key_index_ = std::move(pk_index);
+
+        if (schema_->get_is_auto_id()) {
+            primary_key_index_ = std::move(pk_index_);
+        }
+
         ++system_ready_count_;
     } else {
         // prepare data
@@ -118,6 +127,7 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
             field_datas_[field_offset.get()] = std::move(vec_data);
             scalar_indexings_[field_offset.get()] = std::move(index);
         }
+
         if (schema_->get_primary_key_offset() == field_offset) {
             primary_key_index_ = std::move(pk_index_);
         }
@@ -408,6 +418,15 @@ SegmentSealedImpl::search_ids(const IdArray& id_array, Timestamp timestamp) cons
     auto arr = id_array.int_id();
     Assert(primary_key_index_);
     return primary_key_index_->do_search_ids(id_array);
+}
+
+std::string
+SegmentSealedImpl::debug() const {
+    std::string log_str;
+    log_str += "Sealed\n";
+    log_str += "Index:" + primary_key_index_->debug();
+    log_str += "\n";
+    return log_str;
 }
 
 SegmentSealedPtr

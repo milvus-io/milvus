@@ -57,7 +57,6 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=Non
     fields = [gen_int64_field(), gen_float_field(), gen_float_vec_field()]
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field)
-    log.error(schema)
     return schema
 
 
