@@ -157,7 +157,7 @@ TEST_F(DeleteTest, DELETE_ON_DISK) {
     std::mt19937 gen(rd());
     std::uniform_int_distribution<int64_t> dis(0, nb - 1);
 
-    int64_t num_query = 10;
+    int64_t num_query = 80;
     std::map<int64_t, milvus::engine::VectorsData> search_vectors;
     for (int64_t i = 0; i < num_query; ++i) {
         int64_t index = dis(gen);
@@ -168,6 +168,7 @@ TEST_F(DeleteTest, DELETE_ON_DISK) {
         }
         search_vectors.insert(std::make_pair(xb.id_array_[index], search));
     }
+    auto it = search_vectors.begin();
 
     //    std::this_thread::sleep_for(std::chrono::seconds(3));  // ensure raw data write to disk
     stat = db_->Flush();
@@ -175,8 +176,12 @@ TEST_F(DeleteTest, DELETE_ON_DISK) {
 
     milvus::engine::IDNumbers delete_ids;
     delete_ids.reserve(search_vectors.size());
-    for (auto& kv : search_vectors) {
-        delete_ids.push_back(kv.first);
+
+    // delete 10 items
+    int64_t delete_batch_1 = 10;
+    for (int64_t i = 0; i < delete_batch_1; i++) {
+        delete_ids.push_back(it->first);
+        it++;
     }
     stat = db_->DeleteVectors(collection_info.collection_id_, "", delete_ids);
     ASSERT_TRUE(stat.ok());
@@ -185,6 +190,22 @@ TEST_F(DeleteTest, DELETE_ON_DISK) {
     ASSERT_TRUE(stat.ok());
 
     uint64_t row_count;
+    stat = db_->GetCollectionRowCount(collection_info.collection_id_, row_count);
+    ASSERT_TRUE(stat.ok());
+    ASSERT_EQ(row_count, nb - delete_ids.size());
+
+    // delete others
+    delete_ids.clear();
+    for (int64_t i = delete_batch_1; i < num_query; i++) {
+        delete_ids.push_back(it->first);
+        it++;
+    }
+    stat = db_->DeleteVectors(collection_info.collection_id_, "", delete_ids);
+    ASSERT_TRUE(stat.ok());
+
+    stat = db_->Flush();
+    ASSERT_TRUE(stat.ok());
+
     stat = db_->GetCollectionRowCount(collection_info.collection_id_, row_count);
     ASSERT_TRUE(stat.ok());
     ASSERT_EQ(row_count, nb - search_vectors.size());
