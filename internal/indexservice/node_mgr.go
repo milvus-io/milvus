@@ -28,6 +28,7 @@ import (
 func (i *IndexService) removeNode(nodeID UniqueID) {
 	i.nodeLock.Lock()
 	defer i.nodeLock.Unlock()
+	log.Debug("IndexService", zap.Any("Remove node with ID", nodeID))
 	i.nodeClients.Remove(nodeID)
 }
 
