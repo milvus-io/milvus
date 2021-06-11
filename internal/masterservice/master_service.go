@@ -109,16 +109,16 @@ type Core struct {
 	SendTimeTick func(t typeutil.Timestamp) error
 
 	//setMsgStreams, send create collection into dd channel
-	SendDdCreateCollectionReq func(ctx context.Context, req *internalpb.CreateCollectionRequest) error
+	SendDdCreateCollectionReq func(ctx context.Context, req *internalpb.CreateCollectionRequest, channelNames []string) error
 
 	//setMsgStreams, send drop collection into dd channel, and notify the proxy to delete this collection
-	SendDdDropCollectionReq func(ctx context.Context, req *internalpb.DropCollectionRequest) error
+	SendDdDropCollectionReq func(ctx context.Context, req *internalpb.DropCollectionRequest, channelNames []string) error
 
 	//setMsgStreams, send create partition into dd channel
-	SendDdCreatePartitionReq func(ctx context.Context, req *internalpb.CreatePartitionRequest) error
+	SendDdCreatePartitionReq func(ctx context.Context, req *internalpb.CreatePartitionRequest, channelNames []string) error
 
 	//setMsgStreams, send drop partition into dd channel
-	SendDdDropPartitionReq func(ctx context.Context, req *internalpb.DropPartitionRequest) error
+	SendDdDropPartitionReq func(ctx context.Context, req *internalpb.DropPartitionRequest, channelNames []string) error
 
 	// if master create segment, data service will put segment msg into this channel
 	DataServiceSegmentChan <-chan *ms.MsgPack
@@ -589,7 +589,7 @@ func (c *Core) setMsgStreams() error {
 		return c.chanTimeTick.UpdateTimeTick(&ttMsg)
 	}
 
-	c.SendDdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest) error {
+	c.SendDdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest, channelNames []string) error {
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
 			Ctx:            ctx,
@@ -602,10 +602,10 @@ func (c *Core) setMsgStreams() error {
 			CreateCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.BroadcastMany(req.PhysicalChannelNames, &msgPack)
+		return c.dmlChannels.BroadcastMany(channelNames, &msgPack)
 	}
 
-	c.SendDdDropCollectionReq = func(ctx context.Context, req *internalpb.DropCollectionRequest) error {
+	c.SendDdDropCollectionReq = func(ctx context.Context, req *internalpb.DropCollectionRequest, channelNames []string) error {
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
 			Ctx:            ctx,
@@ -618,15 +618,10 @@ func (c *Core) setMsgStreams() error {
 			DropCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-
-		collInfo, err := c.MetaTable.GetCollectionByID(req.CollectionID, 0)
-		if err != nil {
-			return err
-		}
-		return c.dmlChannels.BroadcastMany(collInfo.PhysicalChannelNames, &msgPack)
+		return c.dmlChannels.BroadcastMany(channelNames, &msgPack)
 	}
 
-	c.SendDdCreatePartitionReq = func(ctx context.Context, req *internalpb.CreatePartitionRequest) error {
+	c.SendDdCreatePartitionReq = func(ctx context.Context, req *internalpb.CreatePartitionRequest, channelNames []string) error {
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
 			Ctx:            ctx,
@@ -639,15 +634,10 @@ func (c *Core) setMsgStreams() error {
 			CreatePartitionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-
-		collInfo, err := c.MetaTable.GetCollectionByID(req.CollectionID, 0)
-		if err != nil {
-			return err
-		}
-		return c.dmlChannels.BroadcastMany(collInfo.PhysicalChannelNames, &msgPack)
+		return c.dmlChannels.BroadcastMany(channelNames, &msgPack)
 	}
 
-	c.SendDdDropPartitionReq = func(ctx context.Context, req *internalpb.DropPartitionRequest) error {
+	c.SendDdDropPartitionReq = func(ctx context.Context, req *internalpb.DropPartitionRequest, channelNames []string) error {
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
 			Ctx:            ctx,
@@ -660,12 +650,7 @@ func (c *Core) setMsgStreams() error {
 			DropPartitionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-
-		collInfo, err := c.MetaTable.GetCollectionByID(req.CollectionID, 0)
-		if err != nil {
-			return err
-		}
-		return c.dmlChannels.BroadcastMany(collInfo.PhysicalChannelNames, &msgPack)
+		return c.dmlChannels.BroadcastMany(channelNames, &msgPack)
 	}
 
 	if Params.DataServiceSegmentChannel == "" {
@@ -1049,10 +1034,14 @@ func (c *Core) reSendDdMsg(ctx context.Context) error {
 		if err = proto.UnmarshalText(ddOp.Body1, &ddPartReq); err != nil {
 			return err
 		}
-		if err = c.SendDdCreateCollectionReq(ctx, &ddCollReq); err != nil {
+		collInfo, err := c.MetaTable.GetCollectionByName(ddCollReq.CollectionName, 0)
+		if err != nil {
 			return err
 		}
-		if err = c.SendDdCreatePartitionReq(ctx, &ddPartReq); err != nil {
+		if err = c.SendDdCreateCollectionReq(ctx, &ddCollReq, collInfo.PhysicalChannelNames); err != nil {
+			return err
+		}
+		if err = c.SendDdCreatePartitionReq(ctx, &ddPartReq, collInfo.PhysicalChannelNames); err != nil {
 			return err
 		}
 	case DropCollectionDDType:
@@ -1060,7 +1049,11 @@ func (c *Core) reSendDdMsg(ctx context.Context) error {
 		if err = proto.UnmarshalText(ddOp.Body, &ddReq); err != nil {
 			return err
 		}
-		if err = c.SendDdDropCollectionReq(ctx, &ddReq); err != nil {
+		collInfo, err := c.MetaTable.GetCollectionByName(ddReq.CollectionName, 0)
+		if err != nil {
+			return err
+		}
+		if err = c.SendDdDropCollectionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
 			return err
 		}
 		req := proxypb.InvalidateCollMetaCacheRequest{
@@ -1080,7 +1073,11 @@ func (c *Core) reSendDdMsg(ctx context.Context) error {
 		if err = proto.UnmarshalText(ddOp.Body, &ddReq); err != nil {
 			return err
 		}
-		if err = c.SendDdCreatePartitionReq(ctx, &ddReq); err != nil {
+		collInfo, err := c.MetaTable.GetCollectionByName(ddReq.CollectionName, 0)
+		if err != nil {
+			return err
+		}
+		if err = c.SendDdCreatePartitionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
 			return err
 		}
 		req := proxypb.InvalidateCollMetaCacheRequest{
@@ -1099,7 +1096,11 @@ func (c *Core) reSendDdMsg(ctx context.Context) error {
 		if err = proto.UnmarshalText(ddOp.Body, &ddReq); err != nil {
 			return err
 		}
-		if err = c.SendDdDropPartitionReq(ctx, &ddReq); err != nil {
+		collInfo, err := c.MetaTable.GetCollectionByName(ddReq.CollectionName, 0)
+		if err != nil {
+			return err
+		}
+		if err = c.SendDdDropPartitionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
 			return err
 		}
 		req := proxypb.InvalidateCollMetaCacheRequest{
