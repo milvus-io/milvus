@@ -1027,6 +1027,15 @@ func (st *SearchTask) OnEnqueue() error {
 	return nil
 }
 
+func (st *SearchTask) getChannels() ([]vChan, error) {
+	collID, err := globalMetaCache.GetCollectionID(st.ctx, st.query.CollectionName)
+	if err != nil {
+		return nil, err
+	}
+
+	return st.chMgr.getChannels(collID)
+}
+
 func (st *SearchTask) getVChannels() ([]vChan, error) {
 	collID, err := globalMetaCache.GetCollectionID(st.ctx, st.query.CollectionName)
 	if err != nil {
@@ -1366,7 +1375,7 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 	for {
 		select {
 		case <-st.TraceCtx().Done():
-			log.Debug("proxynode", zap.Int64("SearchTask: wait to finish failed, timeout!, taskID:", st.ID()))
+			log.Debug("ProxyNode", zap.Int64("SearchTask PostExecute Loop exit caused by ctx.Done", st.ID()))
 			return fmt.Errorf("SearchTask:wait to finish failed, timeout: %d", st.ID())
 		case searchResults := <-st.resultBuf:
 			// fmt.Println("searchResults: ", searchResults)
@@ -1383,7 +1392,9 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 			}
 
 			availableQueryNodeNum := len(filterSearchResult)
+			log.Debug("ProxyNode Search PostExecute stage1", zap.Any("availableQueryNodeNum", availableQueryNodeNum))
 			if availableQueryNodeNum <= 0 {
+				log.Debug("ProxyNode Search PostExecute failed", zap.Any("filterReason", filterReason))
 				st.result = &milvuspb.SearchResults{
 					Status: &commonpb.Status{
 						ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1401,8 +1412,11 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 				}
 				availableQueryNodeNum++
 			}
+			log.Debug("ProxyNode Search PostExecute stage2", zap.Any("availableQueryNodeNum", availableQueryNodeNum))
 
 			if availableQueryNodeNum <= 0 {
+				log.Debug("ProxyNode Search PostExecute stage2 failed", zap.Any("filterReason", filterReason))
+
 				st.result = &milvuspb.SearchResults{
 					Status: &commonpb.Status{
 						ErrorCode: commonpb.ErrorCode_Success,
@@ -1413,11 +1427,13 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 			}
 
 			hits, err := decodeSearchResults(filterSearchResult)
+			log.Debug("ProxyNode Search PostExecute decodeSearchResults", zap.Error(err))
 			if err != nil {
 				return err
 			}
 
 			nq := len(hits[0])
+			log.Debug("ProxyNode Search PostExecute", zap.Any("nq", nq))
 			if nq <= 0 {
 				st.result = &milvuspb.SearchResults{
 					Status: &commonpb.Status{
@@ -1434,7 +1450,7 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 			}
 
 			st.result = reduceSearchResults(hits, nq, availableQueryNodeNum, topk, searchResults[0].MetricType)
-
+			log.Debug("ProxyNode Search PostExecute Done")
 			return nil
 		}
 	}

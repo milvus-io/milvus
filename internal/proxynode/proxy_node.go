@@ -277,6 +277,7 @@ func (node *ProxyNode) Init() error {
 		return ret, nil
 	}
 	mockQueryService := newMockGetChannelsService()
+
 	chMgr := newChannelsMgr(getDmlChannelsFunc, mockQueryService.GetChannels, node.msFactory)
 	node.chMgr = chMgr
 

@@ -118,7 +118,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	vChannelsTmp := make([]string, 0)
 	for _, info := range w.req.Infos {
 		vChannels = append(vChannels, info.ChannelName)
-		vChannelsTmp = append(vChannelsTmp, info.ChannelName+strconv.FormatInt(collectionID, 10))
+		vChannelsTmp = append(vChannelsTmp, info.ChannelName+"#"+strconv.FormatInt(collectionID, 10))
 	}
 	log.Debug("starting WatchDmChannels ...",
 		zap.Any("collectionName", w.req.Schema.Name),
