@@ -632,6 +632,72 @@ func TestStream_PulsarTtMsgStream_Insert(t *testing.T) {
 	outputStream.Close()
 }
 
+func TestStream_PulsarTtMsgStream_NoSeek(t *testing.T) {
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	c1 := funcutil.RandomString(8)
+	producerChannels := []string{c1}
+	consumerChannels := []string{c1}
+	consumerSubName := funcutil.RandomString(8)
+
+	msgPack0 := MsgPack{}
+	msgPack0.Msgs = append(msgPack0.Msgs, getTimeTickMsg(0))
+
+	msgPack1 := MsgPack{}
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 1))
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 19))
+
+	msgPack2 := MsgPack{}
+	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5))
+
+	msgPack3 := MsgPack{}
+	msgPack3.Msgs = append(msgPack3.Msgs, getTsMsg(commonpb.MsgType_Insert, 14))
+	msgPack3.Msgs = append(msgPack3.Msgs, getTsMsg(commonpb.MsgType_Insert, 9))
+
+	msgPack4 := MsgPack{}
+	msgPack4.Msgs = append(msgPack4.Msgs, getTimeTickMsg(11))
+
+	msgPack5 := MsgPack{}
+	msgPack5.Msgs = append(msgPack5.Msgs, getTimeTickMsg(15))
+
+	inputStream := getPulsarInputStream(pulsarAddress, producerChannels)
+	outputStream := getPulsarTtOutputStream(pulsarAddress, consumerChannels, consumerSubName)
+
+	err := inputStream.Broadcast(&msgPack0)
+	assert.Nil(t, err)
+	err = inputStream.Produce(&msgPack1)
+	assert.Nil(t, err)
+	err = inputStream.Broadcast(&msgPack2)
+	assert.Nil(t, err)
+	err = inputStream.Produce(&msgPack3)
+	assert.Nil(t, err)
+	err = inputStream.Broadcast(&msgPack4)
+	assert.Nil(t, err)
+	err = inputStream.Broadcast(&msgPack5)
+	assert.Nil(t, err)
+
+	o1 := outputStream.Consume()
+	o2 := outputStream.Consume()
+	o3 := outputStream.Consume()
+
+	t.Log(o1.BeginTs)
+	t.Log(o2.BeginTs)
+	t.Log(o3.BeginTs)
+	outputStream.Close()
+
+	outputStream = getPulsarTtOutputStream(pulsarAddress, consumerChannels, consumerSubName)
+	p1 := outputStream.Consume()
+	p2 := outputStream.Consume()
+	p3 := outputStream.Consume()
+	t.Log(p1.BeginTs)
+	t.Log(p2.BeginTs)
+	t.Log(p3.BeginTs)
+	outputStream.Close()
+
+	assert.Equal(t, o1.BeginTs, p1.BeginTs)
+	assert.Equal(t, o2.BeginTs, p2.BeginTs)
+	assert.Equal(t, o3.BeginTs, p3.BeginTs)
+
+}
 func TestStream_PulsarTtMsgStream_Seek(t *testing.T) {
 	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	c1, c2 := funcutil.RandomString(8), funcutil.RandomString(8)

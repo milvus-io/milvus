@@ -86,9 +86,8 @@ func (ddn *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 					zap.Uint64("Message endts", msg.EndTs()),
 					zap.Uint64("FilterThreshold", FilterThreshold),
 				)
-				resMsg := ddn.filterFlushedSegmentInsertMessages(msg.(*msgstream.InsertMsg))
-				if resMsg != nil {
-					iMsg.insertMessages = append(iMsg.insertMessages, resMsg)
+				if ddn.filterFlushedSegmentInsertMessages(msg.(*msgstream.InsertMsg)) {
+					continue
 				}
 			}
 
@@ -104,21 +103,21 @@ func (ddn *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	return []Msg{res}
 }
 
-func (ddn *ddNode) filterFlushedSegmentInsertMessages(msg *msgstream.InsertMsg) *msgstream.InsertMsg {
+func (ddn *ddNode) filterFlushedSegmentInsertMessages(msg *msgstream.InsertMsg) bool {
 	if ddn.isFlushed(msg.GetSegmentID()) {
-		return nil
+		return true
 	}
 
 	ddn.mu.Lock()
 	if si, ok := ddn.seg2SegInfo[msg.GetSegmentID()]; ok {
 		if msg.EndTs() > si.GetDmlPosition().GetTimestamp() {
 			delete(ddn.seg2SegInfo, msg.GetSegmentID())
-			return nil
+			return true
 		}
 	}
 
 	ddn.mu.Unlock()
-	return msg
+	return false
 }
 
 func (ddn *ddNode) isFlushed(segmentID UniqueID) bool {
