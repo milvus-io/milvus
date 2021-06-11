@@ -1883,35 +1883,35 @@ func (dct *DescribeCollectionTask) Execute(ctx context.Context) error {
 
 	result, err := dct.masterService.DescribeCollection(ctx, dct.DescribeCollectionRequest)
 
-	if result == nil {
-		return errors.New("has collection resp is nil")
+	if err != nil {
+		return err
 	}
+
 	if result.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return errors.New(dct.result.Status.Reason)
-	}
+		dct.result.Status = result.Status
+	} else {
+		dct.result.Schema.Name = result.Schema.Name
+		dct.result.Schema.Description = result.Schema.Description
+		dct.result.Schema.AutoID = result.Schema.AutoID
+		dct.result.CollectionID = result.CollectionID
+		dct.result.VirtualChannelNames = result.VirtualChannelNames
+		dct.result.PhysicalChannelNames = result.PhysicalChannelNames
 
-	dct.result.Schema.Name = result.Schema.Name
-	dct.result.Schema.Description = result.Schema.Description
-	dct.result.Schema.AutoID = result.Schema.AutoID
-	dct.result.CollectionID = result.CollectionID
-	dct.result.VirtualChannelNames = result.VirtualChannelNames
-	dct.result.PhysicalChannelNames = result.PhysicalChannelNames
-
-	for _, field := range result.Schema.Fields {
-		if field.FieldID >= 100 { // TODO(dragondriver): use StartOfUserFieldID replacing 100
-			dct.result.Schema.Fields = append(dct.result.Schema.Fields, &schemapb.FieldSchema{
-				FieldID:      field.FieldID,
-				Name:         field.Name,
-				IsPrimaryKey: field.IsPrimaryKey,
-				Description:  field.Description,
-				DataType:     field.DataType,
-				TypeParams:   field.TypeParams,
-				IndexParams:  field.IndexParams,
-			})
+		for _, field := range result.Schema.Fields {
+			if field.FieldID >= 100 { // TODO(dragondriver): use StartOfUserFieldID replacing 100
+				dct.result.Schema.Fields = append(dct.result.Schema.Fields, &schemapb.FieldSchema{
+					FieldID:      field.FieldID,
+					Name:         field.Name,
+					IsPrimaryKey: field.IsPrimaryKey,
+					Description:  field.Description,
+					DataType:     field.DataType,
+					TypeParams:   field.TypeParams,
+					IndexParams:  field.IndexParams,
+				})
+			}
 		}
 	}
-
-	return err
+	return nil
 }
 
 func (dct *DescribeCollectionTask) PostExecute(ctx context.Context) error {
