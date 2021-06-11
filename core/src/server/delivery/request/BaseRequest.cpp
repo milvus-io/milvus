@@ -39,7 +39,6 @@ RequestGroup(BaseRequest::RequestType type) {
         {BaseRequest::kDeleteByID, DDL_DML_REQUEST_GROUP},
         {BaseRequest::kGetVectorByID, INFO_REQUEST_GROUP},
         {BaseRequest::kGetVectorIDs, INFO_REQUEST_GROUP},
-        {BaseRequest::kInsertEntity, DDL_DML_REQUEST_GROUP},
 
         // collection operations
         {BaseRequest::kShowCollections, INFO_REQUEST_GROUP},
@@ -51,8 +50,6 @@ RequestGroup(BaseRequest::RequestType type) {
         {BaseRequest::kDropCollection, DDL_DML_REQUEST_GROUP},
         {BaseRequest::kPreloadCollection, DQL_REQUEST_GROUP},
         {BaseRequest::kReleaseCollection, DQL_REQUEST_GROUP},
-        {BaseRequest::kCreateHybridCollection, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kDescribeHybridCollection, INFO_REQUEST_GROUP},
         {BaseRequest::kReloadSegments, DQL_REQUEST_GROUP},
 
         // partition operations
@@ -69,7 +66,6 @@ RequestGroup(BaseRequest::RequestType type) {
         {BaseRequest::kSearchByID, DQL_REQUEST_GROUP},
         {BaseRequest::kSearch, DQL_REQUEST_GROUP},
         {BaseRequest::kSearchCombine, DQL_REQUEST_GROUP},
-        {BaseRequest::kHybridSearch, DQL_REQUEST_GROUP},
     };
 
     auto iter = s_map_type_group.find(type);

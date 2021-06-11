@@ -457,7 +457,6 @@ class TestDeleteBinary:
         assert status.OK()
         assert len(res[0]) == 0
 
-    # TODO: soft delete
     def test_delete_vector_collection_count(self, connect, jac_collection):
         '''
         target: test delete vector

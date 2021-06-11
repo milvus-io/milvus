@@ -19,6 +19,7 @@
 #include "utils/Log.h"
 #include "utils/Status.h"
 
+#include <algorithm>
 #include <string>
 
 namespace milvus {
@@ -57,6 +58,25 @@ IdBloomFilter::Add(const std::vector<doc_id_t>& uids) {
 
     const std::lock_guard<std::mutex> lock(mutex_);
     for (auto uid : uids) {
+        std::string s = std::to_string(uid);
+        if (scaling_bloom_add(bloom_filter_, s.c_str(), s.size(), uid) == -1) {
+            // Counter overflow does not affect bloom filter's normal functionality
+            LOG_ENGINE_WARNING_ << "Warning adding id=" << s << " to bloom filter: 4 bit counter Overflow";
+        }
+    }
+    return Status::OK();
+}
+
+Status
+IdBloomFilter::Add(const std::vector<doc_id_t>& uids, std::vector<offset_t>& delete_docs) {
+    std::sort(delete_docs.begin(), delete_docs.end());
+    for (offset_t i = 0, j = 0; i < uids.size();) {
+        if (j < delete_docs.size() && i >= delete_docs[j]) {
+            j++;
+            continue;
+        }
+
+        auto uid = uids[i++];
         std::string s = std::to_string(uid);
         if (scaling_bloom_add(bloom_filter_, s.c_str(), s.size(), uid) == -1) {
             // Counter overflow does not affect bloom filter's normal functionality

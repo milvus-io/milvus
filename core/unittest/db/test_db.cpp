@@ -1302,7 +1302,7 @@ TEST_F(DBTest2, GET_VECTOR_BY_ID_INVALID_TEST) {
     milvus::cache::CpuCacheMgr::GetInstance()->ClearCache();
     fiu_enable("bloom_filter_nullptr", 1, NULL, 0);
     stat = db_->GetVectorsByID(collection_info, "", qxb.id_array_, vectors);
-    ASSERT_FALSE(stat.ok());
+    ASSERT_TRUE(stat.ok());
     fiu_disable("bloom_filter_nullptr");
 }
 

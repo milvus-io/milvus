@@ -117,7 +117,6 @@ class BaseRequest {
         kDeleteByID,
         kGetVectorByID,
         kGetVectorIDs,
-        kInsertEntity,
 
         // collection operations
         kShowCollections = 300,
@@ -128,9 +127,6 @@ class BaseRequest {
         kShowCollectionInfo,
         kDropCollection,
         kPreloadCollection,
-        kCreateHybridCollection,
-        kHasHybridCollection,
-        kDescribeHybridCollection,
         kReloadSegments,
         kReleaseCollection,
 
@@ -148,7 +144,6 @@ class BaseRequest {
         kSearchByID = 600,
         kSearch,
         kSearchCombine,
-        kHybridSearch,
     };
 
  protected:

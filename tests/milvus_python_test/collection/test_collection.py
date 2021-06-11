@@ -219,6 +219,20 @@ class TestCollection:
         logging.getLogger().info(result)
         assert result.index_file_size == 1024
 
+    def test_create_collection_max_file_size(self, connect):
+        '''
+        target: test create collection with no index_file_size params
+        method: create collection with corrent params
+        expected: create status return ok, use default 1024
+        '''
+        collection_name = gen_unique_str("test_collection")
+        param = {'collection_name': collection_name,
+                 'dimension': dim,
+                 'index_file_size': 1024 * 129,
+                 'metric_type': MetricType.L2}
+        status = connect.create_collection(param)
+        assert not status.OK()
+
     def test_create_collection_no_metric_type(self, connect):
         '''
         target: test create collection with no metric_type params
@@ -1159,7 +1173,7 @@ def gen_sequence():
 class TestCollectionLogic(object):
     @pytest.mark.parametrize("logic_seq", gen_sequence())
     @pytest.mark.level(2)
-    def test_logic(self, connect, logic_seq, args):
+    def _test_logic(self, connect, logic_seq, args):
         if args["handler"] == "HTTP":
             pytest.skip("Skip in http mode")
         if self.is_right(logic_seq):
