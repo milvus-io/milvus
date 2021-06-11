@@ -542,6 +542,7 @@ func (i *IndexService) watchNodeLoop() {
 				i.removeNode(serverID)
 				log.Debug("IndexService watchNodeLoop SessionDelEvent ", zap.Any("serverID", serverID))
 				indexBuildIDs := i.nodeTasks.getTasksByNodeID(serverID)
+				log.Debug("IndexNode crashed", zap.Any("IndexNode ID", serverID), zap.Any("task IDs", indexBuildIDs))
 				i.assignChan <- indexBuildIDs
 				i.nodeTasks.delete(serverID)
 			}
