@@ -192,6 +192,9 @@ func (context *ParserContext) handleArrayExpr(node *ant_ast.Node, dataType schem
 }
 
 func (context *ParserContext) handleInExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
+	if node.Operator != "in" && node.Operator != "not in" {
+		return nil, fmt.Errorf("invalid Operator(%s)", node.Operator)
+	}
 	idNode, ok := node.Left.(*ant_ast.IdentifierNode)
 	if !ok {
 		return nil, fmt.Errorf("left operand of the InExpr must be identifier")
@@ -212,6 +215,10 @@ func (context *ParserContext) handleInExpr(node *ant_ast.BinaryNode) (*planpb.Ex
 				Values:     arrayData,
 			},
 		},
+	}
+
+	if node.Operator == "not in" {
+		return context.createNotExpr(expr)
 	}
 	return expr, nil
 }
