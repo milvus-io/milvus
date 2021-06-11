@@ -469,12 +469,44 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, createMeta.PartitionIDs[0], createPart.PartitionID)
 
 		// get TimeTickMsg
-		msgPack, ok = <-dmlStream.Chan()
+		//msgPack, ok = <-dmlStream.Chan()
+		//assert.True(t, ok)
+		//assert.Equal(t, 1, len(msgPack.Msgs))
+		//ddm, ok := (msgPack.Msgs[0]).(*msgstream.TimeTickMsg)
+		//assert.True(t, ok)
+		//assert.Greater(t, ddm.Base.Timestamp, uint64(0))
+		core.chanTimeTick.lock.Lock()
+		assert.Equal(t, len(core.chanTimeTick.proxyTimeTick), 2)
+		pt, ok := core.chanTimeTick.proxyTimeTick[core.session.ServerID]
 		assert.True(t, ok)
-		assert.Equal(t, 1, len(msgPack.Msgs))
-		ddm, ok := (msgPack.Msgs[0]).(*msgstream.TimeTickMsg)
-		assert.True(t, ok)
-		assert.Greater(t, ddm.Base.Timestamp, uint64(0))
+		assert.Equal(t, 2, len(pt.ChannelNames))
+		assert.Equal(t, 2, len(pt.Timestamps))
+		assert.Equal(t, pt.ChannelNames, createMeta.PhysicalChannelNames)
+		assert.Equal(t, pt.Timestamps[0], pt.Timestamps[1])
+		assert.LessOrEqual(t, createPart.BeginTimestamp, pt.Timestamps[0])
+		core.chanTimeTick.lock.Unlock()
+
+		// check DD operation info
+		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix, 0)
+		assert.Nil(t, err)
+		assert.Equal(t, "true", flag)
+		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
+		assert.Nil(t, err)
+		var ddOp DdOperation
+		err = DecodeDdOperation(ddOpStr, &ddOp)
+		assert.Nil(t, err)
+		assert.Equal(t, CreateCollectionDDType, ddOp.Type)
+
+		var ddCollReq = internalpb.CreateCollectionRequest{}
+		err = proto.UnmarshalText(ddOp.Body, &ddCollReq)
+		assert.Nil(t, err)
+		assert.Equal(t, createMeta.ID, ddCollReq.CollectionID)
+
+		var ddPartReq = internalpb.CreatePartitionRequest{}
+		err = proto.UnmarshalText(ddOp.Body1, &ddPartReq)
+		assert.Nil(t, err)
+		assert.Equal(t, createMeta.ID, ddPartReq.CollectionID)
+		assert.Equal(t, createMeta.PartitionIDs[0], ddPartReq.PartitionID)
 
 		// check invalid operation
 		req.Base.MsgID = 101
@@ -502,35 +534,6 @@ func TestMasterService(t *testing.T) {
 		status, err = core.CreateCollection(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
-
-		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
-		createMsg, ok = (msgs[0]).(*msgstream.CreateCollectionMsg)
-		assert.True(t, ok)
-		createMeta, err = core.MetaTable.GetCollectionByName("testColl-again", 0)
-		assert.Nil(t, err)
-		assert.Equal(t, createMeta.ID, createMsg.CollectionID)
-
-		// check DD operation info
-		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix, 0)
-		assert.Nil(t, err)
-		assert.Equal(t, "true", flag)
-		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
-		assert.Nil(t, err)
-		var ddOp DdOperation
-		err = DecodeDdOperation(ddOpStr, &ddOp)
-		assert.Nil(t, err)
-		assert.Equal(t, CreateCollectionDDType, ddOp.Type)
-
-		var ddCollReq = internalpb.CreateCollectionRequest{}
-		err = proto.UnmarshalText(ddOp.Body, &ddCollReq)
-		assert.Nil(t, err)
-		assert.Equal(t, createMeta.ID, ddCollReq.CollectionID)
-
-		var ddPartReq = internalpb.CreatePartitionRequest{}
-		err = proto.UnmarshalText(ddOp.Body1, &ddPartReq)
-		assert.Nil(t, err)
-		assert.Equal(t, createMeta.ID, ddPartReq.CollectionID)
-		assert.Equal(t, createMeta.PartitionIDs[0], ddPartReq.PartitionID)
 	})
 
 	t.Run("has collection", func(t *testing.T) {
@@ -1257,7 +1260,7 @@ func TestMasterService(t *testing.T) {
 
 	})
 
-	t.Run("undefine req type", func(t *testing.T) {
+	t.Run("undefined req type", func(t *testing.T) {
 		st, err := core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Undefined,
@@ -1517,6 +1520,8 @@ func TestMasterService(t *testing.T) {
 				MsgType:  commonpb.MsgType_TimeTick,
 				SourceID: proxyNodeIDInvalid,
 			},
+			ChannelNames: []string{"test"},
+			Timestamps:   []uint64{0},
 		}
 		s, _ = core.UpdateChannelTimeTick(ctx, msgInvalid)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, s.ErrorCode)
@@ -1897,25 +1902,25 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.SendDdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest) error {
+	c.SendDdCreateCollectionReq = func(context.Context, *internalpb.CreateCollectionRequest, []string) error {
 		return nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.SendDdDropCollectionReq = func(ctx context.Context, req *internalpb.DropCollectionRequest) error {
+	c.SendDdDropCollectionReq = func(context.Context, *internalpb.DropCollectionRequest, []string) error {
 		return nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.SendDdCreatePartitionReq = func(ctx context.Context, req *internalpb.CreatePartitionRequest) error {
+	c.SendDdCreatePartitionReq = func(context.Context, *internalpb.CreatePartitionRequest, []string) error {
 		return nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.SendDdDropPartitionReq = func(ctx context.Context, req *internalpb.DropPartitionRequest) error {
+	c.SendDdDropPartitionReq = func(context.Context, *internalpb.DropPartitionRequest, []string) error {
 		return nil
 	}
 	err = c.checkInit()

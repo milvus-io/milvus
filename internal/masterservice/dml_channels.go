@@ -51,6 +51,21 @@ func (d *dmlChannels) ProduceAll(pack *msgstream.MsgPack) {
 	}
 }
 
+func (d *dmlChannels) BroadcastMany(channels []string, pack *msgstream.MsgPack) error {
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+	for _, ch := range channels {
+		ms, ok := d.dml[ch]
+		if !ok {
+			return fmt.Errorf("channel %s not exist", ch)
+		}
+		if err := ms.Broadcast(pack); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (d *dmlChannels) BroadcastAll(pack *msgstream.MsgPack) {
 	d.lock.RLock()
 	defer d.lock.RUnlock()

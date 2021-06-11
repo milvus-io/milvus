@@ -66,9 +66,20 @@ func (t *timetickSync) sendToChannel() {
 func (t *timetickSync) UpdateTimeTick(in *internalpb.ChannelTimeTickMsg) error {
 	t.lock.Lock()
 	defer t.lock.Unlock()
-	_, ok := t.proxyTimeTick[in.Base.SourceID]
+	if len(in.ChannelNames) == 0 {
+		return nil
+	}
+	if len(in.Timestamps) != len(in.ChannelNames) {
+		return fmt.Errorf("Invalid TimeTickMsg")
+	}
+
+	prev, ok := t.proxyTimeTick[in.Base.SourceID]
 	if !ok {
 		return fmt.Errorf("Skip ChannelTimeTickMsg from un-recognized proxy node %d", in.Base.SourceID)
+	}
+	if prev != nil && prev.Timestamps[0] >= in.Timestamps[0] {
+		log.Debug("timestamp go back", zap.Int64("source id", in.Base.SourceID), zap.Uint64("prev ts", prev.Timestamps[0]), zap.Uint64("curr ts", in.Timestamps[0]))
+		return nil
 	}
 	t.proxyTimeTick[in.Base.SourceID] = in
 	t.sendToChannel()
