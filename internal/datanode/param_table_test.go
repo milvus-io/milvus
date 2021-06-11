@@ -65,7 +65,7 @@ func TestParamTable_DataNode(t *testing.T) {
 		log.Println("MsgChannelSubName:", name)
 	})
 
-	t.Run("Test EtcdAddress", func(t *testing.T) {
+	t.Run("Test EtcdEndpoints", func(t *testing.T) {
 		endpoints := Params.EtcdEndpoints
 		log.Println("EtcdEndpoints:", endpoints)
 	})

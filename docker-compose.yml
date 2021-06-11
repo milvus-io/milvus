@@ -21,7 +21,7 @@ services:
     environment:
       <<: *ccache
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
-      ETCD_ADDRESS: ${ETCD_ADDRESS}
+      ETCD_ENDPOINTS: ${ETCD_ENDPOINTS}
       MINIO_ADDRESS: ${MINIO_ADDRESS}
     volumes: &ubuntu-volumes
       - .:/go/src/github.com/milvus-io/milvus:delegated

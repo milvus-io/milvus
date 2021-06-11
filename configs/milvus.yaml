@@ -14,8 +14,8 @@ nodeID: # will be deprecated later
   queryNodeIDList: [1]
 
 etcd:
-  address: localhost
-  port: 2379
+  endpoints:
+    - localhost:2379
   rootPath: by-dev
   metaSubPath: meta # metaRootPath = rootPath + '/' + metaSubPath
   kvSubPath: kv # kvRootPath = rootPath + '/' + kvSubPath

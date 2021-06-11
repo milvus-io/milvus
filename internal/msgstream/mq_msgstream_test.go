@@ -16,6 +16,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -1022,11 +1023,12 @@ func TestStream_MqMsgStream_Seek(t *testing.T) {
 /****************************************Rmq test******************************************/
 
 func initRmq(name string) *etcdkv.EtcdKV {
-	etcdAddr := os.Getenv("ETCD_ADDRESS")
-	if etcdAddr == "" {
-		etcdAddr = "localhost:2379"
+	endpoints := os.Getenv("ETCD_ENDPOINTS")
+	if endpoints == "" {
+		endpoints = "localhost:2379"
 	}
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	etcdEndpoints := strings.Split(endpoints, ",")
+	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
 	if err != nil {
 		log.Fatalf("New clientv3 error = %v", err)
 	}
