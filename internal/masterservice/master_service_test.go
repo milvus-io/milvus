@@ -1260,7 +1260,7 @@ func TestMasterService(t *testing.T) {
 
 	})
 
-	t.Run("undefine req type", func(t *testing.T) {
+	t.Run("undefined req type", func(t *testing.T) {
 		st, err := core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Undefined,
@@ -1521,6 +1521,7 @@ func TestMasterService(t *testing.T) {
 				SourceID: proxyNodeIDInvalid,
 			},
 			ChannelNames: []string{"test"},
+			Timestamps:   []uint64{0},
 		}
 		s, _ = core.UpdateChannelTimeTick(ctx, msgInvalid)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, s.ErrorCode)
