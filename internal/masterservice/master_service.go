@@ -570,7 +570,7 @@ func (c *Core) setMsgStreams() error {
 		}
 		metrics.MasterDDChannelTimeTick.Set(float64(tsoutil.Mod24H(t)))
 
-		c.dmlChannels.BroadcastAll(&msgPack)
+		//c.dmlChannels.BroadcastAll(&msgPack)
 		pc := c.MetaTable.ListCollectionPhysicalChannels()
 		pt := make([]uint64, len(pc))
 		for i := 0; i < len(pt); i++ {

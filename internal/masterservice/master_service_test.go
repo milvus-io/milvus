@@ -469,12 +469,22 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, createMeta.PartitionIDs[0], createPart.PartitionID)
 
 		// get TimeTickMsg
-		msgPack, ok = <-dmlStream.Chan()
+		//msgPack, ok = <-dmlStream.Chan()
+		//assert.True(t, ok)
+		//assert.Equal(t, 1, len(msgPack.Msgs))
+		//ddm, ok := (msgPack.Msgs[0]).(*msgstream.TimeTickMsg)
+		//assert.True(t, ok)
+		//assert.Greater(t, ddm.Base.Timestamp, uint64(0))
+		core.chanTimeTick.lock.Lock()
+		assert.Equal(t, len(core.chanTimeTick.proxyTimeTick), 2)
+		pt, ok := core.chanTimeTick.proxyTimeTick[core.session.ServerID]
 		assert.True(t, ok)
-		assert.Equal(t, 1, len(msgPack.Msgs))
-		ddm, ok := (msgPack.Msgs[0]).(*msgstream.TimeTickMsg)
-		assert.True(t, ok)
-		assert.Greater(t, ddm.Base.Timestamp, uint64(0))
+		assert.Equal(t, 2, len(pt.ChannelNames))
+		assert.Equal(t, 2, len(pt.Timestamps))
+		assert.Equal(t, pt.ChannelNames, createMeta.PhysicalChannelNames)
+		assert.Equal(t, pt.Timestamps[0], pt.Timestamps[1])
+		assert.Equal(t, createPart.BeginTimestamp, pt.Timestamps[0])
+		core.chanTimeTick.lock.Unlock()
 
 		// check DD operation info
 		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix, 0)
