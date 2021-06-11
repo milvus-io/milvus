@@ -69,6 +69,9 @@ func (t *timetickSync) UpdateTimeTick(in *internalpb.ChannelTimeTickMsg) error {
 	if len(in.ChannelNames) == 0 {
 		return nil
 	}
+	if len(in.Timestamps) != len(in.ChannelNames) {
+		return fmt.Errorf("Invalid TimeTickMsg")
+	}
 
 	prev, ok := t.proxyTimeTick[in.Base.SourceID]
 	if !ok {
