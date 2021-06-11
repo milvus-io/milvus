@@ -61,8 +61,8 @@ func getMasterServiceAddr(sess *sessionutil.Session) (string, error) {
 	return ms.Address, nil
 }
 
-func NewClient(metaRoot string, etcdAddr []string, timeout time.Duration) (*GrpcClient, error) {
-	sess := sessionutil.NewSession(context.Background(), metaRoot, etcdAddr)
+func NewClient(metaRoot string, etcdEndpoints []string, timeout time.Duration) (*GrpcClient, error) {
+	sess := sessionutil.NewSession(context.Background(), metaRoot, etcdEndpoints)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
 		log.Debug("MasterServiceClient NewClient failed", zap.Error(err))

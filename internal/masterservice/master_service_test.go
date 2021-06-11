@@ -280,7 +280,7 @@ func TestMasterService(t *testing.T) {
 	err = core.Register()
 	assert.Nil(t, err)
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}, DialTimeout: 5 * time.Second})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints, DialTimeout: 5 * time.Second})
 	assert.Nil(t, err)
 	sessKey := path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())

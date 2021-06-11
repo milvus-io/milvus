@@ -127,7 +127,7 @@ func (node *DataNode) SetDataServiceInterface(ds types.DataService) error {
 
 // Register register data node at etcd
 func (node *DataNode) Register() error {
-	node.session = sessionutil.NewSession(node.ctx, Params.MetaRootPath, []string{Params.EtcdAddress})
+	node.session = sessionutil.NewSession(node.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
 	node.session.Init(typeutil.DataNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
 	Params.NodeID = node.session.ServerID
 	return nil

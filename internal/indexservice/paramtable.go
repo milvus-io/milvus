@@ -14,6 +14,7 @@ package indexservice
 import (
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -28,9 +29,9 @@ type ParamTable struct {
 
 	MasterAddress string
 
-	EtcdAddress  string
-	KvRootPath   string
-	MetaRootPath string
+	EtcdEndpoints []string
+	KvRootPath    string
+	MetaRootPath  string
 
 	MinIOAddress         string
 	MinIOAccessKeyID     string
@@ -48,7 +49,7 @@ func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
 		pt.initLogCfg()
-		pt.initEtcdAddress()
+		pt.initEtcdEndpoints()
 		pt.initMasterAddress()
 		pt.initMetaRootPath()
 		pt.initKvRootPath()
@@ -60,12 +61,12 @@ func (pt *ParamTable) Init() {
 	})
 }
 
-func (pt *ParamTable) initEtcdAddress() {
-	addr, err := pt.Load("_EtcdAddress")
+func (pt *ParamTable) initEtcdEndpoints() {
+	endpoints, err := pt.Load("_EtcdEndpoints")
 	if err != nil {
 		panic(err)
 	}
-	pt.EtcdAddress = addr
+	pt.EtcdEndpoints = strings.Split(endpoints, ",")
 }
 
 func (pt *ParamTable) initMetaRootPath() {

@@ -108,7 +108,7 @@ func NewQueryNodeWithoutID(ctx context.Context, factory msgstream.Factory) *Quer
 
 // Register register query node at etcd
 func (node *QueryNode) Register() error {
-	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.MetaRootPath, []string{Params.EtcdAddress})
+	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
 	node.session.Init(typeutil.QueryNodeRole, Params.QueryNodeIP+":"+strconv.FormatInt(Params.QueryNodePort, 10), false)
 	Params.QueryNodeID = node.session.ServerID
 	return nil
