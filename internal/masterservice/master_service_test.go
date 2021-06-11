@@ -483,7 +483,7 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, 2, len(pt.Timestamps))
 		assert.Equal(t, pt.ChannelNames, createMeta.PhysicalChannelNames)
 		assert.Equal(t, pt.Timestamps[0], pt.Timestamps[1])
-		assert.Equal(t, createPart.BeginTimestamp, pt.Timestamps[0])
+		assert.LessOrEqual(t, createPart.BeginTimestamp, pt.Timestamps[0])
 		core.chanTimeTick.lock.Unlock()
 
 		// check DD operation info
@@ -1520,6 +1520,7 @@ func TestMasterService(t *testing.T) {
 				MsgType:  commonpb.MsgType_TimeTick,
 				SourceID: proxyNodeIDInvalid,
 			},
+			ChannelNames: []string{"test"},
 		}
 		s, _ = core.UpdateChannelTimeTick(ctx, msgInvalid)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, s.ErrorCode)
