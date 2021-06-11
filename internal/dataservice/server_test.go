@@ -590,8 +590,6 @@ func TestDataNodeTtChannel(t *testing.T) {
 	})
 
 	t.Run("Test segment flush after tt", func(t *testing.T) {
-		// TODO: need fix
-		t.Skip()
 		resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
 			NodeID:   0,
 			PeerRole: "",
