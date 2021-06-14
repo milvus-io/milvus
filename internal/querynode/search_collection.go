@@ -433,6 +433,15 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 				}
 				nilHits[i] = bs
 			}
+			fakedDmChannels := collection.getWatchedDmChannels()
+			var realDmChannels []string
+			for _, dmChan := range fakedDmChannels {
+				parts := strings.Split(dmChan, "#")
+				realDmChannels = append(realDmChannels, parts[0])
+			}
+			log.Debug("QueryNode searchCollection search, realDmChannels", zap.Any("fakedDmChannels", fakedDmChannels),
+				zap.Any("realDmChannels", realDmChannels), zap.Any("collectionID", collection.ID()),
+				zap.Any("sealedSegmentSearched", sealedSegmentSearched))
 			resultChannelInt := 0
 			searchResultMsg := &msgstream.SearchResultMsg{
 				BaseMsg: msgstream.BaseMsg{Ctx: searchMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}},
@@ -443,10 +452,14 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 						Timestamp: searchTimestamp,
 						SourceID:  searchMsg.Base.SourceID,
 					},
-					Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-					ResultChannelID: searchMsg.ResultChannelID,
-					Hits:            nilHits,
-					MetricType:      plan.getMetricType(),
+					Status:                   &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+					ResultChannelID:          searchMsg.ResultChannelID,
+					Hits:                     nilHits,
+					MetricType:               plan.getMetricType(),
+					SealedSegmentIDsSearched: sealedSegmentSearched,
+					ChannelIDsSearched:       realDmChannels,
+					//TODO:: get global sealed segment from etcd
+					GlobalSealedSegmentIDs: sealedSegmentSearched,
 				},
 			}
 			err = s.publishSearchResult(searchResultMsg, searchMsg.CollectionID)

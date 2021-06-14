@@ -37,6 +37,9 @@ import (
 type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
+const sendTimeTickMsgInterval = 200 * time.Millisecond
+const channelMgrTickerInterval = 100 * time.Millisecond
+
 type ProxyNode struct {
 	ctx    context.Context
 	cancel func()
@@ -255,9 +258,7 @@ func (node *ProxyNode) Init() error {
 
 	node.tick = newTimeTick(node.ctx, node.tsoAllocator, time.Millisecond*200, node.sched.TaskDoneTest, node.msFactory)
 
-	// TODO(dragondriver): read this from config
-	interval := time.Millisecond * 200
-	node.chTicker = newChannelsTimeTicker(node.ctx, interval, []string{}, node.sched.getPChanStatistics, tsoAllocator)
+	node.chTicker = newChannelsTimeTicker(node.ctx, channelMgrTickerInterval, []string{}, node.sched.getPChanStatistics, tsoAllocator)
 
 	return nil
 }
@@ -268,8 +269,7 @@ func (node *ProxyNode) sendChannelsTimeTickLoop() {
 		defer node.wg.Done()
 
 		// TODO(dragondriver): read this from config
-		interval := time.Millisecond * 200
-		timer := time.NewTicker(interval)
+		timer := time.NewTicker(sendTimeTickMsgInterval)
 
 		for {
 			select {
@@ -282,8 +282,6 @@ func (node *ProxyNode) sendChannelsTimeTickLoop() {
 					continue
 				}
 
-				log.Debug("send timestamp statistics of pchan", zap.Any("statistics", stats))
-
 				channels := make([]pChan, 0, len(stats))
 				tss := make([]Timestamp, 0, len(stats))
 
@@ -291,6 +289,7 @@ func (node *ProxyNode) sendChannelsTimeTickLoop() {
 					channels = append(channels, channel)
 					tss = append(tss, ts)
 				}
+				log.Debug("send timestamp statistics of pchan", zap.Any("channels", channels), zap.Any("tss", tss))
 
 				req := &internalpb.ChannelTimeTickMsg{
 					Base: &commonpb.MsgBase{
