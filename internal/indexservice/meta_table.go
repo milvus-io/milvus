@@ -474,11 +474,18 @@ func (nt *nodeTasks) finishTask(indexBuildID UniqueID) {
 	nt.lock.Lock()
 	defer nt.lock.Unlock()
 
-	for serverID := range nt.nodeID2Tasks {
-		for i, buildID := range nt.nodeID2Tasks[serverID] {
-			if buildID == indexBuildID {
-				nt.nodeID2Tasks[serverID] = append(nt.nodeID2Tasks[serverID][:i], nt.nodeID2Tasks[serverID][:i+1]...)
+	removed := false
+	for serverID, taskIDs := range nt.nodeID2Tasks {
+		for i := 0; i < len(taskIDs); i++ {
+			if indexBuildID == taskIDs[i] {
+				taskIDs = append(taskIDs[:i], taskIDs[i+1:]...)
+				removed = true
+				break
 			}
+		}
+		if removed {
+			nt.nodeID2Tasks[serverID] = taskIDs
+			break
 		}
 	}
 }
