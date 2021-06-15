@@ -88,13 +88,3 @@ message PlanNode {
     VectorANNS vector_anns = 1;
   }
 }
-
-message RetrieveRequest {
-  schema.IDs ids = 1;
-  repeated string output_fields = 2;
-}
-
-message RetrieveResults {
-  schema.IDs ids = 1;
-  repeated schema.FieldData fields_data = 2;
-}

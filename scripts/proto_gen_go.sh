@@ -51,5 +51,6 @@ ${protoc} --go_out=plugins=grpc,paths=source_relative:./indexpb index_service.pr
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./datapb data_service.proto
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./querypb query_service.proto
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./planpb plan.proto
+${protoc} --go_out=plugins=grpc,paths=source_relative:./segcorepb segcore.proto
 
 popd

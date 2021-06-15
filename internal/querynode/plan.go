@@ -24,7 +24,7 @@ import (
 	"errors"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 )
 
 type Plan struct {
@@ -110,7 +110,7 @@ type RetrievePlan struct {
 	Timestamp       uint64
 }
 
-func createRetrievePlan(col *Collection, msg *planpb.RetrieveRequest, timestamp uint64) (*RetrievePlan, error) {
+func createRetrievePlan(col *Collection, msg *segcorepb.RetrieveRequest, timestamp uint64) (*RetrievePlan, error) {
 	protoCGo, err := MarshalForCGo(msg)
 	if err != nil {
 		return nil, err

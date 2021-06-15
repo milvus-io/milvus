@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
@@ -320,15 +320,15 @@ func (rc *retrieveCollection) doUnsolvedMsgRetrieve() {
 	}
 }
 
-func mergeRetrieveResults(dataArr []*planpb.RetrieveResults) (*planpb.RetrieveResults, error) {
-	var final *planpb.RetrieveResults
+func mergeRetrieveResults(dataArr []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error) {
+	var final *segcorepb.RetrieveResults
 	for _, data := range dataArr {
 		if data == nil {
 			continue
 		}
 
 		if final == nil {
-			final = proto.Clone(data).(*planpb.RetrieveResults)
+			final = proto.Clone(data).(*segcorepb.RetrieveResults)
 			continue
 		}
 
@@ -363,7 +363,7 @@ func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error
 		return err
 	}
 
-	req := &planpb.RetrieveRequest{
+	req := &segcorepb.RetrieveRequest{
 		Ids:          retrieveMsg.Ids,
 		OutputFields: retrieveMsg.OutputFields,
 	}
@@ -404,7 +404,7 @@ func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error
 		}
 	}
 
-	var mergeList []*planpb.RetrieveResults
+	var mergeList []*segcorepb.RetrieveResults
 	for _, partitionID := range partitionIDsInHistorical {
 		segmentIDs, err := rc.historicalReplica.getSegmentIDs(partitionID)
 		if err != nil {

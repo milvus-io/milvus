@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 )
 
 func TestRetrieve_Merge(t *testing.T) {
@@ -35,7 +36,7 @@ func TestRetrieve_Merge(t *testing.T) {
 		},
 	}
 
-	subRes := &planpb.RetrieveResults{
+	subRes := &segcorepb.RetrieveResults{
 		Ids: &schemapb.IDs{
 			IdField: &schemapb.IDs_IntId{
 				IntId: &schemapb.LongArray{
@@ -48,7 +49,7 @@ func TestRetrieve_Merge(t *testing.T) {
 			col2,
 		},
 	}
-	finalRes, err := mergeRetrieveResults([]*planpb.RetrieveResults{subRes, subRes})
+	finalRes, err := mergeRetrieveResults([]*segcorepb.RetrieveResults{subRes, subRes})
 	assert.NoError(t, err)
 	println(finalRes.String())
 }

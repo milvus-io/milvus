@@ -15,6 +15,7 @@
 #include <string>
 #include "common/Schema.h"
 #include "pb/plan.pb.h"
+#include "pb/segcore.pb.h"
 
 namespace milvus::query {
 // NOTE: APIs for C wrapper
@@ -38,7 +39,7 @@ int64_t
 GetNumOfQueries(const PlaceholderGroup*);
 
 std::unique_ptr<RetrievePlan>
-CreateRetrievePlan(const Schema& schema, proto::plan::RetrieveRequest&& request);
+CreateRetrievePlan(const Schema& schema, proto::segcore::RetrieveRequest&& request);
 
 // Query Overall TopK from Plan
 // Used to alloc result memory at Go side

@@ -190,11 +190,11 @@ SegmentInternalInterface::BulkSubScript(FieldOffset field_offset, const SegOffse
     }
 }
 
-std::unique_ptr<proto::plan::RetrieveResults>
+std::unique_ptr<proto::segcore::RetrieveResults>
 SegmentInternalInterface::GetEntityById(const std::vector<FieldOffset>& field_offsets,
                                         const IdArray& id_array,
                                         Timestamp timestamp) const {
-    auto results = std::make_unique<proto::plan::RetrieveResults>();
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
 
     auto [ids_, seg_offsets] = search_ids(id_array, timestamp);
 
