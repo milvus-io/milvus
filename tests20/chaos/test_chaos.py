@@ -67,6 +67,7 @@ class TestsChaos:
 
     def test_chaos(self, h_chk):
         # start the monitor threads to check the milvus ops
+        log.debug("***********************Test_chaos Starting.**************")
         for k in h_chk.keys():
             v = h_chk[k]
             t = threading.Thread(target=v.keep_running, args=())
@@ -77,7 +78,6 @@ class TestsChaos:
         # find the testcase by chaos ops in testcases
         # parse the test expectations
         # wait 120s
-        log.debug("test_chaos starting...")
         sleep(10)
         log.debug("create succ/total count1: %s, %s "
                   % (str(h_chk[Op.create]._succ), str(h_chk[Op.create].total())))
@@ -115,7 +115,7 @@ class TestsChaos:
         # terminate thread
         for ch in h_chk.values():
             ch.terminate()
-        log.debug("Test Completed.")
+        log.debug("*******************Test Completed.*******************")
         '''
         for c_name in utility.list_collections():
             if "CreateChecker_" in c_name:
