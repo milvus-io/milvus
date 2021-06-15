@@ -73,6 +73,12 @@ SearchRequest::OnPreExecute() {
         return status;
     }
 
+    status = ValidationUtil::ValidateResultSize(vectors_data_.vector_count_, topk_);
+    if (!status.ok()) {
+        LOG_SERVER_ERROR_ << LogOut("[%s][%ld] %s", "search", 0, status.message().c_str());
+        return status;
+    }
+
     // step 3: check partition tags
     status = ValidationUtil::ValidatePartitionTags(partition_list_);
     fiu_do_on("SearchRequest.OnExecute.invalid_partition_tags", status = Status(milvus::SERVER_UNEXPECTED_ERROR, ""));
