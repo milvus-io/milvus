@@ -51,28 +51,6 @@ func (d *dmlChannels) GetNumChannles() int {
 	return count
 }
 
-//func (d *dmlChannels) ProduceAll(pack *msgstream.MsgPack) {
-//	d.lock.RLock()
-//	defer d.lock.RUnlock()
-//
-//	for n, ms := range d.dml {
-//		if err := ms.Produce(pack); err != nil {
-//			log.Debug("msgstream produce error", zap.String("name", n), zap.Error(err))
-//		}
-//	}
-//}
-//
-//func (d *dmlChannels) BroadcastAll(pack *msgstream.MsgPack) {
-//	d.lock.RLock()
-//	defer d.lock.RUnlock()
-//
-//	for n, ms := range d.dml {
-//		if err := ms.Broadcast(pack); err != nil {
-//			log.Debug("msgstream broadcast error", zap.String("name", n), zap.Error(err))
-//		}
-//	}
-//}
-
 func (d *dmlChannels) Produce(name string, pack *msgstream.MsgPack) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
