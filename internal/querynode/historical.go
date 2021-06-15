@@ -13,6 +13,8 @@ package querynode
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
@@ -20,7 +22,7 @@ import (
 
 type historical struct {
 	replica      ReplicaInterface
-	loadService  *loadService
+	loader       *segmentLoader
 	statsService *statsService
 }
 
@@ -30,25 +32,86 @@ func newHistorical(ctx context.Context,
 	indexService types.IndexService,
 	factory msgstream.Factory) *historical {
 	replica := newCollectionReplica()
-	ls := newLoadService(ctx, masterService, dataService, indexService, replica)
-	ss := newStatsService(ctx, replica, ls.segLoader.indexLoader.fieldStatsChan, factory)
+	loader := newSegmentLoader(ctx, masterService, indexService, dataService, replica)
+	ss := newStatsService(ctx, replica, loader.indexLoader.fieldStatsChan, factory)
 
 	return &historical{
 		replica:      replica,
-		loadService:  ls,
+		loader:       loader,
 		statsService: ss,
 	}
 }
 
 func (h *historical) start() {
-	h.loadService.start()
 	h.statsService.start()
 }
 
 func (h *historical) close() {
-	h.loadService.close()
 	h.statsService.close()
 
 	// free collectionReplica
 	h.replica.freeAll()
+}
+
+func (h *historical) search(searchReqs []*searchRequest,
+	collID UniqueID,
+	partIDs []UniqueID,
+	plan *Plan,
+	searchTs Timestamp) ([]*SearchResult, []*Segment, error) {
+
+	searchResults := make([]*SearchResult, 0)
+	segmentResults := make([]*Segment, 0)
+
+	// get historical partition ids
+	var searchPartIDs []UniqueID
+	if len(partIDs) == 0 {
+		hisPartIDs, err := h.replica.getPartitionIDs(collID)
+		if len(hisPartIDs) == 0 {
+			// no partitions in collection, do empty search
+			return nil, nil, nil
+		}
+		if err != nil {
+			return searchResults, segmentResults, err
+		}
+		searchPartIDs = hisPartIDs
+	} else {
+		for _, id := range partIDs {
+			_, err := h.replica.getPartitionByID(id)
+			if err == nil {
+				searchPartIDs = append(searchPartIDs, id)
+			}
+		}
+	}
+
+	// all partitions have been released
+	if len(searchPartIDs) == 0 {
+		return nil, nil, errors.New("partitions have been released , collectionID = " +
+			fmt.Sprintln(collID) +
+			"target partitionIDs = " +
+			fmt.Sprintln(partIDs))
+	}
+
+	for _, partID := range searchPartIDs {
+		segIDs, err := h.replica.getSegmentIDs(partID)
+		if err != nil {
+			return searchResults, segmentResults, err
+		}
+		for _, segID := range segIDs {
+			seg, err := h.replica.getSegmentByID(segID)
+			if err != nil {
+				return searchResults, segmentResults, err
+			}
+			if !seg.getOnService() {
+				continue
+			}
+			searchResult, err := seg.segmentSearch(plan, searchReqs, []Timestamp{searchTs})
+			if err != nil {
+				return searchResults, segmentResults, err
+			}
+			searchResults = append(searchResults, searchResult)
+			segmentResults = append(segmentResults, seg)
+		}
+	}
+
+	return searchResults, segmentResults, nil
 }

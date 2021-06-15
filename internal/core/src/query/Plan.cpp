@@ -480,7 +480,7 @@ GetNumOfQueries(const PlaceholderGroup* group) {
 }
 
 [[maybe_unused]] std::unique_ptr<RetrievePlan>
-CreateRetrievePlan(const Schema& schema, proto::plan::RetrieveRequest&& request) {
+CreateRetrievePlan(const Schema& schema, proto::segcore::RetrieveRequest&& request) {
     auto plan = std::make_unique<RetrievePlan>();
     plan->ids_ = std::unique_ptr<proto::schema::IDs>(request.release_ids());
     for (auto& field_name : request.output_fields()) {

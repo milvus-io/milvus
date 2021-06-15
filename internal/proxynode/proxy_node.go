@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -159,7 +160,7 @@ func (node *ProxyNode) Init() error {
 	}
 
 	if node.queryService != nil {
-		resp, err := node.queryService.CreateQueryChannel(ctx)
+		resp, err := node.queryService.CreateQueryChannel(ctx, &querypb.CreateQueryChannelRequest{})
 		if err != nil {
 			log.Debug("ProxyNode CreateQueryChannel failed", zap.Error(err))
 			return err

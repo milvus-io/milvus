@@ -19,11 +19,6 @@ import (
 	"math/rand"
 	"path"
 	"strconv"
-	"testing"
-	"time"
-
-	"github.com/golang/protobuf/proto"
-	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/indexnode"
 	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
@@ -31,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 )
@@ -1025,96 +1019,97 @@ func doInsert(ctx context.Context, collectionID UniqueID, partitionID UniqueID, 
 	return nil
 }
 
-func TestSegmentLoad_Search_Vector(t *testing.T) {
-	collectionID := UniqueID(0)
-	partitionID := UniqueID(1)
-	segmentID := UniqueID(2)
-	fieldIDs := []int64{0, 101}
-
-	// mock write insert bin log
-	keyPrefix := path.Join("query-node-seg-manager-test-minio-prefix", strconv.FormatInt(collectionID, 10), strconv.FormatInt(partitionID, 10))
-
-	node := newQueryNodeMock()
-	defer node.Stop()
-
-	ctx := node.queryNodeLoopCtx
-	node.historical.loadService = newLoadService(ctx, nil, nil, nil, node.historical.replica)
-
-	initTestMeta(t, node, collectionID, 0)
-
-	err := node.historical.replica.addPartition(collectionID, partitionID)
-	assert.NoError(t, err)
-
-	err = node.historical.replica.addSegment(segmentID, partitionID, collectionID, segmentTypeSealed)
-	assert.NoError(t, err)
-
-	paths, srcFieldIDs, err := generateInsertBinLog(collectionID, partitionID, segmentID, keyPrefix)
-	assert.NoError(t, err)
-
-	fieldsMap, _ := node.historical.loadService.segLoader.checkTargetFields(paths, srcFieldIDs, fieldIDs)
-	assert.Equal(t, len(fieldsMap), 4)
-
-	segment, err := node.historical.replica.getSegmentByID(segmentID)
-	assert.NoError(t, err)
-
-	err = node.historical.loadService.segLoader.loadSegmentFieldsData(segment, fieldsMap)
-	assert.NoError(t, err)
-
-	indexPaths, err := generateIndex(segmentID)
-	assert.NoError(t, err)
-
-	indexInfo := &indexInfo{
-		indexPaths: indexPaths,
-		readyLoad:  true,
-	}
-	err = segment.setIndexInfo(100, indexInfo)
-	assert.NoError(t, err)
-
-	err = node.historical.loadService.segLoader.indexLoader.loadIndex(segment, 100)
-	assert.NoError(t, err)
-
-	// do search
-	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
-
-	const DIM = 16
-	var searchRawData []byte
-	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-	for _, ele := range vec {
-		buf := make([]byte, 4)
-		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
-		searchRawData = append(searchRawData, buf...)
-	}
-	placeholderValue := milvuspb.PlaceholderValue{
-		Tag:    "$0",
-		Type:   milvuspb.PlaceholderType_FloatVector,
-		Values: [][]byte{searchRawData},
-	}
-
-	placeholderGroup := milvuspb.PlaceholderGroup{
-		Placeholders: []*milvuspb.PlaceholderValue{&placeholderValue},
-	}
-
-	placeHolderGroupBlob, err := proto.Marshal(&placeholderGroup)
-	assert.NoError(t, err)
-
-	searchTimestamp := Timestamp(1020)
-	collection, err := node.historical.replica.getCollectionByID(collectionID)
-	assert.NoError(t, err)
-	plan, err := createPlan(*collection, dslString)
-	assert.NoError(t, err)
-	holder, err := parseSearchRequest(plan, placeHolderGroupBlob)
-	assert.NoError(t, err)
-	placeholderGroups := make([]*searchRequest, 0)
-	placeholderGroups = append(placeholderGroups, holder)
-
-	// wait for segment building index
-	time.Sleep(1 * time.Second)
-
-	_, err = segment.segmentSearch(plan, placeholderGroups, []Timestamp{searchTimestamp})
-	assert.Nil(t, err)
-
-	plan.delete()
-	holder.delete()
-
-	<-ctx.Done()
-}
+//
+//func TestSegmentLoad_Search_Vector(t *testing.T) {
+//	collectionID := UniqueID(0)
+//	partitionID := UniqueID(1)
+//	segmentID := UniqueID(2)
+//	fieldIDs := []int64{0, 101}
+//
+//	// mock write insert bin log
+//	keyPrefix := path.Join("query-node-seg-manager-test-minio-prefix", strconv.FormatInt(collectionID, 10), strconv.FormatInt(partitionID, 10))
+//
+//	node := newQueryNodeMock()
+//	defer node.Stop()
+//
+//	ctx := node.queryNodeLoopCtx
+//	node.historical.loadService = newLoadService(ctx, nil, nil, nil, node.historical.replica)
+//
+//	initTestMeta(t, node, collectionID, 0)
+//
+//	err := node.historical.replica.addPartition(collectionID, partitionID)
+//	assert.NoError(t, err)
+//
+//	err = node.historical.replica.addSegment(segmentID, partitionID, collectionID, segmentTypeSealed)
+//	assert.NoError(t, err)
+//
+//	paths, srcFieldIDs, err := generateInsertBinLog(collectionID, partitionID, segmentID, keyPrefix)
+//	assert.NoError(t, err)
+//
+//	fieldsMap, _ := node.historical.loadService.segLoader.checkTargetFields(paths, srcFieldIDs, fieldIDs)
+//	assert.Equal(t, len(fieldsMap), 4)
+//
+//	segment, err := node.historical.replica.getSegmentByID(segmentID)
+//	assert.NoError(t, err)
+//
+//	err = node.historical.loadService.segLoader.loadSegmentFieldsData(segment, fieldsMap)
+//	assert.NoError(t, err)
+//
+//	indexPaths, err := generateIndex(segmentID)
+//	assert.NoError(t, err)
+//
+//	indexInfo := &indexInfo{
+//		indexPaths: indexPaths,
+//		readyLoad:  true,
+//	}
+//	err = segment.setIndexInfo(100, indexInfo)
+//	assert.NoError(t, err)
+//
+//	err = node.historical.loadService.segLoader.indexLoader.loadIndex(segment, 100)
+//	assert.NoError(t, err)
+//
+//	// do search
+//	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
+//
+//	const DIM = 16
+//	var searchRawData []byte
+//	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+//	for _, ele := range vec {
+//		buf := make([]byte, 4)
+//		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
+//		searchRawData = append(searchRawData, buf...)
+//	}
+//	placeholderValue := milvuspb.PlaceholderValue{
+//		Tag:    "$0",
+//		Type:   milvuspb.PlaceholderType_FloatVector,
+//		Values: [][]byte{searchRawData},
+//	}
+//
+//	placeholderGroup := milvuspb.PlaceholderGroup{
+//		Placeholders: []*milvuspb.PlaceholderValue{&placeholderValue},
+//	}
+//
+//	placeHolderGroupBlob, err := proto.Marshal(&placeholderGroup)
+//	assert.NoError(t, err)
+//
+//	searchTimestamp := Timestamp(1020)
+//	collection, err := node.historical.replica.getCollectionByID(collectionID)
+//	assert.NoError(t, err)
+//	plan, err := createPlan(*collection, dslString)
+//	assert.NoError(t, err)
+//	holder, err := parseSearchRequest(plan, placeHolderGroupBlob)
+//	assert.NoError(t, err)
+//	placeholderGroups := make([]*searchRequest, 0)
+//	placeholderGroups = append(placeholderGroups, holder)
+//
+//	// wait for segment building index
+//	time.Sleep(1 * time.Second)
+//
+//	_, err = segment.segmentSearch(plan, placeholderGroups, []Timestamp{searchTimestamp})
+//	assert.Nil(t, err)
+//
+//	plan.delete()
+//	holder.delete()
+//
+//	<-ctx.Done()
+//}

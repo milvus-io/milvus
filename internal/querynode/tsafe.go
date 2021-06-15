@@ -12,7 +12,13 @@
 package querynode
 
 import (
+	"context"
+	"math"
 	"sync"
+
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 )
 
 type tSafeWatcher struct {
@@ -28,6 +34,7 @@ func newTSafeWatcher() *tSafeWatcher {
 func (watcher *tSafeWatcher) notify() {
 	if len(watcher.notifyChan) == 0 {
 		watcher.notifyChan <- true
+		//log.Debug("tSafe watcher notify done")
 	}
 }
 
@@ -42,22 +49,73 @@ func (watcher *tSafeWatcher) watcherChan() <-chan bool {
 
 type tSafer interface {
 	get() Timestamp
-	set(t Timestamp)
+	set(id UniqueID, t Timestamp)
 	registerTSafeWatcher(t *tSafeWatcher)
+	start()
 	close()
 }
 
+type tSafeMsg struct {
+	t  Timestamp
+	id UniqueID // collectionID or partitionID
+}
+
 type tSafe struct {
+	ctx         context.Context
+	cancel      context.CancelFunc
+	channel     VChannel
 	tSafeMu     sync.Mutex // guards all fields
 	tSafe       Timestamp
 	watcherList []*tSafeWatcher
+	tSafeChan   chan tSafeMsg
+	tSafeRecord map[UniqueID]Timestamp
 }
 
-func newTSafe() tSafer {
+func newTSafe(ctx context.Context, channel VChannel) tSafer {
+	ctx1, cancel := context.WithCancel(ctx)
+	const channelSize = 4096
+
 	var t tSafer = &tSafe{
+		ctx:         ctx1,
+		cancel:      cancel,
+		channel:     channel,
 		watcherList: make([]*tSafeWatcher, 0),
+		tSafeChan:   make(chan tSafeMsg, channelSize),
+		tSafeRecord: make(map[UniqueID]Timestamp),
 	}
 	return t
+}
+
+func (ts *tSafe) start() {
+	go func() {
+		for {
+			select {
+			case <-ts.ctx.Done():
+				log.Debug("tSafe context done")
+				return
+			case m := <-ts.tSafeChan:
+				ts.tSafeMu.Lock()
+				ts.tSafeRecord[m.id] = m.t
+				var tmpT Timestamp = math.MaxUint64
+				for _, t := range ts.tSafeRecord {
+					if t <= tmpT {
+						tmpT = t
+					}
+				}
+				ts.tSafe = tmpT
+				for _, watcher := range ts.watcherList {
+					watcher.notify()
+				}
+
+				log.Debug("set tSafe done",
+					zap.Any("id", m.id),
+					zap.Any("channel", ts.channel),
+					zap.Any("t", m.t),
+					zap.Any("tSafe", ts.tSafe))
+				ts.tSafeMu.Unlock()
+			}
+		}
+	}()
 }
 
 func (ts *tSafe) registerTSafeWatcher(t *tSafeWatcher) {
@@ -72,20 +130,22 @@ func (ts *tSafe) get() Timestamp {
 	return ts.tSafe
 }
 
-func (ts *tSafe) set(t Timestamp) {
+func (ts *tSafe) set(id UniqueID, t Timestamp) {
 	ts.tSafeMu.Lock()
 	defer ts.tSafeMu.Unlock()
 
-	ts.tSafe = t
-	for _, watcher := range ts.watcherList {
-		watcher.notify()
+	msg := tSafeMsg{
+		t:  t,
+		id: id,
 	}
+	ts.tSafeChan <- msg
 }
 
 func (ts *tSafe) close() {
 	ts.tSafeMu.Lock()
 	defer ts.tSafeMu.Unlock()
 
+	ts.cancel()
 	for _, watcher := range ts.watcherList {
 		close(watcher.notifyChan)
 	}

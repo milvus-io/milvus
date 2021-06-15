@@ -12,14 +12,19 @@
 package querynode
 
 import (
+	"context"
 	"errors"
 	"sync"
+
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 )
 
 // TSafeReplicaInterface is the interface wrapper of tSafeReplica
 type TSafeReplicaInterface interface {
 	getTSafe(vChannel VChannel) Timestamp
-	setTSafe(vChannel VChannel, timestamp Timestamp)
+	setTSafe(vChannel VChannel, id UniqueID, timestamp Timestamp)
 	addTSafe(vChannel VChannel)
 	removeTSafe(vChannel VChannel)
 	registerTSafeWatcher(vChannel VChannel, watcher *tSafeWatcher)
@@ -35,21 +40,21 @@ func (t *tSafeReplica) getTSafe(vChannel VChannel) Timestamp {
 	defer t.mu.Unlock()
 	safer, err := t.getTSaferPrivate(vChannel)
 	if err != nil {
-		//log.Error("get tSafe failed", zap.Error(err))
+		log.Error("get tSafe failed", zap.Error(err))
 		return 0
 	}
 	return safer.get()
 }
 
-func (t *tSafeReplica) setTSafe(vChannel VChannel, timestamp Timestamp) {
+func (t *tSafeReplica) setTSafe(vChannel VChannel, id UniqueID, timestamp Timestamp) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	safer, err := t.getTSaferPrivate(vChannel)
 	if err != nil {
-		//log.Error("set tSafe failed", zap.Error(err))
+		log.Error("set tSafe failed", zap.Error(err))
 		return
 	}
-	safer.set(timestamp)
+	safer.set(id, timestamp)
 }
 
 func (t *tSafeReplica) getTSaferPrivate(vChannel VChannel) (tSafer, error) {
@@ -64,8 +69,14 @@ func (t *tSafeReplica) getTSaferPrivate(vChannel VChannel) (tSafer, error) {
 func (t *tSafeReplica) addTSafe(vChannel VChannel) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.tSafes[vChannel] = newTSafe()
-	//log.Debug("add tSafe done", zap.Any("channel", vChannel))
+	ctx := context.Background()
+	if _, ok := t.tSafes[vChannel]; !ok {
+		t.tSafes[vChannel] = newTSafe(ctx, vChannel)
+		t.tSafes[vChannel].start()
+		log.Debug("add tSafe done", zap.Any("channel", vChannel))
+	} else {
+		log.Error("tSafe has been existed", zap.Any("channel", vChannel))
+	}
 }
 
 func (t *tSafeReplica) removeTSafe(vChannel VChannel) {
@@ -84,7 +95,7 @@ func (t *tSafeReplica) registerTSafeWatcher(vChannel VChannel, watcher *tSafeWat
 	defer t.mu.Unlock()
 	safer, err := t.getTSaferPrivate(vChannel)
 	if err != nil {
-		//log.Error("register tSafe watcher failed", zap.Error(err))
+		log.Error("register tSafe watcher failed", zap.Error(err))
 		return
 	}
 	safer.registerTSafeWatcher(watcher)

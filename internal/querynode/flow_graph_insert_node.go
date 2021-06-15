@@ -75,9 +75,18 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	// 1. hash insertMessages to insertData
 	for _, task := range iMsg.insertMessages {
+		// check if partition exists, if not, create partition
+		if hasPartition := iNode.replica.hasPartition(task.PartitionID); !hasPartition {
+			err := iNode.replica.addPartition(task.CollectionID, task.PartitionID)
+			if err != nil {
+				log.Error(err.Error())
+				continue
+			}
+		}
+
 		// check if segment exists, if not, create this segment
 		if !iNode.replica.hasSegment(task.SegmentID) {
-			err := iNode.replica.addSegment(task.SegmentID, task.PartitionID, task.CollectionID, segmentTypeGrowing)
+			err := iNode.replica.addSegment(task.SegmentID, task.PartitionID, task.CollectionID, task.ChannelID, segmentTypeGrowing, true)
 			if err != nil {
 				log.Error(err.Error())
 				continue

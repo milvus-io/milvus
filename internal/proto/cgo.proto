@@ -1,5 +1,0 @@
-syntax = "proto3";
-package milvus.proto.plan;
-
-option go_package = "github.com/milvus-io/milvus/internal/proto/cgo";
-import "schema.proto";
