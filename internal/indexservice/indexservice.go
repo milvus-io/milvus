@@ -318,6 +318,7 @@ func (i *IndexService) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRe
 		ret.Status.Reason = err.Error()
 		return ret, nil
 	}
+	log.Debug("IndexService BuildIndex Enqueue successfully", zap.Any("IndexBuildID", indexBuildID))
 
 	err = t.WaitToFinish()
 	if err != nil {
@@ -611,7 +612,6 @@ func (i *IndexService) assignTasksServerStart() error {
 		if err = i.addNode(session.ServerID, req); err != nil {
 			log.Debug("IndexService", zap.Any("IndexService start find node fatal, err = ", err))
 		}
-
 	}
 	var serverIDs []int64
 	for _, session := range sessions {
