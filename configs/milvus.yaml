@@ -19,8 +19,6 @@ etcd:
   rootPath: by-dev
   metaSubPath: meta # metaRootPath = rootPath + '/' + metaSubPath
   kvSubPath: kv # kvRootPath = rootPath + '/' + kvSubPath
-  segFlushMetaSubPath: datanode/segment # Full Path = rootPath/metaSubPath/segFlushMetaSubPath
-  ddlFlushMetaSubPath: datanode/ddl     # Full Path = rootPath/metaSubPath/ddlFlushMetaSubPath
   segmentBinlogSubPath: dataservice/binlog/segment  # Full Path = rootPath/metaSubPath/segmentBinlogSubPath
   collectionBinlogSubPath: dataservice/binlog/collection # Full Path = rootPath/metaSubPath/collectionBinglogSubPath
   flushStreamPosSubPath: dataservice/flushstream # Full path = rootPath/metaSubPath/flushStreamPosSubPath

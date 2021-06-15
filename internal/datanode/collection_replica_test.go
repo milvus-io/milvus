@@ -16,7 +16,24 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/types"
 )
+
+func newCollectionSegmentReplica(ms types.MasterService, collectionID UniqueID) *CollectionSegmentReplica {
+	metaService := newMetaService(ms, collectionID)
+	segments := make(map[UniqueID]*Segment)
+
+	replica := &CollectionSegmentReplica{
+		segments:       segments,
+		collection:     &Collection{id: collectionID},
+		metaService:    metaService,
+		startPositions: make(map[UniqueID][]*internalpb.MsgPosition),
+		endPositions:   make(map[UniqueID][]*internalpb.MsgPosition),
+	}
+	return replica
+}
 
 func TestReplica_Collection(t *testing.T) {
 	collID := UniqueID(100)
