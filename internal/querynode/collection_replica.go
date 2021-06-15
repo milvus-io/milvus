@@ -62,10 +62,10 @@ type ReplicaInterface interface {
 	hasPartition(partitionID UniqueID) bool
 	getPartitionNum() int
 	getSegmentIDs(partitionID UniqueID) ([]UniqueID, error)
-	getSegmentIDsByVChannel(partitionID UniqueID, vChannel VChannel) ([]UniqueID, error)
+	getSegmentIDsByVChannel(partitionID UniqueID, vChannel Channel) ([]UniqueID, error)
 
 	// segment
-	addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID VChannel, segType segmentType, onService bool) error
+	addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, segType segmentType, onService bool) error
 	setSegment(segment *Segment) error
 	removeSegment(segmentID UniqueID) error
 	getSegmentByID(segmentID UniqueID) (*Segment, error)
@@ -309,7 +309,7 @@ func (colReplica *collectionReplica) getSegmentIDs(partitionID UniqueID) ([]Uniq
 	return colReplica.getSegmentIDsPrivate(partitionID)
 }
 
-func (colReplica *collectionReplica) getSegmentIDsByVChannel(partitionID UniqueID, vChannel VChannel) ([]UniqueID, error) {
+func (colReplica *collectionReplica) getSegmentIDsByVChannel(partitionID UniqueID, vChannel Channel) ([]UniqueID, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
 	segmentIDs, err := colReplica.getSegmentIDsPrivate(partitionID)
@@ -339,7 +339,7 @@ func (colReplica *collectionReplica) getSegmentIDsPrivate(partitionID UniqueID) 
 }
 
 //----------------------------------------------------------------------------------------------------- segment
-func (colReplica *collectionReplica) addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID VChannel, segType segmentType, onService bool) error {
+func (colReplica *collectionReplica) addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, segType segmentType, onService bool) error {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 	collection, err := colReplica.getCollectionByIDPrivate(collectionID)

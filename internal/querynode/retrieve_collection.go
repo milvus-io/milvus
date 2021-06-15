@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"math"
 	"reflect"
-	"strings"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
@@ -45,7 +44,7 @@ type retrieveCollection struct {
 	unsolvedMsgMu sync.Mutex
 	unsolvedMsg   []*msgstream.RetrieveMsg
 
-	tSafeWatchers     map[VChannel]*tSafeWatcher
+	tSafeWatchers     map[Channel]*tSafeWatcher
 	watcherSelectCase []reflect.SelectCase
 
 	serviceableTimeMutex sync.Mutex
@@ -72,7 +71,7 @@ func newRetrieveCollection(releaseCtx context.Context,
 		historical:   historical,
 		streaming:    streaming,
 
-		tSafeWatchers: make(map[VChannel]*tSafeWatcher),
+		tSafeWatchers: make(map[Channel]*tSafeWatcher),
 
 		msgBuffer:   msgBuffer,
 		unsolvedMsg: unsolvedMsg,
@@ -138,7 +137,7 @@ func (rc *retrieveCollection) register() {
 	}
 
 	rc.watcherSelectCase = make([]reflect.SelectCase, 0)
-	for _, channel := range collection.getWatchedDmChannels() {
+	for _, channel := range collection.getVChannels() {
 		rc.streaming.tSafeReplica.addTSafe(channel)
 		rc.tSafeWatchers[channel] = newTSafeWatcher()
 		rc.streaming.tSafeReplica.registerTSafeWatcher(channel, rc.tSafeWatchers[channel])
@@ -446,16 +445,6 @@ func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error
 		return err
 	}
 
-	fakedDmChannels := collection.getWatchedDmChannels()
-	var realDmChannels []string
-	for _, dmChan := range fakedDmChannels {
-		parts := strings.Split(dmChan, "#")
-		realDmChannels = append(realDmChannels, parts[0])
-	}
-	log.Debug("QueryNode retrieveCollection retrieve, realDmChannels", zap.Any("fakedDmChannels", fakedDmChannels),
-		zap.Any("realDmChannels", realDmChannels), zap.Any("collectionID", collection.ID()),
-		zap.Any("sealedSegmentRetrieved", sealedSegmentRetrieved))
-
 	resultChannelInt := 0
 	retrieveResultMsg := &msgstream.RetrieveResultMsg{
 		BaseMsg: msgstream.BaseMsg{Ctx: retrieveMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}},
@@ -470,11 +459,16 @@ func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error
 			FieldsData:                result.FieldsData,
 			ResultChannelID:           retrieveMsg.ResultChannelID,
 			SealedSegmentIDsRetrieved: sealedSegmentRetrieved,
-			ChannelIDsRetrieved:       realDmChannels,
+			ChannelIDsRetrieved:       collection.getPChannels(),
 			//TODO(yukun):: get global sealed segment from etcd
 			GlobalSealedSegmentIDs: sealedSegmentRetrieved,
 		},
 	}
+	log.Debug("QueryNode RetrieveResultMsg",
+		zap.Any("pChannels", collection.getPChannels()),
+		zap.Any("collectionID", collection.ID()),
+		zap.Any("sealedSegmentRetrieved", sealedSegmentRetrieved),
+	)
 	err3 := rc.publishRetrieveResult(retrieveResultMsg, retrieveMsg.CollectionID)
 	if err3 != nil {
 		return err3

@@ -898,17 +898,16 @@ func mockGetRecoveryInfoFromDataService(ctx context.Context,
 		}
 	}
 	if len(channelInfos) == 0 {
-		getInsertChannelsRequest := &datapb.GetInsertChannelsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_Insert,
-			},
+		// get physical channels
+		desColReq := &milvuspb.DescribeCollectionRequest{
 			CollectionID: req.CollectionID,
 		}
-		res, err := dataService.GetInsertChannels(ctx, getInsertChannelsRequest)
+		desColRsp, err := master.DescribeCollection(ctx, desColReq)
 		if err != nil {
+			log.Error("get physical channels failed, err = " + err.Error())
 			return nil, err
 		}
-		for _, channel := range res.Values {
+		for _, channel := range desColRsp.VirtualChannelNames {
 			channelInfo := &querypb.VchannelInfo{
 				CollectionID: req.CollectionID,
 				ChannelName:  channel,

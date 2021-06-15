@@ -30,8 +30,8 @@ type (
 	IntPrimaryKey = typeutil.IntPrimaryKey
 	// DSL is the Domain Specific Language
 	DSL = string
-	// VChannel is the virtual channel
-	VChannel = string
+	// Channel is the virtual channel
+	Channel = string
 	// ConsumeSubName is consumer's subscription name of the message stream
 	ConsumeSubName = string
 )
