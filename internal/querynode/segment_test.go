@@ -22,8 +22,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 )
 
 //-------------------------------------------------------------------------------------- constructor and destructor
@@ -145,7 +145,7 @@ func TestSegment_retrieve(t *testing.T) {
 	err = segment.segmentInsert(offset, &ids, &timestamps, &records)
 	assert.NoError(t, err)
 
-	reqIds := &planpb.RetrieveRequest{
+	reqIds := &segcorepb.RetrieveRequest{
 		Ids: &schemapb.IDs{
 			IdField: &schemapb.IDs_IntId{
 				IntId: &schemapb.LongArray{

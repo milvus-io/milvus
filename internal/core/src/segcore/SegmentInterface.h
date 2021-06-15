@@ -19,6 +19,7 @@
 #include "common/SystemProperty.h"
 #include "query/PlanNode.h"
 #include "pb/schema.pb.h"
+#include "pb/segcore.pb.h"
 #include <memory>
 #include <vector>
 #include <utility>
@@ -40,7 +41,7 @@ class SegmentInterface {
            const Timestamp timestamps[],
            int64_t num_groups) const = 0;
 
-    virtual std::unique_ptr<proto::plan::RetrieveResults>
+    virtual std::unique_ptr<proto::segcore::RetrieveResults>
     GetEntityById(const std::vector<FieldOffset>& field_offsets,
                   const IdArray& id_array,
                   Timestamp timestamp) const = 0;
@@ -89,7 +90,7 @@ class SegmentInternalInterface : public SegmentInterface {
     void
     FillTargetEntry(const query::Plan* plan, QueryResult& results) const override;
 
-    std::unique_ptr<proto::plan::RetrieveResults>
+    std::unique_ptr<proto::segcore::RetrieveResults>
     GetEntityById(const std::vector<FieldOffset>& field_offsets,
                   const IdArray& id_array,
                   Timestamp timestamp) const override;

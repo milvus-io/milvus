@@ -25,7 +25,6 @@ import "C"
 import (
 	"errors"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"strconv"
 	"sync"
 	"unsafe"
@@ -35,6 +34,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 )
 
 type segmentType int32
@@ -249,9 +249,9 @@ func (s *Segment) segmentSearch(plan *Plan,
 	return &searchResult, nil
 }
 
-func (s *Segment) segmentGetEntityByIds(plan *RetrievePlan) (*planpb.RetrieveResults, error) {
+func (s *Segment) segmentGetEntityByIds(plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
 	resProto := C.GetEntityByIds(s.segmentPtr, plan.RetrievePlanPtr, C.uint64_t(plan.Timestamp))
-	result := new(planpb.RetrieveResults)
+	result := new(segcorepb.RetrieveResults)
 	err := HandleCProtoResult(&resProto, result)
 	if err != nil {
 		return nil, err

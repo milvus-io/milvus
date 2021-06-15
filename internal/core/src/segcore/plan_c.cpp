@@ -12,6 +12,7 @@
 #include "segcore/plan_c.h"
 #include "query/Plan.h"
 #include "segcore/Collection.h"
+#include "pb/segcore.pb.h"
 
 CStatus
 CreatePlan(CCollection c_col, const char* dsl, CPlan* res_plan) {
@@ -135,7 +136,7 @@ CStatus
 CreateRetrievePlan(CCollection c_col, CProto retrieve_request, CRetrievePlan* output) {
     auto col = (milvus::segcore::Collection*)c_col;
     try {
-        milvus::proto::plan::RetrieveRequest request;
+        milvus::proto::segcore::RetrieveRequest request;
         request.ParseFromArray(retrieve_request.proto_blob, retrieve_request.proto_size);
         auto plan = milvus::query::CreateRetrievePlan(*col->get_schema(), std::move(request));
         *output = plan.release();
