@@ -247,9 +247,10 @@ func (s *Session) GetSessions(prefix string) (map[string]*Session, int64, error)
 	if err != nil {
 		return nil, 0, err
 	}
+	log.Debug("SessionUtil GetSessions", zap.Any("prefix", prefix), zap.Any("resp", resp))
 	for _, kv := range resp.Kvs {
 		session := &Session{}
-		err = json.Unmarshal([]byte(kv.Value), session)
+		err = json.Unmarshal(kv.Value, session)
 		if err != nil {
 			return nil, 0, err
 		}

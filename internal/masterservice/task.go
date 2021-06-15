@@ -757,6 +757,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 	}
 	indexName := Params.DefaultIndexName //TODO, get name from request
 	indexID, _, err := t.core.IDAllocator(1)
+	log.Debug("MasterService CreateIndexReqTask", zap.Any("indexID", indexID), zap.Error(err))
 	if err != nil {
 		return err
 	}
@@ -766,6 +767,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 		IndexParams: t.Req.ExtraParams,
 	}
 	segIDs, field, err := t.core.MetaTable.GetNotIndexedSegments(t.Req.CollectionName, t.Req.FieldName, idxInfo)
+	log.Debug("MasterService CreateIndexReqTask metaTable.GetNotIndexedSegments", zap.Error(err))
 	if err != nil {
 		return err
 	}

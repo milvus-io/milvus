@@ -25,13 +25,25 @@ func newMockTsoAllocator() *mockTsoAllocator {
 	return &mockTsoAllocator{}
 }
 
-func getStatistics(pchan pChan) (pChanStatistics, error) {
-	stats := pChanStatistics{
-		minTs:   Timestamp(time.Now().UnixNano()),
-		invalid: false,
+func newGetStatisticsFunc(pchans []pChan) getPChanStatisticsFuncType {
+	pchanNum := rand.Uint64()%5 + 1
+	pchans2 := make([]pChan, 0, pchanNum)
+	for i := 0; uint64(i) < pchanNum; i++ {
+		pchans2 = append(pchans2, pchans[i])
 	}
-	stats.maxTs = stats.minTs + Timestamp(time.Millisecond*10)
-	return stats, nil
+
+	retFunc := func() (map[pChan]*pChanStatistics, error) {
+		ret := make(map[pChan]*pChanStatistics)
+		for _, pchannel := range pchans2 {
+			minTs := Timestamp(time.Now().UnixNano())
+			ret[pchannel] = &pChanStatistics{
+				minTs: minTs,
+				maxTs: minTs + Timestamp(time.Millisecond*10),
+			}
+		}
+		return ret, nil
+	}
+	return retFunc
 }
 
 func TestChannelsTimeTickerImpl_start(t *testing.T) {
@@ -44,7 +56,7 @@ func TestChannelsTimeTickerImpl_start(t *testing.T) {
 	tso := newMockTsoAllocator()
 	ctx := context.Background()
 
-	ticker := newChannelsTimeTicker(ctx, interval, pchans, getStatistics, tso)
+	ticker := newChannelsTimeTicker(ctx, interval, pchans, newGetStatisticsFunc(pchans), tso)
 	err := ticker.start()
 	assert.Equal(t, nil, err)
 
@@ -66,7 +78,7 @@ func TestChannelsTimeTickerImpl_close(t *testing.T) {
 	tso := newMockTsoAllocator()
 	ctx := context.Background()
 
-	ticker := newChannelsTimeTicker(ctx, interval, pchans, getStatistics, tso)
+	ticker := newChannelsTimeTicker(ctx, interval, pchans, newGetStatisticsFunc(pchans), tso)
 	err := ticker.start()
 	assert.Equal(t, nil, err)
 
@@ -88,7 +100,7 @@ func TestChannelsTimeTickerImpl_addPChan(t *testing.T) {
 	tso := newMockTsoAllocator()
 	ctx := context.Background()
 
-	ticker := newChannelsTimeTicker(ctx, interval, pchans, getStatistics, tso)
+	ticker := newChannelsTimeTicker(ctx, interval, pchans, newGetStatisticsFunc(pchans), tso)
 	err := ticker.start()
 	assert.Equal(t, nil, err)
 
@@ -116,7 +128,7 @@ func TestChannelsTimeTickerImpl_getLastTick(t *testing.T) {
 	tso := newMockTsoAllocator()
 	ctx := context.Background()
 
-	ticker := newChannelsTimeTicker(ctx, interval, pchans, getStatistics, tso)
+	ticker := newChannelsTimeTicker(ctx, interval, pchans, newGetStatisticsFunc(pchans), tso)
 	err := ticker.start()
 	assert.Equal(t, nil, err)
 
@@ -163,7 +175,7 @@ func TestChannelsTimeTickerImpl_getMinTsStatistics(t *testing.T) {
 	tso := newMockTsoAllocator()
 	ctx := context.Background()
 
-	ticker := newChannelsTimeTicker(ctx, interval, pchans, getStatistics, tso)
+	ticker := newChannelsTimeTicker(ctx, interval, pchans, newGetStatisticsFunc(pchans), tso)
 	err := ticker.start()
 	assert.Equal(t, nil, err)
 

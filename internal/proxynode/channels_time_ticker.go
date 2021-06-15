@@ -6,22 +6,17 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
 )
 
 type pChanStatistics struct {
-	minTs   Timestamp
-	maxTs   Timestamp
-	invalid bool // invalid is true when there is no task in queue
+	minTs Timestamp
+	maxTs Timestamp
 }
 
-// channelsTimeTickerCheckFunc(pchan, ts) return true only when all timestamp of tasks who use the pchan is greater than ts
-type channelsTimeTickerCheckFunc func(string, Timestamp) bool
-
 // ticker can update ts only when the minTs greater than the ts of ticker, we can use maxTs to update current later
-type getPChanStatisticsFuncType func(pChan) (pChanStatistics, error)
+type getPChanStatisticsFuncType func() (map[pChan]*pChanStatistics, error)
 
 // use interface tsoAllocator to keep channelsTimeTickerImpl testable
 type tsoAllocator interface {
@@ -59,9 +54,10 @@ func (ticker *channelsTimeTickerImpl) getMinTsStatistics() (map[pChan]Timestamp,
 
 	ret := make(map[pChan]Timestamp)
 	for k, v := range ticker.minTsStatistics {
-		ret[k] = v
+		if v > 0 {
+			ret[k] = v
+		}
 	}
-
 	return ret, nil
 }
 
@@ -83,47 +79,58 @@ func (ticker *channelsTimeTickerImpl) initCurrents(current Timestamp) {
 	}
 }
 
-// What if golang support generic? interface{} is not comparable now!
-func getTs(ts1, ts2 Timestamp, comp func(ts1, ts2 Timestamp) bool) Timestamp {
-	if comp(ts1, ts2) {
-		return ts1
-	}
-	return ts2
-}
-
 func (ticker *channelsTimeTickerImpl) tick() error {
+	now, err := ticker.tso.AllocOne()
+	if err != nil {
+		log.Warn("ProxyNode channelsTimeTickerImpl failed to get ts from tso", zap.Error(err))
+		return err
+	}
+	//nowPTime, _ := tsoutil.ParseTS(now)
+
 	ticker.statisticsMtx.Lock()
 	defer ticker.statisticsMtx.Unlock()
 
 	ticker.currentsMtx.Lock()
 	defer ticker.currentsMtx.Unlock()
 
+	stats, err := ticker.getStatisticsFunc()
+	if err != nil {
+		log.Debug("ProxyNode channelsTimeTickerImpl failed to getStatistics", zap.Error(err))
+	}
+
 	for pchan := range ticker.currents {
 		current := ticker.currents[pchan]
+		//currentPTime, _ := tsoutil.ParseTS(current)
+		stat, ok := stats[pchan]
+		//log.Debug("ProxyNode channelsTimeTickerImpl", zap.Any("pchan", pchan),
+		//	zap.Any("TaskInQueue", ok),
+		//	zap.Any("current", currentPTime),
+		//	zap.Any("now", nowPTime))
+		if !ok {
+			ticker.minTsStatistics[pchan] = current
+			ticker.currents[pchan] = now
+		} else {
+			//minPTime, _ := tsoutil.ParseTS(stat.minTs)
+			//maxPTime, _ := tsoutil.ParseTS(stat.maxTs)
 
-		stats, err := ticker.getStatisticsFunc(pchan)
-		if err != nil {
-			log.Warn("failed to get statistics from scheduler", zap.Error(err))
-			continue
-		}
-		log.Debug("ProxyNode channelsTimeTickerImpl", zap.Any("invalid", stats.invalid),
-			zap.Any("stats.minTs", stats.minTs), zap.Any("current", current))
-		if !stats.invalid && stats.minTs > current {
-			ticker.minTsStatistics[pchan] = current
-			ticker.currents[pchan] = getTs(current+Timestamp(ticker.interval), stats.maxTs, func(ts1, ts2 Timestamp) bool {
-				return ts1 > ts2
-			})
-		} else if stats.invalid {
-			ticker.minTsStatistics[pchan] = current
-			// ticker.currents[pchan] = current + Timestamp(ticker.interval)
-			t, err := ticker.tso.AllocOne()
-			if err != nil {
-				log.Warn("failed to get ts from tso", zap.Error(err))
-				continue
+			if stat.minTs > current {
+				cur := current
+				if stat.minTs > now {
+					cur = now
+				}
+				ticker.minTsStatistics[pchan] = cur
+				next := now + Timestamp(sendTimeTickMsgInterval)
+				if next > stat.maxTs {
+					next = stat.maxTs
+				}
+				ticker.currents[pchan] = next
+				//nextPTime, _ := tsoutil.ParseTS(next)
+				//log.Debug("ProxyNode channelsTimeTickerImpl",
+				//	zap.Any("pchan", pchan),
+				//	zap.Any("minPTime", minPTime),
+				//	zap.Any("maxPTime", maxPTime),
+				//	zap.Any("nextPTime", nextPTime))
 			}
-			log.Debug("ProxyNode channelsTimeTickerImpl, update currents", zap.Any("pchan", pchan),
-				zap.Any("t", t))
-			ticker.currents[pchan] = t
 		}
 	}
 
@@ -172,12 +179,13 @@ func (ticker *channelsTimeTickerImpl) close() error {
 
 func (ticker *channelsTimeTickerImpl) addPChan(pchan pChan) error {
 	ticker.statisticsMtx.Lock()
-	defer ticker.statisticsMtx.Unlock()
 
 	if _, ok := ticker.minTsStatistics[pchan]; ok {
+		ticker.statisticsMtx.Unlock()
 		return fmt.Errorf("pChan %v already exist in minTsStatistics", pchan)
 	}
 	ticker.minTsStatistics[pchan] = 0
+	ticker.statisticsMtx.Unlock()
 
 	ticker.currentsMtx.Lock()
 	defer ticker.currentsMtx.Unlock()
@@ -191,13 +199,13 @@ func (ticker *channelsTimeTickerImpl) addPChan(pchan pChan) error {
 
 func (ticker *channelsTimeTickerImpl) removePChan(pchan pChan) error {
 	ticker.statisticsMtx.Lock()
-	defer ticker.statisticsMtx.Unlock()
 
 	if _, ok := ticker.minTsStatistics[pchan]; !ok {
+		ticker.statisticsMtx.Unlock()
 		return fmt.Errorf("pChan %v don't exist in minTsStatistics", pchan)
 	}
-
 	delete(ticker.minTsStatistics, pchan)
+	ticker.statisticsMtx.Unlock()
 
 	ticker.currentsMtx.Lock()
 	defer ticker.currentsMtx.Unlock()
