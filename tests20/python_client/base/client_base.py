@@ -119,6 +119,7 @@ class TestcaseBase(Base):
         res, is_succ = self.connection_wrap.connect(alias='default')
         if not is_succ:
             raise res
+        log.info("_connect: Connected")
         return res
 
     def init_collection_wrap(self, name=None, data=None, schema=None, check_task=None, **kwargs):
@@ -161,7 +162,7 @@ class TestcaseBase(Base):
             default_schema = cf.gen_default_binary_collection_schema()
         else:
             default_schema = cf.gen_default_collection_schema()
-        log.info("init_data: collection creation")
+        log.info("init_collection_general: collection creation")
         collection_w = self.init_collection_wrap(name=collection_name,
                                                  schema=default_schema)
         # 2 add extra partitions if specified (default is 1 partition named "_default")
