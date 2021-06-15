@@ -36,6 +36,8 @@ func (i *IndexService) addNode(nodeID UniqueID, req *indexpb.RegisterNodeRequest
 	i.nodeLock.Lock()
 	defer i.nodeLock.Unlock()
 
+	log.Debug("IndexService addNode", zap.Any("nodeID", nodeID), zap.Any("node address", req.Address))
+
 	if i.nodeClients.CheckAddressExist(req.Address) {
 		log.Debug("IndexService", zap.Any("Node client already exist with ID:", nodeID))
 		return nil
