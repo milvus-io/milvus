@@ -11,6 +11,8 @@ from base.collection_wrapper import ApiCollectionWrapper
 from common import common_func as cf
 from utils.util_log import test_log as log
 from checker import Op
+from chaos_parser import BaseChaos
+from chaos_opt import ChaosOpt
 
 
 def reset_counting(checkers={}):
@@ -123,3 +125,4 @@ class TestsChaos:
                 c_wrap.init_collection(c_name).drop()
         pass
         '''
+

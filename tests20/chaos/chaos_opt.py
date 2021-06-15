@@ -2,16 +2,19 @@ from __future__ import print_function
 from utils import *
 import logging
 from pprint import pprint
+from time import sleep
+
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 import config as cf
+from chaos_parser import BaseChaos
 
 
 logger = logging.getLogger("milvus_benchmark.chaos.chaosOpt")
 
 
 class ChaosOpt(object):
-    def __init__(self, kind, group=cf.DEFAULT_GROUP, version=cf.DEFAULT_VERSION, namespace=cf.CHAOS_NAMESPACE):
+    def __init__(self, kind, group=cf.DEFAULT_GROUP, version=cf.DEFAULT_VERSION, namespace=cf.NAMESPACE):
         self.group = group
         self.version = version
         self.namespace = namespace
@@ -65,3 +68,13 @@ class ChaosOpt(object):
             for item in chaos_objects["items"]:
                 metadata_name = item["metadata"]["name"]
                 self.delete_chaos_object(metadata_name)
+
+
+if __name__ == '__main__':
+    yaml = 'chaos_objects/chaos_standalone_podkill.yaml'
+    chaos_obj = BaseChaos(yaml)
+    chaos_config = chaos_obj.gen_experiment_config()
+    chaos_opt = ChaosOpt(chaos_config['kind'])
+    chaos_opt.create_chaos_object(chaos_config)
+    sleep(120)
+    chaos_opt.delete_chaos_object('test-standalone-pod-kill')
