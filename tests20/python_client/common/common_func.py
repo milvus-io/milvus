@@ -177,6 +177,15 @@ def gen_all_type_fields():
             fields.append(field)
     return fields
 
+def gen_normal_expressions():
+    expressions = [
+        "int64 > 0",
+        "(int64 > 0 && int64 < 400) or (int64 > 500 && int64 < 1000)",
+        "int64 not in [1, 2, 3]",
+        "int64 in [1, 2, 3] and float != 2",
+        "int64 == 0 || int64 == 1 || int64 == 2",
+    ]
+    return expressions
 
 def jaccard(x, y):
     x = np.asarray(x, np.bool)

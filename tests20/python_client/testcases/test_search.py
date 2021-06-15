@@ -653,3 +653,28 @@ class TestCollectionSearch(TestcaseBase):
         for t in threads:
             t.join()
         log.info("test_search_concurrent_multi_threads: searched with %s processes" % threads_num)
+
+    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.parametrize("expression, limit",
+                             zip(cf.gen_normal_expressions(),
+                                 [999, 898, 997, 2, 3]))
+    def test_search_with_expression(self, expression, limit):
+        """
+        target: test search with different expressions
+        method: test search with different expressions
+        expected: searched successfully with correct limit(topK)
+        """
+        log.info("Test case of search interface: test_search_with_expression")
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True, 1000)[0]
+        # 2. create index
+        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
+        collection_w.create_index("float_vector", index_param)
+        # 3. search with different expressions
+        log.info("test_search_with_expression: searching with expression: %s" % expression)
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        res, _ = collection_w.search(vectors[:default_nq], default_search_field,
+                                     default_search_params, 1000, expression,
+                                     check_task=CheckTasks.check_search_results,
+                                     check_items={"nq": default_nq,
+                                                  "limit": limit})
