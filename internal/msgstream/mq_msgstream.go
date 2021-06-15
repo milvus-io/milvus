@@ -164,9 +164,6 @@ func (ms *mqMsgStream) Close() {
 			consumer.Close()
 		}
 	}
-	if ms.client != nil {
-		ms.client.Close()
-	}
 }
 
 func (ms *mqMsgStream) ComputeProduceChannelIndexes(tsMsgs []TsMsg) [][]int32 {
@@ -520,9 +517,6 @@ func (ms *MqTtMsgStream) Close() {
 		if consumer != nil {
 			consumer.Close()
 		}
-	}
-	if ms.client != nil {
-		ms.client.Close()
 	}
 }
 

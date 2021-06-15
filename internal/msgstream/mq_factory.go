@@ -38,7 +38,7 @@ func (f *PmsFactory) SetParams(params map[string]interface{}) error {
 }
 
 func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
-	pulsarClient, err := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: f.PulsarAddress})
+	pulsarClient, err := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: f.PulsarAddress})
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +46,7 @@ func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 }
 
 func (f *PmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
-	pulsarClient, err := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: f.PulsarAddress})
+	pulsarClient, err := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: f.PulsarAddress})
 	if err != nil {
 		return nil, err
 	}
