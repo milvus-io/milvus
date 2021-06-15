@@ -248,7 +248,7 @@ SqliteMetaImpl::ValidateMetaSchema() {
 Status
 SqliteMetaImpl::SqlQuery(const std::string& sql, AttrsMapList* res) {
     try {
-        LOG_ENGINE_DEBUG_ << sql;
+        LOG_ENGINE_INFO_ << sql;
 
         std::lock_guard<std::mutex> meta_lock(sqlite_mutex_);
 
@@ -285,7 +285,7 @@ SqliteMetaImpl::SqlTransaction(const std::vector<std::string>& sql_statements) {
 
         int rc = SQLITE_OK;
         for (auto& sql : sql_statements) {
-            LOG_ENGINE_DEBUG_ << sql;
+            LOG_ENGINE_INFO_ << sql;
 
             rc = sqlite3_exec(db_, sql.c_str(), nullptr, nullptr, nullptr);
             if (rc != SQLITE_OK) {
@@ -2521,6 +2521,7 @@ SqliteMetaImpl::SetGlobalLastLSN(uint64_t lsn) {
 
         if (first_create) {  // first time to get global lsn
             statement = "INSERT INTO " + std::string(META_ENVIRONMENT) + " VALUES(" + std::to_string(lsn) + ");";
+            LOG_ENGINE_DEBUG_ << "Init global lsn = " << lsn;
 
             status = SqlTransaction({statement});
             if (!status.ok()) {
@@ -2528,14 +2529,13 @@ SqliteMetaImpl::SetGlobalLastLSN(uint64_t lsn) {
             }
         } else if (lsn > last_lsn) {
             statement = "UPDATE " + std::string(META_ENVIRONMENT) + " SET global_lsn = " + std::to_string(lsn) + ";";
+            LOG_ENGINE_DEBUG_ << "Update global lsn = " << lsn;
 
             status = SqlTransaction({statement});
             if (!status.ok()) {
                 return HandleException("Failed to set global lsn", status.message().c_str());
             }
         }
-
-        LOG_ENGINE_DEBUG_ << "Update global lsn = " << lsn;
     } catch (std::exception& e) {
         std::string msg = "Exception update global lsn = " + lsn;
         return HandleException(msg, e.what());
