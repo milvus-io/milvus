@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"math"
 	"math/rand"
 	"path"
@@ -484,6 +485,8 @@ func (alloc *AllocatorFactory) genKey(isalloc bool, ids ...UniqueID) (key string
 	return
 }
 
+// If id == 0, AllocID will return not successful status
+// If id == -1, AllocID will return err
 func (m *MasterServiceFactory) setID(id UniqueID) {
 	m.ID = id // GOOSE TODO: random ID generator
 }
@@ -498,9 +501,22 @@ func (m *MasterServiceFactory) setCollectionName(name string) {
 
 func (m *MasterServiceFactory) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
 	resp := &masterpb.AllocIDResponse{
-		Status: &commonpb.Status{},
-		ID:     m.ID,
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		}}
+
+	if m.ID == 0 {
+		resp.Status.Reason = "Zero ID"
+		return resp, nil
 	}
+
+	if m.ID == -1 {
+		resp.Status.ErrorCode = commonpb.ErrorCode_Success
+		return resp, errors.New(resp.Status.GetReason())
+	}
+
+	resp.ID = m.ID
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }
 
