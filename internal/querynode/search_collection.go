@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"math"
 	"reflect"
-	"strings"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
@@ -44,7 +43,7 @@ type searchCollection struct {
 	unsolvedMsgMu sync.Mutex // guards unsolvedMsg
 	unsolvedMsg   []*msgstream.SearchMsg
 
-	tSafeWatchers     map[VChannel]*tSafeWatcher
+	tSafeWatchers     map[Channel]*tSafeWatcher
 	watcherSelectCase []reflect.SelectCase
 
 	serviceableTimeMutex sync.Mutex // guards serviceableTime
@@ -78,7 +77,7 @@ func newSearchCollection(releaseCtx context.Context,
 		historical:   historical,
 		streaming:    streaming,
 
-		tSafeWatchers: make(map[VChannel]*tSafeWatcher),
+		tSafeWatchers: make(map[Channel]*tSafeWatcher),
 
 		msgBuffer:   msgBuffer,
 		unsolvedMsg: unsolvedMsg,
@@ -117,9 +116,9 @@ func (s *searchCollection) register() {
 	s.watcherSelectCase = make([]reflect.SelectCase, 0)
 	log.Debug("register tSafe watcher and init watcher select case",
 		zap.Any("collectionID", collection.ID()),
-		zap.Any("dml channels", collection.getWatchedDmChannels()),
+		zap.Any("dml channels", collection.getVChannels()),
 	)
-	for _, channel := range collection.getWatchedDmChannels() {
+	for _, channel := range collection.getVChannels() {
 		s.tSafeWatchers[channel] = newTSafeWatcher()
 		s.streaming.tSafeReplica.registerTSafeWatcher(channel, s.tSafeWatchers[channel])
 		s.watcherSelectCase = append(s.watcherSelectCase, reflect.SelectCase{
@@ -471,7 +470,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	}
 
 	// streaming search
-	for _, channel := range collection.getWatchedDmChannels() {
+	for _, channel := range collection.getVChannels() {
 		strSearchResults, strSegmentResults, err := s.streaming.search(searchRequests, collectionID, searchMsg.PartitionIDs, channel, plan, searchTimestamp)
 		if err != nil {
 			return err
@@ -493,15 +492,6 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 				}
 				nilHits[i] = bs
 			}
-			fakedDmChannels := collection.getWatchedDmChannels()
-			var realDmChannels []string
-			for _, dmChan := range fakedDmChannels {
-				parts := strings.Split(dmChan, "#")
-				realDmChannels = append(realDmChannels, parts[0])
-			}
-			log.Debug("QueryNode searchCollection search, realDmChannels", zap.Any("fakedDmChannels", fakedDmChannels),
-				zap.Any("realDmChannels", realDmChannels), zap.Any("collectionID", collection.ID()),
-				zap.Any("sealedSegmentSearched", sealedSegmentSearched))
 			resultChannelInt := 0
 			searchResultMsg := &msgstream.SearchResultMsg{
 				BaseMsg: msgstream.BaseMsg{Ctx: searchMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}},
@@ -517,11 +507,16 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 					Hits:                     nilHits,
 					MetricType:               plan.getMetricType(),
 					SealedSegmentIDsSearched: sealedSegmentSearched,
-					ChannelIDsSearched:       realDmChannels,
+					ChannelIDsSearched:       collection.getPChannels(),
 					//TODO:: get global sealed segment from etcd
 					GlobalSealedSegmentIDs: sealedSegmentSearched,
 				},
 			}
+			log.Debug("QueryNode SearchResultMsg",
+				zap.Any("pChannels", collection.getPChannels()),
+				zap.Any("collectionID", collection.ID()),
+				zap.Any("sealedSegmentSearched", sealedSegmentSearched),
+			)
 			err = s.publishSearchResult(searchResultMsg, searchMsg.CollectionID)
 			if err != nil {
 				return err
@@ -588,16 +583,6 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 			offset += len
 		}
 		resultChannelInt := 0
-		fakedDmChannels := collection.getWatchedDmChannels()
-		var realDmChannels []string
-		for _, dmChan := range fakedDmChannels {
-			parts := strings.Split(dmChan, "#")
-			realDmChannels = append(realDmChannels, parts[0])
-		}
-		log.Debug("QueryNode searchCollection search, realDmChannels", zap.Any("fakedDmChannels", fakedDmChannels),
-			zap.Any("realDmChannels", realDmChannels), zap.Any("collectionID", collection.ID()),
-			zap.Any("sealedSegmentSearched", sealedSegmentSearched))
-
 		searchResultMsg := &msgstream.SearchResultMsg{
 			BaseMsg: msgstream.BaseMsg{Ctx: searchMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}},
 			SearchResults: internalpb.SearchResults{
@@ -612,11 +597,16 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 				Hits:                     hits,
 				MetricType:               plan.getMetricType(),
 				SealedSegmentIDsSearched: sealedSegmentSearched,
-				ChannelIDsSearched:       realDmChannels,
+				ChannelIDsSearched:       collection.getPChannels(),
 				//TODO:: get global sealed segment from etcd
 				GlobalSealedSegmentIDs: sealedSegmentSearched,
 			},
 		}
+		log.Debug("QueryNode SearchResultMsg",
+			zap.Any("pChannels", collection.getPChannels()),
+			zap.Any("collectionID", collection.ID()),
+			zap.Any("sealedSegmentSearched", sealedSegmentSearched),
+		)
 
 		// For debugging, please don't delete.
 		//fmt.Println("==================== search result ======================")

@@ -22,7 +22,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
@@ -112,41 +114,48 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	partitionID := w.req.PartitionID
 	loadPartition := partitionID != 0
 
-	// get all channels
-	vChannels := make([]string, 0)
-	// TODO: remove tmp
-	vChannelsTmp := make([]string, 0)
+	// get all vChannels
+	vChannels := make([]Channel, 0)
+	pChannels := make([]Channel, 0)
 	for _, info := range w.req.Infos {
 		vChannels = append(vChannels, info.ChannelName)
-		vChannelsTmp = append(vChannelsTmp, info.ChannelName+"#"+strconv.FormatInt(collectionID, 10))
 	}
 	log.Debug("starting WatchDmChannels ...",
 		zap.Any("collectionName", w.req.Schema.Name),
 		zap.Any("collectionID", collectionID),
 		zap.String("ChannelIDs", fmt.Sprintln(vChannels)))
 
-	//// get physical channels
-	//desColReq := &milvuspb.DescribeCollectionRequest{
-	//	CollectionID: collectionID,
-	//}
-	//desColRsp, err := w.node.masterService.DescribeCollection(ctx, desColReq)
-	//if err != nil {
-	//	log.Error("get physical channels failed, err = " + err.Error())
-	//	return err
-	//}
-	//VPChannels := make(map[string]string) // map[vChannel]pChannel
-	//for _, ch := range vChannels {
-	//	for i := range desColRsp.VirtualChannelNames {
-	//		if desColRsp.VirtualChannelNames[i] == ch {
-	//			VPChannels[ch] = desColRsp.PhysicalChannelNames[i]
-	//			break
-	//		}
-	//	}
-	//}
-	//if len(VPChannels) != len(vChannels) {
-	//	return errors.New("get physical channels failed, illegal channel length, collectionID = " + fmt.Sprintln(collectionID))
-	//}
-	//log.Debug("get physical channels done", zap.Any("collectionID", collectionID))
+	// get physical channels
+	desColReq := &milvuspb.DescribeCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_DescribeCollection,
+		},
+		CollectionID: collectionID,
+	}
+	desColRsp, err := w.node.masterService.DescribeCollection(ctx, desColReq)
+	if err != nil {
+		log.Error("get physical channels failed, err = " + err.Error())
+		return err
+	}
+	log.Debug("get physical channels from master",
+		zap.Any("collectionID", collectionID),
+		zap.Any("vChannels", desColRsp.VirtualChannelNames),
+		zap.Any("pChannels", desColRsp.PhysicalChannelNames),
+	)
+	VPChannels := make(map[string]string) // map[vChannel]pChannel
+	for _, ch := range vChannels {
+		for i := range desColRsp.VirtualChannelNames {
+			if desColRsp.VirtualChannelNames[i] == ch {
+				VPChannels[ch] = desColRsp.PhysicalChannelNames[i]
+				pChannels = append(pChannels, desColRsp.PhysicalChannelNames[i])
+				break
+			}
+		}
+	}
+	if len(VPChannels) != len(vChannels) {
+		return errors.New("get physical channels failed, illegal channel length, collectionID = " + fmt.Sprintln(collectionID))
+	}
+	log.Debug("get physical channels done", zap.Any("collectionID", collectionID))
 
 	// init replica
 	if hasCollectionInStreaming := w.node.streaming.replica.hasCollection(collectionID); !hasCollectionInStreaming {
@@ -159,7 +168,8 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		collection.addWatchedDmChannels(vChannelsTmp)
+		collection.addVChannels(vChannels)
+		collection.addPChannels(pChannels)
 	}
 	if hasCollectionInHistorical := w.node.historical.replica.hasCollection(collectionID); !hasCollectionInHistorical {
 		err := w.node.historical.replica.addCollection(collectionID, w.req.Schema)
@@ -192,7 +202,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 
 	// group channels by to seeking or consuming
 	toSeekChannels := make([]*internalpb.MsgPosition, 0)
-	toSubChannels := make([]string, 0)
+	toSubChannels := make([]Channel, 0)
 	for _, info := range w.req.Infos {
 		if info.SeekPosition == nil || len(info.SeekPosition.MsgID) == 0 {
 			toSubChannels = append(toSubChannels, info.ChannelName)
@@ -208,7 +218,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	for _, info := range w.req.Infos {
 		checkPointInfos = append(checkPointInfos, info.CheckPoints...)
 	}
-	err := w.node.streaming.replica.addExcludedSegments(collectionID, checkPointInfos)
+	err = w.node.streaming.replica.addExcludedSegments(collectionID, checkPointInfos)
 	if err != nil {
 		log.Error(err.Error())
 		return err
@@ -216,7 +226,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	log.Debug("watchDMChannel, add check points info done", zap.Any("collectionID", collectionID))
 
 	// create tSafe
-	for _, channel := range vChannelsTmp {
+	for _, channel := range VPChannels {
 		w.node.streaming.tSafeReplica.addTSafe(channel)
 	}
 
@@ -236,7 +246,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	}
 
 	// channels as consumer
-	var nodeFGs map[VChannel]*queryNodeFlowGraph
+	var nodeFGs map[Channel]*queryNodeFlowGraph
 	if loadPartition {
 		nodeFGs, err = w.node.streaming.dataSyncService.getPartitionFlowGraphs(partitionID, vChannels)
 		if err != nil {
@@ -251,7 +261,8 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	for _, channel := range toSubChannels {
 		for _, fg := range nodeFGs {
 			if fg.channel == channel {
-				err := fg.consumerFlowGraph(channel, consumeSubName)
+				// use pChannel to consume
+				err := fg.consumerFlowGraph(VPChannels[channel], consumeSubName)
 				if err != nil {
 					errMsg := "msgStream consume error :" + err.Error()
 					log.Error(errMsg)
@@ -269,6 +280,8 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		for _, fg := range nodeFGs {
 			if fg.channel == pos.ChannelName {
 				pos.MsgGroup = consumeSubName
+				// use pChannel to seek
+				pos.ChannelName = VPChannels[fg.channel]
 				err := fg.seekQueryNodeFlowGraph(pos)
 				if err != nil {
 					errMsg := "msgStream seek error :" + err.Error()
@@ -392,7 +405,7 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 
 		r.node.streaming.dataSyncService.removeCollectionFlowGraph(r.req.CollectionID)
 		// remove all tSafes of the target collection
-		for _, channel := range collection.getWatchedDmChannels() {
+		for _, channel := range collection.getVChannels() {
 			r.node.streaming.tSafeReplica.removeTSafe(channel)
 		}
 
