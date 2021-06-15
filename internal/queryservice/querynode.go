@@ -132,7 +132,7 @@ func (qn *queryNode) releaseCollection(collectionID UniqueID) {
 	defer qn.Unlock()
 	delete(qn.collectionInfos, collectionID)
 	//TODO::should reopen
-	collectionID = 0
+	//collectionID = 0
 	delete(qn.watchedQueryChannels, collectionID)
 }
 

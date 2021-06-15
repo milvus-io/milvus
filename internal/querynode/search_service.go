@@ -88,6 +88,7 @@ func (s *searchService) stopSearchCollection(collectionID UniqueID) {
 	sc, ok := s.searchCollections[collectionID]
 	if !ok {
 		log.Error("stopSearchCollection failed, collection doesn't exist", zap.Int64("collectionID", collectionID))
+		return
 	}
 	sc.close()
 	sc.cancel()

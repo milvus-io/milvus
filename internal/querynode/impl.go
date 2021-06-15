@@ -15,6 +15,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
+	"strconv"
 	"strings"
 
 	"go.uber.org/zap"
@@ -100,8 +102,8 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 	// add request channel
 	sc := node.searchService.searchCollections[in.CollectionID]
 	consumeChannels := []string{in.RequestChannelID}
-	consumeSubName := Params.MsgChannelSubName
-	//consumeSubName := Params.MsgChannelSubName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
+	//consumeSubName := Params.MsgChannelSubName
+	consumeSubName := Params.MsgChannelSubName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
 	sc.searchMsgStream.AsConsumer(consumeChannels, consumeSubName)
 	node.retrieveService.retrieveMsgStream.AsConsumer(consumeChannels, "RetrieveSubName")
 	log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)

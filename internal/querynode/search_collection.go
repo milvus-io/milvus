@@ -257,13 +257,13 @@ func (s *searchCollection) loadBalance(msg *msgstream.LoadBalanceSegmentsMsg) {
 }
 
 func (s *searchCollection) receiveSearch(msg *msgstream.SearchMsg) {
-	//if msg.CollectionID != s.collectionID {
-	//	log.Debug("not target collection search request",
-	//		zap.Any("collectionID", msg.CollectionID),
-	//		zap.Int64("msgID", msg.ID()),
-	//	)
-	//	return
-	//}
+	if msg.CollectionID != s.collectionID {
+		log.Debug("not target collection search request",
+			zap.Any("collectionID", msg.CollectionID),
+			zap.Int64("msgID", msg.ID()),
+		)
+		return
+	}
 
 	log.Debug("consume search message",
 		zap.Any("collectionID", msg.CollectionID),

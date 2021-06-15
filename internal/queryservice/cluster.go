@@ -152,7 +152,7 @@ func (c *queryNodeCluster) hasWatchedQueryChannel(ctx context.Context, nodeID in
 	defer c.Unlock()
 
 	//TODO::should reopen
-	collectionID = 0
+	//collectionID = 0
 	return c.nodes[nodeID].hasWatchedQueryChannel(collectionID)
 }
 
@@ -163,9 +163,9 @@ func (c *queryNodeCluster) AddQueryChannel(ctx context.Context, nodeID int64, in
 		status, err := node.client.AddQueryChannel(ctx, in)
 		if err == nil && status.ErrorCode == commonpb.ErrorCode_Success {
 			//TODO::should reopen
-			//collectionID := in.CollectionID
-			collectionID := int64(0)
-			if queryChannelInfo, ok := c.clusterMeta.queryChannelInfos[collectionID]; ok {
+			collectionID := in.CollectionID
+			//collectionID := int64(0)
+			if queryChannelInfo, ok := c.clusterMeta.queryChannelInfos[0]; ok {
 				node.addQueryChannel(collectionID, queryChannelInfo)
 				return status, err
 			}

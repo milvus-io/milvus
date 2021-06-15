@@ -385,7 +385,7 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 	}
 	collection.setReleaseTime(r.req.Base.Timestamp)
 
-	const gracefulReleaseTime = 5
+	const gracefulReleaseTime = 3
 	go func() {
 		errMsg := "release collection failed, collectionID = " + strconv.FormatInt(r.req.CollectionID, 10) + ", err = "
 		time.Sleep(gracefulReleaseTime * time.Second)
@@ -397,10 +397,7 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 		}
 
 		r.node.streaming.replica.removeExcludedSegments(r.req.CollectionID)
-
-		if r.node.searchService.hasSearchCollection(r.req.CollectionID) {
-			r.node.searchService.stopSearchCollection(r.req.CollectionID)
-		}
+		r.node.searchService.stopSearchCollection(r.req.CollectionID)
 
 		hasCollectionInHistorical := r.node.historical.replica.hasCollection(r.req.CollectionID)
 		if hasCollectionInHistorical {
