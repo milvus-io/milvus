@@ -42,7 +42,13 @@ func newDMLChannels(c *Core) *dmlChannels {
 func (d *dmlChannels) GetNumChannles() int {
 	d.lock.RLock()
 	defer d.lock.RUnlock()
-	return len(d.dml)
+	count := 0
+	for _, ds := range d.dml {
+		if ds.valid {
+			count++
+		}
+	}
+	return count
 }
 
 //func (d *dmlChannels) ProduceAll(pack *msgstream.MsgPack) {
