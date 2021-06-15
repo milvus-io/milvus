@@ -355,7 +355,7 @@ func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error
 	timestamp := retrieveMsg.Base.Timestamp
 
 	collectionID := retrieveMsg.CollectionID
-	collection, err := rc.historical.replica.getCollectionByID(collectionID)
+	collection, err := rc.streaming.replica.getCollectionByID(collectionID)
 	if err != nil {
 		return err
 	}
