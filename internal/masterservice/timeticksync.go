@@ -45,13 +45,13 @@ func newTimeTickSync(core *Core) *timetickSync {
 // sendToChannel send all channels' timetick to sendChan
 // lock is needed by the invoker
 func (t *timetickSync) sendToChannel() {
+	if len(t.proxyTimeTick) == 0 {
+		return
+	}
 	for _, v := range t.proxyTimeTick {
 		if v == nil {
 			return
 		}
-	}
-	if len(t.proxyTimeTick) == 0 {
-		return
 	}
 	// clear proxyTimeTick and send a clone
 	ptt := make(map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg)
@@ -77,9 +77,11 @@ func (t *timetickSync) UpdateTimeTick(in *internalpb.ChannelTimeTickMsg) error {
 	if !ok {
 		return fmt.Errorf("Skip ChannelTimeTickMsg from un-recognized proxy node %d", in.Base.SourceID)
 	}
-	if prev != nil && prev.Timestamps[0] >= in.Timestamps[0] {
-		log.Debug("timestamp go back", zap.Int64("source id", in.Base.SourceID), zap.Uint64("prev ts", prev.Timestamps[0]), zap.Uint64("curr ts", in.Timestamps[0]))
-		return nil
+	if in.Base.SourceID == t.core.session.ServerID {
+		if prev != nil && prev.Timestamps[0] >= in.Timestamps[0] {
+			log.Debug("timestamp go back", zap.Int64("source id", in.Base.SourceID), zap.Uint64("prev ts", prev.Timestamps[0]), zap.Uint64("curr ts", in.Timestamps[0]))
+			return nil
+		}
 	}
 	t.proxyTimeTick[in.Base.SourceID] = in
 	t.sendToChannel()

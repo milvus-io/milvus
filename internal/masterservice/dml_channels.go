@@ -20,117 +20,111 @@ import (
 	"go.uber.org/zap"
 )
 
+type dmlStream struct {
+	msgStream msgstream.MsgStream
+	valid     bool
+}
+
 type dmlChannels struct {
 	core *Core
 	lock sync.RWMutex
-	dml  map[string]msgstream.MsgStream
+	dml  map[string]*dmlStream
 }
 
 func newDMLChannels(c *Core) *dmlChannels {
 	return &dmlChannels{
 		core: c,
 		lock: sync.RWMutex{},
-		dml:  make(map[string]msgstream.MsgStream),
+		dml:  make(map[string]*dmlStream),
 	}
 }
 
 func (d *dmlChannels) GetNumChannles() int {
 	d.lock.RLock()
 	defer d.lock.RUnlock()
-	return len(d.dml)
-}
-
-func (d *dmlChannels) ProduceAll(pack *msgstream.MsgPack) {
-	d.lock.RLock()
-	defer d.lock.RUnlock()
-
-	for n, ms := range d.dml {
-		if err := ms.Produce(pack); err != nil {
-			log.Debug("msgstream produce error", zap.String("name", n), zap.Error(err))
+	count := 0
+	for _, ds := range d.dml {
+		if ds.valid {
+			count++
 		}
 	}
-}
-
-func (d *dmlChannels) BroadcastMany(channels []string, pack *msgstream.MsgPack) error {
-	d.lock.RLock()
-	defer d.lock.RUnlock()
-	for _, ch := range channels {
-		ms, ok := d.dml[ch]
-		if !ok {
-			return fmt.Errorf("channel %s not exist", ch)
-		}
-		if err := ms.Broadcast(pack); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (d *dmlChannels) BroadcastAll(pack *msgstream.MsgPack) {
-	d.lock.RLock()
-	defer d.lock.RUnlock()
-
-	for n, ms := range d.dml {
-		if err := ms.Broadcast(pack); err != nil {
-			log.Debug("msgstream broadcast error", zap.String("name", n), zap.Error(err))
-		}
-	}
+	return count
 }
 
 func (d *dmlChannels) Produce(name string, pack *msgstream.MsgPack) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
-	var err error
-	ms, ok := d.dml[name]
+	ds, ok := d.dml[name]
 	if !ok {
-		ms, err = d.core.msFactory.NewMsgStream(d.core.ctx)
-		if err != nil {
-			return fmt.Errorf("create mstream failed, name = %s, error=%w", name, err)
-		}
-		ms.AsProducer([]string{name})
-		d.dml[name] = ms
+		return fmt.Errorf("channel %s not exist", name)
 	}
-	return ms.Produce(pack)
-
+	if err := ds.msgStream.Produce(pack); err != nil {
+		return err
+	}
+	if !ds.valid {
+		ds.msgStream.Close()
+		delete(d.dml, name)
+	}
+	return nil
 }
 
 func (d *dmlChannels) Broadcast(name string, pack *msgstream.MsgPack) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
-	if len(name) == 0 {
-		return fmt.Errorf("channel name is empty")
-	}
-	var err error
-	ms, ok := d.dml[name]
+	ds, ok := d.dml[name]
 	if !ok {
-		ms, err = d.core.msFactory.NewMsgStream(d.core.ctx)
-		if err != nil {
-			return fmt.Errorf("create msgtream failed, name = %s, error=%w", name, err)
-		}
-		ms.AsProducer([]string{name})
-		d.dml[name] = ms
+		return fmt.Errorf("channel %s not exist", name)
 	}
-	return ms.Broadcast(pack)
+	if err := ds.msgStream.Broadcast(pack); err != nil {
+		return err
+	}
+	if !ds.valid {
+		ds.msgStream.Close()
+		delete(d.dml, name)
+	}
+	return nil
+}
+
+func (d *dmlChannels) BroadcastAll(channels []string, pack *msgstream.MsgPack) error {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+
+	for _, ch := range channels {
+		ds, ok := d.dml[ch]
+		if !ok {
+			return fmt.Errorf("channel %s not exist", ch)
+		}
+		if err := ds.msgStream.Broadcast(pack); err != nil {
+			return err
+		}
+		if !ds.valid {
+			ds.msgStream.Close()
+			delete(d.dml, ch)
+		}
+	}
+	return nil
 }
 
 func (d *dmlChannels) AddProducerChannels(names ...string) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
-	var err error
 	for _, name := range names {
 		log.Debug("add dml channel", zap.String("channel name", name))
-		ms, ok := d.dml[name]
+		_, ok := d.dml[name]
 		if !ok {
-			ms, err = d.core.msFactory.NewMsgStream(d.core.ctx)
+			ms, err := d.core.msFactory.NewMsgStream(d.core.ctx)
 			if err != nil {
 				log.Debug("add msgstream failed", zap.String("name", name), zap.Error(err))
 				continue
 			}
 			ms.AsProducer([]string{name})
-			d.dml[name] = ms
+			d.dml[name] = &dmlStream{
+				msgStream: ms,
+				valid:     true,
+			}
 		}
 	}
 }
@@ -141,22 +135,8 @@ func (d *dmlChannels) RemoveProducerChannels(names ...string) {
 
 	for _, name := range names {
 		log.Debug("delete dml channel", zap.String("channel name", name))
-		if ms, ok := d.dml[name]; ok {
-			ms.Close()
-			delete(d.dml, name)
+		if ds, ok := d.dml[name]; ok {
+			ds.valid = false
 		}
 	}
-}
-
-func (d *dmlChannels) HasChannel(names ...string) bool {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-
-	for _, name := range names {
-		if _, ok := d.dml[name]; !ok {
-			log.Debug("unknown channel", zap.String("channel name", name))
-			return false
-		}
-	}
-	return true
 }
