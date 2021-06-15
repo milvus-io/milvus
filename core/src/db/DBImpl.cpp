@@ -36,7 +36,6 @@
 #include "db/merge/MergeManagerFactory.h"
 #include "engine/EngineFactory.h"
 #include "index/knowhere/knowhere/index/vector_index/helpers/BuilderSuspend.h"
-#include "index/knowhere/knowhere/index/vector_index/helpers/FaissIO.h"
 #include "index/thirdparty/faiss/utils/distances.h"
 #include "insert/MemManagerFactory.h"
 #include "meta/MetaConsts.h"
@@ -94,7 +93,6 @@ DBImpl::DBImpl(const DBOptions& options)
     SetIdentity("DBImpl");
     AddCacheInsertDataListener();
     AddUseBlasThresholdListener();
-    knowhere::enable_faiss_logging();
 
     Start();
 }
