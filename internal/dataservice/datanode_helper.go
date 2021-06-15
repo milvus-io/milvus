@@ -22,14 +22,14 @@ type vchannel struct {
 
 // positionProvider provides vchannel pair related position pairs
 type positionProvider interface {
-	GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelInfo, error)
+	GetVChanPositions(vchans []vchannel, isAccurate bool) ([]*datapb.VchannelInfo, error)
 	GetDdlChannel() string
 }
 
 type dummyPosProvider struct{}
 
 //GetVChanPositions implements positionProvider
-func (dp dummyPosProvider) GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelInfo, error) {
+func (dp dummyPosProvider) GetVChanPositions(vchans []vchannel, isAccurate bool) ([]*datapb.VchannelInfo, error) {
 	pairs := make([]*datapb.VchannelInfo, len(vchans))
 	for _, vchan := range vchans {
 		pairs = append(pairs, &datapb.VchannelInfo{

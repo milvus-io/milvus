@@ -130,7 +130,7 @@ func (c *cluster) watch(nodes []*datapb.DataNodeInfo) []*datapb.DataNodeInfo {
 		}
 		log.Debug(logMsg)
 
-		vchanInfos, err := c.posProvider.GetVChanPositions(uncompletes)
+		vchanInfos, err := c.posProvider.GetVChanPositions(uncompletes, true)
 		if err != nil {
 			log.Warn("get vchannel position failed", zap.Error(err))
 			continue

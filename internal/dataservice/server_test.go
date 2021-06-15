@@ -689,7 +689,7 @@ func TestGetVChannelPos(t *testing.T) {
 				CollectionID: 0,
 				DmlChannel:   "chx1",
 			},
-		})
+		}, true)
 		assert.Nil(t, err)
 		assert.EqualValues(t, 1, len(pair))
 		assert.Empty(t, pair[0].UnflushedSegments)
@@ -702,7 +702,7 @@ func TestGetVChannelPos(t *testing.T) {
 				CollectionID: 0,
 				DmlChannel:   "ch1",
 			},
-		})
+		}, true)
 		assert.Nil(t, err)
 		assert.EqualValues(t, 1, len(pair))
 		assert.EqualValues(t, 0, pair[0].CollectionID)
@@ -749,6 +749,12 @@ func TestGetRecoveryInfo(t *testing.T) {
 				MsgID:       []byte{},
 				Timestamp:   posTs,
 			},
+			StartPosition: &internalpb.MsgPosition{
+				ChannelName: "",
+				MsgID:       []byte{},
+				MsgGroup:    "",
+				Timestamp:   0,
+			},
 		}
 	}
 
@@ -773,16 +779,13 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.EqualValues(t, 20, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
 	})
 
-	t.Run("test get smallest position of unflushed segments as seek position", func(t *testing.T) {
+	t.Run("test get recovery of unflushed segments ", func(t *testing.T) {
 		seg1 := createSegment(3, 0, 0, 100, 30, "vchan1", commonpb.SegmentState_Growing)
 		seg2 := createSegment(4, 0, 0, 100, 40, "vchan1", commonpb.SegmentState_Growing)
 		err := svr.meta.AddSegment(seg1)
 		assert.Nil(t, err)
 		err = svr.meta.AddSegment(seg2)
 		assert.Nil(t, err)
-		expectedCps := make(map[UniqueID]*datapb.SegmentInfo)
-		expectedCps[3] = seg1
-		expectedCps[4] = seg2
 
 		req := &datapb.GetRecoveryInfoRequest{
 			CollectionID: 0,
@@ -791,17 +794,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 		resp, err := svr.GetRecoveryInfo(context.TODO(), req)
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, 0, len(resp.GetBinlogs()))
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
-		assert.EqualValues(t, 2, len(resp.GetChannels()[0].GetUnflushedSegments()))
-		assert.ElementsMatch(t, []UniqueID{0, 1}, resp.GetChannels()[0].GetFlushedSegments())
-		assert.EqualValues(t, 30, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
-		cps := resp.GetChannels()[0].GetUnflushedSegments()
-		for _, cp := range cps {
-			seg, ok := expectedCps[cp.GetID()]
-			assert.True(t, ok)
-			assert.EqualValues(t, seg.GetDmlPosition().GetTimestamp(), cp.GetDmlPosition().GetTimestamp())
-			assert.EqualValues(t, seg.GetNumOfRows(), cp.GetNumOfRows())
-		}
+		assert.NotNil(t, resp.GetChannels()[0].SeekPosition)
 	})
 
 	t.Run("test get binlogs", func(t *testing.T) {

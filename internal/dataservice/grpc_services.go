@@ -395,6 +395,16 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	segmentIDs := s.meta.GetSegmentsOfPartition(collectionID, partitionID)
 	segment2Binlogs := make(map[UniqueID][]*datapb.FieldBinlog)
 	for _, id := range segmentIDs {
+		segment, err := s.meta.GetSegment(id)
+		if err != nil {
+			log.Error("Get segment failed", zap.Int64("segmentID", id))
+			resp.Status.Reason = err.Error()
+			return resp, nil
+		}
+		if segment.State != commonpb.SegmentState_Flushed && segment.State != commonpb.SegmentState_Flushing {
+			continue
+		}
+
 		meta, err := s.getSegmentBinlogMeta(id)
 		if err != nil {
 			log.Error("Get segment binlog meta failed", zap.Int64("segmentID", id))
@@ -449,7 +459,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		})
 	}
 
-	channelInfos, err := s.GetVChanPositions(vchans)
+	channelInfos, err := s.GetVChanPositions(vchans, false)
 	if err != nil {
 		log.Error("Get channel positions failed",
 			zap.Strings("channels", channels),
