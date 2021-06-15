@@ -134,6 +134,8 @@ func (t *timetickSync) StartWatch() {
 					}
 				}
 			}
+			log.Debug("MasterService timeticksync",
+				zap.Any("chanName2TimeTickMap", chanName2TimeTickMap))
 			// send timetick msg to msg stream
 			for chanName, chanTs := range chanName2TimeTickMap {
 				if err := t.SendChannelTimeTick(chanName, chanTs); err != nil {

@@ -54,6 +54,7 @@ func getIndexServiceaddr(sess *sessionutil.Session) (string, error) {
 		log.Debug("IndexServiceClient GetSessions failed", zap.Any("key", key), zap.Error(err))
 		return "", err
 	}
+	log.Debug("IndexServiceClient GetSessions success", zap.Any("key", key), zap.Any("msess", msess))
 	ms, ok := msess[key]
 	if !ok {
 		log.Debug("IndexServiceClient msess key not existed", zap.Any("key", key), zap.Any("len of msess", len(msess)))

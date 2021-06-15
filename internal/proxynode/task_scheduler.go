@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
@@ -38,7 +39,7 @@ type TaskQueue interface {
 	FrontUnissuedTask() task
 	PopUnissuedTask() task
 	AddActiveTask(t task)
-	PopActiveTask(ts Timestamp) task
+	PopActiveTask(tID UniqueID) task
 	getTaskByReqID(reqID UniqueID) task
 	TaskDoneTest(ts Timestamp) bool
 	Enqueue(t task) error
@@ -46,7 +47,7 @@ type TaskQueue interface {
 
 type BaseTaskQueue struct {
 	unissuedTasks *list.List
-	activeTasks   map[Timestamp]task
+	activeTasks   map[UniqueID]task
 	utLock        sync.RWMutex
 	atLock        sync.RWMutex
 
@@ -114,28 +115,26 @@ func (queue *BaseTaskQueue) PopUnissuedTask() task {
 func (queue *BaseTaskQueue) AddActiveTask(t task) {
 	queue.atLock.Lock()
 	defer queue.atLock.Unlock()
-
-	ts := t.EndTs()
-	_, ok := queue.activeTasks[ts]
+	tID := t.ID()
+	_, ok := queue.activeTasks[tID]
 	if ok {
-		log.Debug("proxynode", zap.Uint64("task with timestamp ts already in active task list! ts:", ts))
+		log.Debug("ProxyNode task with tID already in active task list!", zap.Any("ID", tID))
 	}
 
-	queue.activeTasks[ts] = t
+	queue.activeTasks[tID] = t
 }
 
-func (queue *BaseTaskQueue) PopActiveTask(ts Timestamp) task {
+func (queue *BaseTaskQueue) PopActiveTask(tID UniqueID) task {
 	queue.atLock.Lock()
 	defer queue.atLock.Unlock()
-
-	t, ok := queue.activeTasks[ts]
+	t, ok := queue.activeTasks[tID]
 	if ok {
-		delete(queue.activeTasks, ts)
+		delete(queue.activeTasks, tID)
 		return t
 	}
 
-	log.Debug("proxynode", zap.Uint64("task with timestamp ts already in active task list! ts:", ts))
-	return nil
+	log.Debug("ProxyNode task not in active task list! ts", zap.Any("tID", tID))
+	return t
 }
 
 func (queue *BaseTaskQueue) getTaskByReqID(reqID UniqueID) task {
@@ -149,9 +148,9 @@ func (queue *BaseTaskQueue) getTaskByReqID(reqID UniqueID) task {
 
 	queue.atLock.RLock()
 	defer queue.atLock.RUnlock()
-	for ats := range queue.activeTasks {
-		if queue.activeTasks[ats].ID() == reqID {
-			return queue.activeTasks[ats]
+	for tID := range queue.activeTasks {
+		if tID == reqID {
+			return queue.activeTasks[tID]
 		}
 	}
 
@@ -169,8 +168,8 @@ func (queue *BaseTaskQueue) TaskDoneTest(ts Timestamp) bool {
 
 	queue.atLock.RLock()
 	defer queue.atLock.RUnlock()
-	for ats := range queue.activeTasks {
-		if ats < ts {
+	for _, task := range queue.activeTasks {
+		if task.BeginTs() < ts {
 			return false
 		}
 	}
@@ -204,54 +203,134 @@ type DdTaskQueue struct {
 	lock sync.Mutex
 }
 
-type DmTaskQueue struct {
-	BaseTaskQueue
+type pChanStatInfo struct {
+	pChanStatistics
+	refCnt int
 }
 
-func (queue *DmTaskQueue) getPChanStatistics(pchan pChan) (pChanStatistics, error) {
-	stats := pChanStatistics{
-		minTs:   0,
-		maxTs:   ^uint64(0),
-		invalid: true,
+type DmTaskQueue struct {
+	BaseTaskQueue
+	statsLock            sync.RWMutex
+	pChanStatisticsInfos map[pChan]*pChanStatInfo
+}
+
+func (queue *DmTaskQueue) Enqueue(t task) error {
+	err := t.OnEnqueue()
+	if err != nil {
+		return err
 	}
 
-	queue.utLock.RLock()
-	defer queue.utLock.RUnlock()
+	ts, err := queue.sched.tsoAllocator.AllocOne()
+	if err != nil {
+		return err
+	}
+	t.SetTs(ts)
 
-	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
-		dmlT := e.Value.(task).(dmlTask)
-		stat, err := dmlT.getStatistics(pchan)
+	reqID, err := queue.sched.idAllocator.AllocOne()
+	if err != nil {
+		return err
+	}
+	t.SetID(reqID)
+
+	return queue.addUnissuedTask(t)
+}
+
+func (queue *DmTaskQueue) addUnissuedTask(t task) error {
+	queue.utLock.Lock()
+	defer queue.utLock.Unlock()
+
+	if queue.utFull() {
+		return errors.New("task queue is full")
+	}
+	queue.unissuedTasks.PushBack(t)
+	queue.addPChanStats(t)
+	queue.utBufChan <- 1
+	return nil
+}
+
+func (queue *DmTaskQueue) PopActiveTask(tID UniqueID) task {
+	queue.atLock.Lock()
+	defer queue.atLock.Unlock()
+	t, ok := queue.activeTasks[tID]
+	if ok {
+		delete(queue.activeTasks, tID)
+		log.Debug("ProxyNode DmTaskQueue popPChanStats", zap.Any("tID", t.ID()))
+		queue.popPChanStats(t)
+	} else {
+		log.Debug("ProxyNode task not in active task list!", zap.Any("tID", tID))
+	}
+	return t
+}
+
+func (queue *DmTaskQueue) addPChanStats(t task) error {
+	if dmT, ok := t.(dmlTask); ok {
+		stats, err := dmT.getPChanStats()
 		if err != nil {
-			return pChanStatistics{invalid: true}, nil
+			return err
 		}
-		if stat.minTs < stats.minTs {
-			stats.minTs = stat.minTs
+		log.Debug("ProxyNode DmTaskQueue addPChanStats", zap.Any("tID", t.ID()),
+			zap.Any("stats", stats))
+		queue.statsLock.Lock()
+		for cName, stat := range stats {
+			info, ok := queue.pChanStatisticsInfos[cName]
+			if !ok {
+				info = &pChanStatInfo{
+					pChanStatistics: stat,
+					refCnt:          1,
+				}
+				queue.pChanStatisticsInfos[cName] = info
+			} else {
+				if info.minTs > stat.minTs {
+					info.minTs = stat.minTs
+				}
+				if info.maxTs < stat.maxTs {
+					info.maxTs = stat.maxTs
+				}
+				info.refCnt++
+			}
 		}
-		if stat.maxTs > stats.maxTs {
-			stats.maxTs = stat.maxTs
-		}
-		stats.invalid = false
+		queue.statsLock.Unlock()
+	} else {
+		return fmt.Errorf("ProxyNode addUnissuedTask reflect to dmlTask failed, tID:%v", t.ID())
 	}
+	return nil
+}
 
-	queue.atLock.RLock()
-	defer queue.atLock.RUnlock()
-
-	for _, t := range queue.activeTasks {
-		dmlT, _ := t.(dmlTask)
-		stat, err := dmlT.getStatistics(pchan)
+func (queue *DmTaskQueue) popPChanStats(t task) error {
+	if dmT, ok := t.(dmlTask); ok {
+		channels, err := dmT.getChannels()
 		if err != nil {
-			return pChanStatistics{invalid: true}, nil
+			return err
 		}
-		if stat.minTs < stats.minTs {
-			stats.minTs = stat.minTs
+		queue.statsLock.Lock()
+		for _, cName := range channels {
+			info, ok := queue.pChanStatisticsInfos[cName]
+			if ok {
+				info.refCnt--
+				if info.refCnt <= 0 {
+					delete(queue.pChanStatisticsInfos, cName)
+				}
+			}
 		}
-		if stat.maxTs > stats.maxTs {
-			stats.maxTs = stat.maxTs
-		}
-		stats.invalid = false
+		queue.statsLock.Unlock()
+	} else {
+		return fmt.Errorf("ProxyNode DmTaskQueue popPChanStats reflect to dmlTask failed, tID:%v", t.ID())
 	}
+	return nil
+}
 
-	return stats, nil
+func (queue *DmTaskQueue) getPChanStatsInfo() (map[pChan]*pChanStatistics, error) {
+
+	ret := make(map[pChan]*pChanStatistics)
+	queue.statsLock.RLock()
+	defer queue.statsLock.RUnlock()
+	for cName, info := range queue.pChanStatisticsInfos {
+		ret[cName] = &pChanStatistics{
+			minTs: info.minTs,
+			maxTs: info.maxTs,
+		}
+	}
+	return ret, nil
 }
 
 type DqTaskQueue struct {
@@ -268,7 +347,7 @@ func NewDdTaskQueue(sched *TaskScheduler) *DdTaskQueue {
 	return &DdTaskQueue{
 		BaseTaskQueue: BaseTaskQueue{
 			unissuedTasks: list.New(),
-			activeTasks:   make(map[Timestamp]task),
+			activeTasks:   make(map[UniqueID]task),
 			maxTaskNum:    1024,
 			utBufChan:     make(chan int, 1024),
 			sched:         sched,
@@ -280,11 +359,12 @@ func NewDmTaskQueue(sched *TaskScheduler) *DmTaskQueue {
 	return &DmTaskQueue{
 		BaseTaskQueue: BaseTaskQueue{
 			unissuedTasks: list.New(),
-			activeTasks:   make(map[Timestamp]task),
+			activeTasks:   make(map[UniqueID]task),
 			maxTaskNum:    1024,
 			utBufChan:     make(chan int, 1024),
 			sched:         sched,
 		},
+		pChanStatisticsInfos: make(map[pChan]*pChanStatInfo),
 	}
 }
 
@@ -292,7 +372,7 @@ func NewDqTaskQueue(sched *TaskScheduler) *DqTaskQueue {
 	return &DqTaskQueue{
 		BaseTaskQueue: BaseTaskQueue{
 			unissuedTasks: list.New(),
-			activeTasks:   make(map[Timestamp]task),
+			activeTasks:   make(map[UniqueID]task),
 			maxTaskNum:    1024,
 			utBufChan:     make(chan int, 1024),
 			sched:         sched,
@@ -382,7 +462,7 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 
 	defer func() {
 		span.LogFields(oplog.Int64("scheduler process PopActiveTask", t.ID()))
-		q.PopActiveTask(t.EndTs())
+		q.PopActiveTask(t.ID())
 	}()
 	span.LogFields(oplog.Int64("scheduler process Execute", t.ID()))
 	err = t.Execute(ctx)
@@ -449,6 +529,7 @@ type searchResultBuf struct {
 	receivedSealedSegmentIDsSet map[interface{}]struct{} // set of UniqueID
 	receivedGlobalSegmentIDsSet map[interface{}]struct{} // set of UniqueID
 	resultBuf                   []*internalpb.SearchResults
+	haveError                   bool
 }
 
 func newSearchResultBuf() *searchResultBuf {
@@ -459,6 +540,7 @@ func newSearchResultBuf() *searchResultBuf {
 		receivedSealedSegmentIDsSet: make(map[interface{}]struct{}),
 		receivedGlobalSegmentIDsSet: make(map[interface{}]struct{}),
 		resultBuf:                   make([]*internalpb.SearchResults, 0),
+		haveError:                   false,
 	}
 }
 
@@ -482,6 +564,10 @@ func setContain(m1, m2 map[interface{}]struct{}) bool {
 }
 
 func (sr *searchResultBuf) readyToReduce() bool {
+	if sr.haveError {
+		log.Debug("ProxyNode searchResultBuf readyToReduce", zap.Any("haveError", true))
+		return true
+	}
 
 	usedChansSetStrMap := make(map[string]int)
 	for x := range sr.usedChans {
@@ -529,6 +615,10 @@ func (sr *searchResultBuf) readyToReduce() bool {
 
 func (sr *searchResultBuf) addPartialResult(result *internalpb.SearchResults) {
 	sr.resultBuf = append(sr.resultBuf, result)
+	if result.Status.ErrorCode != commonpb.ErrorCode_Success {
+		sr.haveError = true
+		return
+	}
 
 	for _, vchan := range result.ChannelIDsSearched {
 		sr.receivedVChansSet[vchan] = struct{}{}
@@ -557,6 +647,7 @@ func (sched *TaskScheduler) queryResultLoop() {
 	defer queryResultMsgStream.Close()
 
 	queryResultBuf := make(map[UniqueID]*searchResultBuf)
+	queryResultBufFlag := make(map[UniqueID]bool) // if value is true, we can ignore queryResult
 	retrieveResultBuf := make(map[UniqueID][]*internalpb.RetrieveResults)
 
 	for {
@@ -575,11 +666,21 @@ func (sched *TaskScheduler) queryResultLoop() {
 				if searchResultMsg, srOk := tsMsg.(*msgstream.SearchResultMsg); srOk {
 					reqID := searchResultMsg.Base.MsgID
 					reqIDStr := strconv.FormatInt(reqID, 10)
+					ignoreThisResult, ok := queryResultBufFlag[reqID]
+					if !ok {
+						queryResultBufFlag[reqID] = false
+						ignoreThisResult = false
+					}
+					if ignoreThisResult {
+						log.Debug("ProxyNode queryResultLoop Got a SearchResultMsg, but we should ignore", zap.Any("ReqID", reqID))
+						continue
+					}
 					t := sched.getTaskByReqID(reqID)
 					log.Debug("ProxyNode queryResultLoop Got a SearchResultMsg", zap.Any("ReqID", reqID), zap.Any("t", t))
 					if t == nil {
 						log.Debug("ProxyNode queryResultLoop GetTaskByReqID failed", zap.String("reqID", reqIDStr))
 						delete(queryResultBuf, reqID)
+						queryResultBufFlag[reqID] = true
 						continue
 					}
 
@@ -587,12 +688,13 @@ func (sched *TaskScheduler) queryResultLoop() {
 					if !ok {
 						log.Debug("ProxyNode queryResultLoop type assert t as SearchTask failed", zap.Any("t", t))
 						delete(queryResultBuf, reqID)
+						queryResultBufFlag[reqID] = true
 						continue
 					}
 
-					_, ok = queryResultBuf[reqID]
+					resultBuf, ok := queryResultBuf[reqID]
 					if !ok {
-						queryResultBuf[reqID] = newSearchResultBuf()
+						resultBuf = newSearchResultBuf()
 						vchans, err := st.getVChannels()
 						log.Debug("ProxyNode queryResultLoop, first receive", zap.Any("reqID", reqID), zap.Any("vchans", vchans),
 							zap.Error(err))
@@ -601,7 +703,7 @@ func (sched *TaskScheduler) queryResultLoop() {
 							continue
 						}
 						for _, vchan := range vchans {
-							queryResultBuf[reqID].usedVChans[vchan] = struct{}{}
+							resultBuf.usedVChans[vchan] = struct{}{}
 						}
 						pchans, err := st.getChannels()
 						log.Debug("ProxyNode queryResultLoop, first receive", zap.Any("reqID", reqID), zap.Any("pchans", pchans),
@@ -611,10 +713,11 @@ func (sched *TaskScheduler) queryResultLoop() {
 							continue
 						}
 						for _, pchan := range pchans {
-							queryResultBuf[reqID].usedChans[pchan] = struct{}{}
+							resultBuf.usedChans[pchan] = struct{}{}
 						}
+						queryResultBuf[reqID] = resultBuf
 					}
-					queryResultBuf[reqID].addPartialResult(&searchResultMsg.SearchResults)
+					resultBuf.addPartialResult(&searchResultMsg.SearchResults)
 
 					//t := sched.getTaskByReqID(reqID)
 					{
@@ -622,9 +725,11 @@ func (sched *TaskScheduler) queryResultLoop() {
 						log.Debug("ProxyNode queryResultLoop", zap.String("collection name", colName), zap.String("reqID", reqIDStr), zap.Int("answer cnt", len(queryResultBuf[reqID].resultBuf)))
 					}
 
-					if queryResultBuf[reqID].readyToReduce() {
+					if resultBuf.readyToReduce() {
 						log.Debug("ProxyNode queryResultLoop readyToReduce and assign to reduce")
-						st.resultBuf <- queryResultBuf[reqID].resultBuf
+						queryResultBufFlag[reqID] = true
+						st.resultBuf <- resultBuf.resultBuf
+						delete(queryResultBuf, reqID)
 					}
 
 					sp.Finish()
@@ -694,10 +799,9 @@ func (sched *TaskScheduler) Close() {
 func (sched *TaskScheduler) TaskDoneTest(ts Timestamp) bool {
 	ddTaskDone := sched.DdQueue.TaskDoneTest(ts)
 	dmTaskDone := sched.DmQueue.TaskDoneTest(ts)
-	//dqTaskDone := sched.DqQueue.TaskDoneTest(ts)
-	return ddTaskDone && dmTaskDone && true
+	return ddTaskDone && dmTaskDone
 }
 
-func (sched *TaskScheduler) getPChanStatistics(pchan pChan) (pChanStatistics, error) {
-	return sched.DmQueue.getPChanStatistics(pchan)
+func (sched *TaskScheduler) getPChanStatistics() (map[pChan]*pChanStatistics, error) {
+	return sched.DmQueue.getPChanStatsInfo()
 }

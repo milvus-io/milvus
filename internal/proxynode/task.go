@@ -95,18 +95,10 @@ type task interface {
 	Notify(err error)
 }
 
-type ddlTask interface {
-	task
-}
-
 type dmlTask interface {
 	task
-	getStatistics(pchan pChan) (pChanStatistics, error)
-}
-
-type dqlTask interface {
-	task
-	getVChannels() ([]vChan, error)
+	getChannels() ([]vChan, error)
+	getPChanStats() (map[pChan]pChanStatistics, error)
 }
 
 type BaseInsertTask = msgstream.InsertMsg
@@ -122,6 +114,8 @@ type InsertTask struct {
 	segIDAssigner  *SegIDAssigner
 	chMgr          channelsMgr
 	chTicker       channelsTimeTicker
+	vChannels      []vChan
+	pChannels      []pChan
 }
 
 func (it *InsertTask) TraceCtx() context.Context {
@@ -157,35 +151,41 @@ func (it *InsertTask) EndTs() Timestamp {
 	return it.EndTimestamp
 }
 
-func (it *InsertTask) getStatistics(pchan pChan) (pChanStatistics, error) {
+func (it *InsertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
+	ret := make(map[pChan]pChanStatistics)
+
+	channels, err := it.getChannels()
+	if err != nil {
+		return ret, err
+	}
+
+	beginTs := it.BeginTs()
+	endTs := it.EndTs()
+
+	for _, channel := range channels {
+		ret[channel] = pChanStatistics{
+			minTs: beginTs,
+			maxTs: endTs,
+		}
+	}
+	return ret, nil
+}
+
+func (it *InsertTask) getChannels() ([]pChan, error) {
 	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.CollectionName)
 	if err != nil {
-		return pChanStatistics{invalid: true}, err
+		return nil, err
 	}
-
-	_, err = it.chMgr.getChannels(collID)
+	var channels []pChan
+	channels, err = it.chMgr.getChannels(collID)
 	if err != nil {
-		err := it.chMgr.createDMLMsgStream(collID)
+		err = it.chMgr.createDMLMsgStream(collID)
 		if err != nil {
-			return pChanStatistics{invalid: true}, err
+			return nil, err
 		}
+		channels, err = it.chMgr.getChannels(collID)
 	}
-	pchans, err := it.chMgr.getChannels(collID)
-	if err != nil {
-		return pChanStatistics{invalid: true}, err
-	}
-
-	for _, ch := range pchans {
-		if pchan == ch {
-			return pChanStatistics{
-				minTs:   it.BeginTimestamp,
-				maxTs:   it.EndTimestamp,
-				invalid: false,
-			}, nil
-		}
-	}
-
-	return pChanStatistics{invalid: true}, nil
+	return channels, err
 }
 
 func (it *InsertTask) OnEnqueue() error {
@@ -735,14 +735,16 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 	if err != nil {
 		err = it.chMgr.createDMLMsgStream(collID)
 		if err != nil {
+			it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			it.result.Status.Reason = err.Error()
 			return err
 		}
-	}
-	stream, err = it.chMgr.getDMLStream(collID)
-	if err != nil {
-		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		it.result.Status.Reason = err.Error()
-		return err
+		stream, err = it.chMgr.getDMLStream(collID)
+		if err != nil {
+			it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			it.result.Status.Reason = err.Error()
+			return err
+		}
 	}
 
 	pchans, err := it.chMgr.getChannels(collID)
@@ -750,7 +752,7 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 		return err
 	}
 	for _, pchan := range pchans {
-		log.Debug("add pchan to time ticker", zap.Any("pchan", pchan))
+		log.Debug("ProxyNode InsertTask add pchan", zap.Any("pchan", pchan))
 		_ = it.chTicker.addPChan(pchan)
 	}
 
@@ -1027,7 +1029,7 @@ func (st *SearchTask) OnEnqueue() error {
 	return nil
 }
 
-func (st *SearchTask) getChannels() ([]vChan, error) {
+func (st *SearchTask) getChannels() ([]pChan, error) {
 	collID, err := globalMetaCache.GetCollectionID(st.ctx, st.query.CollectionName)
 	if err != nil {
 		return nil, err
