@@ -242,9 +242,15 @@ func TestGetSegmentStates(t *testing.T) {
 		ID:            1000,
 		CollectionID:  100,
 		PartitionID:   0,
-		InsertChannel: "",
+		InsertChannel: "c1",
 		NumOfRows:     0,
 		State:         commonpb.SegmentState_Growing,
+		StartPosition: &internalpb.MsgPosition{
+			ChannelName: "c1",
+			MsgID:       []byte{},
+			MsgGroup:    "",
+			Timestamp:   0,
+		},
 	})
 	assert.Nil(t, err)
 

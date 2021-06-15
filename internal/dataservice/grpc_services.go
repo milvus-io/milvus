@@ -173,13 +173,8 @@ func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 			state.Status.Reason = "get segment states error: " + err.Error()
 		} else {
 			state.Status.ErrorCode = commonpb.ErrorCode_Success
-			state.State = segmentInfo.State
-			if segmentInfo.DmlPosition != nil {
-				state.StartPosition = segmentInfo.DmlPosition
-				// FIXME no need this rpc
-			} else {
-
-			}
+			state.State = segmentInfo.GetState()
+			state.StartPosition = segmentInfo.GetStartPosition()
 		}
 		resp.States = append(resp.States, state)
 	}
@@ -337,7 +332,8 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	}
 
 	// set segment to SegmentState_Flushing and save binlogs and checkpoints
-	err = s.meta.SaveBinlogAndCheckPoints(req.SegmentID, req.Flushed, binlogs, req.CheckPoints)
+	err = s.meta.SaveBinlogAndCheckPoints(req.GetSegmentID(), req.GetFlushed(),
+		binlogs, req.GetCheckPoints(), req.GetStartPositions())
 	if err != nil {
 		log.Error("Save binlog and checkpoints failed",
 			zap.Int64("segmentID", req.GetSegmentID()),

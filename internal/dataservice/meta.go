@@ -234,7 +234,8 @@ func (m *meta) SealSegment(segID UniqueID) error {
 }
 
 func (m *meta) SaveBinlogAndCheckPoints(segID UniqueID, flushed bool,
-	binlogs map[string]string, checkpoints []*datapb.CheckPoint) error {
+	binlogs map[string]string, checkpoints []*datapb.CheckPoint,
+	startPositions []*datapb.SegmentStartPosition) error {
 	m.Lock()
 	defer m.Unlock()
 	segInfo, ok := m.segments[segID]
@@ -249,6 +250,21 @@ func (m *meta) SaveBinlogAndCheckPoints(segID UniqueID, flushed bool,
 		segInfo.State = commonpb.SegmentState_Flushing
 	}
 
+	modifiedSegments := make(map[UniqueID]struct{})
+	for _, pos := range startPositions {
+		segment, ok := m.segments[pos.GetSegmentID()]
+		if !ok {
+			log.Warn("Failed to find segment", zap.Int64("id", pos.GetSegmentID()))
+			continue
+		}
+		if len(pos.GetStartPosition().GetMsgID()) != 0 {
+			continue
+		}
+
+		segment.StartPosition = pos.GetStartPosition()
+		modifiedSegments[segment.GetID()] = struct{}{}
+	}
+
 	for _, cp := range checkpoints {
 		segment, ok := m.segments[cp.SegmentID]
 		if !ok {
@@ -261,6 +277,11 @@ func (m *meta) SaveBinlogAndCheckPoints(segID UniqueID, flushed bool,
 		}
 		segment.DmlPosition = cp.Position
 		segment.NumOfRows = cp.NumOfRows
+		modifiedSegments[segment.GetID()] = struct{}{}
+	}
+
+	for id := range modifiedSegments {
+		segInfo = m.segments[id]
 		segBytes := proto.MarshalTextString(segInfo)
 		key := m.prepareSegmentPath(segInfo)
 		kv[key] = segBytes
