@@ -325,6 +325,12 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 		State:          commonpb.SegmentState_Growing,
 		MaxRowNum:      int64(totalRows),
 		LastExpireTime: 0,
+		StartPosition: &internalpb.MsgPosition{
+			ChannelName: channelName,
+			MsgID:       []byte{},
+			MsgGroup:    "",
+			Timestamp:   0,
+		},
 	}
 	if err := s.meta.AddSegment(segmentInfo); err != nil {
 		return nil, err
