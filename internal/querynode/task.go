@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"math/rand"
 	"strconv"
 	"time"
@@ -126,6 +127,9 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 
 	// get physical channels
 	desColReq := &milvuspb.DescribeCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_DescribeCollection,
+		},
 		CollectionID: collectionID,
 	}
 	desColRsp, err := w.node.masterService.DescribeCollection(ctx, desColReq)

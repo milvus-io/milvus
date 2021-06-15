@@ -900,6 +900,9 @@ func mockGetRecoveryInfoFromDataService(ctx context.Context,
 	if len(channelInfos) == 0 {
 		// get physical channels
 		desColReq := &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_DescribeCollection,
+			},
 			CollectionID: req.CollectionID,
 		}
 		desColRsp, err := master.DescribeCollection(ctx, desColReq)
