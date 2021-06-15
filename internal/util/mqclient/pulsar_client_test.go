@@ -168,7 +168,7 @@ func Consume3(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 
 func TestPulsarClient(t *testing.T) {
 	pulsarAddress, _ := Params.Load("_PulsarAddress")
-	pc, err := NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	pc, err := GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
 	defer pc.Close()
 	assert.NoError(t, err)
 	assert.NotNil(t, pc)
@@ -319,7 +319,7 @@ func Consume23(ctx context.Context, t *testing.T, pc *pulsarClient, topic string
 
 func TestPulsarClient2(t *testing.T) {
 	pulsarAddress, _ := Params.Load("_PulsarAddress")
-	pc, err := NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	pc, err := GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
 	defer pc.Close()
 	assert.NoError(t, err)
 	assert.NotNil(t, pc)

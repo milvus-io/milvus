@@ -13,6 +13,7 @@ package mqclient
 
 import (
 	"errors"
+	"sync"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/milvus-io/milvus/internal/log"
@@ -23,14 +24,20 @@ type pulsarClient struct {
 	client pulsar.Client
 }
 
-func NewPulsarClient(opts pulsar.ClientOptions) (*pulsarClient, error) {
-	c, err := pulsar.NewClient(opts)
-	if err != nil {
-		log.Error("Set pulsar client failed, error", zap.Error(err))
-		return nil, err
-	}
-	cli := &pulsarClient{client: c}
-	return cli, nil
+var sc *pulsarClient
+var once sync.Once
+
+func GetPulsarClientInstance(opts pulsar.ClientOptions) (*pulsarClient, error) {
+	once.Do(func() {
+		c, err := pulsar.NewClient(opts)
+		if err != nil {
+			log.Error("Set pulsar client failed, error", zap.Error(err))
+			return
+		}
+		cli := &pulsarClient{client: c}
+		sc = cli
+	})
+	return sc, nil
 }
 
 func (pc *pulsarClient) CreateProducer(options ProducerOptions) (Producer, error) {
