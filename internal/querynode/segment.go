@@ -52,12 +52,15 @@ type Segment struct {
 	segmentID    UniqueID
 	partitionID  UniqueID
 	collectionID UniqueID
+
+	onService bool
+
+	vChannelID   VChannel
 	lastMemSize  int64
 	lastRowCount int64
 
-	once             sync.Once // guards enableIndex
-	enableIndex      bool
-	enableLoadBinLog bool
+	once        sync.Once // guards enableIndex
+	enableIndex bool
 
 	rmMutex          sync.Mutex // guards recentlyModified
 	recentlyModified bool
@@ -110,7 +113,15 @@ func (s *Segment) getType() segmentType {
 	return s.segmentType
 }
 
-func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, collectionID UniqueID, segType segmentType) *Segment {
+func (s *Segment) getOnService() bool {
+	return s.onService
+}
+
+func (s *Segment) setOnService(onService bool) {
+	s.onService = onService
+}
+
+func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, collectionID UniqueID, vChannelID VChannel, segType segmentType, onService bool) *Segment {
 	/*
 		CSegmentInterface
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
@@ -133,13 +144,14 @@ func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, c
 	log.Debug("create segment", zap.Int64("segmentID", segmentID))
 
 	var newSegment = &Segment{
-		segmentPtr:       segmentPtr,
-		segmentType:      segType,
-		segmentID:        segmentID,
-		partitionID:      partitionID,
-		collectionID:     collectionID,
-		indexInfos:       indexInfos,
-		enableLoadBinLog: false,
+		segmentPtr:   segmentPtr,
+		segmentType:  segType,
+		segmentID:    segmentID,
+		partitionID:  partitionID,
+		collectionID: collectionID,
+		vChannelID:   vChannelID,
+		onService:    onService,
+		indexInfos:   indexInfos,
 	}
 
 	return newSegment
@@ -415,7 +427,7 @@ func (s *Segment) segmentPreInsert(numOfRecords int) (int64, error) {
 		long int
 		PreInsert(CSegmentInterface c_segment, long int size);
 	*/
-	if s.segmentType != segmentTypeGrowing || s.enableLoadBinLog {
+	if s.segmentType != segmentTypeGrowing {
 		return 0, nil
 	}
 	var offset int64
@@ -454,9 +466,7 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 		           int sizeof_per_row,
 		           signed long int count);
 	*/
-	log.Debug("QueryNode::Segment::segmentInsert:", zap.Any("segmentType", s.segmentType))
-	log.Debug("QueryNode::Segment::segmentInsert:", zap.Any("enableLoadBinLog", s.enableLoadBinLog))
-	if s.segmentType != segmentTypeGrowing || s.enableLoadBinLog {
+	if s.segmentType != segmentTypeGrowing {
 		return nil
 	}
 	log.Debug("QueryNode::Segment::segmentInsert:", zap.Any("s.sgmentPtr", s.segmentPtr))
@@ -728,8 +738,4 @@ func (s *Segment) dropSegmentIndex(fieldID int64) error {
 	log.Debug("dropSegmentIndex done", zap.Int64("fieldID", fieldID), zap.Int64("segmentID", s.ID()))
 
 	return nil
-}
-
-func (s *Segment) setLoadBinLogEnable(enable bool) {
-	s.enableLoadBinLog = enable
 }

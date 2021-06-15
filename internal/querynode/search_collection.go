@@ -14,14 +14,12 @@ package querynode
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"reflect"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
-	oplog "github.com/opentracing/opentracing-go/log"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -29,16 +27,17 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	oplog "github.com/opentracing/opentracing-go/log"
+	"go.uber.org/zap"
 )
 
 type searchCollection struct {
 	releaseCtx context.Context
 	cancel     context.CancelFunc
 
-	collectionID      UniqueID
-	historicalReplica ReplicaInterface
-	streamingReplica  ReplicaInterface
-	tSafeReplica      TSafeReplicaInterface
+	collectionID UniqueID
+	historical   *historical
+	streaming    *streaming
 
 	msgBuffer     chan *msgstream.SearchMsg
 	unsolvedMsgMu sync.Mutex // guards unsolvedMsg
@@ -50,6 +49,7 @@ type searchCollection struct {
 	serviceableTimeMutex sync.Mutex // guards serviceableTime
 	serviceableTime      Timestamp
 
+	searchMsgStream       msgstream.MsgStream
 	searchResultMsgStream msgstream.MsgStream
 }
 
@@ -58,29 +58,31 @@ type ResultEntityIds []UniqueID
 func newSearchCollection(releaseCtx context.Context,
 	cancel context.CancelFunc,
 	collectionID UniqueID,
-	historicalReplica ReplicaInterface,
-	streamingReplica ReplicaInterface,
-	tSafeReplica TSafeReplicaInterface,
-	searchResultStream msgstream.MsgStream) *searchCollection {
+	historical *historical,
+	streaming *streaming,
+	factory msgstream.Factory) *searchCollection {
 
 	receiveBufSize := Params.SearchReceiveBufSize
 	msgBuffer := make(chan *msgstream.SearchMsg, receiveBufSize)
 	unsolvedMsg := make([]*msgstream.SearchMsg, 0)
 
+	searchStream, _ := factory.NewQueryMsgStream(releaseCtx)
+	searchResultStream, _ := factory.NewQueryMsgStream(releaseCtx)
+
 	sc := &searchCollection{
 		releaseCtx: releaseCtx,
 		cancel:     cancel,
 
-		collectionID:      collectionID,
-		historicalReplica: historicalReplica,
-		streamingReplica:  streamingReplica,
-		tSafeReplica:      tSafeReplica,
+		collectionID: collectionID,
+		historical:   historical,
+		streaming:    streaming,
 
 		tSafeWatchers: make(map[VChannel]*tSafeWatcher),
 
 		msgBuffer:   msgBuffer,
 		unsolvedMsg: unsolvedMsg,
 
+		searchMsgStream:       searchStream,
 		searchResultMsgStream: searchResultStream,
 	}
 
@@ -89,12 +91,23 @@ func newSearchCollection(releaseCtx context.Context,
 }
 
 func (s *searchCollection) start() {
-	go s.receiveSearchMsg()
+	go s.searchMsgStream.Start()
+	go s.searchResultMsgStream.Start()
+	go s.consumeSearch()
 	go s.doUnsolvedMsgSearch()
 }
 
+func (s *searchCollection) close() {
+	if s.searchMsgStream != nil {
+		s.searchMsgStream.Close()
+	}
+	if s.searchResultMsgStream != nil {
+		s.searchResultMsgStream.Close()
+	}
+}
+
 func (s *searchCollection) register() {
-	collection, err := s.streamingReplica.getCollectionByID(s.collectionID)
+	collection, err := s.streaming.replica.getCollectionByID(s.collectionID)
 	if err != nil {
 		log.Error(err.Error())
 		return
@@ -102,11 +115,12 @@ func (s *searchCollection) register() {
 
 	s.watcherSelectCase = make([]reflect.SelectCase, 0)
 	log.Debug("register tSafe watcher and init watcher select case",
+		zap.Any("collectionID", collection.ID()),
 		zap.Any("dml channels", collection.getWatchedDmChannels()),
-		zap.Any("collectionID", collection.ID()))
+	)
 	for _, channel := range collection.getWatchedDmChannels() {
 		s.tSafeWatchers[channel] = newTSafeWatcher()
-		s.tSafeReplica.registerTSafeWatcher(channel, s.tSafeWatchers[channel])
+		s.streaming.tSafeReplica.registerTSafeWatcher(channel, s.tSafeWatchers[channel])
 		s.watcherSelectCase = append(s.watcherSelectCase, reflect.SelectCase{
 			Dir:  reflect.SelectRecv,
 			Chan: reflect.ValueOf(s.tSafeWatchers[channel].watcherChan()),
@@ -135,9 +149,10 @@ func (s *searchCollection) waitNewTSafe() Timestamp {
 		log.Error("tSafe has been closed", zap.Any("collectionID", s.collectionID))
 		return invalidTimestamp
 	}
+	//log.Debug("wait new tSafe", zap.Any("collectionID", s.collectionID))
 	t := Timestamp(math.MaxInt64)
 	for channel := range s.tSafeWatchers {
-		ts := s.tSafeReplica.getTSafe(channel)
+		ts := s.streaming.tSafeReplica.getTSafe(channel)
 		if ts <= t {
 			t = ts
 		}
@@ -175,95 +190,191 @@ func (s *searchCollection) emptySearch(searchMsg *msgstream.SearchMsg) {
 	err := s.search(searchMsg)
 	if err != nil {
 		log.Error(err.Error())
-		err2 := s.publishFailedSearchResult(searchMsg, err.Error())
-		if err2 != nil {
-			log.Error("publish FailedSearchResult failed", zap.Error(err2))
-		}
+		s.publishFailedSearchResult(searchMsg, err.Error())
 	}
 }
 
-func (s *searchCollection) receiveSearchMsg() {
+func (s *searchCollection) consumeSearch() {
 	for {
 		select {
 		case <-s.releaseCtx.Done():
 			log.Debug("stop searchCollection's receiveSearchMsg", zap.Int64("collectionID", s.collectionID))
 			return
-		case sm := <-s.msgBuffer:
-			sp, ctx := trace.StartSpanFromContext(sm.TraceCtx())
-			sm.SetTraceCtx(ctx)
-			log.Debug("get search message from msgBuffer",
-				zap.Int64("msgID", sm.ID()),
-				zap.Int64("collectionID", sm.CollectionID))
-			serviceTime := s.getServiceableTime()
-			if sm.BeginTs() > serviceTime {
-				bt, _ := tsoutil.ParseTS(sm.BeginTs())
-				st, _ := tsoutil.ParseTS(serviceTime)
-				log.Debug("querynode::receiveSearchMsg: add to unsolvedMsgs",
-					zap.Any("sm.BeginTs", bt),
-					zap.Any("serviceTime", st),
-					zap.Any("delta seconds", (sm.BeginTs()-serviceTime)/(1000*1000*1000)),
-					zap.Any("collectionID", s.collectionID),
-					zap.Any("msgID", sm.ID()),
-				)
-				s.addToUnsolvedMsg(sm)
-				sp.LogFields(
-					oplog.String("send to unsolved buffer", "send to unsolved buffer"),
-					oplog.Object("begin ts", bt),
-					oplog.Object("serviceTime", st),
-					oplog.Float64("delta seconds", float64(sm.BeginTs()-serviceTime)/(1000.0*1000.0*1000.0)),
-				)
-				sp.Finish()
+		default:
+			msgPack := s.searchMsgStream.Consume()
+			if msgPack == nil || len(msgPack.Msgs) <= 0 {
+				msgPackNil := msgPack == nil
+				msgPackEmpty := true
+				if msgPack != nil {
+					msgPackEmpty = len(msgPack.Msgs) <= 0
+				}
+				log.Debug("consume search message failed", zap.Any("msgPack is Nil", msgPackNil),
+					zap.Any("msgPackEmpty", msgPackEmpty))
 				continue
 			}
-			log.Debug("doing search in receiveSearchMsg...",
-				zap.Int64("msgID", sm.ID()),
-				zap.Int64("collectionID", sm.CollectionID))
-			err := s.search(sm)
-			if err != nil {
-				log.Error(err.Error())
-				log.Debug("do search failed in receiveSearchMsg, prepare to publish failed search result",
-					zap.Int64("msgID", sm.ID()),
-					zap.Int64("collectionID", sm.CollectionID))
-				err2 := s.publishFailedSearchResult(sm, err.Error())
-				if err2 != nil {
-					log.Error("publish FailedSearchResult failed", zap.Error(err2))
+			for _, msg := range msgPack.Msgs {
+				switch sm := msg.(type) {
+				case *msgstream.SearchMsg:
+					s.receiveSearch(sm)
+				case *msgstream.LoadBalanceSegmentsMsg:
+					s.loadBalance(sm)
+				default:
+					log.Warn("unsupported msg type in search channel", zap.Any("msg", sm))
 				}
 			}
-			log.Debug("do search done in receiveSearchMsg",
-				zap.Int64("msgID", sm.ID()),
-				zap.Int64("collectionID", sm.CollectionID))
-			sp.Finish()
 		}
 	}
 }
 
+func (s *searchCollection) loadBalance(msg *msgstream.LoadBalanceSegmentsMsg) {
+	log.Debug("consume load balance message",
+		zap.Int64("msgID", msg.ID()))
+	nodeID := Params.QueryNodeID
+	for _, info := range msg.Infos {
+		segmentID := info.SegmentID
+		if nodeID == info.SourceNodeID {
+			err := s.historical.replica.removeSegment(segmentID)
+			if err != nil {
+				log.Error("loadBalance failed when remove segment",
+					zap.Error(err),
+					zap.Any("segmentID", segmentID))
+			}
+		}
+		if nodeID == info.DstNodeID {
+			segment, err := s.historical.replica.getSegmentByID(segmentID)
+			if err != nil {
+				log.Error("loadBalance failed when making segment on service",
+					zap.Error(err),
+					zap.Any("segmentID", segmentID))
+				continue // not return, try to load balance all segment
+			}
+			segment.setOnService(true)
+		}
+	}
+	log.Debug("load balance done",
+		zap.Int64("msgID", msg.ID()),
+		zap.Int("num of segment", len(msg.Infos)))
+}
+
+func (s *searchCollection) receiveSearch(msg *msgstream.SearchMsg) {
+	if msg.CollectionID != s.collectionID {
+		log.Debug("not target collection search request",
+			zap.Any("collectionID", msg.CollectionID),
+			zap.Int64("msgID", msg.ID()),
+		)
+		return
+	}
+
+	log.Debug("consume search message",
+		zap.Any("collectionID", msg.CollectionID),
+		zap.Int64("msgID", msg.ID()),
+	)
+	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+	msg.SetTraceCtx(ctx)
+
+	// check if collection has been released
+	collection, err := s.historical.replica.getCollectionByID(msg.CollectionID)
+	if err != nil {
+		log.Error(err.Error())
+		s.publishFailedSearchResult(msg, err.Error())
+		return
+	}
+	if msg.BeginTs() >= collection.getReleaseTime() {
+		err := errors.New("search failed, collection has been released, msgID = " +
+			fmt.Sprintln(msg.ID()) +
+			", collectionID = " +
+			fmt.Sprintln(msg.CollectionID))
+		log.Error(err.Error())
+		s.publishFailedSearchResult(msg, err.Error())
+		return
+	}
+
+	serviceTime := s.getServiceableTime()
+	if msg.BeginTs() > serviceTime {
+		bt, _ := tsoutil.ParseTS(msg.BeginTs())
+		st, _ := tsoutil.ParseTS(serviceTime)
+		log.Debug("query node::receiveSearchMsg: add to unsolvedMsg",
+			zap.Any("collectionID", s.collectionID),
+			zap.Any("sm.BeginTs", bt),
+			zap.Any("serviceTime", st),
+			zap.Any("delta seconds", (msg.BeginTs()-serviceTime)/(1000*1000*1000)),
+			zap.Any("msgID", msg.ID()),
+		)
+		s.addToUnsolvedMsg(msg)
+		sp.LogFields(
+			oplog.String("send to unsolved buffer", "send to unsolved buffer"),
+			oplog.Object("begin ts", bt),
+			oplog.Object("serviceTime", st),
+			oplog.Float64("delta seconds", float64(msg.BeginTs()-serviceTime)/(1000.0*1000.0*1000.0)),
+		)
+		sp.Finish()
+		return
+	}
+	log.Debug("doing search in receiveSearchMsg...",
+		zap.Int64("collectionID", msg.CollectionID),
+		zap.Int64("msgID", msg.ID()),
+	)
+	err = s.search(msg)
+	if err != nil {
+		log.Error(err.Error())
+		log.Debug("do search failed in receiveSearchMsg, prepare to publish failed search result",
+			zap.Int64("collectionID", msg.CollectionID),
+			zap.Int64("msgID", msg.ID()),
+		)
+		s.publishFailedSearchResult(msg, err.Error())
+	}
+	log.Debug("do search done in receiveSearch",
+		zap.Int64("collectionID", msg.CollectionID),
+		zap.Int64("msgID", msg.ID()),
+	)
+	sp.Finish()
+}
+
 func (s *searchCollection) doUnsolvedMsgSearch() {
+	log.Debug("starting doUnsolvedMsgSearch...", zap.Any("collectionID", s.collectionID))
 	for {
 		select {
 		case <-s.releaseCtx.Done():
 			log.Debug("stop searchCollection's doUnsolvedMsgSearch", zap.Int64("collectionID", s.collectionID))
 			return
 		default:
+			//time.Sleep(10 * time.Millisecond)
 			serviceTime := s.waitNewTSafe()
-			s.setServiceableTime(serviceTime)
-			log.Debug("query node::doUnsolvedMsgSearch: setServiceableTime",
-				zap.Any("serviceTime", serviceTime),
-			)
+			st, _ := tsoutil.ParseTS(serviceTime)
 			log.Debug("get tSafe from flow graph",
 				zap.Int64("collectionID", s.collectionID),
-				zap.Uint64("tSafe", serviceTime))
+				zap.Any("tSafe", st))
+
+			s.setServiceableTime(serviceTime)
+			log.Debug("query node::doUnsolvedMsgSearch: setServiceableTime",
+				zap.Any("serviceTime", st),
+			)
 
 			searchMsg := make([]*msgstream.SearchMsg, 0)
 			tempMsg := s.popAllUnsolvedMsg()
 
 			for _, sm := range tempMsg {
+				bt, _ := tsoutil.ParseTS(sm.EndTs())
+				st, _ = tsoutil.ParseTS(serviceTime)
 				log.Debug("get search message from unsolvedMsg",
+					zap.Int64("collectionID", sm.CollectionID),
 					zap.Int64("msgID", sm.ID()),
-					zap.Int64("collectionID", sm.CollectionID))
+					zap.Any("reqTime_p", bt),
+					zap.Any("serviceTime_p", st),
+					zap.Any("reqTime_l", sm.EndTs()),
+					zap.Any("serviceTime_l", serviceTime),
+				)
 				if sm.EndTs() <= serviceTime {
 					searchMsg = append(searchMsg, sm)
 					continue
 				}
+				log.Debug("query node::doUnsolvedMsgSearch: add to unsolvedMsg",
+					zap.Any("collectionID", s.collectionID),
+					zap.Any("sm.BeginTs", bt),
+					zap.Any("serviceTime", st),
+					zap.Any("delta seconds", (sm.BeginTs()-serviceTime)/(1000*1000*1000)),
+					zap.Any("msgID", sm.ID()),
+				)
 				s.addToUnsolvedMsg(sm)
 			}
 
@@ -274,23 +385,23 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 				sp, ctx := trace.StartSpanFromContext(sm.TraceCtx())
 				sm.SetTraceCtx(ctx)
 				log.Debug("doing search in doUnsolvedMsgSearch...",
+					zap.Int64("collectionID", sm.CollectionID),
 					zap.Int64("msgID", sm.ID()),
-					zap.Int64("collectionID", sm.CollectionID))
+				)
 				err := s.search(sm)
 				if err != nil {
 					log.Error(err.Error())
 					log.Debug("do search failed in doUnsolvedMsgSearch, prepare to publish failed search result",
+						zap.Int64("collectionID", sm.CollectionID),
 						zap.Int64("msgID", sm.ID()),
-						zap.Int64("collectionID", sm.CollectionID))
-					err2 := s.publishFailedSearchResult(sm, err.Error())
-					if err2 != nil {
-						log.Error("publish FailedSearchResult failed", zap.Error(err2))
-					}
+					)
+					s.publishFailedSearchResult(sm, err.Error())
 				}
 				sp.Finish()
 				log.Debug("do search done in doUnsolvedMsgSearch",
+					zap.Int64("collectionID", sm.CollectionID),
 					zap.Int64("msgID", sm.ID()),
-					zap.Int64("collectionID", sm.CollectionID))
+				)
 			}
 			log.Debug("doUnsolvedMsgSearch, do search done", zap.Int("num of searchMsg", len(searchMsg)))
 		}
@@ -306,20 +417,20 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	searchTimestamp := searchMsg.Base.Timestamp
 
 	collectionID := searchMsg.CollectionID
-	collection, err := s.historicalReplica.getCollectionByID(collectionID)
+	collection, err := s.historical.replica.getCollectionByID(collectionID)
 	if err != nil {
 		return err
 	}
 	var plan *Plan
 	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
 		expr := searchMsg.SerializedExprPlan
-		plan, err = createPlanByExpr(*collection, expr)
+		plan, err = createPlanByExpr(collection, expr)
 		if err != nil {
 			return err
 		}
 	} else {
 		dsl := searchMsg.Dsl
-		plan, err = createPlan(*collection, dsl)
+		plan, err = createPlan(collection, dsl)
 		if err != nil {
 			return err
 		}
@@ -333,39 +444,6 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	searchRequests := make([]*searchRequest, 0)
 	searchRequests = append(searchRequests, searchReq)
 
-	searchResults := make([]*SearchResult, 0)
-	matchedSegments := make([]*Segment, 0)
-
-	var searchPartitionIDsInHistorical []UniqueID
-	var searchPartitionIDsInStreaming []UniqueID
-	partitionIDsInQuery := searchMsg.PartitionIDs
-	if len(partitionIDsInQuery) == 0 {
-		partitionIDsInHistoricalCol, err1 := s.historicalReplica.getPartitionIDs(collectionID)
-		partitionIDsInStreamingCol, err2 := s.streamingReplica.getPartitionIDs(collectionID)
-		if err1 != nil && err2 != nil {
-			return err2
-		}
-		if len(partitionIDsInHistoricalCol) == 0 {
-			return errors.New("none of this collection's partition has been loaded")
-		}
-		searchPartitionIDsInHistorical = partitionIDsInHistoricalCol
-		searchPartitionIDsInStreaming = partitionIDsInStreamingCol
-	} else {
-		for _, id := range partitionIDsInQuery {
-			_, err1 := s.historicalReplica.getPartitionByID(id)
-			if err1 == nil {
-				searchPartitionIDsInHistorical = append(searchPartitionIDsInHistorical, id)
-			}
-			_, err2 := s.streamingReplica.getPartitionByID(id)
-			if err2 == nil {
-				searchPartitionIDsInStreaming = append(searchPartitionIDsInStreaming, id)
-			}
-			if err1 != nil && err2 != nil {
-				return err2
-			}
-		}
-	}
-
 	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
 		sp.LogFields(oplog.String("statistical time", "stats start"),
 			oplog.Object("nq", queryNum),
@@ -376,47 +454,29 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 			oplog.Object("dsl", searchMsg.Dsl))
 	}
 
+	searchResults := make([]*SearchResult, 0)
+	matchedSegments := make([]*Segment, 0)
 	sealedSegmentSearched := make([]UniqueID, 0)
-	for _, partitionID := range searchPartitionIDsInHistorical {
-		segmentIDs, err := s.historicalReplica.getSegmentIDs(partitionID)
-		if err != nil {
-			return err
-		}
-		for _, segmentID := range segmentIDs {
-			segment, err := s.historicalReplica.getSegmentByID(segmentID)
-			if err != nil {
-				return err
-			}
-			searchResult, err := segment.segmentSearch(plan, searchRequests, []Timestamp{searchTimestamp})
 
-			if err != nil {
-				return err
-			}
-			searchResults = append(searchResults, searchResult)
-			matchedSegments = append(matchedSegments, segment)
-			sealedSegmentSearched = append(sealedSegmentSearched, segmentID)
-		}
+	// historical search
+	hisSearchResults, hisSegmentResults, err := s.historical.search(searchRequests, collectionID, searchMsg.PartitionIDs, plan, searchTimestamp)
+	if err != nil {
+		return err
+	}
+	searchResults = append(searchResults, hisSearchResults...)
+	matchedSegments = append(matchedSegments, hisSegmentResults...)
+	for _, seg := range hisSegmentResults {
+		sealedSegmentSearched = append(sealedSegmentSearched, seg.segmentID)
 	}
 
-	//TODO:: get searched channels
-	for _, partitionID := range searchPartitionIDsInStreaming {
-		segmentIDs, err := s.streamingReplica.getSegmentIDs(partitionID)
+	// streaming search
+	for _, channel := range collection.getWatchedDmChannels() {
+		strSearchResults, strSegmentResults, err := s.streaming.search(searchRequests, collectionID, searchMsg.PartitionIDs, channel, plan, searchTimestamp)
 		if err != nil {
 			return err
 		}
-		for _, segmentID := range segmentIDs {
-			segment, err := s.streamingReplica.getSegmentByID(segmentID)
-			if err != nil {
-				return err
-			}
-			searchResult, err := segment.segmentSearch(plan, searchRequests, []Timestamp{searchTimestamp})
-
-			if err != nil {
-				return err
-			}
-			searchResults = append(searchResults, searchResult)
-			matchedSegments = append(matchedSegments, segment)
-		}
+		searchResults = append(searchResults, strSearchResults...)
+		matchedSegments = append(matchedSegments, strSegmentResults...)
 	}
 
 	sp.LogFields(oplog.String("statistical time", "segment search end"))
@@ -562,8 +622,9 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 
 func (s *searchCollection) publishSearchResult(msg msgstream.TsMsg, collectionID UniqueID) error {
 	log.Debug("publishing search result...",
+		zap.Int64("collectionID", collectionID),
 		zap.Int64("msgID", msg.ID()),
-		zap.Int64("collectionID", collectionID))
+	)
 	span, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 	defer span.Finish()
 	msg.SetTraceCtx(ctx)
@@ -571,16 +632,20 @@ func (s *searchCollection) publishSearchResult(msg msgstream.TsMsg, collectionID
 	msgPack.Msgs = append(msgPack.Msgs, msg)
 	err := s.searchResultMsgStream.Produce(&msgPack)
 	if err != nil {
-		log.Error(err.Error())
+		log.Error("publishing search result failed, err = "+err.Error(),
+			zap.Int64("collectionID", collectionID),
+			zap.Int64("msgID", msg.ID()),
+		)
 	} else {
 		log.Debug("publish search result done",
+			zap.Int64("collectionID", collectionID),
 			zap.Int64("msgID", msg.ID()),
-			zap.Int64("collectionID", collectionID))
+		)
 	}
 	return err
 }
 
-func (s *searchCollection) publishFailedSearchResult(searchMsg *msgstream.SearchMsg, errMsg string) error {
+func (s *searchCollection) publishFailedSearchResult(searchMsg *msgstream.SearchMsg, errMsg string) {
 	span, ctx := trace.StartSpanFromContext(searchMsg.TraceCtx())
 	defer span.Finish()
 	searchMsg.SetTraceCtx(ctx)
@@ -606,8 +671,6 @@ func (s *searchCollection) publishFailedSearchResult(searchMsg *msgstream.Search
 	msgPack.Msgs = append(msgPack.Msgs, searchResultMsg)
 	err := s.searchResultMsgStream.Produce(&msgPack)
 	if err != nil {
-		return err
+		log.Error("publish FailedSearchResult failed" + err.Error())
 	}
-
-	return nil
 }

@@ -14,194 +14,141 @@ package queryservice
 import (
 	"container/list"
 	"context"
-	"errors"
 	"sync"
 
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	oplog "github.com/opentracing/opentracing-go/log"
 )
 
-type TaskQueue interface {
-	utChan() <-chan int
-	utEmpty() bool
-	utFull() bool
-	addUnissuedTask(t task) error
-	FrontUnissuedTask() task
-	PopUnissuedTask() task
-	AddActiveTask(t task)
-	PopActiveTask(ts Timestamp) task
-	Enqueue(t task) error
+type TaskQueue struct {
+	tasks *list.List
+
+	maxTask  int64
+	taskChan chan int // to block scheduler
+
+	scheduler *TaskScheduler
+	sync.Mutex
 }
 
-type BaseTaskQueue struct {
-	unissuedTasks *list.List
-	activeTasks   map[Timestamp]task
-	utLock        sync.Mutex
-	atLock        sync.Mutex
-
-	maxTaskNum int64
-
-	utBufChan chan int // to block scheduler
-
-	sched *TaskScheduler
+func (queue *TaskQueue) Chan() <-chan int {
+	return queue.taskChan
 }
 
-func (queue *BaseTaskQueue) utChan() <-chan int {
-	return queue.utBufChan
+func (queue *TaskQueue) taskEmpty() bool {
+	queue.Lock()
+	defer queue.Unlock()
+	return queue.tasks.Len() == 0
 }
 
-func (queue *BaseTaskQueue) utEmpty() bool {
-	queue.utLock.Lock()
-	defer queue.utLock.Unlock()
-	return queue.unissuedTasks.Len() == 0
+func (queue *TaskQueue) taskFull() bool {
+	return int64(queue.tasks.Len()) >= queue.maxTask
 }
 
-func (queue *BaseTaskQueue) utFull() bool {
-	return int64(queue.unissuedTasks.Len()) >= queue.maxTaskNum
-}
+func (queue *TaskQueue) addTask(tasks []task) {
+	queue.Lock()
+	defer queue.Unlock()
 
-func (queue *BaseTaskQueue) addUnissuedTask(t task) error {
-	queue.utLock.Lock()
-	defer queue.utLock.Unlock()
+	for _, t := range tasks {
+		if queue.tasks.Len() == 0 {
+			queue.taskChan <- 1
+			queue.tasks.PushBack(t)
+			continue
+		}
 
-	if queue.utFull() {
-		return errors.New("task queue is full")
-	}
-	if queue.unissuedTasks.Len() <= 0 {
-		queue.unissuedTasks.PushBack(t)
-		queue.utBufChan <- 1
-		return nil
-	}
-
-	if t.Timestamp() >= queue.unissuedTasks.Back().Value.(task).Timestamp() {
-		queue.unissuedTasks.PushBack(t)
-		queue.utBufChan <- 1
-		return nil
-	}
-
-	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
-		if t.Timestamp() <= e.Value.(task).Timestamp() {
-			queue.unissuedTasks.InsertBefore(t, e)
-			queue.utBufChan <- 1
-			return nil
+		for e := queue.tasks.Back(); e != nil; e = e.Prev() {
+			if t.TaskPriority() > e.Value.(task).TaskPriority() {
+				if e.Prev() == nil {
+					queue.taskChan <- 1
+					queue.tasks.InsertBefore(t, e)
+					break
+				}
+				continue
+			}
+			//TODO:: take care of timestamp
+			queue.taskChan <- 1
+			queue.tasks.InsertAfter(t, e)
+			break
 		}
 	}
-	return errors.New("unexpected error in addUnissuedTask")
-
 }
 
-func (queue *BaseTaskQueue) FrontUnissuedTask() task {
-	queue.utLock.Lock()
-	defer queue.utLock.Unlock()
+func (queue *TaskQueue) PopTask() task {
+	queue.Lock()
+	defer queue.Unlock()
 
-	if queue.unissuedTasks.Len() <= 0 {
+	if queue.tasks.Len() <= 0 {
 		log.Warn("sorry, but the unissued task list is empty!")
 		return nil
 	}
 
-	return queue.unissuedTasks.Front().Value.(task)
-}
-
-func (queue *BaseTaskQueue) PopUnissuedTask() task {
-	queue.utLock.Lock()
-	defer queue.utLock.Unlock()
-
-	if queue.unissuedTasks.Len() <= 0 {
-		log.Warn("sorry, but the unissued task list is empty!")
-		return nil
-	}
-
-	ft := queue.unissuedTasks.Front()
-	queue.unissuedTasks.Remove(ft)
+	ft := queue.tasks.Front()
+	queue.tasks.Remove(ft)
 
 	return ft.Value.(task)
 }
 
-func (queue *BaseTaskQueue) AddActiveTask(t task) {
-	queue.atLock.Lock()
-	defer queue.atLock.Unlock()
-
-	ts := t.Timestamp()
-	_, ok := queue.activeTasks[ts]
-	if ok {
-		log.Debug("queryService", zap.Uint64("task with timestamp ts already in active task list! ts:", ts))
-	}
-
-	queue.activeTasks[ts] = t
-}
-
-func (queue *BaseTaskQueue) PopActiveTask(ts Timestamp) task {
-	queue.atLock.Lock()
-	defer queue.atLock.Unlock()
-
-	t, ok := queue.activeTasks[ts]
-	if ok {
-		log.Debug("queryService", zap.Uint64("task with timestamp ts has been deleted in active task list! ts:", ts))
-		delete(queue.activeTasks, ts)
-		return t
-	}
-
-	return nil
-}
-
-func (queue *BaseTaskQueue) Enqueue(t task) error {
-	return queue.addUnissuedTask(t)
-}
-
-type DdTaskQueue struct {
-	BaseTaskQueue
-	lock sync.Mutex
-}
-
-func (queue *DdTaskQueue) Enqueue(t task) error {
-	queue.lock.Lock()
-	defer queue.lock.Unlock()
-	return queue.BaseTaskQueue.Enqueue(t)
-}
-
-func NewDdTaskQueue(sched *TaskScheduler) *DdTaskQueue {
-	return &DdTaskQueue{
-		BaseTaskQueue: BaseTaskQueue{
-			unissuedTasks: list.New(),
-			activeTasks:   make(map[Timestamp]task),
-			maxTaskNum:    1024,
-			utBufChan:     make(chan int, 1024),
-			sched:         sched,
-		},
+func NewTaskQueue(scheduler *TaskScheduler) *TaskQueue {
+	return &TaskQueue{
+		tasks:     list.New(),
+		maxTask:   1024,
+		taskChan:  make(chan int, 1024),
+		scheduler: scheduler,
 	}
 }
 
 type TaskScheduler struct {
-	DdQueue TaskQueue
+	triggerTaskQueue *TaskQueue
+	activateTaskChan chan task
+	meta             *meta
+	taskIDAllocator  func() (UniqueID, error)
+	kvBase           *etcdkv.EtcdKV
 
 	wg     sync.WaitGroup
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-func NewTaskScheduler(ctx context.Context) *TaskScheduler {
+func NewTaskScheduler(ctx context.Context, meta *meta, kv *etcdkv.EtcdKV) *TaskScheduler {
 	ctx1, cancel := context.WithCancel(ctx)
+	taskChan := make(chan task, 1024)
 	s := &TaskScheduler{
-		ctx:    ctx1,
-		cancel: cancel,
+		ctx:              ctx1,
+		cancel:           cancel,
+		meta:             meta,
+		activateTaskChan: taskChan,
+		kvBase:           kv,
 	}
-	s.DdQueue = NewDdTaskQueue(s)
+	s.triggerTaskQueue = NewTaskQueue(s)
+	//TODO::add etcd
+	//idAllocator := allocator.NewGlobalIDAllocator("queryService taskID", s.kvBase)
+	//s.taskIDAllocator = func() (UniqueID, error) {
+	//	return idAllocator.AllocOne()
+	//}
 
 	return s
 }
 
-func (sched *TaskScheduler) scheduleDdTask() task {
-	return sched.DdQueue.PopUnissuedTask()
+func (scheduler *TaskScheduler) Enqueue(tasks []task) {
+	//TODO::open when add etcd
+	//for _, t := range tasks {
+	//	id, err := scheduler.taskIDAllocator()
+	//	if err != nil {
+	//		log.Error(err.Error())
+	//	}
+	//	t.SetID(id)
+	//}
+	scheduler.triggerTaskQueue.addTask(tasks)
 }
 
-func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
+func (scheduler *TaskScheduler) processTask(t task) {
 	span, ctx := trace.StartSpanFromContext(t.TraceCtx(),
 		opentracing.Tags{
-			"Type": t.Name(),
+			"Type": t.Type(),
 			"ID":   t.ID(),
 		})
 	defer span.Finish()
@@ -217,13 +164,6 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 		return
 	}
 
-	span.LogFields(oplog.Int64("scheduler process AddActiveTask", t.ID()))
-	q.AddActiveTask(t)
-
-	defer func() {
-		span.LogFields(oplog.Int64("scheduler process PopActiveTask", t.ID()))
-		q.PopActiveTask(t.Timestamp())
-	}()
 	span.LogFields(oplog.Int64("scheduler process Execute", t.ID()))
 	err = t.Execute(ctx)
 	if err != nil {
@@ -235,29 +175,78 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 	err = t.PostExecute(ctx)
 }
 
-func (sched *TaskScheduler) definitionLoop() {
-	defer sched.wg.Done()
+func (scheduler *TaskScheduler) scheduleLoop() {
+	defer scheduler.wg.Done()
+	var w sync.WaitGroup
 	for {
 		select {
-		case <-sched.ctx.Done():
+		case <-scheduler.ctx.Done():
 			return
-		case <-sched.DdQueue.utChan():
-			if !sched.DdQueue.utEmpty() {
-				t := sched.scheduleDdTask()
-				sched.processTask(t, sched.DdQueue)
-			}
+		case <-scheduler.triggerTaskQueue.Chan():
+			t := scheduler.triggerTaskQueue.PopTask()
+			log.Debug("pop a triggerTask from triggerTaskQueue")
+			scheduler.processTask(t)
+			//TODO::add active task to etcd
+			w.Add(2)
+			go scheduler.addActivateTask(&w, t)
+			//TODO::handle active task return error, maybe node down...
+			go scheduler.processActivateTask(&w)
+			w.Wait()
+			//TODO:: delete trigger task from etcd
 		}
 	}
 }
 
-func (sched *TaskScheduler) Start() error {
-	sched.wg.Add(1)
-	go sched.definitionLoop()
+func (scheduler *TaskScheduler) addActivateTask(wg *sync.WaitGroup, t task) {
+	defer wg.Done()
+	var activeTaskWg sync.WaitGroup
+	log.Debug("num of child task", zap.Int("num child task", len(t.GetChildTask())))
+	for _, childTask := range t.GetChildTask() {
+		if childTask != nil {
+			log.Debug("add a activate task to activateChan")
+			scheduler.activateTaskChan <- childTask
+			activeTaskWg.Add(1)
+			go scheduler.waitActivateTaskDone(&activeTaskWg, childTask)
+		}
+	}
+	scheduler.activateTaskChan <- nil
+	activeTaskWg.Wait()
+}
 
+func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task) {
+	defer wg.Done()
+	err := t.WaitToFinish()
+	if err != nil {
+		//TODO:: redo task
+		log.Error("waitActivateTaskDone: activate task return err")
+	}
+	log.Debug("one activate task done")
+}
+
+func (scheduler *TaskScheduler) processActivateTask(wg *sync.WaitGroup) {
+	defer wg.Done()
+	for {
+		select {
+		case <-scheduler.ctx.Done():
+			return
+		case t := <-scheduler.activateTaskChan:
+			if t == nil {
+				return
+			}
+			log.Debug("pop a activate task from activateChan")
+			scheduler.processTask(t)
+			//TODO:: delete active task from etcd
+		}
+	}
+}
+
+func (scheduler *TaskScheduler) Start() error {
+	scheduler.wg.Add(1)
+	go scheduler.scheduleLoop()
 	return nil
 }
 
-func (sched *TaskScheduler) Close() {
-	sched.cancel()
-	sched.wg.Wait()
+func (scheduler *TaskScheduler) Close() {
+	scheduler.cancel()
+	scheduler.wg.Wait()
 }

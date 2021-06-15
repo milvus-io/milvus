@@ -15,12 +15,12 @@ import (
 	"context"
 	"math/rand"
 	"strconv"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -39,16 +39,15 @@ type queryChannelInfo struct {
 type QueryService struct {
 	loopCtx    context.Context
 	loopCancel context.CancelFunc
+	kvBase     *etcdkv.EtcdKV
 
 	queryServiceID uint64
-	replica        Replica
-	sched          *TaskScheduler
+	meta           *meta
+	cluster        *queryNodeCluster
+	scheduler      *TaskScheduler
 
 	dataServiceClient   types.DataService
 	masterServiceClient types.MasterService
-	queryNodes          map[int64]*queryNodeInfo
-	queryChannels       []*queryChannelInfo
-	qcMutex             *sync.Mutex
 
 	session *sessionutil.Session
 
@@ -73,14 +72,14 @@ func (qs *QueryService) Init() error {
 }
 
 func (qs *QueryService) Start() error {
-	qs.sched.Start()
+	qs.scheduler.Start()
 	log.Debug("start scheduler ...")
 	qs.UpdateStateCode(internalpb.StateCode_Healthy)
 	return nil
 }
 
 func (qs *QueryService) Stop() error {
-	qs.sched.Close()
+	qs.scheduler.Close()
 	log.Debug("close scheduler ...")
 	qs.loopCancel()
 	qs.UpdateStateCode(internalpb.StateCode_Abnormal)
@@ -93,7 +92,6 @@ func (qs *QueryService) UpdateStateCode(code internalpb.StateCode) {
 
 func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryService, error) {
 	rand.Seed(time.Now().UnixNano())
-	nodes := make(map[int64]*queryNodeInfo)
 	queryChannels := make([]*queryChannelInfo, 0)
 	channelID := len(queryChannels)
 	searchPrefix := Params.SearchChannelPrefix
@@ -107,18 +105,16 @@ func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryServ
 	})
 
 	ctx1, cancel := context.WithCancel(ctx)
-	replica := newMetaReplica()
-	scheduler := NewTaskScheduler(ctx1)
+	meta := newMeta()
 	service := &QueryService{
-		loopCtx:       ctx1,
-		loopCancel:    cancel,
-		replica:       replica,
-		sched:         scheduler,
-		queryNodes:    nodes,
-		queryChannels: queryChannels,
-		qcMutex:       &sync.Mutex{},
-		msFactory:     factory,
+		loopCtx:    ctx1,
+		loopCancel: cancel,
+		meta:       meta,
+		msFactory:  factory,
 	}
+	//TODO::set etcd kvbase
+	service.scheduler = NewTaskScheduler(ctx1, meta, service.kvBase)
+	service.cluster = newQueryNodeCluster(meta)
 
 	service.UpdateStateCode(internalpb.StateCode_Abnormal)
 	log.Debug("QueryService", zap.Any("queryChannels", queryChannels))

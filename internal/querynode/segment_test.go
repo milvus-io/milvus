@@ -35,7 +35,7 @@ func TestSegment_newSegment(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, segmentTypeGrowing)
+	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.Equal(t, segmentID, segment.segmentID)
 	deleteSegment(segment)
 	deleteCollection(collection)
@@ -49,7 +49,7 @@ func TestSegment_deleteSegment(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, segmentTypeGrowing)
+	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.Equal(t, segmentID, segment.segmentID)
 
 	deleteSegment(segment)
@@ -65,7 +65,7 @@ func TestSegment_getRowCount(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, segmentTypeGrowing)
+	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.Equal(t, segmentID, segment.segmentID)
 
 	ids := []int64{1, 2, 3}
@@ -113,7 +113,7 @@ func TestSegment_retrieve(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, segmentTypeGrowing)
+	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.Equal(t, segmentID, segment.segmentID)
 
 	ids := []int64{}
@@ -173,7 +173,7 @@ func TestSegment_getDeletedCount(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, segmentTypeGrowing)
+	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.Equal(t, segmentID, segment.segmentID)
 
 	ids := []int64{1, 2, 3}
@@ -227,7 +227,7 @@ func TestSegment_getMemSize(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, segmentTypeGrowing)
+	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.Equal(t, segmentID, segment.segmentID)
 
 	ids := []int64{1, 2, 3}
@@ -275,7 +275,7 @@ func TestSegment_segmentInsert(t *testing.T) {
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
 	assert.Equal(t, collection.ID(), collectionID)
 	segmentID := UniqueID(0)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, segmentTypeGrowing)
+	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.Equal(t, segmentID, segment.segmentID)
 
 	ids := []int64{1, 2, 3}
@@ -319,7 +319,7 @@ func TestSegment_segmentDelete(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, segmentTypeGrowing)
+	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.Equal(t, segmentID, segment.segmentID)
 
 	ids := []int64{1, 2, 3}
@@ -369,7 +369,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, segmentTypeGrowing)
+	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.Equal(t, segmentID, segment.segmentID)
 
 	ids := []int64{1, 2, 3}
@@ -426,7 +426,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 	}
 
 	searchTimestamp := Timestamp(1020)
-	plan, err := createPlan(*collection, dslString)
+	plan, err := createPlan(collection, dslString)
 	assert.NoError(t, err)
 	holder, err := parseSearchRequest(plan, placeHolderGroupBlob)
 	assert.NoError(t, err)
@@ -484,7 +484,7 @@ func TestSegment_segmentPreInsert(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, segmentTypeGrowing)
+	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.Equal(t, segmentID, segment.segmentID)
 
 	const DIM = 16
@@ -523,7 +523,7 @@ func TestSegment_segmentPreDelete(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, segmentTypeGrowing)
+	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.Equal(t, segmentID, segment.segmentID)
 
 	ids := []int64{1, 2, 3}
@@ -572,7 +572,7 @@ func TestSegment_segmentLoadFieldData(t *testing.T) {
 
 	segmentID := UniqueID(0)
 	partitionID := UniqueID(0)
-	segment := newSegment(collection, segmentID, partitionID, collectionID, segmentTypeSealed)
+	segment := newSegment(collection, segmentID, partitionID, collectionID, "", segmentTypeSealed, true)
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Equal(t, partitionID, segment.partitionID)
 

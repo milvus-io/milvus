@@ -132,18 +132,8 @@ func initTestMeta(t *testing.T, node *QueryNode, collectionID UniqueID, segmentI
 	err = node.historical.replica.addPartition(collection.ID(), collectionMeta.PartitionIDs[0])
 	assert.NoError(t, err)
 
-	err = node.historical.replica.addSegment(segmentID, collectionMeta.PartitionIDs[0], collectionID, segmentTypeGrowing)
+	err = node.historical.replica.addSegment(segmentID, collectionMeta.PartitionIDs[0], collectionID, "", segmentTypeGrowing, true)
 	assert.NoError(t, err)
-}
-
-func initDmChannel(ctx context.Context, insertChannels []string, node *QueryNode) {
-	watchReq := &querypb.WatchDmChannelsRequest{
-		ChannelIDs: insertChannels,
-	}
-	_, err := node.WatchDmChannels(ctx, watchReq)
-	if err != nil {
-		panic(err)
-	}
 }
 
 func initSearchChannel(ctx context.Context, searchChan string, resultChan string, node *QueryNode) {

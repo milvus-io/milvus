@@ -29,7 +29,7 @@ func TestReduce_AllFunc(t *testing.T) {
 	collectionMeta := genTestCollectionMeta(collectionID, false)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, segmentTypeGrowing)
+	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 
 	const DIM = 16
 	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
@@ -63,7 +63,7 @@ func TestReduce_AllFunc(t *testing.T) {
 		log.Print("marshal placeholderGroup failed")
 	}
 
-	plan, err := createPlan(*collection, dslString)
+	plan, err := createPlan(collection, dslString)
 	assert.NoError(t, err)
 	holder, err := parseSearchRequest(plan, placeGroupByte)
 	assert.NoError(t, err)

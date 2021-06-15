@@ -31,7 +31,7 @@ type Plan struct {
 	cPlan C.CPlan
 }
 
-func createPlan(col Collection, dsl string) (*Plan, error) {
+func createPlan(col *Collection, dsl string) (*Plan, error) {
 	cDsl := C.CString(dsl)
 	defer C.free(unsafe.Pointer(cDsl))
 	var cPlan C.CPlan
@@ -46,7 +46,7 @@ func createPlan(col Collection, dsl string) (*Plan, error) {
 	return newPlan, nil
 }
 
-func createPlanByExpr(col Collection, expr []byte) (*Plan, error) {
+func createPlanByExpr(col *Collection, expr []byte) (*Plan, error) {
 	var cPlan C.CPlan
 	status := C.CreatePlanByExpr(col.collectionPtr, (*C.char)(unsafe.Pointer(&expr[0])), (C.int64_t)(len(expr)), &cPlan)
 

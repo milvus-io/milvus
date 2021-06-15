@@ -16,9 +16,11 @@ import (
 	"errors"
 
 	"github.com/golang/protobuf/proto"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
 type MsgType = commonpb.MsgType
@@ -881,4 +883,53 @@ func (sim *SegmentInfoMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	return &SegmentInfoMsg{
 		SegmentMsg: segMsg,
 	}, nil
+}
+
+/////////////////////////////////////////LoadBalanceSegments//////////////////////////////////////////
+type LoadBalanceSegmentsMsg struct {
+	BaseMsg
+	querypb.LoadBalanceSegments
+}
+
+func (l *LoadBalanceSegmentsMsg) TraceCtx() context.Context {
+	return l.BaseMsg.Ctx
+}
+
+func (l *LoadBalanceSegmentsMsg) SetTraceCtx(ctx context.Context) {
+	l.BaseMsg.Ctx = ctx
+}
+
+func (l *LoadBalanceSegmentsMsg) ID() UniqueID {
+	return l.Base.MsgID
+}
+
+func (l *LoadBalanceSegmentsMsg) Type() MsgType {
+	return l.Base.MsgType
+}
+
+func (l *LoadBalanceSegmentsMsg) Marshal(input TsMsg) (MarshalType, error) {
+	load := input.(*LoadBalanceSegmentsMsg)
+	loadReq := &load.LoadBalanceSegments
+	mb, err := proto.Marshal(loadReq)
+	if err != nil {
+		return nil, err
+	}
+	return mb, nil
+}
+
+func (l *LoadBalanceSegmentsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
+	loadReq := querypb.LoadBalanceSegments{}
+	in, err := ConvertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &loadReq)
+	if err != nil {
+		return nil, err
+	}
+	loadMsg := &LoadBalanceSegmentsMsg{LoadBalanceSegments: loadReq}
+	loadMsg.BeginTimestamp = loadReq.Base.Timestamp
+	loadMsg.EndTimestamp = loadReq.Base.Timestamp
+
+	return loadMsg, nil
 }

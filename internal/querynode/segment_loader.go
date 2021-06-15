@@ -24,14 +24,14 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 )
 
 // segmentLoader is only responsible for loading the field data from binlog
 type segmentLoader struct {
-	replica ReplicaInterface
+	historicalReplica ReplicaInterface
 
 	dataService types.DataService
 
@@ -40,26 +40,108 @@ type segmentLoader struct {
 	indexLoader *indexLoader
 }
 
-func (loader *segmentLoader) getInsertBinlogPaths(segmentID UniqueID) ([]*internalpb.StringList, []int64, error) {
-	ctx := context.TODO()
-	if loader.dataService == nil {
-		return nil, nil, errors.New("null data service client")
+func (loader *segmentLoader) loadSegmentOfConditionHandOff(req *queryPb.LoadSegmentsRequest) error {
+	return errors.New("TODO: implement hand off")
+}
+
+func (loader *segmentLoader) loadSegmentOfConditionLoadBalance(req *queryPb.LoadSegmentsRequest) error {
+	return loader.loadSegment(req, false)
+}
+
+func (loader *segmentLoader) loadSegmentOfConditionGRPC(req *queryPb.LoadSegmentsRequest) error {
+	return loader.loadSegment(req, true)
+}
+
+func (loader *segmentLoader) loadSegmentOfConditionNodeDown(req *queryPb.LoadSegmentsRequest) error {
+	return loader.loadSegment(req, true)
+}
+
+func (loader *segmentLoader) loadSegment(req *queryPb.LoadSegmentsRequest, onService bool) error {
+	// no segment needs to load, return
+	if len(req.Infos) == 0 {
+		return nil
 	}
 
-	insertBinlogPathRequest := &datapb.GetInsertBinlogPathsRequest{
-		SegmentID: segmentID,
+	// start to load
+	for _, info := range req.Infos {
+		segmentID := info.SegmentID
+		partitionID := info.PartitionID
+		collectionID := info.CollectionID
+
+		// init replica
+		hasCollectionInHistorical := loader.historicalReplica.hasCollection(collectionID)
+		hasPartitionInHistorical := loader.historicalReplica.hasPartition(partitionID)
+		if !hasCollectionInHistorical {
+			err := loader.historicalReplica.addCollection(collectionID, req.Schema)
+			if err != nil {
+				return err
+			}
+		}
+		if !hasPartitionInHistorical {
+			err := loader.historicalReplica.addPartition(collectionID, partitionID)
+			if err != nil {
+				return err
+			}
+		}
+
+		collection, err := loader.historicalReplica.getCollectionByID(collectionID)
+		if err != nil {
+			log.Warn(err.Error())
+			continue
+		}
+		segment := newSegment(collection, segmentID, partitionID, collectionID, "", segmentTypeSealed, onService)
+		err = loader.loadSegmentInternal(collectionID, segment, info.BinlogPaths)
+		if err != nil {
+			deleteSegment(segment)
+			log.Error(err.Error())
+			continue
+		}
+		err = loader.historicalReplica.setSegment(segment)
+		if err != nil {
+			deleteSegment(segment)
+			log.Error(err.Error())
+		}
 	}
 
-	pathResponse, err := loader.dataService.GetInsertBinlogPaths(ctx, insertBinlogPathRequest)
-	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return nil, nil, err
+	// sendQueryNodeStats
+	return loader.indexLoader.sendQueryNodeStats()
+}
+
+func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID,
+	segment *Segment,
+	binlogPaths []*queryPb.FieldBinlog) error {
+
+	vectorFieldIDs, err := loader.historicalReplica.getVecFieldIDsByCollectionID(collectionID)
+	if err != nil {
+		return err
 	}
 
-	if len(pathResponse.FieldIDs) != len(pathResponse.Paths) || len(pathResponse.FieldIDs) <= 0 {
-		return nil, nil, errors.New("illegal GetInsertBinlogPathsResponse")
+	loadIndexFieldIDs := make([]int64, 0)
+	for _, vecFieldID := range vectorFieldIDs {
+		err = loader.indexLoader.setIndexInfo(collectionID, segment, vecFieldID)
+		if err != nil {
+			log.Warn(err.Error())
+			continue
+		}
+		loadIndexFieldIDs = append(loadIndexFieldIDs, vecFieldID)
+	}
+	// we don't need load to vector fields
+	binlogPaths = loader.filterOutVectorFields(binlogPaths, loadIndexFieldIDs)
+
+	log.Debug("loading insert...")
+	err = loader.loadSegmentFieldsData(segment, binlogPaths)
+	if err != nil {
+		return err
+	}
+	for _, id := range loadIndexFieldIDs {
+		log.Debug("loading index...")
+		err = loader.indexLoader.loadIndex(segment, id)
+		if err != nil {
+			return err
+		}
 	}
 
-	return pathResponse.Paths, pathResponse.FieldIDs, nil
+	return nil
 }
 
 func (loader *segmentLoader) GetSegmentStates(segmentID UniqueID) (*datapb.GetSegmentStatesResponse, error) {
@@ -82,7 +164,9 @@ func (loader *segmentLoader) GetSegmentStates(segmentID UniqueID) (*datapb.GetSe
 	return statesResponse, nil
 }
 
-func (loader *segmentLoader) filterOutVectorFields(fieldIDs []int64, vectorFields []int64) []int64 {
+func (loader *segmentLoader) filterOutVectorFields(binlogPaths []*queryPb.FieldBinlog,
+	vectorFields []int64) []*queryPb.FieldBinlog {
+
 	containsFunc := func(s []int64, e int64) bool {
 		for _, a := range s {
 			if a == e {
@@ -91,117 +175,101 @@ func (loader *segmentLoader) filterOutVectorFields(fieldIDs []int64, vectorField
 		}
 		return false
 	}
-	targetFields := make([]int64, 0)
-	for _, id := range fieldIDs {
-		if !containsFunc(vectorFields, id) {
-			targetFields = append(targetFields, id)
+	targetFields := make([]*queryPb.FieldBinlog, 0)
+	for _, path := range binlogPaths {
+		if !containsFunc(vectorFields, path.FieldID) {
+			targetFields = append(targetFields, path)
 		}
 	}
 	return targetFields
 }
 
-func (loader *segmentLoader) checkTargetFields(paths []*internalpb.StringList, srcFieldIDs []int64, dstFieldIDs []int64) (map[int64]*internalpb.StringList, error) {
-	targetFields := make(map[int64]*internalpb.StringList)
-
-	containsFunc := func(s []int64, e int64) bool {
-		for _, a := range s {
-			if a == e {
-				return true
-			}
-		}
-		return false
-	}
-
-	for _, fieldID := range dstFieldIDs {
-		if !containsFunc(srcFieldIDs, fieldID) {
-			return nil, errors.New("uncompleted fields")
-		}
-	}
-
-	for i := range srcFieldIDs {
-		targetFields[srcFieldIDs[i]] = paths[i]
-	}
-
-	return targetFields, nil
-}
-
-func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, targetFields map[int64]*internalpb.StringList) error {
+func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, binlogPaths []*queryPb.FieldBinlog) error {
 	iCodec := storage.InsertCodec{}
-	defer iCodec.Close()
-	for id, p := range targetFields {
-		if id == timestampFieldID {
+	defer func() {
+		err := iCodec.Close()
+		if err != nil {
+			log.Error(err.Error())
+		}
+	}()
+	blobs := make([]*storage.Blob, 0)
+	for _, binlogPath := range binlogPaths {
+		fieldID := binlogPath.FieldID
+		if fieldID == timestampFieldID {
 			// seg core doesn't need timestamp field
 			continue
 		}
 
-		paths := p.Values
-		blobs := make([]*storage.Blob, 0)
-		log.Debug("loadSegmentFieldsData", zap.Int64("segmentID", segment.segmentID), zap.String("path", fmt.Sprintln(paths)))
+		paths := binlogPath.Binlogs
+		log.Debug("load segment fields data",
+			zap.Int64("segmentID", segment.segmentID),
+			zap.Any("fieldID", fieldID),
+			zap.String("paths", fmt.Sprintln(paths)),
+		)
+		blob := &storage.Blob{
+			Key:   strconv.FormatInt(fieldID, 10),
+			Value: make([]byte, 0),
+		}
 		for _, path := range paths {
 			binLog, err := loader.kv.Load(path)
 			if err != nil {
 				// TODO: return or continue?
 				return err
 			}
-			blobs = append(blobs, &storage.Blob{
-				Key:   strconv.FormatInt(id, 10), // TODO: key???
-				Value: []byte(binLog),
-			})
+			blob.Value = append(blob.Value, []byte(binLog)...)
 		}
-		_, _, insertData, err := iCodec.Deserialize(blobs)
+		blobs = append(blobs, blob)
+	}
+
+	_, _, insertData, err := iCodec.Deserialize(blobs)
+	if err != nil {
+		log.Error(err.Error())
+		return err
+	}
+	for fieldID, value := range insertData.Data {
+		var numRows int
+		var data interface{}
+		switch fieldData := value.(type) {
+		case *storage.BoolFieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.Int8FieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.Int16FieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.Int32FieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.Int64FieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.FloatFieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.DoubleFieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case storage.StringFieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.FloatVectorFieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.BinaryVectorFieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		default:
+			return errors.New("unexpected field data type")
+		}
+		err = segment.segmentLoadFieldData(fieldID, numRows, data)
 		if err != nil {
-			// TODO: return or continue
+			// TODO: return or continue?
 			return err
 		}
-		if len(insertData.Data) != 1 {
-			return errors.New("we expect only one field in deserialized insert data")
-		}
-
-		for _, value := range insertData.Data {
-			var numRows int
-			var data interface{}
-
-			switch fieldData := value.(type) {
-			case *storage.BoolFieldData:
-				numRows = fieldData.NumRows
-				data = fieldData.Data
-			case *storage.Int8FieldData:
-				numRows = fieldData.NumRows
-				data = fieldData.Data
-			case *storage.Int16FieldData:
-				numRows = fieldData.NumRows
-				data = fieldData.Data
-			case *storage.Int32FieldData:
-				numRows = fieldData.NumRows
-				data = fieldData.Data
-			case *storage.Int64FieldData:
-				numRows = fieldData.NumRows
-				data = fieldData.Data
-			case *storage.FloatFieldData:
-				numRows = fieldData.NumRows
-				data = fieldData.Data
-			case *storage.DoubleFieldData:
-				numRows = fieldData.NumRows
-				data = fieldData.Data
-			case storage.StringFieldData:
-				numRows = fieldData.NumRows
-				data = fieldData.Data
-			case *storage.FloatVectorFieldData:
-				numRows = fieldData.NumRows
-				data = fieldData.Data
-			case *storage.BinaryVectorFieldData:
-				numRows = fieldData.NumRows
-				data = fieldData.Data
-			default:
-				return errors.New("unexpected field data type")
-			}
-			err = segment.segmentLoadFieldData(id, numRows, data)
-			if err != nil {
-				// TODO: return or continue?
-				return err
-			}
-		}
 	}
+
 	return nil
 }
 
@@ -222,7 +290,7 @@ func newSegmentLoader(ctx context.Context, masterService types.MasterService, in
 
 	iLoader := newIndexLoader(ctx, masterService, indexService, replica)
 	return &segmentLoader{
-		replica: replica,
+		historicalReplica: replica,
 
 		dataService: dataService,
 

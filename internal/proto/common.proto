@@ -94,6 +94,10 @@ enum MsgType {
     /* DEFINE REQUESTS: SEGMENT */
     ShowSegments = 250;
     DescribeSegment = 251;
+    LoadSegments = 252;
+    ReleaseSegments = 253;
+    HandoffSegments = 254;
+    LoadBalanceSegments = 255;
 
     /* DEFINITION REQUESTS: INDEX */
     CreateIndex = 300;
@@ -114,6 +118,10 @@ enum MsgType {
     GetPartitionStatistics = 505;
     Retrieve = 506;
     RetrieveResult = 507;
+    WatchDmChannels = 508;
+    RemoveDmChannels = 509;
+    WatchQueryChannels = 510;
+    RemoveQueryChannels = 511;
 
     /* DATA SERVICE */
     SegmentInfo = 600;

@@ -94,29 +94,49 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 	// check if collection and partition exist
 	collection := fdmNode.replica.hasCollection(msg.CollectionID)
 	partition := fdmNode.replica.hasPartition(msg.PartitionID)
-	if !collection || !partition {
+	if fdmNode.graphType == flowGraphTypeCollection && !collection {
+		log.Debug("filter invalid insert message, collection dose not exist",
+			zap.Any("collectionID", msg.CollectionID),
+			zap.Any("partitionID", msg.PartitionID))
+		return nil
+	}
+
+	if fdmNode.graphType == flowGraphTypePartition && !partition {
+		log.Debug("filter invalid insert message, partition dose not exist",
+			zap.Any("collectionID", msg.CollectionID),
+			zap.Any("partitionID", msg.PartitionID))
 		return nil
 	}
 
 	// check if the collection from message is target collection
 	if msg.CollectionID != fdmNode.collectionID {
+		log.Debug("filter invalid insert message, collection is not the target collection",
+			zap.Any("collectionID", msg.CollectionID),
+			zap.Any("partitionID", msg.PartitionID))
 		return nil
 	}
 
 	// if the flow graph type is partition, check if the partition is target partition
 	if fdmNode.graphType == flowGraphTypePartition && msg.PartitionID != fdmNode.partitionID {
+		log.Debug("filter invalid insert message, partition is not the target partition",
+			zap.Any("collectionID", msg.CollectionID),
+			zap.Any("partitionID", msg.PartitionID))
 		return nil
 	}
 
-	// check if the segment is in excluded segments
+	// Check if the segment is in excluded segments,
+	// messages after seekPosition may contain the redundant data from flushed slice of segment,
+	// so we need to compare the endTimestamp of received messages and position's timestamp.
 	excludedSegments, err := fdmNode.replica.getExcludedSegments(fdmNode.collectionID)
-	//log.Debug("excluded segments", zap.String("segmentIDs", fmt.Sprintln(excludedSegments)))
 	if err != nil {
 		log.Error(err.Error())
 		return nil
 	}
-	for _, id := range excludedSegments {
-		if msg.SegmentID == id {
+	for _, segmentInfo := range excludedSegments {
+		if msg.SegmentID == segmentInfo.SegmentID && msg.EndTs() < segmentInfo.Position.Timestamp {
+			log.Debug("filter invalid insert message, segments are excluded segments",
+				zap.Any("collectionID", msg.CollectionID),
+				zap.Any("partitionID", msg.PartitionID))
 			return nil
 		}
 	}
@@ -128,6 +148,9 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 	}
 
 	if len(msg.Timestamps) <= 0 {
+		log.Debug("filter invalid insert message, no message",
+			zap.Any("collectionID", msg.CollectionID),
+			zap.Any("partitionID", msg.PartitionID))
 		return nil
 	}
 

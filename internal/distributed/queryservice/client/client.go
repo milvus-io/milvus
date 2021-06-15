@@ -246,9 +246,9 @@ func (c *Client) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 	return ret.(*commonpb.Status), err
 }
 
-func (c *Client) CreateQueryChannel(ctx context.Context) (*querypb.CreateQueryChannelResponse, error) {
+func (c *Client) CreateQueryChannel(ctx context.Context, req *querypb.CreateQueryChannelRequest) (*querypb.CreateQueryChannelResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.CreateQueryChannel(ctx, &querypb.CreateQueryChannelRequest{})
+		return c.grpcClient.CreateQueryChannel(ctx, req)
 	})
 	return ret.(*querypb.CreateQueryChannelResponse), err
 }

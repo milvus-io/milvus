@@ -142,15 +142,13 @@ func TestSearch_Search(t *testing.T) {
 
 	// start search service
 	node.searchService = newSearchService(node.queryNodeLoopCtx,
-		node.historical.replica,
-		node.streaming.replica,
-		node.streaming.tSafeReplica,
+		node.historical,
+		node.streaming,
 		msFactory)
-	go node.searchService.start()
-	node.searchService.startSearchCollection(collectionID)
+	node.searchService.addSearchCollection(collectionID)
 
 	// load segment
-	err = node.historical.replica.addSegment(segmentID, defaultPartitionID, collectionID, segmentTypeSealed)
+	err = node.historical.replica.addSegment(segmentID, defaultPartitionID, collectionID, "", segmentTypeSealed, true)
 	assert.NoError(t, err)
 	segment, err := node.historical.replica.getSegmentByID(segmentID)
 	assert.NoError(t, err)
@@ -182,22 +180,20 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 
 	// start search service
 	node.searchService = newSearchService(node.queryNodeLoopCtx,
-		node.streaming.replica,
-		node.streaming.replica,
-		node.streaming.tSafeReplica,
+		node.historical,
+		node.streaming,
 		msFactory)
-	go node.searchService.start()
-	node.searchService.startSearchCollection(collectionID)
+	node.searchService.addSearchCollection(collectionID)
 
 	// load segments
-	err = node.historical.replica.addSegment(segmentID1, defaultPartitionID, collectionID, segmentTypeSealed)
+	err = node.historical.replica.addSegment(segmentID1, defaultPartitionID, collectionID, "", segmentTypeSealed, true)
 	assert.NoError(t, err)
 	segment1, err := node.historical.replica.getSegmentByID(segmentID1)
 	assert.NoError(t, err)
 	err = loadFields(segment1, DIM, N)
 	assert.NoError(t, err)
 
-	err = node.historical.replica.addSegment(segmentID2, defaultPartitionID, collectionID, segmentTypeSealed)
+	err = node.historical.replica.addSegment(segmentID2, defaultPartitionID, collectionID, "", segmentTypeSealed, true)
 	assert.NoError(t, err)
 	segment2, err := node.historical.replica.getSegmentByID(segmentID2)
 	assert.NoError(t, err)

@@ -192,15 +192,13 @@ func (node *QueryNode) Start() error {
 	// init services and manager
 	// TODO: pass node.streaming.replica to search service
 	node.searchService = newSearchService(node.queryNodeLoopCtx,
-		node.historical.replica,
-		node.streaming.replica,
-		node.streaming.tSafeReplica,
+		node.historical,
+		node.streaming,
 		node.msFactory)
 
 	node.retrieveService = newRetrieveService(node.queryNodeLoopCtx,
-		node.historical.replica,
-		node.streaming.replica,
-		node.streaming.tSafeReplica,
+		node.historical,
+		node.streaming,
 		node.msFactory,
 	)
 
@@ -208,7 +206,6 @@ func (node *QueryNode) Start() error {
 	go node.scheduler.Start()
 
 	// start services
-	go node.searchService.start()
 	go node.retrieveService.start()
 	go node.historical.start()
 	node.UpdateStateCode(internalpb.StateCode_Healthy)

@@ -36,10 +36,9 @@ type retrieveCollection struct {
 	releaseCtx context.Context
 	cancel     context.CancelFunc
 
-	collectionID      UniqueID
-	historicalReplica ReplicaInterface
-	streamingReplica  ReplicaInterface
-	tSafeReplica      TSafeReplicaInterface
+	collectionID UniqueID
+	historical   *historical
+	streaming    *streaming
 
 	msgBuffer     chan *msgstream.RetrieveMsg
 	unsolvedMsgMu sync.Mutex
@@ -57,9 +56,8 @@ type retrieveCollection struct {
 func newRetrieveCollection(releaseCtx context.Context,
 	cancel context.CancelFunc,
 	collectionID UniqueID,
-	historicalReplica ReplicaInterface,
-	streamingReplica ReplicaInterface,
-	tSafeReplica TSafeReplicaInterface,
+	historical *historical,
+	streaming *streaming,
 	retrieveResultStream msgstream.MsgStream) *retrieveCollection {
 	receiveBufSize := Params.RetrieveReceiveBufSize
 	msgBuffer := make(chan *msgstream.RetrieveMsg, receiveBufSize)
@@ -69,10 +67,9 @@ func newRetrieveCollection(releaseCtx context.Context,
 		releaseCtx: releaseCtx,
 		cancel:     cancel,
 
-		collectionID:      collectionID,
-		historicalReplica: historicalReplica,
-		streamingReplica:  streamingReplica,
-		tSafeReplica:      tSafeReplica,
+		collectionID: collectionID,
+		historical:   historical,
+		streaming:    streaming,
 
 		tSafeWatchers: make(map[VChannel]*tSafeWatcher),
 
@@ -118,7 +115,7 @@ func (rc *retrieveCollection) waitNewTSafe() Timestamp {
 	}
 	t := Timestamp(math.MaxInt64)
 	for channel := range rc.tSafeWatchers {
-		ts := rc.tSafeReplica.getTSafe(channel)
+		ts := rc.streaming.tSafeReplica.getTSafe(channel)
 		if ts <= t {
 			t = ts
 		}
@@ -133,7 +130,7 @@ func (rc *retrieveCollection) start() {
 
 func (rc *retrieveCollection) register() {
 	// register tSafe watcher and init watcher select case
-	collection, err := rc.streamingReplica.getCollectionByID(rc.collectionID)
+	collection, err := rc.streaming.replica.getCollectionByID(rc.collectionID)
 	if err != nil {
 		log.Error(err.Error())
 		return
@@ -141,9 +138,9 @@ func (rc *retrieveCollection) register() {
 
 	rc.watcherSelectCase = make([]reflect.SelectCase, 0)
 	for _, channel := range collection.getWatchedDmChannels() {
-		rc.tSafeReplica.addTSafe(channel)
+		rc.streaming.tSafeReplica.addTSafe(channel)
 		rc.tSafeWatchers[channel] = newTSafeWatcher()
-		rc.tSafeReplica.registerTSafeWatcher(channel, rc.tSafeWatchers[channel])
+		rc.streaming.tSafeReplica.registerTSafeWatcher(channel, rc.tSafeWatchers[channel])
 		rc.watcherSelectCase = append(rc.watcherSelectCase, reflect.SelectCase{
 			Dir:  reflect.SelectRecv,
 			Chan: reflect.ValueOf(rc.tSafeWatchers[channel].watcherChan()),
@@ -358,7 +355,7 @@ func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error
 	timestamp := retrieveMsg.Base.Timestamp
 
 	collectionID := retrieveMsg.CollectionID
-	collection, err := rc.historicalReplica.getCollectionByID(collectionID)
+	collection, err := rc.historical.replica.getCollectionByID(collectionID)
 	if err != nil {
 		return err
 	}
@@ -378,8 +375,8 @@ func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error
 	var partitionIDsInStreaming []UniqueID
 	partitionIDsInQuery := retrieveMsg.PartitionIDs
 	if len(partitionIDsInQuery) == 0 {
-		partitionIDsInHistoricalCol, err1 := rc.historicalReplica.getPartitionIDs(collectionID)
-		partitionIDsInStreamingCol, err2 := rc.streamingReplica.getPartitionIDs(collectionID)
+		partitionIDsInHistoricalCol, err1 := rc.historical.replica.getPartitionIDs(collectionID)
+		partitionIDsInStreamingCol, err2 := rc.streaming.replica.getPartitionIDs(collectionID)
 		if err1 != nil && err2 != nil {
 			return err2
 		}
@@ -390,11 +387,11 @@ func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error
 		partitionIDsInStreaming = partitionIDsInStreamingCol
 	} else {
 		for _, id := range partitionIDsInQuery {
-			_, err1 := rc.historicalReplica.getPartitionByID(id)
+			_, err1 := rc.historical.replica.getPartitionByID(id)
 			if err1 == nil {
 				partitionIDsInHistorical = append(partitionIDsInHistorical, id)
 			}
-			_, err2 := rc.streamingReplica.getPartitionByID(id)
+			_, err2 := rc.streaming.replica.getPartitionByID(id)
 			if err2 == nil {
 				partitionIDsInStreaming = append(partitionIDsInStreaming, id)
 			}
@@ -406,12 +403,12 @@ func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error
 
 	var mergeList []*planpb.RetrieveResults
 	for _, partitionID := range partitionIDsInHistorical {
-		segmentIDs, err := rc.historicalReplica.getSegmentIDs(partitionID)
+		segmentIDs, err := rc.historical.replica.getSegmentIDs(partitionID)
 		if err != nil {
 			return err
 		}
 		for _, segmentID := range segmentIDs {
-			segment, err := rc.historicalReplica.getSegmentByID(segmentID)
+			segment, err := rc.historical.replica.getSegmentByID(segmentID)
 			if err != nil {
 				return err
 			}
@@ -424,12 +421,12 @@ func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error
 	}
 
 	for _, partitionID := range partitionIDsInStreaming {
-		segmentIDs, err := rc.streamingReplica.getSegmentIDs(partitionID)
+		segmentIDs, err := rc.streaming.replica.getSegmentIDs(partitionID)
 		if err != nil {
 			return err
 		}
 		for _, segmentID := range segmentIDs {
-			segment, err := rc.streamingReplica.getSegmentByID(segmentID)
+			segment, err := rc.streaming.replica.getSegmentByID(segmentID)
 			if err != nil {
 				return err
 			}

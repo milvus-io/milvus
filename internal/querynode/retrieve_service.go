@@ -27,9 +27,8 @@ type retrieveService struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	historicalReplica ReplicaInterface
-	streamingReplica  ReplicaInterface
-	tSafeReplica      TSafeReplicaInterface
+	historical *historical
+	streaming  *streaming
 
 	retrieveMsgStream       msgstream.MsgStream
 	retrieveResultMsgStream msgstream.MsgStream
@@ -39,9 +38,8 @@ type retrieveService struct {
 }
 
 func newRetrieveService(ctx context.Context,
-	historicalReplica ReplicaInterface,
-	streamingReplica ReplicaInterface,
-	tSafeReplica TSafeReplicaInterface,
+	historical *historical,
+	streaming *streaming,
 	factory msgstream.Factory) *retrieveService {
 
 	retrieveStream, _ := factory.NewQueryMsgStream(ctx)
@@ -62,9 +60,8 @@ func newRetrieveService(ctx context.Context,
 		ctx:    retrieveServiceCtx,
 		cancel: retrieveServiceCancel,
 
-		historicalReplica: historicalReplica,
-		streamingReplica:  streamingReplica,
-		tSafeReplica:      tSafeReplica,
+		historical: historical,
+		streaming:  streaming,
 
 		retrieveMsgStream:       retrieveStream,
 		retrieveResultMsgStream: retrieveResultStream,
@@ -81,7 +78,7 @@ func (rs *retrieveService) start() {
 }
 
 func (rs *retrieveService) collectionCheck(collectionID UniqueID) error {
-	if ok := rs.historicalReplica.hasCollection(collectionID); !ok {
+	if ok := rs.historical.replica.hasCollection(collectionID); !ok {
 		err := errors.New("no collection found, collectionID = " + strconv.FormatInt(collectionID, 10))
 		log.Error(err.Error())
 		return err
@@ -164,9 +161,8 @@ func (rs *retrieveService) startRetrieveCollection(collectionID UniqueID) {
 	rc := newRetrieveCollection(ctx1,
 		cancel,
 		collectionID,
-		rs.historicalReplica,
-		rs.streamingReplica,
-		rs.tSafeReplica,
+		rs.historical,
+		rs.streaming,
 		rs.retrieveResultMsgStream)
 	rs.retrieveCollections[collectionID] = rc
 	rc.start()

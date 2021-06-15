@@ -14,6 +14,10 @@ package querynode
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math/rand"
+	"strconv"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -70,30 +74,54 @@ func (node *QueryNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.Stri
 }
 
 func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQueryChannelRequest) (*commonpb.Status, error) {
-	//if node.searchService == nil || node.searchService.searchMsgStream == nil {
-	//	errMsg := "null search service or null search message stream"
+	collectionID := in.CollectionID
+	if node.searchService == nil {
+		errMsg := "null search service, collectionID = " + fmt.Sprintln(collectionID)
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    errMsg,
+		}
+		return status, errors.New(errMsg)
+	}
+
+	//if _, ok := node.searchService.searchCollections[in.CollectionID]; !ok {
+	//	errMsg := "null search collection, collectionID = " + fmt.Sprintln(collectionID)
 	//	status := &commonpb.Status{
 	//		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	//		Reason:    errMsg,
 	//	}
-	//
 	//	return status, errors.New(errMsg)
 	//}
-	//
-	//// add request channel
-	//consumeChannels := []string{in.RequestChannelID}
-	//consumeSubName := Params.MsgChannelSubName
-	//node.searchService.searchMsgStream.AsConsumer(consumeChannels, consumeSubName)
-	//node.retrieveService.retrieveMsgStream.AsConsumer(consumeChannels, "RetrieveSubName")
-	//log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
-	//
-	//// add result channel
-	//producerChannels := []string{in.ResultChannelID}
-	//node.searchService.searchResultMsgStream.AsProducer(producerChannels)
-	//node.retrieveService.retrieveResultMsgStream.AsProducer(producerChannels)
-	//log.Debug("querynode AsProducer: " + strings.Join(producerChannels, ", "))
 
-	// Do nothing
+	// add search collection
+	if !node.searchService.hasSearchCollection(collectionID) {
+		node.searchService.addSearchCollection(collectionID)
+		log.Debug("add search collection", zap.Any("collectionID", collectionID))
+	}
+
+	// add request channel
+	sc := node.searchService.searchCollections[in.CollectionID]
+	consumeChannels := []string{in.RequestChannelID}
+	//consumeSubName := Params.MsgChannelSubName
+	consumeSubName := Params.MsgChannelSubName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
+	sc.searchMsgStream.AsConsumer(consumeChannels, consumeSubName)
+	node.retrieveService.retrieveMsgStream.AsConsumer(consumeChannels, "RetrieveSubName")
+	log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
+
+	// add result channel
+	producerChannels := []string{in.ResultChannelID}
+	sc.searchResultMsgStream.AsProducer(producerChannels)
+	node.retrieveService.retrieveResultMsgStream.AsProducer(producerChannels)
+	log.Debug("querynode AsProducer: " + strings.Join(producerChannels, ", "))
+
+	// message stream need to asConsumer before start
+	// add search collection
+	if !node.searchService.hasSearchCollection(collectionID) {
+		node.searchService.addSearchCollection(collectionID)
+		log.Debug("add search collection", zap.Any("collectionID", collectionID))
+	}
+	sc.start()
+	log.Debug("start search collection", zap.Any("collectionID", collectionID))
 
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -206,7 +234,11 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 		log.Error(err.Error())
 		return status, err
 	}
-	log.Debug("loadSegmentsTask Enqueue done", zap.Any("collectionID", in.CollectionID))
+	segmentIDs := make([]UniqueID, 0)
+	for _, info := range in.Infos {
+		segmentIDs = append(segmentIDs, info.SegmentID)
+	}
+	log.Debug("loadSegmentsTask Enqueue done", zap.Int64s("segmentIDs", segmentIDs))
 
 	func() {
 		err = dct.WaitToFinish()
@@ -214,7 +246,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 			log.Error(err.Error())
 			return
 		}
-		log.Debug("loadSegmentsTask WaitToFinish done", zap.Any("collectionID", in.CollectionID))
+		log.Debug("loadSegmentsTask WaitToFinish done", zap.Int64s("segmentIDs", segmentIDs))
 	}()
 
 	status := &commonpb.Status{
@@ -301,11 +333,17 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseS
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
 	for _, id := range in.SegmentIDs {
-		err2 := node.historical.loadService.segLoader.replica.removeSegment(id)
-		if err2 != nil {
+		err := node.historical.replica.removeSegment(id)
+		if err != nil {
 			// not return, try to release all segments
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			status.Reason = err2.Error()
+			status.Reason = err.Error()
+		}
+		err = node.streaming.replica.removeSegment(id)
+		if err != nil {
+			// not return, try to release all segments
+			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			status.Reason = err.Error()
 		}
 	}
 	return status, nil

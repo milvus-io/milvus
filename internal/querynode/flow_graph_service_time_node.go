@@ -24,10 +24,12 @@ import (
 
 type serviceTimeNode struct {
 	baseNode
-	collectionID UniqueID
-	vChannel     VChannel
-	tSafeReplica TSafeReplicaInterface
-	//timeTickMsgStream msgstream.MsgStream
+	graphType         flowGraphType
+	collectionID      UniqueID
+	partitionID       UniqueID
+	vChannel          VChannel
+	tSafeReplica      TSafeReplicaInterface
+	timeTickMsgStream msgstream.MsgStream
 }
 
 func (stNode *serviceTimeNode) Name() string {
@@ -57,11 +59,19 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 
 	// update service time
-	channel := stNode.vChannel + strconv.FormatInt(stNode.collectionID, 10)
-	stNode.tSafeReplica.setTSafe(channel, serviceTimeMsg.timeRange.timestampMax)
+	var id UniqueID
+	if stNode.graphType == flowGraphTypePartition {
+		id = stNode.partitionID
+	} else {
+		id = stNode.collectionID
+	}
+	channelTmp := stNode.vChannel + strconv.FormatInt(stNode.collectionID, 10)
+	stNode.tSafeReplica.setTSafe(channelTmp, id, serviceTimeMsg.timeRange.timestampMax)
 	//log.Debug("update tSafe:",
 	//	zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)),
 	//	zap.Any("collectionID", stNode.collectionID),
+	//	zap.Any("id", id),
+	//	zap.Any("channel", channelTmp),
 	//)
 
 	//if err := stNode.sendTimeTick(serviceTimeMsg.timeRange.timestampMax); err != nil {
@@ -98,7 +108,9 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 func newServiceTimeNode(ctx context.Context,
 	tSafeReplica TSafeReplicaInterface,
+	graphType flowGraphType,
 	collectionID UniqueID,
+	partitionID UniqueID,
 	channel VChannel,
 	factory msgstream.Factory) *serviceTimeNode {
 
@@ -109,19 +121,23 @@ func newServiceTimeNode(ctx context.Context,
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
-	//timeTimeMsgStream, err := factory.NewMsgStream(ctx)
-	//if err != nil {
-	//	log.Error(err.Error())
-	//} else {
-	//	timeTimeMsgStream.AsProducer([]string{Params.QueryTimeTickChannelName})
-	//	log.Debug("query node AsProducer: " + Params.QueryTimeTickChannelName)
-	//}
+	timeTimeMsgStream, err := factory.NewMsgStream(ctx)
+	if err != nil {
+		log.Error(err.Error())
+	} else {
+		// TODO: use param table
+		timeTickChannel := "query-node-time-tick-0"
+		timeTimeMsgStream.AsProducer([]string{timeTickChannel})
+		log.Debug("query node AsProducer: " + timeTickChannel)
+	}
 
 	return &serviceTimeNode{
-		baseNode:     baseNode,
-		collectionID: collectionID,
-		vChannel:     channel,
-		tSafeReplica: tSafeReplica,
-		//timeTickMsgStream: timeTimeMsgStream,
+		baseNode:          baseNode,
+		graphType:         graphType,
+		collectionID:      collectionID,
+		partitionID:       partitionID,
+		vChannel:          channel,
+		tSafeReplica:      tSafeReplica,
+		timeTickMsgStream: timeTimeMsgStream,
 	}
 }
