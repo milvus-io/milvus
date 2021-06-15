@@ -602,7 +602,7 @@ func (c *Core) setMsgStreams() error {
 			CreateCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.BroadcastMany(channelNames, &msgPack)
+		return c.dmlChannels.BroadcastAll(channelNames, &msgPack)
 	}
 
 	c.SendDdDropCollectionReq = func(ctx context.Context, req *internalpb.DropCollectionRequest, channelNames []string) error {
@@ -618,7 +618,7 @@ func (c *Core) setMsgStreams() error {
 			DropCollectionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.BroadcastMany(channelNames, &msgPack)
+		return c.dmlChannels.BroadcastAll(channelNames, &msgPack)
 	}
 
 	c.SendDdCreatePartitionReq = func(ctx context.Context, req *internalpb.CreatePartitionRequest, channelNames []string) error {
@@ -634,7 +634,7 @@ func (c *Core) setMsgStreams() error {
 			CreatePartitionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.BroadcastMany(channelNames, &msgPack)
+		return c.dmlChannels.BroadcastAll(channelNames, &msgPack)
 	}
 
 	c.SendDdDropPartitionReq = func(ctx context.Context, req *internalpb.DropPartitionRequest, channelNames []string) error {
@@ -650,7 +650,7 @@ func (c *Core) setMsgStreams() error {
 			DropPartitionRequest: *req,
 		}
 		msgPack.Msgs = append(msgPack.Msgs, msg)
-		return c.dmlChannels.BroadcastMany(channelNames, &msgPack)
+		return c.dmlChannels.BroadcastAll(channelNames, &msgPack)
 	}
 
 	if Params.DataServiceSegmentChannel == "" {
@@ -1883,12 +1883,6 @@ func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.Channel
 	if in.Base.MsgType != commonpb.MsgType_TimeTick {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = fmt.Sprintf("UpdateChannelTimeTick receive invalid message %d", in.Base.GetMsgType())
-		return status, nil
-	}
-	if !c.dmlChannels.HasChannel(in.ChannelNames...) {
-		log.Debug("update time tick with unkonw channel", zap.Int("input channel size", len(in.ChannelNames)), zap.Strings("input channels", in.ChannelNames))
-		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		status.Reason = fmt.Sprintf("update time tick with unknown channel name, input channels = %v", in.ChannelNames)
 		return status, nil
 	}
 	err := c.chanTimeTick.UpdateTimeTick(in)
