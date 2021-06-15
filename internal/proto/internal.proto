@@ -161,6 +161,9 @@ message RetrieveResults {
   string result_channelID = 3;
   schema.IDs ids = 4;
   repeated schema.FieldData fields_data = 5;
+  repeated int64 sealed_segmentIDs_retrieved = 6;
+  repeated string channelIDs_retrieved = 7;
+  repeated int64 global_sealed_segmentIDs = 8;
 }
 
 message DeleteRequest {

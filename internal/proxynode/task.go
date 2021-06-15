@@ -1549,7 +1549,9 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 		for _, field := range schema.Fields {
-			rt.OutputFields = append(rt.OutputFields, field.Name)
+			if field.FieldID >= 100 {
+				rt.OutputFields = append(rt.OutputFields, field.Name)
+			}
 		}
 	} else {
 		rt.OutputFields = rt.retrieve.OutputFields
