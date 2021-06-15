@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"strings"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
@@ -94,6 +95,12 @@ func (rc *retrieveCollection) getServiceableTime() Timestamp {
 
 func (rc *retrieveCollection) setServiceableTime(t Timestamp) {
 	rc.serviceableTimeMutex.Lock()
+	defer rc.serviceableTimeMutex.Unlock()
+
+	if t < rc.serviceableTime {
+		return
+	}
+
 	gracefulTimeInMilliSecond := Params.GracefulTime
 	if gracefulTimeInMilliSecond > 0 {
 		gracefulTime := tsoutil.ComposeTS(gracefulTimeInMilliSecond, 0)
@@ -101,7 +108,6 @@ func (rc *retrieveCollection) setServiceableTime(t Timestamp) {
 	} else {
 		rc.serviceableTime = t
 	}
-	rc.serviceableTimeMutex.Unlock()
 }
 
 func (rc *retrieveCollection) waitNewTSafe() Timestamp {
@@ -128,7 +134,7 @@ func (rc *retrieveCollection) start() {
 
 func (rc *retrieveCollection) register() {
 	// register tSafe watcher and init watcher select case
-	collection, err := rc.historicalReplica.getCollectionByID(rc.collectionID)
+	collection, err := rc.streamingReplica.getCollectionByID(rc.collectionID)
 	if err != nil {
 		log.Error(err.Error())
 		return
@@ -399,6 +405,7 @@ func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error
 		}
 	}
 
+	sealedSegmentRetrieved := make([]UniqueID, 0)
 	var mergeList []*planpb.RetrieveResults
 	for _, partitionID := range partitionIDsInHistorical {
 		segmentIDs, err := rc.historicalReplica.getSegmentIDs(partitionID)
@@ -415,6 +422,7 @@ func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error
 				return err
 			}
 			mergeList = append(mergeList, result)
+			sealedSegmentRetrieved = append(sealedSegmentRetrieved, segmentID)
 		}
 	}
 
@@ -441,6 +449,16 @@ func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error
 		return err
 	}
 
+	fakedDmChannels := collection.getWatchedDmChannels()
+	var realDmChannels []string
+	for _, dmChan := range fakedDmChannels {
+		parts := strings.Split(dmChan, "#")
+		realDmChannels = append(realDmChannels, parts[0])
+	}
+	log.Debug("QueryNode retrieveCollection retrieve, realDmChannels", zap.Any("fakedDmChannels", fakedDmChannels),
+		zap.Any("realDmChannels", realDmChannels), zap.Any("collectionID", collection.ID()),
+		zap.Any("sealedSegmentRetrieved", sealedSegmentRetrieved))
+
 	resultChannelInt := 0
 	retrieveResultMsg := &msgstream.RetrieveResultMsg{
 		BaseMsg: msgstream.BaseMsg{Ctx: retrieveMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}},
@@ -450,10 +468,14 @@ func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error
 				MsgID:    retrieveMsg.Base.MsgID,
 				SourceID: retrieveMsg.Base.SourceID,
 			},
-			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-			Ids:             result.Ids,
-			FieldsData:      result.FieldsData,
-			ResultChannelID: retrieveMsg.ResultChannelID,
+			Status:                    &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Ids:                       result.Ids,
+			FieldsData:                result.FieldsData,
+			ResultChannelID:           retrieveMsg.ResultChannelID,
+			SealedSegmentIDsRetrieved: sealedSegmentRetrieved,
+			ChannelIDsRetrieved:       realDmChannels,
+			//TODO(yukun):: get global sealed segment from etcd
+			GlobalSealedSegmentIDs: sealedSegmentRetrieved,
 		},
 	}
 	err3 := rc.publishRetrieveResult(retrieveResultMsg, retrieveMsg.CollectionID)
