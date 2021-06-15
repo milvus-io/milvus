@@ -70,7 +70,7 @@ class TestIndexParams(TestcaseBase):
     def get_valid_index_params(self, request):
         yield request.param
 
-    @pytest.mark.xfail(reason="issue #5646")
+    # @pytest.mark.xfail(reason="issue #5646")
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_collection_None(self):
         """
@@ -316,7 +316,7 @@ class TestIndexBase(TestcaseBase):
 class TestIndexAdvanced(TestcaseBase):
     """ Test case of index interface """
 
-    @pytest.mark.xfail(reason="issue #5660")
+    # @pytest.mark.xfail(reason="issue #5660")
     @pytest.mark.tags(CaseLabel.L2)
     def test_index_drop_multi_collections(self):
         """
