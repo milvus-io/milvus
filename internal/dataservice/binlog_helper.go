@@ -128,7 +128,7 @@ func (s *Server) getSegmentBinlogMeta(segmentID UniqueID) (metas []*datapb.Segme
 }
 
 // GetVChanPositions get vchannel latest postitions with provided dml channel names
-func (s *Server) GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelInfo, error) {
+func (s *Server) GetVChanPositions(vchans []vchannel, isAccurate bool) ([]*datapb.VchannelInfo, error) {
 	if s.kvClient == nil {
 		return nil, errNilKvClient
 	}
@@ -157,7 +157,11 @@ func (s *Server) GetVChanPositions(vchans []vchannel) ([]*datapb.VchannelInfo, e
 
 			if seekPosition == nil || !useUnflushedPosition || s.DmlPosition.Timestamp < seekPosition.Timestamp {
 				useUnflushedPosition = true
-				seekPosition = s.DmlPosition
+				if isAccurate {
+					seekPosition = s.DmlPosition
+				} else {
+					seekPosition = s.StartPosition
+				}
 			}
 		}
 
