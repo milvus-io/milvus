@@ -231,7 +231,7 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 					close(failCh)
 					return
 				}
-				failCh <- true
+				//failCh <- true
 			}
 		}
 	}()

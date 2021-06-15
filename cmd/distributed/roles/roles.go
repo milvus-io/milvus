@@ -327,5 +327,5 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
 	sig := <-sc
-	fmt.Printf("Get %s signal to exit", sig.String())
+	fmt.Printf("Get %s signal to exit\n", sig.String())
 }
