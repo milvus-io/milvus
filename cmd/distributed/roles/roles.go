@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/milvus-io/milvus/internal/datanode"
@@ -74,7 +75,9 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	if mr.EnableMaster {
 		var ms *components.MasterService
+		var wg sync.WaitGroup
 
+		wg.Add(1)
 		go func() {
 			masterservice.Params.Init()
 			logutil.SetupLogger(&masterservice.Params.Log)
@@ -86,9 +89,11 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			if err != nil {
 				panic(err)
 			}
+			wg.Done()
 			_ = ms.Run()
 		}()
 
+		wg.Wait()
 		if ms != nil {
 			defer ms.Stop()
 		}
@@ -98,7 +103,9 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	if mr.EnableProxyNode {
 		var pn *components.ProxyNode
+		var wg sync.WaitGroup
 
+		wg.Add(1)
 		go func() {
 			proxynode.Params.Init()
 			logutil.SetupLogger(&proxynode.Params.Log)
@@ -110,9 +117,11 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			if err != nil {
 				panic(err)
 			}
+			wg.Done()
 			_ = pn.Run()
 		}()
 
+		wg.Wait()
 		if pn != nil {
 			defer pn.Stop()
 		}
@@ -122,7 +131,9 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	if mr.EnableQueryService {
 		var qs *components.QueryService
+		var wg sync.WaitGroup
 
+		wg.Add(1)
 		go func() {
 			queryservice.Params.Init()
 			logutil.SetupLogger(&queryservice.Params.Log)
@@ -134,9 +145,11 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			if err != nil {
 				panic(err)
 			}
+			wg.Done()
 			_ = qs.Run()
 		}()
 
+		wg.Wait()
 		if qs != nil {
 			defer qs.Stop()
 		}
@@ -146,7 +159,9 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	if mr.EnableQueryNode {
 		var qn *components.QueryNode
+		var wg sync.WaitGroup
 
+		wg.Add(1)
 		go func() {
 			querynode.Params.Init()
 			logutil.SetupLogger(&querynode.Params.Log)
@@ -158,9 +173,11 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			if err != nil {
 				panic(err)
 			}
+			wg.Done()
 			_ = qn.Run()
 		}()
 
+		wg.Wait()
 		if qn != nil {
 			defer qn.Stop()
 		}
@@ -170,7 +187,9 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	if mr.EnableDataService {
 		var ds *components.DataService
+		var wg sync.WaitGroup
 
+		wg.Add(1)
 		go func() {
 			dataservice.Params.Init()
 			logutil.SetupLogger(&dataservice.Params.Log)
@@ -182,9 +201,11 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			if err != nil {
 				panic(err)
 			}
+			wg.Done()
 			_ = ds.Run()
 		}()
 
+		wg.Wait()
 		if ds != nil {
 			defer ds.Stop()
 		}
@@ -194,7 +215,9 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	if mr.EnableDataNode {
 		var dn *components.DataNode
+		var wg sync.WaitGroup
 
+		wg.Add(1)
 		go func() {
 			datanode.Params.Init()
 			logutil.SetupLogger(&datanode.Params.Log)
@@ -206,9 +229,11 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			if err != nil {
 				panic(err)
 			}
+			wg.Done()
 			_ = dn.Run()
 		}()
 
+		wg.Wait()
 		if dn != nil {
 			defer dn.Stop()
 		}
@@ -218,7 +243,9 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	if mr.EnableIndexService {
 		var is *components.IndexService
+		var wg sync.WaitGroup
 
+		wg.Add(1)
 		go func() {
 			indexservice.Params.Init()
 			logutil.SetupLogger(&indexservice.Params.Log)
@@ -229,9 +256,11 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			if err != nil {
 				panic(err)
 			}
+			wg.Done()
 			_ = is.Run()
 		}()
 
+		wg.Wait()
 		if is != nil {
 			defer is.Stop()
 		}
@@ -241,7 +270,9 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	if mr.EnableIndexNode {
 		var in *components.IndexNode
+		var wg sync.WaitGroup
 
+		wg.Add(1)
 		go func() {
 			indexnode.Params.Init()
 			logutil.SetupLogger(&indexnode.Params.Log)
@@ -252,9 +283,11 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			if err != nil {
 				panic(err)
 			}
+			wg.Done()
 			_ = in.Run()
 		}()
 
+		wg.Wait()
 		if in != nil {
 			defer in.Stop()
 		}
@@ -264,16 +297,20 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	if mr.EnableMsgStreamService {
 		var mss *components.MsgStream
+		var wg sync.WaitGroup
 
+		wg.Add(1)
 		go func() {
 			var err error
 			mss, err = components.NewMsgStreamService(ctx)
 			if err != nil {
 				panic(err)
 			}
+			wg.Done()
 			_ = mss.Run()
 		}()
 
+		wg.Wait()
 		if mss != nil {
 			defer mss.Stop()
 		}

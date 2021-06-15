@@ -73,7 +73,7 @@ func (i *IndexService) prepareNodeInitParams() []*commonpb.KeyValuePair {
 }
 
 func (i *IndexService) RegisterNode(ctx context.Context, req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
-	log.Debug("indexservice", zap.Any("register index node, node address = ", req.Address))
+	log.Debug("indexservice", zap.Any("register index node, node address = ", req.Address), zap.Any("node ID = ", req.NodeID))
 	ret := &indexpb.RegisterNodeResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
