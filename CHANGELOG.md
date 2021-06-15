@@ -5,10 +5,14 @@ Please mark all change in change log and use the issue from GitHub
 # Milvus 1.1.1 (TBD)
 ## Bug
 -   \#4897 Query results contain some deleted ids
+-   \#5115 Relax restrictions on topk from 16384 to 1M for CPU search
 -   \#5164 Exception should be raised if insert or delete entity on the none-existed partition
 -   \#5191 Mishards throw "index out of range" error after continually search/insert for a period of time
+-   \#5398 Random crash after request is executed
 -   \#5537 Failed to load bloom filter after suddenly power off
+-   \#5544 Relax restrictions on index_file_size from 4GB to 128Gb
 -   \#5574 IVF_SQ8 and IVF_PQ cannot be built on multiple GPUs
+-   \#5747 Search with big nq and topk crash milvus
 
 ## Feature
 -   \#1434 Storage: enabling s3 storage support (implemented by Unisinsight)
