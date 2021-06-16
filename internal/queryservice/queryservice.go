@@ -13,18 +13,26 @@ package queryservice
 
 import (
 	"context"
+	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 	"math/rand"
+	"path/filepath"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
-	"go.uber.org/zap"
+	"github.com/coreos/etcd/mvcc/mvccpb"
+	"github.com/golang/protobuf/proto"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -39,6 +47,7 @@ type queryChannelInfo struct {
 type QueryService struct {
 	loopCtx    context.Context
 	loopCancel context.CancelFunc
+	loopWg     sync.WaitGroup
 	kvBase     *etcdkv.EtcdKV
 
 	queryServiceID uint64
@@ -49,7 +58,8 @@ type QueryService struct {
 	dataServiceClient   types.DataService
 	masterServiceClient types.MasterService
 
-	session *sessionutil.Session
+	session   *sessionutil.Session
+	eventChan <-chan *sessionutil.SessionEvent
 
 	stateCode  atomic.Value
 	isInit     atomic.Value
@@ -67,7 +77,32 @@ func (qs *QueryService) Register() error {
 }
 
 func (qs *QueryService) Init() error {
+	connectEtcdFn := func() error {
+		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+		if err != nil {
+			return err
+		}
+		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+		metaKV, err := newMeta(etcdKV)
+		if err != nil {
+			return err
+		}
+		qs.meta = metaKV
+		qs.cluster, err = newQueryNodeCluster(metaKV, etcdKV)
+		if err != nil {
+			return err
+		}
 
+		qs.scheduler, err = NewTaskScheduler(qs.loopCtx, metaKV, qs.cluster, etcdKV, qs.masterServiceClient, qs.dataServiceClient)
+		return err
+	}
+	log.Debug("IndexService try to connect etcd")
+	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
+	if err != nil {
+		log.Debug("IndexService try to connect etcd failed", zap.Error(err))
+		return err
+	}
+	log.Debug("IndexService try to connect etcd success")
 	return nil
 }
 
@@ -75,6 +110,13 @@ func (qs *QueryService) Start() error {
 	qs.scheduler.Start()
 	log.Debug("start scheduler ...")
 	qs.UpdateStateCode(internalpb.StateCode_Healthy)
+
+	qs.loopWg.Add(1)
+	go qs.watchNodeLoop()
+
+	qs.loopWg.Add(1)
+	go qs.watchMetaLoop()
+
 	return nil
 }
 
@@ -83,6 +125,8 @@ func (qs *QueryService) Stop() error {
 	log.Debug("close scheduler ...")
 	qs.loopCancel()
 	qs.UpdateStateCode(internalpb.StateCode_Abnormal)
+
+	qs.loopWg.Wait()
 	return nil
 }
 
@@ -105,16 +149,11 @@ func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryServ
 	})
 
 	ctx1, cancel := context.WithCancel(ctx)
-	meta := newMeta()
 	service := &QueryService{
 		loopCtx:    ctx1,
 		loopCancel: cancel,
-		meta:       meta,
 		msFactory:  factory,
 	}
-	//TODO::set etcd kvbase
-	service.scheduler = NewTaskScheduler(ctx1, meta, service.kvBase)
-	service.cluster = newQueryNodeCluster(meta)
 
 	service.UpdateStateCode(internalpb.StateCode_Abnormal)
 	log.Debug("QueryService", zap.Any("queryChannels", queryChannels))
@@ -127,4 +166,131 @@ func (qs *QueryService) SetMasterService(masterService types.MasterService) {
 
 func (qs *QueryService) SetDataService(dataService types.DataService) {
 	qs.dataServiceClient = dataService
+}
+
+func (qs *QueryService) watchNodeLoop() {
+	ctx, cancel := context.WithCancel(qs.loopCtx)
+	defer cancel()
+	defer qs.loopWg.Done()
+	log.Debug("QueryService start watch node loop")
+
+	clusterStartSession, version, _ := qs.session.GetSessions(typeutil.QueryNodeRole)
+	sessionMap := make(map[int64]*sessionutil.Session, 0)
+	for _, session := range clusterStartSession {
+		nodeID := session.ServerID
+		sessionMap[nodeID] = session
+	}
+	for nodeID, session := range sessionMap {
+		if _, ok := qs.cluster.nodes[nodeID]; !ok {
+			serverID := session.ServerID
+			err := qs.cluster.RegisterNode(session, serverID)
+			log.Warn(err.Error())
+			log.Debug("QueryService", zap.Any("Add QueryNode, session serverID", serverID))
+		}
+	}
+	for nodeID := range qs.cluster.nodes {
+		if _, ok := sessionMap[nodeID]; !ok {
+			qs.cluster.nodes[nodeID].setNodeState(false)
+			loadBalanceSegment := &querypb.LoadBalanceRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_LoadBalanceSegments,
+					SourceID: qs.session.ServerID,
+				},
+				SourceNodeIDs: []int64{nodeID},
+			}
+
+			loadBalanceTask := &LoadBalanceTask{
+				BaseTask: BaseTask{
+					ctx:              qs.loopCtx,
+					Condition:        NewTaskCondition(qs.loopCtx),
+					triggerCondition: querypb.TriggerCondition_nodeDown,
+				},
+				LoadBalanceRequest: loadBalanceSegment,
+				master:             qs.masterServiceClient,
+				dataService:        qs.dataServiceClient,
+				cluster:            qs.cluster,
+				meta:               qs.meta,
+			}
+			qs.scheduler.Enqueue([]task{loadBalanceTask})
+		}
+	}
+
+	qs.eventChan = qs.session.WatchServices(typeutil.QueryNodeRole, version+1)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event := <-qs.eventChan:
+			switch event.EventType {
+			case sessionutil.SessionAddEvent:
+				serverID := event.Session.ServerID
+				err := qs.cluster.RegisterNode(event.Session, serverID)
+				log.Warn(err.Error())
+				log.Debug("QueryService", zap.Any("Add QueryNode, session serverID", serverID))
+			case sessionutil.SessionDelEvent:
+				serverID := event.Session.ServerID
+				log.Debug("QueryService", zap.Any("The QueryNode crashed with ID", serverID))
+				qs.cluster.nodes[serverID].setNodeState(false)
+				loadBalanceSegment := &querypb.LoadBalanceRequest{
+					Base: &commonpb.MsgBase{
+						MsgType:  commonpb.MsgType_LoadBalanceSegments,
+						SourceID: qs.session.ServerID,
+					},
+					SourceNodeIDs: []int64{serverID},
+					BalanceReason: querypb.TriggerCondition_nodeDown,
+				}
+
+				loadBalanceTask := &LoadBalanceTask{
+					BaseTask: BaseTask{
+						ctx:              qs.loopCtx,
+						Condition:        NewTaskCondition(qs.loopCtx),
+						triggerCondition: querypb.TriggerCondition_nodeDown,
+					},
+					LoadBalanceRequest: loadBalanceSegment,
+					master:             qs.masterServiceClient,
+					dataService:        qs.dataServiceClient,
+					cluster:            qs.cluster,
+					meta:               qs.meta,
+				}
+				qs.scheduler.Enqueue([]task{loadBalanceTask})
+			}
+		}
+	}
+}
+
+func (qs *QueryService) watchMetaLoop() {
+	ctx, cancel := context.WithCancel(qs.loopCtx)
+
+	defer cancel()
+	defer qs.loopWg.Done()
+	log.Debug("QueryService start watch meta loop")
+
+	watchChan := qs.meta.client.WatchWithPrefix(segmentMetaPrefix)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case resp := <-watchChan:
+			log.Debug("segment meta updated.")
+			for _, event := range resp.Events {
+				segmentID, err := strconv.ParseInt(filepath.Base(string(event.Kv.Key)), 10, 64)
+				if err != nil {
+					log.Error("watch meta loop error when get segmentID", zap.Any("error", err.Error()))
+				}
+				segmentInfo := &querypb.SegmentInfo{}
+				err = proto.UnmarshalText(string(event.Kv.Value), segmentInfo)
+				if err != nil {
+					log.Error("watch meta loop error when unmarshal", zap.Any("error", err.Error()))
+				}
+				switch event.Type {
+				case mvccpb.PUT:
+					qs.meta.setSegmentInfo(segmentID, segmentInfo)
+				case mvccpb.DELETE:
+					//TODO::
+				}
+			}
+		}
+	}
+
 }

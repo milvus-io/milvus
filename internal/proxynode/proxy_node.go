@@ -14,7 +14,11 @@ package proxynode
 import (
 	"context"
 	"errors"
+<<<<<<< HEAD
 	"fmt"
+=======
+	"github.com/milvus-io/milvus/internal/proto/querypb"
+>>>>>>> add-task-scheduler-debug-nodedown
 	"math/rand"
 	"sync"
 	"sync/atomic"
