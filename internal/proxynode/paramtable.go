@@ -43,7 +43,6 @@ type ParamTable struct {
 	MasterAddress string
 	PulsarAddress string
 
-	QueryNodeNum               int
 	QueryNodeIDList            []UniqueID
 	ProxyID                    UniqueID
 	TimeTickInterval           time.Duration
@@ -86,7 +85,6 @@ func (pt *ParamTable) initParams() {
 	pt.initMetaRootPath()
 	pt.initPulsarAddress()
 	pt.initQueryNodeIDList()
-	pt.initQueryNodeNum()
 	pt.initTimeTickInterval()
 	pt.initK2SChannelNames()
 	pt.initProxySubName()
@@ -108,10 +106,6 @@ func (pt *ParamTable) initPulsarAddress() {
 		panic(err)
 	}
 	pt.PulsarAddress = ret
-}
-
-func (pt *ParamTable) initQueryNodeNum() {
-	pt.QueryNodeNum = len(pt.QueryNodeIDList)
 }
 
 func (pt *ParamTable) initQueryNodeIDList() []UniqueID {
