@@ -89,9 +89,9 @@ def gen_binary_vectors(num, dim):
     return raw_vectors, binary_vectors
 
 
-def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim):
-    int_values = pd.Series(data=[i for i in range(nb)])
-    float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
+def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0):
+    int_values = pd.Series(data=[i for i in range(start, start+nb)])
+    float_values = pd.Series(data=[float(i) for i in range(start, start+nb)], dtype="float32")
     float_vec_values = gen_vectors(nb, dim)
     df = pd.DataFrame({
         ct.default_int64_field_name: int_values,
@@ -101,9 +101,9 @@ def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim):
     return df
 
 
-def gen_default_binary_dataframe_data(nb=ct.default_nb, dim=ct.default_dim):
-    int_values = pd.Series(data=[i for i in range(nb)])
-    float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
+def gen_default_binary_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0):
+    int_values = pd.Series(data=[i for i in range(start, start+nb)])
+    float_values = pd.Series(data=[float(i) for i in range(start, start+nb)], dtype="float32")
     binary_raw_values, binary_vec_values = gen_binary_vectors(nb, dim)
     df = pd.DataFrame({
         ct.default_int64_field_name: int_values,
@@ -177,6 +177,7 @@ def gen_all_type_fields():
             fields.append(field)
     return fields
 
+
 def gen_normal_expressions():
     expressions = [
         "int64 > 0",
@@ -186,6 +187,7 @@ def gen_normal_expressions():
         "int64 == 0 || int64 == 1 || int64 == 2",
     ]
     return expressions
+
 
 def jaccard(x, y):
     x = np.asarray(x, np.bool)
@@ -244,6 +246,7 @@ def modify_file(file_path_list, is_modify=False, input_content=""):
                     f.close()
                 log.info("[modify_file] file(%s) modification is complete." % file_path_list)
 
+
 def index_to_dict(index):
     return {
         "collection_name": index.collection_name,
@@ -252,8 +255,10 @@ def index_to_dict(index):
         "params": index.params
     }
 
+
 def assert_equal_index(index_1, index_2):
     return index_to_dict(index_1) == index_to_dict(index_2)
+
 
 def gen_partitions(collection_w, partition_num=1):
     """
@@ -270,6 +275,7 @@ def gen_partitions(collection_w, partition_num=1):
     assert len(par) == (partition_num + 1)
     log.info("gen_partitions: created partitions %s" % par)
 
+
 def insert_data(collection_w, nb=3000, is_binary=False):
     """
     target: insert non-binary/binary data
@@ -278,16 +284,17 @@ def insert_data(collection_w, nb=3000, is_binary=False):
     """
     par = collection_w.partitions
     num = len(par)
+    partition_nb = nb // num
     vectors = []
     binary_raw_vectors = []
     log.info("insert_data: inserting data into collection %s (num_entities: %s)"
              % (collection_w.name, nb))
     for i in range(num):
         if is_binary:
-            default_data, binary_raw_data = gen_default_binary_dataframe_data(nb // num)
+            default_data, binary_raw_data = gen_default_binary_dataframe_data(partition_nb, start=i*partition_nb)
             binary_raw_vectors.extend(binary_raw_data)
         else:
-            default_data = gen_default_dataframe_data(nb // num)
+            default_data = gen_default_dataframe_data(partition_nb, start=i*partition_nb)
         collection_w.insert(default_data, par[i].name)
         vectors.extend(default_data)
     log.info("insert_data: inserted data into collection %s (num_entities: %s)"
