@@ -8,6 +8,7 @@ import "common.proto";
 import "milvus.proto";
 import "internal.proto";
 import "schema.proto";
+import "data_service.proto";
 
 service QueryService {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
@@ -196,9 +197,9 @@ message WatchDmChannelsRequest {
   int64 nodeID = 2;
   int64 collectionID = 3;
   int64 partitionID = 4;
-  repeated VchannelInfo infos = 5;
+  repeated data.VchannelInfo infos = 5;
   schema.CollectionSchema schema = 6;
-  repeated CheckPoint exclude_infos = 7;
+  repeated data.SegmentInfo exclude_infos = 7;
 }
 
 enum TriggerCondition {
@@ -220,7 +221,7 @@ message SegmentLoadInfo {
   int64 collectionID = 3;
   int64 dbID = 4;
   int64 flush_time = 5;
-  repeated FieldBinlog binlog_paths = 6;
+  repeated data.FieldBinlog binlog_paths = 6;
 }
 
 message LoadSegmentsRequest {
@@ -286,43 +287,6 @@ message LoadBalanceSegmentInfo {
 message LoadBalanceSegments {
   common.MsgBase base = 1;
   repeated LoadBalanceSegmentInfo infos = 2;
-}
-
-//--------------temp used, delete after data_service.proto update-----
-message CheckPoint {
-  int64 segmentID = 1;
-  internal.MsgPosition position = 2;
-  int64 num_of_rows = 3;
-}
-
-message VchannelInfo {
-  int64 collectionID = 1;
-  string channelName = 2;
-  internal.MsgPosition seek_position = 3;
-  repeated CheckPoint checkPoints = 4;
-  repeated int64 flushedSegments = 5;
-}
-
-message SegmentBinlogs {
-  int64 segmentID = 1;
-  repeated FieldBinlog fieldBinlogs = 2;
-}
-
-message FieldBinlog{
-  int64 fieldID = 1;
-  repeated string binlogs = 2;
-}
-
-message GetRecoveryInfoResponse {
-  common.MsgBase base = 1;
-  repeated VchannelInfo channels = 2;
-  repeated SegmentBinlogs binlogs = 3;
-}
-
-message GetRecoveryInfoRequest {
-  common.MsgBase base = 1;
-  int64 collectionID = 2;
-  int64 partitionID = 3;
 }
 
 
