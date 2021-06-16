@@ -138,7 +138,13 @@ The implemented SDK and its API documentatation are listed below:
 
 ## Contact
 
-Join the Milvus community on [Slack Channel](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ) to share your suggestions, advice, and questions with our engineering team. You can also submit questions to our [FAQ page](https://milvus.io/docs/v1.0.0/performance_faq.md).
+Join the Milvus community on [Slack Channel](https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ) to share your suggestions, advice, and questions with our engineering team. 
+
+<a href="https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ">
+    <img src="https://zillizstorage.blob.core.windows.net/zilliz-assets/zilliz-assets/assets/readme_slack_4a07c4c92f.png" alt="Miluvs Slack Channel"  height="150" width="500">
+</a>
+
+You can also submit questions to our [FAQ page](https://milvus.io/docs/v1.0.0/performance_faq.md).
 
 Subscribe to our mailing lists:
 
