@@ -50,7 +50,7 @@ type ParamTable struct {
 	// --- ETCD ---
 	EtcdEndpoints []string
 	MetaRootPath  string
-	KvRootPath   string
+	KvRootPath    string
 }
 
 var Params ParamTable

@@ -16,12 +16,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"go.uber.org/zap"
 	"path/filepath"
 	"strconv"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
+	"go.uber.org/zap"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
-
 
 const (
 	queryNodeMetaPrefix = "queryService-queryNodeMeta"
@@ -44,7 +43,6 @@ type queryNodeCluster struct {
 	clusterMeta *meta
 	nodes       map[int64]*queryNode
 }
-
 
 func newQueryNodeCluster(clusterMeta *meta, kv *etcdkv.EtcdKV) (*queryNodeCluster, error) {
 	nodes := make(map[int64]*queryNode)
@@ -398,7 +396,7 @@ func (c *queryNodeCluster) RegisterNode(session *sessionutil.Session, id UniqueI
 		return nil
 	}
 
-	return errors.New(fmt.Sprintf("node %d alredy exists in cluster", id))
+	return fmt.Errorf("node %d alredy exists in cluster", id)
 }
 
 func (c *queryNodeCluster) removeNodeInfo(nodeID int64) error {

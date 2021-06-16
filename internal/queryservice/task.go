@@ -13,12 +13,10 @@ package queryservice
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"go.uber.org/zap"
-	"sort"
 
 	"github.com/golang/protobuf/proto"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -27,6 +25,22 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+)
+
+const (
+	triggerTaskPrefix     = "queryService-triggerTask"
+	activeTaskPrefix      = "queryService-activeTask"
+	taskInfoPrefix        = "queryService-taskInfo"
+	loadBalanceInfoPrefix = "queryService-loadBalanceInfo"
+)
+
+type taskState int
+
+const (
+	taskUndo    taskState = 0
+	taskDoing   taskState = 1
+	taskDone    taskState = 3
+	taskExpired taskState = 4
 )
 
 type task interface {
@@ -45,8 +59,10 @@ type task interface {
 	GetChildTask() []task
 	AddChildTask(t task)
 	IsValid() bool
-	Reschedule() error
+	Reschedule() ([]task, error)
 	Marshal() string
+	State() taskState
+	SetState(state taskState)
 }
 
 type BaseTask struct {
@@ -54,6 +70,7 @@ type BaseTask struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	result *commonpb.Status
+	state  taskState
 
 	taskID           UniqueID
 	triggerCondition querypb.TriggerCondition
@@ -93,18 +110,26 @@ func (bt *BaseTask) IsValid() bool {
 	return true
 }
 
-func (bt *BaseTask) Reschedule() error {
-	return nil
+func (bt *BaseTask) Reschedule() ([]task, error) {
+	return nil, nil
+}
+
+func (bt *BaseTask) State() taskState {
+	return bt.state
+}
+
+func (bt *BaseTask) SetState(state taskState) {
+	bt.state = state
 }
 
 //************************grpcTask***************************//
 type LoadCollectionTask struct {
 	BaseTask
 	*querypb.LoadCollectionRequest
-	masterService   types.MasterService
-	dataService     types.DataService
-	cluster         *queryNodeCluster
-	meta            *meta
+	masterService types.MasterService
+	dataService   types.DataService
+	cluster       *queryNodeCluster
+	meta          *meta
 }
 
 func (lct *LoadCollectionTask) Marshal() string {
@@ -161,7 +186,6 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 			CollectionID: collectionID,
 			PartitionID:  partitionID,
 		}
-		//recoveryInfo, err := mockGetRecoveryInfoFromDataService(lct.ctx, lct.masterService, lct.dataService, getRecoveryInfoRequest)
 		recoveryInfo, err := lct.dataService.GetRecoveryInfo(lct.ctx, getRecoveryInfoRequest)
 		if err != nil {
 			status.Reason = err.Error()
@@ -247,7 +271,7 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 			cluster:             lct.cluster,
 		}
 		lct.AddChildTask(loadSegmentTask)
-	log.Debug("add a loadSegmentTask to loadCollectionTask's childTask", zap.Any("load segment Task", loadSegmentTask))
+		log.Debug("add a loadSegmentTask to loadCollectionTask's childTask", zap.Any("load segment Task", loadSegmentTask))
 	}
 
 	for index, nodeID := range watchRequest2Nodes {
@@ -255,9 +279,8 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 		watchRequests[channel].NodeID = nodeID
 		watchDmChannelTask := &WatchDmChannelTask{
 			BaseTask: BaseTask{
-				ctx:       lct.ctx,
-				Condition: NewTaskCondition(lct.ctx),
-
+				ctx:              lct.ctx,
+				Condition:        NewTaskCondition(lct.ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			WatchDmChannelsRequest: watchRequests[channel],
@@ -282,9 +305,8 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 			}
 			watchQueryChannelTask := &WatchQueryChannelTask{
 				BaseTask: BaseTask{
-					ctx:       lct.ctx,
-					Condition: NewTaskCondition(lct.ctx),
-
+					ctx:              lct.ctx,
+					Condition:        NewTaskCondition(lct.ctx),
 					triggerCondition: querypb.TriggerCondition_grpcRequest,
 				},
 
@@ -394,10 +416,9 @@ func (rct *ReleaseCollectionTask) PostExecute(ctx context.Context) error {
 type LoadPartitionTask struct {
 	BaseTask
 	*querypb.LoadPartitionsRequest
-	masterService types.MasterService
-	dataService   types.DataService
-	cluster       *queryNodeCluster
-	meta          *meta
+	dataService types.DataService
+	cluster     *queryNodeCluster
+	meta        *meta
 }
 
 func (lpt *LoadPartitionTask) Marshal() string {
@@ -438,7 +459,6 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 			CollectionID: collectionID,
 			PartitionID:  partitionID,
 		}
-		//recoveryInfo, err := mockGetRecoveryInfoFromDataService(lpt.ctx, lpt.masterService, lpt.dataService, getRecoveryInfoRequest)
 		recoveryInfo, err := lpt.dataService.GetRecoveryInfo(lpt.ctx, getRecoveryInfoRequest)
 		if err != nil {
 			status.Reason = err.Error()
@@ -527,9 +547,8 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 		watchRequests[index].NodeID = nodeID
 		watchDmChannelTask := &WatchDmChannelTask{
 			BaseTask: BaseTask{
-				ctx:       lpt.ctx,
-				Condition: NewTaskCondition(lpt.ctx),
-
+				ctx:              lpt.ctx,
+				Condition:        NewTaskCondition(lpt.ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			WatchDmChannelsRequest: watchRequests[index],
@@ -553,9 +572,8 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 			}
 			watchQueryChannelTask := &WatchQueryChannelTask{
 				BaseTask: BaseTask{
-					ctx:       lpt.ctx,
-					Condition: NewTaskCondition(lpt.ctx),
-
+					ctx:              lpt.ctx,
+					Condition:        NewTaskCondition(lpt.ctx),
 					triggerCondition: querypb.TriggerCondition_grpcRequest,
 				},
 
@@ -716,9 +734,10 @@ func (lst *LoadSegmentTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-func (lst *LoadSegmentTask) Reschedule() error {
+func (lst *LoadSegmentTask) Reschedule() ([]task, error) {
 	segmentIDs := make([]UniqueID, 0)
 	collectionID := lst.Infos[0].CollectionID
+	reScheduledTask := make([]task, 0)
 	for _, info := range lst.Infos {
 		segmentID := info.SegmentID
 		segmentIDs = append(segmentIDs, segmentID)
@@ -747,8 +766,8 @@ func (lst *LoadSegmentTask) Reschedule() error {
 			meta:    lst.meta,
 			cluster: lst.cluster,
 		}
-		lst.AddChildTask(loadSegmentTask)
-		log.Debug("add a loadSegmentTask to loadSegmentTask's childTask")
+		reScheduledTask = append(reScheduledTask, loadSegmentTask)
+		log.Debug("add a loadSegmentTask to RescheduleTasks")
 
 		hasWatchQueryChannel := lst.cluster.hasWatchedQueryChannel(lst.ctx, nodeID, collectionID)
 		if !hasWatchQueryChannel {
@@ -763,21 +782,20 @@ func (lst *LoadSegmentTask) Reschedule() error {
 			}
 			watchQueryChannelTask := &WatchQueryChannelTask{
 				BaseTask: BaseTask{
-					ctx:       lst.ctx,
-					Condition: NewTaskCondition(lst.ctx),
-
+					ctx:              lst.ctx,
+					Condition:        NewTaskCondition(lst.ctx),
 					triggerCondition: querypb.TriggerCondition_grpcRequest,
 				},
 
 				AddQueryChannelRequest: addQueryChannelRequest,
 				cluster:                lst.cluster,
 			}
-			lst.AddChildTask(watchQueryChannelTask)
-			log.Debug("add a watchQueryChannelTask to loadSegmentTask's childTask")
+			reScheduledTask = append(reScheduledTask, watchQueryChannelTask)
+			log.Debug("add a watchQueryChannelTask to RescheduleTasks")
 		}
 	}
 
-	return nil
+	return reScheduledTask, nil
 }
 
 type ReleaseSegmentTask struct {
@@ -880,20 +898,21 @@ func (wdt *WatchDmChannelTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-func (wdt *WatchDmChannelTask) Reschedule() error {
+func (wdt *WatchDmChannelTask) Reschedule() ([]task, error) {
 	collectionID := wdt.CollectionID
 	channelIDs := make([]string, 0)
+	reScheduledTask := make([]task, 0)
 	for _, info := range wdt.Infos {
 		channelID := info.ChannelName
 		channelIDs = append(channelIDs, channelID)
 	}
 
 	channel2Nodes := shuffleChannelsToQueryNode(channelIDs, wdt.cluster)
-	node2channelInfos := make(map[int64][]*querypb.VchannelInfo)
+	node2channelInfos := make(map[int64][]*datapb.VchannelInfo)
 	for index, info := range wdt.Infos {
 		nodeID := channel2Nodes[index]
 		if _, ok := node2channelInfos[nodeID]; !ok {
-			node2channelInfos[nodeID] = make([]*querypb.VchannelInfo, 0)
+			node2channelInfos[nodeID] = make([]*datapb.VchannelInfo, 0)
 		}
 		node2channelInfos[nodeID] = append(node2channelInfos[nodeID], info)
 	}
@@ -913,8 +932,8 @@ func (wdt *WatchDmChannelTask) Reschedule() error {
 			meta:    wdt.meta,
 			cluster: wdt.cluster,
 		}
-		wdt.AddChildTask(loadSegmentTask)
-		log.Debug("add a watchDmChannelTask to watchDmChannelTask's childTask")
+		reScheduledTask = append(reScheduledTask, loadSegmentTask)
+		log.Debug("add a watchDmChannelTask to RescheduleTasks")
 
 		hasWatchQueryChannel := wdt.cluster.hasWatchedQueryChannel(wdt.ctx, nodeID, collectionID)
 		if !hasWatchQueryChannel {
@@ -929,21 +948,20 @@ func (wdt *WatchDmChannelTask) Reschedule() error {
 			}
 			watchQueryChannelTask := &WatchQueryChannelTask{
 				BaseTask: BaseTask{
-					ctx:       wdt.ctx,
-					Condition: NewTaskCondition(wdt.ctx),
-
+					ctx:              wdt.ctx,
+					Condition:        NewTaskCondition(wdt.ctx),
 					triggerCondition: querypb.TriggerCondition_grpcRequest,
 				},
 
 				AddQueryChannelRequest: addQueryChannelRequest,
 				cluster:                wdt.cluster,
 			}
-			wdt.AddChildTask(watchQueryChannelTask)
-			log.Debug("add a watchQueryChannelTask to watchDmChannelTask's childTask")
+			reScheduledTask = append(reScheduledTask, watchQueryChannelTask)
+			log.Debug("add a watchQueryChannelTask to RescheduleTasks")
 		}
 	}
 
-	return nil
+	return reScheduledTask, nil
 }
 
 type WatchQueryChannelTask struct {
@@ -1060,13 +1078,14 @@ func (lbt *LoadBalanceTask) Execute(ctx context.Context) error {
 				}
 
 				for _, partitionID := range partitionIDs {
-					recoveryInfo, err := mockGetRecoveryInfoFromDataService(lbt.ctx,
-						lbt.master,
-						lbt.dataService,
-						&querypb.GetRecoveryInfoRequest{
-							CollectionID: collectionID,
-							PartitionID:  partitionID,
-						})
+					getRecoveryInfo := &datapb.GetRecoveryInfoRequest{
+						Base: &commonpb.MsgBase{
+							MsgType: commonpb.MsgType_LoadBalanceSegments,
+						},
+						CollectionID: collectionID,
+						PartitionID:  partitionID,
+					}
+					recoveryInfo, err := lbt.dataService.GetRecoveryInfo(lbt.ctx, getRecoveryInfo)
 					if err != nil {
 						status.Reason = err.Error()
 						lbt.result = status
@@ -1079,7 +1098,7 @@ func (lbt *LoadBalanceTask) Execute(ctx context.Context) error {
 								watchRequest := &querypb.WatchDmChannelsRequest{
 									Base:         lbt.Base,
 									CollectionID: collectionID,
-									Infos:        []*querypb.VchannelInfo{channelInfo},
+									Infos:        []*datapb.VchannelInfo{channelInfo},
 									Schema:       schema,
 								}
 								if loadCollection {
@@ -1089,7 +1108,7 @@ func (lbt *LoadBalanceTask) Execute(ctx context.Context) error {
 									} else {
 										oldInfo := watchRequestsInCollection[channel].Infos[0]
 										newInfo := mergeVChannelInfo(oldInfo, channelInfo)
-										watchRequestsInCollection[channel].Infos = []*querypb.VchannelInfo{newInfo}
+										watchRequestsInCollection[channel].Infos = []*datapb.VchannelInfo{newInfo}
 									}
 								} else {
 									watchRequest.PartitionID = partitionID
@@ -1110,11 +1129,9 @@ func (lbt *LoadBalanceTask) Execute(ctx context.Context) error {
 							SegmentID:    segmentID,
 							PartitionID:  partitionID,
 							CollectionID: collectionID,
-							BinlogPaths:  make([]*querypb.FieldBinlog, 0),
+							BinlogPaths:  make([]*datapb.FieldBinlog, 0),
 						}
-						for _, fieldBinLog := range binlog.FieldBinlogs {
-							segmentLoadInfo.BinlogPaths = append(segmentLoadInfo.BinlogPaths, fieldBinLog)
-						}
+						segmentLoadInfo.BinlogPaths = append(segmentLoadInfo.BinlogPaths, binlog.FieldBinlogs...)
 						segmentsToLoad = append(segmentsToLoad, segmentID)
 						segment2BingLog[segmentID] = segmentLoadInfo
 					}
@@ -1179,9 +1196,8 @@ func (lbt *LoadBalanceTask) Execute(ctx context.Context) error {
 					watchRequest.NodeID = id
 					watchDmChannelTask := &WatchDmChannelTask{
 						BaseTask: BaseTask{
-							ctx:       lbt.ctx,
-							Condition: NewTaskCondition(lbt.ctx),
-
+							ctx:              lbt.ctx,
+							Condition:        NewTaskCondition(lbt.ctx),
 							triggerCondition: querypb.TriggerCondition_grpcRequest,
 						},
 						WatchDmChannelsRequest: watchRequest,
@@ -1205,9 +1221,8 @@ func (lbt *LoadBalanceTask) Execute(ctx context.Context) error {
 						}
 						watchQueryChannelTask := &WatchQueryChannelTask{
 							BaseTask: BaseTask{
-								ctx:       lbt.ctx,
-								Condition: NewTaskCondition(lbt.ctx),
-
+								ctx:              lbt.ctx,
+								Condition:        NewTaskCondition(lbt.ctx),
 								triggerCondition: querypb.TriggerCondition_grpcRequest,
 							},
 
@@ -1377,19 +1392,4 @@ func mergeVChannelInfo(info1 *datapb.VchannelInfo, info2 *datapb.VchannelInfo) *
 		UnflushedSegments: checkPoints,
 		FlushedSegments:   flushedSegments,
 	}
-}
-
-type taskState int
-const (
-	assigning  taskState = 0
-	assigned   taskState = 1
-	active     taskState = 2
-	done       taskState = 3
-)
-
-type taskInfo struct {
-	taskID int64
-	parentTaskID int64
-	childTaskID []int64
-	state taskState
 }

@@ -14,12 +14,12 @@ package queryservice
 import (
 	"errors"
 	"fmt"
-	"go.uber.org/zap"
 	"path/filepath"
 	"strconv"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
+	"go.uber.org/zap"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -353,9 +353,7 @@ func (m *meta) releaseCollection(collectionID UniqueID) {
 		}
 	}
 
-	if _, ok := m.queryChannelInfos[collectionID]; ok {
-		delete(m.queryChannelInfos, collectionID)
-	}
+	delete(m.queryChannelInfos, collectionID)
 	err := m.removeCollectionInfo(collectionID)
 	if err != nil {
 		log.Error("remove collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))

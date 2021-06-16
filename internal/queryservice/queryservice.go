@@ -13,8 +13,6 @@ package queryservice
 
 import (
 	"context"
-	"go.etcd.io/etcd/clientv3"
-	"go.uber.org/zap"
 	"math/rand"
 	"path/filepath"
 	"strconv"
@@ -24,6 +22,8 @@ import (
 
 	"github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/golang/protobuf/proto"
+	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -48,7 +48,7 @@ type QueryService struct {
 	loopCtx    context.Context
 	loopCancel context.CancelFunc
 	loopWg     sync.WaitGroup
-	kvBase     *etcdkv.EtcdKV
+	kvClient   *etcdkv.EtcdKV
 
 	queryServiceID uint64
 	meta           *meta
@@ -83,6 +83,7 @@ func (qs *QueryService) Init() error {
 			return err
 		}
 		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+		qs.kvClient = etcdKV
 		metaKV, err := newMeta(etcdKV)
 		if err != nil {
 			return err
@@ -175,7 +176,7 @@ func (qs *QueryService) watchNodeLoop() {
 	log.Debug("QueryService start watch node loop")
 
 	clusterStartSession, version, _ := qs.session.GetSessions(typeutil.QueryNodeRole)
-	sessionMap := make(map[int64]*sessionutil.Session, 0)
+	sessionMap := make(map[int64]*sessionutil.Session)
 	for _, session := range clusterStartSession {
 		nodeID := session.ServerID
 		sessionMap[nodeID] = session

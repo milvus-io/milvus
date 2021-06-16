@@ -18,14 +18,13 @@ import (
 	"fmt"
 	"path/filepath"
 	"strconv"
-	"go.uber.org/zap"
 	"sync"
 
-	"github.com/opentracing/opentracing-go"
 	"github.com/golang/protobuf/proto"
+	"github.com/opentracing/opentracing-go"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -34,12 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	oplog "github.com/opentracing/opentracing-go/log"
-)
-
-const (
-	triggerTaskPrefix = "queryService-triggerTask"
-	activeTaskPrefix = "queryService-activeTask"
-	taskInfoPrefix = "queryService-taskInfo"
 )
 
 type TaskQueue struct {
@@ -93,6 +86,15 @@ func (queue *TaskQueue) addTask(tasks []task) {
 	}
 }
 
+func (queue *TaskQueue) addTaskToFront(t task) {
+	queue.taskChan <- 1
+	if queue.tasks.Len() == 0 {
+		queue.tasks.PushBack(t)
+	} else {
+		queue.tasks.PushFront(t)
+	}
+}
+
 func (queue *TaskQueue) PopTask() task {
 	queue.Lock()
 	defer queue.Unlock()
@@ -120,11 +122,11 @@ type TaskScheduler struct {
 	triggerTaskQueue *TaskQueue
 	activateTaskChan chan task
 	meta             *meta
-	cluster *queryNodeCluster
+	cluster          *queryNodeCluster
 	taskIDAllocator  func() (UniqueID, error)
 	client           *etcdkv.EtcdKV
 
-	master types.MasterService
+	master      types.MasterService
 	dataService types.DataService
 
 	wg     sync.WaitGroup
@@ -139,11 +141,11 @@ func NewTaskScheduler(ctx context.Context, meta *meta, cluster *queryNodeCluster
 		ctx:              ctx1,
 		cancel:           cancel,
 		meta:             meta,
-		cluster: cluster,
+		cluster:          cluster,
 		activateTaskChan: taskChan,
 		client:           kv,
-		master: master,
-		dataService: dataService,
+		master:           master,
+		dataService:      dataService,
 	}
 	s.triggerTaskQueue = NewTaskQueue()
 	idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "queryService task id"))
@@ -167,17 +169,75 @@ func (scheduler *TaskScheduler) reloadFromKV() error {
 	if err != nil {
 		return err
 	}
+	activeTaskIDKeys, activeTaskValues, err := scheduler.client.LoadWithPrefix(activeTaskPrefix)
+	if err != nil {
+		return err
+	}
+	taskInfoKeys, taskInfoValues, err := scheduler.client.LoadWithPrefix(taskInfoPrefix)
+	if err != nil {
+		return err
+	}
+
+	triggerTasks := make(map[int64]task)
 	for index := range triggerTaskIDKeys {
 		taskID, err := strconv.ParseInt(filepath.Base(triggerTaskIDKeys[index]), 10, 64)
 		if err != nil {
 			return err
 		}
-
+		t, err := scheduler.unmarshalTask(triggerTaskValues[index])
+		if err != nil {
+			return err
+		}
+		triggerTasks[taskID] = t
 	}
+
+	activeTasks := make(map[int64]task)
+	for index := range activeTaskIDKeys {
+		taskID, err := strconv.ParseInt(filepath.Base(activeTaskIDKeys[index]), 10, 64)
+		if err != nil {
+			return err
+		}
+		t, err := scheduler.unmarshalTask(activeTaskValues[index])
+		if err != nil {
+			return err
+		}
+		activeTasks[taskID] = t
+	}
+
+	taskInfos := make(map[int64]taskState)
+	for index := range taskInfoKeys {
+		taskID, err := strconv.ParseInt(filepath.Base(taskInfoKeys[index]), 10, 64)
+		if err != nil {
+			return err
+		}
+		value, err := strconv.ParseInt(taskInfoValues[index], 10, 64)
+		if err != nil {
+			return err
+		}
+		state := taskState(value)
+		taskInfos[taskID] = state
+	}
+
+	var doneTriggerTask task = nil
+	for id, t := range triggerTasks {
+		if taskInfos[id] == taskDone {
+			doneTriggerTask = t
+			for _, childTask := range activeTasks {
+				t.AddChildTask(childTask)
+			}
+			continue
+		}
+		scheduler.triggerTaskQueue.addTask([]task{t})
+	}
+
+	if doneTriggerTask != nil {
+		scheduler.triggerTaskQueue.addTaskToFront(doneTriggerTask)
+	}
+
+	return nil
 }
 
-//todo:: taskID to nodeID save to etcd/ or save to proto releaseCollection
-func (scheduler *TaskScheduler)unmarshalTask(t string) (task, error) {
+func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 	header := commonpb.MsgHeader{}
 	err := proto.UnmarshalText(t, &header)
 	if err != nil {
@@ -193,15 +253,15 @@ func (scheduler *TaskScheduler)unmarshalTask(t string) (task, error) {
 		}
 		loadCollectionTask := &LoadCollectionTask{
 			BaseTask: BaseTask{
-				ctx: scheduler.ctx,
-				Condition: NewTaskCondition(scheduler.ctx),
+				ctx:              scheduler.ctx,
+				Condition:        NewTaskCondition(scheduler.ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			LoadCollectionRequest: &loadReq,
-			masterService: scheduler.master,
-			dataService: scheduler.dataService,
-			cluster: scheduler.cluster,
-			meta: scheduler.meta,
+			masterService:         scheduler.master,
+			dataService:           scheduler.dataService,
+			cluster:               scheduler.cluster,
+			meta:                  scheduler.meta,
 		}
 		newTask = loadCollectionTask
 	case commonpb.MsgType_LoadPartitions:
@@ -212,15 +272,14 @@ func (scheduler *TaskScheduler)unmarshalTask(t string) (task, error) {
 		}
 		loadPartitionTask := &LoadPartitionTask{
 			BaseTask: BaseTask{
-				ctx: scheduler.ctx,
-				Condition: NewTaskCondition(scheduler.ctx),
+				ctx:              scheduler.ctx,
+				Condition:        NewTaskCondition(scheduler.ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			LoadPartitionsRequest: &loadReq,
-			masterService: scheduler.master,
-			dataService: scheduler.dataService,
-			cluster: scheduler.cluster,
-			meta: scheduler.meta,
+			dataService:           scheduler.dataService,
+			cluster:               scheduler.cluster,
+			meta:                  scheduler.meta,
 		}
 		newTask = loadPartitionTask
 	case commonpb.MsgType_ReleaseCollection:
@@ -231,12 +290,12 @@ func (scheduler *TaskScheduler)unmarshalTask(t string) (task, error) {
 		}
 		releaseCollectionTask := &ReleaseCollectionTask{
 			BaseTask: BaseTask{
-				ctx: scheduler.ctx,
-				Condition: NewTaskCondition(scheduler.ctx),
+				ctx:              scheduler.ctx,
+				Condition:        NewTaskCondition(scheduler.ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			ReleaseCollectionRequest: &loadReq,
-			cluster: scheduler.cluster,
+			cluster:                  scheduler.cluster,
 		}
 		newTask = releaseCollectionTask
 	case commonpb.MsgType_ReleasePartitions:
@@ -247,12 +306,12 @@ func (scheduler *TaskScheduler)unmarshalTask(t string) (task, error) {
 		}
 		releasePartitionTask := &ReleasePartitionTask{
 			BaseTask: BaseTask{
-				ctx: scheduler.ctx,
-				Condition: NewTaskCondition(scheduler.ctx),
+				ctx:              scheduler.ctx,
+				Condition:        NewTaskCondition(scheduler.ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			ReleasePartitionsRequest: &loadReq,
-			cluster: scheduler.cluster,
+			cluster:                  scheduler.cluster,
 		}
 		newTask = releasePartitionTask
 	case commonpb.MsgType_LoadSegments:
@@ -263,13 +322,13 @@ func (scheduler *TaskScheduler)unmarshalTask(t string) (task, error) {
 		}
 		loadSegmentTask := &LoadSegmentTask{
 			BaseTask: BaseTask{
-				ctx: scheduler.ctx,
-				Condition: NewTaskCondition(scheduler.ctx),
+				ctx:              scheduler.ctx,
+				Condition:        NewTaskCondition(scheduler.ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			LoadSegmentsRequest: &loadReq,
-			cluster: scheduler.cluster,
-			meta: scheduler.meta,
+			cluster:             scheduler.cluster,
+			meta:                scheduler.meta,
 		}
 		newTask = loadSegmentTask
 	case commonpb.MsgType_ReleaseSegments:
@@ -280,12 +339,12 @@ func (scheduler *TaskScheduler)unmarshalTask(t string) (task, error) {
 		}
 		releaseSegmentTask := &ReleaseSegmentTask{
 			BaseTask: BaseTask{
-				ctx: scheduler.ctx,
-				Condition: NewTaskCondition(scheduler.ctx),
+				ctx:              scheduler.ctx,
+				Condition:        NewTaskCondition(scheduler.ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			ReleaseSegmentsRequest: &loadReq,
-			cluster: scheduler.cluster,
+			cluster:                scheduler.cluster,
 		}
 		newTask = releaseSegmentTask
 	case commonpb.MsgType_WatchDmChannels:
@@ -296,13 +355,13 @@ func (scheduler *TaskScheduler)unmarshalTask(t string) (task, error) {
 		}
 		watchDmChannelTask := &WatchDmChannelTask{
 			BaseTask: BaseTask{
-				ctx: scheduler.ctx,
-				Condition: NewTaskCondition(scheduler.ctx),
+				ctx:              scheduler.ctx,
+				Condition:        NewTaskCondition(scheduler.ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			WatchDmChannelsRequest: &loadReq,
-			cluster: scheduler.cluster,
-			meta: scheduler.meta,
+			cluster:                scheduler.cluster,
+			meta:                   scheduler.meta,
 		}
 		newTask = watchDmChannelTask
 	case commonpb.MsgType_WatchQueryChannels:
@@ -313,12 +372,12 @@ func (scheduler *TaskScheduler)unmarshalTask(t string) (task, error) {
 		}
 		watchQueryChannelTask := &WatchQueryChannelTask{
 			BaseTask: BaseTask{
-				ctx: scheduler.ctx,
-				Condition: NewTaskCondition(scheduler.ctx),
+				ctx:              scheduler.ctx,
+				Condition:        NewTaskCondition(scheduler.ctx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			AddQueryChannelRequest: &loadReq,
-			cluster: scheduler.cluster,
+			cluster:                scheduler.cluster,
 		}
 		newTask = watchQueryChannelTask
 	case commonpb.MsgType_LoadBalanceSegments:
@@ -329,15 +388,15 @@ func (scheduler *TaskScheduler)unmarshalTask(t string) (task, error) {
 		}
 		loadBalanceTask := &LoadBalanceTask{
 			BaseTask: BaseTask{
-				ctx: scheduler.ctx,
-				Condition: NewTaskCondition(scheduler.ctx),
+				ctx:              scheduler.ctx,
+				Condition:        NewTaskCondition(scheduler.ctx),
 				triggerCondition: loadReq.BalanceReason,
 			},
 			LoadBalanceRequest: &loadReq,
-			master: scheduler.master,
-			dataService: scheduler.dataService,
-			cluster: scheduler.cluster,
-			meta: scheduler.meta,
+			master:             scheduler.master,
+			dataService:        scheduler.dataService,
+			cluster:            scheduler.cluster,
+			meta:               scheduler.meta,
 		}
 		newTask = loadBalanceTask
 	default:
@@ -356,8 +415,12 @@ func (scheduler *TaskScheduler) Enqueue(tasks []task) {
 			log.Error(err.Error())
 		}
 		t.SetID(id)
-		key := fmt.Sprintf("%s/%d", triggerTaskPrefix, t.ID())
-		err = scheduler.client.Save(key, t.Marshal())
+		kvs := make(map[string]string)
+		taskKey := fmt.Sprintf("%s/%d", triggerTaskPrefix, t.ID())
+		kvs[taskKey] = t.Marshal()
+		stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
+		kvs[stateKey] = string(taskUndo)
+		err = scheduler.client.MultiSave(kvs)
 		if err != nil {
 			log.Error("error when save trigger task to etcd")
 		}
@@ -366,23 +429,7 @@ func (scheduler *TaskScheduler) Enqueue(tasks []task) {
 	scheduler.triggerTaskQueue.addTask(tasks)
 }
 
-func (scheduler *TaskScheduler) AddActiveTask(tasks []task) {
-	for _, t := range tasks {
-		id, err := scheduler.taskIDAllocator()
-		if err != nil {
-			log.Error(err.Error())
-		}
-		t.SetID(id)
-		key := fmt.Sprintf("%s/%d", activeTaskPrefix, t.ID())
-		err = scheduler.client.Save(key, t.Marshal())
-		if err != nil {
-			log.Error("error when save active task to etcd")
-		}
-
-	}
-}
-
-func (scheduler *TaskScheduler) processTask(t task) {
+func (scheduler *TaskScheduler) processTask(t task) error {
 	span, ctx := trace.StartSpanFromContext(t.TraceCtx(),
 		opentracing.Tags{
 			"Type": t.Type(),
@@ -391,21 +438,21 @@ func (scheduler *TaskScheduler) processTask(t task) {
 	defer span.Finish()
 	span.LogFields(oplog.Int64("scheduler process PreExecute", t.ID()))
 	key := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
-	err := scheduler.client.Save(key, string(assigning))
-	defer func() {
-		t.Notify(err)
-	}()
+	err := scheduler.client.Save(key, string(taskDoing))
+	//defer func() {
+	//	t.Notify(err)
+	//}()
 	if err != nil {
 		log.Debug("update task state err", zap.String("reason", err.Error()))
 		trace.LogError(span, err)
-		return
+		return err
 	}
 
 	err = t.PreExecute(ctx)
 	if err != nil {
 		log.Debug("preExecute err", zap.String("reason", err.Error()))
 		trace.LogError(span, err)
-		return
+		return err
 	}
 
 	span.LogFields(oplog.Int64("scheduler process Execute", t.ID()))
@@ -413,15 +460,51 @@ func (scheduler *TaskScheduler) processTask(t task) {
 	if err != nil {
 		log.Debug("execute err", zap.String("reason", err.Error()))
 		trace.LogError(span, err)
-		return
+		return err
 	}
 	span.LogFields(oplog.Int64("scheduler process PostExecute", t.ID()))
 	err = t.PostExecute(ctx)
+	if err != nil {
+		log.Debug("postExecute err", zap.String("reason", err.Error()))
+		trace.LogError(span, err)
+		return err
+	}
+
+	for _, childTask := range t.GetChildTask() {
+		if childTask == nil {
+			log.Error("child task equal nil")
+			continue
+		}
+
+		id, err := scheduler.taskIDAllocator()
+		if err != nil {
+			return err
+		}
+		t.SetID(id)
+		kvs := make(map[string]string)
+		taskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, t.ID())
+		kvs[taskKey] = t.Marshal()
+		stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
+		kvs[stateKey] = string(taskUndo)
+		err = scheduler.client.MultiSave(kvs)
+		if err != nil {
+			return err
+		}
+	}
+
+	err = scheduler.client.Save(key, string(taskDone))
+	if err != nil {
+		log.Debug("update task state err", zap.String("reason", err.Error()))
+		trace.LogError(span, err)
+		return err
+	}
+	return err
 }
 
 func (scheduler *TaskScheduler) scheduleLoop() {
 	defer scheduler.wg.Done()
-	var w sync.WaitGroup
+	var activeTaskWg sync.WaitGroup
+	var err error = nil
 	for {
 		select {
 		case <-scheduler.ctx.Done():
@@ -429,67 +512,37 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 		case <-scheduler.triggerTaskQueue.Chan():
 			t := scheduler.triggerTaskQueue.PopTask()
 			log.Debug("pop a triggerTask from triggerTaskQueue")
-			go scheduler.processTask(t)
-			err := t.WaitToFinish()
-			if err != nil {
-				log.Error("process task error", zap.Any("error", err.Error()))
-				continue
+			if t.State() < taskDone {
+				err = scheduler.processTask(t)
+				if err != nil {
+					log.Error("process task error", zap.Any("error", err.Error()))
+					continue
+				}
 			}
-			err = scheduler.saveActiveTask(t)
-			if err != nil {
-				log.Error("save activate task error ")
+			log.Debug("num of child task", zap.Int("num child task", len(t.GetChildTask())))
+			for _, childTask := range t.GetChildTask() {
+				if childTask != nil {
+					log.Debug("add a activate task to activateChan")
+					scheduler.activateTaskChan <- childTask
+					activeTaskWg.Add(1)
+					go scheduler.waitActivateTaskDone(&activeTaskWg, childTask)
+				}
 			}
-			//TODO::add active task to etcd
-			w.Add(2)
-			go scheduler.addActivateTask(&w, t)
-			//TODO::handle active task return error, maybe node down...
-			go scheduler.processActivateTask(&w)
-			w.Wait()
-			//TODO:: delete trigger task from etcd
-		}
-	}
-}
-
-func (scheduler *TaskScheduler) saveActiveTask(t task) error {
-	for _, childTask := range t.GetChildTask() {
-		if childTask != nil {
-			id, err := scheduler.taskIDAllocator()
-			if err != nil {
-				return err
+			activeTaskWg.Wait()
+			if t.Type() == commonpb.MsgType_ReleaseCollection || t.Type() == commonpb.MsgType_ReleasePartitions {
+				t.Notify(err)
 			}
-			t.SetID(id)
-			key := fmt.Sprintf("%s/%d", activeTaskPrefix, t.ID())
-			err = scheduler.client.Save(key, t.Marshal())
+			keys := make([]string, 0)
+			taskKey := fmt.Sprintf("%s/%d", triggerTaskPrefix, t.ID())
+			stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
+			keys = append(keys, taskKey)
+			keys = append(keys, stateKey)
+			err = scheduler.client.MultiRemove(keys)
 			if err != nil {
-				return err
+				log.Error("error when remove trigger task to etcd")
 			}
 		}
 	}
-
-	key := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
-	err := scheduler.client.Save(key, string(assigned))
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (scheduler *TaskScheduler) addActivateTask(wg *sync.WaitGroup, t task) {
-	defer wg.Done()
-	var activeTaskWg sync.WaitGroup
-	log.Debug("num of child task", zap.Int("num child task", len(t.GetChildTask())))
-
-	for _, childTask := range t.GetChildTask() {
-		if childTask != nil {
-			log.Debug("add a activate task to activateChan")
-			scheduler.activateTaskChan <- childTask
-			activeTaskWg.Add(1)
-			go scheduler.waitActivateTaskDone(&activeTaskWg, childTask)
-		}
-	}
-	scheduler.activateTaskChan <- nil
-	activeTaskWg.Wait()
 }
 
 func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task) {
@@ -500,26 +553,30 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task)
 		log.Debug("redo task")
 		redoFunc1 := func() {
 			if !t.IsValid() {
-				err = t.Reschedule()
+				reScheduledTasks, err := t.Reschedule()
 				if err != nil {
 					log.Error(err.Error())
 					return
 				}
 				removes := make([]string, 0)
-				key := fmt.Sprintf("%s/%d", activeTaskPrefix, t.ID())
-				removes = append(removes, key)
+				taskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, t.ID())
+				removes = append(removes, taskKey)
+				stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
+				removes = append(removes, stateKey)
 
 				saves := make(map[string]string)
-				for _, childTask := range t.GetChildTask() {
-					if childTask != nil {
+				for _, rt := range reScheduledTasks {
+					if rt != nil {
 						id, err := scheduler.taskIDAllocator()
 						if err != nil {
 							log.Error(err.Error())
 							continue
 						}
-						t.SetID(id)
-						taskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, t.ID())
-						saves[taskKey] = t.Marshal()
+						rt.SetID(id)
+						taskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, rt.ID())
+						saves[taskKey] = rt.Marshal()
+						stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, rt.ID())
+						saves[stateKey] = string(taskUndo)
 					}
 				}
 				err = scheduler.client.MultiSaveAndRemove(saves, removes)
@@ -527,12 +584,12 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task)
 					log.Error("error when save and remove task from etcd")
 				}
 
-				for _, childTask := range t.GetChildTask() {
-					if childTask != nil {
+				for _, rt := range reScheduledTasks {
+					if rt != nil {
 						log.Debug("add a activate task to activateChan")
-						scheduler.activateTaskChan <- childTask
+						scheduler.activateTaskChan <- rt
 						wg.Add(1)
-						go scheduler.waitActivateTaskDone(wg, childTask)
+						go scheduler.waitActivateTaskDone(wg, rt)
 					}
 				}
 				//delete task from etcd
@@ -542,6 +599,7 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task)
 				go scheduler.waitActivateTaskDone(wg, t)
 			}
 		}
+
 		redoFunc2 := func() {
 			if t.IsValid() {
 				scheduler.activateTaskChan <- t
@@ -567,8 +625,12 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task)
 			//TODO:: case commonpb.MsgType_RemoveDmChannels:
 		}
 	} else {
-		key := fmt.Sprintf("%s/%d", activeTaskPrefix, t.ID())
-		err = scheduler.client.Remove(key)
+		keys := make([]string, 0)
+		taskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, t.ID())
+		stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
+		keys = append(keys, taskKey)
+		keys = append(keys, stateKey)
+		err = scheduler.client.MultiRemove(keys)
 		if err != nil {
 			log.Error("error when remove task from etcd")
 		}
@@ -576,25 +638,36 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task)
 	log.Debug("one activate task done")
 }
 
-func (scheduler *TaskScheduler) processActivateTask(wg *sync.WaitGroup) {
-	defer wg.Done()
+func (scheduler *TaskScheduler) processActivateTaskLoop() {
+	defer scheduler.wg.Done()
 	for {
 		select {
 		case <-scheduler.ctx.Done():
 			return
 		case t := <-scheduler.activateTaskChan:
 			if t == nil {
-				return
+				log.Error("pop a nil active task")
+				continue
 			}
-			log.Debug("pop a activate task from activateChan")
-			scheduler.processTask(t)
+			stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
+			err := scheduler.client.Save(stateKey, string(taskDoing))
+			if err != nil {
+				t.Notify(err)
+				continue
+			}
+			log.Debug("pop a active task from activateChan")
+			go func() {
+				err := scheduler.processTask(t)
+				t.Notify(err)
+			}()
 		}
 	}
 }
 
 func (scheduler *TaskScheduler) Start() error {
-	scheduler.wg.Add(1)
+	scheduler.wg.Add(2)
 	go scheduler.scheduleLoop()
+	go scheduler.processActivateTaskLoop()
 	return nil
 }
 

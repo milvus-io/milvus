@@ -20,7 +20,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
 type MsgType = commonpb.MsgType
@@ -888,7 +887,7 @@ func (sim *SegmentInfoMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 /////////////////////////////////////////LoadBalanceSegments//////////////////////////////////////////
 type LoadBalanceSegmentsMsg struct {
 	BaseMsg
-	querypb.LoadBalanceSegments
+	internalpb.LoadBalanceSegmentsRequest
 }
 
 func (l *LoadBalanceSegmentsMsg) TraceCtx() context.Context {
@@ -909,7 +908,7 @@ func (l *LoadBalanceSegmentsMsg) Type() MsgType {
 
 func (l *LoadBalanceSegmentsMsg) Marshal(input TsMsg) (MarshalType, error) {
 	load := input.(*LoadBalanceSegmentsMsg)
-	loadReq := &load.LoadBalanceSegments
+	loadReq := &load.LoadBalanceSegmentsRequest
 	mb, err := proto.Marshal(loadReq)
 	if err != nil {
 		return nil, err
@@ -918,7 +917,7 @@ func (l *LoadBalanceSegmentsMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (l *LoadBalanceSegmentsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	loadReq := querypb.LoadBalanceSegments{}
+	loadReq := internalpb.LoadBalanceSegmentsRequest{}
 	in, err := ConvertToByteArray(input)
 	if err != nil {
 		return nil, err
@@ -927,7 +926,7 @@ func (l *LoadBalanceSegmentsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	if err != nil {
 		return nil, err
 	}
-	loadMsg := &LoadBalanceSegmentsMsg{LoadBalanceSegments: loadReq}
+	loadMsg := &LoadBalanceSegmentsMsg{LoadBalanceSegmentsRequest: loadReq}
 	loadMsg.BeginTimestamp = loadReq.Base.Timestamp
 	loadMsg.EndTimestamp = loadReq.Base.Timestamp
 

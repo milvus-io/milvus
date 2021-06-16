@@ -15,8 +15,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go.uber.org/zap"
 	"strconv"
+
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -45,7 +46,7 @@ func (qs *QueryService) GetComponentStates(ctx context.Context) (*internalpb.Com
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		State:              serviceComponentInfo,
+		State: serviceComponentInfo,
 		//SubcomponentStates: subComponentInfos,
 	}, nil
 }
@@ -148,9 +149,8 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 
 	loadCollectionTask := &LoadCollectionTask{
 		BaseTask: BaseTask{
-			ctx:       qs.loopCtx,
-			Condition: NewTaskCondition(qs.loopCtx),
-
+			ctx:              qs.loopCtx,
+			Condition:        NewTaskCondition(qs.loopCtx),
 			triggerCondition: querypb.TriggerCondition_grpcRequest,
 		},
 		LoadCollectionRequest: req,
@@ -188,9 +188,8 @@ func (qs *QueryService) ReleaseCollection(ctx context.Context, req *querypb.Rele
 
 	releaseCollectionTask := &ReleaseCollectionTask{
 		BaseTask: BaseTask{
-			ctx:       qs.loopCtx,
-			Condition: NewTaskCondition(qs.loopCtx),
-
+			ctx:              qs.loopCtx,
+			Condition:        NewTaskCondition(qs.loopCtx),
 			triggerCondition: querypb.TriggerCondition_grpcRequest,
 		},
 		ReleaseCollectionRequest: req,
@@ -198,12 +197,12 @@ func (qs *QueryService) ReleaseCollection(ctx context.Context, req *querypb.Rele
 	}
 	qs.scheduler.Enqueue([]task{releaseCollectionTask})
 
-	//err := releaseCollectionTask.WaitToFinish()
-	//if err != nil {
-	//	status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-	//	status.Reason = err.Error()
-	//	return status, err
-	//}
+	err := releaseCollectionTask.WaitToFinish()
+	if err != nil {
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = err.Error()
+		return status, err
+	}
 
 	log.Debug("ReleaseCollectionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID))
 	return status, nil
@@ -261,13 +260,11 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 	if len(req.PartitionIDs) > 0 {
 		loadPartitionTask := &LoadPartitionTask{
 			BaseTask: BaseTask{
-				ctx:       qs.loopCtx,
-				Condition: NewTaskCondition(qs.loopCtx),
-
+				ctx:              qs.loopCtx,
+				Condition:        NewTaskCondition(qs.loopCtx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			LoadPartitionsRequest: req,
-			masterService:         qs.masterServiceClient,
 			dataService:           qs.dataServiceClient,
 			cluster:               qs.cluster,
 			meta:                  qs.meta,
@@ -307,9 +304,8 @@ func (qs *QueryService) ReleasePartitions(ctx context.Context, req *querypb.Rele
 		req.PartitionIDs = toReleasedPartitionID
 		releasePartitionTask := &ReleasePartitionTask{
 			BaseTask: BaseTask{
-				ctx:       qs.loopCtx,
-				Condition: NewTaskCondition(qs.loopCtx),
-
+				ctx:              qs.loopCtx,
+				Condition:        NewTaskCondition(qs.loopCtx),
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			ReleasePartitionsRequest: req,
@@ -317,15 +313,14 @@ func (qs *QueryService) ReleasePartitions(ctx context.Context, req *querypb.Rele
 		}
 		qs.scheduler.Enqueue([]task{releasePartitionTask})
 
-		//err := releasePartitionTask.WaitToFinish()
-		//if err != nil {
-		//	status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		//	status.Reason = err.Error()
-		//	return status, err
-		//}
+		err := releasePartitionTask.WaitToFinish()
+		if err != nil {
+			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			status.Reason = err.Error()
+			return status, err
+		}
 	}
 	log.Debug("ReleasePartitionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
-	//TODO:: queryNodeCluster cancel subscribe dmChannels
 	return status, nil
 }
 

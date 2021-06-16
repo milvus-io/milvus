@@ -15,7 +15,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"strconv"
 
 	"go.uber.org/zap"

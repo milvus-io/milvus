@@ -14,11 +14,11 @@ package queryservice
 import (
 	"errors"
 	"fmt"
-	"go.uber.org/zap"
 	"sync"
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"go.uber.org/zap"
 
 	nodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -154,9 +154,7 @@ func (qn *queryNode) releaseCollection(collectionID UniqueID) {
 		delete(qn.collectionInfos, collectionID)
 	}
 
-	if _, ok := qn.watchedQueryChannels[collectionID]; ok {
-		delete(qn.watchedQueryChannels, collectionID)
-	}
+	delete(qn.watchedQueryChannels, collectionID)
 }
 
 func (qn *queryNode) releasePartition(collectionID UniqueID, partitionID UniqueID) {
@@ -295,9 +293,7 @@ func (qn *queryNode) removeQueryChannel(collectionID UniqueID) error {
 	qn.Lock()
 	defer qn.Unlock()
 
-	if _, ok := qn.watchedQueryChannels[collectionID]; ok {
-		delete(qn.watchedQueryChannels, collectionID)
-	}
+	delete(qn.watchedQueryChannels, collectionID)
 
 	return errors.New("removeQueryChannel: can't find collection in watchedQueryChannel")
 }
