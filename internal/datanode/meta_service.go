@@ -16,9 +16,6 @@ import (
 	"fmt"
 	"reflect"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/types"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -44,7 +41,7 @@ func newMetaService(m types.MasterService, collectionID UniqueID) *metaService {
 }
 
 func (mService *metaService) getCollectionSchema(ctx context.Context, collID UniqueID, timestamp Timestamp) (*schemapb.CollectionSchema, error) {
-	log.Debug("Describing collection", zap.Int64("ID", collID))
+	// fmt.Println("Describing collection", collID)
 	req := &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DescribeCollection,
@@ -58,8 +55,12 @@ func (mService *metaService) getCollectionSchema(ctx context.Context, collID Uni
 	}
 
 	response, err := mService.masterClient.DescribeCollection(ctx, req)
+	if response.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return nil, fmt.Errorf("Describe collection %v from master service wrong: %s", collID, err.Error())
+	}
+
 	if err != nil {
-		return nil, fmt.Errorf("Describe collection %v from master service wrong: %v", collID, err)
+		return nil, fmt.Errorf("Grpc error when describe collection %v from master service: %s", collID, err.Error())
 	}
 
 	return response.GetSchema(), nil
