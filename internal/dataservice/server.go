@@ -84,7 +84,7 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 		return datanodeclient.NewClient(addr, 3*time.Second)
 	}
 	s.masterClientCreator = func(addr string) (types.MasterService, error) {
-		return masterclient.NewClient(Params.MetaRootPath, Params.EtcdEndpoints, masterClientTimout)
+		return masterclient.NewClient(ctx, Params.MetaRootPath, Params.EtcdEndpoints, masterClientTimout)
 	}
 
 	return s, nil

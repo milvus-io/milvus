@@ -101,12 +101,10 @@ func (node *ProxyNode) Register() error {
 }
 
 func (node *ProxyNode) Init() error {
-	ctx := context.Background()
-
 	// wait for dataservice state changed to Healthy
 	if node.dataService != nil {
 		log.Debug("ProxyNode wait for dataService ready")
-		err := funcutil.WaitForComponentHealthy(ctx, node.dataService, "DataService", 1000000, time.Millisecond*200)
+		err := funcutil.WaitForComponentHealthy(node.ctx, node.dataService, "DataService", 1000000, time.Millisecond*200)
 		if err != nil {
 			log.Debug("ProxyNode wait for dataService ready failed", zap.Error(err))
 			return err
@@ -117,7 +115,7 @@ func (node *ProxyNode) Init() error {
 	// wait for queryService state changed to Healthy
 	if node.queryService != nil {
 		log.Debug("ProxyNode wait for queryService ready")
-		err := funcutil.WaitForComponentHealthy(ctx, node.queryService, "QueryService", 1000000, time.Millisecond*200)
+		err := funcutil.WaitForComponentHealthy(node.ctx, node.queryService, "QueryService", 1000000, time.Millisecond*200)
 		if err != nil {
 			log.Debug("ProxyNode wait for queryService ready failed", zap.Error(err))
 			return err
@@ -128,7 +126,7 @@ func (node *ProxyNode) Init() error {
 	// wait for indexservice state changed to Healthy
 	if node.indexService != nil {
 		log.Debug("ProxyNode wait for indexService ready")
-		err := funcutil.WaitForComponentHealthy(ctx, node.indexService, "IndexService", 1000000, time.Millisecond*200)
+		err := funcutil.WaitForComponentHealthy(node.ctx, node.indexService, "IndexService", 1000000, time.Millisecond*200)
 		if err != nil {
 			log.Debug("ProxyNode wait for indexService ready failed", zap.Error(err))
 			return err
@@ -137,7 +135,7 @@ func (node *ProxyNode) Init() error {
 	}
 
 	if node.queryService != nil {
-		resp, err := node.queryService.CreateQueryChannel(ctx, &querypb.CreateQueryChannelRequest{})
+		resp, err := node.queryService.CreateQueryChannel(node.ctx, &querypb.CreateQueryChannelRequest{})
 		if err != nil {
 			log.Debug("ProxyNode CreateQueryChannel failed", zap.Error(err))
 			return err
@@ -187,7 +185,7 @@ func (node *ProxyNode) Init() error {
 	node.idAllocator = idAllocator
 	node.idAllocator.PeerID = Params.ProxyID
 
-	tsoAllocator, err := NewTimestampAllocator(node.masterService, Params.ProxyID)
+	tsoAllocator, err := NewTimestampAllocator(node.ctx, node.masterService, Params.ProxyID)
 	if err != nil {
 		return err
 	}
