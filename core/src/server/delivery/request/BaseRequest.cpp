@@ -108,8 +108,8 @@ BaseRequest::Execute() {
 
 Status
 BaseRequest::PostExecute() {
-    status_ = OnPostExecute();
-    return status_;
+    // not allow assign status_ here, because PostExecute() and Execute() are running on different threads
+    return OnPostExecute();
 }
 
 Status

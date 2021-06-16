@@ -20,6 +20,7 @@
 
 #include "config/Config.h"
 #include "db/DBFactory.h"
+#include "index/knowhere/knowhere/index/vector_index/helpers/FaissIO.h"
 #include "utils/CommonUtil.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
@@ -213,6 +214,12 @@ DBWrapper::StartService() {
         std::cerr << "ERROR! Failed to preload tables: " << preload_collections << std::endl;
         std::cerr << s.ToString() << std::endl;
         kill(0, SIGUSR1);
+    }
+
+    bool trace_enable = false;
+    s = config.GetLogsTraceEnable(trace_enable);
+    if (s.ok() && trace_enable) {
+        knowhere::enable_faiss_logging();
     }
 
     return Status::OK();

@@ -1744,7 +1744,7 @@ MySQLMetaImpl::FilesToSearchEx(const std::string& root_collection, const std::se
                           << " OR file_type = " << std::to_string(SegmentSchema::TO_INDEX)
                           << " OR file_type = " << std::to_string(SegmentSchema::INDEX) << ");";
 
-                LOG_ENGINE_DEBUG_ << "FilesToSearch: " << statement.str();
+                LOG_ENGINE_DEBUG_ << "FilesToSearchEx: " << statement.str();
 
                 res = statement.store();
             }  // Scoped Connection
@@ -1900,7 +1900,7 @@ MySQLMetaImpl::FilesToIndex(FilesHolder& files_holder) {
                       << " FROM " << META_TABLEFILES << " WHERE file_type = " << std::to_string(SegmentSchema::TO_INDEX)
                       << ";";
 
-            //            LOG_ENGINE_DEBUG_ << "FilesToIndex: " << statement.str();
+            // LOG_ENGINE_DEBUG_ << "FilesToIndex: " << statement.str();
 
             res = statement.store();
         }  // Scoped Connection
@@ -2162,7 +2162,7 @@ MySQLMetaImpl::FilesByTypeEx(const std::vector<meta::CollectionSchema>& collecti
                 }
                 statement << ") AND file_type in (" << types << ");";
 
-                LOG_ENGINE_DEBUG_ << "FilesByType: " << statement.str();
+                LOG_ENGINE_DEBUG_ << "FilesByTypeEx: " << statement.str();
 
                 res = statement.store();
             }  // Scoped Connection
@@ -2295,7 +2295,7 @@ MySQLMetaImpl::FilesByID(const std::vector<size_t>& ids, FilesHolder& files_hold
 
             statement << " WHERE (" << idStr << ")";
 
-            LOG_ENGINE_DEBUG_ << "FilesToSearch: " << statement.str();
+            LOG_ENGINE_DEBUG_ << "FilesByID: " << statement.str();
 
             res = statement.store();
         }  // Scoped Connection
@@ -2473,7 +2473,7 @@ MySQLMetaImpl::CleanUpShadowFiles() {
                   << " WHERE table_schema = " << mysqlpp::quote << mysql_connection_pool_->db_name()
                   << " AND table_name = " << mysqlpp::quote << META_TABLEFILES << ";";
 
-        LOG_ENGINE_DEBUG_ << "CleanUp: " << statement.str();
+        LOG_ENGINE_DEBUG_ << "CleanUpShadowFiles: " << statement.str();
 
         mysqlpp::StoreQueryResult res = statement.store();
 

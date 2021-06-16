@@ -36,7 +36,6 @@
 #include "db/merge/MergeManagerFactory.h"
 #include "engine/EngineFactory.h"
 #include "index/knowhere/knowhere/index/vector_index/helpers/BuilderSuspend.h"
-#include "index/knowhere/knowhere/index/vector_index/helpers/FaissIO.h"
 #include "index/thirdparty/faiss/utils/distances.h"
 #include "insert/MemManagerFactory.h"
 #include "meta/MetaConsts.h"
@@ -94,7 +93,6 @@ DBImpl::DBImpl(const DBOptions& options)
     SetIdentity("DBImpl");
     AddCacheInsertDataListener();
     AddUseBlasThresholdListener();
-    knowhere::enable_faiss_logging();
 
     Start();
 }
@@ -1397,7 +1395,7 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
         segment::SegmentReader segment_reader(segment_dir);
 
         // uids_ptr
-        std::shared_ptr<std::vector<segment::doc_id_t>> uids_ptr = nullptr;
+        segment::UidsPtr uids_ptr = nullptr;
         auto LoadUid = [&]() {
             auto index = cache::CpuCacheMgr::GetInstance()->GetItem(file.location_);
             if (index != nullptr) {
@@ -1430,6 +1428,7 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
             codec::DefaultCodec default_codec;
             default_codec.GetIdBloomFilterFormat()->create(uids_ptr->size(), id_bloom_filter_ptr);
             id_bloom_filter_ptr->Add(*uids_ptr, deleted_docs_ptr->GetMutableDeletedDocs());
+            LOG_ENGINE_DEBUG_ << "A new bloom filter is created";
 
             segment::SegmentWriter segment_writer(segment_dir);
             segment_writer.WriteBloomFilter(id_bloom_filter_ptr);
@@ -1454,7 +1453,6 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
 
                     // Check whether the id has been deleted
                     if (!deleted_docs_ptr && !(status = LoadDeleteDoc()).ok()) {
-                        LOG_ENGINE_ERROR_ << status.message();
                         return status;
                     }
                     auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();

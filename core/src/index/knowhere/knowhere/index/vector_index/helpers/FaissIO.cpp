@@ -63,7 +63,7 @@ MemoryIOReader::operator()(void* ptr, size_t size, size_t nitems) {
 
 void
 enable_faiss_logging() {
-    faiss::LOG_DEBUG_ = &log_debug_;
+    faiss::LOG_TRACE_ = &log_trace_;
 }
 
 }  // namespace knowhere
