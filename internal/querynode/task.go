@@ -119,12 +119,12 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	vChannels := make([]Channel, 0)
 	pChannels := make([]Channel, 0)
 	for _, info := range w.req.Infos {
-		pChannels = append(pChannels, info.ChannelName)
+		vChannels = append(vChannels, info.ChannelName)
 	}
 	log.Debug("starting WatchDmChannels ...",
 		zap.Any("collectionName", w.req.Schema.Name),
 		zap.Any("collectionID", collectionID),
-		zap.String("ChannelIDs", fmt.Sprintln(pChannels)))
+		zap.String("vChannels", fmt.Sprintln(vChannels)))
 
 	// get physical channels
 	desColReq := &milvuspb.DescribeCollectionRequest{
@@ -144,11 +144,11 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		zap.Any("pChannels", desColRsp.PhysicalChannelNames),
 	)
 	VPChannels := make(map[string]string) // map[vChannel]pChannel
-	for _, ch := range pChannels {
+	for _, ch := range vChannels {
 		for i := range desColRsp.VirtualChannelNames {
-			if desColRsp.PhysicalChannelNames[i] == ch {
+			if desColRsp.VirtualChannelNames[i] == ch {
 				VPChannels[ch] = desColRsp.PhysicalChannelNames[i]
-				vChannels = append(vChannels, desColRsp.PhysicalChannelNames[i])
+				pChannels = append(pChannels, desColRsp.PhysicalChannelNames[i])
 				break
 			}
 		}
@@ -227,7 +227,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	log.Debug("watchDMChannel, add check points info done", zap.Any("collectionID", collectionID))
 
 	// create tSafe
-	for _, channel := range VPChannels {
+	for _, channel := range vChannels {
 		w.node.streaming.tSafeReplica.addTSafe(channel)
 	}
 
