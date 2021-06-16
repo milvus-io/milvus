@@ -43,12 +43,6 @@ jobs:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-go-mod
           key: ubuntu${{ matrix.ubuntu }}-go-mod-${{ hashFiles('**/go.sum') }}
           restore-keys: ubuntu${{ matrix.ubuntu }}-go-mod-
-      - name: Dockerfile Lint
-        uses: reviewdog/action-hadolint@v1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          reporter: github-pr-check # Default is github-pr-check
-          hadolint_ignore: DL3008 SC1091 DL3013 DL3003
       - name: Code Check
         env:
           CHECK_BUILDER: "1"
