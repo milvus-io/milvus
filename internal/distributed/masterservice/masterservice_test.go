@@ -255,7 +255,7 @@ func TestGrpcService(t *testing.T) {
 
 	svr.masterService.UpdateStateCode(internalpb.StateCode_Healthy)
 
-	cli, err := grpcmasterserviceclient.NewClient(cms.Params.MetaRootPath, cms.Params.EtcdEndpoints, 3*time.Second)
+	cli, err := grpcmasterserviceclient.NewClient(context.Background(), cms.Params.MetaRootPath, cms.Params.EtcdEndpoints, 3*time.Second)
 	assert.Nil(t, err)
 
 	err = cli.Init()

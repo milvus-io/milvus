@@ -71,7 +71,6 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	if mr.EnableMaster {
 		var ms *components.MasterService
@@ -328,4 +327,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		syscall.SIGQUIT)
 	sig := <-sc
 	fmt.Printf("Get %s signal to exit\n", sig.String())
+
+	// some deferred Stop has race with context cancel
+	cancel()
 }
