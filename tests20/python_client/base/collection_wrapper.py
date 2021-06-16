@@ -9,13 +9,13 @@ from utils.api_request import api_request
 class ApiCollectionWrapper:
     collection = None
 
-    def init_collection(self, name, data=None, schema=None, check_task=None, check_items=None, **kwargs):
+    def init_collection(self, name, schema=None, check_task=None, check_items=None, **kwargs):
         """ In order to distinguish the same name of collection """
         func_name = sys._getframe().f_code.co_name
-        res, is_succ = api_request([Collection, name, data, schema], **kwargs)
+        res, is_succ = api_request([Collection, name, schema], **kwargs)
         self.collection = res if is_succ else None
         check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
-                                       name=name, data=data, schema=schema, **kwargs).run()
+                                       name=name, schema=schema, **kwargs).run()
         return res, check_result
 
     @property
