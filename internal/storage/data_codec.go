@@ -124,9 +124,7 @@ type FloatVectorFieldData struct {
 // TODO: fill it
 // info for each blob
 type BlobInfo struct {
-	Length  int
-	StartTs uint64
-	EndTs   uint64
+	Length int
 }
 
 // example row_schema: {float_field, int_field, float_vector_field, string_field}
@@ -461,9 +459,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 		}
 		if fieldID == ms.TimeStampField {
 			blobInfo := BlobInfo{
-				Length:  totalLength,
-				StartTs: binlogReader.StartTimestamp,
-				EndTs:   binlogReader.EndTimestamp,
+				Length: totalLength,
 			}
 			resultData.Infos = append(resultData.Infos, blobInfo)
 		}
