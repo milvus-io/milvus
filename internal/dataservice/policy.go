@@ -180,7 +180,7 @@ func (p *randomAssignUnregisterPolicy) apply(cluster map[string]*datapb.DataNode
 
 type channelAssignPolicy interface {
 	// apply accept all online nodes and new created channel with collectionID, returns node needed to be changed
-	apply(cluster map[string]*datapb.DataNodeInfo, channel string, collectionID UniqueID) []*datapb.DataNodeInfo
+	apply(cluster map[string]*datapb.DataNodeInfo, vchannelName string, pchannelName string, collectionID UniqueID) []*datapb.DataNodeInfo
 }
 
 type assignAllPolicy struct {
@@ -190,12 +190,13 @@ func newAssignAllPolicy() channelAssignPolicy {
 	return &assignAllPolicy{}
 }
 
-func (p *assignAllPolicy) apply(cluster map[string]*datapb.DataNodeInfo, channel string, collectionID UniqueID) []*datapb.DataNodeInfo {
+func (p *assignAllPolicy) apply(cluster map[string]*datapb.DataNodeInfo, vchannelName string,
+	pchannelName string, collectionID UniqueID) []*datapb.DataNodeInfo {
 	ret := make([]*datapb.DataNodeInfo, 0)
 	for _, node := range cluster {
 		has := false
 		for _, ch := range node.Channels {
-			if ch.Name == channel {
+			if ch.VchannelName == vchannelName {
 				has = true
 				break
 			}
@@ -204,7 +205,8 @@ func (p *assignAllPolicy) apply(cluster map[string]*datapb.DataNodeInfo, channel
 			continue
 		}
 		node.Channels = append(node.Channels, &datapb.ChannelStatus{
-			Name:         channel,
+			VchannelName: vchannelName,
+			PchannelName: pchannelName,
 			State:        datapb.ChannelWatchState_Uncomplete,
 			CollectionID: collectionID,
 		})
@@ -220,14 +222,15 @@ func newBalancedAssignPolicy() channelAssignPolicy {
 	return &balancedAssignPolicy{}
 }
 
-func (p *balancedAssignPolicy) apply(cluster map[string]*datapb.DataNodeInfo, channel string, collectionID UniqueID) []*datapb.DataNodeInfo {
+func (p *balancedAssignPolicy) apply(cluster map[string]*datapb.DataNodeInfo, vchannelName string,
+	pchannelName string, collectionID UniqueID) []*datapb.DataNodeInfo {
 	if len(cluster) == 0 {
 		return []*datapb.DataNodeInfo{}
 	}
 	// filter existed channel
 	for _, node := range cluster {
 		for _, c := range node.GetChannels() {
-			if c.GetName() == channel && c.GetCollectionID() == collectionID {
+			if c.GetVchannelName() == vchannelName && c.GetCollectionID() == collectionID {
 				return nil
 			}
 		}
@@ -242,7 +245,8 @@ func (p *balancedAssignPolicy) apply(cluster map[string]*datapb.DataNodeInfo, ch
 
 	ret := make([]*datapb.DataNodeInfo, 0)
 	cluster[target].Channels = append(cluster[target].Channels, &datapb.ChannelStatus{
-		Name:         channel,
+		VchannelName: vchannelName,
+		PchannelName: pchannelName,
 		State:        datapb.ChannelWatchState_Uncomplete,
 		CollectionID: collectionID,
 	})

@@ -101,13 +101,13 @@ func TestWatchIfNeeded(t *testing.T) {
 	assert.EqualValues(t, "localhost:8080", dataNodes[addr].Address)
 
 	chName := "ch1"
-	cluster.watchIfNeeded(chName, 0)
+	cluster.watchIfNeeded(chName, chName, 0)
 	dataNodes, _ = cluster.dataManager.getDataNodes(true)
 	assert.EqualValues(t, 1, len(dataNodes[addr].Channels))
-	assert.EqualValues(t, chName, dataNodes[addr].Channels[0].Name)
-	cluster.watchIfNeeded(chName, 0)
+	assert.EqualValues(t, chName, dataNodes[addr].Channels[0].GetPchannelName())
+	cluster.watchIfNeeded(chName, chName, 0)
 	assert.EqualValues(t, 1, len(dataNodes[addr].Channels))
-	assert.EqualValues(t, chName, dataNodes[addr].Channels[0].Name)
+	assert.EqualValues(t, chName, dataNodes[addr].Channels[0].GetPchannelName())
 }
 
 func TestFlushSegments(t *testing.T) {

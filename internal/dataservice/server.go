@@ -71,6 +71,11 @@ type Server struct {
 
 	dataClientCreator   func(addr string) (types.DataNode, error)
 	masterClientCreator func(addr string) (types.MasterService, error)
+
+	channelMapCacheMu struct {
+		sync.RWMutex
+		mapping map[string]string
+	}
 }
 
 func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
@@ -79,6 +84,12 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 		ctx:       ctx,
 		msFactory: factory,
 		flushCh:   make(chan UniqueID, 1024),
+		channelMapCacheMu: struct {
+			sync.RWMutex
+			mapping map[string]string
+		}{
+			mapping: make(map[string]string),
+		},
 	}
 	s.dataClientCreator = func(addr string) (types.DataNode, error) {
 		return datanodeclient.NewClient(addr, 3*time.Second)
@@ -539,6 +550,44 @@ func (s *Server) prepareBinlog(req *datapb.SaveBinlogPathsRequest) (map[string]s
 	}
 
 	return meta, nil
+}
+
+func (s *Server) getPChannel(collectionID UniqueID, vchan string) (string, error) {
+	s.channelMapCacheMu.Lock()
+	defer s.channelMapCacheMu.Unlock()
+	pch, ok := s.channelMapCacheMu.mapping[vchan]
+	if ok {
+		return pch, nil
+	}
+
+	req := &milvuspb.DescribeCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_DescribeCollection,
+			MsgID:     0,
+			Timestamp: 0,
+			SourceID:  Params.NodeID,
+		},
+		DbName:         "",
+		CollectionName: "",
+		CollectionID:   collectionID,
+		TimeStamp:      0,
+	}
+	resp, err := s.masterClient.DescribeCollection(s.ctx, req)
+	if err := VerifyResponse(resp, err); err != nil {
+		log.Error("Failed to describe collection", zap.Int64("collectionID", collectionID))
+		return "", err
+	}
+
+	vchans := resp.GetVirtualChannelNames()
+	pchans := resp.GetPhysicalChannelNames()
+	for i, v := range vchans {
+		if vchan == v {
+			s.channelMapCacheMu.mapping[vchan] = pchans[i]
+			return pchans[i], nil
+		}
+	}
+
+	return "", fmt.Errorf("Can not find physical channel of %s", vchan)
 }
 
 func composeSegmentFlushMsgPack(segmentID UniqueID) msgstream.MsgPack {

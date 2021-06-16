@@ -280,9 +280,10 @@ enum ChannelWatchState {
 }
 
 message ChannelStatus {
-  string name = 1;
-  ChannelWatchState state=2;
-  int64 collectionID = 3;
+  string vchannel_name = 1;
+  string pchannel_name = 2;
+  ChannelWatchState state=3;
+  int64 collectionID = 4;
 }
 
 message DataNodeInfo {

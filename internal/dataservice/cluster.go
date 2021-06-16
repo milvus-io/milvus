@@ -111,17 +111,19 @@ func (c *cluster) watch(nodes []*datapb.DataNodeInfo) []*datapb.DataNodeInfo {
 	for _, n := range nodes {
 		logMsg := fmt.Sprintf("Begin to watch channels for node %s:", n.Address)
 		uncompletes := make([]vchannel, 0, len(n.Channels))
+		channelMap := make(map[string]string)
 		for _, ch := range n.Channels {
 			if ch.State == datapb.ChannelWatchState_Uncomplete {
 				if len(uncompletes) == 0 {
-					logMsg += ch.Name
+					logMsg += ch.GetVchannelName()
 				} else {
-					logMsg += "," + ch.Name
+					logMsg += "," + ch.GetVchannelName()
 				}
 				uncompletes = append(uncompletes, vchannel{
 					CollectionID: ch.CollectionID,
-					DmlChannel:   ch.Name,
+					DmlChannel:   ch.GetVchannelName(),
 				})
+				channelMap[ch.GetVchannelName()] = ch.GetPchannelName()
 			}
 		}
 
@@ -135,6 +137,12 @@ func (c *cluster) watch(nodes []*datapb.DataNodeInfo) []*datapb.DataNodeInfo {
 			log.Warn("get vchannel position failed", zap.Error(err))
 			continue
 		}
+
+		// replace vchan with pchannel
+		for _, info := range vchanInfos {
+			info.ChannelName = channelMap[info.ChannelName]
+		}
+
 		cli, err := c.sessionManager.getOrCreateSession(n.Address)
 		if err != nil {
 			log.Warn("get session failed", zap.String("addr", n.Address), zap.Error(err))
@@ -204,19 +212,20 @@ func (c *cluster) unregister(n *datapb.DataNodeInfo) {
 	c.dataManager.updateDataNodes(rets, chanBuffer)
 }
 
-func (c *cluster) watchIfNeeded(channel string, collectionID UniqueID) {
+func (c *cluster) watchIfNeeded(vchannel string, pchannel string, collectionID UniqueID) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	cNodes, chanBuffer := c.dataManager.getDataNodes(true)
 	var rets []*datapb.DataNodeInfo
 	if len(cNodes) == 0 { // no nodes to assign, put into buffer
 		chanBuffer = append(chanBuffer, &datapb.ChannelStatus{
-			Name:         channel,
+			VchannelName: vchannel,
+			PchannelName: pchannel,
 			CollectionID: collectionID,
 			State:        datapb.ChannelWatchState_Uncomplete,
 		})
 	} else {
-		rets = c.assignPolicy.apply(cNodes, channel, collectionID)
+		rets = c.assignPolicy.apply(cNodes, vchannel, pchannel, collectionID)
 	}
 	c.dataManager.updateDataNodes(rets, chanBuffer)
 	rets = c.watch(rets)
@@ -242,7 +251,7 @@ func (c *cluster) flush(segments []*datapb.SegmentInfo) {
 	channel2Node := make(map[string]string)
 	for _, node := range dataNodes {
 		for _, chstatus := range node.Channels {
-			channel2Node[chstatus.Name] = node.Address
+			channel2Node[chstatus.GetVchannelName()] = node.Address
 		}
 	}
 

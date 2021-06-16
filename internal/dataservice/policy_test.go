@@ -26,7 +26,8 @@ func TestWatchRestartsPolicy(t *testing.T) {
 		Version: 0,
 		Channels: []*datapb.ChannelStatus{
 			{
-				Name:         "vch1",
+				VchannelName: "vch1",
+				PchannelName: "vch1",
 				State:        datapb.ChannelWatchState_Complete,
 				CollectionID: 0,
 			},
@@ -38,7 +39,8 @@ func TestWatchRestartsPolicy(t *testing.T) {
 		Version: 0,
 		Channels: []*datapb.ChannelStatus{
 			{
-				Name:         "vch2",
+				VchannelName: "vch2",
+				PchannelName: "vch2",
 				State:        datapb.ChannelWatchState_Complete,
 				CollectionID: 0,
 			},
@@ -79,14 +81,14 @@ func TestRandomReassign(t *testing.T) {
 		},
 		{
 			Channels: []*datapb.ChannelStatus{
-				{Name: "VChan1", CollectionID: 1},
-				{Name: "VChan2", CollectionID: 2},
+				{VchannelName: "VChan1", PchannelName: "VChan1", CollectionID: 1},
+				{VchannelName: "VChan2", PchannelName: "VChan2", CollectionID: 2},
 			},
 		},
 		{
 			Channels: []*datapb.ChannelStatus{
-				{Name: "VChan3", CollectionID: 1},
-				{Name: "VChan4", CollectionID: 2},
+				{VchannelName: "VChan3", PchannelName: "VChan3", CollectionID: 1},
+				{VchannelName: "VChan4", PchannelName: "VChan4", CollectionID: 2},
 			},
 		},
 		nil,
@@ -102,7 +104,7 @@ func TestRandomReassign(t *testing.T) {
 			loop:
 				for _, node := range nodes {
 					for _, nch := range node.Channels {
-						if nch.Name == ch.Name {
+						if nch.GetVchannelName() == ch.GetVchannelName() {
 							found = true
 							assert.EqualValues(t, datapb.ChannelWatchState_Uncomplete, nch.State)
 							break loop

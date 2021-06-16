@@ -190,8 +190,9 @@ func (m *mockMasterService) DescribeCollection(ctx context.Context, req *milvusp
 		Schema: &schemapb.CollectionSchema{
 			Name: "test",
 		},
-		CollectionID:        1314,
-		VirtualChannelNames: []string{"vchan1"},
+		CollectionID:         1314,
+		VirtualChannelNames:  []string{"vchan1"},
+		PhysicalChannelNames: []string{"pchan1"},
 	}, nil
 }
 

@@ -57,6 +57,8 @@ func TestAssignSegmentID(t *testing.T) {
 		Schema:     schema,
 		Partitions: []int64{},
 	})
+	svr.channelMapCacheMu.mapping[channel0] = channel0
+	svr.channelMapCacheMu.mapping[channel1] = channel1
 	recordSize, err := typeutil.EstimateSizePerRecord(schema)
 	assert.Nil(t, err)
 	maxCount := int(Params.SegmentSize * 1024 * 1024 / float64(recordSize))
@@ -592,13 +594,15 @@ func TestDataNodeTtChannel(t *testing.T) {
 		Version: 0,
 		Channels: []*datapb.ChannelStatus{
 			{
-				Name:  "ch-1",
-				State: datapb.ChannelWatchState_Complete,
+				VchannelName: "ch-1",
+				PchannelName: "ch-1",
+				State:        datapb.ChannelWatchState_Complete,
 			},
 		},
 	})
 
 	t.Run("Test segment flush after tt", func(t *testing.T) {
+		svr.channelMapCacheMu.mapping["ch-1"] = "ch-1"
 		resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
 			NodeID:   0,
 			PeerRole: "",

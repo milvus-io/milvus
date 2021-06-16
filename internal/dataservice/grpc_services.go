@@ -99,7 +99,13 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 		//continue
 		//}
 
-		s.cluster.watchIfNeeded(r.ChannelName, r.CollectionID)
+		// get pchannel
+		pchan, err := s.getPChannel(r.GetCollectionID(), r.GetChannelName())
+		if err != nil {
+			log.Warn("Failed to get pchannel", zap.Int64("collection", r.GetCollectionID()), zap.String("channel", r.GetChannelName()))
+			continue
+		}
+		s.cluster.watchIfNeeded(r.GetChannelName(), pchan, r.CollectionID)
 
 		segmentID, retCount, expireTs, err := s.segmentManager.AllocSegment(ctx,
 			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
@@ -314,7 +320,8 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	}
 	log.Debug("Receive SaveBinlogPaths request",
 		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Int64("segmentID", req.GetSegmentID()))
+		zap.Int64("segmentID", req.GetSegmentID()),
+		zap.Any("checkpoints", req.GetCheckPoints()))
 
 	// check segment id & collection id matched
 	_, err := s.meta.GetCollection(req.GetCollectionID())
