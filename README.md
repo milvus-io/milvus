@@ -30,15 +30,15 @@ See [Milvus install guide](https://www.milvus.io/docs/install_milvus.md) to inst
 
 ### Try example programs
 
-Try an example program with Milvus using [Python](https://www.milvus.io/docs/example_code.md), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples), [Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples), or [C++ example code](https://github.com/milvus-io/milvus/tree/master/sdk/examples).
+Try an example program with Milvus using [Python](https://www.milvus.io/docs/example_code.md), [Java](https://github.com/milvus-io/milvus-sdk-java/tree/master/examples), [Go](https://github.com/milvus-io/milvus-sdk-go/tree/master/examples), or [C++ example code](https://github.com/milvus-io/milvus/tree/1.1/sdk/examples).
 
 ## Supported clients
 
 -   [Go](https://github.com/milvus-io/milvus-sdk-go)
 -   [Python](https://github.com/milvus-io/pymilvus)
 -   [Java](https://github.com/milvus-io/milvus-sdk-java)
--   [C++](https://github.com/milvus-io/milvus/tree/master/sdk)
--   [RESTful API](https://github.com/milvus-io/milvus/tree/master/core/src/server/web_impl)
+-   [C++](https://github.com/milvus-io/milvus/tree/1.1/sdk)
+-   [RESTful API](https://github.com/milvus-io/milvus/tree/1.1/core/src/server/web_impl)
 -   [Node.js](https://www.npmjs.com/package/@arkie-ai/milvus-client) (Contributed by [arkie](https://www.arkie.cn/))
 
 ## Application scenarios
@@ -47,7 +47,7 @@ You can use Milvus to build intelligent systems in a variety of AI application s
 
 ## Benchmark
 
-See our [test reports](https://github.com/milvus-io/milvus/tree/master/docs) for more information about performance benchmarking of different indexes in Milvus.
+See our [test reports](https://github.com/milvus-io/milvus/tree/1.1/docs) for more information about performance benchmarking of different indexes in Milvus.
 
 ## Roadmap
 
