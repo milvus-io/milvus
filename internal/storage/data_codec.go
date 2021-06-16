@@ -156,7 +156,6 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		return nil, nil, errors.New("data doesn't contains timestamp field")
 	}
 	ts := timeFieldData.(*Int64FieldData).Data
-	sort.Slice(ts, func(i, j int) bool { return ts[i] < ts[j] })
 	startTs := ts[0]
 	endTs := ts[len(ts)-1]
 
@@ -460,18 +459,12 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				return -1, -1, nil, fmt.Errorf("undefined data type %d", dataType)
 			}
 		}
-		blobInfo := BlobInfo{
-			Length:  totalLength,
-			StartTs: binlogReader.StartTimestamp,
-			EndTs:   binlogReader.EndTimestamp,
-		}
-		notExist := true
-		for _, info := range resultData.Infos {
-			if info == blobInfo {
-				notExist = false
+		if fieldID == ms.TimeStampField {
+			blobInfo := BlobInfo{
+				Length:  totalLength,
+				StartTs: binlogReader.StartTimestamp,
+				EndTs:   binlogReader.EndTimestamp,
 			}
-		}
-		if notExist {
 			resultData.Infos = append(resultData.Infos, blobInfo)
 		}
 		insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))

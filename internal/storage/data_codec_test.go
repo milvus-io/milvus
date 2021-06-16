@@ -129,7 +129,7 @@ func TestInsertCodec(t *testing.T) {
 			},
 			1: &Int64FieldData{
 				NumRows: 2,
-				Data:    []int64{4, 3},
+				Data:    []int64{3, 4},
 			},
 			100: &BoolFieldData{
 				NumRows: 2,
@@ -184,7 +184,7 @@ func TestInsertCodec(t *testing.T) {
 			},
 			1: &Int64FieldData{
 				NumRows: 2,
-				Data:    []int64{2, 1},
+				Data:    []int64{1, 2},
 			},
 			100: &BoolFieldData{
 				NumRows: 2,
