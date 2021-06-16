@@ -17,6 +17,9 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"path"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1895,4 +1898,75 @@ func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.Channel
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
 	}, nil
+}
+
+func (c *Core) GetInfo(ctx context.Context, in *masterpb.GetInfoRequest) (*masterpb.GetInfoResponse, error) {
+	code := c.stateCode.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &masterpb.GetInfoResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+			},
+		}, nil
+	}
+
+	// get from env first
+	if Params.ProxyListFromEnvValid {
+		return &masterpb.GetInfoResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+				Reason:    "",
+			},
+			Nodes:   Params.ParsedProxyListFromEnv,
+			Metrics: nil,
+		}, nil
+	}
+
+	// get from etcd
+	resp, err := c.etcdCli.Get(
+		ctx,
+		path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyNodeRole),
+		clientv3.WithPrefix(),
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
+	)
+	if err != nil {
+		return &masterpb.GetInfoResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("failed to get proxy list from etcd: %v", err.Error()),
+			},
+		}, nil
+	}
+
+	ret := &masterpb.GetInfoResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		Nodes:   make([]*masterpb.ProxyNodeInfo, 0, len(resp.Kvs)),
+		Metrics: nil,
+	}
+
+	for _, info := range resp.Kvs {
+		sess := new(sessionutil.Session)
+		err := json.Unmarshal(info.Value, sess)
+		if err != nil {
+			continue
+		}
+
+		hostAndPort := strings.Split(sess.Address, ":")
+		if len(hostAndPort) != 2 {
+			continue
+		}
+
+		port, err := strconv.Atoi(hostAndPort[1])
+		if err != nil {
+			continue
+		}
+
+		ret.Nodes = append(ret.Nodes, &masterpb.ProxyNodeInfo{Host: hostAndPort[0], Port: uint32(port)})
+	}
+
+	return ret, nil
 }

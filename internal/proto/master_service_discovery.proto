@@ -1,0 +1,24 @@
+syntax = "proto3";
+package milvus.proto.master;
+
+option go_package="github.com/milvus-io/milvus/internal/proto/masterpb";
+
+import "common.proto";
+
+service ServiceDiscoveryProvider {
+  rpc GetInfo(GetInfoRequest) returns (GetInfoResponse) {}
+}
+
+message GetInfoRequest {
+}
+
+message GetInfoResponse {
+  common.Status status = 1;
+  repeated ProxyNodeInfo nodes = 2;
+  repeated common.KeyValuePair metrics = 3;
+}
+
+message ProxyNodeInfo {
+  string host = 1;
+  uint32 port = 2;
+}

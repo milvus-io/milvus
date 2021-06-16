@@ -232,6 +232,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		grpc.StreamInterceptor(
 			otgrpc.OpenTracingStreamServerInterceptor(tracer)))
 	masterpb.RegisterMasterServiceServer(s.grpcServer, s)
+	masterpb.RegisterServiceDiscoveryProviderServer(s.grpcServer, s)
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {
@@ -366,4 +367,8 @@ func (s *Server) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegme
 
 func (s *Server) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
 	return s.masterService.ShowSegments(ctx, in)
+}
+
+func (s *Server) GetInfo(ctx context.Context, in *masterpb.GetInfoRequest) (*masterpb.GetInfoResponse, error) {
+	return s.masterService.GetInfo(ctx, in)
 }

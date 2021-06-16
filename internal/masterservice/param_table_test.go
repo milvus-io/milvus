@@ -58,4 +58,8 @@ func TestParamTable(t *testing.T) {
 
 	assert.NotZero(t, Params.TimeTickInterval)
 	t.Logf("master timetickerInterval = %d", Params.TimeTickInterval)
+
+	t.Logf("proxy list from env: %v", Params.ProxyListFromEnv)
+	t.Logf("proxy list from env is valid: %v", Params.ProxyListFromEnvValid)
+	t.Logf("parsed proxy list from env: %v", Params.ParsedProxyListFromEnv)
 }

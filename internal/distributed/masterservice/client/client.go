@@ -36,6 +36,8 @@ type GrpcClient struct {
 	conn       *grpc.ClientConn
 	ctx        context.Context
 
+	serviceDiscoveryClient masterpb.ServiceDiscoveryProviderClient
+
 	//inner member
 	addr      string
 	timeout   time.Duration
@@ -70,13 +72,14 @@ func NewClient(metaRoot string, etcdEndpoints []string, timeout time.Duration) (
 	}
 
 	return &GrpcClient{
-		grpcClient: nil,
-		conn:       nil,
-		ctx:        context.Background(),
-		timeout:    timeout,
-		reconnTry:  300,
-		recallTry:  3,
-		sess:       sess,
+		grpcClient:             nil,
+		conn:                   nil,
+		ctx:                    context.Background(),
+		serviceDiscoveryClient: nil,
+		timeout:                timeout,
+		reconnTry:              300,
+		recallTry:              3,
+		sess:                   sess,
 	}, nil
 }
 
@@ -118,6 +121,7 @@ func (c *GrpcClient) connect() error {
 	}
 	log.Debug("MasterServiceClient try reconnect success")
 	c.grpcClient = masterpb.NewMasterServiceClient(c.conn)
+	c.serviceDiscoveryClient = masterpb.NewServiceDiscoveryProviderClient(c.conn)
 	return nil
 }
 
@@ -301,4 +305,11 @@ func (c *GrpcClient) ShowSegments(ctx context.Context, in *milvuspb.ShowSegments
 		return c.grpcClient.ShowSegments(ctx, in)
 	})
 	return ret.(*milvuspb.ShowSegmentsResponse), err
+}
+
+func (c *GrpcClient) GetInfo(ctx context.Context, in *masterpb.GetInfoRequest) (*masterpb.GetInfoResponse, error) {
+	ret, err := c.recall(func() (interface{}, error) {
+		return c.serviceDiscoveryClient.GetInfo(ctx, in)
+	})
+	return ret.(*masterpb.GetInfoResponse), err
 }

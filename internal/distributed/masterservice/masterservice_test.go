@@ -803,6 +803,26 @@ func TestGrpcService(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 	})
 
+	t.Run("get proxy node infos", func(t *testing.T) {
+		req := &masterpb.GetInfoRequest{}
+
+		cms.Params.ProxyListFromEnvValid = true
+		cms.Params.ProxyListFromEnv = "host1:50051,host2:50052"
+		cms.Params.ParsedProxyListFromEnv = make([]*masterpb.ProxyNodeInfo, 0, 2)
+		cms.Params.ParsedProxyListFromEnv = append(cms.Params.ParsedProxyListFromEnv, &masterpb.ProxyNodeInfo{Host: "host1", Port: 50051})
+		cms.Params.ParsedProxyListFromEnv = append(cms.Params.ParsedProxyListFromEnv, &masterpb.ProxyNodeInfo{Host: "host2", Port: 50052})
+
+		respFromEnv, err := cli.GetInfo(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, 2, len(respFromEnv.Nodes))
+
+		cms.Params.ProxyListFromEnvValid = false
+
+		respFromEtcd, err := cli.GetInfo(ctx, req)
+		assert.Nil(t, err)
+		t.Logf("get information of proxy node from etcd: %v", respFromEtcd.Nodes)
+	})
+
 	err = cli.Stop()
 	assert.Nil(t, err)
 

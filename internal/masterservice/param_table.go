@@ -12,10 +12,13 @@
 package masterservice
 
 import (
+	"os"
 	"path"
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/milvus-io/milvus/internal/proto/masterpb"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -46,6 +49,10 @@ type ParamTable struct {
 
 	Timeout          int
 	TimeTickInterval int
+
+	ProxyListFromEnv       string
+	ParsedProxyListFromEnv []*masterpb.ProxyNodeInfo
+	ProxyListFromEnvValid  bool
 
 	Log log.Config
 
@@ -186,6 +193,34 @@ func (p *ParamTable) initTimeout() {
 
 func (p *ParamTable) initTimeTickInterval() {
 	p.TimeTickInterval = p.ParseInt("master.timeTickInterval")
+}
+
+func (p *ParamTable) initProxyListFromEnv() {
+	p.ProxyListFromEnv = os.Getenv("PROXY_LIST")
+	if len(p.ProxyListFromEnv) == 0 {
+		p.ProxyListFromEnvValid = false
+	} else {
+		splitProxyEndpointList := strings.Split(p.ProxyListFromEnv, ",")
+		p.ParsedProxyListFromEnv = make([]*masterpb.ProxyNodeInfo, 0, len(splitProxyEndpointList))
+		for _, proxy := range splitProxyEndpointList {
+			hostAndPort := strings.Split(proxy, ":")
+			if len(hostAndPort) != 2 {
+				//continue
+				p.ProxyListFromEnvValid = false
+				break
+			}
+
+			host := hostAndPort[0]
+			port, err := strconv.Atoi(hostAndPort[1])
+			if err != nil {
+				//continue
+				p.ProxyListFromEnvValid = false
+				break
+			}
+
+			p.ParsedProxyListFromEnv = append(p.ParsedProxyListFromEnv, &masterpb.ProxyNodeInfo{Host: host, Port: uint32(port)})
+		}
+	}
 }
 
 func (p *ParamTable) initLogCfg() {

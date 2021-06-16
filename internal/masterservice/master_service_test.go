@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"os"
 	"path"
 	"sync"
 	"testing"
@@ -1534,6 +1535,47 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, 5, core.chanTimeTick.GetChanNum())
 	})
 
+	t.Run("get information of proxy node", func(t *testing.T) {
+		req := &masterpb.GetInfoRequest{}
+
+		proxyListFromListBackup := os.Getenv("PROXY_LIST")
+		_ = os.Setenv("PROXY_LIST", "host1:50051,host2:50052")
+		Params.initProxyListFromEnv()
+
+		respFromEnv, err := core.GetInfo(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, 2, len(respFromEnv.Nodes))
+
+		_ = os.Setenv("PROXY_LIST", proxyListFromListBackup)
+
+		Params.ProxyListFromEnvValid = false
+
+		p1 := sessionutil.Session{
+			ServerID: 100,
+			Address:  "host3:50051,host4:50052",
+		}
+
+		p2 := sessionutil.Session{
+			ServerID: 101,
+		}
+		ctx2, cancel2 := context.WithTimeout(ctx, RequestTimeout)
+		defer cancel2()
+		s1, err := json.Marshal(&p1)
+		assert.Nil(t, err)
+		s2, err := json.Marshal(&p2)
+		assert.Nil(t, err)
+
+		_, err = core.etcdCli.Put(ctx2, path.Join(sessKey, typeutil.ProxyNodeRole)+"-1", string(s1))
+		assert.Nil(t, err)
+		_, err = core.etcdCli.Put(ctx2, path.Join(sessKey, typeutil.ProxyNodeRole)+"-2", string(s2))
+		assert.Nil(t, err)
+		time.Sleep(time.Second)
+
+		respFromEtcd, err := core.GetInfo(ctx, req)
+		assert.Nil(t, err)
+		t.Logf("get information of proxy list from etcd: %v", respFromEtcd.Nodes)
+	})
+
 	err = core.Stop()
 	assert.Nil(t, err)
 	st, err := core.GetComponentStates(ctx)
@@ -1696,6 +1738,9 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp8.Status.ErrorCode)
 
+		rsp9, err := core.GetInfo(ctx, &masterpb.GetInfoRequest{})
+		assert.Nil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp9.Status.ErrorCode)
 	})
 
 	t.Run("alloc_error", func(t *testing.T) {

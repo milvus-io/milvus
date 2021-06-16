@@ -43,6 +43,7 @@ ${protoc} --go_out=plugins=grpc,paths=source_relative:./indexcgopb index_cgo_msg
 #${protoc} --go_out=plugins=grpc,paths=source_relative:./internalpb internal_msg.proto
 
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./masterpb master.proto
+${protoc} --go_out=plugins=grpc,paths=source_relative:./masterpb master_service_discovery.proto
 
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./internalpb internal.proto
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./milvuspb milvus.proto
