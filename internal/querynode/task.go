@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
@@ -214,9 +215,9 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	log.Debug("watchDMChannel, group channels done", zap.Any("collectionID", collectionID))
 
 	// add check points info
-	checkPointInfos := make([]*queryPb.CheckPoint, 0)
+	checkPointInfos := make([]*datapb.SegmentInfo, 0)
 	for _, info := range w.req.Infos {
-		checkPointInfos = append(checkPointInfos, info.CheckPoints...)
+		checkPointInfos = append(checkPointInfos, info.UnflushedSegments...)
 	}
 	err = w.node.streaming.replica.addExcludedSegments(collectionID, checkPointInfos)
 	if err != nil {

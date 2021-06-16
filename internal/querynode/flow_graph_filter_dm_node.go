@@ -133,7 +133,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 		return nil
 	}
 	for _, segmentInfo := range excludedSegments {
-		if msg.SegmentID == segmentInfo.SegmentID && msg.EndTs() < segmentInfo.Position.Timestamp {
+		if msg.SegmentID == segmentInfo.ID && msg.EndTs() < segmentInfo.DmlPosition.Timestamp {
 			log.Debug("filter invalid insert message, segments are excluded segments",
 				zap.Any("collectionID", msg.CollectionID),
 				zap.Any("partitionID", msg.PartitionID))
