@@ -474,7 +474,10 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 	reqID := it.Base.MsgID
 	channelCountMap := make(map[int32]uint32)    //   channelID to count
 	channelMaxTSMap := make(map[int32]Timestamp) //  channelID to max Timestamp
-	channelNames := stream.GetProduceChannels()
+	channelNames, err := it.chMgr.getVChannels(it.GetCollectionID())
+	if err != nil {
+		return nil, err
+	}
 	log.Debug("_assignSemgentID, produceChannels:", zap.Any("Channels", channelNames))
 
 	for i, request := range tsMsgs {

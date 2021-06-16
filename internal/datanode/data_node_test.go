@@ -43,6 +43,7 @@ func TestDataNode(t *testing.T) {
 	node.Register()
 
 	t.Run("Test WatchDmChannels", func(t *testing.T) {
+		t.Skip()
 		ctx, cancel := context.WithCancel(context.Background())
 		node1 := newIDLEDataNodeMock(ctx)
 		node1.Start()
@@ -94,6 +95,7 @@ func TestDataNode(t *testing.T) {
 	})
 
 	t.Run("Test NewDataSyncService", func(t *testing.T) {
+		t.Skip()
 		ctx, cancel := context.WithCancel(context.Background())
 		node2 := newIDLEDataNodeMock(ctx)
 		node2.Start()
@@ -204,6 +206,7 @@ func TestDataNode(t *testing.T) {
 	})
 
 	t.Run("Test ReleaseDataSyncService", func(t *testing.T) {
+		t.Skip()
 		dmChannelName := "fake-dm-channel-test-NewDataSyncService"
 
 		vchan := &datapb.VchannelInfo{

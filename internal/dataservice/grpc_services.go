@@ -314,7 +314,8 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	}
 	log.Debug("Receive SaveBinlogPaths request",
 		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Int64("segmentID", req.GetSegmentID()))
+		zap.Int64("segmentID", req.GetSegmentID()),
+		zap.Any("checkpoints", req.GetCheckPoints()))
 
 	// check segment id & collection id matched
 	_, err := s.meta.GetCollection(req.GetCollectionID())
