@@ -130,6 +130,11 @@ func (node *DataNode) Register() error {
 	node.session = sessionutil.NewSession(node.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
 	node.session.Init(typeutil.DataNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
 	Params.NodeID = node.session.ServerID
+
+	Params.initMsgChannelSubName()
+	log.Debug("DataNode Init",
+		zap.String("MsgChannelSubName", Params.MsgChannelSubName),
+	)
 	return nil
 }
 
@@ -151,15 +156,7 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 		return nil
 	}
 
-	var initTs Timestamp = 0
-	if vchan.SeekPosition != nil {
-		initTs = vchan.SeekPosition.Timestamp
-	}
-
 	replica := newReplica(node.masterService, vchan.CollectionID)
-	if err := replica.init(initTs); err != nil {
-		return err
-	}
 
 	var alloc allocatorInterface = newAllocator(node.masterService)
 

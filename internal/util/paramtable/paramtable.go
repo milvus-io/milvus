@@ -136,23 +136,6 @@ func (gp *BaseTable) tryloadFromEnv() {
 		panic(err)
 	}
 
-	proxyServiceAddress := os.Getenv("PROXY_SERVICE_ADDRESS")
-	if proxyServiceAddress == "" {
-		addr, err := gp.Load("proxyService.address")
-		if err != nil {
-			panic(err)
-		}
-		proxyServicePort, err := gp.Load("proxyService.port")
-		if err != nil {
-			panic(err)
-		}
-		proxyServiceAddress = addr + ":" + proxyServicePort
-	}
-	err = gp.Save("_PROXY_SERVICE_ADDRESS", proxyServiceAddress)
-	if err != nil {
-		panic(err)
-	}
-
 	indexBuilderAddress := os.Getenv("INDEX_SERVICE_ADDRESS")
 	if indexBuilderAddress == "" {
 		indexBuilderHost, err := gp.Load("indexService.address")

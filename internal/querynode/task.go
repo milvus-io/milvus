@@ -400,7 +400,7 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 	collection.setReleaseTime(r.req.Base.Timestamp)
 
 	const gracefulReleaseTime = 3
-	go func() {
+	func() { // release synchronously
 		errMsg := "release collection failed, collectionID = " + strconv.FormatInt(r.req.CollectionID, 10) + ", err = "
 		time.Sleep(gracefulReleaseTime * time.Second)
 

@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -45,8 +44,6 @@ func TestDataSyncService_Start(t *testing.T) {
 
 	flushChan := make(chan *flushMsg, 100)
 	replica := newReplica(mockMaster, collectionID)
-	err := replica.init(0)
-	require.NoError(t, err)
 
 	allocFactory := NewAllocatorFactory(1)
 	msFactory := msgstream.NewPmsFactory()
@@ -54,7 +51,7 @@ func TestDataSyncService_Start(t *testing.T) {
 		"pulsarAddress":  pulsarURL,
 		"receiveBufSize": 1024,
 		"pulsarBufSize":  1024}
-	err = msFactory.SetParams(m)
+	err := msFactory.SetParams(m)
 
 	insertChannelName := "data_sync_service_test_dml"
 	ddlChannelName := "data_sync_service_test_ddl"

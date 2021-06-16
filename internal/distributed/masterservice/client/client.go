@@ -13,6 +13,7 @@ package grpcmasterserviceclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -61,8 +62,13 @@ func getMasterServiceAddr(sess *sessionutil.Session) (string, error) {
 	return ms.Address, nil
 }
 
-func NewClient(metaRoot string, etcdEndpoints []string, timeout time.Duration) (*GrpcClient, error) {
-	sess := sessionutil.NewSession(context.Background(), metaRoot, etcdEndpoints)
+// NewClient create master service client with specified ectd info and timeout
+// ctx execution control context
+// metaRoot is the path in etcd for master registration
+// etcdEndpoints are the address list for etcd end points
+// timeout is default setting for each grpc call
+func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string, timeout time.Duration) (*GrpcClient, error) {
+	sess := sessionutil.NewSession(ctx, metaRoot, etcdEndpoints)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
 		log.Debug("MasterServiceClient NewClient failed", zap.Error(err))
@@ -72,7 +78,7 @@ func NewClient(metaRoot string, etcdEndpoints []string, timeout time.Duration) (
 	return &GrpcClient{
 		grpcClient: nil,
 		conn:       nil,
-		ctx:        context.Background(),
+		ctx:        ctx,
 		timeout:    timeout,
 		reconnTry:  300,
 		recallTry:  3,
@@ -84,7 +90,17 @@ func (c *GrpcClient) connect() error {
 	tracer := opentracing.GlobalTracer()
 	var err error
 	getMasterServiceAddrFn := func() error {
-		c.addr, err = getMasterServiceAddr(c.sess)
+		ch := make(chan struct{}, 1)
+		var err error
+		go func() {
+			c.addr, err = getMasterServiceAddr(c.sess)
+			ch <- struct{}{}
+		}()
+		select {
+		case <-c.ctx.Done():
+			return retry.NoRetryError(errors.New("context canceled"))
+		case <-ch:
+		}
 		if err != nil {
 			return err
 		}
@@ -99,16 +115,26 @@ func (c *GrpcClient) connect() error {
 		log.Debug("MasterServiceClient try reconnect ", zap.String("address", c.addr))
 		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
 		defer cancelFunc()
-		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
-			grpc.WithUnaryInterceptor(
-				otgrpc.OpenTracingClientInterceptor(tracer)),
-			grpc.WithStreamInterceptor(
-				otgrpc.OpenTracingStreamClientInterceptor(tracer)))
-		if err != nil {
-			return err
+		var conn *grpc.ClientConn
+		var err error
+		ch := make(chan struct{}, 1)
+		go func() {
+			conn, err = grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
+				grpc.WithUnaryInterceptor(
+					otgrpc.OpenTracingClientInterceptor(tracer)),
+				grpc.WithStreamInterceptor(
+					otgrpc.OpenTracingStreamClientInterceptor(tracer)))
+			ch <- struct{}{}
+		}()
+		select {
+		case <-c.ctx.Done():
+			return retry.NoRetryError(errors.New("context canceled"))
+		case <-ch:
 		}
-		c.conn = conn
-		return nil
+		if err == nil {
+			c.conn = conn
+		}
+		return err
 	}
 
 	err = retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
@@ -143,18 +169,31 @@ func (c *GrpcClient) Register() error {
 }
 
 func (c *GrpcClient) recall(caller func() (interface{}, error)) (interface{}, error) {
-	ret, err := caller()
-	if err == nil {
-		return ret, nil
-	}
-	for i := 0; i < c.recallTry; i++ {
-		err = c.connect()
+	ch := make(chan struct{}, 1)
+	var ret interface{}
+	var err error
+	go func() {
+		ret, err = caller()
 		if err == nil {
-			ret, err = caller()
+			ch <- struct{}{}
+			return
+		}
+		for i := 0; i < c.recallTry; i++ {
+			err = c.connect()
 			if err == nil {
-				return ret, nil
+				ret, err = caller()
+				if err == nil {
+					ch <- struct{}{}
+					return
+				}
 			}
 		}
+		ch <- struct{}{}
+	}()
+	select {
+	case <-c.ctx.Done():
+		return nil, errors.New("context canceled")
+	case <-ch:
 	}
 	return ret, err
 }

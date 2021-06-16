@@ -127,7 +127,6 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) init() error {
-	ctx := context.Background()
 	var err error
 	Params.Init()
 	if !funcutil.CheckPortAvailable(Params.Port) {
@@ -171,7 +170,7 @@ func (s *Server) init() error {
 	masterServiceAddr := Params.MasterAddress
 	log.Debug("ProxyNode", zap.String("master address", masterServiceAddr))
 	timeout := 3 * time.Second
-	s.masterServiceClient, err = grpcmasterserviceclient.NewClient(proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
+	s.masterServiceClient, err = grpcmasterserviceclient.NewClient(s.ctx, proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
 	if err != nil {
 		log.Debug("ProxyNode new masterServiceClient failed ", zap.Error(err))
 		return err
@@ -181,7 +180,7 @@ func (s *Server) init() error {
 		log.Debug("ProxyNode new masterServiceClient Init ", zap.Error(err))
 		return err
 	}
-	err = funcutil.WaitForComponentHealthy(ctx, s.masterServiceClient, "MasterService", 1000000, time.Millisecond*200)
+	err = funcutil.WaitForComponentHealthy(s.ctx, s.masterServiceClient, "MasterService", 1000000, time.Millisecond*200)
 
 	if err != nil {
 		log.Debug("ProxyNode WaitForComponentHealthy master service failed ", zap.Error(err))
