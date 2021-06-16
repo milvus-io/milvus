@@ -121,10 +121,19 @@ type FloatVectorFieldData struct {
 // 101: second user field id
 // 102: ...
 
+// TODO: fill it
+// info for each blob
+type BlobInfo struct {
+	Length  int
+	StartTs uint64
+	EndTs   uint64
+}
+
 // example row_schema: {float_field, int_field, float_vector_field, string_field}
 // Data {<0, row_id>, <1, timestamp>, <100, float_field>, <101, int_field>, <102, float_vector_field>, <103, string_field>}
 type InsertData struct {
-	Data map[FieldID]FieldData // field id to field data
+	Data  map[FieldID]FieldData // field id to field data
+	Infos []BlobInfo
 }
 
 // Blob key example:
@@ -147,6 +156,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		return nil, nil, errors.New("data doesn't contains timestamp field")
 	}
 	ts := timeFieldData.(*Int64FieldData).Data
+	sort.Slice(ts, func(i, j int) bool { return ts[i] < ts[j] })
 	startTs := ts[0]
 	endTs := ts[len(ts)-1]
 
@@ -262,6 +272,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 
 		dataType := binlogReader.PayloadDataType
 		fieldID := binlogReader.FieldID
+		totalLength := 0
 		for {
 			eventReader, err := binlogReader.NextEventReader()
 			if err != nil {
@@ -285,6 +296,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				if err != nil {
 					return -1, -1, nil, err
 				}
+				totalLength += length
 				boolFieldData.NumRows += length
 				resultData.Data[fieldID] = boolFieldData
 			case schemapb.DataType_Int8:
@@ -301,6 +313,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				if err != nil {
 					return -1, -1, nil, err
 				}
+				totalLength += length
 				int8FieldData.NumRows += length
 				resultData.Data[fieldID] = int8FieldData
 			case schemapb.DataType_Int16:
@@ -317,6 +330,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				if err != nil {
 					return -1, -1, nil, err
 				}
+				totalLength += length
 				int16FieldData.NumRows += length
 				resultData.Data[fieldID] = int16FieldData
 			case schemapb.DataType_Int32:
@@ -333,6 +347,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				if err != nil {
 					return -1, -1, nil, err
 				}
+				totalLength += length
 				int32FieldData.NumRows += length
 				resultData.Data[fieldID] = int32FieldData
 			case schemapb.DataType_Int64:
@@ -349,6 +364,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				if err != nil {
 					return -1, -1, nil, err
 				}
+				totalLength += length
 				int64FieldData.NumRows += length
 				resultData.Data[fieldID] = int64FieldData
 			case schemapb.DataType_Float:
@@ -365,6 +381,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				if err != nil {
 					return -1, -1, nil, err
 				}
+				totalLength += length
 				floatFieldData.NumRows += length
 				resultData.Data[fieldID] = floatFieldData
 			case schemapb.DataType_Double:
@@ -381,6 +398,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				if err != nil {
 					return -1, -1, nil, err
 				}
+				totalLength += length
 				doubleFieldData.NumRows += length
 				resultData.Data[fieldID] = doubleFieldData
 			case schemapb.DataType_String:
@@ -392,6 +410,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				if err != nil {
 					return -1, -1, nil, err
 				}
+				totalLength += length
 				stringFieldData.NumRows += length
 				for i := 0; i < length; i++ {
 					singleString, err := eventReader.GetOneStringFromPayload(i)
@@ -416,6 +435,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				if err != nil {
 					return -1, -1, nil, err
 				}
+				totalLength += length
 				binaryVectorFieldData.NumRows += length
 				resultData.Data[fieldID] = binaryVectorFieldData
 			case schemapb.DataType_FloatVector:
@@ -433,11 +453,26 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				if err != nil {
 					return -1, -1, nil, err
 				}
+				totalLength += length
 				floatVectorFieldData.NumRows += length
 				resultData.Data[fieldID] = floatVectorFieldData
 			default:
 				return -1, -1, nil, fmt.Errorf("undefined data type %d", dataType)
 			}
+		}
+		blobInfo := BlobInfo{
+			Length:  totalLength,
+			StartTs: binlogReader.StartTimestamp,
+			EndTs:   binlogReader.EndTimestamp,
+		}
+		notExist := true
+		for _, info := range resultData.Infos {
+			if info == blobInfo {
+				notExist = false
+			}
+		}
+		if notExist {
+			resultData.Infos = append(resultData.Infos, blobInfo)
 		}
 		insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
 	}
