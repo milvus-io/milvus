@@ -19,8 +19,6 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
@@ -43,8 +41,6 @@ type ParamTable struct {
 	MasterAddress string
 	PulsarAddress string
 
-	QueryNodeNum               int
-	QueryNodeIDList            []UniqueID
 	ProxyID                    UniqueID
 	TimeTickInterval           time.Duration
 	K2SChannelNames            []string
@@ -85,8 +81,6 @@ func (pt *ParamTable) initParams() {
 	pt.initEtcdEndpoints()
 	pt.initMetaRootPath()
 	pt.initPulsarAddress()
-	pt.initQueryNodeIDList()
-	pt.initQueryNodeNum()
 	pt.initTimeTickInterval()
 	pt.initK2SChannelNames()
 	pt.initProxySubName()
@@ -108,28 +102,6 @@ func (pt *ParamTable) initPulsarAddress() {
 		panic(err)
 	}
 	pt.PulsarAddress = ret
-}
-
-func (pt *ParamTable) initQueryNodeNum() {
-	pt.QueryNodeNum = len(pt.QueryNodeIDList)
-}
-
-func (pt *ParamTable) initQueryNodeIDList() []UniqueID {
-	queryNodeIDStr, err := pt.Load("nodeID.queryNodeIDList")
-	if err != nil {
-		panic(err)
-	}
-	var ret []UniqueID
-	queryNodeIDs := strings.Split(queryNodeIDStr, ",")
-	for _, i := range queryNodeIDs {
-		v, err := strconv.Atoi(i)
-		if err != nil {
-			log.Error("ProxyNode ParamsTable", zap.String("load QueryNodeID list error", err.Error()))
-		}
-		ret = append(ret, UniqueID(v))
-	}
-	pt.QueryNodeIDList = ret
-	return ret
 }
 
 func (pt *ParamTable) initTimeTickInterval() {

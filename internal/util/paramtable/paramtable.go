@@ -303,23 +303,6 @@ func (gp *BaseTable) ParseInt(key string) int {
 	return value
 }
 
-func (gp *BaseTable) QueryNodeIDList() []UniqueID {
-	queryNodeIDStr, err := gp.Load("nodeID.queryNodeIDList")
-	if err != nil {
-		panic(err)
-	}
-	var ret []UniqueID
-	queryNodeIDs := strings.Split(queryNodeIDStr, ",")
-	for _, i := range queryNodeIDs {
-		v, err := strconv.Atoi(i)
-		if err != nil {
-			log.Panicf("load proxy id list error, %s", err.Error())
-		}
-		ret = append(ret, UniqueID(v))
-	}
-	return ret
-}
-
 // package methods
 
 func ConvertRangeToIntRange(rangeStr, sep string) []int {

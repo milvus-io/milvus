@@ -10,9 +10,6 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
 
-nodeID: # will be deprecated later
-  queryNodeIDList: [1]
-
 etcd:
   endpoints:
     - localhost:2379
