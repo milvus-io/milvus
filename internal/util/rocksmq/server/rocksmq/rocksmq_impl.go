@@ -224,11 +224,11 @@ func (rmq *rocksmq) DestroyConsumerGroup(topicName, groupName string) error {
 func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) error {
 	ll, ok := rmq.channelMu.Load(topicName)
 	if !ok {
-		return errors.New(fmt.Sprintf("topic name = %s not exist", topicName))
+		return fmt.Errorf("topic name = %s not exist", topicName)
 	}
 	lock, ok := ll.(*sync.Mutex)
 	if !ok {
-		return errors.New(fmt.Sprintf("get mutex failed, topic name = %s", topicName))
+		return fmt.Errorf("get mutex failed, topic name = %s", topicName)
 	}
 	lock.Lock()
 	defer lock.Unlock()
@@ -305,11 +305,11 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) error 
 func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]ConsumerMessage, error) {
 	ll, ok := rmq.channelMu.Load(topicName)
 	if !ok {
-		return nil, errors.New(fmt.Sprintf("topic name = %s not exist", topicName))
+		return nil, fmt.Errorf("topic name = %s not exist", topicName)
 	}
 	lock, ok := ll.(*sync.Mutex)
 	if !ok {
-		return nil, errors.New(fmt.Sprintf("get mutex failed, topic name = %s", topicName))
+		return nil, fmt.Errorf("get mutex failed, topic name = %s", topicName)
 	}
 	lock.Lock()
 	defer lock.Unlock()
