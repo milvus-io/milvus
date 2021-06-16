@@ -5,7 +5,6 @@ from pymilvus import DataType
 
 import utils as ut
 
-default_entity = ut.gen_entities(1, is_normal=True)
 default_entities = ut.gen_entities(ut.default_nb, is_normal=True)
 raw_vectors, default_binary_entities = ut.gen_binary_entities(ut.default_nb)
 default_int_field_name = "int64"
