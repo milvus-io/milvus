@@ -118,12 +118,12 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	vChannels := make([]Channel, 0)
 	pChannels := make([]Channel, 0)
 	for _, info := range w.req.Infos {
-		vChannels = append(vChannels, info.ChannelName)
+		pChannels = append(pChannels, info.ChannelName)
 	}
 	log.Debug("starting WatchDmChannels ...",
 		zap.Any("collectionName", w.req.Schema.Name),
 		zap.Any("collectionID", collectionID),
-		zap.String("ChannelIDs", fmt.Sprintln(vChannels)))
+		zap.String("ChannelIDs", fmt.Sprintln(pChannels)))
 
 	// get physical channels
 	desColReq := &milvuspb.DescribeCollectionRequest{
@@ -134,20 +134,20 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	}
 	desColRsp, err := w.node.masterService.DescribeCollection(ctx, desColReq)
 	if err != nil {
-		log.Error("get physical channels failed, err = " + err.Error())
+		log.Error("get channels failed, err = " + err.Error())
 		return err
 	}
-	log.Debug("get physical channels from master",
+	log.Debug("get channels from master",
 		zap.Any("collectionID", collectionID),
 		zap.Any("vChannels", desColRsp.VirtualChannelNames),
 		zap.Any("pChannels", desColRsp.PhysicalChannelNames),
 	)
 	VPChannels := make(map[string]string) // map[vChannel]pChannel
-	for _, ch := range vChannels {
+	for _, ch := range pChannels {
 		for i := range desColRsp.VirtualChannelNames {
-			if desColRsp.VirtualChannelNames[i] == ch {
+			if desColRsp.PhysicalChannelNames[i] == ch {
 				VPChannels[ch] = desColRsp.PhysicalChannelNames[i]
-				pChannels = append(pChannels, desColRsp.PhysicalChannelNames[i])
+				vChannels = append(vChannels, desColRsp.PhysicalChannelNames[i])
 				break
 			}
 		}
@@ -164,13 +164,13 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 			return err
 		}
 		w.node.streaming.replica.initExcludedSegments(collectionID)
-		collection, err := w.node.streaming.replica.getCollectionByID(collectionID)
-		if err != nil {
-			return err
-		}
-		collection.addVChannels(vChannels)
-		collection.addPChannels(pChannels)
 	}
+	collection, err := w.node.streaming.replica.getCollectionByID(collectionID)
+	if err != nil {
+		return err
+	}
+	collection.addVChannels(vChannels)
+	collection.addPChannels(pChannels)
 	if hasCollectionInHistorical := w.node.historical.replica.hasCollection(collectionID); !hasCollectionInHistorical {
 		err := w.node.historical.replica.addCollection(collectionID, w.req.Schema)
 		if err != nil {
