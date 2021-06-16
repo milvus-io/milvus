@@ -40,6 +40,7 @@ func TestDataNode(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	node := newIDLEDataNodeMock(ctx)
 	node.Start()
+	node.Register()
 
 	t.Run("Test WatchDmChannels", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
