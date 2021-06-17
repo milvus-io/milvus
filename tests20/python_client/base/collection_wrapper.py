@@ -42,6 +42,14 @@ class ApiCollectionWrapper:
     def primary_field(self):
         return self.collection.primary_field
 
+    def construct_from_dataframe(self, name, dataframe, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([Collection.construct_from_dataframe, name, dataframe], **kwargs)
+        self.collection = res if is_succ else None
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
+                                       name=name, dataframe=dataframe, **kwargs).run()
+        return res, check_result
+
     def drop(self, check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.drop], **kwargs)
@@ -70,15 +78,15 @@ class ApiCollectionWrapper:
                                        **kwargs).run()
         return res, check_result
 
-    def search(self, data, anns_field, param, limit, expression,
+    def search(self, data, anns_field, param, limit, expr=None,
                partition_names=None, output_fields=None, timeout=None,
                check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.collection.search, data, anns_field, param, limit, expression, partition_names,
+        res, check = api_request([self.collection.search, data, anns_field, param, limit, expr, partition_names,
                                output_fields, timeout], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        data=data, anns_field=anns_field, param=param, limit=limit,
-                                       expression=expression, partition_names=partition_names,
+                                       expr=expr, partition_names=partition_names,
                                        output_fields=output_fields,
                                        timeout=timeout, **kwargs).run()
         return res, check_result

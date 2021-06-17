@@ -3,7 +3,7 @@ import pytest
 from pymilvus import DataType
 
 from base.client_base import TestcaseBase
-# from utils.util_log import test_log as log
+from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
@@ -19,12 +19,6 @@ default_binary_schema = cf.gen_default_binary_collection_schema()
 
 class TestCollectionParams(TestcaseBase):
     """ Test case of collection interface """
-
-    '''
-    def teardown_method(self):
-        if self.self.collection_wrap is not None and self.self.collection_wrap.collection is not None:
-            self.self.collection_wrap.drop()
-    '''
 
     @pytest.fixture(scope="function", params=ct.get_invalid_strs)
     def get_invalid_type_schema(self, request):
@@ -59,7 +53,7 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        self.collection_wrap.init_collection(c_name, data=None, schema=default_schema,
+        self.collection_wrap.init_collection(c_name, schema=default_schema,
                                              check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: default_schema})
         assert c_name, _ in self.utility_wrap.list_collections()
@@ -227,48 +221,6 @@ class TestCollectionParams(TestcaseBase):
                                              check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: default_schema})
         assert collection_w.name == self.collection_wrap.name
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_collection_dup_name_none_schema_dataframe(self):
-        """
-        target: test collection with dup name and insert dataframe
-        method: create collection with dup name, none schema, dataframe
-        expected: two collection object is correct
-        """
-        conn = self._connect()
-        nb = ct.default_nb
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name,
-                                                 check_task=CheckTasks.check_collection_property,
-                                                 check_items={exp_name: c_name, exp_schema: default_schema})
-        df = cf.gen_default_dataframe_data(nb)
-        self.collection_wrap.init_collection(c_name, schema=None, data=df,
-                                             check_task=CheckTasks.check_collection_property,
-                                             check_items={exp_name: c_name, exp_schema: default_schema})
-        conn.flush([collection_w.name])
-        assert collection_w.num_entities == nb
-        assert collection_w.num_entities == self.collection_wrap.num_entities
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_collection_dup_name_none_schema_data_list(self):
-        """
-        target: test collection with dup name and insert data (list-like)
-        method: create collection with dup name, none schema, data (list-like)
-        expected: two collection object is correct
-        """
-        conn = self._connect()
-        nb = ct.default_nb
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name,
-                                                 check_task=CheckTasks.check_collection_property,
-                                                 check_items={exp_name: c_name, exp_schema: default_schema})
-        data = cf.gen_default_dataframe_data(nb)
-        self.collection_wrap.init_collection(c_name, schema=None, data=data,
-                                             check_task=CheckTasks.check_collection_property,
-                                             check_items={exp_name: c_name, exp_schema: default_schema})
-        conn.flush([collection_w.name])
-        assert collection_w.num_entities == nb
-        assert collection_w.num_entities == self.collection_wrap.num_entities
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_collection_none_schema(self):
@@ -665,38 +617,6 @@ class TestCollectionParams(TestcaseBase):
                                              check_items={exp_name: c_name, exp_schema: schema})
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_collection_with_dataframe(self):
-        """
-        target: test collection with dataframe data
-        method: create collection and insert with dataframe
-        expected: collection num entities equal to nb
-        """
-        conn = self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        data = cf.gen_default_dataframe_data(ct.default_nb)
-        self.collection_wrap.init_collection(c_name, schema=default_schema, data=data,
-                                             check_task=CheckTasks.check_collection_property,
-                                             check_items={exp_name: c_name, exp_schema: default_schema})
-        conn.flush([c_name])
-        assert self.collection_wrap.num_entities == ct.default_nb
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_collection_with_data_list(self):
-        """
-        target: test collection with data (list-like)
-        method: create collection with data (list-like)
-        expected: collection num entities equal to nb
-        """
-        conn = self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        data = cf.gen_default_list_data(ct.default_nb)
-        self.collection_wrap.init_collection(c_name, schema=default_schema, data=data,
-                                             check_task=CheckTasks.check_collection_property,
-                                             check_items={exp_name: c_name, exp_schema: default_schema})
-        conn.flush([c_name])
-        assert self.collection_wrap.num_entities == ct.default_nb
-
-    @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.xfail(reason="issue #5667")
     def test_collection_binary(self):
         """
@@ -706,42 +626,10 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        self.collection_wrap.init_collection(c_name, data=None, schema=default_binary_schema,
+        self.collection_wrap.init_collection(c_name, schema=default_binary_schema,
                                              check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: default_binary_schema})
         assert c_name, _ in self.utility_wrap.list_collections()
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_collection_binary_with_dataframe(self):
-        """
-        target: test binary collection with dataframe
-        method: create binary collection with dataframe
-        expected: collection num entities equal to nb
-        """
-        conn = self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        df, _ = cf.gen_default_binary_dataframe_data(nb=ct.default_nb)
-        self.collection_wrap.init_collection(c_name, schema=default_binary_schema, data=df,
-                                             check_task=CheckTasks.check_collection_property,
-                                             check_items={exp_name: c_name, exp_schema: default_binary_schema})
-        conn.flush([c_name])
-        assert self.collection_wrap.num_entities == ct.default_nb
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_collection_binary_with_data_list(self):
-        """
-        target: test collection with data (list-like)
-        method: create binary collection with data (list-like)
-        expected: collection num entities equal to nb
-        """
-        conn = self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        data, _ = cf.gen_default_binary_list_data(ct.default_nb)
-        self.collection_wrap.init_collection(c_name, schema=default_binary_schema, data=data,
-                                             check_task=CheckTasks.check_collection_property,
-                                             check_items={exp_name: c_name, exp_schema: default_binary_schema})
-        conn.flush([c_name])
-        assert self.collection_wrap.num_entities == ct.default_nb
 
 
 class TestCollectionOperation(TestcaseBase):
@@ -754,12 +642,6 @@ class TestCollectionOperation(TestcaseBase):
     # def teardown_method(self):
     #     if self.self.collection_wrap is not None and self.self.collection_wrap.collection is not None:
     #         self.self.collection_wrap.drop()
-
-    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
-    def get_non_df(self, request):
-        if request.param is None:
-            pytest.skip("skip None")
-        yield request.param
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_collection_without_connection(self):
@@ -816,122 +698,6 @@ class TestCollectionOperation(TestcaseBase):
         collection_w.has_partition("p", check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_collection_created_by_dataframe(self):
-        """
-        target: test collection with dataframe
-        method: create collection with dataframe
-        expected: create successfully
-        """
-        conn = self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        df = cf.gen_default_dataframe_data(nb=ct.default_nb)
-        schema = cf.gen_default_collection_schema()
-        self.collection_wrap.init_collection(name=c_name, data=df, check_task=CheckTasks.check_collection_property,
-                                             check_items={exp_name: c_name, exp_schema: schema})
-        conn.flush([c_name])
-        assert self.collection_wrap.num_entities == ct.default_nb
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_collection_created_by_empty_dataframe(self):
-        """
-        target: test create collection by empty dataframe
-        method: invalid dataframe type create collection
-        expected: raise exception
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        data = pd.DataFrame()
-        error = {ct.err_code: 0, ct.err_msg: "The field of the schema cannot be empty"}
-        self.collection_wrap.init_collection(name=c_name, schema=None, data=data,
-                                             check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("df", [pd.DataFrame({"date": pd.date_range('20210101', periods=3)}),
-                                    pd.DataFrame({'%$#': cf.gen_vectors(3, 2)})])
-    def test_collection_created_by_invalid_dataframe(self, df):
-        """
-        target: test collection with invalid dataframe
-        method: create with invalid dataframe
-        expected: raise exception
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 0, ct.err_msg: "Invalid field name"}
-        self.collection_wrap.init_collection(name=c_name, schema=None, data=df,
-                                             check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_collection_construct_only_column_dataframe(self):
-        """
-        target: test collection with dataframe only columns
-        method: dataframe only has columns
-        expected: raise exception
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        df = pd.DataFrame(columns=[ct.default_int64_field_name, ct.default_float_vec_field_name])
-        error = {ct.err_code: 0, ct.err_msg: "Cannot infer schema from empty dataframe"}
-        self.collection_wrap.init_collection(name=c_name, schema=None, data=df,
-                                             check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_collection_construct_no_column_dataframe(self):
-        """
-        target: test collection with dataframe without columns
-        method: dataframe without columns
-        expected: raise exception
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        df = pd.DataFrame({' ': cf.gen_vectors(3, 2)})
-        error = {ct.err_code: 0, ct.err_msg: "Field name should not be empty"}
-        self.collection_wrap.init_collection(name=c_name, schema=None, data=df,
-                                             check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_collection_created_by_inconsistent_dataframe(self):
-        """
-        target: test collection with data inconsistent
-        method: create and insert with inconsistent data
-        expected: raise exception
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        # one field different type df
-        mix_data = [(1, 2., [0.1, 0.2]), (2, 3., 4)]
-        df = pd.DataFrame(data=mix_data, columns=list("ABC"))
-        error = {ct.err_code: 0, ct.err_msg: "The data in the same column must be of the same type"}
-        self.collection_wrap.init_collection(name=c_name, schema=None, data=df,
-                                             check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_collection_created_by_non_dataframe(self, get_non_df):
-        """
-        target: test create collection by invalid dataframe
-        method: non-dataframe type create collection
-        expected: raise exception
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 0, ct.err_msg: "Data of not pandas.DataFrame type should bepassed into the schema"}
-        self.collection_wrap.init_collection(name=c_name, schema=None, data=get_non_df,
-                                             check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_collection_created_by_data_list(self):
-        """
-        target: test create collection by data list
-        method: data type is list-like
-        expected: raise exception
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        data = cf.gen_default_list_data(nb=100)
-        error = {ct.err_code: 0, ct.err_msg: "Data of not pandas.DataFrame type should bepassed into the schema"}
-        self.collection_wrap.init_collection(name=c_name, schema=None, data=data,
-                                             check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L1)
     def test_collection_after_drop(self):
         """
         target: test create collection after create and drop
@@ -947,32 +713,148 @@ class TestCollectionOperation(TestcaseBase):
                                   check_items={exp_name: c_name, exp_schema: default_schema})
         assert self.utility_wrap.has_collection(c_name)[0]
 
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5675")
-    def test_collection_binary_created_by_dataframe(self):
+
+class TestCollectionDataframe(TestcaseBase):
+    """
+    ******************************************************************
+      The following cases are used to test construct_from_dataframe
+    ******************************************************************
+    """
+
+    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
+    def get_non_df(self, request):
+        if request.param is None:
+            pytest.skip("skip None")
+        yield request.param
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_construct_from_dataframe(self):
         """
-        target: test collection with dataframe
-        method: create collection with dataframe
-        expected: create successfully
+        target: test collection with dataframe data
+        method: create collection and insert with dataframe
+        expected: collection num entities equal to nb
         """
         conn = self._connect()
         c_name = cf.gen_unique_str(prefix)
-        df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb)
-        schema = cf.gen_default_binary_collection_schema()
-        self.collection_wrap.init_collection(name=c_name, data=df, check_task=CheckTasks.check_collection_property,
-                                             check_items={exp_name: c_name, exp_schema: schema})
+        df = cf.gen_default_dataframe_data(ct.default_nb)
+        self.collection_wrap.construct_from_dataframe(c_name, df,
+                                                      check_task=CheckTasks.check_collection_property,
+                                                      check_items={exp_name: c_name, exp_schema: default_schema})
         conn.flush([c_name])
+        assert self.collection_wrap.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_collection_binary_created_by_data_list(self):
+    @pytest.mark.xfail(reason="issue #5675")
+    def test_construct_from_binary_dataframe(self):
         """
-        target: test create collection by data list
-        method: data type is list-like
+        target: test binary collection with dataframe
+        method: create binary collection with dataframe
+        expected: collection num entities equal to nb
+        """
+        conn = self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        df, _ = cf.gen_default_binary_dataframe_data(nb=ct.default_nb)
+        self.collection_wrap.construct_from_dataframe(c_name, df,
+                                                      check_task=CheckTasks.check_collection_property,
+                                                      check_items={exp_name: c_name, exp_schema: default_binary_schema})
+        conn.flush([c_name])
+        assert self.collection_wrap.num_entities == ct.default_nb
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_construct_from_none_dataframe(self):
+        """
+        target: test create collection by empty dataframe
+        method: invalid dataframe type create collection
         expected: raise exception
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        data, _ = cf.gen_default_binary_list_data(nb=100)
-        error = {ct.err_code: 0, ct.err_msg: "Data of not pandas.DataFrame type should bepassed into the schema"}
-        self.collection_wrap.init_collection(name=c_name, schema=None, data=data,
-                                             check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 0, ct.err_msg: "Dataframe can not be None!"}
+        self.collection_wrap.construct_from_dataframe(c_name, None, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_construct_from_empty_dataframe(self):
+        """
+        target: test create collection by empty dataframe
+        method: invalid dataframe type create collection
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        df = pd.DataFrame()
+        error = {ct.err_code: 0, ct.err_msg: "The field of the schema cannot be empty"}
+        self.collection_wrap.construct_from_dataframe(c_name, df, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_construct_from_dataframe_only_column(self):
+        """
+        target: test collection with dataframe only columns
+        method: dataframe only has columns
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        df = pd.DataFrame(columns=[ct.default_int64_field_name, ct.default_float_vec_field_name])
+        error = {ct.err_code: 0, ct.err_msg: "Cannot infer schema from empty dataframe"}
+        self.collection_wrap.construct_from_dataframe(c_name, df, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_construct_from_inconsistent_dataframe(self):
+        """
+        target: test collection with data inconsistent
+        method: create and insert with inconsistent data
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        # one field different type df
+        mix_data = [(1, 2., [0.1, 0.2]), (2, 3., 4)]
+        df = pd.DataFrame(data=mix_data, columns=list("ABC"))
+        error = {ct.err_code: 0, ct.err_msg: "The data in the same column must be of the same type"}
+        self.collection_wrap.construct_from_dataframe(c_name, df, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_construct_from_non_dataframe(self, get_non_df):
+        """
+        target: test create collection by invalid dataframe
+        method: non-dataframe type create collection
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        error = {ct.err_code: 0, ct.err_msg: "Data type must be pandas.DataFrame!"}
+        df = get_non_df
+        self.collection_wrap.construct_from_dataframe(c_name, df, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("df", [pd.DataFrame({"date": pd.date_range('20210101', periods=3)}),
+                                    pd.DataFrame({'%$#': cf.gen_vectors(3, 2)})])
+    def test_construct_from_invalid_dataframe(self, df):
+        """
+        target: test collection with invalid dataframe
+        method: create with invalid dataframe
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        error = {ct.err_code: 0, ct.err_msg: "Invalid field name"}
+        self.collection_wrap.construct_from_dataframe(c_name, df, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_construct_from_dataframe_dup_name(self):
+        """
+        target: test collection with dup name and insert dataframe
+        method: create collection with dup name, none schema, dataframe
+        expected: two collection object is correct
+        """
+        conn = self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name,
+                                                 check_task=CheckTasks.check_collection_property,
+                                                 check_items={exp_name: c_name, exp_schema: default_schema})
+        df = cf.gen_default_dataframe_data(ct.default_nb)
+        self.collection_wrap.construct_from_dataframe(c_name, df, check_task=CheckTasks.check_collection_property,
+                                                      check_items={exp_name: c_name, exp_schema: default_schema})
+        conn.flush([collection_w.name])
+        assert collection_w.num_entities == ct.default_nb
+        assert collection_w.num_entities == self.collection_wrap.num_entities
