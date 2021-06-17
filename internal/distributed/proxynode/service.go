@@ -29,7 +29,7 @@ import (
 	grpcmasterserviceclient "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
 	grpcqueryserviceclient "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
 
-	"github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
+	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"

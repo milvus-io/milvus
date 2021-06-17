@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
+	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	dsc "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
 	msc "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
 	"github.com/milvus-io/milvus/internal/log"

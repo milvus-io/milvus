@@ -28,7 +28,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
+	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	dsc "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
 	isc "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
 	msc "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
