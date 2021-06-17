@@ -20,41 +20,26 @@ class ApiPartitionWrapper:
         return response, check_result
 
     @property
-    def description(self, check_task=None, check_items=None):
+    def description(self):
         return self.partition.description if self.partition else None
-        # func_name = sys._getframe().f_code.co_name
-        # res, check = func_req([self.partition.description])
-        # check_result = CheckFunc(res, func_name, check_task, check_items, check).run()
-        # return res, check_result
 
     @property
-    def name(self, check_task=None, check_items=None):
+    def name(self):
         return self.partition.name if self.partition else None
-        # func_name = sys._getframe().f_code.co_name
-        # res, check = func_req([self.partition.name])
-        # check_result = CheckFunc(res, func_name, check_task, check_items, check).run()
-        # return res, check_result
 
     @property
-    def is_empty(self, check_task=None, check_items=None):
+    def is_empty(self):
         return self.partition.is_empty if self.partition else None
-        # func_name = sys._getframe().f_code.co_name
-        # res, check = func_req([self.partition.is_empty])
-        # check_result = CheckFunc(res, func_name, check_task, check_items, check).run()
-        # return res, check_result
 
     @property
-    def num_entities(self, check_task=None, check_items=None):
+    def num_entities(self):
         return self.partition.num_entities if self.partition else None
-        # func_name = sys._getframe().f_code.co_name
-        # res, check = func_req([self.partition.num_entities])
-        # check_result = CheckFunc(res, func_name, check_task, check_items, check).run()
-        # return res, check_result
 
     def drop(self, check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, succ = api_request([self.partition.drop], **kwargs)
-        check_result = ResponseChecker(res, func_name, check_task, check_items, succ, **kwargs).run()
+        check_result = ResponseChecker(res, func_name,
+                                       check_task, check_items, succ, **kwargs).run()
         return res, check_result
 
     def load(self, check_task=None, check_items=None, **kwargs):

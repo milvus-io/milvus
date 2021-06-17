@@ -19,20 +19,12 @@ class ApiCollectionWrapper:
         return res, check_result
 
     @property
-    def schema(self, check_task=None, check_items=None):
+    def schema(self):
         return self.collection.schema
-        # func_name = sys._getframe().f_code.co_name
-        # res, check = func_req([self.collection.schema])
-        # check_result = CheckFunc(res, func_name, check_task, check_items, check).run()
-        # return res, check_result
 
     @property
-    def description(self, check_task=None, check_items=None):
+    def description(self):
         return self.collection.description
-        # func_name = sys._getframe().f_code.co_name
-        # res, check = func_req([self.collection.description])
-        # check_result = CheckFunc(res, func_name, check_task, check_items, check).run()
-        # return res, check_result
 
     @property
     def name(self):
