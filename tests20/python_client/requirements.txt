@@ -22,5 +22,5 @@ pandas
 pytest-html==3.1.1
 pymilvus-orm==2.0a1.dev17
 delayed-assert
-kubernetes=17.17.0
-PyYAML=5.4.1
+kubernetes==17.17.0
+PyYAML==5.4.1
