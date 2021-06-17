@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -340,4 +341,10 @@ func (c *GrpcClient) ShowSegments(ctx context.Context, in *milvuspb.ShowSegments
 		return c.grpcClient.ShowSegments(ctx, in)
 	})
 	return ret.(*milvuspb.ShowSegmentsResponse), err
+}
+func (c *GrpcClient) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
+	ret, err := c.recall(func() (interface{}, error) {
+		return c.grpcClient.ReleaseDQLMessageStream(ctx, in)
+	})
+	return ret.(*commonpb.Status), err
 }

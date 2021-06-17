@@ -274,6 +274,10 @@ func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, request *pro
 	return s.proxynode.InvalidateCollectionMetaCache(ctx, request)
 }
 
+func (s *Server) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
+	panic("not implement")
+}
+
 func (s *Server) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	return s.proxynode.CreateCollection(ctx, request)
 }
