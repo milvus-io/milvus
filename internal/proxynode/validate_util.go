@@ -68,9 +68,9 @@ func ValidateCollectionName(collName string) error {
 func ValidatePartitionTag(partitionTag string, strictCheck bool) error {
 	partitionTag = strings.TrimSpace(partitionTag)
 
-	invalidMsg := "Invalid partition tag: " + partitionTag + ". "
+	invalidMsg := "Invalid partition name: " + partitionTag + ". "
 	if partitionTag == "" {
-		msg := invalidMsg + "Partition tag should not be empty."
+		msg := invalidMsg + "Partition name should not be empty."
 		return errors.New(msg)
 	}
 
