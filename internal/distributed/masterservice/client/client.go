@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"time"
 
+	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -24,9 +25,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	otgrpc "github.com/opentracing-contrib/go-grpc"
-	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -87,7 +87,6 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string, tim
 }
 
 func (c *GrpcClient) connect() error {
-	tracer := opentracing.GlobalTracer()
 	var err error
 	getMasterServiceAddrFn := func() error {
 		ch := make(chan struct{}, 1)
@@ -118,12 +117,13 @@ func (c *GrpcClient) connect() error {
 		var conn *grpc.ClientConn
 		var err error
 		ch := make(chan struct{}, 1)
+		opts := trace.GetInterceptorOpts()
 		go func() {
 			conn, err = grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 				grpc.WithUnaryInterceptor(
-					otgrpc.OpenTracingClientInterceptor(tracer)),
+					grpc_opentracing.UnaryClientInterceptor(opts...)),
 				grpc.WithStreamInterceptor(
-					otgrpc.OpenTracingStreamClientInterceptor(tracer)))
+					grpc_opentracing.StreamClientInterceptor(opts...)))
 			ch <- struct{}{}
 		}()
 		select {
