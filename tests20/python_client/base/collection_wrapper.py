@@ -83,6 +83,16 @@ class ApiCollectionWrapper:
                                        timeout=timeout, **kwargs).run()
         return res, check_result
 
+    def query(self, expr, output_fields=None, partition_names=None, timeout=None, check_task=None, check_items=None,
+              **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.collection.query, expr, output_fields, partition_names, timeout])
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       expression=expr, partition_names=partition_names,
+                                       output_fields=output_fields,
+                                       timeout=timeout, **kwargs).run()
+        return res, check_result
+
     @property
     def partitions(self):
         return self.collection.partitions
