@@ -284,17 +284,16 @@ def insert_data(collection_w, nb=3000, is_binary=False):
     """
     par = collection_w.partitions
     num = len(par)
-    partition_nb = nb // num
     vectors = []
     binary_raw_vectors = []
     log.info("insert_data: inserting data into collection %s (num_entities: %s)"
              % (collection_w.name, nb))
     for i in range(num):
         if is_binary:
-            default_data, binary_raw_data = gen_default_binary_dataframe_data(partition_nb, start=i*partition_nb)
+            default_data, binary_raw_data = gen_default_binary_dataframe_data(nb // num)
             binary_raw_vectors.extend(binary_raw_data)
         else:
-            default_data = gen_default_dataframe_data(partition_nb, start=i*partition_nb)
+            default_data = gen_default_dataframe_data(nb // num)
         collection_w.insert(default_data, par[i].name)
         vectors.extend(default_data)
     log.info("insert_data: inserted data into collection %s (num_entities: %s)"
