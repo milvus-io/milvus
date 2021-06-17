@@ -32,14 +32,15 @@ const (
 	roleIndexNode  = "indexnode"
 	roleDataNode   = "datanode"
 	roleMixture    = "mixture"
+	roleStandalone = "standalone"
 )
 
-func getPidFileName(coordType string, alias string) string {
+func getPidFileName(serverType string, alias string) string {
 	var filename string
 	if len(alias) != 0 {
-		filename = fmt.Sprintf("%s-%s.pid", coordType, alias)
+		filename = fmt.Sprintf("%s-%s.pid", serverType, alias)
 	} else {
-		filename = coordType + ".pid"
+		filename = serverType + ".pid"
 	}
 	return filename
 }
@@ -125,11 +126,11 @@ func makeRuntimeDir(dir string) error {
 
 func main() {
 	if len(os.Args) < 3 {
-		_, _ = fmt.Fprint(os.Stderr, "usage: milvus [command] [coordinator type] [flags]\n")
+		_, _ = fmt.Fprint(os.Stderr, "usage: milvus [command] [server type] [flags]\n")
 		return
 	}
 	command := os.Args[1]
-	coordType := os.Args[2]
+	serverType := os.Args[2]
 	flags := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 
 	var svrAlias string
@@ -146,7 +147,7 @@ func main() {
 	}
 
 	role := roles.MilvusRoles{}
-	switch coordType {
+	switch serverType {
 	case roleRootCoord:
 		role.EnableRootCoord = true
 	case roleProxyNode:
@@ -168,8 +169,18 @@ func main() {
 		role.EnableQueryCoord = enableQueryCoord
 		role.EnableDataCoord = enableDataCoord
 		role.EnableIndexCoord = enableIndexCoord
+	case roleStandalone:
+		role.EnableRootCoord = true
+		role.EnableProxyNode = true
+		role.EnableQueryCoord = true
+		role.EnableQueryNode = true
+		role.EnableDataCoord = true
+		role.EnableDataNode = true
+		role.EnableIndexCoord = true
+		role.EnableIndexNode = true
+		role.EnableMsgStreamCoord = true
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown coordinator type = %s\n", coordType)
+		fmt.Fprintf(os.Stderr, "Unknown server type = %s\n", serverType)
 		os.Exit(-1)
 	}
 
@@ -183,7 +194,7 @@ func main() {
 		}
 	}
 
-	filename := getPidFileName(coordType, svrAlias)
+	filename := getPidFileName(serverType, svrAlias)
 	switch command {
 	case "run":
 		fd, err := createPidFile(filename, runtimeDir)
