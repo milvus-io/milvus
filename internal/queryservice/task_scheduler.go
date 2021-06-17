@@ -503,7 +503,7 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 
 func (scheduler *TaskScheduler) scheduleLoop() {
 	defer scheduler.wg.Done()
-	var activeTaskWg sync.WaitGroup
+	activeTaskWg := &sync.WaitGroup{}
 	var err error = nil
 	for {
 		select {
@@ -525,7 +525,7 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 					log.Debug("add a activate task to activateChan")
 					scheduler.activateTaskChan <- childTask
 					activeTaskWg.Add(1)
-					go scheduler.waitActivateTaskDone(&activeTaskWg, childTask)
+					go scheduler.waitActivateTaskDone(activeTaskWg, childTask)
 				}
 			}
 			activeTaskWg.Wait()

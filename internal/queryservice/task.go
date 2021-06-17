@@ -646,7 +646,7 @@ func (rpt *ReleasePartitionTask) Execute(ctx context.Context) error {
 			releasePartitionTask := &ReleasePartitionTask{
 				BaseTask: BaseTask{
 					ctx:              rpt.ctx,
-					Condition:        rpt.Condition,
+					Condition:        NewTaskCondition(rpt.ctx),
 					triggerCondition: querypb.TriggerCondition_grpcRequest,
 				},
 
