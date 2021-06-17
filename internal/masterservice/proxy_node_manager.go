@@ -91,7 +91,7 @@ func (p *proxyNodeManager) WatchProxyNode() error {
 		f(sessions)
 	}
 	for _, s := range sessions {
-		metrics.MasterProxyNodeLister.WithLabelValues(metricProxyNode(s.ServerID)).Set(1)
+		metrics.RootCoordProxyNodeLister.WithLabelValues(metricProxyNode(s.ServerID)).Set(1)
 	}
 	for _, s := range sessions {
 		log.Debug("Get proxy node", zap.Int64("node id", s.ServerID), zap.String("node addr", s.Address), zap.String("node name", s.ServerName))
@@ -131,7 +131,7 @@ func (p *proxyNodeManager) WatchProxyNode() error {
 							f(sess)
 						}
 						p.lock.Unlock()
-						metrics.MasterProxyNodeLister.WithLabelValues(metricProxyNode(sess.ServerID)).Set(1)
+						metrics.RootCoordProxyNodeLister.WithLabelValues(metricProxyNode(sess.ServerID)).Set(1)
 					case mvccpb.DELETE:
 						sess := new(sessionutil.Session)
 						err := json.Unmarshal(ev.PrevKv.Value, sess)
@@ -144,7 +144,7 @@ func (p *proxyNodeManager) WatchProxyNode() error {
 							f(sess)
 						}
 						p.lock.Unlock()
-						metrics.MasterProxyNodeLister.WithLabelValues(metricProxyNode(sess.ServerID)).Set(0)
+						metrics.RootCoordProxyNodeLister.WithLabelValues(metricProxyNode(sess.ServerID)).Set(0)
 					}
 				}
 			}
