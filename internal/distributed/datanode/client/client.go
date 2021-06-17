@@ -18,13 +18,13 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/retry"
-	otgrpc "github.com/opentracing-contrib/go-grpc"
-	"github.com/opentracing/opentracing-go"
 
+	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/trace"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -69,17 +69,16 @@ func (c *Client) Init() error {
 }
 
 func (c *Client) connect() error {
-	tracer := opentracing.GlobalTracer()
-	var err error
 	connectGrpcFunc := func() error {
-		log.Debug("DataNode connect ", zap.String("address", c.addr))
 		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
 		defer cancelFunc()
+		opts := trace.GetInterceptorOpts()
+		log.Debug("DataNode connect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
-				otgrpc.OpenTracingClientInterceptor(tracer)),
+				grpc_opentracing.UnaryClientInterceptor(opts...)),
 			grpc.WithStreamInterceptor(
-				otgrpc.OpenTracingStreamClientInterceptor(tracer)))
+				grpc_opentracing.StreamClientInterceptor(opts...)))
 		if err != nil {
 			return err
 		}
@@ -87,7 +86,7 @@ func (c *Client) connect() error {
 		return nil
 	}
 
-	err = retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
+	err := retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
 	if err != nil {
 		log.Debug("DataNodeClient try connect failed", zap.Error(err))
 		return err
