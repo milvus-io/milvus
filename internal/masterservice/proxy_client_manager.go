@@ -111,3 +111,39 @@ func (p *proxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 
 	}
 }
+
+func (p *proxyClientManager) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	if len(p.proxyClient) == 0 {
+		log.Debug("proxy client is empty,ReleaseDQLMessageStream will not send to any client")
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}, nil
+	}
+	for k, f := range p.proxyClient {
+		sta, err := func() (retSta *commonpb.Status, retErr error) {
+			defer func() {
+				if err := recover(); err != nil {
+					log.Debug("call proxy node ReleaseDQLMessageStream panic", zap.Int64("proxy node id", k), zap.Any("error", err))
+					retSta.ErrorCode = commonpb.ErrorCode_UnexpectedError
+					retSta.Reason = fmt.Sprintf("call proxy node ReleaseDQLMessageStream panic, proxy node id =%d, error = %v", k, err)
+					retErr = nil
+				}
+			}()
+			retSta, retErr = f.ReleaseDQLMessageStream(ctx, in)
+			return
+		}()
+		if err != nil {
+			return sta, err
+		}
+		if sta.ErrorCode != commonpb.ErrorCode_Success {
+			return sta, err
+		}
+
+	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
