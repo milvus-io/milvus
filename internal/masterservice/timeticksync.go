@@ -30,7 +30,6 @@ type timetickSync struct {
 	core          *Core
 	lock          sync.Mutex
 	proxyTimeTick map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg
-	chanStream    map[string]msgstream.MsgStream
 	sendChan      chan map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg
 }
 
@@ -39,7 +38,6 @@ func newTimeTickSync(core *Core) *timetickSync {
 		lock:          sync.Mutex{},
 		core:          core,
 		proxyTimeTick: make(map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg),
-		chanStream:    make(map[string]msgstream.MsgStream),
 		sendChan:      make(chan map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg, 16),
 	}
 }
@@ -47,13 +45,13 @@ func newTimeTickSync(core *Core) *timetickSync {
 // sendToChannel send all channels' timetick to sendChan
 // lock is needed by the invoker
 func (t *timetickSync) sendToChannel() {
+	if len(t.proxyTimeTick) == 0 {
+		return
+	}
 	for _, v := range t.proxyTimeTick {
 		if v == nil {
 			return
 		}
-	}
-	if len(t.proxyTimeTick) == 0 {
-		return
 	}
 	// clear proxyTimeTick and send a clone
 	ptt := make(map[typeutil.UniqueID]*internalpb.ChannelTimeTickMsg)
@@ -68,9 +66,22 @@ func (t *timetickSync) sendToChannel() {
 func (t *timetickSync) UpdateTimeTick(in *internalpb.ChannelTimeTickMsg) error {
 	t.lock.Lock()
 	defer t.lock.Unlock()
-	_, ok := t.proxyTimeTick[in.Base.SourceID]
+	if len(in.ChannelNames) == 0 {
+		return nil
+	}
+	if len(in.Timestamps) != len(in.ChannelNames) {
+		return fmt.Errorf("Invalid TimeTickMsg")
+	}
+
+	prev, ok := t.proxyTimeTick[in.Base.SourceID]
 	if !ok {
 		return fmt.Errorf("Skip ChannelTimeTickMsg from un-recognized proxy node %d", in.Base.SourceID)
+	}
+	if in.Base.SourceID == t.core.session.ServerID {
+		if prev != nil && prev.Timestamps[0] >= in.Timestamps[0] {
+			log.Debug("timestamp go back", zap.Int64("source id", in.Base.SourceID), zap.Uint64("prev ts", prev.Timestamps[0]), zap.Uint64("curr ts", in.Timestamps[0]))
+			return nil
+		}
 	}
 	t.proxyTimeTick[in.Base.SourceID] = in
 	t.sendToChannel()
@@ -125,6 +136,8 @@ func (t *timetickSync) StartWatch() {
 					}
 				}
 			}
+			log.Debug("MasterService timeticksync",
+				zap.Any("chanName2TimeTickMap", chanName2TimeTickMap))
 			// send timetick msg to msg stream
 			for chanName, chanTs := range chanName2TimeTickMap {
 				if err := t.SendChannelTimeTick(chanName, chanTs); err != nil {
@@ -157,23 +170,7 @@ func (t *timetickSync) SendChannelTimeTick(chanName string, ts typeutil.Timestam
 	}
 	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
 
-	t.lock.Lock()
-	defer t.lock.Unlock()
-
-	// send timetick msg to msg stream
-	var err error
-	var stream msgstream.MsgStream
-	stream, ok := t.chanStream[chanName]
-	if !ok {
-		stream, err = t.core.msFactory.NewMsgStream(t.core.ctx)
-		if err != nil {
-			return err
-		}
-		stream.AsProducer([]string{chanName})
-		t.chanStream[chanName] = stream
-	}
-
-	err = stream.Broadcast(&msgPack)
+	err := t.core.dmlChannels.Broadcast(chanName, &msgPack)
 	if err == nil {
 		metrics.MasterInsertChannelTimeTick.WithLabelValues(chanName).Set(float64(tsoutil.Mod24H(ts)))
 	}
@@ -189,7 +186,5 @@ func (t *timetickSync) GetProxyNodeNum() int {
 
 // GetChanNum return the num of channel
 func (t *timetickSync) GetChanNum() int {
-	t.lock.Lock()
-	defer t.lock.Unlock()
-	return len(t.chanStream)
+	return t.core.dmlChannels.GetNumChannles()
 }

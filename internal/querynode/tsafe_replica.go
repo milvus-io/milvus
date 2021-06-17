@@ -23,11 +23,11 @@ import (
 
 // TSafeReplicaInterface is the interface wrapper of tSafeReplica
 type TSafeReplicaInterface interface {
-	getTSafe(vChannel VChannel) Timestamp
-	setTSafe(vChannel VChannel, id UniqueID, timestamp Timestamp)
-	addTSafe(vChannel VChannel)
-	removeTSafe(vChannel VChannel)
-	registerTSafeWatcher(vChannel VChannel, watcher *tSafeWatcher)
+	getTSafe(vChannel Channel) Timestamp
+	setTSafe(vChannel Channel, id UniqueID, timestamp Timestamp)
+	addTSafe(vChannel Channel)
+	removeTSafe(vChannel Channel)
+	registerTSafeWatcher(vChannel Channel, watcher *tSafeWatcher)
 }
 
 type tSafeReplica struct {
@@ -35,7 +35,7 @@ type tSafeReplica struct {
 	tSafes map[string]tSafer // map[vChannel]tSafer
 }
 
-func (t *tSafeReplica) getTSafe(vChannel VChannel) Timestamp {
+func (t *tSafeReplica) getTSafe(vChannel Channel) Timestamp {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	safer, err := t.getTSaferPrivate(vChannel)
@@ -46,7 +46,7 @@ func (t *tSafeReplica) getTSafe(vChannel VChannel) Timestamp {
 	return safer.get()
 }
 
-func (t *tSafeReplica) setTSafe(vChannel VChannel, id UniqueID, timestamp Timestamp) {
+func (t *tSafeReplica) setTSafe(vChannel Channel, id UniqueID, timestamp Timestamp) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	safer, err := t.getTSaferPrivate(vChannel)
@@ -57,7 +57,7 @@ func (t *tSafeReplica) setTSafe(vChannel VChannel, id UniqueID, timestamp Timest
 	safer.set(id, timestamp)
 }
 
-func (t *tSafeReplica) getTSaferPrivate(vChannel VChannel) (tSafer, error) {
+func (t *tSafeReplica) getTSaferPrivate(vChannel Channel) (tSafer, error) {
 	if _, ok := t.tSafes[vChannel]; !ok {
 		err := errors.New("cannot found tSafer, vChannel = " + vChannel)
 		//log.Error(err.Error())
@@ -66,7 +66,7 @@ func (t *tSafeReplica) getTSaferPrivate(vChannel VChannel) (tSafer, error) {
 	return t.tSafes[vChannel], nil
 }
 
-func (t *tSafeReplica) addTSafe(vChannel VChannel) {
+func (t *tSafeReplica) addTSafe(vChannel Channel) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	ctx := context.Background()
@@ -79,7 +79,7 @@ func (t *tSafeReplica) addTSafe(vChannel VChannel) {
 	}
 }
 
-func (t *tSafeReplica) removeTSafe(vChannel VChannel) {
+func (t *tSafeReplica) removeTSafe(vChannel Channel) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	safer, err := t.getTSaferPrivate(vChannel)
@@ -90,7 +90,7 @@ func (t *tSafeReplica) removeTSafe(vChannel VChannel) {
 	delete(t.tSafes, vChannel)
 }
 
-func (t *tSafeReplica) registerTSafeWatcher(vChannel VChannel, watcher *tSafeWatcher) {
+func (t *tSafeReplica) registerTSafeWatcher(vChannel Channel, watcher *tSafeWatcher) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	safer, err := t.getTSaferPrivate(vChannel)

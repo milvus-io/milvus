@@ -16,6 +16,8 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -69,8 +71,8 @@ func newMeta(kv kv.TxnKV) (*meta, error) {
 	return mt, nil
 }
 
-func (meta *meta) reloadFromKV() error {
-	_, values, err := meta.client.LoadWithPrefix(segmentPrefix)
+func (m *meta) reloadFromKV() error {
+	_, values, err := m.client.LoadWithPrefix(segmentPrefix)
 	if err != nil {
 		return err
 	}
@@ -81,180 +83,248 @@ func (meta *meta) reloadFromKV() error {
 		if err != nil {
 			return fmt.Errorf("DataService reloadFromKV UnMarshalText datapb.SegmentInfo err:%w", err)
 		}
-		meta.segments[segmentInfo.ID] = segmentInfo
+		m.segments[segmentInfo.ID] = segmentInfo
 	}
 
 	return nil
 }
 
-func (meta *meta) AddCollection(collection *datapb.CollectionInfo) error {
-	meta.Lock()
-	defer meta.Unlock()
-	if _, ok := meta.collections[collection.ID]; ok {
+func (m *meta) AddCollection(collection *datapb.CollectionInfo) error {
+	m.Lock()
+	defer m.Unlock()
+	if _, ok := m.collections[collection.ID]; ok {
 		return fmt.Errorf("collection %s with id %d already exist", collection.Schema.Name, collection.ID)
 	}
-	meta.collections[collection.ID] = collection
+	m.collections[collection.ID] = collection
 	return nil
 }
 
-func (meta *meta) DropCollection(collID UniqueID) error {
-	meta.Lock()
-	defer meta.Unlock()
+func (m *meta) DropCollection(collID UniqueID) error {
+	m.Lock()
+	defer m.Unlock()
 
-	if _, ok := meta.collections[collID]; !ok {
+	if _, ok := m.collections[collID]; !ok {
 		return newErrCollectionNotFound(collID)
 	}
 	key := fmt.Sprintf("%s/%d/", segmentPrefix, collID)
-	if err := meta.client.RemoveWithPrefix(key); err != nil {
+	if err := m.client.RemoveWithPrefix(key); err != nil {
 		return err
 	}
-	delete(meta.collections, collID)
+	delete(m.collections, collID)
 
-	for i, info := range meta.segments {
+	for i, info := range m.segments {
 		if info.CollectionID == collID {
-			delete(meta.segments, i)
+			delete(m.segments, i)
 		}
 	}
 	return nil
 }
 
-func (meta *meta) HasCollection(collID UniqueID) bool {
-	meta.RLock()
-	defer meta.RUnlock()
-	_, ok := meta.collections[collID]
+func (m *meta) HasCollection(collID UniqueID) bool {
+	m.RLock()
+	defer m.RUnlock()
+	_, ok := m.collections[collID]
 	return ok
 }
-func (meta *meta) GetCollection(collectionID UniqueID) (*datapb.CollectionInfo, error) {
-	meta.RLock()
-	defer meta.RUnlock()
+func (m *meta) GetCollection(collectionID UniqueID) (*datapb.CollectionInfo, error) {
+	m.RLock()
+	defer m.RUnlock()
 
-	collection, ok := meta.collections[collectionID]
+	collection, ok := m.collections[collectionID]
 	if !ok {
 		return nil, newErrCollectionNotFound(collectionID)
 	}
 	return proto.Clone(collection).(*datapb.CollectionInfo), nil
 }
 
-func (meta *meta) GetNumRowsOfCollection(collectionID UniqueID) (int64, error) {
-	meta.RLock()
-	defer meta.RUnlock()
+func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) (int64, error) {
+	m.RLock()
+	defer m.RUnlock()
 	var ret int64 = 0
-	for _, info := range meta.segments {
+	for _, info := range m.segments {
 		if info.CollectionID == collectionID {
-			ret += info.NumRows
+			ret += info.NumOfRows
 		}
 	}
 	return ret, nil
 }
 
-func (meta *meta) AddSegment(segment *datapb.SegmentInfo) error {
-	meta.Lock()
-	defer meta.Unlock()
-	if _, ok := meta.segments[segment.ID]; ok {
+func (m *meta) AddSegment(segment *datapb.SegmentInfo) error {
+	m.Lock()
+	defer m.Unlock()
+	if _, ok := m.segments[segment.ID]; ok {
 		return fmt.Errorf("segment %d already exist", segment.ID)
 	}
-	meta.segments[segment.ID] = segment
-	if err := meta.saveSegmentInfo(segment); err != nil {
+	m.segments[segment.ID] = segment
+	if err := m.saveSegmentInfo(segment); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (meta *meta) UpdateSegmentStatistic(segment *datapb.SegmentInfo) error {
-	meta.Lock()
-	defer meta.Unlock()
-	seg, ok := meta.segments[segment.ID]
+func (m *meta) UpdateSegmentStatistic(stats *internalpb.SegmentStatisticsUpdates) error {
+	m.Lock()
+	defer m.Unlock()
+	seg, ok := m.segments[stats.SegmentID]
 	if !ok {
-		return newErrSegmentNotFound(segment.ID)
+		return newErrSegmentNotFound(stats.SegmentID)
 	}
-	seg.NumRows = segment.NumRows
-	seg.StartPosition = proto.Clone(segment.StartPosition).(*internalpb.MsgPosition)
-	seg.EndPosition = proto.Clone(segment.EndPosition).(*internalpb.MsgPosition)
-
-	if err := meta.saveSegmentInfo(segment); err != nil {
+	seg.NumOfRows = stats.NumRows
+	if err := m.saveSegmentInfo(seg); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (meta *meta) SetLastExpireTime(segmentID UniqueID, expireTs Timestamp) error {
-	meta.Lock()
-	defer meta.Unlock()
-	seg, ok := meta.segments[segmentID]
+func (m *meta) SetLastExpireTime(segmentID UniqueID, expireTs Timestamp) error {
+	m.Lock()
+	defer m.Unlock()
+	seg, ok := m.segments[segmentID]
 	if !ok {
 		return newErrSegmentNotFound(segmentID)
 	}
 	seg.LastExpireTime = expireTs
 
-	if err := meta.saveSegmentInfo(seg); err != nil {
+	if err := m.saveSegmentInfo(seg); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (meta *meta) DropSegment(segmentID UniqueID) error {
-	meta.Lock()
-	defer meta.Unlock()
+func (m *meta) DropSegment(segmentID UniqueID) error {
+	m.Lock()
+	defer m.Unlock()
 
-	segment, ok := meta.segments[segmentID]
+	segment, ok := m.segments[segmentID]
 	if !ok {
 		return newErrSegmentNotFound(segmentID)
 	}
-	if err := meta.removeSegmentInfo(segment); err != nil {
+	if err := m.removeSegmentInfo(segment); err != nil {
 		return err
 	}
-	delete(meta.segments, segmentID)
+	delete(m.segments, segmentID)
 	return nil
 }
 
-func (meta *meta) GetSegment(segID UniqueID) (*datapb.SegmentInfo, error) {
-	meta.RLock()
-	defer meta.RUnlock()
+func (m *meta) GetSegment(segID UniqueID) (*datapb.SegmentInfo, error) {
+	m.RLock()
+	defer m.RUnlock()
 
-	segment, ok := meta.segments[segID]
+	segment, ok := m.segments[segID]
 	if !ok {
 		return nil, newErrSegmentNotFound(segID)
 	}
 	return proto.Clone(segment).(*datapb.SegmentInfo), nil
 }
 
-func (meta *meta) SealSegment(segID UniqueID, timetick Timestamp) error {
-	meta.Lock()
-	defer meta.Unlock()
+func (m *meta) SealSegment(segID UniqueID) error {
+	m.Lock()
+	defer m.Unlock()
 
-	segInfo, ok := meta.segments[segID]
+	segInfo, ok := m.segments[segID]
 	if !ok {
 		return newErrSegmentNotFound(segID)
 	}
 
 	segInfo.State = commonpb.SegmentState_Sealed
-	if err := meta.saveSegmentInfo(segInfo); err != nil {
+	if err := m.saveSegmentInfo(segInfo); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (meta *meta) FlushSegment(segID UniqueID, timetick Timestamp) error {
-	meta.Lock()
-	defer meta.Unlock()
+func (m *meta) SaveBinlogAndCheckPoints(segID UniqueID, flushed bool,
+	binlogs map[string]string, checkpoints []*datapb.CheckPoint,
+	startPositions []*datapb.SegmentStartPosition) error {
+	m.Lock()
+	defer m.Unlock()
+	segInfo, ok := m.segments[segID]
+	if !ok {
+		return newErrSegmentNotFound(segID)
+	}
+	kv := make(map[string]string)
+	for k, v := range binlogs {
+		kv[k] = v
+	}
+	if flushed {
+		segInfo.State = commonpb.SegmentState_Flushing
+	}
 
-	segInfo, ok := meta.segments[segID]
+	modifiedSegments := make(map[UniqueID]struct{})
+	for _, pos := range startPositions {
+		segment, ok := m.segments[pos.GetSegmentID()]
+		if !ok {
+			log.Warn("Failed to find segment", zap.Int64("id", pos.GetSegmentID()))
+			continue
+		}
+		if len(pos.GetStartPosition().GetMsgID()) != 0 {
+			continue
+		}
+
+		segment.StartPosition = pos.GetStartPosition()
+		modifiedSegments[segment.GetID()] = struct{}{}
+	}
+
+	for _, cp := range checkpoints {
+		segment, ok := m.segments[cp.SegmentID]
+		if !ok {
+			log.Warn("Failed to find segment", zap.Int64("id", cp.SegmentID))
+			continue
+		}
+		if segment.DmlPosition != nil && segment.DmlPosition.Timestamp >= cp.Position.Timestamp {
+			// segment position in etcd is larger than checkpoint, then dont change it
+			continue
+		}
+		segment.DmlPosition = cp.Position
+		segment.NumOfRows = cp.NumOfRows
+		modifiedSegments[segment.GetID()] = struct{}{}
+	}
+
+	for id := range modifiedSegments {
+		segInfo = m.segments[id]
+		segBytes := proto.MarshalTextString(segInfo)
+		key := m.prepareSegmentPath(segInfo)
+		kv[key] = segBytes
+	}
+
+	if err := m.saveKvTxn(kv); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *meta) GetSegmentsByChannel(dmlCh string) []*datapb.SegmentInfo {
+	infos := make([]*datapb.SegmentInfo, 0)
+	for _, segment := range m.segments {
+		if segment.InsertChannel != dmlCh {
+			continue
+		}
+		cInfo := proto.Clone(segment).(*datapb.SegmentInfo)
+		infos = append(infos, cInfo)
+	}
+	return infos
+}
+
+func (m *meta) FlushSegment(segID UniqueID) error {
+	m.Lock()
+	defer m.Unlock()
+	segInfo, ok := m.segments[segID]
 	if !ok {
 		return newErrSegmentNotFound(segID)
 	}
 	segInfo.State = commonpb.SegmentState_Flushed
-	if err := meta.saveSegmentInfo(segInfo); err != nil {
+	if err := m.saveSegmentInfo(segInfo); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (meta *meta) GetSegmentsOfCollection(collectionID UniqueID) []UniqueID {
-	meta.RLock()
-	defer meta.RUnlock()
+func (m *meta) GetSegmentsOfCollection(collectionID UniqueID) []UniqueID {
+	m.RLock()
+	defer m.RUnlock()
 
 	ret := make([]UniqueID, 0)
-	for _, info := range meta.segments {
+	for _, info := range m.segments {
 		if info.CollectionID == collectionID {
 			ret = append(ret, info.ID)
 		}
@@ -262,12 +332,12 @@ func (meta *meta) GetSegmentsOfCollection(collectionID UniqueID) []UniqueID {
 	return ret
 }
 
-func (meta *meta) GetSegmentsOfPartition(collectionID, partitionID UniqueID) []UniqueID {
-	meta.RLock()
-	defer meta.RUnlock()
+func (m *meta) GetSegmentsOfPartition(collectionID, partitionID UniqueID) []UniqueID {
+	m.RLock()
+	defer m.RUnlock()
 
 	ret := make([]UniqueID, 0)
-	for _, info := range meta.segments {
+	for _, info := range m.segments {
 		if info.CollectionID == collectionID && info.PartitionID == partitionID {
 			ret = append(ret, info.ID)
 		}
@@ -275,10 +345,10 @@ func (meta *meta) GetSegmentsOfPartition(collectionID, partitionID UniqueID) []U
 	return ret
 }
 
-func (meta *meta) AddPartition(collectionID UniqueID, partitionID UniqueID) error {
-	meta.Lock()
-	defer meta.Unlock()
-	coll, ok := meta.collections[collectionID]
+func (m *meta) AddPartition(collectionID UniqueID, partitionID UniqueID) error {
+	m.Lock()
+	defer m.Unlock()
+	coll, ok := m.collections[collectionID]
 	if !ok {
 		return newErrCollectionNotFound(collectionID)
 	}
@@ -292,11 +362,11 @@ func (meta *meta) AddPartition(collectionID UniqueID, partitionID UniqueID) erro
 	return nil
 }
 
-func (meta *meta) DropPartition(collID UniqueID, partitionID UniqueID) error {
-	meta.Lock()
-	defer meta.Unlock()
+func (m *meta) DropPartition(collID UniqueID, partitionID UniqueID) error {
+	m.Lock()
+	defer m.Unlock()
 
-	collection, ok := meta.collections[collID]
+	collection, ok := m.collections[collID]
 	if !ok {
 		return newErrCollectionNotFound(collID)
 	}
@@ -312,23 +382,23 @@ func (meta *meta) DropPartition(collID UniqueID, partitionID UniqueID) error {
 	}
 
 	prefix := fmt.Sprintf("%s/%d/%d/", segmentPrefix, collID, partitionID)
-	if err := meta.client.RemoveWithPrefix(prefix); err != nil {
+	if err := m.client.RemoveWithPrefix(prefix); err != nil {
 		return err
 	}
 	collection.Partitions = append(collection.Partitions[:idx], collection.Partitions[idx+1:]...)
 
-	for i, info := range meta.segments {
+	for i, info := range m.segments {
 		if info.PartitionID == partitionID {
-			delete(meta.segments, i)
+			delete(m.segments, i)
 		}
 	}
 	return nil
 }
 
-func (meta *meta) HasPartition(collID UniqueID, partID UniqueID) bool {
-	meta.RLock()
-	defer meta.RUnlock()
-	coll, ok := meta.collections[collID]
+func (m *meta) HasPartition(collID UniqueID, partID UniqueID) bool {
+	m.RLock()
+	defer m.RUnlock()
+	coll, ok := m.collections[collID]
 	if !ok {
 		return false
 	}
@@ -340,24 +410,24 @@ func (meta *meta) HasPartition(collID UniqueID, partID UniqueID) bool {
 	return false
 }
 
-func (meta *meta) GetNumRowsOfPartition(collectionID UniqueID, partitionID UniqueID) (int64, error) {
-	meta.RLock()
-	defer meta.RUnlock()
+func (m *meta) GetNumRowsOfPartition(collectionID UniqueID, partitionID UniqueID) (int64, error) {
+	m.RLock()
+	defer m.RUnlock()
 	var ret int64 = 0
-	for _, info := range meta.segments {
+	for _, info := range m.segments {
 		if info.CollectionID == collectionID && info.PartitionID == partitionID {
-			ret += info.NumRows
+			ret += info.NumOfRows
 		}
 	}
 	return ret, nil
 }
 
-func (meta *meta) GetUnFlushedSegments() []*datapb.SegmentInfo {
-	meta.RLock()
-	defer meta.RUnlock()
+func (m *meta) GetUnFlushedSegments() []*datapb.SegmentInfo {
+	m.RLock()
+	defer m.RUnlock()
 	segments := make([]*datapb.SegmentInfo, 0)
-	for _, info := range meta.segments {
-		if info.State != commonpb.SegmentState_Flushed {
+	for _, info := range m.segments {
+		if info.State != commonpb.SegmentState_Flushing && info.State != commonpb.SegmentState_Flushed {
 			cInfo := proto.Clone(info).(*datapb.SegmentInfo)
 			segments = append(segments, cInfo)
 		}
@@ -365,16 +435,37 @@ func (meta *meta) GetUnFlushedSegments() []*datapb.SegmentInfo {
 	return segments
 }
 
-func (meta *meta) saveSegmentInfo(segment *datapb.SegmentInfo) error {
-	segBytes := proto.MarshalTextString(segment)
-
-	key := fmt.Sprintf("%s/%d/%d/%d", segmentPrefix, segment.CollectionID, segment.PartitionID, segment.ID)
-	return meta.client.Save(key, segBytes)
+func (m *meta) GetFlushingSegments() []*datapb.SegmentInfo {
+	m.RLock()
+	defer m.RUnlock()
+	segments := make([]*datapb.SegmentInfo, 0)
+	for _, info := range m.segments {
+		if info.State == commonpb.SegmentState_Flushing {
+			cInfo := proto.Clone(info).(*datapb.SegmentInfo)
+			segments = append(segments, cInfo)
+		}
+	}
+	return segments
 }
 
-func (meta *meta) removeSegmentInfo(segment *datapb.SegmentInfo) error {
-	key := fmt.Sprintf("%s/%d/%d/%d", segmentPrefix, segment.CollectionID, segment.PartitionID, segment.ID)
-	return meta.client.Remove(key)
+func (m *meta) saveSegmentInfo(segment *datapb.SegmentInfo) error {
+	segBytes := proto.MarshalTextString(segment)
+
+	key := m.prepareSegmentPath(segment)
+	return m.client.Save(key, segBytes)
+}
+
+func (m *meta) removeSegmentInfo(segment *datapb.SegmentInfo) error {
+	key := m.prepareSegmentPath(segment)
+	return m.client.Remove(key)
+}
+
+func (m *meta) prepareSegmentPath(segInfo *datapb.SegmentInfo) string {
+	return fmt.Sprintf("%s/%d/%d/%d", segmentPrefix, segInfo.CollectionID, segInfo.PartitionID, segInfo.ID)
+}
+
+func (m *meta) saveKvTxn(kv map[string]string) error {
+	return m.client.MultiSave(kv)
 }
 
 func BuildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, channelName string) (*datapb.SegmentInfo, error) {
@@ -383,17 +474,7 @@ func BuildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueI
 		CollectionID:  collectionID,
 		PartitionID:   partitionID,
 		InsertChannel: channelName,
-		NumRows:       0,
+		NumOfRows:     0,
 		State:         commonpb.SegmentState_Growing,
-		StartPosition: &internalpb.MsgPosition{
-			ChannelName: channelName,
-			MsgID:       make([]byte, 0),
-			Timestamp:   0,
-		},
-		EndPosition: &internalpb.MsgPosition{
-			ChannelName: channelName,
-			MsgID:       make([]byte, 0),
-			Timestamp:   0,
-		},
 	}, nil
 }

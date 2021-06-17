@@ -1,16 +1,22 @@
-# Only for files in the root directory
-
 filters:
   ".*":
     reviewers:
       - czs007
+      - del-zhenwu
       - jeffoverflow
       - neza2017
       - scsven
       - shengjun1985
+      - sunby
+      - xiaofan-luan
+      - xige-16
+      - yanliang567
+      - zwd1208
     approvers:
       - czs007
-      - jeffoverflow
       - neza2017
       - scsven
       - shengjun1985
+      - xiaofan-luan
+      - yanliang567
+      - zwd1208

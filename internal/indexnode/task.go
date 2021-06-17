@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
@@ -86,13 +85,12 @@ func (bt *BaseTask) Notify(err error) {
 
 type IndexBuildTask struct {
 	BaseTask
-	index         Index
-	kv            kv.BaseKV
-	etcdKV        *etcdkv.EtcdKV
-	savePaths     []string
-	req           *indexpb.CreateIndexRequest
-	serviceClient types.IndexService
-	nodeID        UniqueID
+	index     Index
+	kv        kv.BaseKV
+	etcdKV    *etcdkv.EtcdKV
+	savePaths []string
+	req       *indexpb.CreateIndexRequest
+	nodeID    UniqueID
 }
 
 func (it *IndexBuildTask) Ctx() context.Context {
@@ -173,18 +171,6 @@ func (it *IndexBuildTask) PreExecute(ctx context.Context) error {
 
 func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 	log.Debug("IndexNode IndexBuildTask PostExecute...")
-
-	defer func() {
-		if it.err != nil {
-			it.Rollback()
-		}
-	}()
-
-	if it.serviceClient == nil {
-		err := errors.New("IndexNode IndexBuildTask PostExecute, serviceClient is nil")
-		log.Error("", zap.Error(err))
-		return err
-	}
 
 	return it.checkIndexMeta(false)
 }
@@ -393,18 +379,5 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	// if err != nil {
 	// 	log.Print("CIndexDelete Failed")
 	// }
-	return nil
-}
-func (it *IndexBuildTask) Rollback() error {
-
-	if it.savePaths == nil {
-		return nil
-	}
-
-	err := it.kv.MultiRemove(it.savePaths)
-	if err != nil {
-		log.Warn("IndexNode IndexBuildTask Rollback Failed", zap.Error(err))
-		return err
-	}
 	return nil
 }

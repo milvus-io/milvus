@@ -33,58 +33,43 @@ type Client struct {
 	ctx        context.Context
 	grpcClient querypb.QueryNodeClient
 	conn       *grpc.ClientConn
-	addr       string
+
+	addr string
 
 	timeout   time.Duration
 	reconnTry int
 	recallTry int
 }
 
-func NewClient(address string) (*Client, error) {
-	if address == "" {
-		return nil, fmt.Errorf("address is empty")
+func NewClient(addr string, timeout time.Duration) (*Client, error) {
+	if addr == "" {
+		return nil, fmt.Errorf("addr is empty")
 	}
 	return &Client{
-		ctx:     context.Background(),
-		addr:    address,
-		timeout: 3 * time.Second,
+		ctx:       context.Background(),
+		addr:      addr,
+		timeout:   timeout,
+		recallTry: 3,
+		reconnTry: 10,
 	}, nil
 }
 
 func (c *Client) Init() error {
-	tracer := opentracing.GlobalTracer()
-	connectGrpcFunc := func() error {
-		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
-		defer cancelFunc()
-		log.Debug("QueryNodeClient try connect", zap.String("address", c.addr))
-		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
-			grpc.WithUnaryInterceptor(
-				otgrpc.OpenTracingClientInterceptor(tracer)),
-			grpc.WithStreamInterceptor(
-				otgrpc.OpenTracingStreamClientInterceptor(tracer)))
-		if err != nil {
-			return err
-		}
-		c.conn = conn
-		return nil
+	// for now, we must try many times in Init Stage
+	initFunc := func() error {
+		return c.connect()
 	}
-	err := retry.Retry(c.reconnTry, time.Millisecond*200, connectGrpcFunc)
-	if err != nil {
-		log.Debug("QueryNodeClient try connect failed", zap.Error(err))
-		return err
-	}
-	log.Debug("QueryNodeClient try connect success")
-	c.grpcClient = querypb.NewQueryNodeClient(c.conn)
-	return nil
+	err := retry.Retry(10000, 3*time.Second, initFunc)
+	return err
 }
 
-func (c *Client) reconnect() error {
+func (c *Client) connect() error {
 	tracer := opentracing.GlobalTracer()
 	var err error
 	connectGrpcFunc := func() error {
 		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
 		defer cancelFunc()
-		log.Debug("QueryNodeClient try reconnect ", zap.String("address", c.addr))
+		log.Debug("QueryNodeClient try connect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
@@ -99,10 +84,10 @@ func (c *Client) reconnect() error {
 
 	err = retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
 	if err != nil {
-		log.Debug("QueryNodeClient try reconnect failed", zap.Error(err))
+		log.Debug("QueryNodeClient try connect failed", zap.Error(err))
 		return err
 	}
-	log.Debug("QueryNodeClient try reconnect success")
+	log.Debug("QueryNodeClient try connect success")
 	c.grpcClient = querypb.NewQueryNodeClient(c.conn)
 	return nil
 }
@@ -113,7 +98,7 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 		return ret, nil
 	}
 	for i := 0; i < c.recallTry; i++ {
-		err = c.reconnect()
+		err = c.connect()
 		if err == nil {
 			ret, err = caller()
 			if err == nil {

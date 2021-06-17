@@ -130,7 +130,7 @@ class TestConnectionOperation(TestcaseBase):
     """
 
     @pytest.mark.xfail(reason="#5684")
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_connection_add_wrong_format(self):
         """
         target: test add_connection, regardless of whether the connection exists
@@ -159,7 +159,7 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.get_connection_addr(alias="testing", check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {"": ""}})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_connection_add_more(self):
         """
         target: test add_connection passes in multiple parameters
@@ -188,7 +188,7 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.get_connection_addr(alias="alias2", check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {"host": "192.168.1.1", "port": "123"}})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_connection_add_single_more(self):
         """
         target: test add connections separately
@@ -214,7 +214,7 @@ class TestConnectionOperation(TestcaseBase):
                                                  check_items={
                                                      "dict_content": {"host": "192.168.1.1", "port": "123"}})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_connection_add_default(self):
         """
         target: add_connection passes default params successfully
@@ -234,7 +234,7 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {'host': 'localhost', 'port': '19530'}})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_connection_add_cover_default(self):
         """
         target: add a connection to override the default connection
@@ -257,7 +257,7 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {'host': '192.168.1.1', 'port': '12345'}})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_connection_get_addr_not_exist(self):
         """
         target: get addr of alias that is not exist and return {}
@@ -270,13 +270,14 @@ class TestConnectionOperation(TestcaseBase):
                                                  check_items={"dict_content": {}})
 
     @pytest.mark.skip("The maximum number of add_connection is not set")
+    @pytest.mark.tags(CaseLabel.L2)
     def test_connection_add_max(self):
         """
         The maximum number of add_connection is not set
         """
         pass
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_connection_add_after_connect(self, host, port):
         """
         target: add_connect passes different params after normal connect
@@ -297,7 +298,7 @@ class TestConnectionOperation(TestcaseBase):
         # add connection with the same params
         self.connection_wrap.add_connection(test_alias_name={"host": host, "port": port})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_connection_add_after_default_connect(self, host, port):
         """
         target: add_connect passes different params after normal connect passes default alias
@@ -318,7 +319,7 @@ class TestConnectionOperation(TestcaseBase):
         # add connection with the same params
         self.connection_wrap.add_connection(test_alias_name={"host": host, "port": port})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_connection_add_after_disconnect(self, host, port):
         """
         target: add_connect after normal connect、disconnect
@@ -343,7 +344,7 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.get_connection_addr(alias="test_alias_name", check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {"host": "localhost", "port": "1"}})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_connection_add_after_remove(self, host, port):
         """
         target: add_connect after normal connect、remove_connection
@@ -368,7 +369,7 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.get_connection_addr(alias="test_alias_name", check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {"host": "localhost", "port": "1"}})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_connection_connect_alias_not_exist(self):
         """
         target: connect passes alias that is not exist and raise error
@@ -389,7 +390,7 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {'host': "localhost", 'port': "19530"}})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_connection_connect_default_alias_invalid(self, port):
         """
         target: connect passes configure is not exist and raise error
@@ -413,7 +414,7 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {'host': "host", 'port': port}})
 
-    @ pytest.mark.tags(CaseLabel.L3)
+    @ pytest.mark.tags(CaseLabel.L0)
     def test_connection_connect_default_alias_effective(self, host, port):
         """
         target: connect passes useful configure that adds by add_connect
@@ -436,7 +437,7 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {'host': host, 'port': port}})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
     def test_connection_connect_repeat(self, host, port, connect_name):
         """
@@ -472,7 +473,7 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.connect(alias=connect_name, host="host", port=port,
                                      check_task=CheckTasks.err_res, check_items={"err_code": -1, "err_msg": err_msg})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING, "test_alias_nme"])
     def test_connection_connect_params(self, host, port, connect_name):
         """
@@ -545,7 +546,7 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {"host": "localhost", "port": "19530"}})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_connection_disconnect_after_default_connect(self, host, port):
         """
         target: disconnect default connect and check result
@@ -581,7 +582,7 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {'host': host, 'port': port}})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_connection_disconnect_after_connect(self, host, port):
         """
         target: disconnect test connect and check result
@@ -618,7 +619,7 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.get_connection_addr(alias=test_alias_name, check_task=CheckTasks.check_connection_result,
                                                  check_items={"dict_content": {'host': host, 'port': port}})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_connection_remove_connection_not_exist(self):
         """
         target: remove connection that is not exist and check result
@@ -633,7 +634,7 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
                                               check_items={"list_content": [(DefaultConfig.DEFAULT_USING, None)]})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_connection_remove_default_alias(self):
         """
         target: remove default alias connect and check result
@@ -648,7 +649,7 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
                                               check_items={"list_content": []})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING, "test_alias_name"])
     def test_connection_remove_after_connect(self, host, port, connect_name):
         """
@@ -674,7 +675,7 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.list_connections(check_task=CheckTasks.check_connection_result,
                                               check_items={"list_content": list_content})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING, "test_alias_name"])
     def test_connection_remove_after_disconnect(self, host, port, connect_name):
         """

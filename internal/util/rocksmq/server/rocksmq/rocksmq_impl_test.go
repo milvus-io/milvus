@@ -15,6 +15,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -33,12 +34,17 @@ func TestFixChannelName(t *testing.T) {
 	assert.Equal(t, len(fixName), FixedChannelNameLen)
 }
 
-func TestRocksMQ(t *testing.T) {
-	etcdAddr := os.Getenv("ETCD_ADDRESS")
-	if etcdAddr == "" {
-		etcdAddr = "localhost:2379"
+func newEtcdClient() (*clientv3.Client, error) {
+	endpoints := os.Getenv("ETCD_ENDPOINTS")
+	if endpoints == "" {
+		endpoints = "localhost:2379"
 	}
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	etcdEndpoints := strings.Split(endpoints, ",")
+	return clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
+}
+
+func TestRocksMQ(t *testing.T) {
+	cli, err := newEtcdClient()
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()
@@ -91,11 +97,7 @@ func TestRocksMQ(t *testing.T) {
 }
 
 func TestRocksMQ_Loop(t *testing.T) {
-	etcdAddr := os.Getenv("ETCD_ADDRESS")
-	if etcdAddr == "" {
-		etcdAddr = "localhost:2379"
-	}
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	cli, err := newEtcdClient()
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()
@@ -159,11 +161,7 @@ func TestRocksMQ_Loop(t *testing.T) {
 }
 
 func TestRocksMQ_Goroutines(t *testing.T) {
-	etcdAddr := os.Getenv("ETCD_ADDRESS")
-	if etcdAddr == "" {
-		etcdAddr = "localhost:2379"
-	}
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	cli, err := newEtcdClient()
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()
@@ -230,11 +228,7 @@ func TestRocksMQ_Goroutines(t *testing.T) {
 		Consume: 90000 message / s
 */
 func TestRocksMQ_Throughout(t *testing.T) {
-	etcdAddr := os.Getenv("ETCD_ADDRESS")
-	if etcdAddr == "" {
-		etcdAddr = "localhost:2379"
-	}
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	cli, err := newEtcdClient()
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()
@@ -251,7 +245,7 @@ func TestRocksMQ_Throughout(t *testing.T) {
 	assert.Nil(t, err)
 	defer rmq.DestroyTopic(channelName)
 
-	entityNum := 1000000
+	entityNum := 100000
 
 	pt0 := time.Now().UnixNano() / int64(time.Millisecond)
 	for i := 0; i < entityNum; i++ {
@@ -284,11 +278,7 @@ func TestRocksMQ_Throughout(t *testing.T) {
 }
 
 func TestRocksMQ_MultiChan(t *testing.T) {
-	etcdAddr := os.Getenv("ETCD_ADDRESS")
-	if etcdAddr == "" {
-		etcdAddr = "localhost:2379"
-	}
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	cli, err := newEtcdClient()
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()

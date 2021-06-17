@@ -29,11 +29,10 @@ func TestMetaSnapshot(t *testing.T) {
 	randVal := rand.Int()
 
 	Params.Init()
-	etcdAddr := Params.EtcdAddress
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
@@ -168,12 +167,11 @@ func TestGetRevOnEtcd(t *testing.T) {
 	randVal := rand.Int()
 
 	Params.Init()
-	etcdAddr := Params.EtcdAddress
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 	key := path.Join(rootPath, tsKey)
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
@@ -214,11 +212,10 @@ func TestLoad(t *testing.T) {
 	randVal := rand.Int()
 
 	Params.Init()
-	etcdAddr := Params.EtcdAddress
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
@@ -262,11 +259,10 @@ func TestMultiSave(t *testing.T) {
 	randVal := rand.Int()
 
 	Params.Init()
-	etcdAddr := Params.EtcdAddress
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
@@ -326,11 +322,10 @@ func TestMultiSaveAndRemoveWithPrefix(t *testing.T) {
 	randVal := rand.Int()
 
 	Params.Init()
-	etcdAddr := Params.EtcdAddress
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
 	assert.Nil(t, err)
 
 	var vtso typeutil.Timestamp
@@ -345,13 +340,13 @@ func TestMultiSaveAndRemoveWithPrefix(t *testing.T) {
 
 	for i := 0; i < 20; i++ {
 		vtso = typeutil.Timestamp(100 + i*5)
-		ts, err := ms.Save(fmt.Sprintf("kd-%d", i), fmt.Sprintf("value-%d", i))
+		ts, err := ms.Save(fmt.Sprintf("kd-%04d", i), fmt.Sprintf("value-%d", i))
 		assert.Nil(t, err)
 		assert.Equal(t, vtso, ts)
 	}
 	for i := 20; i < 40; i++ {
 		sm := map[string]string{"ks": fmt.Sprintf("value-%d", i)}
-		dm := []string{fmt.Sprintf("kd-%d", i-20)}
+		dm := []string{fmt.Sprintf("kd-%04d", i-20)}
 		vtso = typeutil.Timestamp(100 + i*5)
 		ts, err := ms.MultiSaveAndRemoveWithPrefix(sm, dm, nil)
 		assert.Nil(t, err)
@@ -359,7 +354,7 @@ func TestMultiSaveAndRemoveWithPrefix(t *testing.T) {
 	}
 
 	for i := 0; i < 20; i++ {
-		val, err := ms.Load(fmt.Sprintf("kd-%d", i), typeutil.Timestamp(100+i*5+2))
+		val, err := ms.Load(fmt.Sprintf("kd-%04d", i), typeutil.Timestamp(100+i*5+2))
 		assert.Nil(t, err)
 		assert.Equal(t, fmt.Sprintf("value-%d", i), val)
 		_, vals, err := ms.LoadWithPrefix("kd-", typeutil.Timestamp(100+i*5+2))
@@ -380,7 +375,7 @@ func TestMultiSaveAndRemoveWithPrefix(t *testing.T) {
 	assert.NotNil(t, ms)
 
 	for i := 0; i < 20; i++ {
-		val, err := ms.Load(fmt.Sprintf("kd-%d", i), typeutil.Timestamp(100+i*5+2))
+		val, err := ms.Load(fmt.Sprintf("kd-%04d", i), typeutil.Timestamp(100+i*5+2))
 		assert.Nil(t, err)
 		assert.Equal(t, fmt.Sprintf("value-%d", i), val)
 		_, vals, err := ms.LoadWithPrefix("kd-", typeutil.Timestamp(100+i*5+2))

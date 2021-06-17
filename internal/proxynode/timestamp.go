@@ -22,12 +22,14 @@ import (
 )
 
 type TimestampAllocator struct {
+	ctx           context.Context
 	masterService types.MasterService
 	peerID        UniqueID
 }
 
-func NewTimestampAllocator(master types.MasterService, peerID UniqueID) (*TimestampAllocator, error) {
+func NewTimestampAllocator(ctx context.Context, master types.MasterService, peerID UniqueID) (*TimestampAllocator, error) {
 	a := &TimestampAllocator{
+		ctx:           ctx,
 		peerID:        peerID,
 		masterService: master,
 	}
@@ -35,7 +37,7 @@ func NewTimestampAllocator(master types.MasterService, peerID UniqueID) (*Timest
 }
 
 func (ta *TimestampAllocator) Alloc(count uint32) ([]Timestamp, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ta.ctx, 5*time.Second)
 	req := &masterpb.AllocTimestampRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_RequestTSO,
@@ -51,6 +53,9 @@ func (ta *TimestampAllocator) Alloc(count uint32) ([]Timestamp, error) {
 
 	if err != nil {
 		return nil, fmt.Errorf("syncTimestamp Failed:%w", err)
+	}
+	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return nil, fmt.Errorf("syncTimeStamp Failed:%s", resp.Status.Reason)
 	}
 	start, cnt := resp.Timestamp, resp.Count
 	var ret []Timestamp

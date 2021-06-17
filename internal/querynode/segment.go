@@ -55,7 +55,7 @@ type Segment struct {
 
 	onService bool
 
-	vChannelID   VChannel
+	vChannelID   Channel
 	lastMemSize  int64
 	lastRowCount int64
 
@@ -121,7 +121,7 @@ func (s *Segment) setOnService(onService bool) {
 	s.onService = onService
 }
 
-func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, collectionID UniqueID, vChannelID VChannel, segType segmentType, onService bool) *Segment {
+func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, segType segmentType, onService bool) *Segment {
 	/*
 		CSegmentInterface
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);

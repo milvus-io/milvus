@@ -226,10 +226,8 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
 	ddOp := func(ts typeutil.Timestamp) (string, error) {
-		if SetDDTimeTimeByMaster {
-			ddCollReq.Base.Timestamp = ts
-			ddPartReq.Base.Timestamp = ts
-		}
+		ddCollReq.Base.Timestamp = ts
+		ddPartReq.Base.Timestamp = ts
 		return EncodeDdOperation(&ddCollReq, &ddPartReq, CreateCollectionDDType)
 	}
 
@@ -238,18 +236,19 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	err = t.core.SendDdCreateCollectionReq(ctx, &ddCollReq)
+	// add dml channel before send dd msg
+	t.core.dmlChannels.AddProducerChannels(chanNames...)
+
+	err = t.core.SendDdCreateCollectionReq(ctx, &ddCollReq, chanNames)
 	if err != nil {
 		return err
 	}
-	err = t.core.SendDdCreatePartitionReq(ctx, &ddPartReq)
+	err = t.core.SendDdCreatePartitionReq(ctx, &ddPartReq, chanNames)
 	if err != nil {
 		return err
 	}
 
-	if SetDDTimeTimeByMaster {
-		t.core.SendTimeTick(ts)
-	}
+	t.core.SendTimeTick(ts)
 
 	// Update DDOperation in etcd
 	return t.core.setDdMsgSendFlag(true)
@@ -289,9 +288,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
 	ddOp := func(ts typeutil.Timestamp) (string, error) {
-		if SetDDTimeTimeByMaster {
-			ddReq.Base.Timestamp = ts
-		}
+		ddReq.Base.Timestamp = ts
 		return EncodeDdOperation(&ddReq, nil, DropCollectionDDType)
 	}
 
@@ -300,14 +297,15 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	err = t.core.SendDdDropCollectionReq(ctx, &ddReq)
+	err = t.core.SendDdDropCollectionReq(ctx, &ddReq, collMeta.PhysicalChannelNames)
 	if err != nil {
 		return err
 	}
 
-	if SetDDTimeTimeByMaster {
-		t.core.SendTimeTick(ts)
-	}
+	t.core.SendTimeTick(ts)
+
+	// remove dml channel after send dd msg
+	t.core.dmlChannels.RemoveProducerChannels(collMeta.PhysicalChannelNames...)
 
 	//notify query service to release collection
 	go func() {
@@ -395,13 +393,13 @@ func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
 
 	t.Rsp.Schema = proto.Clone(collInfo.Schema).(*schemapb.CollectionSchema)
 	t.Rsp.CollectionID = collInfo.ID
-	var newField []*schemapb.FieldSchema
-	for _, field := range t.Rsp.Schema.Fields {
-		if field.FieldID >= StartOfUserFieldID {
-			newField = append(newField, field)
-		}
-	}
-	t.Rsp.Schema.Fields = newField
+	//var newField []*schemapb.FieldSchema
+	//for _, field := range t.Rsp.Schema.Fields {
+	//	if field.FieldID >= StartOfUserFieldID {
+	//		newField = append(newField, field)
+	//	}
+	//}
+	//t.Rsp.Schema.Fields = newField
 
 	t.Rsp.VirtualChannelNames = collInfo.VirtualChannelNames
 	t.Rsp.PhysicalChannelNames = collInfo.PhysicalChannelNames
@@ -476,9 +474,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
 	ddOp := func(ts typeutil.Timestamp) (string, error) {
-		if SetDDTimeTimeByMaster {
-			ddReq.Base.Timestamp = ts
-		}
+		ddReq.Base.Timestamp = ts
 		return EncodeDdOperation(&ddReq, nil, CreatePartitionDDType)
 	}
 
@@ -487,14 +483,12 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	err = t.core.SendDdCreatePartitionReq(ctx, &ddReq)
+	err = t.core.SendDdCreatePartitionReq(ctx, &ddReq, collMeta.PhysicalChannelNames)
 	if err != nil {
 		return err
 	}
 
-	if SetDDTimeTimeByMaster {
-		t.core.SendTimeTick(ts)
-	}
+	t.core.SendTimeTick(ts)
 
 	req := proxypb.InvalidateCollMetaCacheRequest{
 		Base: &commonpb.MsgBase{
@@ -552,9 +546,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
 	ddOp := func(ts typeutil.Timestamp) (string, error) {
-		if SetDDTimeTimeByMaster {
-			ddReq.Base.Timestamp = ts
-		}
+		ddReq.Base.Timestamp = ts
 		return EncodeDdOperation(&ddReq, nil, DropPartitionDDType)
 	}
 
@@ -563,14 +555,12 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	err = t.core.SendDdDropPartitionReq(ctx, &ddReq)
+	err = t.core.SendDdDropPartitionReq(ctx, &ddReq, collInfo.PhysicalChannelNames)
 	if err != nil {
 		return err
 	}
 
-	if SetDDTimeTimeByMaster {
-		t.core.SendTimeTick(ts)
-	}
+	t.core.SendTimeTick(ts)
 
 	req := proxypb.InvalidateCollMetaCacheRequest{
 		Base: &commonpb.MsgBase{
@@ -767,6 +757,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 	}
 	indexName := Params.DefaultIndexName //TODO, get name from request
 	indexID, _, err := t.core.IDAllocator(1)
+	log.Debug("MasterService CreateIndexReqTask", zap.Any("indexID", indexID), zap.Error(err))
 	if err != nil {
 		return err
 	}
@@ -776,6 +767,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 		IndexParams: t.Req.ExtraParams,
 	}
 	segIDs, field, err := t.core.MetaTable.GetNotIndexedSegments(t.Req.CollectionName, t.Req.FieldName, idxInfo)
+	log.Debug("MasterService CreateIndexReqTask metaTable.GetNotIndexedSegments", zap.Error(err))
 	if err != nil {
 		return err
 	}

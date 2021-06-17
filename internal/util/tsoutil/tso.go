@@ -44,9 +44,9 @@ func Mod24H(ts uint64) uint64 {
 	return (physical << logicalBits) | logical
 }
 
-func NewTSOKVBase(etcdAddr []string, tsoRoot, subPath string) *etcdkv.EtcdKV {
+func NewTSOKVBase(etcdEndpoints []string, tsoRoot, subPath string) *etcdkv.EtcdKV {
 	client, _ := clientv3.New(clientv3.Config{
-		Endpoints:   etcdAddr,
+		Endpoints:   etcdEndpoints,
 		DialTimeout: 5 * time.Second,
 	})
 	return etcdkv.NewEtcdKV(client, path.Join(tsoRoot, subPath))

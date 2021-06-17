@@ -63,7 +63,7 @@ type tSafeMsg struct {
 type tSafe struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
-	channel     VChannel
+	channel     Channel
 	tSafeMu     sync.Mutex // guards all fields
 	tSafe       Timestamp
 	watcherList []*tSafeWatcher
@@ -71,7 +71,7 @@ type tSafe struct {
 	tSafeRecord map[UniqueID]Timestamp
 }
 
-func newTSafe(ctx context.Context, channel VChannel) tSafer {
+func newTSafe(ctx context.Context, channel Channel) tSafer {
 	ctx1, cancel := context.WithCancel(ctx)
 	const channelSize = 4096
 

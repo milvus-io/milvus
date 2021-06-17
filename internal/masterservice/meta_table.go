@@ -488,6 +488,30 @@ func (mt *metaTable) ListCollections(ts typeutil.Timestamp) (map[string]typeutil
 	return colls, nil
 }
 
+// ListCollectionVirtualChannels list virtual channel of all the collection
+func (mt *metaTable) ListCollectionVirtualChannels() []string {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	vlist := []string{}
+
+	for _, c := range mt.collID2Meta {
+		vlist = append(vlist, c.VirtualChannelNames...)
+	}
+	return vlist
+}
+
+// ListCollectionPhysicalChannels list physical channel of all the collection
+func (mt *metaTable) ListCollectionPhysicalChannels() []string {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	plist := []string{}
+
+	for _, c := range mt.collID2Meta {
+		plist = append(plist, c.PhysicalChannelNames...)
+	}
+	return plist
+}
+
 func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()

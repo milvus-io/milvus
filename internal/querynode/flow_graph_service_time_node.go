@@ -13,7 +13,6 @@ package querynode
 
 import (
 	"context"
-	"strconv"
 
 	"go.uber.org/zap"
 
@@ -27,7 +26,7 @@ type serviceTimeNode struct {
 	graphType         flowGraphType
 	collectionID      UniqueID
 	partitionID       UniqueID
-	vChannel          VChannel
+	vChannel          Channel
 	tSafeReplica      TSafeReplicaInterface
 	timeTickMsgStream msgstream.MsgStream
 }
@@ -65,8 +64,7 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	} else {
 		id = stNode.collectionID
 	}
-	channelTmp := stNode.vChannel + strconv.FormatInt(stNode.collectionID, 10)
-	stNode.tSafeReplica.setTSafe(channelTmp, id, serviceTimeMsg.timeRange.timestampMax)
+	stNode.tSafeReplica.setTSafe(stNode.vChannel, id, serviceTimeMsg.timeRange.timestampMax)
 	//log.Debug("update tSafe:",
 	//	zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)),
 	//	zap.Any("collectionID", stNode.collectionID),
@@ -111,7 +109,7 @@ func newServiceTimeNode(ctx context.Context,
 	graphType flowGraphType,
 	collectionID UniqueID,
 	partitionID UniqueID,
-	channel VChannel,
+	channel Channel,
 	factory msgstream.Factory) *serviceTimeNode {
 
 	maxQueueLength := Params.FlowGraphMaxQueueLength

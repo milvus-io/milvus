@@ -127,10 +127,8 @@ func TestGrpcService(t *testing.T) {
 	cms.Params.Init()
 	cms.Params.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
 	cms.Params.KvRootPath = fmt.Sprintf("/%d/test/kv", randVal)
-	cms.Params.ProxyTimeTickChannel = fmt.Sprintf("proxyTimeTick%d", randVal)
 	cms.Params.MsgChannelSubName = fmt.Sprintf("msgChannel%d", randVal)
 	cms.Params.TimeTickChannel = fmt.Sprintf("timeTick%d", randVal)
-	cms.Params.DdChannel = fmt.Sprintf("ddChannel%d", randVal)
 	cms.Params.StatisticsChannel = fmt.Sprintf("stateChannel%d", randVal)
 	cms.Params.DataServiceSegmentChannel = fmt.Sprintf("segmentChannel%d", randVal)
 
@@ -150,7 +148,7 @@ func TestGrpcService(t *testing.T) {
 	assert.Nil(t, err)
 	svr.masterService.UpdateStateCode(internalpb.StateCode_Initializing)
 
-	etcdCli, err := initEtcd(cms.Params.EtcdAddress)
+	etcdCli, err := initEtcd(cms.Params.EtcdEndpoints)
 	assert.Nil(t, err)
 	sessKey := path.Join(cms.Params.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
@@ -168,7 +166,6 @@ func TestGrpcService(t *testing.T) {
 	err = core.Init()
 	assert.Nil(t, err)
 
-	core.ProxyTimeTickChan = make(chan typeutil.Timestamp, 8)
 	FlushedSegmentChan := make(chan *msgstream.MsgPack, 8)
 	core.DataNodeFlushedSegmentChan = FlushedSegmentChan
 	SegmentInfoChan := make(chan *msgstream.MsgPack, 8)
@@ -181,28 +178,28 @@ func TestGrpcService(t *testing.T) {
 		return nil
 	}
 	createCollectionArray := make([]*internalpb.CreateCollectionRequest, 0, 16)
-	core.SendDdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest) error {
+	core.SendDdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest, channelNames []string) error {
 		t.Logf("Create Colllection %s", req.CollectionName)
 		createCollectionArray = append(createCollectionArray, req)
 		return nil
 	}
 
 	dropCollectionArray := make([]*internalpb.DropCollectionRequest, 0, 16)
-	core.SendDdDropCollectionReq = func(ctx context.Context, req *internalpb.DropCollectionRequest) error {
+	core.SendDdDropCollectionReq = func(ctx context.Context, req *internalpb.DropCollectionRequest, channelNames []string) error {
 		t.Logf("Drop Collection %s", req.CollectionName)
 		dropCollectionArray = append(dropCollectionArray, req)
 		return nil
 	}
 
 	createPartitionArray := make([]*internalpb.CreatePartitionRequest, 0, 16)
-	core.SendDdCreatePartitionReq = func(ctx context.Context, req *internalpb.CreatePartitionRequest) error {
+	core.SendDdCreatePartitionReq = func(ctx context.Context, req *internalpb.CreatePartitionRequest, channelNames []string) error {
 		t.Logf("Create Partition %s", req.PartitionName)
 		createPartitionArray = append(createPartitionArray, req)
 		return nil
 	}
 
 	dropPartitionArray := make([]*internalpb.DropPartitionRequest, 0, 16)
-	core.SendDdDropPartitionReq = func(ctx context.Context, req *internalpb.DropPartitionRequest) error {
+	core.SendDdDropPartitionReq = func(ctx context.Context, req *internalpb.DropPartitionRequest, channelNames []string) error {
 		t.Logf("Drop Partition %s", req.PartitionName)
 		dropPartitionArray = append(dropPartitionArray, req)
 		return nil
@@ -249,12 +246,16 @@ func TestGrpcService(t *testing.T) {
 		return nil
 	}
 
+	cms.Params.Address = Params.Address
+	err = svr.masterService.Register()
+	assert.Nil(t, err)
+
 	err = svr.start()
 	assert.Nil(t, err)
 
 	svr.masterService.UpdateStateCode(internalpb.StateCode_Healthy)
 
-	cli, err := grpcmasterserviceclient.NewClient(Params.Address, cms.Params.MetaRootPath, []string{cms.Params.EtcdAddress}, 3*time.Second)
+	cli, err := grpcmasterserviceclient.NewClient(context.Background(), cms.Params.MetaRootPath, cms.Params.EtcdEndpoints, 3*time.Second)
 	assert.Nil(t, err)
 
 	err = cli.Init()
@@ -280,13 +281,6 @@ func TestGrpcService(t *testing.T) {
 	t.Run("get statistics channel", func(t *testing.T) {
 		req := &internalpb.GetStatisticsChannelRequest{}
 		rsp, err := svr.GetStatisticsChannel(ctx, req)
-		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
-	})
-
-	t.Run("get dd channel", func(t *testing.T) {
-		req := &internalpb.GetDdChannelRequest{}
-		rsp, err := svr.GetDdChannel(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 	})
@@ -814,6 +808,10 @@ func TestGrpcService(t *testing.T) {
 
 	err = svr.Stop()
 	assert.Nil(t, err)
+
+	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
+	assert.Nil(t, err)
+
 }
 
 type mockCore struct {
@@ -821,9 +819,6 @@ type mockCore struct {
 }
 
 func (m *mockCore) UpdateStateCode(internalpb.StateCode) {
-}
-func (m *mockCore) SetProxyService(context.Context, types.ProxyService) error {
-	return nil
 }
 func (m *mockCore) SetDataService(context.Context, types.DataService) error {
 	return nil
@@ -853,32 +848,6 @@ func (m *mockCore) Stop() error {
 }
 
 func (m *mockCore) SetNewProxyClient(func(sess *sessionutil.Session) (types.ProxyNode, error)) {
-}
-
-type mockProxy struct {
-	types.ProxyService
-}
-
-func (m *mockProxy) Init() error {
-	return nil
-}
-func (m *mockProxy) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{
-		State: &internalpb.ComponentInfo{
-			StateCode: internalpb.StateCode_Healthy,
-		},
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		SubcomponentStates: []*internalpb.ComponentInfo{
-			{
-				StateCode: internalpb.StateCode_Healthy,
-			},
-		},
-	}, nil
-}
-func (m *mockProxy) Stop() error {
-	return fmt.Errorf("stop error")
 }
 
 type mockDataService struct {
@@ -952,17 +921,14 @@ func TestRun(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "listen tcp: address 1000000: invalid port")
 
-	svr.newProxyServiceClient = func(s string) types.ProxyService {
-		return &mockProxy{}
-	}
-	svr.newDataServiceClient = func(s, metaRoot, address string, timeout time.Duration) types.DataService {
+	svr.newDataServiceClient = func(string, []string, time.Duration) types.DataService {
 		return &mockDataService{}
 	}
-	svr.newIndexServiceClient = func(s, etcdAddress, metaRootPath string, timeout time.Duration) types.IndexService {
+	svr.newIndexServiceClient = func(string, []string, time.Duration) types.IndexService {
 		return &mockIndex{}
 	}
-	svr.newQueryServiceClient = func(s, metaRootPath, etcdAddress string) (types.QueryService, error) {
-		return &mockQuery{}, nil
+	svr.newQueryServiceClient = func(string, []string, time.Duration) types.QueryService {
+		return &mockQuery{}
 	}
 
 	Params.Port = rand.Int()%100 + 10000
@@ -972,7 +938,7 @@ func TestRun(t *testing.T) {
 	cms.Params.Init()
 	cms.Params.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
 
-	etcdCli, err := initEtcd(cms.Params.EtcdAddress)
+	etcdCli, err := initEtcd(cms.Params.EtcdEndpoints)
 	assert.Nil(t, err)
 	sessKey := path.Join(cms.Params.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
@@ -985,10 +951,10 @@ func TestRun(t *testing.T) {
 
 }
 
-func initEtcd(etcdAddress string) (*clientv3.Client, error) {
+func initEtcd(etcdEndpoints []string) (*clientv3.Client, error) {
 	var etcdCli *clientv3.Client
 	connectEtcdFn := func() error {
-		etcd, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}, DialTimeout: 5 * time.Second})
+		etcd, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints, DialTimeout: 5 * time.Second})
 		if err != nil {
 			return err
 		}

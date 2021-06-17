@@ -31,24 +31,11 @@ services:
     image: registry.zilliz.com/milvus/milvus:master-release
     command: ["/milvus/bin/milvus", "run", "master"]
     environment:
-      ETCD_ADDRESS: etcd:2379
+      ETCD_ENDPOINTS: etcd:2379
       PULSAR_ADDRESS: pulsar://pulsar:6650
       DATA_SERVICE_ADDRESS: dataservice:13333
       INDEX_SERVICE_ADDRESS: indexservice:31000
       QUERY_SERVICE_ADDRESS: queryservice:19531
-      PROXY_SERVICE_ADDRESS: proxyservice:21122
-    depends_on:
-      - "etcd"
-      - "pulsar"
-      - "minio"
-    networks:
-      - milvus
-
-  proxyservice:
-    image: registry.zilliz.com/milvus/milvus:master-release
-    command: ["/milvus/bin/milvus", "run", "proxyservice"]
-    environment:
-      PULSAR_ADDRESS: pulsar://pulsar:6650
     depends_on:
       - "etcd"
       - "pulsar"
@@ -60,17 +47,14 @@ services:
     image: registry.zilliz.com/milvus/milvus:master-release
     command: ["/milvus/bin/milvus", "run", "proxynode"]
     environment:
-      ETCD_ADDRESS: etcd:2379
+      ETCD_ENDPOINTS: etcd:2379
       PULSAR_ADDRESS: pulsar://pulsar:6650
       MASTER_ADDRESS: master:53100
       DATA_SERVICE_ADDRESS: dataservice:13333
       INDEX_SERVICE_ADDRESS: indexservice:31000
       QUERY_SERVICE_ADDRESS: queryservice:19531
-      PROXY_SERVICE_ADDRESS: proxyservice:21122
     ports:
       - "19530:19530"
-    depends_on:
-      - "proxyservice"
     networks:
       - milvus
 
@@ -107,7 +91,7 @@ services:
     image: registry.zilliz.com/milvus/milvus:master-release
     command: ["/milvus/bin/milvus", "run", "indexservice"]
     environment:
-      ETCD_ADDRESS: etcd:2379
+      ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
       MASTER_ADDRESS: master:53100
     depends_on:
@@ -132,7 +116,7 @@ services:
     image: registry.zilliz.com/milvus/milvus:master-release
     command: ["/milvus/bin/milvus", "run", "dataservice"]
     environment:
-      ETCD_ADDRESS: etcd:2379
+      ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
       PULSAR_ADDRESS: pulsar://pulsar:6650
       MASTER_ADDRESS: master:53100
@@ -147,7 +131,7 @@ services:
     image: registry.zilliz.com/milvus/milvus:master-release
     command: ["/milvus/bin/milvus", "run", "datanode"]
     environment:
-      ETCD_ADDRESS: etcd:2379
+      ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
       PULSAR_ADDRESS: pulsar://pulsar:6650
       MASTER_ADDRESS: master:53100

@@ -23,8 +23,8 @@ func TestParamTable(t *testing.T) {
 	assert.NotEqual(t, Params.PulsarAddress, "")
 	t.Logf("pulsar address = %s", Params.PulsarAddress)
 
-	assert.NotEqual(t, Params.EtcdAddress, "")
-	t.Logf("etcd address = %s", Params.EtcdAddress)
+	assert.NotZero(t, len(Params.EtcdEndpoints))
+	t.Logf("etcd endpoints = %s", Params.EtcdEndpoints)
 
 	assert.NotEqual(t, Params.MetaRootPath, "")
 	t.Logf("meta root path = %s", Params.MetaRootPath)
@@ -37,9 +37,6 @@ func TestParamTable(t *testing.T) {
 
 	assert.NotEqual(t, Params.TimeTickChannel, "")
 	t.Logf("master time tick channel = %s", Params.TimeTickChannel)
-
-	assert.NotEqual(t, Params.DdChannel, "")
-	t.Logf("master dd channel = %s", Params.DdChannel)
 
 	assert.NotEqual(t, Params.StatisticsChannel, "")
 	t.Logf("master statistics channel = %s", Params.StatisticsChannel)

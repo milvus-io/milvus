@@ -25,6 +25,22 @@ func (rc *rmqConsumer) Subscription() string {
 }
 
 func (rc *rmqConsumer) Chan() <-chan ConsumerMessage {
+
+	if rc.msgChannel == nil {
+		rc.msgChannel = make(chan ConsumerMessage)
+		go func() {
+			for { //nolint:gosimple
+				select {
+				case msg, ok := <-rc.c.Chan():
+					if !ok {
+						close(rc.msgChannel)
+						return
+					}
+					rc.msgChannel <- &rmqMessage{msg: msg}
+				}
+			}
+		}()
+	}
 	return rc.msgChannel
 }
 

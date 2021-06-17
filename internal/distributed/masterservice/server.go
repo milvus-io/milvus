@@ -28,7 +28,6 @@ import (
 	dsc "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
 	isc "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
 	pnc "github.com/milvus-io/milvus/internal/distributed/proxynode/client"
-	psc "github.com/milvus-io/milvus/internal/distributed/proxyservice/client"
 	qsc "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
 	"github.com/milvus-io/milvus/internal/log"
 	cms "github.com/milvus-io/milvus/internal/masterservice"
@@ -55,15 +54,13 @@ type Server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	proxyService types.ProxyService
 	dataService  types.DataService
 	indexService types.IndexService
 	queryService types.QueryService
 
-	newProxyServiceClient func(string) types.ProxyService
-	newIndexServiceClient func(string, string, string, time.Duration) types.IndexService
-	newDataServiceClient  func(string, string, string, time.Duration) types.DataService
-	newQueryServiceClient func(string, string, string) (types.QueryService, error)
+	newIndexServiceClient func(string, []string, time.Duration) types.IndexService
+	newDataServiceClient  func(string, []string, time.Duration) types.DataService
+	newQueryServiceClient func(string, []string, time.Duration) types.QueryService
 
 	closer io.Closer
 }
@@ -87,31 +84,21 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 func (s *Server) setClient() {
 	ctx := context.Background()
 
-	s.newProxyServiceClient = func(s string) types.ProxyService {
-		psClient := psc.NewClient(s)
-		if err := psClient.Init(); err != nil {
-			panic(err)
-		}
-		if err := psClient.Start(); err != nil {
-			panic(err)
-		}
-		if err := funcutil.WaitForComponentInitOrHealthy(ctx, psClient, "ProxyService", 1000000, 200*time.Millisecond); err != nil {
-			panic(err)
-		}
-		return psClient
-	}
-	s.newDataServiceClient = func(s, etcdMetaRoot, etcdAddress string, timeout time.Duration) types.DataService {
-		dsClient := dsc.NewClient(s, etcdMetaRoot, []string{etcdAddress}, timeout)
+	s.newDataServiceClient = func(etcdMetaRoot string, etcdEndpoints []string, timeout time.Duration) types.DataService {
+		dsClient := dsc.NewClient(etcdMetaRoot, etcdEndpoints, timeout)
 		if err := dsClient.Init(); err != nil {
 			panic(err)
 		}
 		if err := dsClient.Start(); err != nil {
 			panic(err)
 		}
+		if err := funcutil.WaitForComponentInitOrHealthy(ctx, dsClient, "DataService", 1000000, 200*time.Millisecond); err != nil {
+			panic(err)
+		}
 		return dsClient
 	}
-	s.newIndexServiceClient = func(s, metaRootPath, etcdAddress string, timeout time.Duration) types.IndexService {
-		isClient := isc.NewClient(s, metaRootPath, []string{etcdAddress}, timeout)
+	s.newIndexServiceClient = func(metaRootPath string, etcdEndpoints []string, timeout time.Duration) types.IndexService {
+		isClient := isc.NewClient(metaRootPath, etcdEndpoints, timeout)
 		if err := isClient.Init(); err != nil {
 			panic(err)
 		}
@@ -120,8 +107,8 @@ func (s *Server) setClient() {
 		}
 		return isClient
 	}
-	s.newQueryServiceClient = func(s, metaRootPath, etcdAddress string) (types.QueryService, error) {
-		qsClient, err := qsc.NewClient(context.Background(), s, metaRootPath, []string{etcdAddress}, 5*time.Second)
+	s.newQueryServiceClient = func(metaRootPath string, etcdEndpoints []string, timeout time.Duration) types.QueryService {
+		qsClient, err := qsc.NewClient(metaRootPath, etcdEndpoints, timeout)
 		if err != nil {
 			panic(err)
 		}
@@ -131,7 +118,7 @@ func (s *Server) setClient() {
 		if err := qsClient.Start(); err != nil {
 			panic(err)
 		}
-		return qsClient, nil
+		return qsClient
 	}
 }
 
@@ -174,7 +161,7 @@ func (s *Server) init() error {
 	log.Debug("MasterService", zap.Any("State", internalpb.StateCode_Initializing))
 	s.masterService.SetNewProxyClient(
 		func(s *sessionutil.Session) (types.ProxyNode, error) {
-			cli := pnc.NewClient(ctx, s.Address, 10*time.Second)
+			cli := pnc.NewClient(s.Address, 3*time.Second)
 			if err := cli.Init(); err != nil {
 				return nil, err
 			}
@@ -185,33 +172,25 @@ func (s *Server) init() error {
 		},
 	)
 
-	if s.newProxyServiceClient != nil {
-		log.Debug("MasterService start to create ProxyService client", zap.String("address", Params.ProxyServiceAddress))
-		proxyService := s.newProxyServiceClient(Params.ProxyServiceAddress)
-		if err := s.masterService.SetProxyService(ctx, proxyService); err != nil {
-			panic(err)
-		}
-		s.proxyService = proxyService
-	}
 	if s.newDataServiceClient != nil {
-		log.Debug("MasterService start to create DataService client", zap.String("address", Params.DataServiceAddress))
-		dataService := s.newDataServiceClient(Params.DataServiceAddress, cms.Params.MetaRootPath, cms.Params.EtcdAddress, 10*time.Second)
+		log.Debug("MasterService start to create DataService client")
+		dataService := s.newDataServiceClient(cms.Params.MetaRootPath, cms.Params.EtcdEndpoints, 3*time.Second)
 		if err := s.masterService.SetDataService(ctx, dataService); err != nil {
 			panic(err)
 		}
 		s.dataService = dataService
 	}
 	if s.newIndexServiceClient != nil {
-		log.Debug("MasterService start to create IndexService client", zap.String("address", Params.IndexServiceAddress))
-		indexService := s.newIndexServiceClient(Params.IndexServiceAddress, cms.Params.MetaRootPath, cms.Params.EtcdAddress, 10*time.Second)
+		log.Debug("MasterService start to create IndexService client")
+		indexService := s.newIndexServiceClient(cms.Params.MetaRootPath, cms.Params.EtcdEndpoints, 3*time.Second)
 		if err := s.masterService.SetIndexService(indexService); err != nil {
 			panic(err)
 		}
 		s.indexService = indexService
 	}
 	if s.newQueryServiceClient != nil {
-		log.Debug("MasterService start to create QueryService client", zap.String("address", Params.QueryServiceAddress))
-		queryService, _ := s.newQueryServiceClient(Params.QueryServiceAddress, cms.Params.MetaRootPath, cms.Params.EtcdAddress)
+		log.Debug("MasterService start to create QueryService client")
+		queryService := s.newQueryServiceClient(cms.Params.MetaRootPath, cms.Params.EtcdEndpoints, 3*time.Second)
 		if err := s.masterService.SetQueryService(queryService); err != nil {
 			panic(err)
 		}
@@ -275,11 +254,6 @@ func (s *Server) Stop() error {
 			log.Error("close opentracing", zap.Error(err))
 		}
 	}
-	if s.proxyService != nil {
-		if err := s.proxyService.Stop(); err != nil {
-			log.Debug("close proxyService client", zap.Error(err))
-		}
-	}
 	if s.indexService != nil {
 		if err := s.indexService.Stop(); err != nil {
 			log.Debug("close indexService client", zap.Error(err))
@@ -322,12 +296,7 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 	return s.masterService.GetStatisticsChannel(ctx)
 }
 
-// GetDdChannel receive ddl from rpc and time tick from proxy service, and put them into this channel
-func (s *Server) GetDdChannel(ctx context.Context, req *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.masterService.GetDdChannel(ctx)
-}
-
-// CreateCollection DDL request
+//DDL request
 func (s *Server) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	return s.masterService.CreateCollection(ctx, in)
 }

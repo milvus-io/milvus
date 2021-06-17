@@ -933,3 +933,48 @@ func (l *LoadBalanceSegmentsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 
 	return loadMsg, nil
 }
+
+type DataNodeTtMsg struct {
+	BaseMsg
+	datapb.DataNodeTtMsg
+}
+
+func (m *DataNodeTtMsg) TraceCtx() context.Context {
+	return m.BaseMsg.Ctx
+}
+
+func (m *DataNodeTtMsg) SetTraceCtx(ctx context.Context) {
+	m.BaseMsg.Ctx = ctx
+}
+
+func (m *DataNodeTtMsg) ID() UniqueID {
+	return m.Base.MsgID
+}
+
+func (m *DataNodeTtMsg) Type() MsgType {
+	return m.Base.MsgType
+}
+
+func (m *DataNodeTtMsg) Marshal(input TsMsg) (MarshalType, error) {
+	msg := input.(*DataNodeTtMsg)
+	t, err := proto.Marshal(&msg.DataNodeTtMsg)
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+func (m *DataNodeTtMsg) Unmarshal(input MarshalType) (TsMsg, error) {
+	msg := datapb.DataNodeTtMsg{}
+	in, err := ConvertToByteArray(input)
+	if err != nil {
+		return nil, err
+	}
+	err = proto.Unmarshal(in, &msg)
+	if err != nil {
+		return nil, err
+	}
+	return &DataNodeTtMsg{
+		DataNodeTtMsg: msg,
+	}, nil
+}

@@ -60,7 +60,7 @@ type QueryService struct {
 
 // Register register query service at etcd
 func (qs *QueryService) Register() error {
-	qs.session = sessionutil.NewSession(qs.loopCtx, Params.MetaRootPath, []string{Params.EtcdAddress})
+	qs.session = sessionutil.NewSession(qs.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
 	qs.session.Init(typeutil.QueryServiceRole, Params.Address, true)
 	Params.NodeID = uint64(qs.session.ServerID)
 	return nil

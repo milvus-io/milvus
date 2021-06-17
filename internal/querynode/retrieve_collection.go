@@ -44,7 +44,7 @@ type retrieveCollection struct {
 	unsolvedMsgMu sync.Mutex
 	unsolvedMsg   []*msgstream.RetrieveMsg
 
-	tSafeWatchers     map[VChannel]*tSafeWatcher
+	tSafeWatchers     map[Channel]*tSafeWatcher
 	watcherSelectCase []reflect.SelectCase
 
 	serviceableTimeMutex sync.Mutex
@@ -71,7 +71,7 @@ func newRetrieveCollection(releaseCtx context.Context,
 		historical:   historical,
 		streaming:    streaming,
 
-		tSafeWatchers: make(map[VChannel]*tSafeWatcher),
+		tSafeWatchers: make(map[Channel]*tSafeWatcher),
 
 		msgBuffer:   msgBuffer,
 		unsolvedMsg: unsolvedMsg,
@@ -137,7 +137,7 @@ func (rc *retrieveCollection) register() {
 	}
 
 	rc.watcherSelectCase = make([]reflect.SelectCase, 0)
-	for _, channel := range collection.getWatchedDmChannels() {
+	for _, channel := range collection.getVChannels() {
 		rc.streaming.tSafeReplica.addTSafe(channel)
 		rc.tSafeWatchers[channel] = newTSafeWatcher()
 		rc.streaming.tSafeReplica.registerTSafeWatcher(channel, rc.tSafeWatchers[channel])
@@ -355,7 +355,7 @@ func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error
 	timestamp := retrieveMsg.Base.Timestamp
 
 	collectionID := retrieveMsg.CollectionID
-	collection, err := rc.historical.replica.getCollectionByID(collectionID)
+	collection, err := rc.streaming.replica.getCollectionByID(collectionID)
 	if err != nil {
 		return err
 	}
@@ -401,6 +401,7 @@ func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error
 		}
 	}
 
+	sealedSegmentRetrieved := make([]UniqueID, 0)
 	var mergeList []*segcorepb.RetrieveResults
 	for _, partitionID := range partitionIDsInHistorical {
 		segmentIDs, err := rc.historical.replica.getSegmentIDs(partitionID)
@@ -417,6 +418,7 @@ func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error
 				return err
 			}
 			mergeList = append(mergeList, result)
+			sealedSegmentRetrieved = append(sealedSegmentRetrieved, segmentID)
 		}
 	}
 
@@ -452,12 +454,21 @@ func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error
 				MsgID:    retrieveMsg.Base.MsgID,
 				SourceID: retrieveMsg.Base.SourceID,
 			},
-			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-			Ids:             result.Ids,
-			FieldsData:      result.FieldsData,
-			ResultChannelID: retrieveMsg.ResultChannelID,
+			Status:                    &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Ids:                       result.Ids,
+			FieldsData:                result.FieldsData,
+			ResultChannelID:           retrieveMsg.ResultChannelID,
+			SealedSegmentIDsRetrieved: sealedSegmentRetrieved,
+			ChannelIDsRetrieved:       collection.getPChannels(),
+			//TODO(yukun):: get global sealed segment from etcd
+			GlobalSealedSegmentIDs: sealedSegmentRetrieved,
 		},
 	}
+	log.Debug("QueryNode RetrieveResultMsg",
+		zap.Any("pChannels", collection.getPChannels()),
+		zap.Any("collectionID", collection.ID()),
+		zap.Any("sealedSegmentRetrieved", sealedSegmentRetrieved),
+	)
 	err3 := rc.publishRetrieveResult(retrieveResultMsg, retrieveMsg.CollectionID)
 	if err3 != nil {
 		return err3
