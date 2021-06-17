@@ -76,20 +76,8 @@ func metricProxyNode(v int64) string {
 	return fmt.Sprintf("client_%d", v)
 }
 
-// Core master core
+// Core root coordinator core
 type Core struct {
-	/*
-		ProxyServiceClient Interface:
-		get proxy service time tick channel,InvalidateCollectionMetaCache
-
-		DataService Interface:
-		Segment States Channel, from DataService, if create new segment, data service should put the segment id into this channel, and let the master add the segment id to the collection meta
-		Segment Flush Watcher, monitor if segment has flushed into disk
-
-		IndexService Interface
-		IndexService Sch, tell index service to build index
-	*/
-
 	MetaTable *metaTable
 	//id allocator
 	IDAllocator       func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error)
@@ -120,8 +108,8 @@ type Core struct {
 	//setMsgStreams, send drop partition into dd channel
 	SendDdDropPartitionReq func(ctx context.Context, req *internalpb.DropPartitionRequest, channelNames []string) error
 
-	// if master create segment, data service will put segment msg into this channel
-	DataServiceSegmentChan <-chan *ms.MsgPack
+	// if rootcoord create segment, datacoord will put segment msg into this channel
+	DataCoordSegmentChan <-chan *ms.MsgPack
 
 	// if segment flush completed, data node would put segment msg into this channel
 	DataNodeFlushedSegmentChan <-chan *ms.MsgPack
@@ -244,8 +232,8 @@ func (c *Core) checkInit() error {
 	if c.CallReleaseCollectionService == nil {
 		return fmt.Errorf("CallReleaseCollectionService is nil")
 	}
-	if c.DataServiceSegmentChan == nil {
-		return fmt.Errorf("DataServiceSegmentChan is nil")
+	if c.DataCoordSegmentChan == nil {
+		return fmt.Errorf("DataCoordSegmentChan is nil")
 	}
 	if c.DataNodeFlushedSegmentChan == nil {
 		return fmt.Errorf("DataNodeFlushedSegmentChan is nil")
@@ -277,7 +265,7 @@ func (c *Core) startTimeTickLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():
-			log.Debug("master context closed", zap.Error(c.ctx.Err()))
+			log.Debug("rootcoord context closed", zap.Error(c.ctx.Err()))
 			return
 		case <-ticker.C:
 			if len(c.ddReqQueue) < 2 || cnt > 5 {
@@ -298,14 +286,14 @@ func (c *Core) startTimeTickLoop() {
 	}
 }
 
-// data service send segment info msg to master when create segment
-func (c *Core) startDataServiceSegmentLoop() {
+// datacoord send segment info msg to rootcoord when create segment
+func (c *Core) startDataCoordSegmentLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Debug("close data service segment loop")
 			return
-		case segMsg, ok := <-c.DataServiceSegmentChan:
+		case segMsg, ok := <-c.DataCoordSegmentChan:
 			if !ok {
 				log.Debug("data service segment channel is closed, exit loop")
 				return
@@ -338,7 +326,7 @@ func (c *Core) startDataServiceSegmentLoop() {
 				}
 
 				if _, err := c.MetaTable.AddSegment(segInfos, startPosStr, endPosStr); err != nil {
-					//what if master add segment failed, but data service success?
+					//what if rootcoord add segment failed, but datacoord success?
 					log.Debug("add segment info meta table failed ", zap.String("error", err.Error()))
 					continue
 				}
@@ -471,7 +459,7 @@ func (c *Core) sessionLoop() {
 			return
 		case _, ok := <-c.sessCloseCh:
 			if !ok {
-				log.Error("master service disconnect with etcd, process will exit in 1 second")
+				log.Error("rootcoord disconnect with etcd, process will exit in 1 second")
 				go func() {
 					time.Sleep(time.Second)
 					os.Exit(-1)
@@ -537,13 +525,13 @@ func (c *Core) setMsgStreams() error {
 		return fmt.Errorf("MsgChannelSubName is emptyr")
 	}
 
-	// master time tick channel
+	// rootcoord time tick channel
 	if Params.TimeTickChannel == "" {
 		return fmt.Errorf("TimeTickChannel is empty")
 	}
 	timeTickStream, _ := c.msFactory.NewMsgStream(c.ctx)
 	timeTickStream.AsProducer([]string{Params.TimeTickChannel})
-	log.Debug("masterservice AsProducer: " + Params.TimeTickChannel)
+	log.Debug("rootcoord AsProducer: " + Params.TimeTickChannel)
 
 	c.SendTimeTick = func(t typeutil.Timestamp) error {
 		msgPack := ms.MsgPack{}
@@ -568,7 +556,7 @@ func (c *Core) setMsgStreams() error {
 		if err := timeTickStream.Broadcast(&msgPack); err != nil {
 			return err
 		}
-		metrics.MasterDDChannelTimeTick.Set(float64(tsoutil.Mod24H(t)))
+		metrics.RootCoordDDChannelTimeTick.Set(float64(tsoutil.Mod24H(t)))
 
 		//c.dmlChannels.BroadcastAll(&msgPack)
 		pc := c.MetaTable.ListCollectionPhysicalChannels()
@@ -665,7 +653,7 @@ func (c *Core) setMsgStreams() error {
 	if err != nil {
 		return err
 	}
-	c.DataServiceSegmentChan = (*dsStream).Chan()
+	c.DataCoordSegmentChan = (*dsStream).Chan()
 
 	// data node will put msg into this channel when flush segment
 	dnChanName := Params.DataServiceSegmentChannel
@@ -688,7 +676,7 @@ func (c *Core) SetNewProxyClient(f func(sess *sessionutil.Session) (types.ProxyN
 	}
 }
 
-func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
+func (c *Core) SetDataCoord(ctx context.Context, s types.DataService) error {
 	rsp, err := s.GetSegmentInfoChannel(ctx)
 	if err != nil {
 		return err
@@ -790,7 +778,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 	return nil
 }
 
-func (c *Core) SetIndexService(s types.IndexService) error {
+func (c *Core) SetIndexCoord(s types.IndexService) error {
 	c.CallBuildIndexService = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (retID typeutil.UniqueID, retErr error) {
 		defer func() {
 			if err := recover(); err != nil {
@@ -846,7 +834,7 @@ func (c *Core) SetIndexService(s types.IndexService) error {
 	return nil
 }
 
-func (c *Core) SetQueryService(s types.QueryService) error {
+func (c *Core) SetQueryCoord(s types.QueryService) error {
 	c.CallReleaseCollectionService = func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) (retErr error) {
 		defer func() {
 			if err := recover(); err != nil {
@@ -907,13 +895,13 @@ func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, 
 	return bldID, nil
 }
 
-// Register register master service at etcd
+// Register register rootcoord at etcd
 func (c *Core) Register() error {
 	c.session = sessionutil.NewSession(c.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
 	if c.session == nil {
 		return fmt.Errorf("session is nil, maybe the etcd client connection fails")
 	}
-	c.sessCloseCh = c.session.Init(typeutil.MasterServiceRole, Params.Address, true)
+	c.sessCloseCh = c.session.Init(typeutil.RootCoordRole, Params.Address, true)
 	return nil
 }
 
@@ -1002,7 +990,7 @@ func (c *Core) Init() error {
 		initError = c.setMsgStreams()
 	})
 	if initError == nil {
-		log.Debug("Master service", zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Initializing)]))
+		log.Debug(typeutil.RootCoordRole, zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Initializing)]))
 	}
 	return initError
 }
@@ -1125,32 +1113,32 @@ func (c *Core) reSendDdMsg(ctx context.Context) error {
 
 func (c *Core) Start() error {
 	if err := c.checkInit(); err != nil {
-		log.Debug("MasterService Start checkInit failed", zap.Error(err))
+		log.Debug("RootCoord Start checkInit failed", zap.Error(err))
 		return err
 	}
 
-	log.Debug("MasterService", zap.Int64("node id", c.session.ServerID))
-	log.Debug("MasterService", zap.String("time tick channel name", Params.TimeTickChannel))
+	log.Debug(typeutil.RootCoordRole, zap.Int64("node id", c.session.ServerID))
+	log.Debug(typeutil.RootCoordRole, zap.String("time tick channel name", Params.TimeTickChannel))
 
 	c.startOnce.Do(func() {
 		if err := c.proxyNodeManager.WatchProxyNode(); err != nil {
-			log.Debug("MasterService Start WatchProxyNode failed", zap.Error(err))
+			log.Debug("RootCoord Start WatchProxyNode failed", zap.Error(err))
 			return
 		}
 		if err := c.reSendDdMsg(c.ctx); err != nil {
-			log.Debug("MasterService Start reSendDdMsg failed", zap.Error(err))
+			log.Debug("RootCoord Start reSendDdMsg failed", zap.Error(err))
 			return
 		}
 		go c.startDdScheduler()
 		go c.startTimeTickLoop()
-		go c.startDataServiceSegmentLoop()
+		go c.startDataCoordSegmentLoop()
 		go c.startDataNodeFlushedSegmentLoop()
 		go c.tsLoop()
 		go c.sessionLoop()
 		go c.chanTimeTick.StartWatch()
 		c.stateCode.Store(internalpb.StateCode_Healthy)
 	})
-	log.Debug("MasterService", zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Healthy)]))
+	log.Debug(typeutil.RootCoordRole, zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Healthy)]))
 	return nil
 }
 
@@ -1167,7 +1155,7 @@ func (c *Core) GetComponentStates(ctx context.Context) (*internalpb.ComponentSta
 	return &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{
 			NodeID:    c.session.ServerID,
-			Role:      typeutil.MasterServiceRole,
+			Role:      typeutil.RootCoordRole,
 			StateCode: code,
 			ExtraInfo: nil,
 		},
@@ -1178,7 +1166,7 @@ func (c *Core) GetComponentStates(ctx context.Context) (*internalpb.ComponentSta
 		SubcomponentStates: []*internalpb.ComponentInfo{
 			{
 				NodeID:    c.session.ServerID,
-				Role:      typeutil.MasterServiceRole,
+				Role:      typeutil.RootCoordRole,
 				StateCode: code,
 				ExtraInfo: nil,
 			},
@@ -1207,7 +1195,7 @@ func (c *Core) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringRespon
 }
 
 func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
-	metrics.MasterCreateCollectionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
+	metrics.RootCoordCreateCollectionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
 		return &commonpb.Status{
@@ -1234,7 +1222,7 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 		}, nil
 	}
 	log.Debug("CreateCollection Success", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
-	metrics.MasterCreateCollectionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
+	metrics.RootCoordCreateCollectionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -1242,7 +1230,7 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 }
 
 func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
-	metrics.MasterDropCollectionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
+	metrics.RootCoordDropCollectionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
 		return &commonpb.Status{
@@ -1269,7 +1257,7 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 		}, nil
 	}
 	log.Debug("DropCollection Success", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
-	metrics.MasterDropCollectionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
+	metrics.RootCoordDropCollectionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -1277,7 +1265,7 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 }
 
 func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
-	metrics.MasterHasCollectionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
+	metrics.RootCoordHasCollectionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
 		return &milvuspb.BoolResponse{
@@ -1311,7 +1299,7 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 		}, nil
 	}
 	log.Debug("HasCollection Success", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
-	metrics.MasterHasCollectionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
+	metrics.RootCoordHasCollectionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	return &milvuspb.BoolResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -1322,7 +1310,7 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 }
 
 func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-	metrics.MasterDescribeCollectionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
+	metrics.RootCoordDescribeCollectionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
 		return &milvuspb.DescribeCollectionResponse{
@@ -1357,7 +1345,7 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 		}, nil
 	}
 	log.Debug("DescribeCollection Success", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
-	metrics.MasterDescribeCollectionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
+	metrics.RootCoordDescribeCollectionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	t.Rsp.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -1367,7 +1355,7 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 }
 
 func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
-	metrics.MasterShowCollectionsCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
+	metrics.RootCoordShowCollectionsCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
 		return &milvuspb.ShowCollectionsResponse{
@@ -1404,7 +1392,7 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 		}, nil
 	}
 	log.Debug("ShowCollections Success", zap.String("dbname", in.DbName), zap.Strings("collection names", t.Rsp.CollectionNames), zap.Int64("msgID", in.Base.MsgID))
-	metrics.MasterShowCollectionsCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
+	metrics.RootCoordShowCollectionsCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	t.Rsp.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -1413,7 +1401,7 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 }
 
 func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
-	metrics.MasterCreatePartitionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
+	metrics.RootCoordCreatePartitionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
 		return &commonpb.Status{
@@ -1440,7 +1428,7 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 		}, nil
 	}
 	log.Debug("CreatePartition Success", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
-	metrics.MasterCreatePartitionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
+	metrics.RootCoordCreatePartitionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -1448,7 +1436,7 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 }
 
 func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
-	metrics.MasterDropPartitionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
+	metrics.RootCoordDropPartitionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
 		return &commonpb.Status{
@@ -1475,7 +1463,7 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 		}, nil
 	}
 	log.Debug("DropPartition Success", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
-	metrics.MasterDropPartitionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
+	metrics.RootCoordDropPartitionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -1483,7 +1471,7 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 }
 
 func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
-	metrics.MasterHasPartitionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
+	metrics.RootCoordHasPartitionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
 		return &milvuspb.BoolResponse{
@@ -1517,7 +1505,7 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 		}, nil
 	}
 	log.Debug("HasPartition Success", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
-	metrics.MasterHasPartitionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
+	metrics.RootCoordHasPartitionCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	return &milvuspb.BoolResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -1528,17 +1516,17 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 }
 
 func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
-	metrics.MasterShowPartitionsCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
+	metrics.RootCoordShowPartitionsCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
 	log.Debug("ShowPartitionRequest received", zap.String("role", Params.RoleName), zap.Int64("msgID", in.Base.MsgID),
 		zap.String("collection", in.CollectionName))
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		log.Debug("ShowPartitionRequest failed: master is not healthy", zap.String("role", Params.RoleName),
+		log.Debug("ShowPartitionRequest failed: rootcoord is not healthy", zap.String("role", Params.RoleName),
 			zap.Int64("msgID", in.Base.MsgID), zap.String("state", internalpb.StateCode_name[int32(code)]))
 		return &milvuspb.ShowPartitionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    fmt.Sprintf("master is not healthy, state code = %s", internalpb.StateCode_name[int32(code)]),
+				Reason:    fmt.Sprintf("rootcoord is not healthy, state code = %s", internalpb.StateCode_name[int32(code)]),
 			},
 			PartitionNames: nil,
 			PartitionIDs:   nil,
@@ -1571,7 +1559,7 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRe
 	log.Debug("ShowPartitions succeed", zap.String("role", Params.RoleName), zap.Int64("msgID", t.Req.Base.MsgID),
 		zap.String("collection name", in.CollectionName), zap.Strings("partition names", t.Rsp.PartitionNames),
 		zap.Int64s("partition ids", t.Rsp.PartitionIDs))
-	metrics.MasterShowPartitionsCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
+	metrics.RootCoordShowPartitionsCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	t.Rsp.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -1580,7 +1568,7 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRe
 }
 
 func (c *Core) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
-	metrics.MasterCreateIndexCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
+	metrics.RootCoordCreateIndexCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
 		return &commonpb.Status{
@@ -1607,7 +1595,7 @@ func (c *Core) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest)
 		}, nil
 	}
 	log.Debug("CreateIndex Success", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.Int64("msgID", in.Base.MsgID))
-	metrics.MasterCreateIndexCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
+	metrics.RootCoordCreateIndexCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -1615,7 +1603,7 @@ func (c *Core) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest)
 }
 
 func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
-	metrics.MasterDescribeIndexCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
+	metrics.RootCoordDescribeIndexCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
 		return &milvuspb.DescribeIndexResponse{
@@ -1656,7 +1644,7 @@ func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequ
 		idxNames = append(idxNames, i.IndexName)
 	}
 	log.Debug("DescribeIndex Success", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.Strings("index names", idxNames), zap.Int64("msgID", in.Base.MsgID))
-	metrics.MasterDescribeIndexCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
+	metrics.RootCoordDescribeIndexCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	if len(t.Rsp.IndexDescriptions) == 0 {
 		t.Rsp.Status = &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_IndexNotExist,
@@ -1672,7 +1660,7 @@ func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequ
 }
 
 func (c *Core) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
-	metrics.MasterDropIndexCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
+	metrics.RootCoordDropIndexCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
 		return &commonpb.Status{
@@ -1699,7 +1687,7 @@ func (c *Core) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*c
 		}, nil
 	}
 	log.Debug("DropIndex Success", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.String("index name", in.IndexName), zap.Int64("msgID", in.Base.MsgID))
-	metrics.MasterDropIndexCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
+	metrics.RootCoordDropIndexCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -1707,7 +1695,7 @@ func (c *Core) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*c
 }
 
 func (c *Core) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
-	metrics.MasterDescribeSegmentCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
+	metrics.RootCoordDescribeSegmentCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
 		return &milvuspb.DescribeSegmentResponse{
@@ -1744,7 +1732,7 @@ func (c *Core) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegment
 		}, nil
 	}
 	log.Debug("DescribeSegment Success", zap.Int64("collection id", in.CollectionID), zap.Int64("segment id", in.SegmentID), zap.Int64("msgID", in.Base.MsgID))
-	metrics.MasterDescribeSegmentCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
+	metrics.RootCoordDescribeSegmentCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	t.Rsp.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -1753,7 +1741,7 @@ func (c *Core) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegment
 }
 
 func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
-	metrics.MasterShowSegmentsCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
+	metrics.RootCoordShowSegmentsCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsTotal).Inc()
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
 		return &milvuspb.ShowSegmentsResponse{
@@ -1790,7 +1778,7 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 		}, nil
 	}
 	log.Debug("ShowSegments Success", zap.Int64("collection id", in.CollectionID), zap.Int64("partition id", in.PartitionID), zap.Int64s("segments ids", t.Rsp.SegmentIDs), zap.Int64("msgID", in.Base.MsgID))
-	metrics.MasterShowSegmentsCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
+	metrics.RootCoordShowSegmentsCounter.WithLabelValues(metricProxyNode(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	t.Rsp.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",

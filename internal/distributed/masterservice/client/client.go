@@ -46,32 +46,32 @@ type GrpcClient struct {
 	sess *sessionutil.Session
 }
 
-func getMasterServiceAddr(sess *sessionutil.Session) (string, error) {
-	key := typeutil.MasterServiceRole
+func getRootCoordAddr(sess *sessionutil.Session) (string, error) {
+	key := typeutil.RootCoordRole
 	msess, _, err := sess.GetSessions(key)
 	if err != nil {
-		log.Debug("MasterServiceClient GetSessions failed", zap.Any("key", key))
+		log.Debug("RootCoordClient GetSessions failed", zap.Any("key", key))
 		return "", err
 	}
-	log.Debug("MasterServiceClient GetSessions success")
+	log.Debug("RootCoordClient GetSessions success")
 	ms, ok := msess[key]
 	if !ok {
-		log.Debug("MasterServiceClient mess key not exist", zap.Any("key", key))
+		log.Debug("RootCoordClient mess key not exist", zap.Any("key", key))
 		return "", fmt.Errorf("number of master service is incorrect, %d", len(msess))
 	}
 	return ms.Address, nil
 }
 
-// NewClient create master service client with specified ectd info and timeout
+// NewClient create root coordinator client with specified ectd info and timeout
 // ctx execution control context
-// metaRoot is the path in etcd for master registration
+// metaRoot is the path in etcd for root coordinator registration
 // etcdEndpoints are the address list for etcd end points
 // timeout is default setting for each grpc call
 func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string, timeout time.Duration) (*GrpcClient, error) {
 	sess := sessionutil.NewSession(ctx, metaRoot, etcdEndpoints)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
-		log.Debug("MasterServiceClient NewClient failed", zap.Error(err))
+		log.Debug("RootCoordClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
 
@@ -88,11 +88,11 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string, tim
 
 func (c *GrpcClient) connect() error {
 	var err error
-	getMasterServiceAddrFn := func() error {
+	getRootCoordAddrFn := func() error {
 		ch := make(chan struct{}, 1)
 		var err error
 		go func() {
-			c.addr, err = getMasterServiceAddr(c.sess)
+			c.addr, err = getRootCoordAddr(c.sess)
 			ch <- struct{}{}
 		}()
 		select {
@@ -105,13 +105,13 @@ func (c *GrpcClient) connect() error {
 		}
 		return nil
 	}
-	err = retry.Retry(c.reconnTry, 3*time.Second, getMasterServiceAddrFn)
+	err = retry.Retry(c.reconnTry, 3*time.Second, getRootCoordAddrFn)
 	if err != nil {
-		log.Debug("MasterServiceClient getMasterServiceAddr failed", zap.Error(err))
+		log.Debug("RootCoordClient getRootCoordAddr failed", zap.Error(err))
 		return err
 	}
 	connectGrpcFunc := func() error {
-		log.Debug("MasterServiceClient try reconnect ", zap.String("address", c.addr))
+		log.Debug("RootCoordClient try reconnect ", zap.String("address", c.addr))
 		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
 		defer cancelFunc()
 		var conn *grpc.ClientConn
@@ -139,10 +139,10 @@ func (c *GrpcClient) connect() error {
 
 	err = retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
 	if err != nil {
-		log.Debug("MasterServiceClient try reconnect failed", zap.Error(err))
+		log.Debug("RootCoordClient try reconnect failed", zap.Error(err))
 		return err
 	}
-	log.Debug("MasterServiceClient try reconnect success")
+	log.Debug("RootCoordClient try reconnect success")
 	c.grpcClient = masterpb.NewMasterServiceClient(c.conn)
 	return nil
 }

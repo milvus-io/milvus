@@ -16,12 +16,12 @@ type IntPrimaryKey = int64
 type UniqueID = int64
 
 const (
-	MasterServiceRole = "MasterService"
-	ProxyNodeRole     = "ProxyNode"
-	QueryServiceRole  = "QueryService"
-	QueryNodeRole     = "QueryNode"
-	IndexServiceRole  = "IndexService"
-	IndexNodeRole     = "IndexNode"
-	DataServiceRole   = "DataService"
-	DataNodeRole      = "DataNode"
+	RootCoordRole    = "RootCoord"
+	ProxyNodeRole    = "ProxyNode"
+	QueryServiceRole = "QueryService"
+	QueryNodeRole    = "QueryNode"
+	IndexServiceRole = "IndexService"
+	IndexNodeRole    = "IndexNode"
+	DataServiceRole  = "DataService"
+	DataNodeRole     = "DataNode"
 )

@@ -307,7 +307,7 @@ func TestMasterService(t *testing.T) {
 	}
 
 	dm := &dataMock{randVal: randVal}
-	err = core.SetDataService(ctx, dm)
+	err = core.SetDataCoord(ctx, dm)
 	assert.Nil(t, err)
 
 	im := &indexMock{
@@ -317,14 +317,14 @@ func TestMasterService(t *testing.T) {
 		idxDropID:  []int64{},
 		mutex:      sync.Mutex{},
 	}
-	err = core.SetIndexService(im)
+	err = core.SetIndexCoord(im)
 	assert.Nil(t, err)
 
 	qm := &queryMock{
 		collID: nil,
 		mutex:  sync.Mutex{},
 	}
-	err = core.SetQueryService(qm)
+	err = core.SetQueryCoord(qm)
 	assert.Nil(t, err)
 
 	tmpFactory := msgstream.NewPmsFactory()
@@ -1763,7 +1763,7 @@ func TestMasterService2(t *testing.T) {
 	assert.Nil(t, err)
 
 	dm := &dataMock{randVal: randVal}
-	err = core.SetDataService(ctx, dm)
+	err = core.SetDataCoord(ctx, dm)
 	assert.Nil(t, err)
 
 	im := &indexMock{
@@ -1773,14 +1773,14 @@ func TestMasterService2(t *testing.T) {
 		idxDropID:  []int64{},
 		mutex:      sync.Mutex{},
 	}
-	err = core.SetIndexService(im)
+	err = core.SetIndexCoord(im)
 	assert.Nil(t, err)
 
 	qm := &queryMock{
 		collID: nil,
 		mutex:  sync.Mutex{},
 	}
-	err = core.SetQueryService(qm)
+	err = core.SetQueryCoord(qm)
 	assert.Nil(t, err)
 
 	core.NewProxyClient = func(*sessionutil.Session) (types.ProxyNode, error) {
@@ -1966,7 +1966,7 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.DataServiceSegmentChan = make(chan *msgstream.MsgPack)
+	c.DataCoordSegmentChan = make(chan *msgstream.MsgPack)
 	err = c.checkInit()
 	assert.NotNil(t, err)
 

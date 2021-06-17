@@ -97,7 +97,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			defer ms.Stop()
 		}
 
-		metrics.RegisterMaster()
+		metrics.RegisterRootCoord()
 	}
 
 	if mr.EnableProxyNode {
@@ -153,7 +153,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			defer qs.Stop()
 		}
 
-		metrics.RegisterQueryService()
+		metrics.RegisterQueryCoord()
 	}
 
 	if mr.EnableQueryNode {
@@ -209,7 +209,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			defer ds.Stop()
 		}
 
-		metrics.RegisterDataService()
+		metrics.RegisterDataCoord()
 	}
 
 	if mr.EnableDataNode {
@@ -264,7 +264,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			defer is.Stop()
 		}
 
-		metrics.RegisterIndexService()
+		metrics.RegisterIndexCoord()
 	}
 
 	if mr.EnableIndexNode {
@@ -314,7 +314,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 			defer mss.Stop()
 		}
 
-		metrics.RegisterMsgStreamService()
+		metrics.RegisterMsgStreamCoord()
 	}
 
 	metrics.ServeHTTP()

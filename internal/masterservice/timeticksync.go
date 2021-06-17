@@ -197,7 +197,7 @@ func (t *timetickSync) SendChannelTimeTick(chanName string, ts typeutil.Timestam
 
 	err := t.core.dmlChannels.Broadcast(chanName, &msgPack)
 	if err == nil {
-		metrics.MasterInsertChannelTimeTick.WithLabelValues(chanName).Set(float64(tsoutil.Mod24H(ts)))
+		metrics.RootCoordInsertChannelTimeTick.WithLabelValues(chanName).Set(float64(tsoutil.Mod24H(ts)))
 	}
 	return err
 }
