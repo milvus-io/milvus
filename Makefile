@@ -109,7 +109,6 @@ build-cpp-with-unittest:
 # Runs the tests.
 unittest: test-cpp test-go
 
-#TODO: proxynode master query node writer's unittest
 test-go:build-cpp
 	@echo "Running go unittests..."
 	@echo "disable go unittest for now, enable it later"
