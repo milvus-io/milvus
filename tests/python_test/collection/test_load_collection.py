@@ -275,6 +275,7 @@ class TestLoadCollection:
 
 class TestReleaseAdvanced:
 
+    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_release_collection_during_searching(self, connect, collection):
         """
@@ -311,6 +312,7 @@ class TestReleaseAdvanced:
         with pytest.raises(Exception):
             res = connect.search(collection, default_single_query)
 
+    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_release_collection_during_searching_A(self, connect, collection):
         """
