@@ -122,7 +122,7 @@ class ResponseChecker:
 
     @staticmethod
     def check_partition_property(partition, func_name, check_items):
-        exp_func_name = "_init_partition"
+        exp_func_name = "init_partition"
         if func_name != exp_func_name:
             log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
         if not isinstance(partition, Partition):
