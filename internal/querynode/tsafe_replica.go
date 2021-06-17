@@ -86,6 +86,9 @@ func (t *tSafeReplica) removeTSafe(vChannel Channel) {
 	if err != nil {
 		return
 	}
+	log.Debug("remove tSafe replica",
+		zap.Any("vChannel", vChannel),
+	)
 	safer.close()
 	delete(t.tSafes, vChannel)
 }
