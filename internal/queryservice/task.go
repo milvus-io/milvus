@@ -143,12 +143,13 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 	partitionIDs := showPartitionResponse.PartitionIDs
 	log.Debug("partitionIDs", zap.Int64s("partitionIDs", partitionIDs))
 	for _, partitionID := range partitionIDs {
-		getRecoveryInfoRequest := &querypb.GetRecoveryInfoRequest{
+		getRecoveryInfoRequest := &datapb.GetRecoveryInfoRequest{
 			Base:         lct.Base,
 			CollectionID: collectionID,
 			PartitionID:  partitionID,
 		}
-		recoveryInfo, err := mockGetRecoveryInfoFromDataService(lct.ctx, lct.masterService, lct.dataService, getRecoveryInfoRequest)
+		//recoveryInfo, err := mockGetRecoveryInfoFromDataService(lct.ctx, lct.masterService, lct.dataService, getRecoveryInfoRequest)
+		recoveryInfo, err := lct.dataService.GetRecoveryInfo(lct.ctx, getRecoveryInfoRequest)
 		if err != nil {
 			status.Reason = err.Error()
 			lct.result = status
@@ -161,7 +162,7 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 				SegmentID:    segmentBingLog.SegmentID,
 				PartitionID:  partitionID,
 				CollectionID: collectionID,
-				BinlogPaths:  make([]*querypb.FieldBinlog, 0),
+				BinlogPaths:  make([]*datapb.FieldBinlog, 0),
 			}
 			segmentLoadInfo.BinlogPaths = append(segmentLoadInfo.BinlogPaths, segmentBingLog.FieldBinlogs...)
 			segmentsToLoad = append(segmentsToLoad, segmentID)
@@ -174,7 +175,7 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 				watchRequest := &querypb.WatchDmChannelsRequest{
 					Base:         lct.Base,
 					CollectionID: collectionID,
-					Infos:        []*querypb.VchannelInfo{info},
+					Infos:        []*datapb.VchannelInfo{info},
 					Schema:       lct.Schema,
 				}
 				watchRequests[channel] = watchRequest
@@ -183,7 +184,7 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 			}
 			oldInfo := watchRequests[channel].Infos[0]
 			newInfo := mergeVChannelInfo(oldInfo, info)
-			watchRequests[channel].Infos = []*querypb.VchannelInfo{newInfo}
+			watchRequests[channel].Infos = []*datapb.VchannelInfo{newInfo}
 		}
 	}
 
@@ -404,12 +405,13 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 	channelsToWatch := make([]string, 0)
 	watchRequests := make([]*querypb.WatchDmChannelsRequest, 0)
 	for _, partitionID := range partitionIDs {
-		getRecoveryInfoRequest := &querypb.GetRecoveryInfoRequest{
+		getRecoveryInfoRequest := &datapb.GetRecoveryInfoRequest{
 			Base:         lpt.Base,
 			CollectionID: collectionID,
 			PartitionID:  partitionID,
 		}
-		recoveryInfo, err := mockGetRecoveryInfoFromDataService(lpt.ctx, lpt.masterService, lpt.dataService, getRecoveryInfoRequest)
+		//recoveryInfo, err := mockGetRecoveryInfoFromDataService(lpt.ctx, lpt.masterService, lpt.dataService, getRecoveryInfoRequest)
+		recoveryInfo, err := lpt.dataService.GetRecoveryInfo(lpt.ctx, getRecoveryInfoRequest)
 		if err != nil {
 			status.Reason = err.Error()
 			lpt.result = status
@@ -422,7 +424,7 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 				SegmentID:    segmentID,
 				PartitionID:  partitionID,
 				CollectionID: collectionID,
-				BinlogPaths:  make([]*querypb.FieldBinlog, 0),
+				BinlogPaths:  make([]*datapb.FieldBinlog, 0),
 			}
 			segmentLoadInfo.BinlogPaths = append(segmentLoadInfo.BinlogPaths, segmentBingLog.FieldBinlogs...)
 			segmentsToLoad = append(segmentsToLoad, segmentID)
@@ -435,7 +437,7 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 				Base:         lpt.Base,
 				CollectionID: collectionID,
 				PartitionID:  partitionID,
-				Infos:        []*querypb.VchannelInfo{info},
+				Infos:        []*datapb.VchannelInfo{info},
 				Schema:       lpt.Schema,
 			}
 			channelsToWatch = append(channelsToWatch, channel)
@@ -777,6 +779,7 @@ func (aqt *WatchQueryChannelTask) Execute(ctx context.Context) error {
 		zap.String("queryResultChannel", aqt.ResultChannelID))
 	return nil
 }
+
 func (aqt *WatchQueryChannelTask) PostExecute(ctx context.Context) error {
 	log.Debug("WatchQueryChannelTask postExecute done",
 		zap.Int64("collectionID", aqt.CollectionID),
@@ -788,7 +791,7 @@ func (aqt *WatchQueryChannelTask) PostExecute(ctx context.Context) error {
 func mockGetRecoveryInfoFromDataService(ctx context.Context,
 	master types.MasterService,
 	dataService types.DataService,
-	req *querypb.GetRecoveryInfoRequest) (*querypb.GetRecoveryInfoResponse, error) {
+	req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
 	segmentIDs := make([]UniqueID, 0)
 	showSegmentRequest := &milvuspb.ShowSegmentsRequest{
 		Base: &commonpb.MsgBase{
@@ -827,17 +830,17 @@ func mockGetRecoveryInfoFromDataService(ctx context.Context,
 			channel2Segments[channelName] = append(channel2Segments[channelName], segmentID)
 		}
 	}
-	channelInfos := make([]*querypb.VchannelInfo, 0)
-	segmentBinlogs := make([]*querypb.SegmentBinlogs, 0)
+	channelInfos := make([]*datapb.VchannelInfo, 0)
+	segmentBinlogs := make([]*datapb.SegmentBinlogs, 0)
 	for channel, segmentIDs := range channel2Segments {
-		channelInfo := &querypb.VchannelInfo{
+		channelInfo := &datapb.VchannelInfo{
 			CollectionID: req.CollectionID,
 			ChannelName:  channel,
 			SeekPosition: &internalpb.MsgPosition{
 				ChannelName: channel,
 			},
-			CheckPoints:     make([]*querypb.CheckPoint, 0),
-			FlushedSegments: make([]UniqueID, 0),
+			UnflushedSegments: make([]*datapb.SegmentInfo, 0),
+			FlushedSegments:   make([]UniqueID, 0),
 		}
 		sort.Slice(segmentIDs, func(i, j int) bool {
 			return segmentIDs[i] < segmentIDs[j]
@@ -849,22 +852,22 @@ func mockGetRecoveryInfoFromDataService(ctx context.Context,
 				continue
 			}
 			if segmentStates[id].StartPosition != nil {
-				checkpoint := &querypb.CheckPoint{
-					SegmentID: id,
-					Position:  segmentStates[id].StartPosition,
+				checkpoint := &datapb.SegmentInfo{
+					ID:          id,
+					DmlPosition: segmentStates[id].StartPosition,
 				}
-				channelInfo.CheckPoints = append(channelInfo.CheckPoints, checkpoint)
-				if checkpoint.Position.Timestamp < channelInfo.SeekPosition.Timestamp || channelInfo.SeekPosition.Timestamp == 0 {
-					channelInfo.SeekPosition = checkpoint.Position
+				channelInfo.UnflushedSegments = append(channelInfo.UnflushedSegments, checkpoint)
+				if checkpoint.DmlPosition.Timestamp < channelInfo.SeekPosition.Timestamp || channelInfo.SeekPosition.Timestamp == 0 {
+					channelInfo.SeekPosition = checkpoint.DmlPosition
 				}
 			}
 		}
 		channelInfos = append(channelInfos, channelInfo)
 
 		for _, id := range channelInfo.FlushedSegments {
-			segmentBinlog := &querypb.SegmentBinlogs{
+			segmentBinlog := &datapb.SegmentBinlogs{
 				SegmentID:    id,
-				FieldBinlogs: make([]*querypb.FieldBinlog, 0),
+				FieldBinlogs: make([]*datapb.FieldBinlog, 0),
 			}
 			insertBinlogPathRequest := &datapb.GetInsertBinlogPathsRequest{
 				SegmentID: id,
@@ -882,7 +885,7 @@ func mockGetRecoveryInfoFromDataService(ctx context.Context,
 				if len(pathResponse.Paths[index].Values) == 0 {
 					continue
 				}
-				fieldBingLog := &querypb.FieldBinlog{
+				fieldBingLog := &datapb.FieldBinlog{
 					FieldID: fieldID,
 					Binlogs: pathResponse.Paths[index].Values,
 				}
@@ -898,18 +901,20 @@ func mockGetRecoveryInfoFromDataService(ctx context.Context,
 		}
 	}
 	if len(channelInfos) == 0 {
-		getInsertChannelsRequest := &datapb.GetInsertChannelsRequest{
+		// get physical channels
+		desColReq := &milvuspb.DescribeCollectionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_Insert,
+				MsgType: commonpb.MsgType_DescribeCollection,
 			},
 			CollectionID: req.CollectionID,
 		}
-		res, err := dataService.GetInsertChannels(ctx, getInsertChannelsRequest)
+		desColRsp, err := master.DescribeCollection(ctx, desColReq)
 		if err != nil {
+			log.Error("get physical channels failed, err = " + err.Error())
 			return nil, err
 		}
-		for _, channel := range res.Values {
-			channelInfo := &querypb.VchannelInfo{
+		for _, channel := range desColRsp.VirtualChannelNames {
+			channelInfo := &datapb.VchannelInfo{
 				CollectionID: req.CollectionID,
 				ChannelName:  channel,
 			}
@@ -917,8 +922,10 @@ func mockGetRecoveryInfoFromDataService(ctx context.Context,
 		}
 	}
 
-	return &querypb.GetRecoveryInfoResponse{
-		Base:     req.Base,
+	return &datapb.GetRecoveryInfoResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
 		Channels: channelInfos,
 		Binlogs:  segmentBinlogs,
 	}, nil
@@ -1013,28 +1020,35 @@ func shuffleSegmentsToQueryNode(segmentIDs []UniqueID, cluster *queryNodeCluster
 	}
 }
 
-func mergeVChannelInfo(info1 *querypb.VchannelInfo, info2 *querypb.VchannelInfo) *querypb.VchannelInfo {
+func mergeVChannelInfo(info1 *datapb.VchannelInfo, info2 *datapb.VchannelInfo) *datapb.VchannelInfo {
 	collectionID := info1.CollectionID
 	channelName := info1.ChannelName
-	seekPosition := info1.SeekPosition
-	if info1.SeekPosition.Timestamp > info2.SeekPosition.Timestamp {
-		seekPosition = info2.SeekPosition
+	var seekPosition *internalpb.MsgPosition
+	if info1.SeekPosition == nil || info2.SeekPosition == nil {
+		seekPosition = &internalpb.MsgPosition{
+			ChannelName: channelName,
+		}
+	} else {
+		seekPosition = info1.SeekPosition
+		if info1.SeekPosition.Timestamp > info2.SeekPosition.Timestamp {
+			seekPosition = info2.SeekPosition
+		}
 	}
 
-	checkPoints := make([]*querypb.CheckPoint, 0)
-	checkPoints = append(checkPoints, info1.CheckPoints...)
-	checkPoints = append(checkPoints, info2.CheckPoints...)
+	checkPoints := make([]*datapb.SegmentInfo, 0)
+	checkPoints = append(checkPoints, info1.UnflushedSegments...)
+	checkPoints = append(checkPoints, info2.UnflushedSegments...)
 
 	flushedSegments := make([]UniqueID, 0)
 	flushedSegments = append(flushedSegments, info1.FlushedSegments...)
 	flushedSegments = append(flushedSegments, info2.FlushedSegments...)
 
-	return &querypb.VchannelInfo{
-		CollectionID:    collectionID,
-		ChannelName:     channelName,
-		SeekPosition:    seekPosition,
-		CheckPoints:     checkPoints,
-		FlushedSegments: flushedSegments,
+	return &datapb.VchannelInfo{
+		CollectionID:      collectionID,
+		ChannelName:       channelName,
+		SeekPosition:      seekPosition,
+		UnflushedSegments: checkPoints,
+		FlushedSegments:   flushedSegments,
 	}
 }
 

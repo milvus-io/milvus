@@ -49,9 +49,9 @@ type DataService interface {
 	Component
 	TimeTickProvider
 
-	RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error)
 	Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error)
 
+	RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error)
 	AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error)
 	ShowSegments(ctx context.Context, req *datapb.ShowSegmentsRequest) (*datapb.ShowSegmentsResponse, error)
 	GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
@@ -62,6 +62,7 @@ type DataService interface {
 	GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error)
 	GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error)
 	GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error)
+	SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error)
 }
 
 type IndexNode interface {
@@ -110,8 +111,6 @@ type MasterService interface {
 	//segment
 	DescribeSegment(ctx context.Context, req *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
 	ShowSegments(ctx context.Context, req *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error)
-
-	GetDdChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 }
 
 // MasterComponent is used by grpc server of master service
@@ -119,7 +118,6 @@ type MasterComponent interface {
 	MasterService
 
 	UpdateStateCode(internalpb.StateCode)
-	SetProxyService(context.Context, ProxyService) error
 	SetDataService(context.Context, DataService) error
 	SetIndexService(IndexService) error
 	SetQueryService(QueryService) error
@@ -164,14 +162,6 @@ type ProxyNode interface {
 		GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQuerySegmentInfoRequest) (*milvuspb.GetQuerySegmentInfoResponse, error)
 		GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error)
 	*/
-}
-
-type ProxyService interface {
-	Component
-	TimeTickProvider
-
-	RegisterNode(ctx context.Context, req *proxypb.RegisterNodeRequest) (*proxypb.RegisterNodeResponse, error)
-	InvalidateCollectionMetaCache(ctx context.Context, req *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
 }
 
 type QueryNode interface {

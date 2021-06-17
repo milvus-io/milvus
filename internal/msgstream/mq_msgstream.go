@@ -168,9 +168,6 @@ func (ms *mqMsgStream) Close() {
 			consumer.Close()
 		}
 	}
-	if ms.client != nil {
-		ms.client.Close()
-	}
 }
 
 func (ms *mqMsgStream) ComputeProduceChannelIndexes(tsMsgs []TsMsg) [][]int32 {
@@ -352,6 +349,13 @@ func (ms *mqMsgStream) receiveMsg(consumer mqclient.Consumer) {
 				log.Error("Failed to getTsMsgFromConsumerMsg", zap.Error(err))
 				continue
 			}
+			pos := tsMsg.Position()
+			tsMsg.SetPosition(&MsgPosition{
+				ChannelName: pos.ChannelName,
+				MsgID:       pos.MsgID,
+				MsgGroup:    consumer.Subscription(),
+				Timestamp:   tsMsg.BeginTs(),
+			})
 
 			sp, ok := ExtractFromPulsarMsgProperties(tsMsg, msg.Properties())
 			if ok {
@@ -517,9 +521,6 @@ func (ms *MqTtMsgStream) Close() {
 		if consumer != nil {
 			consumer.Close()
 		}
-	}
-	if ms.client != nil {
-		ms.client.Close()
 	}
 }
 
@@ -697,21 +698,12 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 	var mp *MsgPosition
 	var err error
 	fn := func() error {
-		if _, ok := ms.consumers[mp.ChannelName]; ok {
-			return fmt.Errorf("the channel should not been subscribed")
+		var ok bool
+		consumer, ok = ms.consumers[mp.ChannelName]
+		if !ok {
+			return fmt.Errorf("please subcribe the channel, channel name =%s", mp.ChannelName)
 		}
 
-		receiveChannel := make(chan mqclient.ConsumerMessage, ms.bufSize)
-		consumer, err = ms.client.Subscribe(mqclient.ConsumerOptions{
-			Topic:                       mp.ChannelName,
-			SubscriptionName:            mp.MsgGroup,
-			SubscriptionInitialPosition: mqclient.SubscriptionPositionEarliest,
-			Type:                        mqclient.KeyShared,
-			MessageChannel:              receiveChannel,
-		})
-		if err != nil {
-			return err
-		}
 		if consumer == nil {
 			return fmt.Errorf("consumer is nil")
 		}
@@ -736,7 +728,6 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 		if len(mp.MsgID) == 0 {
 			return fmt.Errorf("when msgID's length equal to 0, please use AsConsumer interface")
 		}
-
 		if err = Retry(20, time.Millisecond*200, fn); err != nil {
 			return fmt.Errorf("Failed to seek, error %s", err.Error())
 		}

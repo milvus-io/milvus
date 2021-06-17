@@ -95,6 +95,12 @@ type task interface {
 	Notify(err error)
 }
 
+type dmlTask interface {
+	task
+	getChannels() ([]vChan, error)
+	getPChanStats() (map[pChan]pChanStatistics, error)
+}
+
 type BaseInsertTask = msgstream.InsertMsg
 
 type InsertTask struct {
@@ -106,6 +112,10 @@ type InsertTask struct {
 	result         *milvuspb.InsertResponse
 	rowIDAllocator *allocator.IDAllocator
 	segIDAssigner  *SegIDAssigner
+	chMgr          channelsMgr
+	chTicker       channelsTimeTicker
+	vChannels      []vChan
+	pChannels      []pChan
 }
 
 func (it *InsertTask) TraceCtx() context.Context {
@@ -139,6 +149,43 @@ func (it *InsertTask) SetTs(ts Timestamp) {
 
 func (it *InsertTask) EndTs() Timestamp {
 	return it.EndTimestamp
+}
+
+func (it *InsertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
+	ret := make(map[pChan]pChanStatistics)
+
+	channels, err := it.getChannels()
+	if err != nil {
+		return ret, err
+	}
+
+	beginTs := it.BeginTs()
+	endTs := it.EndTs()
+
+	for _, channel := range channels {
+		ret[channel] = pChanStatistics{
+			minTs: beginTs,
+			maxTs: endTs,
+		}
+	}
+	return ret, nil
+}
+
+func (it *InsertTask) getChannels() ([]pChan, error) {
+	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.CollectionName)
+	if err != nil {
+		return nil, err
+	}
+	var channels []pChan
+	channels, err = it.chMgr.getChannels(collID)
+	if err != nil {
+		err = it.chMgr.createDMLMsgStream(collID)
+		if err != nil {
+			return nil, err
+		}
+		channels, err = it.chMgr.getChannels(collID)
+	}
+	return channels, err
 }
 
 func (it *InsertTask) OnEnqueue() error {
@@ -684,34 +731,29 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 
 	msgPack.Msgs[0] = tsMsg
 
-	stream, err := globalInsertChannelsMap.GetInsertMsgStream(collID)
+	stream, err := it.chMgr.getDMLStream(collID)
 	if err != nil {
-		resp, _ := it.dataService.GetInsertChannels(ctx, &datapb.GetInsertChannelsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_Insert, // todo
-				MsgID:     it.Base.MsgID,           // todo
-				Timestamp: 0,                       // todo
-				SourceID:  Params.ProxyID,
-			},
-			DbID:         0, // todo
-			CollectionID: collID,
-		})
-		if resp == nil {
-			return errors.New("get insert channels resp is nil")
-		}
-		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			return errors.New(resp.Status.Reason)
-		}
-		err = globalInsertChannelsMap.CreateInsertMsgStream(collID, resp.Values)
+		err = it.chMgr.createDMLMsgStream(collID)
 		if err != nil {
+			it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			it.result.Status.Reason = err.Error()
+			return err
+		}
+		stream, err = it.chMgr.getDMLStream(collID)
+		if err != nil {
+			it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			it.result.Status.Reason = err.Error()
 			return err
 		}
 	}
-	stream, err = globalInsertChannelsMap.GetInsertMsgStream(collID)
+
+	pchans, err := it.chMgr.getChannels(collID)
 	if err != nil {
-		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		it.result.Status.Reason = err.Error()
 		return err
+	}
+	for _, pchan := range pchans {
+		log.Debug("ProxyNode InsertTask add pchan", zap.Any("pchan", pchan))
+		_ = it.chTicker.addPChan(pchan)
 	}
 
 	// Assign SegmentID
@@ -849,36 +891,7 @@ func (cct *CreateCollectionTask) PreExecute(ctx context.Context) error {
 func (cct *CreateCollectionTask) Execute(ctx context.Context) error {
 	var err error
 	cct.result, err = cct.masterService.CreateCollection(ctx, cct.CreateCollectionRequest)
-	if err != nil {
-		return err
-	}
-	if cct.result.ErrorCode == commonpb.ErrorCode_Success {
-		collID, err := globalMetaCache.GetCollectionID(ctx, cct.CollectionName)
-		if err != nil {
-			return err
-		}
-		resp, _ := cct.dataServiceClient.GetInsertChannels(ctx, &datapb.GetInsertChannelsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_Insert, // todo
-				MsgID:     cct.Base.MsgID,          // todo
-				Timestamp: 0,                       // todo
-				SourceID:  Params.ProxyID,
-			},
-			DbID:         0, // todo
-			CollectionID: collID,
-		})
-		if resp == nil {
-			return errors.New("get insert channels resp is nil")
-		}
-		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			return errors.New(resp.Status.Reason)
-		}
-		err = globalInsertChannelsMap.CreateInsertMsgStream(collID, resp.Values)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	return err
 }
 
 func (cct *CreateCollectionTask) PostExecute(ctx context.Context) error {
@@ -891,6 +904,8 @@ type DropCollectionTask struct {
 	ctx           context.Context
 	masterService types.MasterService
 	result        *commonpb.Status
+	chMgr         channelsMgr
+	chTicker      channelsTimeTicker
 }
 
 func (dct *DropCollectionTask) TraceCtx() context.Context {
@@ -951,10 +966,12 @@ func (dct *DropCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	err = globalInsertChannelsMap.CloseInsertMsgStream(collID)
-	if err != nil {
-		return err
+	pchans, _ := dct.chMgr.getChannels(collID)
+	for _, pchan := range pchans {
+		_ = dct.chTicker.removePChan(pchan)
 	}
+
+	_ = dct.chMgr.removeDMLStream(collID)
 
 	return nil
 }
@@ -972,6 +989,7 @@ type SearchTask struct {
 	resultBuf      chan []*internalpb.SearchResults
 	result         *milvuspb.SearchResults
 	query          *milvuspb.SearchRequest
+	chMgr          channelsMgr
 }
 
 func (st *SearchTask) TraceCtx() context.Context {
@@ -1009,6 +1027,32 @@ func (st *SearchTask) SetTs(ts Timestamp) {
 func (st *SearchTask) OnEnqueue() error {
 	st.Base = &commonpb.MsgBase{}
 	return nil
+}
+
+func (st *SearchTask) getChannels() ([]pChan, error) {
+	collID, err := globalMetaCache.GetCollectionID(st.ctx, st.query.CollectionName)
+	if err != nil {
+		return nil, err
+	}
+
+	return st.chMgr.getChannels(collID)
+}
+
+func (st *SearchTask) getVChannels() ([]vChan, error) {
+	collID, err := globalMetaCache.GetCollectionID(st.ctx, st.query.CollectionName)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = st.chMgr.getChannels(collID)
+	if err != nil {
+		err := st.chMgr.createDMLMsgStream(collID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return st.chMgr.getVChannels(collID)
 }
 
 func (st *SearchTask) PreExecute(ctx context.Context) error {
@@ -1333,7 +1377,7 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 	for {
 		select {
 		case <-st.TraceCtx().Done():
-			log.Debug("proxynode", zap.Int64("SearchTask: wait to finish failed, timeout!, taskID:", st.ID()))
+			log.Debug("ProxyNode", zap.Int64("SearchTask PostExecute Loop exit caused by ctx.Done", st.ID()))
 			return fmt.Errorf("SearchTask:wait to finish failed, timeout: %d", st.ID())
 		case searchResults := <-st.resultBuf:
 			// fmt.Println("searchResults: ", searchResults)
@@ -1350,7 +1394,9 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 			}
 
 			availableQueryNodeNum := len(filterSearchResult)
+			log.Debug("ProxyNode Search PostExecute stage1", zap.Any("availableQueryNodeNum", availableQueryNodeNum))
 			if availableQueryNodeNum <= 0 {
+				log.Debug("ProxyNode Search PostExecute failed", zap.Any("filterReason", filterReason))
 				st.result = &milvuspb.SearchResults{
 					Status: &commonpb.Status{
 						ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1368,8 +1414,11 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 				}
 				availableQueryNodeNum++
 			}
+			log.Debug("ProxyNode Search PostExecute stage2", zap.Any("availableQueryNodeNum", availableQueryNodeNum))
 
 			if availableQueryNodeNum <= 0 {
+				log.Debug("ProxyNode Search PostExecute stage2 failed", zap.Any("filterReason", filterReason))
+
 				st.result = &milvuspb.SearchResults{
 					Status: &commonpb.Status{
 						ErrorCode: commonpb.ErrorCode_Success,
@@ -1380,11 +1429,13 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 			}
 
 			hits, err := decodeSearchResults(filterSearchResult)
+			log.Debug("ProxyNode Search PostExecute decodeSearchResults", zap.Error(err))
 			if err != nil {
 				return err
 			}
 
 			nq := len(hits[0])
+			log.Debug("ProxyNode Search PostExecute", zap.Any("nq", nq))
 			if nq <= 0 {
 				st.result = &milvuspb.SearchResults{
 					Status: &commonpb.Status{
@@ -1401,7 +1452,7 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 			}
 
 			st.result = reduceSearchResults(hits, nq, availableQueryNodeNum, topk, searchResults[0].MetricType)
-
+			log.Debug("ProxyNode Search PostExecute Done")
 			return nil
 		}
 	}
@@ -1415,6 +1466,7 @@ type RetrieveTask struct {
 	resultBuf      chan []*internalpb.RetrieveResults
 	result         *milvuspb.RetrieveResults
 	retrieve       *milvuspb.RetrieveRequest
+	chMgr          channelsMgr
 }
 
 func (rt *RetrieveTask) TraceCtx() context.Context {
@@ -1452,6 +1504,32 @@ func (rt *RetrieveTask) SetTs(ts Timestamp) {
 func (rt *RetrieveTask) OnEnqueue() error {
 	rt.Base.MsgType = commonpb.MsgType_Retrieve
 	return nil
+}
+
+func (rt *RetrieveTask) getChannels() ([]pChan, error) {
+	collID, err := globalMetaCache.GetCollectionID(rt.ctx, rt.retrieve.CollectionName)
+	if err != nil {
+		return nil, err
+	}
+
+	return rt.chMgr.getChannels(collID)
+}
+
+func (rt *RetrieveTask) getVChannels() ([]vChan, error) {
+	collID, err := globalMetaCache.GetCollectionID(rt.ctx, rt.retrieve.CollectionName)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = rt.chMgr.getChannels(collID)
+	if err != nil {
+		err := rt.chMgr.createDMLMsgStream(collID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return rt.chMgr.getVChannels(collID)
 }
 
 func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
@@ -1498,7 +1576,9 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 		for _, field := range schema.Fields {
-			rt.OutputFields = append(rt.OutputFields, field.Name)
+			if field.FieldID >= 100 {
+				rt.OutputFields = append(rt.OutputFields, field.Name)
+			}
 		}
 	} else {
 		rt.OutputFields = rt.retrieve.OutputFields
@@ -1817,14 +1897,52 @@ func (dct *DescribeCollectionTask) PreExecute(ctx context.Context) error {
 
 func (dct *DescribeCollectionTask) Execute(ctx context.Context) error {
 	var err error
-	dct.result, err = dct.masterService.DescribeCollection(ctx, dct.DescribeCollectionRequest)
-	if dct.result == nil {
-		return errors.New("has collection resp is nil")
+	dct.result = &milvuspb.DescribeCollectionResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		Schema: &schemapb.CollectionSchema{
+			Name:        "",
+			Description: "",
+			AutoID:      false,
+			Fields:      make([]*schemapb.FieldSchema, 0),
+		},
+		CollectionID:         0,
+		VirtualChannelNames:  nil,
+		PhysicalChannelNames: nil,
 	}
-	if dct.result.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return errors.New(dct.result.Status.Reason)
+
+	result, err := dct.masterService.DescribeCollection(ctx, dct.DescribeCollectionRequest)
+
+	if err != nil {
+		return err
 	}
-	return err
+
+	if result.Status.ErrorCode != commonpb.ErrorCode_Success {
+		dct.result.Status = result.Status
+	} else {
+		dct.result.Schema.Name = result.Schema.Name
+		dct.result.Schema.Description = result.Schema.Description
+		dct.result.Schema.AutoID = result.Schema.AutoID
+		dct.result.CollectionID = result.CollectionID
+		dct.result.VirtualChannelNames = result.VirtualChannelNames
+		dct.result.PhysicalChannelNames = result.PhysicalChannelNames
+
+		for _, field := range result.Schema.Fields {
+			if field.FieldID >= 100 { // TODO(dragondriver): use StartOfUserFieldID replacing 100
+				dct.result.Schema.Fields = append(dct.result.Schema.Fields, &schemapb.FieldSchema{
+					FieldID:      field.FieldID,
+					Name:         field.Name,
+					IsPrimaryKey: field.IsPrimaryKey,
+					Description:  field.Description,
+					DataType:     field.DataType,
+					TypeParams:   field.TypeParams,
+					IndexParams:  field.IndexParams,
+				})
+			}
+		}
+	}
+	return nil
 }
 
 func (dct *DescribeCollectionTask) PostExecute(ctx context.Context) error {
@@ -2863,9 +2981,9 @@ func (gibpt *GetIndexBuildProgressTask) Execute(ctx context.Context) error {
 	indexed := int64(0)
 
 	for _, info := range infoResp.Infos {
-		total += info.NumRows
+		total += info.NumOfRows
 		if buildFinishMap[buildIndexMap[info.ID]] {
-			indexed += info.NumRows
+			indexed += info.NumOfRows
 		}
 	}
 

@@ -13,6 +13,7 @@ package datanode
 
 import (
 	"context"
+	"errors"
 	"path"
 	"strconv"
 
@@ -50,9 +51,15 @@ func (alloc *allocator) allocID() (UniqueID, error) {
 		},
 		Count: 1,
 	})
+
+	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return 0, errors.New(resp.Status.GetReason())
+	}
+
 	if err != nil {
 		return 0, err
 	}
+
 	return resp.ID, nil
 }
 

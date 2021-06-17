@@ -14,6 +14,7 @@ package masterservice
 import (
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -30,13 +31,11 @@ type ParamTable struct {
 	Port    int
 
 	PulsarAddress             string
-	EtcdAddress               string
+	EtcdEndpoints             []string
 	MetaRootPath              string
 	KvRootPath                string
-	ProxyTimeTickChannel      string //get from proxy client
 	MsgChannelSubName         string
 	TimeTickChannel           string
-	DdChannel                 string
 	StatisticsChannel         string
 	DataServiceSegmentChannel string // data service create segment, or data node flush segment
 
@@ -63,13 +62,12 @@ func (p *ParamTable) Init() {
 		}
 
 		p.initPulsarAddress()
-		p.initEtcdAddress()
+		p.initEtcdEndpoints()
 		p.initMetaRootPath()
 		p.initKvRootPath()
 
 		p.initMsgChannelSubName()
 		p.initTimeTickChannel()
-		p.initDdChannelName()
 		p.initStatisticsChannelName()
 		p.initSegmentInfoChannelName()
 
@@ -94,12 +92,12 @@ func (p *ParamTable) initPulsarAddress() {
 	p.PulsarAddress = addr
 }
 
-func (p *ParamTable) initEtcdAddress() {
-	addr, err := p.Load("_EtcdAddress")
+func (p *ParamTable) initEtcdEndpoints() {
+	endpoints, err := p.Load("_EtcdEndpoints")
 	if err != nil {
 		panic(err)
 	}
-	p.EtcdAddress = addr
+	p.EtcdEndpoints = strings.Split(endpoints, ",")
 }
 
 func (p *ParamTable) initMetaRootPath() {
@@ -140,14 +138,6 @@ func (p *ParamTable) initTimeTickChannel() {
 		panic(err)
 	}
 	p.TimeTickChannel = channel
-}
-
-func (p *ParamTable) initDdChannelName() {
-	channel, err := p.Load("msgChannel.chanNamePrefix.dataDefinition")
-	if err != nil {
-		panic(err)
-	}
-	p.DdChannel = channel
 }
 
 func (p *ParamTable) initStatisticsChannelName() {

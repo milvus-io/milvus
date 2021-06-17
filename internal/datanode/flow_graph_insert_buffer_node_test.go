@@ -22,10 +22,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -34,18 +37,10 @@ import (
 )
 
 func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
-	const ctxTimeInMillisecond = 2000
-	const closeWithDeadline = false
-	var ctx context.Context
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 
-	if closeWithDeadline {
-		var cancel context.CancelFunc
-		d := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-		ctx, cancel = context.WithDeadline(context.Background(), d)
-		defer cancel()
-	} else {
-		ctx = context.Background()
-	}
+	insertChannelName := "datanode-01-test-flowgraphinsertbuffernode-operate"
 
 	testPath := "/test/datanode/root/meta"
 	err := clearEtcd(testPath)
@@ -54,11 +49,11 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
+	mockMaster := &MasterServiceFactory{}
 
-	replica := newReplica()
-	err = replica.addCollection(collMeta.ID, collMeta.Schema)
-	require.NoError(t, err)
-	err = replica.addSegment(1, collMeta.ID, 0, Params.InsertChannelNames[0])
+	replica := newReplica(mockMaster, collMeta.ID)
+
+	err = replica.addSegment(1, collMeta.ID, 0, insertChannelName)
 	require.NoError(t, err)
 
 	msFactory := msgstream.NewPmsFactory()
@@ -69,13 +64,33 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
 
-	iBNode := newInsertBufferNode(ctx, newBinlogMeta(), replica, msFactory, NewAllocatorFactory())
-	inMsg := genInsertMsg()
+	saveBinlog := func(fu *segmentFlushUnit) error {
+		t.Log(fu)
+		return nil
+	}
+
+	flushChan := make(chan *flushMsg, 100)
+	iBNode := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+
+	dmlFlushedCh := make(chan []*datapb.ID2PathList, 1)
+
+	flushChan <- &flushMsg{
+		msgID:        1,
+		timestamp:    2000,
+		segmentID:    UniqueID(1),
+		collectionID: UniqueID(1),
+		dmlFlushedCh: dmlFlushedCh,
+	}
+
+	inMsg := genInsertMsg(insertChannelName)
 	var iMsg flowgraph.Msg = &inMsg
 	iBNode.Operate([]flowgraph.Msg{iMsg})
+	isflushed := <-dmlFlushedCh
+	assert.NotNil(t, isflushed)
+	log.Debug("DML binlog paths", zap.Any("paths", isflushed))
 }
 
-func genInsertMsg() insertMsg {
+func genInsertMsg(insertChannelName string) insertMsg {
 
 	timeRange := TimeRange{
 		timestampMin: 0,
@@ -84,7 +99,7 @@ func genInsertMsg() insertMsg {
 
 	startPos := []*internalpb.MsgPosition{
 		{
-			ChannelName: Params.InsertChannelNames[0],
+			ChannelName: insertChannelName,
 			MsgID:       make([]byte, 0),
 			Timestamp:   0,
 		},
@@ -92,7 +107,6 @@ func genInsertMsg() insertMsg {
 
 	var iMsg = &insertMsg{
 		insertMessages: make([]*msgstream.InsertMsg, 0),
-		flushMessages:  make([]*flushMsg, 0),
 		timeRange: TimeRange{
 			timestampMin: timeRange.timestampMin,
 			timestampMax: timeRange.timestampMax,
@@ -104,21 +118,16 @@ func genInsertMsg() insertMsg {
 	dataFactory := NewDataFactory()
 	iMsg.insertMessages = append(iMsg.insertMessages, dataFactory.GetMsgStreamInsertMsgs(2)...)
 
-	fmsg := &flushMsg{
-		msgID:        1,
-		timestamp:    2000,
-		segmentIDs:   []UniqueID{1},
-		collectionID: UniqueID(1),
-	}
-
-	iMsg.flushMessages = append(iMsg.flushMessages, fmsg)
 	return *iMsg
 
 }
 
-func TestFlushSegmentTxn(t *testing.T) {
+func TestFlushSegment(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	idAllocMock := NewAllocatorFactory(1)
 	mockMinIO := memkv.NewMemoryKV()
+	insertChannelName := "datanode-02-test-flushsegment"
 
 	segmentID, _ := idAllocMock.allocID()
 	partitionID, _ := idAllocMock.allocID()
@@ -128,9 +137,15 @@ func TestFlushSegmentTxn(t *testing.T) {
 
 	collMeta := genCollectionMeta(collectionID, "test_flush_segment_txn")
 	flushMap := sync.Map{}
-	flushMeta := newBinlogMeta()
+	mockMaster := &MasterServiceFactory{}
 
-	finishCh := make(chan map[UniqueID]string)
+	replica := newReplica(mockMaster, collMeta.ID)
+
+	err := replica.addSegment(segmentID, collMeta.ID, 0, insertChannelName)
+	require.NoError(t, err)
+	replica.setEndPositions(segmentID, []*internalpb.MsgPosition{{ChannelName: "TestChannel"}})
+
+	finishCh := make(chan segmentFlushUnit, 1)
 
 	insertData := &InsertData{
 		Data: make(map[storage.FieldID]storage.FieldData),
@@ -149,10 +164,18 @@ func TestFlushSegmentTxn(t *testing.T) {
 	}
 	flushMap.Store(segmentID, insertData)
 
-	go func(wait <-chan map[UniqueID]string) {
-		field2Path := <-wait
-		assert.NotNil(t, field2Path)
-	}(finishCh)
+	msFactory := msgstream.NewPmsFactory()
+	m := map[string]interface{}{
+		"receiveBufSize": 1024,
+		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarBufSize":  1024}
+	err = msFactory.SetParams(m)
+	assert.Nil(t, err)
+	flushChan := make(chan *flushMsg, 100)
+	saveBinlog := func(*segmentFlushUnit) error {
+		return nil
+	}
+	ibNode := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
 
 	flushSegment(collMeta,
 		segmentID,
@@ -161,9 +184,15 @@ func TestFlushSegmentTxn(t *testing.T) {
 		&flushMap,
 		mockMinIO,
 		finishCh,
+		nil,
+		ibNode,
 		idAllocMock)
 
-	k, _ := flushMeta.genKey(false, collectionID, partitionID, segmentID, 0)
+	fu := <-finishCh
+	assert.NotNil(t, fu.field2Path)
+	assert.Equal(t, fu.segID, segmentID)
+
+	k, _ := idAllocMock.genKey(false, collectionID, partitionID, segmentID, 0)
 	key := path.Join(Params.StatsBinlogRootPath, k)
 	_, values, _ := mockMinIO.LoadWithPrefix(key)
 	assert.Equal(t, len(values), 1)
@@ -219,4 +248,213 @@ func genCollectionMeta(collectionID UniqueID, collectionName string) *etcdpb.Col
 		PartitionIDs: []UniqueID{0},
 	}
 	return &collection
+}
+
+func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	testPath := "/test/datanode/root/meta"
+	err := clearEtcd(testPath)
+	require.NoError(t, err)
+	Params.MetaRootPath = testPath
+
+	Factory := &MetaFactory{}
+	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
+	dataFactory := NewDataFactory()
+
+	mockMaster := &MasterServiceFactory{}
+
+	colRep := &CollectionSegmentReplica{
+		segments:       make(map[UniqueID]*Segment),
+		collectionID:   collMeta.ID,
+		startPositions: make(map[UniqueID][]*internalpb.MsgPosition),
+		endPositions:   make(map[UniqueID][]*internalpb.MsgPosition),
+	}
+
+	colRep.metaService = newMetaService(mockMaster, collMeta.ID)
+
+	msFactory := msgstream.NewPmsFactory()
+	m := map[string]interface{}{
+		"receiveBufSize": 1024,
+		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarBufSize":  1024}
+	err = msFactory.SetParams(m)
+	assert.Nil(t, err)
+
+	flushUnit := []segmentFlushUnit{}
+	saveBinlog := func(fu *segmentFlushUnit) error {
+		flushUnit = append(flushUnit, *fu)
+		return nil
+	}
+
+	flushChan := make(chan *flushMsg, 100)
+	iBNode := newInsertBufferNode(ctx, colRep, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+
+	inMsg := genInsertMsg("datanode-03-test-autoflush")
+	inMsg.insertMessages = dataFactory.GetMsgStreamInsertMsgs(100)
+	inMsg.insertMessages = append(inMsg.insertMessages, dataFactory.GetMsgStreamInsertMsgs(32000)...)
+	for i := range inMsg.insertMessages {
+		inMsg.insertMessages[i].SegmentID = int64(i%2) + 1
+	}
+	inMsg.startPositions = []*internalpb.MsgPosition{{Timestamp: 100}}
+	inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 123}}
+
+	var iMsg flowgraph.Msg = &inMsg
+	iBNode.Operate([]flowgraph.Msg{iMsg})
+	assert.Equal(t, len(colRep.endPositions), 2)
+	assert.Equal(t, colRep.endPositions[1][0].Timestamp, Timestamp(123))
+	assert.Equal(t, colRep.endPositions[2][0].Timestamp, Timestamp(123))
+	assert.Equal(t, len(iBNode.segmentCheckPoints), 2)
+	assert.Equal(t, iBNode.segmentCheckPoints[1].numRows, int64(0))
+	assert.Equal(t, iBNode.segmentCheckPoints[2].numRows, int64(0))
+	assert.Equal(t, iBNode.segmentCheckPoints[1].pos.Timestamp, Timestamp(100))
+	assert.Equal(t, iBNode.segmentCheckPoints[2].pos.Timestamp, Timestamp(100))
+	assert.Equal(t, len(iBNode.insertBuffer.insertData), 2)
+	assert.Equal(t, iBNode.insertBuffer.size(1), int32(50+16000))
+	assert.Equal(t, iBNode.insertBuffer.size(2), int32(50+16000))
+	assert.Equal(t, len(flushUnit), 0)
+
+	for i := range inMsg.insertMessages {
+		inMsg.insertMessages[i].SegmentID = int64(i%2) + 2
+	}
+	inMsg.startPositions = []*internalpb.MsgPosition{{Timestamp: 123}}
+	inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 234}}
+	iBNode.Operate([]flowgraph.Msg{iMsg})
+	assert.Equal(t, len(colRep.endPositions), 3)
+	assert.Equal(t, colRep.endPositions[1][0].Timestamp, Timestamp(123))
+	assert.Equal(t, colRep.endPositions[2][0].Timestamp, Timestamp(234))
+	assert.Equal(t, colRep.endPositions[3][0].Timestamp, Timestamp(234))
+	assert.Equal(t, len(iBNode.segmentCheckPoints), 3)
+	assert.Equal(t, iBNode.segmentCheckPoints[1].numRows, int64(0))
+	assert.Equal(t, iBNode.segmentCheckPoints[2].numRows, int64(100+32000))
+	assert.Equal(t, iBNode.segmentCheckPoints[3].numRows, int64(0))
+	assert.Equal(t, iBNode.segmentCheckPoints[1].pos.Timestamp, Timestamp(100))
+	assert.Equal(t, iBNode.segmentCheckPoints[2].pos.Timestamp, Timestamp(234))
+	assert.Equal(t, iBNode.segmentCheckPoints[3].pos.Timestamp, Timestamp(123))
+
+	assert.Equal(t, len(flushUnit), 1)
+	assert.Equal(t, flushUnit[0].segID, int64(2))
+	assert.Equal(t, len(flushUnit[0].checkPoint), 3)
+	assert.Equal(t, flushUnit[0].checkPoint[1].numRows, int64(0))
+	assert.Equal(t, flushUnit[0].checkPoint[2].numRows, int64(100+32000))
+	assert.Equal(t, flushUnit[0].checkPoint[3].numRows, int64(0))
+	assert.Equal(t, flushUnit[0].checkPoint[1].pos.Timestamp, Timestamp(100))
+	assert.Equal(t, flushUnit[0].checkPoint[2].pos.Timestamp, Timestamp(234))
+	assert.Equal(t, flushUnit[0].checkPoint[3].pos.Timestamp, Timestamp(123))
+
+	assert.Greater(t, len(flushUnit[0].field2Path), 0)
+	assert.False(t, flushUnit[0].flushed)
+	assert.Equal(t, len(iBNode.insertBuffer.insertData), 2)
+	assert.Equal(t, iBNode.insertBuffer.size(1), int32(50+16000))
+	assert.Equal(t, iBNode.insertBuffer.size(3), int32(50+16000))
+
+	for i := range inMsg.insertMessages {
+		inMsg.insertMessages[i].SegmentID = 1
+	}
+	inMsg.startPositions = []*internalpb.MsgPosition{{Timestamp: 234}}
+	inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 345}}
+	iBNode.Operate([]flowgraph.Msg{iMsg})
+	assert.Equal(t, len(colRep.endPositions), 3)
+	assert.Equal(t, colRep.endPositions[1][0].Timestamp, Timestamp(345))
+	assert.Equal(t, colRep.endPositions[2][0].Timestamp, Timestamp(234))
+	assert.Equal(t, colRep.endPositions[3][0].Timestamp, Timestamp(234))
+	assert.Equal(t, len(iBNode.segmentCheckPoints), 3)
+	assert.Equal(t, iBNode.segmentCheckPoints[1].numRows, int64(50+16000+100+32000))
+	assert.Equal(t, iBNode.segmentCheckPoints[2].numRows, int64(100+32000))
+	assert.Equal(t, iBNode.segmentCheckPoints[3].numRows, int64(0))
+	assert.Equal(t, iBNode.segmentCheckPoints[1].pos.Timestamp, Timestamp(345))
+	assert.Equal(t, iBNode.segmentCheckPoints[2].pos.Timestamp, Timestamp(234))
+	assert.Equal(t, iBNode.segmentCheckPoints[3].pos.Timestamp, Timestamp(123))
+
+	assert.Equal(t, len(flushUnit), 2)
+	assert.Equal(t, flushUnit[1].segID, int64(1))
+	assert.Equal(t, len(flushUnit[1].checkPoint), 3)
+	assert.Equal(t, flushUnit[1].checkPoint[1].numRows, int64(50+16000+100+32000))
+	assert.Equal(t, flushUnit[1].checkPoint[2].numRows, int64(100+32000))
+	assert.Equal(t, flushUnit[1].checkPoint[3].numRows, int64(0))
+	assert.Equal(t, flushUnit[1].checkPoint[1].pos.Timestamp, Timestamp(345))
+	assert.Equal(t, flushUnit[1].checkPoint[2].pos.Timestamp, Timestamp(234))
+	assert.Equal(t, flushUnit[1].checkPoint[3].pos.Timestamp, Timestamp(123))
+	assert.False(t, flushUnit[1].flushed)
+	assert.Greater(t, len(flushUnit[1].field2Path), 0)
+	assert.Equal(t, len(iBNode.insertBuffer.insertData), 1)
+	assert.Equal(t, iBNode.insertBuffer.size(3), int32(50+16000))
+
+	dmlFlushedCh := make(chan []*datapb.ID2PathList, 1)
+
+	flushChan <- &flushMsg{
+		msgID:        3,
+		timestamp:    456,
+		segmentID:    UniqueID(1),
+		collectionID: UniqueID(1),
+		dmlFlushedCh: dmlFlushedCh,
+	}
+
+	inMsg.insertMessages = []*msgstream.InsertMsg{}
+	inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 345}}
+	inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 456}}
+	iBNode.Operate([]flowgraph.Msg{iMsg})
+
+	flushSeg := <-dmlFlushedCh
+	assert.NotNil(t, flushSeg)
+	assert.Equal(t, len(flushSeg), 1)
+	assert.Equal(t, flushSeg[0].ID, int64(1))
+	assert.NotNil(t, flushSeg[0].Paths)
+	assert.Equal(t, len(colRep.endPositions), 3)
+	assert.Equal(t, colRep.endPositions[1][0].Timestamp, Timestamp(345))
+	assert.Equal(t, colRep.endPositions[2][0].Timestamp, Timestamp(234))
+	assert.Equal(t, colRep.endPositions[3][0].Timestamp, Timestamp(234))
+	assert.Equal(t, len(iBNode.segmentCheckPoints), 2)
+	assert.Equal(t, iBNode.segmentCheckPoints[2].numRows, int64(100+32000))
+	assert.Equal(t, iBNode.segmentCheckPoints[3].numRows, int64(0))
+	assert.Equal(t, iBNode.segmentCheckPoints[2].pos.Timestamp, Timestamp(234))
+	assert.Equal(t, iBNode.segmentCheckPoints[3].pos.Timestamp, Timestamp(123))
+
+	assert.Equal(t, len(flushUnit), 3)
+	assert.Equal(t, flushUnit[2].segID, int64(1))
+	assert.Equal(t, len(flushUnit[2].checkPoint), 3)
+	assert.Equal(t, flushUnit[2].checkPoint[1].numRows, int64(50+16000+100+32000))
+	assert.Equal(t, flushUnit[2].checkPoint[2].numRows, int64(100+32000))
+	assert.Equal(t, flushUnit[2].checkPoint[3].numRows, int64(0))
+	assert.Equal(t, flushUnit[2].checkPoint[1].pos.Timestamp, Timestamp(345))
+	assert.Equal(t, flushUnit[2].checkPoint[2].pos.Timestamp, Timestamp(234))
+	assert.Equal(t, flushUnit[2].checkPoint[3].pos.Timestamp, Timestamp(123))
+	assert.Equal(t, len(flushUnit[2].field2Path), 0)
+	assert.NotNil(t, flushUnit[2].field2Path)
+	assert.True(t, flushUnit[2].flushed)
+	assert.Equal(t, len(iBNode.insertBuffer.insertData), 1)
+	assert.Equal(t, iBNode.insertBuffer.size(3), int32(50+16000))
+
+	flushChan <- &flushMsg{
+		msgID:        4,
+		timestamp:    567,
+		segmentID:    UniqueID(3),
+		collectionID: UniqueID(3),
+		dmlFlushedCh: dmlFlushedCh,
+	}
+	iBNode.Operate([]flowgraph.Msg{iMsg})
+	flushSeg = <-dmlFlushedCh
+	assert.NotNil(t, flushSeg)
+	assert.Equal(t, len(flushSeg), 1)
+	assert.Equal(t, flushSeg[0].ID, int64(3))
+	assert.NotNil(t, flushSeg[0].Paths)
+	assert.Equal(t, len(colRep.endPositions), 3)
+	assert.Equal(t, colRep.endPositions[1][0].Timestamp, Timestamp(345))
+	assert.Equal(t, colRep.endPositions[2][0].Timestamp, Timestamp(234))
+	assert.Equal(t, colRep.endPositions[3][0].Timestamp, Timestamp(234))
+	assert.Equal(t, len(iBNode.segmentCheckPoints), 1)
+	assert.Equal(t, iBNode.segmentCheckPoints[2].numRows, int64(100+32000))
+	assert.Equal(t, iBNode.segmentCheckPoints[2].pos.Timestamp, Timestamp(234))
+	assert.Equal(t, len(flushUnit), 4)
+	assert.Equal(t, flushUnit[3].segID, int64(3))
+	assert.Equal(t, len(flushUnit[3].checkPoint), 2)
+	assert.Equal(t, flushUnit[3].checkPoint[3].numRows, int64(50+16000))
+	assert.Equal(t, flushUnit[3].checkPoint[2].numRows, int64(100+32000))
+	assert.Equal(t, flushUnit[3].checkPoint[3].pos.Timestamp, Timestamp(234))
+	assert.Equal(t, flushUnit[3].checkPoint[2].pos.Timestamp, Timestamp(234))
+	assert.Greater(t, len(flushUnit[3].field2Path), 0)
+	assert.NotNil(t, flushUnit[3].field2Path)
+	assert.True(t, flushUnit[3].flushed)
+	assert.Equal(t, len(iBNode.insertBuffer.insertData), 0)
 }

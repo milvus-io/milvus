@@ -35,11 +35,12 @@ import (
 )
 
 type Collection struct {
-	collectionPtr   C.CCollection
-	id              UniqueID
-	partitionIDs    []UniqueID
-	schema          *schemapb.CollectionSchema
-	watchedChannels []VChannel
+	collectionPtr C.CCollection
+	id            UniqueID
+	partitionIDs  []UniqueID
+	schema        *schemapb.CollectionSchema
+	vChannels     []Channel
+	pChannels     []Channel
 
 	releaseMu   sync.RWMutex // guards releaseTime
 	releaseTime Timestamp
@@ -67,15 +68,26 @@ func (c *Collection) removePartitionID(partitionID UniqueID) {
 	c.partitionIDs = tmpIDs
 }
 
-func (c *Collection) addWatchedDmChannels(channels []VChannel) {
-	log.Debug("add watch dm channels to collection",
+func (c *Collection) addVChannels(channels []Channel) {
+	log.Debug("add vChannels to collection",
 		zap.Any("channels", channels),
 		zap.Any("collectionID", c.ID()))
-	c.watchedChannels = append(c.watchedChannels, channels...)
+	c.vChannels = append(c.vChannels, channels...)
 }
 
-func (c *Collection) getWatchedDmChannels() []VChannel {
-	return c.watchedChannels
+func (c *Collection) getVChannels() []Channel {
+	return c.vChannels
+}
+
+func (c *Collection) addPChannels(channels []Channel) {
+	log.Debug("add pChannels to collection",
+		zap.Any("channels", channels),
+		zap.Any("collectionID", c.ID()))
+	c.pChannels = append(c.pChannels, channels...)
+}
+
+func (c *Collection) getPChannels() []Channel {
+	return c.pChannels
 }
 
 func (c *Collection) setReleaseTime(t Timestamp) {
@@ -101,10 +113,11 @@ func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Co
 	collection := C.NewCollection(cSchemaBlob)
 
 	var newCollection = &Collection{
-		collectionPtr:   collection,
-		id:              collectionID,
-		schema:          schema,
-		watchedChannels: make([]VChannel, 0),
+		collectionPtr: collection,
+		id:            collectionID,
+		schema:        schema,
+		vChannels:     make([]Channel, 0),
+		pChannels:     make([]Channel, 0),
 	}
 	C.free(unsafe.Pointer(cSchemaBlob))
 

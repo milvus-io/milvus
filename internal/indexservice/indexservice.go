@@ -16,6 +16,7 @@ import (
 	"errors"
 	"math/rand"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -92,24 +93,24 @@ func NewIndexService(ctx context.Context) (*IndexService, error) {
 		nodeClients: &PriorityQueue{},
 		nodeTasks:   &nodeTasks{},
 	}
-
+	i.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return i, nil
 }
 
 // Register register index service at etcd
 func (i *IndexService) Register() error {
-	i.session = sessionutil.NewSession(i.loopCtx, Params.MetaRootPath, []string{Params.EtcdAddress})
+	i.session = sessionutil.NewSession(i.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
 	i.session.Init(typeutil.IndexServiceRole, Params.Address, true)
 	i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, 0)
 	return nil
 }
 
 func (i *IndexService) Init() error {
-	log.Debug("IndexService", zap.String("etcd address", Params.EtcdAddress))
+	log.Debug("IndexService", zap.Any("etcd endpoints", Params.EtcdEndpoints))
 
 	i.assignChan = make(chan []UniqueID, 1024)
 	connectEtcdFn := func() error {
-		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
+		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
 		if err != nil {
 			return err
 		}
@@ -131,7 +132,7 @@ func (i *IndexService) Init() error {
 
 	//init idAllocator
 	kvRootPath := Params.KvRootPath
-	i.idAllocator = allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase([]string{Params.EtcdAddress}, kvRootPath, "index_gid"))
+	i.idAllocator = allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(Params.EtcdEndpoints, kvRootPath, "index_gid"))
 	if err := i.idAllocator.Initialize(); err != nil {
 		log.Debug("IndexService idAllocator initialize failed", zap.Error(err))
 		return err
@@ -317,6 +318,7 @@ func (i *IndexService) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRe
 		ret.Status.Reason = err.Error()
 		return ret, nil
 	}
+	log.Debug("IndexService BuildIndex Enqueue successfully", zap.Any("IndexBuildID", indexBuildID))
 
 	err = t.WaitToFinish()
 	if err != nil {
@@ -492,6 +494,7 @@ func (i *IndexService) assignmentTasksLoop() {
 					i.assignChan <- []UniqueID{indexBuildID}
 					continue
 				}
+				i.nodeTasks.assignTask(nodeID, indexBuildID)
 				req := &indexpb.CreateIndexRequest{
 					IndexBuildID: indexBuildID,
 					IndexName:    meta.indexMeta.Req.IndexName,
@@ -505,9 +508,11 @@ func (i *IndexService) assignmentTasksLoop() {
 				resp, err := builderClient.CreateIndex(ctx, req)
 				if err != nil {
 					log.Debug("IndexService assignmentTasksLoop builderClient.CreateIndex failed", zap.Error(err))
+					continue
 				}
 				if resp.ErrorCode != commonpb.ErrorCode_Success {
 					log.Debug("IndexService assignmentTasksLoop builderClient.CreateIndex failed", zap.String("Reason", resp.Reason))
+					continue
 				}
 				if err = i.metaTable.BuildIndex(indexBuildID, nodeID); err != nil {
 					log.Debug("IndexService assignmentTasksLoop metaTable.BuildIndex failed", zap.Error(err))
@@ -536,8 +541,10 @@ func (i *IndexService) watchNodeLoop() {
 				log.Debug("IndexService watchNodeLoop SessionAddEvent", zap.Any("serverID", serverID))
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
+				i.removeNode(serverID)
 				log.Debug("IndexService watchNodeLoop SessionDelEvent ", zap.Any("serverID", serverID))
 				indexBuildIDs := i.nodeTasks.getTasksByNodeID(serverID)
+				log.Debug("IndexNode crashed", zap.Any("IndexNode ID", serverID), zap.Any("task IDs", indexBuildIDs))
 				i.assignChan <- indexBuildIDs
 				i.nodeTasks.delete(serverID)
 			}
@@ -586,6 +593,25 @@ func (i *IndexService) assignTasksServerStart() error {
 	sessions, _, err := i.session.GetSessions(typeutil.IndexNodeRole)
 	if err != nil {
 		return err
+	}
+	for _, session := range sessions {
+		addrs := strings.Split(session.Address, ":")
+		ip := addrs[0]
+		port, err := strconv.ParseInt(addrs[1], 10, 64)
+		if err != nil {
+			return err
+		}
+
+		req := &indexpb.RegisterNodeRequest{
+			Address: &commonpb.Address{
+				Ip:   ip,
+				Port: port,
+			},
+			NodeID: session.ServerID,
+		}
+		if err = i.addNode(session.ServerID, req); err != nil {
+			log.Debug("IndexService", zap.Any("IndexService start find node fatal, err = ", err))
+		}
 	}
 	var serverIDs []int64
 	for _, session := range sessions {

@@ -34,6 +34,7 @@ pipeline {
                     IMAGE_REPO = "dockerhub-mirror-sh.zilliz.cc/milvusdb"
                     DOCKER_BUILDKIT = 1
                     ARTIFACTS = "${env.WORKSPACE}/artifacts"
+                    MILVUS_HELM_BRANCH = "recovery"
                 }
                 stages {
                     stage('Test') {

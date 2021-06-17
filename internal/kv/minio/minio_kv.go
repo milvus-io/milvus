@@ -47,28 +47,26 @@ type Option struct {
 
 func NewMinIOKV(ctx context.Context, option *Option) (*MinIOKV, error) {
 	var minIOClient *minio.Client
-	connectMinIOFn := func() error {
-		var err error
-		minIOClient, err = minio.New(option.Address, &minio.Options{
-			Creds:  credentials.NewStaticV4(option.AccessKeyID, option.SecretAccessKeyID, ""),
-			Secure: option.UseSSL,
-		})
-		if err != nil {
-			return err
-		}
-		return nil
-	}
-
-	err := retry.Retry(100000, time.Millisecond*200, connectMinIOFn)
+	var err error
+	minIOClient, err = minio.New(option.Address, &minio.Options{
+		Creds:  credentials.NewStaticV4(option.AccessKeyID, option.SecretAccessKeyID, ""),
+		Secure: option.UseSSL,
+	})
+	// options nil or invalid formatted endpoint, don't need retry
 	if err != nil {
 		return nil, err
 	}
-
-	bucketExists, err := minIOClient.BucketExists(ctx, option.BucketName)
+	var bucketExists bool
+	// check valid in first query
+	checkBucketFn := func() error {
+		bucketExists, err = minIOClient.BucketExists(ctx, option.BucketName)
+		return err
+	}
+	err = retry.Retry(100000, time.Millisecond*200, checkBucketFn)
 	if err != nil {
 		return nil, err
 	}
-
+	// connection shall be valid here, no need to retry
 	if option.CreateBucket {
 		if !bucketExists {
 			err = minIOClient.MakeBucket(ctx, option.BucketName, minio.MakeBucketOptions{})

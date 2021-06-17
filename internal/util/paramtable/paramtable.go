@@ -60,23 +60,19 @@ func (gp *BaseTable) Init() {
 		panic(err)
 	}
 	gp.tryloadFromEnv()
-
 }
 
 func (gp *BaseTable) LoadFromKVPair(kvPairs []*commonpb.KeyValuePair) error {
-
 	for _, pair := range kvPairs {
 		err := gp.Save(pair.Key, pair.Value)
 		if err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
 func (gp *BaseTable) tryloadFromEnv() {
-
 	minioAddress := os.Getenv("MINIO_ADDRESS")
 	if minioAddress == "" {
 		minioHost, err := gp.Load("minio.address")
@@ -94,19 +90,14 @@ func (gp *BaseTable) tryloadFromEnv() {
 		panic(err)
 	}
 
-	etcdAddress := os.Getenv("ETCD_ADDRESS")
-	if etcdAddress == "" {
-		etcdHost, err := gp.Load("etcd.address")
+	etcdEndpoints := os.Getenv("ETCD_ENDPOINTS")
+	if etcdEndpoints == "" {
+		etcdEndpoints, err = gp.Load("etcd.endpoints")
 		if err != nil {
 			panic(err)
 		}
-		port, err := gp.Load("etcd.port")
-		if err != nil {
-			panic(err)
-		}
-		etcdAddress = etcdHost + ":" + port
 	}
-	err = gp.Save("_EtcdAddress", etcdAddress)
+	err = gp.Save("_EtcdEndpoints", etcdEndpoints)
 	if err != nil {
 		panic(err)
 	}
@@ -141,23 +132,6 @@ func (gp *BaseTable) tryloadFromEnv() {
 		masterAddress = masterHost + ":" + port
 	}
 	err = gp.Save("_MasterAddress", masterAddress)
-	if err != nil {
-		panic(err)
-	}
-
-	proxyServiceAddress := os.Getenv("PROXY_SERVICE_ADDRESS")
-	if proxyServiceAddress == "" {
-		addr, err := gp.Load("proxyService.address")
-		if err != nil {
-			panic(err)
-		}
-		proxyServicePort, err := gp.Load("proxyService.port")
-		if err != nil {
-			panic(err)
-		}
-		proxyServiceAddress = addr + ":" + proxyServicePort
-	}
-	err = gp.Save("_PROXY_SERVICE_ADDRESS", proxyServiceAddress)
 	if err != nil {
 		panic(err)
 	}
@@ -327,23 +301,6 @@ func (gp *BaseTable) ParseInt(key string) int {
 		panic(err)
 	}
 	return value
-}
-
-func (gp *BaseTable) QueryNodeIDList() []UniqueID {
-	queryNodeIDStr, err := gp.Load("nodeID.queryNodeIDList")
-	if err != nil {
-		panic(err)
-	}
-	var ret []UniqueID
-	queryNodeIDs := strings.Split(queryNodeIDStr, ",")
-	for _, i := range queryNodeIDs {
-		v, err := strconv.Atoi(i)
-		if err != nil {
-			log.Panicf("load proxy id list error, %s", err.Error())
-		}
-		ret = append(ret, UniqueID(v))
-	}
-	return ret
 }
 
 // package methods

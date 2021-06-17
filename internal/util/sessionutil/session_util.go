@@ -55,7 +55,7 @@ type SessionEvent struct {
 // NewSession is a helper to build Session object.
 // ServerID and LeaseID will be assigned after registeration.
 // etcdCli is initialized when NewSession
-func NewSession(ctx context.Context, metaRoot string, etcdAddress []string) *Session {
+func NewSession(ctx context.Context, metaRoot string, etcdEndpoints []string) *Session {
 	ctx, cancel := context.WithCancel(ctx)
 	session := &Session{
 		ctx:      ctx,
@@ -64,7 +64,7 @@ func NewSession(ctx context.Context, metaRoot string, etcdAddress []string) *Ses
 	}
 
 	connectEtcdFn := func() error {
-		etcdCli, err := clientv3.New(clientv3.Config{Endpoints: etcdAddress, DialTimeout: 5 * time.Second})
+		etcdCli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints, DialTimeout: 5 * time.Second})
 		if err != nil {
 			return err
 		}
@@ -231,7 +231,7 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 					close(failCh)
 					return
 				}
-				failCh <- true
+				//failCh <- true
 			}
 		}
 	}()
@@ -247,9 +247,10 @@ func (s *Session) GetSessions(prefix string) (map[string]*Session, int64, error)
 	if err != nil {
 		return nil, 0, err
 	}
+	log.Debug("SessionUtil GetSessions", zap.Any("prefix", prefix), zap.Any("resp", resp))
 	for _, kv := range resp.Kvs {
 		session := &Session{}
-		err = json.Unmarshal([]byte(kv.Value), session)
+		err = json.Unmarshal(kv.Value, session)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -282,7 +283,6 @@ func (s *Session) WatchServices(prefix string, revision int64) (eventChannel <-c
 					case mvccpb.PUT:
 						log.Debug("watch services",
 							zap.Any("add kv", ev.Kv))
-						session := &Session{}
 						err := json.Unmarshal([]byte(ev.Kv.Value), session)
 						if err != nil {
 							log.Error("watch services", zap.Error(err))
@@ -311,10 +311,10 @@ func (s *Session) WatchServices(prefix string, revision int64) (eventChannel <-c
 	return eventCh
 }
 
-func initEtcd(etcdAddress string) (*clientv3.Client, error) {
+func initEtcd(etcdEndpoints []string) (*clientv3.Client, error) {
 	var etcdCli *clientv3.Client
 	connectEtcdFn := func() error {
-		etcd, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddress}, DialTimeout: 5 * time.Second})
+		etcd, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints, DialTimeout: 5 * time.Second})
 		if err != nil {
 			return err
 		}

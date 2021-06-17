@@ -178,6 +178,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	if err := s.grpcServer.Serve(lis); err != nil {
 		s.grpcErrChan <- err
 	}
+	log.Debug("IndexService grpcServer loop exit")
 }
 
 func NewServer(ctx context.Context) (*Server, error) {

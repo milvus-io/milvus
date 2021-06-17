@@ -14,6 +14,7 @@ package etcdkv
 import (
 	"context"
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,9 +27,10 @@ func TestEtcdStatsWatcher(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	var p paramtable.BaseTable
 	p.Init()
-	addr, err := p.Load("_EtcdAddress")
+	endpoints, err := p.Load("_EtcdEndpoints")
 	assert.Nil(t, err)
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{addr}})
+	etcdEndpoints := strings.Split(endpoints, ",")
+	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
 	assert.Nil(t, err)
 	defer cli.Close()
 	w := NewEtcdStatsWatcher(cli)
@@ -55,15 +57,15 @@ func TestEtcdStatsWatcher(t *testing.T) {
 	<-receiveCh
 	size := w.GetSize()
 	assert.EqualValues(t, 4, size)
-
 }
 
 func TestEtcdStatsWatcherDone(t *testing.T) {
 	var p paramtable.BaseTable
 	p.Init()
-	addr, err := p.Load("_EtcdAddress")
+	endpoints, err := p.Load("_EtcdEndpoints")
 	assert.Nil(t, err)
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{addr}})
+	etcdEndpoints := strings.Split(endpoints, ",")
+	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
 	assert.Nil(t, err)
 	defer cli.Close()
 	w := NewEtcdStatsWatcher(cli)

@@ -18,7 +18,6 @@ import (
 	"net"
 	"strconv"
 	"sync"
-	"time"
 
 	"github.com/milvus-io/milvus/internal/logutil"
 
@@ -26,8 +25,8 @@ import (
 
 	"google.golang.org/grpc"
 
+	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/milvus-io/milvus/internal/dataservice"
-	msc "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
@@ -53,8 +52,6 @@ type Server struct {
 	grpcServer    *grpc.Server
 	masterService types.MasterService
 
-	newMasterServiceClient func(string) (types.MasterService, error)
-
 	closer io.Closer
 }
 
@@ -67,9 +64,6 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		ctx:         ctx1,
 		cancel:      cancel,
 		grpcErrChan: make(chan error),
-		newMasterServiceClient: func(s string) (types.MasterService, error) {
-			return msc.NewClient(s, dataservice.Params.MetaRootPath, []string{dataservice.Params.EtcdAddress}, 10*time.Second)
-		},
 	}
 	s.dataService, err = dataservice.CreateServer(s.ctx, factory)
 	if err != nil {
@@ -81,8 +75,6 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 func (s *Server) init() error {
 	Params.Init()
 	Params.LoadFromEnv()
-
-	ctx := context.Background()
 
 	closer := trace.InitTracing("data_service")
 	s.closer = closer
@@ -102,34 +94,6 @@ func (s *Server) init() error {
 	if err != nil {
 		log.Debug("DataService startGrpc failed", zap.Error(err))
 		return err
-	}
-
-	s.dataService.UpdateStateCode(internalpb.StateCode_Initializing)
-	log.Debug("DataService", zap.Any("State", internalpb.StateCode_Initializing))
-
-	if s.newMasterServiceClient != nil {
-		log.Debug("DataService try to new master service client", zap.String("address", Params.MasterAddress))
-		masterServiceClient, err := s.newMasterServiceClient(Params.MasterAddress)
-		if err != nil {
-			log.Debug("DataService new master service client failed", zap.Error(err))
-			panic(err)
-		}
-
-		if err = masterServiceClient.Init(); err != nil {
-			log.Debug("DataService masterServiceClient Init failed", zap.Error(err))
-			panic(err)
-		}
-		if err = masterServiceClient.Start(); err != nil {
-			log.Debug("DataService masterServiceClient Start failed", zap.Error(err))
-			panic(err)
-		}
-		log.Debug("DataService start to wait for MasterService ready")
-		if err = funcutil.WaitForComponentInitOrHealthy(ctx, masterServiceClient, "MasterService", 1000000, 200*time.Millisecond); err != nil {
-			log.Debug("DataService wait for MasterService Ready failed", zap.Error(err))
-			panic(err)
-		}
-		log.Debug("DataService report MasterService is ready")
-		s.dataService.SetMasterClient(masterServiceClient)
 	}
 
 	if err := s.dataService.Init(); err != nil {
@@ -170,8 +134,9 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 			otgrpc.OpenTracingServerInterceptor(tracer)),
 		grpc.StreamInterceptor(
 			otgrpc.OpenTracingStreamServerInterceptor(tracer)))
+	//grpc.UnaryInterceptor(grpc_prometheus.UnaryServerInterceptor))
 	datapb.RegisterDataServiceServer(s.grpcServer, s)
-
+	grpc_prometheus.Register(s.grpcServer)
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {
 		s.grpcErrChan <- err

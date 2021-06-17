@@ -21,7 +21,6 @@ import (
 
 func initRoles(roles *roles.MilvusRoles) {
 	roles.EnableMaster = true
-	roles.EnableProxyService = true
 	roles.EnableProxyNode = true
 	roles.EnableQueryService = true
 	roles.EnableQueryNode = true

@@ -109,7 +109,7 @@ func (loader *segmentLoader) loadSegment(req *queryPb.LoadSegmentsRequest, onSer
 
 func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID,
 	segment *Segment,
-	binlogPaths []*queryPb.FieldBinlog) error {
+	binlogPaths []*datapb.FieldBinlog) error {
 
 	vectorFieldIDs, err := loader.historicalReplica.getVecFieldIDsByCollectionID(collectionID)
 	if err != nil {
@@ -164,8 +164,8 @@ func (loader *segmentLoader) GetSegmentStates(segmentID UniqueID) (*datapb.GetSe
 	return statesResponse, nil
 }
 
-func (loader *segmentLoader) filterOutVectorFields(binlogPaths []*queryPb.FieldBinlog,
-	vectorFields []int64) []*queryPb.FieldBinlog {
+func (loader *segmentLoader) filterOutVectorFields(binlogPaths []*datapb.FieldBinlog,
+	vectorFields []int64) []*datapb.FieldBinlog {
 
 	containsFunc := func(s []int64, e int64) bool {
 		for _, a := range s {
@@ -175,7 +175,7 @@ func (loader *segmentLoader) filterOutVectorFields(binlogPaths []*queryPb.FieldB
 		}
 		return false
 	}
-	targetFields := make([]*queryPb.FieldBinlog, 0)
+	targetFields := make([]*datapb.FieldBinlog, 0)
 	for _, path := range binlogPaths {
 		if !containsFunc(vectorFields, path.FieldID) {
 			targetFields = append(targetFields, path)
@@ -184,7 +184,7 @@ func (loader *segmentLoader) filterOutVectorFields(binlogPaths []*queryPb.FieldB
 	return targetFields
 }
 
-func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, binlogPaths []*queryPb.FieldBinlog) error {
+func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, binlogPaths []*datapb.FieldBinlog) error {
 	iCodec := storage.InsertCodec{}
 	defer func() {
 		err := iCodec.Close()

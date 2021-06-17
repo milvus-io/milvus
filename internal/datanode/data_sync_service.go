@@ -13,52 +13,64 @@ package datanode
 
 import (
 	"context"
-	"time"
+	"fmt"
 
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	"github.com/milvus-io/milvus/internal/util/retry"
-	"go.etcd.io/etcd/clientv3"
 
 	"go.uber.org/zap"
 )
 
 type dataSyncService struct {
-	ctx         context.Context
-	fg          *flowgraph.TimeTickedFlowGraph
-	flushChan   <-chan *flushMsg
-	replica     Replica
-	idAllocator allocatorInterface
-	msFactory   msgstream.Factory
+	ctx          context.Context
+	cancelFn     context.CancelFunc
+	fg           *flowgraph.TimeTickedFlowGraph
+	flushChan    <-chan *flushMsg
+	replica      Replica
+	idAllocator  allocatorInterface
+	msFactory    msgstream.Factory
+	collectionID UniqueID
+	dataService  types.DataService
+	clearSignal  chan<- UniqueID
 }
 
-func newDataSyncService(ctx context.Context, flushChan <-chan *flushMsg,
-	replica Replica, alloc allocatorInterface, factory msgstream.Factory) *dataSyncService {
+func newDataSyncService(ctx context.Context,
+	flushChan <-chan *flushMsg,
+	replica Replica,
+	alloc allocatorInterface,
+	factory msgstream.Factory,
+	vchan *datapb.VchannelInfo,
+	clearSignal chan<- UniqueID,
+	dataService types.DataService,
+
+) *dataSyncService {
+
+	ctx1, cancel := context.WithCancel(ctx)
+
 	service := &dataSyncService{
-		ctx:         ctx,
-		fg:          nil,
-		flushChan:   flushChan,
-		replica:     replica,
-		idAllocator: alloc,
-		msFactory:   factory,
+		ctx:          ctx1,
+		cancelFn:     cancel,
+		fg:           nil,
+		flushChan:    flushChan,
+		replica:      replica,
+		idAllocator:  alloc,
+		msFactory:    factory,
+		collectionID: vchan.GetCollectionID(),
+		dataService:  dataService,
+		clearSignal:  clearSignal,
 	}
+
+	service.initNodes(vchan)
 	return service
 }
 
-func (dsService *dataSyncService) init() {
-	if len(Params.InsertChannelNames) == 0 {
-		log.Error("InsertChannels not readly, init datasync service failed")
-		return
-	}
-
-	dsService.initNodes()
-}
-
 func (dsService *dataSyncService) start() {
-	log.Debug("Data Sync Service Start Successfully")
 	if dsService.fg != nil {
+		log.Debug("Data Sync Service starting flowgraph")
 		dsService.fg.Start()
 	} else {
 		log.Debug("Data Sync Service flowgraph nil")
@@ -67,92 +79,129 @@ func (dsService *dataSyncService) start() {
 
 func (dsService *dataSyncService) close() {
 	if dsService.fg != nil {
+		log.Debug("Data Sync Service closing flowgraph")
 		dsService.fg.Close()
 	}
+
+	dsService.cancelFn()
 }
 
-func (dsService *dataSyncService) initNodes() {
+func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) {
 	// TODO: add delete pipeline support
-	var kvClient *clientv3.Client
-	var err error
-	connectEtcdFn := func() error {
-		kvClient, err = clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
-		if err != nil {
-			return err
-		}
-		return nil
-	}
-	err = retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
-	if err != nil {
-		panic(err)
-	}
-
-	etcdKV := etcdkv.NewEtcdKV(kvClient, Params.MetaRootPath)
-	// New binlogMeta
-	mt, _ := NewBinlogMeta(etcdKV, dsService.idAllocator)
-
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
 
 	m := map[string]interface{}{
 		"PulsarAddress":  Params.PulsarAddress,
 		"ReceiveBufSize": 1024,
-		"PulsarBufSize":  1024}
-	err = dsService.msFactory.SetParams(m)
+		"PulsarBufSize":  1024,
+	}
+
+	err := dsService.msFactory.SetParams(m)
 	if err != nil {
 		panic(err)
 	}
 
-	var dmStreamNode Node = newDmInputNode(dsService.ctx, dsService.msFactory)
-	var ddStreamNode Node = newDDInputNode(dsService.ctx, dsService.msFactory)
+	saveBinlog := func(fu *segmentFlushUnit) error {
+		id2path := []*datapb.ID2PathList{}
+		checkPoints := []*datapb.CheckPoint{}
+		for k, v := range fu.field2Path {
+			id2path = append(id2path, &datapb.ID2PathList{ID: k, Paths: []string{v}})
+		}
+		for k, v := range fu.checkPoint {
+			v := v
+			checkPoints = append(checkPoints, &datapb.CheckPoint{
+				SegmentID: k,
+				NumOfRows: v.numRows,
+				Position:  &v.pos,
+			})
+		}
+		log.Debug("SaveBinlogPath",
+			zap.Int64("SegmentID", fu.segID),
+			zap.Int64("CollectionID", fu.collID),
+			zap.Int("Length of Field2BinlogPaths", len(id2path)),
+			zap.Any("Start Positions", fu.startPositions),
+		)
 
-	var filterDmNode Node = newFilteredDmNode()
-	var ddNode Node = newDDNode(dsService.ctx, mt, dsService.flushChan, dsService.replica, dsService.idAllocator)
-	var insertBufferNode Node = newInsertBufferNode(dsService.ctx, mt, dsService.replica, dsService.msFactory, dsService.idAllocator)
-	var gcNode Node = newGCNode(dsService.replica)
+		req := &datapb.SaveBinlogPathsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   0, //TODO msg type
+				MsgID:     0, //TODO msg id
+				Timestamp: 0, //TODO time stamp
+				SourceID:  Params.NodeID,
+			},
+			SegmentID:         fu.segID,
+			CollectionID:      fu.collID,
+			Field2BinlogPaths: id2path,
+			CheckPoints:       checkPoints,
+			StartPositions:    fu.startPositions,
+			Flushed:           fu.flushed,
+		}
+		rsp, err := dsService.dataService.SaveBinlogPaths(dsService.ctx, req)
+		if err != nil {
+			return fmt.Errorf(err.Error())
+		}
+		if rsp.ErrorCode != commonpb.ErrorCode_Success {
+			return fmt.Errorf("data service save bin log path failed, reason = %s", rsp.Reason)
+		}
+		return nil
+	}
+	var dmStreamNode Node = newDmInputNode(
+		dsService.ctx,
+		dsService.msFactory,
+		vchanInfo.GetChannelName(),
+		vchanInfo.GetSeekPosition(),
+	)
+	var ddNode Node = newDDNode(dsService.clearSignal, dsService.collectionID, vchanInfo)
+	var insertBufferNode Node = newInsertBufferNode(
+		dsService.ctx,
+		dsService.replica,
+		dsService.msFactory,
+		dsService.idAllocator,
+		dsService.flushChan,
+		saveBinlog,
+		vchanInfo.GetChannelName(),
+	)
+
+	// recover segment checkpoints
+	for _, us := range vchanInfo.GetUnflushedSegments() {
+		if us.CollectionID != dsService.collectionID ||
+			us.GetInsertChannel() != vchanInfo.ChannelName {
+			log.Warn("Collection ID or ChannelName not compact",
+				zap.Int64("Wanted ID", dsService.collectionID),
+				zap.Int64("Actual ID", us.CollectionID),
+				zap.String("Wanted Channel Name", vchanInfo.ChannelName),
+				zap.String("Actual Channel Name", us.GetInsertChannel()),
+			)
+			continue
+		}
+
+		log.Info("Recover Segment NumOfRows form checkpoints",
+			zap.String("InsertChannel", us.GetInsertChannel()),
+			zap.Int64("SegmentID", us.GetID()),
+			zap.Int64("NumOfRows", us.GetNumOfRows()),
+		)
+		dsService.replica.addSegment(us.GetID(), us.CollectionID, us.PartitionID, us.GetInsertChannel())
+		dsService.replica.updateStatistics(us.GetID(), us.GetNumOfRows())
+	}
 
 	dsService.fg.AddNode(dmStreamNode)
-	dsService.fg.AddNode(ddStreamNode)
-
-	dsService.fg.AddNode(filterDmNode)
 	dsService.fg.AddNode(ddNode)
-
 	dsService.fg.AddNode(insertBufferNode)
-	dsService.fg.AddNode(gcNode)
 
-	// dmStreamNode
+	// ddStreamNode
 	err = dsService.fg.SetEdges(dmStreamNode.Name(),
 		[]string{},
-		[]string{filterDmNode.Name()},
+		[]string{ddNode.Name()},
 	)
 	if err != nil {
 		log.Error("set edges failed in node", zap.String("name", dmStreamNode.Name()), zap.Error(err))
 		panic("set edges faild in the node")
 	}
 
-	// ddStreamNode
-	err = dsService.fg.SetEdges(ddStreamNode.Name(),
-		[]string{},
-		[]string{ddNode.Name()},
-	)
-	if err != nil {
-		log.Error("set edges failed in node", zap.String("name", ddStreamNode.Name()), zap.Error(err))
-		panic("set edges faild in the node")
-	}
-
-	// filterDmNode
-	err = dsService.fg.SetEdges(filterDmNode.Name(),
-		[]string{dmStreamNode.Name(), ddNode.Name()},
-		[]string{insertBufferNode.Name()},
-	)
-	if err != nil {
-		log.Error("set edges failed in node", zap.String("name", filterDmNode.Name()), zap.Error(err))
-		panic("set edges faild in the node")
-	}
-
 	// ddNode
 	err = dsService.fg.SetEdges(ddNode.Name(),
-		[]string{ddStreamNode.Name()},
-		[]string{filterDmNode.Name()},
+		[]string{dmStreamNode.Name()},
+		[]string{insertBufferNode.Name()},
 	)
 	if err != nil {
 		log.Error("set edges failed in node", zap.String("name", ddNode.Name()), zap.Error(err))
@@ -161,20 +210,11 @@ func (dsService *dataSyncService) initNodes() {
 
 	// insertBufferNode
 	err = dsService.fg.SetEdges(insertBufferNode.Name(),
-		[]string{filterDmNode.Name()},
-		[]string{gcNode.Name()},
+		[]string{ddNode.Name()},
+		[]string{},
 	)
 	if err != nil {
 		log.Error("set edges failed in node", zap.String("name", insertBufferNode.Name()), zap.Error(err))
-		panic("set edges faild in the node")
-	}
-
-	// gcNode
-	err = dsService.fg.SetEdges(gcNode.Name(),
-		[]string{insertBufferNode.Name()},
-		[]string{})
-	if err != nil {
-		log.Error("set edges failed in node", zap.String("name", gcNode.Name()), zap.Error(err))
 		panic("set edges faild in the node")
 	}
 }

@@ -223,37 +223,38 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "\027\022\017\n\013OutOfMemory\020\030\022\021\n\rIndexNotExist\020\031\022\022\n"
   "\rDDRequestRace\020\350\007*X\n\nIndexState\022\022\n\016Index"
   "StateNone\020\000\022\014\n\010Unissued\020\001\022\016\n\nInProgress\020"
-  "\002\022\014\n\010Finished\020\003\022\n\n\006Failed\020\004*X\n\014SegmentSt"
+  "\002\022\014\n\010Finished\020\003\022\n\n\006Failed\020\004*f\n\014SegmentSt"
   "ate\022\024\n\020SegmentStateNone\020\000\022\014\n\010NotExist\020\001\022"
-  "\013\n\007Growing\020\002\022\n\n\006Sealed\020\003\022\013\n\007Flushed\020\004*\363\007"
-  "\n\007MsgType\022\r\n\tUndefined\020\000\022\024\n\020CreateCollec"
-  "tion\020d\022\022\n\016DropCollection\020e\022\021\n\rHasCollect"
-  "ion\020f\022\026\n\022DescribeCollection\020g\022\023\n\017ShowCol"
-  "lections\020h\022\024\n\020GetSystemConfigs\020i\022\022\n\016Load"
-  "Collection\020j\022\025\n\021ReleaseCollection\020k\022\024\n\017C"
-  "reatePartition\020\310\001\022\022\n\rDropPartition\020\311\001\022\021\n"
-  "\014HasPartition\020\312\001\022\026\n\021DescribePartition\020\313\001"
-  "\022\023\n\016ShowPartitions\020\314\001\022\023\n\016LoadPartitions\020"
-  "\315\001\022\026\n\021ReleasePartitions\020\316\001\022\021\n\014ShowSegmen"
-  "ts\020\372\001\022\024\n\017DescribeSegment\020\373\001\022\021\n\014LoadSegme"
-  "nts\020\374\001\022\024\n\017ReleaseSegments\020\375\001\022\024\n\017HandoffS"
-  "egments\020\376\001\022\030\n\023LoadBalanceSegments\020\377\001\022\020\n\013"
-  "CreateIndex\020\254\002\022\022\n\rDescribeIndex\020\255\002\022\016\n\tDr"
-  "opIndex\020\256\002\022\013\n\006Insert\020\220\003\022\013\n\006Delete\020\221\003\022\n\n\005"
-  "Flush\020\222\003\022\013\n\006Search\020\364\003\022\021\n\014SearchResult\020\365\003"
-  "\022\022\n\rGetIndexState\020\366\003\022\032\n\025GetIndexBuildPro"
-  "gress\020\367\003\022\034\n\027GetCollectionStatistics\020\370\003\022\033"
-  "\n\026GetPartitionStatistics\020\371\003\022\r\n\010Retrieve\020"
-  "\372\003\022\023\n\016RetrieveResult\020\373\003\022\024\n\017WatchDmChanne"
-  "ls\020\374\003\022\025\n\020RemoveDmChannels\020\375\003\022\027\n\022WatchQue"
-  "ryChannels\020\376\003\022\030\n\023RemoveQueryChannels\020\377\003\022"
-  "\020\n\013SegmentInfo\020\330\004\022\r\n\010TimeTick\020\260\t\022\023\n\016Quer"
-  "yNodeStats\020\261\t\022\016\n\tLoadIndex\020\262\t\022\016\n\tRequest"
-  "ID\020\263\t\022\017\n\nRequestTSO\020\264\t\022\024\n\017AllocateSegmen"
-  "t\020\265\t\022\026\n\021SegmentStatistics\020\266\t\022\025\n\020SegmentF"
-  "lushDone\020\267\t*\"\n\007DslType\022\007\n\003Dsl\020\000\022\016\n\nBoolE"
-  "xprV1\020\001B5Z3github.com/milvus-io/milvus/i"
-  "nternal/proto/commonpbb\006proto3"
+  "\013\n\007Growing\020\002\022\n\n\006Sealed\020\003\022\013\n\007Flushed\020\004\022\014\n"
+  "\010Flushing\020\005*\204\010\n\007MsgType\022\r\n\tUndefined\020\000\022\024"
+  "\n\020CreateCollection\020d\022\022\n\016DropCollection\020e"
+  "\022\021\n\rHasCollection\020f\022\026\n\022DescribeCollectio"
+  "n\020g\022\023\n\017ShowCollections\020h\022\024\n\020GetSystemCon"
+  "figs\020i\022\022\n\016LoadCollection\020j\022\025\n\021ReleaseCol"
+  "lection\020k\022\024\n\017CreatePartition\020\310\001\022\022\n\rDropP"
+  "artition\020\311\001\022\021\n\014HasPartition\020\312\001\022\026\n\021Descri"
+  "bePartition\020\313\001\022\023\n\016ShowPartitions\020\314\001\022\023\n\016L"
+  "oadPartitions\020\315\001\022\026\n\021ReleasePartitions\020\316\001"
+  "\022\021\n\014ShowSegments\020\372\001\022\024\n\017DescribeSegment\020\373"
+  "\001\022\021\n\014LoadSegments\020\374\001\022\024\n\017ReleaseSegments\020"
+  "\375\001\022\024\n\017HandoffSegments\020\376\001\022\030\n\023LoadBalanceS"
+  "egments\020\377\001\022\020\n\013CreateIndex\020\254\002\022\022\n\rDescribe"
+  "Index\020\255\002\022\016\n\tDropIndex\020\256\002\022\013\n\006Insert\020\220\003\022\013\n"
+  "\006Delete\020\221\003\022\n\n\005Flush\020\222\003\022\013\n\006Search\020\364\003\022\021\n\014S"
+  "earchResult\020\365\003\022\022\n\rGetIndexState\020\366\003\022\032\n\025Ge"
+  "tIndexBuildProgress\020\367\003\022\034\n\027GetCollectionS"
+  "tatistics\020\370\003\022\033\n\026GetPartitionStatistics\020\371"
+  "\003\022\r\n\010Retrieve\020\372\003\022\023\n\016RetrieveResult\020\373\003\022\024\n"
+  "\017WatchDmChannels\020\374\003\022\025\n\020RemoveDmChannels\020"
+  "\375\003\022\027\n\022WatchQueryChannels\020\376\003\022\030\n\023RemoveQue"
+  "ryChannels\020\377\003\022\020\n\013SegmentInfo\020\330\004\022\r\n\010TimeT"
+  "ick\020\260\t\022\023\n\016QueryNodeStats\020\261\t\022\016\n\tLoadIndex"
+  "\020\262\t\022\016\n\tRequestID\020\263\t\022\017\n\nRequestTSO\020\264\t\022\024\n\017"
+  "AllocateSegment\020\265\t\022\026\n\021SegmentStatistics\020"
+  "\266\t\022\025\n\020SegmentFlushDone\020\267\t\022\017\n\nDataNodeTt\020"
+  "\270\t*\"\n\007DslType\022\007\n\003Dsl\020\000\022\016\n\nBoolExprV1\020\001B5"
+  "Z3github.com/milvus-io/milvus/internal/p"
+  "roto/commonpbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_common_2eproto_deps[1] = {
 };
@@ -268,7 +269,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_com
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_common_2eproto_once;
 static bool descriptor_table_common_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_common_2eproto = {
-  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 2230,
+  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 2261,
   &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_sccs, descriptor_table_common_2eproto_deps, 6, 0,
   schemas, file_default_instances, TableStruct_common_2eproto::offsets,
   file_level_metadata_common_2eproto, 6, file_level_enum_descriptors_common_2eproto, file_level_service_descriptors_common_2eproto,
@@ -345,6 +346,7 @@ bool SegmentState_IsValid(int value) {
     case 2:
     case 3:
     case 4:
+    case 5:
       return true;
     default:
       return false;
@@ -406,6 +408,7 @@ bool MsgType_IsValid(int value) {
     case 1205:
     case 1206:
     case 1207:
+    case 1208:
       return true;
     default:
       return false;

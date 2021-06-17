@@ -37,7 +37,8 @@ type Client struct {
 	ctx        context.Context
 	addr       string
 
-	sess      *sessionutil.Session
+	sess *sessionutil.Session
+
 	timeout   time.Duration
 	recallTry int
 	reconnTry int
@@ -53,15 +54,14 @@ func getDataServiceAddress(sess *sessionutil.Session) (string, error) {
 	ms, ok := msess[key]
 	if !ok {
 		log.Debug("DataServiceClient, not existed in msess ", zap.Any("key", key), zap.Any("len of msess", len(msess)))
-		return "", fmt.Errorf("number of master service is incorrect, %d", len(msess))
+		return "", fmt.Errorf("number of dataservice is incorrect, %d", len(msess))
 	}
 	return ms.Address, nil
 }
 
-func NewClient(address, metaRoot string, etcdAddr []string, timeout time.Duration) *Client {
-	sess := sessionutil.NewSession(context.Background(), metaRoot, etcdAddr)
+func NewClient(metaRoot string, etcdEndpoints []string, timeout time.Duration) *Client {
+	sess := sessionutil.NewSession(context.Background(), metaRoot, etcdEndpoints)
 	return &Client{
-		addr:      address,
 		ctx:       context.Background(),
 		sess:      sess,
 		timeout:   timeout,
@@ -71,40 +71,15 @@ func NewClient(address, metaRoot string, etcdAddr []string, timeout time.Duratio
 }
 
 func (c *Client) Init() error {
-	tracer := opentracing.GlobalTracer()
-	log.Debug("DataServiceClient", zap.Any("c.addr", c.addr))
-	if c.addr != "" {
-		connectGrpcFunc := func() error {
-			ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
-			defer cancelFunc()
-			log.Debug("DataServiceClient try connect ", zap.String("address", c.addr))
-			conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
-				grpc.WithUnaryInterceptor(
-					otgrpc.OpenTracingClientInterceptor(tracer)),
-				grpc.WithStreamInterceptor(
-					otgrpc.OpenTracingStreamClientInterceptor(tracer)))
-			if err != nil {
-				return err
-			}
-			c.conn = conn
-			return nil
-		}
-
-		err := retry.Retry(100000, time.Millisecond*200, connectGrpcFunc)
-		if err != nil {
-			log.Debug("DataServiceClient connect failed", zap.Error(err))
-			return err
-		}
-	} else {
-		return c.reconnect()
+	// for now, we must try many times in Init Stage
+	initFunc := func() error {
+		return c.connect()
 	}
-	log.Debug("DataServiceClient connect success")
-	c.grpcClient = datapb.NewDataServiceClient(c.conn)
-
-	return nil
+	err := retry.Retry(10000, 3*time.Second, initFunc)
+	return err
 }
 
-func (c *Client) reconnect() error {
+func (c *Client) connect() error {
 	tracer := opentracing.GlobalTracer()
 	var err error
 	getDataServiceAddressFn := func() error {
@@ -150,7 +125,7 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 		return ret, nil
 	}
 	for i := 0; i < c.recallTry; i++ {
-		err = c.reconnect()
+		err = c.connect()
 		if err == nil {
 			ret, err = caller()
 			if err == nil {
@@ -270,6 +245,10 @@ func (c *Client) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 		return c.grpcClient.GetSegmentInfo(ctx, req)
 	})
 	return ret.(*datapb.GetSegmentInfoResponse), err
+}
+
+func (c *Client) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
+	return c.grpcClient.SaveBinlogPaths(ctx, req)
 }
 
 func (c *Client) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {

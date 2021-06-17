@@ -143,6 +143,8 @@ func (node *ProxyNode) DropCollection(ctx context.Context, request *milvuspb.Dro
 		Condition:             NewTaskCondition(ctx),
 		DropCollectionRequest: request,
 		masterService:         node.masterService,
+		chMgr:                 node.chMgr,
+		chTicker:              node.chTicker,
 	}
 
 	err := node.sched.DdQueue.Enqueue(dct)
@@ -1062,6 +1064,8 @@ func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertReque
 		},
 		rowIDAllocator: node.idAllocator,
 		segIDAssigner:  node.segAssigner,
+		chMgr:          node.chMgr,
+		chTicker:       node.chTicker,
 	}
 	if len(it.PartitionName) <= 0 {
 		it.PartitionName = Params.DefaultPartitionName
@@ -1127,6 +1131,7 @@ func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchReque
 		queryMsgStream: node.queryMsgStream,
 		resultBuf:      make(chan []*internalpb.SearchResults),
 		query:          request,
+		chMgr:          node.chMgr,
 	}
 
 	err := node.sched.DqQueue.Enqueue(qt)
@@ -1162,6 +1167,17 @@ func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchReque
 	}()
 
 	err = qt.WaitToFinish()
+	log.Debug("Search Finished",
+		zap.Error(err),
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", qt.Base.MsgID),
+		zap.Uint64("timestamp", qt.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.Any("partitions", request.PartitionNames),
+		zap.Any("dsl", request.Dsl),
+		zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)))
+
 	if err != nil {
 		return &milvuspb.SearchResults{
 			Status: &commonpb.Status{
@@ -1339,6 +1355,7 @@ func (node *ProxyNode) Query(ctx context.Context, request *milvuspb.QueryRequest
 			queryMsgStream: node.queryMsgStream,
 			resultBuf:      make(chan []*internalpb.RetrieveResults),
 			retrieve:       retrieveRequest,
+			chMgr:          node.chMgr,
 		}
 
 		err := node.sched.DqQueue.Enqueue(rt)
@@ -1441,7 +1458,7 @@ func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvus
 			SegmentID:    info.ID,
 			CollectionID: info.CollectionID,
 			PartitionID:  info.PartitionID,
-			NumRows:      info.NumRows,
+			NumRows:      info.NumOfRows,
 			State:        info.State,
 		}
 	}
