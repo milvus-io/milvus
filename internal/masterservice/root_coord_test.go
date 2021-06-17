@@ -479,11 +479,15 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, len(core.chanTimeTick.proxyTimeTick), 2)
 		pt, ok := core.chanTimeTick.proxyTimeTick[core.session.ServerID]
 		assert.True(t, ok)
-		assert.Equal(t, 2, len(pt.ChannelNames))
-		assert.Equal(t, 2, len(pt.Timestamps))
-		assert.Equal(t, pt.ChannelNames, createMeta.PhysicalChannelNames)
-		assert.Equal(t, pt.Timestamps[0], pt.Timestamps[1])
-		assert.LessOrEqual(t, createPart.BeginTimestamp, pt.Timestamps[0])
+		assert.Equal(t, 2, len(pt.in.ChannelNames))
+		assert.Equal(t, 2, len(pt.in.Timestamps))
+		assert.Equal(t, 2, len(pt.timeTick))
+		assert.Equal(t, pt.in.ChannelNames, createMeta.PhysicalChannelNames)
+		assert.Equal(t, pt.in.Timestamps[0], pt.in.Timestamps[1])
+		assert.Equal(t, pt.in.Timestamps[0], pt.in.DefaultTimestamp)
+		assert.Equal(t, pt.timeTick[pt.in.ChannelNames[0]], pt.in.DefaultTimestamp)
+		assert.Equal(t, pt.timeTick[pt.in.ChannelNames[1]], pt.in.DefaultTimestamp)
+		assert.LessOrEqual(t, createPart.BeginTimestamp, pt.in.Timestamps[0])
 		core.chanTimeTick.lock.Unlock()
 
 		// check DD operation info
