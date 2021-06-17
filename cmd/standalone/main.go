@@ -20,15 +20,15 @@ import (
 )
 
 func initRoles(roles *roles.MilvusRoles) {
-	roles.EnableRootCoordinator = true
+	roles.EnableRootCoord = true
 	roles.EnableProxyNode = true
-	roles.EnableQueryCoordinator = true
+	roles.EnableQueryCoord = true
 	roles.EnableQueryNode = true
-	roles.EnableDataCoordinator = true
+	roles.EnableDataCoord = true
 	roles.EnableDataNode = true
-	roles.EnableIndexCoordinator = true
+	roles.EnableIndexCoord = true
 	roles.EnableIndexNode = true
-	roles.EnableMsgStreamCoordinator = true
+	roles.EnableMsgStreamCoord = true
 }
 
 func initLogCfg() log.Config {

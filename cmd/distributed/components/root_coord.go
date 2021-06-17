@@ -20,7 +20,7 @@ import (
 	"github.com/opentracing/opentracing-go"
 )
 
-type MasterService struct {
+type RootCoord struct {
 	ctx context.Context
 	svr *msc.Server
 
@@ -28,27 +28,27 @@ type MasterService struct {
 	closer io.Closer
 }
 
-func NewMasterService(ctx context.Context, factory msgstream.Factory) (*MasterService, error) {
-
+// NewRootCoord creates a new RoorCoord
+func NewRootCoord(ctx context.Context, factory msgstream.Factory) (*RootCoord, error) {
 	svr, err := msc.NewServer(ctx, factory)
 	if err != nil {
 		return nil, err
 	}
-	return &MasterService{
+	return &RootCoord{
 		ctx: ctx,
 		svr: svr,
 	}, nil
 }
 
-func (m *MasterService) Run() error {
-	if err := m.svr.Run(); err != nil {
+func (rc *RootCoord) Run() error {
+	if err := rc.svr.Run(); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (m *MasterService) Stop() error {
-	if err := m.svr.Stop(); err != nil {
+func (rc *RootCoord) Stop() error {
+	if err := rc.svr.Stop(); err != nil {
 		return err
 	}
 	return nil

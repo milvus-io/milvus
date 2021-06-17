@@ -23,23 +23,23 @@ import (
 )
 
 const (
-	roleRootCoordinator  = "rootcoordinator"
-	roleQueryCoordinator = "querycoordinator"
-	roleIndexCoordinator = "indexcoordinator"
-	roleDataCoordinator  = "datacoordinator"
-	roleProxyNode        = "proxynode"
-	roleQueryNode        = "querynode"
-	roleIndexNode        = "indexnode"
-	roleDataNode         = "datanode"
-	roleMixture          = "mixture"
+	roleRootCoord  = "rootcoord"
+	roleQueryCoord = "querycoord"
+	roleIndexCoord = "indexcoord"
+	roleDataCoord  = "datacoord"
+	roleProxyNode  = "proxynode"
+	roleQueryNode  = "querynode"
+	roleIndexNode  = "indexnode"
+	roleDataNode   = "datanode"
+	roleMixture    = "mixture"
 )
 
-func getPidFileName(sv string, alias string) string {
+func getPidFileName(coordType string, alias string) string {
 	var filename string
 	if len(alias) != 0 {
-		filename = fmt.Sprintf("%s-%s.pid", sv, alias)
+		filename = fmt.Sprintf("%s-%s.pid", coordType, alias)
 	} else {
-		filename = sv + ".pid"
+		filename = coordType + ".pid"
 	}
 	return filename
 }
@@ -129,47 +129,47 @@ func main() {
 		return
 	}
 	command := os.Args[1]
-	coordinatorType := os.Args[2]
+	coordType := os.Args[2]
 	flags := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 
 	var svrAlias string
 	flags.StringVar(&svrAlias, "alias", "", "set alias")
 
-	var enableRootCoordinator, enableQueryCoordinator, enableIndexCoordinator, enableDataCoordinator bool
-	flags.BoolVar(&enableRootCoordinator, roleRootCoordinator, false, "enable root coordinator")
-	flags.BoolVar(&enableQueryCoordinator, roleQueryCoordinator, false, "enable query coordinator")
-	flags.BoolVar(&enableIndexCoordinator, roleIndexCoordinator, false, "enable index coordinator")
-	flags.BoolVar(&enableDataCoordinator, roleDataCoordinator, false, "enable data coordinator")
+	var enableRootCoord, enableQueryCoord, enableIndexCoord, enableDataCoord bool
+	flags.BoolVar(&enableRootCoord, roleRootCoord, false, "enable root coordinator")
+	flags.BoolVar(&enableQueryCoord, roleQueryCoord, false, "enable query coordinator")
+	flags.BoolVar(&enableIndexCoord, roleIndexCoord, false, "enable index coordinator")
+	flags.BoolVar(&enableDataCoord, roleDataCoord, false, "enable data coordinator")
 
 	if err := flags.Parse(os.Args[3:]); err != nil {
 		os.Exit(-1)
 	}
 
 	role := roles.MilvusRoles{}
-	switch coordinatorType {
-	case roleRootCoordinator:
-		role.EnableRootCoordinator = true
+	switch coordType {
+	case roleRootCoord:
+		role.EnableRootCoord = true
 	case roleProxyNode:
 		role.EnableProxyNode = true
-	case roleQueryCoordinator:
-		role.EnableQueryCoordinator = true
+	case roleQueryCoord:
+		role.EnableQueryCoord = true
 	case roleQueryNode:
 		role.EnableQueryNode = true
-	case roleDataCoordinator:
-		role.EnableDataCoordinator = true
+	case roleDataCoord:
+		role.EnableDataCoord = true
 	case roleDataNode:
 		role.EnableDataNode = true
-	case roleIndexCoordinator:
-		role.EnableIndexCoordinator = true
+	case roleIndexCoord:
+		role.EnableIndexCoord = true
 	case roleIndexNode:
 		role.EnableIndexNode = true
 	case roleMixture:
-		role.EnableRootCoordinator = enableRootCoordinator
-		role.EnableQueryCoordinator = enableQueryCoordinator
-		role.EnableDataCoordinator = enableDataCoordinator
-		role.EnableIndexCoordinator = enableIndexCoordinator
+		role.EnableRootCoord = enableRootCoord
+		role.EnableQueryCoord = enableQueryCoord
+		role.EnableDataCoord = enableDataCoord
+		role.EnableIndexCoord = enableIndexCoord
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown coordinator type = %s\n", coordinatorType)
+		fmt.Fprintf(os.Stderr, "Unknown coordinator type = %s\n", coordType)
 		os.Exit(-1)
 	}
 
@@ -183,7 +183,7 @@ func main() {
 		}
 	}
 
-	filename := getPidFileName(coordinatorType, svrAlias)
+	filename := getPidFileName(coordType, svrAlias)
 	switch command {
 	case "run":
 		fd, err := createPidFile(filename, runtimeDir)
