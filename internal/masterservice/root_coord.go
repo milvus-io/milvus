@@ -76,20 +76,8 @@ func metricProxyNode(v int64) string {
 	return fmt.Sprintf("client_%d", v)
 }
 
-// Core master core
+// Core root coordinator core
 type Core struct {
-	/*
-		ProxyServiceClient Interface:
-		get proxy service time tick channel,InvalidateCollectionMetaCache
-
-		DataService Interface:
-		Segment States Channel, from DataService, if create new segment, data service should put the segment id into this channel, and let the master add the segment id to the collection meta
-		Segment Flush Watcher, monitor if segment has flushed into disk
-
-		IndexService Interface
-		IndexService Sch, tell index service to build index
-	*/
-
 	MetaTable *metaTable
 	//id allocator
 	IDAllocator       func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error)
@@ -120,8 +108,8 @@ type Core struct {
 	//setMsgStreams, send drop partition into dd channel
 	SendDdDropPartitionReq func(ctx context.Context, req *internalpb.DropPartitionRequest, channelNames []string) error
 
-	// if master create segment, data service will put segment msg into this channel
-	DataServiceSegmentChan <-chan *ms.MsgPack
+	// if rootcoord create segment, datacoord will put segment msg into this channel
+	DataCoordSegmentChan <-chan *ms.MsgPack
 
 	// if segment flush completed, data node would put segment msg into this channel
 	DataNodeFlushedSegmentChan <-chan *ms.MsgPack
@@ -244,8 +232,8 @@ func (c *Core) checkInit() error {
 	if c.CallReleaseCollectionService == nil {
 		return fmt.Errorf("CallReleaseCollectionService is nil")
 	}
-	if c.DataServiceSegmentChan == nil {
-		return fmt.Errorf("DataServiceSegmentChan is nil")
+	if c.DataCoordSegmentChan == nil {
+		return fmt.Errorf("DataCoordSegmentChan is nil")
 	}
 	if c.DataNodeFlushedSegmentChan == nil {
 		return fmt.Errorf("DataNodeFlushedSegmentChan is nil")
@@ -277,7 +265,7 @@ func (c *Core) startTimeTickLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():
-			log.Debug("master context closed", zap.Error(c.ctx.Err()))
+			log.Debug("rootcoord context closed", zap.Error(c.ctx.Err()))
 			return
 		case <-ticker.C:
 			if len(c.ddReqQueue) < 2 || cnt > 5 {
@@ -298,14 +286,14 @@ func (c *Core) startTimeTickLoop() {
 	}
 }
 
-// data service send segment info msg to master when create segment
-func (c *Core) startDataServiceSegmentLoop() {
+// datacoord send segment info msg to rootcoord when create segment
+func (c *Core) startDataCoordSegmentLoop() {
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Debug("close data service segment loop")
 			return
-		case segMsg, ok := <-c.DataServiceSegmentChan:
+		case segMsg, ok := <-c.DataCoordSegmentChan:
 			if !ok {
 				log.Debug("data service segment channel is closed, exit loop")
 				return
@@ -338,7 +326,7 @@ func (c *Core) startDataServiceSegmentLoop() {
 				}
 
 				if _, err := c.MetaTable.AddSegment(segInfos, startPosStr, endPosStr); err != nil {
-					//what if master add segment failed, but data service success?
+					//what if rootcoord add segment failed, but datacoord success?
 					log.Debug("add segment info meta table failed ", zap.String("error", err.Error()))
 					continue
 				}
@@ -471,7 +459,7 @@ func (c *Core) sessionLoop() {
 			return
 		case _, ok := <-c.sessCloseCh:
 			if !ok {
-				log.Error("master service disconnect with etcd, process will exit in 1 second")
+				log.Error("rootcoord disconnect with etcd, process will exit in 1 second")
 				go func() {
 					time.Sleep(time.Second)
 					os.Exit(-1)
@@ -537,13 +525,13 @@ func (c *Core) setMsgStreams() error {
 		return fmt.Errorf("MsgChannelSubName is emptyr")
 	}
 
-	// master time tick channel
+	// rootcoord time tick channel
 	if Params.TimeTickChannel == "" {
 		return fmt.Errorf("TimeTickChannel is empty")
 	}
 	timeTickStream, _ := c.msFactory.NewMsgStream(c.ctx)
 	timeTickStream.AsProducer([]string{Params.TimeTickChannel})
-	log.Debug("masterservice AsProducer: " + Params.TimeTickChannel)
+	log.Debug("rootcoord AsProducer: " + Params.TimeTickChannel)
 
 	c.SendTimeTick = func(t typeutil.Timestamp) error {
 		msgPack := ms.MsgPack{}
@@ -664,7 +652,7 @@ func (c *Core) setMsgStreams() error {
 	if err != nil {
 		return err
 	}
-	c.DataServiceSegmentChan = (*dsStream).Chan()
+	c.DataCoordSegmentChan = (*dsStream).Chan()
 
 	// data node will put msg into this channel when flush segment
 	dnChanName := Params.DataServiceSegmentChannel
@@ -687,7 +675,7 @@ func (c *Core) SetNewProxyClient(f func(sess *sessionutil.Session) (types.ProxyN
 	}
 }
 
-func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
+func (c *Core) SetDataCoord(ctx context.Context, s types.DataService) error {
 	rsp, err := s.GetSegmentInfoChannel(ctx)
 	if err != nil {
 		return err
@@ -789,7 +777,7 @@ func (c *Core) SetDataService(ctx context.Context, s types.DataService) error {
 	return nil
 }
 
-func (c *Core) SetIndexService(s types.IndexService) error {
+func (c *Core) SetIndexCoord(s types.IndexService) error {
 	c.CallBuildIndexService = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (retID typeutil.UniqueID, retErr error) {
 		defer func() {
 			if err := recover(); err != nil {
@@ -845,7 +833,7 @@ func (c *Core) SetIndexService(s types.IndexService) error {
 	return nil
 }
 
-func (c *Core) SetQueryService(s types.QueryService) error {
+func (c *Core) SetQueryCoord(s types.QueryService) error {
 	c.CallReleaseCollectionService = func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) (retErr error) {
 		defer func() {
 			if err := recover(); err != nil {
@@ -906,13 +894,13 @@ func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, 
 	return bldID, nil
 }
 
-// Register register master service at etcd
+// Register register rootcoord at etcd
 func (c *Core) Register() error {
 	c.session = sessionutil.NewSession(c.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
 	if c.session == nil {
 		return fmt.Errorf("session is nil, maybe the etcd client connection fails")
 	}
-	c.sessCloseCh = c.session.Init(typeutil.MasterServiceRole, Params.Address, true)
+	c.sessCloseCh = c.session.Init(typeutil.RootCoordRole, Params.Address, true)
 	return nil
 }
 
@@ -1001,7 +989,7 @@ func (c *Core) Init() error {
 		initError = c.setMsgStreams()
 	})
 	if initError == nil {
-		log.Debug("Master service", zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Initializing)]))
+		log.Debug(typeutil.RootCoordRole, zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Initializing)]))
 	}
 	return initError
 }
@@ -1124,32 +1112,32 @@ func (c *Core) reSendDdMsg(ctx context.Context) error {
 
 func (c *Core) Start() error {
 	if err := c.checkInit(); err != nil {
-		log.Debug("MasterService Start checkInit failed", zap.Error(err))
+		log.Debug("RootCoord Start checkInit failed", zap.Error(err))
 		return err
 	}
 
-	log.Debug("MasterService", zap.Int64("node id", c.session.ServerID))
-	log.Debug("MasterService", zap.String("time tick channel name", Params.TimeTickChannel))
+	log.Debug(typeutil.RootCoordRole, zap.Int64("node id", c.session.ServerID))
+	log.Debug(typeutil.RootCoordRole, zap.String("time tick channel name", Params.TimeTickChannel))
 
 	c.startOnce.Do(func() {
 		if err := c.proxyNodeManager.WatchProxyNode(); err != nil {
-			log.Debug("MasterService Start WatchProxyNode failed", zap.Error(err))
+			log.Debug("RootCoord Start WatchProxyNode failed", zap.Error(err))
 			return
 		}
 		if err := c.reSendDdMsg(c.ctx); err != nil {
-			log.Debug("MasterService Start reSendDdMsg failed", zap.Error(err))
+			log.Debug("RootCoord Start reSendDdMsg failed", zap.Error(err))
 			return
 		}
 		go c.startDdScheduler()
 		go c.startTimeTickLoop()
-		go c.startDataServiceSegmentLoop()
+		go c.startDataCoordSegmentLoop()
 		go c.startDataNodeFlushedSegmentLoop()
 		go c.tsLoop()
 		go c.sessionLoop()
 		go c.chanTimeTick.StartWatch()
 		c.stateCode.Store(internalpb.StateCode_Healthy)
 	})
-	log.Debug("MasterService", zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Healthy)]))
+	log.Debug(typeutil.RootCoordRole, zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Healthy)]))
 	return nil
 }
 
@@ -1166,7 +1154,7 @@ func (c *Core) GetComponentStates(ctx context.Context) (*internalpb.ComponentSta
 	return &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{
 			NodeID:    c.session.ServerID,
-			Role:      typeutil.MasterServiceRole,
+			Role:      typeutil.RootCoordRole,
 			StateCode: code,
 			ExtraInfo: nil,
 		},
@@ -1177,7 +1165,7 @@ func (c *Core) GetComponentStates(ctx context.Context) (*internalpb.ComponentSta
 		SubcomponentStates: []*internalpb.ComponentInfo{
 			{
 				NodeID:    c.session.ServerID,
-				Role:      typeutil.MasterServiceRole,
+				Role:      typeutil.RootCoordRole,
 				StateCode: code,
 				ExtraInfo: nil,
 			},
@@ -1532,12 +1520,12 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRe
 		zap.String("collection", in.CollectionName))
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		log.Debug("ShowPartitionRequest failed: master is not healthy", zap.String("role", Params.RoleName),
+		log.Debug("ShowPartitionRequest failed: rootcoord is not healthy", zap.String("role", Params.RoleName),
 			zap.Int64("msgID", in.Base.MsgID), zap.String("state", internalpb.StateCode_name[int32(code)]))
 		return &milvuspb.ShowPartitionsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    fmt.Sprintf("master is not healthy, state code = %s", internalpb.StateCode_name[int32(code)]),
+				Reason:    fmt.Sprintf("rootcoord is not healthy, state code = %s", internalpb.StateCode_name[int32(code)]),
 			},
 			PartitionNames: nil,
 			PartitionIDs:   nil,

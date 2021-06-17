@@ -138,7 +138,7 @@ func TestGrpcService(t *testing.T) {
 
 	t.Logf("master service port = %d", Params.Port)
 
-	core, ok := (svr.masterService).(*cms.Core)
+	core, ok := (svr.rootCoord).(*cms.Core)
 	assert.True(t, ok)
 
 	err = core.Register()
@@ -146,7 +146,7 @@ func TestGrpcService(t *testing.T) {
 
 	err = svr.startGrpc()
 	assert.Nil(t, err)
-	svr.masterService.UpdateStateCode(internalpb.StateCode_Initializing)
+	svr.rootCoord.UpdateStateCode(internalpb.StateCode_Initializing)
 
 	etcdCli, err := initEtcd(cms.Params.EtcdEndpoints)
 	assert.Nil(t, err)
@@ -169,7 +169,7 @@ func TestGrpcService(t *testing.T) {
 	FlushedSegmentChan := make(chan *msgstream.MsgPack, 8)
 	core.DataNodeFlushedSegmentChan = FlushedSegmentChan
 	SegmentInfoChan := make(chan *msgstream.MsgPack, 8)
-	core.DataServiceSegmentChan = SegmentInfoChan
+	core.DataCoordSegmentChan = SegmentInfoChan
 
 	timeTickArray := make([]typeutil.Timestamp, 0, 16)
 	core.SendTimeTick = func(ts typeutil.Timestamp) error {
@@ -247,13 +247,13 @@ func TestGrpcService(t *testing.T) {
 	}
 
 	cms.Params.Address = Params.Address
-	err = svr.masterService.Register()
+	err = svr.rootCoord.Register()
 	assert.Nil(t, err)
 
 	err = svr.start()
 	assert.Nil(t, err)
 
-	svr.masterService.UpdateStateCode(internalpb.StateCode_Healthy)
+	svr.rootCoord.UpdateStateCode(internalpb.StateCode_Healthy)
 
 	cli, err := grpcmasterserviceclient.NewClient(context.Background(), cms.Params.MetaRootPath, cms.Params.EtcdEndpoints, 3*time.Second)
 	assert.Nil(t, err)
@@ -820,14 +820,15 @@ type mockCore struct {
 
 func (m *mockCore) UpdateStateCode(internalpb.StateCode) {
 }
-func (m *mockCore) SetDataService(context.Context, types.DataService) error {
+
+func (m *mockCore) SetDataCoord(context.Context, types.DataService) error {
 	return nil
 }
-func (m *mockCore) SetIndexService(types.IndexService) error {
+func (m *mockCore) SetIndexCoord(types.IndexService) error {
 	return nil
 }
 
-func (m *mockCore) SetQueryService(types.QueryService) error {
+func (m *mockCore) SetQueryCoord(types.QueryService) error {
 	return nil
 }
 
@@ -850,17 +851,17 @@ func (m *mockCore) Stop() error {
 func (m *mockCore) SetNewProxyClient(func(sess *sessionutil.Session) (types.ProxyNode, error)) {
 }
 
-type mockDataService struct {
+type mockDataCoord struct {
 	types.DataService
 }
 
-func (m *mockDataService) Init() error {
+func (m *mockDataCoord) Init() error {
 	return nil
 }
-func (m *mockDataService) Start() error {
+func (m *mockDataCoord) Start() error {
 	return nil
 }
-func (m *mockDataService) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (m *mockDataCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	return &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{
 			StateCode: internalpb.StateCode_Healthy,
@@ -875,7 +876,7 @@ func (m *mockDataService) GetComponentStates(ctx context.Context) (*internalpb.C
 		},
 	}, nil
 }
-func (m *mockDataService) Stop() error {
+func (m *mockDataCoord) Stop() error {
 	return fmt.Errorf("stop error")
 }
 
@@ -910,10 +911,10 @@ func (m *mockQuery) Stop() error {
 func TestRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	svr := Server{
-		masterService: &mockCore{},
-		ctx:           ctx,
-		cancel:        cancel,
-		grpcErrChan:   make(chan error),
+		rootCoord:   &mockCore{},
+		ctx:         ctx,
+		cancel:      cancel,
+		grpcErrChan: make(chan error),
 	}
 	Params.Init()
 	Params.Port = 1000000
@@ -921,13 +922,13 @@ func TestRun(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "listen tcp: address 1000000: invalid port")
 
-	svr.newDataServiceClient = func(string, []string, time.Duration) types.DataService {
-		return &mockDataService{}
+	svr.newDataCoordClient = func(string, []string, time.Duration) types.DataService {
+		return &mockDataCoord{}
 	}
-	svr.newIndexServiceClient = func(string, []string, time.Duration) types.IndexService {
+	svr.newIndexCoordClient = func(string, []string, time.Duration) types.IndexService {
 		return &mockIndex{}
 	}
-	svr.newQueryServiceClient = func(string, []string, time.Duration) types.QueryService {
+	svr.newQueryCoordClient = func(string, []string, time.Duration) types.QueryService {
 		return &mockQuery{}
 	}
 

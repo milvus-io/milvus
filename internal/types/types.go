@@ -118,9 +118,9 @@ type MasterComponent interface {
 	MasterService
 
 	UpdateStateCode(internalpb.StateCode)
-	SetDataService(context.Context, DataService) error
-	SetIndexService(IndexService) error
-	SetQueryService(QueryService) error
+	SetDataCoord(context.Context, DataService) error
+	SetIndexCoord(IndexService) error
+	SetQueryCoord(QueryService) error
 	SetNewProxyClient(func(sess *sessionutil.Session) (ProxyNode, error))
 }
 
