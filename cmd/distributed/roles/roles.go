@@ -45,15 +45,15 @@ func newMsgFactory(localMsg bool) msgstream.Factory {
 }
 
 type MilvusRoles struct {
-	EnableMaster           bool `env:"ENABLE_MASTER"`
-	EnableProxyNode        bool `env:"ENABLE_PROXY_NODE"`
-	EnableQueryService     bool `env:"ENABLE_QUERY_SERVICE"`
-	EnableQueryNode        bool `env:"ENABLE_QUERY_NODE"`
-	EnableDataService      bool `env:"ENABLE_DATA_SERVICE"`
-	EnableDataNode         bool `env:"ENABLE_DATA_NODE"`
-	EnableIndexService     bool `env:"ENABLE_INDEX_SERVICE"`
-	EnableIndexNode        bool `env:"ENABLE_INDEX_NODE"`
-	EnableMsgStreamService bool `env:"ENABLE_MSGSTREAM_SERVICE"`
+	EnableRootCoordinator      bool `env:"ENABLE_ROOT_COORDINATOR"`
+	EnableProxyNode            bool `env:"ENABLE_PROXY_NODE"`
+	EnableQueryCoordinator     bool `env:"ENABLE_QUERY_COORDINATOR"`
+	EnableQueryNode            bool `env:"ENABLE_QUERY_NODE"`
+	EnableDataCoordinator      bool `env:"ENABLE_DATA_COORDINATOR"`
+	EnableDataNode             bool `env:"ENABLE_DATA_NODE"`
+	EnableIndexCoordinator     bool `env:"ENABLE_INDEX_COORDINATOR"`
+	EnableIndexNode            bool `env:"ENABLE_INDEX_NODE"`
+	EnableMsgStreamCoordinator bool `env:"ENABLE_MSGSTREAM_COORDINATOR"`
 }
 
 func (mr *MilvusRoles) EnvValue(env string) bool {
@@ -72,7 +72,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	if mr.EnableMaster {
+	if mr.EnableRootCoordinator {
 		var ms *components.MasterService
 		var wg sync.WaitGroup
 
@@ -128,7 +128,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		metrics.RegisterProxyNode()
 	}
 
-	if mr.EnableQueryService {
+	if mr.EnableQueryCoordinator {
 		var qs *components.QueryService
 		var wg sync.WaitGroup
 
@@ -184,7 +184,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		metrics.RegisterQueryNode()
 	}
 
-	if mr.EnableDataService {
+	if mr.EnableDataCoordinator {
 		var ds *components.DataService
 		var wg sync.WaitGroup
 
@@ -240,7 +240,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		metrics.RegisterDataNode()
 	}
 
-	if mr.EnableIndexService {
+	if mr.EnableIndexCoordinator {
 		var is *components.IndexService
 		var wg sync.WaitGroup
 
@@ -294,7 +294,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		metrics.RegisterIndexNode()
 	}
 
-	if mr.EnableMsgStreamService {
+	if mr.EnableMsgStreamCoordinator {
 		var mss *components.MsgStream
 		var wg sync.WaitGroup
 
