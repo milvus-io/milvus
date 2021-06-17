@@ -9,13 +9,13 @@ from utils.api_request import api_request
 class ApiCollectionWrapper:
     collection = None
 
-    def init_collection(self, name, data=None, schema=None, check_task=None, check_items=None, **kwargs):
+    def init_collection(self, name, schema=None, check_task=None, check_items=None, **kwargs):
         """ In order to distinguish the same name of collection """
         func_name = sys._getframe().f_code.co_name
-        res, is_succ = api_request([Collection, name, data, schema], **kwargs)
+        res, is_succ = api_request([Collection, name, schema], **kwargs)
         self.collection = res if is_succ else None
         check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
-                                       name=name, data=data, schema=schema, **kwargs).run()
+                                       name=name, schema=schema, **kwargs).run()
         return res, check_result
 
     @property
@@ -35,58 +35,32 @@ class ApiCollectionWrapper:
         # return res, check_result
 
     @property
-    def name(self, check_task=None, check_items=None):
+    def name(self):
         return self.collection.name
-        # func_name = sys._getframe().f_code.co_name
-        # res, check = func_req([self.collection.name])
-        # check_result = CheckFunc(res, func_name, check_task, check_items, check).run()
-        # return res, check_result
 
     @property
-    def is_empty(self, check_task=None, check_items=None):
+    def is_empty(self):
         return self.collection.is_empty
-        # func_name = sys._getframe().f_code.co_name
-        # res, check = func_req([self.collection.is_empty])
-        # check_result = CheckFunc(res, func_name, check_task, check_items, check).run()
-        # return res, check_result
 
     @property
-    def num_entities(self, check_task=None, check_items=None):
+    def num_entities(self):
         return self.collection.num_entities
-        # func_name = sys._getframe().f_code.co_name
-        # res, check = func_req([self.collection.num_entities])
-        # check_result = CheckFunc(res, func_name, check_task, check_items, check).run()
-        # return res, check_result
 
     @property
-    def primary_field(self, check_task=None, check_items=None):
+    def primary_field(self):
         return self.collection.primary_field
-        # func_name = sys._getframe().f_code.co_name
-        # res, check = func_req([self.collection.primary_field])
-        # check_result = CheckFunc(res, func_name, check_task, check_items, check).run()
-        # return res, check_result
 
     def drop(self, check_task=None, check_items=None, **kwargs):
-        # log.info("Dropping collection")
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.drop], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
-        # if check_result:
-        #     log.info("Dropped collection")
-        # else:
-        #     log.info("Dropping collection failed")
         return res, check_result
 
-    def load(self, field_names=None, index_names=None, partition_names=None, check_task=None, check_items=None, **kwargs):
-        # log.info("loading data")
+    def load(self, partition_names=None, check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.collection.load, field_names, index_names, partition_names], **kwargs)
-        check_result = ResponseChecker(res, func_name, check_task, check_items, check, field_names=field_names, index_names=index_names,
+        res, check = api_request([self.collection.load, partition_names], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        partition_names=partition_names, **kwargs).run()
-        # if check_result:
-        #     log.info("loaded data")
-        # else:
-        #     log.info("loading failed")
         return res, check_result
 
     def release(self, check_task=None, check_items=None, **kwargs):
@@ -118,12 +92,8 @@ class ApiCollectionWrapper:
         return res, check_result
 
     @property
-    def partitions(self, check_task=None, check_items=None):
+    def partitions(self):
         return self.collection.partitions
-        # func_name = sys._getframe().f_code.co_name
-        # res, check = func_req([self.collection.partitions])
-        # check_result = CheckFunc(res, func_name, check_task, check_items, check).run()
-        # return res, check_result
 
     def partition(self, partition_name, check_task=None, check_items=None):
         func_name = sys._getframe().f_code.co_name
@@ -153,34 +123,30 @@ class ApiCollectionWrapper:
         return res, check_result
 
     @property
-    def indexes(self, check_task=None, check_items=None):
+    def indexes(self):
         return self.collection.indexes
-        # func_name = sys._getframe().f_code.co_name
-        # res, check = func_req([self.collection.indexes])
-        # check_result = CheckFunc(res, func_name, check_task, check_items, check).run()
-        # return res, check_result
 
-    def index(self, index_name="", check_task=None, check_items=None):
+    def index(self, check_task=None, check_items=None):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.collection.index, index_name])
-        check_result = ResponseChecker(res, func_name, check_task, check_items, check, index_name=index_name).run()
+        res, check = api_request([self.collection.index])
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check).run()
         return res, check_result
 
-    def create_index(self, field_name, index_params, index_name="", check_task=None, check_items=None, **kwargs):
+    def create_index(self, field_name, index_params, check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.collection.create_index, field_name, index_params, index_name], **kwargs)
-        check_result = ResponseChecker(res, func_name, check_task, check_items, check, field_name=field_name, index_params=index_params,
-                                       index_name=index_name, **kwargs).run()
+        res, check = api_request([self.collection.create_index, field_name, index_params], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       field_name=field_name, index_params=index_params, **kwargs).run()
         return res, check_result
 
-    def has_index(self, index_name="", check_task=None, check_items=None):
+    def has_index(self, check_task=None, check_items=None):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.collection.has_index, index_name])
-        check_result = ResponseChecker(res, func_name, check_task, check_items, check, index_name=index_name).run()
+        res, check = api_request([self.collection.has_index])
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check).run()
         return res, check_result
 
-    def drop_index(self, index_name="", check_task=None, check_items=None, **kwargs):
+    def drop_index(self, check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.collection.drop_index, index_name], **kwargs)
-        check_result = ResponseChecker(res, func_name, check_task, check_items, check, index_name=index_name, **kwargs).run()
+        res, check = api_request([self.collection.drop_index], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result

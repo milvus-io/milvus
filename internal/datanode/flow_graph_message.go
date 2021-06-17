@@ -13,6 +13,7 @@ package datanode
 
 import (
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
@@ -22,70 +23,21 @@ type (
 	MsgStreamMsg = flowgraph.MsgStreamMsg
 )
 
-type key2SegMsg struct {
-	tsMessages []msgstream.TsMsg
-	timeRange  TimeRange
-}
-
-type ddMsg struct {
-	collectionRecords map[UniqueID][]*metaOperateRecord
-	partitionRecords  map[UniqueID][]*metaOperateRecord
-	flushMessages     []*flushMsg
-	gcRecord          *gcRecord
-	timeRange         TimeRange
-}
-
-type metaOperateRecord struct {
-	createOrDrop bool // create: true, drop: false
-	timestamp    Timestamp
-}
-
 type insertMsg struct {
 	insertMessages []*msgstream.InsertMsg
-	flushMessages  []*flushMsg
-	gcRecord       *gcRecord
 	timeRange      TimeRange
 	startPositions []*internalpb.MsgPosition
 	endPositions   []*internalpb.MsgPosition
 }
 
-type deleteMsg struct {
-	deleteMessages []*msgstream.DeleteMsg
-	timeRange      TimeRange
-}
-
-type gcMsg struct {
-	gcRecord  *gcRecord
-	timeRange TimeRange
-}
-
-type gcRecord struct {
-	collections []UniqueID
-}
-
 type flushMsg struct {
 	msgID        UniqueID
 	timestamp    Timestamp
-	segmentIDs   []UniqueID
+	segmentID    UniqueID
 	collectionID UniqueID
-}
-
-func (ksMsg *key2SegMsg) TimeTick() Timestamp {
-	return ksMsg.timeRange.timestampMax
-}
-
-func (suMsg *ddMsg) TimeTick() Timestamp {
-	return suMsg.timeRange.timestampMax
+	dmlFlushedCh chan<- []*datapb.ID2PathList
 }
 
 func (iMsg *insertMsg) TimeTick() Timestamp {
 	return iMsg.timeRange.timestampMax
-}
-
-func (dMsg *deleteMsg) TimeTick() Timestamp {
-	return dMsg.timeRange.timestampMax
-}
-
-func (gcMsg *gcMsg) TimeTick() Timestamp {
-	return gcMsg.timeRange.timestampMax
 }

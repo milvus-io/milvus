@@ -24,12 +24,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-      - name: Check Dockerfile
-        uses: reviewdog/action-hadolint@v1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          reporter: github-pr-check # Default is github-pr-check
-          hadolint_ignore: DL3008 SC1091 DL3013 DL3003
       - name: Get version from system time after release step
         id: extracter
         run: |

@@ -10,23 +10,20 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
 
-nodeID: # will be deprecated later
-  queryNodeIDList: [1]
-
 etcd:
-  address: localhost
-  port: 2379
+  endpoints:
+    - localhost:2379
   rootPath: by-dev
   metaSubPath: meta # metaRootPath = rootPath + '/' + metaSubPath
   kvSubPath: kv # kvRootPath = rootPath + '/' + kvSubPath
-  segFlushMetaSubPath: datanode/segment # Full Path = rootPath/metaSubPath/segFlushMetaSubPath
-  ddlFlushMetaSubPath: datanode/ddl     # Full Path = rootPath/metaSubPath/ddlFlushMetaSubPath
   segmentBinlogSubPath: dataservice/binlog/segment  # Full Path = rootPath/metaSubPath/segmentBinlogSubPath
   collectionBinlogSubPath: dataservice/binlog/collection # Full Path = rootPath/metaSubPath/collectionBinglogSubPath
   flushStreamPosSubPath: dataservice/flushstream # Full path = rootPath/metaSubPath/flushStreamPosSubPath
   statsStreamPosSubPath: dataservice/statsstream # Full path = rootPath/metaSubPath/statsStreamPosSubPath
   segmentDmlPosSubPath: dataservice/segmentdml # Full path = rootPath/metaSubPath/segmentDmlPosSubPath
   segmentDdlPosSubPath: dataservice/segmentddl # Full path = rootPath/metaSubPath/segmentDdlPosSubPath
+  dmlChanPosSubPath: dataservice/dmlchannel # Full Path = root/metaSubPath/dmlChanPosSubPath
+  ddlChanPosSubPath: dataservice/ddlchannel # Full Path = root/metaSubPath/ddlChanPosSubPath
 
 minio:
   address: localhost

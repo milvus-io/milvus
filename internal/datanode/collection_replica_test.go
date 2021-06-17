@@ -14,105 +14,37 @@ package datanode
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/types"
 )
 
+func newCollectionSegmentReplica(ms types.MasterService, collectionID UniqueID) *CollectionSegmentReplica {
+	metaService := newMetaService(ms, collectionID)
+	segments := make(map[UniqueID]*Segment)
+
+	replica := &CollectionSegmentReplica{
+		segments:       segments,
+		collectionID:   collectionID,
+		metaService:    metaService,
+		startPositions: make(map[UniqueID][]*internalpb.MsgPosition),
+		endPositions:   make(map[UniqueID][]*internalpb.MsgPosition),
+	}
+	return replica
+}
+
 func TestReplica_Collection(t *testing.T) {
-	Factory := &MetaFactory{}
-	collID := UniqueID(100)
-	collMetaMock := Factory.CollectionMetaFactory(collID, "test-coll-name-0")
-
-	t.Run("get_collection_num", func(t *testing.T) {
-		replica := newReplica()
-		assert.Zero(t, replica.getCollectionNum())
-
-		replica = new(CollectionSegmentReplica)
-		assert.Zero(t, replica.getCollectionNum())
-
-		replica = &CollectionSegmentReplica{
-			collections: map[UniqueID]*Collection{
-				0: {id: 0},
-				1: {id: 1},
-				2: {id: 2},
-			},
-		}
-		assert.Equal(t, 3, replica.getCollectionNum())
-	})
-
-	t.Run("add_collection", func(t *testing.T) {
-		replica := newReplica()
-		require.Zero(t, replica.getCollectionNum())
-
-		err := replica.addCollection(collID, nil)
-		assert.Error(t, err)
-		assert.Zero(t, replica.getCollectionNum())
-
-		err = replica.addCollection(collID, collMetaMock.Schema)
-		assert.NoError(t, err)
-		assert.Equal(t, 1, replica.getCollectionNum())
-		assert.True(t, replica.hasCollection(collID))
-		coll, err := replica.getCollectionByID(collID)
-		assert.NoError(t, err)
-		assert.NotNil(t, coll)
-		assert.Equal(t, collID, coll.GetID())
-		assert.Equal(t, collMetaMock.Schema.GetName(), coll.GetName())
-		assert.Equal(t, collMetaMock.Schema, coll.GetSchema())
-
-		sameID := collID
-		otherSchema := Factory.CollectionMetaFactory(sameID, "test-coll-name-1").GetSchema()
-		err = replica.addCollection(sameID, otherSchema)
-		assert.Error(t, err)
-
-	})
-
-	t.Run("remove_collection", func(t *testing.T) {
-		replica := newReplica()
-		require.False(t, replica.hasCollection(collID))
-		require.Zero(t, replica.getCollectionNum())
-
-		err := replica.removeCollection(collID)
-		assert.NoError(t, err)
-
-		err = replica.addCollection(collID, collMetaMock.Schema)
-		require.NoError(t, err)
-		require.True(t, replica.hasCollection(collID))
-		require.Equal(t, 1, replica.getCollectionNum())
-
-		err = replica.removeCollection(collID)
-		assert.NoError(t, err)
-		assert.False(t, replica.hasCollection(collID))
-		assert.Zero(t, replica.getCollectionNum())
-		err = replica.removeCollection(collID)
-		assert.NoError(t, err)
-	})
-
-	t.Run("get_collection_by_id", func(t *testing.T) {
-		replica := newReplica()
-		require.False(t, replica.hasCollection(collID))
-
-		coll, err := replica.getCollectionByID(collID)
-		assert.Error(t, err)
-		assert.Nil(t, coll)
-
-		err = replica.addCollection(collID, collMetaMock.Schema)
-		require.NoError(t, err)
-		require.True(t, replica.hasCollection(collID))
-		require.Equal(t, 1, replica.getCollectionNum())
-
-		coll, err = replica.getCollectionByID(collID)
-		assert.NoError(t, err)
-		assert.NotNil(t, coll)
-		assert.Equal(t, collID, coll.GetID())
-		assert.Equal(t, collMetaMock.Schema.GetName(), coll.GetName())
-		assert.Equal(t, collMetaMock.Schema, coll.GetSchema())
-	})
+	// collID := UniqueID(100)
 }
 
 func TestReplica_Segment(t *testing.T) {
+	mockMaster := &MasterServiceFactory{}
+	collID := UniqueID(1)
+
 	t.Run("Test segment", func(t *testing.T) {
-		replica := newReplica()
+		replica := newReplica(mockMaster, collID)
 		assert.False(t, replica.hasSegment(0))
 
 		err := replica.addSegment(0, 1, 2, "insert-01")
@@ -135,37 +67,9 @@ func TestReplica_Segment(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, UniqueID(0), update.SegmentID)
 		assert.Equal(t, int64(100), update.NumRows)
-		assert.NotNil(t, update.StartPosition)
-		assert.Nil(t, update.EndPosition)
 
-		f2p := map[UniqueID]string{
-			1: "a",
-			2: "b",
-		}
-
-		err = replica.bufferAutoFlushBinlogPaths(UniqueID(0), f2p)
-		assert.NoError(t, err)
-		r, err := replica.getBufferPaths(0)
-		assert.NoError(t, err)
-		assert.ElementsMatch(t, []string{"a"}, r[1])
-		assert.ElementsMatch(t, []string{"b"}, r[2])
-		err = replica.bufferAutoFlushBinlogPaths(UniqueID(0), f2p)
-		assert.NoError(t, err)
-		r, err = replica.getBufferPaths(0)
-		assert.NoError(t, err)
-		assert.ElementsMatch(t, []string{"a", "a"}, r[1])
-		assert.ElementsMatch(t, []string{"b", "b"}, r[2])
-
-		err = replica.setIsFlushed(0)
-		assert.NoError(t, err)
-		err = replica.setStartPosition(0, &internalpb.MsgPosition{})
-		assert.NoError(t, err)
-		err = replica.setEndPosition(0, &internalpb.MsgPosition{})
-		assert.NoError(t, err)
 		update, err = replica.getSegmentStatisticsUpdates(0)
 		assert.NoError(t, err)
-		assert.Nil(t, update.StartPosition)
-		assert.NotNil(t, update.EndPosition)
 
 		err = replica.removeSegment(0)
 		assert.NoError(t, err)
@@ -173,23 +77,12 @@ func TestReplica_Segment(t *testing.T) {
 	})
 
 	t.Run("Test errors", func(t *testing.T) {
-		replica := newReplica()
+		replica := newReplica(mockMaster, collID)
 		require.False(t, replica.hasSegment(0))
 
 		seg, err := replica.getSegmentByID(0)
 		assert.Error(t, err)
 		assert.Nil(t, seg)
-
-		err = replica.setIsFlushed(0)
-		assert.Error(t, err)
-		err = replica.setStartPosition(0, &internalpb.MsgPosition{})
-		assert.Error(t, err)
-		err = replica.setStartPosition(0, nil)
-		assert.Error(t, err)
-		err = replica.setEndPosition(0, &internalpb.MsgPosition{})
-		assert.Error(t, err)
-		err = replica.setEndPosition(0, nil)
-		assert.Error(t, err)
 
 		err = replica.updateStatistics(0, 0)
 		assert.Error(t, err)

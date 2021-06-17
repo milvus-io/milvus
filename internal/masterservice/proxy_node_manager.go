@@ -37,8 +37,8 @@ type proxyNodeManager struct {
 	delSessions []func(*sessionutil.Session)
 }
 
-func newProxyNodeManager(ctx context.Context, etcdAddr []string, fns ...func([]*sessionutil.Session)) (*proxyNodeManager, error) {
-	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdAddr})
+func newProxyNodeManager(ctx context.Context, etcdEndpoints []string, fns ...func([]*sessionutil.Session)) (*proxyNodeManager, error) {
+	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
 	if err != nil {
 		return nil, err
 	}

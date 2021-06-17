@@ -36,22 +36,22 @@ type Client struct {
 	grpc datapb.DataNodeClient
 	conn *grpc.ClientConn
 
-	address string
+	addr string
 
 	timeout   time.Duration
 	reconnTry int
 	recallTry int
 }
 
-func NewClient(address string, timeout time.Duration) (*Client, error) {
-	if address == "" {
+func NewClient(addr string, timeout time.Duration) (*Client, error) {
+	if addr == "" {
 		return nil, fmt.Errorf("address is empty")
 	}
 
 	return &Client{
 		grpc:      nil,
 		conn:      nil,
-		address:   address,
+		addr:      addr,
 		ctx:       context.Background(),
 		timeout:   timeout,
 		recallTry: 3,
@@ -60,39 +60,22 @@ func NewClient(address string, timeout time.Duration) (*Client, error) {
 }
 
 func (c *Client) Init() error {
-	tracer := opentracing.GlobalTracer()
-	connectGrpcFunc := func() error {
-		log.Debug("DataNodeClient try connect ", zap.String("address", c.address))
-		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
-		defer cancelFunc()
-		conn, err := grpc.DialContext(ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
-			grpc.WithUnaryInterceptor(
-				otgrpc.OpenTracingClientInterceptor(tracer)),
-			grpc.WithStreamInterceptor(
-				otgrpc.OpenTracingStreamClientInterceptor(tracer)))
-		if err != nil {
-			return err
-		}
-		c.conn = conn
-		return nil
+	// for now, we must try many times in Init Stage
+	initFunc := func() error {
+		return c.connect()
 	}
-
-	err := retry.Retry(c.reconnTry, time.Millisecond*500, connectGrpcFunc)
-	if err != nil {
-		log.Debug("DataNodeClient try connect failed", zap.Error(err))
-		return err
-	}
-	log.Debug("DataNodeClient connect success")
-	c.grpc = datapb.NewDataNodeClient(c.conn)
-	return nil
+	err := retry.Retry(10000, 3*time.Second, initFunc)
+	return err
 }
 
-func (c *Client) reconnect() error {
+func (c *Client) connect() error {
 	tracer := opentracing.GlobalTracer()
 	var err error
 	connectGrpcFunc := func() error {
-		log.Debug("DataNodeClient try reconnect ", zap.String("address", c.address))
-		conn, err := grpc.DialContext(c.ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
+		log.Debug("DataNode connect ", zap.String("address", c.addr))
+		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
+		defer cancelFunc()
+		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(
@@ -106,10 +89,10 @@ func (c *Client) reconnect() error {
 
 	err = retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
 	if err != nil {
-		log.Debug("DataNodeClient try reconnect failed", zap.Error(err))
+		log.Debug("DataNodeClient try connect failed", zap.Error(err))
 		return err
 	}
-	log.Debug("DataNodeClient reconnect success")
+	log.Debug("DataNodeClient connect success")
 	c.grpc = datapb.NewDataNodeClient(c.conn)
 	return nil
 }
@@ -120,7 +103,7 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 		return ret, nil
 	}
 	for i := 0; i < c.recallTry; i++ {
-		err = c.reconnect()
+		err = c.connect()
 		if err == nil {
 			ret, err = caller()
 			if err == nil {

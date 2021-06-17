@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"math"
 	"math/rand"
 	"path"
@@ -26,12 +27,12 @@ import (
 	"go.uber.org/zap"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/masterpb"
@@ -42,7 +43,26 @@ import (
 const ctxTimeInMillisecond = 5000
 const debug = false
 
-func newDataNodeMock() *DataNode {
+func newIDLEDataNodeMock(ctx context.Context) *DataNode {
+
+	msFactory := msgstream.NewPmsFactory()
+	node := NewDataNode(ctx, msFactory)
+
+	ms := &MasterServiceFactory{
+		ID:             0,
+		collectionID:   1,
+		collectionName: "collection-1",
+	}
+
+	node.SetMasterServiceInterface(ms)
+
+	ds := &DataServiceFactory{}
+	node.SetDataServiceInterface(ds)
+
+	return node
+}
+
+func newHEALTHDataNodeMock(dmChannelName string) *DataNode {
 	var ctx context.Context
 
 	if debug {
@@ -59,27 +79,27 @@ func newDataNodeMock() *DataNode {
 
 	msFactory := msgstream.NewPmsFactory()
 	node := NewDataNode(ctx, msFactory)
-	replica := newReplica()
 
 	ms := &MasterServiceFactory{
 		ID:             0,
 		collectionID:   1,
 		collectionName: "collection-1",
 	}
+
 	node.SetMasterServiceInterface(ms)
 
 	ds := &DataServiceFactory{}
 	node.SetDataServiceInterface(ds)
 
-	var alloc allocatorInterface = NewAllocatorFactory(100)
+	vchan := &datapb.VchannelInfo{
+		CollectionID:      1,
+		ChannelName:       dmChannelName,
+		UnflushedSegments: []*datapb.SegmentInfo{},
+		FlushedSegments:   []int64{},
+	}
+	node.Start()
 
-	chanSize := 100
-	flushChan := make(chan *flushMsg, chanSize)
-	node.flushChan = flushChan
-	node.dataSyncService = newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory)
-	node.dataSyncService.init()
-	node.metaService = newMetaService(node.ctx, replica, node.masterService)
-	node.replica = replica
+	_ = node.NewDataSyncService(vchan)
 
 	return node
 }
@@ -93,27 +113,14 @@ func makeNewChannelNames(names []string, suffix string) []string {
 }
 
 func refreshChannelNames() {
-	Params.DDChannelNames = []string{"datanode-test"}
-	Params.SegmentStatisticsChannelName = "segment-statistics"
-	Params.CompleteFlushChannelName = "flush-completed"
-	Params.InsertChannelNames = []string{"intsert-a-1", "insert-b-1"}
-	Params.TimeTickChannelName = "hard-timetick"
-	suffix := "-test-data-node" + strconv.FormatInt(rand.Int63n(100), 10)
-	Params.DDChannelNames = makeNewChannelNames(Params.DDChannelNames, suffix)
-	Params.InsertChannelNames = makeNewChannelNames(Params.InsertChannelNames, suffix)
-}
-
-func newBinlogMeta() *binlogMeta {
-	kvMock := memkv.NewMemoryKV()
-	idAllocMock := NewAllocatorFactory(1)
-	mt, _ := NewBinlogMeta(kvMock, idAllocMock)
-	return mt
+	Params.SegmentStatisticsChannelName = "datanode-refresh-segment-statistics"
+	Params.TimeTickChannelName = "datanode-refresh-hard-timetick"
 }
 
 func clearEtcd(rootPath string) error {
-	etcdAddr := Params.EtcdAddress
-	log.Info("etcd tests address", zap.String("address", etcdAddr))
-	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	etcdEndpoints := Params.EtcdEndpoints
+	log.Info("etcd tests address", zap.Any("endpoints", etcdEndpoints))
+	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
 	if err != nil {
 		return err
 	}
@@ -158,6 +165,27 @@ type MasterServiceFactory struct {
 
 type DataServiceFactory struct {
 	types.DataService
+}
+
+func (ds *DataServiceFactory) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+}
+
+func (ds *DataServiceFactory) RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
+	ret := &datapb.RegisterNodeResponse{Status: &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success}}
+
+	ret.InitParams = &internalpb.InitParams{
+		NodeID: Params.NodeID,
+		StartParams: []*commonpb.KeyValuePair{
+			{Key: "DDChannelName", Value: "fake-dd-channel-name"},
+			{Key: "SegmentStatisticsChannelName", Value: "fake-segment-statistics-channel-name"},
+			{Key: "TimeTickChannelName", Value: "fake-time-tick-channel-name"},
+			{Key: "CompleteFlushChannelName", Value: "fake-complete-flush-name"},
+		},
+	}
+
+	return ret, nil
 }
 
 func (mf *MetaFactory) CollectionMetaFactory(collectionID UniqueID, collectionName string) *etcdpb.CollectionMeta {
@@ -377,7 +405,7 @@ func GenRowData() (rawData []byte) {
 	return
 }
 
-func (df *DataFactory) GenMsgStreamInsertMsg(idx int) *msgstream.InsertMsg {
+func (df *DataFactory) GenMsgStreamInsertMsg(idx int, chanName string) *msgstream.InsertMsg {
 	var msg = &msgstream.InsertMsg{
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{uint32(idx)},
@@ -385,14 +413,14 @@ func (df *DataFactory) GenMsgStreamInsertMsg(idx int) *msgstream.InsertMsg {
 		InsertRequest: internalpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
-				MsgID:     0, // GOOSE TODO
+				MsgID:     0,
 				Timestamp: Timestamp(idx + 1000),
 				SourceID:  0,
 			},
-			CollectionName: "col1", // GOOSE TODO
+			CollectionName: "col1",
 			PartitionName:  "default",
-			SegmentID:      1,   // GOOSE TODO
-			ChannelID:      "0", // GOOSE TODO
+			SegmentID:      1,
+			ChannelID:      chanName,
 			Timestamps:     []Timestamp{Timestamp(idx + 1000)},
 			RowIDs:         []UniqueID{UniqueID(idx)},
 			RowData:        []*commonpb.Blob{{Value: df.rawData}},
@@ -401,9 +429,9 @@ func (df *DataFactory) GenMsgStreamInsertMsg(idx int) *msgstream.InsertMsg {
 	return msg
 }
 
-func (df *DataFactory) GetMsgStreamTsInsertMsgs(n int) (inMsgs []msgstream.TsMsg) {
+func (df *DataFactory) GetMsgStreamTsInsertMsgs(n int, chanName string) (inMsgs []msgstream.TsMsg) {
 	for i := 0; i < n; i++ {
-		var msg = df.GenMsgStreamInsertMsg(i)
+		var msg = df.GenMsgStreamInsertMsg(i, chanName)
 		var tsMsg msgstream.TsMsg = msg
 		inMsgs = append(inMsgs, tsMsg)
 	}
@@ -412,7 +440,7 @@ func (df *DataFactory) GetMsgStreamTsInsertMsgs(n int) (inMsgs []msgstream.TsMsg
 
 func (df *DataFactory) GetMsgStreamInsertMsgs(n int) (inMsgs []*msgstream.InsertMsg) {
 	for i := 0; i < n; i++ {
-		var msg = df.GenMsgStreamInsertMsg(i)
+		var msg = df.GenMsgStreamInsertMsg(i, "")
 		inMsgs = append(inMsgs, msg)
 	}
 	return
@@ -436,7 +464,7 @@ func NewAllocatorFactory(id ...UniqueID) *AllocatorFactory {
 func (alloc *AllocatorFactory) allocID() (UniqueID, error) {
 	alloc.Lock()
 	defer alloc.Unlock()
-	return alloc.r.Int63n(1000000), nil
+	return alloc.r.Int63n(10000), nil
 }
 
 func (alloc *AllocatorFactory) genKey(isalloc bool, ids ...UniqueID) (key string, err error) {
@@ -457,6 +485,8 @@ func (alloc *AllocatorFactory) genKey(isalloc bool, ids ...UniqueID) (key string
 	return
 }
 
+// If id == 0, AllocID will return not successful status
+// If id == -1, AllocID will return err
 func (m *MasterServiceFactory) setID(id UniqueID) {
 	m.ID = id // GOOSE TODO: random ID generator
 }
@@ -471,8 +501,29 @@ func (m *MasterServiceFactory) setCollectionName(name string) {
 
 func (m *MasterServiceFactory) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
 	resp := &masterpb.AllocIDResponse{
-		Status: &commonpb.Status{},
-		ID:     m.ID,
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		}}
+
+	if m.ID == 0 {
+		resp.Status.Reason = "Zero ID"
+		return resp, nil
+	}
+
+	if m.ID == -1 {
+		resp.Status.ErrorCode = commonpb.ErrorCode_Success
+		return resp, errors.New(resp.Status.GetReason())
+	}
+
+	resp.ID = m.ID
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
+	return resp, nil
+}
+
+func (m *MasterServiceFactory) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
+	resp := &masterpb.AllocTimestampResponse{
+		Status:    &commonpb.Status{},
+		Timestamp: 1000,
 	}
 	return resp, nil
 }

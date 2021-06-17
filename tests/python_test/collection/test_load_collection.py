@@ -198,7 +198,7 @@ class TestLoadCollection:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "describe collection failed: can't find collection: %s" % collection
 
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+#     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_load_collection_without_flush(self, connect, collection):
         """
         target: test load collection without flush

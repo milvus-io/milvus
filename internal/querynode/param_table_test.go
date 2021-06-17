@@ -27,11 +27,6 @@ func TestParamTable_PulsarAddress(t *testing.T) {
 }
 
 func TestParamTable_QueryNode(t *testing.T) {
-	t.Run("Test id", func(t *testing.T) {
-		id := Params.QueryNodeID
-		assert.Contains(t, Params.QueryNodeIDList(), id)
-	})
-
 	t.Run("Test time tick channel", func(t *testing.T) {
 		ch := Params.QueryTimeTickChannelName
 		assert.Equal(t, ch, "queryTimeTick")
@@ -93,7 +88,7 @@ func TestParamTable_flowGraphMaxParallelism(t *testing.T) {
 
 func TestParamTable_msgChannelSubName(t *testing.T) {
 	name := Params.MsgChannelSubName
-	expectName := fmt.Sprintf("queryNode-%d", Params.QueryNodeID)
+	expectName := "queryNode"
 	assert.Equal(t, expectName, name)
 }
 

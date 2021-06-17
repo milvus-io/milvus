@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	nodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -40,7 +41,7 @@ type queryNode struct {
 }
 
 func newQueryNode(ip string, port int64, id UniqueID) (*queryNode, error) {
-	client, err := nodeclient.NewClient(fmt.Sprintf("%s:%d", ip, port))
+	client, err := nodeclient.NewClient(fmt.Sprintf("%s:%d", ip, port), 3*time.Second)
 	if err != nil {
 		return nil, err
 	}

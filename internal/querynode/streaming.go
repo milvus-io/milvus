@@ -59,7 +59,7 @@ func (s *streaming) close() {
 func (s *streaming) search(searchReqs []*searchRequest,
 	collID UniqueID,
 	partIDs []UniqueID,
-	vChannel VChannel,
+	vChannel Channel,
 	plan *Plan,
 	searchTs Timestamp) ([]*SearchResult, []*Segment, error) {
 

@@ -434,6 +434,8 @@ func (mt *metaTable) LoadMetaFromETCD(indexBuildID int64, revision int64) bool {
 
 type nodeTasks struct {
 	nodeID2Tasks map[int64][]UniqueID
+
+	lock sync.RWMutex
 }
 
 func NewNodeTasks() *nodeTasks {
@@ -443,6 +445,9 @@ func NewNodeTasks() *nodeTasks {
 }
 
 func (nt *nodeTasks) getTasksByNodeID(nodeID int64) []UniqueID {
+	nt.lock.Lock()
+	defer nt.lock.Unlock()
+
 	indexBuildIDs, ok := nt.nodeID2Tasks[nodeID]
 	if !ok {
 		return nil
@@ -451,6 +456,9 @@ func (nt *nodeTasks) getTasksByNodeID(nodeID int64) []UniqueID {
 }
 
 func (nt *nodeTasks) assignTask(serverID int64, indexBuildID UniqueID) {
+	nt.lock.Lock()
+	defer nt.lock.Unlock()
+
 	indexBuildIDs, ok := nt.nodeID2Tasks[serverID]
 	if !ok {
 		var IDs []UniqueID
@@ -463,15 +471,28 @@ func (nt *nodeTasks) assignTask(serverID int64, indexBuildID UniqueID) {
 }
 
 func (nt *nodeTasks) finishTask(indexBuildID UniqueID) {
-	for serverID := range nt.nodeID2Tasks {
-		for i, buildID := range nt.nodeID2Tasks[serverID] {
-			if buildID == indexBuildID {
-				nt.nodeID2Tasks[serverID] = append(nt.nodeID2Tasks[serverID][:i], nt.nodeID2Tasks[serverID][:i+1]...)
+	nt.lock.Lock()
+	defer nt.lock.Unlock()
+
+	removed := false
+	for serverID, taskIDs := range nt.nodeID2Tasks {
+		for i := 0; i < len(taskIDs); i++ {
+			if indexBuildID == taskIDs[i] {
+				taskIDs = append(taskIDs[:i], taskIDs[i+1:]...)
+				removed = true
+				break
 			}
+		}
+		if removed {
+			nt.nodeID2Tasks[serverID] = taskIDs
+			break
 		}
 	}
 }
 
 func (nt *nodeTasks) delete(serverID int64) {
+	nt.lock.Lock()
+	defer nt.lock.Unlock()
+
 	delete(nt.nodeID2Tasks, serverID)
 }

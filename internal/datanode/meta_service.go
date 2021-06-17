@@ -16,77 +16,32 @@ import (
 	"fmt"
 	"reflect"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/types"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
 // metaService initialize replica collections in data node from master service.
 // Initializing replica collections happens on data node starting. It depends on
 // a healthy master service and a valid master service grpc client.
 type metaService struct {
-	ctx          context.Context
 	replica      Replica
+	collectionID UniqueID
 	masterClient types.MasterService
 }
 
-func newMetaService(ctx context.Context, replica Replica, m types.MasterService) *metaService {
+func newMetaService(m types.MasterService, collectionID UniqueID) *metaService {
 	return &metaService{
-		ctx:          ctx,
-		replica:      replica,
 		masterClient: m,
+		collectionID: collectionID,
 	}
 }
 
-func (mService *metaService) init() {
-	log.Debug("Initing meta ...")
-	ctx := context.Background()
-	err := mService.loadCollections(ctx)
-	if err != nil {
-		log.Error("metaService init failed", zap.Error(err))
-	}
-}
-
-func (mService *metaService) loadCollections(ctx context.Context) error {
-	names, err := mService.getCollectionNames(ctx)
-	if err != nil {
-		return err
-	}
-
-	for _, name := range names {
-		err := mService.createCollection(ctx, name)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (mService *metaService) getCollectionNames(ctx context.Context) ([]string, error) {
-	req := &milvuspb.ShowCollectionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_ShowCollections,
-			MsgID:     0, //GOOSE TODO
-			Timestamp: 0, // GOOSE TODO
-			SourceID:  Params.NodeID,
-		},
-		DbName: "default", // GOOSE TODO
-	}
-
-	response, err := mService.masterClient.ShowCollections(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("Get collection names from master service wrong: %v", err)
-	}
-	return response.GetCollectionNames(), nil
-}
-
-func (mService *metaService) createCollection(ctx context.Context, name string) error {
-	log.Debug("Describing collections")
+func (mService *metaService) getCollectionSchema(ctx context.Context, collID UniqueID, timestamp Timestamp) (*schemapb.CollectionSchema, error) {
+	// fmt.Println("Describing collection", collID)
 	req := &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DescribeCollection,
@@ -94,21 +49,21 @@ func (mService *metaService) createCollection(ctx context.Context, name string) 
 			Timestamp: 0, // GOOSE TODO
 			SourceID:  Params.NodeID,
 		},
-		DbName:         "default", // GOOSE TODO
-		CollectionName: name,
+		DbName:       "default", // GOOSE TODO
+		CollectionID: collID,
+		TimeStamp:    timestamp,
 	}
 
 	response, err := mService.masterClient.DescribeCollection(ctx, req)
-	if err != nil {
-		return fmt.Errorf("Describe collection %v from master service wrong: %v", name, err)
+	if response.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return nil, fmt.Errorf("Describe collection %v from master service wrong: %s", collID, err.Error())
 	}
 
-	err = mService.replica.addCollection(response.GetCollectionID(), response.GetSchema())
 	if err != nil {
-		return fmt.Errorf("Add collection %v into collReplica wrong: %v", name, err)
+		return nil, fmt.Errorf("Grpc error when describe collection %v from master service: %s", collID, err.Error())
 	}
 
-	return nil
+	return response.GetSchema(), nil
 }
 
 func printCollectionStruct(obj *etcdpb.CollectionMeta) {
@@ -116,7 +71,7 @@ func printCollectionStruct(obj *etcdpb.CollectionMeta) {
 	v = reflect.Indirect(v)
 	typeOfS := v.Type()
 
-	for i := 0; i < v.NumField(); i++ {
+	for i := 0; i < v.NumField()-3; i++ {
 		if typeOfS.Field(i).Name == "GrpcMarshalString" {
 			continue
 		}

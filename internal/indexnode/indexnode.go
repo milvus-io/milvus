@@ -73,6 +73,7 @@ func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 		loopCtx:    ctx1,
 		loopCancel: cancel,
 	}
+	b.UpdateStateCode(internalpb.StateCode_Abnormal)
 	var err error
 	b.sched, err = NewTaskScheduler(b.loopCtx, b.kv)
 	if err != nil {
@@ -83,7 +84,7 @@ func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 
 // Register register index node at etcd
 func (i *IndexNode) Register() error {
-	i.session = sessionutil.NewSession(i.loopCtx, Params.MetaRootPath, []string{Params.EtcdAddress})
+	i.session = sessionutil.NewSession(i.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
 	i.session.Init(typeutil.IndexNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
 	Params.NodeID = i.session.ServerID
 	return nil
@@ -93,7 +94,7 @@ func (i *IndexNode) Init() error {
 	ctx := context.Background()
 
 	connectEtcdFn := func() error {
-		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: []string{Params.EtcdAddress}})
+		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
 		i.etcdKV = etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
 		return err
 	}
@@ -205,11 +206,10 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 			ctx:  ctx,
 			done: make(chan error),
 		},
-		req:           request,
-		kv:            i.kv,
-		etcdKV:        i.etcdKV,
-		serviceClient: i.serviceClient,
-		nodeID:        Params.NodeID,
+		req:    request,
+		kv:     i.kv,
+		etcdKV: i.etcdKV,
+		nodeID: Params.NodeID,
 	}
 
 	ret := &commonpb.Status{
