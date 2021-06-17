@@ -11,6 +11,7 @@
 </div>
 
 
+
 <div class="column" align="middle">
   <a href="https://internal.zilliz.com:18080/jenkins/job/milvus-ha-ci/job/master/badge/">
         <img src="https://internal.zilliz.com:18080/jenkins/job/milvus-ha-ci/job/master/badge/icon" />
@@ -27,6 +28,7 @@
 </div>
 
 
+
 <br />
 
 ## What is Milvus?
@@ -38,40 +40,42 @@ Both Milvus Standalone and Milvus Cluster are available.
 
 Milvus was released under the [open-source Apache License 2.0](https://github.com/milvus-io/milvus/blob/master/LICENSE) in October 2019. It is currently a graduate project under [LF AI & Data Foundation](https://lfaidata.foundation/).
 
+## 产品亮点
 
-## Key features
+<details>
+  <summary><b>Millisecond search on trillion vector datasets</b></summary>
+  Average latency measured in milliseconds on trillion vector datasets.
+  </details>
 
-### Millisecond search on trillion vector datasets
+<details>
+  <summary><b>Simplified unstructured data management</b></summary>
+  <li>Rich APIs designed for data science workflows.</li><li>Consistent user experience across laptop, local cluster, and cloud.</li><li>Embed real-time search and analytics into virtually any application.</li>
+  </details>
 
-Average latency measured in milliseconds on trillion vector datasets.
+<details>
+  <summary><b>Reliable, always on vector database</b></summary>
+  Milvus’ built-in replication and failover/failback features ensure data and applications can maintain business continuity in the event of a disruption.
+  </details>
 
-### Simplified unstructured data management
+<details>
+  <summary><b>Highly scalable and elastic</b></summary>
+  Component-level scalability makes it possible to scale up and down on demand. Milvus can autoscale at a component level according to the load type, making resource scheduling much more efficient.
+  </details>
 
-- Rich APIs designed for data science workflows.
+<details>
+  <summary><b>Hybrid search</b></summary>
+  In addition to vectors, Milvus supports data types such as Boolean, integers, floating-point numbers, and more. A collection in Milvus can hold multiple fields for accommodating different data features or properties. By complementing scalar filtering to vector similarity search, Milvus makes modern search much more flexible than ever.
+  </details>
 
-- Consistent user experience across laptop, local cluster, and cloud.
+<details>
+  <summary><b>Unified Lambda structure</b></summary>
+  Milvus combines stream and batch processing for data storage to balance timeliness and efficiency. Its unified interface makes vector similarity search a breeze.
+  </details>
 
-- Embed real-time search and analytics into virtually any application.
-
-### Reliable, always on vector database
-
-Milvus’ built-in replication and failover/failback features ensure data and applications can maintain business continuity in the event of a disruption.
-
-### Highly scalable and elastic
-
-Component-level scalability makes it possible to scale up and down on demand. Milvus can autoscale at a component level according to the load type, making resource scheduling much more efficient.
-
-### Hybrid search
-
-In addition to vectors, Milvus supports data types such as Boolean, integers, floating-point numbers, and more. A collection in Milvus can hold multiple fields for accommodating different data features or properties. By complementing scalar filtering to vector similarity search, Milvus makes modern search much more flexible than ever.
-
-### Unified Lambda structure
-
-Milvus combines stream and batch processing for data storage to balance timeliness and efficiency. Its unified interface makes vector similarity search a breeze.
-
-### Community supported, industry recognized
-
-With over 1,000 enterprise users, 6,000+ stars on GitHub, and an active open-source community, you’re not alone when you use Milvus. As a graduate project under the LF AI & Data Foundation, Milvus has institutional support.
+<details>
+  <summary><b>Community supported, industry recognized</b></summary>
+  With over 1,000 enterprise users, 6,000+ stars on GitHub, and an active open-source community, you’re not alone when you use Milvus. As a graduate project under the <a href="https://lfaidata.foundation/">LF AI & Data Foundation</a>, Milvus has institutional support.
+  </details>
 
 
 > **IMPORTANT** The master branch is for the development of Milvus v2.0. On March 9th, 2021, we released Milvus v1.0, the first stable version of Milvus with long-term support. To use Milvus v1.0, switch to [branch 1.0](https://github.com/milvus-io/milvus/tree/1.0).
@@ -84,95 +88,130 @@ With over 1,000 enterprise users, 6,000+ stars on GitHub, and an active open-sou
 Install with Docker-Compose
     
 
-```
+```bash
 $ cd milvus/deployments/docker/standalone
 $ sudo docker-compose up -d
 ```
 
 Install with Helm
 
-```
+```bash
 $ helm install -n milvus --set image.all.repository=registry.zilliz.com/milvus/milvus --set image.all.tag=master-latest milvus milvus-helm-charts/charts/milvus-ha
 ```
+
+Build from source code
+
+```bash
+# Clone github repository.
+$ cd /home/$USER/
+$ git clone https://github.com/milvus-io/milvus.git
+
+# Install third-party dependencies.
+$ cd /home/$USER/milvus/
+$ ./scripts/install_deps.sh
+
+# Compile Milvus standalone.
+$ make standalone
+```
+
+
 
 ### Install Milvus Cluster
 
 Install with Docker-Compose
 
-```
+```bash
 $ cd milvus/deployments/docker/distributed
 $ sudo docker-compose up -d
 ```
 
 Install with Helm
 
-```
+```bash
 $ helm install -n milvus --set image.all.repository=registry.zilliz.com/milvus/milvus --set image.all.tag=master-latest --set standalone.enabled=false milvus milvus-helm-charts/charts/milvus-ha
 ```
 
-## Make Milvus
+Build from source code
 
-You can also build Milvus from source code.
-
-### Prerequisites
-
-Install the following before building Milvus from source code.
-
-- [Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git) for version control.
-- [Golang](https://golang.org/doc/install) version 1.15 or higher and associated toolkits.
-- [CMake](https://cmake.org/install/) version 3.14 or higher for compilation.
-- [OpenBLAS](https://github.com/xianyi/OpenBLAS/wiki/Installation-Guide) (Basic Linear Algebra Subprograms) library version 0.3.9 or higher for matrix operations.
-
-
-### Make Milvus Standalone
-
-
- ```
-# Clone github repository
-$ cd /home/$USER/
-$ git clone https://github.com/milvus-io/milvus.git
-
-# Install third-party dependencies
-$ cd /home/$USER/milvus/
-$ ./scripts/install_deps.sh
-
-# Compile Milvus standalone
-$ make standalone
- ```
-
-### Make Milvus Cluster
-
-
-```
-# Clone github repository
+```bash
+# Clone github repository.
 $ cd /home/$USER
 $ git clone https://github.com/milvus-io/milvus.git
 
-# Install third-party dependencies
+# Install third-party dependencies.
 $ cd milvus
 $ ./scripts/install_deps.sh
 
-# Compile Milvus Cluster
+# Compile Milvus Cluster.
 $ make milvus
 ```
 
+
+
 ## Milvus 2.0 is better than Milvus 1.x
 
-|                                | **Milvus 1.x**                                               | **Milvus 2.0**                                               |
-| ------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| **Architecture**               | Shared storage                                               | Cloud native                                                 |
-| **Scalability**                | 1 - 32 read-only nodes with only one write node.             | 500+ nodes                                                   |
-| **Durability**                 | Local diskNetwork file system (NFS)                          | Object storage service (OSS)Distributed file system (DFS)    |
-| **Availability**               | 99%                                                          | 99.9%                                                        |
-| **Data consistency**           | Eventual consistency                                         | Three levels of consistency: StrongSessionConsistent prefix  |
-| **Data types supported**       | Vectors                                                      | VectorsFixed-length scalars String and text (in planning)    |
-| **Basic operations supported** | Data insertionData deletionApproximate nearest neighbor (ANN) Search | Data insertionData deletion (in planning)Data queryApproximate nearest neighbor (ANN) SearchRecurrent neural network (RNN) search (in planning) |
-| **Advanced features**          | MishardsMilvus DM                                            | Scalar filteringTime TravelMulti-site deployment and multi-cloud integrationData management tools |
-| **Index types and libraries**  | FaissAnnoyHnswlibRNSG                                        | FaissAnnoyHnswlibRNSGScaNN (in planning)On-disk index (in planning) |
-| **SDKs**                       | PythonJava,GoRESTfulC++                                      | PythonGo (in planning)RESTful (in planning)C++ (in planning) |
-| **Release status**             | Long-term support (LTS)                                      | Release candidate. A stable version will be released in August. |
-
-
+<table class="comparison">
+	<tr>
+		<th>&nbsp;</th>
+		<th><b>Milvus 1.x</b></th>
+		<th><b>Milvus 2.0</b></th>
+	</tr>
+	<tr>
+		<td><b>Architecture</b></td>
+		<td>Shared storage</td>
+		<td>Cloud native</td>
+	</tr>
+	<tr>
+		<td><b>Scalability</b></td>
+		<td>1 to 32 read nodes with only one write node</td>
+		<td>500+ nodes</td>
+	</tr>
+  	<tr>
+		<td><b>Durability</b></td>
+		<td><li>Local disk</li><li>Network file system (NFS)</li></td>
+		<td><li>Object storage service (OSS)</li><li>Distributed file system (DFS)</li></td>
+	</tr>
+  	<tr>
+		<td><b>Availability</b></td>
+		<td>99%</td>
+		<td>99.9%</td>
+	</tr>
+	<tr>
+		<td><b>Data consistency</b></td>
+		<td>Eventual consistency</td>
+		<td>Three levels of consistency:<li>Strong</li><li>Session</li><li>Consistent prefix</li></td>
+	</tr>
+	<tr>
+		<td><b>Data types supported</b></td>
+		<td>Vectors</td>
+		<td><li>Vectors</li><li>Fixed-length scalars</li><li>String and text (in planning)</li></td>
+	</tr>
+	<tr>
+		<td><b>Basic operations supported</b></td>
+		<td><li>Data insertion</li><li>Data deletion</li><li>Approximate nearest neighbor (ANN) Search</li></td>
+		<td><li>Data insertion</li><li>Data deletion (in planning)</li><li>Data query</li><li>Approximate nearest neighbor (ANN) Search</li><li>Recurrent neural network (RNN) search (in planning)</li></td>
+	</tr>
+	<tr>
+		<td><b>Advanced features</b></td>
+		<td><li>Mishards</li><li>Milvus DM</li></td>
+		<td><li>Scalar filtering</li><li>Time Travel</li><li>Multi-site deployment and multi-cloud integration</li><li>Data management tools</li></td>
+	</tr>
+	<tr>
+		<td><b>Index types and libraries</b></td>
+		<td><li>Faiss</li><li>Annoy</li><li>Hnswlib</li><li>RNSG</li></td>
+		<td><li>Faiss</li><li>Annoy</li><li>Hnswlib</li><li>RNSG</li><li>ScaNN (in planning)</li><li>On-disk index (in planning)</li></td>
+	</tr>
+	<tr>
+		<td><b>SDKs</b></td>
+		<td><li>Python</li><li>Java</li><li>Go</li><li>RESTful</li><li>C++</li></td>
+		<td><li>Python</li><li>Go (in planning)</li><li>RESTful (in planning)</li><li>C++ (in planning)</li></td>
+	</tr>
+	<tr>
+		<td><b>Release status</b></td>
+		<td>Long-term support (LTS)</td>
+		<td>Release candidate. A stable version will be released in August.</td>
+	</tr>
+</table>
 
 ## Getting Started
 
@@ -208,7 +247,6 @@ $ make milvus
     </th>
   </tr>
 </table>
-
 
 
 - [Image Search](https://zilliz.com/milvus-demos)
@@ -278,3 +316,4 @@ Milvus adopts dependencies from the following:
 - Thank [etcd](https://github.com/coreos/etcd) for providing some great open-source tools.
 - Thank [Pulsar](https://github.com/apache/pulsar) for its great distributed information pub/sub platform.
 - Thank [RocksDB](https://github.com/facebook/rocksdb) for the powerful storage engines.
+
