@@ -1,0 +1,15 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: test-standalone-pod-kill
+  namespace:
+spec:
+  action: pod-kill
+  mode: one
+  selector:
+    namespaces:
+      - default         # target namespace of milvus deployment
+    labelSelectors:
+      app.kubernetes.io/name: milvus-ha     # pod of standalone milvus
+  scheduler:
+    cron: '@every 20s'
