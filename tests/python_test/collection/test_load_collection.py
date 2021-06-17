@@ -254,6 +254,7 @@ class TestLoadCollection:
         with pytest.raises(Exception) as e:
             connect.search(collection, default_single_query)
 
+    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_load_partitions_release_collection(self, connect, collection):
         """
