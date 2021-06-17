@@ -45,15 +45,15 @@ func newMsgFactory(localMsg bool) msgstream.Factory {
 }
 
 type MilvusRoles struct {
-	EnableRootCoord      bool `env:"ENABLE_ROOT_COORD"`
-	EnableProxyNode      bool `env:"ENABLE_PROXY_NODE"`
-	EnableQueryCoord     bool `env:"ENABLE_QUERY_COORD"`
-	EnableQueryNode      bool `env:"ENABLE_QUERY_NODE"`
-	EnableDataCoord      bool `env:"ENABLE_DATA_COORD"`
-	EnableDataNode       bool `env:"ENABLE_DATA_NODE"`
-	EnableIndexCoord     bool `env:"ENABLE_INDEX_COORD"`
-	EnableIndexNode      bool `env:"ENABLE_INDEX_NODE"`
-	EnableMsgStreamCoord bool `env:"ENABLE_MSGSTREAM_COORD"`
+	EnableMaster           bool `env:"ENABLE_MASTER"`
+	EnableProxyNode        bool `env:"ENABLE_PROXY_NODE"`
+	EnableQueryService     bool `env:"ENABLE_QUERY_SERVICE"`
+	EnableQueryNode        bool `env:"ENABLE_QUERY_NODE"`
+	EnableDataService      bool `env:"ENABLE_DATA_SERVICE"`
+	EnableDataNode         bool `env:"ENABLE_DATA_NODE"`
+	EnableIndexService     bool `env:"ENABLE_INDEX_SERVICE"`
+	EnableIndexNode        bool `env:"ENABLE_INDEX_NODE"`
+	EnableMsgStreamService bool `env:"ENABLE_MSGSTREAM_SERVICE"`
 }
 
 func (mr *MilvusRoles) EnvValue(env string) bool {
@@ -72,8 +72,8 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	if mr.EnableRootCoord {
-		var rc *components.RootCoord
+	if mr.EnableMaster {
+		var ms *components.MasterService
 		var wg sync.WaitGroup
 
 		wg.Add(1)
@@ -84,17 +84,17 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 			factory := newMsgFactory(localMsg)
 			var err error
-			rc, err = components.NewRootCoord(ctx, factory)
+			ms, err = components.NewMasterService(ctx, factory)
 			if err != nil {
 				panic(err)
 			}
 			wg.Done()
-			_ = rc.Run()
+			_ = ms.Run()
 		}()
 
 		wg.Wait()
-		if rc != nil {
-			defer rc.Stop()
+		if ms != nil {
+			defer ms.Stop()
 		}
 
 		metrics.RegisterRootCoord()
@@ -128,7 +128,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		metrics.RegisterProxyNode()
 	}
 
-	if mr.EnableQueryCoord {
+	if mr.EnableQueryService {
 		var qs *components.QueryService
 		var wg sync.WaitGroup
 
@@ -184,7 +184,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		metrics.RegisterQueryNode()
 	}
 
-	if mr.EnableDataCoord {
+	if mr.EnableDataService {
 		var ds *components.DataService
 		var wg sync.WaitGroup
 
@@ -240,7 +240,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		metrics.RegisterDataNode()
 	}
 
-	if mr.EnableIndexCoord {
+	if mr.EnableIndexService {
 		var is *components.IndexService
 		var wg sync.WaitGroup
 
@@ -294,7 +294,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		metrics.RegisterIndexNode()
 	}
 
-	if mr.EnableMsgStreamCoord {
+	if mr.EnableMsgStreamService {
 		var mss *components.MsgStream
 		var wg sync.WaitGroup
 

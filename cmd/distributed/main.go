@@ -23,23 +23,23 @@ import (
 )
 
 const (
-	roleRootCoord  = "rootcoord"
-	roleQueryCoord = "querycoord"
-	roleIndexCoord = "indexcoord"
-	roleDataCoord  = "datacoord"
-	roleProxyNode  = "proxynode"
-	roleQueryNode  = "querynode"
-	roleIndexNode  = "indexnode"
-	roleDataNode   = "datanode"
-	roleMixture    = "mixture"
+	roleMaster       = "master"
+	roleQueryService = "queryservice"
+	roleIndexService = "indexservice"
+	roleDataService  = "dataservice"
+	roleProxyNode    = "proxynode"
+	roleQueryNode    = "querynode"
+	roleIndexNode    = "indexnode"
+	roleDataNode     = "datanode"
+	roleMixture      = "mixture"
 )
 
-func getPidFileName(coordType string, alias string) string {
+func getPidFileName(service string, alias string) string {
 	var filename string
 	if len(alias) != 0 {
-		filename = fmt.Sprintf("%s-%s.pid", coordType, alias)
+		filename = fmt.Sprintf("%s-%s.pid", service, alias)
 	} else {
-		filename = coordType + ".pid"
+		filename = service + ".pid"
 	}
 	return filename
 }
@@ -125,51 +125,51 @@ func makeRuntimeDir(dir string) error {
 
 func main() {
 	if len(os.Args) < 3 {
-		_, _ = fmt.Fprint(os.Stderr, "usage: milvus [command] [coordinator type] [flags]\n")
+		_, _ = fmt.Fprint(os.Stderr, "usage: milvus [command] [server type] [flags]\n")
 		return
 	}
 	command := os.Args[1]
-	coordType := os.Args[2]
+	serverType := os.Args[2]
 	flags := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 
 	var svrAlias string
 	flags.StringVar(&svrAlias, "alias", "", "set alias")
 
-	var enableRootCoord, enableQueryCoord, enableIndexCoord, enableDataCoord bool
-	flags.BoolVar(&enableRootCoord, roleRootCoord, false, "enable root coordinator")
-	flags.BoolVar(&enableQueryCoord, roleQueryCoord, false, "enable query coordinator")
-	flags.BoolVar(&enableIndexCoord, roleIndexCoord, false, "enable index coordinator")
-	flags.BoolVar(&enableDataCoord, roleDataCoord, false, "enable data coordinator")
+	var enableMaster, enableQueryService, enableIndexService, enableDataService bool
+	flags.BoolVar(&enableMaster, roleMaster, false, "enable master")
+	flags.BoolVar(&enableQueryService, roleQueryService, false, "enable query service")
+	flags.BoolVar(&enableIndexService, roleIndexService, false, "enable index service")
+	flags.BoolVar(&enableDataService, roleDataService, false, "enable data service")
 
 	if err := flags.Parse(os.Args[3:]); err != nil {
 		os.Exit(-1)
 	}
 
 	role := roles.MilvusRoles{}
-	switch coordType {
-	case roleRootCoord:
-		role.EnableRootCoord = true
+	switch serverType {
+	case roleMaster:
+		role.EnableMaster = true
 	case roleProxyNode:
 		role.EnableProxyNode = true
-	case roleQueryCoord:
-		role.EnableQueryCoord = true
+	case roleQueryService:
+		role.EnableQueryService = true
 	case roleQueryNode:
 		role.EnableQueryNode = true
-	case roleDataCoord:
-		role.EnableDataCoord = true
+	case roleDataService:
+		role.EnableDataService = true
 	case roleDataNode:
 		role.EnableDataNode = true
-	case roleIndexCoord:
-		role.EnableIndexCoord = true
+	case roleIndexService:
+		role.EnableIndexService = true
 	case roleIndexNode:
 		role.EnableIndexNode = true
 	case roleMixture:
-		role.EnableRootCoord = enableRootCoord
-		role.EnableQueryCoord = enableQueryCoord
-		role.EnableDataCoord = enableDataCoord
-		role.EnableIndexCoord = enableIndexCoord
+		role.EnableMaster = enableMaster
+		role.EnableQueryService = enableQueryService
+		role.EnableDataService = enableDataService
+		role.EnableIndexService = enableIndexService
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown coordinator type = %s\n", coordType)
+		fmt.Fprintf(os.Stderr, "Unknown server type = %s\n", serverType)
 		os.Exit(-1)
 	}
 
@@ -183,7 +183,7 @@ func main() {
 		}
 	}
 
-	filename := getPidFileName(coordType, svrAlias)
+	filename := getPidFileName(serverType, svrAlias)
 	switch command {
 	case "run":
 		fd, err := createPidFile(filename, runtimeDir)
