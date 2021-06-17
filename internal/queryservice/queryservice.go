@@ -14,6 +14,7 @@ package queryservice
 import (
 	"context"
 	"math/rand"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -267,7 +268,7 @@ func (qs *QueryService) watchMetaLoop() {
 	defer qs.loopWg.Done()
 	log.Debug("QueryService start watch meta loop")
 
-	watchChan := qs.meta.client.WatchWithPrefix(segmentMetaPrefix)
+	watchChan := qs.meta.client.WatchWithPrefix(queryNodeMetaPrefix)
 
 	for {
 		select {
@@ -276,19 +277,19 @@ func (qs *QueryService) watchMetaLoop() {
 		case resp := <-watchChan:
 			log.Debug("segment meta updated.")
 			for _, event := range resp.Events {
-				//segmentID, err := strconv.ParseInt(filepath.Base(string(event.Kv.Key)), 10, 64)
-				//if err != nil {
-				//	log.Error("watch meta loop error when get segmentID", zap.Any("error", err.Error()))
-				//}
+				segmentID, err := strconv.ParseInt(filepath.Base(string(event.Kv.Key)), 10, 64)
+				if err != nil {
+					log.Error("watch meta loop error when get segmentID", zap.Any("error", err.Error()))
+				}
 				segmentInfo := &querypb.SegmentInfo{}
-				err := proto.UnmarshalText(string(event.Kv.Value), segmentInfo)
+				err = proto.UnmarshalText(string(event.Kv.Value), segmentInfo)
 				if err != nil {
 					log.Error("watch meta loop error when unmarshal", zap.Any("error", err.Error()))
 				}
 				switch event.Type {
 				case mvccpb.PUT:
 					//TODO::
-					//qs.meta.setSegmentInfo(segmentID, segmentInfo)
+					qs.meta.setSegmentInfo(segmentID, segmentInfo)
 				case mvccpb.DELETE:
 					//TODO::
 				}

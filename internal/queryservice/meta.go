@@ -28,9 +28,10 @@ import (
 )
 
 const (
-	collectionMetaPrefix   = "queryService-collectionMeta"
-	segmentMetaPrefix      = "queryService-segmentMeta"
-	queryChannelMetaPrefix = "queryService-queryChannel"
+	collectionMetaPrefix       = "queryService-collectionMeta"
+	segmentMetaPrefix          = "queryService-segmentMeta"
+	queryChannelMetaPrefix     = "queryService-queryChannel"
+	queryNodeSegmentMetaPrefix = "queryNode-segmentMeta"
 )
 
 type meta struct {

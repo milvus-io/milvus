@@ -27,6 +27,11 @@ import "C"
 import (
 	"context"
 	"errors"
+	"github.com/milvus-io/milvus/internal/kv"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/util/retry"
+	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 	"math/rand"
 	"strconv"
 	"sync/atomic"
@@ -65,6 +70,9 @@ type QueryNode struct {
 	scheduler *taskScheduler
 
 	session *sessionutil.Session
+
+	minioKV kv.BaseKV // minio minioKV
+	etcdKV  *etcdkv.EtcdKV
 }
 
 func NewQueryNode(ctx context.Context, queryNodeID UniqueID, factory msgstream.Factory) *QueryNode {
@@ -111,13 +119,30 @@ func (node *QueryNode) Register() error {
 
 func (node *QueryNode) Init() error {
 	//ctx := context.Background()
+	connectEtcdFn := func() error {
+		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+		if err != nil {
+			return err
+		}
+		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+		node.etcdKV = etcdKV
+		return err
+	}
+	log.Debug("queryNode try to connect etcd")
+	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
+	if err != nil {
+		log.Debug("queryNode try to connect etcd failed", zap.Error(err))
+		return err
+	}
+	log.Debug("queryNode try to connect etcd success")
 
 	node.historical = newHistorical(node.queryNodeLoopCtx,
 		node.masterService,
 		node.dataService,
 		node.indexService,
-		node.msFactory)
-	node.streaming = newStreaming(node.queryNodeLoopCtx, node.msFactory)
+		node.msFactory,
+		node.etcdKV)
+	node.streaming = newStreaming(node.queryNodeLoopCtx, node.msFactory, node.etcdKV)
 
 	C.SegcoreInit()
 	//registerReq := &queryPb.RegisterNodeRequest{
