@@ -32,7 +32,7 @@ pipeline {
                         inheritFrom 'default'
                         defaultContainer 'main'
                         yamlFile "build/ci/jenkins/pod/krte.yaml"
-                        customWorkspace '/home/jenkins/agent/workspace'
+                        customWorkspace "/home/jenkins/agent/workspace/${JOB_NAME}"
                     }
                 }
                 environment {
