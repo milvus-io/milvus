@@ -1,9 +1,5 @@
 from __future__ import print_function
-from utils import *
 import logging
-from pprint import pprint
-from time import sleep
-
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 import constants as cf

@@ -1,7 +1,7 @@
 import os
 import threading
 import glob
-
+from delayed_assert import expect
 import constants
 from yaml import full_load
 
@@ -43,10 +43,10 @@ def assert_statistic(checkers, expectations={}):
         succ_rate = checkers[k].succ_rate()
         if expectations.get(k, '') == constants.FAIL:
             print(f"Expect Fail: {str(checkers[k])} current succ rate {succ_rate}")
-            assert succ_rate < 0.49
+            expect(succ_rate < 0.49)
         else:
             print(f"Expect Succ: {str(checkers[k])} current succ rate {succ_rate}")
-            assert succ_rate > 0.90
+            expect(succ_rate > 0.90)
 
 
 def get_env_variable_by_name(name):

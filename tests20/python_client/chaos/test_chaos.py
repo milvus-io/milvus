@@ -3,6 +3,7 @@ from time import sleep
 
 from pymilvus_orm import connections
 from checker import CreateChecker, Op
+from chaos_opt import ChaosOpt
 from utils.util_log import test_log as log
 from base.collection_wrapper import ApiCollectionWrapper
 from common import common_func as cf
@@ -18,6 +19,7 @@ class TestChaosBase:
     expect_search = constants.SUCC
     expect_query = constants.SUCC
     chaos_location = ''
+    health_checkers = {}
 
     def parser_testcase_config(self, chaos_yaml):
         tests_yaml = constants.TESTS_CONFIG_LOCATION + 'testcases.yaml'
@@ -75,8 +77,8 @@ class TestChaos(TestChaosBase):
         return c_wrap
 
     @pytest.fixture(scope="function", autouse=True)
-    def h_chk(self, connection, collection_wrap_4_insert, collection_wrap_4_flush,
-              collection_wrap_4_search):
+    def init_health_checkers(self, connection, collection_wrap_4_insert,
+                             collection_wrap_4_flush, collection_wrap_4_search):
         checkers = {}
         # search_ch = SearchChecker(collection_wrap=collection_wrap_4_search)
         # checkers[Op.search] = search_ch
@@ -90,18 +92,17 @@ class TestChaos(TestChaosBase):
         create_ch = CreateChecker()
         checkers[Op.create] = create_ch
 
-        return checkers
+        self.health_checkers = checkers
 
-    '''
-    def teardown(self, health_checkers):
-        for ch in health_checkers.values():
+    def teardown(self):
+        for ch in self.health_checkers.values():
             ch.terminate()
         pass
-    '''
+
     @pytest.mark.parametrize('chaos_yaml', get_chaos_yamls())
-    def test_chaos(self, h_chk, chaos_yaml):
+    def test_chaos(self, chaos_yaml):
         # start the monitor threads to check the milvus ops
-        start_monitor_threads(h_chk)
+        start_monitor_threads(self.health_checkers)
 
         # parse chaos object
         print("test.start")
@@ -115,42 +116,42 @@ class TestChaos(TestChaosBase):
         sleep(1)
 
         # assert statistic:all ops 100% succ
-        assert_statistic(h_chk)
+        assert_statistic(self.health_checkers)
 
         # reset counting
-        reset_counting(h_chk)
+        reset_counting(self.health_checkers)
 
         # apply chaos object
-        chaos_opt = ChaosOpt(chaos_config['kind'])
-        chaos_opt.create_chaos_object(chaos_config)
+        # chaos_opt = ChaosOpt(chaos_config['kind'])
+        # chaos_opt.create_chaos_object(chaos_config)
 
         # wait 120s
         sleep(1)
 
         # assert statistic
-        assert_statistic(h_chk, expectations={Op.create: self.expect_create,
-                                              Op.insert: self.expect_insert,
-                                              Op.flush: self.expect_flush,
-                                              Op.index: self.expect_index,
-                                              Op.search: self.expect_search,
-                                              Op.query: self.expect_query
-                                              })
+        assert_statistic(self.health_checkers, expectations={Op.create: self.expect_create,
+                                                             Op.insert: self.expect_insert,
+                                                             Op.flush: self.expect_flush,
+                                                             Op.index: self.expect_index,
+                                                             Op.search: self.expect_search,
+                                                             Op.query: self.expect_query
+                                                             })
         #
         # delete chaos
         # meta_name = chaos_config.get('metadata', None).get('name', None)
         # chaos_opt.delete_chaos_object(meta_name)
 
         # reset counting again
-        reset_counting(h_chk)
+        reset_counting(self.health_checkers)
 
         # wait 300s (varies by feature)
         sleep(1)
 
         # assert statistic: all ops success again
-        assert_statistic(h_chk)
+        assert_statistic(self.health_checkers)
 
         # terminate thread
-        for ch in h_chk.values():
+        for ch in self.health_checkers.values():
             ch.terminate()
         # log.debug("*******************Test Completed.*******************")
 
