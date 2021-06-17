@@ -100,7 +100,8 @@ class ResponseChecker:
     @staticmethod
     def check_collection_property(collection, func_name, check_items):
         exp_func_name = "init_collection"
-        if func_name != exp_func_name:
+        exp_func_name_2 = "construct_from_dataframe"
+        if func_name != exp_func_name and func_name != exp_func_name_2:
             log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
         if not isinstance(collection, Collection):
             raise Exception("The result to check isn't collection type object")
