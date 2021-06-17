@@ -326,6 +326,7 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 
 func (lct *LoadCollectionTask) PostExecute(ctx context.Context) error {
 	collectionID := lct.CollectionID
+	lct.meta.addCollection(collectionID, lct.Schema)
 	lct.meta.collectionInfos[collectionID].LoadCollection = true
 	log.Debug("LoadCollectionTask postExecute done",
 		zap.Int64("msgID", lct.ID()),

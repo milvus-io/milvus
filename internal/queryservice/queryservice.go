@@ -14,7 +14,6 @@ package queryservice
 import (
 	"context"
 	"math/rand"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -97,13 +96,13 @@ func (qs *QueryService) Init() error {
 		qs.scheduler, err = NewTaskScheduler(qs.loopCtx, metaKV, qs.cluster, etcdKV, qs.masterServiceClient, qs.dataServiceClient)
 		return err
 	}
-	log.Debug("IndexService try to connect etcd")
+	log.Debug("queryService try to connect etcd")
 	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
 	if err != nil {
-		log.Debug("IndexService try to connect etcd failed", zap.Error(err))
+		log.Debug("queryService try to connect etcd failed", zap.Error(err))
 		return err
 	}
-	log.Debug("IndexService try to connect etcd success")
+	log.Debug("queryService try to connect etcd success")
 	return nil
 }
 
@@ -185,7 +184,9 @@ func (qs *QueryService) watchNodeLoop() {
 		if _, ok := qs.cluster.nodes[nodeID]; !ok {
 			serverID := session.ServerID
 			err := qs.cluster.RegisterNode(session, serverID)
-			log.Warn(err.Error())
+			if err != nil {
+				log.Error("register queryNode error", zap.Any("error", err.Error()))
+			}
 			log.Debug("QueryService", zap.Any("Add QueryNode, session serverID", serverID))
 		}
 	}
@@ -275,18 +276,19 @@ func (qs *QueryService) watchMetaLoop() {
 		case resp := <-watchChan:
 			log.Debug("segment meta updated.")
 			for _, event := range resp.Events {
-				segmentID, err := strconv.ParseInt(filepath.Base(string(event.Kv.Key)), 10, 64)
-				if err != nil {
-					log.Error("watch meta loop error when get segmentID", zap.Any("error", err.Error()))
-				}
+				//segmentID, err := strconv.ParseInt(filepath.Base(string(event.Kv.Key)), 10, 64)
+				//if err != nil {
+				//	log.Error("watch meta loop error when get segmentID", zap.Any("error", err.Error()))
+				//}
 				segmentInfo := &querypb.SegmentInfo{}
-				err = proto.UnmarshalText(string(event.Kv.Value), segmentInfo)
+				err := proto.UnmarshalText(string(event.Kv.Value), segmentInfo)
 				if err != nil {
 					log.Error("watch meta loop error when unmarshal", zap.Any("error", err.Error()))
 				}
 				switch event.Type {
 				case mvccpb.PUT:
-					qs.meta.setSegmentInfo(segmentID, segmentInfo)
+					//TODO::
+					//qs.meta.setSegmentInfo(segmentID, segmentInfo)
 				case mvccpb.DELETE:
 					//TODO::
 				}

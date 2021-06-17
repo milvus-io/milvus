@@ -392,7 +392,7 @@ func (r *releaseCollectionTask) PreExecute(ctx context.Context) error {
 
 func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 	log.Debug("receive release collection task", zap.Any("collectionID", r.req.CollectionID))
-	collection, err := r.node.historical.replica.getCollectionByID(r.req.CollectionID)
+	collection, err := r.node.streaming.replica.getCollectionByID(r.req.CollectionID)
 	if err != nil {
 		log.Error(err.Error())
 		return err
