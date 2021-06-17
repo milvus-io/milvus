@@ -40,7 +40,7 @@ Both Milvus Standalone and Milvus Cluster are available.
 
 Milvus was released under the [open-source Apache License 2.0](https://github.com/milvus-io/milvus/blob/master/LICENSE) in October 2019. It is currently a graduate project under [LF AI & Data Foundation](https://lfaidata.foundation/).
 
-## 产品亮点
+## Key features
 
 <details>
   <summary><b>Millisecond search on trillion vector datasets</b></summary>
