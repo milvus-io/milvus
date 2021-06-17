@@ -12,7 +12,6 @@
 package datanode
 
 import (
-	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -73,7 +72,6 @@ func (p *ParamTable) Init() {
 		}
 
 		// === DataNode Internal Components Configs ===
-		p.initNodeID()
 		p.initFlowGraphMaxQueueLength()
 		p.initFlowGraphMaxParallelism()
 		p.initFlushInsertBufferSize()
@@ -91,9 +89,6 @@ func (p *ParamTable) Init() {
 		// - timetick channel -
 		p.initTimeTickChannelName()
 
-		// - channel subname -
-		p.initMsgChannelSubName()
-
 		// --- ETCD ---
 		p.initEtcdEndpoints()
 		p.initMetaRootPath()
@@ -108,20 +103,6 @@ func (p *ParamTable) Init() {
 }
 
 // ==== DataNode internal components configs ====
-func (p *ParamTable) initNodeID() {
-	dataNodeIDStr := os.Getenv("DATA_NODE_ID")
-	if dataNodeIDStr == "" {
-		dataNodeIDStr = "1"
-	}
-
-	dnID, err := strconv.Atoi(dataNodeIDStr)
-	if err != nil {
-		panic(err)
-	}
-
-	p.NodeID = UniqueID(dnID)
-}
-
 // ---- flowgraph configs ----
 func (p *ParamTable) initFlowGraphMaxQueueLength() {
 	p.FlowGraphMaxQueueLength = p.ParseInt32("dataNode.dataSync.flowGraph.maxQueueLength")

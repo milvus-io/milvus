@@ -1466,6 +1466,7 @@ type RetrieveTask struct {
 	resultBuf      chan []*internalpb.RetrieveResults
 	result         *milvuspb.RetrieveResults
 	retrieve       *milvuspb.RetrieveRequest
+	chMgr          channelsMgr
 }
 
 func (rt *RetrieveTask) TraceCtx() context.Context {
@@ -1503,6 +1504,32 @@ func (rt *RetrieveTask) SetTs(ts Timestamp) {
 func (rt *RetrieveTask) OnEnqueue() error {
 	rt.Base.MsgType = commonpb.MsgType_Retrieve
 	return nil
+}
+
+func (rt *RetrieveTask) getChannels() ([]pChan, error) {
+	collID, err := globalMetaCache.GetCollectionID(rt.ctx, rt.retrieve.CollectionName)
+	if err != nil {
+		return nil, err
+	}
+
+	return rt.chMgr.getChannels(collID)
+}
+
+func (rt *RetrieveTask) getVChannels() ([]vChan, error) {
+	collID, err := globalMetaCache.GetCollectionID(rt.ctx, rt.retrieve.CollectionName)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = rt.chMgr.getChannels(collID)
+	if err != nil {
+		err := rt.chMgr.createDMLMsgStream(collID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return rt.chMgr.getVChannels(collID)
 }
 
 func (rt *RetrieveTask) PreExecute(ctx context.Context) error {

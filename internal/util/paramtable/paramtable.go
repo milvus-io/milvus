@@ -136,23 +136,6 @@ func (gp *BaseTable) tryloadFromEnv() {
 		panic(err)
 	}
 
-	proxyServiceAddress := os.Getenv("PROXY_SERVICE_ADDRESS")
-	if proxyServiceAddress == "" {
-		addr, err := gp.Load("proxyService.address")
-		if err != nil {
-			panic(err)
-		}
-		proxyServicePort, err := gp.Load("proxyService.port")
-		if err != nil {
-			panic(err)
-		}
-		proxyServiceAddress = addr + ":" + proxyServicePort
-	}
-	err = gp.Save("_PROXY_SERVICE_ADDRESS", proxyServiceAddress)
-	if err != nil {
-		panic(err)
-	}
-
 	indexBuilderAddress := os.Getenv("INDEX_SERVICE_ADDRESS")
 	if indexBuilderAddress == "" {
 		indexBuilderHost, err := gp.Load("indexService.address")
@@ -318,23 +301,6 @@ func (gp *BaseTable) ParseInt(key string) int {
 		panic(err)
 	}
 	return value
-}
-
-func (gp *BaseTable) QueryNodeIDList() []UniqueID {
-	queryNodeIDStr, err := gp.Load("nodeID.queryNodeIDList")
-	if err != nil {
-		panic(err)
-	}
-	var ret []UniqueID
-	queryNodeIDs := strings.Split(queryNodeIDStr, ",")
-	for _, i := range queryNodeIDs {
-		v, err := strconv.Atoi(i)
-		if err != nil {
-			log.Panicf("load proxy id list error, %s", err.Error())
-		}
-		ret = append(ret, UniqueID(v))
-	}
-	return ret
 }
 
 // package methods

@@ -513,9 +513,10 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 					GlobalSealedSegmentIDs: sealedSegmentSearched,
 				},
 			}
-			log.Debug("QueryNode SearchResultMsg",
-				zap.Any("pChannels", collection.getPChannels()),
+			log.Debug("QueryNode Empty SearchResultMsg",
 				zap.Any("collectionID", collection.ID()),
+				zap.Any("msgID", searchMsg.ID()),
+				zap.Any("pChannels", collection.getPChannels()),
 				zap.Any("sealedSegmentSearched", sealedSegmentSearched),
 			)
 			err = s.publishSearchResult(searchResultMsg, searchMsg.CollectionID)
@@ -604,8 +605,9 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 			},
 		}
 		log.Debug("QueryNode SearchResultMsg",
-			zap.Any("pChannels", collection.getPChannels()),
 			zap.Any("collectionID", collection.ID()),
+			zap.Any("msgID", searchMsg.ID()),
+			zap.Any("pChannels", collection.getPChannels()),
 			zap.Any("sealedSegmentSearched", sealedSegmentSearched),
 		)
 

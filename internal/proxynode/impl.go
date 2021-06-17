@@ -1355,6 +1355,7 @@ func (node *ProxyNode) Query(ctx context.Context, request *milvuspb.QueryRequest
 			queryMsgStream: node.queryMsgStream,
 			resultBuf:      make(chan []*internalpb.RetrieveResults),
 			retrieve:       retrieveRequest,
+			chMgr:          node.chMgr,
 		}
 
 		err := node.sched.DqQueue.Enqueue(rt)
