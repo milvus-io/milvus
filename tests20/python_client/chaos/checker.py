@@ -1,17 +1,16 @@
-import sys
-import threading
 from enum import Enum
 
 from time import sleep
 from base.collection_wrapper import ApiCollectionWrapper
 from common import common_func as cf
 from common import common_type as ct
-from utils.util_log import test_log as log
+import constants
 
 
 class Op(Enum):
     create = 'create'
-    insert_n_flush = 'insert_n_flush'
+    insert = 'insert'
+    flush = 'flush'
     index = 'index'
     search = 'search'
     query = 'query'
@@ -59,49 +58,31 @@ class SearchChecker(Checker):
                 self._fail += 1
 
 
-class InsertAndFlushChecker(Checker):
-    def __init__(self, connection, collection_wrap):
+class InsertFlushChecker(Checker):
+    def __init__(self, connection, collection_wrap, do_flush=False):
         super().__init__()
-        self._flush_succ = 0
-        self._flush_fail = 0
         self.conn = connection
         self.c_wrap = collection_wrap
-
-    def insert_succ_rate(self):
-        return self._succ / self.total() if self.total() != 0 else 0
-
-    def flush_succ_rate(self):
-        return self._flush_succ / self.flush_total() if self.flush_total() != 0 else 0
-
-    def flush_total(self):
-        return self._flush_succ + self._flush_fail
-
-    def reset(self):
-        self._succ = 0
-        self._fail = 0
-        self._flush_succ = 0
-        self._flush_fail = 0
+        self._do_flush = do_flush
 
     def keep_running(self):
         while self._running is True:
             _, insert_result = self.c_wrap.insert(
-                                    data=cf.gen_default_dataframe_data(nb=1)
+                                    data=cf.gen_default_dataframe_data(nb=constants.DELTA_PER_INS)
                                     )
-            if insert_result is True:
-                self._succ += 1
+            if self._do_flush is False:
+                if insert_result is True:
+                    self._succ += 1
+                else:
+                    self._fail += 1
+            else:
                 entities_1 = self.c_wrap.num_entities
                 self.conn.flush([self.c_wrap.name])
                 entities_2 = self.c_wrap.num_entities
-                log.debug("Before flush: %d, After flush %d" % (entities_1, entities_2))
-                if entities_2 == (entities_1 + 1):
-                    self._flush_succ += 1
-                    log.debug("flush succ")
+                if entities_2 == (entities_1 + constants.DELTA_PER_INS):
+                    self._succ += 1
                 else:
-                    self._flush_fail += 1
-                    log.debug("flush fail")
-            else:
-                self._fail += 1
-                self._flush_fail += 1
+                    self._fail += 1
 
 
 class CreateChecker(Checker):
@@ -133,14 +114,6 @@ class IndexChecker(Checker):
 
 
 class QueryChecker(Checker):
-    def __init__(self):
-        super().__init__()
-
-    def keep_running(self):
-        pass
-
-
-class FlushChecker(Checker):
     def __init__(self):
         super().__init__()
 

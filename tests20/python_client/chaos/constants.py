@@ -24,7 +24,12 @@ LOG_PATH = "/test/milvus/benchmark/logs/{}/".format(BRANCH)
 DEFAULT_DEPLOY_MODE = "single"
 
 NAMESPACE = "default"
-# CHAOS_NAMESPACE = "chaos-testing"
 DEFAULT_API_VERSION = 'chaos-mesh.org/v1alpha1'
 DEFAULT_GROUP = 'chaos-mesh.org'
 DEFAULT_VERSION = 'v1alpha1'
+SUCC = 'succ'
+FAIL = 'fail'
+DELTA_PER_INS = 10
+
+CHAOS_CONFIG_ENV = 'CHAOS_CONFIG_PATH'      # env variables for chao path
+TESTS_CONFIG_LOCATION = 'chaos_objects/'

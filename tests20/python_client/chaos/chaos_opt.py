@@ -6,8 +6,7 @@ from time import sleep
 
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
-import config as cf
-from chaos_parser import BaseChaos
+import constants as cf
 
 
 logger = logging.getLogger("milvus_benchmark.chaos.chaosOpt")
@@ -69,12 +68,3 @@ class ChaosOpt(object):
                 metadata_name = item["metadata"]["name"]
                 self.delete_chaos_object(metadata_name)
 
-
-if __name__ == '__main__':
-    yaml = 'chaos_objects/chaos_standalone_podkill.yaml'
-    chaos_obj = BaseChaos(yaml)
-    chaos_config = chaos_obj.gen_experiment_config()
-    chaos_opt = ChaosOpt(chaos_config['kind'])
-    chaos_opt.create_chaos_object(chaos_config)
-    sleep(120)
-    chaos_opt.delete_chaos_object('test-standalone-pod-kill')

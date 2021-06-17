@@ -1,7 +1,7 @@
 apiVersion: chaos-mesh.org/v1alpha1
 kind: PodChaos
 metadata:
-  name: test-query-node-pod-kill
+  name: test-proxy-node-pod-kill
   namespace:
 spec:
   action: pod-kill
@@ -10,6 +10,7 @@ spec:
     namespaces:
       - default         # target namespace of milvus deployment
     labelSelectors:
-      app.kubernetes.io/name: query-node     # query node pod of milvus
+      app.kubernetes.io/name: milvus-ha
+      component: 'proxynode'
   scheduler:
     cron: '@every 20s'
