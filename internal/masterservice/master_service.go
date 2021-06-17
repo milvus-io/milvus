@@ -583,8 +583,9 @@ func (c *Core) setMsgStreams() error {
 				Timestamp: t,
 				SourceID:  c.session.ServerID,
 			},
-			ChannelNames: pc,
-			Timestamps:   pt,
+			ChannelNames:     pc,
+			Timestamps:       pt,
+			DefaultTimestamp: t,
 		}
 		return c.chanTimeTick.UpdateTimeTick(&ttMsg)
 	}
