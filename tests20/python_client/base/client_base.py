@@ -143,7 +143,7 @@ class TestcaseBase(Base):
                                       **kwargs)
         return partition_wrap
 
-    def init_collection_general(self, prefix, insert_data=False, nb=3000, partition_num=0, is_binary=False):
+    def init_collection_general(self, prefix, insert_data=False, nb=ct.default_nb, partition_num=0, is_binary=False):
         """
         target: create specified collections
         method: 1. create collections (binary/non-binary)
