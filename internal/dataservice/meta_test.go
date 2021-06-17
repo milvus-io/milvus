@@ -174,9 +174,9 @@ func TestMeta_Basic(t *testing.T) {
 		assert.EqualValues(t, 1, len(segIDs))
 		assert.Contains(t, segIDs, segID1_1)
 
-		err = meta.SealSegment(segID0_0, 200)
+		err = meta.SealSegment(segID0_0)
 		assert.Nil(t, err)
-		err = meta.FlushSegment(segID0_0, 300)
+		err = meta.FlushSegment(segID0_0)
 		assert.Nil(t, err)
 
 		info0_0, err = meta.GetSegment(segID0_0)
@@ -204,42 +204,26 @@ func TestMeta_Basic(t *testing.T) {
 		assert.Nil(t, err)
 		segInfo0, err := BuildSegment(collID, partID0, segID0, channelName)
 		assert.Nil(t, err)
-		segInfo0.NumRows = rowCount0
+		segInfo0.NumOfRows = rowCount0
 		err = meta.AddSegment(segInfo0)
 		assert.Nil(t, err)
-
-		// update seg1 to 300 rows
-		segInfo0.NumRows = rowCount1
-		err = meta.UpdateSegmentStatistic(segInfo0)
-		assert.Nil(t, err)
-
-		nums, err = meta.GetNumRowsOfCollection(collID)
-		assert.Nil(t, err)
-		assert.EqualValues(t, rowCount1, nums)
-
-		// check update non-exist segment
-		segInfoNonExist := segInfo0
-		segInfoNonExist.ID, err = mockAllocator.allocID()
-		assert.Nil(t, err)
-		err = meta.UpdateSegmentStatistic(segInfo0)
-		assert.NotNil(t, err)
 
 		// add seg2 with 300 rows
 		segID1, err := mockAllocator.allocID()
 		assert.Nil(t, err)
 		segInfo1, err := BuildSegment(collID, partID0, segID1, channelName)
 		assert.Nil(t, err)
-		segInfo1.NumRows = rowCount1
+		segInfo1.NumOfRows = rowCount1
 		err = meta.AddSegment(segInfo1)
 		assert.Nil(t, err)
 
 		// check partition/collection statistics
 		nums, err = meta.GetNumRowsOfPartition(collID, partID0)
 		assert.Nil(t, err)
-		assert.EqualValues(t, (rowCount1 + rowCount1), nums)
+		assert.EqualValues(t, (rowCount0 + rowCount1), nums)
 		nums, err = meta.GetNumRowsOfCollection(collID)
 		assert.Nil(t, err)
-		assert.EqualValues(t, (rowCount1 + rowCount1), nums)
+		assert.EqualValues(t, (rowCount0 + rowCount1), nums)
 	})
 
 	t.Run("Test Invalid", func(t *testing.T) {
@@ -273,11 +257,11 @@ func TestMeta_Basic(t *testing.T) {
 		assert.NotNil(t, err)
 
 		// check seal non-exist segment
-		err = meta.SealSegment(segIDInvalid, 200)
+		err = meta.SealSegment(segIDInvalid)
 		assert.NotNil(t, err)
 
 		// check flush non-exist segment
-		err = meta.FlushSegment(segIDInvalid, 300)
+		err = meta.FlushSegment(segIDInvalid)
 		assert.NotNil(t, err)
 
 		err = meta.DropCollection(collID)

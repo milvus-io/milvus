@@ -14,6 +14,7 @@ package proxynode
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -26,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -36,6 +37,9 @@ import (
 
 type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
+
+const sendTimeTickMsgInterval = 200 * time.Millisecond
+const channelMgrTickerInterval = 100 * time.Millisecond
 
 type ProxyNode struct {
 	ctx    context.Context
@@ -51,11 +55,14 @@ type ProxyNode struct {
 	masterService types.MasterService
 	indexService  types.IndexService
 	dataService   types.DataService
-	proxyService  types.ProxyService
 	queryService  types.QueryService
+
+	chMgr channelsMgr
 
 	sched *TaskScheduler
 	tick  *timeTick
+
+	chTicker channelsTimeTicker
 
 	idAllocator  *allocator.IDAllocator
 	tsoAllocator *TimestampAllocator
@@ -87,49 +94,17 @@ func NewProxyNode(ctx context.Context, factory msgstream.Factory) (*ProxyNode, e
 
 // Register register proxy node at etcd
 func (node *ProxyNode) Register() error {
-	node.session = sessionutil.NewSession(node.ctx, Params.MetaRootPath, []string{Params.EtcdAddress})
+	node.session = sessionutil.NewSession(node.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
 	node.session.Init(typeutil.ProxyNodeRole, Params.NetworkAddress, false)
 	Params.ProxyID = node.session.ServerID
 	return nil
 }
 
 func (node *ProxyNode) Init() error {
-	// todo wait for proxyservice state changed to Healthy
-	ctx := context.Background()
-
-	err := funcutil.WaitForComponentHealthy(ctx, node.proxyService, "ProxyService", 1000000, time.Millisecond*200)
-	if err != nil {
-		return err
-	}
-	log.Debug("ProxyService is ready ...")
-
-	request := &proxypb.RegisterNodeRequest{
-		Address: &commonpb.Address{
-			Ip:   Params.IP,
-			Port: int64(Params.NetworkPort),
-		},
-	}
-
-	response, err := node.proxyService.RegisterNode(ctx, request)
-	if err != nil {
-		log.Debug("ProxyNode RegisterNode failed", zap.Error(err))
-		return err
-	}
-	if response.Status.ErrorCode != commonpb.ErrorCode_Success {
-		log.Debug("ProxyNode RegisterNode failed", zap.String("Reason", response.Status.Reason))
-		return errors.New(response.Status.Reason)
-	}
-
-	err = Params.LoadConfigFromInitParams(response.InitParams)
-	if err != nil {
-		log.Debug("ProxyNode LoadConfigFromInitParams failed", zap.Error(err))
-		return err
-	}
-
 	// wait for dataservice state changed to Healthy
 	if node.dataService != nil {
 		log.Debug("ProxyNode wait for dataService ready")
-		err := funcutil.WaitForComponentHealthy(ctx, node.dataService, "DataService", 1000000, time.Millisecond*200)
+		err := funcutil.WaitForComponentHealthy(node.ctx, node.dataService, "DataService", 1000000, time.Millisecond*200)
 		if err != nil {
 			log.Debug("ProxyNode wait for dataService ready failed", zap.Error(err))
 			return err
@@ -140,7 +115,7 @@ func (node *ProxyNode) Init() error {
 	// wait for queryService state changed to Healthy
 	if node.queryService != nil {
 		log.Debug("ProxyNode wait for queryService ready")
-		err := funcutil.WaitForComponentHealthy(ctx, node.queryService, "QueryService", 1000000, time.Millisecond*200)
+		err := funcutil.WaitForComponentHealthy(node.ctx, node.queryService, "QueryService", 1000000, time.Millisecond*200)
 		if err != nil {
 			log.Debug("ProxyNode wait for queryService ready failed", zap.Error(err))
 			return err
@@ -151,7 +126,7 @@ func (node *ProxyNode) Init() error {
 	// wait for indexservice state changed to Healthy
 	if node.indexService != nil {
 		log.Debug("ProxyNode wait for indexService ready")
-		err := funcutil.WaitForComponentHealthy(ctx, node.indexService, "IndexService", 1000000, time.Millisecond*200)
+		err := funcutil.WaitForComponentHealthy(node.ctx, node.indexService, "IndexService", 1000000, time.Millisecond*200)
 		if err != nil {
 			log.Debug("ProxyNode wait for indexService ready failed", zap.Error(err))
 			return err
@@ -160,7 +135,7 @@ func (node *ProxyNode) Init() error {
 	}
 
 	if node.queryService != nil {
-		resp, err := node.queryService.CreateQueryChannel(ctx, &querypb.CreateQueryChannelRequest{})
+		resp, err := node.queryService.CreateQueryChannel(node.ctx, &querypb.CreateQueryChannelRequest{})
 		if err != nil {
 			log.Debug("ProxyNode CreateQueryChannel failed", zap.Error(err))
 			return err
@@ -191,7 +166,7 @@ func (node *ProxyNode) Init() error {
 	m := map[string]interface{}{
 		"PulsarAddress": Params.PulsarAddress,
 		"PulsarBufSize": 1024}
-	err = node.msFactory.SetParams(m)
+	err := node.msFactory.SetParams(m)
 	if err != nil {
 		return err
 	}
@@ -202,8 +177,7 @@ func (node *ProxyNode) Init() error {
 	log.Debug("proxynode", zap.Strings("proxynode AsProducer:", Params.SearchChannelNames))
 	log.Debug("create query message stream ...")
 
-	masterAddr := Params.MasterAddress
-	idAllocator, err := allocator.NewIDAllocator(node.ctx, masterAddr, Params.MetaRootPath, []string{Params.EtcdAddress})
+	idAllocator, err := allocator.NewIDAllocator(node.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
 
 	if err != nil {
 		return err
@@ -211,7 +185,7 @@ func (node *ProxyNode) Init() error {
 	node.idAllocator = idAllocator
 	node.idAllocator.PeerID = Params.ProxyID
 
-	tsoAllocator, err := NewTimestampAllocator(node.masterService, Params.ProxyID)
+	tsoAllocator, err := NewTimestampAllocator(node.ctx, node.masterService, Params.ProxyID)
 	if err != nil {
 		return err
 	}
@@ -224,6 +198,58 @@ func (node *ProxyNode) Init() error {
 	node.segAssigner = segAssigner
 	node.segAssigner.PeerID = Params.ProxyID
 
+	getDmlChannelsFunc := func(collectionID UniqueID) (map[vChan]pChan, error) {
+		req := &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DescribeCollection,
+				MsgID:     0, // todo
+				Timestamp: 0, // todo
+				SourceID:  0, // todo
+			},
+			DbName:         "", // todo
+			CollectionName: "", // todo
+			CollectionID:   collectionID,
+			TimeStamp:      0, // todo
+		}
+		resp, err := node.masterService.DescribeCollection(node.ctx, req)
+		if err != nil {
+			log.Warn("DescribeCollection", zap.Error(err))
+			return nil, err
+		}
+		if resp.Status.ErrorCode != 0 {
+			log.Warn("DescribeCollection",
+				zap.Any("ErrorCode", resp.Status.ErrorCode),
+				zap.Any("Reason", resp.Status.Reason))
+			return nil, err
+		}
+		if len(resp.VirtualChannelNames) != len(resp.PhysicalChannelNames) {
+			err := fmt.Errorf(
+				"len(VirtualChannelNames): %v, len(PhysicalChannelNames): %v",
+				len(resp.VirtualChannelNames),
+				len(resp.PhysicalChannelNames))
+			log.Warn("GetDmlChannels", zap.Error(err))
+			return nil, err
+		}
+
+		ret := make(map[vChan]pChan)
+		for idx, name := range resp.VirtualChannelNames {
+			if _, ok := ret[name]; ok {
+				err := fmt.Errorf(
+					"duplicated virtual channel found, vchan: %v, pchan: %v",
+					name,
+					resp.PhysicalChannelNames[idx])
+				return nil, err
+			}
+			ret[name] = resp.PhysicalChannelNames[idx]
+		}
+
+		return ret, nil
+	}
+	mockQueryService := newMockGetChannelsService()
+
+	chMgr := newChannelsMgr(getDmlChannelsFunc, mockQueryService.GetChannels, node.msFactory)
+	node.chMgr = chMgr
+
 	node.sched, err = NewTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator, node.msFactory)
 	if err != nil {
 		return err
@@ -231,7 +257,64 @@ func (node *ProxyNode) Init() error {
 
 	node.tick = newTimeTick(node.ctx, node.tsoAllocator, time.Millisecond*200, node.sched.TaskDoneTest, node.msFactory)
 
+	node.chTicker = newChannelsTimeTicker(node.ctx, channelMgrTickerInterval, []string{}, node.sched.getPChanStatistics, tsoAllocator)
+
 	return nil
+}
+
+func (node *ProxyNode) sendChannelsTimeTickLoop() {
+	node.wg.Add(1)
+	go func() {
+		defer node.wg.Done()
+
+		// TODO(dragondriver): read this from config
+		timer := time.NewTicker(sendTimeTickMsgInterval)
+
+		for {
+			select {
+			case <-node.ctx.Done():
+				return
+			case <-timer.C:
+				stats, err := node.chTicker.getMinTsStatistics()
+				if err != nil {
+					log.Warn("sendChannelsTimeTickLoop.getMinTsStatistics", zap.Error(err))
+					continue
+				}
+
+				channels := make([]pChan, 0, len(stats))
+				tss := make([]Timestamp, 0, len(stats))
+
+				for channel, ts := range stats {
+					channels = append(channels, channel)
+					tss = append(tss, ts)
+				}
+				log.Debug("send timestamp statistics of pchan", zap.Any("channels", channels), zap.Any("tss", tss))
+
+				req := &internalpb.ChannelTimeTickMsg{
+					Base: &commonpb.MsgBase{
+						MsgType:   commonpb.MsgType_TimeTick, // todo
+						MsgID:     0,                         // todo
+						Timestamp: 0,                         // todo
+						SourceID:  node.session.ServerID,
+					},
+					ChannelNames: channels,
+					Timestamps:   tss,
+				}
+
+				status, err := node.masterService.UpdateChannelTimeTick(node.ctx, req)
+				if err != nil {
+					log.Warn("sendChannelsTimeTickLoop.UpdateChannelTimeTick", zap.Error(err))
+					continue
+				}
+				if status.ErrorCode != 0 {
+					log.Warn("sendChannelsTimeTickLoop.UpdateChannelTimeTick",
+						zap.Any("ErrorCode", status.ErrorCode),
+						zap.Any("Reason", status.Reason))
+					continue
+				}
+			}
+		}
+	}()
 }
 
 func (node *ProxyNode) Start() error {
@@ -259,6 +342,14 @@ func (node *ProxyNode) Start() error {
 	node.tick.Start()
 	log.Debug("start time tick ...")
 
+	err = node.chTicker.start()
+	if err != nil {
+		return err
+	}
+	log.Debug("start channelsTimeTicker")
+
+	node.sendChannelsTimeTickLoop()
+
 	// Start callbacks
 	for _, cb := range node.startCallbacks {
 		cb()
@@ -279,6 +370,10 @@ func (node *ProxyNode) Stop() error {
 	node.sched.Close()
 	node.queryMsgStream.Close()
 	node.tick.Close()
+	err := node.chTicker.close()
+	if err != nil {
+		return err
+	}
 
 	node.wg.Wait()
 
@@ -313,10 +408,6 @@ func (node *ProxyNode) SetIndexServiceClient(cli types.IndexService) {
 
 func (node *ProxyNode) SetDataServiceClient(cli types.DataService) {
 	node.dataService = cli
-}
-
-func (node *ProxyNode) SetProxyServiceClient(cli types.ProxyService) {
-	node.proxyService = cli
 }
 
 func (node *ProxyNode) SetQueryServiceClient(cli types.QueryService) {

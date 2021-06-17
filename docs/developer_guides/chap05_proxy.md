@@ -383,8 +383,6 @@ type GlobalParamsTable struct {
 	MasterAddress string
 	PulsarAddress string
 	
-	QueryNodeNum                       int
-	QueryNodeIDList                    []UniqueID
 	ProxyID                            UniqueID
 	TimeTickInterval                   time.Duration
 	InsertChannelNames                 []string

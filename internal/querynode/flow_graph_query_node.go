@@ -28,7 +28,7 @@ type queryNodeFlowGraph struct {
 	cancel       context.CancelFunc
 	collectionID UniqueID
 	partitionID  UniqueID
-	channel      VChannel
+	channel      Channel
 	flowGraph    *flowgraph.TimeTickedFlowGraph
 	dmlStream    msgstream.MsgStream
 }
@@ -39,7 +39,7 @@ func newQueryNodeFlowGraph(ctx context.Context,
 	partitionID UniqueID,
 	streamingReplica ReplicaInterface,
 	tSafeReplica TSafeReplicaInterface,
-	channel VChannel,
+	channel Channel,
 	factory msgstream.Factory) *queryNodeFlowGraph {
 
 	ctx1, cancel := context.WithCancel(ctx)
@@ -117,17 +117,25 @@ func (q *queryNodeFlowGraph) newDmInputNode(ctx context.Context, factory msgstre
 	return node
 }
 
-func (q *queryNodeFlowGraph) consumerFlowGraph(channel VChannel, subName ConsumeSubName) error {
+func (q *queryNodeFlowGraph) consumerFlowGraph(channel Channel, subName ConsumeSubName) error {
 	if q.dmlStream == nil {
 		return errors.New("null dml message stream in flow graph")
 	}
 	q.dmlStream.AsConsumer([]string{channel}, subName)
-	log.Debug("query node flow graph consumes from virtual channel", zap.Any("vChannel", channel))
+	log.Debug("query node flow graph consumes from pChannel",
+		zap.Any("collectionID", q.collectionID),
+		zap.Any("channel", channel),
+	)
 	return nil
 }
 
 func (q *queryNodeFlowGraph) seekQueryNodeFlowGraph(position *internalpb.MsgPosition) error {
+	q.dmlStream.AsConsumer([]string{position.ChannelName}, position.MsgGroup)
 	err := q.dmlStream.Seek([]*internalpb.MsgPosition{position})
+	log.Debug("query node flow graph seeks from pChannel",
+		zap.Any("collectionID", q.collectionID),
+		zap.Any("channel", position.ChannelName),
+	)
 	return err
 }
 

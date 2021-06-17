@@ -11,153 +11,276 @@
 package dataservice
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"sync"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/types"
-
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"go.uber.org/zap"
+	"golang.org/x/net/context"
 )
 
-type dataNode struct {
-	id      int64
-	address struct {
-		ip   string
-		port int64
+type cluster struct {
+	mu             sync.RWMutex
+	ctx            context.Context
+	dataManager    *clusterNodeManager
+	sessionManager sessionManager
+	posProvider    positionProvider
+
+	startupPolicy    clusterStartupPolicy
+	registerPolicy   dataNodeRegisterPolicy
+	unregisterPolicy dataNodeUnregisterPolicy
+	assignPolicy     channelAssignPolicy
+}
+
+type clusterOption struct {
+	apply func(c *cluster)
+}
+
+func withStartupPolicy(p clusterStartupPolicy) clusterOption {
+	return clusterOption{
+		apply: func(c *cluster) { c.startupPolicy = p },
 	}
-	client     types.DataNode
-	channelNum int
-}
-type dataNodeCluster struct {
-	sync.RWMutex
-	nodes []*dataNode
 }
 
-func (node *dataNode) String() string {
-	return fmt.Sprintf("id: %d, address: %s:%d", node.id, node.address.ip, node.address.port)
-}
-
-func newDataNodeCluster() *dataNodeCluster {
-	return &dataNodeCluster{
-		nodes: make([]*dataNode, 0),
+func withRegisterPolicy(p dataNodeRegisterPolicy) clusterOption {
+	return clusterOption{
+		apply: func(c *cluster) { c.registerPolicy = p },
 	}
 }
 
-func (c *dataNodeCluster) Register(dataNode *dataNode) error {
-	c.Lock()
-	defer c.Unlock()
-	if c.checkDataNodeNotExist(dataNode.address.ip, dataNode.address.port) {
-		c.nodes = append(c.nodes, dataNode)
-		return nil
+func withUnregistorPolicy(p dataNodeUnregisterPolicy) clusterOption {
+	return clusterOption{
+		apply: func(c *cluster) { c.unregisterPolicy = p },
 	}
-	return errors.New("datanode already exist")
 }
 
-func (c *dataNodeCluster) checkDataNodeNotExist(ip string, port int64) bool {
-	for _, node := range c.nodes {
-		if node.address.ip == ip && node.address.port == port {
-			return false
+func withAssignPolicy(p channelAssignPolicy) clusterOption {
+	return clusterOption{
+		apply: func(c *cluster) { c.assignPolicy = p },
+	}
+}
+
+func defaultStartupPolicy() clusterStartupPolicy {
+	return newWatchRestartsStartupPolicy()
+}
+
+func defaultRegisterPolicy() dataNodeRegisterPolicy {
+	return newAssiggBufferRegisterPolicy()
+}
+
+func defaultUnregisterPolicy() dataNodeUnregisterPolicy {
+	return &randomAssignUnregisterPolicy{}
+}
+
+func defaultAssignPolicy() channelAssignPolicy {
+	return newBalancedAssignPolicy()
+}
+
+func newCluster(ctx context.Context, dataManager *clusterNodeManager, sessionManager sessionManager, posProvider positionProvider, opts ...clusterOption) *cluster {
+	c := &cluster{
+		ctx:              ctx,
+		sessionManager:   sessionManager,
+		dataManager:      dataManager,
+		posProvider:      posProvider,
+		startupPolicy:    defaultStartupPolicy(),
+		registerPolicy:   defaultRegisterPolicy(),
+		unregisterPolicy: defaultUnregisterPolicy(),
+		assignPolicy:     defaultAssignPolicy(),
+	}
+	for _, opt := range opts {
+		opt.apply(c)
+	}
+
+	return c
+}
+
+func (c *cluster) startup(dataNodes []*datapb.DataNodeInfo) error {
+	deltaChange := c.dataManager.updateCluster(dataNodes)
+	nodes, chanBuffer := c.dataManager.getDataNodes(false)
+	var rets []*datapb.DataNodeInfo
+	rets, chanBuffer = c.startupPolicy.apply(nodes, deltaChange, chanBuffer)
+	c.dataManager.updateDataNodes(rets, chanBuffer)
+	rets = c.watch(rets)
+	c.dataManager.updateDataNodes(rets, chanBuffer)
+	return nil
+}
+
+func (c *cluster) watch(nodes []*datapb.DataNodeInfo) []*datapb.DataNodeInfo {
+	for _, n := range nodes {
+		logMsg := fmt.Sprintf("Begin to watch channels for node %s:", n.Address)
+		uncompletes := make([]vchannel, 0, len(n.Channels))
+		for _, ch := range n.Channels {
+			if ch.State == datapb.ChannelWatchState_Uncomplete {
+				if len(uncompletes) == 0 {
+					logMsg += ch.Name
+				} else {
+					logMsg += "," + ch.Name
+				}
+				uncompletes = append(uncompletes, vchannel{
+					CollectionID: ch.CollectionID,
+					DmlChannel:   ch.Name,
+				})
+			}
 		}
-	}
-	return true
-}
 
-func (c *dataNodeCluster) GetNumOfNodes() int {
-	c.RLock()
-	defer c.RUnlock()
-	return len(c.nodes)
-}
-
-func (c *dataNodeCluster) GetNodeIDs() []int64 {
-	c.RLock()
-	defer c.RUnlock()
-	ret := make([]int64, 0, len(c.nodes))
-	for _, node := range c.nodes {
-		ret = append(ret, node.id)
-	}
-	return ret
-}
-
-func (c *dataNodeCluster) WatchInsertChannels(channels []string) {
-	ctx := context.TODO()
-	c.Lock()
-	defer c.Unlock()
-	var groups [][]string
-	if len(channels) < len(c.nodes) {
-		groups = make([][]string, len(channels))
-	} else {
-		groups = make([][]string, len(c.nodes))
-	}
-	length := len(groups)
-	for i, channel := range channels {
-		groups[i%length] = append(groups[i%length], channel)
-	}
-	for i, group := range groups {
-		resp, err := c.nodes[i].client.WatchDmChannels(ctx, &datapb.WatchDmChannelsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_DescribeCollection,
-				MsgID:     -1, // todo
-				Timestamp: 0,  // todo
-				SourceID:  Params.NodeID,
-			},
-			ChannelNames: group,
-		})
-		if err = VerifyResponse(resp, err); err != nil {
-			log.Error("watch dm channels error", zap.Stringer("dataNode", c.nodes[i]), zap.Error(err))
+		if len(uncompletes) == 0 {
 			continue
 		}
-		c.nodes[i].channelNum += len(group)
-	}
-}
+		log.Debug(logMsg)
 
-func (c *dataNodeCluster) GetDataNodeStates(ctx context.Context) ([]*internalpb.ComponentInfo, error) {
-	c.RLock()
-	defer c.RUnlock()
-	ret := make([]*internalpb.ComponentInfo, 0)
-	for _, node := range c.nodes {
-		states, err := node.client.GetComponentStates(ctx)
+		vchanInfos, err := c.posProvider.GetVChanPositions(uncompletes, true)
 		if err != nil {
-			log.Error("get component states error", zap.Stringer("dataNode", node), zap.Error(err))
+			log.Warn("get vchannel position failed", zap.Error(err))
 			continue
 		}
-		ret = append(ret, states.State)
+		cli, err := c.sessionManager.getOrCreateSession(n.Address)
+		if err != nil {
+			log.Warn("get session failed", zap.String("addr", n.Address), zap.Error(err))
+			continue
+		}
+		req := &datapb.WatchDmChannelsRequest{
+			Base: &commonpb.MsgBase{
+				SourceID: Params.NodeID,
+			},
+			Vchannels: vchanInfos,
+		}
+		resp, err := cli.WatchDmChannels(c.ctx, req)
+		if err != nil {
+			log.Warn("watch dm channel failed", zap.String("addr", n.Address), zap.Error(err))
+			continue
+		}
+		if resp.ErrorCode != commonpb.ErrorCode_Success {
+			log.Warn("watch channels failed", zap.String("address", n.Address), zap.Error(err))
+			continue
+		}
+		for _, ch := range n.Channels {
+			if ch.State == datapb.ChannelWatchState_Uncomplete {
+				ch.State = datapb.ChannelWatchState_Complete
+			}
+		}
 	}
-	return ret, nil
+	return nodes
 }
 
-func (c *dataNodeCluster) FlushSegment(request *datapb.FlushSegmentsRequest) {
-	ctx := context.TODO()
-	c.Lock()
-	defer c.Unlock()
-	for _, node := range c.nodes {
-		if _, err := node.client.FlushSegments(ctx, request); err != nil {
-			log.Error("flush segment err", zap.Stringer("dataNode", node), zap.Error(err))
+func (c *cluster) register(n *datapb.DataNodeInfo) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.dataManager.register(n)
+	cNodes, chanBuffer := c.dataManager.getDataNodes(true)
+	var rets []*datapb.DataNodeInfo
+	log.Debug("before register policy applied", zap.Any("n.Channels", n.Channels), zap.Any("buffer", chanBuffer))
+	rets, chanBuffer = c.registerPolicy.apply(cNodes, n, chanBuffer)
+	log.Debug("after register policy applied", zap.Any("ret", rets), zap.Any("buffer", chanBuffer))
+	c.dataManager.updateDataNodes(rets, chanBuffer)
+	rets = c.watch(rets)
+	c.dataManager.updateDataNodes(rets, chanBuffer)
+}
+
+func (c *cluster) unregister(n *datapb.DataNodeInfo) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.sessionManager.releaseSession(n.Address)
+	oldNode := c.dataManager.unregister(n)
+	if oldNode != nil {
+		n = oldNode
+	}
+	cNodes, chanBuffer := c.dataManager.getDataNodes(true)
+	log.Debug("before unregister policy applied", zap.Any("n.Channels", n.Channels), zap.Any("buffer", chanBuffer))
+	var rets []*datapb.DataNodeInfo
+	if len(cNodes) == 0 {
+		for _, chStat := range n.Channels {
+			chStat.State = datapb.ChannelWatchState_Uncomplete
+			chanBuffer = append(chanBuffer, chStat)
+		}
+	} else {
+		rets = c.unregisterPolicy.apply(cNodes, n)
+	}
+	log.Debug("after register policy applied", zap.Any("ret", rets), zap.Any("buffer", chanBuffer))
+	c.dataManager.updateDataNodes(rets, chanBuffer)
+	rets = c.watch(rets)
+	c.dataManager.updateDataNodes(rets, chanBuffer)
+}
+
+func (c *cluster) watchIfNeeded(channel string, collectionID UniqueID) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cNodes, chanBuffer := c.dataManager.getDataNodes(true)
+	var rets []*datapb.DataNodeInfo
+	if len(cNodes) == 0 { // no nodes to assign, put into buffer
+		chanBuffer = append(chanBuffer, &datapb.ChannelStatus{
+			Name:         channel,
+			CollectionID: collectionID,
+			State:        datapb.ChannelWatchState_Uncomplete,
+		})
+	} else {
+		rets = c.assignPolicy.apply(cNodes, channel, collectionID)
+	}
+	c.dataManager.updateDataNodes(rets, chanBuffer)
+	rets = c.watch(rets)
+	c.dataManager.updateDataNodes(rets, chanBuffer)
+}
+
+func (c *cluster) flush(segments []*datapb.SegmentInfo) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	m := make(map[string]map[UniqueID][]UniqueID) // channel-> map[collectionID]segmentIDs
+
+	for _, seg := range segments {
+		if _, ok := m[seg.InsertChannel]; !ok {
+			m[seg.InsertChannel] = make(map[UniqueID][]UniqueID)
+		}
+
+		m[seg.InsertChannel][seg.CollectionID] = append(m[seg.InsertChannel][seg.CollectionID], seg.ID)
+	}
+
+	dataNodes, _ := c.dataManager.getDataNodes(true)
+
+	channel2Node := make(map[string]string)
+	for _, node := range dataNodes {
+		for _, chstatus := range node.Channels {
+			channel2Node[chstatus.Name] = node.Address
+		}
+	}
+
+	for ch, coll2seg := range m {
+		node, ok := channel2Node[ch]
+		if !ok {
 			continue
+		}
+		cli, err := c.sessionManager.getOrCreateSession(node)
+		if err != nil {
+			log.Warn("get session failed", zap.String("addr", node), zap.Error(err))
+			continue
+		}
+		for coll, segs := range coll2seg {
+			req := &datapb.FlushSegmentsRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Flush,
+					SourceID: Params.NodeID,
+				},
+				CollectionID: coll,
+				SegmentIDs:   segs,
+			}
+			resp, err := cli.FlushSegments(c.ctx, req)
+			if err != nil {
+				log.Warn("flush segment failed", zap.String("addr", node), zap.Error(err))
+				continue
+			}
+			if resp.ErrorCode != commonpb.ErrorCode_Success {
+				log.Warn("flush segment failed", zap.String("dataNode", node), zap.Error(err))
+				continue
+			}
+			log.Debug("flush segments succeed", zap.Any("segmentIDs", segs))
 		}
 	}
 }
 
-func (c *dataNodeCluster) ShutDownClients() {
-	c.Lock()
-	defer c.Unlock()
-	for _, node := range c.nodes {
-		if err := node.client.Stop(); err != nil {
-			log.Error("stop client error", zap.Stringer("dataNode", node), zap.Error(err))
-			continue
-		}
-	}
-}
-
-// Clear only for test
-func (c *dataNodeCluster) Clear() {
-	c.Lock()
-	defer c.Unlock()
-	c.nodes = make([]*dataNode, 0)
+func (c *cluster) releaseSessions() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.sessionManager.release()
 }

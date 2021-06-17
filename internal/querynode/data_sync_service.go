@@ -33,9 +33,9 @@ const (
 type dataSyncService struct {
 	ctx context.Context
 
-	mu                   sync.Mutex                                    // guards FlowGraphs
-	collectionFlowGraphs map[UniqueID]map[VChannel]*queryNodeFlowGraph // map[collectionID]flowGraphs
-	partitionFlowGraphs  map[UniqueID]map[VChannel]*queryNodeFlowGraph // map[partitionID]flowGraphs
+	mu                   sync.Mutex                                   // guards FlowGraphs
+	collectionFlowGraphs map[UniqueID]map[Channel]*queryNodeFlowGraph // map[collectionID]flowGraphs
+	partitionFlowGraphs  map[UniqueID]map[Channel]*queryNodeFlowGraph // map[partitionID]flowGraphs
 
 	streamingReplica ReplicaInterface
 	tSafeReplica     TSafeReplicaInterface
@@ -48,7 +48,7 @@ func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, 
 	defer dsService.mu.Unlock()
 
 	if _, ok := dsService.collectionFlowGraphs[collectionID]; !ok {
-		dsService.collectionFlowGraphs[collectionID] = make(map[VChannel]*queryNodeFlowGraph)
+		dsService.collectionFlowGraphs[collectionID] = make(map[Channel]*queryNodeFlowGraph)
 	}
 	for _, vChannel := range vChannels {
 		// collection flow graph doesn't need partition id
@@ -69,7 +69,7 @@ func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, 
 	return nil
 }
 
-func (dsService *dataSyncService) getCollectionFlowGraphs(collectionID UniqueID, vChannels []string) (map[VChannel]*queryNodeFlowGraph, error) {
+func (dsService *dataSyncService) getCollectionFlowGraphs(collectionID UniqueID, vChannels []string) (map[Channel]*queryNodeFlowGraph, error) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
@@ -77,7 +77,7 @@ func (dsService *dataSyncService) getCollectionFlowGraphs(collectionID UniqueID,
 		return nil, errors.New("collection flow graph doesn't existed, collectionID = " + fmt.Sprintln(collectionID))
 	}
 
-	tmpFGs := make(map[VChannel]*queryNodeFlowGraph)
+	tmpFGs := make(map[Channel]*queryNodeFlowGraph)
 	for _, channel := range vChannels {
 		if _, ok := dsService.collectionFlowGraphs[collectionID][channel]; ok {
 			tmpFGs[channel] = dsService.collectionFlowGraphs[collectionID][channel]
@@ -124,7 +124,7 @@ func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID, p
 	defer dsService.mu.Unlock()
 
 	if _, ok := dsService.partitionFlowGraphs[partitionID]; !ok {
-		dsService.partitionFlowGraphs[partitionID] = make(map[VChannel]*queryNodeFlowGraph)
+		dsService.partitionFlowGraphs[partitionID] = make(map[Channel]*queryNodeFlowGraph)
 	}
 	for _, vChannel := range vChannels {
 		newFlowGraph := newQueryNodeFlowGraph(dsService.ctx,
@@ -140,7 +140,7 @@ func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID, p
 	return nil
 }
 
-func (dsService *dataSyncService) getPartitionFlowGraphs(partitionID UniqueID, vChannels []string) (map[VChannel]*queryNodeFlowGraph, error) {
+func (dsService *dataSyncService) getPartitionFlowGraphs(partitionID UniqueID, vChannels []string) (map[Channel]*queryNodeFlowGraph, error) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
@@ -148,7 +148,7 @@ func (dsService *dataSyncService) getPartitionFlowGraphs(partitionID UniqueID, v
 		return nil, errors.New("partition flow graph doesn't existed, partitionID = " + fmt.Sprintln(partitionID))
 	}
 
-	tmpFGs := make(map[VChannel]*queryNodeFlowGraph)
+	tmpFGs := make(map[Channel]*queryNodeFlowGraph)
 	for _, channel := range vChannels {
 		if _, ok := dsService.partitionFlowGraphs[partitionID][channel]; ok {
 			tmpFGs[channel] = dsService.partitionFlowGraphs[partitionID][channel]
@@ -196,8 +196,8 @@ func newDataSyncService(ctx context.Context,
 
 	return &dataSyncService{
 		ctx:                  ctx,
-		collectionFlowGraphs: make(map[UniqueID]map[VChannel]*queryNodeFlowGraph),
-		partitionFlowGraphs:  make(map[UniqueID]map[VChannel]*queryNodeFlowGraph),
+		collectionFlowGraphs: make(map[UniqueID]map[Channel]*queryNodeFlowGraph),
+		partitionFlowGraphs:  make(map[UniqueID]map[Channel]*queryNodeFlowGraph),
 		streamingReplica:     streamingReplica,
 		tSafeReplica:         tSafeReplica,
 		msFactory:            factory,
@@ -219,6 +219,6 @@ func (dsService *dataSyncService) close() {
 			}
 		}
 	}
-	dsService.collectionFlowGraphs = make(map[UniqueID]map[VChannel]*queryNodeFlowGraph)
-	dsService.partitionFlowGraphs = make(map[UniqueID]map[VChannel]*queryNodeFlowGraph)
+	dsService.collectionFlowGraphs = make(map[UniqueID]map[Channel]*queryNodeFlowGraph)
+	dsService.partitionFlowGraphs = make(map[UniqueID]map[Channel]*queryNodeFlowGraph)
 }

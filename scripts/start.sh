@@ -9,9 +9,6 @@ nohup ./bin/milvus run dataservice > ~/dataservice.out 2>&1 &
 echo "starting datanode"
 nohup ./bin/milvus run datanode > ~/datanode.out 2>&1 &
 
-echo "starting proxyservice"
-nohup ./bin/milvus run proxyservice > ~/proxyservice.out 2>&1 &
-
 echo "starting proxynode"
 nohup ./bin/milvus run proxynode > ~/proxynode.out 2>&1 &
 

@@ -39,32 +39,33 @@ type Client struct {
 	grpcClient indexpb.IndexServiceClient
 	conn       *grpc.ClientConn
 
-	address   string
-	sess      *sessionutil.Session
+	addr string
+	sess *sessionutil.Session
+
 	timeout   time.Duration
 	recallTry int
 	reconnTry int
 }
 
-func getIndexServiceAddress(sess *sessionutil.Session) (string, error) {
+func getIndexServiceaddr(sess *sessionutil.Session) (string, error) {
 	key := typeutil.IndexServiceRole
 	msess, _, err := sess.GetSessions(key)
 	if err != nil {
 		log.Debug("IndexServiceClient GetSessions failed", zap.Any("key", key), zap.Error(err))
 		return "", err
 	}
+	log.Debug("IndexServiceClient GetSessions success", zap.Any("key", key), zap.Any("msess", msess))
 	ms, ok := msess[key]
 	if !ok {
 		log.Debug("IndexServiceClient msess key not existed", zap.Any("key", key), zap.Any("len of msess", len(msess)))
-		return "", fmt.Errorf("number of master service is incorrect, %d", len(msess))
+		return "", fmt.Errorf("number of indexservice is incorrect, %d", len(msess))
 	}
 	return ms.Address, nil
 }
 
-func NewClient(address, metaRoot string, etcdAddr []string, timeout time.Duration) *Client {
-	sess := sessionutil.NewSession(context.Background(), metaRoot, etcdAddr)
+func NewClient(metaRoot string, etcdEndpoints []string, timeout time.Duration) *Client {
+	sess := sessionutil.NewSession(context.Background(), metaRoot, etcdEndpoints)
 	return &Client{
-		address:   address,
 		ctx:       context.Background(),
 		sess:      sess,
 		timeout:   timeout,
@@ -74,48 +75,25 @@ func NewClient(address, metaRoot string, etcdAddr []string, timeout time.Duratio
 }
 
 func (c *Client) Init() error {
-	tracer := opentracing.GlobalTracer()
-	log.Debug("IndexServiceClient Init", zap.Any("c.address", c.address))
-	if c.address != "" {
-		connectGrpcFunc := func() error {
-			ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
-			defer cancelFunc()
-			log.Debug("IndexServiceClient try connect ", zap.String("address", c.address))
-			conn, err := grpc.DialContext(ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
-				grpc.WithUnaryInterceptor(
-					otgrpc.OpenTracingClientInterceptor(tracer)),
-				grpc.WithStreamInterceptor(
-					otgrpc.OpenTracingStreamClientInterceptor(tracer)))
-			if err != nil {
-				return err
-			}
-			c.conn = conn
-			return nil
-		}
-		err := retry.Retry(100000, time.Millisecond*200, connectGrpcFunc)
-		if err != nil {
-			return err
-		}
-		log.Debug("IndexServiceClient try connect failed", zap.Error(err))
-	} else {
-		return c.reconnect()
+	// for now, we must try many times in Init Stage
+	initFunc := func() error {
+		return c.connect()
 	}
-	log.Debug("IndexServiceClient try connect success")
-	c.grpcClient = indexpb.NewIndexServiceClient(c.conn)
-	return nil
+	err := retry.Retry(10000, 3*time.Second, initFunc)
+	return err
 }
 
-func (c *Client) reconnect() error {
+func (c *Client) connect() error {
 	tracer := opentracing.GlobalTracer()
 	var err error
-	getIndexServiceAddressFn := func() error {
-		c.address, err = getIndexServiceAddress(c.sess)
+	getIndexServiceaddrFn := func() error {
+		c.addr, err = getIndexServiceaddr(c.sess)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
-	err = retry.Retry(c.reconnTry, 3*time.Second, getIndexServiceAddressFn)
+	err = retry.Retry(c.reconnTry, 3*time.Second, getIndexServiceaddrFn)
 	if err != nil {
 		log.Debug("IndexServiceClient getIndexServiceAddress failed", zap.Error(err))
 		return err
@@ -124,8 +102,8 @@ func (c *Client) reconnect() error {
 	connectGrpcFunc := func() error {
 		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
 		defer cancelFunc()
-		log.Debug("IndexServiceClient try connect ", zap.String("address", c.address))
-		conn, err := grpc.DialContext(ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
+		log.Debug("IndexServiceClient try connect ", zap.String("address", c.addr))
+		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(
@@ -152,7 +130,7 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 		return ret, nil
 	}
 	for i := 0; i < c.recallTry; i++ {
-		err = c.reconnect()
+		err = c.connect()
 		if err == nil {
 			ret, err = caller()
 			if err == nil {

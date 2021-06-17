@@ -26,7 +26,7 @@ func TestAllocSegment(t *testing.T) {
 	mockAllocator := newMockAllocator()
 	meta, err := newMemoryMeta(mockAllocator)
 	assert.Nil(t, err)
-	segAllocator := newSegmentAllocator(meta, mockAllocator)
+	segmentManager := newSegmentManager(meta, mockAllocator)
 
 	schema := newTestSchema()
 	collID, err := mockAllocator.allocID()
@@ -47,7 +47,7 @@ func TestAllocSegment(t *testing.T) {
 		{collID, 100, "c1", math.MaxInt64, false},
 	}
 	for _, c := range cases {
-		id, count, expireTime, err := segAllocator.AllocSegment(ctx, c.collectionID, c.partitionID, c.channelName, c.requestRows)
+		id, count, expireTime, err := segmentManager.AllocSegment(ctx, c.collectionID, c.partitionID, c.channelName, c.requestRows)
 		if c.expectResult {
 			assert.Nil(t, err)
 			assert.EqualValues(t, c.requestRows, count)
@@ -108,11 +108,11 @@ func TestLoadSegmentsFromMeta(t *testing.T) {
 	err = meta.AddSegment(flushedSegment)
 	assert.Nil(t, err)
 
-	segAllocator := newSegmentAllocator(meta, mockAllocator)
-	segments := segAllocator.allocStats.getAllSegments()
+	segmentManager := newSegmentManager(meta, mockAllocator)
+	segments := segmentManager.stats
 	assert.EqualValues(t, 2, len(segments))
-	assert.NotNil(t, segments[0])
 	assert.NotNil(t, segments[1])
+	assert.NotNil(t, segments[2])
 }
 
 func TestSaveSegmentsToMeta(t *testing.T) {
@@ -130,12 +130,12 @@ func TestSaveSegmentsToMeta(t *testing.T) {
 	})
 	assert.Nil(t, err)
 
-	allocator := newSegmentAllocator(meta, mockAllocator)
-	segID, _, expireTs, err := allocator.AllocSegment(context.Background(), collID, 0, "c1", 1000)
+	segmentManager := newSegmentManager(meta, mockAllocator)
+	segID, _, expireTs, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000)
 	assert.Nil(t, err)
-	segStatus := allocator.allocStats.getSegmentBy(segID)
+	segStatus := segmentManager.stats[segID]
 	assert.NotNil(t, segStatus)
-	err = allocator.SealAllSegments(context.Background(), collID)
+	err = segmentManager.SealAllSegments(context.Background(), collID)
 	assert.Nil(t, err)
 
 	segment, err := meta.GetSegment(segID)

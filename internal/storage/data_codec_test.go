@@ -15,9 +15,11 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
 
 func TestInsertCodec(t *testing.T) {
@@ -271,6 +273,8 @@ func TestInsertCodec(t *testing.T) {
 	assert.Equal(t, []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
 		resultData.Data[109].(*FloatVectorFieldData).Data)
 	assert.Nil(t, insertCodec.Close())
+	log.Debug("Data", zap.Any("Data", resultData.Data))
+	log.Debug("Infos", zap.Any("Infos", resultData.Infos))
 
 	blobs := []*Blob{}
 	_, _, _, err = insertCodec.Deserialize(blobs)

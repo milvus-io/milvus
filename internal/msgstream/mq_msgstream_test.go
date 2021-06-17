@@ -16,6 +16,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -222,7 +223,7 @@ func getTimeTickMsgPack(reqID UniqueID) *MsgPack {
 
 func getPulsarInputStream(pulsarAddress string, producerChannels []string, opts ...RepackFunc) MsgStream {
 	factory := ProtoUDFactory{}
-	pulsarClient, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	pulsarClient, _ := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
 	inputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
 	inputStream.AsProducer(producerChannels)
 	for _, opt := range opts {
@@ -234,7 +235,7 @@ func getPulsarInputStream(pulsarAddress string, producerChannels []string, opts 
 
 func getPulsarOutputStream(pulsarAddress string, consumerChannels []string, consumerSubName string) MsgStream {
 	factory := ProtoUDFactory{}
-	pulsarClient, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	pulsarClient, _ := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
 	outputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
 	outputStream.AsConsumer(consumerChannels, consumerSubName)
 	outputStream.Start()
@@ -243,7 +244,7 @@ func getPulsarOutputStream(pulsarAddress string, consumerChannels []string, cons
 
 func getPulsarTtOutputStream(pulsarAddress string, consumerChannels []string, consumerSubName string) MsgStream {
 	factory := ProtoUDFactory{}
-	pulsarClient, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	pulsarClient, _ := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
 	outputStream, _ := NewMqTtMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
 	outputStream.AsConsumer(consumerChannels, consumerSubName)
 	outputStream.Start()
@@ -252,8 +253,13 @@ func getPulsarTtOutputStream(pulsarAddress string, consumerChannels []string, co
 
 func getPulsarTtOutputStreamAndSeek(pulsarAddress string, positions []*MsgPosition) MsgStream {
 	factory := ProtoUDFactory{}
-	pulsarClient, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	pulsarClient, _ := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
 	outputStream, _ := NewMqTtMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+	consumerName := []string{}
+	for _, c := range positions {
+		consumerName = append(consumerName, c.ChannelName)
+	}
+	outputStream.AsConsumer(consumerName, positions[0].MsgGroup)
 	outputStream.Seek(positions)
 	outputStream.Start()
 	return outputStream
@@ -483,12 +489,12 @@ func TestStream_PulsarMsgStream_InsertRepackFunc(t *testing.T) {
 
 	factory := ProtoUDFactory{}
 
-	pulsarClient, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	pulsarClient, _ := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
 	inputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
 	inputStream.AsProducer(producerChannels)
 	inputStream.Start()
 
-	pulsarClient2, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	pulsarClient2, _ := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
 	outputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient2, factory.NewUnmarshalDispatcher())
 	outputStream.AsConsumer(consumerChannels, consumerSubName)
 	outputStream.Start()
@@ -537,12 +543,12 @@ func TestStream_PulsarMsgStream_DeleteRepackFunc(t *testing.T) {
 	msgPack.Msgs = append(msgPack.Msgs, deleteMsg)
 
 	factory := ProtoUDFactory{}
-	pulsarClient, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	pulsarClient, _ := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
 	inputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
 	inputStream.AsProducer(producerChannels)
 	inputStream.Start()
 
-	pulsarClient2, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	pulsarClient2, _ := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
 	outputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient2, factory.NewUnmarshalDispatcher())
 	outputStream.AsConsumer(consumerChannels, consumerSubName)
 	outputStream.Start()
@@ -571,12 +577,12 @@ func TestStream_PulsarMsgStream_DefaultRepackFunc(t *testing.T) {
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_QueryNodeStats, 4))
 
 	factory := ProtoUDFactory{}
-	pulsarClient, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	pulsarClient, _ := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
 	inputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
 	inputStream.AsProducer(producerChannels)
 	inputStream.Start()
 
-	pulsarClient2, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	pulsarClient2, _ := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
 	outputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient2, factory.NewUnmarshalDispatcher())
 	outputStream.AsConsumer(consumerChannels, consumerSubName)
 	outputStream.Start()
@@ -627,6 +633,72 @@ func TestStream_PulsarTtMsgStream_Insert(t *testing.T) {
 	outputStream.Close()
 }
 
+func TestStream_PulsarTtMsgStream_NoSeek(t *testing.T) {
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	c1 := funcutil.RandomString(8)
+	producerChannels := []string{c1}
+	consumerChannels := []string{c1}
+	consumerSubName := funcutil.RandomString(8)
+
+	msgPack0 := MsgPack{}
+	msgPack0.Msgs = append(msgPack0.Msgs, getTimeTickMsg(0))
+
+	msgPack1 := MsgPack{}
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 1))
+	msgPack1.Msgs = append(msgPack1.Msgs, getTsMsg(commonpb.MsgType_Insert, 19))
+
+	msgPack2 := MsgPack{}
+	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5))
+
+	msgPack3 := MsgPack{}
+	msgPack3.Msgs = append(msgPack3.Msgs, getTsMsg(commonpb.MsgType_Insert, 14))
+	msgPack3.Msgs = append(msgPack3.Msgs, getTsMsg(commonpb.MsgType_Insert, 9))
+
+	msgPack4 := MsgPack{}
+	msgPack4.Msgs = append(msgPack4.Msgs, getTimeTickMsg(11))
+
+	msgPack5 := MsgPack{}
+	msgPack5.Msgs = append(msgPack5.Msgs, getTimeTickMsg(15))
+
+	inputStream := getPulsarInputStream(pulsarAddress, producerChannels)
+	outputStream := getPulsarTtOutputStream(pulsarAddress, consumerChannels, consumerSubName)
+
+	err := inputStream.Broadcast(&msgPack0)
+	assert.Nil(t, err)
+	err = inputStream.Produce(&msgPack1)
+	assert.Nil(t, err)
+	err = inputStream.Broadcast(&msgPack2)
+	assert.Nil(t, err)
+	err = inputStream.Produce(&msgPack3)
+	assert.Nil(t, err)
+	err = inputStream.Broadcast(&msgPack4)
+	assert.Nil(t, err)
+	err = inputStream.Broadcast(&msgPack5)
+	assert.Nil(t, err)
+
+	o1 := outputStream.Consume()
+	o2 := outputStream.Consume()
+	o3 := outputStream.Consume()
+
+	t.Log(o1.BeginTs)
+	t.Log(o2.BeginTs)
+	t.Log(o3.BeginTs)
+	outputStream.Close()
+
+	outputStream = getPulsarTtOutputStream(pulsarAddress, consumerChannels, consumerSubName)
+	p1 := outputStream.Consume()
+	p2 := outputStream.Consume()
+	p3 := outputStream.Consume()
+	t.Log(p1.BeginTs)
+	t.Log(p2.BeginTs)
+	t.Log(p3.BeginTs)
+	outputStream.Close()
+
+	assert.Equal(t, o1.BeginTs, p1.BeginTs)
+	assert.Equal(t, o2.BeginTs, p2.BeginTs)
+	assert.Equal(t, o3.BeginTs, p3.BeginTs)
+
+}
 func TestStream_PulsarTtMsgStream_Seek(t *testing.T) {
 	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	c1, c2 := funcutil.RandomString(8), funcutil.RandomString(8)
@@ -934,7 +1006,7 @@ func TestStream_MqMsgStream_Seek(t *testing.T) {
 	outputStream.Close()
 
 	factory := ProtoUDFactory{}
-	pulsarClient, _ := mqclient.NewPulsarClient(pulsar.ClientOptions{URL: pulsarAddress})
+	pulsarClient, _ := mqclient.GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
 	outputStream2, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
 	outputStream2.AsConsumer(consumerChannels, consumerSubName)
 	outputStream2.Seek([]*internalpb.MsgPosition{seekPosition})
@@ -951,11 +1023,12 @@ func TestStream_MqMsgStream_Seek(t *testing.T) {
 /****************************************Rmq test******************************************/
 
 func initRmq(name string) *etcdkv.EtcdKV {
-	etcdAddr := os.Getenv("ETCD_ADDRESS")
-	if etcdAddr == "" {
-		etcdAddr = "localhost:2379"
+	endpoints := os.Getenv("ETCD_ENDPOINTS")
+	if endpoints == "" {
+		endpoints = "localhost:2379"
 	}
-	cli, err := clientv3.New(clientv3.Config{Endpoints: []string{etcdAddr}})
+	etcdEndpoints := strings.Split(endpoints, ",")
+	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
 	if err != nil {
 		log.Fatalf("New clientv3 error = %v", err)
 	}

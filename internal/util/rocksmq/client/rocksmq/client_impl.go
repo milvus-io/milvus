@@ -134,6 +134,7 @@ func consume(ctx context.Context, consumer *consumer) {
 				consumer.messageCh <- ConsumerMessage{
 					MsgID:   msg[0].MsgID,
 					Payload: msg[0].Payload,
+					Topic:   consumer.Topic(),
 				}
 			}
 		}

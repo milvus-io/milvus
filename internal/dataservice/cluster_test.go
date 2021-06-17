@@ -11,90 +11,133 @@
 package dataservice
 
 import (
+	"context"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/stretchr/testify/assert"
-	"golang.org/x/net/context"
 )
 
-func TestDataNodeClusterRegister(t *testing.T) {
-	Params.Init()
-	cluster := newDataNodeCluster()
-	dataNodeNum := 3
-	ids := make([]int64, 0, dataNodeNum)
-	for i := 0; i < dataNodeNum; i++ {
-		c, err := newMockDataNodeClient(int64(i))
-		assert.Nil(t, err)
-		err = c.Init()
-		assert.Nil(t, err)
-		err = c.Start()
-		assert.Nil(t, err)
-		cluster.Register(&dataNode{
-			id: int64(i),
-			address: struct {
-				ip   string
-				port int64
-			}{"localhost", int64(9999 + i)},
-			client:     c,
-			channelNum: 0,
-		})
-		ids = append(ids, int64(i))
+func TestClusterCreate(t *testing.T) {
+	cPolicy := newMockStartupPolicy()
+	cluster := createCluster(t, nil, withStartupPolicy(cPolicy))
+	addr := "localhost:8080"
+	nodes := []*datapb.DataNodeInfo{
+		{
+			Address:  addr,
+			Version:  1,
+			Channels: []*datapb.ChannelStatus{},
+		},
 	}
-	assert.EqualValues(t, dataNodeNum, cluster.GetNumOfNodes())
-	assert.EqualValues(t, ids, cluster.GetNodeIDs())
-	states, err := cluster.GetDataNodeStates(context.TODO())
+	err := cluster.startup(nodes)
 	assert.Nil(t, err)
-	assert.EqualValues(t, dataNodeNum, len(states))
-	for _, s := range states {
-		assert.EqualValues(t, internalpb.StateCode_Healthy, s.StateCode)
-	}
-	cluster.ShutDownClients()
-	states, err = cluster.GetDataNodeStates(context.TODO())
-	assert.Nil(t, err)
-	assert.EqualValues(t, dataNodeNum, len(states))
-	for _, s := range states {
-		assert.EqualValues(t, internalpb.StateCode_Abnormal, s.StateCode)
-	}
+	dataNodes, _ := cluster.dataManager.getDataNodes(true)
+	assert.EqualValues(t, 1, len(dataNodes))
+	assert.EqualValues(t, "localhost:8080", dataNodes[addr].Address)
 }
 
-func TestWatchChannels(t *testing.T) {
-	Params.Init()
-	dataNodeNum := 3
-	cases := []struct {
-		collectionID UniqueID
-		channels     []string
-		channelNums  []int
-	}{
-		{1, []string{"c1"}, []int{1, 0, 0}},
-		{1, []string{"c1", "c2", "c3"}, []int{1, 1, 1}},
-		{1, []string{"c1", "c2", "c3", "c4"}, []int{2, 1, 1}},
-		{1, []string{"c1", "c2", "c3", "c4", "c5", "c6", "c7"}, []int{3, 2, 2}},
+func TestRegister(t *testing.T) {
+	cPolicy := newMockStartupPolicy()
+	registerPolicy := newEmptyRegisterPolicy()
+	cluster := createCluster(t, nil, withStartupPolicy(cPolicy), withRegisterPolicy(registerPolicy))
+	addr := "localhost:8080"
+
+	err := cluster.startup(nil)
+	assert.Nil(t, err)
+	cluster.register(&datapb.DataNodeInfo{
+		Address:  addr,
+		Version:  1,
+		Channels: []*datapb.ChannelStatus{},
+	})
+	dataNodes, _ := cluster.dataManager.getDataNodes(true)
+	assert.EqualValues(t, 1, len(dataNodes))
+	assert.EqualValues(t, "localhost:8080", dataNodes[addr].Address)
+}
+
+func TestUnregister(t *testing.T) {
+	cPolicy := newMockStartupPolicy()
+	unregisterPolicy := newEmptyUnregisterPolicy()
+	cluster := createCluster(t, nil, withStartupPolicy(cPolicy), withUnregistorPolicy(unregisterPolicy))
+	addr := "localhost:8080"
+	nodes := []*datapb.DataNodeInfo{
+		{
+			Address:  addr,
+			Version:  1,
+			Channels: []*datapb.ChannelStatus{},
+		},
+	}
+	err := cluster.startup(nodes)
+	assert.Nil(t, err)
+	dataNodes, _ := cluster.dataManager.getDataNodes(true)
+	assert.EqualValues(t, 1, len(dataNodes))
+	assert.EqualValues(t, "localhost:8080", dataNodes[addr].Address)
+	cluster.unregister(&datapb.DataNodeInfo{
+		Address:  addr,
+		Version:  1,
+		Channels: []*datapb.ChannelStatus{},
+	})
+	dataNodes, _ = cluster.dataManager.getDataNodes(false)
+	assert.EqualValues(t, 1, len(dataNodes))
+	assert.EqualValues(t, offline, cluster.dataManager.dataNodes[addr].status)
+	assert.EqualValues(t, "localhost:8080", dataNodes[addr].Address)
+}
+
+func TestWatchIfNeeded(t *testing.T) {
+	cPolicy := newMockStartupPolicy()
+	cluster := createCluster(t, nil, withStartupPolicy(cPolicy))
+	addr := "localhost:8080"
+	nodes := []*datapb.DataNodeInfo{
+		{
+			Address:  addr,
+			Version:  1,
+			Channels: []*datapb.ChannelStatus{},
+		},
+	}
+	err := cluster.startup(nodes)
+	assert.Nil(t, err)
+	dataNodes, _ := cluster.dataManager.getDataNodes(true)
+	assert.EqualValues(t, 1, len(dataNodes))
+	assert.EqualValues(t, "localhost:8080", dataNodes[addr].Address)
+
+	chName := "ch1"
+	cluster.watchIfNeeded(chName, 0)
+	dataNodes, _ = cluster.dataManager.getDataNodes(true)
+	assert.EqualValues(t, 1, len(dataNodes[addr].Channels))
+	assert.EqualValues(t, chName, dataNodes[addr].Channels[0].Name)
+	cluster.watchIfNeeded(chName, 0)
+	assert.EqualValues(t, 1, len(dataNodes[addr].Channels))
+	assert.EqualValues(t, chName, dataNodes[addr].Channels[0].Name)
+}
+
+func TestFlushSegments(t *testing.T) {
+	cPolicy := newMockStartupPolicy()
+	cluster := createCluster(t, nil, withStartupPolicy(cPolicy))
+	addr := "localhost:8080"
+	nodes := []*datapb.DataNodeInfo{
+		{
+			Address:  addr,
+			Version:  1,
+			Channels: []*datapb.ChannelStatus{},
+		},
+	}
+	err := cluster.startup(nodes)
+	assert.Nil(t, err)
+	segments := []*datapb.SegmentInfo{
+		{
+			ID:            0,
+			CollectionID:  0,
+			InsertChannel: "ch1",
+		},
 	}
 
-	cluster := newDataNodeCluster()
-	for _, c := range cases {
-		for i := 0; i < dataNodeNum; i++ {
-			c, err := newMockDataNodeClient(int64(i))
-			assert.Nil(t, err)
-			err = c.Init()
-			assert.Nil(t, err)
-			err = c.Start()
-			assert.Nil(t, err)
-			cluster.Register(&dataNode{
-				id: int64(i),
-				address: struct {
-					ip   string
-					port int64
-				}{"localhost", int64(9999 + i)},
-				client:     c,
-				channelNum: 0,
-			})
-		}
-		cluster.WatchInsertChannels(c.channels)
-		for i := 0; i < len(cluster.nodes); i++ {
-			assert.EqualValues(t, c.channelNums[i], cluster.nodes[i].channelNum)
-		}
-		cluster.Clear()
-	}
+	cluster.flush(segments)
+}
+
+func createCluster(t *testing.T, ch chan interface{}, options ...clusterOption) *cluster {
+	kv := memkv.NewMemoryKV()
+	sessionManager := newMockSessionManager(ch)
+	dataManager, err := newClusterNodeManager(kv)
+	assert.Nil(t, err)
+	return newCluster(context.TODO(), dataManager, sessionManager, dummyPosProvider{}, options...)
 }

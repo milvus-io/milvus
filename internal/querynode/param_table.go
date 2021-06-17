@@ -13,9 +13,9 @@ package querynode
 
 import (
 	"fmt"
-	"os"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -26,13 +26,12 @@ type ParamTable struct {
 	paramtable.BaseTable
 
 	PulsarAddress string
-	EtcdAddress   string
+	EtcdEndpoints []string
 	MetaRootPath  string
 
 	QueryNodeIP              string
 	QueryNodePort            int64
 	QueryNodeID              UniqueID
-	QueryNodeNum             int
 	QueryTimeTickChannelName string
 
 	FlowGraphMaxQueueLength int32
@@ -81,23 +80,6 @@ func (p *ParamTable) Init() {
 			panic(err)
 		}
 
-		queryNodeIDStr := os.Getenv("QUERY_NODE_ID")
-		if queryNodeIDStr == "" {
-			queryNodeIDList := p.QueryNodeIDList()
-			if len(queryNodeIDList) <= 0 {
-				queryNodeIDStr = "0"
-			} else {
-				queryNodeIDStr = strconv.Itoa(int(queryNodeIDList[0]))
-			}
-		}
-
-		err = p.Save("_queryNodeID", queryNodeIDStr)
-		if err != nil {
-			panic(err)
-		}
-
-		p.initQueryNodeID()
-		p.initQueryNodeNum()
 		//p.initQueryTimeTickChannelName()
 
 		p.initMinioEndPoint()
@@ -107,12 +89,11 @@ func (p *ParamTable) Init() {
 		p.initMinioBucketName()
 
 		p.initPulsarAddress()
-		p.initEtcdAddress()
+		p.initEtcdEndpoints()
 		p.initMetaRootPath()
 
 		p.initGracefulTime()
 		p.initMsgChannelSubName()
-		p.initSliceIndex()
 
 		p.initFlowGraphMaxQueueLength()
 		p.initFlowGraphMaxParallelism()
@@ -129,22 +110,6 @@ func (p *ParamTable) Init() {
 }
 
 // ---------------------------------------------------------- query node
-func (p *ParamTable) initQueryNodeID() {
-	queryNodeID, err := p.Load("_queryNodeID")
-	if err != nil {
-		panic(err)
-	}
-	id, err := strconv.Atoi(queryNodeID)
-	if err != nil {
-		panic(err)
-	}
-	p.QueryNodeID = UniqueID(id)
-}
-
-func (p *ParamTable) initQueryNodeNum() {
-	p.QueryNodeNum = len(p.QueryNodeIDList())
-}
-
 func (p *ParamTable) initQueryTimeTickChannelName() {
 	ch, err := p.Load("msgChannel.chanNamePrefix.queryTimeTick")
 	if err != nil {
@@ -234,12 +199,12 @@ func (p *ParamTable) initSearchResultReceiveBufSize() {
 	p.SearchResultReceiveBufSize = p.ParseInt64("queryNode.msgStream.searchResult.recvBufSize")
 }
 
-func (p *ParamTable) initEtcdAddress() {
-	EtcdAddress, err := p.Load("_EtcdAddress")
+func (p *ParamTable) initEtcdEndpoints() {
+	endpoints, err := p.Load("_EtcdEndpoints")
 	if err != nil {
 		panic(err)
 	}
-	p.EtcdAddress = EtcdAddress
+	p.EtcdEndpoints = strings.Split(endpoints, ",")
 }
 
 func (p *ParamTable) initMetaRootPath() {
@@ -264,11 +229,7 @@ func (p *ParamTable) initMsgChannelSubName() {
 	if err != nil {
 		log.Error(err.Error())
 	}
-	queryNodeIDStr, err := p.Load("_QueryNodeID")
-	if err != nil {
-		panic(err)
-	}
-	p.MsgChannelSubName = name + "-" + queryNodeIDStr
+	p.MsgChannelSubName = name
 }
 
 func (p *ParamTable) initStatsChannelName() {
@@ -277,18 +238,6 @@ func (p *ParamTable) initStatsChannelName() {
 		panic(err)
 	}
 	p.StatsChannelName = channels
-}
-
-func (p *ParamTable) initSliceIndex() {
-	queryNodeID := p.QueryNodeID
-	queryNodeIDList := p.QueryNodeIDList()
-	for i := 0; i < len(queryNodeIDList); i++ {
-		if queryNodeID == queryNodeIDList[i] {
-			p.SliceIndex = i
-			return
-		}
-	}
-	p.SliceIndex = -1
 }
 
 func (p *ParamTable) initLogCfg() {

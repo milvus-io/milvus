@@ -15,6 +15,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sync"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -23,28 +24,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/stretchr/testify/assert"
 )
-
-type tbp struct {
-	types.ProxyService
-}
-
-func (*tbp) GetTimeTickChannel(context.Context) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Value: fmt.Sprintf("tbp-%d", rand.Int()),
-	}, nil
-}
-
-func (*tbp) InvalidateCollectionMetaCache(context.Context, *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
 
 type tbd struct {
 	types.DataService
@@ -100,14 +84,10 @@ func BenchmarkAllocTimestamp(b *testing.B) {
 	randVal := rand.Int()
 
 	Params.TimeTickChannel = fmt.Sprintf("master-time-tick-%d", randVal)
-	Params.DdChannel = fmt.Sprintf("master-dd-%d", randVal)
 	Params.StatisticsChannel = fmt.Sprintf("master-statistics-%d", randVal)
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
-
-	err = core.SetProxyService(ctx, &tbp{})
-	assert.Nil(b, err)
 
 	err = core.SetDataService(ctx, &tbd{})
 	assert.Nil(b, err)
@@ -117,6 +97,17 @@ func BenchmarkAllocTimestamp(b *testing.B) {
 
 	err = core.SetQueryService(&tbq{})
 	assert.Nil(b, err)
+
+	err = core.Register()
+	assert.Nil(b, err)
+
+	pnm := &proxyNodeMock{
+		collArray: make([]string, 0, 16),
+		mutex:     sync.Mutex{},
+	}
+	core.NewProxyClient = func(*sessionutil.Session) (types.ProxyNode, error) {
+		return pnm, nil
+	}
 
 	err = core.Init()
 	assert.Nil(b, err)

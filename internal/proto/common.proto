@@ -49,6 +49,7 @@ enum SegmentState {
     Growing = 2;
     Sealed = 3;
     Flushed = 4;
+    Flushing = 5;
 }
 
 message Status {
@@ -135,6 +136,8 @@ enum MsgType {
     AllocateSegment = 1205;
     SegmentStatistics = 1206;
     SegmentFlushDone = 1207;
+
+    DataNodeTt = 1208;
 }
 
 message MsgBase {

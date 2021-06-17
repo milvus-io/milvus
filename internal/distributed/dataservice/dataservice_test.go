@@ -90,10 +90,6 @@ func TestRun(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "listen tcp: address 1000000: invalid port")
 
-	dsServer.newMasterServiceClient = func(s string) (types.MasterService, error) {
-		return &mockMaster{}, nil
-	}
-
 	Params.Port = rand.Int()%100 + 10000
 	err = dsServer.Run()
 	assert.Nil(t, err)

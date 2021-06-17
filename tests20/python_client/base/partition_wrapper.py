@@ -57,13 +57,11 @@ class ApiPartitionWrapper:
         check_result = ResponseChecker(res, func_name, check_task, check_items, succ, **kwargs).run()
         return res, check_result
 
-    def load(self, field_names=None, index_names=None, check_task=None, check_items=None, **kwargs):
+    def load(self, check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, succ = api_request([self.partition.load, field_names, index_names], **kwargs)
+        res, succ = api_request([self.partition.load], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task,
                                        check_items, is_succ=succ,
-                                       field_names=field_names,
-                                       index_names=index_names,
                                        **kwargs).run()
         return res, check_result
 

@@ -32,16 +32,16 @@ type Client struct {
 	conn       *grpc.ClientConn
 	ctx        context.Context
 
-	address   string
+	addr      string
 	timeout   time.Duration
 	reconnTry int
 	recallTry int
 }
 
-func NewClient(ctx context.Context, address string, timeout time.Duration) *Client {
+func NewClient(addr string, timeout time.Duration) *Client {
 	return &Client{
-		address:   address,
-		ctx:       ctx,
+		addr:      addr,
+		ctx:       context.Background(),
 		timeout:   timeout,
 		recallTry: 3,
 		reconnTry: 10,
@@ -49,39 +49,21 @@ func NewClient(ctx context.Context, address string, timeout time.Duration) *Clie
 }
 
 func (c *Client) Init() error {
-	tracer := opentracing.GlobalTracer()
-	connectGrpcFunc := func() error {
-		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
-		defer cancelFunc()
-		log.Debug("ProxyNodeClient try connect ", zap.String("address", c.address))
-		conn, err := grpc.DialContext(ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
-			grpc.WithUnaryInterceptor(
-				otgrpc.OpenTracingClientInterceptor(tracer)),
-			grpc.WithStreamInterceptor(
-				otgrpc.OpenTracingStreamClientInterceptor(tracer)))
-		if err != nil {
-			return err
-		}
-		c.conn = conn
-		return nil
+	// for now, we must try many times in Init Stage
+	initFunc := func() error {
+		return c.connect()
 	}
-	err := retry.Retry(c.reconnTry, time.Millisecond*200, connectGrpcFunc)
-	if err != nil {
-		log.Debug("ProxyNodeClient connect failed", zap.Error(err))
-		return err
-	}
-	log.Debug("ProxyNodeClient connect success", zap.String("address", c.address))
-	c.grpcClient = proxypb.NewProxyNodeServiceClient(c.conn)
-	return nil
+	err := retry.Retry(10000, 3*time.Second, initFunc)
+	return err
 }
 
-func (c *Client) reconnect() error {
+func (c *Client) connect() error {
 	tracer := opentracing.GlobalTracer()
 	connectGrpcFunc := func() error {
 		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
 		defer cancelFunc()
-		log.Debug("ProxyNodeClient try reconnect ", zap.String("address", c.address))
-		conn, err := grpc.DialContext(ctx, c.address, grpc.WithInsecure(), grpc.WithBlock(),
+		log.Debug("ProxyNodeClient try connect ", zap.String("address", c.addr))
+		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				otgrpc.OpenTracingClientInterceptor(tracer)),
 			grpc.WithStreamInterceptor(
@@ -95,10 +77,10 @@ func (c *Client) reconnect() error {
 
 	err := retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
 	if err != nil {
-		log.Debug("ProxyNodeClient try reconnect failed", zap.Error(err))
+		log.Debug("ProxyNodeClient try connect failed", zap.Error(err))
 		return err
 	}
-	log.Debug("ProxyNodeClient reconnect success")
+	log.Debug("ProxyNodeClient connect success")
 	c.grpcClient = proxypb.NewProxyNodeServiceClient(c.conn)
 	return nil
 }
@@ -109,7 +91,7 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 		return ret, nil
 	}
 	for i := 0; i < c.recallTry; i++ {
-		err = c.reconnect()
+		err = c.connect()
 		if err == nil {
 			ret, err = caller()
 			if err == nil {

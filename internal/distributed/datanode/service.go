@@ -55,8 +55,8 @@ type Server struct {
 	masterService types.MasterService
 	dataService   types.DataService
 
-	newMasterServiceClient func(string) (types.MasterService, error)
-	newDataServiceClient   func(string, string, string, time.Duration) types.DataService
+	newMasterServiceClient func() (types.MasterService, error)
+	newDataServiceClient   func(string, []string, time.Duration) types.DataService
 
 	closer io.Closer
 }
@@ -69,11 +69,11 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		cancel:      cancel,
 		msFactory:   factory,
 		grpcErrChan: make(chan error),
-		newMasterServiceClient: func(s string) (types.MasterService, error) {
-			return msc.NewClient(s, dn.Params.MetaRootPath, []string{dn.Params.EtcdAddress}, 20*time.Second)
+		newMasterServiceClient: func() (types.MasterService, error) {
+			return msc.NewClient(ctx1, dn.Params.MetaRootPath, dn.Params.EtcdEndpoints, 3*time.Second)
 		},
-		newDataServiceClient: func(s, etcdMetaRoot, etcdAddress string, timeout time.Duration) types.DataService {
-			return dsc.NewClient(Params.DataServiceAddress, etcdMetaRoot, []string{etcdAddress}, timeout)
+		newDataServiceClient: func(etcdMetaRoot string, etcdEndpoints []string, timeout time.Duration) types.DataService {
+			return dsc.NewClient(etcdMetaRoot, etcdEndpoints, timeout)
 		},
 	}
 
@@ -169,12 +169,7 @@ func (s *Server) init() error {
 	addr := Params.IP + ":" + strconv.Itoa(Params.Port)
 	log.Debug("DataNode address", zap.String("address", addr))
 
-	err := s.datanode.Register()
-	if err != nil {
-		log.Debug("DataNode Register etcd failed", zap.Error(err))
-		return err
-	}
-	err = s.startGrpc()
+	err := s.startGrpc()
 	if err != nil {
 		return err
 	}
@@ -183,7 +178,7 @@ func (s *Server) init() error {
 	if s.newMasterServiceClient != nil {
 		log.Debug("Master service address", zap.String("address", Params.MasterAddress))
 		log.Debug("Init master service client ...")
-		masterServiceClient, err := s.newMasterServiceClient(Params.MasterAddress)
+		masterServiceClient, err := s.newMasterServiceClient()
 		if err != nil {
 			log.Debug("DataNode newMasterServiceClient failed", zap.Error(err))
 			panic(err)
@@ -211,7 +206,7 @@ func (s *Server) init() error {
 	if s.newDataServiceClient != nil {
 		log.Debug("Data service address", zap.String("address", Params.DataServiceAddress))
 		log.Debug("DataNode Init data service client ...")
-		dataServiceClient := s.newDataServiceClient(Params.DataServiceAddress, dn.Params.MetaRootPath, dn.Params.EtcdAddress, 3*time.Second)
+		dataServiceClient := s.newDataServiceClient(dn.Params.MetaRootPath, dn.Params.EtcdEndpoints, 10*time.Second)
 		if err = dataServiceClient.Init(); err != nil {
 			log.Debug("DataNode newDataServiceClient failed", zap.Error(err))
 			panic(err)
@@ -243,7 +238,15 @@ func (s *Server) init() error {
 }
 
 func (s *Server) start() error {
-	return s.datanode.Start()
+	if err := s.datanode.Start(); err != nil {
+		return err
+	}
+	err := s.datanode.Register()
+	if err != nil {
+		log.Debug("DataNode Register etcd failed", zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {

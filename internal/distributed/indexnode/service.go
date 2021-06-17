@@ -139,8 +139,7 @@ func (s *Server) init() error {
 		return err
 	}
 
-	indexServiceAddr := Params.IndexServerAddress
-	s.indexServiceClient = grpcindexserviceclient.NewClient(indexServiceAddr, indexnode.Params.MetaRootPath, []string{indexnode.Params.EtcdAddress}, 10*time.Second)
+	s.indexServiceClient = grpcindexserviceclient.NewClient(indexnode.Params.MetaRootPath, indexnode.Params.EtcdEndpoints, 3*time.Second)
 	err = s.indexServiceClient.Init()
 	if err != nil {
 		log.Debug("IndexNode indexSerticeClient init failed", zap.Error(err))
@@ -152,7 +151,7 @@ func (s *Server) init() error {
 	log.Debug("IndexNode", zap.Any("State", internalpb.StateCode_Initializing))
 	err = s.indexnode.Init()
 	if err != nil {
-		log.Debug("IndexNode  Init failed", zap.Error(err))
+		log.Debug("IndexNode Init failed", zap.Error(err))
 		return err
 	}
 	return nil
