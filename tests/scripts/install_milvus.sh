@@ -52,7 +52,7 @@ if [[ "${MILVUS_STANDALONE_ENABLED}" == "false" ]]; then
                                  --set image.all.tag="${MILVUS_IMAGE_TAG}" \
                                  --set image.all.pullPolicy="${MILVUS_PULL_POLICY:-Always}" \
                                  --set standalone.enabled="${MILVUS_STANDALONE_ENABLED}" \
-                                 --set proxynode.service.type="${MILVUS_SERVICE_TYPE}" \
+                                 --set proxy.service.type="${MILVUS_SERVICE_TYPE}" \
                                  --namespace "${MILVUS_HELM_NAMESPACE}" \
                                  "${MILVUS_HELM_RELEASE_NAME}" \
                                  ${@:-} "${MILVUS_HELM_CHART_PATH}"
