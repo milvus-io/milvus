@@ -31,7 +31,7 @@ ROOT="$( cd -P "$( dirname "$SOURCE" )/../.." && pwd )"
 if [[ "${MILVUS_STANDALONE_ENABLED}" == "true" ]]; then
   MILVUS_LABELS="app.kubernetes.io/instance=${MILVUS_HELM_RELEASE_NAME},component=standalone"
 else
-  MILVUS_LABELS="app.kubernetes.io/instance=${MILVUS_HELM_RELEASE_NAME},component=proxynode"
+  MILVUS_LABELS="app.kubernetes.io/instance=${MILVUS_HELM_RELEASE_NAME},component=proxy"
 fi
 
 SERVICE_TYPE=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.type}')

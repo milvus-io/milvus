@@ -399,14 +399,21 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 	}
 	collection.setReleaseTime(r.req.Base.Timestamp)
 
-	const gracefulReleaseTime = 3
+	const gracefulReleaseTime = 1
 	func() { // release synchronously
 		errMsg := "release collection failed, collectionID = " + strconv.FormatInt(r.req.CollectionID, 10) + ", err = "
 		time.Sleep(gracefulReleaseTime * time.Second)
 
+		log.Debug("starting release collection...",
+			zap.Any("collectionID", r.req.CollectionID),
+		)
 		r.node.streaming.dataSyncService.removeCollectionFlowGraph(r.req.CollectionID)
 		// remove all tSafes of the target collection
 		for _, channel := range collection.getVChannels() {
+			log.Debug("releasing tSafe...",
+				zap.Any("collectionID", r.req.CollectionID),
+				zap.Any("vChannel", channel),
+			)
 			r.node.streaming.tSafeReplica.removeTSafe(channel)
 		}
 

@@ -17,6 +17,9 @@ import (
 	"fmt"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
@@ -78,11 +81,21 @@ func (s *streaming) search(searchReqs []*searchRequest,
 		if err != nil {
 			return searchResults, segmentResults, err
 		}
+		log.Debug("no partition specified, search all partitions",
+			zap.Any("collectionID", collID),
+			zap.Any("vChannel", vChannel),
+			zap.Any("all partitions", strPartIDs),
+		)
 		searchPartIDs = strPartIDs
 	} else {
 		for _, id := range partIDs {
 			_, err := s.replica.getPartitionByID(id)
 			if err == nil {
+				log.Debug("append search partition id",
+					zap.Any("collectionID", collID),
+					zap.Any("vChannel", vChannel),
+					zap.Any("partitionID", id),
+				)
 				searchPartIDs = append(searchPartIDs, id)
 			}
 		}
@@ -95,6 +108,13 @@ func (s *streaming) search(searchReqs []*searchRequest,
 			"target partitionIDs = " +
 			fmt.Sprintln(partIDs))
 	}
+
+	log.Debug("doing search in streaming",
+		zap.Any("collectionID", collID),
+		zap.Any("vChannel", vChannel),
+		zap.Any("reqPartitionIDs", partIDs),
+		zap.Any("searchPartitionIDs", searchPartIDs),
+	)
 
 	for _, partID := range searchPartIDs {
 		segIDs, err := s.replica.getSegmentIDsByVChannel(partID, vChannel)

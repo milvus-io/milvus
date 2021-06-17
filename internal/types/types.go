@@ -111,6 +111,7 @@ type MasterService interface {
 	//segment
 	DescribeSegment(ctx context.Context, req *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
 	ShowSegments(ctx context.Context, req *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error)
+	ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error)
 }
 
 // MasterComponent is used by grpc server of master service
@@ -118,9 +119,9 @@ type MasterComponent interface {
 	MasterService
 
 	UpdateStateCode(internalpb.StateCode)
-	SetDataService(context.Context, DataService) error
-	SetIndexService(IndexService) error
-	SetQueryService(QueryService) error
+	SetDataCoord(context.Context, DataService) error
+	SetIndexCoord(IndexService) error
+	SetQueryCoord(QueryService) error
 	SetNewProxyClient(func(sess *sessionutil.Session) (ProxyNode, error))
 }
 
@@ -128,6 +129,7 @@ type ProxyNode interface {
 	Component
 
 	InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
+	ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error)
 
 	//TODO: move to milvus service
 	/*

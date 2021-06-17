@@ -89,9 +89,9 @@ def gen_binary_vectors(num, dim):
     return raw_vectors, binary_vectors
 
 
-def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim):
-    int_values = pd.Series(data=[i for i in range(nb)])
-    float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
+def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0):
+    int_values = pd.Series(data=[i for i in range(start, start + nb)])
+    float_values = pd.Series(data=[float(i) for i in range(start, start + nb)], dtype="float32")
     float_vec_values = gen_vectors(nb, dim)
     df = pd.DataFrame({
         ct.default_int64_field_name: int_values,
@@ -101,9 +101,9 @@ def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim):
     return df
 
 
-def gen_default_binary_dataframe_data(nb=ct.default_nb, dim=ct.default_dim):
-    int_values = pd.Series(data=[i for i in range(nb)])
-    float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
+def gen_default_binary_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0):
+    int_values = pd.Series(data=[i for i in range(start, start + nb)])
+    float_values = pd.Series(data=[float(i) for i in range(start, start + nb)], dtype="float32")
     binary_raw_values, binary_vec_values = gen_binary_vectors(nb, dim)
     df = pd.DataFrame({
         ct.default_int64_field_name: int_values,
@@ -177,6 +177,7 @@ def gen_all_type_fields():
             fields.append(field)
     return fields
 
+
 def gen_normal_expressions():
     expressions = [
         "int64 > 0",
@@ -186,6 +187,7 @@ def gen_normal_expressions():
         "int64 == 0 || int64 == 1 || int64 == 2",
     ]
     return expressions
+
 
 def jaccard(x, y):
     x = np.asarray(x, np.bool)
@@ -244,6 +246,7 @@ def modify_file(file_path_list, is_modify=False, input_content=""):
                     f.close()
                 log.info("[modify_file] file(%s) modification is complete." % file_path_list)
 
+
 def index_to_dict(index):
     return {
         "collection_name": index.collection_name,
@@ -252,8 +255,10 @@ def index_to_dict(index):
         "params": index.params
     }
 
+
 def assert_equal_index(index_1, index_2):
     return index_to_dict(index_1) == index_to_dict(index_2)
+
 
 def gen_partitions(collection_w, partition_num=1):
     """
@@ -269,6 +274,7 @@ def gen_partitions(collection_w, partition_num=1):
     par = collection_w.partitions
     assert len(par) == (partition_num + 1)
     log.info("gen_partitions: created partitions %s" % par)
+
 
 def insert_data(collection_w, nb=3000, is_binary=False):
     """

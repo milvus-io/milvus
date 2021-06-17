@@ -28,8 +28,8 @@ import (
 	grpcindexserviceclient "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
 	grpcmasterserviceclient "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
 	grpcqueryserviceclient "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
-	otgrpc "github.com/opentracing-contrib/go-grpc"
 
+	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -93,15 +93,15 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
 
-	tracer := opentracing.GlobalTracer()
+	opts := trace.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
 		grpc.MaxRecvMsgSize(math.MaxInt32),
 		grpc.MaxSendMsgSize(math.MaxInt32),
+		grpc.MaxRecvMsgSize(GRPCMaxMagSize),
 		grpc.UnaryInterceptor(
-			otgrpc.OpenTracingServerInterceptor(tracer)),
+			grpc_opentracing.UnaryServerInterceptor(opts...)),
 		grpc.StreamInterceptor(
-			otgrpc.OpenTracingStreamServerInterceptor(tracer)),
-		grpc.MaxRecvMsgSize(GRPCMaxMagSize))
+			grpc_opentracing.StreamServerInterceptor(opts...)))
 	proxypb.RegisterProxyNodeServiceServer(s.grpcServer, s)
 	milvuspb.RegisterMilvusServiceServer(s.grpcServer, s)
 
@@ -272,6 +272,10 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, request *internalpb.G
 
 func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	return s.proxynode.InvalidateCollectionMetaCache(ctx, request)
+}
+
+func (s *Server) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
+	panic("not implement")
 }
 
 func (s *Server) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
