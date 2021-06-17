@@ -16,11 +16,11 @@ import (
 	"fmt"
 	"time"
 
+	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	otgrpc "github.com/opentracing-contrib/go-grpc"
-	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -83,7 +83,6 @@ func (c *Client) Init() error {
 }
 
 func (c *Client) connect() error {
-	tracer := opentracing.GlobalTracer()
 	var err error
 	getQueryServiceAddressFn := func() error {
 		c.addr, err = getQueryServiceAddress(c.sess)
@@ -100,12 +99,13 @@ func (c *Client) connect() error {
 	connectGrpcFunc := func() error {
 		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
 		defer cancelFunc()
+		opts := trace.GetInterceptorOpts()
 		log.Debug("QueryServiceClient try reconnect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
-				otgrpc.OpenTracingClientInterceptor(tracer)),
+				grpc_opentracing.UnaryClientInterceptor(opts...)),
 			grpc.WithStreamInterceptor(
-				otgrpc.OpenTracingStreamClientInterceptor(tracer)))
+				grpc_opentracing.StreamClientInterceptor(opts...)))
 		if err != nil {
 			return err
 		}
