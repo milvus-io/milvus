@@ -168,3 +168,4 @@ class ResponseChecker:
                 log.info("search_results_check: limit (topK) "
                          "searched for each query is correct")
         log.info("search_results_check: search_results_check: checked the searching results")
+        return True

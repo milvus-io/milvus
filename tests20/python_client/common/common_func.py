@@ -180,6 +180,7 @@ def gen_all_type_fields():
 
 def gen_normal_expressions():
     expressions = [
+        "",
         "int64 > 0",
         "(int64 > 0 && int64 < 400) or (int64 > 500 && int64 < 1000)",
         "int64 not in [1, 2, 3]",
@@ -295,10 +296,7 @@ def insert_data(collection_w, nb=3000, is_binary=False):
         else:
             default_data = gen_default_dataframe_data(nb // num)
         collection_w.insert(default_data, par[i].name)
-        vectors.extend(default_data)
+        vectors.append(default_data)
     log.info("insert_data: inserted data into collection %s (num_entities: %s)"
              % (collection_w.name, nb))
-    collection_w.load()
-    assert collection_w.is_empty == False
-    assert collection_w.num_entities == nb
     return collection_w, vectors, binary_raw_vectors
