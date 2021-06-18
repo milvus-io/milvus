@@ -30,6 +30,7 @@ import (
 )
 
 func TestMain(t *testing.M) {
+	Params.InitAlias("datanode-alias-1")
 	Params.Init()
 	refreshChannelNames()
 	code := t.Run()

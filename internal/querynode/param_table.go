@@ -29,6 +29,7 @@ type ParamTable struct {
 	EtcdEndpoints []string
 	MetaRootPath  string
 
+	Alias                    string
 	QueryNodeIP              string
 	QueryNodePort            int64
 	QueryNodeID              UniqueID
@@ -72,6 +73,10 @@ type ParamTable struct {
 var Params ParamTable
 var once sync.Once
 
+func (p *ParamTable) InitAlias(alias string) {
+	p.Alias = alias
+}
+
 func (p *ParamTable) Init() {
 	once.Do(func() {
 		p.BaseTable.Init()
@@ -93,7 +98,6 @@ func (p *ParamTable) Init() {
 		p.initMetaRootPath()
 
 		p.initGracefulTime()
-		p.initMsgChannelSubName()
 
 		p.initFlowGraphMaxQueueLength()
 		p.initFlowGraphMaxParallelism()
@@ -224,12 +228,12 @@ func (p *ParamTable) initGracefulTime() {
 }
 
 func (p *ParamTable) initMsgChannelSubName() {
-	// TODO: subName = namePrefix + "-" + queryNodeID, queryNodeID is assigned by master
-	name, err := p.Load("msgChannel.subNamePrefix.queryNodeSubNamePrefix")
+	namePrefix, err := p.Load("msgChannel.subNamePrefix.queryNodeSubNamePrefix")
 	if err != nil {
 		log.Error(err.Error())
 	}
-	p.MsgChannelSubName = name
+	subName := namePrefix + "-" + strconv.FormatInt(p.QueryNodeID, 10)
+	p.MsgChannelSubName = subName
 }
 
 func (p *ParamTable) initStatsChannelName() {
@@ -252,15 +256,6 @@ func (p *ParamTable) initLogCfg() {
 		panic(err)
 	}
 	p.Log.Level = level
-	devStr, err := p.Load("log.dev")
-	if err != nil {
-		panic(err)
-	}
-	dev, err := strconv.ParseBool(devStr)
-	if err != nil {
-		panic(err)
-	}
-	p.Log.Development = dev
 	p.Log.File.MaxSize = p.ParseInt("log.file.maxSize")
 	p.Log.File.MaxBackups = p.ParseInt("log.file.maxBackups")
 	p.Log.File.MaxDays = p.ParseInt("log.file.maxAge")
@@ -269,7 +264,7 @@ func (p *ParamTable) initLogCfg() {
 		panic(err)
 	}
 	if len(rootPath) != 0 {
-		p.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("querynode-%d.log", p.QueryNodeID))
+		p.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("querynode-%s.log", p.Alias))
 	} else {
 		p.Log.File.Filename = ""
 	}

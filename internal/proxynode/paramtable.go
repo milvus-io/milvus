@@ -35,6 +35,7 @@ type ParamTable struct {
 	NetworkPort    int
 	IP             string
 	NetworkAddress string
+	Alias          string
 
 	EtcdEndpoints []string
 	MetaRootPath  string
@@ -43,7 +44,6 @@ type ParamTable struct {
 
 	ProxyID                    UniqueID
 	TimeTickInterval           time.Duration
-	K2SChannelNames            []string
 	SearchResultChannelNames   []string
 	RetrieveResultChannelNames []string
 	ProxySubName               string
@@ -80,7 +80,6 @@ func (pt *ParamTable) initParams() {
 	pt.initMetaRootPath()
 	pt.initPulsarAddress()
 	pt.initTimeTickInterval()
-	pt.initK2SChannelNames()
 	pt.initProxySubName()
 	pt.initProxyTimeTickChannelNames()
 	pt.initMsgStreamTimeTickBufSize()
@@ -92,6 +91,10 @@ func (pt *ParamTable) initParams() {
 
 	pt.initPulsarMaxMessageSize()
 	pt.initRoleName()
+}
+
+func (pt *ParamTable) InitAlias(alias string) {
+	pt.Alias = alias
 }
 
 func (pt *ParamTable) initPulsarAddress() {
@@ -114,30 +117,12 @@ func (pt *ParamTable) initTimeTickInterval() {
 	pt.TimeTickInterval = time.Duration(interval) * time.Millisecond
 }
 
-func (pt *ParamTable) initK2SChannelNames() {
-	prefix, err := pt.Load("msgChannel.chanNamePrefix.k2s")
-	if err != nil {
-		panic(err)
-	}
-	prefix += "-"
-	k2sRangeStr, err := pt.Load("msgChannel.channelRange.k2s")
-	if err != nil {
-		panic(err)
-	}
-	channelIDs := paramtable.ConvertRangeToIntSlice(k2sRangeStr, ",")
-	var ret []string
-	for _, ID := range channelIDs {
-		ret = append(ret, prefix+strconv.Itoa(ID))
-	}
-	pt.K2SChannelNames = ret
-}
-
 func (pt *ParamTable) initProxySubName() {
 	prefix, err := pt.Load("msgChannel.subNamePrefix.proxySubNamePrefix")
 	if err != nil {
 		panic(err)
 	}
-	pt.ProxySubName = prefix + "-" + strconv.Itoa(int(pt.ProxyID))
+	pt.ProxySubName = prefix + "-" + pt.Alias
 }
 
 func (pt *ParamTable) initProxyTimeTickChannelNames() {
@@ -253,15 +238,6 @@ func (pt *ParamTable) initLogCfg() {
 		panic(err)
 	}
 	pt.Log.Level = level
-	devStr, err := pt.Load("log.dev")
-	if err != nil {
-		panic(err)
-	}
-	dev, err := strconv.ParseBool(devStr)
-	if err != nil {
-		panic(err)
-	}
-	pt.Log.Development = dev
 	pt.Log.File.MaxSize = pt.ParseInt("log.file.maxSize")
 	pt.Log.File.MaxBackups = pt.ParseInt("log.file.maxBackups")
 	pt.Log.File.MaxDays = pt.ParseInt("log.file.maxAge")
@@ -270,14 +246,14 @@ func (pt *ParamTable) initLogCfg() {
 		panic(err)
 	}
 	if len(rootPath) != 0 {
-		pt.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("proxynode-%d.log", pt.ProxyID))
+		pt.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("proxynode%s.log", pt.Alias))
 	} else {
 		pt.Log.File.Filename = ""
 	}
 }
 
 func (pt *ParamTable) initRoleName() {
-	pt.RoleName = fmt.Sprintf("%s-%d", "ProxyNode", pt.ProxyID)
+	pt.RoleName = fmt.Sprintf("%s-%s", "ProxyNode", pt.Alias)
 }
 
 func (pt *ParamTable) initEtcdEndpoints() {

@@ -585,16 +585,6 @@ func (ss *SegmentStatisticsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	return segStatsMsg, nil
 }
 
-///////////////////////////////////////////Key2Seg//////////////////////////////////////////
-//type Key2SegMsg struct {
-//	BaseMsg
-//	internalpb.Key2SegMsg
-//}
-//
-//func (k2st *Key2SegMsg) Type() MsgType {
-//	return
-//}
-
 /////////////////////////////////////////CreateCollection//////////////////////////////////////////
 type CreateCollectionMsg struct {
 	BaseMsg

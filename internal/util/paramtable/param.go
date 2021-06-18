@@ -12,7 +12,6 @@
 package paramtable
 
 import (
-	"strconv"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -47,15 +46,6 @@ func (p *ParamTable) initLogCfg() {
 		panic(err)
 	}
 	p.LogConfig.Level = level
-	devStr, err := p.Load("log.dev")
-	if err != nil {
-		panic(err)
-	}
-	dev, err := strconv.ParseBool(devStr)
-	if err != nil {
-		panic(err)
-	}
-	p.LogConfig.Development = dev
 	p.LogConfig.File.MaxSize = p.ParseInt("log.file.maxSize")
 	p.LogConfig.File.MaxBackups = p.ParseInt("log.file.maxBackups")
 	p.LogConfig.File.MaxDays = p.ParseInt("log.file.maxAge")

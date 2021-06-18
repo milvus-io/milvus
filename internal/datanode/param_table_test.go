@@ -18,11 +18,15 @@ import (
 
 func TestParamTable_DataNode(t *testing.T) {
 
-	Params.Init()
-
 	t.Run("Test NodeID", func(t *testing.T) {
 		id := Params.NodeID
 		log.Println("NodeID:", id)
+	})
+
+	t.Run("Test Alias", func(t *testing.T) {
+		alias := Params.Alias
+		log.Println("Alias:", alias)
+
 	})
 
 	t.Run("Test flowGraphMaxQueueLength", func(t *testing.T) {
