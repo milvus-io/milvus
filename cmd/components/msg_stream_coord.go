@@ -13,34 +13,22 @@ package components
 
 import (
 	"context"
-
-	grpcindexserver "github.com/milvus-io/milvus/internal/distributed/indexservice"
 )
 
-type IndexService struct {
-	svr *grpcindexserver.Server
+type MsgStream struct {
 }
 
-func NewIndexService(ctx context.Context) (*IndexService, error) {
-	var err error
-	s := &IndexService{}
-	svr, err := grpcindexserver.NewServer(ctx)
-
-	if err != nil {
-		return nil, err
-	}
-	s.svr = svr
-	return s, nil
+// NewMsgStreamCoord nil
+func NewMsgStreamCoord(ctx context.Context) (*MsgStream, error) {
+	return nil, nil
 }
-func (s *IndexService) Run() error {
-	if err := s.svr.Run(); err != nil {
-		return err
-	}
+
+// Run nil
+func (ps *MsgStream) Run() error {
 	return nil
 }
-func (s *IndexService) Stop() error {
-	if err := s.svr.Stop(); err != nil {
-		return err
-	}
+
+// Stop nil
+func (ps *MsgStream) Stop() error {
 	return nil
 }

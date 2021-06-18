@@ -36,6 +36,7 @@ pipeline {
                     DOCKER_BUILDKIT = 1
                     CUSTOM_THIRDPARTY_PATH = "/tmp/third_party"
                     ARTIFACTS = "${env.WORKSPACE}/artifacts"
+                    MILVUS_HELM_BRANCH = "rename"
                 }
                 stages {
                     stage('Test') {

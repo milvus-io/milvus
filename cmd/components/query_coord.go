@@ -13,42 +13,40 @@ package components
 
 import (
 	"context"
-	"io"
 
-	msc "github.com/milvus-io/milvus/internal/distributed/masterservice"
+	grpcqueryservice "github.com/milvus-io/milvus/internal/distributed/queryservice"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/opentracing/opentracing-go"
 )
 
-type MasterService struct {
+type QueryCoord struct {
 	ctx context.Context
-	svr *msc.Server
-
-	tracer opentracing.Tracer
-	closer io.Closer
+	svr *grpcqueryservice.Server
 }
 
-func NewMasterService(ctx context.Context, factory msgstream.Factory) (*MasterService, error) {
-
-	svr, err := msc.NewServer(ctx, factory)
+// NewQueryCoord creates a new QueryCoord
+func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord, error) {
+	svr, err := grpcqueryservice.NewServer(ctx, factory)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
-	return &MasterService{
+
+	return &QueryCoord{
 		ctx: ctx,
 		svr: svr,
 	}, nil
 }
 
-func (m *MasterService) Run() error {
-	if err := m.svr.Run(); err != nil {
-		return err
+// Run starts service
+func (qs *QueryCoord) Run() error {
+	if err := qs.svr.Run(); err != nil {
+		panic(err)
 	}
 	return nil
 }
 
-func (m *MasterService) Stop() error {
-	if err := m.svr.Stop(); err != nil {
+// Stop terminates service
+func (qs *QueryCoord) Stop() error {
+	if err := qs.svr.Stop(); err != nil {
 		return err
 	}
 	return nil

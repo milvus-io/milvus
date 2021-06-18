@@ -19,27 +19,28 @@ import (
 	"path"
 	"syscall"
 
-	"github.com/milvus-io/milvus/cmd/distributed/roles"
+	"github.com/milvus-io/milvus/cmd/roles"
 )
 
 const (
-	roleMaster       = "master"
-	roleQueryService = "queryservice"
-	roleIndexService = "indexservice"
-	roleDataService  = "dataservice"
-	roleProxyNode    = "proxynode"
-	roleQueryNode    = "querynode"
-	roleIndexNode    = "indexnode"
-	roleDataNode     = "datanode"
-	roleMixture      = "mixture"
+	roleRootCoord  = "rootcoord"
+	roleQueryCoord = "querycoord"
+	roleIndexCoord = "indexcoord"
+	roleDataCoord  = "datacoord"
+	roleProxy      = "proxy"
+	roleQueryNode  = "querynode"
+	roleIndexNode  = "indexnode"
+	roleDataNode   = "datanode"
+	roleMixture    = "mixture"
+	roleStandalone = "standalone"
 )
 
-func getPidFileName(service string, alias string) string {
+func getPidFileName(serverType string, alias string) string {
 	var filename string
 	if len(alias) != 0 {
-		filename = fmt.Sprintf("%s-%s.pid", service, alias)
+		filename = fmt.Sprintf("%s-%s.pid", serverType, alias)
 	} else {
-		filename = service + ".pid"
+		filename = serverType + ".pid"
 	}
 	return filename
 }
@@ -135,39 +136,51 @@ func main() {
 	var svrAlias string
 	flags.StringVar(&svrAlias, "alias", "", "set alias")
 
-	var enableMaster, enableQueryService, enableIndexService, enableDataService bool
-	flags.BoolVar(&enableMaster, roleMaster, false, "enable master")
-	flags.BoolVar(&enableQueryService, roleQueryService, false, "enable query service")
-	flags.BoolVar(&enableIndexService, roleIndexService, false, "enable index service")
-	flags.BoolVar(&enableDataService, roleDataService, false, "enable data service")
+	var enableRootCoord, enableQueryCoord, enableIndexCoord, enableDataCoord bool
+	flags.BoolVar(&enableRootCoord, roleRootCoord, false, "enable root coordinator")
+	flags.BoolVar(&enableQueryCoord, roleQueryCoord, false, "enable query coordinator")
+	flags.BoolVar(&enableIndexCoord, roleIndexCoord, false, "enable index coordinator")
+	flags.BoolVar(&enableDataCoord, roleDataCoord, false, "enable data coordinator")
 
 	if err := flags.Parse(os.Args[3:]); err != nil {
 		os.Exit(-1)
 	}
 
+	var localMsg = false
 	role := roles.MilvusRoles{}
 	switch serverType {
-	case roleMaster:
-		role.EnableMaster = true
-	case roleProxyNode:
-		role.EnableProxyNode = true
-	case roleQueryService:
-		role.EnableQueryService = true
+	case roleRootCoord:
+		role.EnableRootCoord = true
+	case roleProxy:
+		role.EnableProxy = true
+	case roleQueryCoord:
+		role.EnableQueryCoord = true
 	case roleQueryNode:
 		role.EnableQueryNode = true
-	case roleDataService:
-		role.EnableDataService = true
+	case roleDataCoord:
+		role.EnableDataCoord = true
 	case roleDataNode:
 		role.EnableDataNode = true
-	case roleIndexService:
-		role.EnableIndexService = true
+	case roleIndexCoord:
+		role.EnableIndexCoord = true
 	case roleIndexNode:
 		role.EnableIndexNode = true
 	case roleMixture:
-		role.EnableMaster = enableMaster
-		role.EnableQueryService = enableQueryService
-		role.EnableDataService = enableDataService
-		role.EnableIndexService = enableIndexService
+		role.EnableRootCoord = enableRootCoord
+		role.EnableQueryCoord = enableQueryCoord
+		role.EnableDataCoord = enableDataCoord
+		role.EnableIndexCoord = enableIndexCoord
+	case roleStandalone:
+		role.EnableRootCoord = true
+		role.EnableProxy = true
+		role.EnableQueryCoord = true
+		role.EnableQueryNode = true
+		role.EnableDataCoord = true
+		role.EnableDataNode = true
+		role.EnableIndexCoord = true
+		role.EnableIndexNode = true
+		role.EnableMsgStreamCoord = true
+		localMsg = true
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown server type = %s\n", serverType)
 		os.Exit(-1)
@@ -191,7 +204,7 @@ func main() {
 			panic(err)
 		}
 		defer removePidFile(fd)
-		role.Run(false)
+		role.Run(localMsg)
 	case "stop":
 		if err := stopPid(filename, runtimeDir); err != nil {
 			panic(err)
