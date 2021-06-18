@@ -1,5 +1,3 @@
-import logging
-
 import pytest
 from base.client_base import TestcaseBase
 from common import common_func as cf
@@ -8,7 +6,7 @@ from common.common_type import CaseLabel, CheckTasks
 from utils.util_log import test_log as log
 
 prefix = "query"
-default_term_expr = f'{ct.default_int_field_name} in [0, 1]'
+default_term_expr = f'{ct.default_int64_field_name} in [0, 1]'
 
 
 @pytest.mark.skip(reason="waiting for debug")
@@ -26,11 +24,11 @@ class TestQueryBase(TestcaseBase):
         """
         # create collection, insert default_nb, load collection
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
-        int_values = vectors[0][cf.default_int64_field_name].values.tolist()
+        int_values = vectors[0][ct.default_int64_field_name].values.tolist()
         pos = 5
-        term_expr = f'{ct.default_int_field_name} in {int_values[:pos]}'
-        res = collection_w.query(term_expr)
-        logging.getLogger().debug(res)
+        term_expr = f'{ct.default_int64_field_name} in {int_values[:pos]}'
+        res, _ = collection_w.query(term_expr)
+        log.debug(res)
 
     def test_query_empty_collection(self):
         """
@@ -134,9 +132,9 @@ class TestQueryBase(TestcaseBase):
         # with pytest.raises(Exception, match=msg):
         #     connect.query(collection, term_expr)
 
-    @pytest.mark.parametrize("expr", [f'{ct.default_int_field_name} inn [1, 2]',
-                                      f'{ct.default_int_field_name} not in [1, 2]',
-                                      f'{ct.default_int_field_name} in not [1, 2]'])
+    @pytest.mark.parametrize("expr", [f'{ct.default_int64_field_name} inn [1, 2]',
+                                      f'{ct.default_int64_field_name} not in [1, 2]',
+                                      f'{ct.default_int64_field_name} in not [1, 2]'])
     def test_query_expr_wrong_term_keyword(self, expr):
         """
         target: test query with wrong term expr keyword
@@ -147,9 +145,9 @@ class TestQueryBase(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "invalid expr"}
         collection_w.query(expr, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.parametrize("expr", [f'{ct.default_int_field_name} in 1',
-                                      f'{ct.default_int_field_name} in "in"',
-                                      f'{ct.default_int_field_name} in (mn)'])
+    @pytest.mark.parametrize("expr", [f'{ct.default_int64_field_name} in 1',
+                                      f'{ct.default_int64_field_name} in "in"',
+                                      f'{ct.default_int64_field_name} in (mn)'])
     def test_query_expr_non_array_term(self, expr):
         """
         target: test query with non-array term expr
@@ -166,7 +164,7 @@ class TestQueryBase(TestcaseBase):
         method: query with empty term expr
         expected: empty rsult
         """
-        term_expr = f'{ct.default_int_field_name} in []'
+        term_expr = f'{ct.default_int64_field_name} in []'
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
         res, _ = collection_w.query(term_expr)
         assert len(res) == 0
@@ -179,7 +177,7 @@ class TestQueryBase(TestcaseBase):
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
         int_values = [1., 2.]
-        term_expr = f'{ct.default_int_field_name} in {int_values}'
+        term_expr = f'{ct.default_int64_field_name} in {int_values}'
         error = {ct.err_code: 1, ct.err_msg: "Invalid str"}
         collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
@@ -191,7 +189,7 @@ class TestQueryBase(TestcaseBase):
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
         int_values = [1., 2]
-        term_expr = f'{ct.default_int_field_name} in {int_values}'
+        term_expr = f'{ct.default_int64_field_name} in {int_values}'
         error = {ct.err_code: 1, ct.err_msg: "Invalid str"}
         collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
@@ -203,7 +201,7 @@ class TestQueryBase(TestcaseBase):
         expected: raise exception
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
-        term_expr = f'{ct.default_int_field_name} in [{constant}]'
+        term_expr = f'{ct.default_int64_field_name} in [{constant}]'
         error = {ct.err_code: 1, ct.err_msg: "Invalid str"}
         collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
@@ -215,7 +213,7 @@ class TestQueryBase(TestcaseBase):
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
         res, _ = collection_w.query(default_term_expr, output_fields=None)
-        fields = [ct.default_int_field_name, ct.default_float_field_name, ct.default_float_vec_field_name]
+        fields = [ct.default_int64_field_name, ct.default_float_field_name, ct.default_float_vec_field_name]
         assert res[0].keys() == fields
 
     def test_query_output_one_field(self):
@@ -225,8 +223,8 @@ class TestQueryBase(TestcaseBase):
         expected: return one field
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
-        res, _ = collection_w.query(default_term_expr, output_fields=[ct.default_int_field_name])
-        assert res[0].keys() == [ct.default_int_field_name]
+        res, _ = collection_w.query(default_term_expr, output_fields=[ct.default_int64_field_name])
+        assert res[0].keys() == [ct.default_int64_field_name]
 
     def test_query_output_all_fields(self):
         """
@@ -235,7 +233,7 @@ class TestQueryBase(TestcaseBase):
         expected: return all fields
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
-        fields = [ct.default_int_field_name, ct.default_float_field_name, ct.default_float_vec_field_name]
+        fields = [ct.default_int64_field_name, ct.default_float_field_name, ct.default_float_vec_field_name]
         res, _ = collection_w.query(default_term_expr, output_fields=fields)
         assert res[0].keys() == fields
 
@@ -270,7 +268,7 @@ class TestQueryBase(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: 'output fields is empty'}
         collection_w.query(default_term_expr, output_fields=[], check_items=CheckTasks.err_res, check_task=error)
 
-    @pytest.mark.parametrize("fields", ct.get_invalid_string)
+    @pytest.mark.parametrize("fields", ct.get_invalid_strs)
     def test_query_invalid_output_fields(self, fields):
         """
         target: test query with invalid output fields
@@ -345,7 +343,7 @@ class TestQueryBase(TestcaseBase):
         """
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
         collection_w.load()
-        partition_names = ct.gen_unique_str()
+        partition_names = cf.gen_unique_str()
         collection_w.query(default_term_expr, partition_names=[partition_names])
         error = {ct.err_code: 1, ct.err_msg: 'cannot find partition'}
         collection_w.query(default_term_expr, partition_names=[partition_names],
@@ -397,11 +395,11 @@ class TestQueryOperation(TestcaseBase):
         expected: query result is one entity
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
-        term_expr = f'{ct.default_int_field_name} in [0]'
+        term_expr = f'{ct.default_int64_field_name} in [0]'
         res, _ = collection_w.query(term_expr)
         assert len(res) == 1
         df = vectors[0]
-        assert res[0][ct.default_int_field_name] == df[ct.default_int64_field_name].values.tolist()[0]
+        assert res[0][ct.default_int64_field_name] == df[ct.default_int64_field_name].values.tolist()[0]
         assert res[1][ct.default_float_field_name] == df[ct.default_float_field_name].values.tolist()[0]
         assert res[2][ct.default_float_vec_field_name] == df[ct.default_float_vec_field_name].values.tolist()[0]
 
@@ -412,13 +410,13 @@ class TestQueryOperation(TestcaseBase):
         expected: query result is one entity
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True, is_binary=True)
-        term_expr = f'{ct.default_int_field_name} in [0]'
+        term_expr = f'{ct.default_int64_field_name} in [0]'
         res, _ = collection_w.query(term_expr)
         assert len(res) == 1
-        int_values = vectors[0][ct.default_int_field_name].values.tolist()
+        int_values = vectors[0][ct.default_int64_field_name].values.tolist()
         float_values = vectors[0][ct.default_float_field_name].values.tolist()
         vec_values = vectors[0][ct.default_float_vec_field_name].values.tolist()
-        assert res[0][ct.default_int_field_name] == int_values[0]
+        assert res[0][ct.default_int64_field_name] == int_values[0]
         assert res[1][ct.default_float_field_name] == float_values[0]
         assert res[2][ct.default_float_vec_field_name] == vec_values[0]
 
@@ -429,12 +427,12 @@ class TestQueryOperation(TestcaseBase):
         expected: verify query result
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
-        int_values = vectors[0][ct.default_int_field_name].values.tolist()
-        term_expr = f'{ct.default_int_field_name} in {int_values}'
+        int_values = vectors[0][ct.default_int64_field_name].values.tolist()
+        term_expr = f'{ct.default_int64_field_name} in {int_values}'
         res, _ = collection_w.query(term_expr)
         assert len(res) == ct.default_nb
         for i in ct.default_nb:
-            assert res[i][ct.default_int_field_name] == int_values[i]
+            assert res[i][ct.default_int64_field_name] == int_values[i]
 
     def test_query_expr_half_term_array(self):
         """
@@ -444,14 +442,14 @@ class TestQueryOperation(TestcaseBase):
         """
         half = ct.default_nb // 2
         collection_w, partition_w, _, df_default = self.insert_entities_into_two_partitions_in_half(half)
-        int_values = df_default[ct.default_int_field_name].values.tolist()
+        int_values = df_default[ct.default_int64_field_name].values.tolist()
         float_values = df_default[ct.default_float_field_name].values.tolist()
         vec_values = df_default[ct.default_float_vec_field_name].values.tolist()
-        term_expr = f'{ct.default_int_field_name} in {int_values}'
+        term_expr = f'{ct.default_int64_field_name} in {int_values}'
         res, _ = collection_w.query(term_expr)
         assert len(res) == half
         for i in half:
-            assert res[i][ct.default_int_field_name] == int_values[i]
+            assert res[i][ct.default_int64_field_name] == int_values[i]
             assert res[i][ct.default_float_field_name] == float_values[i]
             assert res[i][ct.default_float_vec_field_name] == vec_values[i]
 
@@ -463,10 +461,10 @@ class TestQueryOperation(TestcaseBase):
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
         int_values = [0, 0]
-        term_expr = f'{ct.default_int_field_name} in {int_values}'
+        term_expr = f'{ct.default_int64_field_name} in {int_values}'
         res, _ = collection_w.query(term_expr)
         assert len(res) == 1
-        assert res[0][ct.default_int_field_name] == int_values[0]
+        assert res[0][ct.default_int64_field_name] == int_values[0]
 
     def test_query_after_index(self, get_simple_index):
         """
@@ -525,7 +523,7 @@ class TestQueryOperation(TestcaseBase):
         """
         half = ct.default_nb // 2
         collection_w, partition_w, _, _ = self.insert_entities_into_two_partitions_in_half(half)
-        term_expr = f'{ct.default_int_field_name} in [{half}]'
+        term_expr = f'{ct.default_int64_field_name} in [{half}]'
         # half entity in _default partition rather than partition_w
         res, _ = collection_w.query(term_expr, partition_names=[partition_w.name])
         assert len(res) == 0
@@ -539,7 +537,7 @@ class TestQueryOperation(TestcaseBase):
         """
         half = ct.default_nb // 2
         collection_w, partition_w, _, _ = self.insert_entities_into_two_partitions_in_half(half)
-        term_expr = f'{ct.default_int_field_name} in [{half - 1}, {half}]'
+        term_expr = f'{ct.default_int64_field_name} in [{half - 1}, {half}]'
         # half entity in _default, half-1 entity in partition_w
         res, _ = collection_w.query(term_expr, partition_names=[ct.default_partition_name, partition_w.name])
         assert len(res) == 2
@@ -553,11 +551,11 @@ class TestQueryOperation(TestcaseBase):
         """
         half = ct.default_nb // 2
         collection_w, partition_w = self.insert_entities_into_two_partitions_in_half(half)
-        term_expr = f'{ct.default_int_field_name} in [{half}]'
+        term_expr = f'{ct.default_int64_field_name} in [{half}]'
         # half entity in _default
         res, _ = collection_w.query(term_expr, partition_names=[ct.default_partition_name, partition_w.name])
         assert len(res) == 1
-        assert res[0][ct.default_int_field_name] == half
+        assert res[0][ct.default_int64_field_name] == half
 
     def insert_entities_into_two_partitions_in_half(self, half):
         """
