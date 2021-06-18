@@ -1510,11 +1510,14 @@ func (node *ProxyNode) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.Ge
 		SegmentIDs: segments,
 	})
 	if err != nil {
+		log.Error("Failed to get segment info from QueryService",
+			zap.Int64s("segmentIDs", segments), zap.Error(err))
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}
 	log.Debug("GetQuerySegmentInfo ", zap.Any("infos", infoResp.Infos), zap.Any("status", infoResp.Status))
 	if infoResp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		log.Error("Failed to get segment info from QueryService", zap.String("errMsg", infoResp.Status.Reason))
 		resp.Status.Reason = infoResp.Status.Reason
 		return resp, nil
 	}

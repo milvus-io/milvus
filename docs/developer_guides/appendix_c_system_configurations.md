@@ -4,7 +4,8 @@ Milvus 能够通过配置文件、命令行选项、环境变量进行配置。
 
 优先级顺序： 命令行选项 > 环境变量 > 配置文件 > 默认值
 
-如果提供了配置文件，则其他的命令行选项和环境变量都将被忽略。例如： `milvus run master --config-file milvus.yaml --log-level debug` 将忽略 `--log-level` 选项。
+如果提供了配置文件，则其他的命令行选项和环境变量都将被忽略。
+例如： `milvus run rootcoord --config-file milvus.yaml --log-level debug` 将忽略 `--log-level` 选项。
 
 ### 语法
 
@@ -17,7 +18,7 @@ $ milvus [command] [server type] [flags]
 例如：
 
 ```shell
-$ MILVUS_CONFIG_FILE=/path/to/milvus/configs/milvus.yaml milvus run master
+$ MILVUS_CONFIG_FILE=/path/to/milvus/configs/milvus.yaml milvus run rootcoord
 ```
 
 `command`， `server type`， `flags` 分别表示为
@@ -26,13 +27,13 @@ $ MILVUS_CONFIG_FILE=/path/to/milvus/configs/milvus.yaml milvus run master
 
 `server type`：指定执行程序的类型。`server type` 有：
 
-* `master`
-* `proxy`
-* `queryservice`
+* `rootcoord`
+* `proxynode`
+* `querycoord`
 * `querynode`
-* `dataservice`
+* `datacoord`
 * `datanode`
-* `indexservice`
+* `indexcoord`
 * `indexnode`
 * `standalone`
 * `mixture`
@@ -41,17 +42,17 @@ $ MILVUS_CONFIG_FILE=/path/to/milvus/configs/milvus.yaml milvus run master
 
 当 `server type` 为 `mixture` 时，必须附加以下几个 `flag` 中的一个或多个，表示这几个服务在一个进程内启动
 
-* `-master`
-* `-queryservice`
-* `-dataservice`
-* `-indexservice`
+* `-rootcoord`
+* `-querycoord`
+* `-datacoord`
+* `-indexcoord`
 
 
 > Getting help
 >
 > You can get help for CLI tool using the `--help` flag, or `-h` for short.
 > ```shell
-> $ milvus run master --help
+> $ milvus run rootcoord --help
 > ```
 
 ### 命令行参数
@@ -87,8 +88,7 @@ $ MILVUS_CONFIG_FILE=/path/to/milvus/configs/milvus.yaml milvus run master
 
 | 名称         | 描述         | 默认值         |
 | --------- | --------- | --------- |
-| etcd.address | etcd 服务地址 | "localhost" |
-| etcd.port    | etcd 服务端口 | 2379        |
+| etcd.endpoints | etcd 服务接入端 | "localhost:2379" |
 | minio.address | minio 服务地址 | "localhost" |
 | minio.port    | minio 服务端口 | 9000      |
 | pulsar.address | pulsar 服务地址 | "localhost" |

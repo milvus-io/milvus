@@ -14,36 +14,41 @@ package components
 import (
 	"context"
 
-	grpcqueryservice "github.com/milvus-io/milvus/internal/distributed/queryservice"
+	grpcdatanode "github.com/milvus-io/milvus/internal/distributed/datanode"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
-type QueryService struct {
+type DataNode struct {
 	ctx context.Context
-	svr *grpcqueryservice.Server
+	svr *grpcdatanode.Server
 }
 
-func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryService, error) {
-	svr, err := grpcqueryservice.NewServer(ctx, factory)
+// NewDataNode creates a new DataNode
+func NewDataNode(ctx context.Context, factory msgstream.Factory) (*DataNode, error) {
+	svr, err := grpcdatanode.NewServer(ctx, factory)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	return &QueryService{
+	return &DataNode{
 		ctx: ctx,
 		svr: svr,
 	}, nil
 }
 
-func (qs *QueryService) Run() error {
-	if err := qs.svr.Run(); err != nil {
+// Run starts service
+func (d *DataNode) Run() error {
+	if err := d.svr.Run(); err != nil {
 		panic(err)
 	}
+	log.Debug("Datanode successfully started")
 	return nil
 }
 
-func (qs *QueryService) Stop() error {
-	if err := qs.svr.Stop(); err != nil {
+// Stop terminates service
+func (d *DataNode) Stop() error {
+	if err := d.svr.Stop(); err != nil {
 		return err
 	}
 	return nil

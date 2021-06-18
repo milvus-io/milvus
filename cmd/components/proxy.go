@@ -14,31 +14,37 @@ package components
 import (
 	"context"
 
-	grpcindexnode "github.com/milvus-io/milvus/internal/distributed/indexnode"
+	grpcproxynode "github.com/milvus-io/milvus/internal/distributed/proxynode"
+	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
-type IndexNode struct {
-	svr *grpcindexnode.Server
+type Proxy struct {
+	svr *grpcproxynode.Server
 }
 
-func NewIndexNode(ctx context.Context) (*IndexNode, error) {
+// NewProxy creates a new Proxy
+func NewProxy(ctx context.Context, factory msgstream.Factory) (*Proxy, error) {
 	var err error
-	n := &IndexNode{}
-	svr, err := grpcindexnode.NewServer(ctx)
+	n := &Proxy{}
+
+	svr, err := grpcproxynode.NewServer(ctx, factory)
 	if err != nil {
 		return nil, err
 	}
 	n.svr = svr
 	return n, nil
-
 }
-func (n *IndexNode) Run() error {
+
+// Run starts service
+func (n *Proxy) Run() error {
 	if err := n.svr.Run(); err != nil {
 		return err
 	}
 	return nil
 }
-func (n *IndexNode) Stop() error {
+
+// Stop terminates service
+func (n *Proxy) Stop() error {
 	if err := n.svr.Stop(); err != nil {
 		return err
 	}
