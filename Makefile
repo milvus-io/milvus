@@ -143,3 +143,4 @@ clean:
 	@rm -rf lib/
 	@rm $(GOPATH)/bin/standalone
 	@rm $(GOPATH)/bin/milvus
+
