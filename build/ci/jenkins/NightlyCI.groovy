@@ -97,15 +97,10 @@ pipeline {
                                 dir("${env.ARTIFACTS}") {
                                     sh "find ./kind -path '*/history/*' -type f | xargs tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-e2e-nightly-logs.tar.gz --transform='s:^[^/]*/[^/]*/[^/]*/[^/]*/::g' || true"
                                     archiveArtifacts artifacts: "**.tar.gz", allowEmptyArchive: true
-                                    sh 'rm -rf ./*'
                                     sh 'docker rm -f \$(docker network inspect -f \'{{ range \$key, \$value := .Containers }}{{ printf "%s " \$key}}{{ end }}\' kind) || true'
                                     sh 'docker network rm kind 2>&1 > /dev/null || true'
                                 }
-                                cleanWs(cleanWhenNotBuilt: false,
-                                        deleteDirs: true,
-                                        disableDeferredWipeout: true,
-                                        notFailBuild: true,
-                                        patterns: [[pattern: '.gitignore', type: 'INCLUDE']])
+                                sh 'find . -name . -o -prune -exec rm -rf -- {} +' /* clean up our workspace */
                             }
                         }
                     }
