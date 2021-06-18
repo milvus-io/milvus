@@ -205,6 +205,8 @@ func (qs *QueryService) ReleaseCollection(ctx context.Context, req *querypb.Rele
 	}
 
 	log.Debug("ReleaseCollectionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID))
+	qs.meta.printMeta()
+	qs.cluster.printMeta()
 	return status, nil
 }
 
@@ -321,6 +323,8 @@ func (qs *QueryService) ReleasePartitions(ctx context.Context, req *querypb.Rele
 		}
 	}
 	log.Debug("ReleasePartitionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
+	qs.meta.printMeta()
+	qs.cluster.printMeta()
 	return status, nil
 }
 

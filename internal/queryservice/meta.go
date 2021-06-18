@@ -28,10 +28,9 @@ import (
 )
 
 const (
-	collectionMetaPrefix       = "queryService-collectionMeta"
-	segmentMetaPrefix          = "queryService-segmentMeta"
-	queryChannelMetaPrefix     = "queryService-queryChannel"
-	queryNodeSegmentMetaPrefix = "queryNode-segmentMeta"
+	collectionMetaPrefix   = "queryService-collectionMeta"
+	segmentMetaPrefix      = "queryService-segmentMeta"
+	queryChannelMetaPrefix = "queryService-queryChannel"
 )
 
 type meta struct {
@@ -350,6 +349,10 @@ func (m *meta) releaseCollection(collectionID UniqueID) {
 	}
 	for id, info := range m.segmentInfos {
 		if info.CollectionID == collectionID {
+			err := m.removeSegmentInfo(id)
+			if err != nil {
+				log.Error("remove segmentInfo error", zap.Any("error", err.Error()), zap.Int64("segmentID", id))
+			}
 			delete(m.segmentInfos, id)
 		}
 	}
@@ -571,4 +574,18 @@ func (m *meta) setLoadCollection(collectionID UniqueID, state bool) error {
 	}
 
 	return errors.New("setLoadCollection: can't find collection in collectionInfos")
+}
+
+func (m *meta) printMeta() {
+	for id, info := range m.collectionInfos {
+		log.Debug("queryService meta: collectionInfo", zap.Int64("collectionID", id), zap.Any("info", info))
+	}
+
+	for id, info := range m.segmentInfos {
+		log.Debug("queryService meta: segmentInfo", zap.Int64("segmentID", id), zap.Any("info", info))
+	}
+
+	for id, info := range m.queryChannelInfos {
+		log.Debug("queryService meta: queryChannelInfo", zap.Int64("collectionID", id), zap.Any("info", info))
+	}
 }

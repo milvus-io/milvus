@@ -386,7 +386,7 @@ func (c *queryNodeCluster) RegisterNode(session *sessionutil.Session, id UniqueI
 	if err != nil {
 		return err
 	}
-	key := fmt.Sprintf("%s/%d", queryNodeMetaPrefix, id)
+	key := fmt.Sprintf("%s/%d", queryNodeInfoPrefix, id)
 	err = c.client.Save(key, string(sessionJSON))
 	if err != nil {
 		return err
@@ -395,6 +395,7 @@ func (c *queryNodeCluster) RegisterNode(session *sessionutil.Session, id UniqueI
 	if err != nil {
 		return err
 	}
+	log.Debug("register a new query node", zap.Int64("nodeID", id), zap.String("address", session.Address))
 
 	if _, ok := c.nodes[id]; !ok {
 		c.nodes[id] = node
@@ -428,4 +429,18 @@ func (c *queryNodeCluster) getOnServiceNodeIDs() ([]int64, error) {
 	}
 
 	return nodeIDs, nil
+}
+
+func (c *queryNodeCluster) printMeta() {
+	for id, node := range c.nodes {
+		if node.isOnService() {
+			for collectionID, info := range node.collectionInfos {
+				log.Debug("queryService cluster info: collectionInfo", zap.Int64("nodeID", id), zap.Int64("collectionID", collectionID), zap.Any("info", info))
+			}
+
+			for collectionID, info := range node.watchedQueryChannels {
+				log.Debug("queryService cluster info: watchedQueryChannelInfo", zap.Int64("nodeID", id), zap.Int64("collectionID", collectionID), zap.Any("info", info))
+			}
+		}
+	}
 }

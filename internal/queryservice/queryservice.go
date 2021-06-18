@@ -276,7 +276,7 @@ func (qs *QueryService) watchMetaLoop() {
 	defer qs.loopWg.Done()
 	log.Debug("QueryService start watch meta loop")
 
-	watchChan := qs.meta.client.WatchWithPrefix(queryNodeMetaPrefix)
+	watchChan := qs.meta.client.WatchWithPrefix("queryNode-segmentMeta")
 
 	for {
 		select {

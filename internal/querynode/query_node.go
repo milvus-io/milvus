@@ -114,6 +114,7 @@ func (node *QueryNode) Register() error {
 	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
 	node.session.Init(typeutil.QueryNodeRole, Params.QueryNodeIP+":"+strconv.FormatInt(Params.QueryNodePort, 10), false)
 	Params.QueryNodeID = node.session.ServerID
+	log.Debug("query nodeID", zap.Int64("nodeID", Params.QueryNodeID))
 	return nil
 }
 

@@ -301,12 +301,12 @@ func (qn *queryNode) removeQueryChannel(collectionID UniqueID) error {
 func (qn *queryNode) saveCollectionInfo(collectionID UniqueID, info *querypb.CollectionInfo) error {
 	infoBytes := proto.MarshalTextString(info)
 
-	key := fmt.Sprintf("%s/%d/%d", queryChannelMetaPrefix, qn.id, collectionID)
+	key := fmt.Sprintf("%s/%d/%d", queryNodeMetaPrefix, qn.id, collectionID)
 	return qn.kvClient.Save(key, infoBytes)
 }
 
 func (qn *queryNode) removeCollectionInfo(collectionID UniqueID) error {
-	key := fmt.Sprintf("%s/%d/%d", queryChannelMetaPrefix, qn.id, collectionID)
+	key := fmt.Sprintf("%s/%d/%d", queryNodeMetaPrefix, qn.id, collectionID)
 	return qn.kvClient.Remove(key)
 }
 

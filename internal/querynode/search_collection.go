@@ -347,9 +347,9 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 				zap.Any("tSafe", st))
 
 			s.setServiceableTime(serviceTime)
-			log.Debug("query node::doUnsolvedMsgSearch: setServiceableTime",
-				zap.Any("serviceTime", st),
-			)
+			//log.Debug("query node::doUnsolvedMsgSearch: setServiceableTime",
+			//	zap.Any("serviceTime", st),
+			//)
 
 			searchMsg := make([]*msgstream.SearchMsg, 0)
 			tempMsg := s.popAllUnsolvedMsg()
