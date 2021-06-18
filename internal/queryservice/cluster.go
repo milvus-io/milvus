@@ -326,8 +326,13 @@ func (c *queryNodeCluster) getSegmentInfo(ctx context.Context, in *querypb.GetSe
 	defer c.Unlock()
 
 	segmentInfos := make([]*querypb.SegmentInfo, 0)
-	for _, node := range c.nodes {
-		res, err := node.client.GetSegmentInfo(ctx, in)
+	nodes, err := c.getOnServiceNodeIDs()
+	if err != nil {
+		log.Warn(err.Error())
+		return segmentInfos, nil
+	}
+	for _, nodeID := range nodes {
+		res, err := c.nodes[nodeID].client.GetSegmentInfo(ctx, in)
 		if err != nil {
 			return nil, err
 		}

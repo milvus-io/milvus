@@ -228,7 +228,9 @@ func (qs *QueryService) watchNodeLoop() {
 			case sessionutil.SessionAddEvent:
 				serverID := event.Session.ServerID
 				err := qs.cluster.RegisterNode(event.Session, serverID)
-				log.Warn(err.Error())
+				if err != nil {
+					log.Error(err.Error())
+				}
 				log.Debug("QueryService", zap.Any("Add QueryNode, session serverID", serverID))
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
@@ -256,6 +258,12 @@ func (qs *QueryService) watchNodeLoop() {
 					meta:               qs.meta,
 				}
 				qs.scheduler.Enqueue([]task{loadBalanceTask})
+				err := loadBalanceTask.WaitToFinish()
+				if err != nil {
+					log.Error(err.Error())
+				}
+				log.Debug("load balance done after queryNode down", zap.Int64s("nodeIDs", loadBalanceTask.SourceNodeIDs))
+				//TODO::remove nodeInfo and clear etcd
 			}
 		}
 	}
