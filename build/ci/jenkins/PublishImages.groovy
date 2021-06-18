@@ -16,8 +16,6 @@ pipeline {
     options {
         timestamps()
         timeout(time: 30, unit: 'MINUTES')
-        // This is required if you want to clean before build
-        skipDefaultCheckout(true)
         // parallelsAlwaysFailFast()
     }
 
