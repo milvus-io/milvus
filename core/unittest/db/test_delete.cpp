@@ -159,14 +159,21 @@ TEST_F(DeleteTest, DELETE_ON_DISK) {
 
     int64_t num_query = 80;
     std::map<int64_t, milvus::engine::VectorsData> search_vectors;
-    for (int64_t i = 0; i < num_query; ++i) {
+    for (int64_t i = 0; i < num_query; ) {
         int64_t index = dis(gen);
+        auto temp_id = xb.id_array_[index];
+        if (search_vectors.find(temp_id) != search_vectors.end()) {
+            continue;
+        }
+
         milvus::engine::VectorsData search;
         search.vector_count_ = 1;
         for (int64_t j = 0; j < COLLECTION_DIM; j++) {
             search.float_data_.push_back(xb.float_data_[index * COLLECTION_DIM + j]);
         }
-        search_vectors.insert(std::make_pair(xb.id_array_[index], search));
+
+        search_vectors.insert(std::make_pair(temp_id, search));
+        ++i;
     }
     auto it = search_vectors.begin();
 
