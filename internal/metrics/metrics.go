@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	milvusNamespace      = `milvus`
-	subSystemDataService = `dataservice`
+	milvusNamespace    = "milvus"
+	subSystemRootCoord = "rootcoord"
+	subSystemDataCoord = "dataCoord"
 )
 
 /*
@@ -28,11 +29,11 @@ var (
 */
 
 var (
-	// MasterProxyNodeLister used to count the num of registered proxy nodes
-	MasterProxyNodeLister = prometheus.NewGaugeVec(
+	// RootCoordProxyNodeLister used to count the num of registered proxy nodes
+	RootCoordProxyNodeLister = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: "milvus",
-			Subsystem: "master",
+			Namespace: milvusNamespace,
+			Subsystem: subSystemRootCoord,
 			Name:      "list_of_proxy_node",
 			Help:      "List of proxy nodes which has register with etcd",
 		}, []string{"client_id"})
@@ -40,128 +41,128 @@ var (
 	////////////////////////////////////////////////////////////////////////////
 	// for grpc
 
-	// MasterCreateCollectionCounter used to count the num of calls of CreateCollection
-	MasterCreateCollectionCounter = prometheus.NewCounterVec(
+	// RootCoordCreateCollectionCounter used to count the num of calls of CreateCollection
+	RootCoordCreateCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "milvus",
-			Subsystem: "master",
+			Namespace: milvusNamespace,
+			Subsystem: subSystemRootCoord,
 			Name:      "create_collection_total",
 			Help:      "Counter of create collection",
 		}, []string{"client_id", "type"})
 
-	// MasterDropCollectionCounter used to count the num of calls of DropCollection
-	MasterDropCollectionCounter = prometheus.NewCounterVec(
+	// RootCoordDropCollectionCounter used to count the num of calls of DropCollection
+	RootCoordDropCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "milvus",
-			Subsystem: "master",
+			Namespace: milvusNamespace,
+			Subsystem: subSystemRootCoord,
 			Name:      "drop_collection_total",
 			Help:      "Counter of drop collection",
 		}, []string{"client_id", "type"})
 
-	// MasterHasCollectionCounter used to count the num of calls of HasCollection
-	MasterHasCollectionCounter = prometheus.NewCounterVec(
+	// RootCoordHasCollectionCounter used to count the num of calls of HasCollection
+	RootCoordHasCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "milvus",
-			Subsystem: "master",
+			Namespace: milvusNamespace,
+			Subsystem: subSystemRootCoord,
 			Name:      "has_collection_total",
 			Help:      "Counter of has collection",
 		}, []string{"client_id", "type"})
 
-	// MasterDescribeCollectionCounter used to count the num of calls of DescribeCollection
-	MasterDescribeCollectionCounter = prometheus.NewCounterVec(
+	// RootCoordDescribeCollectionCounter used to count the num of calls of DescribeCollection
+	RootCoordDescribeCollectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "milvus",
-			Subsystem: "master",
+			Namespace: milvusNamespace,
+			Subsystem: subSystemRootCoord,
 			Name:      "describe_collection_total",
 			Help:      "Counter of describe collection",
 		}, []string{"client_id", "type"})
 
-	// MasterShowCollectionsCounter used to count the num of calls of ShowCollections
-	MasterShowCollectionsCounter = prometheus.NewCounterVec(
+	// RootCoordShowCollectionsCounter used to count the num of calls of ShowCollections
+	RootCoordShowCollectionsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "milvus",
-			Subsystem: "master",
+			Namespace: milvusNamespace,
+			Subsystem: subSystemRootCoord,
 			Name:      "show_collections_total",
 			Help:      "Counter of show collections",
 		}, []string{"client_id", "type"})
 
-	// MasterCreatePartitionCounter used to count the num of calls of CreatePartition
-	MasterCreatePartitionCounter = prometheus.NewCounterVec(
+	// RootCoordCreatePartitionCounter used to count the num of calls of CreatePartition
+	RootCoordCreatePartitionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "milvus",
-			Subsystem: "master",
+			Namespace: milvusNamespace,
+			Subsystem: subSystemRootCoord,
 			Name:      "create_partition_total",
 			Help:      "Counter of create partition",
 		}, []string{"client_id", "type"})
 
-	// MasterDropPartitionCounter used to count the num of calls of DropPartition
-	MasterDropPartitionCounter = prometheus.NewCounterVec(
+	// RootCoordDropPartitionCounter used to count the num of calls of DropPartition
+	RootCoordDropPartitionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "milvus",
-			Subsystem: "master",
+			Namespace: milvusNamespace,
+			Subsystem: subSystemRootCoord,
 			Name:      "drop_partition_total",
 			Help:      "Counter of drop partition",
 		}, []string{"client_id", "type"})
 
-	// MasterHasPartitionCounter used to count the num of calls of HasPartition
-	MasterHasPartitionCounter = prometheus.NewCounterVec(
+	// RootCoordHasPartitionCounter used to count the num of calls of HasPartition
+	RootCoordHasPartitionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "milvus",
-			Subsystem: "master",
+			Namespace: milvusNamespace,
+			Subsystem: subSystemRootCoord,
 			Name:      "has_partition_total",
 			Help:      "Counter of has partition",
 		}, []string{"client_id", "type"})
 
-	// MasterShowPartitionsCounter used to count the num of calls of ShowPartitions
-	MasterShowPartitionsCounter = prometheus.NewCounterVec(
+	// RootCoordShowPartitionsCounter used to count the num of calls of ShowPartitions
+	RootCoordShowPartitionsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "milvus",
-			Subsystem: "master",
+			Namespace: milvusNamespace,
+			Subsystem: subSystemRootCoord,
 			Name:      "show_partitions_total",
 			Help:      "Counter of show partitions",
 		}, []string{"client_id", "type"})
 
-	// MasterCreateIndexCounter used to count the num of calls of CreateIndex
-	MasterCreateIndexCounter = prometheus.NewCounterVec(
+	// RootCoordCreateIndexCounter used to count the num of calls of CreateIndex
+	RootCoordCreateIndexCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "milvus",
-			Subsystem: "master",
+			Namespace: milvusNamespace,
+			Subsystem: subSystemRootCoord,
 			Name:      "create_index_total",
 			Help:      "Counter of create index",
 		}, []string{"client_id", "type"})
 
-	// MasterDropIndexCounter used to count the num of calls of DropIndex
-	MasterDropIndexCounter = prometheus.NewCounterVec(
+	// RootCoordDropIndexCounter used to count the num of calls of DropIndex
+	RootCoordDropIndexCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "milvus",
-			Subsystem: "master",
+			Namespace: milvusNamespace,
+			Subsystem: subSystemRootCoord,
 			Name:      "drop_index_total",
 			Help:      "Counter of drop index",
 		}, []string{"client_id", "type"})
 
-	// MasterDescribeIndexCounter used to count the num of calls of DescribeIndex
-	MasterDescribeIndexCounter = prometheus.NewCounterVec(
+	// RootCoordDescribeIndexCounter used to count the num of calls of DescribeIndex
+	RootCoordDescribeIndexCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "milvus",
-			Subsystem: "master",
+			Namespace: milvusNamespace,
+			Subsystem: subSystemRootCoord,
 			Name:      "describe_index_total",
 			Help:      "Counter of describe index",
 		}, []string{"client_id", "type"})
 
-	// MasterDescribeSegmentCounter used to count the num of calls of DescribeSegment
-	MasterDescribeSegmentCounter = prometheus.NewCounterVec(
+	// RootCoordDescribeSegmentCounter used to count the num of calls of DescribeSegment
+	RootCoordDescribeSegmentCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "milvus",
-			Subsystem: "master",
+			Namespace: milvusNamespace,
+			Subsystem: subSystemRootCoord,
 			Name:      "describe_segment_total",
 			Help:      "Counter of describe segment",
 		}, []string{"client_id", "type"})
 
-	// MasterShowSegmentsCounter used to count the num of calls of ShowSegments
-	MasterShowSegmentsCounter = prometheus.NewCounterVec(
+	// RootCoordShowSegmentsCounter used to count the num of calls of ShowSegments
+	RootCoordShowSegmentsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "milvus",
-			Subsystem: "master",
+			Namespace: milvusNamespace,
+			Subsystem: subSystemRootCoord,
 			Name:      "show_segments_total",
 			Help:      "Counter of show segments",
 		}, []string{"client_id", "type"})
@@ -169,48 +170,48 @@ var (
 	////////////////////////////////////////////////////////////////////////////
 	// for time tick
 
-	// MasterInsertChannelTimeTick used to count the time tick num of insert channel in 24H
-	MasterInsertChannelTimeTick = prometheus.NewGaugeVec(
+	// RootCoordInsertChannelTimeTick used to count the time tick num of insert channel in 24H
+	RootCoordInsertChannelTimeTick = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: "milvus",
-			Subsystem: "master",
+			Namespace: milvusNamespace,
+			Subsystem: subSystemRootCoord,
 			Name:      "insert_channel_time_tick",
 			Help:      "Time tick of insert Channel in 24H",
 		}, []string{"vchannel"})
 
-	// MasterDDChannelTimeTick used to count the time tick num of dd channel in 24H
-	MasterDDChannelTimeTick = prometheus.NewGauge(
+	// RootCoordDDChannelTimeTick used to count the time tick num of dd channel in 24H
+	RootCoordDDChannelTimeTick = prometheus.NewGauge(
 		prometheus.GaugeOpts{
-			Namespace: "milvus",
-			Subsystem: "master",
+			Namespace: milvusNamespace,
+			Subsystem: subSystemRootCoord,
 			Name:      "dd_channel_time_tick",
 			Help:      "Time tick of dd Channel in 24H",
 		})
 )
 
-//RegisterMaster register Master metrics
-func RegisterMaster() {
-	prometheus.MustRegister(MasterProxyNodeLister)
+//RegisterRootCoord register RootCoord metrics
+func RegisterRootCoord() {
+	prometheus.MustRegister(RootCoordProxyNodeLister)
 
 	// for grpc
-	prometheus.MustRegister(MasterCreateCollectionCounter)
-	prometheus.MustRegister(MasterDropCollectionCounter)
-	prometheus.MustRegister(MasterHasCollectionCounter)
-	prometheus.MustRegister(MasterDescribeCollectionCounter)
-	prometheus.MustRegister(MasterShowCollectionsCounter)
-	prometheus.MustRegister(MasterCreatePartitionCounter)
-	prometheus.MustRegister(MasterDropPartitionCounter)
-	prometheus.MustRegister(MasterHasPartitionCounter)
-	prometheus.MustRegister(MasterShowPartitionsCounter)
-	prometheus.MustRegister(MasterCreateIndexCounter)
-	prometheus.MustRegister(MasterDropIndexCounter)
-	prometheus.MustRegister(MasterDescribeIndexCounter)
-	prometheus.MustRegister(MasterDescribeSegmentCounter)
-	prometheus.MustRegister(MasterShowSegmentsCounter)
+	prometheus.MustRegister(RootCoordCreateCollectionCounter)
+	prometheus.MustRegister(RootCoordDropCollectionCounter)
+	prometheus.MustRegister(RootCoordHasCollectionCounter)
+	prometheus.MustRegister(RootCoordDescribeCollectionCounter)
+	prometheus.MustRegister(RootCoordShowCollectionsCounter)
+	prometheus.MustRegister(RootCoordCreatePartitionCounter)
+	prometheus.MustRegister(RootCoordDropPartitionCounter)
+	prometheus.MustRegister(RootCoordHasPartitionCounter)
+	prometheus.MustRegister(RootCoordShowPartitionsCounter)
+	prometheus.MustRegister(RootCoordCreateIndexCounter)
+	prometheus.MustRegister(RootCoordDropIndexCounter)
+	prometheus.MustRegister(RootCoordDescribeIndexCounter)
+	prometheus.MustRegister(RootCoordDescribeSegmentCounter)
+	prometheus.MustRegister(RootCoordShowSegmentsCounter)
 
 	// for time tick
-	prometheus.MustRegister(MasterInsertChannelTimeTick)
-	prometheus.MustRegister(MasterDDChannelTimeTick)
+	prometheus.MustRegister(RootCoordInsertChannelTimeTick)
+	prometheus.MustRegister(RootCoordDDChannelTimeTick)
 	//prometheus.MustRegister(PanicCounter)
 }
 
@@ -219,8 +220,8 @@ func RegisterProxyNode() {
 
 }
 
-//RegisterQueryService register QueryService metrics
-func RegisterQueryService() {
+//RegisterQueryCoord register QueryCoord metrics
+func RegisterQueryCoord() {
 
 }
 
@@ -230,20 +231,20 @@ func RegisterQueryNode() {
 }
 
 var (
-	//DataServiceDataNodeList records the num of regsitered data nodes
-	DataServiceDataNodeList = prometheus.NewGaugeVec(
+	//DataCoordDataNodeList records the num of regsitered data nodes
+	DataCoordDataNodeList = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
-			Subsystem: subSystemDataService,
+			Subsystem: subSystemDataCoord,
 			Name:      "list_of_data_node",
 			Help:      "List of data nodes regsitered within etcd",
 		}, []string{"status"},
 	)
 )
 
-//RegisterDataService register DataService metrics
-func RegisterDataService() {
-	prometheus.Register(DataServiceDataNodeList)
+//RegisterDataCoord register DataService metrics
+func RegisterDataCoord() {
+	prometheus.Register(DataCoordDataNodeList)
 }
 
 //RegisterDataNode register DataNode metrics
@@ -251,8 +252,8 @@ func RegisterDataNode() {
 
 }
 
-//RegisterIndexService register IndexService metrics
-func RegisterIndexService() {
+//RegisterIndexCoord register IndexCoord metrics
+func RegisterIndexCoord() {
 
 }
 
@@ -261,8 +262,8 @@ func RegisterIndexNode() {
 
 }
 
-//RegisterMsgStreamService register MsgStreamService metrics
-func RegisterMsgStreamService() {
+//RegisterMsgStreamCoord register MsgStreamCoord metrics
+func RegisterMsgStreamCoord() {
 
 }
 

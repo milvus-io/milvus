@@ -13,10 +13,18 @@ service ProxyNodeService {
 
   rpc InvalidateCollectionMetaCache(InvalidateCollMetaCacheRequest) returns (common.Status) {}
   rpc GetDdChannel(internal.GetDdChannelRequest) returns (milvus.StringResponse) {}
+
+  rpc ReleaseDQLMessageStream(ReleaseDQLMessageStreamRequest) returns (common.Status) {}
 }
 
 message InvalidateCollMetaCacheRequest {
   common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
+}
+
+message ReleaseDQLMessageStreamRequest {
+  common.MsgBase base = 1;
+  int64 dbID = 2;
+  int64 collectionID = 3;
 }

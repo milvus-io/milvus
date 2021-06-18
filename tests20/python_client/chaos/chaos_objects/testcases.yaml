@@ -10,16 +10,25 @@
 
 Collections:
   -
-    testcase: test_querynode_podkill
+    testcase:
+      name: test_standalone_podkill
+      chaos: chaos_standalone_podkill.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+        cluster_n_nodes:
+          search: degrade    # keep functional, but performance degraded
+          query: degrade
+  -
+    testcase:
+      name: test_querynode_podkill
       chaos: chaos_querynode_podkill.yaml
       expectation:
-          standalone:
-            create: succ   # succ by default if not specified
-            insert: succ
-            flush: succ
-            index: succ
-            search: fail
-            query: fail
           cluster_1_node:
             search: fail
             query: fail
@@ -27,50 +36,71 @@ Collections:
             search: degrade    # keep functional, but performance degraded
             query: degrade
   -
-    testcase: test_queryservice_podkill
+    testcase:
+      name: test_queryservice_podkill
       chaos: chaos_queryservice_podkill.yaml
   -
-    testcase: test_datanode_podkill
+    testcase:
+      name: test_datanode_podkill
       chaos: chaos_datanode_podkill.yaml
       expectation:
-        standalone:
-          insert: fail
         cluster_1_node:
-          insert: fail
+          insert: succ
+          flush: fail
         cluster_n_nodes:
           insert: degrade
   -
-    testcase: test_dataservice_podkill
+    testcase:
+      name: test_dataservice_podkill
       chaos: chaos_dataservice_podkill.yaml
   -
-    testcase: test_indexnode_podkill
+    testcase:
+      name: test_indexnode_podkill
       chaos: chaos_indexnode_podkill.yaml
   -
-    testcase: test_indexservice_podkill
+    testcase:
+      name: test_indexservice_podkill
       chaos: chaos_indexservice_podkill.yaml
   -
-    testcase: test_proxy_podkill
+    testcase:
+      name: test_proxy_podkill
       chaos: chaos_proxy_podkill.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+        cluster_n_nodes:
+          insert: degrade
   -
-    testcase: test_master_podkill
+    testcase:
+      name: test_master_podkill
       chaos: chaos_master_podkill.yaml
   -
-    testcase: test_etcd_podkill
+    testcase:
+      name: test_etcd_podkill
       chaos: chaos_etcd_podkill.yaml
   -
-    testcase: test_minio_podkill
+    testcase:
+      name: test_minio_podkill
       chaos: chaos_minio_podkill.yaml
   -
-    testcase: test_querynode_cpu100p
+    testcase:
+      name: test_querynode_cpu100p
       chaos: chaos_querynode_cpu100p.yaml
     # and 10 more for the other pods
 
   -
-    testcase: test_querynode_mem100p
+    testcase:
+      name: test_querynode_mem100p
       chaos: chaos_querynode_mem100p.yaml
     # and 10 more for the other pods
 
   -
-    testcase: test_querynode_network_isolation
+    testcase:
+      name: test_querynode_network_isolation
       chaos: chaos_querynode_network_isolation.yaml
     # and 10 more for the other pods

@@ -6,13 +6,13 @@ import (
 
 func TestRegisterMetrics(t *testing.T) {
 	// Make sure it doesn't panic.
-	RegisterMaster()
+	RegisterRootCoord()
 	RegisterDataNode()
-	RegisterDataService()
+	RegisterDataCoord()
 	RegisterIndexNode()
-	RegisterIndexService()
+	RegisterIndexCoord()
 	RegisterProxyNode()
 	RegisterQueryNode()
-	RegisterQueryService()
-	RegisterMsgStreamService()
+	RegisterQueryCoord()
+	RegisterMsgStreamCoord()
 }
