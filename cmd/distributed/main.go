@@ -146,6 +146,7 @@ func main() {
 		os.Exit(-1)
 	}
 
+	var localMsg = false
 	role := roles.MilvusRoles{}
 	switch serverType {
 	case roleRootCoord:
@@ -179,6 +180,7 @@ func main() {
 		role.EnableIndexCoord = true
 		role.EnableIndexNode = true
 		role.EnableMsgStreamCoord = true
+		localMsg = true
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown server type = %s\n", serverType)
 		os.Exit(-1)
@@ -202,7 +204,7 @@ func main() {
 			panic(err)
 		}
 		defer removePidFile(fd)
-		role.Run(false)
+		role.Run(localMsg)
 	case "stop":
 		if err := stopPid(filename, runtimeDir); err != nil {
 			panic(err)

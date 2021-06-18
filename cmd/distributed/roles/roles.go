@@ -65,11 +65,12 @@ func (mr *MilvusRoles) EnvValue(env string) bool {
 }
 
 func (mr *MilvusRoles) setLogConfigFilename(filename string) *log.Config {
+	paramtable.Params.Init()
 	cfg := paramtable.Params.LogConfig
-	if len(cfg.File.RootPath) == 0 {
-		cfg.File.Filename = ""
-	} else {
+	if len(cfg.File.RootPath) != 0 {
 		cfg.File.Filename = path.Join(cfg.File.RootPath, filename)
+	} else {
+		cfg.File.Filename = ""
 	}
 	return cfg
 }
@@ -97,6 +98,7 @@ func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *compone
 		_ = rc.Run()
 	}()
 	wg.Wait()
+
 	metrics.RegisterRootCoord()
 	return rc
 }
@@ -124,6 +126,7 @@ func (mr *MilvusRoles) runProxyNode(ctx context.Context, localMsg bool) *compone
 		_ = pn.Run()
 	}()
 	wg.Wait()
+
 	metrics.RegisterProxyNode()
 	return pn
 }
@@ -151,6 +154,7 @@ func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *compon
 		_ = qs.Run()
 	}()
 	wg.Wait()
+
 	metrics.RegisterQueryCoord()
 	return qs
 }
@@ -178,6 +182,7 @@ func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool) *compone
 		_ = qn.Run()
 	}()
 	wg.Wait()
+
 	metrics.RegisterQueryNode()
 	return qn
 }
@@ -205,6 +210,7 @@ func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *compone
 		_ = ds.Run()
 	}()
 	wg.Wait()
+
 	metrics.RegisterDataCoord()
 	return ds
 }
@@ -232,6 +238,7 @@ func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool) *componen
 		_ = dn.Run()
 	}()
 	wg.Wait()
+
 	metrics.RegisterDataNode()
 	return dn
 }
@@ -258,6 +265,7 @@ func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *compon
 		_ = is.Run()
 	}()
 	wg.Wait()
+
 	metrics.RegisterIndexCoord()
 	return is
 }
@@ -284,6 +292,7 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool) *compone
 		_ = in.Run()
 	}()
 	wg.Wait()
+
 	metrics.RegisterIndexNode()
 	return in
 }
@@ -303,6 +312,7 @@ func (mr *MilvusRoles) runMsgStreamCoord(ctx context.Context) *components.MsgStr
 		_ = mss.Run()
 	}()
 	wg.Wait()
+
 	metrics.RegisterMsgStreamCoord()
 	return mss
 }
@@ -316,6 +326,15 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+
+	// only standalone enable localMsg
+	if localMsg {
+		os.Setenv("QUERY_NODE_ID", "1")
+		os.Setenv("DEPLOY_MODE", "STANDALONE")
+		cfg := mr.setLogConfigFilename("standalone.log")
+		logutil.SetupLogger(cfg)
+		defer log.Sync()
+	}
 
 	var rc *components.RootCoord
 	if mr.EnableRootCoord {
