@@ -371,7 +371,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w = self.init_collection_general(prefix, True, nb_old)[0]
         # 2. search for original data after load
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        log.info("test_search_before_after_delete: searching for original data after load")
+        log.info("test_search_new_data: searching for original data after load")
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, limit, default_search_exp,
                             check_task=CheckTasks.check_search_results,
@@ -526,7 +526,7 @@ class TestCollectionSearch(TestcaseBase):
                 partition name
         expected: searched successfully
         """
-        log.info("Test case of search interface: test_search_index_partitions")
+        log.info("Test case of search interface: test_search_index_partitions_fuzzy")
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix, True, 1000, 1)[0]
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
@@ -534,10 +534,9 @@ class TestCollectionSearch(TestcaseBase):
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
         # 3. search through partitions
-        log.info("test_search_index_partitions: searching through partitions")
+        log.info("test_search_index_partitions_fuzzy: searching through partitions")
         par = collection_w.partitions
         entity_num = par[1].num_entities
-        log.info("test_search_index_partitions: partitions: %s" % par)
         limit = 1000
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, limit, default_search_exp,
