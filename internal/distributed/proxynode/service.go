@@ -26,8 +26,8 @@ import (
 
 	grpcdataserviceclient "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
 	grpcindexserviceclient "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
-	grpcmasterserviceclient "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
 	grpcqueryserviceclient "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
+	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/milvus-io/milvus/internal/log"
@@ -54,10 +54,10 @@ type Server struct {
 
 	grpcErrChan chan error
 
-	masterServiceClient *grpcmasterserviceclient.GrpcClient
-	dataServiceClient   *grpcdataserviceclient.Client
-	queryServiceClient  *grpcqueryserviceclient.Client
-	indexServiceClient  *grpcindexserviceclient.Client
+	rootCoordClient    *rcc.GrpcClient
+	dataServiceClient  *grpcdataserviceclient.Client
+	queryServiceClient *grpcqueryserviceclient.Client
+	indexServiceClient *grpcindexserviceclient.Client
 
 	tracer opentracing.Tracer
 	closer io.Closer
@@ -167,26 +167,25 @@ func (s *Server) init() error {
 		return err
 	}
 
-	masterServiceAddr := Params.MasterAddress
-	log.Debug("ProxyNode", zap.String("master address", masterServiceAddr))
+	rootCoordAddr := Params.MasterAddress
+	log.Debug("ProxyNode", zap.String("RootCoord address", rootCoordAddr))
 	timeout := 3 * time.Second
-	s.masterServiceClient, err = grpcmasterserviceclient.NewClient(s.ctx, proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
+	s.rootCoordClient, err = rcc.NewClient(s.ctx, proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
 	if err != nil {
-		log.Debug("ProxyNode new masterServiceClient failed ", zap.Error(err))
+		log.Debug("ProxyNode new rootCoordClient failed ", zap.Error(err))
 		return err
 	}
-	err = s.masterServiceClient.Init()
+	err = s.rootCoordClient.Init()
 	if err != nil {
-		log.Debug("ProxyNode new masterServiceClient Init ", zap.Error(err))
+		log.Debug("ProxyNode new rootCoordClient Init ", zap.Error(err))
 		return err
 	}
-	err = funcutil.WaitForComponentHealthy(s.ctx, s.masterServiceClient, "MasterService", 1000000, time.Millisecond*200)
-
+	err = funcutil.WaitForComponentHealthy(s.ctx, s.rootCoordClient, "RootCoord", 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("ProxyNode WaitForComponentHealthy master service failed ", zap.Error(err))
+		log.Debug("ProxyNode WaitForComponentHealthy RootCoord failed ", zap.Error(err))
 		panic(err)
 	}
-	s.proxynode.SetMasterClient(s.masterServiceClient)
+	s.proxynode.SetMasterClient(s.rootCoordClient)
 	log.Debug("set master client ...")
 
 	dataServiceAddr := Params.DataServiceAddress

@@ -18,7 +18,7 @@ import (
 	"time"
 
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
-	masterclient "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
+	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/logutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -84,7 +84,7 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 		return datanodeclient.NewClient(addr, 3*time.Second)
 	}
 	s.masterClientCreator = func(addr string) (types.MasterService, error) {
-		return masterclient.NewClient(ctx, Params.MetaRootPath, Params.EtcdEndpoints, masterClientTimout)
+		return rootcoordclient.NewClient(ctx, Params.MetaRootPath, Params.EtcdEndpoints, masterClientTimout)
 	}
 
 	return s, nil

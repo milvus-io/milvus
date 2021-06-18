@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package grpcmasterservice
+package grpcrootcoord
 
 import (
 	"context"
@@ -23,10 +23,8 @@ import (
 	"testing"
 	"time"
 
-	grpcmasterserviceclient "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
-
 	"github.com/golang/protobuf/proto"
-	cms "github.com/milvus-io/milvus/internal/masterservice"
+	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -36,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -98,6 +97,7 @@ type proxyNodeMock struct {
 func (p *proxyNodeMock) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	return p.invalidateCollectionMetaCache(ctx, request)
 }
+
 func TestGrpcService(t *testing.T) {
 	const (
 		dbName    = "testDB"
@@ -124,21 +124,21 @@ func TestGrpcService(t *testing.T) {
 	svr, err := NewServer(ctx, msFactory)
 	assert.Nil(t, err)
 
-	cms.Params.Init()
-	cms.Params.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
-	cms.Params.KvRootPath = fmt.Sprintf("/%d/test/kv", randVal)
-	cms.Params.MsgChannelSubName = fmt.Sprintf("msgChannel%d", randVal)
-	cms.Params.TimeTickChannel = fmt.Sprintf("timeTick%d", randVal)
-	cms.Params.StatisticsChannel = fmt.Sprintf("stateChannel%d", randVal)
-	cms.Params.DataServiceSegmentChannel = fmt.Sprintf("segmentChannel%d", randVal)
+	rootcoord.Params.Init()
+	rootcoord.Params.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
+	rootcoord.Params.KvRootPath = fmt.Sprintf("/%d/test/kv", randVal)
+	rootcoord.Params.MsgChannelSubName = fmt.Sprintf("msgChannel%d", randVal)
+	rootcoord.Params.TimeTickChannel = fmt.Sprintf("timeTick%d", randVal)
+	rootcoord.Params.StatisticsChannel = fmt.Sprintf("stateChannel%d", randVal)
+	rootcoord.Params.DataServiceSegmentChannel = fmt.Sprintf("segmentChannel%d", randVal)
 
-	cms.Params.MaxPartitionNum = 64
-	cms.Params.DefaultPartitionName = "_default"
-	cms.Params.DefaultIndexName = "_default"
+	rootcoord.Params.MaxPartitionNum = 64
+	rootcoord.Params.DefaultPartitionName = "_default"
+	rootcoord.Params.DefaultIndexName = "_default"
 
 	t.Logf("master service port = %d", Params.Port)
 
-	core, ok := (svr.rootCoord).(*cms.Core)
+	core, ok := (svr.rootCoord).(*rootcoord.Core)
 	assert.True(t, ok)
 
 	err = core.Register()
@@ -148,9 +148,9 @@ func TestGrpcService(t *testing.T) {
 	assert.Nil(t, err)
 	svr.rootCoord.UpdateStateCode(internalpb.StateCode_Initializing)
 
-	etcdCli, err := initEtcd(cms.Params.EtcdEndpoints)
+	etcdCli, err := initEtcd(rootcoord.Params.EtcdEndpoints)
 	assert.Nil(t, err)
-	sessKey := path.Join(cms.Params.MetaRootPath, sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(rootcoord.Params.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
@@ -209,7 +209,7 @@ func TestGrpcService(t *testing.T) {
 		return []string{"file1", "file2", "file3"}, nil
 	}
 	core.CallGetNumRowsService = func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error) {
-		return cms.Params.MinSegmentSizeToEnableIndex, nil
+		return rootcoord.Params.MinSegmentSizeToEnableIndex, nil
 	}
 
 	var binlogLock sync.Mutex
@@ -246,7 +246,7 @@ func TestGrpcService(t *testing.T) {
 		return nil
 	}
 
-	cms.Params.Address = Params.Address
+	rootcoord.Params.Address = Params.Address
 	err = svr.rootCoord.Register()
 	assert.Nil(t, err)
 
@@ -255,7 +255,7 @@ func TestGrpcService(t *testing.T) {
 
 	svr.rootCoord.UpdateStateCode(internalpb.StateCode_Healthy)
 
-	cli, err := grpcmasterserviceclient.NewClient(context.Background(), cms.Params.MetaRootPath, cms.Params.EtcdEndpoints, 3*time.Second)
+	cli, err := rcc.NewClient(context.Background(), rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, 3*time.Second)
 	assert.Nil(t, err)
 
 	err = cli.Init()
@@ -661,7 +661,7 @@ func TestGrpcService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 		assert.Equal(t, 1, len(rsp.IndexDescriptions))
-		assert.Equal(t, cms.Params.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
+		assert.Equal(t, rootcoord.Params.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
 	})
 
 	t.Run("flush segment", func(t *testing.T) {
@@ -712,7 +712,7 @@ func TestGrpcService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 		assert.Equal(t, 1, len(rsp.IndexDescriptions))
-		assert.Equal(t, cms.Params.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
+		assert.Equal(t, rootcoord.Params.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
 
 	})
 
@@ -727,9 +727,9 @@ func TestGrpcService(t *testing.T) {
 			DbName:         dbName,
 			CollectionName: collName,
 			FieldName:      fieldName,
-			IndexName:      cms.Params.DefaultIndexName,
+			IndexName:      rootcoord.Params.DefaultIndexName,
 		}
-		_, idx, err := core.MetaTable.GetIndexByName(collName, cms.Params.DefaultIndexName)
+		_, idx, err := core.MetaTable.GetIndexByName(collName, rootcoord.Params.DefaultIndexName)
 		assert.Nil(t, err)
 		assert.Equal(t, len(idx), 1)
 		rsp, err := cli.DropIndex(ctx, req)
@@ -762,7 +762,7 @@ func TestGrpcService(t *testing.T) {
 		assert.Equal(t, 1, len(collMeta.PartitionIDs))
 		partMeta, err := core.MetaTable.GetPartitionByID(1, collMeta.PartitionIDs[0], 0)
 		assert.Nil(t, err)
-		assert.Equal(t, cms.Params.DefaultPartitionName, partMeta.PartitionName)
+		assert.Equal(t, rootcoord.Params.DefaultPartitionName, partMeta.PartitionName)
 		assert.Equal(t, 2, len(collectionMetaCache))
 	})
 
@@ -936,12 +936,12 @@ func TestRun(t *testing.T) {
 
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
-	cms.Params.Init()
-	cms.Params.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
+	rootcoord.Params.Init()
+	rootcoord.Params.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
 
-	etcdCli, err := initEtcd(cms.Params.EtcdEndpoints)
+	etcdCli, err := initEtcd(rootcoord.Params.EtcdEndpoints)
 	assert.Nil(t, err)
-	sessKey := path.Join(cms.Params.MetaRootPath, sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(rootcoord.Params.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 	err = svr.Run()

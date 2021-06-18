@@ -15,14 +15,14 @@ import (
 	"context"
 	"io"
 
-	msc "github.com/milvus-io/milvus/internal/distributed/masterservice"
+	rc "github.com/milvus-io/milvus/internal/distributed/rootcoord"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/opentracing/opentracing-go"
 )
 
 type RootCoord struct {
 	ctx context.Context
-	svr *msc.Server
+	svr *rc.Server
 
 	tracer opentracing.Tracer
 	closer io.Closer
@@ -30,7 +30,7 @@ type RootCoord struct {
 
 // NewRootCoord creates a new RoorCoord
 func NewRootCoord(ctx context.Context, factory msgstream.Factory) (*RootCoord, error) {
-	svr, err := msc.NewServer(ctx, factory)
+	svr, err := rc.NewServer(ctx, factory)
 	if err != nil {
 		return nil, err
 	}
