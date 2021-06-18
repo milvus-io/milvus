@@ -14,13 +14,20 @@ ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 MILVUS_DIR="${ROOT_DIR}/internal/"
 echo $MILVUS_DIR
 
-go test -race -cover "${MILVUS_DIR}/util/sessionutil/..." -failfast
-go test -race -cover "${MILVUS_DIR}/kv/..." -failfast
-go test -race -cover "${MILVUS_DIR}/tso/..." -failfast
 go test -race -cover "${MILVUS_DIR}/allocator/..." -failfast
+go test -race -cover "${MILVUS_DIR}/kv/..." -failfast
 go test -race -cover "${MILVUS_DIR}/msgstream/..." -failfast
-#go test -race -cover "${MILVUS_DIR}/storage" -failfast
-#go test -race -cover "${MILVUS_DIR}/util/..." -failfast
+go test -race -cover "${MILVUS_DIR}/storage" -failfast
+go test -race -cover "${MILVUS_DIR}/tso/..." -failfast
+go test -race -cover "${MILVUS_DIR}/util/dablooms/..." -failfast
+go test -race -cover "${MILVUS_DIR}/util/funcutil/..." -failfast
+go test -race -cover "${MILVUS_DIR}/util/mqclient/..." -failfast
+go test -race -cover "${MILVUS_DIR}/util/paramtable/..." -failfast
+go test -race -cover "${MILVUS_DIR}/util/retry/..." -failfast
+go test -race -cover "${MILVUS_DIR}/util/rocksmq/..." -failfast
+go test -race -cover "${MILVUS_DIR}/util/sessionutil/..." -failfast
+go test -race -cover "${MILVUS_DIR}/util/trace/..." -failfast
+go test -race -cover "${MILVUS_DIR}/util/typeutil/..." -failfast
 
 # TODO: remove to distributed
 #go test -race -cover "${MILVUS_DIR}/proxynode/..." -failfast
