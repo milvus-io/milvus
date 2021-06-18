@@ -107,6 +107,7 @@ message ReleasePartitionsRequest {
 
 message CreateQueryChannelRequest {
   int64 collectionID = 1;
+  int64 proxyID = 2;
 }
 
 message CreateQueryChannelResponse {
