@@ -13,37 +13,44 @@ package components
 
 import (
 	"context"
+	"io"
 
-	grpcdataserviceclient "github.com/milvus-io/milvus/internal/distributed/dataservice"
+	msc "github.com/milvus-io/milvus/internal/distributed/masterservice"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/opentracing/opentracing-go"
 )
 
-type DataService struct {
+type RootCoord struct {
 	ctx context.Context
-	svr *grpcdataserviceclient.Server
+	svr *msc.Server
+
+	tracer opentracing.Tracer
+	closer io.Closer
 }
 
-func NewDataService(ctx context.Context, factory msgstream.Factory) (*DataService, error) {
-	s, err := grpcdataserviceclient.NewServer(ctx, factory)
+// NewRootCoord creates a new RoorCoord
+func NewRootCoord(ctx context.Context, factory msgstream.Factory) (*RootCoord, error) {
+	svr, err := msc.NewServer(ctx, factory)
 	if err != nil {
 		return nil, err
 	}
-
-	return &DataService{
+	return &RootCoord{
 		ctx: ctx,
-		svr: s,
+		svr: svr,
 	}, nil
 }
 
-func (s *DataService) Run() error {
-	if err := s.svr.Run(); err != nil {
+// Run starts service
+func (rc *RootCoord) Run() error {
+	if err := rc.svr.Run(); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (s *DataService) Stop() error {
-	if err := s.svr.Stop(); err != nil {
+// Stop terminates service
+func (rc *RootCoord) Stop() error {
+	if err := rc.svr.Stop(); err != nil {
 		return err
 	}
 	return nil

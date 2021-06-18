@@ -14,38 +14,37 @@ package components
 import (
 	"context"
 
-	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
-	"github.com/milvus-io/milvus/internal/msgstream"
+	grpcindexnode "github.com/milvus-io/milvus/internal/distributed/indexnode"
 )
 
-type QueryNode struct {
-	ctx context.Context
-	svr *grpcquerynode.Server
+type IndexNode struct {
+	svr *grpcindexnode.Server
 }
 
-func NewQueryNode(ctx context.Context, factory msgstream.Factory) (*QueryNode, error) {
-
-	svr, err := grpcquerynode.NewServer(ctx, factory)
+// NewIndexNode creates a new IndexNode
+func NewIndexNode(ctx context.Context) (*IndexNode, error) {
+	var err error
+	n := &IndexNode{}
+	svr, err := grpcindexnode.NewServer(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	return &QueryNode{
-		ctx: ctx,
-		svr: svr,
-	}, nil
+	n.svr = svr
+	return n, nil
 
 }
 
-func (q *QueryNode) Run() error {
-	if err := q.svr.Run(); err != nil {
-		panic(err)
+// Run starts service
+func (n *IndexNode) Run() error {
+	if err := n.svr.Run(); err != nil {
+		return err
 	}
 	return nil
 }
 
-func (q *QueryNode) Stop() error {
-	if err := q.svr.Stop(); err != nil {
+// Stop terminates service
+func (n *IndexNode) Stop() error {
+	if err := n.svr.Stop(); err != nil {
 		return err
 	}
 	return nil

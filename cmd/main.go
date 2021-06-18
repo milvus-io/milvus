@@ -14,32 +14,35 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path"
+	"strings"
 	"syscall"
 
-	"github.com/milvus-io/milvus/cmd/distributed/roles"
+	"github.com/milvus-io/milvus/cmd/roles"
 )
 
 const (
-	roleMaster       = "master"
-	roleQueryService = "queryservice"
-	roleIndexService = "indexservice"
-	roleDataService  = "dataservice"
-	roleProxyNode    = "proxynode"
-	roleQueryNode    = "querynode"
-	roleIndexNode    = "indexnode"
-	roleDataNode     = "datanode"
-	roleMixture      = "mixture"
+	roleRootCoord  = "rootcoord"
+	roleQueryCoord = "querycoord"
+	roleIndexCoord = "indexcoord"
+	roleDataCoord  = "datacoord"
+	roleProxy      = "proxy"
+	roleQueryNode  = "querynode"
+	roleIndexNode  = "indexnode"
+	roleDataNode   = "datanode"
+	roleMixture    = "mixture"
+	roleStandalone = "standalone"
 )
 
-func getPidFileName(service string, alias string) string {
+func getPidFileName(serverType string, alias string) string {
 	var filename string
 	if len(alias) != 0 {
-		filename = fmt.Sprintf("%s-%s.pid", service, alias)
+		filename = fmt.Sprintf("%s-%s.pid", serverType, alias)
 	} else {
-		filename = service + ".pid"
+		filename = serverType + ".pid"
 	}
 	return filename
 }
@@ -123,6 +126,27 @@ func makeRuntimeDir(dir string) error {
 	return nil
 }
 
+// simplified print from flag package
+func printUsage(w io.Writer, f *flag.Flag) {
+	s := fmt.Sprintf("  -%s", f.Name) // Two spaces before -; see next two comments.
+	name, usage := flag.UnquoteUsage(f)
+	if len(name) > 0 {
+		s += " " + name
+	}
+	// Boolean flags of one ASCII letter are so common we
+	// treat them specially, putting their usage on the same line.
+	if len(s) <= 4 { // space, space, '-', 'x'.
+		s += "\t"
+	} else {
+		// Four spaces before the tab triggers good alignment
+		// for both 4- and 8-space tab stops.
+		s += "\n    \t"
+	}
+	s += strings.ReplaceAll(usage, "\n", "\n    \t")
+
+	fmt.Fprint(w, s, "\n")
+}
+
 func main() {
 	if len(os.Args) < 3 {
 		_, _ = fmt.Fprint(os.Stderr, "usage: milvus [command] [server type] [flags]\n")
@@ -135,39 +159,68 @@ func main() {
 	var svrAlias string
 	flags.StringVar(&svrAlias, "alias", "", "set alias")
 
-	var enableMaster, enableQueryService, enableIndexService, enableDataService bool
-	flags.BoolVar(&enableMaster, roleMaster, false, "enable master")
-	flags.BoolVar(&enableQueryService, roleQueryService, false, "enable query service")
-	flags.BoolVar(&enableIndexService, roleIndexService, false, "enable index service")
-	flags.BoolVar(&enableDataService, roleDataService, false, "enable data service")
+	var enableRootCoord, enableQueryCoord, enableIndexCoord, enableDataCoord bool
+	flags.BoolVar(&enableRootCoord, roleRootCoord, false, "enable root coordinator")
+	flags.BoolVar(&enableQueryCoord, roleQueryCoord, false, "enable query coordinator")
+	flags.BoolVar(&enableIndexCoord, roleIndexCoord, false, "enable index coordinator")
+	flags.BoolVar(&enableDataCoord, roleDataCoord, false, "enable data coordinator")
+
+	flags.Usage = func() {
+		fmt.Fprintf(flags.Output(), "Usage of %s:\n", os.Args[0])
+		switch {
+		case serverType == roleMixture:
+			flags.VisitAll(func(f *flag.Flag) {
+				printUsage(flags.Output(), f)
+			})
+		default:
+			flags.VisitAll(func(f *flag.Flag) {
+				if f.Name != "alias" {
+					return
+				}
+				printUsage(flags.Output(), f)
+			})
+		}
+	}
 
 	if err := flags.Parse(os.Args[3:]); err != nil {
 		os.Exit(-1)
 	}
 
+	var localMsg = false
 	role := roles.MilvusRoles{}
 	switch serverType {
-	case roleMaster:
-		role.EnableMaster = true
-	case roleProxyNode:
-		role.EnableProxyNode = true
-	case roleQueryService:
-		role.EnableQueryService = true
+	case roleRootCoord:
+		role.EnableRootCoord = true
+	case roleProxy:
+		role.EnableProxy = true
+	case roleQueryCoord:
+		role.EnableQueryCoord = true
 	case roleQueryNode:
 		role.EnableQueryNode = true
-	case roleDataService:
-		role.EnableDataService = true
+	case roleDataCoord:
+		role.EnableDataCoord = true
 	case roleDataNode:
 		role.EnableDataNode = true
-	case roleIndexService:
-		role.EnableIndexService = true
+	case roleIndexCoord:
+		role.EnableIndexCoord = true
 	case roleIndexNode:
 		role.EnableIndexNode = true
 	case roleMixture:
-		role.EnableMaster = enableMaster
-		role.EnableQueryService = enableQueryService
-		role.EnableDataService = enableDataService
-		role.EnableIndexService = enableIndexService
+		role.EnableRootCoord = enableRootCoord
+		role.EnableQueryCoord = enableQueryCoord
+		role.EnableDataCoord = enableDataCoord
+		role.EnableIndexCoord = enableIndexCoord
+	case roleStandalone:
+		role.EnableRootCoord = true
+		role.EnableProxy = true
+		role.EnableQueryCoord = true
+		role.EnableQueryNode = true
+		role.EnableDataCoord = true
+		role.EnableDataNode = true
+		role.EnableIndexCoord = true
+		role.EnableIndexNode = true
+		role.EnableMsgStreamCoord = true
+		localMsg = true
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown server type = %s\n", serverType)
 		os.Exit(-1)
@@ -191,7 +244,7 @@ func main() {
 			panic(err)
 		}
 		defer removePidFile(fd)
-		role.Run(false)
+		role.Run(localMsg)
 	case "stop":
 		if err := stopPid(filename, runtimeDir); err != nil {
 			panic(err)
