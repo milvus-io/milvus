@@ -15,7 +15,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 
 	"go.uber.org/zap"
 
@@ -115,9 +114,9 @@ func (qs *QueryService) RegisterNode(ctx context.Context, req *querypb.RegisterN
 
 func (qs *QueryService) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
 	dbID := req.DbID
-	log.Debug("show collection start, dbID = ", zap.String("dbID", strconv.FormatInt(dbID, 10)))
+	log.Debug("show collection start", zap.Int64("dbID", dbID))
 	collectionIDs := qs.meta.showCollections()
-	log.Debug("show collection end")
+	log.Debug("show collection end", zap.Int64s("collections", collectionIDs))
 	return &querypb.ShowCollectionsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -212,6 +211,7 @@ func (qs *QueryService) ReleaseCollection(ctx context.Context, req *querypb.Rele
 
 func (qs *QueryService) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 	collectionID := req.CollectionID
+	log.Debug("show partitions start, ", zap.Int64("collectionID", collectionID))
 	partitionIDs, err := qs.meta.showPartitions(collectionID)
 	if err != nil {
 		return &querypb.ShowPartitionsResponse{
@@ -221,6 +221,8 @@ func (qs *QueryService) ShowPartitions(ctx context.Context, req *querypb.ShowPar
 			},
 		}, err
 	}
+
+	log.Debug("show partitions end", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
 
 	return &querypb.ShowPartitionsResponse{
 		Status: &commonpb.Status{

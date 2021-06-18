@@ -160,6 +160,7 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
 
+	lct.meta.addCollection(collectionID, lct.Schema)
 	showPartitionRequest := &milvuspb.ShowPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_ShowPartitions,
@@ -446,6 +447,10 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 	collectionID := lpt.CollectionID
 	partitionIDs := lpt.PartitionIDs
 
+	lpt.meta.addCollection(collectionID, lpt.Schema)
+	for _, id := range partitionIDs {
+		lpt.meta.addPartition(collectionID, id)
+	}
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
