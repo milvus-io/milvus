@@ -15,8 +15,6 @@ pipeline {
         timestamps()
         timeout(time: 1, unit: 'HOURS')
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
-        // This is required if you want to clean before build
-        skipDefaultCheckout(true)
         // parallelsAlwaysFailFast()
     }
     stages {
@@ -47,6 +45,7 @@ pipeline {
                     DOCKER_CREDENTIALS_ID = "ba070c98-c8cc-4f7c-b657-897715f359fc"
                     DOKCER_REGISTRY_URL = "registry.zilliz.com"
                     TARGET_REPO = "${DOKCER_REGISTRY_URL}/milvus"
+                    MILVUS_HELM_BRANCH = "rename"
                 }
                 stages {
                     stage('Test') {
