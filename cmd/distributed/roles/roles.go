@@ -14,8 +14,10 @@ package roles
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"os"
 	"os/signal"
+	"path"
 	"strings"
 	"sync"
 	"syscall"
@@ -62,6 +64,249 @@ func (mr *MilvusRoles) EnvValue(env string) bool {
 	return env == "1" || env == "true"
 }
 
+func (mr *MilvusRoles) setLogConfigFilename(filename string) *log.Config {
+	cfg := paramtable.Params.LogConfig
+	if len(cfg.File.RootPath) == 0 {
+		cfg.File.Filename = ""
+	} else {
+		cfg.File.Filename = path.Join(cfg.File.RootPath, filename)
+	}
+	return cfg
+}
+
+func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *components.RootCoord {
+	var rc *components.RootCoord
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		masterservice.Params.Init()
+
+		if !localMsg {
+			logutil.SetupLogger(&masterservice.Params.Log)
+			defer log.Sync()
+		}
+
+		factory := newMsgFactory(localMsg)
+		var err error
+		rc, err = components.NewRootCoord(ctx, factory)
+		if err != nil {
+			panic(err)
+		}
+		wg.Done()
+		_ = rc.Run()
+	}()
+	wg.Wait()
+	metrics.RegisterRootCoord()
+	return rc
+}
+
+func (mr *MilvusRoles) runProxyNode(ctx context.Context, localMsg bool) *components.ProxyNode {
+	var pn *components.ProxyNode
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		proxynode.Params.Init()
+
+		if !localMsg {
+			logutil.SetupLogger(&proxynode.Params.Log)
+			defer log.Sync()
+		}
+
+		factory := newMsgFactory(localMsg)
+		var err error
+		pn, err = components.NewProxyNode(ctx, factory)
+		if err != nil {
+			panic(err)
+		}
+		wg.Done()
+		_ = pn.Run()
+	}()
+	wg.Wait()
+	metrics.RegisterProxyNode()
+	return pn
+}
+
+func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *components.QueryService {
+	var qs *components.QueryService
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		queryservice.Params.Init()
+
+		if !localMsg {
+			logutil.SetupLogger(&queryservice.Params.Log)
+			defer log.Sync()
+		}
+
+		factory := newMsgFactory(localMsg)
+		var err error
+		qs, err = components.NewQueryService(ctx, factory)
+		if err != nil {
+			panic(err)
+		}
+		wg.Done()
+		_ = qs.Run()
+	}()
+	wg.Wait()
+	metrics.RegisterQueryCoord()
+	return qs
+}
+
+func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool) *components.QueryNode {
+	var qn *components.QueryNode
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		querynode.Params.Init()
+
+		if !localMsg {
+			logutil.SetupLogger(&querynode.Params.Log)
+			defer log.Sync()
+		}
+
+		factory := newMsgFactory(localMsg)
+		var err error
+		qn, err = components.NewQueryNode(ctx, factory)
+		if err != nil {
+			panic(err)
+		}
+		wg.Done()
+		_ = qn.Run()
+	}()
+	wg.Wait()
+	metrics.RegisterQueryNode()
+	return qn
+}
+
+func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *components.DataService {
+	var ds *components.DataService
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		dataservice.Params.Init()
+
+		if !localMsg {
+			logutil.SetupLogger(&dataservice.Params.Log)
+			defer log.Sync()
+		}
+
+		factory := newMsgFactory(localMsg)
+		var err error
+		ds, err = components.NewDataService(ctx, factory)
+		if err != nil {
+			panic(err)
+		}
+		wg.Done()
+		_ = ds.Run()
+	}()
+	wg.Wait()
+	metrics.RegisterDataCoord()
+	return ds
+}
+
+func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool) *components.DataNode {
+	var dn *components.DataNode
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		datanode.Params.Init()
+
+		if !localMsg {
+			logutil.SetupLogger(&datanode.Params.Log)
+			defer log.Sync()
+		}
+
+		factory := newMsgFactory(localMsg)
+		var err error
+		dn, err = components.NewDataNode(ctx, factory)
+		if err != nil {
+			panic(err)
+		}
+		wg.Done()
+		_ = dn.Run()
+	}()
+	wg.Wait()
+	metrics.RegisterDataNode()
+	return dn
+}
+
+func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *components.IndexService {
+	var is *components.IndexService
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		indexservice.Params.Init()
+
+		if !localMsg {
+			logutil.SetupLogger(&indexservice.Params.Log)
+			defer log.Sync()
+		}
+
+		var err error
+		is, err = components.NewIndexService(ctx)
+		if err != nil {
+			panic(err)
+		}
+		wg.Done()
+		_ = is.Run()
+	}()
+	wg.Wait()
+	metrics.RegisterIndexCoord()
+	return is
+}
+
+func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool) *components.IndexNode {
+	var in *components.IndexNode
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		indexnode.Params.Init()
+
+		if !localMsg {
+			logutil.SetupLogger(&indexnode.Params.Log)
+			defer log.Sync()
+		}
+
+		var err error
+		in, err = components.NewIndexNode(ctx)
+		if err != nil {
+			panic(err)
+		}
+		wg.Done()
+		_ = in.Run()
+	}()
+	wg.Wait()
+	metrics.RegisterIndexNode()
+	return in
+}
+
+func (mr *MilvusRoles) runMsgStreamCoord(ctx context.Context) *components.MsgStream {
+	var mss *components.MsgStream
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		var err error
+		mss, err = components.NewMsgStreamService(ctx)
+		if err != nil {
+			panic(err)
+		}
+		wg.Done()
+		_ = mss.Run()
+	}()
+	wg.Wait()
+	metrics.RegisterMsgStreamCoord()
+	return mss
+}
+
 func (mr *MilvusRoles) Run(localMsg bool) {
 	if os.Getenv("DEPLOY_MODE") == "STANDALONE" {
 		closer := trace.InitTracing("standalone")
@@ -72,249 +317,76 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	var rc *components.RootCoord
 	if mr.EnableRootCoord {
-		var rc *components.RootCoord
-		var wg sync.WaitGroup
-
-		wg.Add(1)
-		go func() {
-			masterservice.Params.Init()
-			logutil.SetupLogger(&masterservice.Params.Log)
-			defer log.Sync()
-
-			factory := newMsgFactory(localMsg)
-			var err error
-			rc, err = components.NewRootCoord(ctx, factory)
-			if err != nil {
-				panic(err)
-			}
-			wg.Done()
-			_ = rc.Run()
-		}()
-
-		wg.Wait()
+		rc = mr.runRootCoord(ctx, localMsg)
 		if rc != nil {
 			defer rc.Stop()
 		}
-
-		metrics.RegisterRootCoord()
 	}
 
+	var pn *components.ProxyNode
 	if mr.EnableProxyNode {
-		var pn *components.ProxyNode
-		var wg sync.WaitGroup
-
-		wg.Add(1)
-		go func() {
-			proxynode.Params.Init()
-			logutil.SetupLogger(&proxynode.Params.Log)
-			defer log.Sync()
-
-			factory := newMsgFactory(localMsg)
-			var err error
-			pn, err = components.NewProxyNode(ctx, factory)
-			if err != nil {
-				panic(err)
-			}
-			wg.Done()
-			_ = pn.Run()
-		}()
-
-		wg.Wait()
+		pn = mr.runProxyNode(ctx, localMsg)
 		if pn != nil {
 			defer pn.Stop()
 		}
-
-		metrics.RegisterProxyNode()
 	}
 
+	var qs *components.QueryService
 	if mr.EnableQueryCoord {
-		var qs *components.QueryService
-		var wg sync.WaitGroup
-
-		wg.Add(1)
-		go func() {
-			queryservice.Params.Init()
-			logutil.SetupLogger(&queryservice.Params.Log)
-			defer log.Sync()
-
-			factory := newMsgFactory(localMsg)
-			var err error
-			qs, err = components.NewQueryService(ctx, factory)
-			if err != nil {
-				panic(err)
-			}
-			wg.Done()
-			_ = qs.Run()
-		}()
-
-		wg.Wait()
+		qs = mr.runQueryCoord(ctx, localMsg)
 		if qs != nil {
 			defer qs.Stop()
 		}
-
-		metrics.RegisterQueryCoord()
 	}
 
+	var qn *components.QueryNode
 	if mr.EnableQueryNode {
-		var qn *components.QueryNode
-		var wg sync.WaitGroup
-
-		wg.Add(1)
-		go func() {
-			querynode.Params.Init()
-			logutil.SetupLogger(&querynode.Params.Log)
-			defer log.Sync()
-
-			factory := newMsgFactory(localMsg)
-			var err error
-			qn, err = components.NewQueryNode(ctx, factory)
-			if err != nil {
-				panic(err)
-			}
-			wg.Done()
-			_ = qn.Run()
-		}()
-
-		wg.Wait()
+		qn = mr.runQueryNode(ctx, localMsg)
 		if qn != nil {
 			defer qn.Stop()
 		}
-
-		metrics.RegisterQueryNode()
 	}
 
+	var ds *components.DataService
 	if mr.EnableDataCoord {
-		var ds *components.DataService
-		var wg sync.WaitGroup
-
-		wg.Add(1)
-		go func() {
-			dataservice.Params.Init()
-			logutil.SetupLogger(&dataservice.Params.Log)
-			defer log.Sync()
-
-			factory := newMsgFactory(localMsg)
-			var err error
-			ds, err = components.NewDataService(ctx, factory)
-			if err != nil {
-				panic(err)
-			}
-			wg.Done()
-			_ = ds.Run()
-		}()
-
-		wg.Wait()
+		ds = mr.runDataCoord(ctx, localMsg)
 		if ds != nil {
 			defer ds.Stop()
 		}
-
-		metrics.RegisterDataCoord()
 	}
 
+	var dn *components.DataNode
 	if mr.EnableDataNode {
-		var dn *components.DataNode
-		var wg sync.WaitGroup
-
-		wg.Add(1)
-		go func() {
-			datanode.Params.Init()
-			logutil.SetupLogger(&datanode.Params.Log)
-			defer log.Sync()
-
-			factory := newMsgFactory(localMsg)
-			var err error
-			dn, err = components.NewDataNode(ctx, factory)
-			if err != nil {
-				panic(err)
-			}
-			wg.Done()
-			_ = dn.Run()
-		}()
-
-		wg.Wait()
+		dn = mr.runDataNode(ctx, localMsg)
 		if dn != nil {
 			defer dn.Stop()
 		}
-
-		metrics.RegisterDataNode()
 	}
 
+	var is *components.IndexService
 	if mr.EnableIndexCoord {
-		var is *components.IndexService
-		var wg sync.WaitGroup
-
-		wg.Add(1)
-		go func() {
-			indexservice.Params.Init()
-			logutil.SetupLogger(&indexservice.Params.Log)
-			defer log.Sync()
-
-			var err error
-			is, err = components.NewIndexService(ctx)
-			if err != nil {
-				panic(err)
-			}
-			wg.Done()
-			_ = is.Run()
-		}()
-
-		wg.Wait()
+		is = mr.runIndexCoord(ctx, localMsg)
 		if is != nil {
 			defer is.Stop()
 		}
-
-		metrics.RegisterIndexCoord()
 	}
 
+	var in *components.IndexNode
 	if mr.EnableIndexNode {
-		var in *components.IndexNode
-		var wg sync.WaitGroup
-
-		wg.Add(1)
-		go func() {
-			indexnode.Params.Init()
-			logutil.SetupLogger(&indexnode.Params.Log)
-			defer log.Sync()
-
-			var err error
-			in, err = components.NewIndexNode(ctx)
-			if err != nil {
-				panic(err)
-			}
-			wg.Done()
-			_ = in.Run()
-		}()
-
-		wg.Wait()
+		in = mr.runIndexNode(ctx, localMsg)
 		if in != nil {
 			defer in.Stop()
 		}
-
-		metrics.RegisterIndexNode()
 	}
 
+	var mss *components.MsgStream
 	if mr.EnableMsgStreamCoord {
-		var mss *components.MsgStream
-		var wg sync.WaitGroup
-
-		wg.Add(1)
-		go func() {
-			var err error
-			mss, err = components.NewMsgStreamService(ctx)
-			if err != nil {
-				panic(err)
-			}
-			wg.Done()
-			_ = mss.Run()
-		}()
-
-		wg.Wait()
+		mss = mr.runMsgStreamCoord(ctx)
 		if mss != nil {
 			defer mss.Stop()
 		}
-
-		metrics.RegisterMsgStreamCoord()
 	}
 
 	metrics.ServeHTTP()
