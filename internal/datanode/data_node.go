@@ -166,7 +166,7 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 	)
 
 	flushChan := make(chan *flushMsg, 100)
-	dataSyncService := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataService)
+	dataSyncService := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataService, node.masterService)
 	node.vchan2SyncService[vchan.GetChannelName()] = dataSyncService
 	node.vchan2FlushCh[vchan.GetChannelName()] = flushChan
 

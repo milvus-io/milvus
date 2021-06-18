@@ -14,9 +14,11 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path"
+	"strings"
 	"syscall"
 
 	"github.com/milvus-io/milvus/cmd/roles"
@@ -124,6 +126,27 @@ func makeRuntimeDir(dir string) error {
 	return nil
 }
 
+// simplified print from flag package
+func printUsage(w io.Writer, f *flag.Flag) {
+	s := fmt.Sprintf("  -%s", f.Name) // Two spaces before -; see next two comments.
+	name, usage := flag.UnquoteUsage(f)
+	if len(name) > 0 {
+		s += " " + name
+	}
+	// Boolean flags of one ASCII letter are so common we
+	// treat them specially, putting their usage on the same line.
+	if len(s) <= 4 { // space, space, '-', 'x'.
+		s += "\t"
+	} else {
+		// Four spaces before the tab triggers good alignment
+		// for both 4- and 8-space tab stops.
+		s += "\n    \t"
+	}
+	s += strings.ReplaceAll(usage, "\n", "\n    \t")
+
+	fmt.Fprint(w, s, "\n")
+}
+
 func main() {
 	if len(os.Args) < 3 {
 		_, _ = fmt.Fprint(os.Stderr, "usage: milvus [command] [server type] [flags]\n")
@@ -141,6 +164,23 @@ func main() {
 	flags.BoolVar(&enableQueryCoord, roleQueryCoord, false, "enable query coordinator")
 	flags.BoolVar(&enableIndexCoord, roleIndexCoord, false, "enable index coordinator")
 	flags.BoolVar(&enableDataCoord, roleDataCoord, false, "enable data coordinator")
+
+	flags.Usage = func() {
+		fmt.Fprintf(flags.Output(), "Usage of %s:\n", os.Args[0])
+		switch {
+		case serverType == roleMixture:
+			flags.VisitAll(func(f *flag.Flag) {
+				printUsage(flags.Output(), f)
+			})
+		default:
+			flags.VisitAll(func(f *flag.Flag) {
+				if f.Name != "alias" {
+					return
+				}
+				printUsage(flags.Output(), f)
+			})
+		}
+	}
 
 	if err := flags.Parse(os.Args[3:]); err != nil {
 		os.Exit(-1)
