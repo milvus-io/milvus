@@ -18,13 +18,13 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
-type ProxyNode struct {
+type Proxy struct {
 	svr *grpcproxynode.Server
 }
 
-func NewProxyNode(ctx context.Context, factory msgstream.Factory) (*ProxyNode, error) {
+func NewProxy(ctx context.Context, factory msgstream.Factory) (*Proxy, error) {
 	var err error
-	n := &ProxyNode{}
+	n := &Proxy{}
 
 	svr, err := grpcproxynode.NewServer(ctx, factory)
 	if err != nil {
@@ -34,14 +34,14 @@ func NewProxyNode(ctx context.Context, factory msgstream.Factory) (*ProxyNode, e
 	return n, nil
 }
 
-func (n *ProxyNode) Run() error {
+func (n *Proxy) Run() error {
 	if err := n.svr.Run(); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (n *ProxyNode) Stop() error {
+func (n *Proxy) Stop() error {
 	if err := n.svr.Stop(); err != nil {
 		return err
 	}

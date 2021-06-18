@@ -14,36 +14,32 @@ package components
 import (
 	"context"
 
-	grpcqueryservice "github.com/milvus-io/milvus/internal/distributed/queryservice"
-	"github.com/milvus-io/milvus/internal/msgstream"
+	grpcindexserver "github.com/milvus-io/milvus/internal/distributed/indexservice"
 )
 
-type QueryService struct {
-	ctx context.Context
-	svr *grpcqueryservice.Server
+type IndexCoord struct {
+	svr *grpcindexserver.Server
 }
 
-func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryService, error) {
-	svr, err := grpcqueryservice.NewServer(ctx, factory)
+func NewIndexService(ctx context.Context) (*IndexCoord, error) {
+	var err error
+	s := &IndexCoord{}
+	svr, err := grpcindexserver.NewServer(ctx)
+
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-
-	return &QueryService{
-		ctx: ctx,
-		svr: svr,
-	}, nil
+	s.svr = svr
+	return s, nil
 }
-
-func (qs *QueryService) Run() error {
-	if err := qs.svr.Run(); err != nil {
-		panic(err)
+func (s *IndexCoord) Run() error {
+	if err := s.svr.Run(); err != nil {
+		return err
 	}
 	return nil
 }
-
-func (qs *QueryService) Stop() error {
-	if err := qs.svr.Stop(); err != nil {
+func (s *IndexCoord) Stop() error {
+	if err := s.svr.Stop(); err != nil {
 		return err
 	}
 	return nil

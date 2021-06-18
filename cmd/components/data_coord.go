@@ -13,19 +13,38 @@ package components
 
 import (
 	"context"
+
+	grpcdataserviceclient "github.com/milvus-io/milvus/internal/distributed/dataservice"
+	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
-func NewMsgStreamService(ctx context.Context) (*MsgStream, error) {
-	return nil, nil
+type DataCoord struct {
+	ctx context.Context
+	svr *grpcdataserviceclient.Server
 }
 
-type MsgStream struct {
+func NewDataCoord(ctx context.Context, factory msgstream.Factory) (*DataCoord, error) {
+	s, err := grpcdataserviceclient.NewServer(ctx, factory)
+	if err != nil {
+		return nil, err
+	}
+
+	return &DataCoord{
+		ctx: ctx,
+		svr: s,
+	}, nil
 }
 
-func (ps *MsgStream) Run() error {
+func (s *DataCoord) Run() error {
+	if err := s.svr.Run(); err != nil {
+		return err
+	}
 	return nil
 }
 
-func (ps *MsgStream) Stop() error {
+func (s *DataCoord) Stop() error {
+	if err := s.svr.Stop(); err != nil {
+		return err
+	}
 	return nil
 }

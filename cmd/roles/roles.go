@@ -102,8 +102,8 @@ func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *compone
 	return rc
 }
 
-func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool) *components.ProxyNode {
-	var pn *components.ProxyNode
+func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool) *components.Proxy {
+	var pn *components.Proxy
 	var wg sync.WaitGroup
 
 	wg.Add(1)
@@ -117,7 +117,7 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool) *components.
 
 		factory := newMsgFactory(localMsg)
 		var err error
-		pn, err = components.NewProxyNode(ctx, factory)
+		pn, err = components.NewProxy(ctx, factory)
 		if err != nil {
 			panic(err)
 		}
@@ -130,8 +130,8 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool) *components.
 	return pn
 }
 
-func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *components.QueryService {
-	var qs *components.QueryService
+func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *components.QueryCoord {
+	var qs *components.QueryCoord
 	var wg sync.WaitGroup
 
 	wg.Add(1)
@@ -186,8 +186,8 @@ func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool) *compone
 	return qn
 }
 
-func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *components.DataService {
-	var ds *components.DataService
+func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *components.DataCoord {
+	var ds *components.DataCoord
 	var wg sync.WaitGroup
 
 	wg.Add(1)
@@ -201,7 +201,7 @@ func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *compone
 
 		factory := newMsgFactory(localMsg)
 		var err error
-		ds, err = components.NewDataService(ctx, factory)
+		ds, err = components.NewDataCoord(ctx, factory)
 		if err != nil {
 			panic(err)
 		}
@@ -242,8 +242,8 @@ func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool) *componen
 	return dn
 }
 
-func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *components.IndexService {
-	var is *components.IndexService
+func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *components.IndexCoord {
+	var is *components.IndexCoord
 	var wg sync.WaitGroup
 
 	wg.Add(1)
@@ -303,7 +303,7 @@ func (mr *MilvusRoles) runMsgStreamCoord(ctx context.Context) *components.MsgStr
 	wg.Add(1)
 	go func() {
 		var err error
-		mss, err = components.NewMsgStreamService(ctx)
+		mss, err = components.NewMsgStreamCoord(ctx)
 		if err != nil {
 			panic(err)
 		}
@@ -343,7 +343,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		}
 	}
 
-	var pn *components.ProxyNode
+	var pn *components.Proxy
 	if mr.EnableProxy {
 		pn = mr.runProxy(ctx, localMsg)
 		if pn != nil {
@@ -351,7 +351,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		}
 	}
 
-	var qs *components.QueryService
+	var qs *components.QueryCoord
 	if mr.EnableQueryCoord {
 		qs = mr.runQueryCoord(ctx, localMsg)
 		if qs != nil {
@@ -367,7 +367,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		}
 	}
 
-	var ds *components.DataService
+	var ds *components.DataCoord
 	if mr.EnableDataCoord {
 		ds = mr.runDataCoord(ctx, localMsg)
 		if ds != nil {
@@ -383,7 +383,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 		}
 	}
 
-	var is *components.IndexService
+	var is *components.IndexCoord
 	if mr.EnableIndexCoord {
 		is = mr.runIndexCoord(ctx, localMsg)
 		if is != nil {

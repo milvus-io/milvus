@@ -14,36 +14,36 @@ package components
 import (
 	"context"
 
-	grpcdataserviceclient "github.com/milvus-io/milvus/internal/distributed/dataservice"
+	grpcqueryservice "github.com/milvus-io/milvus/internal/distributed/queryservice"
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
-type DataService struct {
+type QueryCoord struct {
 	ctx context.Context
-	svr *grpcdataserviceclient.Server
+	svr *grpcqueryservice.Server
 }
 
-func NewDataService(ctx context.Context, factory msgstream.Factory) (*DataService, error) {
-	s, err := grpcdataserviceclient.NewServer(ctx, factory)
+func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryCoord, error) {
+	svr, err := grpcqueryservice.NewServer(ctx, factory)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
 
-	return &DataService{
+	return &QueryCoord{
 		ctx: ctx,
-		svr: s,
+		svr: svr,
 	}, nil
 }
 
-func (s *DataService) Run() error {
-	if err := s.svr.Run(); err != nil {
-		return err
+func (qs *QueryCoord) Run() error {
+	if err := qs.svr.Run(); err != nil {
+		panic(err)
 	}
 	return nil
 }
 
-func (s *DataService) Stop() error {
-	if err := s.svr.Stop(); err != nil {
+func (qs *QueryCoord) Stop() error {
+	if err := qs.svr.Stop(); err != nil {
 		return err
 	}
 	return nil
