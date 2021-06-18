@@ -59,11 +59,7 @@ pipeline {
         always {
             container('main') {
                 script {
-                    cleanWs(cleanWhenNotBuilt: false,
-                            deleteDirs: true,
-                            disableDeferredWipeout: true,
-                            notFailBuild: true,
-                            patterns: [[pattern: '.gitignore', type: 'INCLUDE']])
+                    sh 'find . -name . -o -prune -exec rm -rf -- {} +' /* clean up our workspace */
                 }
             }
         }
