@@ -31,8 +31,8 @@ import (
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	dsc "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
 	isc "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
-	msc "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
 	qsc "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
+	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -57,7 +57,7 @@ type Server struct {
 	grpcServer *grpc.Server
 
 	dataService   *dsc.Client
-	masterService *msc.GrpcClient
+	masterService *rcc.GrpcClient
 	indexService  *isc.Client
 	queryService  *qsc.Client
 
@@ -135,31 +135,31 @@ func (s *Server) init() error {
 	//ms.Params.Init()
 	addr := Params.MasterAddress
 
-	log.Debug("QueryNode start to new MasterServiceClient", zap.Any("QueryServiceAddress", addr))
-	masterService, err := msc.NewClient(s.ctx, qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
+	log.Debug("QueryNode start to new RootCoordClient", zap.Any("QueryServiceAddress", addr))
+	rootCoord, err := rcc.NewClient(s.ctx, qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
 	if err != nil {
-		log.Debug("QueryNode new MasterServiceClient failed", zap.Error(err))
+		log.Debug("QueryNode new RootCoordClient failed", zap.Error(err))
 		panic(err)
 	}
 
-	if err = masterService.Init(); err != nil {
-		log.Debug("QueryNode MasterServiceClient Init failed", zap.Error(err))
+	if err = rootCoord.Init(); err != nil {
+		log.Debug("QueryNode RootCoordClient Init failed", zap.Error(err))
 		panic(err)
 	}
 
-	if err = masterService.Start(); err != nil {
-		log.Debug("QueryNode MasterServiceClient Start failed", zap.Error(err))
+	if err = rootCoord.Start(); err != nil {
+		log.Debug("QueryNode RootCoordClient Start failed", zap.Error(err))
 		panic(err)
 	}
-	log.Debug("QueryNode start to wait for MasterService ready")
-	err = funcutil.WaitForComponentHealthy(s.ctx, masterService, "MasterService", 1000000, time.Millisecond*200)
+	log.Debug("QueryNode start to wait for RootCoord ready")
+	err = funcutil.WaitForComponentHealthy(s.ctx, rootCoord, "RootCoord", 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("QueryNode wait for MasterService ready failed", zap.Error(err))
+		log.Debug("QueryNode wait for RootCoord ready failed", zap.Error(err))
 		panic(err)
 	}
-	log.Debug("QueryNode report MasterService is ready")
+	log.Debug("QueryNode report RootCoord is ready")
 
-	if err := s.SetMasterService(masterService); err != nil {
+	if err := s.SetMasterService(rootCoord); err != nil {
 		panic(err)
 	}
 
