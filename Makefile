@@ -83,15 +83,11 @@ binlog:
 	@echo "Building binlog ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/binlog $(PWD)/cmd/binlog/main.go 1>/dev/null
 
-standalone: build-cpp
-	@echo "Building Milvus standalone ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/standalone $(PWD)/cmd/standalone/main.go 1>/dev/null
-
 milvus: build-cpp
-	@echo "Building Milvus distributed ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/milvus $(PWD)/cmd/distributed/main.go 1>/dev/null
+	@echo "Building Milvus ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
 
-build-go: standalone milvus
+build-go: milvus
 
 build-cpp:
 	@(env bash $(PWD)/scripts/core_build.sh -f "$(CUSTOM_THIRDPARTY_PATH)")
@@ -109,7 +105,6 @@ build-cpp-with-unittest:
 # Runs the tests.
 unittest: test-cpp test-go
 
-#TODO: proxynode master query node writer's unittest
 test-go:build-cpp
 	@echo "Running go unittests..."
 	@echo "disable go unittest for now, enable it later"
@@ -130,7 +125,6 @@ docker: verifiers
 # Builds each component and installs it to $GOPATH/bin.
 install: all
 	@echo "Installing binary to './bin'"
-	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/standalone $(GOPATH)/bin/standalone
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/milvus $(GOPATH)/bin/milvus
 	@mkdir -p $(LIBRARY_PATH) && cp -f $(PWD)/internal/core/output/lib/* $(LIBRARY_PATH)
 	@echo "Installation successful."
@@ -141,5 +135,4 @@ clean:
 	@find . -name '*~' | xargs rm -fv
 	@rm -rf bin/
 	@rm -rf lib/
-	@rm $(GOPATH)/bin/standalone
 	@rm $(GOPATH)/bin/milvus

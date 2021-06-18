@@ -18,10 +18,10 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var Params = BaseTable{}
+var baseParams = BaseTable{}
 
 func TestMain(m *testing.M) {
-	Params.Init()
+	baseParams.Init()
 	code := m.Run()
 	os.Exit(code)
 }
@@ -29,42 +29,42 @@ func TestMain(m *testing.M) {
 //func TestMain
 
 func TestGlobalParamsTable_SaveAndLoad(t *testing.T) {
-	err1 := Params.Save("int", "10")
+	err1 := baseParams.Save("int", "10")
 	assert.Nil(t, err1)
 
-	err2 := Params.Save("string", "testSaveAndLoad")
+	err2 := baseParams.Save("string", "testSaveAndLoad")
 	assert.Nil(t, err2)
 
-	err3 := Params.Save("float", "1.234")
+	err3 := baseParams.Save("float", "1.234")
 	assert.Nil(t, err3)
 
-	r1, _ := Params.Load("int")
+	r1, _ := baseParams.Load("int")
 	assert.Equal(t, "10", r1)
 
-	r2, _ := Params.Load("string")
+	r2, _ := baseParams.Load("string")
 	assert.Equal(t, "testSaveAndLoad", r2)
 
-	r3, _ := Params.Load("float")
+	r3, _ := baseParams.Load("float")
 	assert.Equal(t, "1.234", r3)
 
-	err4 := Params.Remove("int")
+	err4 := baseParams.Remove("int")
 	assert.Nil(t, err4)
 
-	err5 := Params.Remove("string")
+	err5 := baseParams.Remove("string")
 	assert.Nil(t, err5)
 
-	err6 := Params.Remove("float")
+	err6 := baseParams.Remove("float")
 	assert.Nil(t, err6)
 }
 
 func TestGlobalParamsTable_LoadRange(t *testing.T) {
-	_ = Params.Save("xxxaab", "10")
-	_ = Params.Save("xxxfghz", "20")
-	_ = Params.Save("xxxbcde", "1.1")
-	_ = Params.Save("xxxabcd", "testSaveAndLoad")
-	_ = Params.Save("xxxzhi", "12")
+	_ = baseParams.Save("xxxaab", "10")
+	_ = baseParams.Save("xxxfghz", "20")
+	_ = baseParams.Save("xxxbcde", "1.1")
+	_ = baseParams.Save("xxxabcd", "testSaveAndLoad")
+	_ = baseParams.Save("xxxzhi", "12")
 
-	keys, values, err := Params.LoadRange("xxxa", "xxxg", 10)
+	keys, values, err := baseParams.LoadRange("xxxa", "xxxg", 10)
 	assert.Nil(t, err)
 	assert.Equal(t, 4, len(keys))
 	assert.Equal(t, "10", values[0])
@@ -72,42 +72,42 @@ func TestGlobalParamsTable_LoadRange(t *testing.T) {
 	assert.Equal(t, "1.1", values[2])
 	assert.Equal(t, "20", values[3])
 
-	_ = Params.Remove("abc")
-	_ = Params.Remove("fghz")
-	_ = Params.Remove("bcde")
-	_ = Params.Remove("abcd")
-	_ = Params.Remove("zhi")
+	_ = baseParams.Remove("abc")
+	_ = baseParams.Remove("fghz")
+	_ = baseParams.Remove("bcde")
+	_ = baseParams.Remove("abcd")
+	_ = baseParams.Remove("zhi")
 }
 
 func TestGlobalParamsTable_Remove(t *testing.T) {
-	err1 := Params.Save("RemoveInt", "10")
+	err1 := baseParams.Save("RemoveInt", "10")
 	assert.Nil(t, err1)
 
-	err2 := Params.Save("RemoveString", "testRemove")
+	err2 := baseParams.Save("RemoveString", "testRemove")
 	assert.Nil(t, err2)
 
-	err3 := Params.Save("RemoveFloat", "1.234")
+	err3 := baseParams.Save("RemoveFloat", "1.234")
 	assert.Nil(t, err3)
 
-	err4 := Params.Remove("RemoveInt")
+	err4 := baseParams.Remove("RemoveInt")
 	assert.Nil(t, err4)
 
-	err5 := Params.Remove("RemoveString")
+	err5 := baseParams.Remove("RemoveString")
 	assert.Nil(t, err5)
 
-	err6 := Params.Remove("RemoveFloat")
+	err6 := baseParams.Remove("RemoveFloat")
 	assert.Nil(t, err6)
 }
 
 func TestGlobalParamsTable_LoadYaml(t *testing.T) {
-	err := Params.LoadYaml("milvus.yaml")
+	err := baseParams.LoadYaml("milvus.yaml")
 	assert.Nil(t, err)
 
-	err = Params.LoadYaml("advanced/channel.yaml")
+	err = baseParams.LoadYaml("advanced/channel.yaml")
 	assert.Nil(t, err)
 
-	_, err = Params.Load("etcd.address")
+	_, err = baseParams.Load("etcd.address")
 	assert.Nil(t, err)
-	_, err = Params.Load("pulsar.port")
+	_, err = baseParams.Load("pulsar.port")
 	assert.Nil(t, err)
 }

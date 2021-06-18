@@ -44,11 +44,13 @@ pipeline {
                     SEMVER = "${BRANCH_NAME.contains('/') ? BRANCH_NAME.substring(BRANCH_NAME.lastIndexOf('/') + 1) : BRANCH_NAME}"
                     IMAGE_REPO = "dockerhub-mirror-sh.zilliz.cc/milvusdb"
                     DOCKER_BUILDKIT = 1
+                    CUSTOM_THIRDPARTY_PATH = "/tmp/third_party"
                     ARTIFACTS = "${env.WORKSPACE}/artifacts"
                     MILVUS_PYTEST_LOG_PATH = "/milvus/artifacts/pytest_logs"
                     DOCKER_CREDENTIALS_ID = "ba070c98-c8cc-4f7c-b657-897715f359fc"
                     DOKCER_REGISTRY_URL = "registry.zilliz.com"
                     TARGET_REPO = "${DOKCER_REGISTRY_URL}/milvus"
+                    MILVUS_HELM_BRANCH = "rename"
                 }
                 stages {
                     stage('Test') {
@@ -111,6 +113,11 @@ pipeline {
                                     sh 'docker rm -f \$(docker network inspect -f \'{{ range \$key, \$value := .Containers }}{{ printf "%s " \$key}}{{ end }}\' kind) || true'
                                     sh 'docker network rm kind 2>&1 > /dev/null || true'
                                 }
+                                cleanWs(cleanWhenNotBuilt: false,
+                                        deleteDirs: true,
+                                        disableDeferredWipeout: true,
+                                        notFailBuild: true,
+                                        patterns: [[pattern: '.gitignore', type: 'INCLUDE']])
                             }
                         }
                     }

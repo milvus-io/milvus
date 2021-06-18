@@ -14,35 +14,40 @@ package components
 import (
 	"context"
 
-	grpcproxynode "github.com/milvus-io/milvus/internal/distributed/proxynode"
+	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
-type ProxyNode struct {
-	svr *grpcproxynode.Server
+type QueryNode struct {
+	ctx context.Context
+	svr *grpcquerynode.Server
 }
 
-func NewProxyNode(ctx context.Context, factory msgstream.Factory) (*ProxyNode, error) {
-	var err error
-	n := &ProxyNode{}
-
-	svr, err := grpcproxynode.NewServer(ctx, factory)
+// NewQueryNode creates a new QueryNode
+func NewQueryNode(ctx context.Context, factory msgstream.Factory) (*QueryNode, error) {
+	svr, err := grpcquerynode.NewServer(ctx, factory)
 	if err != nil {
 		return nil, err
 	}
-	n.svr = svr
-	return n, nil
+
+	return &QueryNode{
+		ctx: ctx,
+		svr: svr,
+	}, nil
+
 }
 
-func (n *ProxyNode) Run() error {
-	if err := n.svr.Run(); err != nil {
-		return err
+// Run starts service
+func (q *QueryNode) Run() error {
+	if err := q.svr.Run(); err != nil {
+		panic(err)
 	}
 	return nil
 }
 
-func (n *ProxyNode) Stop() error {
-	if err := n.svr.Stop(); err != nil {
+// Stop terminates service
+func (q *QueryNode) Stop() error {
+	if err := q.svr.Stop(); err != nil {
 		return err
 	}
 	return nil

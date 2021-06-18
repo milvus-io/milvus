@@ -14,38 +14,37 @@ package components
 import (
 	"context"
 
-	grpcdatanode "github.com/milvus-io/milvus/internal/distributed/datanode"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
+	grpcindexserver "github.com/milvus-io/milvus/internal/distributed/indexservice"
 )
 
-type DataNode struct {
-	ctx context.Context
-	svr *grpcdatanode.Server
+type IndexCoord struct {
+	svr *grpcindexserver.Server
 }
 
-func NewDataNode(ctx context.Context, factory msgstream.Factory) (*DataNode, error) {
-	svr, err := grpcdatanode.NewServer(ctx, factory)
+// NewIndexService creates a new IndexCoord
+func NewIndexCoord(ctx context.Context) (*IndexCoord, error) {
+	var err error
+	s := &IndexCoord{}
+	svr, err := grpcindexserver.NewServer(ctx)
+
 	if err != nil {
 		return nil, err
 	}
-
-	return &DataNode{
-		ctx: ctx,
-		svr: svr,
-	}, nil
+	s.svr = svr
+	return s, nil
 }
 
-func (d *DataNode) Run() error {
-	if err := d.svr.Run(); err != nil {
-		panic(err)
+// Run starts service
+func (s *IndexCoord) Run() error {
+	if err := s.svr.Run(); err != nil {
+		return err
 	}
-	log.Debug("Datanode successfully started")
 	return nil
 }
 
-func (d *DataNode) Stop() error {
-	if err := d.svr.Stop(); err != nil {
+// Stop terminates service
+func (s *IndexCoord) Stop() error {
+	if err := s.svr.Stop(); err != nil {
 		return err
 	}
 	return nil

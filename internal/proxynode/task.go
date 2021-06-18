@@ -474,7 +474,10 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 	reqID := it.Base.MsgID
 	channelCountMap := make(map[int32]uint32)    //   channelID to count
 	channelMaxTSMap := make(map[int32]Timestamp) //  channelID to max Timestamp
-	channelNames := stream.GetProduceChannels()
+	channelNames, err := it.chMgr.getVChannels(it.GetCollectionID())
+	if err != nil {
+		return nil, err
+	}
 	log.Debug("_assignSemgentID, produceChannels:", zap.Any("Channels", channelNames))
 
 	for i, request := range tsMsgs {
@@ -972,6 +975,7 @@ func (dct *DropCollectionTask) Execute(ctx context.Context) error {
 	}
 
 	_ = dct.chMgr.removeDMLStream(collID)
+	_ = dct.chMgr.removeDQLStream(collID)
 
 	return nil
 }
@@ -984,12 +988,11 @@ func (dct *DropCollectionTask) PostExecute(ctx context.Context) error {
 type SearchTask struct {
 	Condition
 	*internalpb.SearchRequest
-	ctx            context.Context
-	queryMsgStream msgstream.MsgStream
-	resultBuf      chan []*internalpb.SearchResults
-	result         *milvuspb.SearchResults
-	query          *milvuspb.SearchRequest
-	chMgr          channelsMgr
+	ctx       context.Context
+	resultBuf chan []*internalpb.SearchResults
+	result    *milvuspb.SearchResults
+	query     *milvuspb.SearchRequest
+	chMgr     channelsMgr
 }
 
 func (st *SearchTask) TraceCtx() context.Context {
@@ -1183,7 +1186,29 @@ func (st *SearchTask) Execute(ctx context.Context) error {
 		Msgs:    make([]msgstream.TsMsg, 1),
 	}
 	msgPack.Msgs[0] = tsMsg
-	err := st.queryMsgStream.Produce(&msgPack)
+
+	collectionName := st.query.CollectionName
+	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+	if err != nil { // err is not nil if collection not exists
+		return err
+	}
+
+	stream, err := st.chMgr.getDQLStream(collID)
+	if err != nil {
+		err = st.chMgr.createDQLStream(collID)
+		if err != nil {
+			st.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			st.result.Status.Reason = err.Error()
+			return err
+		}
+		stream, err = st.chMgr.getDQLStream(collID)
+		if err != nil {
+			st.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			st.result.Status.Reason = err.Error()
+			return err
+		}
+	}
+	err = stream.Produce(&msgPack)
 	log.Debug("proxynode", zap.Int("length of searchMsg", len(msgPack.Msgs)))
 	log.Debug("proxy node sent one searchMsg",
 		zap.Any("collectionID", st.CollectionID),
@@ -1461,12 +1486,11 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 type RetrieveTask struct {
 	Condition
 	*internalpb.RetrieveRequest
-	ctx            context.Context
-	queryMsgStream msgstream.MsgStream
-	resultBuf      chan []*internalpb.RetrieveResults
-	result         *milvuspb.RetrieveResults
-	retrieve       *milvuspb.RetrieveRequest
-	chMgr          channelsMgr
+	ctx       context.Context
+	resultBuf chan []*internalpb.RetrieveResults
+	result    *milvuspb.RetrieveResults
+	retrieve  *milvuspb.RetrieveRequest
+	chMgr     channelsMgr
 }
 
 func (rt *RetrieveTask) TraceCtx() context.Context {
@@ -1584,7 +1608,7 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 		rt.OutputFields = rt.retrieve.OutputFields
 	}
 
-	rt.ResultChannelID = Params.RetrieveChannelNames[0]
+	rt.ResultChannelID = Params.RetrieveResultChannelNames[0]
 	rt.DbID = 0 // todo(yukun)
 
 	rt.CollectionID = collectionID
@@ -1646,7 +1670,29 @@ func (rt *RetrieveTask) Execute(ctx context.Context) error {
 		Msgs:    make([]msgstream.TsMsg, 1),
 	}
 	msgPack.Msgs[0] = tsMsg
-	err := rt.queryMsgStream.Produce(&msgPack)
+
+	collectionName := rt.retrieve.CollectionName
+	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+	if err != nil {
+		return err
+	}
+
+	stream, err := rt.chMgr.getDQLStream(collID)
+	if err != nil {
+		err = rt.chMgr.createDQLStream(collID)
+		if err != nil {
+			rt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			rt.result.Status.Reason = err.Error()
+			return err
+		}
+		stream, err = rt.chMgr.getDQLStream(collID)
+		if err != nil {
+			rt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			rt.result.Status.Reason = err.Error()
+			return err
+		}
+	}
+	err = stream.Produce(&msgPack)
 	log.Debug("proxynode", zap.Int("length of retrieveMsg", len(msgPack.Msgs)))
 	if err != nil {
 		log.Debug("Failed to send retrieve request.",
@@ -3415,6 +3461,7 @@ type ReleaseCollectionTask struct {
 	ctx          context.Context
 	queryService types.QueryService
 	result       *commonpb.Status
+	chMgr        channelsMgr
 }
 
 func (rct *ReleaseCollectionTask) TraceCtx() context.Context {
@@ -3482,7 +3529,11 @@ func (rct *ReleaseCollectionTask) Execute(ctx context.Context) (err error) {
 		DbID:         0,
 		CollectionID: collID,
 	}
+
 	rct.result, err = rct.queryService.ReleaseCollection(ctx, request)
+
+	_ = rct.chMgr.removeDQLStream(collID)
+
 	return err
 }
 
