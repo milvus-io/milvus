@@ -54,9 +54,9 @@ type Server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	dataService  types.DataService
-	indexService types.IndexService
-	queryService types.QueryService
+	dataCoord  types.DataService
+	indexCoord types.IndexService
+	queryCoord types.QueryService
 
 	newIndexCoordClient func(string, []string, time.Duration) types.IndexService
 	newDataCoordClient  func(string, []string, time.Duration) types.DataService
@@ -92,7 +92,7 @@ func (s *Server) setClient() {
 		if err := dsClient.Start(); err != nil {
 			panic(err)
 		}
-		if err := funcutil.WaitForComponentInitOrHealthy(ctx, dsClient, "DataService", 1000000, 200*time.Millisecond); err != nil {
+		if err := funcutil.WaitForComponentInitOrHealthy(ctx, dsClient, "DataCoord", 1000000, 200*time.Millisecond); err != nil {
 			panic(err)
 		}
 		return dsClient
@@ -158,7 +158,7 @@ func (s *Server) init() error {
 	}
 
 	s.rootCoord.UpdateStateCode(internalpb.StateCode_Initializing)
-	log.Debug("MasterService", zap.Any("State", internalpb.StateCode_Initializing))
+	log.Debug("RootCoord", zap.Any("State", internalpb.StateCode_Initializing))
 	s.rootCoord.SetNewProxyClient(
 		func(s *sessionutil.Session) (types.ProxyNode, error) {
 			cli := pnc.NewClient(s.Address, 3*time.Second)
@@ -173,28 +173,28 @@ func (s *Server) init() error {
 	)
 
 	if s.newDataCoordClient != nil {
-		log.Debug("MasterService start to create DataService client")
-		dataService := s.newDataCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, 3*time.Second)
-		if err := s.rootCoord.SetDataCoord(ctx, dataService); err != nil {
+		log.Debug("RootCoord start to create DataCoord client")
+		dataCoord := s.newDataCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, 3*time.Second)
+		if err := s.rootCoord.SetDataCoord(ctx, dataCoord); err != nil {
 			panic(err)
 		}
-		s.dataService = dataService
+		s.dataCoord = dataCoord
 	}
 	if s.newIndexCoordClient != nil {
-		log.Debug("MasterService start to create IndexService client")
-		indexService := s.newIndexCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, 3*time.Second)
-		if err := s.rootCoord.SetIndexCoord(indexService); err != nil {
+		log.Debug("RootCoord start to create IndexCoord client")
+		indexCoord := s.newIndexCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, 3*time.Second)
+		if err := s.rootCoord.SetIndexCoord(indexCoord); err != nil {
 			panic(err)
 		}
-		s.indexService = indexService
+		s.indexCoord = indexCoord
 	}
 	if s.newQueryCoordClient != nil {
-		log.Debug("MasterService start to create QueryService client")
-		queryService := s.newQueryCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, 3*time.Second)
-		if err := s.rootCoord.SetQueryCoord(queryService); err != nil {
+		log.Debug("RootCoord start to create QueryCoord client")
+		queryCoord := s.newQueryCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, 3*time.Second)
+		if err := s.rootCoord.SetQueryCoord(queryCoord); err != nil {
 			panic(err)
 		}
-		s.queryService = queryService
+		s.queryCoord = queryCoord
 	}
 
 	return s.rootCoord.Init()
@@ -254,19 +254,19 @@ func (s *Server) Stop() error {
 			log.Error("close opentracing", zap.Error(err))
 		}
 	}
-	if s.indexService != nil {
-		if err := s.indexService.Stop(); err != nil {
-			log.Debug("close indexService client", zap.Error(err))
+	if s.indexCoord != nil {
+		if err := s.indexCoord.Stop(); err != nil {
+			log.Debug("close indexCoord client", zap.Error(err))
 		}
 	}
-	if s.dataService != nil {
-		if err := s.dataService.Stop(); err != nil {
-			log.Debug("close dataService client", zap.Error(err))
+	if s.dataCoord != nil {
+		if err := s.dataCoord.Stop(); err != nil {
+			log.Debug("close dataCoord client", zap.Error(err))
 		}
 	}
-	if s.queryService != nil {
-		if err := s.queryService.Stop(); err != nil {
-			log.Debug("close queryService client", zap.Error(err))
+	if s.queryCoord != nil {
+		if err := s.queryCoord.Stop(); err != nil {
+			log.Debug("close queryCoord client", zap.Error(err))
 		}
 	}
 	if s.rootCoord != nil {
@@ -367,6 +367,7 @@ func (s *Server) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegme
 func (s *Server) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
 	return s.rootCoord.ShowSegments(ctx, in)
 }
+
 func (s *Server) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
 	return s.rootCoord.ReleaseDQLMessageStream(ctx, in)
 }
