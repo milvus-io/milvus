@@ -110,7 +110,7 @@ class ResponseChecker:
         name = check_items.get("name", None)
         schema = check_items.get("schema", None)
         num_entities = check_items.get("num_entities", 0)
-        primary = check_items.get("primary", None)
+        primary = check_items.get("primary", ct.default_int64_field_name)
         if name:
             assert collection.name == name
         if schema:
@@ -118,7 +118,7 @@ class ResponseChecker:
         if num_entities == 0:
             assert collection.is_empty
         assert collection.num_entities == num_entities
-        assert collection.primary_field == primary
+        assert collection.primary_field.name == primary
         return True
 
     @staticmethod

@@ -53,7 +53,7 @@ def gen_binary_vec_field(name=ct.default_binary_vec_field_name, is_primary=False
     return binary_vec_field
 
 
-def gen_default_collection_schema(description=ct.default_desc, primary_field=None):
+def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name):
     fields = [gen_int64_field(), gen_float_field(), gen_float_vec_field()]
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field)
@@ -66,7 +66,7 @@ def gen_collection_schema(fields, primary_field=None, description=ct.default_des
     return schema
 
 
-def gen_default_binary_collection_schema(description=ct.default_desc, primary_field=None):
+def gen_default_binary_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name):
     fields = [gen_int64_field(), gen_float_field(), gen_binary_vec_field()]
     binary_schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                            primary_field=primary_field)
@@ -295,7 +295,7 @@ def insert_data(collection_w, nb=3000, is_binary=False):
         else:
             default_data = gen_default_dataframe_data(nb // num)
         collection_w.insert(default_data, par[i].name)
-        vectors.extend(default_data)
+        vectors.append(default_data)
     log.info("insert_data: inserted data into collection %s (num_entities: %s)"
              % (collection_w.name, nb))
     collection_w.load()
