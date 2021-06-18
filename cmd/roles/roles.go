@@ -14,7 +14,6 @@ package roles
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"os"
 	"os/signal"
 	"path"
@@ -22,20 +21,20 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/milvus-io/milvus/cmd/components"
 	"github.com/milvus-io/milvus/internal/datanode"
 	"github.com/milvus-io/milvus/internal/dataservice"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/indexservice"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/logutil"
 	"github.com/milvus-io/milvus/internal/masterservice"
 	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proxynode"
 	"github.com/milvus-io/milvus/internal/querynode"
 	"github.com/milvus-io/milvus/internal/queryservice"
-
-	"github.com/milvus-io/milvus/cmd/components"
-	"github.com/milvus-io/milvus/internal/logutil"
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
