@@ -18,6 +18,7 @@ def pytest_addoption(parser):
     parser.addoption('--index_param', action='store', default="index_param", help="index_param of index")
     parser.addoption('--data', action='store', default="data", help="data of request")
     parser.addoption('--clean_log', action='store_true', default=False, help="clean log before testing")
+    parser.addoption('--schema', action='store', default="schema", help="schema of test interface")
 
 
 @pytest.fixture
@@ -98,3 +99,8 @@ def data(request):
 @pytest.fixture
 def clean_log(request):
     return request.config.getoption("--clean_log")
+
+
+@pytest.fixture
+def schema(request):
+    return request.config.getoption("--schema")

@@ -146,6 +146,14 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		msg.SetTraceCtx(ctx)
 	}
 
+	// replace pchannel with vchannel
+	for _, pos := range iMsg.startPositions {
+		pos.ChannelName = ibNode.channelName
+	}
+	for _, pos := range iMsg.endPositions {
+		pos.ChannelName = ibNode.channelName
+	}
+
 	// Updating segment statistics
 	uniqueSeg := make(map[UniqueID]int64)
 	for _, msg := range iMsg.insertMessages {

@@ -153,7 +153,7 @@ class TestcaseBase(Base):
         expected: return collection and raw data
         """
         log.info("Test case of search interface: initialize before test case")
-        self._connect()
+        conn = self._connect()
         collection_name = cf.gen_unique_str(prefix)
         vectors = []
         binary_raw_vectors = []
@@ -171,5 +171,10 @@ class TestcaseBase(Base):
         # 3 insert data if specified
         if insert_data:
             collection_w, vectors, binary_raw_vectors = cf.insert_data(collection_w, nb, is_binary)
+            if nb <= 32000:
+                conn.flush([collection_w.name])
+                assert collection_w.is_empty == False
+                assert collection_w.num_entities == nb
+            collection_w.load()
 
         return collection_w, vectors, binary_raw_vectors

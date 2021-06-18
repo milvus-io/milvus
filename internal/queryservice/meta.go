@@ -133,7 +133,7 @@ func (m *meta) addPartition(collectionID UniqueID, partitionID UniqueID) error {
 
 func (m *meta) deleteSegmentInfoByID(segmentID UniqueID) {
 	m.Lock()
-	m.Unlock()
+	defer m.Unlock()
 	delete(m.segmentInfos, segmentID)
 }
 

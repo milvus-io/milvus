@@ -1,7 +1,7 @@
 --extra-index-url https://test.pypi.org/simple/
 grpcio==1.26.0
 grpcio-tools==1.26.0
-numpy==1.18.1
+numpy==1.19.5
 pytest-cov==2.8.1
 sklearn==0.0
 pytest==6.2.2
@@ -12,7 +12,7 @@ pytest-print==0.2.1
 pytest-level==0.1.1
 pytest-xdist==2.2.1
 pytest-parallel
-pymilvus==2.0a1.dev35
+pymilvus-orm==2.0a1.dev33
 pytest-rerunfailures==9.1.1
 git+https://github.com/Projectplace/pytest-tags
 ndg-httpsclient
@@ -20,4 +20,6 @@ pyopenssl
 pyasn1
 pandas
 pytest-html==3.1.1
-pymilvus-orm==2.0a1.dev17
+delayed-assert
+kubernetes==17.17.0
+PyYAML==5.4.1

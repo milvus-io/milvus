@@ -1151,6 +1151,7 @@ func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchReque
 		resultBuf: make(chan []*internalpb.SearchResults),
 		query:     request,
 		chMgr:     node.chMgr,
+		qs:        node.queryService,
 	}
 
 	err := node.sched.DqQueue.Enqueue(qt)
@@ -1222,6 +1223,7 @@ func (node *ProxyNode) Retrieve(ctx context.Context, request *milvuspb.RetrieveR
 		},
 		resultBuf: make(chan []*internalpb.RetrieveResults),
 		retrieve:  request,
+		qs:        node.queryService,
 	}
 
 	err := node.sched.DqQueue.Enqueue(rt)
@@ -1373,6 +1375,7 @@ func (node *ProxyNode) Query(ctx context.Context, request *milvuspb.QueryRequest
 			resultBuf: make(chan []*internalpb.RetrieveResults),
 			retrieve:  retrieveRequest,
 			chMgr:     node.chMgr,
+			qs:        node.queryService,
 		}
 
 		err := node.sched.DqQueue.Enqueue(rt)
@@ -1510,11 +1513,14 @@ func (node *ProxyNode) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.Ge
 		SegmentIDs: segments,
 	})
 	if err != nil {
+		log.Error("Failed to get segment info from QueryService",
+			zap.Int64s("segmentIDs", segments), zap.Error(err))
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}
 	log.Debug("GetQuerySegmentInfo ", zap.Any("infos", infoResp.Infos), zap.Any("status", infoResp.Status))
 	if infoResp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		log.Error("Failed to get segment info from QueryService", zap.String("errMsg", infoResp.Status.Reason))
 		resp.Status.Reason = infoResp.Status.Reason
 		return resp, nil
 	}

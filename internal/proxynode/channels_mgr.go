@@ -336,7 +336,12 @@ func (mgr *singleTypeChannelsMgr) createMsgStream(collectionID UniqueID) error {
 	mgr.updateChannels(channels)
 
 	id := getUniqueIntGeneratorIns().get()
-	vchans := getAllKeys(channels)
+
+	vchans, pchans := make([]string, 0, len(channels)), make([]string, 0, len(channels))
+	for k, v := range channels {
+		vchans = append(vchans, k)
+		pchans = append(pchans, v)
+	}
 	mgr.updateVChans(id, vchans)
 
 	var stream msgstream.MsgStream
@@ -348,7 +353,6 @@ func (mgr *singleTypeChannelsMgr) createMsgStream(collectionID UniqueID) error {
 	if err != nil {
 		return err
 	}
-	pchans := getAllValues(channels)
 	stream.AsProducer(pchans)
 	if mgr.repackFunc != nil {
 		stream.SetRepackFunc(mgr.repackFunc)
