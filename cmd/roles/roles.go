@@ -328,7 +328,6 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	// only standalone enable localMsg
 	if localMsg {
-		os.Setenv("QUERY_NODE_ID", "1")
 		os.Setenv("DEPLOY_MODE", "STANDALONE")
 		cfg := mr.setLogConfigFilename("standalone.log")
 		logutil.SetupLogger(cfg)
