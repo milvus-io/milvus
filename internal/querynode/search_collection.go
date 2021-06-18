@@ -475,6 +475,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 		if err != nil {
 			return err
 		}
+
 		searchResults = append(searchResults, strSearchResults...)
 		matchedSegments = append(matchedSegments, strSegmentResults...)
 	}
