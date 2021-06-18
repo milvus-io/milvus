@@ -8,7 +8,7 @@ class Error:
         self.message = getattr(error, 'message', str(error))
 
 
-log_row_length = 150
+log_row_length = 300
 
 
 def api_request_catch():
