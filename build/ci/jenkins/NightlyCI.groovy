@@ -15,8 +15,6 @@ pipeline {
         timestamps()
         timeout(time: 1, unit: 'HOURS')
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
-        // This is required if you want to clean before build
-        skipDefaultCheckout(true)
         // parallelsAlwaysFailFast()
     }
     stages {
