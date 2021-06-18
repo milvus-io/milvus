@@ -170,31 +170,18 @@ func (c *GrpcClient) Register() error {
 }
 
 func (c *GrpcClient) recall(caller func() (interface{}, error)) (interface{}, error) {
-	ch := make(chan struct{}, 1)
-	var ret interface{}
-	var err error
-	go func() {
-		ret, err = caller()
+	ret, err := caller()
+	if err == nil {
+		return ret, nil
+	}
+	for i := 0; i < c.recallTry; i++ {
+		err = c.connect()
 		if err == nil {
-			ch <- struct{}{}
-			return
-		}
-		for i := 0; i < c.recallTry; i++ {
-			err = c.connect()
+			ret, err = caller()
 			if err == nil {
-				ret, err = caller()
-				if err == nil {
-					ch <- struct{}{}
-					return
-				}
+				return ret, nil
 			}
 		}
-		ch <- struct{}{}
-	}()
-	select {
-	case <-c.ctx.Done():
-		return nil, errors.New("context canceled")
-	case <-ch:
 	}
 	return ret, err
 }
