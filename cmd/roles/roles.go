@@ -28,7 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/indexservice"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/logutil"
-	"github.com/milvus-io/milvus/internal/masterservice"
+	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proxynode"
@@ -80,10 +80,10 @@ func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *compone
 
 	wg.Add(1)
 	go func() {
-		masterservice.Params.Init()
+		rootcoord.Params.Init()
 
 		if !localMsg {
-			logutil.SetupLogger(&masterservice.Params.Log)
+			logutil.SetupLogger(&rootcoord.Params.Log)
 			defer log.Sync()
 		}
 

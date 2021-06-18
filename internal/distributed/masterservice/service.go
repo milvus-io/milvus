@@ -28,7 +28,7 @@ import (
 	pnc "github.com/milvus-io/milvus/internal/distributed/proxynode/client"
 	qsc "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
 	"github.com/milvus-io/milvus/internal/log"
-	cms "github.com/milvus-io/milvus/internal/masterservice"
+	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -74,7 +74,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 	}
 	s.setClient()
 	var err error
-	s.rootCoord, err = cms.NewCore(s.ctx, factory)
+	s.rootCoord, err = rootcoord.NewCore(s.ctx, factory)
 	if err != nil {
 		return nil, err
 	}
@@ -135,9 +135,9 @@ func (s *Server) Run() error {
 func (s *Server) init() error {
 	Params.Init()
 
-	cms.Params.Init()
-	cms.Params.Address = Params.Address
-	cms.Params.Port = Params.Port
+	rootcoord.Params.Init()
+	rootcoord.Params.Address = Params.Address
+	rootcoord.Params.Port = Params.Port
 	log.Debug("grpc init done ...")
 
 	ctx := context.Background()
@@ -174,7 +174,7 @@ func (s *Server) init() error {
 
 	if s.newDataCoordClient != nil {
 		log.Debug("MasterService start to create DataService client")
-		dataService := s.newDataCoordClient(cms.Params.MetaRootPath, cms.Params.EtcdEndpoints, 3*time.Second)
+		dataService := s.newDataCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, 3*time.Second)
 		if err := s.rootCoord.SetDataCoord(ctx, dataService); err != nil {
 			panic(err)
 		}
@@ -182,7 +182,7 @@ func (s *Server) init() error {
 	}
 	if s.newIndexCoordClient != nil {
 		log.Debug("MasterService start to create IndexService client")
-		indexService := s.newIndexCoordClient(cms.Params.MetaRootPath, cms.Params.EtcdEndpoints, 3*time.Second)
+		indexService := s.newIndexCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, 3*time.Second)
 		if err := s.rootCoord.SetIndexCoord(indexService); err != nil {
 			panic(err)
 		}
@@ -190,7 +190,7 @@ func (s *Server) init() error {
 	}
 	if s.newQueryCoordClient != nil {
 		log.Debug("MasterService start to create QueryService client")
-		queryService := s.newQueryCoordClient(cms.Params.MetaRootPath, cms.Params.EtcdEndpoints, 3*time.Second)
+		queryService := s.newQueryCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, 3*time.Second)
 		if err := s.rootCoord.SetQueryCoord(queryService); err != nil {
 			panic(err)
 		}
