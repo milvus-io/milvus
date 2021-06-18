@@ -16,6 +16,9 @@ import (
 	"errors"
 	"fmt"
 
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
 )
@@ -73,11 +76,19 @@ func (h *historical) search(searchReqs []*searchRequest,
 		if err != nil {
 			return searchResults, segmentResults, err
 		}
+		log.Debug("no partition specified, search all partitions",
+			zap.Any("collectionID", collID),
+			zap.Any("all partitions", hisPartIDs),
+		)
 		searchPartIDs = hisPartIDs
 	} else {
 		for _, id := range partIDs {
 			_, err := h.replica.getPartitionByID(id)
 			if err == nil {
+				log.Debug("append search partition id",
+					zap.Any("collectionID", collID),
+					zap.Any("partitionID", id),
+				)
 				searchPartIDs = append(searchPartIDs, id)
 			}
 		}
@@ -90,6 +101,12 @@ func (h *historical) search(searchReqs []*searchRequest,
 			"target partitionIDs = " +
 			fmt.Sprintln(partIDs))
 	}
+
+	log.Debug("doing search in historical",
+		zap.Any("collectionID", collID),
+		zap.Any("reqPartitionIDs", partIDs),
+		zap.Any("searchPartitionIDs", searchPartIDs),
+	)
 
 	for _, partID := range searchPartIDs {
 		segIDs, err := h.replica.getSegmentIDs(partID)

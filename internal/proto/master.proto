@@ -6,6 +6,7 @@ option go_package="github.com/milvus-io/milvus/internal/proto/masterpb";
 import "common.proto";
 import "milvus.proto";
 import "internal.proto";
+import "proxy_service.proto";
 
 service MasterService {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
@@ -94,6 +95,7 @@ service MasterService {
     rpc AllocTimestamp(AllocTimestampRequest) returns (AllocTimestampResponse) {}
     rpc AllocID(AllocIDRequest) returns (AllocIDResponse) {}
     rpc UpdateChannelTimeTick(internal.ChannelTimeTickMsg) returns (common.Status) {}
+    rpc ReleaseDQLMessageStream(proxy.ReleaseDQLMessageStreamRequest) returns (common.Status) {}
 }
 
 message AllocTimestampRequest {

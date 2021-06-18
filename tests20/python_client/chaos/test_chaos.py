@@ -8,6 +8,7 @@ from utils.util_log import test_log as log
 from base.collection_wrapper import ApiCollectionWrapper
 from common import common_func as cf
 from chaos_commons import *
+from common.common_type import CaseLabel
 import constants
 
 
@@ -43,6 +44,7 @@ class TestChaosBase:
 
 class TestChaos(TestChaosBase):
 
+    @pytest.mark.tags(CaseLabel.L3)
     @pytest.fixture(scope="function", autouse=True)
     def connection(self):
         connections.add_connection(default={"host": "192.168.1.239", "port": 19530})

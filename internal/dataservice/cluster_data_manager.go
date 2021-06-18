@@ -117,8 +117,8 @@ func (c *clusterNodeManager) updateCluster(dataNodes []*datapb.DataNodeInfo) *cl
 			offlines = append(offlines, nAddr)
 		}
 	}
-	metrics.DataServiceDataNodeList.WithLabelValues("online").Set(onCnt)
-	metrics.DataServiceDataNodeList.WithLabelValues("offline").Set(offCnt)
+	metrics.DataCoordDataNodeList.WithLabelValues("online").Set(onCnt)
+	metrics.DataCoordDataNodeList.WithLabelValues("offline").Set(offCnt)
 	return &clusterDeltaChange{
 		newNodes: newNodes,
 		offlines: offlines,
@@ -177,8 +177,8 @@ func (c *clusterNodeManager) updateMetrics() {
 			offCnt++
 		}
 	}
-	metrics.DataServiceDataNodeList.WithLabelValues("online").Set(onCnt)
-	metrics.DataServiceDataNodeList.WithLabelValues("offline").Set(offCnt)
+	metrics.DataCoordDataNodeList.WithLabelValues("online").Set(onCnt)
+	metrics.DataCoordDataNodeList.WithLabelValues("offline").Set(offCnt)
 }
 
 func (c *clusterNodeManager) txnSaveNodes(nodes []*datapb.DataNodeInfo, buffer []*datapb.ChannelStatus) error {

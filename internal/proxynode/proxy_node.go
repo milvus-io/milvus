@@ -70,8 +70,7 @@ type ProxyNode struct {
 
 	session *sessionutil.Session
 
-	queryMsgStream msgstream.MsgStream
-	msFactory      msgstream.Factory
+	msFactory msgstream.Factory
 
 	// Add callback functions at different stages
 	startCallbacks []func()
@@ -147,13 +146,9 @@ func (node *ProxyNode) Init() error {
 		}
 		log.Debug("ProxyNode CreateQueryChannel success")
 
-		Params.SearchChannelNames = []string{resp.RequestChannel}
 		Params.SearchResultChannelNames = []string{resp.ResultChannel}
-		Params.RetrieveChannelNames = []string{resp.RequestChannel}
 		Params.RetrieveResultChannelNames = []string{resp.ResultChannel}
-		log.Debug("ProxyNode CreateQueryChannel success", zap.Any("SearchChannelNames", Params.SearchChannelNames))
 		log.Debug("ProxyNode CreateQueryChannel success", zap.Any("SearchResultChannelNames", Params.SearchResultChannelNames))
-		log.Debug("ProxyNode CreateQueryChannel success", zap.Any("RetrieveChannelNames", Params.RetrieveChannelNames))
 		log.Debug("ProxyNode CreateQueryChannel success", zap.Any("RetrieveResultChannelNames", Params.RetrieveResultChannelNames))
 	}
 
@@ -170,12 +165,6 @@ func (node *ProxyNode) Init() error {
 	if err != nil {
 		return err
 	}
-
-	node.queryMsgStream, _ = node.msFactory.NewQueryMsgStream(node.ctx)
-	node.queryMsgStream.AsProducer(Params.SearchChannelNames)
-	// FIXME(wxyu): use log.Debug instead
-	log.Debug("proxynode", zap.Strings("proxynode AsProducer:", Params.SearchChannelNames))
-	log.Debug("create query message stream ...")
 
 	idAllocator, err := allocator.NewIDAllocator(node.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
 
@@ -245,9 +234,26 @@ func (node *ProxyNode) Init() error {
 
 		return ret, nil
 	}
-	mockQueryService := newMockGetChannelsService()
+	getDqlChannelsFunc := func(collectionID UniqueID) (map[vChan]pChan, error) {
+		req := &querypb.CreateQueryChannelRequest{
+			CollectionID: collectionID,
+			ProxyID:      node.session.ServerID,
+		}
+		resp, err := node.queryService.CreateQueryChannel(node.ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+			return nil, errors.New(resp.Status.Reason)
+		}
 
-	chMgr := newChannelsMgr(getDmlChannelsFunc, mockQueryService.GetChannels, node.msFactory)
+		m := make(map[vChan]pChan)
+		m[resp.RequestChannel] = resp.RequestChannel
+
+		return m, nil
+	}
+
+	chMgr := newChannelsMgr(getDmlChannelsFunc, defaultInsertRepackFunc, getDqlChannelsFunc, nil, node.msFactory)
 	node.chMgr = chMgr
 
 	node.sched, err = NewTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator, node.msFactory)
@@ -324,12 +330,6 @@ func (node *ProxyNode) Start() error {
 	}
 	log.Debug("init global meta cache ...")
 
-	initGlobalInsertChannelsMap(node)
-	log.Debug("init global insert channels map ...")
-
-	node.queryMsgStream.Start()
-	log.Debug("start query message stream ...")
-
 	node.sched.Start()
 	log.Debug("start scheduler ...")
 
@@ -364,11 +364,9 @@ func (node *ProxyNode) Start() error {
 func (node *ProxyNode) Stop() error {
 	node.cancel()
 
-	globalInsertChannelsMap.CloseAllMsgStream()
 	node.idAllocator.Close()
 	node.segAssigner.Close()
 	node.sched.Close()
-	node.queryMsgStream.Close()
 	node.tick.Close()
 	err := node.chTicker.close()
 	if err != nil {

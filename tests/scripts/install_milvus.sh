@@ -46,24 +46,12 @@ fi
 
 kubectl create namespace "${MILVUS_HELM_NAMESPACE}" || true
 
-if [[ "${MILVUS_STANDALONE_ENABLED}" == "false" ]]; then
-  helm install --wait --timeout "${MILVUS_INSTALL_TIMEOUT}" \
-                                 --set image.all.repository="${MILVUS_IMAGE_REPO}" \
-                                 --set image.all.tag="${MILVUS_IMAGE_TAG}" \
-                                 --set image.all.pullPolicy="${MILVUS_PULL_POLICY:-Always}" \
-                                 --set standalone.enabled="${MILVUS_STANDALONE_ENABLED}" \
-                                 --set proxy.service.type="${MILVUS_SERVICE_TYPE}" \
-                                 --namespace "${MILVUS_HELM_NAMESPACE}" \
-                                 "${MILVUS_HELM_RELEASE_NAME}" \
-                                 ${@:-} "${MILVUS_HELM_CHART_PATH}"
-else
-  helm install --wait --timeout "${MILVUS_INSTALL_TIMEOUT}" \
-                                 --set image.all.repository="${MILVUS_IMAGE_REPO}" \
-                                 --set image.all.tag="${MILVUS_IMAGE_TAG}" \
-                                 --set image.all.pullPolicy="${MILVUS_PULL_POLICY:-Always}" \
-                                 --set standalone.enabled="${MILVUS_STANDALONE_ENABLED}" \
-                                 --set standalone.service.type="${MILVUS_SERVICE_TYPE}" \
-                                 --namespace "${MILVUS_HELM_NAMESPACE}" \
-                                 "${MILVUS_HELM_RELEASE_NAME}" \
-                                 ${@:-} "${MILVUS_HELM_CHART_PATH}"
-fi
+helm install --wait --timeout "${MILVUS_INSTALL_TIMEOUT}" \
+                               --set image.all.repository="${MILVUS_IMAGE_REPO}" \
+                               --set image.all.tag="${MILVUS_IMAGE_TAG}" \
+                               --set image.all.pullPolicy="${MILVUS_PULL_POLICY:-Always}" \
+                               --set standalone.enabled="${MILVUS_STANDALONE_ENABLED}" \
+                               --set service.type="${MILVUS_SERVICE_TYPE}" \
+                               --namespace "${MILVUS_HELM_NAMESPACE}" \
+                               "${MILVUS_HELM_RELEASE_NAME}" \
+                               ${@:-} "${MILVUS_HELM_CHART_PATH}"
