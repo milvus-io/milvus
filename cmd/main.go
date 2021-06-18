@@ -27,7 +27,7 @@ const (
 	roleQueryCoord = "querycoord"
 	roleIndexCoord = "indexcoord"
 	roleDataCoord  = "datacoord"
-	roleProxyNode  = "proxynode"
+	roleProxy      = "proxy"
 	roleQueryNode  = "querynode"
 	roleIndexNode  = "indexnode"
 	roleDataNode   = "datanode"
@@ -151,8 +151,8 @@ func main() {
 	switch serverType {
 	case roleRootCoord:
 		role.EnableRootCoord = true
-	case roleProxyNode:
-		role.EnableProxyNode = true
+	case roleProxy:
+		role.EnableProxy = true
 	case roleQueryCoord:
 		role.EnableQueryCoord = true
 	case roleQueryNode:
@@ -172,7 +172,7 @@ func main() {
 		role.EnableIndexCoord = enableIndexCoord
 	case roleStandalone:
 		role.EnableRootCoord = true
-		role.EnableProxyNode = true
+		role.EnableProxy = true
 		role.EnableQueryCoord = true
 		role.EnableQueryNode = true
 		role.EnableDataCoord = true

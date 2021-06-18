@@ -47,7 +47,7 @@ func newMsgFactory(localMsg bool) msgstream.Factory {
 
 type MilvusRoles struct {
 	EnableRootCoord      bool `env:"ENABLE_ROOT_COORD"`
-	EnableProxyNode      bool `env:"ENABLE_PROXY_NODE"`
+	EnableProxy          bool `env:"ENABLE_PROXY"`
 	EnableQueryCoord     bool `env:"ENABLE_QUERY_COORD"`
 	EnableQueryNode      bool `env:"ENABLE_QUERY_NODE"`
 	EnableDataCoord      bool `env:"ENABLE_DATA_COORD"`
@@ -102,7 +102,7 @@ func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *compone
 	return rc
 }
 
-func (mr *MilvusRoles) runProxyNode(ctx context.Context, localMsg bool) *components.ProxyNode {
+func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool) *components.ProxyNode {
 	var pn *components.ProxyNode
 	var wg sync.WaitGroup
 
@@ -344,8 +344,8 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 	}
 
 	var pn *components.ProxyNode
-	if mr.EnableProxyNode {
-		pn = mr.runProxyNode(ctx, localMsg)
+	if mr.EnableProxy {
+		pn = mr.runProxy(ctx, localMsg)
 		if pn != nil {
 			defer pn.Stop()
 		}
