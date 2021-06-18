@@ -40,6 +40,7 @@ func NewRootCoord(ctx context.Context, factory msgstream.Factory) (*RootCoord, e
 	}, nil
 }
 
+// Run starts service
 func (rc *RootCoord) Run() error {
 	if err := rc.svr.Run(); err != nil {
 		return err
@@ -47,6 +48,7 @@ func (rc *RootCoord) Run() error {
 	return nil
 }
 
+// Stop terminates service
 func (rc *RootCoord) Stop() error {
 	if err := rc.svr.Stop(); err != nil {
 		return err

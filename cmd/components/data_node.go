@@ -24,6 +24,7 @@ type DataNode struct {
 	svr *grpcdatanode.Server
 }
 
+// NewDataNode creates a new DataNode
 func NewDataNode(ctx context.Context, factory msgstream.Factory) (*DataNode, error) {
 	svr, err := grpcdatanode.NewServer(ctx, factory)
 	if err != nil {
@@ -36,6 +37,7 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) (*DataNode, err
 	}, nil
 }
 
+// Run starts service
 func (d *DataNode) Run() error {
 	if err := d.svr.Run(); err != nil {
 		panic(err)
@@ -44,6 +46,7 @@ func (d *DataNode) Run() error {
 	return nil
 }
 
+// Stop terminates service
 func (d *DataNode) Stop() error {
 	if err := d.svr.Stop(); err != nil {
 		return err

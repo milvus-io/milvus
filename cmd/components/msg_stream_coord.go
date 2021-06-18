@@ -15,17 +15,20 @@ import (
 	"context"
 )
 
+type MsgStream struct {
+}
+
+// NewMsgStreamCoord nil
 func NewMsgStreamCoord(ctx context.Context) (*MsgStream, error) {
 	return nil, nil
 }
 
-type MsgStream struct {
-}
-
+// Run nil
 func (ps *MsgStream) Run() error {
 	return nil
 }
 
+// Stop nil
 func (ps *MsgStream) Stop() error {
 	return nil
 }

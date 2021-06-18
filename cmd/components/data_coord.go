@@ -23,6 +23,7 @@ type DataCoord struct {
 	svr *grpcdataserviceclient.Server
 }
 
+// NewDataCoord creates a new DataCoord
 func NewDataCoord(ctx context.Context, factory msgstream.Factory) (*DataCoord, error) {
 	s, err := grpcdataserviceclient.NewServer(ctx, factory)
 	if err != nil {
@@ -35,6 +36,7 @@ func NewDataCoord(ctx context.Context, factory msgstream.Factory) (*DataCoord, e
 	}, nil
 }
 
+// Run starts service
 func (s *DataCoord) Run() error {
 	if err := s.svr.Run(); err != nil {
 		return err
@@ -42,6 +44,7 @@ func (s *DataCoord) Run() error {
 	return nil
 }
 
+// Stop terminates service
 func (s *DataCoord) Stop() error {
 	if err := s.svr.Stop(); err != nil {
 		return err

@@ -145,7 +145,7 @@ func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *compon
 
 		factory := newMsgFactory(localMsg)
 		var err error
-		qs, err = components.NewQueryService(ctx, factory)
+		qs, err = components.NewQueryCoord(ctx, factory)
 		if err != nil {
 			panic(err)
 		}
@@ -256,7 +256,7 @@ func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *compon
 		}
 
 		var err error
-		is, err = components.NewIndexService(ctx)
+		is, err = components.NewIndexCoord(ctx)
 		if err != nil {
 			panic(err)
 		}

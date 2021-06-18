@@ -22,6 +22,7 @@ type Proxy struct {
 	svr *grpcproxynode.Server
 }
 
+// NewProxy creates a new Proxy
 func NewProxy(ctx context.Context, factory msgstream.Factory) (*Proxy, error) {
 	var err error
 	n := &Proxy{}
@@ -34,6 +35,7 @@ func NewProxy(ctx context.Context, factory msgstream.Factory) (*Proxy, error) {
 	return n, nil
 }
 
+// Run starts service
 func (n *Proxy) Run() error {
 	if err := n.svr.Run(); err != nil {
 		return err
@@ -41,6 +43,7 @@ func (n *Proxy) Run() error {
 	return nil
 }
 
+// Stop terminates service
 func (n *Proxy) Stop() error {
 	if err := n.svr.Stop(); err != nil {
 		return err

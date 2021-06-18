@@ -21,6 +21,7 @@ type IndexNode struct {
 	svr *grpcindexnode.Server
 }
 
+// NewIndexNode creates a new IndexNode
 func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 	var err error
 	n := &IndexNode{}
@@ -32,12 +33,16 @@ func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 	return n, nil
 
 }
+
+// Run starts service
 func (n *IndexNode) Run() error {
 	if err := n.svr.Run(); err != nil {
 		return err
 	}
 	return nil
 }
+
+// Stop terminates service
 func (n *IndexNode) Stop() error {
 	if err := n.svr.Stop(); err != nil {
 		return err

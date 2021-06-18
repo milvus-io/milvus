@@ -21,7 +21,8 @@ type IndexCoord struct {
 	svr *grpcindexserver.Server
 }
 
-func NewIndexService(ctx context.Context) (*IndexCoord, error) {
+// NewIndexService creates a new IndexCoord
+func NewIndexCoord(ctx context.Context) (*IndexCoord, error) {
 	var err error
 	s := &IndexCoord{}
 	svr, err := grpcindexserver.NewServer(ctx)
@@ -32,12 +33,16 @@ func NewIndexService(ctx context.Context) (*IndexCoord, error) {
 	s.svr = svr
 	return s, nil
 }
+
+// Run starts service
 func (s *IndexCoord) Run() error {
 	if err := s.svr.Run(); err != nil {
 		return err
 	}
 	return nil
 }
+
+// Stop terminates service
 func (s *IndexCoord) Stop() error {
 	if err := s.svr.Stop(); err != nil {
 		return err

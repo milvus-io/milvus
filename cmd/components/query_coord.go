@@ -23,7 +23,8 @@ type QueryCoord struct {
 	svr *grpcqueryservice.Server
 }
 
-func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryCoord, error) {
+// NewQueryCoord creates a new QueryCoord
+func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord, error) {
 	svr, err := grpcqueryservice.NewServer(ctx, factory)
 	if err != nil {
 		panic(err)
@@ -35,6 +36,7 @@ func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryCoor
 	}, nil
 }
 
+// Run starts service
 func (qs *QueryCoord) Run() error {
 	if err := qs.svr.Run(); err != nil {
 		panic(err)
@@ -42,6 +44,7 @@ func (qs *QueryCoord) Run() error {
 	return nil
 }
 
+// Stop terminates service
 func (qs *QueryCoord) Stop() error {
 	if err := qs.svr.Stop(); err != nil {
 		return err

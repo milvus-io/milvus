@@ -23,8 +23,8 @@ type QueryNode struct {
 	svr *grpcquerynode.Server
 }
 
+// NewQueryNode creates a new QueryNode
 func NewQueryNode(ctx context.Context, factory msgstream.Factory) (*QueryNode, error) {
-
 	svr, err := grpcquerynode.NewServer(ctx, factory)
 	if err != nil {
 		return nil, err
@@ -37,6 +37,7 @@ func NewQueryNode(ctx context.Context, factory msgstream.Factory) (*QueryNode, e
 
 }
 
+// Run starts service
 func (q *QueryNode) Run() error {
 	if err := q.svr.Run(); err != nil {
 		panic(err)
@@ -44,6 +45,7 @@ func (q *QueryNode) Run() error {
 	return nil
 }
 
+// Stop terminates service
 func (q *QueryNode) Stop() error {
 	if err := q.svr.Stop(); err != nil {
 		return err
