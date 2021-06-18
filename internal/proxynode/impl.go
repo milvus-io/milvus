@@ -1151,6 +1151,7 @@ func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchReque
 		resultBuf: make(chan []*internalpb.SearchResults),
 		query:     request,
 		chMgr:     node.chMgr,
+		qs:        node.queryService,
 	}
 
 	err := node.sched.DqQueue.Enqueue(qt)
@@ -1222,6 +1223,7 @@ func (node *ProxyNode) Retrieve(ctx context.Context, request *milvuspb.RetrieveR
 		},
 		resultBuf: make(chan []*internalpb.RetrieveResults),
 		retrieve:  request,
+		qs:        node.queryService,
 	}
 
 	err := node.sched.DqQueue.Enqueue(rt)
@@ -1373,6 +1375,7 @@ func (node *ProxyNode) Query(ctx context.Context, request *milvuspb.QueryRequest
 			resultBuf: make(chan []*internalpb.RetrieveResults),
 			retrieve:  retrieveRequest,
 			chMgr:     node.chMgr,
+			qs:        node.queryService,
 		}
 
 		err := node.sched.DqQueue.Enqueue(rt)

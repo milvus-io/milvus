@@ -31,7 +31,7 @@ class ResponseChecker:
         elif self.check_task == CheckTasks.err_res:
             result = self.assert_exception(self.response, self.succ, self.check_items)
 
-        elif self.check_task == CheckTasks.check_connection_result:
+        elif self.check_task == CheckTasks.ccr:
             result = self.check_value_equal(self.response, self.func_name, self.check_items)
 
         elif self.check_task == CheckTasks.check_collection_property:
@@ -73,7 +73,7 @@ class ResponseChecker:
                 log.error("[CheckFunc] Response of list_connections is not a list: %s" % str(res))
                 assert False
 
-            list_content = params.get("list_content", None)
+            list_content = params.get(ct.list_content, None)
             if not isinstance(list_content, list):
                 log.error("[CheckFunc] Check param of list_content is not a list: %s" % str(list_content))
                 assert False
@@ -82,7 +82,7 @@ class ResponseChecker:
             assert pc.list_equal_check(new_res, list_content)
 
         if func_name == "get_connection_addr":
-            dict_content = params.get("dict_content", None)
+            dict_content = params.get(ct.dict_content, None)
             assert pc.dict_equal_check(res, dict_content)
 
         if func_name == "connect":
@@ -91,7 +91,7 @@ class ResponseChecker:
             assert res_obj == class_obj
 
         if func_name == "get_connection":
-            value_content = params.get("value_content", None)
+            value_content = params.get(ct.value_content, None)
             res_obj = type(res).__name__ if res is not None else None
             assert res_obj == value_content
 
