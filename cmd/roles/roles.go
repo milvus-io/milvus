@@ -33,7 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynode"
 	"github.com/milvus-io/milvus/internal/queryservice"
 
-	"github.com/milvus-io/milvus/cmd/distributed/components"
+	"github.com/milvus-io/milvus/cmd/components"
 	"github.com/milvus-io/milvus/internal/logutil"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/util/trace"

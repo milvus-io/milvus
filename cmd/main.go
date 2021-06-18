@@ -19,7 +19,7 @@ import (
 	"path"
 	"syscall"
 
-	"github.com/milvus-io/milvus/cmd/distributed/roles"
+	"github.com/milvus-io/milvus/cmd/roles"
 )
 
 const (
