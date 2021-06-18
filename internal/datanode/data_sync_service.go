@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 
@@ -26,16 +27,17 @@ import (
 )
 
 type dataSyncService struct {
-	ctx          context.Context
-	cancelFn     context.CancelFunc
-	fg           *flowgraph.TimeTickedFlowGraph
-	flushChan    <-chan *flushMsg
-	replica      Replica
-	idAllocator  allocatorInterface
-	msFactory    msgstream.Factory
-	collectionID UniqueID
-	dataService  types.DataService
-	clearSignal  chan<- UniqueID
+	ctx           context.Context
+	cancelFn      context.CancelFunc
+	fg            *flowgraph.TimeTickedFlowGraph
+	flushChan     <-chan *flushMsg
+	replica       Replica
+	idAllocator   allocatorInterface
+	msFactory     msgstream.Factory
+	collectionID  UniqueID
+	dataService   types.DataService
+	masterService types.MasterService
+	clearSignal   chan<- UniqueID
 }
 
 func newDataSyncService(ctx context.Context,
@@ -46,22 +48,24 @@ func newDataSyncService(ctx context.Context,
 	vchan *datapb.VchannelInfo,
 	clearSignal chan<- UniqueID,
 	dataService types.DataService,
+	masterService types.MasterService,
 
 ) *dataSyncService {
 
 	ctx1, cancel := context.WithCancel(ctx)
 
 	service := &dataSyncService{
-		ctx:          ctx1,
-		cancelFn:     cancel,
-		fg:           nil,
-		flushChan:    flushChan,
-		replica:      replica,
-		idAllocator:  alloc,
-		msFactory:    factory,
-		collectionID: vchan.GetCollectionID(),
-		dataService:  dataService,
-		clearSignal:  clearSignal,
+		ctx:           ctx1,
+		cancelFn:      cancel,
+		fg:            nil,
+		flushChan:     flushChan,
+		replica:       replica,
+		idAllocator:   alloc,
+		msFactory:     factory,
+		collectionID:  vchan.GetCollectionID(),
+		dataService:   dataService,
+		clearSignal:   clearSignal,
+		masterService: masterService,
 	}
 
 	service.initNodes(vchan)
@@ -84,6 +88,42 @@ func (dsService *dataSyncService) close() {
 	}
 
 	dsService.cancelFn()
+}
+
+func (dsService *dataSyncService) getPChannel(collectionID UniqueID, vchan string) (string, error) {
+	req := &milvuspb.DescribeCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_DescribeCollection,
+			MsgID:     0,
+			Timestamp: 0,
+			SourceID:  Params.NodeID,
+		},
+		DbName:         "",
+		CollectionName: "",
+		CollectionID:   collectionID,
+		TimeStamp:      0,
+	}
+	resp, err := dsService.masterService.DescribeCollection(dsService.ctx, req)
+	if err != nil {
+		log.Error("Failed to describe collection", zap.Int64("collectionID", collectionID))
+		return "", err
+	}
+
+	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		log.Error("Failed to describe collection", zap.Int64("collectionID", collectionID),
+			zap.String("Reason", resp.Status.GetReason()))
+		return "", fmt.Errorf("Failed to describe collection, resp.Reason: %s", resp.Status.GetReason())
+	}
+
+	vchans := resp.GetVirtualChannelNames()
+	pchans := resp.GetPhysicalChannelNames()
+	for i, v := range vchans {
+		if vchan == v {
+			return pchans[i], nil
+		}
+	}
+
+	return "", fmt.Errorf("Can not find physical channel of %s", vchan)
 }
 
 func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) {
@@ -145,10 +185,16 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) {
 		}
 		return nil
 	}
+
+	pchan, err := dsService.getPChannel(vchanInfo.GetCollectionID(), vchanInfo.GetChannelName())
+	if err != nil {
+		//FIXME dont panic
+		panic(err)
+	}
 	var dmStreamNode Node = newDmInputNode(
 		dsService.ctx,
 		dsService.msFactory,
-		vchanInfo.GetChannelName(),
+		pchan,
 		vchanInfo.GetSeekPosition(),
 	)
 	var ddNode Node = newDDNode(dsService.clearSignal, dsService.collectionID, vchanInfo)
