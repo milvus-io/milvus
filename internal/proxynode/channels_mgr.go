@@ -65,6 +65,7 @@ func getUniqueIntGeneratorIns() uniqueIntGenerator {
 }
 
 type getChannelsFuncType = func(collectionID UniqueID) (map[vChan]pChan, error)
+type repackFuncType = func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error)
 
 type getChannelsService interface {
 	GetChannels(collectionID UniqueID) (map[vChan]pChan, error)
@@ -105,6 +106,13 @@ func (m *mockGetChannelsService) GetChannels(collectionID UniqueID) (map[vChan]p
 	return channels, nil
 }
 
+type streamType int
+
+const (
+	dmlStreamType streamType = iota
+	dqlStreamType
+)
+
 type singleTypeChannelsMgr struct {
 	collectionID2VIDs map[UniqueID][]int // id are sorted
 	collMtx           sync.RWMutex
@@ -120,6 +128,10 @@ type singleTypeChannelsMgr struct {
 	vchans2pchansMtx sync.RWMutex
 
 	getChannelsFunc getChannelsFuncType
+
+	repackFunc repackFuncType
+
+	singleStreamType streamType
 
 	msgStreamFactory msgstream.Factory
 }
@@ -327,29 +339,20 @@ func (mgr *singleTypeChannelsMgr) createMsgStream(collectionID UniqueID) error {
 	vchans := getAllKeys(channels)
 	mgr.updateVChans(id, vchans)
 
-	stream, err := mgr.msgStreamFactory.NewMsgStream(context.Background())
+	var stream msgstream.MsgStream
+	if mgr.singleStreamType == dqlStreamType {
+		stream, err = mgr.msgStreamFactory.NewQueryMsgStream(context.Background())
+	} else {
+		stream, err = mgr.msgStreamFactory.NewMsgStream(context.Background())
+	}
 	if err != nil {
 		return err
 	}
 	pchans := getAllValues(channels)
 	stream.AsProducer(pchans)
-	repack := func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
-		// after assigning segment id to msg, tsMsgs was already re-bucketed
-		pack := make(map[int32]*msgstream.MsgPack)
-		for idx, msg := range tsMsgs {
-			if len(hashKeys[idx]) <= 0 {
-				continue
-			}
-			key := hashKeys[idx][0]
-			_, ok := pack[key]
-			if !ok {
-				pack[key] = &msgstream.MsgPack{}
-			}
-			pack[key].Msgs = append(pack[key].Msgs, msg)
-		}
-		return pack, nil
+	if mgr.repackFunc != nil {
+		stream.SetRepackFunc(mgr.repackFunc)
 	}
-	stream.SetRepackFunc(repack)
 	runtime.SetFinalizer(stream, func(stream msgstream.MsgStream) {
 		stream.Close()
 	})
@@ -398,7 +401,12 @@ func (mgr *singleTypeChannelsMgr) removeAllStream() error {
 	return nil
 }
 
-func newSingleTypeChannelsMgr(getChannelsFunc getChannelsFuncType, msgStreamFactory msgstream.Factory) *singleTypeChannelsMgr {
+func newSingleTypeChannelsMgr(
+	getChannelsFunc getChannelsFuncType,
+	msgStreamFactory msgstream.Factory,
+	repackFunc repackFuncType,
+	singleStreamType streamType,
+) *singleTypeChannelsMgr {
 	return &singleTypeChannelsMgr{
 		collectionID2VIDs:         make(map[UniqueID][]int),
 		id2vchans:                 make(map[int][]vChan),
@@ -406,6 +414,8 @@ func newSingleTypeChannelsMgr(getChannelsFunc getChannelsFuncType, msgStreamFact
 		id2UsageHistogramOfStream: make(map[int]int),
 		vchans2pchans:             make(map[vChan]pChan),
 		getChannelsFunc:           getChannelsFunc,
+		repackFunc:                repackFunc,
+		singleStreamType:          singleStreamType,
 		msgStreamFactory:          msgStreamFactory,
 	}
 }
@@ -455,9 +465,15 @@ func (mgr *channelsMgrImpl) removeAllDMLStream() error {
 	return mgr.dmlChannelsMgr.removeAllStream()
 }
 
-func newChannelsMgr(getDmlChannelsFunc getChannelsFuncType, getDqlChannelsFunc getChannelsFuncType, msgStreamFactory msgstream.Factory) channelsMgr {
+func newChannelsMgr(
+	getDmlChannelsFunc getChannelsFuncType,
+	dmlRepackFunc repackFuncType,
+	getDqlChannelsFunc getChannelsFuncType,
+	dqlRepackFunc repackFuncType,
+	msgStreamFactory msgstream.Factory,
+) channelsMgr {
 	return &channelsMgrImpl{
-		dmlChannelsMgr: newSingleTypeChannelsMgr(getDmlChannelsFunc, msgStreamFactory),
-		dqlChannelsMgr: newSingleTypeChannelsMgr(getDqlChannelsFunc, msgStreamFactory),
+		dmlChannelsMgr: newSingleTypeChannelsMgr(getDmlChannelsFunc, msgStreamFactory, dmlRepackFunc, dmlStreamType),
+		dqlChannelsMgr: newSingleTypeChannelsMgr(getDqlChannelsFunc, msgStreamFactory, dqlRepackFunc, dqlStreamType),
 	}
 }
