@@ -44,14 +44,14 @@ TEST(Span, Naive) {
         auto float_span = interface.chunk_data<FloatVector>(FieldOffset(2), chunk_id);
         auto begin = chunk_id * size_per_chunk;
         auto end = std::min((chunk_id + 1) * size_per_chunk, N);
-        auto size_per_chunk = end - begin;
-        for (int i = 0; i < size_per_chunk * 512 / 8; ++i) {
+        auto size_of_chunk = end - begin;
+        for (int i = 0; i < size_of_chunk * 512 / 8; ++i) {
             ASSERT_EQ(vec_span.data()[i], vec_ptr[i + begin * 512 / 8]);
         }
-        for (int i = 0; i < size_per_chunk; ++i) {
+        for (int i = 0; i < size_of_chunk; ++i) {
             ASSERT_EQ(age_span.data()[i], age_ptr[i + begin]);
         }
-        for (int i = 0; i < size_per_chunk; ++i) {
+        for (int i = 0; i < size_of_chunk; ++i) {
             ASSERT_EQ(float_span.data()[i], float_ptr[i + begin * 32]);
         }
     }

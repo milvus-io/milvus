@@ -21,6 +21,7 @@
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
 #include <memory>
+#include <deque>
 #include <vector>
 #include <utility>
 #include <string>
@@ -104,12 +105,16 @@ class SegmentInternalInterface : public SegmentInterface {
                   query::QueryInfo query_info,
                   const void* query_data,
                   int64_t query_count,
+                  Timestamp timestamp,
                   const BitsetView& bitset,
                   QueryResult& output) const = 0;
 
     // count of chunk that has index available
     virtual int64_t
     num_chunk_index(FieldOffset field_offset) const = 0;
+
+    virtual void
+    mask_with_timestamps(std::deque<boost::dynamic_bitset<>>& bitset_chunks, Timestamp timestamp) const = 0;
 
     // count of chunks
     virtual int64_t
@@ -118,6 +123,9 @@ class SegmentInternalInterface : public SegmentInterface {
     // element size in each chunk
     virtual int64_t
     size_per_chunk() const = 0;
+
+    virtual int64_t
+    get_active_count(Timestamp ts) const = 0;
 
  protected:
     // internal API: return chunk_data in span

@@ -823,7 +823,7 @@ TEST(CApiTest, LoadIndex_Search) {
     constexpr auto DIM = 16;
     constexpr auto K = 10;
 
-    auto N = 1024 * 1024 * 10;
+    auto N = 1024 * 1024;
     auto num_query = 100;
     auto [raw_data, timestamps, uids] = generate_data(N);
     auto indexing = std::make_shared<milvus::knowhere::IVFPQ>();
@@ -2569,6 +2569,14 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     status = LoadFieldData(segment, c_id_field_data);
     assert(status.error_code == Success);
 
+    auto c_ts_field_data = CLoadFieldDataInfo{
+        1,
+        counter_col.data(),
+        N,
+    };
+    status = LoadFieldData(segment, c_ts_field_data);
+    assert(status.error_code == Success);
+
     status = UpdateSealedSegmentIndex(segment, c_load_index_info);
     assert(status.error_code == Success);
 
@@ -2726,6 +2734,14 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
         N,
     };
     status = LoadFieldData(segment, c_id_field_data);
+    assert(status.error_code == Success);
+
+    auto c_ts_field_data = CLoadFieldDataInfo{
+        1,
+        counter_col.data(),
+        N,
+    };
+    status = LoadFieldData(segment, c_ts_field_data);
     assert(status.error_code == Success);
 
     status = UpdateSealedSegmentIndex(segment, c_load_index_info);

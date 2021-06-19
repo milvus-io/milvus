@@ -10,9 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
+#include <segcore/TimestampIndex.h>
 #include "segcore/SegmentSealed.h"
 #include "SealedIndexingRecord.h"
 #include "ScalarIndex.h"
+#include <deque>
 #include <map>
 #include <vector>
 #include <memory>
@@ -28,10 +30,11 @@ class SegmentSealedImpl : public SegmentSealed {
     void
     LoadFieldData(const LoadFieldDataInfo& info) override;
     void
+    LoadSegmentMeta(const milvus::proto::segcore::LoadSegmentMeta& segment_meta) override;
+    void
     DropIndex(const FieldId field_id) override;
     void
     DropFieldData(const FieldId field_id) override;
-
     bool
     HasIndex(FieldId field_id) const override;
     bool
@@ -82,6 +85,9 @@ class SegmentSealedImpl : public SegmentSealed {
     void
     check_search(const query::Plan* plan) const override;
 
+    int64_t
+    get_active_count(Timestamp ts) const override;
+
  private:
     template <typename T>
     static void
@@ -101,16 +107,20 @@ class SegmentSealedImpl : public SegmentSealed {
     }
 
     void
+    mask_with_timestamps(std::deque<boost::dynamic_bitset<>>& bitset_chunks, Timestamp timestamp) const override;
+
+    void
     vector_search(int64_t vec_count,
                   query::QueryInfo query_info,
                   const void* query_data,
                   int64_t query_count,
+                  Timestamp timestamp,
                   const BitsetView& bitset,
                   QueryResult& output) const override;
 
     bool
     is_system_field_ready() const {
-        return system_ready_count_ == 1;
+        return system_ready_count_ == 2;
     }
 
     std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
@@ -138,6 +148,8 @@ class SegmentSealedImpl : public SegmentSealed {
 
     SealedIndexingRecord vecindexs_;
     aligned_vector<idx_t> row_ids_;
+    aligned_vector<Timestamp> timestamps_;
+    TimestampIndex timestamp_index_;
     SchemaPtr schema_;
 };
 }  // namespace milvus::segcore
