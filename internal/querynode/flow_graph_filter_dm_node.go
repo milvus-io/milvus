@@ -124,6 +124,19 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 		return nil
 	}
 
+	// check if partition has been released
+	if fdmNode.loadType == loadTypeCollection {
+		col, err := fdmNode.replica.getCollectionByID(msg.CollectionID)
+		if err != nil {
+			log.Error(err.Error())
+			return nil
+		}
+		if err = col.checkReleasedPartitions([]UniqueID{msg.PartitionID}); err != nil {
+			log.Warn(err.Error())
+			return nil
+		}
+	}
+
 	// Check if the segment is in excluded segments,
 	// messages after seekPosition may contain the redundant data from flushed slice of segment,
 	// so we need to compare the endTimestamp of received messages and position's timestamp.
