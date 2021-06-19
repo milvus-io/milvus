@@ -101,12 +101,24 @@ func (s *streaming) search(searchReqs []*searchRequest,
 		}
 	}
 
+	col, err := s.replica.getCollectionByID(collID)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	// all partitions have been released
-	if len(searchPartIDs) == 0 {
+	if len(searchPartIDs) == 0 && col.getLoadType() == loadTypePartition {
 		return nil, nil, errors.New("partitions have been released , collectionID = " +
 			fmt.Sprintln(collID) +
 			"target partitionIDs = " +
 			fmt.Sprintln(partIDs))
+	}
+
+	if len(searchPartIDs) == 0 && col.getLoadType() == loadTypeCollection {
+		if err = col.checkReleasedPartitions(partIDs); err != nil {
+			return nil, nil, err
+		}
+		return nil, nil, nil
 	}
 
 	log.Debug("doing search in streaming",
