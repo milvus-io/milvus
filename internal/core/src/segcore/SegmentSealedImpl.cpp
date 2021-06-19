@@ -476,7 +476,7 @@ SegmentSealedImpl::mask_with_timestamps(std::deque<boost::dynamic_bitset<>>& bit
     Assert(this->timestamps_.size() == get_row_count());
     Assert(bitset_chunks.size() == 1);
     auto range = timestamp_index_.get_active_range(timestamp);
-    if(range.first == range.second && range.first == this->timestamps_.size()) {
+    if (range.first == range.second && range.first == this->timestamps_.size()) {
         // just skip
         return;
     }
