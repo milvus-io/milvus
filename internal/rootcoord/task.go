@@ -151,8 +151,8 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	vchanNames := make([]string, t.Req.ShardsNum)
 	chanNames := make([]string, t.Req.ShardsNum)
 	for i := int32(0); i < t.Req.ShardsNum; i++ {
-		vchanNames[i] = fmt.Sprintf("%s_%d_v%d", t.Req.CollectionName, collID, i)
-		chanNames[i] = fmt.Sprintf("%s_%d_c%d", t.Req.CollectionName, collID, i)
+		vchanNames[i] = fmt.Sprintf("%s_%d_%d_v", t.Req.CollectionName, collID, i)
+		chanNames[i] = ToPhysicalChannel(vchanNames[i])
 	}
 
 	collInfo := etcdpb.CollectionInfo{
