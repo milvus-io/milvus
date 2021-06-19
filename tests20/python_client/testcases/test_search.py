@@ -83,6 +83,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "err_msg": "collection %s doesn't exist!" % collection_w.name})
 
     @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.xfail(reason="issue 5838")
     def test_search_with_empty_collection(self):
         """
         target: test search with empty connection
@@ -92,14 +93,21 @@ class TestCollectionSearch(TestcaseBase):
         log.info("Test case of search interface: test_search_with_empty_collection")
         # 1 initialize without data
         collection_w = self.init_collection_general(prefix)[0]
-        # 2 search collection without data
+        # 2 search collection without data before load
         log.info("test_search_with_empty_collection: Searching empty collection %s" % collection_w.name)
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
-                            default_limit, default_search_exp,
+                            default_limit, default_search_exp, timeout=1,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
                                          "err_msg": "collection hasn't been loaded or has been released"})
+        # 3 search collection without data after load
+        collection_w.load()
+        collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
+                            default_limit, default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": 0})
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_search_with_empty_vectors(self):
@@ -128,13 +136,15 @@ class TestCollectionSearch(TestcaseBase):
         """
         log.info("Test case of search interface: test_search_param_missing")
         # 1 initialize without data
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, True)[0]
         # 2 search collection with missing parameters
-        log.info("test_search_param_missing: Searching collection %s with missing parameters" % collection_w.name)
+        log.info("test_search_param_missing: Searching collection %s "
+                 "with missing parameters" % collection_w.name)
         try:
             collection_w.search()
         except TypeError as e:
-            assert "missing" and "'data', 'anns_field', 'param', 'limit', and 'expression'" in str(e)
+            assert "missing 4 required positional arguments: 'data', " \
+                   "'anns_field', 'param', and 'limit'" in str(e)
             log.info("test_search_no_collection: test PASS with expected assertion: %s" % e)
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -345,6 +355,41 @@ class TestCollectionSearch(TestcaseBase):
                                                   "limit": limit-deleted_entity_num})
 
     @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.xfail(reason="issue 5858")
+    def test_search_new_data(self):
+        """
+        target: test search new inserted data without load
+        method: 1 search the collection
+                2 insert new data
+                3 search the collection without load again
+        expected: new data should be searched
+        """
+        log.info("test_search_new_data: search new data without another load")
+        # 1. initialize with data
+        limit = 1000
+        nb_old = 500
+        collection_w = self.init_collection_general(prefix, True, nb_old)[0]
+        # 2. search for original data after load
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        log.info("test_search_new_data: searching for original data after load")
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, limit, default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": nb_old})
+        # 3. insert new data
+        nb_new = 300
+        cf.insert_data(collection_w, nb_new, False)
+        conn = self.connection_wrap.get_connection()[0]
+        conn.flush([collection_w.name])
+        # 4. search for new data without load
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, limit, default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": nb_old+nb_new})
+
+    @pytest.mark.tags(CaseLabel.L3)
     def test_search_after_different_index(self):
         """
         target: test search with different index
@@ -474,6 +519,40 @@ class TestCollectionSearch(TestcaseBase):
                                                   "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L3)
+    def test_search_index_partitions_fuzzy(self):
+        """
+        target: test search from partitions
+        method: search from partitions with fuzzy
+                partition name
+        expected: searched successfully
+        """
+        log.info("Test case of search interface: test_search_index_partitions_fuzzy")
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True, 1000, 1)[0]
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        # 2. create index
+        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
+        collection_w.create_index("float_vector", default_index)
+        # 3. search through partitions
+        log.info("test_search_index_partitions_fuzzy: searching through partitions")
+        par = collection_w.partitions
+        entity_num = par[1].num_entities
+        limit = 1000
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, limit, default_search_exp,
+                            ["(.*)"],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": limit})
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, limit, default_search_exp,
+                            ["search(.*)"],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": entity_num})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.xfail(reason="issue 5852")
     def test_search_index_partition_empty(self):
         """
         target: test search the empty partition
@@ -657,7 +736,7 @@ class TestCollectionSearch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("expression, limit",
                              zip(cf.gen_normal_expressions(),
-                                 [999, 898, 997, 2, 3]))
+                                 [1000, 999, 898, 997, 2, 3]))
     def test_search_with_expression(self, expression, limit):
         """
         target: test search with different expressions

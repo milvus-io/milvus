@@ -13,16 +13,15 @@ package storage
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
 
-	"errors"
-
-	ms "github.com/milvus-io/milvus/internal/masterservice"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -149,7 +148,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 	var blobs []*Blob
 	var statsBlobs []*Blob
 	var writer *InsertBinlogWriter
-	timeFieldData, ok := data.Data[ms.TimeStampField]
+	timeFieldData, ok := data.Data[rootcoord.TimeStampField]
 	if !ok {
 		return nil, nil, errors.New("data doesn't contains timestamp field")
 	}
@@ -457,7 +456,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				return -1, -1, nil, fmt.Errorf("undefined data type %d", dataType)
 			}
 		}
-		if fieldID == ms.TimeStampField {
+		if fieldID == rootcoord.TimeStampField {
 			blobInfo := BlobInfo{
 				Length: totalLength,
 			}

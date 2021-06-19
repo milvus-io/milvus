@@ -122,13 +122,13 @@ class TestcaseBase(Base):
         log.info("_connect: Connected")
         return res
 
-    def init_collection_wrap(self, name=None, data=None, schema=None, check_task=None, **kwargs):
+    def init_collection_wrap(self, name=None, schema=None, check_task=None, **kwargs):
         name = cf.gen_unique_str('coll_') if name is None else name
         schema = cf.gen_default_collection_schema() if schema is None else schema
         if self.connection_wrap.get_connection(alias='default')[0] is None:
             self._connect()
         collection_w = ApiCollectionWrapper()
-        collection_w.init_collection(name=name, data=data, schema=schema,
+        collection_w.init_collection(name=name, schema=schema,
                                      check_task=check_task, **kwargs)
         return collection_w
 
@@ -153,7 +153,7 @@ class TestcaseBase(Base):
         expected: return collection and raw data
         """
         log.info("Test case of search interface: initialize before test case")
-        self._connect()
+        conn = self._connect()
         collection_name = cf.gen_unique_str(prefix)
         vectors = []
         binary_raw_vectors = []
@@ -171,5 +171,10 @@ class TestcaseBase(Base):
         # 3 insert data if specified
         if insert_data:
             collection_w, vectors, binary_raw_vectors = cf.insert_data(collection_w, nb, is_binary)
+            if nb <= 32000:
+                conn.flush([collection_w.name])
+                assert collection_w.is_empty == False
+                assert collection_w.num_entities == nb
+            collection_w.load()
 
         return collection_w, vectors, binary_raw_vectors

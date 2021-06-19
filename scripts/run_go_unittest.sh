@@ -14,18 +14,28 @@ ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 MILVUS_DIR="${ROOT_DIR}/internal/"
 echo $MILVUS_DIR
 
+go test -race -cover "${MILVUS_DIR}/allocator/..." -failfast
+go test -race -cover "${MILVUS_DIR}/kv/..." -failfast
+go test -race -cover "${MILVUS_DIR}/msgstream/..." -failfast
+go test -race -cover "${MILVUS_DIR}/storage" -failfast
+go test -race -cover "${MILVUS_DIR}/tso/..." -failfast
+go test -race -cover "${MILVUS_DIR}/util/dablooms/..." -failfast
+go test -race -cover "${MILVUS_DIR}/util/funcutil/..." -failfast
+go test -race -cover "${MILVUS_DIR}/util/mqclient/..." -failfast
+go test -race -cover "${MILVUS_DIR}/util/paramtable/..." -failfast
+go test -race -cover "${MILVUS_DIR}/util/retry/..." -failfast
+go test -race -cover "${MILVUS_DIR}/util/rocksmq/..." -failfast
 go test -race -cover "${MILVUS_DIR}/util/sessionutil/..." -failfast
-go test -race -cover "${MILVUS_DIR}/kv/..." "${MILVUS_DIR}/tso/..." "${MILVUS_DIR}/allocator/..." -failfast
+go test -race -cover "${MILVUS_DIR}/util/trace/..." -failfast
+go test -race -cover "${MILVUS_DIR}/util/typeutil/..." -failfast
+
 # TODO: remove to distributed
 #go test -race -cover "${MILVUS_DIR}/proxynode/..." -failfast
 go test -race -cover "${MILVUS_DIR}/datanode/..." -failfast
 go test -race -cover "${MILVUS_DIR}/indexnode/..." -failfast
-#go test -race -cover "${MILVUS_DIR}/msgstream/..." "${MILVUS_DIR}/querynode/..." "${MILVUS_DIR}/storage"   "${MILVUS_DIR}/util/..." -failfast
-go test -cover "${MILVUS_DIR}/querynode/..." -failfast
-#go test -race -cover "${MILVUS_DIR}/msgstream/..." "${MILVUS_DIR}/storage"   "${MILVUS_DIR}/util/..." -failfast
-#go test -race -cover "${MILVUS_DIR}/msgstream/..." "${MILVUS_DIR}/util/..." -failfast
-go test -race -cover "${MILVUS_DIR}/msgstream/..." -failfast
+go test -race -cover "${MILVUS_DIR}/querynode/..." -failfast
 
-go test -race -cover -v "${MILVUS_DIR}/masterservice" "${MILVUS_DIR}/distributed/masterservice" -failfast
-#go test -race -cover "${MILVUS_DIR}/kv/..." "${MILVUS_DIR}/msgstream/..." "${MILVUS_DIR}/master/..." "${MILVUS_DIR}/querynode/..." -failfast
-go test -race -cover "${MILVUS_DIR}/dataservice/..." -failfast
+go test -race -cover -v "${MILVUS_DIR}/distributed/rootcoord" -failfast
+go test -race -cover -v "${MILVUS_DIR}/rootcoord" -failfast
+go test -race -cover -v "${MILVUS_DIR}/dataservice/..." -failfast
+go test -race -cover -v "${MILVUS_DIR}/indexservice/..." -failfast

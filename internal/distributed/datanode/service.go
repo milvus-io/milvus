@@ -27,7 +27,7 @@ import (
 
 	dn "github.com/milvus-io/milvus/internal/datanode"
 	dsc "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
-	msc "github.com/milvus-io/milvus/internal/distributed/masterservice/client"
+	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/milvus-io/milvus/internal/log"
@@ -69,7 +69,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		msFactory:   factory,
 		grpcErrChan: make(chan error),
 		newMasterServiceClient: func() (types.MasterService, error) {
-			return msc.NewClient(ctx1, dn.Params.MetaRootPath, dn.Params.EtcdEndpoints, 3*time.Second)
+			return rcc.NewClient(ctx1, dn.Params.MetaRootPath, dn.Params.EtcdEndpoints, 3*time.Second)
 		},
 		newDataServiceClient: func(etcdMetaRoot string, etcdEndpoints []string, timeout time.Duration) types.DataService {
 			return dsc.NewClient(etcdMetaRoot, etcdEndpoints, timeout)

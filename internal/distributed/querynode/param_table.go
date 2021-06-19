@@ -12,8 +12,6 @@
 package grpcquerynode
 
 import (
-	"os"
-	"strconv"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -53,21 +51,7 @@ func (pt *ParamTable) LoadFromArgs() {
 }
 
 func (pt *ParamTable) LoadFromEnv() {
-
-	// todo assign by queryservice and set by read initparms
-	queryNodeIDStr := os.Getenv("QUERY_NODE_ID")
-	if queryNodeIDStr == "" {
-		panic("Can't Get QUERY_NODE_ID")
-	}
-
-	queryID, err := strconv.Atoi(queryNodeIDStr)
-	if err != nil {
-		panic(err)
-	}
-	pt.QueryNodeID = UniqueID(queryID)
-
 	Params.QueryNodeIP = funcutil.GetLocalIP()
-
 }
 
 func (pt *ParamTable) initMasterAddress() {

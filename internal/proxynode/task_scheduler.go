@@ -524,7 +524,7 @@ func (sched *TaskScheduler) queryLoop() {
 
 type resultBufHeader struct {
 	usedVChans                  map[interface{}]struct{} // set of vChan
-	usedChans                   map[interface{}]struct{} // set of Chan todo
+	usedChans                   map[interface{}]struct{} // set of pChan todo
 	receivedVChansSet           map[interface{}]struct{} // set of vChan
 	receivedSealedSegmentIDsSet map[interface{}]struct{} // set of UniqueID
 	receivedGlobalSegmentIDsSet map[interface{}]struct{} // set of UniqueID
@@ -699,6 +699,7 @@ func (sched *TaskScheduler) collectResultLoop() {
 			if msgPack == nil {
 				continue
 			}
+
 			for _, tsMsg := range msgPack.Msgs {
 				sp, ctx := trace.StartSpanFromContext(tsMsg.TraceCtx())
 				tsMsg.SetTraceCtx(ctx)

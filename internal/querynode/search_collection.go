@@ -459,24 +459,31 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	sealedSegmentSearched := make([]UniqueID, 0)
 
 	// historical search
-	hisSearchResults, hisSegmentResults, err := s.historical.search(searchRequests, collectionID, searchMsg.PartitionIDs, plan, searchTimestamp)
-	if err != nil {
-		return err
-	}
-	searchResults = append(searchResults, hisSearchResults...)
-	matchedSegments = append(matchedSegments, hisSegmentResults...)
-	for _, seg := range hisSegmentResults {
-		sealedSegmentSearched = append(sealedSegmentSearched, seg.segmentID)
+	hisSearchResults, hisSegmentResults, err1 := s.historical.search(searchRequests, collectionID, searchMsg.PartitionIDs, plan, searchTimestamp)
+	if err1 == nil {
+		searchResults = append(searchResults, hisSearchResults...)
+		matchedSegments = append(matchedSegments, hisSegmentResults...)
+		for _, seg := range hisSegmentResults {
+			sealedSegmentSearched = append(sealedSegmentSearched, seg.segmentID)
+		}
 	}
 
 	// streaming search
+	var err2 error
 	for _, channel := range collection.getVChannels() {
-		strSearchResults, strSegmentResults, err := s.streaming.search(searchRequests, collectionID, searchMsg.PartitionIDs, channel, plan, searchTimestamp)
-		if err != nil {
-			return err
+		var strSearchResults []*SearchResult
+		var strSegmentResults []*Segment
+		strSearchResults, strSegmentResults, err2 = s.streaming.search(searchRequests, collectionID, searchMsg.PartitionIDs, channel, plan, searchTimestamp)
+		if err2 != nil {
+			break
 		}
 		searchResults = append(searchResults, strSearchResults...)
 		matchedSegments = append(matchedSegments, strSegmentResults...)
+	}
+
+	if err1 != nil && err2 != nil {
+		log.Error(err1.Error() + err2.Error())
+		return errors.New(err1.Error() + err2.Error())
 	}
 
 	sp.LogFields(oplog.String("statistical time", "segment search end"))

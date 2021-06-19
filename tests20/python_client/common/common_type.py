@@ -36,6 +36,9 @@ binary_vec_field_desc = "binary vector type field"
 
 Not_Exist = "Not_Exist"
 Connect_Object_Name = "Milvus"
+list_content = "list_content"
+dict_content = "dict_content"
+value_content = "value_content"
 
 err_code = "err_code"
 err_msg = "err_msg"
@@ -79,7 +82,7 @@ class CheckTasks:
     """ The name of the method used to check the result """
     false = False
     err_res = "error_response"
-    check_connection_result = "check_connection_result"
+    ccr = "check_connection_result"
     check_collection_property = "check_collection_property"
     check_partition_property = "check_partition_property"
     check_search_results = "check_search_results"
