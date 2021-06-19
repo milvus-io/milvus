@@ -91,6 +91,8 @@ type collectionReplica struct {
 	partitions  map[UniqueID]*Partition
 	segments    map[UniqueID]*Segment
 
+	loadType
+
 	excludedSegments map[UniqueID][]*datapb.SegmentInfo // map[collectionID]segmentIDs
 }
 
