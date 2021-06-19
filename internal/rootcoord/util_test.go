@@ -90,3 +90,11 @@ func Test_GetFieldSchemaByIndexID(t *testing.T) {
 	_, err = GetFieldSchemaByIndexID(coll, 3)
 	assert.NotNil(t, err)
 }
+
+func Test_ToPhysicalChannel(t *testing.T) {
+	assert.Equal(t, "abc", ToPhysicalChannel("abc_"))
+	assert.Equal(t, "abc", ToPhysicalChannel("abc_123"))
+	assert.Equal(t, "abc", ToPhysicalChannel("abc_defgsg"))
+	assert.Equal(t, "abc__", ToPhysicalChannel("abc___defgsg"))
+	assert.Equal(t, "abcdef", ToPhysicalChannel("abcdef"))
+}

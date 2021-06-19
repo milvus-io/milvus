@@ -27,15 +27,15 @@ services:
     networks:
       - milvus
 
-  master:
-    image: registry.zilliz.com/milvus/milvus:master-release
-    command: ["/milvus/bin/milvus", "run", "master"]
+  rootcoord:
+    image: milvusdb/milvus:latest
+    command: ["milvus", "run", "rootcoord"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
       PULSAR_ADDRESS: pulsar://pulsar:6650
-      DATA_SERVICE_ADDRESS: dataservice:13333
-      INDEX_SERVICE_ADDRESS: indexservice:31000
-      QUERY_SERVICE_ADDRESS: queryservice:19531
+      DATA_SERVICE_ADDRESS: datacoord:13333
+      INDEX_SERVICE_ADDRESS: indexcoord:31000
+      QUERY_SERVICE_ADDRESS: querycoord:19531
     depends_on:
       - "etcd"
       - "pulsar"
@@ -43,27 +43,27 @@ services:
     networks:
       - milvus
 
-  proxynode:
-    image: registry.zilliz.com/milvus/milvus:master-release
-    command: ["/milvus/bin/milvus", "run", "proxynode"]
+  proxy:
+    image: milvusdb/milvus:latest
+    command: ["milvus", "run", "proxy"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
       PULSAR_ADDRESS: pulsar://pulsar:6650
       MASTER_ADDRESS: master:53100
-      DATA_SERVICE_ADDRESS: dataservice:13333
-      INDEX_SERVICE_ADDRESS: indexservice:31000
-      QUERY_SERVICE_ADDRESS: queryservice:19531
+      DATA_SERVICE_ADDRESS: datacoord:13333
+      INDEX_SERVICE_ADDRESS: indexcoord:31000
+      QUERY_SERVICE_ADDRESS: querycoord:19531
     ports:
       - "19530:19530"
     networks:
       - milvus
 
-  queryservice:
-    image: registry.zilliz.com/milvus/milvus:master-release
-    command: ["/milvus/bin/milvus", "run", "queryservice"]
+  querycoord:
+    image: milvusdb/milvus:latest
+    command: ["milvus", "run", "querycoord"]
     environment:
       MASTER_ADDRESS: master:53100
-      DATA_SERVICE_ADDRESS: dataservice:13333
+      DATA_SERVICE_ADDRESS: datacoord:13333
     depends_on:
       - "etcd"
       - "pulsar"
@@ -72,24 +72,23 @@ services:
       - milvus
 
   querynode:
-    image: registry.zilliz.com/milvus/milvus:master-release
-    command: ["/milvus/bin/milvus", "run", "querynode"]
+    image: milvusdb/milvus:latest
+    command: ["milvus", "run", "querynode"]
     environment:
       MINIO_ADDRESS: minio:9000
       PULSAR_ADDRESS: pulsar://pulsar:6650
       MASTER_ADDRESS: master:53100
-      DATA_SERVICE_ADDRESS: dataservice:13333
-      INDEX_SERVICE_ADDRESS: indexservice:31000
-      QUERY_SERVICE_ADDRESS: queryservice:19531
-      QUERY_NODE_ID: 1
+      DATA_SERVICE_ADDRESS: datacoord:13333
+      INDEX_SERVICE_ADDRESS: indexcoord:31000
+      QUERY_SERVICE_ADDRESS: querycoord:19531
     depends_on:
-      - "queryservice"
+      - "querycoord"
     networks:
       - milvus
 
-  indexservice:
-    image: registry.zilliz.com/milvus/milvus:master-release
-    command: ["/milvus/bin/milvus", "run", "indexservice"]
+  indexcoord:
+    image: milvusdb/milvus:latest
+    command: ["milvus", "run", "indexcoord"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
@@ -102,19 +101,19 @@ services:
       - milvus
 
   indexnode:
-    image: registry.zilliz.com/milvus/milvus:master-release
-    command: ["/milvus/bin/milvus", "run", "indexnode"]
+    image: milvusdb/milvus:latest
+    command: ["milvus", "run", "indexnode"]
     environment:
       MINIO_ADDRESS: minio:9000
-      INDEX_SERVICE_ADDRESS: indexservice:31000
+      INDEX_SERVICE_ADDRESS: indexcoord:31000
     depends_on:
-      - "indexservice"
+      - "indexcoord"
     networks:
       - milvus
 
-  dataservice:
-    image: registry.zilliz.com/milvus/milvus:master-release
-    command: ["/milvus/bin/milvus", "run", "dataservice"]
+  datacoord:
+    image: milvusdb/milvus:latest
+    command: ["milvus", "run", "datacoord"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
@@ -128,16 +127,16 @@ services:
       - milvus
 
   datanode:
-    image: registry.zilliz.com/milvus/milvus:master-release
-    command: ["/milvus/bin/milvus", "run", "datanode"]
+    image: milvusdb/milvus:latest
+    command: ["milvus", "run", "datanode"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
       PULSAR_ADDRESS: pulsar://pulsar:6650
       MASTER_ADDRESS: master:53100
-      DATA_SERVICE_ADDRESS: dataservice:13333
+      DATA_SERVICE_ADDRESS: datacoord:13333
     depends_on:
-      - "dataservice"
+      - "datacoord"
     networks:
       - milvus
 

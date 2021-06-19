@@ -405,37 +405,6 @@ func TestChannel(t *testing.T) {
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
 	})
-
-	t.Run("Test ProxyTimeTickChannel", func(t *testing.T) {
-		genMsg := func(msgType commonpb.MsgType, t Timestamp) *msgstream.TimeTickMsg {
-			return &msgstream.TimeTickMsg{
-				BaseMsg: msgstream.BaseMsg{
-					HashValues: []uint32{0},
-				},
-				TimeTickMsg: internalpb.TimeTickMsg{
-					Base: &commonpb.MsgBase{
-						MsgType:   msgType,
-						MsgID:     0,
-						Timestamp: t,
-						SourceID:  0,
-					},
-				},
-			}
-		}
-
-		timeTickStream, _ := svr.msFactory.NewMsgStream(svr.ctx)
-		timeTickStream.AsProducer([]string{Params.ProxyTimeTickChannelName})
-		timeTickStream.Start()
-		defer timeTickStream.Close()
-
-		msgPack := msgstream.MsgPack{}
-		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_TimeTick, 123))
-		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentInfo, 234))
-		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_TimeTick, 345))
-		err := timeTickStream.Produce(&msgPack)
-		assert.Nil(t, err)
-		time.Sleep(time.Second)
-	})
 }
 
 func TestSaveBinlogPaths(t *testing.T) {

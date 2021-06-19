@@ -12,14 +12,11 @@
 msgChannel:
   # channel name generation rule: ${namePrefix}-${ChannelIdx}
   chanNamePrefix:
-    dataDefinition: "data-definition"
     masterTimeTick: "master-timetick"
     masterStatistics: "master-statistics"
     search: "search"
     searchResult: "searchResult"
-    k2s: "k2s"
     proxyTimeTick: "proxyTimeTick"
-    proxyServiceTimeTick: "proxyServiceTimeTick"
     queryTimeTick: "queryTimeTick"
     queryNodeStats: "query-node-stats"
     # cmd for loadIndex, flush, etc...
@@ -36,7 +33,3 @@ msgChannel:
     queryNodeSubNamePrefix: "queryNode"
     dataNodeSubNamePrefix: "dataNode"
     dataServiceSubNamePrefix: "dataService"
-
-  # default channel range [0, 1)
-  channelRange:
-    k2s: [0, 1]

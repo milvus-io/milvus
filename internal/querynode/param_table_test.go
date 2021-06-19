@@ -87,8 +87,9 @@ func TestParamTable_flowGraphMaxParallelism(t *testing.T) {
 }
 
 func TestParamTable_msgChannelSubName(t *testing.T) {
+	Params.initMsgChannelSubName()
 	name := Params.MsgChannelSubName
-	expectName := "queryNode"
+	expectName := "queryNode-0"
 	assert.Equal(t, expectName, name)
 }
 

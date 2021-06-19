@@ -34,9 +34,6 @@ type ParamTable struct {
 	KvRootPath              string
 	SegmentBinlogSubPath    string
 	CollectionBinlogSubPath string
-	SegmentDmlPosSubPath    string
-	SegmentDdlPosSubPath    string
-	DmlChannelPosSubPath    string
 
 	// --- Pulsar ---
 	PulsarAddress string
@@ -50,14 +47,10 @@ type ParamTable struct {
 	SegIDAssignExpiration int64
 
 	InsertChannelPrefixName     string
-	InsertChannelNum            int64
 	StatisticsChannelName       string
 	TimeTickChannelName         string
-	DataNodeNum                 int
 	SegmentInfoChannelName      string
 	DataServiceSubscriptionName string
-	K2SChannelNames             []string
-	ProxyTimeTickChannelName    string
 
 	Log log.Config
 }
@@ -75,8 +68,6 @@ func (p *ParamTable) Init() {
 		}
 
 		// set members
-		p.initNodeID()
-
 		p.initEtcdEndpoints()
 		p.initMetaRootPath()
 		p.initKvRootPath()
@@ -89,25 +80,15 @@ func (p *ParamTable) Init() {
 		p.initSegmentSizeFactor()
 		p.initSegIDAssignExpiration()
 		p.initInsertChannelPrefixName()
-		p.initInsertChannelNum()
 		p.initStatisticsChannelName()
 		p.initTimeTickChannelName()
-		p.initDataNodeNum()
 		p.initSegmentInfoChannelName()
 		p.initDataServiceSubscriptionName()
-		p.initK2SChannelNames()
 		p.initLogCfg()
-		p.initProxyServiceTimeTickChannelName()
 
 		p.initFlushStreamPosSubPath()
 		p.initStatsStreamPosSubPath()
-		p.initSegmentDmlPosSubPath()
-		p.initDmlChannelPosSubPath()
 	})
-}
-
-func (p *ParamTable) initNodeID() {
-	p.NodeID = p.ParseInt64("dataservice.nodeID")
 }
 
 func (p *ParamTable) initEtcdEndpoints() {
@@ -186,10 +167,6 @@ func (p *ParamTable) initInsertChannelPrefixName() {
 	}
 }
 
-func (p *ParamTable) initInsertChannelNum() {
-	p.InsertChannelNum = p.ParseInt64("dataservice.insertChannelNum")
-}
-
 func (p *ParamTable) initStatisticsChannelName() {
 	var err error
 	p.StatisticsChannelName, err = p.Load("msgChannel.chanNamePrefix.dataServiceStatistic")
@@ -204,10 +181,6 @@ func (p *ParamTable) initTimeTickChannelName() {
 	if err != nil {
 		panic(err)
 	}
-}
-
-func (p *ParamTable) initDataNodeNum() {
-	p.DataNodeNum = p.ParseInt("dataservice.dataNodeNum")
 }
 
 func (p *ParamTable) initSegmentInfoChannelName() {
@@ -226,24 +199,6 @@ func (p *ParamTable) initDataServiceSubscriptionName() {
 	}
 }
 
-func (p *ParamTable) initK2SChannelNames() {
-	prefix, err := p.Load("msgChannel.chanNamePrefix.k2s")
-	if err != nil {
-		panic(err)
-	}
-	prefix += "-"
-	iRangeStr, err := p.Load("msgChannel.channelRange.k2s")
-	if err != nil {
-		panic(err)
-	}
-	channelIDs := paramtable.ConvertRangeToIntSlice(iRangeStr, ",")
-	var ret []string
-	for _, ID := range channelIDs {
-		ret = append(ret, prefix+strconv.Itoa(ID))
-	}
-	p.K2SChannelNames = ret
-}
-
 func (p *ParamTable) initLogCfg() {
 	p.Log = log.Config{}
 	format, err := p.Load("log.format")
@@ -256,15 +211,6 @@ func (p *ParamTable) initLogCfg() {
 		panic(err)
 	}
 	p.Log.Level = level
-	devStr, err := p.Load("log.dev")
-	if err != nil {
-		panic(err)
-	}
-	dev, err := strconv.ParseBool(devStr)
-	if err != nil {
-		panic(err)
-	}
-	p.Log.Development = dev
 	p.Log.File.MaxSize = p.ParseInt("log.file.maxSize")
 	p.Log.File.MaxBackups = p.ParseInt("log.file.maxBackups")
 	p.Log.File.MaxDays = p.ParseInt("log.file.maxAge")
@@ -277,14 +223,6 @@ func (p *ParamTable) initLogCfg() {
 	} else {
 		p.Log.File.Filename = ""
 	}
-}
-
-func (p *ParamTable) initProxyServiceTimeTickChannelName() {
-	ch, err := p.Load("msgChannel.chanNamePrefix.proxyServiceTimeTick")
-	if err != nil {
-		panic(err)
-	}
-	p.ProxyTimeTickChannelName = ch
 }
 
 func (p *ParamTable) initFlushStreamPosSubPath() {
@@ -301,20 +239,4 @@ func (p *ParamTable) initStatsStreamPosSubPath() {
 		panic(err)
 	}
 	p.StatsStreamPosSubPath = subPath
-}
-
-func (p *ParamTable) initSegmentDmlPosSubPath() {
-	subPath, err := p.Load("etcd.segmentDmlPosSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.SegmentDmlPosSubPath = subPath
-}
-
-func (p *ParamTable) initDmlChannelPosSubPath() {
-	subPath, err := p.Load("etcd.dmlChanPosSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.DmlChannelPosSubPath = subPath
 }

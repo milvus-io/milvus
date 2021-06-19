@@ -40,7 +40,6 @@ pipeline {
                     SEMVER = "${BRANCH_NAME.contains('/') ? BRANCH_NAME.substring(BRANCH_NAME.lastIndexOf('/') + 1) : BRANCH_NAME}"
                     IMAGE_REPO = "dockerhub-mirror-sh.zilliz.cc/milvusdb"
                     DOCKER_BUILDKIT = 1
-                    CUSTOM_THIRDPARTY_PATH = "/tmp/third_party"
                     ARTIFACTS = "${env.WORKSPACE}/artifacts"
                     DOCKER_CREDENTIALS_ID = "ba070c98-c8cc-4f7c-b657-897715f359fc"
                     DOKCER_REGISTRY_URL = "registry.zilliz.com"
@@ -58,7 +57,11 @@ pipeline {
                                             standaloneEnabled = "false"
                                         }
 
-                                        sh "MILVUS_STANDALONE_ENABLED=${standaloneEnabled} ./e2e-k8s.sh --node-image registry.zilliz.com/kindest/node:v1.20.2"
+                                        sh """
+                                        MILVUS_STANDALONE_ENABLED=${standaloneEnabled} \
+                                        ./e2e-k8s.sh \
+                                        --node-image registry.zilliz.com/kindest/node:v1.20.2
+                                        """
                                     }
                                 }
                             }
@@ -100,6 +103,12 @@ pipeline {
                                     sh 'docker rm -f \$(docker network inspect -f \'{{ range \$key, \$value := .Containers }}{{ printf "%s " \$key}}{{ end }}\' kind) || true'
                                     sh 'docker network rm kind 2>&1 > /dev/null || true'
                                 }
+                            }
+                        }
+                    }
+                    cleanup {
+                        container('main') {
+                            script {
                                 sh 'find . -name . -o -prune -exec rm -rf -- {} +' /* clean up our workspace */
                             }
                         }

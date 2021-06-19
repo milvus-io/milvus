@@ -19,8 +19,9 @@ import (
 )
 
 func TestReplica_Release(t *testing.T) {
-	meta := newMeta()
-	err := meta.addCollection(1, nil)
+	meta, err := newMeta(nil)
+	assert.Nil(t, err)
+	err = meta.addCollection(1, nil)
 	require.NoError(t, err)
 
 	collections := meta.showCollections()

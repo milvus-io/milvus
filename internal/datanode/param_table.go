@@ -34,6 +34,7 @@ type ParamTable struct {
 	InsertBinlogRootPath    string
 	StatsBinlogRootPath     string
 	Log                     log.Config
+	Alias                   string // Different datanode in one machine
 
 	// === DataNode External Components Configs ===
 	// --- Pulsar ---
@@ -62,6 +63,10 @@ type ParamTable struct {
 
 var Params ParamTable
 var once sync.Once
+
+func (p *ParamTable) InitAlias(alias string) {
+	p.Alias = alias
+}
 
 func (p *ParamTable) Init() {
 	once.Do(func() {
@@ -243,15 +248,6 @@ func (p *ParamTable) initLogCfg() {
 		panic(err)
 	}
 	p.Log.Level = level
-	devStr, err := p.Load("log.dev")
-	if err != nil {
-		panic(err)
-	}
-	dev, err := strconv.ParseBool(devStr)
-	if err != nil {
-		panic(err)
-	}
-	p.Log.Development = dev
 	p.Log.File.MaxSize = p.ParseInt("log.file.maxSize")
 	p.Log.File.MaxBackups = p.ParseInt("log.file.maxBackups")
 	p.Log.File.MaxDays = p.ParseInt("log.file.maxAge")
@@ -260,7 +256,7 @@ func (p *ParamTable) initLogCfg() {
 		panic(err)
 	}
 	if len(rootPath) != 0 {
-		p.Log.File.Filename = path.Join(rootPath, "datanode-"+strconv.FormatInt(p.NodeID, 10)+".log")
+		p.Log.File.Filename = path.Join(rootPath, "datanode"+p.Alias+".log")
 	} else {
 		p.Log.File.Filename = ""
 	}

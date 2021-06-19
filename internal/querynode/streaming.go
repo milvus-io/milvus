@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -32,8 +33,8 @@ type streaming struct {
 	msFactory       msgstream.Factory
 }
 
-func newStreaming(ctx context.Context, factory msgstream.Factory) *streaming {
-	replica := newCollectionReplica()
+func newStreaming(ctx context.Context, factory msgstream.Factory, etcdKV *etcdkv.EtcdKV) *streaming {
+	replica := newCollectionReplica(etcdKV)
 	tReplica := newTSafeReplica()
 	newDS := newDataSyncService(ctx, replica, tReplica, factory)
 

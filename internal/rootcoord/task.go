@@ -143,11 +143,16 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	log.Debug("collection name -> id",
+		zap.String("collection name", t.Req.CollectionName),
+		zap.Int64("colletion_id", collID),
+		zap.Int64("default partition id", partID))
+
 	vchanNames := make([]string, t.Req.ShardsNum)
 	chanNames := make([]string, t.Req.ShardsNum)
 	for i := int32(0); i < t.Req.ShardsNum; i++ {
-		vchanNames[i] = fmt.Sprintf("%s_%d_v%d", t.Req.CollectionName, collID, i)
-		chanNames[i] = fmt.Sprintf("%s_%d_c%d", t.Req.CollectionName, collID, i)
+		vchanNames[i] = fmt.Sprintf("%s_%d_%d_v", t.Req.CollectionName, collID, i)
+		chanNames[i] = ToPhysicalChannel(vchanNames[i])
 	}
 
 	collInfo := etcdpb.CollectionInfo{

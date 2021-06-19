@@ -13,37 +13,106 @@ package queryservice
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strconv"
 	"sync"
 
+	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
+)
+
+const (
+	queryNodeMetaPrefix = "queryService-queryNodeMeta"
+	queryNodeInfoPrefix = "queryService-queryNodeInfo"
 )
 
 type queryNodeCluster struct {
+	client *etcdkv.EtcdKV
+
 	sync.RWMutex
 	clusterMeta *meta
 	nodes       map[int64]*queryNode
 }
 
-func newQueryNodeCluster(clusterMeta *meta) *queryNodeCluster {
+func newQueryNodeCluster(clusterMeta *meta, kv *etcdkv.EtcdKV) (*queryNodeCluster, error) {
 	nodes := make(map[int64]*queryNode)
-	return &queryNodeCluster{
+	c := &queryNodeCluster{
+		client:      kv,
 		clusterMeta: clusterMeta,
 		nodes:       nodes,
 	}
+	err := c.reloadFromKV()
+	if err != nil {
+		return nil, err
+	}
+
+	return c, nil
 }
 
-func (c *queryNodeCluster) GetComponentInfos(ctx context.Context) []*internalpb.ComponentInfo {
+func (c *queryNodeCluster) reloadFromKV() error {
+	nodeIDs := make([]UniqueID, 0)
+	keys, values, err := c.client.LoadWithPrefix(queryNodeInfoPrefix)
+	if err != nil {
+		return err
+	}
+	for index := range keys {
+		nodeID, err := strconv.ParseInt(filepath.Base(keys[index]), 10, 64)
+		if err != nil {
+			return err
+		}
+		nodeIDs = append(nodeIDs, nodeID)
+		session := &sessionutil.Session{}
+		err = json.Unmarshal([]byte(values[index]), session)
+		if err != nil {
+			return err
+		}
+		err = c.RegisterNode(session, nodeID)
+		if err != nil {
+			return err
+		}
+	}
+	for _, nodeID := range nodeIDs {
+		infoPrefix := fmt.Sprintf("%s/%d", queryNodeMetaPrefix, nodeID)
+		collectionKeys, collectionValues, err := c.client.LoadWithPrefix(infoPrefix)
+		if err != nil {
+			return err
+		}
+		for index := range collectionKeys {
+			collectionID, err := strconv.ParseInt(filepath.Base(collectionKeys[index]), 10, 64)
+			if err != nil {
+				return err
+			}
+			collectionInfo := &querypb.CollectionInfo{}
+			err = proto.UnmarshalText(collectionValues[index], collectionInfo)
+			if err != nil {
+				return err
+			}
+			c.nodes[nodeID].collectionInfos[collectionID] = collectionInfo
+		}
+	}
+	return nil
+}
+
+func (c *queryNodeCluster) GetComponentInfos(ctx context.Context) ([]*internalpb.ComponentInfo, error) {
 	c.RLock()
 	defer c.RUnlock()
 	subComponentInfos := make([]*internalpb.ComponentInfo, 0)
-	for nodeID, node := range c.nodes {
+	nodeIDs, err := c.getOnServiceNodeIDs()
+	if err != nil {
+		return nil, err
+	}
+	for _, nodeID := range nodeIDs {
+		node := c.nodes[nodeID]
 		componentStates, err := node.client.GetComponentStates(ctx)
 		if err != nil {
 			subComponentInfos = append(subComponentInfos, &internalpb.ComponentInfo{
@@ -55,49 +124,59 @@ func (c *queryNodeCluster) GetComponentInfos(ctx context.Context) []*internalpb.
 		subComponentInfos = append(subComponentInfos, componentStates.State)
 	}
 
-	return subComponentInfos
+	return subComponentInfos, nil
 }
 
 func (c *queryNodeCluster) LoadSegments(ctx context.Context, nodeID int64, in *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	c.Lock()
 	defer c.Unlock()
+
 	if node, ok := c.nodes[nodeID]; ok {
-		//TODO::etcd
-		log.Debug("load segment infos", zap.Any("infos", in))
+		if !node.isOnService() {
+			return nil, errors.New("node offline")
+		}
+		segmentInfos := make(map[UniqueID]*querypb.SegmentInfo)
 		for _, info := range in.Infos {
 			segmentID := info.SegmentID
-			if info, ok := c.clusterMeta.segmentInfos[segmentID]; ok {
-				info.SegmentState = querypb.SegmentState_sealing
+			segmentInfo, err := c.clusterMeta.getSegmentInfoByID(segmentID)
+			if err == nil {
+				segmentInfos[segmentID] = proto.Clone(segmentInfo).(*querypb.SegmentInfo)
+				if in.LoadCondition != querypb.TriggerCondition_loadBalance {
+					segmentInfo.SegmentState = querypb.SegmentState_sealing
+					segmentInfo.NodeID = nodeID
+				}
+			} else {
+				segmentInfo = &querypb.SegmentInfo{
+					SegmentID:    segmentID,
+					CollectionID: info.CollectionID,
+					PartitionID:  info.PartitionID,
+					NodeID:       nodeID,
+					SegmentState: querypb.SegmentState_sealing,
+				}
 			}
-			segmentInfo := &querypb.SegmentInfo{
-				SegmentID:    segmentID,
-				CollectionID: info.CollectionID,
-				PartitionID:  info.PartitionID,
-				NodeID:       nodeID,
-				SegmentState: querypb.SegmentState_sealing,
-			}
-			c.clusterMeta.segmentInfos[segmentID] = segmentInfo
+			c.clusterMeta.setSegmentInfo(segmentID, segmentInfo)
 		}
 		status, err := node.client.LoadSegments(ctx, in)
 		if err == nil && status.ErrorCode == commonpb.ErrorCode_Success {
 			for _, info := range in.Infos {
-				if !c.clusterMeta.hasCollection(info.CollectionID) {
-					c.clusterMeta.addCollection(info.CollectionID, in.Schema)
-				}
-
+				c.clusterMeta.addCollection(info.CollectionID, in.Schema)
 				c.clusterMeta.addPartition(info.CollectionID, info.PartitionID)
 
-				if !node.hasCollection(info.CollectionID) {
-					node.addCollection(info.CollectionID, in.Schema)
-				}
+				node.addCollection(info.CollectionID, in.Schema)
 				node.addPartition(info.CollectionID, info.PartitionID)
 			}
-			return status, err
+		} else {
+			for _, info := range in.Infos {
+				segmentID := info.SegmentID
+				if _, ok = segmentInfos[segmentID]; ok {
+					c.clusterMeta.setSegmentInfo(segmentID, segmentInfos[segmentID])
+					continue
+				}
+				c.clusterMeta.removeSegmentInfo(segmentID)
+				c.clusterMeta.deleteSegmentInfoByID(segmentID)
+			}
 		}
-		for _, info := range in.Infos {
-			segmentID := info.SegmentID
-			c.clusterMeta.deleteSegmentInfoByID(segmentID)
-		}
+
 		return status, err
 	}
 	return nil, errors.New("Can't find query node by nodeID ")
@@ -108,6 +187,15 @@ func (c *queryNodeCluster) ReleaseSegments(ctx context.Context, nodeID int64, in
 	defer c.Unlock()
 
 	if node, ok := c.nodes[nodeID]; ok {
+		if !node.isOnService() {
+			return nil, errors.New("node offline")
+		}
+		for _, segmentID := range in.SegmentIDs {
+			err := c.clusterMeta.removeSegmentInfo(segmentID)
+			if err != nil {
+				log.Error("remove segmentInfo Error", zap.Any("error", err.Error()), zap.Int64("segmentID", segmentID))
+			}
+		}
 		status, err := node.client.ReleaseSegments(ctx, in)
 		if err == nil && status.ErrorCode == commonpb.ErrorCode_Success {
 			for _, segmentID := range in.SegmentIDs {
@@ -123,7 +211,11 @@ func (c *queryNodeCluster) ReleaseSegments(ctx context.Context, nodeID int64, in
 func (c *queryNodeCluster) WatchDmChannels(ctx context.Context, nodeID int64, in *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	c.Lock()
 	defer c.Unlock()
+
 	if node, ok := c.nodes[nodeID]; ok {
+		if !node.isOnService() {
+			return nil, errors.New("node offline")
+		}
 		channels := make([]string, 0)
 		for _, info := range in.Infos {
 			channels = append(channels, info.ChannelName)
@@ -133,14 +225,13 @@ func (c *queryNodeCluster) WatchDmChannels(ctx context.Context, nodeID int64, in
 		log.Debug("queryNode watch dm channel done")
 		if err == nil && status.ErrorCode == commonpb.ErrorCode_Success {
 			collectionID := in.CollectionID
-			if !c.clusterMeta.hasCollection(collectionID) {
-				c.clusterMeta.addCollection(collectionID, in.Schema)
-			}
+			c.clusterMeta.addCollection(collectionID, in.Schema)
 			c.clusterMeta.addDmChannel(collectionID, nodeID, channels)
-			if !node.hasCollection(collectionID) {
-				node.addCollection(collectionID, in.Schema)
-			}
+
+			node.addCollection(collectionID, in.Schema)
 			node.addDmChannel(collectionID, channels)
+		} else {
+
 		}
 		return status, err
 	}
@@ -151,8 +242,6 @@ func (c *queryNodeCluster) hasWatchedQueryChannel(ctx context.Context, nodeID in
 	c.Lock()
 	defer c.Unlock()
 
-	//TODO::should reopen
-	//collectionID = 0
 	return c.nodes[nodeID].hasWatchedQueryChannel(collectionID)
 }
 
@@ -237,8 +326,13 @@ func (c *queryNodeCluster) getSegmentInfo(ctx context.Context, in *querypb.GetSe
 	defer c.Unlock()
 
 	segmentInfos := make([]*querypb.SegmentInfo, 0)
-	for _, node := range c.nodes {
-		res, err := node.client.GetSegmentInfo(ctx, in)
+	nodes, err := c.getOnServiceNodeIDs()
+	if err != nil {
+		log.Warn(err.Error())
+		return segmentInfos, nil
+	}
+	for _, nodeID := range nodes {
+		res, err := c.nodes[nodeID].client.GetSegmentInfo(ctx, in)
 		if err != nil {
 			return nil, err
 		}
@@ -284,16 +378,69 @@ func (c *queryNodeCluster) getNumSegments(nodeID int64) (int, error) {
 	return numSegment, nil
 }
 
-func (c *queryNodeCluster) RegisterNode(ip string, port int64, id UniqueID) error {
-	node, err := newQueryNode(ip, port, id)
+func (c *queryNodeCluster) RegisterNode(session *sessionutil.Session, id UniqueID) error {
+	c.Lock()
+	defer c.Unlock()
+
+	sessionJSON, err := json.Marshal(session)
 	if err != nil {
 		return err
 	}
-	c.Lock()
-	defer c.Unlock()
+	key := fmt.Sprintf("%s/%d", queryNodeInfoPrefix, id)
+	err = c.client.Save(key, string(sessionJSON))
+	if err != nil {
+		return err
+	}
+	node, err := newQueryNode(session.Address, id, c.client)
+	if err != nil {
+		return err
+	}
+	log.Debug("register a new query node", zap.Int64("nodeID", id), zap.String("address", session.Address))
+
 	if _, ok := c.nodes[id]; !ok {
 		c.nodes[id] = node
 		return nil
 	}
+
 	return fmt.Errorf("node %d alredy exists in cluster", id)
+}
+
+func (c *queryNodeCluster) removeNodeInfo(nodeID int64) error {
+	key := fmt.Sprintf("%s/%d", queryNodeInfoPrefix, nodeID)
+	return c.client.Remove(key)
+}
+
+func (c *queryNodeCluster) onServiceNodeIDs() ([]int64, error) {
+	c.Lock()
+	defer c.Unlock()
+
+	return c.getOnServiceNodeIDs()
+}
+
+func (c *queryNodeCluster) getOnServiceNodeIDs() ([]int64, error) {
+	nodeIDs := make([]int64, 0)
+	for nodeID, node := range c.nodes {
+		if node.isOnService() {
+			nodeIDs = append(nodeIDs, nodeID)
+		}
+	}
+	if len(nodeIDs) == 0 {
+		return nil, errors.New("no queryNode is alive")
+	}
+
+	return nodeIDs, nil
+}
+
+func (c *queryNodeCluster) printMeta() {
+	for id, node := range c.nodes {
+		if node.isOnService() {
+			for collectionID, info := range node.collectionInfos {
+				log.Debug("queryService cluster info: collectionInfo", zap.Int64("nodeID", id), zap.Int64("collectionID", collectionID), zap.Any("info", info))
+			}
+
+			for collectionID, info := range node.watchedQueryChannels {
+				log.Debug("queryService cluster info: watchedQueryChannelInfo", zap.Int64("nodeID", id), zap.Int64("collectionID", collectionID), zap.Any("info", info))
+			}
+		}
+	}
 }
