@@ -22,8 +22,8 @@ services:
       - milvus
 
   standalone:
-    image: registry.zilliz.com/milvus/milvus:master-release
-    command: ["/milvus/bin/standalone"]
+    image: milvusdb/milvus:latest
+    command: ["milvus", "run", "standalone"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
