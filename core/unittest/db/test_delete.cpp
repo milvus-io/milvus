@@ -90,14 +90,20 @@ TEST_F(DeleteTest, DELETE_IN_MEM) {
 
     int64_t num_query = 10;
     std::map<int64_t, milvus::engine::VectorsData> search_vectors;
-    for (int64_t i = 0; i < num_query; ++i) {
+    for (int64_t i = 0; i < num_query; ) {
         int64_t index = dis(gen);
+        auto temp_id = xb.id_array_[index];
+        if (search_vectors.find(temp_id) != search_vectors.end()) {
+            continue;
+        }
+
         milvus::engine::VectorsData search;
         search.vector_count_ = 1;
         for (int64_t j = 0; j < COLLECTION_DIM; j++) {
             search.float_data_.push_back(xb.float_data_[index * COLLECTION_DIM + j]);
         }
-        search_vectors.insert(std::make_pair(xb.id_array_[index], search));
+        search_vectors.insert(std::make_pair(temp_id, search));
+        ++i;
     }
 
     milvus::engine::IDNumbers ids_to_delete;
@@ -159,14 +165,21 @@ TEST_F(DeleteTest, DELETE_ON_DISK) {
 
     int64_t num_query = 80;
     std::map<int64_t, milvus::engine::VectorsData> search_vectors;
-    for (int64_t i = 0; i < num_query; ++i) {
+    for (int64_t i = 0; i < num_query; ) {
         int64_t index = dis(gen);
+        auto temp_id = xb.id_array_[index];
+        if (search_vectors.find(temp_id) != search_vectors.end()) {
+            continue;
+        }
+
         milvus::engine::VectorsData search;
         search.vector_count_ = 1;
         for (int64_t j = 0; j < COLLECTION_DIM; j++) {
             search.float_data_.push_back(xb.float_data_[index * COLLECTION_DIM + j]);
         }
-        search_vectors.insert(std::make_pair(xb.id_array_[index], search));
+
+        search_vectors.insert(std::make_pair(temp_id, search));
+        ++i;
     }
     auto it = search_vectors.begin();
 
@@ -258,14 +271,20 @@ TEST_F(DeleteTest, DELETE_MULTIPLE_TIMES) {
 
     int64_t num_query = 10;
     std::map<int64_t, milvus::engine::VectorsData> search_vectors;
-    for (int64_t i = 0; i < num_query; ++i) {
+    for (int64_t i = 0; i < num_query; ) {
         int64_t index = dis(gen);
+        auto temp_id = xb.id_array_[index];
+        if (search_vectors.find(temp_id) != search_vectors.end()) {
+            continue;
+        }
+
         milvus::engine::VectorsData search;
         search.vector_count_ = 1;
         for (int64_t j = 0; j < COLLECTION_DIM; j++) {
             search.float_data_.push_back(xb.float_data_[index * COLLECTION_DIM + j]);
         }
-        search_vectors.insert(std::make_pair(xb.id_array_[index], search));
+        search_vectors.insert(std::make_pair(temp_id, search));
+        ++i;
     }
 
     //    std::this_thread::sleep_for(std::chrono::seconds(3));  // ensure raw data write to disk
@@ -331,14 +350,20 @@ TEST_F(DeleteTest, DELETE_BEFORE_CREATE_INDEX) {
 
     int64_t num_query = 10;
     std::map<int64_t, milvus::engine::VectorsData> search_vectors;
-    for (int64_t i = 0; i < num_query; ++i) {
+    for (int64_t i = 0; i < num_query; ) {
         int64_t index = dis(gen);
+        auto temp_id = xb.id_array_[index];
+        if (search_vectors.find(temp_id) != search_vectors.end()) {
+            continue;
+        }
+
         milvus::engine::VectorsData search;
         search.vector_count_ = 1;
         for (int64_t j = 0; j < COLLECTION_DIM; j++) {
             search.float_data_.push_back(xb.float_data_[index * COLLECTION_DIM + j]);
         }
-        search_vectors.insert(std::make_pair(xb.id_array_[index], search));
+        search_vectors.insert(std::make_pair(temp_id, search));
+        ++i;
     }
 
     milvus::engine::IDNumbers ids_to_delete;
@@ -410,14 +435,20 @@ TEST_F(DeleteTest, DELETE_WITH_INDEX) {
 
     int64_t num_query = 10;
     std::map<int64_t, milvus::engine::VectorsData> search_vectors;
-    for (int64_t i = 0; i < num_query; ++i) {
+    for (int64_t i = 0; i < num_query; ) {
         int64_t index = dis(gen);
+        auto temp_id = xb.id_array_[index];
+        if (search_vectors.find(temp_id) != search_vectors.end()) {
+            continue;
+        }
+
         milvus::engine::VectorsData search;
         search.vector_count_ = 1;
         for (int64_t j = 0; j < COLLECTION_DIM; j++) {
             search.float_data_.push_back(xb.float_data_[index * COLLECTION_DIM + j]);
         }
-        search_vectors.insert(std::make_pair(xb.id_array_[index], search));
+        search_vectors.insert(std::make_pair(temp_id, search));
+        ++i;
     }
 
     milvus::engine::CollectionIndex index;
@@ -492,14 +523,20 @@ TEST_F(DeleteTest, DELETE_MULTIPLE_TIMES_WITH_INDEX) {
 
     int64_t num_query = 10;
     std::map<int64_t, milvus::engine::VectorsData> search_vectors;
-    for (int64_t i = 0; i < num_query; ++i) {
+    for (int64_t i = 0; i < num_query; ) {
         int64_t index = dis(gen);
+        auto temp_id = xb.id_array_[index];
+        if (search_vectors.find(temp_id) != search_vectors.end()) {
+            continue;
+        }
+
         milvus::engine::VectorsData search;
         search.vector_count_ = 1;
         for (int64_t j = 0; j < COLLECTION_DIM; j++) {
             search.float_data_.push_back(xb.float_data_[index * COLLECTION_DIM + j]);
         }
-        search_vectors.insert(std::make_pair(xb.id_array_[index], search));
+        search_vectors.insert(std::make_pair(temp_id, search));
+        ++i;
     }
 
     //    std::this_thread::sleep_for(std::chrono::seconds(3));  // ensure raw data write to disk
@@ -822,14 +859,20 @@ TEST_F(CompactTest, COMPACT_WITH_INDEX) {
 
     int64_t num_query = 10;
     std::map<int64_t, milvus::engine::VectorsData> search_vectors;
-    for (int64_t i = 0; i < num_query; ++i) {
+    for (int64_t i = 0; i < num_query; ) {
         int64_t index = dis(gen);
+        auto temp_id = xb.id_array_[index];
+        if (search_vectors.find(temp_id) != search_vectors.end()) {
+            continue;
+        }
+
         milvus::engine::VectorsData search;
         search.vector_count_ = 1;
         for (int64_t j = 0; j < COLLECTION_DIM; j++) {
             search.float_data_.push_back(xb.float_data_[index * COLLECTION_DIM + j]);
         }
-        search_vectors.insert(std::make_pair(xb.id_array_[index], search));
+        search_vectors.insert(std::make_pair(temp_id, search));
+        ++i;
     }
 
     milvus::engine::CollectionIndex index;
