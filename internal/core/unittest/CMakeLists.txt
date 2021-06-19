@@ -36,6 +36,7 @@ set(MILVUS_TEST_FILES
         test_init.cpp
         test_plan_proto.cpp
         test_get_entity_by_ids.cpp
+        test_timestamp_index.cpp
         )
 
 add_executable(all_tests

@@ -61,6 +61,17 @@ class ExecPlanNodeVisitor : PlanNodeVisitor {
 }  // namespace impl
 #endif
 
+static QueryResult
+empty_query_result(int64_t num_queries, int64_t topk, MetricType metric_type) {
+    QueryResult final_result;
+    SubQueryResult result(num_queries, topk, metric_type);
+    final_result.num_queries_ = num_queries;
+    final_result.topK_ = topk;
+    final_result.internal_seg_offsets_ = std::move(result.mutable_labels());
+    final_result.result_distances_ = std::move(result.mutable_values());
+    return final_result;
+}
+
 template <typename VectorType>
 void
 ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
@@ -76,15 +87,24 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     aligned_vector<uint8_t> bitset_holder;
     BitsetView view;
     // TODO: add API to unify row_count
-    auto row_count = segment->get_row_count();
+    // auto row_count = segment->get_row_count();
+    auto active_count = segment->get_active_count(timestamp_);
+
+    // skip all calculation
+    if (active_count == 0) {
+        ret_ = empty_query_result(num_queries, node.query_info_.topK_, node.query_info_.metric_type_);
+        return;
+    }
 
     if (node.predicate_.has_value()) {
-        ExecExprVisitor::RetType expr_ret = ExecExprVisitor(*segment, row_count).call_child(*node.predicate_.value());
+        ExecExprVisitor::RetType expr_ret =
+            ExecExprVisitor(*segment, active_count, timestamp_).call_child(*node.predicate_.value());
+        segment->mask_with_timestamps(expr_ret, timestamp_);
         bitset_holder = AssembleNegBitset(expr_ret);
         view = BitsetView(bitset_holder.data(), bitset_holder.size() * 8);
     }
 
-    segment->vector_search(row_count, node.query_info_, src_data, num_queries, view, ret);
+    segment->vector_search(active_count, node.query_info_, src_data, num_queries, MAX_TIMESTAMP, view, ret);
 
     ret_ = ret;
 }

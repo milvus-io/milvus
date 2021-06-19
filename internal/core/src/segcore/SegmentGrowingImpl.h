@@ -33,6 +33,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <deque>
 
 namespace milvus::segcore {
 
@@ -136,6 +137,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return 0;
     }
 
+    int64_t
+    get_active_count(Timestamp ts) const override;
+
     // for scalar vectors
     template <typename T>
     void
@@ -171,10 +175,14 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     void
+    mask_with_timestamps(std::deque<boost::dynamic_bitset<>>& bitset_chunks, Timestamp timestamp) const override;
+
+    void
     vector_search(int64_t vec_count,
                   query::QueryInfo query_info,
                   const void* query_data,
                   int64_t query_count,
+                  Timestamp timestamp,
                   const BitsetView& bitset,
                   QueryResult& output) const override;
 

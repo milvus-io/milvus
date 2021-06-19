@@ -27,6 +27,7 @@
 #include "query/PlanImpl.h"
 #include "segcore/Reduce.h"
 #include "utils/tools.h"
+#include <boost/iterator/counting_iterator.hpp>
 
 namespace milvus::segcore {
 
@@ -289,6 +290,7 @@ SegmentGrowingImpl::vector_search(int64_t vec_count,
                                   query::QueryInfo query_info,
                                   const void* query_data,
                                   int64_t query_count,
+                                  Timestamp timestamp,
                                   const BitsetView& bitset,
                                   QueryResult& output) const {
     auto& sealed_indexing = this->get_sealed_indexing_record();
@@ -490,6 +492,21 @@ SegmentGrowingImpl::search_ids(const IdArray& id_array, Timestamp timestamp) con
 std::string
 SegmentGrowingImpl::debug() const {
     return "Growing\n";
+}
+
+int64_t
+SegmentGrowingImpl::get_active_count(Timestamp ts) const {
+    auto row_count = this->get_row_count();
+    auto& ts_vec = this->get_insert_record().timestamps_;
+    auto iter = std::upper_bound(boost::make_counting_iterator((int64_t)0), boost::make_counting_iterator(row_count),
+                                 ts, [&](Timestamp ts, int64_t index) { return ts < ts_vec[index]; });
+    return *iter;
+}
+
+void
+SegmentGrowingImpl::mask_with_timestamps(std::deque<boost::dynamic_bitset<>>& bitset_chunks,
+                                         Timestamp timestamp) const {
+    // DO NOTHING
 }
 
 }  // namespace milvus::segcore

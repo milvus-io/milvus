@@ -227,10 +227,6 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, binlogPaths
 	blobs := make([]*storage.Blob, 0)
 	for _, binlogPath := range binlogPaths {
 		fieldID := binlogPath.FieldID
-		if fieldID == timestampFieldID {
-			// seg core doesn't need timestamp field
-			continue
-		}
 
 		paths := binlogPath.Binlogs
 		log.Debug("load segment fields data",
@@ -254,6 +250,7 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, binlogPaths
 	}
 
 	_, _, insertData, err := iCodec.Deserialize(blobs)
+
 	if err != nil {
 		log.Error(err.Error())
 		return err

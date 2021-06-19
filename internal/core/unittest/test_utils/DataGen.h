@@ -299,6 +299,13 @@ SealedLoader(const GeneratedData& dataset, SegmentSealed& seg) {
         info.field_id = 0;  // field id for RowId
         seg.LoadFieldData(info);
     }
+    {
+        LoadFieldDataInfo info;
+        info.blob = dataset.timestamps_.data();
+        info.row_count = dataset.timestamps_.size();
+        info.field_id = 1;
+        seg.LoadFieldData(info);
+    }
     int field_offset = 0;
     for (auto& meta : seg.get_schema().get_fields()) {
         LoadFieldDataInfo info;
