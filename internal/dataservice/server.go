@@ -37,8 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
-const role = "dataservice"
-
 const masterClientTimout = 20 * time.Second
 
 type (
@@ -93,7 +91,7 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 // Register register data service at etcd
 func (s *Server) Register() error {
 	s.session = sessionutil.NewSession(s.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
-	s.activeCh = s.session.Init(typeutil.DataServiceRole, Params.IP, true)
+	s.activeCh = s.session.Init(typeutil.DataCoordRole, Params.IP, true)
 	Params.NodeID = s.session.ServerID
 	return nil
 }
@@ -160,7 +158,7 @@ func (s *Server) initCluster() error {
 func (s *Server) initServiceDiscovery() error {
 	sessions, rev, err := s.session.GetSessions(typeutil.DataNodeRole)
 	if err != nil {
-		log.Debug("DataService initMeta failed", zap.Error(err))
+		log.Debug("DataCoord initMeta failed", zap.Error(err))
 		return err
 	}
 	log.Debug("registered sessions", zap.Any("sessions", sessions))
@@ -175,7 +173,7 @@ func (s *Server) initServiceDiscovery() error {
 	}
 
 	if err := s.cluster.startup(datanodes); err != nil {
-		log.Debug("DataService loadMetaFromMaster failed", zap.Error(err))
+		log.Debug("DataCoord loadMetaFromMaster failed", zap.Error(err))
 		return err
 	}
 
@@ -195,7 +193,7 @@ func (s *Server) initSegmentInfoChannel() error {
 		return err
 	}
 	s.segmentInfoStream.AsProducer([]string{Params.SegmentInfoChannelName})
-	log.Debug("DataService AsProducer: " + Params.SegmentInfoChannelName)
+	log.Debug("DataCoord AsProducer: " + Params.SegmentInfoChannelName)
 	s.segmentInfoStream.Start()
 	return nil
 }
@@ -224,7 +222,7 @@ func (s *Server) initFlushMsgStream() error {
 		return err
 	}
 	s.flushMsgStream.AsProducer([]string{Params.SegmentInfoChannelName})
-	log.Debug("dataservice AsProducer:" + Params.SegmentInfoChannelName)
+	log.Debug("DataCoord AsProducer:" + Params.SegmentInfoChannelName)
 	s.flushMsgStream.Start()
 
 	return nil
@@ -244,10 +242,10 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 	statsStream, _ := s.msFactory.NewMsgStream(ctx)
-	statsStream.AsConsumer([]string{Params.StatisticsChannelName}, Params.DataServiceSubscriptionName)
-	log.Debug("dataservce stats stream",
+	statsStream.AsConsumer([]string{Params.StatisticsChannelName}, Params.DataCoordSubscriptionName)
+	log.Debug("DataCoord stats stream",
 		zap.String("channelName", Params.StatisticsChannelName),
-		zap.String("descriptionName", Params.DataServiceSubscriptionName))
+		zap.String("descriptionName", Params.DataCoordSubscriptionName))
 	statsStream.Start()
 	defer statsStream.Close()
 	for {
@@ -284,9 +282,9 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 		return
 	}
 	ttMsgStream.AsConsumer([]string{Params.TimeTickChannelName},
-		Params.DataServiceSubscriptionName)
-	log.Debug(fmt.Sprintf("dataservice AsConsumer:%s:%s",
-		Params.TimeTickChannelName, Params.DataServiceSubscriptionName))
+		Params.DataCoordSubscriptionName)
+	log.Debug(fmt.Sprintf("DataCoord AsConsumer:%s:%s",
+		Params.TimeTickChannelName, Params.DataCoordSubscriptionName))
 	ttMsgStream.Start()
 	defer ttMsgStream.Close()
 	for {
@@ -454,7 +452,7 @@ func (s *Server) Stop() error {
 	if !atomic.CompareAndSwapInt64(&s.isServing, 2, 0) {
 		return nil
 	}
-	log.Debug("dataservice server shutdown")
+	log.Debug("DataCoord server shutdown")
 	atomic.StoreInt64(&s.isServing, 0)
 	s.cluster.releaseSessions()
 	s.segmentInfoStream.Close()

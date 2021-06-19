@@ -46,11 +46,11 @@ type ParamTable struct {
 	SegmentSizeFactor     float64
 	SegIDAssignExpiration int64
 
-	InsertChannelPrefixName     string
-	StatisticsChannelName       string
-	TimeTickChannelName         string
-	SegmentInfoChannelName      string
-	DataServiceSubscriptionName string
+	InsertChannelPrefixName   string
+	StatisticsChannelName     string
+	TimeTickChannelName       string
+	SegmentInfoChannelName    string
+	DataCoordSubscriptionName string
 
 	Log log.Config
 }
@@ -83,7 +83,7 @@ func (p *ParamTable) Init() {
 		p.initStatisticsChannelName()
 		p.initTimeTickChannelName()
 		p.initSegmentInfoChannelName()
-		p.initDataServiceSubscriptionName()
+		p.initDataCoordSubscriptionName()
 		p.initLogCfg()
 
 		p.initFlushStreamPosSubPath()
@@ -148,20 +148,20 @@ func (p *ParamTable) initCollectionBinlogSubPath() {
 }
 
 func (p *ParamTable) initSegmentSize() {
-	p.SegmentSize = p.ParseFloat("dataservice.segment.size")
+	p.SegmentSize = p.ParseFloat("datacoord.segment.size")
 }
 
 func (p *ParamTable) initSegmentSizeFactor() {
-	p.SegmentSizeFactor = p.ParseFloat("dataservice.segment.sizeFactor")
+	p.SegmentSizeFactor = p.ParseFloat("datacoord.segment.sizeFactor")
 }
 
 func (p *ParamTable) initSegIDAssignExpiration() {
-	p.SegIDAssignExpiration = p.ParseInt64("dataservice.segment.IDAssignExpiration") //ms
+	p.SegIDAssignExpiration = p.ParseInt64("datacoord.segment.IDAssignExpiration") //ms
 }
 
 func (p *ParamTable) initInsertChannelPrefixName() {
 	var err error
-	p.InsertChannelPrefixName, err = p.Load("msgChannel.chanNamePrefix.dataServiceInsertChannel")
+	p.InsertChannelPrefixName, err = p.Load("msgChannel.chanNamePrefix.dataCoordInsertChannel")
 	if err != nil {
 		panic(err)
 	}
@@ -169,7 +169,7 @@ func (p *ParamTable) initInsertChannelPrefixName() {
 
 func (p *ParamTable) initStatisticsChannelName() {
 	var err error
-	p.StatisticsChannelName, err = p.Load("msgChannel.chanNamePrefix.dataServiceStatistic")
+	p.StatisticsChannelName, err = p.Load("msgChannel.chanNamePrefix.dataCoordStatistic")
 	if err != nil {
 		panic(err)
 	}
@@ -177,7 +177,7 @@ func (p *ParamTable) initStatisticsChannelName() {
 
 func (p *ParamTable) initTimeTickChannelName() {
 	var err error
-	p.TimeTickChannelName, err = p.Load("msgChannel.chanNamePrefix.dataServiceTimeTick")
+	p.TimeTickChannelName, err = p.Load("msgChannel.chanNamePrefix.dataCoordTimeTick")
 	if err != nil {
 		panic(err)
 	}
@@ -185,15 +185,15 @@ func (p *ParamTable) initTimeTickChannelName() {
 
 func (p *ParamTable) initSegmentInfoChannelName() {
 	var err error
-	p.SegmentInfoChannelName, err = p.Load("msgChannel.chanNamePrefix.dataServiceSegmentInfo")
+	p.SegmentInfoChannelName, err = p.Load("msgChannel.chanNamePrefix.dataCoordSegmentInfo")
 	if err != nil {
 		panic(err)
 	}
 }
 
-func (p *ParamTable) initDataServiceSubscriptionName() {
+func (p *ParamTable) initDataCoordSubscriptionName() {
 	var err error
-	p.DataServiceSubscriptionName, err = p.Load("msgChannel.subNamePrefix.dataServiceSubNamePrefix")
+	p.DataCoordSubscriptionName, err = p.Load("msgChannel.subNamePrefix.dataCoordSubNamePrefix")
 	if err != nil {
 		panic(err)
 	}
@@ -219,7 +219,7 @@ func (p *ParamTable) initLogCfg() {
 		panic(err)
 	}
 	if len(rootPath) != 0 {
-		p.Log.File.Filename = path.Join(rootPath, "dataservice-"+strconv.FormatInt(p.NodeID, 10)+".log")
+		p.Log.File.Filename = path.Join(rootPath, "datacoord-"+strconv.FormatInt(p.NodeID, 10)+".log")
 	} else {
 		p.Log.File.Filename = ""
 	}
