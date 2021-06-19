@@ -166,7 +166,10 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 	)
 
 	flushChan := make(chan *flushMsg, 100)
-	dataSyncService := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataService, node.masterService)
+	dataSyncService, err := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataService)
+	if err != nil {
+		return err
+	}
 	node.vchan2SyncService[vchan.GetChannelName()] = dataSyncService
 	node.vchan2FlushCh[vchan.GetChannelName()] = flushChan
 
@@ -262,7 +265,9 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 				zap.String("channel name", chanInfo.ChannelName),
 				zap.Any("channal Info", chanInfo),
 			)
-			node.NewDataSyncService(chanInfo)
+			if err := node.NewDataSyncService(chanInfo); err != nil {
+				log.Warn("Failed to new data sync service", zap.Any("channel", chanInfo))
+			}
 		}
 
 		status.ErrorCode = commonpb.ErrorCode_Success
