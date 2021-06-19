@@ -1160,6 +1160,11 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 	}
+	travelTimestamp := st.query.TravelTimestamp
+	if travelTimestamp == 0 {
+		travelTimestamp = st.BeginTs()
+	}
+	st.SearchRequest.TravelTimestamp = travelTimestamp
 
 	st.SearchRequest.ResultChannelID = Params.SearchResultChannelNames[0]
 	st.SearchRequest.DbID = 0 // todo
@@ -1674,6 +1679,12 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 	} else {
 		rt.OutputFields = rt.retrieve.OutputFields
 	}
+
+	travelTimestamp := rt.retrieve.TravelTimestamp
+	if travelTimestamp == 0 {
+		travelTimestamp = rt.BeginTs()
+	}
+	rt.RetrieveRequest.TravelTimestamp = travelTimestamp
 
 	rt.ResultChannelID = Params.RetrieveResultChannelNames[0]
 	rt.DbID = 0 // todo(yukun)

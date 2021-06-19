@@ -132,6 +132,7 @@ message SearchRequest {
   bytes placeholder_group = 7;
   common.DslType dsl_type = 8;
   bytes serialized_expr_plan = 9;
+  uint64 travel_timestamp = 10;
 }
 
 message SearchResults {
@@ -153,6 +154,7 @@ message RetrieveRequest {
   repeated int64 partitionIDs = 5;
   schema.IDs ids = 6;
   repeated string output_fields = 7;
+  uint64 travel_timestamp = 8;
 }
 
 message RetrieveResults {
