@@ -17,9 +17,11 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -29,13 +31,19 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 )
 
+const (
+	queryServiceSegmentMetaPrefix = "queryService-segmentMeta"
+	queryNodeSegmentMetaPrefix    = "queryNode-segmentMeta"
+)
+
 // segmentLoader is only responsible for loading the field data from binlog
 type segmentLoader struct {
 	historicalReplica ReplicaInterface
 
 	dataService types.DataService
 
-	kv kv.BaseKV // minio kv
+	minioKV kv.BaseKV // minio minioKV
+	etcdKV  *etcdkv.EtcdKV
 
 	indexLoader *indexLoader
 }
@@ -100,6 +108,30 @@ func (loader *segmentLoader) loadSegment(req *queryPb.LoadSegmentsRequest, onSer
 		if err != nil {
 			deleteSegment(segment)
 			log.Error(err.Error())
+			continue
+		}
+		if onService {
+			key := fmt.Sprintf("%s/%d", queryServiceSegmentMetaPrefix, segmentID)
+			value, err := loader.etcdKV.Load(key)
+			if err != nil {
+				deleteSegment(segment)
+				log.Error("error when load segment info from etcd", zap.Any("error", err.Error()))
+				continue
+			}
+			segmentInfo := &queryPb.SegmentInfo{}
+			err = proto.UnmarshalText(value, segmentInfo)
+			if err != nil {
+				deleteSegment(segment)
+				log.Error("error when unmarshal segment info from etcd", zap.Any("error", err.Error()))
+				continue
+			}
+			segmentInfo.SegmentState = queryPb.SegmentState_sealed
+			newKey := fmt.Sprintf("%s/%d", queryNodeSegmentMetaPrefix, segmentID)
+			err = loader.etcdKV.Save(newKey, proto.MarshalTextString(segmentInfo))
+			if err != nil {
+				deleteSegment(segment)
+				log.Error("error when update segment info to etcd", zap.Any("error", err.Error()))
+			}
 		}
 	}
 
@@ -211,7 +243,7 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, binlogPaths
 			Value: make([]byte, 0),
 		}
 		for _, path := range paths {
-			binLog, err := loader.kv.Load(path)
+			binLog, err := loader.minioKV.Load(path)
 			if err != nil {
 				// TODO: return or continue?
 				return err
@@ -273,7 +305,7 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, binlogPaths
 	return nil
 }
 
-func newSegmentLoader(ctx context.Context, masterService types.MasterService, indexService types.IndexService, dataService types.DataService, replica ReplicaInterface) *segmentLoader {
+func newSegmentLoader(ctx context.Context, masterService types.MasterService, indexService types.IndexService, dataService types.DataService, replica ReplicaInterface, etcdKV *etcdkv.EtcdKV) *segmentLoader {
 	option := &minioKV.Option{
 		Address:           Params.MinioEndPoint,
 		AccessKeyID:       Params.MinioAccessKeyID,
@@ -294,7 +326,8 @@ func newSegmentLoader(ctx context.Context, masterService types.MasterService, in
 
 		dataService: dataService,
 
-		kv: client,
+		minioKV: client,
+		etcdKV:  etcdKV,
 
 		indexLoader: iLoader,
 	}

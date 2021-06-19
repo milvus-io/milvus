@@ -50,6 +50,7 @@ type ParamTable struct {
 	// --- ETCD ---
 	EtcdEndpoints []string
 	MetaRootPath  string
+	KvRootPath    string
 }
 
 var Params ParamTable
@@ -86,6 +87,7 @@ func (p *ParamTable) Init() {
 		// --- ETCD ---
 		p.initEtcdEndpoints()
 		p.initMetaRootPath()
+		p.initKvRootPath()
 	})
 }
 
@@ -193,4 +195,16 @@ func (p *ParamTable) initMetaRootPath() {
 		panic(err)
 	}
 	p.MetaRootPath = path.Join(rootPath, subPath)
+}
+
+func (p *ParamTable) initKvRootPath() {
+	rootPath, err := p.Load("etcd.rootPath")
+	if err != nil {
+		panic(err)
+	}
+	subPath, err := p.Load("etcd.kvSubPath")
+	if err != nil {
+		panic(err)
+	}
+	p.KvRootPath = path.Join(rootPath, subPath)
 }

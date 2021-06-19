@@ -69,7 +69,7 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	//	zap.Int64("tSafe", int64(serviceTimeMsg.timeRange.timestampMax)),
 	//	zap.Any("collectionID", stNode.collectionID),
 	//	zap.Any("id", id),
-	//	zap.Any("channel", channelTmp),
+	//	zap.Any("channel", stNode.vChannel),
 	//)
 
 	//if err := stNode.sendTimeTick(serviceTimeMsg.timeRange.timestampMax); err != nil {

@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -27,15 +28,19 @@ type historical struct {
 	replica      ReplicaInterface
 	loader       *segmentLoader
 	statsService *statsService
+
+	//TODO
+	globalSealedSegments []UniqueID
 }
 
 func newHistorical(ctx context.Context,
 	masterService types.MasterService,
 	dataService types.DataService,
 	indexService types.IndexService,
-	factory msgstream.Factory) *historical {
-	replica := newCollectionReplica()
-	loader := newSegmentLoader(ctx, masterService, indexService, dataService, replica)
+	factory msgstream.Factory,
+	etcdKV *etcdkv.EtcdKV) *historical {
+	replica := newCollectionReplica(etcdKV)
+	loader := newSegmentLoader(ctx, masterService, indexService, dataService, replica, etcdKV)
 	ss := newStatsService(ctx, replica, loader.indexLoader.fieldStatsChan, factory)
 
 	return &historical{

@@ -27,19 +27,19 @@ import "C"
 import (
 	"context"
 	"errors"
-	"fmt"
+	"github.com/milvus-io/milvus/internal/kv"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/util/retry"
+	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 	"math/rand"
 	"strconv"
 	"sync/atomic"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -70,6 +70,9 @@ type QueryNode struct {
 	scheduler *taskScheduler
 
 	session *sessionutil.Session
+
+	minioKV kv.BaseKV // minio minioKV
+	etcdKV  *etcdkv.EtcdKV
 }
 
 func NewQueryNode(ctx context.Context, queryNodeID UniqueID, factory msgstream.Factory) *QueryNode {
@@ -111,57 +114,75 @@ func (node *QueryNode) Register() error {
 	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
 	node.session.Init(typeutil.QueryNodeRole, Params.QueryNodeIP+":"+strconv.FormatInt(Params.QueryNodePort, 10), false)
 	Params.QueryNodeID = node.session.ServerID
+	log.Debug("query nodeID", zap.Int64("nodeID", Params.QueryNodeID))
 	return nil
 }
 
 func (node *QueryNode) Init() error {
-	ctx := context.Background()
+	//ctx := context.Background()
+	connectEtcdFn := func() error {
+		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+		if err != nil {
+			return err
+		}
+		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+		node.etcdKV = etcdKV
+		return err
+	}
+	log.Debug("queryNode try to connect etcd")
+	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
+	if err != nil {
+		log.Debug("queryNode try to connect etcd failed", zap.Error(err))
+		return err
+	}
+	log.Debug("queryNode try to connect etcd success")
 
 	node.historical = newHistorical(node.queryNodeLoopCtx,
 		node.masterService,
 		node.dataService,
 		node.indexService,
-		node.msFactory)
-	node.streaming = newStreaming(node.queryNodeLoopCtx, node.msFactory)
+		node.msFactory,
+		node.etcdKV)
+	node.streaming = newStreaming(node.queryNodeLoopCtx, node.msFactory, node.etcdKV)
 
 	C.SegcoreInit()
-	registerReq := &queryPb.RegisterNodeRequest{
-		Base: &commonpb.MsgBase{
-			SourceID: Params.QueryNodeID,
-		},
-		Address: &commonpb.Address{
-			Ip:   Params.QueryNodeIP,
-			Port: Params.QueryNodePort,
-		},
-	}
-
-	resp, err := node.queryService.RegisterNode(ctx, registerReq)
-	if err != nil {
-		log.Debug("QueryNode RegisterNode failed", zap.Error(err))
-		panic(err)
-	}
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		log.Debug("QueryNode RegisterNode failed", zap.Any("Reason", resp.Status.Reason))
-		panic(resp.Status.Reason)
-	}
-	log.Debug("QueryNode RegisterNode success")
-
-	for _, kv := range resp.InitParams.StartParams {
-		switch kv.Key {
-		case "StatsChannelName":
-			Params.StatsChannelName = kv.Value
-		case "TimeTickChannelName":
-			Params.QueryTimeTickChannelName = kv.Value
-		case "SearchChannelName":
-			Params.SearchChannelNames = append(Params.SearchChannelNames, kv.Value)
-		case "SearchResultChannelName":
-			Params.SearchResultChannelNames = append(Params.SearchResultChannelNames, kv.Value)
-		default:
-			return fmt.Errorf("Invalid key: %v", kv.Key)
-		}
-	}
-
-	log.Debug("QueryNode Init ", zap.Int64("QueryNodeID", Params.QueryNodeID), zap.Any("searchChannelNames", Params.SearchChannelNames))
+	//registerReq := &queryPb.RegisterNodeRequest{
+	//	Base: &commonpb.MsgBase{
+	//		SourceID: Params.QueryNodeID,
+	//	},
+	//	Address: &commonpb.Address{
+	//		Ip:   Params.QueryNodeIP,
+	//		Port: Params.QueryNodePort,
+	//	},
+	//}
+	//
+	//resp, err := node.queryService.RegisterNode(ctx, registerReq)
+	//if err != nil {
+	//	log.Debug("QueryNode RegisterNode failed", zap.Error(err))
+	//	panic(err)
+	//}
+	//if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+	//	log.Debug("QueryNode RegisterNode failed", zap.Any("Reason", resp.Status.Reason))
+	//	panic(resp.Status.Reason)
+	//}
+	//log.Debug("QueryNode RegisterNode success")
+	//
+	//for _, kv := range resp.InitParams.StartParams {
+	//	switch kv.Key {
+	//	case "StatsChannelName":
+	//		Params.StatsChannelName = kv.Value
+	//	case "TimeTickChannelName":
+	//		Params.QueryTimeTickChannelName = kv.Value
+	//	case "SearchChannelName":
+	//		Params.SearchChannelNames = append(Params.SearchChannelNames, kv.Value)
+	//	case "SearchResultChannelName":
+	//		Params.SearchResultChannelNames = append(Params.SearchResultChannelNames, kv.Value)
+	//	default:
+	//		return fmt.Errorf("Invalid key: %v", kv.Key)
+	//	}
+	//}
+	//
+	//log.Debug("QueryNode Init ", zap.Int64("QueryNodeID", Params.QueryNodeID), zap.Any("searchChannelNames", Params.SearchChannelNames))
 
 	if node.masterService == nil {
 		log.Error("null master service detected")

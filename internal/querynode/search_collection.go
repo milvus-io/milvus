@@ -227,33 +227,34 @@ func (s *searchCollection) consumeSearch() {
 }
 
 func (s *searchCollection) loadBalance(msg *msgstream.LoadBalanceSegmentsMsg) {
-	log.Debug("consume load balance message",
-		zap.Int64("msgID", msg.ID()))
-	nodeID := Params.QueryNodeID
-	for _, info := range msg.Infos {
-		segmentID := info.SegmentID
-		if nodeID == info.SourceNodeID {
-			err := s.historical.replica.removeSegment(segmentID)
-			if err != nil {
-				log.Error("loadBalance failed when remove segment",
-					zap.Error(err),
-					zap.Any("segmentID", segmentID))
-			}
-		}
-		if nodeID == info.DstNodeID {
-			segment, err := s.historical.replica.getSegmentByID(segmentID)
-			if err != nil {
-				log.Error("loadBalance failed when making segment on service",
-					zap.Error(err),
-					zap.Any("segmentID", segmentID))
-				continue // not return, try to load balance all segment
-			}
-			segment.setOnService(true)
-		}
-	}
-	log.Debug("load balance done",
-		zap.Int64("msgID", msg.ID()),
-		zap.Int("num of segment", len(msg.Infos)))
+	//TODO:: get loadBalance info from etcd
+	//log.Debug("consume load balance message",
+	//	zap.Int64("msgID", msg.ID()))
+	//nodeID := Params.QueryNodeID
+	//for _, info := range msg.Infos {
+	//	segmentID := info.SegmentID
+	//	if nodeID == info.SourceNodeID {
+	//		err := s.historical.replica.removeSegment(segmentID)
+	//		if err != nil {
+	//			log.Error("loadBalance failed when remove segment",
+	//				zap.Error(err),
+	//				zap.Any("segmentID", segmentID))
+	//		}
+	//	}
+	//	if nodeID == info.DstNodeID {
+	//		segment, err := s.historical.replica.getSegmentByID(segmentID)
+	//		if err != nil {
+	//			log.Error("loadBalance failed when making segment on service",
+	//				zap.Error(err),
+	//				zap.Any("segmentID", segmentID))
+	//			continue // not return, try to load balance all segment
+	//		}
+	//		segment.setOnService(true)
+	//	}
+	//}
+	//log.Debug("load balance done",
+	//	zap.Int64("msgID", msg.ID()),
+	//	zap.Int("num of segment", len(msg.Infos)))
 }
 
 func (s *searchCollection) receiveSearch(msg *msgstream.SearchMsg) {
@@ -346,9 +347,9 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 				zap.Any("tSafe", st))
 
 			s.setServiceableTime(serviceTime)
-			log.Debug("query node::doUnsolvedMsgSearch: setServiceableTime",
-				zap.Any("serviceTime", st),
-			)
+			//log.Debug("query node::doUnsolvedMsgSearch: setServiceableTime",
+			//	zap.Any("serviceTime", st),
+			//)
 
 			searchMsg := make([]*msgstream.SearchMsg, 0)
 			tempMsg := s.popAllUnsolvedMsg()

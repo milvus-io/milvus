@@ -13,17 +13,29 @@ package queryservice
 
 import (
 	"errors"
+	"fmt"
+	"path/filepath"
 	"strconv"
 	"sync"
 
+	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
+const (
+	collectionMetaPrefix   = "queryService-collectionMeta"
+	segmentMetaPrefix      = "queryService-segmentMeta"
+	queryChannelMetaPrefix = "queryService-queryChannel"
+)
+
 type meta struct {
+	client *etcdkv.EtcdKV // client of a reliable kv service, i.e. etcd client
+
 	sync.RWMutex
 	collectionInfos   map[UniqueID]*querypb.CollectionInfo
 	segmentInfos      map[UniqueID]*querypb.SegmentInfo
@@ -32,17 +44,82 @@ type meta struct {
 	partitionStates map[UniqueID]querypb.PartitionState
 }
 
-func newMeta() *meta {
+func newMeta(kv *etcdkv.EtcdKV) (*meta, error) {
 	collectionInfos := make(map[UniqueID]*querypb.CollectionInfo)
 	segmentInfos := make(map[UniqueID]*querypb.SegmentInfo)
 	queryChannelInfos := make(map[UniqueID]*querypb.QueryChannelInfo)
 	partitionStates := make(map[UniqueID]querypb.PartitionState)
-	return &meta{
+
+	m := &meta{
+		client:            kv,
 		collectionInfos:   collectionInfos,
 		segmentInfos:      segmentInfos,
 		queryChannelInfos: queryChannelInfos,
 		partitionStates:   partitionStates,
 	}
+
+	err := m.reloadFromKV()
+	if err != nil {
+		return nil, err
+	}
+
+	return m, nil
+}
+
+func (m *meta) reloadFromKV() error {
+	collectionKeys, collectionValues, err := m.client.LoadWithPrefix(collectionMetaPrefix)
+	if err != nil {
+		return err
+	}
+	for index := range collectionKeys {
+		collectionID, err := strconv.ParseInt(filepath.Base(collectionKeys[index]), 10, 64)
+		if err != nil {
+			return err
+		}
+		collectionInfo := &querypb.CollectionInfo{}
+		err = proto.UnmarshalText(collectionValues[index], collectionInfo)
+		if err != nil {
+			return err
+		}
+		m.collectionInfos[collectionID] = collectionInfo
+	}
+
+	segmentKeys, segmentValues, err := m.client.LoadWithPrefix(segmentMetaPrefix)
+	if err != nil {
+		return err
+	}
+	for index := range segmentKeys {
+		segmentID, err := strconv.ParseInt(filepath.Base(segmentKeys[index]), 10, 64)
+		if err != nil {
+			return err
+		}
+		segmentInfo := &querypb.SegmentInfo{}
+		err = proto.UnmarshalText(segmentValues[index], segmentInfo)
+		if err != nil {
+			return err
+		}
+		m.segmentInfos[segmentID] = segmentInfo
+	}
+
+	queryChannelKeys, queryChannelValues, err := m.client.LoadWithPrefix(queryChannelMetaPrefix)
+	if err != nil {
+		return nil
+	}
+	for index := range queryChannelKeys {
+		collectionID, err := strconv.ParseInt(filepath.Base(queryChannelKeys[index]), 10, 64)
+		if err != nil {
+			return err
+		}
+		queryChannelInfo := &querypb.QueryChannelInfo{}
+		err = proto.UnmarshalText(queryChannelValues[index], queryChannelInfo)
+		if err != nil {
+			return err
+		}
+		m.queryChannelInfos[collectionID] = queryChannelInfo
+	}
+	//TODO::update partition states
+
+	return nil
 }
 
 func (m *meta) showCollections() []UniqueID {
@@ -107,6 +184,10 @@ func (m *meta) addCollection(collectionID UniqueID, schema *schemapb.CollectionS
 			Schema:       schema,
 		}
 		m.collectionInfos[collectionID] = newCollection
+		err := m.saveCollectionInfo(collectionID, newCollection)
+		if err != nil {
+			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+		}
 		return nil
 	}
 
@@ -126,6 +207,10 @@ func (m *meta) addPartition(collectionID UniqueID, partitionID UniqueID) error {
 		col.PartitionIDs = append(col.PartitionIDs, partitionID)
 		m.partitionStates[partitionID] = querypb.PartitionState_NotPresent
 		log.Debug("add a  partition to meta", zap.Int64s("partitionIDs", col.PartitionIDs))
+		err := m.saveCollectionInfo(collectionID, col)
+		if err != nil {
+			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+		}
 		return nil
 	}
 	return errors.New("addPartition: can't find collection when add partition")
@@ -134,21 +219,50 @@ func (m *meta) addPartition(collectionID UniqueID, partitionID UniqueID) error {
 func (m *meta) deleteSegmentInfoByID(segmentID UniqueID) {
 	m.Lock()
 	defer m.Unlock()
-	delete(m.segmentInfos, segmentID)
+
+	if _, ok := m.segmentInfos[segmentID]; ok {
+		err := m.removeSegmentInfo(segmentID)
+		if err != nil {
+			log.Error("remove segmentInfo error", zap.Any("error", err.Error()), zap.Int64("segmentID", segmentID))
+		}
+		delete(m.segmentInfos, segmentID)
+	}
+}
+
+func (m *meta) deleteSegmentInfoByNodeID(nodeID UniqueID) {
+	m.Lock()
+	defer m.Unlock()
+
+	for segmentID, info := range m.segmentInfos {
+		if info.NodeID == nodeID {
+			err := m.removeSegmentInfo(segmentID)
+			if err != nil {
+				log.Error("remove segmentInfo error", zap.Any("error", err.Error()), zap.Int64("segmentID", segmentID))
+			}
+			delete(m.segmentInfos, segmentID)
+		}
+	}
 }
 
 func (m *meta) setSegmentInfo(segmentID UniqueID, info *querypb.SegmentInfo) {
 	m.Lock()
 	defer m.Unlock()
 
+	err := m.saveSegmentInfo(segmentID, info)
+	if err != nil {
+		log.Error("save segmentInfo error", zap.Any("error", err.Error()), zap.Int64("segmentID", segmentID))
+	}
 	m.segmentInfos[segmentID] = info
 }
 
 func (m *meta) getSegmentInfos(segmentIDs []UniqueID) ([]*querypb.SegmentInfo, error) {
+	m.Lock()
+	defer m.Unlock()
+
 	segmentInfos := make([]*querypb.SegmentInfo, 0)
 	for _, segmentID := range segmentIDs {
 		if info, ok := m.segmentInfos[segmentID]; ok {
-			segmentInfos = append(segmentInfos, info)
+			segmentInfos = append(segmentInfos, proto.Clone(info).(*querypb.SegmentInfo))
 			continue
 		}
 		return nil, errors.New("segment not exist")
@@ -156,15 +270,49 @@ func (m *meta) getSegmentInfos(segmentIDs []UniqueID) ([]*querypb.SegmentInfo, e
 	return segmentInfos, nil
 }
 
+func (m *meta) hasSegmentInfo(segmentID UniqueID) bool {
+	m.RLock()
+	defer m.RUnlock()
+
+	if _, ok := m.segmentInfos[segmentID]; ok {
+		return true
+	}
+
+	return false
+}
+
 func (m *meta) getSegmentInfoByID(segmentID UniqueID) (*querypb.SegmentInfo, error) {
 	m.Lock()
 	defer m.Unlock()
 
 	if info, ok := m.segmentInfos[segmentID]; ok {
-		return info, nil
+
+		return proto.Clone(info).(*querypb.SegmentInfo), nil
 	}
 
 	return nil, errors.New("getSegmentInfoByID: can't find segmentID in segmentInfos")
+}
+
+func (m *meta) getCollectionInfoByID(collectionID UniqueID) (*querypb.CollectionInfo, error) {
+	m.Lock()
+	defer m.Unlock()
+
+	if info, ok := m.collectionInfos[collectionID]; ok {
+		return proto.Clone(info).(*querypb.CollectionInfo), nil
+	}
+
+	return nil, errors.New("getCollectionInfoByID: can't find collectionID in collectionInfo")
+}
+
+func (m *meta) getQueryChannelInfoByID(collectionID UniqueID) (*querypb.QueryChannelInfo, error) {
+	m.Lock()
+	defer m.Unlock()
+
+	if info, ok := m.queryChannelInfos[collectionID]; ok {
+		return proto.Clone(info).(*querypb.QueryChannelInfo), nil
+	}
+
+	return nil, errors.New("getQueryChannelInfoByID: can't find collectionID in queryChannelInfo")
 }
 
 func (m *meta) updatePartitionState(partitionID UniqueID, state querypb.PartitionState) error {
@@ -201,10 +349,19 @@ func (m *meta) releaseCollection(collectionID UniqueID) {
 	}
 	for id, info := range m.segmentInfos {
 		if info.CollectionID == collectionID {
+			err := m.removeSegmentInfo(id)
+			if err != nil {
+				log.Error("remove segmentInfo error", zap.Any("error", err.Error()), zap.Int64("segmentID", id))
+			}
 			delete(m.segmentInfos, id)
 		}
 	}
+
 	delete(m.queryChannelInfos, collectionID)
+	err := m.removeCollectionInfo(collectionID)
+	if err != nil {
+		log.Error("remove collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+	}
 }
 
 func (m *meta) releasePartition(collectionID UniqueID, partitionID UniqueID) {
@@ -300,6 +457,43 @@ func (m *meta) addDmChannel(collectionID UniqueID, nodeID int64, channels []stri
 			}
 			info.ChannelInfos = append(info.ChannelInfos, newChannelInfo)
 		}
+
+		err := m.saveCollectionInfo(collectionID, info)
+		if err != nil {
+			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+		}
+	}
+
+	return errors.New("addDmChannels: can't find collection in collectionInfos")
+}
+
+func (m *meta) removeDmChannel(collectionID UniqueID, nodeID int64, channels []string) error {
+	m.Lock()
+	defer m.Unlock()
+
+	if info, ok := m.collectionInfos[collectionID]; ok {
+		for _, channelInfo := range info.ChannelInfos {
+			if channelInfo.NodeIDLoaded == nodeID {
+				newChannelIDs := make([]string, 0)
+				for _, channelID := range channelInfo.ChannelIDs {
+					findChannel := false
+					for _, channel := range channels {
+						if channelID == channel {
+							findChannel = true
+						}
+					}
+					if !findChannel {
+						newChannelIDs = append(newChannelIDs, channelID)
+					}
+				}
+				channelInfo.ChannelIDs = newChannelIDs
+			}
+		}
+
+		err := m.saveCollectionInfo(collectionID, info)
+		if err != nil {
+			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+		}
 	}
 
 	return errors.New("addDmChannels: can't find collection in collectionInfos")
@@ -329,4 +523,69 @@ func (m *meta) GetQueryChannel(collectionID UniqueID) (string, string) {
 	m.queryChannelInfos[collectionID] = queryChannelInfo
 	//TODO::return channel according collectionID
 	return allocatedQueryChannel, allocatedQueryResultChannel
+}
+
+func (m *meta) saveCollectionInfo(collectionID UniqueID, info *querypb.CollectionInfo) error {
+	infoBytes := proto.MarshalTextString(info)
+
+	key := fmt.Sprintf("%s/%d", collectionMetaPrefix, collectionID)
+	return m.client.Save(key, infoBytes)
+}
+
+func (m *meta) removeCollectionInfo(collectionID UniqueID) error {
+	key := fmt.Sprintf("%s/%d", collectionMetaPrefix, collectionID)
+	return m.client.Remove(key)
+}
+
+func (m *meta) saveSegmentInfo(segmentID UniqueID, info *querypb.SegmentInfo) error {
+	infoBytes := proto.MarshalTextString(info)
+
+	key := fmt.Sprintf("%s/%d", segmentMetaPrefix, segmentID)
+	return m.client.Save(key, infoBytes)
+}
+
+func (m *meta) removeSegmentInfo(segmentID UniqueID) error {
+	key := fmt.Sprintf("%s/%d", segmentMetaPrefix, segmentID)
+	return m.client.Remove(key)
+}
+
+func (m *meta) saveQueryChannelInfo(collectionID UniqueID, info *querypb.QueryChannelInfo) error {
+	infoBytes := proto.MarshalTextString(info)
+
+	key := fmt.Sprintf("%s/%d", queryChannelMetaPrefix, collectionID)
+	return m.client.Save(key, infoBytes)
+}
+
+func (m *meta) removeQueryChannelInfo(collectionID UniqueID) error {
+	key := fmt.Sprintf("%s/%d", queryChannelMetaPrefix, collectionID)
+	return m.client.Remove(key)
+}
+
+func (m *meta) setLoadCollection(collectionID UniqueID, state bool) error {
+	m.Lock()
+	defer m.Unlock()
+
+	if info, ok := m.collectionInfos[collectionID]; ok {
+		info.LoadCollection = state
+		err := m.saveCollectionInfo(collectionID, info)
+		if err != nil {
+			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+		}
+	}
+
+	return errors.New("setLoadCollection: can't find collection in collectionInfos")
+}
+
+func (m *meta) printMeta() {
+	for id, info := range m.collectionInfos {
+		log.Debug("queryService meta: collectionInfo", zap.Int64("collectionID", id), zap.Any("info", info))
+	}
+
+	for id, info := range m.segmentInfos {
+		log.Debug("queryService meta: segmentInfo", zap.Int64("segmentID", id), zap.Any("info", info))
+	}
+
+	for id, info := range m.queryChannelInfos {
+		log.Debug("queryService meta: queryChannelInfo", zap.Int64("collectionID", id), zap.Any("info", info))
+	}
 }
