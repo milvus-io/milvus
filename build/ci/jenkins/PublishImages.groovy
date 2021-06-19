@@ -31,7 +31,7 @@ pipeline {
             steps {
                 container('main') {
                     script {
-                        sh "build/builder.sh /bin/bash -c \"make install\""
+                        sh "build/builder.sh /bin/bash -c \"CUSTOM_THIRDPARTY_PATH=/tmp/third_party make install\""
 
                         def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
                         def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()

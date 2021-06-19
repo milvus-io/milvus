@@ -34,7 +34,6 @@ pipeline {
                     SEMVER = "${BRANCH_NAME.contains('/') ? BRANCH_NAME.substring(BRANCH_NAME.lastIndexOf('/') + 1) : BRANCH_NAME}"
                     IMAGE_REPO = "dockerhub-mirror-sh.zilliz.cc/milvusdb"
                     DOCKER_BUILDKIT = 1
-                    CUSTOM_THIRDPARTY_PATH = "/tmp/third_party"
                     ARTIFACTS = "${env.WORKSPACE}/artifacts"
                     MILVUS_HELM_BRANCH = "rename"
                 }
@@ -49,7 +48,13 @@ pipeline {
                                             standaloneEnabled = "false"
                                         }
 
-                                        sh "MILVUS_STANDALONE_ENABLED=${standaloneEnabled} ./e2e-k8s.sh --node-image registry.zilliz.com/kindest/node:v1.20.2 --test-extra-arg \"--tags=smoke\""
+                                        sh """
+                                        MILVUS_STANDALONE_ENABLED=${standaloneEnabled} \
+                                        ./e2e-k8s.sh \
+                                        --node-image registry.zilliz.com/kindest/node:v1.20.2 \
+                                        --build-command "CUSTOM_THIRDPARTY_PATH=/tmp/third_party make install" \
+                                        --test-extra-arg "--tags=smoke"
+                                        """
                                     }
                                 }
                             }
