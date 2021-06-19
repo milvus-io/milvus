@@ -10,10 +10,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
 dataservice:
-  nodeID: 14040
   segment:
     size: 512 # MB
     sizeFactor: 0.75
     IDAssignExpiration: 2000 # ms
-  insertChannelNum: 2
-  dataNodeNum: 1

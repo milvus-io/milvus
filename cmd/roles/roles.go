@@ -102,12 +102,13 @@ func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *compone
 	return rc
 }
 
-func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool) *components.Proxy {
+func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string) *components.Proxy {
 	var pn *components.Proxy
 	var wg sync.WaitGroup
 
 	wg.Add(1)
 	go func() {
+		proxynode.Params.InitAlias(alias)
 		proxynode.Params.Init()
 
 		if !localMsg {
@@ -158,12 +159,13 @@ func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *compon
 	return qs
 }
 
-func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool) *components.QueryNode {
+func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, alias string) *components.QueryNode {
 	var qn *components.QueryNode
 	var wg sync.WaitGroup
 
 	wg.Add(1)
 	go func() {
+		querynode.Params.InitAlias(alias)
 		querynode.Params.Init()
 
 		if !localMsg {
@@ -214,12 +216,13 @@ func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *compone
 	return ds
 }
 
-func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool) *components.DataNode {
+func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, alias string) *components.DataNode {
 	var dn *components.DataNode
 	var wg sync.WaitGroup
 
 	wg.Add(1)
 	go func() {
+		datanode.Params.InitAlias(alias)
 		datanode.Params.Init()
 
 		if !localMsg {
@@ -269,12 +272,13 @@ func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *compon
 	return is
 }
 
-func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool) *components.IndexNode {
+func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias string) *components.IndexNode {
 	var in *components.IndexNode
 	var wg sync.WaitGroup
 
 	wg.Add(1)
 	go func() {
+		indexnode.Params.InitAlias(alias)
 		indexnode.Params.Init()
 
 		if !localMsg {
@@ -316,7 +320,7 @@ func (mr *MilvusRoles) runMsgStreamCoord(ctx context.Context) *components.MsgStr
 	return mss
 }
 
-func (mr *MilvusRoles) Run(localMsg bool) {
+func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 	if os.Getenv("DEPLOY_MODE") == "STANDALONE" {
 		closer := trace.InitTracing("standalone")
 		if closer != nil {
@@ -344,7 +348,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	var pn *components.Proxy
 	if mr.EnableProxy {
-		pn = mr.runProxy(ctx, localMsg)
+		pn = mr.runProxy(ctx, localMsg, alias)
 		if pn != nil {
 			defer pn.Stop()
 		}
@@ -360,7 +364,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	var qn *components.QueryNode
 	if mr.EnableQueryNode {
-		qn = mr.runQueryNode(ctx, localMsg)
+		qn = mr.runQueryNode(ctx, localMsg, alias)
 		if qn != nil {
 			defer qn.Stop()
 		}
@@ -376,7 +380,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	var dn *components.DataNode
 	if mr.EnableDataNode {
-		dn = mr.runDataNode(ctx, localMsg)
+		dn = mr.runDataNode(ctx, localMsg, alias)
 		if dn != nil {
 			defer dn.Stop()
 		}
@@ -392,7 +396,7 @@ func (mr *MilvusRoles) Run(localMsg bool) {
 
 	var in *components.IndexNode
 	if mr.EnableIndexNode {
-		in = mr.runIndexNode(ctx, localMsg)
+		in = mr.runIndexNode(ctx, localMsg, alias)
 		if in != nil {
 			defer in.Stop()
 		}

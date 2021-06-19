@@ -14,7 +14,6 @@ package queryservice
 import (
 	"fmt"
 	"path"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -64,17 +63,11 @@ func (p *ParamTable) Init() {
 			panic(err)
 		}
 
-		err = p.LoadYaml("advanced/query_service.yaml")
-		if err != nil {
-			panic(err)
-		}
-
 		err = p.LoadYaml("milvus.yaml")
 		if err != nil {
 			panic(err)
 		}
 
-		p.initNodeID()
 		p.initLogCfg()
 
 		p.initStatsChannelName()
@@ -91,10 +84,6 @@ func (p *ParamTable) Init() {
 	})
 }
 
-func (p *ParamTable) initNodeID() {
-	p.NodeID = uint64(p.ParseInt64("queryService.nodeID"))
-}
-
 func (p *ParamTable) initLogCfg() {
 	p.Log = log.Config{}
 	format, err := p.Load("log.format")
@@ -107,15 +96,6 @@ func (p *ParamTable) initLogCfg() {
 		panic(err)
 	}
 	p.Log.Level = level
-	devStr, err := p.Load("log.dev")
-	if err != nil {
-		panic(err)
-	}
-	dev, err := strconv.ParseBool(devStr)
-	if err != nil {
-		panic(err)
-	}
-	p.Log.Development = dev
 	p.Log.File.MaxSize = p.ParseInt("log.file.maxSize")
 	p.Log.File.MaxBackups = p.ParseInt("log.file.maxBackups")
 	p.Log.File.MaxDays = p.ParseInt("log.file.maxAge")

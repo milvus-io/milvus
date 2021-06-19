@@ -115,6 +115,9 @@ func (node *QueryNode) Register() error {
 	node.session.Init(typeutil.QueryNodeRole, Params.QueryNodeIP+":"+strconv.FormatInt(Params.QueryNodePort, 10), false)
 	Params.QueryNodeID = node.session.ServerID
 	log.Debug("query nodeID", zap.Int64("nodeID", Params.QueryNodeID))
+
+	// This param needs valid QueryNodeID
+	Params.initMsgChannelSubName()
 	return nil
 }
 

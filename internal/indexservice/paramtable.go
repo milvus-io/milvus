@@ -156,15 +156,6 @@ func (pt *ParamTable) initLogCfg() {
 		panic(err)
 	}
 	pt.Log.Level = level
-	devStr, err := pt.Load("log.dev")
-	if err != nil {
-		panic(err)
-	}
-	dev, err := strconv.ParseBool(devStr)
-	if err != nil {
-		panic(err)
-	}
-	pt.Log.Development = dev
 	pt.Log.File.MaxSize = pt.ParseInt("log.file.maxSize")
 	pt.Log.File.MaxBackups = pt.ParseInt("log.file.maxBackups")
 	pt.Log.File.MaxDays = pt.ParseInt("log.file.maxAge")

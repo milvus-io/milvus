@@ -12,7 +12,6 @@
 master:
   maxPartitionNum: 4096
   minSegmentSizeToEnableIndex: 1024
-  nodeID: 100
   timeout: 3600 # time out, 5 seconds
   timeTickInterval: 200 # ms
 
