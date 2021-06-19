@@ -143,6 +143,11 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	log.Debug("collection name -> id",
+		zap.String("collection name", t.Req.CollectionName),
+		zap.Int64("colletion_id", collID),
+		zap.Int64("default partition id", partID))
+
 	vchanNames := make([]string, t.Req.ShardsNum)
 	chanNames := make([]string, t.Req.ShardsNum)
 	for i := int32(0); i < t.Req.ShardsNum; i++ {
