@@ -52,6 +52,7 @@ pushd "$ROOT_DIR"
 
 mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-ccache"
 mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-go-mod"
+mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-thirdparty"
 mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-vscode-extensions"
 chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}"
 
