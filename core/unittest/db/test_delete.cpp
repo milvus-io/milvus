@@ -525,6 +525,7 @@ TEST_F(DeleteTest, DELETE_MULTIPLE_TIMES_WITH_INDEX) {
     std::map<int64_t, milvus::engine::VectorsData> search_vectors;
     for (int64_t i = 0; i < num_query; ) {
         int64_t index = dis(gen);
+        auto temp_id = xb.id_array_[index];
         if (search_vectors.find(temp_id) != search_vectors.end()) {
             continue;
         }
@@ -860,6 +861,7 @@ TEST_F(CompactTest, COMPACT_WITH_INDEX) {
     std::map<int64_t, milvus::engine::VectorsData> search_vectors;
     for (int64_t i = 0; i < num_query; ) {
         int64_t index = dis(gen);
+        auto temp_id = xb.id_array_[index];
         if (search_vectors.find(temp_id) != search_vectors.end()) {
             continue;
         }
