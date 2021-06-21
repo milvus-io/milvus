@@ -23,11 +23,11 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
-type flowGraphType = int32
+type loadType = int32
 
 const (
-	flowGraphTypeCollection = 0
-	flowGraphTypePartition  = 1
+	loadTypeCollection = 0
+	loadTypePartition  = 1
 )
 
 type dataSyncService struct {
@@ -54,7 +54,7 @@ func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, 
 		// collection flow graph doesn't need partition id
 		partitionID := UniqueID(0)
 		newFlowGraph := newQueryNodeFlowGraph(dsService.ctx,
-			flowGraphTypeCollection,
+			loadTypeCollection,
 			collectionID,
 			partitionID,
 			dsService.streamingReplica,
@@ -128,7 +128,7 @@ func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID, p
 	}
 	for _, vChannel := range vChannels {
 		newFlowGraph := newQueryNodeFlowGraph(dsService.ctx,
-			flowGraphTypePartition,
+			loadTypePartition,
 			collectionID,
 			partitionID,
 			dsService.streamingReplica,

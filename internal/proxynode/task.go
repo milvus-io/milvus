@@ -1846,7 +1846,38 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 					}
 				}
 
-				rt.result.FieldsData = append(rt.result.FieldsData, partialRetrieveResult.FieldsData...)
+				if idx == 0 {
+					rt.result.FieldsData = append(rt.result.FieldsData, partialRetrieveResult.FieldsData...)
+				} else {
+					for k, fieldData := range partialRetrieveResult.FieldsData {
+						switch fieldType := fieldData.Field.(type) {
+						case *schemapb.FieldData_Scalars:
+							switch scalarType := fieldType.Scalars.Data.(type) {
+							case *schemapb.ScalarField_BoolData:
+								rt.result.FieldsData[k].GetScalars().GetBoolData().Data = append(rt.result.FieldsData[k].GetScalars().GetBoolData().Data, scalarType.BoolData.Data...)
+							case *schemapb.ScalarField_IntData:
+								rt.result.FieldsData[k].GetScalars().GetIntData().Data = append(rt.result.FieldsData[k].GetScalars().GetIntData().Data, scalarType.IntData.Data...)
+							case *schemapb.ScalarField_LongData:
+								rt.result.FieldsData[k].GetScalars().GetLongData().Data = append(rt.result.FieldsData[k].GetScalars().GetLongData().Data, scalarType.LongData.Data...)
+							case *schemapb.ScalarField_FloatData:
+								rt.result.FieldsData[k].GetScalars().GetFloatData().Data = append(rt.result.FieldsData[k].GetScalars().GetFloatData().Data, scalarType.FloatData.Data...)
+							case *schemapb.ScalarField_DoubleData:
+								rt.result.FieldsData[k].GetScalars().GetDoubleData().Data = append(rt.result.FieldsData[k].GetScalars().GetDoubleData().Data, scalarType.DoubleData.Data...)
+							default:
+								log.Debug("Retrieve received not supported data type")
+							}
+						case *schemapb.FieldData_Vectors:
+							switch vectorType := fieldType.Vectors.Data.(type) {
+							case *schemapb.VectorField_BinaryVector:
+								rt.result.FieldsData[k].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector = append(rt.result.FieldsData[k].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector, vectorType.BinaryVector...)
+							case *schemapb.VectorField_FloatVector:
+								rt.result.FieldsData[k].GetVectors().GetFloatVector().Data = append(rt.result.FieldsData[k].GetVectors().GetFloatVector().Data, vectorType.FloatVector.Data...)
+							}
+						default:
+						}
+					}
+				}
+				// rt.result.FieldsData = append(rt.result.FieldsData, partialRetrieveResult.FieldsData...)
 			}
 			availableQueryNodeNum++
 		}

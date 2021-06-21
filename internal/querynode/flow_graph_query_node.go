@@ -34,7 +34,7 @@ type queryNodeFlowGraph struct {
 }
 
 func newQueryNodeFlowGraph(ctx context.Context,
-	flowGraphType flowGraphType,
+	loadType loadType,
 	collectionID UniqueID,
 	partitionID UniqueID,
 	streamingReplica ReplicaInterface,
@@ -54,9 +54,9 @@ func newQueryNodeFlowGraph(ctx context.Context,
 	}
 
 	var dmStreamNode node = q.newDmInputNode(ctx1, factory)
-	var filterDmNode node = newFilteredDmNode(streamingReplica, flowGraphType, collectionID, partitionID)
+	var filterDmNode node = newFilteredDmNode(streamingReplica, loadType, collectionID, partitionID)
 	var insertNode node = newInsertNode(streamingReplica)
-	var serviceTimeNode node = newServiceTimeNode(ctx1, tSafeReplica, flowGraphType, collectionID, partitionID, channel, factory)
+	var serviceTimeNode node = newServiceTimeNode(ctx1, tSafeReplica, loadType, collectionID, partitionID, channel, factory)
 
 	q.flowGraph.AddNode(dmStreamNode)
 	q.flowGraph.AddNode(filterDmNode)

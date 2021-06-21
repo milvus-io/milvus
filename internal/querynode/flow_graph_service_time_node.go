@@ -23,7 +23,7 @@ import (
 
 type serviceTimeNode struct {
 	baseNode
-	graphType         flowGraphType
+	loadType          loadType
 	collectionID      UniqueID
 	partitionID       UniqueID
 	vChannel          Channel
@@ -59,7 +59,7 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	// update service time
 	var id UniqueID
-	if stNode.graphType == flowGraphTypePartition {
+	if stNode.loadType == loadTypePartition {
 		id = stNode.partitionID
 	} else {
 		id = stNode.collectionID
@@ -106,7 +106,7 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 func newServiceTimeNode(ctx context.Context,
 	tSafeReplica TSafeReplicaInterface,
-	graphType flowGraphType,
+	loadType loadType,
 	collectionID UniqueID,
 	partitionID UniqueID,
 	channel Channel,
@@ -131,7 +131,7 @@ func newServiceTimeNode(ctx context.Context,
 
 	return &serviceTimeNode{
 		baseNode:          baseNode,
-		graphType:         graphType,
+		loadType:          loadType,
 		collectionID:      collectionID,
 		partitionID:       partitionID,
 		vChannel:          channel,

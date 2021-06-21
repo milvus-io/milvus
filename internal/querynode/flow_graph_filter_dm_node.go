@@ -26,7 +26,7 @@ import (
 
 type filterDmNode struct {
 	baseNode
-	graphType    flowGraphType
+	loadType     loadType
 	collectionID UniqueID
 	partitionID  UniqueID
 	replica      ReplicaInterface
@@ -94,14 +94,14 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 	// check if collection and partition exist
 	collection := fdmNode.replica.hasCollection(msg.CollectionID)
 	partition := fdmNode.replica.hasPartition(msg.PartitionID)
-	if fdmNode.graphType == flowGraphTypeCollection && !collection {
+	if fdmNode.loadType == loadTypeCollection && !collection {
 		log.Debug("filter invalid insert message, collection dose not exist",
 			zap.Any("collectionID", msg.CollectionID),
 			zap.Any("partitionID", msg.PartitionID))
 		return nil
 	}
 
-	if fdmNode.graphType == flowGraphTypePartition && !partition {
+	if fdmNode.loadType == loadTypePartition && !partition {
 		log.Debug("filter invalid insert message, partition dose not exist",
 			zap.Any("collectionID", msg.CollectionID),
 			zap.Any("partitionID", msg.PartitionID))
@@ -117,11 +117,24 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 	}
 
 	// if the flow graph type is partition, check if the partition is target partition
-	if fdmNode.graphType == flowGraphTypePartition && msg.PartitionID != fdmNode.partitionID {
+	if fdmNode.loadType == loadTypePartition && msg.PartitionID != fdmNode.partitionID {
 		log.Debug("filter invalid insert message, partition is not the target partition",
 			zap.Any("collectionID", msg.CollectionID),
 			zap.Any("partitionID", msg.PartitionID))
 		return nil
+	}
+
+	// check if partition has been released
+	if fdmNode.loadType == loadTypeCollection {
+		col, err := fdmNode.replica.getCollectionByID(msg.CollectionID)
+		if err != nil {
+			log.Error(err.Error())
+			return nil
+		}
+		if err = col.checkReleasedPartitions([]UniqueID{msg.PartitionID}); err != nil {
+			log.Warn(err.Error())
+			return nil
+		}
 	}
 
 	// Check if the segment is in excluded segments,
@@ -158,7 +171,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 }
 
 func newFilteredDmNode(replica ReplicaInterface,
-	graphType flowGraphType,
+	loadType loadType,
 	collectionID UniqueID,
 	partitionID UniqueID) *filterDmNode {
 
@@ -169,14 +182,14 @@ func newFilteredDmNode(replica ReplicaInterface,
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
-	if graphType != flowGraphTypeCollection && graphType != flowGraphTypePartition {
+	if loadType != loadTypeCollection && loadType != loadTypePartition {
 		err := errors.New("invalid flow graph type")
 		log.Error(err.Error())
 	}
 
 	return &filterDmNode{
 		baseNode:     baseNode,
-		graphType:    graphType,
+		loadType:     loadType,
 		collectionID: collectionID,
 		partitionID:  partitionID,
 		replica:      replica,
