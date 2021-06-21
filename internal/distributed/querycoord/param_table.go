@@ -65,5 +65,5 @@ func (pt *ParamTable) initDataServiceAddress() {
 }
 
 func (pt *ParamTable) initPort() {
-	pt.Port = pt.ParseInt("queryService.port")
+	pt.Port = pt.ParseInt("queryCoord.port")
 }

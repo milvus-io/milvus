@@ -72,7 +72,7 @@ func (p *ParamTable) Init() {
 
 		p.initStatsChannelName()
 		p.initTimeTickChannelName()
-		p.initQueryServiceAddress()
+		p.initQueryCoordAddress()
 		p.initRoleName()
 		p.initSearchChannelPrefix()
 		p.initSearchResultChannelPrefix()
@@ -127,8 +127,8 @@ func (p *ParamTable) initTimeTickChannelName() {
 
 }
 
-func (p *ParamTable) initQueryServiceAddress() {
-	url, err := p.Load("_QueryServiceAddress")
+func (p *ParamTable) initQueryCoordAddress() {
+	url, err := p.Load("_QueryCoordAddress")
 	if err != nil {
 		panic(err)
 	}

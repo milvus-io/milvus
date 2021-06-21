@@ -153,19 +153,19 @@ func (gp *BaseTable) tryloadFromEnv() {
 		panic(err)
 	}
 
-	queryServiceAddress := os.Getenv("QUERY_SERVICE_ADDRESS")
-	if queryServiceAddress == "" {
-		serviceHost, err := gp.Load("queryService.address")
+	queryCoordAddress := os.Getenv("QUERY_SERVICE_ADDRESS")
+	if queryCoordAddress == "" {
+		serviceHost, err := gp.Load("queryCoord.address")
 		if err != nil {
 			panic(err)
 		}
-		port, err := gp.Load("queryService.port")
+		port, err := gp.Load("queryCoord.port")
 		if err != nil {
 			panic(err)
 		}
-		queryServiceAddress = serviceHost + ":" + port
+		queryCoordAddress = serviceHost + ":" + port
 	}
-	err = gp.Save("_QueryServiceAddress", queryServiceAddress)
+	err = gp.Save("_QueryCoordAddress", queryCoordAddress)
 	if err != nil {
 		panic(err)
 	}
