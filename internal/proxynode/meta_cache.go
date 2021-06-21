@@ -43,7 +43,7 @@ type collectionInfo struct {
 }
 
 type MetaCache struct {
-	client types.MasterService
+	client types.RootCoord
 
 	collInfo map[string]*collectionInfo
 	mu       sync.RWMutex
@@ -51,7 +51,7 @@ type MetaCache struct {
 
 var globalMetaCache Cache
 
-func InitMetaCache(client types.MasterService) error {
+func InitMetaCache(client types.RootCoord) error {
 	var err error
 	globalMetaCache, err = NewMetaCache(client)
 	if err != nil {
@@ -60,7 +60,7 @@ func InitMetaCache(client types.MasterService) error {
 	return nil
 }
 
-func NewMetaCache(client types.MasterService) (*MetaCache, error) {
+func NewMetaCache(client types.RootCoord) (*MetaCache, error) {
 	return &MetaCache{
 		client:   client,
 		collInfo: map[string]*collectionInfo{},
@@ -217,7 +217,24 @@ func (m *MetaCache) describeCollection(ctx context.Context, collectionName strin
 	if coll.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return nil, errors.New(coll.Status.Reason)
 	}
-	return coll, nil
+	resp := &milvuspb.DescribeCollectionResponse{
+		Status: coll.Status,
+		Schema: &schemapb.CollectionSchema{
+			Name:        coll.Schema.Name,
+			Description: coll.Schema.Description,
+			AutoID:      coll.Schema.AutoID,
+			Fields:      make([]*schemapb.FieldSchema, 0),
+		},
+		CollectionID:         coll.CollectionID,
+		VirtualChannelNames:  coll.VirtualChannelNames,
+		PhysicalChannelNames: coll.PhysicalChannelNames,
+	}
+	for _, field := range coll.Schema.Fields {
+		if field.FieldID >= 100 { // TODO(dragondriver): use StartOfUserField to replace 100
+			resp.Schema.Fields = append(resp.Schema.Fields, field)
+		}
+	}
+	return resp, nil
 }
 
 func (m *MetaCache) showPartitions(ctx context.Context, collectionName string) (*milvuspb.ShowPartitionsResponse, error) {

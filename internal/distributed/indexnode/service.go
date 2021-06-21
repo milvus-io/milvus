@@ -24,7 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
-	grpcindexserviceclient "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
+	grpcindexcoordclient "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -43,10 +43,10 @@ type Server struct {
 	grpcServer  *grpc.Server
 	grpcErrChan chan error
 
-	indexServiceClient types.IndexService
-	loopCtx            context.Context
-	loopCancel         func()
-	loopWg             sync.WaitGroup
+	indexCoordClient types.IndexCoord
+	loopCtx          context.Context
+	loopCancel       func()
+	loopWg           sync.WaitGroup
 
 	closer io.Closer
 }
@@ -82,10 +82,8 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	s.grpcServer = grpc.NewServer(
 		grpc.MaxRecvMsgSize(math.MaxInt32),
 		grpc.MaxSendMsgSize(math.MaxInt32),
-		grpc.UnaryInterceptor(
-			grpc_opentracing.UnaryServerInterceptor(opts...)),
-		grpc.StreamInterceptor(
-			grpc_opentracing.StreamServerInterceptor(opts...)))
+		grpc.UnaryInterceptor(grpc_opentracing.UnaryServerInterceptor(opts...)),
+		grpc.StreamInterceptor(grpc_opentracing.StreamServerInterceptor(opts...)))
 	indexpb.RegisterIndexNodeServer(s.grpcServer, s)
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {
@@ -138,13 +136,13 @@ func (s *Server) init() error {
 		return err
 	}
 
-	s.indexServiceClient = grpcindexserviceclient.NewClient(indexnode.Params.MetaRootPath, indexnode.Params.EtcdEndpoints, 3*time.Second)
-	err = s.indexServiceClient.Init()
+	s.indexCoordClient = grpcindexcoordclient.NewClient(indexnode.Params.MetaRootPath, indexnode.Params.EtcdEndpoints, 3*time.Second)
+	err = s.indexCoordClient.Init()
 	if err != nil {
 		log.Debug("IndexNode indexSerticeClient init failed", zap.Error(err))
 		return err
 	}
-	s.indexnode.SetIndexServiceClient(s.indexServiceClient)
+	s.indexnode.SetIndexCoordClient(s.indexCoordClient)
 
 	s.indexnode.UpdateStateCode(internalpb.StateCode_Initializing)
 	log.Debug("IndexNode", zap.Any("State", internalpb.StateCode_Initializing))

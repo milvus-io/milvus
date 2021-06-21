@@ -32,7 +32,7 @@ import (
 )
 
 type Client struct {
-	grpcClient datapb.DataServiceClient
+	grpcClient datapb.DataCoordClient
 	conn       *grpc.ClientConn
 	ctx        context.Context
 	addr       string
@@ -44,17 +44,17 @@ type Client struct {
 	reconnTry int
 }
 
-func getDataServiceAddress(sess *sessionutil.Session) (string, error) {
-	key := typeutil.DataServiceRole
+func getDataCoordAddress(sess *sessionutil.Session) (string, error) {
+	key := typeutil.DataCoordRole
 	msess, _, err := sess.GetSessions(key)
 	if err != nil {
-		log.Debug("DataServiceClient, getSessions failed", zap.Any("key", key), zap.Error(err))
+		log.Debug("DataCoordClient, getSessions failed", zap.Any("key", key), zap.Error(err))
 		return "", err
 	}
 	ms, ok := msess[key]
 	if !ok {
-		log.Debug("DataServiceClient, not existed in msess ", zap.Any("key", key), zap.Any("len of msess", len(msess)))
-		return "", fmt.Errorf("number of dataservice is incorrect, %d", len(msess))
+		log.Debug("DataCoordClient, not existed in msess ", zap.Any("key", key), zap.Any("len of msess", len(msess)))
+		return "", fmt.Errorf("number of datacoord is incorrect, %d", len(msess))
 	}
 	return ms.Address, nil
 }
@@ -81,23 +81,23 @@ func (c *Client) Init() error {
 
 func (c *Client) connect() error {
 	var err error
-	getDataServiceAddressFn := func() error {
-		c.addr, err = getDataServiceAddress(c.sess)
+	getDataCoordAddressFn := func() error {
+		c.addr, err = getDataCoordAddress(c.sess)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
-	err = retry.Retry(c.reconnTry, 3*time.Second, getDataServiceAddressFn)
+	err = retry.Retry(c.reconnTry, 3*time.Second, getDataCoordAddressFn)
 	if err != nil {
-		log.Debug("DataServiceClient try reconnect getDataServiceAddressFn failed", zap.Error(err))
+		log.Debug("DataCoordClient try reconnect getDataCoordAddressFn failed", zap.Error(err))
 		return err
 	}
 	connectGrpcFunc := func() error {
 		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
 		defer cancelFunc()
 		opts := trace.GetInterceptorOpts()
-		log.Debug("DataServiceClient try reconnect ", zap.String("address", c.addr))
+		log.Debug("DataCoordClient try reconnect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				grpc_opentracing.UnaryClientInterceptor(opts...)),
@@ -112,10 +112,10 @@ func (c *Client) connect() error {
 
 	err = retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
 	if err != nil {
-		log.Debug("DataService try reconnect failed", zap.Error(err))
+		log.Debug("DataCoord try reconnect failed", zap.Error(err))
 		return err
 	}
-	c.grpcClient = datapb.NewDataServiceClient(c.conn)
+	c.grpcClient = datapb.NewDataCoordClient(c.conn)
 	return nil
 }
 
@@ -170,13 +170,6 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 	return ret.(*milvuspb.StringResponse), err
 }
 
-func (c *Client) RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.RegisterNode(ctx, req)
-	})
-	return ret.(*datapb.RegisterNodeResponse), err
-}
-
 func (c *Client) Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		return c.grpcClient.Flush(ctx, req)
@@ -191,13 +184,6 @@ func (c *Client) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 	return ret.(*datapb.AssignSegmentIDResponse), err
 }
 
-func (c *Client) ShowSegments(ctx context.Context, req *datapb.ShowSegmentsRequest) (*datapb.ShowSegmentsResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.ShowSegments(ctx, req)
-	})
-	return ret.(*datapb.ShowSegmentsResponse), err
-}
-
 func (c *Client) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		return c.grpcClient.GetSegmentStates(ctx, req)
@@ -210,13 +196,6 @@ func (c *Client) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 		return c.grpcClient.GetInsertBinlogPaths(ctx, req)
 	})
 	return ret.(*datapb.GetInsertBinlogPathsResponse), err
-}
-
-func (c *Client) GetInsertChannels(ctx context.Context, req *datapb.GetInsertChannelsRequest) (*internalpb.StringList, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetInsertChannels(ctx, req)
-	})
-	return ret.(*internalpb.StringList), err
 }
 
 func (c *Client) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {

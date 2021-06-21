@@ -15,7 +15,7 @@ set -e
 set -x
 
 MILVUS_HELM_RELEASE_NAME="${MILVUS_HELM_RELEASE_NAME:-milvus-testing}"
-MILVUS_STANDALONE_ENABLED="${MILVUS_STANDALONE_ENABLED:-true}"
+MILVUS_CLUSTER_ENABLED="${MILVUS_CLUSTER_ENABLED:-false}"
 MILVUS_HELM_NAMESPACE="${MILVUS_HELM_NAMESPACE:-default}"
 PARALLEL_NUM="${PARALLEL_NUM:-4}"
 
@@ -28,7 +28,7 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 ROOT="$( cd -P "$( dirname "$SOURCE" )/../.." && pwd )"
 
-if [[ "${MILVUS_STANDALONE_ENABLED}" == "true" ]]; then
+if [[ "${MILVUS_CLUSTER_ENABLED}" == "false" ]]; then
   MILVUS_LABELS="app.kubernetes.io/instance=${MILVUS_HELM_RELEASE_NAME},component=standalone"
 else
   MILVUS_LABELS="app.kubernetes.io/instance=${MILVUS_HELM_RELEASE_NAME},component=proxy"

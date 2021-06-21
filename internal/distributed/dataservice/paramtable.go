@@ -39,7 +39,7 @@ func (pt *ParamTable) Init() {
 
 func (pt *ParamTable) initParams() {
 	pt.initMasterAddress()
-	pt.initDataServiceAddress()
+	pt.initDataCoordAddress()
 }
 
 func (pt *ParamTable) LoadFromEnv() {
@@ -47,7 +47,7 @@ func (pt *ParamTable) LoadFromEnv() {
 }
 
 func (pt *ParamTable) initPort() {
-	pt.Port = pt.ParseInt("dataService.port")
+	pt.Port = pt.ParseInt("dataCoord.port")
 }
 
 func (pt *ParamTable) initMasterAddress() {
@@ -58,8 +58,8 @@ func (pt *ParamTable) initMasterAddress() {
 	pt.MasterAddress = ret
 }
 
-func (pt *ParamTable) initDataServiceAddress() {
-	ret, err := pt.Load("_DataServiceAddress")
+func (pt *ParamTable) initDataCoordAddress() {
+	ret, err := pt.Load("_DataCoordAddress")
 	if err != nil {
 		panic(err)
 	}

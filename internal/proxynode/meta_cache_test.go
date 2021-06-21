@@ -24,11 +24,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type MockMasterClientInterface struct {
-	types.MasterService
+type MockRootCoordClientInterface struct {
+	types.RootCoord
 }
 
-func (m *MockMasterClientInterface) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+func (m *MockRootCoordClientInterface) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	if in.CollectionName == "collection1" {
 		return &milvuspb.ShowPartitionsResponse{
 			Status: &commonpb.Status{
@@ -47,7 +47,7 @@ func (m *MockMasterClientInterface) ShowPartitions(ctx context.Context, in *milv
 	}, nil
 }
 
-func (m *MockMasterClientInterface) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+func (m *MockRootCoordClientInterface) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	if in.CollectionName == "collection1" {
 		return &milvuspb.DescribeCollectionResponse{
 			Status: &commonpb.Status{
@@ -70,7 +70,7 @@ func (m *MockMasterClientInterface) DescribeCollection(ctx context.Context, in *
 
 func TestMetaCache_GetCollection(t *testing.T) {
 	ctx := context.Background()
-	client := &MockMasterClientInterface{}
+	client := &MockRootCoordClientInterface{}
 	err := InitMetaCache(client)
 	assert.Nil(t, err)
 
@@ -92,7 +92,7 @@ func TestMetaCache_GetCollection(t *testing.T) {
 
 func TestMetaCache_GetPartitionID(t *testing.T) {
 	ctx := context.Background()
-	client := &MockMasterClientInterface{}
+	client := &MockRootCoordClientInterface{}
 	err := InitMetaCache(client)
 	assert.Nil(t, err)
 

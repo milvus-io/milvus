@@ -30,8 +30,8 @@ func TestParamTable(t *testing.T) {
 	assert.NotNil(t, Params.listener)
 	t.Logf("DataNode listener:%d", Params.listener)
 
-	assert.NotEqual(t, Params.DataServiceAddress, "")
-	t.Logf("DataServiceAddress:%s", Params.DataServiceAddress)
+	assert.NotEqual(t, Params.DataCoordAddress, "")
+	t.Logf("DataCoordAddress:%s", Params.DataCoordAddress)
 
 	assert.NotEqual(t, Params.MasterAddress, "")
 	t.Logf("MasterAddress:%s", Params.MasterAddress)
