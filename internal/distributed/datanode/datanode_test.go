@@ -103,17 +103,6 @@ func (m *mockDataService) GetComponentStates(ctx context.Context) (*internalpb.C
 	}, nil
 }
 
-func (m *mockDataService) RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
-	return &datapb.RegisterNodeResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		InitParams: &internalpb.InitParams{
-			NodeID: int64(1),
-		},
-	}, nil
-}
-
 func TestRun(t *testing.T) {
 	ctx := context.Background()
 	msFactory := msgstream.NewPmsFactory()

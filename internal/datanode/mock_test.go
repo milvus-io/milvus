@@ -171,23 +171,6 @@ func (ds *DataServiceFactory) SaveBinlogPaths(ctx context.Context, req *datapb.S
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
-func (ds *DataServiceFactory) RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
-	ret := &datapb.RegisterNodeResponse{Status: &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success}}
-
-	ret.InitParams = &internalpb.InitParams{
-		NodeID: Params.NodeID,
-		StartParams: []*commonpb.KeyValuePair{
-			{Key: "DDChannelName", Value: "fake-dd-channel-name"},
-			{Key: "SegmentStatisticsChannelName", Value: "fake-segment-statistics-channel-name"},
-			{Key: "TimeTickChannelName", Value: "fake-time-tick-channel-name"},
-			{Key: "CompleteFlushChannelName", Value: "fake-complete-flush-name"},
-		},
-	}
-
-	return ret, nil
-}
-
 func (mf *MetaFactory) CollectionMetaFactory(collectionID UniqueID, collectionName string) *etcdpb.CollectionMeta {
 	sch := schemapb.CollectionSchema{
 		Name:        collectionName,

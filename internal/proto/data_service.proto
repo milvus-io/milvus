@@ -14,7 +14,6 @@ service DataService {
   rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
 
-  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
   rpc Flush(FlushRequest) returns (common.Status) {}
 
   rpc AssignSegmentID(AssignSegmentIDRequest) returns (AssignSegmentIDResponse) {}
@@ -38,16 +37,6 @@ service DataNode {
 
   rpc WatchDmChannels(WatchDmChannelsRequest) returns (common.Status) {}
   rpc FlushSegments(FlushSegmentsRequest) returns(common.Status) {}
-}
-
-message RegisterNodeRequest {
-  common.MsgBase base = 1;
-  common.Address address = 2;
-}
-
-message RegisterNodeResponse {
-  internal.InitParams init_params = 1;
-  common.Status status = 2;
 }
 
 message FlushRequest {

@@ -449,12 +449,3 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }
-
-func (s *Server) RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
-	return &datapb.RegisterNodeResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-	}, nil
-
-}

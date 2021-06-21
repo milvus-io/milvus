@@ -122,16 +122,6 @@ func TestRun(t *testing.T) {
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
 	})
 
-	//t.Run("register node", func(t *testing.T) {
-	//	req := &datapb.RegisterNodeRequest{
-	//		Base: &commonpb.MsgBase{},
-	//		Address: &commonpb.Address{},
-	//	}
-	//	rsp, err := dsServer.RegisterNode(ctx, req)
-	//	assert.Nil(t, err)
-	//	assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
-	//})
-
 	t.Run("flush", func(t *testing.T) {
 		req := &datapb.FlushRequest{}
 		rsp, err := dsServer.Flush(ctx, req)

@@ -17,7 +17,6 @@ type DataCoord interface {
 
 	Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error)
 
-	RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error)
 	AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error)
 	GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
 	GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error)
@@ -40,20 +39,6 @@ type MsgBase struct {
 	MsgID	    UniqueID
 	Timestamp Timestamp
 	SourceID  UniqueID
-}
-```
-
-* *RegisterNode*
-
-```go
-type RegisterNodeRequest struct {
-	Base    *commonpb.MsgBase
-	Address *commonpb.Address
-}
-
-type RegisterNodeResponse struct {
-	InitParams *internalpb.InitParams
-	Status     *commonpb.Status
 }
 ```
 

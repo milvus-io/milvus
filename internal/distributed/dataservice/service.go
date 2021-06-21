@@ -197,10 +197,6 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	return s.dataService.GetSegmentInfo(ctx, req)
 }
 
-func (s *Server) RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
-	return s.dataService.RegisterNode(ctx, req)
-}
-
 func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error) {
 	return s.dataService.Flush(ctx, req)
 }
