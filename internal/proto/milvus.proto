@@ -30,7 +30,7 @@ service MilvusService {
   rpc GetIndexBuildProgress(GetIndexBuildProgressRequest) returns (GetIndexBuildProgressResponse) {}
   rpc DropIndex(DropIndexRequest) returns (common.Status) {}
 
-  rpc Insert(InsertRequest) returns (InsertResponse) {}
+  rpc Insert(InsertRequest) returns (MutationResult) {}
   rpc Search(SearchRequest) returns (SearchResults) {}
   rpc Retrieve(RetrieveRequest) returns (RetrieveResults) {}
   rpc Flush(FlushRequest) returns (common.Status) {}
@@ -288,12 +288,19 @@ message InsertRequest {
   string partition_name = 4;
   repeated schema.FieldData fields_data = 5;
   repeated uint32 hash_keys = 6;
+  uint32 num_rows = 7;
 }
 
-message InsertResponse {
+message MutationResult {
   common.Status status = 1;
-  int64 rowID_begin = 2;
-  int64 rowID_end = 3;
+  schema.IDs IDs = 2; // required for insert, delete
+  repeated uint32 succ_index = 3; // error indexes indicate
+  repeated uint32 err_index = 4; // error indexes indicate
+  bool acknowledged = 5;
+  int64 insert_cnt = 6;
+  int64 delete_cnt = 7;
+  int64 upsert_cnt = 8;
+  uint64 timestamp = 9;
 }
 
 enum PlaceholderType {

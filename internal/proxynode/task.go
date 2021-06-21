@@ -109,13 +109,14 @@ type InsertTask struct {
 	Condition
 	ctx            context.Context
 	dataService    types.DataService
-	result         *milvuspb.InsertResponse
+	result         *milvuspb.MutationResult
 	rowIDAllocator *allocator.IDAllocator
 	segIDAssigner  *SegIDAssigner
 	chMgr          channelsMgr
 	chTicker       channelsTimeTicker
 	vChannels      []vChan
 	pChannels      []pChan
+	schema         *schemapb.CollectionSchema
 }
 
 func (it *InsertTask) TraceCtx() context.Context {
@@ -193,6 +194,7 @@ func (it *InsertTask) OnEnqueue() error {
 	return nil
 }
 
+// TODO(dragondriver): ignore the order of fields in request, use the order of CollectionSchema to reorganize data
 func (it *InsertTask) transferColumnBasedRequestToRowBasedData() error {
 	dTypes := make([]schemapb.DataType, 0, len(it.req.FieldsData))
 	datas := make([][]interface{}, 0, len(it.req.FieldsData))
@@ -434,20 +436,185 @@ func (it *InsertTask) transferColumnBasedRequestToRowBasedData() error {
 	return nil
 }
 
+func (it *InsertTask) checkFieldAutoID() error {
+	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
+	rowNums := it.req.NumRows
+	if len(it.req.FieldsData) == 0 || rowNums == 0 {
+		return fmt.Errorf("do not contain any data")
+	}
+
+	primaryFieldName := ""
+	autoIDFieldName := ""
+	autoIDLoc := -1
+	primaryLoc := -1
+	var fieldType schemapb.DataType
+	fields := it.schema.Fields
+
+	for loc, field := range fields {
+		if field.AutoID {
+			autoIDLoc = loc
+			autoIDFieldName = field.Name
+		}
+		if field.IsPrimaryKey {
+			primaryLoc = loc
+			primaryFieldName = field.Name
+		}
+	}
+
+	if primaryLoc < 0 {
+		return fmt.Errorf("primary field is not found")
+	}
+
+	if autoIDLoc >= 0 && autoIDLoc != primaryLoc {
+		return fmt.Errorf("currently auto id field is only supported on primary field")
+	}
+
+	var primaryField *schemapb.FieldData
+	var primaryData []int64
+	for _, field := range it.req.FieldsData {
+		if field.FieldName == autoIDFieldName {
+			return fmt.Errorf("autoID field (%v) does not require data", autoIDFieldName)
+		}
+		if field.FieldName == primaryFieldName {
+			primaryField = field
+		}
+	}
+
+	if primaryField != nil {
+		if primaryField.Type != schemapb.DataType_Int64 {
+			return fmt.Errorf("currently only support DataType Int64 as PrimaryField and Enable autoID")
+		}
+		switch primaryField.Field.(type) {
+		case *schemapb.FieldData_Scalars:
+			scalarField := primaryField.GetScalars()
+			switch scalarField.Data.(type) {
+			case *schemapb.ScalarField_LongData:
+				primaryData = scalarField.GetLongData().Data
+			default:
+				return fmt.Errorf("currently only support DataType Int64 as PrimaryField and Enable autoID")
+			}
+		default:
+			return fmt.Errorf("currently only support DataType Int64 as PrimaryField and Enable autoID")
+		}
+		it.result.IDs.IdField = &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: primaryData,
+			},
+		}
+	}
+
+	var rowIDBegin UniqueID
+	var rowIDEnd UniqueID
+
+	rowIDBegin, rowIDEnd, _ = it.rowIDAllocator.Alloc(rowNums)
+
+	it.BaseInsertTask.RowIDs = make([]UniqueID, rowNums)
+	for i := rowIDBegin; i < rowIDEnd; i++ {
+		offset := i - rowIDBegin
+		it.BaseInsertTask.RowIDs[offset] = i
+	}
+
+	if autoIDLoc >= 0 {
+		fieldData := schemapb.FieldData{
+			FieldName: primaryFieldName,
+			Type:      fieldType,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: it.BaseInsertTask.RowIDs,
+						},
+					},
+				},
+			},
+		}
+
+		// TODO(dragondriver): when we can ignore the order of input fields, use append directly
+		// it.req.FieldsData = append(it.req.FieldsData, &fieldData)
+
+		it.req.FieldsData = append(it.req.FieldsData, &schemapb.FieldData{})
+		copy(it.req.FieldsData[autoIDLoc+1:], it.req.FieldsData[autoIDLoc:])
+		it.req.FieldsData[autoIDLoc] = &fieldData
+
+		it.result.IDs.IdField = &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: it.BaseInsertTask.RowIDs,
+			},
+		}
+
+		// TODO(dragondriver): in this case, should we directly overwrite the hash?
+
+		if len(it.HashValues) != 0 && len(it.HashValues) != len(it.BaseInsertTask.RowIDs) {
+			return fmt.Errorf("invalid length of input hash values")
+		}
+		if it.HashValues == nil || len(it.HashValues) <= 0 {
+			it.HashValues = make([]uint32, 0, len(it.BaseInsertTask.RowIDs))
+			for _, rowID := range it.BaseInsertTask.RowIDs {
+				hash, _ := typeutil.Hash32Int64(rowID)
+				it.HashValues = append(it.HashValues, hash)
+			}
+		}
+	} else {
+		// use primary keys as hash if hash is not provided
+		// in this case, primary field is required, we have already checked this
+		if uint32(len(it.HashValues)) != 0 && uint32(len(it.HashValues)) != rowNums {
+			return fmt.Errorf("invalid length of input hash values")
+		}
+		if it.HashValues == nil || len(it.HashValues) <= 0 {
+			it.HashValues = make([]uint32, 0, len(primaryData))
+			for _, pk := range primaryData {
+				hash, _ := typeutil.Hash32Int64(pk)
+				it.HashValues = append(it.HashValues, hash)
+			}
+		}
+	}
+
+	sliceIndex := make([]uint32, rowNums)
+	for i := uint32(0); i < rowNums; i++ {
+		sliceIndex[i] = i
+	}
+	it.result.SuccIndex = sliceIndex
+
+	return nil
+}
+
 func (it *InsertTask) PreExecute(ctx context.Context) error {
 	it.Base.MsgType = commonpb.MsgType_Insert
 	it.Base.SourceID = Params.ProxyID
+
+	it.result = &milvuspb.MutationResult{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		IDs: &schemapb.IDs{
+			IdField: nil,
+		},
+		Timestamp: it.BeginTs(),
+	}
 
 	collectionName := it.BaseInsertTask.CollectionName
 	if err := ValidateCollectionName(collectionName); err != nil {
 		return err
 	}
+
 	partitionTag := it.BaseInsertTask.PartitionName
 	if err := ValidatePartitionTag(partitionTag, true); err != nil {
 		return err
 	}
 
-	err := it.transferColumnBasedRequestToRowBasedData()
+	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
+	log.Debug("ProxyNode Insert PreExecute", zap.Any("collSchema", collSchema))
+	if err != nil {
+		return err
+	}
+	it.schema = collSchema
+
+	err = it.checkFieldAutoID()
+	if err != nil {
+		return err
+	}
+
+	err = it.transferColumnBasedRequestToRowBasedData()
 	if err != nil {
 		return err
 	}
@@ -671,12 +838,6 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 
 func (it *InsertTask) Execute(ctx context.Context) error {
 	collectionName := it.BaseInsertTask.CollectionName
-	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
-	log.Debug("ProxyNode Insert", zap.Any("collSchema", collSchema))
-	if err != nil {
-		return err
-	}
-	autoID := collSchema.AutoID
 	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	if err != nil {
 		return err
@@ -695,26 +856,6 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 		}
 	}
 	it.PartitionID = partitionID
-	var rowIDBegin UniqueID
-	var rowIDEnd UniqueID
-	rowNums := len(it.BaseInsertTask.RowData)
-	rowIDBegin, rowIDEnd, _ = it.rowIDAllocator.Alloc(uint32(rowNums))
-
-	it.BaseInsertTask.RowIDs = make([]UniqueID, rowNums)
-	for i := rowIDBegin; i < rowIDEnd; i++ {
-		offset := i - rowIDBegin
-		it.BaseInsertTask.RowIDs[offset] = i
-	}
-
-	if autoID {
-		if it.HashValues == nil || len(it.HashValues) == 0 {
-			it.HashValues = make([]uint32, 0)
-		}
-		for _, rowID := range it.RowIDs {
-			hashValue, _ := typeutil.Hash32Int64(rowID)
-			it.HashValues = append(it.HashValues, hashValue)
-		}
-	}
 
 	var tsMsg msgstream.TsMsg = &it.BaseInsertTask
 	it.BaseMsg.Ctx = ctx
@@ -722,14 +863,6 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 		BeginTs: it.BeginTs(),
 		EndTs:   it.EndTs(),
 		Msgs:    make([]msgstream.TsMsg, 1),
-	}
-
-	it.result = &milvuspb.InsertResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		RowIDBegin: rowIDBegin,
-		RowIDEnd:   rowIDEnd,
 	}
 
 	msgPack.Msgs[0] = tsMsg
@@ -833,6 +966,8 @@ func (cct *CreateCollectionTask) PreExecute(ctx context.Context) error {
 
 	cct.schema = &schemapb.CollectionSchema{}
 	err := proto.Unmarshal(cct.Schema, cct.schema)
+	cct.schema.AutoID = false
+	cct.CreateCollectionRequest.Schema, _ = proto.Marshal(cct.schema)
 	if err != nil {
 		return err
 	}
@@ -851,6 +986,10 @@ func (cct *CreateCollectionTask) PreExecute(ctx context.Context) error {
 	}
 
 	if err := ValidatePrimaryKey(cct.schema); err != nil {
+		return err
+	}
+
+	if err := ValidateFieldAutoID(cct.schema); err != nil {
 		return err
 	}
 
@@ -2089,6 +2228,7 @@ func (dct *DescribeCollectionTask) Execute(ctx context.Context) error {
 					FieldID:      field.FieldID,
 					Name:         field.Name,
 					IsPrimaryKey: field.IsPrimaryKey,
+					AutoID:       field.AutoID,
 					Description:  field.Description,
 					DataType:     field.DataType,
 					TypeParams:   field.TypeParams,

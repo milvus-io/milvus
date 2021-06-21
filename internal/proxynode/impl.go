@@ -1062,7 +1062,7 @@ func (node *ProxyNode) GetIndexState(ctx context.Context, request *milvuspb.GetI
 	return dipt.result, nil
 }
 
-func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.InsertResponse, error) {
+func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
 	it := &InsertTask{
 		ctx:         ctx,
 		Condition:   NewTaskCondition(ctx),
@@ -1091,15 +1091,23 @@ func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertReque
 		it.PartitionName = Params.DefaultPartitionName
 	}
 
+	result := &milvuspb.MutationResult{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+	}
 	err := node.sched.DmQueue.Enqueue(it)
 
 	if err != nil {
-		return &milvuspb.InsertResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-		}, nil
+		result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		result.Status.Reason = err.Error()
+		numRows := it.req.NumRows
+		errIndex := make([]uint32, numRows)
+		for i := uint32(0); i < numRows; i++ {
+			errIndex[i] = i
+		}
+		result.ErrIndex = errIndex
+		return result, nil
 	}
 
 	log.Debug("Insert",
@@ -1126,14 +1134,24 @@ func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertReque
 
 	err = it.WaitToFinish()
 	if err != nil {
-		return &milvuspb.InsertResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-		}, nil
+		result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		result.Status.Reason = err.Error()
+		numRows := it.req.NumRows
+		errIndex := make([]uint32, numRows)
+		for i := uint32(0); i < numRows; i++ {
+			errIndex[i] = i
+		}
+		result.ErrIndex = errIndex
+		return result, nil
 	}
-
+	if it.result.Status.ErrorCode != commonpb.ErrorCode_Success {
+		numRows := it.req.NumRows
+		errIndex := make([]uint32, numRows)
+		for i := uint32(0); i < numRows; i++ {
+			errIndex[i] = i
+		}
+		it.result.ErrIndex = errIndex
+	}
 	return it.result, nil
 }
 

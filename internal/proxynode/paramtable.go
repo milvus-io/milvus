@@ -24,7 +24,6 @@ import (
 )
 
 const (
-	StartParamsKey                 = "START_PARAMS"
 	PulsarMaxMessageSizeKey        = "maxMessageSize"
 	SuggestPulsarMaxMessageSizeKey = 5 * 1024 * 1024
 )

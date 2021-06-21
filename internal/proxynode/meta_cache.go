@@ -217,7 +217,24 @@ func (m *MetaCache) describeCollection(ctx context.Context, collectionName strin
 	if coll.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return nil, errors.New(coll.Status.Reason)
 	}
-	return coll, nil
+	resp := &milvuspb.DescribeCollectionResponse{
+		Status: coll.Status,
+		Schema: &schemapb.CollectionSchema{
+			Name:        coll.Schema.Name,
+			Description: coll.Schema.Description,
+			AutoID:      coll.Schema.AutoID,
+			Fields:      make([]*schemapb.FieldSchema, 0),
+		},
+		CollectionID:         coll.CollectionID,
+		VirtualChannelNames:  coll.VirtualChannelNames,
+		PhysicalChannelNames: coll.PhysicalChannelNames,
+	}
+	for _, field := range coll.Schema.Fields {
+		if field.FieldID >= 100 { // TODO(dragondriver): use StartOfUserField to replace 100
+			resp.Schema.Fields = append(resp.Schema.Fields, field)
+		}
+	}
+	return resp, nil
 }
 
 func (m *MetaCache) showPartitions(ctx context.Context, collectionName string) (*milvuspb.ShowPartitionsResponse, error) {

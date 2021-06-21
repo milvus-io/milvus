@@ -274,8 +274,9 @@ class FieldSchema :
     kNameFieldNumber = 2,
     kDescriptionFieldNumber = 4,
     kFieldIDFieldNumber = 1,
-    kIsPrimaryKeyFieldNumber = 3,
     kDataTypeFieldNumber = 5,
+    kIsPrimaryKeyFieldNumber = 3,
+    kAutoIDFieldNumber = 8,
   };
   // repeated .milvus.proto.common.KeyValuePair type_params = 6;
   int type_params_size() const;
@@ -326,15 +327,20 @@ class FieldSchema :
   ::PROTOBUF_NAMESPACE_ID::int64 fieldid() const;
   void set_fieldid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
+  // .milvus.proto.schema.DataType data_type = 5;
+  void clear_data_type();
+  ::milvus::proto::schema::DataType data_type() const;
+  void set_data_type(::milvus::proto::schema::DataType value);
+
   // bool is_primary_key = 3;
   void clear_is_primary_key();
   bool is_primary_key() const;
   void set_is_primary_key(bool value);
 
-  // .milvus.proto.schema.DataType data_type = 5;
-  void clear_data_type();
-  ::milvus::proto::schema::DataType data_type() const;
-  void set_data_type(::milvus::proto::schema::DataType value);
+  // bool autoID = 8;
+  void clear_autoid();
+  bool autoid() const;
+  void set_autoid(bool value);
 
   // @@protoc_insertion_point(class_scope:milvus.proto.schema.FieldSchema)
  private:
@@ -346,8 +352,9 @@ class FieldSchema :
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr description_;
   ::PROTOBUF_NAMESPACE_ID::int64 fieldid_;
-  bool is_primary_key_;
   int data_type_;
+  bool is_primary_key_;
+  bool autoid_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_schema_2eproto;
 };
@@ -2445,6 +2452,20 @@ inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common:
 FieldSchema::index_params() const {
   // @@protoc_insertion_point(field_list:milvus.proto.schema.FieldSchema.index_params)
   return index_params_;
+}
+
+// bool autoID = 8;
+inline void FieldSchema::clear_autoid() {
+  autoid_ = false;
+}
+inline bool FieldSchema::autoid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.FieldSchema.autoID)
+  return autoid_;
+}
+inline void FieldSchema::set_autoid(bool value) {
+  
+  autoid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.FieldSchema.autoID)
 }
 
 // -------------------------------------------------------------------

@@ -187,6 +187,7 @@ class TestInsertBase:
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.skip("TODO: change these cases to use ids in primary field")
     def test_insert_ids(self, connect, id_collection, insert_count):
         '''
         target: test insert entities in collection, use customize ids
@@ -195,7 +196,7 @@ class TestInsertBase:
         '''
         nb = insert_count
         ids = [i for i in range(nb)]
-        res_ids = connect.insert(id_collection, gen_entities(nb), ids)
+        res_ids = connect.insert(id_collection, gen_entities(nb))
         connect.flush([id_collection])
         assert len(res_ids) == nb
         assert res_ids == ids
@@ -203,6 +204,7 @@ class TestInsertBase:
         assert stats[row_count] == nb
 
     @pytest.mark.timeout(ADD_TIMEOUT)
+    @pytest.mark.skip("TODO: change these cases to use ids in primary field")
     def test_insert_the_same_ids(self, connect, id_collection, insert_count):
         '''
         target: test insert vectors in collection, use customize the same ids
@@ -220,6 +222,7 @@ class TestInsertBase:
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.skip("TODO: change these cases to use ids in primary field")
     def test_insert_ids_fields(self, connect, get_filter_field, get_vector_field):
         '''
         target: test create normal collection with different fields, insert entities into id with ids
@@ -245,6 +248,7 @@ class TestInsertBase:
         assert stats[row_count] == nb
 
     @pytest.mark.timeout(ADD_TIMEOUT)
+    @pytest.mark.skip("TODO: change these cases to use ids in primary field")
     def test_insert_ids_not_match(self, connect, id_collection, insert_count):
         '''
         target: test insert entities in collection without ids
@@ -258,6 +262,7 @@ class TestInsertBase:
     # TODO
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.skip("TODO: change these cases to use ids in primary field")
     def test_insert_twice_ids_no_ids(self, connect, id_collection):
         '''
         target: check the result of insert, with params ids and no ids
@@ -270,6 +275,7 @@ class TestInsertBase:
             connect.insert(id_collection, default_entities)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
+    @pytest.mark.skip("TODO: change these cases to use ids in primary field")
     def test_insert_not_ids(self, connect, id_collection):
         '''
         target: check the result of insert, with params ids and no ids
@@ -281,6 +287,7 @@ class TestInsertBase:
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.skip("TODO: change these cases to use ids in primary field")
     def test_insert_ids_length_not_match_batch(self, connect, id_collection):
         '''
         target: test insert vectors in collection, use customize ids, len(ids) != len(vectors)
@@ -293,6 +300,7 @@ class TestInsertBase:
             connect.insert(id_collection, default_entities, ids)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
+    @pytest.mark.skip("TODO: change these cases to use ids in primary field")
     def test_insert_ids_length_not_match_single(self, connect, id_collection):
         '''
         target: test insert vectors in collection, use customize ids, len(ids) != len(vectors)
@@ -323,6 +331,7 @@ class TestInsertBase:
     # TODO
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.skip("TODO: change these cases to use ids in primary field")
     def test_insert_partition_with_ids(self, connect, id_collection):
         '''
         target: test insert entities in collection created before, insert with ids

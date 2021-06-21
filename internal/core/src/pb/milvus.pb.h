@@ -159,15 +159,15 @@ extern IndexDescriptionDefaultTypeInternal _IndexDescription_default_instance_;
 class InsertRequest;
 class InsertRequestDefaultTypeInternal;
 extern InsertRequestDefaultTypeInternal _InsertRequest_default_instance_;
-class InsertResponse;
-class InsertResponseDefaultTypeInternal;
-extern InsertResponseDefaultTypeInternal _InsertResponse_default_instance_;
 class LoadCollectionRequest;
 class LoadCollectionRequestDefaultTypeInternal;
 extern LoadCollectionRequestDefaultTypeInternal _LoadCollectionRequest_default_instance_;
 class LoadPartitionsRequest;
 class LoadPartitionsRequestDefaultTypeInternal;
 extern LoadPartitionsRequestDefaultTypeInternal _LoadPartitionsRequest_default_instance_;
+class MutationResult;
+class MutationResultDefaultTypeInternal;
+extern MutationResultDefaultTypeInternal _MutationResult_default_instance_;
 class PersistentSegmentInfo;
 class PersistentSegmentInfoDefaultTypeInternal;
 extern PersistentSegmentInfoDefaultTypeInternal _PersistentSegmentInfo_default_instance_;
@@ -268,9 +268,9 @@ template<> ::milvus::proto::milvus::HasPartitionRequest* Arena::CreateMaybeMessa
 template<> ::milvus::proto::milvus::Hits* Arena::CreateMaybeMessage<::milvus::proto::milvus::Hits>(Arena*);
 template<> ::milvus::proto::milvus::IndexDescription* Arena::CreateMaybeMessage<::milvus::proto::milvus::IndexDescription>(Arena*);
 template<> ::milvus::proto::milvus::InsertRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::InsertRequest>(Arena*);
-template<> ::milvus::proto::milvus::InsertResponse* Arena::CreateMaybeMessage<::milvus::proto::milvus::InsertResponse>(Arena*);
 template<> ::milvus::proto::milvus::LoadCollectionRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::LoadCollectionRequest>(Arena*);
 template<> ::milvus::proto::milvus::LoadPartitionsRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::LoadPartitionsRequest>(Arena*);
+template<> ::milvus::proto::milvus::MutationResult* Arena::CreateMaybeMessage<::milvus::proto::milvus::MutationResult>(Arena*);
 template<> ::milvus::proto::milvus::PersistentSegmentInfo* Arena::CreateMaybeMessage<::milvus::proto::milvus::PersistentSegmentInfo>(Arena*);
 template<> ::milvus::proto::milvus::PlaceholderGroup* Arena::CreateMaybeMessage<::milvus::proto::milvus::PlaceholderGroup>(Arena*);
 template<> ::milvus::proto::milvus::PlaceholderValue* Arena::CreateMaybeMessage<::milvus::proto::milvus::PlaceholderValue>(Arena*);
@@ -6248,6 +6248,7 @@ class InsertRequest :
     kCollectionNameFieldNumber = 3,
     kPartitionNameFieldNumber = 4,
     kBaseFieldNumber = 1,
+    kNumRowsFieldNumber = 7,
   };
   // repeated .milvus.proto.schema.FieldData fields_data = 5;
   int fields_data_size() const;
@@ -6312,6 +6313,11 @@ class InsertRequest :
   ::milvus::proto::common::MsgBase* mutable_base();
   void set_allocated_base(::milvus::proto::common::MsgBase* base);
 
+  // uint32 num_rows = 7;
+  void clear_num_rows();
+  ::PROTOBUF_NAMESPACE_ID::uint32 num_rows() const;
+  void set_num_rows(::PROTOBUF_NAMESPACE_ID::uint32 value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.InsertRequest)
  private:
   class _Internal;
@@ -6324,28 +6330,29 @@ class InsertRequest :
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr partition_name_;
   ::milvus::proto::common::MsgBase* base_;
+  ::PROTOBUF_NAMESPACE_ID::uint32 num_rows_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
 // -------------------------------------------------------------------
 
-class InsertResponse :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.milvus.InsertResponse) */ {
+class MutationResult :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.milvus.MutationResult) */ {
  public:
-  InsertResponse();
-  virtual ~InsertResponse();
+  MutationResult();
+  virtual ~MutationResult();
 
-  InsertResponse(const InsertResponse& from);
-  InsertResponse(InsertResponse&& from) noexcept
-    : InsertResponse() {
+  MutationResult(const MutationResult& from);
+  MutationResult(MutationResult&& from) noexcept
+    : MutationResult() {
     *this = ::std::move(from);
   }
 
-  inline InsertResponse& operator=(const InsertResponse& from) {
+  inline MutationResult& operator=(const MutationResult& from) {
     CopyFrom(from);
     return *this;
   }
-  inline InsertResponse& operator=(InsertResponse&& from) noexcept {
+  inline MutationResult& operator=(MutationResult&& from) noexcept {
     if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
       if (this != &from) InternalSwap(&from);
     } else {
@@ -6363,37 +6370,37 @@ class InsertResponse :
   static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
     return GetMetadataStatic().reflection;
   }
-  static const InsertResponse& default_instance();
+  static const MutationResult& default_instance();
 
   static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
-  static inline const InsertResponse* internal_default_instance() {
-    return reinterpret_cast<const InsertResponse*>(
-               &_InsertResponse_default_instance_);
+  static inline const MutationResult* internal_default_instance() {
+    return reinterpret_cast<const MutationResult*>(
+               &_MutationResult_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
     36;
 
-  friend void swap(InsertResponse& a, InsertResponse& b) {
+  friend void swap(MutationResult& a, MutationResult& b) {
     a.Swap(&b);
   }
-  inline void Swap(InsertResponse* other) {
+  inline void Swap(MutationResult* other) {
     if (other == this) return;
     InternalSwap(other);
   }
 
   // implements Message ----------------------------------------------
 
-  inline InsertResponse* New() const final {
-    return CreateMaybeMessage<InsertResponse>(nullptr);
+  inline MutationResult* New() const final {
+    return CreateMaybeMessage<MutationResult>(nullptr);
   }
 
-  InsertResponse* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
-    return CreateMaybeMessage<InsertResponse>(arena);
+  MutationResult* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<MutationResult>(arena);
   }
   void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
   void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
-  void CopyFrom(const InsertResponse& from);
-  void MergeFrom(const InsertResponse& from);
+  void CopyFrom(const MutationResult& from);
+  void MergeFrom(const MutationResult& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -6414,10 +6421,10 @@ class InsertResponse :
   inline void SharedCtor();
   inline void SharedDtor();
   void SetCachedSize(int size) const final;
-  void InternalSwap(InsertResponse* other);
+  void InternalSwap(MutationResult* other);
   friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
   static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "milvus.proto.milvus.InsertResponse";
+    return "milvus.proto.milvus.MutationResult";
   }
   private:
   inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
@@ -6442,10 +6449,38 @@ class InsertResponse :
   // accessors -------------------------------------------------------
 
   enum : int {
+    kSuccIndexFieldNumber = 3,
+    kErrIndexFieldNumber = 4,
     kStatusFieldNumber = 1,
-    kRowIDBeginFieldNumber = 2,
-    kRowIDEndFieldNumber = 3,
+    kIDsFieldNumber = 2,
+    kInsertCntFieldNumber = 6,
+    kDeleteCntFieldNumber = 7,
+    kUpsertCntFieldNumber = 8,
+    kTimestampFieldNumber = 9,
+    kAcknowledgedFieldNumber = 5,
   };
+  // repeated uint32 succ_index = 3;
+  int succ_index_size() const;
+  void clear_succ_index();
+  ::PROTOBUF_NAMESPACE_ID::uint32 succ_index(int index) const;
+  void set_succ_index(int index, ::PROTOBUF_NAMESPACE_ID::uint32 value);
+  void add_succ_index(::PROTOBUF_NAMESPACE_ID::uint32 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 >&
+      succ_index() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 >*
+      mutable_succ_index();
+
+  // repeated uint32 err_index = 4;
+  int err_index_size() const;
+  void clear_err_index();
+  ::PROTOBUF_NAMESPACE_ID::uint32 err_index(int index) const;
+  void set_err_index(int index, ::PROTOBUF_NAMESPACE_ID::uint32 value);
+  void add_err_index(::PROTOBUF_NAMESPACE_ID::uint32 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 >&
+      err_index() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 >*
+      mutable_err_index();
+
   // .milvus.proto.common.Status status = 1;
   bool has_status() const;
   void clear_status();
@@ -6454,24 +6489,55 @@ class InsertResponse :
   ::milvus::proto::common::Status* mutable_status();
   void set_allocated_status(::milvus::proto::common::Status* status);
 
-  // int64 rowID_begin = 2;
-  void clear_rowid_begin();
-  ::PROTOBUF_NAMESPACE_ID::int64 rowid_begin() const;
-  void set_rowid_begin(::PROTOBUF_NAMESPACE_ID::int64 value);
+  // .milvus.proto.schema.IDs IDs = 2;
+  bool has_ids() const;
+  void clear_ids();
+  const ::milvus::proto::schema::IDs& ids() const;
+  ::milvus::proto::schema::IDs* release_ids();
+  ::milvus::proto::schema::IDs* mutable_ids();
+  void set_allocated_ids(::milvus::proto::schema::IDs* ids);
 
-  // int64 rowID_end = 3;
-  void clear_rowid_end();
-  ::PROTOBUF_NAMESPACE_ID::int64 rowid_end() const;
-  void set_rowid_end(::PROTOBUF_NAMESPACE_ID::int64 value);
+  // int64 insert_cnt = 6;
+  void clear_insert_cnt();
+  ::PROTOBUF_NAMESPACE_ID::int64 insert_cnt() const;
+  void set_insert_cnt(::PROTOBUF_NAMESPACE_ID::int64 value);
 
-  // @@protoc_insertion_point(class_scope:milvus.proto.milvus.InsertResponse)
+  // int64 delete_cnt = 7;
+  void clear_delete_cnt();
+  ::PROTOBUF_NAMESPACE_ID::int64 delete_cnt() const;
+  void set_delete_cnt(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // int64 upsert_cnt = 8;
+  void clear_upsert_cnt();
+  ::PROTOBUF_NAMESPACE_ID::int64 upsert_cnt() const;
+  void set_upsert_cnt(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // uint64 timestamp = 9;
+  void clear_timestamp();
+  ::PROTOBUF_NAMESPACE_ID::uint64 timestamp() const;
+  void set_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
+
+  // bool acknowledged = 5;
+  void clear_acknowledged();
+  bool acknowledged() const;
+  void set_acknowledged(bool value);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.milvus.MutationResult)
  private:
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 > succ_index_;
+  mutable std::atomic<int> _succ_index_cached_byte_size_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 > err_index_;
+  mutable std::atomic<int> _err_index_cached_byte_size_;
   ::milvus::proto::common::Status* status_;
-  ::PROTOBUF_NAMESPACE_ID::int64 rowid_begin_;
-  ::PROTOBUF_NAMESPACE_ID::int64 rowid_end_;
+  ::milvus::proto::schema::IDs* ids_;
+  ::PROTOBUF_NAMESPACE_ID::int64 insert_cnt_;
+  ::PROTOBUF_NAMESPACE_ID::int64 delete_cnt_;
+  ::PROTOBUF_NAMESPACE_ID::int64 upsert_cnt_;
+  ::PROTOBUF_NAMESPACE_ID::uint64 timestamp_;
+  bool acknowledged_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -15454,37 +15520,51 @@ InsertRequest::mutable_hash_keys() {
   return &hash_keys_;
 }
 
+// uint32 num_rows = 7;
+inline void InsertRequest::clear_num_rows() {
+  num_rows_ = 0u;
+}
+inline ::PROTOBUF_NAMESPACE_ID::uint32 InsertRequest::num_rows() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.InsertRequest.num_rows)
+  return num_rows_;
+}
+inline void InsertRequest::set_num_rows(::PROTOBUF_NAMESPACE_ID::uint32 value) {
+  
+  num_rows_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.InsertRequest.num_rows)
+}
+
 // -------------------------------------------------------------------
 
-// InsertResponse
+// MutationResult
 
 // .milvus.proto.common.Status status = 1;
-inline bool InsertResponse::has_status() const {
+inline bool MutationResult::has_status() const {
   return this != internal_default_instance() && status_ != nullptr;
 }
-inline const ::milvus::proto::common::Status& InsertResponse::status() const {
+inline const ::milvus::proto::common::Status& MutationResult::status() const {
   const ::milvus::proto::common::Status* p = status_;
-  // @@protoc_insertion_point(field_get:milvus.proto.milvus.InsertResponse.status)
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.MutationResult.status)
   return p != nullptr ? *p : *reinterpret_cast<const ::milvus::proto::common::Status*>(
       &::milvus::proto::common::_Status_default_instance_);
 }
-inline ::milvus::proto::common::Status* InsertResponse::release_status() {
-  // @@protoc_insertion_point(field_release:milvus.proto.milvus.InsertResponse.status)
+inline ::milvus::proto::common::Status* MutationResult::release_status() {
+  // @@protoc_insertion_point(field_release:milvus.proto.milvus.MutationResult.status)
   
   ::milvus::proto::common::Status* temp = status_;
   status_ = nullptr;
   return temp;
 }
-inline ::milvus::proto::common::Status* InsertResponse::mutable_status() {
+inline ::milvus::proto::common::Status* MutationResult::mutable_status() {
   
   if (status_ == nullptr) {
     auto* p = CreateMaybeMessage<::milvus::proto::common::Status>(GetArenaNoVirtual());
     status_ = p;
   }
-  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.InsertResponse.status)
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.MutationResult.status)
   return status_;
 }
-inline void InsertResponse::set_allocated_status(::milvus::proto::common::Status* status) {
+inline void MutationResult::set_allocated_status(::milvus::proto::common::Status* status) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
   if (message_arena == nullptr) {
     delete reinterpret_cast< ::PROTOBUF_NAMESPACE_ID::MessageLite*>(status_);
@@ -15500,35 +15580,182 @@ inline void InsertResponse::set_allocated_status(::milvus::proto::common::Status
     
   }
   status_ = status;
-  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.InsertResponse.status)
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.MutationResult.status)
 }
 
-// int64 rowID_begin = 2;
-inline void InsertResponse::clear_rowid_begin() {
-  rowid_begin_ = PROTOBUF_LONGLONG(0);
+// .milvus.proto.schema.IDs IDs = 2;
+inline bool MutationResult::has_ids() const {
+  return this != internal_default_instance() && ids_ != nullptr;
 }
-inline ::PROTOBUF_NAMESPACE_ID::int64 InsertResponse::rowid_begin() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.milvus.InsertResponse.rowID_begin)
-  return rowid_begin_;
+inline const ::milvus::proto::schema::IDs& MutationResult::ids() const {
+  const ::milvus::proto::schema::IDs* p = ids_;
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.MutationResult.IDs)
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::proto::schema::IDs*>(
+      &::milvus::proto::schema::_IDs_default_instance_);
 }
-inline void InsertResponse::set_rowid_begin(::PROTOBUF_NAMESPACE_ID::int64 value) {
+inline ::milvus::proto::schema::IDs* MutationResult::release_ids() {
+  // @@protoc_insertion_point(field_release:milvus.proto.milvus.MutationResult.IDs)
   
-  rowid_begin_ = value;
-  // @@protoc_insertion_point(field_set:milvus.proto.milvus.InsertResponse.rowID_begin)
+  ::milvus::proto::schema::IDs* temp = ids_;
+  ids_ = nullptr;
+  return temp;
+}
+inline ::milvus::proto::schema::IDs* MutationResult::mutable_ids() {
+  
+  if (ids_ == nullptr) {
+    auto* p = CreateMaybeMessage<::milvus::proto::schema::IDs>(GetArenaNoVirtual());
+    ids_ = p;
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.MutationResult.IDs)
+  return ids_;
+}
+inline void MutationResult::set_allocated_ids(::milvus::proto::schema::IDs* ids) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
+  if (message_arena == nullptr) {
+    delete reinterpret_cast< ::PROTOBUF_NAMESPACE_ID::MessageLite*>(ids_);
+  }
+  if (ids) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
+    if (message_arena != submessage_arena) {
+      ids = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, ids, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  ids_ = ids;
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.MutationResult.IDs)
 }
 
-// int64 rowID_end = 3;
-inline void InsertResponse::clear_rowid_end() {
-  rowid_end_ = PROTOBUF_LONGLONG(0);
+// repeated uint32 succ_index = 3;
+inline int MutationResult::succ_index_size() const {
+  return succ_index_.size();
 }
-inline ::PROTOBUF_NAMESPACE_ID::int64 InsertResponse::rowid_end() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.milvus.InsertResponse.rowID_end)
-  return rowid_end_;
+inline void MutationResult::clear_succ_index() {
+  succ_index_.Clear();
 }
-inline void InsertResponse::set_rowid_end(::PROTOBUF_NAMESPACE_ID::int64 value) {
+inline ::PROTOBUF_NAMESPACE_ID::uint32 MutationResult::succ_index(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.MutationResult.succ_index)
+  return succ_index_.Get(index);
+}
+inline void MutationResult::set_succ_index(int index, ::PROTOBUF_NAMESPACE_ID::uint32 value) {
+  succ_index_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.MutationResult.succ_index)
+}
+inline void MutationResult::add_succ_index(::PROTOBUF_NAMESPACE_ID::uint32 value) {
+  succ_index_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.MutationResult.succ_index)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 >&
+MutationResult::succ_index() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.MutationResult.succ_index)
+  return succ_index_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 >*
+MutationResult::mutable_succ_index() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.MutationResult.succ_index)
+  return &succ_index_;
+}
+
+// repeated uint32 err_index = 4;
+inline int MutationResult::err_index_size() const {
+  return err_index_.size();
+}
+inline void MutationResult::clear_err_index() {
+  err_index_.Clear();
+}
+inline ::PROTOBUF_NAMESPACE_ID::uint32 MutationResult::err_index(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.MutationResult.err_index)
+  return err_index_.Get(index);
+}
+inline void MutationResult::set_err_index(int index, ::PROTOBUF_NAMESPACE_ID::uint32 value) {
+  err_index_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.MutationResult.err_index)
+}
+inline void MutationResult::add_err_index(::PROTOBUF_NAMESPACE_ID::uint32 value) {
+  err_index_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.MutationResult.err_index)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 >&
+MutationResult::err_index() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.MutationResult.err_index)
+  return err_index_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 >*
+MutationResult::mutable_err_index() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.MutationResult.err_index)
+  return &err_index_;
+}
+
+// bool acknowledged = 5;
+inline void MutationResult::clear_acknowledged() {
+  acknowledged_ = false;
+}
+inline bool MutationResult::acknowledged() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.MutationResult.acknowledged)
+  return acknowledged_;
+}
+inline void MutationResult::set_acknowledged(bool value) {
   
-  rowid_end_ = value;
-  // @@protoc_insertion_point(field_set:milvus.proto.milvus.InsertResponse.rowID_end)
+  acknowledged_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.MutationResult.acknowledged)
+}
+
+// int64 insert_cnt = 6;
+inline void MutationResult::clear_insert_cnt() {
+  insert_cnt_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 MutationResult::insert_cnt() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.MutationResult.insert_cnt)
+  return insert_cnt_;
+}
+inline void MutationResult::set_insert_cnt(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  insert_cnt_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.MutationResult.insert_cnt)
+}
+
+// int64 delete_cnt = 7;
+inline void MutationResult::clear_delete_cnt() {
+  delete_cnt_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 MutationResult::delete_cnt() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.MutationResult.delete_cnt)
+  return delete_cnt_;
+}
+inline void MutationResult::set_delete_cnt(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  delete_cnt_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.MutationResult.delete_cnt)
+}
+
+// int64 upsert_cnt = 8;
+inline void MutationResult::clear_upsert_cnt() {
+  upsert_cnt_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 MutationResult::upsert_cnt() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.MutationResult.upsert_cnt)
+  return upsert_cnt_;
+}
+inline void MutationResult::set_upsert_cnt(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  upsert_cnt_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.MutationResult.upsert_cnt)
+}
+
+// uint64 timestamp = 9;
+inline void MutationResult::clear_timestamp() {
+  timestamp_ = PROTOBUF_ULONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::uint64 MutationResult::timestamp() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.MutationResult.timestamp)
+  return timestamp_;
+}
+inline void MutationResult::set_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value) {
+  
+  timestamp_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.MutationResult.timestamp)
 }
 
 // -------------------------------------------------------------------
