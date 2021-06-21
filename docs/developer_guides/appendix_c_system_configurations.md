@@ -28,7 +28,7 @@ $ MILVUS_CONFIG_FILE=/path/to/milvus/configs/milvus.yaml milvus run rootcoord
 `server type`：指定执行程序的类型。`server type` 有：
 
 * `rootcoord`
-* `proxynode`
+* `proxy`
 * `querycoord`
 * `querynode`
 * `datacoord`
