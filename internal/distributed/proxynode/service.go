@@ -24,7 +24,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	grpcdataserviceclient "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
+	grpcdatacoordclient "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	grpcindexcoordclient "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	grpcqueryserviceclient "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
@@ -55,7 +55,7 @@ type Server struct {
 	grpcErrChan chan error
 
 	rootCoordClient    *rcc.GrpcClient
-	dataCoordClient    *grpcdataserviceclient.Client
+	dataCoordClient    *grpcdatacoordclient.Client
 	queryServiceClient *grpcqueryserviceclient.Client
 	indexCoordClient   *grpcindexcoordclient.Client
 
@@ -190,7 +190,7 @@ func (s *Server) init() error {
 
 	dataCoordAddr := Params.DataCoordAddress
 	log.Debug("ProxyNode", zap.String("data service address", dataCoordAddr))
-	s.dataCoordClient = grpcdataserviceclient.NewClient(proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
+	s.dataCoordClient = grpcdatacoordclient.NewClient(proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
 	err = s.dataCoordClient.Init()
 	if err != nil {
 		log.Debug("ProxyNode dataCoordClient init failed ", zap.Error(err))

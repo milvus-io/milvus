@@ -8,7 +8,7 @@ import "common.proto";
 import "milvus.proto";
 import "internal.proto";
 import "schema.proto";
-import "data_service.proto";
+import "data_coord.proto";
 
 service QueryService {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
