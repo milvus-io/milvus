@@ -164,7 +164,7 @@ func (pt *ParamTable) initLogCfg() {
 		panic(err)
 	}
 	if len(rootPath) != 0 {
-		pt.Log.File.Filename = path.Join(rootPath, "indexservice.log")
+		pt.Log.File.Filename = path.Join(rootPath, "indexcoord.log")
 	} else {
 		pt.Log.File.Filename = ""
 	}

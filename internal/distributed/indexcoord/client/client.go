@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package grpcindexserviceclient
+package grpcindexcoordclient
 
 import (
 	"context"
@@ -58,7 +58,7 @@ func getIndexCoordAddr(sess *sessionutil.Session) (string, error) {
 	ms, ok := msess[key]
 	if !ok {
 		log.Debug("IndexCoordClient msess key not existed", zap.Any("key", key), zap.Any("len of msess", len(msess)))
-		return "", fmt.Errorf("number of indexservice is incorrect, %d", len(msess))
+		return "", fmt.Errorf("number of indexcoord is incorrect, %d", len(msess))
 	}
 	return ms.Address, nil
 }

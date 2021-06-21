@@ -25,7 +25,7 @@ import (
 	"google.golang.org/grpc"
 
 	grpcdataserviceclient "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
-	grpcindexserviceclient "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
+	grpcindexserviceclient "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	grpcqueryserviceclient "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 

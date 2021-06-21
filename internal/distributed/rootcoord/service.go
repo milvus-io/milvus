@@ -25,7 +25,7 @@ import (
 
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	dsc "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
-	isc "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
+	isc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	pnc "github.com/milvus-io/milvus/internal/distributed/proxynode/client"
 	qsc "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
 	"github.com/milvus-io/milvus/internal/log"
