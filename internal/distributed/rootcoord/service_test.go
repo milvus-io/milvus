@@ -815,7 +815,7 @@ func TestGrpcService(t *testing.T) {
 }
 
 type mockCore struct {
-	types.MasterComponent
+	types.RootCoordComponent
 }
 
 func (m *mockCore) UpdateStateCode(internalpb.StateCode) {

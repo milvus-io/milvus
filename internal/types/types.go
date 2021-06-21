@@ -114,8 +114,8 @@ type MasterService interface {
 	ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error)
 }
 
-// MasterComponent is used by grpc server of master service
-type MasterComponent interface {
+// RootCoordComponent is used by grpc server of master service
+type RootCoordComponent interface {
 	MasterService
 
 	UpdateStateCode(internalpb.StateCode)

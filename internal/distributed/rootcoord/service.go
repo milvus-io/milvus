@@ -44,7 +44,7 @@ import (
 
 // Server grpc wrapper
 type Server struct {
-	rootCoord   types.MasterComponent
+	rootCoord   types.RootCoordComponent
 	grpcServer  *grpc.Server
 	grpcErrChan chan error
 
