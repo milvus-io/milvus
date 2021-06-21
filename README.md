@@ -109,6 +109,9 @@ $ ./scripts/install_deps.sh
 $ make standalone
 ```
 
+Install with helm
+
+Coming soon.
 
 
 ### Install Milvus Cluster
@@ -135,7 +138,9 @@ $ ./scripts/install_deps.sh
 # Compile Milvus Cluster.
 $ make milvus
 ```
+Install with helm
 
+Coming soon.
 
 
 ## Milvus 2.0 is better than Milvus 1.x
