@@ -134,8 +134,7 @@ func TestDataNode(t *testing.T) {
 
 		sync, ok := node1.vchan2SyncService[dmChannelName]
 		assert.True(t, ok)
-		sync.replica.addSegment(0, 1, 1, dmChannelName)
-		// sync.replica.addSegment(1, 1, 1, dmChannelName) unable to deal with this.
+		sync.replica.addNewSegment(0, 1, 1, dmChannelName, nil, nil)
 
 		req := &datapb.FlushSegmentsRequest{
 			Base:         &commonpb.MsgBase{},
@@ -185,9 +184,6 @@ func TestDataNode(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = insertMsgStream.Broadcast(&timeTickMsgPack)
-		assert.NoError(t, err)
-
-		_, err = sync.replica.getSegmentByID(0)
 		assert.NoError(t, err)
 
 		defer func() {
