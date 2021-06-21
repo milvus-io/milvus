@@ -77,7 +77,7 @@ func (s *Server) init() error {
 
 	s.loopWg.Add(1)
 	go s.startGrpcLoop(Params.ServicePort)
-	// wait for grpc IndexService loop start
+	// wait for grpc IndexCoord loop start
 	if err := <-s.grpcErrChan; err != nil {
 		return err
 	}
@@ -93,7 +93,7 @@ func (s *Server) start() error {
 	if err := s.indexcoord.Start(); err != nil {
 		return err
 	}
-	log.Debug("indexService started")
+	log.Debug("indexCoord started")
 	return nil
 }
 
@@ -152,10 +152,10 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	defer s.loopWg.Done()
 
-	log.Debug("IndexService", zap.Int("network port", grpcPort))
+	log.Debug("IndexCoord", zap.Int("network port", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
-		log.Warn("IndexService", zap.String("GrpcServer:failed to listen", err.Error()))
+		log.Warn("IndexCoord", zap.String("GrpcServer:failed to listen", err.Error()))
 		s.grpcErrChan <- err
 		return
 	}
@@ -175,7 +175,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	if err := s.grpcServer.Serve(lis); err != nil {
 		s.grpcErrChan <- err
 	}
-	log.Debug("IndexService grpcServer loop exit")
+	log.Debug("IndexCoord grpcServer loop exit")
 }
 
 func NewServer(ctx context.Context) (*Server, error) {
