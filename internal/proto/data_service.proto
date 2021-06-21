@@ -18,13 +18,11 @@ service DataService {
   rpc Flush(FlushRequest) returns (common.Status) {}
 
   rpc AssignSegmentID(AssignSegmentIDRequest) returns (AssignSegmentIDResponse) {}
-  rpc ShowSegments(ShowSegmentsRequest) returns (ShowSegmentsResponse) {}
 
   rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
   rpc GetSegmentStates(GetSegmentStatesRequest) returns (GetSegmentStatesResponse) {}
   rpc GetInsertBinlogPaths(GetInsertBinlogPathsRequest) returns (GetInsertBinlogPathsResponse) {}
 
-  rpc GetInsertChannels(GetInsertChannelsRequest) returns (internal.StringList) {}
   rpc GetCollectionStatistics(GetCollectionStatisticsRequest) returns (GetCollectionStatisticsResponse) {}
   rpc GetPartitionStatistics(GetPartitionStatisticsRequest) returns (GetPartitionStatisticsResponse) {}
 
@@ -86,18 +84,6 @@ message AssignSegmentIDResponse {
   common.Status status = 2;
 }
 
-message ShowSegmentsRequest {
-  common.MsgBase base = 1;
-  int64 collectionID = 2;
-  int64 partitionID = 3;
-  int64 dbID = 4;
-}
-
-message ShowSegmentsResponse {
-  repeated int64 segmentIDs = 1;
-  common.Status status = 2;
-}
-
 message GetSegmentStatesRequest {
   common.MsgBase base = 1;
   repeated int64 segmentIDs = 2;
@@ -135,12 +121,6 @@ message GetInsertBinlogPathsResponse {
   repeated int64 fieldIDs = 1;
   repeated internal.StringList paths = 2;
   common.Status status = 3;
-}
-
-message GetInsertChannelsRequest {
-  common.MsgBase base = 1;
-  int64 dbID = 2;
-  int64 collectionID = 3;
 }
 
 message GetCollectionStatisticsRequest {

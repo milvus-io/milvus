@@ -135,22 +135,6 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 	}, nil
 }
 
-func (s *Server) ShowSegments(ctx context.Context, req *datapb.ShowSegmentsRequest) (*datapb.ShowSegmentsResponse, error) {
-	resp := &datapb.ShowSegmentsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
-	}
-	if s.isClosed() {
-		resp.Status.Reason = "server is initializing"
-		return resp, nil
-	}
-	ids := s.meta.GetSegmentsOfPartition(req.CollectionID, req.PartitionID)
-	resp.Status.ErrorCode = commonpb.ErrorCode_Success
-	resp.SegmentIDs = ids
-	return resp, nil
-}
-
 func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 	resp := &datapb.GetSegmentStatesResponse{
 		Status: &commonpb.Status{
@@ -219,15 +203,6 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 	resp.FieldIDs = fids
 	resp.Paths = paths
 	return resp, nil
-}
-
-func (s *Server) GetInsertChannels(ctx context.Context, req *datapb.GetInsertChannelsRequest) (*internalpb.StringList, error) {
-	return &internalpb.StringList{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Values: []string{},
-	}, nil
 }
 
 func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {
