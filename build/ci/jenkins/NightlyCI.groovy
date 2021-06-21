@@ -44,7 +44,6 @@ pipeline {
                     DOCKER_CREDENTIALS_ID = "ba070c98-c8cc-4f7c-b657-897715f359fc"
                     DOKCER_REGISTRY_URL = "registry.zilliz.com"
                     TARGET_REPO = "${DOKCER_REGISTRY_URL}/milvus"
-                    MILVUS_HELM_BRANCH = "rename"
                 }
                 stages {
                     stage('Test') {
@@ -52,13 +51,13 @@ pipeline {
                             container('main') {
                                 dir ('tests/scripts') {
                                     script {
-                                        def standaloneEnabled = "true"
+                                        def clusterEnabled = "false"
                                         if ("${MILVUS_SERVER_TYPE}" == "distributed") {
-                                            standaloneEnabled = "false"
+                                            clusterEnabled = "true"
                                         }
 
                                         sh """
-                                        MILVUS_STANDALONE_ENABLED=${standaloneEnabled} \
+                                        MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
                                         ./e2e-k8s.sh \
                                         --node-image registry.zilliz.com/kindest/node:v1.20.2
                                         """
