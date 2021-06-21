@@ -675,7 +675,7 @@ func (mt *metaTable) AddFlushedSegment(segID typeutil.UniqueID) error
 
 
 
-#### 10.5 System Time Synchronization
+#### 10.7 System Time Synchronization
 
 
 
@@ -763,117 +763,4 @@ func (syncMsgProducer *timeSyncMsgProducer) Close() error
 func newTimeSyncMsgProducer(ctx context.Context) *timeSyncMsgProducer error
  ```
 
-
-
-#### 10.6 System Statistics
-
-###### 10.6.1 Query Node Statistics
-
-```protobuf
-message SegmentStats {
-  int64 segment_id = 1;
-  int64 memory_size = 2;
-  int64 num_rows = 3;
-  bool recently_modified = 4;
-}
-
-message QueryNodeStats {
-  int64 id = 1;
-  uint64 timestamp = 2;
-  repeated SegmentStats seg_stats = 3;
-}
-```
-
-
-
-#### 10.7 Segment Management
-
-
-
-//TODO
-```go
-type assignment struct {
-	MemSize    int64
-	AssignTime time.Time
-}
-
-type segmentStatus struct {
-	assignments []*assignment
-}
-
-type collectionStatus struct {
-	openedSegment []UniqueID
-}
-
-type SegmentManagement struct {
-	segStatus map[UniqueID]*SegmentStatus
-	collStatus map[UniqueID]*collectionStatus
-}
-
-func NewSegmentManagement(ctx context.Context) *SegmentManagement
-```
-
-
-
-//TODO
-###### 10.7.1 Assign Segment ID to Inserted Rows
-
-Master receives *AssignSegIDRequest* which contains a list of *SegIDRequest(count, channelName, collectionName, partitionName)* from Proxy. Segment Manager will assign the opened segments or open a new segment if there is no enough space, and Segment Manager will record the allocated space which can be reallocated after a expire duration.
-
-```go
-func (segMgr *SegmentManager) AssignSegmentID(segIDReq []*internalpb.SegIDRequest) ([]*internalpb.SegIDAssignment, error)
-
-```
-
-
-
-#### 10.8 System Config
-
-```protobuf
-// examples of keys:
-// "/pulsar/ip"
-// "/pulsar/port"
-// examples of key_prefixes:
-// "/proxy"
-// "/msg_stream/insert"
-
-message SysConfigRequest {
-  MsgType msg_type = 1;
-  int64 reqID = 2;
-  int64 proxyID = 3;
-  uint64 timestamp = 4;
-  repeated string keys = 5;
-  repeated string key_prefixes = 6;
-}
-
-message SysConfigResponse {
-  common.Status status = 1;
-  repeated string keys = 2;
-  repeated string values = 3;
-}
-```
-
-
-
-```go
-type SysConfig struct {
-	kv *kv.EtcdKV
-}
-
-func (conf *SysConfig) InitFromFile(filePath string) (error)
-func (conf *SysConfig) GetByPrefix(keyPrefix string) (keys []string, values []string, err error)
-func (conf *SysConfig) Get(keys []string) ([]string, error)
-```
-
-
-
-configuration examples in etcd:
-
-```
-key: root_path/config/master/address
-value: "localhost"
-
-key: root_path/config/proxy/timezone
-value: "UTC+8"
-```
 
