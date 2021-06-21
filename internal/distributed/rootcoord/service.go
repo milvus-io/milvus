@@ -54,10 +54,10 @@ type Server struct {
 	cancel context.CancelFunc
 
 	dataCoord  types.DataService
-	indexCoord types.IndexService
+	indexCoord types.IndexCoord
 	queryCoord types.QueryService
 
-	newIndexCoordClient func(string, []string, time.Duration) types.IndexService
+	newIndexCoordClient func(string, []string, time.Duration) types.IndexCoord
 	newDataCoordClient  func(string, []string, time.Duration) types.DataService
 	newQueryCoordClient func(string, []string, time.Duration) types.QueryService
 
@@ -96,7 +96,7 @@ func (s *Server) setClient() {
 		}
 		return dsClient
 	}
-	s.newIndexCoordClient = func(metaRootPath string, etcdEndpoints []string, timeout time.Duration) types.IndexService {
+	s.newIndexCoordClient = func(metaRootPath string, etcdEndpoints []string, timeout time.Duration) types.IndexCoord {
 		isClient := isc.NewClient(metaRootPath, etcdEndpoints, timeout)
 		if err := isClient.Init(); err != nil {
 			panic(err)

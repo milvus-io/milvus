@@ -960,7 +960,7 @@ func (node *ProxyNode) GetIndexBuildProgress(ctx context.Context, request *milvu
 		ctx:                          ctx,
 		Condition:                    NewTaskCondition(ctx),
 		GetIndexBuildProgressRequest: request,
-		indexService:                 node.indexService,
+		indexCoord:                   node.indexCoord,
 		rootCoord:                    node.rootCoord,
 		dataService:                  node.dataService,
 	}
@@ -1015,7 +1015,7 @@ func (node *ProxyNode) GetIndexState(ctx context.Context, request *milvuspb.GetI
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		GetIndexStateRequest: request,
-		indexService:         node.indexService,
+		indexCoord:           node.indexCoord,
 		rootCoord:            node.rootCoord,
 	}
 

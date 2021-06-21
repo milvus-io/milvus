@@ -53,7 +53,7 @@ type ProxyNode struct {
 	stateCode atomic.Value
 
 	rootCoord    types.RootCoord
-	indexService types.IndexService
+	indexCoord   types.IndexCoord
 	dataService  types.DataService
 	queryService types.QueryService
 
@@ -123,14 +123,14 @@ func (node *ProxyNode) Init() error {
 	}
 
 	// wait for indexservice state changed to Healthy
-	if node.indexService != nil {
-		log.Debug("ProxyNode wait for indexService ready")
-		err := funcutil.WaitForComponentHealthy(node.ctx, node.indexService, "IndexService", 1000000, time.Millisecond*200)
+	if node.indexCoord != nil {
+		log.Debug("ProxyNode wait for indexCoord ready")
+		err := funcutil.WaitForComponentHealthy(node.ctx, node.indexCoord, "IndexCoord", 1000000, time.Millisecond*200)
 		if err != nil {
-			log.Debug("ProxyNode wait for indexService ready failed", zap.Error(err))
+			log.Debug("ProxyNode wait for indexCoord ready failed", zap.Error(err))
 			return err
 		}
-		log.Debug("ProxyNode indexService is ready")
+		log.Debug("ProxyNode indexCoord is ready")
 	}
 
 	if node.queryService != nil {
@@ -412,8 +412,8 @@ func (node *ProxyNode) SetRootCoordClient(cli types.RootCoord) {
 	node.rootCoord = cli
 }
 
-func (node *ProxyNode) SetIndexServiceClient(cli types.IndexService) {
-	node.indexService = cli
+func (node *ProxyNode) SetIndexCoordClient(cli types.IndexCoord) {
+	node.indexCoord = cli
 }
 
 func (node *ProxyNode) SetDataServiceClient(cli types.DataService) {

@@ -63,7 +63,7 @@ type QueryNode struct {
 	// clients
 	rootCoord    types.RootCoord
 	queryService types.QueryService
-	indexService types.IndexService
+	indexCoord   types.IndexCoord
 	dataService  types.DataService
 
 	msFactory msgstream.Factory
@@ -143,7 +143,7 @@ func (node *QueryNode) Init() error {
 	node.historical = newHistorical(node.queryNodeLoopCtx,
 		node.rootCoord,
 		node.dataService,
-		node.indexService,
+		node.indexCoord,
 		node.msFactory,
 		node.etcdKV)
 	node.streaming = newStreaming(node.queryNodeLoopCtx, node.msFactory, node.etcdKV)
@@ -191,8 +191,8 @@ func (node *QueryNode) Init() error {
 		log.Error("null rootCoord detected")
 	}
 
-	if node.indexService == nil {
-		log.Error("null index service detected")
+	if node.indexCoord == nil {
+		log.Error("null indexCoord detected")
 	}
 
 	if node.dataService == nil {
@@ -276,11 +276,11 @@ func (node *QueryNode) SetQueryService(query types.QueryService) error {
 	return nil
 }
 
-func (node *QueryNode) SetIndexService(index types.IndexService) error {
+func (node *QueryNode) SetIndexCoord(index types.IndexCoord) error {
 	if index == nil {
-		return errors.New("null index service interface")
+		return errors.New("null indexCoord interface")
 	}
-	node.indexService = index
+	node.indexCoord = index
 	return nil
 }
 

@@ -778,7 +778,7 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataService) error {
 	return nil
 }
 
-func (c *Core) SetIndexCoord(s types.IndexService) error {
+func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 	c.CallBuildIndexService = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (retID typeutil.UniqueID, retErr error) {
 		defer func() {
 			if err := recover(); err != nil {

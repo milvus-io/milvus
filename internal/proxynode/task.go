@@ -3079,11 +3079,11 @@ func (dit *DropIndexTask) PostExecute(ctx context.Context) error {
 type GetIndexBuildProgressTask struct {
 	Condition
 	*milvuspb.GetIndexBuildProgressRequest
-	ctx          context.Context
-	indexService types.IndexService
-	rootCoord    types.RootCoord
-	dataService  types.DataService
-	result       *milvuspb.GetIndexBuildProgressResponse
+	ctx         context.Context
+	indexCoord  types.IndexCoord
+	rootCoord   types.RootCoord
+	dataService types.DataService
+	result      *milvuspb.GetIndexBuildProgressResponse
 }
 
 func (gibpt *GetIndexBuildProgressTask) TraceCtx() context.Context {
@@ -3241,7 +3241,7 @@ func (gibpt *GetIndexBuildProgressTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	states, err := gibpt.indexService.GetIndexStates(ctx, getIndexStatesRequest)
+	states, err := gibpt.indexCoord.GetIndexStates(ctx, getIndexStatesRequest)
 	if err != nil {
 		return err
 	}
@@ -3301,10 +3301,10 @@ func (gibpt *GetIndexBuildProgressTask) PostExecute(ctx context.Context) error {
 type GetIndexStateTask struct {
 	Condition
 	*milvuspb.GetIndexStateRequest
-	ctx          context.Context
-	indexService types.IndexService
-	rootCoord    types.RootCoord
-	result       *milvuspb.GetIndexStateResponse
+	ctx        context.Context
+	indexCoord types.IndexCoord
+	rootCoord  types.RootCoord
+	result     *milvuspb.GetIndexStateResponse
 }
 
 func (gist *GetIndexStateTask) TraceCtx() context.Context {
@@ -3483,7 +3483,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 			getIndexStatesRequest.IndexBuildIDs = append(getIndexStatesRequest.IndexBuildIDs, indexBuildIDs[idx])
 		}
 	}
-	states, err := gist.indexService.GetIndexStates(ctx, getIndexStatesRequest)
+	states, err := gist.indexCoord.GetIndexStates(ctx, getIndexStatesRequest)
 	if err != nil {
 		return err
 	}

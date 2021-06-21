@@ -53,7 +53,7 @@ type IndexNode struct {
 	kv      kv.BaseKV
 	session *sessionutil.Session
 
-	serviceClient types.IndexService // method factory
+	serviceClient types.IndexCoord // method factory
 
 	// Add callback functions at different stages
 	startCallbacks []func()
@@ -186,7 +186,7 @@ func (i *IndexNode) UpdateStateCode(code internalpb.StateCode) {
 	i.stateCode.Store(code)
 }
 
-func (i *IndexNode) SetIndexCoordClient(serviceClient types.IndexService) {
+func (i *IndexNode) SetIndexCoordClient(serviceClient types.IndexCoord) {
 	i.serviceClient = serviceClient
 }
 

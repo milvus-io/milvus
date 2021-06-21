@@ -43,7 +43,7 @@ type Server struct {
 	grpcServer  *grpc.Server
 	grpcErrChan chan error
 
-	indexCoordClient types.IndexService
+	indexCoordClient types.IndexCoord
 	loopCtx          context.Context
 	loopCancel       func()
 	loopWg           sync.WaitGroup

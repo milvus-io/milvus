@@ -72,7 +72,7 @@ type IndexNode interface {
 	CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error)
 }
 
-type IndexService interface {
+type IndexCoord interface {
 	Component
 	TimeTickProvider
 
@@ -120,7 +120,7 @@ type RootCoordComponent interface {
 
 	UpdateStateCode(internalpb.StateCode)
 	SetDataCoord(context.Context, DataService) error
-	SetIndexCoord(IndexService) error
+	SetIndexCoord(IndexCoord) error
 	SetQueryCoord(QueryService) error
 	SetNewProxyClient(func(sess *sessionutil.Session) (ProxyNode, error))
 }
