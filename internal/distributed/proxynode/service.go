@@ -185,8 +185,8 @@ func (s *Server) init() error {
 		log.Debug("ProxyNode WaitForComponentHealthy RootCoord failed ", zap.Error(err))
 		panic(err)
 	}
-	s.proxynode.SetMasterClient(s.rootCoordClient)
-	log.Debug("set master client ...")
+	s.proxynode.SetRootCoordClient(s.rootCoordClient)
+	log.Debug("set rootcoord client ...")
 
 	dataServiceAddr := Params.DataServiceAddress
 	log.Debug("ProxyNode", zap.String("data service address", dataServiceAddr))

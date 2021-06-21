@@ -52,10 +52,10 @@ type ProxyNode struct {
 
 	stateCode atomic.Value
 
-	masterService types.MasterService
-	indexService  types.IndexService
-	dataService   types.DataService
-	queryService  types.QueryService
+	rootCoord    types.RootCoord
+	indexService types.IndexService
+	dataService  types.DataService
+	queryService types.QueryService
 
 	chMgr channelsMgr
 
@@ -174,7 +174,7 @@ func (node *ProxyNode) Init() error {
 	node.idAllocator = idAllocator
 	node.idAllocator.PeerID = Params.ProxyID
 
-	tsoAllocator, err := NewTimestampAllocator(node.ctx, node.masterService, Params.ProxyID)
+	tsoAllocator, err := NewTimestampAllocator(node.ctx, node.rootCoord, Params.ProxyID)
 	if err != nil {
 		return err
 	}
@@ -200,7 +200,7 @@ func (node *ProxyNode) Init() error {
 			CollectionID:   collectionID,
 			TimeStamp:      0, // todo
 		}
-		resp, err := node.masterService.DescribeCollection(node.ctx, req)
+		resp, err := node.rootCoord.DescribeCollection(node.ctx, req)
 		if err != nil {
 			log.Warn("DescribeCollection", zap.Error(err))
 			return nil, err
@@ -319,7 +319,7 @@ func (node *ProxyNode) sendChannelsTimeTickLoop() {
 					DefaultTimestamp: maxTs,
 				}
 
-				status, err := node.masterService.UpdateChannelTimeTick(node.ctx, req)
+				status, err := node.rootCoord.UpdateChannelTimeTick(node.ctx, req)
 				if err != nil {
 					log.Warn("sendChannelsTimeTickLoop.UpdateChannelTimeTick", zap.Error(err))
 					continue
@@ -336,7 +336,7 @@ func (node *ProxyNode) sendChannelsTimeTickLoop() {
 }
 
 func (node *ProxyNode) Start() error {
-	err := InitMetaCache(node.masterService)
+	err := InitMetaCache(node.rootCoord)
 	if err != nil {
 		return err
 	}
@@ -408,8 +408,8 @@ func (node *ProxyNode) AddCloseCallback(callbacks ...func()) {
 	node.closeCallbacks = append(node.closeCallbacks, callbacks...)
 }
 
-func (node *ProxyNode) SetMasterClient(cli types.MasterService) {
-	node.masterService = cli
+func (node *ProxyNode) SetRootCoordClient(cli types.RootCoord) {
+	node.rootCoord = cli
 }
 
 func (node *ProxyNode) SetIndexServiceClient(cli types.IndexService) {
