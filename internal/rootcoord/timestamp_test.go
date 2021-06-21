@@ -31,7 +31,7 @@ import (
 )
 
 type tbd struct {
-	types.DataService
+	types.DataCoord
 }
 
 func (*tbd) GetInsertBinlogPaths(context.Context, *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {

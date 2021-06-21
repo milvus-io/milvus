@@ -45,7 +45,7 @@ type DataNode interface {
 	FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error)
 }
 
-type DataService interface {
+type DataCoord interface {
 	Component
 	TimeTickProvider
 
@@ -116,7 +116,7 @@ type RootCoordComponent interface {
 	RootCoord
 
 	UpdateStateCode(internalpb.StateCode)
-	SetDataCoord(context.Context, DataService) error
+	SetDataCoord(context.Context, DataCoord) error
 	SetIndexCoord(IndexCoord) error
 	SetQueryCoord(QueryService) error
 	SetNewProxyClient(func(sess *sessionutil.Session) (ProxyNode, error))

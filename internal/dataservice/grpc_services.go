@@ -187,7 +187,7 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 	tMeta := &datapb.SegmentFieldBinlogMeta{}
 	for _, v := range values {
 		if err := proto.UnmarshalText(v, tMeta); err != nil {
-			resp.Status.Reason = fmt.Errorf("DataService GetInsertBinlogPaths UnmarshalText datapb.SegmentFieldBinlogMeta err:%w", err).Error()
+			resp.Status.Reason = fmt.Errorf("DataCoord GetInsertBinlogPaths UnmarshalText datapb.SegmentFieldBinlogMeta err:%w", err).Error()
 			return resp, nil
 		}
 		m[tMeta.FieldID] = append(m[tMeta.FieldID], tMeta.BinlogPath)
@@ -278,7 +278,6 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	return resp, nil
 }
 
-// SaveBinlogPaths implement DataServiceServer
 func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
 	resp := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -333,7 +332,7 @@ func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 	resp := &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{
 			NodeID:    Params.NodeID,
-			Role:      "dataservice",
+			Role:      "datacoord",
 			StateCode: 0,
 		},
 		Status: &commonpb.Status{

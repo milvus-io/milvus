@@ -56,7 +56,7 @@ const (
 //
 // DataNode struct implements `types.Component`, `types.DataNode` interfaces.
 //  `rootCoord` holds a grpc client of root coordinator.
-//  `dataService` holds a grpc client of data service.
+//  `dataCoord` holds a grpc client of data service.
 //  `NodeID` is unique to each data node.
 //  `State` is current statement of this data node, indicating whether it's healthy.
 //
@@ -77,8 +77,8 @@ type DataNode struct {
 	clearSignal       chan UniqueID               // collection ID
 	segmentCache      *Cache
 
-	rootCoord   types.RootCoord
-	dataService types.DataService
+	rootCoord types.RootCoord
+	dataCoord types.DataCoord
 
 	session *sessionutil.Session
 
@@ -98,7 +98,7 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 		watchDm: make(chan struct{}, 1),
 
 		rootCoord:    nil,
-		dataService:  nil,
+		dataCoord:    nil,
 		msFactory:    factory,
 		segmentCache: newCache(),
 
@@ -121,13 +121,13 @@ func (node *DataNode) SetRootCoordInterface(rc types.RootCoord) error {
 	}
 }
 
-// SetDataServiceInterface sets data service's grpc client, error is returned if repeatedly set.
-func (node *DataNode) SetDataServiceInterface(ds types.DataService) error {
+// SetDataCoordInterface sets data service's grpc client, error is returned if repeatedly set.
+func (node *DataNode) SetDataCoordInterface(ds types.DataCoord) error {
 	switch {
-	case ds == nil, node.dataService != nil:
+	case ds == nil, node.dataCoord != nil:
 		return errors.New("Nil parameter or repeatly set")
 	default:
-		node.dataService = ds
+		node.dataCoord = ds
 		return nil
 	}
 }
@@ -173,7 +173,7 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 	)
 
 	flushChan := make(chan *flushMsg, 100)
-	dataSyncService, err := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataService)
+	dataSyncService, err := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataCoord)
 	if err != nil {
 		return err
 	}

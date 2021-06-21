@@ -64,7 +64,7 @@ func (p *proxyNodeMock) GetCollArray() []string {
 }
 
 type dataMock struct {
-	types.DataService
+	types.DataCoord
 	randVal int
 }
 
@@ -275,7 +275,7 @@ func TestMasterService(t *testing.T) {
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
-	Params.DataServiceSegmentChannel = fmt.Sprintf("data-service-segment-%d", randVal)
+	Params.DataCoordSegmentChannel = fmt.Sprintf("data-service-segment-%d", randVal)
 
 	err = core.Register()
 	assert.Nil(t, err)
@@ -336,8 +336,8 @@ func TestMasterService(t *testing.T) {
 	err = tmpFactory.SetParams(m)
 	assert.Nil(t, err)
 
-	dataServiceSegmentStream, _ := tmpFactory.NewMsgStream(ctx)
-	dataServiceSegmentStream.AsProducer([]string{Params.DataServiceSegmentChannel})
+	dataCoordSegmentStream, _ := tmpFactory.NewMsgStream(ctx)
+	dataCoordSegmentStream.AsProducer([]string{Params.DataCoordSegmentChannel})
 
 	timeTickStream, _ := tmpFactory.NewMsgStream(ctx)
 	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
@@ -345,13 +345,13 @@ func TestMasterService(t *testing.T) {
 
 	dmlStream, _ := tmpFactory.NewMsgStream(ctx)
 
-	// test dataServiceSegmentStream seek
+	// test dataCoordSegmentStream seek
 	dataNodeSubName := Params.MsgChannelSubName + "dn"
 	flushedSegStream, _ := tmpFactory.NewMsgStream(ctx)
-	flushedSegStream.AsConsumer([]string{Params.DataServiceSegmentChannel}, dataNodeSubName)
+	flushedSegStream.AsConsumer([]string{Params.DataCoordSegmentChannel}, dataNodeSubName)
 	flushedSegStream.Start()
 	msgPackTmp := GenFlushedSegMsgPack(9999)
-	err = dataServiceSegmentStream.Produce(msgPackTmp)
+	err = dataCoordSegmentStream.Produce(msgPackTmp)
 	assert.Nil(t, err)
 
 	flushedSegMsgPack := flushedSegStream.Consume()
@@ -732,7 +732,7 @@ func TestMasterService(t *testing.T) {
 			PartitionID:  part.PartitionID,
 		}
 		segInfoMsgPack := GenSegInfoMsgPack(seg)
-		err = dataServiceSegmentStream.Broadcast(segInfoMsgPack)
+		err = dataCoordSegmentStream.Broadcast(segInfoMsgPack)
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
 
@@ -873,7 +873,7 @@ func TestMasterService(t *testing.T) {
 			PartitionID:  part.PartitionID,
 		}
 		segInfoMsgPack := GenSegInfoMsgPack(seg)
-		err = dataServiceSegmentStream.Broadcast(segInfoMsgPack)
+		err = dataCoordSegmentStream.Broadcast(segInfoMsgPack)
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
 
@@ -882,7 +882,7 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, 2, len(part.SegmentIDs))
 
 		flushedSegMsgPack := GenFlushedSegMsgPack(segID)
-		err = dataServiceSegmentStream.Broadcast(flushedSegMsgPack)
+		err = dataCoordSegmentStream.Broadcast(flushedSegMsgPack)
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
 
@@ -1800,8 +1800,8 @@ func TestMasterService2(t *testing.T) {
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
 
-	dataServiceSegmentStream, _ := msFactory.NewMsgStream(ctx)
-	dataServiceSegmentStream.AsProducer([]string{Params.DataServiceSegmentChannel})
+	dataCoordSegmentStream, _ := msFactory.NewMsgStream(ctx)
+	dataCoordSegmentStream.AsProducer([]string{Params.DataCoordSegmentChannel})
 
 	timeTickStream, _ := msFactory.NewMsgStream(ctx)
 	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)

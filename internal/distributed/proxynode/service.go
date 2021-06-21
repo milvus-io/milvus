@@ -55,7 +55,7 @@ type Server struct {
 	grpcErrChan chan error
 
 	rootCoordClient    *rcc.GrpcClient
-	dataServiceClient  *grpcdataserviceclient.Client
+	dataCoordClient    *grpcdataserviceclient.Client
 	queryServiceClient *grpcqueryserviceclient.Client
 	indexCoordClient   *grpcindexcoordclient.Client
 
@@ -188,15 +188,15 @@ func (s *Server) init() error {
 	s.proxynode.SetRootCoordClient(s.rootCoordClient)
 	log.Debug("set rootcoord client ...")
 
-	dataServiceAddr := Params.DataServiceAddress
-	log.Debug("ProxyNode", zap.String("data service address", dataServiceAddr))
-	s.dataServiceClient = grpcdataserviceclient.NewClient(proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
-	err = s.dataServiceClient.Init()
+	dataCoordAddr := Params.DataCoordAddress
+	log.Debug("ProxyNode", zap.String("data service address", dataCoordAddr))
+	s.dataCoordClient = grpcdataserviceclient.NewClient(proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
+	err = s.dataCoordClient.Init()
 	if err != nil {
-		log.Debug("ProxyNode dataServiceClient init failed ", zap.Error(err))
+		log.Debug("ProxyNode dataCoordClient init failed ", zap.Error(err))
 		return err
 	}
-	s.proxynode.SetDataServiceClient(s.dataServiceClient)
+	s.proxynode.SetDataCoordClient(s.dataCoordClient)
 	log.Debug("set data service address ...")
 
 	indexServiceAddr := Params.IndexServerAddress

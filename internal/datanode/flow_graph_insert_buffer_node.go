@@ -522,7 +522,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		}
 	}
 
-	// iMsg is Flush() msg from data cooperator
+	// iMsg is Flush() msg from datacoord
 	select {
 	case fmsg := <-ibNode.flushChan:
 		currentSegID := fmsg.segmentID

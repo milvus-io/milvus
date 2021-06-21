@@ -61,7 +61,7 @@ func TestQueryService_load(t *testing.T) {
 	service.Init()
 	service.Start()
 	service.SetRootCoord(NewRootCoordMock())
-	service.SetDataService(NewDataMock())
+	service.SetDataCoord(NewDataMock())
 	registerNodeRequest := &querypb.RegisterNodeRequest{
 		Address: &commonpb.Address{},
 	}

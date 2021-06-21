@@ -32,7 +32,7 @@ import (
 )
 
 type Client struct {
-	grpcClient datapb.DataServiceClient
+	grpcClient datapb.DataCoordClient
 	conn       *grpc.ClientConn
 	ctx        context.Context
 	addr       string
@@ -44,17 +44,17 @@ type Client struct {
 	reconnTry int
 }
 
-func getDataServiceAddress(sess *sessionutil.Session) (string, error) {
+func getDataCoordAddress(sess *sessionutil.Session) (string, error) {
 	key := typeutil.DataCoordRole
 	msess, _, err := sess.GetSessions(key)
 	if err != nil {
-		log.Debug("DataServiceClient, getSessions failed", zap.Any("key", key), zap.Error(err))
+		log.Debug("DataCoordClient, getSessions failed", zap.Any("key", key), zap.Error(err))
 		return "", err
 	}
 	ms, ok := msess[key]
 	if !ok {
-		log.Debug("DataServiceClient, not existed in msess ", zap.Any("key", key), zap.Any("len of msess", len(msess)))
-		return "", fmt.Errorf("number of dataservice is incorrect, %d", len(msess))
+		log.Debug("DataCoordClient, not existed in msess ", zap.Any("key", key), zap.Any("len of msess", len(msess)))
+		return "", fmt.Errorf("number of datacoord is incorrect, %d", len(msess))
 	}
 	return ms.Address, nil
 }
@@ -81,23 +81,23 @@ func (c *Client) Init() error {
 
 func (c *Client) connect() error {
 	var err error
-	getDataServiceAddressFn := func() error {
-		c.addr, err = getDataServiceAddress(c.sess)
+	getDataCoordAddressFn := func() error {
+		c.addr, err = getDataCoordAddress(c.sess)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
-	err = retry.Retry(c.reconnTry, 3*time.Second, getDataServiceAddressFn)
+	err = retry.Retry(c.reconnTry, 3*time.Second, getDataCoordAddressFn)
 	if err != nil {
-		log.Debug("DataServiceClient try reconnect getDataServiceAddressFn failed", zap.Error(err))
+		log.Debug("DataCoordClient try reconnect getDataCoordAddressFn failed", zap.Error(err))
 		return err
 	}
 	connectGrpcFunc := func() error {
 		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
 		defer cancelFunc()
 		opts := trace.GetInterceptorOpts()
-		log.Debug("DataServiceClient try reconnect ", zap.String("address", c.addr))
+		log.Debug("DataCoordClient try reconnect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				grpc_opentracing.UnaryClientInterceptor(opts...)),
@@ -112,10 +112,10 @@ func (c *Client) connect() error {
 
 	err = retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
 	if err != nil {
-		log.Debug("DataService try reconnect failed", zap.Error(err))
+		log.Debug("DataCoord try reconnect failed", zap.Error(err))
 		return err
 	}
-	c.grpcClient = datapb.NewDataServiceClient(c.conn)
+	c.grpcClient = datapb.NewDataCoordClient(c.conn)
 	return nil
 }
 

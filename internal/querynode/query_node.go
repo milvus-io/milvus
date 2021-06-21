@@ -27,15 +27,16 @@ import "C"
 import (
 	"context"
 	"errors"
+	"math/rand"
+	"strconv"
+	"sync/atomic"
+	"time"
+
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
-	"math/rand"
-	"strconv"
-	"sync/atomic"
-	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -64,7 +65,7 @@ type QueryNode struct {
 	rootCoord    types.RootCoord
 	queryService types.QueryService
 	indexCoord   types.IndexCoord
-	dataService  types.DataService
+	dataCoord    types.DataCoord
 
 	msFactory msgstream.Factory
 	scheduler *taskScheduler
@@ -142,7 +143,7 @@ func (node *QueryNode) Init() error {
 
 	node.historical = newHistorical(node.queryNodeLoopCtx,
 		node.rootCoord,
-		node.dataService,
+		node.dataCoord,
 		node.indexCoord,
 		node.msFactory,
 		node.etcdKV)
@@ -195,7 +196,7 @@ func (node *QueryNode) Init() error {
 		log.Error("null indexCoord detected")
 	}
 
-	if node.dataService == nil {
+	if node.dataCoord == nil {
 		log.Error("null data service detected")
 	}
 
@@ -284,10 +285,10 @@ func (node *QueryNode) SetIndexCoord(index types.IndexCoord) error {
 	return nil
 }
 
-func (node *QueryNode) SetDataService(data types.DataService) error {
+func (node *QueryNode) SetDataCoord(data types.DataCoord) error {
 	if data == nil {
 		return errors.New("null data service interface")
 	}
-	node.dataService = data
+	node.dataCoord = data
 	return nil
 }
