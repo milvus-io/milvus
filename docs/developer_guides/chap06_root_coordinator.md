@@ -733,7 +733,7 @@ func NewHardTimeTickBarrier(ctx context.Context, ttStream ms.MsgStream, peerIds 
 // TODO
 ###### 10.5.1 Time Synchronization Message Producer
 
-<img src="./figs/time_sync_msg_producer.png" width=700>
+<img src="./figs/root_coord_time_sync.png" width=700>
 
 
  ```go
