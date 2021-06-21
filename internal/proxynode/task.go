@@ -1235,8 +1235,9 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 		return errors.New(showResp.Status.Reason)
 	}
 	log.Debug("query service show collections",
+		zap.Any("collID", collID),
 		zap.Any("collections", showResp.CollectionIDs),
-		zap.Any("collID", collID))
+	)
 	collectionLoaded := false
 	for _, collectionID := range showResp.CollectionIDs {
 		if collectionID == collID {

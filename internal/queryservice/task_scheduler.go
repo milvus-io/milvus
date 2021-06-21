@@ -518,6 +518,9 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 					log.Error("scheduleLoop: process task error", zap.Any("error", err.Error()))
 					continue
 				}
+				if t.Type() == commonpb.MsgType_LoadCollection || t.Type() == commonpb.MsgType_LoadPartitions {
+					t.Notify(err)
+				}
 			}
 			log.Debug("scheduleLoop: num of child task", zap.Int("num child task", len(t.GetChildTask())))
 			for _, childTask := range t.GetChildTask() {
