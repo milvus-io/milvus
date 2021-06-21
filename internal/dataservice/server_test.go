@@ -687,8 +687,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)
 
-	svr.masterClientCreator = func(addr string) (types.MasterService, error) {
-		return newMockMasterService(), nil
+	svr.rootCoordClientCreator = func(addr string) (types.RootCoord, error) {
+		return newMockRootCoordService(), nil
 	}
 
 	t.Run("test get recovery info with no segments", func(t *testing.T) {
@@ -827,8 +827,8 @@ func newTestServer(t *testing.T, receiveCh chan interface{}) *Server {
 	svr.dataClientCreator = func(addr string) (types.DataNode, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
-	svr.masterClientCreator = func(addr string) (types.MasterService, error) {
-		return newMockMasterService(), nil
+	svr.rootCoordClientCreator = func(addr string) (types.RootCoord, error) {
+		return newMockRootCoordService(), nil
 	}
 	assert.Nil(t, err)
 	err = svr.Register()
