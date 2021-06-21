@@ -11,6 +11,7 @@
 
 package queryservice
 
+/*
 import (
 	"testing"
 
@@ -44,3 +45,4 @@ func TestReplica_Release(t *testing.T) {
 	assert.Equal(t, 0, len(collections))
 	meta.releaseCollection(1)
 }
+*/

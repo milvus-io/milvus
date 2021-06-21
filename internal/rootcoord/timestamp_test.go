@@ -11,6 +11,7 @@
 
 package rootcoord
 
+/*
 import (
 	"context"
 	"fmt"
@@ -136,3 +137,4 @@ func BenchmarkAllocTimestamp(b *testing.B) {
 	}
 	b.StopTimer()
 }
+*/
