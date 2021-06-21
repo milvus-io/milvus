@@ -6897,6 +6897,7 @@ class SearchRequest :
     kDslFieldNumber = 5,
     kPlaceholderGroupFieldNumber = 6,
     kBaseFieldNumber = 1,
+    kTravelTimestampFieldNumber = 9,
     kDslTypeFieldNumber = 7,
   };
   // repeated string partition_names = 4;
@@ -6979,6 +6980,11 @@ class SearchRequest :
   ::milvus::proto::common::MsgBase* mutable_base();
   void set_allocated_base(::milvus::proto::common::MsgBase* base);
 
+  // uint64 travel_timestamp = 9;
+  void clear_travel_timestamp();
+  ::PROTOBUF_NAMESPACE_ID::uint64 travel_timestamp() const;
+  void set_travel_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
+
   // .milvus.proto.common.DslType dsl_type = 7;
   void clear_dsl_type();
   ::milvus::proto::common::DslType dsl_type() const;
@@ -6996,6 +7002,7 @@ class SearchRequest :
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr dsl_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr placeholder_group_;
   ::milvus::proto::common::MsgBase* base_;
+  ::PROTOBUF_NAMESPACE_ID::uint64 travel_timestamp_;
   int dsl_type_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
@@ -7121,6 +7128,7 @@ class RetrieveRequest :
     kCollectionNameFieldNumber = 3,
     kBaseFieldNumber = 1,
     kIdsFieldNumber = 5,
+    kTravelTimestampFieldNumber = 7,
   };
   // repeated string partition_names = 4;
   int partition_names_size() const;
@@ -7194,6 +7202,11 @@ class RetrieveRequest :
   ::milvus::proto::schema::IDs* mutable_ids();
   void set_allocated_ids(::milvus::proto::schema::IDs* ids);
 
+  // uint64 travel_timestamp = 7;
+  void clear_travel_timestamp();
+  ::PROTOBUF_NAMESPACE_ID::uint64 travel_timestamp() const;
+  void set_travel_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.RetrieveRequest)
  private:
   class _Internal;
@@ -7205,6 +7218,7 @@ class RetrieveRequest :
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::milvus::proto::common::MsgBase* base_;
   ::milvus::proto::schema::IDs* ids_;
+  ::PROTOBUF_NAMESPACE_ID::uint64 travel_timestamp_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -16044,6 +16058,20 @@ SearchRequest::search_params() const {
   return search_params_;
 }
 
+// uint64 travel_timestamp = 9;
+inline void SearchRequest::clear_travel_timestamp() {
+  travel_timestamp_ = PROTOBUF_ULONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::uint64 SearchRequest::travel_timestamp() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.SearchRequest.travel_timestamp)
+  return travel_timestamp_;
+}
+inline void SearchRequest::set_travel_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value) {
+  
+  travel_timestamp_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.SearchRequest.travel_timestamp)
+}
+
 // -------------------------------------------------------------------
 
 // RetrieveRequest
@@ -16368,6 +16396,20 @@ inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
 RetrieveRequest::mutable_output_fields() {
   // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.RetrieveRequest.output_fields)
   return &output_fields_;
+}
+
+// uint64 travel_timestamp = 7;
+inline void RetrieveRequest::clear_travel_timestamp() {
+  travel_timestamp_ = PROTOBUF_ULONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::uint64 RetrieveRequest::travel_timestamp() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.RetrieveRequest.travel_timestamp)
+  return travel_timestamp_;
+}
+inline void RetrieveRequest::set_travel_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value) {
+  
+  travel_timestamp_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.RetrieveRequest.travel_timestamp)
 }
 
 // -------------------------------------------------------------------
