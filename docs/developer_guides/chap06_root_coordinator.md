@@ -301,6 +301,7 @@ type AllocIDResponse struct {
 ```
 
 * *UpdateChannelTimeTick*
+
 ```go
 type ChannelTimeTickMsg struct {
 	Base             *commonpb.MsgBase
@@ -314,20 +315,35 @@ type ChannelTimeTickMsg struct {
 
 `RC` would put `Dd Message` into the `DML MsgSteams`
 
+* *BaseMsg*
+
+```go
+type BaseMsg struct {
+	Ctx            context.Context
+	BeginTimestamp Timestamp
+	EndTimestamp   Timestamp
+	HashValues     []uint32
+	MsgPosition    *MsgPosition
+}
+```
+
 * *CreateCollectionMsg*
 
 ```go
-
 type CreateCollectionRequest struct {
-	Base           *commonpb.MsgBase
-	DbName         string
-	CollectionName string
-	Schema         []byte
+	Base                 *commonpb.MsgBase
+	DbName               string
+	CollectionName       string
+	DbID                 UniqueID
+	CollectionID         UniqueID 
+	Schema               []byte
+	VirtualChannelNames  []string
+	PhysicalChannelNames []string
 }
 
 type CreateCollectionMsg struct {
 	BaseMsg
-	CreateCollectionRequest
+	internalpb.CreateCollectionRequest
 }
 ```
 
@@ -338,6 +354,8 @@ type DropCollectionRequest struct {
 	Base           *commonpb.MsgBase
 	DbName         string
 	CollectionName string
+	DbID           UniqueID 
+	CollectionID   UniqueID 
 }
 
 type DropCollectionMsg struct {
@@ -354,6 +372,9 @@ type CreatePartitionRequest struct {
 	DbName         string
 	CollectionName string
 	PartitionName  string
+	DbID           UniqueID
+	CollectionID   UniqueID
+	PartitionID    UniqueID
 }
 
 type CreatePartitionMsg struct {
@@ -370,9 +391,9 @@ type DropPartitionRequest struct {
 	DbName         string
 	CollectionName string
 	PartitionName  string
-	DbID           int64
-	CollectionID   int64
-	PartitionID    int64
+	DbID           UniqueID
+	CollectionID   UniqueID
+	PartitionID    UniqueID
 }
 
 type DropPartitionMsg struct {
@@ -380,6 +401,11 @@ type DropPartitionMsg struct {
 	DropPartitionRequest
 }
 ```
+
+#### 10.3 Create Index automatically 
+
+
+
 
 #### 10.2 Master Instance
 
