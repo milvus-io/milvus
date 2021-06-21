@@ -52,10 +52,10 @@ type ProxyNode struct {
 
 	stateCode atomic.Value
 
-	masterService types.MasterService
-	indexService  types.IndexService
-	dataService   types.DataService
-	queryService  types.QueryService
+	rootCoord    types.RootCoord
+	indexCoord   types.IndexCoord
+	dataService  types.DataService
+	queryService types.QueryService
 
 	chMgr channelsMgr
 
@@ -122,15 +122,15 @@ func (node *ProxyNode) Init() error {
 		log.Debug("ProxyNode queryService is ready")
 	}
 
-	// wait for indexservice state changed to Healthy
-	if node.indexService != nil {
-		log.Debug("ProxyNode wait for indexService ready")
-		err := funcutil.WaitForComponentHealthy(node.ctx, node.indexService, "IndexService", 1000000, time.Millisecond*200)
+	// wait for indexcoord state changed to Healthy
+	if node.indexCoord != nil {
+		log.Debug("ProxyNode wait for indexCoord ready")
+		err := funcutil.WaitForComponentHealthy(node.ctx, node.indexCoord, "IndexCoord", 1000000, time.Millisecond*200)
 		if err != nil {
-			log.Debug("ProxyNode wait for indexService ready failed", zap.Error(err))
+			log.Debug("ProxyNode wait for indexCoord ready failed", zap.Error(err))
 			return err
 		}
-		log.Debug("ProxyNode indexService is ready")
+		log.Debug("ProxyNode indexCoord is ready")
 	}
 
 	if node.queryService != nil {
@@ -174,7 +174,7 @@ func (node *ProxyNode) Init() error {
 	node.idAllocator = idAllocator
 	node.idAllocator.PeerID = Params.ProxyID
 
-	tsoAllocator, err := NewTimestampAllocator(node.ctx, node.masterService, Params.ProxyID)
+	tsoAllocator, err := NewTimestampAllocator(node.ctx, node.rootCoord, Params.ProxyID)
 	if err != nil {
 		return err
 	}
@@ -200,7 +200,7 @@ func (node *ProxyNode) Init() error {
 			CollectionID:   collectionID,
 			TimeStamp:      0, // todo
 		}
-		resp, err := node.masterService.DescribeCollection(node.ctx, req)
+		resp, err := node.rootCoord.DescribeCollection(node.ctx, req)
 		if err != nil {
 			log.Warn("DescribeCollection", zap.Error(err))
 			return nil, err
@@ -319,7 +319,7 @@ func (node *ProxyNode) sendChannelsTimeTickLoop() {
 					DefaultTimestamp: maxTs,
 				}
 
-				status, err := node.masterService.UpdateChannelTimeTick(node.ctx, req)
+				status, err := node.rootCoord.UpdateChannelTimeTick(node.ctx, req)
 				if err != nil {
 					log.Warn("sendChannelsTimeTickLoop.UpdateChannelTimeTick", zap.Error(err))
 					continue
@@ -336,7 +336,7 @@ func (node *ProxyNode) sendChannelsTimeTickLoop() {
 }
 
 func (node *ProxyNode) Start() error {
-	err := InitMetaCache(node.masterService)
+	err := InitMetaCache(node.rootCoord)
 	if err != nil {
 		return err
 	}
@@ -408,12 +408,12 @@ func (node *ProxyNode) AddCloseCallback(callbacks ...func()) {
 	node.closeCallbacks = append(node.closeCallbacks, callbacks...)
 }
 
-func (node *ProxyNode) SetMasterClient(cli types.MasterService) {
-	node.masterService = cli
+func (node *ProxyNode) SetRootCoordClient(cli types.RootCoord) {
+	node.rootCoord = cli
 }
 
-func (node *ProxyNode) SetIndexServiceClient(cli types.IndexService) {
-	node.indexService = cli
+func (node *ProxyNode) SetIndexCoordClient(cli types.IndexCoord) {
+	node.indexCoord = cli
 }
 
 func (node *ProxyNode) SetDataServiceClient(cli types.DataService) {

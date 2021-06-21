@@ -20,7 +20,7 @@ const (
 	ProxyNodeRole    = "ProxyNode"
 	QueryServiceRole = "QueryService"
 	QueryNodeRole    = "QueryNode"
-	IndexServiceRole = "IndexService"
+	IndexCoordRole   = "IndexCoord"
 	IndexNodeRole    = "IndexNode"
 	DataCoordRole    = "DataCoord"
 	DataNodeRole     = "DataNode"

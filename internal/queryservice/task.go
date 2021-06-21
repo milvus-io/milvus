@@ -126,10 +126,10 @@ func (bt *BaseTask) SetState(state taskState) {
 type LoadCollectionTask struct {
 	BaseTask
 	*querypb.LoadCollectionRequest
-	masterService types.MasterService
-	dataService   types.DataService
-	cluster       *queryNodeCluster
-	meta          *meta
+	rootCoord   types.RootCoord
+	dataService types.DataService
+	cluster     *queryNodeCluster
+	meta        *meta
 }
 
 func (lct *LoadCollectionTask) Marshal() string {
@@ -167,7 +167,7 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 		},
 		CollectionID: collectionID,
 	}
-	showPartitionResponse, err := lct.masterService.ShowPartitions(ctx, showPartitionRequest)
+	showPartitionResponse, err := lct.rootCoord.ShowPartitions(ctx, showPartitionRequest)
 	if err != nil {
 		status.Reason = err.Error()
 		lct.result = status
@@ -1047,7 +1047,7 @@ type HandoffTask struct {
 type LoadBalanceTask struct {
 	BaseTask
 	*querypb.LoadBalanceRequest
-	master      types.MasterService
+	rootCoord   types.RootCoord
 	dataService types.DataService
 	cluster     *queryNodeCluster
 	meta        *meta

@@ -24,18 +24,18 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
-// metaService initialize replica collections in data node from master service.
+// metaService initialize replica collections in data node from root coord.
 // Initializing replica collections happens on data node starting. It depends on
-// a healthy master service and a valid master service grpc client.
+// a healthy root coord and a valid root coord grpc client.
 type metaService struct {
 	replica      Replica
 	collectionID UniqueID
-	masterClient types.MasterService
+	rootCoord    types.RootCoord
 }
 
-func newMetaService(m types.MasterService, collectionID UniqueID) *metaService {
+func newMetaService(rc types.RootCoord, collectionID UniqueID) *metaService {
 	return &metaService{
-		masterClient: m,
+		rootCoord:    rc,
 		collectionID: collectionID,
 	}
 }
@@ -54,13 +54,13 @@ func (mService *metaService) getCollectionSchema(ctx context.Context, collID Uni
 		TimeStamp:    timestamp,
 	}
 
-	response, err := mService.masterClient.DescribeCollection(ctx, req)
+	response, err := mService.rootCoord.DescribeCollection(ctx, req)
 	if response.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return nil, fmt.Errorf("Describe collection %v from master service wrong: %s", collID, err.Error())
+		return nil, fmt.Errorf("Describe collection %v from rootcoord wrong: %s", collID, err.Error())
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("Grpc error when describe collection %v from master service: %s", collID, err.Error())
+		return nil, fmt.Errorf("Grpc error when describe collection %v from rootcoord: %s", collID, err.Error())
 	}
 
 	return response.GetSchema(), nil

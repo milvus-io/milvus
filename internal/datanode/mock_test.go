@@ -48,13 +48,13 @@ func newIDLEDataNodeMock(ctx context.Context) *DataNode {
 	msFactory := msgstream.NewPmsFactory()
 	node := NewDataNode(ctx, msFactory)
 
-	ms := &MasterServiceFactory{
+	rc := &RootCoordFactory{
 		ID:             0,
 		collectionID:   1,
 		collectionName: "collection-1",
 	}
 
-	node.SetMasterServiceInterface(ms)
+	node.SetRootCoordInterface(rc)
 
 	ds := &DataServiceFactory{}
 	node.SetDataServiceInterface(ds)
@@ -80,13 +80,13 @@ func newHEALTHDataNodeMock(dmChannelName string) *DataNode {
 	msFactory := msgstream.NewPmsFactory()
 	node := NewDataNode(ctx, msFactory)
 
-	ms := &MasterServiceFactory{
+	ms := &RootCoordFactory{
 		ID:             0,
 		collectionID:   1,
 		collectionName: "collection-1",
 	}
 
-	node.SetMasterServiceInterface(ms)
+	node.SetRootCoordInterface(ms)
 
 	ds := &DataServiceFactory{}
 	node.SetDataServiceInterface(ds)
@@ -156,8 +156,8 @@ type DataFactory struct {
 	rawData []byte
 }
 
-type MasterServiceFactory struct {
-	types.MasterService
+type RootCoordFactory struct {
+	types.RootCoord
 	ID             UniqueID
 	collectionName string
 	collectionID   UniqueID
@@ -487,19 +487,19 @@ func (alloc *AllocatorFactory) genKey(isalloc bool, ids ...UniqueID) (key string
 
 // If id == 0, AllocID will return not successful status
 // If id == -1, AllocID will return err
-func (m *MasterServiceFactory) setID(id UniqueID) {
+func (m *RootCoordFactory) setID(id UniqueID) {
 	m.ID = id // GOOSE TODO: random ID generator
 }
 
-func (m *MasterServiceFactory) setCollectionID(id UniqueID) {
+func (m *RootCoordFactory) setCollectionID(id UniqueID) {
 	m.collectionID = id
 }
 
-func (m *MasterServiceFactory) setCollectionName(name string) {
+func (m *RootCoordFactory) setCollectionName(name string) {
 	m.collectionName = name
 }
 
-func (m *MasterServiceFactory) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
+func (m *RootCoordFactory) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
 	resp := &masterpb.AllocIDResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -520,7 +520,7 @@ func (m *MasterServiceFactory) AllocID(ctx context.Context, in *masterpb.AllocID
 	return resp, nil
 }
 
-func (m *MasterServiceFactory) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
+func (m *RootCoordFactory) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
 	resp := &masterpb.AllocTimestampResponse{
 		Status:    &commonpb.Status{},
 		Timestamp: 1000,
@@ -528,7 +528,7 @@ func (m *MasterServiceFactory) AllocTimestamp(ctx context.Context, in *masterpb.
 	return resp, nil
 }
 
-func (m *MasterServiceFactory) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
+func (m *RootCoordFactory) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	resp := &milvuspb.ShowCollectionsResponse{
 		Status:          &commonpb.Status{},
 		CollectionNames: []string{m.collectionName},
@@ -537,7 +537,7 @@ func (m *MasterServiceFactory) ShowCollections(ctx context.Context, in *milvuspb
 
 }
 
-func (m *MasterServiceFactory) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+func (m *RootCoordFactory) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	f := MetaFactory{}
 	meta := f.CollectionMetaFactory(m.collectionID, m.collectionName)
 	resp := &milvuspb.DescribeCollectionResponse{
@@ -548,7 +548,7 @@ func (m *MasterServiceFactory) DescribeCollection(ctx context.Context, in *milvu
 	return resp, nil
 }
 
-func (m *MasterServiceFactory) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (m *RootCoordFactory) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	return &internalpb.ComponentStates{
 		State:              &internalpb.ComponentInfo{},
 		SubcomponentStates: make([]*internalpb.ComponentInfo, 0),

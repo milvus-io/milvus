@@ -84,10 +84,10 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			zap.Uint32("count", r.GetCount()))
 
 		if !s.meta.HasCollection(r.CollectionID) {
-			if err := s.loadCollectionFromMaster(ctx, r.CollectionID); err != nil {
+			if err := s.loadCollectionFromRootCoord(ctx, r.CollectionID); err != nil {
 				errMsg := fmt.Sprintf("can not load collection %d", r.CollectionID)
 				appendFailedAssignment(errMsg)
-				log.Error("load collection from master error",
+				log.Error("load collection from rootcoord error",
 					zap.Int64("collectionID", r.CollectionID),
 					zap.Error(err))
 				continue
@@ -435,7 +435,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		binlogs = append(binlogs, sbl)
 	}
 
-	dresp, err := s.masterClient.DescribeCollection(s.ctx, &milvuspb.DescribeCollectionRequest{
+	dresp, err := s.rootCoordClient.DescribeCollection(s.ctx, &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_DescribeCollection,
 			SourceID: Params.NodeID,

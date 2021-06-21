@@ -25,7 +25,7 @@ import (
 
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	dsc "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
-	isc "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
+	isc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	pnc "github.com/milvus-io/milvus/internal/distributed/proxynode/client"
 	qsc "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
 	"github.com/milvus-io/milvus/internal/log"
@@ -44,7 +44,7 @@ import (
 
 // Server grpc wrapper
 type Server struct {
-	rootCoord   types.MasterComponent
+	rootCoord   types.RootCoordComponent
 	grpcServer  *grpc.Server
 	grpcErrChan chan error
 
@@ -54,10 +54,10 @@ type Server struct {
 	cancel context.CancelFunc
 
 	dataCoord  types.DataService
-	indexCoord types.IndexService
+	indexCoord types.IndexCoord
 	queryCoord types.QueryService
 
-	newIndexCoordClient func(string, []string, time.Duration) types.IndexService
+	newIndexCoordClient func(string, []string, time.Duration) types.IndexCoord
 	newDataCoordClient  func(string, []string, time.Duration) types.DataService
 	newQueryCoordClient func(string, []string, time.Duration) types.QueryService
 
@@ -96,7 +96,7 @@ func (s *Server) setClient() {
 		}
 		return dsClient
 	}
-	s.newIndexCoordClient = func(metaRootPath string, etcdEndpoints []string, timeout time.Duration) types.IndexService {
+	s.newIndexCoordClient = func(metaRootPath string, etcdEndpoints []string, timeout time.Duration) types.IndexCoord {
 		isClient := isc.NewClient(metaRootPath, etcdEndpoints, timeout)
 		if err := isClient.Init(); err != nil {
 			panic(err)
