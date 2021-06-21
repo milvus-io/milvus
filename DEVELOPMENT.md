@@ -22,8 +22,8 @@ In fact, all Linux distributions is available to develop Milvus. The following o
 #### Debian/Ubuntu
 
 ```shell
-sudo apt update
-sudo apt install -y build-essential ccache gfortran \
+$ sudo apt update
+$ sudo apt install -y build-essential ccache gfortran \
     libssl-dev zlib1g-dev python3-dev libcurl4-openssl-dev libtbb-dev\
     libboost-regex-dev libboost-program-options-dev libboost-system-dev \
     libboost-filesystem-dev libboost-serialization-dev libboost-python-dev
@@ -32,8 +32,8 @@ sudo apt install -y build-essential ccache gfortran \
 Once you have finished, confirm that `gcc` and `make` are installed:
 
 ```shell
-gcc --version
-make --version
+$ gcc --version
+$ make --version
 ```
 
 #### CMake
@@ -43,7 +43,7 @@ The algorithm library of Milvus, Knowhere is written in c++. CMake is required i
 Confirm that cmake is available:
 
 ```shell
-cmake --version
+$ cmake --version
 ```
 
 #### Go
@@ -53,7 +53,7 @@ Milvus is written in [Go](http://golang.org/). If you don't have a Go developmen
 Confirm that your `GOPATH` and `GOBIN` environment variables are correctly set as detailed in [How to Write Go Code](https://golang.org/doc/code.html) before proceeding.
 
 ```shell
-go version
+$ go version
 ```
 
 #### Docker & Docker Compose
@@ -68,7 +68,7 @@ Milvus depends on Etcd, Pulsar and minIO. Using Docker Compose to manage these i
 To build the Milvus project, run the following command:
 
 ```shell
-make all
+$ make all
 ```
 
 If this command succeed, you will now have an executable at `bin/milvus` off of your Milvus project directory.
@@ -82,7 +82,7 @@ Presubmission verification provides a battery of checks and tests to give your p
 To run all presubmission verification tests, use this command:
 
 ```shell
-make verifiers
+$ make verifiers
 ```
 
 ### Unit Tests
@@ -90,7 +90,7 @@ make verifiers
 Pull requests need to pass all unit tests. To run every unit test, use this command:
 
 ```shell
-make unittest
+$ make unittest
 ```
 
 ### E2E Tests
@@ -100,24 +100,27 @@ Milvus uses Python SDK to write test cases to verify the correctness of Milvus f
 #### Standalone
 
 ```shell
-cd deployments/docker/standalone
-docker-compose up -d
-cd ../../../
-./bin/milvus run standalone
+$ cd deployments/docker/dev
+$ docker-compose up -d
+$ cd ../../..
+$ ./scripts/start_standalone.sh
 ```
 
 #### Cluster
 
 ```shell
-./scripts/start.sh
+$ cd deployments/docker/dev
+$ docker-compose up -d
+$ cd ../../..
+$ ./scripts/start_cluster.sh
 ```
 
 To run E2E tests, use these command:
 
 ```shell
-cd test20/python_client
-pip install -r requirements.txt
-pytest .
+$ cd test20/python_client
+$ pip install -r requirements.txt
+$ pytest .
 ```
 
 ## GitHub Flow
