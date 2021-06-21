@@ -582,7 +582,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 				}
 				ms.chanMsgBuf[consumer] = tempBuffer
 
-				startMsgPosition = append(startMsgPosition, ms.chanMsgPos[consumer])
+				startMsgPosition = append(startMsgPosition, proto.Clone(ms.chanMsgPos[consumer]).(*internalpb.MsgPosition))
 				var newPos *internalpb.MsgPosition
 				if len(tempBuffer) > 0 {
 					// if tempBuffer is not empty, use tempBuffer[0] to seek
