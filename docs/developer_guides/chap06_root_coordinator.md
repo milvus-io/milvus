@@ -608,7 +608,6 @@ message SegmentIndexInfo {
 "partition/$collectionId/$partitionId" string -> partitionInfoBlob string
 "index/$collectionId/$indexId" string -> IndexInfoBlob string
 "segment-index/$collectionId/$indexId/$partitionId/$segmentId" -> segmentIndexInfoBlog string
-""
 ```
 
 Note that *tenantId*, *proxyId*, *collectionId*, *partitionId*, *indexId*, *segmentId* are unique strings converted from int64.
@@ -677,90 +676,24 @@ func (mt *metaTable) AddFlushedSegment(segID typeutil.UniqueID) error
 
 #### 10.7 System Time Synchronization
 
-
-
-###### 10.5.1 Time Tick Barrier
-
-//TODO
-* Soft Time Tick Barrier
-
-
-<img src="./figs/soft_time_tick_barrier.png" width=500>
+<img src="./figs/root_coord_time_sync.png">
 
 ```go
-type softTimeTickBarrier struct {
-	peer2LastTt   map[UniqueID]Timestamp
-	minTtInterval Timestamp
-	lastTt        int64
-	outTt         chan Timestamp
-	ttStream      ms.MsgStream
-	ctx           context.Context
+type timetickSync struct {
+	core          *Core
+	lock          sync.Mutex
+	proxyTimeTick map[typeutil.UniqueID]*channelTimeTickMsg
+	sendChan      chan map[typeutil.UniqueID]*channelTimeTickMsg
 }
 
-func (ttBarrier *softTimeTickBarrier) GetTimeTick() (Timestamp,error)
-func (ttBarrier *softTimeTickBarrier) Start()
-func (ttBarrier *softTimeTickBarrier) Close()
+func newTimeTickSync(core *Core) *timetickSync
 
-func NewSoftTimeTickBarrier(ctx context.Context, ttStream ms.MsgStream, peerIds []UniqueID, minTtInterval Timestamp) *softTimeTickBarrier
+func (t *timetickSync) UpdateTimeTick(in *internalpb.ChannelTimeTickMsg) error
+func (t *timetickSync) AddProxyNode(sess *sessionutil.Session)
+func (t *timetickSync) DelProxyNode(sess *sessionutil.Session)
+func (t *timetickSync) GetProxyNodes(sess []*sessionutil.Session)
+func (t *timetickSync) StartWatch()
+func (t *timetickSync) SendChannelTimeTick(chanName string, ts typeutil.Timestamp) error
+func (t *timetickSync) GetProxyNodeNum()
+func (t *timetickSync) GetChanNum() int 
 ```
-
-
-
-* Hard Time Tick Barrier
-
-<img src="./figs/hard_time_tick_barrier.png" width=420>
-
-```go
-type hardTimeTickBarrier struct {
-	peer2Tt    map[UniqueID]Timestamp
-	outTt      chan Timestamp
-	ttStream   ms.MsgStream
-	ctx        context.Context
-	wg         sync.WaitGroup
-	loopCtx    context.Context
-	loopCancel context.CancelFunc
-}
-
-func (ttBarrier *hardTimeTickBarrier) GetTimeTick() (Timestamp,error)
-func (ttBarrier *hardTimeTickBarrier) Start()
-func (ttBarrier *hardTimeTickBarrier) Close()
-
-func NewHardTimeTickBarrier(ctx context.Context, ttStream ms.MsgStream, peerIds []UniqueID) *hardTimeTickBarrier
-```
-
-
-
-// TODO
-###### 10.5.1 Time Synchronization Message Producer
-
-<img src="./figs/root_coord_time_sync.png" width=700>
-
-
- ```go
-type TimeTickBarrier interface {
-	GetTimeTick() (Timestamp,error)
-	Start()
-	  Close()
-}
-
-type timeSyncMsgProducer struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	ttBarrier TimeTickBarrier
-	watchers  []TimeTickWatcher
-}
-
-func (syncMsgProducer *timeSyncMsgProducer) SetProxyTtStreams(proxyTt *MsgStream, proxyIds []UniqueId)
-func (syncMsgProducer *timeSyncMsgProducer) SetWriteNodeTtStreams(WriteNodeTt *MsgStream, writeNodeIds []UniqueId)
-
-func (syncMsgProducer *timeSyncMsgProducer) SetDmSyncStream(dmSyncStream *MsgStream)
-func (syncMsgProducer *timeSyncMsgProducer) SetK2sSyncStream(k2sSyncStream *MsgStream)
-
-func (syncMsgProducer *timeSyncMsgProducer) Start() error
-func (syncMsgProducer *timeSyncMsgProducer) Close() error
-
-func newTimeSyncMsgProducer(ctx context.Context) *timeSyncMsgProducer error
- ```
-
-
