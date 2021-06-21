@@ -28,9 +28,8 @@ func TestDo(t *testing.T) {
 		if n < 3 {
 			n++
 			return fmt.Errorf("some error")
-		} else {
-			return nil
 		}
+		return nil
 	}
 
 	err := Do(ctx, testFn)

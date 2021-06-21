@@ -55,7 +55,7 @@ type ErrorList []error
 
 func (el ErrorList) Error() string {
 	var builder strings.Builder
-	builder.WriteString("All attemps results:\n")
+	builder.WriteString("All attempts results:\n")
 	for index, err := range el {
 		builder.WriteString(fmt.Sprintf("attempt #%d:%s\n", index+1, err.Error()))
 	}
