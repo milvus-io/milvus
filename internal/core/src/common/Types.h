@@ -18,11 +18,14 @@
 #include <memory>
 #include <vector>
 #include <utility>
+#include <limits>
 #include <NamedType/named_type.hpp>
 #include "pb/schema.pb.h"
 
 namespace milvus {
 using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp
+constexpr auto MAX_TIMESTAMP = std::numeric_limits<Timestamp>::max();
+
 using engine::DataType;
 using engine::FieldElementType;
 using engine::idx_t;

@@ -54,7 +54,7 @@ pipeline {
         }
     }
     post {
-        always {
+        cleanup {
             container('main') {
                 script {
                     sh 'find . -name . -o -prune -exec rm -rf -- {} +' /* clean up our workspace */

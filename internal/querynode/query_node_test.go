@@ -20,7 +20,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"go.etcd.io/etcd/clientv3"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -163,6 +165,12 @@ func newQueryNodeMock() *QueryNode {
 		}()
 	}
 
+	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	if err != nil {
+		panic(err)
+	}
+	etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+
 	msFactory, err := newMessageStreamFactory()
 	if err != nil {
 		panic(err)
@@ -172,8 +180,8 @@ func newQueryNodeMock() *QueryNode {
 	if err != nil {
 		panic(err)
 	}
-	svr.historical = newHistorical(svr.queryNodeLoopCtx, nil, nil, nil, svr.msFactory)
-	svr.streaming = newStreaming(ctx, msFactory)
+	svr.historical = newHistorical(svr.queryNodeLoopCtx, nil, nil, nil, svr.msFactory, etcdKV)
+	svr.streaming = newStreaming(ctx, msFactory, etcdKV)
 
 	return svr
 }

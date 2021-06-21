@@ -68,29 +68,51 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
 
     if (SystemProperty::Instance().IsSystem(field_id)) {
         auto system_field_type = SystemProperty::Instance().GetSystemFieldType(field_id);
-        Assert(system_field_type == SystemFieldType::RowId);
-        auto src_ptr = reinterpret_cast<const idx_t*>(info.blob);
+        if (system_field_type == SystemFieldType::Timestamp) {
+            auto src_ptr = reinterpret_cast<const Timestamp*>(info.blob);
+            aligned_vector<Timestamp> vec_data(info.row_count);
+            std::copy_n(src_ptr, info.row_count, vec_data.data());
 
-        // prepare data
-        aligned_vector<idx_t> vec_data(info.row_count);
-        std::copy_n(src_ptr, info.row_count, vec_data.data());
+            auto size = info.row_count;
 
-        std::unique_ptr<ScalarIndexBase> pk_index_;
-        // fix unintentional index update
-        if (schema_->get_is_auto_id()) {
-            pk_index_ = create_index(vec_data.data(), vec_data.size());
+            // TODO: load from outside
+            TimestampIndex index;
+            auto min_slice_length = size < 4096 ? 1 : 4096;
+            auto meta = GenerateFakeSlices(src_ptr, size, min_slice_length);
+            index.set_length_meta(std::move(meta));
+            index.build_with(src_ptr, size);
+
+            // use special index
+            std::unique_lock lck(mutex_);
+            update_row_count(info.row_count);
+            AssertInfo(timestamps_.empty(), "already exists");
+            timestamps_ = std::move(vec_data);
+            timestamp_index_ = std::move(index);
+
+        } else {
+            Assert(system_field_type == SystemFieldType::RowId);
+            auto src_ptr = reinterpret_cast<const idx_t*>(info.blob);
+
+            // prepare data
+            aligned_vector<idx_t> vec_data(info.row_count);
+            std::copy_n(src_ptr, info.row_count, vec_data.data());
+
+            std::unique_ptr<ScalarIndexBase> pk_index_;
+            // fix unintentional index update
+            if (schema_->get_is_auto_id()) {
+                pk_index_ = create_index(vec_data.data(), vec_data.size());
+            }
+
+            // write data under lock
+            std::unique_lock lck(mutex_);
+            update_row_count(info.row_count);
+            AssertInfo(row_ids_.empty(), "already exists");
+            row_ids_ = std::move(vec_data);
+
+            if (schema_->get_is_auto_id()) {
+                primary_key_index_ = std::move(pk_index_);
+            }
         }
-
-        // write data under lock
-        std::unique_lock lck(mutex_);
-        update_row_count(info.row_count);
-        AssertInfo(row_ids_.empty(), "already exists");
-        row_ids_ = std::move(vec_data);
-
-        if (schema_->get_is_auto_id()) {
-            primary_key_index_ = std::move(pk_index_);
-        }
-
         ++system_ready_count_;
     } else {
         // prepare data
@@ -194,8 +216,10 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
                                  query::QueryInfo query_info,
                                  const void* query_data,
                                  int64_t query_count,
+                                 Timestamp timestamp,
                                  const BitsetView& bitset,
                                  QueryResult& output) const {
+    Assert(is_system_field_ready());
     auto field_offset = query_info.field_offset_;
     auto& field_meta = schema_->operator[](field_offset);
 
@@ -203,52 +227,54 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
     if (get_bit(vecindex_ready_bitset_, field_offset)) {
         Assert(vecindexs_.is_ready(field_offset));
         query::SearchOnSealed(*schema_, vecindexs_, query_info, query_data, query_count, bitset, output);
-    } else if (get_bit(field_data_ready_bitset_, field_offset)) {
-        query::dataset::QueryDataset dataset;
-        dataset.query_data = query_data;
-        dataset.num_queries = query_count;
-        // if(field_meta.is)
-        dataset.metric_type = query_info.metric_type_;
-        dataset.topk = query_info.topK_;
-        dataset.dim = field_meta.get_dim();
-
-        Assert(get_bit(field_data_ready_bitset_, field_offset));
-        Assert(row_count_opt_.has_value());
-        auto row_count = row_count_opt_.value();
-        auto chunk_data = field_datas_[field_offset.get()].data();
-
-        auto sub_qr = [&] {
-            if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
-                return query::FloatSearchBruteForce(dataset, chunk_data, row_count, bitset);
-            } else {
-                return query::BinarySearchBruteForce(dataset, chunk_data, row_count, bitset);
-            }
-        }();
-
-        QueryResult results;
-        results.result_distances_ = std::move(sub_qr.mutable_values());
-        results.internal_seg_offsets_ = std::move(sub_qr.mutable_labels());
-        results.topK_ = dataset.topk;
-        results.num_queries_ = dataset.num_queries;
-
-        output = std::move(results);
-    } else {
+        return;
+    } else if (!get_bit(field_data_ready_bitset_, field_offset)) {
         PanicInfo("Field Data is not loaded");
     }
+
+    query::dataset::QueryDataset dataset;
+    dataset.query_data = query_data;
+    dataset.num_queries = query_count;
+    // if(field_meta.is)
+    dataset.metric_type = query_info.metric_type_;
+    dataset.topk = query_info.topK_;
+    dataset.dim = field_meta.get_dim();
+
+    Assert(get_bit(field_data_ready_bitset_, field_offset));
+    Assert(row_count_opt_.has_value());
+    auto row_count = row_count_opt_.value();
+    auto chunk_data = field_datas_[field_offset.get()].data();
+
+    auto sub_qr = [&] {
+        if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
+            return query::FloatSearchBruteForce(dataset, chunk_data, row_count, bitset);
+        } else {
+            return query::BinarySearchBruteForce(dataset, chunk_data, row_count, bitset);
+        }
+    }();
+
+    QueryResult results;
+    results.result_distances_ = std::move(sub_qr.mutable_values());
+    results.internal_seg_offsets_ = std::move(sub_qr.mutable_labels());
+    results.topK_ = dataset.topk;
+    results.num_queries_ = dataset.num_queries;
+
+    output = std::move(results);
 }
 
 void
 SegmentSealedImpl::DropFieldData(const FieldId field_id) {
     if (SystemProperty::Instance().IsSystem(field_id)) {
         auto system_field_type = SystemProperty::Instance().GetSystemFieldType(field_id);
-        Assert(system_field_type == SystemFieldType::RowId);
 
         std::unique_lock lck(mutex_);
         --system_ready_count_;
-        auto row_ids = std::move(row_ids_);
+        if (system_field_type == SystemFieldType::RowId) {
+            auto row_ids = std::move(row_ids_);
+        } else if (system_field_type == SystemFieldType::Timestamp) {
+            auto ts = std::move(timestamps_);
+        }
         lck.unlock();
-
-        row_ids.clear();
     } else {
         auto field_offset = schema_->get_offset(field_id);
         auto& field_meta = schema_->operator[](field_offset);
@@ -280,7 +306,7 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
     Assert(plan->extra_info_opt_.has_value());
 
     if (!is_system_field_ready()) {
-        PanicInfo("System Field RowID is not loaded");
+        PanicInfo("System Field RowID or Timestamp is not loaded");
     }
 
     auto& request_fields = plan->extra_info_opt_.value().involved_fields_;
@@ -427,6 +453,35 @@ SegmentSealedImpl::debug() const {
     log_str += "Index:" + primary_key_index_->debug();
     log_str += "\n";
     return log_str;
+}
+
+void
+SegmentSealedImpl::LoadSegmentMeta(const proto::segcore::LoadSegmentMeta& segment_meta) {
+    std::unique_lock lck(mutex_);
+    std::vector<int64_t> slice_lengths;
+    for (auto& info : segment_meta.metas()) {
+        slice_lengths.push_back(info.row_count());
+    }
+    timestamp_index_.set_length_meta(std::move(slice_lengths));
+    PanicInfo("unimplemented");
+}
+int64_t
+SegmentSealedImpl::get_active_count(Timestamp ts) const {
+    // TODO optimize here to reduce expr search range
+    return this->get_row_count();
+}
+void
+SegmentSealedImpl::mask_with_timestamps(std::deque<boost::dynamic_bitset<>>& bitset_chunks, Timestamp timestamp) const {
+    // TODO change the
+    Assert(this->timestamps_.size() == get_row_count());
+    Assert(bitset_chunks.size() == 1);
+    auto range = timestamp_index_.get_active_range(timestamp);
+    if (range.first == range.second && range.first == this->timestamps_.size()) {
+        // just skip
+        return;
+    }
+    auto mask = TimestampIndex::GenerateBitset(timestamp, range, this->timestamps_.data(), this->timestamps_.size());
+    bitset_chunks[0] &= mask;
 }
 
 SegmentSealedPtr

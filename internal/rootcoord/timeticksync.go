@@ -90,7 +90,7 @@ func (t *timetickSync) sendToChannel() {
 func (t *timetickSync) UpdateTimeTick(in *internalpb.ChannelTimeTickMsg) error {
 	t.lock.Lock()
 	defer t.lock.Unlock()
-	if len(in.ChannelNames) == 0 {
+	if len(in.ChannelNames) == 0 && in.DefaultTimestamp == 0 {
 		return nil
 	}
 	if len(in.Timestamps) != len(in.ChannelNames) {

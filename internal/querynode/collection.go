@@ -23,6 +23,8 @@ package querynode
 */
 import "C"
 import (
+	"errors"
+	"fmt"
 	"math"
 	"sync"
 	"unsafe"
@@ -42,8 +44,11 @@ type Collection struct {
 	vChannels     []Channel
 	pChannels     []Channel
 
-	releaseMu   sync.RWMutex // guards releaseTime
-	releaseTime Timestamp
+	loadType loadType
+
+	releaseMu          sync.RWMutex // guards release
+	releasedPartitions map[UniqueID]struct{}
+	releaseTime        Timestamp
 }
 
 func (c *Collection) ID() UniqueID {
@@ -102,6 +107,34 @@ func (c *Collection) getReleaseTime() Timestamp {
 	return c.releaseTime
 }
 
+func (c *Collection) addReleasedPartition(partitionID UniqueID) {
+	c.releaseMu.Lock()
+	defer c.releaseMu.Unlock()
+	c.releasedPartitions[partitionID] = struct{}{}
+}
+
+func (c *Collection) checkReleasedPartitions(partitionIDs []UniqueID) error {
+	c.releaseMu.RLock()
+	defer c.releaseMu.RUnlock()
+	for _, id := range partitionIDs {
+		if _, ok := c.releasedPartitions[id]; ok {
+			return errors.New("partition has been released" +
+				", collectionID = " + fmt.Sprintln(c.ID()) +
+				", partitionID = " + fmt.Sprintln(id))
+		}
+	}
+
+	return nil
+}
+
+func (c *Collection) setLoadType(l loadType) {
+	c.loadType = l
+}
+
+func (c *Collection) getLoadType() loadType {
+	return c.loadType
+}
+
 func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Collection {
 	/*
 		CCollection
@@ -113,11 +146,12 @@ func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Co
 	collection := C.NewCollection(cSchemaBlob)
 
 	var newCollection = &Collection{
-		collectionPtr: collection,
-		id:            collectionID,
-		schema:        schema,
-		vChannels:     make([]Channel, 0),
-		pChannels:     make([]Channel, 0),
+		collectionPtr:      collection,
+		id:                 collectionID,
+		schema:             schema,
+		vChannels:          make([]Channel, 0),
+		pChannels:          make([]Channel, 0),
+		releasedPartitions: make(map[UniqueID]struct{}),
 	}
 	C.free(unsafe.Pointer(cSchemaBlob))
 

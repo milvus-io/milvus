@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -32,8 +33,8 @@ type streaming struct {
 	msFactory       msgstream.Factory
 }
 
-func newStreaming(ctx context.Context, factory msgstream.Factory) *streaming {
-	replica := newCollectionReplica()
+func newStreaming(ctx context.Context, factory msgstream.Factory, etcdKV *etcdkv.EtcdKV) *streaming {
+	replica := newCollectionReplica(etcdKV)
 	tReplica := newTSafeReplica()
 	newDS := newDataSyncService(ctx, replica, tReplica, factory)
 
@@ -100,12 +101,24 @@ func (s *streaming) search(searchReqs []*searchRequest,
 		}
 	}
 
+	col, err := s.replica.getCollectionByID(collID)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	// all partitions have been released
-	if len(searchPartIDs) == 0 {
+	if len(searchPartIDs) == 0 && col.getLoadType() == loadTypePartition {
 		return nil, nil, errors.New("partitions have been released , collectionID = " +
 			fmt.Sprintln(collID) +
 			"target partitionIDs = " +
 			fmt.Sprintln(partIDs))
+	}
+
+	if len(searchPartIDs) == 0 && col.getLoadType() == loadTypeCollection {
+		if err = col.checkReleasedPartitions(partIDs); err != nil {
+			return nil, nil, err
+		}
+		return nil, nil, nil
 	}
 
 	log.Debug("doing search in streaming",

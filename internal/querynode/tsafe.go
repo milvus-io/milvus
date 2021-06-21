@@ -16,8 +16,6 @@ import (
 	"math"
 	"sync"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
 )
 
@@ -107,11 +105,11 @@ func (ts *tSafe) start() {
 					watcher.notify()
 				}
 
-				log.Debug("set tSafe done",
-					zap.Any("id", m.id),
-					zap.Any("channel", ts.channel),
-					zap.Any("t", m.t),
-					zap.Any("tSafe", ts.tSafe))
+				//log.Debug("set tSafe done",
+				//	zap.Any("id", m.id),
+				//	zap.Any("channel", ts.channel),
+				//	zap.Any("t", m.t),
+				//	zap.Any("tSafe", ts.tSafe))
 				ts.tSafeMu.Unlock()
 			}
 		}

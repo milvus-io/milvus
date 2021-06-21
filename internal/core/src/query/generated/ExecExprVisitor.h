@@ -37,8 +37,8 @@ class ExecExprVisitor : public ExprVisitor {
 
  public:
     using RetType = std::deque<boost::dynamic_bitset<>>;
-    ExecExprVisitor(const segcore::SegmentInternalInterface& segment, int64_t row_count)
-        : segment_(segment), row_count_(row_count) {
+    ExecExprVisitor(const segcore::SegmentInternalInterface& segment, int64_t row_count, Timestamp timestamp)
+        : segment_(segment), row_count_(row_count), timestamp_(timestamp) {
     }
     RetType
     call_child(Expr& expr) {
@@ -67,5 +67,6 @@ class ExecExprVisitor : public ExprVisitor {
     const segcore::SegmentInternalInterface& segment_;
     int64_t row_count_;
     std::optional<RetType> ret_;
+    Timestamp timestamp_;
 };
 }  // namespace milvus::query

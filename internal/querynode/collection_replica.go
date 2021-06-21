@@ -25,6 +25,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"strconv"
 	"sync"
@@ -91,7 +92,11 @@ type collectionReplica struct {
 	partitions  map[UniqueID]*Partition
 	segments    map[UniqueID]*Segment
 
+	loadType
+
 	excludedSegments map[UniqueID][]*datapb.SegmentInfo // map[collectionID]segmentIDs
+
+	etcdKV *etcdkv.EtcdKV
 }
 
 //----------------------------------------------------------------------------------------------------- collection
@@ -396,6 +401,11 @@ func (colReplica *collectionReplica) removeSegmentPrivate(segmentID UniqueID) er
 	partition.removeSegmentID(segmentID)
 	delete(colReplica.segments, segmentID)
 	deleteSegment(segment)
+	key := fmt.Sprintf("%s/%d", queryNodeSegmentMetaPrefix, segmentID)
+	err = colReplica.etcdKV.Remove(key)
+	if err != nil {
+		log.Error("error when remove segment info from etcd")
+	}
 
 	return nil
 }
@@ -551,7 +561,7 @@ func (colReplica *collectionReplica) freeAll() {
 	colReplica.segments = make(map[UniqueID]*Segment)
 }
 
-func newCollectionReplica() ReplicaInterface {
+func newCollectionReplica(etcdKv *etcdkv.EtcdKV) ReplicaInterface {
 	collections := make(map[UniqueID]*Collection)
 	partitions := make(map[UniqueID]*Partition)
 	segments := make(map[UniqueID]*Segment)
@@ -563,6 +573,7 @@ func newCollectionReplica() ReplicaInterface {
 		segments:    segments,
 
 		excludedSegments: excludedSegments,
+		etcdKV:           etcdKv,
 	}
 
 	return replica

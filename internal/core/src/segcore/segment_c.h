@@ -103,9 +103,6 @@ UpdateSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_index_info
 int
 Close(CSegmentInterface c_segment);
 
-int
-BuildIndex(CCollection c_collection, CSegmentInterface c_segment);
-
 bool
 IsOpened(CSegmentInterface c_segment);
 

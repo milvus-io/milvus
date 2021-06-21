@@ -166,18 +166,32 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		}
 		w.node.streaming.replica.initExcludedSegments(collectionID)
 	}
-	collection, err := w.node.streaming.replica.getCollectionByID(collectionID)
-	if err != nil {
-		return err
-	}
-	collection.addVChannels(vChannels)
-	collection.addPChannels(pChannels)
 	if hasCollectionInHistorical := w.node.historical.replica.hasCollection(collectionID); !hasCollectionInHistorical {
 		err := w.node.historical.replica.addCollection(collectionID, w.req.Schema)
 		if err != nil {
 			return err
 		}
 	}
+	var l loadType
+	if loadPartition {
+		l = loadTypePartition
+	} else {
+		l = loadTypeCollection
+	}
+	sCol, err := w.node.streaming.replica.getCollectionByID(collectionID)
+	if err != nil {
+		return err
+	}
+	sCol.addVChannels(vChannels)
+	sCol.addPChannels(pChannels)
+	sCol.setLoadType(l)
+	hCol, err := w.node.historical.replica.getCollectionByID(collectionID)
+	if err != nil {
+		return err
+	}
+	hCol.addVChannels(vChannels)
+	hCol.addPChannels(pChannels)
+	hCol.setLoadType(l)
 	if loadPartition {
 		if hasPartitionInStreaming := w.node.streaming.replica.hasPartition(partitionID); !hasPartitionInStreaming {
 			err := w.node.streaming.replica.addPartition(collectionID, partitionID)
@@ -475,6 +489,18 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 		zap.Any("collectionID", r.req.CollectionID),
 		zap.Any("partitionIDs", r.req.PartitionIDs))
 
+	hCol, err := r.node.historical.replica.getCollectionByID(r.req.CollectionID)
+	if err != nil {
+		log.Error(err.Error())
+		return err
+	}
+
+	sCol, err := r.node.streaming.replica.getCollectionByID(r.req.CollectionID)
+	if err != nil {
+		log.Error(err.Error())
+		return err
+	}
+
 	for _, id := range r.req.PartitionIDs {
 		r.node.streaming.dataSyncService.removePartitionFlowGraph(id)
 		hasPartitionInHistorical := r.node.historical.replica.hasPartition(id)
@@ -485,6 +511,7 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 				log.Error(err.Error())
 			}
 		}
+		hCol.addReleasedPartition(id)
 
 		hasPartitionInStreaming := r.node.streaming.replica.hasPartition(id)
 		if hasPartitionInStreaming {
@@ -493,6 +520,7 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 				log.Error(err.Error())
 			}
 		}
+		sCol.addReleasedPartition(id)
 	}
 
 	log.Debug("release partition task done",

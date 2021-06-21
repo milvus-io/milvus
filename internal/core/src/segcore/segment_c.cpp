@@ -258,16 +258,24 @@ UpdateSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_index_info
     }
 }
 
+CStatus
+LoadSealedSegmentMeta(CSegmentInterface c_segment, CProto LoadSegmentMetaProto) {
+    try {
+        auto segment_raw = (const milvus::segcore::SegmentGrowing*)c_segment;
+        auto segment = dynamic_cast<const milvus::segcore::SegmentSealed*>(segment_raw);
+
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        // TODO
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
 int
 Close(CSegmentInterface c_segment) {
     auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
     auto status = segment->Close();
     return status.code();
-}
-
-int
-BuildIndex(CCollection c_collection, CSegmentInterface c_segment) {
-    PanicInfo("unimplemented");
 }
 
 bool

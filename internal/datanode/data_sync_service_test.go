@@ -52,6 +52,7 @@ func TestDataSyncService_Start(t *testing.T) {
 		"receiveBufSize": 1024,
 		"pulsarBufSize":  1024}
 	err := msFactory.SetParams(m)
+	assert.Nil(t, err)
 
 	insertChannelName := "data_sync_service_test_dml"
 	ddlChannelName := "data_sync_service_test_ddl"
@@ -65,8 +66,9 @@ func TestDataSyncService_Start(t *testing.T) {
 	}
 
 	signalCh := make(chan UniqueID, 100)
-	sync := newDataSyncService(ctx, flushChan, replica, allocFactory, msFactory, vchan, signalCh, &DataServiceFactory{}, &MasterServiceFactory{})
+	sync, err := newDataSyncService(ctx, flushChan, replica, allocFactory, msFactory, vchan, signalCh, &DataServiceFactory{})
 
+	assert.Nil(t, err)
 	// sync.replica.addCollection(collMeta.ID, collMeta.Schema)
 	go sync.start()
 

@@ -119,3 +119,17 @@ func DecodeMsgPositions(str string, msgPositions *[]*msgstream.MsgPosition) erro
 	}
 	return json.Unmarshal([]byte(str), msgPositions)
 }
+
+//ToPhysicalChannel virtual channel -> physical channel
+func ToPhysicalChannel(vchannel string) string {
+	var idx int
+	for idx = len(vchannel) - 1; idx >= 0; idx-- {
+		if vchannel[idx] == '_' {
+			break
+		}
+	}
+	if idx < 0 {
+		return vchannel
+	}
+	return vchannel[:idx]
+}

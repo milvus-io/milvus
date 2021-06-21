@@ -40,6 +40,7 @@ type ParamTable struct {
 	Port    int
 
 	NodeID int64
+	Alias  string
 
 	MasterAddress string
 
@@ -57,6 +58,10 @@ type ParamTable struct {
 
 var Params ParamTable
 var once sync.Once
+
+func (pt *ParamTable) InitAlias(alias string) {
+	pt.Alias = alias
+}
 
 func (pt *ParamTable) Init() {
 	once.Do(func() {
@@ -200,15 +205,6 @@ func (pt *ParamTable) initLogCfg() {
 		panic(err)
 	}
 	pt.Log.Level = level
-	devStr, err := pt.Load("log.dev")
-	if err != nil {
-		panic(err)
-	}
-	dev, err := strconv.ParseBool(devStr)
-	if err != nil {
-		panic(err)
-	}
-	pt.Log.Development = dev
 	pt.Log.File.MaxSize = pt.ParseInt("log.file.maxSize")
 	pt.Log.File.MaxBackups = pt.ParseInt("log.file.maxBackups")
 	pt.Log.File.MaxDays = pt.ParseInt("log.file.maxAge")
@@ -217,7 +213,7 @@ func (pt *ParamTable) initLogCfg() {
 		panic(err)
 	}
 	if len(rootPath) != 0 {
-		pt.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("indexnode-%d.log", pt.NodeID))
+		pt.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("indexnode-%s.log", pt.Alias))
 	} else {
 		pt.Log.File.Filename = ""
 	}

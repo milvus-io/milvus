@@ -14,7 +14,6 @@ package queryservice
 import (
 	"fmt"
 	"path"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -50,6 +49,7 @@ type ParamTable struct {
 	// --- ETCD ---
 	EtcdEndpoints []string
 	MetaRootPath  string
+	KvRootPath    string
 }
 
 var Params ParamTable
@@ -63,17 +63,11 @@ func (p *ParamTable) Init() {
 			panic(err)
 		}
 
-		err = p.LoadYaml("advanced/query_service.yaml")
-		if err != nil {
-			panic(err)
-		}
-
 		err = p.LoadYaml("milvus.yaml")
 		if err != nil {
 			panic(err)
 		}
 
-		p.initNodeID()
 		p.initLogCfg()
 
 		p.initStatsChannelName()
@@ -86,11 +80,8 @@ func (p *ParamTable) Init() {
 		// --- ETCD ---
 		p.initEtcdEndpoints()
 		p.initMetaRootPath()
+		p.initKvRootPath()
 	})
-}
-
-func (p *ParamTable) initNodeID() {
-	p.NodeID = uint64(p.ParseInt64("queryService.nodeID"))
 }
 
 func (p *ParamTable) initLogCfg() {
@@ -105,15 +96,6 @@ func (p *ParamTable) initLogCfg() {
 		panic(err)
 	}
 	p.Log.Level = level
-	devStr, err := p.Load("log.dev")
-	if err != nil {
-		panic(err)
-	}
-	dev, err := strconv.ParseBool(devStr)
-	if err != nil {
-		panic(err)
-	}
-	p.Log.Development = dev
 	p.Log.File.MaxSize = p.ParseInt("log.file.maxSize")
 	p.Log.File.MaxBackups = p.ParseInt("log.file.maxBackups")
 	p.Log.File.MaxDays = p.ParseInt("log.file.maxAge")
@@ -193,4 +175,16 @@ func (p *ParamTable) initMetaRootPath() {
 		panic(err)
 	}
 	p.MetaRootPath = path.Join(rootPath, subPath)
+}
+
+func (p *ParamTable) initKvRootPath() {
+	rootPath, err := p.Load("etcd.rootPath")
+	if err != nil {
+		panic(err)
+	}
+	subPath, err := p.Load("etcd.kvSubPath")
+	if err != nil {
+		panic(err)
+	}
+	p.KvRootPath = path.Join(rootPath, subPath)
 }

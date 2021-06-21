@@ -88,6 +88,7 @@ message ReleaseCollectionRequest {
   common.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
+  int64 nodeID = 4;
 }
 
 message LoadPartitionsRequest {
@@ -103,6 +104,7 @@ message ReleasePartitionsRequest {
   int64 dbID = 2;
   int64 collectionID = 3;
   repeated int64 partitionIDs = 4;
+  int64 nodeID = 5;
 }
 
 message CreateQueryChannelRequest {
@@ -266,7 +268,8 @@ message CollectionInfo {
   int64 collectionID = 1;
   repeated int64 partitionIDs = 2;
   repeated DmChannelInfo channel_infos = 3;
-  schema.CollectionSchema schema = 6;
+  bool load_collection = 4;
+  schema.CollectionSchema schema = 5;
 }
 
 message HandoffSegments {
@@ -285,9 +288,8 @@ message LoadBalanceSegmentInfo {
   bool valid_info = 8;
 }
 
-message LoadBalanceSegments {
+message LoadBalanceRequest {
   common.MsgBase base = 1;
-  repeated LoadBalanceSegmentInfo infos = 2;
+  repeated int64 source_nodeIDs = 2;
+  TriggerCondition balance_reason = 3;
 }
-
-

@@ -244,7 +244,7 @@ func main() {
 			panic(err)
 		}
 		defer removePidFile(fd)
-		role.Run(localMsg)
+		role.Run(localMsg, svrAlias)
 	case "stop":
 		if err := stopPid(filename, runtimeDir); err != nil {
 			panic(err)
