@@ -76,8 +76,8 @@ type SegmentReplica struct {
 
 var _ Replica = &SegmentReplica{}
 
-func newReplica(ms types.MasterService, collID UniqueID) Replica {
-	metaService := newMetaService(ms, collID)
+func newReplica(rc types.RootCoord, collID UniqueID) Replica {
+	metaService := newMetaService(rc, collID)
 
 	var replica Replica = &SegmentReplica{
 		collectionID: collID,
