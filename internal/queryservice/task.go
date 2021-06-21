@@ -1273,6 +1273,12 @@ func (lbt *LoadBalanceTask) Execute(ctx context.Context) error {
 }
 
 func (lbt *LoadBalanceTask) PostExecute(ctx context.Context) error {
+	for _, id := range lbt.SourceNodeIDs {
+		err := lbt.cluster.removeNodeInfo(id)
+		if err != nil {
+			log.Error("LoadBalanceTask: remove mode info error", zap.Int64("nodeID", id))
+		}
+	}
 	log.Debug("LoadBalanceTask postExecute done",
 		zap.Int64s("sourceNodeIDs", lbt.SourceNodeIDs),
 		zap.Any("balanceReason", lbt.BalanceReason),
