@@ -30,7 +30,7 @@ import (
 
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	dsc "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
-	isc "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
+	isc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	qsc "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/log"
@@ -56,10 +56,10 @@ type Server struct {
 
 	grpcServer *grpc.Server
 
-	dataService   *dsc.Client
-	masterService *rcc.GrpcClient
-	indexService  *isc.Client
-	queryService  *qsc.Client
+	dataService  *dsc.Client
+	rootCoord    *rcc.GrpcClient
+	indexCoord   *isc.Client
+	queryService *qsc.Client
 
 	closer io.Closer
 }
@@ -163,29 +163,29 @@ func (s *Server) init() error {
 		panic(err)
 	}
 
-	// --- IndexService ---
-	log.Debug("Index service", zap.String("address", Params.IndexServiceAddress))
-	indexService := isc.NewClient(qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
+	// --- IndexCoord ---
+	log.Debug("Index coord", zap.String("address", Params.IndexServiceAddress))
+	indexCoord := isc.NewClient(qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
 
-	if err := indexService.Init(); err != nil {
-		log.Debug("QueryNode IndexServiceClient Init failed", zap.Error(err))
+	if err := indexCoord.Init(); err != nil {
+		log.Debug("QueryNode IndexCoordClient Init failed", zap.Error(err))
 		panic(err)
 	}
 
-	if err := indexService.Start(); err != nil {
-		log.Debug("QueryNode IndexServiceClient Start failed", zap.Error(err))
+	if err := indexCoord.Start(); err != nil {
+		log.Debug("QueryNode IndexCoordClient Start failed", zap.Error(err))
 		panic(err)
 	}
-	// wait IndexService healthy
-	log.Debug("QueryNode start to wait for IndexService ready")
-	err = funcutil.WaitForComponentHealthy(s.ctx, indexService, "IndexService", 1000000, time.Millisecond*200)
+	// wait IndexCoord healthy
+	log.Debug("QueryNode start to wait for IndexCoord ready")
+	err = funcutil.WaitForComponentHealthy(s.ctx, indexCoord, "IndexCoord", 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("QueryNode wait for IndexService ready failed", zap.Error(err))
+		log.Debug("QueryNode wait for IndexCoord ready failed", zap.Error(err))
 		panic(err)
 	}
-	log.Debug("QueryNode report IndexService is ready")
+	log.Debug("QueryNode report IndexCoord is ready")
 
-	if err := s.SetIndexService(indexService); err != nil {
+	if err := s.SetIndexCoord(indexCoord); err != nil {
 		panic(err)
 	}
 
@@ -302,16 +302,16 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-func (s *Server) SetMasterService(masterService types.MasterService) error {
-	return s.querynode.SetMasterService(masterService)
+func (s *Server) SetMasterService(rootCoord types.RootCoord) error {
+	return s.querynode.SetRootCoord(rootCoord)
 }
 
 func (s *Server) SetQueryService(queryService types.QueryService) error {
 	return s.querynode.SetQueryService(queryService)
 }
 
-func (s *Server) SetIndexService(indexService types.IndexService) error {
-	return s.querynode.SetIndexService(indexService)
+func (s *Server) SetIndexCoord(indexCoord types.IndexCoord) error {
+	return s.querynode.SetIndexCoord(indexCoord)
 }
 
 func (s *Server) SetDataService(dataService types.DataService) error {

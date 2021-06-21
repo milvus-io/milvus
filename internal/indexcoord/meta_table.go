@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package indexservice
+package indexcoord
 
 import (
 	"fmt"
@@ -56,7 +56,7 @@ func NewMetaTable(kv *etcdkv.EtcdKV) (*metaTable, error) {
 func (mt *metaTable) reloadFromKV() error {
 	mt.indexBuildID2Meta = make(map[UniqueID]Meta)
 	key := "indexes"
-	log.Debug("IndexService metaTable LoadWithPrefix ", zap.String("prefix", key))
+	log.Debug("IndexCoord metaTable LoadWithPrefix ", zap.String("prefix", key))
 
 	_, values, versions, err := mt.client.LoadWithPrefix2(key)
 	if err != nil {
@@ -67,7 +67,7 @@ func (mt *metaTable) reloadFromKV() error {
 		indexMeta := indexpb.IndexMeta{}
 		err = proto.UnmarshalText(values[i], &indexMeta)
 		if err != nil {
-			return fmt.Errorf("IndexService metaTable reloadFromKV UnmarshalText indexpb.IndexMeta err:%w", err)
+			return fmt.Errorf("IndexCoord metaTable reloadFromKV UnmarshalText indexpb.IndexMeta err:%w", err)
 		}
 
 		meta := &Meta{
@@ -85,13 +85,13 @@ func (mt *metaTable) saveIndexMeta(meta *Meta) error {
 
 	key := "indexes/" + strconv.FormatInt(meta.indexMeta.IndexBuildID, 10)
 	err := mt.client.CompareVersionAndSwap(key, meta.revision, value)
-	log.Debug("IndexService metaTable saveIndexMeta ", zap.String("key", key), zap.Error(err))
+	log.Debug("IndexCoord metaTable saveIndexMeta ", zap.String("key", key), zap.Error(err))
 	if err != nil {
 		return err
 	}
 	meta.revision = meta.revision + 1
 	mt.indexBuildID2Meta[meta.indexMeta.IndexBuildID] = *meta
-	log.Debug("IndexService metaTable saveIndexMeta success", zap.Any("meta.revision", meta.revision))
+	log.Debug("IndexCoord metaTable saveIndexMeta success", zap.Any("meta.revision", meta.revision))
 
 	return nil
 }
@@ -100,7 +100,7 @@ func (mt *metaTable) reloadMeta(indexBuildID UniqueID) (*Meta, error) {
 	key := "indexes/" + strconv.FormatInt(indexBuildID, 10)
 
 	_, values, version, err := mt.client.LoadWithPrefix2(key)
-	log.Debug("IndexService reloadMeta mt.client.LoadWithPrefix2", zap.Any("indexBuildID", indexBuildID), zap.Error(err))
+	log.Debug("IndexCoord reloadMeta mt.client.LoadWithPrefix2", zap.Any("indexBuildID", indexBuildID), zap.Error(err))
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +124,7 @@ func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequ
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 	_, ok := mt.indexBuildID2Meta[indexBuildID]
-	log.Debug("IndexService metaTable AddIndex", zap.Any(" index already exist", ok))
+	log.Debug("IndexCoord metaTable AddIndex", zap.Any(" index already exist", ok))
 	if ok {
 		return fmt.Errorf("index already exists with ID = %d", indexBuildID)
 	}
@@ -144,11 +144,11 @@ func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequ
 func (mt *metaTable) BuildIndex(indexBuildID UniqueID, nodeID int64) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
-	log.Debug("IndexService metaTable BuildIndex")
+	log.Debug("IndexCoord metaTable BuildIndex")
 
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
 	if !ok {
-		log.Debug("IndexService metaTable BuildIndex index not exists", zap.Any("indexBuildID", indexBuildID))
+		log.Debug("IndexCoord metaTable BuildIndex index not exists", zap.Any("indexBuildID", indexBuildID))
 		return fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 
@@ -181,10 +181,10 @@ func (mt *metaTable) BuildIndex(indexBuildID UniqueID, nodeID int64) error {
 func (mt *metaTable) UpdateVersion(indexBuildID UniqueID) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
-	log.Debug("IndexService metaTable update UpdateVersion", zap.Any("IndexBuildId", indexBuildID))
+	log.Debug("IndexCoord metaTable update UpdateVersion", zap.Any("IndexBuildId", indexBuildID))
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
 	if !ok {
-		log.Debug("IndexService metaTable update UpdateVersion indexBuildID not exists", zap.Any("IndexBuildId", indexBuildID))
+		log.Debug("IndexCoord metaTable update UpdateVersion indexBuildID not exists", zap.Any("IndexBuildId", indexBuildID))
 		return fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 
@@ -193,7 +193,7 @@ func (mt *metaTable) UpdateVersion(indexBuildID UniqueID) error {
 	//}
 
 	meta.indexMeta.Version = meta.indexMeta.Version + 1
-	log.Debug("IndexService metaTable update UpdateVersion", zap.Any("IndexBuildId", indexBuildID),
+	log.Debug("IndexCoord metaTable update UpdateVersion", zap.Any("IndexBuildId", indexBuildID),
 		zap.Any("Version", meta.indexMeta.Version))
 
 	err := mt.saveIndexMeta(&meta)
@@ -218,13 +218,13 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 
-	log.Debug("IndexService metaTable MarkIndexAsDeleted ", zap.Int64("indexID", indexID))
+	log.Debug("IndexCoord metaTable MarkIndexAsDeleted ", zap.Int64("indexID", indexID))
 
 	for _, meta := range mt.indexBuildID2Meta {
 		if meta.indexMeta.Req.IndexID == indexID {
 			meta.indexMeta.MarkDeleted = true
 			if err := mt.saveIndexMeta(&meta); err != nil {
-				log.Debug("IndexService metaTable MarkIndexAsDeleted saveIndexMeta failed", zap.Error(err))
+				log.Debug("IndexCoord metaTable MarkIndexAsDeleted saveIndexMeta failed", zap.Error(err))
 				fn := func() error {
 					m, err := mt.reloadMeta(meta.indexMeta.IndexBuildID)
 					if m == nil {
@@ -290,7 +290,7 @@ func (mt *metaTable) DeleteIndex(indexBuildID UniqueID) {
 	key := "indexes/" + strconv.FormatInt(indexBuildID, 10)
 
 	err := mt.client.Remove(key)
-	log.Debug("IndexService metaTable DeleteIndex", zap.Error(err))
+	log.Debug("IndexCoord metaTable DeleteIndex", zap.Error(err))
 }
 
 func (mt *metaTable) UpdateRecycleState(indexBuildID UniqueID) error {
@@ -298,7 +298,7 @@ func (mt *metaTable) UpdateRecycleState(indexBuildID UniqueID) error {
 	defer mt.lock.Unlock()
 
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
-	log.Debug("IndexService metaTable UpdateRecycleState", zap.Any("indexBuildID", indexBuildID),
+	log.Debug("IndexCoord metaTable UpdateRecycleState", zap.Any("indexBuildID", indexBuildID),
 		zap.Any("exists", ok))
 	if !ok {
 		return fmt.Errorf("index not exists with ID = %d", indexBuildID)
@@ -322,7 +322,7 @@ func (mt *metaTable) UpdateRecycleState(indexBuildID UniqueID) error {
 		err2 := retry.Retry(5, time.Millisecond*200, fn)
 		if err2 != nil {
 			meta.indexMeta.Recycled = false
-			log.Debug("IndexService metaTable UpdateRecycleState failed", zap.Error(err2))
+			log.Debug("IndexCoord metaTable UpdateRecycleState failed", zap.Error(err2))
 			return err2
 		}
 	}
@@ -352,7 +352,7 @@ func (mt *metaTable) GetIndexMeta(indexBuildID UniqueID) Meta {
 	defer mt.lock.Unlock()
 
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
-	log.Debug("IndexService metaTable GetIndexMeta", zap.Any("indexBuildID", indexBuildID),
+	log.Debug("IndexCoord metaTable GetIndexMeta", zap.Any("indexBuildID", indexBuildID),
 		zap.Any("exist", ok))
 	return meta
 }
@@ -408,10 +408,10 @@ func (mt *metaTable) LoadMetaFromETCD(indexBuildID int64, revision int64) bool {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
-	log.Debug("IndexService metaTable LoadMetaFromETCD", zap.Any("indexBuildID", indexBuildID),
+	log.Debug("IndexCoord metaTable LoadMetaFromETCD", zap.Any("indexBuildID", indexBuildID),
 		zap.Any("revision", revision), zap.Any("ok", ok))
 	if ok {
-		log.Debug("IndexService metaTable LoadMetaFromETCD",
+		log.Debug("IndexCoord metaTable LoadMetaFromETCD",
 			zap.Any("meta.revision", meta.revision),
 			zap.Any("revision", revision))
 
@@ -422,12 +422,12 @@ func (mt *metaTable) LoadMetaFromETCD(indexBuildID int64, revision int64) bool {
 
 	m, err := mt.reloadMeta(meta.indexMeta.IndexBuildID)
 	if m == nil {
-		log.Debug("IndexService metaTable reloadMeta failed", zap.Error(err))
+		log.Debug("IndexCoord metaTable reloadMeta failed", zap.Error(err))
 		return false
 	}
 
 	mt.indexBuildID2Meta[indexBuildID] = *m
-	log.Debug("IndexService LoadMetaFromETCD success", zap.Any("IndexMeta", m))
+	log.Debug("IndexCoord LoadMetaFromETCD success", zap.Any("IndexMeta", m))
 
 	return true
 }

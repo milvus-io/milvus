@@ -162,22 +162,13 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		collID := msg.GetCollectionID()
 		partitionID := msg.GetPartitionID()
 
-		// log.Debug("InsertBufferNode Operating Segment",
-		//     zap.Int64("ID", currentSegID),
-		//     zap.Int("NumOfRows", len(msg.RowIDs)),
-		// )
-
 		if !ibNode.replica.hasSegment(currentSegID) {
-			err := ibNode.replica.addSegment(currentSegID, collID, partitionID, msg.GetChannelID())
+			err := ibNode.replica.addNewSegment(currentSegID, collID, partitionID, msg.GetChannelID(),
+				iMsg.startPositions[0], iMsg.endPositions[0])
 			if err != nil {
 				log.Error("add segment wrong", zap.Error(err))
 			}
 
-			// set msg pack start positions
-			// this position is the start position of current segment, not start position of current MsgPack
-			// so setStartPositions will only call once when meet new segment
-			ibNode.replica.setStartPositions(currentSegID, iMsg.startPositions)
-			ibNode.setSegmentCheckPoint(currentSegID, segmentCheckPoint{0, *iMsg.startPositions[0]})
 		}
 
 		segNum := uniqueSeg[currentSegID]
@@ -473,7 +464,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		ibNode.insertBuffer.insertData[currentSegID] = idata
 
 		// store current endPositions as Segment->EndPostion
-		ibNode.replica.setEndPositions(currentSegID, iMsg.endPositions)
+		ibNode.replica.updateSegmentEndPosition(currentSegID, iMsg.endPositions[0])
 	}
 
 	if len(iMsg.insertMessages) > 0 {
@@ -524,15 +515,14 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			log.Debug("segment is empty")
 			continue
 		}
-		fu.checkPoint = ibNode.listSegmentCheckPoints()
+		fu.checkPoint = ibNode.replica.listSegmentsCheckPoints()
 		fu.flushed = false
 		if err := ibNode.dsSaveBinlog(&fu); err != nil {
 			log.Debug("data service save bin log path failed", zap.Error(err))
 		}
 	}
 
-	// iMsg is Flush() msg from dataservice
-	//   1. insertBuffer(not empty) -> binLogs -> minIO/S3
+	// iMsg is Flush() msg from data cooperator
 	select {
 	case fmsg := <-ibNode.flushChan:
 		currentSegID := fmsg.segmentID
@@ -547,12 +537,12 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				collID:     fmsg.collectionID,
 				segID:      currentSegID,
 				field2Path: map[UniqueID]string{},
-				checkPoint: ibNode.listSegmentCheckPoints(),
+				checkPoint: ibNode.replica.listSegmentsCheckPoints(),
 				flushed:    true,
 			})
-			ibNode.removeSegmentCheckPoint(fmsg.segmentID)
+			ibNode.replica.segmentFlushed(currentSegID)
 			fmsg.dmlFlushedCh <- []*datapb.ID2PathList{{ID: currentSegID, Paths: []string{}}}
-		} else {
+		} else { //insertBuffer(not empty) -> binLogs -> minIO/S3
 			log.Debug(".. Buffer not empty, flushing ..")
 			finishCh := make(chan segmentFlushUnit, 1)
 
@@ -587,13 +577,12 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			fu := <-finishCh
 			close(finishCh)
 			if fu.field2Path != nil {
-				fu.checkPoint = ibNode.listSegmentCheckPoints()
+				fu.checkPoint = ibNode.replica.listSegmentsCheckPoints()
 				fu.flushed = true
 				if err := ibNode.dsSaveBinlog(&fu); err != nil {
 					log.Debug("Data service save binlog path failed", zap.Error(err))
 				} else {
-					// this segment has flushed, so it's not `open segment`, so remove from the check point
-					ibNode.removeSegmentCheckPoint(fu.segID)
+					ibNode.replica.segmentFlushed(fu.segID)
 				}
 			}
 			fmsg.dmlFlushedCh <- []*datapb.ID2PathList{{ID: currentSegID, Paths: []string{}}}
@@ -714,39 +703,15 @@ func flushSegment(
 		return
 	}
 
-	_, ep := ibNode.replica.getSegmentPositions(segID)
-	sta, _ := ibNode.replica.getSegmentStatisticsUpdates(segID)
-	ibNode.setSegmentCheckPoint(segID, segmentCheckPoint{sta.NumRows, *ep[0]})
-
-	startPos := ibNode.replica.getAllStartPositions()
+	ibNode.replica.updateSegmentCheckPoint(segID)
+	startPos := ibNode.replica.listNewSegmentsStartPositions()
 	flushUnit <- segmentFlushUnit{collID: collID, segID: segID, field2Path: field2Path, startPositions: startPos}
 	clearFn(true)
-}
-
-func (ibNode *insertBufferNode) setSegmentCheckPoint(segID UniqueID, chk segmentCheckPoint) {
-	ibNode.segmentCheckPointLock.Lock()
-	defer ibNode.segmentCheckPointLock.Unlock()
-	ibNode.segmentCheckPoints[segID] = chk
-}
-func (ibNode *insertBufferNode) removeSegmentCheckPoint(segID UniqueID) {
-	ibNode.segmentCheckPointLock.Lock()
-	defer ibNode.segmentCheckPointLock.Unlock()
-	delete(ibNode.segmentCheckPoints, segID)
-}
-func (ibNode *insertBufferNode) listSegmentCheckPoints() map[UniqueID]segmentCheckPoint {
-	ibNode.segmentCheckPointLock.Lock()
-	defer ibNode.segmentCheckPointLock.Unlock()
-	segs := make(map[UniqueID]segmentCheckPoint)
-	for k, v := range ibNode.segmentCheckPoints {
-		segs[k] = v
-	}
-	return segs
 }
 
 func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp) error {
 	msgPack := msgstream.MsgPack{}
 	timeTickMsg := msgstream.DataNodeTtMsg{
-		// timeTickMsg := msgstream.TimeTickMsg{
 		BaseMsg: msgstream.BaseMsg{
 			BeginTimestamp: ts,
 			EndTimestamp:   ts,
@@ -826,13 +791,7 @@ func (ibNode *insertBufferNode) getCollMetabySegID(segmentID UniqueID, ts Timest
 }
 
 func (ibNode *insertBufferNode) getCollectionandPartitionIDbySegID(segmentID UniqueID) (collID, partitionID UniqueID, err error) {
-	seg, err := ibNode.replica.getSegmentByID(segmentID)
-	if err != nil {
-		return
-	}
-	collID = seg.collectionID
-	partitionID = seg.partitionID
-	return
+	return ibNode.replica.getCollectionAndPartitionID(segmentID)
 }
 
 func newInsertBufferNode(

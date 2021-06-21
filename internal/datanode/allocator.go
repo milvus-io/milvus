@@ -29,20 +29,20 @@ type allocatorInterface interface {
 }
 
 type allocator struct {
-	masterService types.MasterService
+	rootCoord types.RootCoord
 }
 
 var _ allocatorInterface = &allocator{}
 
-func newAllocator(s types.MasterService) *allocator {
+func newAllocator(s types.RootCoord) *allocator {
 	return &allocator{
-		masterService: s,
+		rootCoord: s,
 	}
 }
 
 func (alloc *allocator) allocID() (UniqueID, error) {
 	ctx := context.TODO()
-	resp, err := alloc.masterService.AllocID(ctx, &masterpb.AllocIDRequest{
+	resp, err := alloc.rootCoord.AllocID(ctx, &masterpb.AllocIDRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_RequestID,
 			MsgID:     1, // GOOSE TODO

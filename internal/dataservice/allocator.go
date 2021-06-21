@@ -24,19 +24,19 @@ type allocator interface {
 	allocID() (UniqueID, error)
 }
 
-type masterAllocator struct {
-	masterClient types.MasterService
+type rootCoordAllocator struct {
+	rootCoordClient types.RootCoord
 }
 
-func newAllocator(masterClient types.MasterService) *masterAllocator {
-	return &masterAllocator{
-		masterClient: masterClient,
+func newAllocator(rootCoordClient types.RootCoord) *rootCoordAllocator {
+	return &rootCoordAllocator{
+		rootCoordClient: rootCoordClient,
 	}
 }
 
-func (allocator *masterAllocator) allocTimestamp() (Timestamp, error) {
+func (allocator *rootCoordAllocator) allocTimestamp() (Timestamp, error) {
 	ctx := context.TODO()
-	resp, err := allocator.masterClient.AllocTimestamp(ctx, &masterpb.AllocTimestampRequest{
+	resp, err := allocator.rootCoordClient.AllocTimestamp(ctx, &masterpb.AllocTimestampRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_RequestTSO,
 			MsgID:     -1, // todo add msg id
@@ -51,9 +51,9 @@ func (allocator *masterAllocator) allocTimestamp() (Timestamp, error) {
 	return resp.Timestamp, nil
 }
 
-func (allocator *masterAllocator) allocID() (UniqueID, error) {
+func (allocator *rootCoordAllocator) allocID() (UniqueID, error) {
 	ctx := context.TODO()
-	resp, err := allocator.masterClient.AllocID(ctx, &masterpb.AllocIDRequest{
+	resp, err := allocator.rootCoordClient.AllocID(ctx, &masterpb.AllocIDRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_RequestID,
 			MsgID:     -1, // todo add msg id

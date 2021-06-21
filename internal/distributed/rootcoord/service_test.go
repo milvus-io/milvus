@@ -815,7 +815,7 @@ func TestGrpcService(t *testing.T) {
 }
 
 type mockCore struct {
-	types.MasterComponent
+	types.RootCoordComponent
 }
 
 func (m *mockCore) UpdateStateCode(internalpb.StateCode) {
@@ -824,7 +824,7 @@ func (m *mockCore) UpdateStateCode(internalpb.StateCode) {
 func (m *mockCore) SetDataCoord(context.Context, types.DataService) error {
 	return nil
 }
-func (m *mockCore) SetIndexCoord(types.IndexService) error {
+func (m *mockCore) SetIndexCoord(types.IndexCoord) error {
 	return nil
 }
 
@@ -881,7 +881,7 @@ func (m *mockDataCoord) Stop() error {
 }
 
 type mockIndex struct {
-	types.IndexService
+	types.IndexCoord
 }
 
 func (m *mockIndex) Init() error {
@@ -925,7 +925,7 @@ func TestRun(t *testing.T) {
 	svr.newDataCoordClient = func(string, []string, time.Duration) types.DataService {
 		return &mockDataCoord{}
 	}
-	svr.newIndexCoordClient = func(string, []string, time.Duration) types.IndexService {
+	svr.newIndexCoordClient = func(string, []string, time.Duration) types.IndexCoord {
 		return &mockIndex{}
 	}
 	svr.newQueryCoordClient = func(string, []string, time.Duration) types.QueryService {

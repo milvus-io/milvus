@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package indexservice
+package indexcoord
 
 import (
 	"context"
@@ -25,21 +25,21 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
-func (i *IndexService) removeNode(nodeID UniqueID) {
+func (i *IndexCoord) removeNode(nodeID UniqueID) {
 	i.nodeLock.Lock()
 	defer i.nodeLock.Unlock()
-	log.Debug("IndexService", zap.Any("Remove node with ID", nodeID))
+	log.Debug("IndexCoord", zap.Any("Remove node with ID", nodeID))
 	i.nodeClients.Remove(nodeID)
 }
 
-func (i *IndexService) addNode(nodeID UniqueID, req *indexpb.RegisterNodeRequest) error {
+func (i *IndexCoord) addNode(nodeID UniqueID, req *indexpb.RegisterNodeRequest) error {
 	i.nodeLock.Lock()
 	defer i.nodeLock.Unlock()
 
-	log.Debug("IndexService addNode", zap.Any("nodeID", nodeID), zap.Any("node address", req.Address))
+	log.Debug("IndexCoord addNode", zap.Any("nodeID", nodeID), zap.Any("node address", req.Address))
 
 	if i.nodeClients.CheckAddressExist(req.Address) {
-		log.Debug("IndexService", zap.Any("Node client already exist with ID:", nodeID))
+		log.Debug("IndexCoord", zap.Any("Node client already exist with ID:", nodeID))
 		return nil
 	}
 
@@ -62,7 +62,7 @@ func (i *IndexService) addNode(nodeID UniqueID, req *indexpb.RegisterNodeRequest
 	return nil
 }
 
-func (i *IndexService) prepareNodeInitParams() []*commonpb.KeyValuePair {
+func (i *IndexCoord) prepareNodeInitParams() []*commonpb.KeyValuePair {
 	var params []*commonpb.KeyValuePair
 	params = append(params, &commonpb.KeyValuePair{Key: "minio.address", Value: Params.MinIOAddress})
 	params = append(params, &commonpb.KeyValuePair{Key: "minio.accessKeyID", Value: Params.MinIOAccessKeyID})
@@ -72,8 +72,8 @@ func (i *IndexService) prepareNodeInitParams() []*commonpb.KeyValuePair {
 	return params
 }
 
-func (i *IndexService) RegisterNode(ctx context.Context, req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
-	log.Debug("indexservice", zap.Any("register index node, node address = ", req.Address), zap.Any("node ID = ", req.NodeID))
+func (i *IndexCoord) RegisterNode(ctx context.Context, req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
+	log.Debug("indexcoord", zap.Any("register index node, node address = ", req.Address), zap.Any("node ID = ", req.NodeID))
 	ret := &indexpb.RegisterNodeResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,

@@ -35,9 +35,9 @@ type UniqueID = typeutil.UniqueID
 type IDAllocator struct {
 	Allocator
 
-	etcdEndpoints []string
-	metaRoot      string
-	masterClient  types.MasterService
+	etcdEndpoints   []string
+	metaRoot        string
+	rootCoordClient types.RootCoord
 
 	countPerRPC uint32
 
@@ -71,16 +71,16 @@ func NewIDAllocator(ctx context.Context, metaRoot string, etcdEndpoints []string
 func (ia *IDAllocator) Start() error {
 	var err error
 
-	ia.masterClient, err = rcc.NewClient(ia.Ctx, ia.metaRoot, ia.etcdEndpoints, 3*time.Second)
+	ia.rootCoordClient, err = rcc.NewClient(ia.Ctx, ia.metaRoot, ia.etcdEndpoints, 3*time.Second)
 	if err != nil {
 		panic(err)
 	}
 
-	if err = ia.masterClient.Init(); err != nil {
+	if err = ia.rootCoordClient.Init(); err != nil {
 		panic(err)
 	}
 
-	if err = ia.masterClient.Start(); err != nil {
+	if err = ia.rootCoordClient.Start(); err != nil {
 		panic(err)
 	}
 	return ia.Allocator.Start()
@@ -112,7 +112,7 @@ func (ia *IDAllocator) syncID() (bool, error) {
 		},
 		Count: need,
 	}
-	resp, err := ia.masterClient.AllocID(ctx, req)
+	resp, err := ia.rootCoordClient.AllocID(ctx, req)
 
 	cancel()
 	if err != nil {

@@ -51,11 +51,11 @@ type Server struct {
 
 	msFactory msgstream.Factory
 
-	masterService types.MasterService
-	dataService   types.DataService
+	rootCoord   types.RootCoord
+	dataService types.DataService
 
-	newMasterServiceClient func() (types.MasterService, error)
-	newDataServiceClient   func(string, []string, time.Duration) types.DataService
+	newRootCoordClient   func() (types.RootCoord, error)
+	newDataServiceClient func(string, []string, time.Duration) types.DataService
 
 	closer io.Closer
 }
@@ -68,7 +68,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		cancel:      cancel,
 		msFactory:   factory,
 		grpcErrChan: make(chan error),
-		newMasterServiceClient: func() (types.MasterService, error) {
+		newRootCoordClient: func() (types.RootCoord, error) {
 			return rcc.NewClient(ctx1, dn.Params.MetaRootPath, dn.Params.EtcdEndpoints, 3*time.Second)
 		},
 		newDataServiceClient: func(etcdMetaRoot string, etcdEndpoints []string, timeout time.Duration) types.DataService {
@@ -113,8 +113,8 @@ func (s *Server) startGrpcLoop(listener net.Listener) {
 
 }
 
-func (s *Server) SetMasterServiceInterface(ms types.MasterService) error {
-	return s.datanode.SetMasterServiceInterface(ms)
+func (s *Server) SetRootCoordInterface(ms types.RootCoord) error {
+	return s.datanode.SetRootCoordInterface(ms)
 }
 
 func (s *Server) SetDataServiceInterface(ds types.DataService) error {
@@ -174,29 +174,29 @@ func (s *Server) init() error {
 	}
 
 	// --- Master Server Client ---
-	if s.newMasterServiceClient != nil {
-		log.Debug("Master service address", zap.String("address", Params.MasterAddress))
-		log.Debug("Init master service client ...")
-		masterServiceClient, err := s.newMasterServiceClient()
+	if s.newRootCoordClient != nil {
+		log.Debug("RootCoord address", zap.String("address", Params.MasterAddress))
+		log.Debug("Init root coord client ...")
+		rootCoordClient, err := s.newRootCoordClient()
 		if err != nil {
-			log.Debug("DataNode newMasterServiceClient failed", zap.Error(err))
+			log.Debug("DataNode newRootCoordClient failed", zap.Error(err))
 			panic(err)
 		}
-		if err = masterServiceClient.Init(); err != nil {
-			log.Debug("DataNode masterServiceClient Init failed", zap.Error(err))
+		if err = rootCoordClient.Init(); err != nil {
+			log.Debug("DataNode rootCoordClient Init failed", zap.Error(err))
 			panic(err)
 		}
-		if err = masterServiceClient.Start(); err != nil {
-			log.Debug("DataNode masterServiceClient Start failed", zap.Error(err))
+		if err = rootCoordClient.Start(); err != nil {
+			log.Debug("DataNode rootCoordClient Start failed", zap.Error(err))
 			panic(err)
 		}
-		err = funcutil.WaitForComponentHealthy(ctx, masterServiceClient, "MasterService", 1000000, time.Millisecond*200)
+		err = funcutil.WaitForComponentHealthy(ctx, rootCoordClient, "RootCoord", 1000000, time.Millisecond*200)
 		if err != nil {
-			log.Debug("DataNode wait masterService ready failed", zap.Error(err))
+			log.Debug("DataNode wait rootCoord ready failed", zap.Error(err))
 			panic(err)
 		}
-		log.Debug("DataNode masterService is ready")
-		if err = s.SetMasterServiceInterface(masterServiceClient); err != nil {
+		log.Debug("DataNode rootCoord is ready")
+		if err = s.SetRootCoordInterface(rootCoordClient); err != nil {
 			panic(err)
 		}
 	}

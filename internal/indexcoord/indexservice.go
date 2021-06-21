@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package indexservice
+package indexcoord
 
 import (
 	"context"
@@ -48,7 +48,7 @@ const (
 	recycleIndexLimit  = 20
 )
 
-type IndexService struct {
+type IndexCoord struct {
 	nodeClients *PriorityQueue
 	nodeStates  map[UniqueID]*internalpb.ComponentStates
 	stateCode   atomic.Value
@@ -84,10 +84,10 @@ type IndexService struct {
 type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
-func NewIndexService(ctx context.Context) (*IndexService, error) {
+func NewIndexCoord(ctx context.Context) (*IndexCoord, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
-	i := &IndexService{
+	i := &IndexCoord{
 		loopCtx:     ctx1,
 		loopCancel:  cancel,
 		nodeClients: &PriorityQueue{},
@@ -98,15 +98,15 @@ func NewIndexService(ctx context.Context) (*IndexService, error) {
 }
 
 // Register register index service at etcd
-func (i *IndexService) Register() error {
+func (i *IndexCoord) Register() error {
 	i.session = sessionutil.NewSession(i.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
-	i.session.Init(typeutil.IndexServiceRole, Params.Address, true)
+	i.session.Init(typeutil.IndexCoordRole, Params.Address, true)
 	i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, 0)
 	return nil
 }
 
-func (i *IndexService) Init() error {
-	log.Debug("IndexService", zap.Any("etcd endpoints", Params.EtcdEndpoints))
+func (i *IndexCoord) Init() error {
+	log.Debug("IndexCoord", zap.Any("etcd endpoints", Params.EtcdEndpoints))
 
 	i.assignChan = make(chan []UniqueID, 1024)
 	connectEtcdFn := func() error {
@@ -122,19 +122,19 @@ func (i *IndexService) Init() error {
 		i.metaTable = metakv
 		return err
 	}
-	log.Debug("IndexService try to connect etcd")
+	log.Debug("IndexCoord try to connect etcd")
 	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
 	if err != nil {
-		log.Debug("IndexService try to connect etcd failed", zap.Error(err))
+		log.Debug("IndexCoord try to connect etcd failed", zap.Error(err))
 		return err
 	}
-	log.Debug("IndexService try to connect etcd success")
+	log.Debug("IndexCoord try to connect etcd success")
 
 	//init idAllocator
 	kvRootPath := Params.KvRootPath
 	i.idAllocator = allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(Params.EtcdEndpoints, kvRootPath, "index_gid"))
 	if err := i.idAllocator.Initialize(); err != nil {
-		log.Debug("IndexService idAllocator initialize failed", zap.Error(err))
+		log.Debug("IndexCoord idAllocator initialize failed", zap.Error(err))
 		return err
 	}
 
@@ -154,32 +154,32 @@ func (i *IndexService) Init() error {
 
 	i.kv, err = miniokv.NewMinIOKV(i.loopCtx, option)
 	if err != nil {
-		log.Debug("IndexService new minio kv failed", zap.Error(err))
+		log.Debug("IndexCoord new minio kv failed", zap.Error(err))
 		return err
 	}
-	log.Debug("IndexService new minio kv success")
+	log.Debug("IndexCoord new minio kv success")
 
 	i.sched, err = NewTaskScheduler(i.loopCtx, i.idAllocator, i.kv, i.metaTable)
 	if err != nil {
-		log.Debug("IndexService new task scheduler failed", zap.Error(err))
+		log.Debug("IndexCoord new task scheduler failed", zap.Error(err))
 		return err
 	}
-	log.Debug("IndexService new task scheduler success")
+	log.Debug("IndexCoord new task scheduler success")
 	i.UpdateStateCode(internalpb.StateCode_Healthy)
-	log.Debug("IndexService", zap.Any("State", i.stateCode.Load()))
+	log.Debug("IndexCoord", zap.Any("State", i.stateCode.Load()))
 
 	i.nodeTasks = NewNodeTasks()
 
 	err = i.assignTasksServerStart()
 	if err != nil {
-		log.Debug("IndexService assign tasks server start failed", zap.Error(err))
+		log.Debug("IndexCoord assign tasks server start failed", zap.Error(err))
 		return err
 	}
-	log.Debug("IndexService assign tasks server success", zap.Error(err))
+	log.Debug("IndexCoord assign tasks server success", zap.Error(err))
 	return nil
 }
 
-func (i *IndexService) Start() error {
+func (i *IndexCoord) Start() error {
 	i.loopWg.Add(1)
 	go i.tsLoop()
 
@@ -200,12 +200,12 @@ func (i *IndexService) Start() error {
 	for _, cb := range i.startCallbacks {
 		cb()
 	}
-	log.Debug("IndexService  start")
+	log.Debug("IndexCoord start")
 
 	return nil
 }
 
-func (i *IndexService) Stop() error {
+func (i *IndexCoord) Stop() error {
 	i.loopCancel()
 	i.sched.Close()
 	for _, cb := range i.closeCallbacks {
@@ -214,15 +214,15 @@ func (i *IndexService) Stop() error {
 	return nil
 }
 
-func (i *IndexService) UpdateStateCode(code internalpb.StateCode) {
+func (i *IndexCoord) UpdateStateCode(code internalpb.StateCode) {
 	i.stateCode.Store(code)
 }
 
-func (i *IndexService) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	log.Debug("get IndexService component states ...")
+func (i *IndexCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+	log.Debug("get IndexCoord component states ...")
 	stateInfo := &internalpb.ComponentInfo{
 		NodeID:    i.ID,
-		Role:      "IndexService",
+		Role:      "IndexCoord",
 		StateCode: i.stateCode.Load().(internalpb.StateCode),
 	}
 
@@ -236,8 +236,8 @@ func (i *IndexService) GetComponentStates(ctx context.Context) (*internalpb.Comp
 	return ret, nil
 }
 
-func (i *IndexService) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	log.Debug("get IndexService time tick channel ...")
+func (i *IndexCoord) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	log.Debug("get IndexCoord time tick channel ...")
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -247,8 +247,8 @@ func (i *IndexService) GetTimeTickChannel(ctx context.Context) (*milvuspb.String
 	}, nil
 }
 
-func (i *IndexService) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	log.Debug("get IndexService statistics channel ...")
+func (i *IndexCoord) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	log.Debug("get IndexCoord statistics channel ...")
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -258,8 +258,8 @@ func (i *IndexService) GetStatisticsChannel(ctx context.Context) (*milvuspb.Stri
 	}, nil
 }
 
-func (i *IndexService) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
-	log.Debug("IndexService building index ...",
+func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
+	log.Debug("IndexCoord building index ...",
 		zap.Int64("IndexBuildID", req.IndexBuildID),
 		zap.String("IndexName = ", req.IndexName),
 		zap.Int64("IndexID = ", req.IndexID),
@@ -268,7 +268,7 @@ func (i *IndexService) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRe
 		zap.Any("IndexParams", req.IndexParams))
 	hasIndex, indexBuildID := i.metaTable.HasSameReq(req)
 	if hasIndex {
-		log.Debug("IndexService", zap.Any("hasIndex true", indexBuildID))
+		log.Debug("IndexCoord", zap.Any("hasIndex true", indexBuildID))
 		return &indexpb.BuildIndexResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
@@ -318,7 +318,7 @@ func (i *IndexService) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRe
 		ret.Status.Reason = err.Error()
 		return ret, nil
 	}
-	log.Debug("IndexService BuildIndex Enqueue successfully", zap.Any("IndexBuildID", indexBuildID))
+	log.Debug("IndexCoord BuildIndex Enqueue successfully", zap.Any("IndexBuildID", indexBuildID))
 
 	err = t.WaitToFinish()
 	if err != nil {
@@ -332,8 +332,8 @@ func (i *IndexService) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRe
 	return ret, nil
 }
 
-func (i *IndexService) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
-	log.Debug("IndexService get index states ...", zap.Int64s("IndexBuildIDs", req.IndexBuildIDs))
+func (i *IndexCoord) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
+	log.Debug("IndexCoord get index states ...", zap.Int64s("IndexBuildIDs", req.IndexBuildIDs))
 	var indexStates []*indexpb.IndexInfo
 	for _, indexID := range req.IndexBuildIDs {
 		indexState, err := i.metaTable.GetIndexState(indexID)
@@ -348,15 +348,15 @@ func (i *IndexService) GetIndexStates(ctx context.Context, req *indexpb.GetIndex
 		},
 		States: indexStates,
 	}
-	log.Debug("IndexService get index states success",
+	log.Debug("IndexCoord get index states success",
 		zap.Any("index status", ret.Status),
 		zap.Any("index states", ret.States))
 
 	return ret, nil
 }
 
-func (i *IndexService) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	log.Debug("IndexService DropIndex", zap.Any("IndexID", req.IndexID))
+func (i *IndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+	log.Debug("IndexCoord DropIndex", zap.Any("IndexID", req.IndexID))
 
 	ret := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -377,12 +377,12 @@ func (i *IndexService) DropIndex(ctx context.Context, req *indexpb.DropIndexRequ
 		}()
 	}()
 
-	log.Debug("IndexService DropIndex success", zap.Any("IndexID", req.IndexID))
+	log.Debug("IndexCoord DropIndex success", zap.Any("IndexID", req.IndexID))
 	return ret, nil
 }
 
-func (i *IndexService) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
-	log.Debug("IndexService GetIndexFilePaths", zap.Int64s("IndexBuildIds", req.IndexBuildIDs))
+func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
+	log.Debug("IndexCoord GetIndexFilePaths", zap.Int64s("IndexBuildIds", req.IndexBuildIDs))
 	var indexPaths []*indexpb.IndexFilePathInfo = nil
 
 	for _, indexID := range req.IndexBuildIDs {
@@ -392,7 +392,7 @@ func (i *IndexService) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIn
 		}
 		indexPaths = append(indexPaths, indexPathInfo)
 	}
-	log.Debug("IndexService GetIndexFilePaths success")
+	log.Debug("IndexCoord GetIndexFilePaths success")
 
 	ret := &indexpb.GetIndexFilePathsResponse{
 		Status: &commonpb.Status{
@@ -400,12 +400,12 @@ func (i *IndexService) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIn
 		},
 		FilePaths: indexPaths,
 	}
-	log.Debug("IndexService GetIndexFilePaths ", zap.Any("FilePaths", ret.FilePaths))
+	log.Debug("IndexCoord GetIndexFilePaths ", zap.Any("FilePaths", ret.FilePaths))
 
 	return ret, nil
 }
 
-func (i *IndexService) tsLoop() {
+func (i *IndexCoord) tsLoop() {
 	tsoTicker := time.NewTicker(tso.UpdateTimestampStep)
 	defer tsoTicker.Stop()
 	ctx, cancel := context.WithCancel(i.loopCtx)
@@ -415,25 +415,25 @@ func (i *IndexService) tsLoop() {
 		select {
 		case <-tsoTicker.C:
 			if err := i.idAllocator.UpdateID(); err != nil {
-				log.Debug("IndexService tsLoop UpdateID failed", zap.Error(err))
+				log.Debug("IndexCoord tsLoop UpdateID failed", zap.Error(err))
 				return
 			}
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
-			log.Debug("IndexService tsLoop is closed")
+			log.Debug("IndexCoord tsLoop is closed")
 			return
 		}
 	}
 }
 
-func (i *IndexService) recycleUnusedIndexFiles() {
+func (i *IndexCoord) recycleUnusedIndexFiles() {
 	ctx, cancel := context.WithCancel(i.loopCtx)
 
 	defer cancel()
 	defer i.loopWg.Done()
 
 	timeTicker := time.NewTicker(durationInterval)
-	log.Debug("IndexService start recycleUnusedIndexFiles loop")
+	log.Debug("IndexCoord start recycleUnusedIndexFiles loop")
 
 	for {
 		select {
@@ -445,7 +445,7 @@ func (i *IndexService) recycleUnusedIndexFiles() {
 				if meta.indexMeta.MarkDeleted {
 					unusedIndexFilePathPrefix := strconv.Itoa(int(meta.indexMeta.IndexBuildID))
 					if err := i.kv.RemoveWithPrefix(unusedIndexFilePathPrefix); err != nil {
-						log.Debug("IndexService recycleUnusedIndexFiles Remove index files failed",
+						log.Debug("IndexCoord recycleUnusedIndexFiles Remove index files failed",
 							zap.Any("MarkDeleted", true), zap.Error(err))
 					}
 					i.metaTable.DeleteIndex(meta.indexMeta.IndexBuildID)
@@ -453,12 +453,12 @@ func (i *IndexService) recycleUnusedIndexFiles() {
 					for j := 1; j < int(meta.indexMeta.Version); j++ {
 						unusedIndexFilePathPrefix := strconv.Itoa(int(meta.indexMeta.IndexBuildID)) + "/" + strconv.Itoa(j)
 						if err := i.kv.RemoveWithPrefix(unusedIndexFilePathPrefix); err != nil {
-							log.Debug("IndexService recycleUnusedIndexFiles Remove index files failed",
+							log.Debug("IndexCoord recycleUnusedIndexFiles Remove index files failed",
 								zap.Any("MarkDeleted", false), zap.Error(err))
 						}
 					}
 					if err := i.metaTable.UpdateRecycleState(meta.indexMeta.IndexBuildID); err != nil {
-						log.Debug("IndexService recycleUnusedIndexFiles UpdateRecycleState failed", zap.Error(err))
+						log.Debug("IndexCoord recycleUnusedIndexFiles UpdateRecycleState failed", zap.Error(err))
 					}
 				}
 			}
@@ -466,13 +466,13 @@ func (i *IndexService) recycleUnusedIndexFiles() {
 	}
 }
 
-func (i *IndexService) assignmentTasksLoop() {
+func (i *IndexCoord) assignmentTasksLoop() {
 	ctx, cancel := context.WithCancel(i.loopCtx)
 
 	defer cancel()
 	defer i.loopWg.Done()
 
-	log.Debug("IndexService start assignmentTasksLoop start")
+	log.Debug("IndexCoord start assignmentTasksLoop start")
 
 	for {
 		select {
@@ -481,16 +481,16 @@ func (i *IndexService) assignmentTasksLoop() {
 		case indexBuildIDs := <-i.assignChan:
 			for _, indexBuildID := range indexBuildIDs {
 				meta := i.metaTable.GetIndexMeta(indexBuildID)
-				log.Debug("IndexService assignmentTasksLoop ", zap.Any("Meta", meta))
+				log.Debug("IndexCoord assignmentTasksLoop ", zap.Any("Meta", meta))
 				if meta.indexMeta.State == commonpb.IndexState_Finished {
 					continue
 				}
 				if err := i.metaTable.UpdateVersion(indexBuildID); err != nil {
-					log.Debug("IndexService assignmentTasksLoop metaTable.UpdateVersion failed", zap.Error(err))
+					log.Debug("IndexCoord assignmentTasksLoop metaTable.UpdateVersion failed", zap.Error(err))
 				}
 				nodeID, builderClient := i.nodeClients.PeekClient()
 				if builderClient == nil {
-					log.Debug("IndexService assignmentTasksLoop can not find available IndexNode")
+					log.Debug("IndexCoord assignmentTasksLoop can not find available IndexNode")
 					i.assignChan <- []UniqueID{indexBuildID}
 					continue
 				}
@@ -507,15 +507,15 @@ func (i *IndexService) assignmentTasksLoop() {
 				}
 				resp, err := builderClient.CreateIndex(ctx, req)
 				if err != nil {
-					log.Debug("IndexService assignmentTasksLoop builderClient.CreateIndex failed", zap.Error(err))
+					log.Debug("IndexCoord assignmentTasksLoop builderClient.CreateIndex failed", zap.Error(err))
 					continue
 				}
 				if resp.ErrorCode != commonpb.ErrorCode_Success {
-					log.Debug("IndexService assignmentTasksLoop builderClient.CreateIndex failed", zap.String("Reason", resp.Reason))
+					log.Debug("IndexCoord assignmentTasksLoop builderClient.CreateIndex failed", zap.String("Reason", resp.Reason))
 					continue
 				}
 				if err = i.metaTable.BuildIndex(indexBuildID, nodeID); err != nil {
-					log.Debug("IndexService assignmentTasksLoop metaTable.BuildIndex failed", zap.Error(err))
+					log.Debug("IndexCoord assignmentTasksLoop metaTable.BuildIndex failed", zap.Error(err))
 				}
 				i.nodeClients.IncPriority(nodeID, 1)
 			}
@@ -523,12 +523,12 @@ func (i *IndexService) assignmentTasksLoop() {
 	}
 }
 
-func (i *IndexService) watchNodeLoop() {
+func (i *IndexCoord) watchNodeLoop() {
 	ctx, cancel := context.WithCancel(i.loopCtx)
 
 	defer cancel()
 	defer i.loopWg.Done()
-	log.Debug("IndexService watchNodeLoop start")
+	log.Debug("IndexCoord watchNodeLoop start")
 
 	for {
 		select {
@@ -538,11 +538,11 @@ func (i *IndexService) watchNodeLoop() {
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:
 				serverID := event.Session.ServerID
-				log.Debug("IndexService watchNodeLoop SessionAddEvent", zap.Any("serverID", serverID))
+				log.Debug("IndexCoord watchNodeLoop SessionAddEvent", zap.Any("serverID", serverID))
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
 				i.removeNode(serverID)
-				log.Debug("IndexService watchNodeLoop SessionDelEvent ", zap.Any("serverID", serverID))
+				log.Debug("IndexCoord watchNodeLoop SessionDelEvent ", zap.Any("serverID", serverID))
 				indexBuildIDs := i.nodeTasks.getTasksByNodeID(serverID)
 				log.Debug("IndexNode crashed", zap.Any("IndexNode ID", serverID), zap.Any("task IDs", indexBuildIDs))
 				i.assignChan <- indexBuildIDs
@@ -552,12 +552,12 @@ func (i *IndexService) watchNodeLoop() {
 	}
 }
 
-func (i *IndexService) watchMetaLoop() {
+func (i *IndexCoord) watchMetaLoop() {
 	ctx, cancel := context.WithCancel(i.loopCtx)
 
 	defer cancel()
 	defer i.loopWg.Done()
-	log.Debug("IndexService watchMetaLoop start")
+	log.Debug("IndexCoord watchMetaLoop start")
 
 	watchChan := i.metaTable.client.WatchWithPrefix("indexes")
 
@@ -566,19 +566,19 @@ func (i *IndexService) watchMetaLoop() {
 		case <-ctx.Done():
 			return
 		case resp := <-watchChan:
-			log.Debug("IndexService watchMetaLoop find meta updated.")
+			log.Debug("IndexCoord watchMetaLoop find meta updated.")
 			for _, event := range resp.Events {
 				eventRevision := event.Kv.Version
 				indexMeta := &indexpb.IndexMeta{}
 				err := proto.UnmarshalText(string(event.Kv.Value), indexMeta)
 				indexBuildID := indexMeta.IndexBuildID
-				log.Debug("IndexService watchMetaLoop", zap.Any("event.Key", event.Kv.Key),
+				log.Debug("IndexCoord watchMetaLoop", zap.Any("event.Key", event.Kv.Key),
 					zap.Any("event.V", indexMeta), zap.Any("IndexBuildID", indexBuildID), zap.Error(err))
 				switch event.Type {
 				case mvccpb.PUT:
 					//TODO: get indexBuildID fast
 					reload := i.metaTable.LoadMetaFromETCD(indexBuildID, eventRevision)
-					log.Debug("IndexService watchMetaLoop PUT", zap.Any("IndexBuildID", indexBuildID), zap.Any("reload", reload))
+					log.Debug("IndexCoord watchMetaLoop PUT", zap.Any("IndexBuildID", indexBuildID), zap.Any("reload", reload))
 					if reload {
 						i.nodeTasks.finishTask(indexBuildID)
 					}
@@ -589,7 +589,7 @@ func (i *IndexService) watchMetaLoop() {
 	}
 }
 
-func (i *IndexService) assignTasksServerStart() error {
+func (i *IndexCoord) assignTasksServerStart() error {
 	sessions, _, err := i.session.GetSessions(typeutil.IndexNodeRole)
 	if err != nil {
 		return err
@@ -610,7 +610,7 @@ func (i *IndexService) assignTasksServerStart() error {
 			NodeID: session.ServerID,
 		}
 		if err = i.addNode(session.ServerID, req); err != nil {
-			log.Debug("IndexService", zap.Any("IndexService start find node fatal, err = ", err))
+			log.Debug("IndexCoord", zap.Any("IndexCoord start find node fatal, err = ", err))
 		}
 	}
 	var serverIDs []int64

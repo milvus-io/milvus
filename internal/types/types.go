@@ -72,7 +72,7 @@ type IndexNode interface {
 	CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error)
 }
 
-type IndexService interface {
+type IndexCoord interface {
 	Component
 	TimeTickProvider
 
@@ -83,7 +83,7 @@ type IndexService interface {
 	GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error)
 }
 
-type MasterService interface {
+type RootCoord interface {
 	Component
 	TimeTickProvider
 
@@ -114,13 +114,13 @@ type MasterService interface {
 	ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error)
 }
 
-// MasterComponent is used by grpc server of master service
-type MasterComponent interface {
-	MasterService
+// RootCoordComponent is used by grpc server of master service
+type RootCoordComponent interface {
+	RootCoord
 
 	UpdateStateCode(internalpb.StateCode)
 	SetDataCoord(context.Context, DataService) error
-	SetIndexCoord(IndexService) error
+	SetIndexCoord(IndexCoord) error
 	SetQueryCoord(QueryService) error
 	SetNewProxyClient(func(sess *sessionutil.Session) (ProxyNode, error))
 }

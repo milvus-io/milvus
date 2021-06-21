@@ -43,7 +43,7 @@ type collectionInfo struct {
 }
 
 type MetaCache struct {
-	client types.MasterService
+	client types.RootCoord
 
 	collInfo map[string]*collectionInfo
 	mu       sync.RWMutex
@@ -51,7 +51,7 @@ type MetaCache struct {
 
 var globalMetaCache Cache
 
-func InitMetaCache(client types.MasterService) error {
+func InitMetaCache(client types.RootCoord) error {
 	var err error
 	globalMetaCache, err = NewMetaCache(client)
 	if err != nil {
@@ -60,7 +60,7 @@ func InitMetaCache(client types.MasterService) error {
 	return nil
 }
 
-func NewMetaCache(client types.MasterService) (*MetaCache, error) {
+func NewMetaCache(client types.RootCoord) (*MetaCache, error) {
 	return &MetaCache{
 		client:   client,
 		collInfo: map[string]*collectionInfo{},

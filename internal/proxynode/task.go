@@ -917,7 +917,7 @@ type CreateCollectionTask struct {
 	Condition
 	*milvuspb.CreateCollectionRequest
 	ctx               context.Context
-	masterService     types.MasterService
+	rootCoord         types.RootCoord
 	dataServiceClient types.DataService
 	result            *commonpb.Status
 	schema            *schemapb.CollectionSchema
@@ -1032,7 +1032,7 @@ func (cct *CreateCollectionTask) PreExecute(ctx context.Context) error {
 
 func (cct *CreateCollectionTask) Execute(ctx context.Context) error {
 	var err error
-	cct.result, err = cct.masterService.CreateCollection(ctx, cct.CreateCollectionRequest)
+	cct.result, err = cct.rootCoord.CreateCollection(ctx, cct.CreateCollectionRequest)
 	return err
 }
 
@@ -1043,11 +1043,11 @@ func (cct *CreateCollectionTask) PostExecute(ctx context.Context) error {
 type DropCollectionTask struct {
 	Condition
 	*milvuspb.DropCollectionRequest
-	ctx           context.Context
-	masterService types.MasterService
-	result        *commonpb.Status
-	chMgr         channelsMgr
-	chTicker      channelsTimeTicker
+	ctx       context.Context
+	rootCoord types.RootCoord
+	result    *commonpb.Status
+	chMgr     channelsMgr
+	chTicker  channelsTimeTicker
 }
 
 func (dct *DropCollectionTask) TraceCtx() context.Context {
@@ -1103,7 +1103,7 @@ func (dct *DropCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	dct.result, err = dct.masterService.DropCollection(ctx, dct.DropCollectionRequest)
+	dct.result, err = dct.rootCoord.DropCollection(ctx, dct.DropCollectionRequest)
 	if err != nil {
 		return err
 	}
@@ -2066,9 +2066,9 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 type HasCollectionTask struct {
 	Condition
 	*milvuspb.HasCollectionRequest
-	ctx           context.Context
-	masterService types.MasterService
-	result        *milvuspb.BoolResponse
+	ctx       context.Context
+	rootCoord types.RootCoord
+	result    *milvuspb.BoolResponse
 }
 
 func (hct *HasCollectionTask) TraceCtx() context.Context {
@@ -2120,7 +2120,7 @@ func (hct *HasCollectionTask) PreExecute(ctx context.Context) error {
 
 func (hct *HasCollectionTask) Execute(ctx context.Context) error {
 	var err error
-	hct.result, err = hct.masterService.HasCollection(ctx, hct.HasCollectionRequest)
+	hct.result, err = hct.rootCoord.HasCollection(ctx, hct.HasCollectionRequest)
 	if hct.result == nil {
 		return errors.New("has collection resp is nil")
 	}
@@ -2137,9 +2137,9 @@ func (hct *HasCollectionTask) PostExecute(ctx context.Context) error {
 type DescribeCollectionTask struct {
 	Condition
 	*milvuspb.DescribeCollectionRequest
-	ctx           context.Context
-	masterService types.MasterService
-	result        *milvuspb.DescribeCollectionResponse
+	ctx       context.Context
+	rootCoord types.RootCoord
+	result    *milvuspb.DescribeCollectionResponse
 }
 
 func (dct *DescribeCollectionTask) TraceCtx() context.Context {
@@ -2206,7 +2206,7 @@ func (dct *DescribeCollectionTask) Execute(ctx context.Context) error {
 		PhysicalChannelNames: nil,
 	}
 
-	result, err := dct.masterService.DescribeCollection(ctx, dct.DescribeCollectionRequest)
+	result, err := dct.rootCoord.DescribeCollection(ctx, dct.DescribeCollectionRequest)
 
 	if err != nil {
 		return err
@@ -2426,10 +2426,10 @@ func (g *GetPartitionStatisticsTask) PostExecute(ctx context.Context) error {
 type ShowCollectionsTask struct {
 	Condition
 	*milvuspb.ShowCollectionsRequest
-	ctx           context.Context
-	masterService types.MasterService
-	queryService  types.QueryService
-	result        *milvuspb.ShowCollectionsResponse
+	ctx          context.Context
+	rootCoord    types.RootCoord
+	queryService types.QueryService
+	result       *milvuspb.ShowCollectionsResponse
 }
 
 func (sct *ShowCollectionsTask) TraceCtx() context.Context {
@@ -2479,18 +2479,18 @@ func (sct *ShowCollectionsTask) PreExecute(ctx context.Context) error {
 func (sct *ShowCollectionsTask) Execute(ctx context.Context) error {
 	var err error
 
-	respFromMaster, err := sct.masterService.ShowCollections(ctx, sct.ShowCollectionsRequest)
+	respFromRootCoord, err := sct.rootCoord.ShowCollections(ctx, sct.ShowCollectionsRequest)
 
 	if err != nil {
 		return err
 	}
 
-	if respFromMaster == nil {
+	if respFromRootCoord == nil {
 		return errors.New("failed to show collections")
 	}
 
-	if respFromMaster.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return errors.New(respFromMaster.Status.Reason)
+	if respFromRootCoord.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(respFromRootCoord.Status.Reason)
 	}
 
 	if sct.ShowCollectionsRequest.Type == milvuspb.ShowCollectionsType_InMemory {
@@ -2523,8 +2523,8 @@ func (sct *ShowCollectionsTask) Execute(ctx context.Context) error {
 		}
 
 		idMap := make(map[int64]string)
-		for i, name := range respFromMaster.CollectionNames {
-			idMap[respFromMaster.CollectionIds[i]] = name
+		for i, name := range respFromRootCoord.CollectionNames {
+			idMap[respFromRootCoord.CollectionIds[i]] = name
 		}
 
 		for _, id := range resp.CollectionIDs {
@@ -2533,7 +2533,7 @@ func (sct *ShowCollectionsTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	sct.result = respFromMaster
+	sct.result = respFromRootCoord
 
 	return nil
 }
@@ -2545,9 +2545,9 @@ func (sct *ShowCollectionsTask) PostExecute(ctx context.Context) error {
 type CreatePartitionTask struct {
 	Condition
 	*milvuspb.CreatePartitionRequest
-	ctx           context.Context
-	masterService types.MasterService
-	result        *commonpb.Status
+	ctx       context.Context
+	rootCoord types.RootCoord
+	result    *commonpb.Status
 }
 
 func (cpt *CreatePartitionTask) TraceCtx() context.Context {
@@ -2605,7 +2605,7 @@ func (cpt *CreatePartitionTask) PreExecute(ctx context.Context) error {
 }
 
 func (cpt *CreatePartitionTask) Execute(ctx context.Context) (err error) {
-	cpt.result, err = cpt.masterService.CreatePartition(ctx, cpt.CreatePartitionRequest)
+	cpt.result, err = cpt.rootCoord.CreatePartition(ctx, cpt.CreatePartitionRequest)
 	if cpt.result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -2622,9 +2622,9 @@ func (cpt *CreatePartitionTask) PostExecute(ctx context.Context) error {
 type DropPartitionTask struct {
 	Condition
 	*milvuspb.DropPartitionRequest
-	ctx           context.Context
-	masterService types.MasterService
-	result        *commonpb.Status
+	ctx       context.Context
+	rootCoord types.RootCoord
+	result    *commonpb.Status
 }
 
 func (dpt *DropPartitionTask) TraceCtx() context.Context {
@@ -2682,7 +2682,7 @@ func (dpt *DropPartitionTask) PreExecute(ctx context.Context) error {
 }
 
 func (dpt *DropPartitionTask) Execute(ctx context.Context) (err error) {
-	dpt.result, err = dpt.masterService.DropPartition(ctx, dpt.DropPartitionRequest)
+	dpt.result, err = dpt.rootCoord.DropPartition(ctx, dpt.DropPartitionRequest)
 	if dpt.result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -2699,9 +2699,9 @@ func (dpt *DropPartitionTask) PostExecute(ctx context.Context) error {
 type HasPartitionTask struct {
 	Condition
 	*milvuspb.HasPartitionRequest
-	ctx           context.Context
-	masterService types.MasterService
-	result        *milvuspb.BoolResponse
+	ctx       context.Context
+	rootCoord types.RootCoord
+	result    *milvuspb.BoolResponse
 }
 
 func (hpt *HasPartitionTask) TraceCtx() context.Context {
@@ -2758,7 +2758,7 @@ func (hpt *HasPartitionTask) PreExecute(ctx context.Context) error {
 }
 
 func (hpt *HasPartitionTask) Execute(ctx context.Context) (err error) {
-	hpt.result, err = hpt.masterService.HasPartition(ctx, hpt.HasPartitionRequest)
+	hpt.result, err = hpt.rootCoord.HasPartition(ctx, hpt.HasPartitionRequest)
 	if hpt.result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -2775,9 +2775,9 @@ func (hpt *HasPartitionTask) PostExecute(ctx context.Context) error {
 type ShowPartitionsTask struct {
 	Condition
 	*milvuspb.ShowPartitionsRequest
-	ctx           context.Context
-	masterService types.MasterService
-	result        *milvuspb.ShowPartitionsResponse
+	ctx       context.Context
+	rootCoord types.RootCoord
+	result    *milvuspb.ShowPartitionsResponse
 }
 
 func (spt *ShowPartitionsTask) TraceCtx() context.Context {
@@ -2829,7 +2829,7 @@ func (spt *ShowPartitionsTask) PreExecute(ctx context.Context) error {
 
 func (spt *ShowPartitionsTask) Execute(ctx context.Context) error {
 	var err error
-	spt.result, err = spt.masterService.ShowPartitions(ctx, spt.ShowPartitionsRequest)
+	spt.result, err = spt.rootCoord.ShowPartitions(ctx, spt.ShowPartitionsRequest)
 	if spt.result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -2846,9 +2846,9 @@ func (spt *ShowPartitionsTask) PostExecute(ctx context.Context) error {
 type CreateIndexTask struct {
 	Condition
 	*milvuspb.CreateIndexRequest
-	ctx           context.Context
-	masterService types.MasterService
-	result        *commonpb.Status
+	ctx       context.Context
+	rootCoord types.RootCoord
+	result    *commonpb.Status
 }
 
 func (cit *CreateIndexTask) TraceCtx() context.Context {
@@ -2907,7 +2907,7 @@ func (cit *CreateIndexTask) PreExecute(ctx context.Context) error {
 
 func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 	var err error
-	cit.result, err = cit.masterService.CreateIndex(ctx, cit.CreateIndexRequest)
+	cit.result, err = cit.rootCoord.CreateIndex(ctx, cit.CreateIndexRequest)
 	if cit.result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -2924,9 +2924,9 @@ func (cit *CreateIndexTask) PostExecute(ctx context.Context) error {
 type DescribeIndexTask struct {
 	Condition
 	*milvuspb.DescribeIndexRequest
-	ctx           context.Context
-	masterService types.MasterService
-	result        *milvuspb.DescribeIndexResponse
+	ctx       context.Context
+	rootCoord types.RootCoord
+	result    *milvuspb.DescribeIndexResponse
 }
 
 func (dit *DescribeIndexTask) TraceCtx() context.Context {
@@ -2984,7 +2984,7 @@ func (dit *DescribeIndexTask) PreExecute(ctx context.Context) error {
 
 func (dit *DescribeIndexTask) Execute(ctx context.Context) error {
 	var err error
-	dit.result, err = dit.masterService.DescribeIndex(ctx, dit.DescribeIndexRequest)
+	dit.result, err = dit.rootCoord.DescribeIndex(ctx, dit.DescribeIndexRequest)
 	if dit.result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -3002,8 +3002,8 @@ type DropIndexTask struct {
 	Condition
 	ctx context.Context
 	*milvuspb.DropIndexRequest
-	masterService types.MasterService
-	result        *commonpb.Status
+	rootCoord types.RootCoord
+	result    *commonpb.Status
 }
 
 func (dit *DropIndexTask) TraceCtx() context.Context {
@@ -3062,7 +3062,7 @@ func (dit *DropIndexTask) PreExecute(ctx context.Context) error {
 
 func (dit *DropIndexTask) Execute(ctx context.Context) error {
 	var err error
-	dit.result, err = dit.masterService.DropIndex(ctx, dit.DropIndexRequest)
+	dit.result, err = dit.rootCoord.DropIndex(ctx, dit.DropIndexRequest)
 	if dit.result == nil {
 		return errors.New("drop index resp is nil")
 	}
@@ -3079,11 +3079,11 @@ func (dit *DropIndexTask) PostExecute(ctx context.Context) error {
 type GetIndexBuildProgressTask struct {
 	Condition
 	*milvuspb.GetIndexBuildProgressRequest
-	ctx           context.Context
-	indexService  types.IndexService
-	masterService types.MasterService
-	dataService   types.DataService
-	result        *milvuspb.GetIndexBuildProgressResponse
+	ctx         context.Context
+	indexCoord  types.IndexCoord
+	rootCoord   types.RootCoord
+	dataService types.DataService
+	result      *milvuspb.GetIndexBuildProgressResponse
 }
 
 func (gibpt *GetIndexBuildProgressTask) TraceCtx() context.Context {
@@ -3152,7 +3152,7 @@ func (gibpt *GetIndexBuildProgressTask) Execute(ctx context.Context) error {
 		CollectionName: collectionName,
 		CollectionID:   collectionID,
 	}
-	partitions, err := gibpt.masterService.ShowPartitions(ctx, showPartitionRequest)
+	partitions, err := gibpt.rootCoord.ShowPartitions(ctx, showPartitionRequest)
 	if err != nil {
 		return err
 	}
@@ -3173,7 +3173,7 @@ func (gibpt *GetIndexBuildProgressTask) Execute(ctx context.Context) error {
 		//		IndexName:      gibpt.IndexName,
 	}
 
-	indexDescriptionResp, err2 := gibpt.masterService.DescribeIndex(ctx, &describeIndexReq)
+	indexDescriptionResp, err2 := gibpt.rootCoord.DescribeIndex(ctx, &describeIndexReq)
 	if err2 != nil {
 		return err2
 	}
@@ -3203,7 +3203,7 @@ func (gibpt *GetIndexBuildProgressTask) Execute(ctx context.Context) error {
 			CollectionID: collectionID,
 			PartitionID:  partitionID,
 		}
-		segments, err := gibpt.masterService.ShowSegments(ctx, showSegmentsRequest)
+		segments, err := gibpt.rootCoord.ShowSegments(ctx, showSegmentsRequest)
 		if err != nil {
 			return err
 		}
@@ -3229,7 +3229,7 @@ func (gibpt *GetIndexBuildProgressTask) Execute(ctx context.Context) error {
 			CollectionID: collectionID,
 			SegmentID:    segmentID,
 		}
-		segmentDesc, err := gibpt.masterService.DescribeSegment(ctx, describeSegmentRequest)
+		segmentDesc, err := gibpt.rootCoord.DescribeSegment(ctx, describeSegmentRequest)
 		if err != nil {
 			return err
 		}
@@ -3241,7 +3241,7 @@ func (gibpt *GetIndexBuildProgressTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	states, err := gibpt.indexService.GetIndexStates(ctx, getIndexStatesRequest)
+	states, err := gibpt.indexCoord.GetIndexStates(ctx, getIndexStatesRequest)
 	if err != nil {
 		return err
 	}
@@ -3301,10 +3301,10 @@ func (gibpt *GetIndexBuildProgressTask) PostExecute(ctx context.Context) error {
 type GetIndexStateTask struct {
 	Condition
 	*milvuspb.GetIndexStateRequest
-	ctx           context.Context
-	indexService  types.IndexService
-	masterService types.MasterService
-	result        *milvuspb.GetIndexStateResponse
+	ctx        context.Context
+	indexCoord types.IndexCoord
+	rootCoord  types.RootCoord
+	result     *milvuspb.GetIndexStateResponse
 }
 
 func (gist *GetIndexStateTask) TraceCtx() context.Context {
@@ -3373,7 +3373,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 		CollectionName: collectionName,
 		CollectionID:   collectionID,
 	}
-	partitions, err := gist.masterService.ShowPartitions(ctx, showPartitionRequest)
+	partitions, err := gist.rootCoord.ShowPartitions(ctx, showPartitionRequest)
 	if err != nil {
 		return err
 	}
@@ -3394,7 +3394,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 		IndexName:      gist.IndexName,
 	}
 
-	indexDescriptionResp, err2 := gist.masterService.DescribeIndex(ctx, &describeIndexReq)
+	indexDescriptionResp, err2 := gist.rootCoord.DescribeIndex(ctx, &describeIndexReq)
 	if err2 != nil {
 		return err2
 	}
@@ -3424,7 +3424,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 			CollectionID: collectionID,
 			PartitionID:  partitionID,
 		}
-		segments, err := gist.masterService.ShowSegments(ctx, showSegmentsRequest)
+		segments, err := gist.rootCoord.ShowSegments(ctx, showSegmentsRequest)
 		if err != nil {
 			return err
 		}
@@ -3451,7 +3451,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 			CollectionID: collectionID,
 			SegmentID:    segmentID,
 		}
-		segmentDesc, err := gist.masterService.DescribeSegment(ctx, describeSegmentRequest)
+		segmentDesc, err := gist.rootCoord.DescribeSegment(ctx, describeSegmentRequest)
 		if err != nil {
 			return err
 		}
@@ -3483,7 +3483,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 			getIndexStatesRequest.IndexBuildIDs = append(getIndexStatesRequest.IndexBuildIDs, indexBuildIDs[idx])
 		}
 	}
-	states, err := gist.indexService.GetIndexStates(ctx, getIndexStatesRequest)
+	states, err := gist.indexCoord.GetIndexStates(ctx, getIndexStatesRequest)
 	if err != nil {
 		return err
 	}
