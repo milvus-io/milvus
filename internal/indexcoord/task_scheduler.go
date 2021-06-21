@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package indexservice
+package indexcoord
 
 import (
 	"container/list"
@@ -112,7 +112,7 @@ func (queue *BaseTaskQueue) AddActiveTask(t task) {
 	tID := t.ID()
 	_, ok := queue.activeTasks[tID]
 	if ok {
-		log.Warn("indexservice", zap.Int64("task with ID already in active task list!", tID))
+		log.Warn("indexcoord", zap.Int64("task with ID already in active task list!", tID))
 	}
 
 	queue.activeTasks[tID] = t
@@ -127,13 +127,13 @@ func (queue *BaseTaskQueue) PopActiveTask(tID UniqueID) task {
 		delete(queue.activeTasks, tID)
 		return t
 	}
-	log.Debug("indexservice", zap.Int64("sorry, but the ID was not found in the active task list!", tID))
+	log.Debug("indexcoord", zap.Int64("sorry, but the ID was not found in the active task list!", tID))
 	return nil
 }
 
 func (queue *BaseTaskQueue) Enqueue(t task) error {
 	tID, _ := queue.sched.idAllocator.AllocOne()
-	log.Debug("indexservice", zap.Int64("[Builder] allocate reqID", tID))
+	log.Debug("indexcoord", zap.Int64("[Builder] allocate reqID", tID))
 	t.SetID(tID)
 	err := t.OnEnqueue()
 	if err != nil {

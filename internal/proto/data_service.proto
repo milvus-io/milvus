@@ -14,17 +14,14 @@ service DataService {
   rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
 
-  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
   rpc Flush(FlushRequest) returns (common.Status) {}
 
   rpc AssignSegmentID(AssignSegmentIDRequest) returns (AssignSegmentIDResponse) {}
-  rpc ShowSegments(ShowSegmentsRequest) returns (ShowSegmentsResponse) {}
 
   rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
   rpc GetSegmentStates(GetSegmentStatesRequest) returns (GetSegmentStatesResponse) {}
   rpc GetInsertBinlogPaths(GetInsertBinlogPathsRequest) returns (GetInsertBinlogPathsResponse) {}
 
-  rpc GetInsertChannels(GetInsertChannelsRequest) returns (internal.StringList) {}
   rpc GetCollectionStatistics(GetCollectionStatisticsRequest) returns (GetCollectionStatisticsResponse) {}
   rpc GetPartitionStatistics(GetPartitionStatisticsRequest) returns (GetPartitionStatisticsResponse) {}
 
@@ -40,16 +37,6 @@ service DataNode {
 
   rpc WatchDmChannels(WatchDmChannelsRequest) returns (common.Status) {}
   rpc FlushSegments(FlushSegmentsRequest) returns(common.Status) {}
-}
-
-message RegisterNodeRequest {
-  common.MsgBase base = 1;
-  common.Address address = 2;
-}
-
-message RegisterNodeResponse {
-  internal.InitParams init_params = 1;
-  common.Status status = 2;
 }
 
 message FlushRequest {
@@ -83,18 +70,6 @@ message SegmentIDAssignment {
 
 message AssignSegmentIDResponse {
   repeated SegmentIDAssignment segIDAssignments = 1;
-  common.Status status = 2;
-}
-
-message ShowSegmentsRequest {
-  common.MsgBase base = 1;
-  int64 collectionID = 2;
-  int64 partitionID = 3;
-  int64 dbID = 4;
-}
-
-message ShowSegmentsResponse {
-  repeated int64 segmentIDs = 1;
   common.Status status = 2;
 }
 
@@ -135,12 +110,6 @@ message GetInsertBinlogPathsResponse {
   repeated int64 fieldIDs = 1;
   repeated internal.StringList paths = 2;
   common.Status status = 3;
-}
-
-message GetInsertChannelsRequest {
-  common.MsgBase base = 1;
-  int64 dbID = 2;
-  int64 collectionID = 3;
 }
 
 message GetCollectionStatisticsRequest {

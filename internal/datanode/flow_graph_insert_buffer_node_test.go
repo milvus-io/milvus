@@ -49,9 +49,9 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
-	mockMaster := &MasterServiceFactory{}
+	mockRootCoord := &RootCoordFactory{}
 
-	replica := newReplica(mockMaster, collMeta.ID)
+	replica := newReplica(mockRootCoord, collMeta.ID)
 
 	err = replica.addNewSegment(1, collMeta.ID, 0, insertChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
 	require.NoError(t, err)
@@ -137,9 +137,9 @@ func TestFlushSegment(t *testing.T) {
 
 	collMeta := genCollectionMeta(collectionID, "test_flush_segment_txn")
 	flushMap := sync.Map{}
-	mockMaster := &MasterServiceFactory{}
+	mockRootCoord := &RootCoordFactory{}
 
-	replica := newReplica(mockMaster, collMeta.ID)
+	replica := newReplica(mockRootCoord, collMeta.ID)
 
 	err := replica.addNewSegment(segmentID, collMeta.ID, 0, insertChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
 	require.NoError(t, err)
@@ -263,7 +263,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
 	dataFactory := NewDataFactory()
 
-	mockMaster := &MasterServiceFactory{}
+	mockRootCoord := &RootCoordFactory{}
 
 	colRep := &SegmentReplica{
 		collectionID:    collMeta.ID,
@@ -272,7 +272,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		flushedSegments: make(map[UniqueID]*Segment),
 	}
 
-	colRep.metaService = newMetaService(mockMaster, collMeta.ID)
+	colRep.metaService = newMetaService(mockRootCoord, collMeta.ID)
 
 	msFactory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{

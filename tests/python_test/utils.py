@@ -361,10 +361,12 @@ def gen_binary_entities_rows(nb, _id=True):
     return raw_vectors, entities
 
 
-def gen_entities_by_fields(fields, nb, dim):
+def gen_entities_by_fields(fields, nb, dim, ids=None):
     entities = []
     for field in fields:
-        if field["type"] in [DataType.INT32, DataType.INT64]:
+        if field.get("is_primary", False) and ids:
+            field_value = ids
+        elif field["type"] in [DataType.INT32, DataType.INT64]:
             field_value = [1 for i in range(nb)]
         elif field["type"] in [DataType.FLOAT, DataType.DOUBLE]:
             field_value = [3.0 for i in range(nb)]

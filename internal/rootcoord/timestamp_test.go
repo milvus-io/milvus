@@ -60,7 +60,7 @@ func (*tbq) ReleaseCollection(context.Context, *querypb.ReleaseCollectionRequest
 }
 
 type tbi struct {
-	types.IndexService
+	types.IndexCoord
 }
 
 func (*tbi) BuildIndex(context.Context, *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {

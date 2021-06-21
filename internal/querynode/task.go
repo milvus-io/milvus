@@ -133,7 +133,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		},
 		CollectionID: collectionID,
 	}
-	desColRsp, err := w.node.masterService.DescribeCollection(ctx, desColReq)
+	desColRsp, err := w.node.rootCoord.DescribeCollection(ctx, desColReq)
 	if err != nil {
 		log.Error("get channels failed, err = " + err.Error())
 		return err

@@ -121,35 +121,35 @@ func (c *mockDataNodeClient) Stop() error {
 	return nil
 }
 
-type mockMasterService struct {
+type mockRootCoordService struct {
 	cnt int64
 }
 
-func newMockMasterService() *mockMasterService {
-	return &mockMasterService{}
+func newMockRootCoordService() *mockRootCoordService {
+	return &mockRootCoordService{}
 }
 
-func (m *mockMasterService) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (m *mockRootCoordService) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return nil, nil
 }
 
-func (m *mockMasterService) Init() error {
+func (m *mockRootCoordService) Init() error {
 	return nil
 }
 
-func (m *mockMasterService) Start() error {
+func (m *mockRootCoordService) Start() error {
 	return nil
 }
 
-func (m *mockMasterService) Stop() error {
+func (m *mockRootCoordService) Stop() error {
 	return nil
 }
 
-func (m *mockMasterService) Register() error {
+func (m *mockRootCoordService) Register() error {
 	return nil
 }
 
-func (m *mockMasterService) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (m *mockRootCoordService) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	return &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{
 			NodeID:    0,
@@ -165,24 +165,24 @@ func (m *mockMasterService) GetComponentStates(ctx context.Context) (*internalpb
 	}, nil
 }
 
-func (m *mockMasterService) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (m *mockRootCoordService) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	panic("not implemented") // TODO: Implement
 }
 
 //DDL request
-func (m *mockMasterService) CreateCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
+func (m *mockRootCoordService) CreateCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockMasterService) DropCollection(ctx context.Context, req *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+func (m *mockRootCoordService) DropCollection(ctx context.Context, req *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockMasterService) HasCollection(ctx context.Context, req *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
+func (m *mockRootCoordService) HasCollection(ctx context.Context, req *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockMasterService) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+func (m *mockRootCoordService) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	return &milvuspb.DescribeCollectionResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -196,7 +196,7 @@ func (m *mockMasterService) DescribeCollection(ctx context.Context, req *milvusp
 	}, nil
 }
 
-func (m *mockMasterService) ShowCollections(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
+func (m *mockRootCoordService) ShowCollections(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	return &milvuspb.ShowCollectionsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -206,19 +206,19 @@ func (m *mockMasterService) ShowCollections(ctx context.Context, req *milvuspb.S
 	}, nil
 }
 
-func (m *mockMasterService) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
+func (m *mockRootCoordService) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockMasterService) DropPartition(ctx context.Context, req *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
+func (m *mockRootCoordService) DropPartition(ctx context.Context, req *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockMasterService) HasPartition(ctx context.Context, req *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
+func (m *mockRootCoordService) HasPartition(ctx context.Context, req *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockMasterService) ShowPartitions(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+func (m *mockRootCoordService) ShowPartitions(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	return &milvuspb.ShowPartitionsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -230,20 +230,20 @@ func (m *mockMasterService) ShowPartitions(ctx context.Context, req *milvuspb.Sh
 }
 
 //index builder service
-func (m *mockMasterService) CreateIndex(ctx context.Context, req *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
+func (m *mockRootCoordService) CreateIndex(ctx context.Context, req *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockMasterService) DescribeIndex(ctx context.Context, req *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
+func (m *mockRootCoordService) DescribeIndex(ctx context.Context, req *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockMasterService) DropIndex(ctx context.Context, req *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
+func (m *mockRootCoordService) DropIndex(ctx context.Context, req *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }
 
 //global timestamp allocator
-func (m *mockMasterService) AllocTimestamp(ctx context.Context, req *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
+func (m *mockRootCoordService) AllocTimestamp(ctx context.Context, req *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
 	val := atomic.AddInt64(&m.cnt, int64(req.Count))
 	phy := time.Now().UnixNano() / int64(time.Millisecond)
 	ts := tsoutil.ComposeTS(phy, val)
@@ -257,7 +257,7 @@ func (m *mockMasterService) AllocTimestamp(ctx context.Context, req *masterpb.Al
 	}, nil
 }
 
-func (m *mockMasterService) AllocID(ctx context.Context, req *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
+func (m *mockRootCoordService) AllocID(ctx context.Context, req *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
 	val := atomic.AddInt64(&m.cnt, int64(req.Count))
 	return &masterpb.AllocIDResponse{
 		Status: &commonpb.Status{
@@ -270,15 +270,15 @@ func (m *mockMasterService) AllocID(ctx context.Context, req *masterpb.AllocIDRe
 }
 
 //segment
-func (m *mockMasterService) DescribeSegment(ctx context.Context, req *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
+func (m *mockRootCoordService) DescribeSegment(ctx context.Context, req *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockMasterService) ShowSegments(ctx context.Context, req *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
+func (m *mockRootCoordService) ShowSegments(ctx context.Context, req *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockMasterService) GetDdChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (m *mockRootCoordService) GetDdChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -288,11 +288,11 @@ func (m *mockMasterService) GetDdChannel(ctx context.Context) (*milvuspb.StringR
 	}, nil
 }
 
-func (m *mockMasterService) UpdateChannelTimeTick(ctx context.Context, req *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
+func (m *mockRootCoordService) UpdateChannelTimeTick(ctx context.Context, req *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockMasterService) ReleaseDQLMessageStream(ctx context.Context, req *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
+func (m *mockRootCoordService) ReleaseDQLMessageStream(ctx context.Context, req *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }
 

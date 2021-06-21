@@ -10,5 +10,5 @@ approvers:
   - scsven
 
 labels:
-- component/indexservice
+- component/indexcoord
 

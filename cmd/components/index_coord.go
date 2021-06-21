@@ -14,18 +14,18 @@ package components
 import (
 	"context"
 
-	grpcindexserver "github.com/milvus-io/milvus/internal/distributed/indexservice"
+	grpcindexcoord "github.com/milvus-io/milvus/internal/distributed/indexcoord"
 )
 
 type IndexCoord struct {
-	svr *grpcindexserver.Server
+	svr *grpcindexcoord.Server
 }
 
-// NewIndexService creates a new IndexCoord
+// NewIndexCoord creates a new IndexCoord
 func NewIndexCoord(ctx context.Context) (*IndexCoord, error) {
 	var err error
 	s := &IndexCoord{}
-	svr, err := grpcindexserver.NewServer(ctx)
+	svr, err := grpcindexcoord.NewServer(ctx)
 
 	if err != nil {
 		return nil, err
