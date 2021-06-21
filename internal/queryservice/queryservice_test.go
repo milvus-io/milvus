@@ -11,6 +11,7 @@
 
 package queryservice
 
+/*
 import (
 	"context"
 	"testing"
@@ -86,3 +87,4 @@ func TestQueryService_load(t *testing.T) {
 		assert.Equal(t, response.ErrorCode, commonpb.ErrorCode_Success)
 	})
 }
+*/
