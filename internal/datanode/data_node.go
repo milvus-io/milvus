@@ -28,6 +28,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -42,6 +43,12 @@ import (
 
 const (
 	RPCConnectionTimeout = 30 * time.Second
+
+	// MetricRequestsTotal used to count the num of total requests
+	MetricRequestsTotal = "total"
+
+	// MetricRequestsSuccess used to count the num of successful requests
+	MetricRequestsSuccess = "success"
 )
 
 // DataNode struct communicates with outside services and unioun all
@@ -246,6 +253,7 @@ func (node *DataNode) UpdateStateCode(code internalpb.StateCode) {
 
 // WatchDmChannels create a new dataSyncService for every unique dmlVchannel name, ignore if dmlVchannel existed.
 func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
+	metrics.DataNodeWatchDmChannelsCounter.WithLabelValues(MetricRequestsTotal).Inc()
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
@@ -253,11 +261,11 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 	switch {
 	case node.State.Load() != internalpb.StateCode_Healthy:
 		status.Reason = fmt.Sprintf("DataNode %d not healthy, please re-send message", node.NodeID)
-		return status, errors.New(status.GetReason())
+		return status, nil
 
 	case len(in.GetVchannels()) == 0:
 		status.Reason = "Illegal request"
-		return status, errors.New(status.GetReason())
+		return status, nil
 
 	default:
 		for _, chanInfo := range in.GetVchannels() {
@@ -272,6 +280,7 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 
 		status.ErrorCode = commonpb.ErrorCode_Success
 		log.Debug("DataNode WatchDmChannels Done")
+		metrics.DataNodeWatchDmChannelsCounter.WithLabelValues(MetricRequestsSuccess).Inc()
 		return status, nil
 	}
 }
@@ -345,6 +354,7 @@ func (node *DataNode) ReadyToFlush() error {
 //
 //   There are 1 precondition: The segmentID in req is in ascending order.
 func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
+	metrics.DataNodeFlushSegmentsCounter.WithLabelValues(MetricRequestsTotal).Inc()
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
@@ -411,6 +421,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 	log.Debug("FlushSegments Done")
 
 	status.ErrorCode = commonpb.ErrorCode_Success
+	metrics.DataNodeFlushSegmentsCounter.WithLabelValues(MetricRequestsSuccess).Inc()
 	return status, nil
 }
 
