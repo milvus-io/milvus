@@ -1,8 +1,8 @@
 
 
-## 10. Master
+## 10. Root Coordinator 
 
-<img src="./figs/master.jpeg" width=700>
+<img src="./figs/root_coord.png">
 
 #### 10.1 Master Interface
 
