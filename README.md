@@ -93,11 +93,6 @@ $ cd milvus/deployments/docker/standalone
 $ sudo docker-compose up -d
 ```
 
-Install with Helm
-
-```bash
-$ helm install -n milvus --set image.all.repository=registry.zilliz.com/milvus/milvus --set image.all.tag=master-latest milvus milvus-helm-charts/charts/milvus-ha
-```
 
 Build from source code
 
@@ -123,12 +118,6 @@ Install with Docker-Compose
 ```bash
 $ cd milvus/deployments/docker/distributed
 $ sudo docker-compose up -d
-```
-
-Install with Helm
-
-```bash
-$ helm install -n milvus --set image.all.repository=registry.zilliz.com/milvus/milvus --set image.all.tag=master-latest --set standalone.enabled=false milvus milvus-helm-charts/charts/milvus-ha
 ```
 
 Build from source code
