@@ -61,10 +61,10 @@ type QueryNode struct {
 	retrieveService *retrieveService
 
 	// clients
-	masterService types.MasterService
-	queryService  types.QueryService
-	indexService  types.IndexService
-	dataService   types.DataService
+	rootCoord    types.RootCoord
+	queryService types.QueryService
+	indexService types.IndexService
+	dataService  types.DataService
 
 	msFactory msgstream.Factory
 	scheduler *taskScheduler
@@ -141,7 +141,7 @@ func (node *QueryNode) Init() error {
 	log.Debug("queryNode try to connect etcd success")
 
 	node.historical = newHistorical(node.queryNodeLoopCtx,
-		node.masterService,
+		node.rootCoord,
 		node.dataService,
 		node.indexService,
 		node.msFactory,
@@ -187,8 +187,8 @@ func (node *QueryNode) Init() error {
 	//
 	//log.Debug("QueryNode Init ", zap.Int64("QueryNodeID", Params.QueryNodeID), zap.Any("searchChannelNames", Params.SearchChannelNames))
 
-	if node.masterService == nil {
-		log.Error("null master service detected")
+	if node.rootCoord == nil {
+		log.Error("null rootCoord detected")
 	}
 
 	if node.indexService == nil {
@@ -260,11 +260,11 @@ func (node *QueryNode) UpdateStateCode(code internalpb.StateCode) {
 	node.stateCode.Store(code)
 }
 
-func (node *QueryNode) SetMasterService(master types.MasterService) error {
-	if master == nil {
-		return errors.New("null master service interface")
+func (node *QueryNode) SetRootCoord(rc types.RootCoord) error {
+	if rc == nil {
+		return errors.New("null root coord interface")
 	}
-	node.masterService = master
+	node.rootCoord = rc
 	return nil
 }
 
