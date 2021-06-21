@@ -107,13 +107,13 @@ func (it *IndexAddTask) OnEnqueue() error {
 }
 
 func (it *IndexAddTask) PreExecute(ctx context.Context) error {
-	log.Debug("IndexService IndexAddTask PreExecute", zap.Any("IndexBuildID", it.indexBuildID))
+	log.Debug("IndexCoord IndexAddTask PreExecute", zap.Any("IndexBuildID", it.indexBuildID))
 	it.req.IndexBuildID = it.indexBuildID
 	return nil
 }
 
 func (it *IndexAddTask) Execute(ctx context.Context) error {
-	log.Debug("IndexService IndexAddTask Execute", zap.Any("IndexBuildID", it.indexBuildID))
+	log.Debug("IndexCoord IndexAddTask Execute", zap.Any("IndexBuildID", it.indexBuildID))
 	err := it.table.AddIndex(it.indexBuildID, it.req)
 	if err != nil {
 		return err
@@ -122,6 +122,6 @@ func (it *IndexAddTask) Execute(ctx context.Context) error {
 }
 
 func (it *IndexAddTask) PostExecute(ctx context.Context) error {
-	log.Debug("IndexService IndexAddTask PostExecute", zap.Any("IndexBuildID", it.indexBuildID))
+	log.Debug("IndexCoord IndexAddTask PostExecute", zap.Any("IndexBuildID", it.indexBuildID))
 	return nil
 }

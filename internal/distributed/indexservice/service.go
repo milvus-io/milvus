@@ -20,8 +20,9 @@ import (
 	"sync"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
-	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
+	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/milvus-io/milvus/internal/indexservice"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -31,14 +32,13 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"google.golang.org/grpc"
 )
 
 type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
 type Server struct {
-	indexcoord *indexcoord.IndexService
+	indexcoord *indexcoord.IndexCoord
 
 	grpcServer  *grpc.Server
 	grpcErrChan chan error
@@ -167,10 +167,8 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	s.grpcServer = grpc.NewServer(
 		grpc.MaxRecvMsgSize(math.MaxInt32),
 		grpc.MaxSendMsgSize(math.MaxInt32),
-		grpc.UnaryInterceptor(
-			grpc_opentracing.UnaryServerInterceptor(opts...)),
-		grpc.StreamInterceptor(
-			grpc_opentracing.StreamServerInterceptor(opts...)))
+		grpc.UnaryInterceptor(ot.UnaryServerInterceptor(opts...)),
+		grpc.StreamInterceptor(ot.StreamServerInterceptor(opts...)))
 	indexpb.RegisterIndexServiceServer(s.grpcServer, s)
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
@@ -181,9 +179,8 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 }
 
 func NewServer(ctx context.Context) (*Server, error) {
-
 	ctx1, cancel := context.WithCancel(ctx)
-	serverImp, err := indexcoord.NewIndexService(ctx)
+	serverImp, err := indexcoord.NewIndexCoord(ctx)
 	if err != nil {
 		defer cancel()
 		return nil, err
