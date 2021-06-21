@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package queryservice
+package querycoord
 
 import (
 	"fmt"
@@ -29,9 +29,9 @@ type ParamTable struct {
 
 	NodeID uint64
 
-	Address        string
-	Port           int
-	QueryServiceID UniqueID
+	Address      string
+	Port         int
+	QueryCoordID UniqueID
 
 	// stats
 	StatsChannelName string
@@ -136,7 +136,7 @@ func (p *ParamTable) initQueryServiceAddress() {
 }
 
 func (p *ParamTable) initRoleName() {
-	p.RoleName = fmt.Sprintf("%s-%d", "QueryService", p.NodeID)
+	p.RoleName = fmt.Sprintf("%s-%d", "QueryCoord", p.NodeID)
 }
 
 func (p *ParamTable) initSearchChannelPrefix() {

@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package grpcqueryserviceclient
+package grpcquerycoordclient
 
 import (
 	"context"
@@ -33,7 +33,7 @@ import (
 
 type Client struct {
 	ctx        context.Context
-	grpcClient querypb.QueryServiceClient
+	grpcClient querypb.QueryCoordClient
 	conn       *grpc.ClientConn
 
 	addr      string
@@ -53,7 +53,7 @@ func getQueryServiceAddress(sess *sessionutil.Session) (string, error) {
 	ms, ok := msess[key]
 	if !ok {
 		log.Debug("QueryServiceClient msess key not existed", zap.Any("key", key))
-		return "", fmt.Errorf("number of queryservice is incorrect, %d", len(msess))
+		return "", fmt.Errorf("number of querycoord is incorrect, %d", len(msess))
 	}
 	return ms.Address, nil
 }
@@ -119,7 +119,7 @@ func (c *Client) connect() error {
 		return err
 	}
 	log.Debug("QueryServiceClient try reconnect success")
-	c.grpcClient = querypb.NewQueryServiceClient(c.conn)
+	c.grpcClient = querypb.NewQueryCoordClient(c.conn)
 	return nil
 }
 func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error) {

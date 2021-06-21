@@ -24,9 +24,9 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	grpcdataserviceclient "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
-	grpcindexserviceclient "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
-	grpcqueryserviceclient "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
+	grpcdatacoordclient "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
+	grpcindexcoordclient "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
+	grpcquerycoordclient "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
@@ -54,10 +54,10 @@ type Server struct {
 
 	grpcErrChan chan error
 
-	rootCoordClient    *rcc.GrpcClient
-	dataServiceClient  *grpcdataserviceclient.Client
-	queryServiceClient *grpcqueryserviceclient.Client
-	indexServiceClient *grpcindexserviceclient.Client
+	rootCoordClient  *rcc.GrpcClient
+	dataCoordClient  *grpcdatacoordclient.Client
+	queryCooedClient *grpcquerycoordclient.Client
+	indexCoordClient *grpcindexcoordclient.Client
 
 	tracer opentracing.Tracer
 	closer io.Closer
@@ -190,37 +190,37 @@ func (s *Server) init() error {
 
 	dataServiceAddr := Params.DataServiceAddress
 	log.Debug("ProxyNode", zap.String("data service address", dataServiceAddr))
-	s.dataServiceClient = grpcdataserviceclient.NewClient(proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
-	err = s.dataServiceClient.Init()
+	s.dataCoordClient = grpcdatacoordclient.NewClient(proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
+	err = s.dataCoordClient.Init()
 	if err != nil {
 		log.Debug("ProxyNode dataServiceClient init failed ", zap.Error(err))
 		return err
 	}
-	s.proxynode.SetDataServiceClient(s.dataServiceClient)
+	s.proxynode.SetDataServiceClient(s.dataCoordClient)
 	log.Debug("set data service address ...")
 
 	indexServiceAddr := Params.IndexServerAddress
 	log.Debug("ProxyNode", zap.String("index server address", indexServiceAddr))
-	s.indexServiceClient = grpcindexserviceclient.NewClient(proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
-	err = s.indexServiceClient.Init()
+	s.indexCoordClient = grpcindexcoordclient.NewClient(proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
+	err = s.indexCoordClient.Init()
 	if err != nil {
 		log.Debug("ProxyNode indexServiceClient init failed ", zap.Error(err))
 		return err
 	}
-	s.proxynode.SetIndexServiceClient(s.indexServiceClient)
+	s.proxynode.SetIndexServiceClient(s.indexCoordClient)
 	log.Debug("set index service client ...")
 
 	queryServiceAddr := Params.QueryServiceAddress
 	log.Debug("ProxyNode", zap.String("query server address", queryServiceAddr))
-	s.queryServiceClient, err = grpcqueryserviceclient.NewClient(proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
+	s.queryCooedClient, err = grpcquerycoordclient.NewClient(proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
 	if err != nil {
 		return err
 	}
-	err = s.queryServiceClient.Init()
+	err = s.queryCooedClient.Init()
 	if err != nil {
 		return err
 	}
-	s.proxynode.SetQueryServiceClient(s.queryServiceClient)
+	s.proxynode.SetQueryServiceClient(s.queryCooedClient)
 	log.Debug("set query service client ...")
 
 	s.proxynode.UpdateStateCode(internalpb.StateCode_Initializing)

@@ -34,13 +34,13 @@ type historical struct {
 }
 
 func newHistorical(ctx context.Context,
-	masterService types.MasterService,
-	dataService types.DataService,
-	indexService types.IndexService,
+	rootCoord types.MasterService,
+	dataCoord types.DataService,
+	indexCoord types.IndexService,
 	factory msgstream.Factory,
 	etcdKV *etcdkv.EtcdKV) *historical {
 	replica := newCollectionReplica(etcdKV)
-	loader := newSegmentLoader(ctx, masterService, indexService, dataService, replica, etcdKV)
+	loader := newSegmentLoader(ctx, rootCoord, indexCoord, dataCoord, replica, etcdKV)
 	ss := newStatsService(ctx, replica, loader.indexLoader.fieldStatsChan, factory)
 
 	return &historical{

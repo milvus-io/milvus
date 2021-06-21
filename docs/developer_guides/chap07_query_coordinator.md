@@ -1,17 +1,17 @@
 
 
-## 8. Query Service
+## 8. Query Coordinator
 
 #### 8.1 Overview
 
-<img src="./figs/query_service.png" width=500>
+<img src="figs/query_coordinator.png" width=500>
 
 
 
-#### 8.2 Query Service Interface
+#### 8.2 Query Coordinator Interface
 
 ```go
-type QueryService interface {
+type QueryCoord interface {
 	Component
 	TimeTickProvider
 

@@ -14,7 +14,7 @@ package components
 import (
 	"context"
 
-	grpcqueryservice "github.com/milvus-io/milvus/internal/distributed/queryservice"
+	grpcqueryservice "github.com/milvus-io/milvus/internal/distributed/querycoord"
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 

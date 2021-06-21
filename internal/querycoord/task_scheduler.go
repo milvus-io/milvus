@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package queryservice
+package querycoord
 
 import (
 	"container/list"
@@ -126,15 +126,15 @@ type TaskScheduler struct {
 	taskIDAllocator  func() (UniqueID, error)
 	client           *etcdkv.EtcdKV
 
-	master      types.MasterService
-	dataService types.DataService
+	rootCoord types.MasterService
+	dataCoord types.DataService
 
 	wg     sync.WaitGroup
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-func NewTaskScheduler(ctx context.Context, meta *meta, cluster *queryNodeCluster, kv *etcdkv.EtcdKV, master types.MasterService, dataService types.DataService) (*TaskScheduler, error) {
+func NewTaskScheduler(ctx context.Context, meta *meta, cluster *queryNodeCluster, kv *etcdkv.EtcdKV, rootCoord types.MasterService, dataCoord types.DataService) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	taskChan := make(chan task, 1024)
 	s := &TaskScheduler{
@@ -144,13 +144,13 @@ func NewTaskScheduler(ctx context.Context, meta *meta, cluster *queryNodeCluster
 		cluster:          cluster,
 		activateTaskChan: taskChan,
 		client:           kv,
-		master:           master,
-		dataService:      dataService,
+		rootCoord:        rootCoord,
+		dataCoord:        dataCoord,
 	}
 	s.triggerTaskQueue = NewTaskQueue()
-	idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "queryService task id"))
+	idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "query coordinator task id"))
 	if err := idAllocator.Initialize(); err != nil {
-		log.Debug("QueryService idAllocator initialize failed", zap.Error(err))
+		log.Debug("query coordinator idAllocator initialize failed", zap.Error(err))
 		return nil, err
 	}
 	s.taskIDAllocator = func() (UniqueID, error) {
@@ -258,8 +258,8 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			LoadCollectionRequest: &loadReq,
-			masterService:         scheduler.master,
-			dataService:           scheduler.dataService,
+			rootCoord:             scheduler.rootCoord,
+			dataCoord:             scheduler.dataCoord,
 			cluster:               scheduler.cluster,
 			meta:                  scheduler.meta,
 		}
@@ -277,7 +277,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			LoadPartitionsRequest: &loadReq,
-			dataService:           scheduler.dataService,
+			dataCoord:             scheduler.dataCoord,
 			cluster:               scheduler.cluster,
 			meta:                  scheduler.meta,
 		}
@@ -393,8 +393,8 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 				triggerCondition: loadReq.BalanceReason,
 			},
 			LoadBalanceRequest: &loadReq,
-			master:             scheduler.master,
-			dataService:        scheduler.dataService,
+			rootCoord:          scheduler.rootCoord,
+			dataCoord:          scheduler.dataCoord,
 			cluster:            scheduler.cluster,
 			meta:               scheduler.meta,
 		}

@@ -31,7 +31,7 @@ import (
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	dsc "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
 	isc "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
-	qsc "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
+	qsc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -302,20 +302,20 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-func (s *Server) SetMasterService(masterService types.MasterService) error {
-	return s.querynode.SetMasterService(masterService)
+func (s *Server) SetMasterService(rootCoord types.MasterService) error {
+	return s.querynode.SetRootCoord(rootCoord)
 }
 
-func (s *Server) SetQueryService(queryService types.QueryService) error {
-	return s.querynode.SetQueryService(queryService)
+func (s *Server) SetQueryService(queryCoord types.QueryCoord) error {
+	return s.querynode.SetQueryCoord(queryCoord)
 }
 
-func (s *Server) SetIndexService(indexService types.IndexService) error {
-	return s.querynode.SetIndexService(indexService)
+func (s *Server) SetIndexService(indexCoord types.IndexService) error {
+	return s.querynode.SetIndexCoord(indexCoord)
 }
 
-func (s *Server) SetDataService(dataService types.DataService) error {
-	return s.querynode.SetDataService(dataService)
+func (s *Server) SetDataService(dataCoord types.DataService) error {
+	return s.querynode.SetDataCoord(dataCoord)
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {

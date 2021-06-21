@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package grpcqueryserviceclient
+package grpcquerycoordclient
 
 //import (
 //	"context"
@@ -29,7 +29,7 @@ package grpcqueryserviceclient
 //	"github.com/milvus-io/milvus/internal/proto/internalpb"
 //	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 //	"github.com/milvus-io/milvus/internal/proto/querypb"
-//	qs "github.com/milvus-io/milvus/internal/queryservice"
+//	qs "github.com/milvus-io/milvus/internal/querycoord"
 //)
 //
 //const (

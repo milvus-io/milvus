@@ -41,7 +41,7 @@ master:
 proxyNode:
   port: 19530
 
-queryService:
+queryCoord:
   address: localhost
   port: 19531
 

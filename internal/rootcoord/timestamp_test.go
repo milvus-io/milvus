@@ -52,7 +52,7 @@ func (*tbd) GetSegmentInfoChannel(context.Context) (*milvuspb.StringResponse, er
 }
 
 type tbq struct {
-	types.QueryService
+	types.QueryCoord
 }
 
 func (*tbq) ReleaseCollection(context.Context, *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {

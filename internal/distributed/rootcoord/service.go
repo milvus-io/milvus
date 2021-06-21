@@ -27,7 +27,7 @@ import (
 	dsc "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
 	isc "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
 	pnc "github.com/milvus-io/milvus/internal/distributed/proxynode/client"
-	qsc "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
+	qsc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -55,11 +55,11 @@ type Server struct {
 
 	dataCoord  types.DataService
 	indexCoord types.IndexService
-	queryCoord types.QueryService
+	queryCoord types.QueryCoord
 
 	newIndexCoordClient func(string, []string, time.Duration) types.IndexService
 	newDataCoordClient  func(string, []string, time.Duration) types.DataService
-	newQueryCoordClient func(string, []string, time.Duration) types.QueryService
+	newQueryCoordClient func(string, []string, time.Duration) types.QueryCoord
 
 	closer io.Closer
 }
@@ -106,7 +106,7 @@ func (s *Server) setClient() {
 		}
 		return isClient
 	}
-	s.newQueryCoordClient = func(metaRootPath string, etcdEndpoints []string, timeout time.Duration) types.QueryService {
+	s.newQueryCoordClient = func(metaRootPath string, etcdEndpoints []string, timeout time.Duration) types.QueryCoord {
 		qsClient, err := qsc.NewClient(metaRootPath, etcdEndpoints, timeout)
 		if err != nil {
 			panic(err)

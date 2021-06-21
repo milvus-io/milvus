@@ -40,7 +40,7 @@ const (
 type segmentLoader struct {
 	historicalReplica ReplicaInterface
 
-	dataService types.DataService
+	dataCoord types.DataService
 
 	minioKV kv.BaseKV // minio minioKV
 	etcdKV  *etcdkv.EtcdKV
@@ -178,14 +178,14 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID,
 
 func (loader *segmentLoader) GetSegmentStates(segmentID UniqueID) (*datapb.GetSegmentStatesResponse, error) {
 	ctx := context.TODO()
-	if loader.dataService == nil {
+	if loader.dataCoord == nil {
 		return nil, errors.New("null data service client")
 	}
 
 	segmentStatesRequest := &datapb.GetSegmentStatesRequest{
 		SegmentIDs: []int64{segmentID},
 	}
-	statesResponse, err := loader.dataService.GetSegmentStates(ctx, segmentStatesRequest)
+	statesResponse, err := loader.dataCoord.GetSegmentStates(ctx, segmentStatesRequest)
 	if err != nil || statesResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return nil, err
 	}
@@ -302,7 +302,7 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, binlogPaths
 	return nil
 }
 
-func newSegmentLoader(ctx context.Context, masterService types.MasterService, indexService types.IndexService, dataService types.DataService, replica ReplicaInterface, etcdKV *etcdkv.EtcdKV) *segmentLoader {
+func newSegmentLoader(ctx context.Context, rootCoord types.MasterService, indexCoord types.IndexService, dataCoord types.DataService, replica ReplicaInterface, etcdKV *etcdkv.EtcdKV) *segmentLoader {
 	option := &minioKV.Option{
 		Address:           Params.MinioEndPoint,
 		AccessKeyID:       Params.MinioAccessKeyID,
@@ -317,11 +317,11 @@ func newSegmentLoader(ctx context.Context, masterService types.MasterService, in
 		panic(err)
 	}
 
-	iLoader := newIndexLoader(ctx, masterService, indexService, replica)
+	iLoader := newIndexLoader(ctx, rootCoord, indexCoord, replica)
 	return &segmentLoader{
 		historicalReplica: replica,
 
-		dataService: dataService,
+		dataCoord: dataCoord,
 
 		minioKV: client,
 		etcdKV:  etcdKV,

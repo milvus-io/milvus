@@ -116,7 +116,7 @@ func (d *dataMock) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringR
 }
 
 type queryMock struct {
-	types.QueryService
+	types.QueryCoord
 	collID []typeutil.UniqueID
 	mutex  sync.Mutex
 }
