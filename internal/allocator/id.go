@@ -35,9 +35,9 @@ type UniqueID = typeutil.UniqueID
 type IDAllocator struct {
 	Allocator
 
-	etcdEndpoints []string
-	metaRoot      string
-	rootCoordClient  types.RootCoord
+	etcdEndpoints   []string
+	metaRoot        string
+	rootCoordClient types.RootCoord
 
 	countPerRPC uint32
 

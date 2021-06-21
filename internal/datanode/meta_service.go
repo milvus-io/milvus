@@ -35,7 +35,7 @@ type metaService struct {
 
 func newMetaService(rc types.RootCoord, collectionID UniqueID) *metaService {
 	return &metaService{
-		rootCoord: rc,
+		rootCoord:    rc,
 		collectionID: collectionID,
 	}
 }

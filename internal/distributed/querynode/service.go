@@ -302,8 +302,8 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-func (s *Server) SetMasterService(masterService types.MasterService) error {
-	return s.querynode.SetMasterService(masterService)
+func (s *Server) SetMasterService(rootCoord types.RootCoord) error {
+	return s.querynode.SetRootCoord(rootCoord)
 }
 
 func (s *Server) SetQueryService(queryService types.QueryService) error {

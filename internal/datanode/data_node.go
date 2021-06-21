@@ -90,10 +90,10 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 		Role:    typeutil.DataNodeRole,
 		watchDm: make(chan struct{}, 1),
 
-		rootCoord: nil,
-		dataService:   nil,
-		msFactory:     factory,
-		segmentCache:  newCache(),
+		rootCoord:    nil,
+		dataService:  nil,
+		msFactory:    factory,
+		segmentCache: newCache(),
 
 		vchan2SyncService: make(map[string]*dataSyncService),
 		vchan2FlushCh:     make(map[string]chan<- *flushMsg),

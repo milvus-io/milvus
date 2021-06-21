@@ -56,7 +56,7 @@ type Server struct {
 	segmentManager    Manager
 	allocator         allocator
 	cluster           *cluster
-	rootCoordClient      types.RootCoord
+	rootCoordClient   types.RootCoord
 	ddChannelName     string
 
 	flushCh        chan UniqueID
@@ -67,7 +67,7 @@ type Server struct {
 	activeCh <-chan bool
 	eventCh  <-chan *sessionutil.SessionEvent
 
-	dataClientCreator   func(addr string) (types.DataNode, error)
+	dataClientCreator      func(addr string) (types.DataNode, error)
 	rootCoordClientCreator func(addr string) (types.RootCoord, error)
 }
 

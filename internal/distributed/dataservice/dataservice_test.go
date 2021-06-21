@@ -26,23 +26,23 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type mockMaster struct {
-	types.MasterService
+type mockRootCoord struct {
+	types.RootCoord
 }
 
-func (m *mockMaster) Init() error {
+func (m *mockRootCoord) Init() error {
 	return nil
 }
 
-func (m *mockMaster) Start() error {
+func (m *mockRootCoord) Start() error {
 	return nil
 }
 
-func (m *mockMaster) Stop() error {
+func (m *mockRootCoord) Stop() error {
 	return fmt.Errorf("stop error")
 }
 
-func (m *mockMaster) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (m *mockRootCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	return &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{
 			StateCode: internalpb.StateCode_Healthy,
@@ -58,7 +58,7 @@ func (m *mockMaster) GetComponentStates(ctx context.Context) (*internalpb.Compon
 	}, nil
 }
 
-func (m *mockMaster) GetDdChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (m *mockRootCoord) GetDdChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -68,7 +68,7 @@ func (m *mockMaster) GetDdChannel(ctx context.Context) (*milvuspb.StringResponse
 	}, nil
 }
 
-func (m *mockMaster) ShowCollections(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
+func (m *mockRootCoord) ShowCollections(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	return &milvuspb.ShowCollectionsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,

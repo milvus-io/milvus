@@ -48,8 +48,8 @@ type Server struct {
 	grpcErrChan chan error
 	wg          sync.WaitGroup
 
-	grpcServer    *grpc.Server
-	masterService types.MasterService
+	grpcServer *grpc.Server
+	rootCoord  types.RootCoord
 
 	closer io.Closer
 }
