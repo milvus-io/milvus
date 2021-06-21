@@ -156,11 +156,11 @@ func (data *DataServiceMock) GetSegmentStates(req *datapb.GetSegmentStatesReques
 	}, nil
 }
 
-type IndexServiceMock struct {
+type IndexCoordMock struct {
 	Count int
 }
 
-func (index *IndexServiceMock) GetIndexFilePaths(req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
+func (index *IndexCoordMock) GetIndexFilePaths(req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
 	if index.Count < 30 {
 		index.Count++
 		return nil, errors.New("index path not exist")

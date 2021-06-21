@@ -168,22 +168,22 @@ func (s *Server) init() error {
 	indexCoord := isc.NewClient(qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
 
 	if err := indexCoord.Init(); err != nil {
-		log.Debug("QueryNode IndexServiceClient Init failed", zap.Error(err))
+		log.Debug("QueryNode IndexCoordClient Init failed", zap.Error(err))
 		panic(err)
 	}
 
 	if err := indexCoord.Start(); err != nil {
-		log.Debug("QueryNode IndexServiceClient Start failed", zap.Error(err))
+		log.Debug("QueryNode IndexCoordClient Start failed", zap.Error(err))
 		panic(err)
 	}
-	// wait IndexService healthy
-	log.Debug("QueryNode start to wait for IndexService ready")
-	err = funcutil.WaitForComponentHealthy(s.ctx, indexCoord, "IndexService", 1000000, time.Millisecond*200)
+	// wait IndexCoord healthy
+	log.Debug("QueryNode start to wait for IndexCoord ready")
+	err = funcutil.WaitForComponentHealthy(s.ctx, indexCoord, "IndexCoord", 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("QueryNode wait for IndexService ready failed", zap.Error(err))
+		log.Debug("QueryNode wait for IndexCoord ready failed", zap.Error(err))
 		panic(err)
 	}
-	log.Debug("QueryNode report IndexService is ready")
+	log.Debug("QueryNode report IndexCoord is ready")
 
 	if err := s.SetIndexCoord(indexCoord); err != nil {
 		panic(err)

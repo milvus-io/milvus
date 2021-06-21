@@ -122,7 +122,7 @@ func (node *ProxyNode) Init() error {
 		log.Debug("ProxyNode queryService is ready")
 	}
 
-	// wait for indexservice state changed to Healthy
+	// wait for indexcoord state changed to Healthy
 	if node.indexCoord != nil {
 		log.Debug("ProxyNode wait for indexCoord ready")
 		err := funcutil.WaitForComponentHealthy(node.ctx, node.indexCoord, "IndexCoord", 1000000, time.Millisecond*200)
