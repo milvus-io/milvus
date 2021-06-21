@@ -148,7 +148,7 @@ func (p *ParamTable) initStatisticsChannelName() {
 }
 
 func (p *ParamTable) initSegmentInfoChannelName() {
-	channel, err := p.Load("msgChannel.chanNamePrefix.dataServiceSegmentInfo")
+	channel, err := p.Load("msgChannel.chanNamePrefix.dataCoordSegmentInfo")
 	if err != nil {
 		panic(err)
 	}

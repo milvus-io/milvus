@@ -150,7 +150,7 @@ func (p *ParamTable) initPulsarAddress() {
 
 func (p *ParamTable) initSegmentStatisticsChannelName() {
 
-	path, err := p.Load("msgChannel.chanNamePrefix.dataServiceStatistic")
+	path, err := p.Load("msgChannel.chanNamePrefix.dataCoordStatistic")
 	if err != nil {
 		panic(err)
 	}
@@ -158,7 +158,7 @@ func (p *ParamTable) initSegmentStatisticsChannelName() {
 }
 
 func (p *ParamTable) initTimeTickChannelName() {
-	path, err := p.Load("msgChannel.chanNamePrefix.dataServiceTimeTick")
+	path, err := p.Load("msgChannel.chanNamePrefix.dataCoordTimeTick")
 	if err != nil {
 		panic(err)
 	}
