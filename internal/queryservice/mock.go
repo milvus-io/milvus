@@ -28,14 +28,14 @@ const (
 	numSegment = 12
 )
 
-type MasterMock struct {
-	types.MasterService
+type RootCoordMock struct {
+	types.RootCoord
 	CollectionIDs     []UniqueID
 	Col2partition     map[UniqueID][]UniqueID
 	Partition2segment map[UniqueID][]UniqueID
 }
 
-func NewMasterMock() *MasterMock {
+func NewRootCoordMock() *RootCoordMock {
 	collectionIDs := make([]UniqueID, 0)
 	collectionIDs = append(collectionIDs, 1)
 
@@ -51,19 +51,19 @@ func NewMasterMock() *MasterMock {
 	}
 	partition2segment[1] = segmentIDs
 
-	return &MasterMock{
+	return &RootCoordMock{
 		CollectionIDs:     collectionIDs,
 		Col2partition:     col2partition,
 		Partition2segment: partition2segment,
 	}
 }
 
-func (master *MasterMock) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+func (rc *RootCoordMock) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	collectionID := in.CollectionID
 	partitionIDs := make([]UniqueID, 0)
-	for _, id := range master.CollectionIDs {
+	for _, id := range rc.CollectionIDs {
 		if id == collectionID {
-			partitions := master.Col2partition[collectionID]
+			partitions := rc.Col2partition[collectionID]
 			partitionIDs = append(partitionIDs, partitions...)
 		}
 	}
@@ -77,20 +77,20 @@ func (master *MasterMock) ShowPartitions(ctx context.Context, in *milvuspb.ShowP
 	return response, nil
 }
 
-func (master *MasterMock) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
+func (rc *RootCoordMock) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
 	collectionID := in.CollectionID
 	partitionID := in.PartitionID
 
-	for _, id := range master.CollectionIDs {
+	for _, id := range rc.CollectionIDs {
 		if id == collectionID {
-			partitions := master.Col2partition[collectionID]
+			partitions := rc.Col2partition[collectionID]
 			for _, partition := range partitions {
 				if partition == partitionID {
 					return &milvuspb.ShowSegmentsResponse{
 						Status: &commonpb.Status{
 							ErrorCode: commonpb.ErrorCode_Success,
 						},
-						//SegmentIDs: master.Partition2segment[partition],
+						//SegmentIDs: rc.Partition2segment[partition],
 					}, nil
 				}
 			}

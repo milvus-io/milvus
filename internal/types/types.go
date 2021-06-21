@@ -83,7 +83,7 @@ type IndexService interface {
 	GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error)
 }
 
-type MasterService interface {
+type RootCoord interface {
 	Component
 	TimeTickProvider
 
@@ -116,7 +116,7 @@ type MasterService interface {
 
 // RootCoordComponent is used by grpc server of master service
 type RootCoordComponent interface {
-	MasterService
+	RootCoord
 
 	UpdateStateCode(internalpb.StateCode)
 	SetDataCoord(context.Context, DataService) error

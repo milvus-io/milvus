@@ -126,7 +126,7 @@ type TaskScheduler struct {
 	taskIDAllocator  func() (UniqueID, error)
 	client           *etcdkv.EtcdKV
 
-	master      types.MasterService
+	rootCoord   types.RootCoord
 	dataService types.DataService
 
 	wg     sync.WaitGroup
@@ -134,7 +134,7 @@ type TaskScheduler struct {
 	cancel context.CancelFunc
 }
 
-func NewTaskScheduler(ctx context.Context, meta *meta, cluster *queryNodeCluster, kv *etcdkv.EtcdKV, master types.MasterService, dataService types.DataService) (*TaskScheduler, error) {
+func NewTaskScheduler(ctx context.Context, meta *meta, cluster *queryNodeCluster, kv *etcdkv.EtcdKV, rootCoord types.RootCoord, dataService types.DataService) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	taskChan := make(chan task, 1024)
 	s := &TaskScheduler{
@@ -144,7 +144,7 @@ func NewTaskScheduler(ctx context.Context, meta *meta, cluster *queryNodeCluster
 		cluster:          cluster,
 		activateTaskChan: taskChan,
 		client:           kv,
-		master:           master,
+		rootCoord:        rootCoord,
 		dataService:      dataService,
 	}
 	s.triggerTaskQueue = NewTaskQueue()
@@ -258,7 +258,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			LoadCollectionRequest: &loadReq,
-			masterService:         scheduler.master,
+			rootCoord:             scheduler.rootCoord,
 			dataService:           scheduler.dataService,
 			cluster:               scheduler.cluster,
 			meta:                  scheduler.meta,
@@ -393,7 +393,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 				triggerCondition: loadReq.BalanceReason,
 			},
 			LoadBalanceRequest: &loadReq,
-			master:             scheduler.master,
+			rootCoord:          scheduler.rootCoord,
 			dataService:        scheduler.dataService,
 			cluster:            scheduler.cluster,
 			meta:               scheduler.meta,
