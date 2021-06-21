@@ -38,20 +38,20 @@ const (
 )
 
 var (
-	BuildTags = "unknown"
-	BuildTime = "unknown"
+	BuildTags      = "unknown"
+	BuildTime      = "unknown"
 	LastCommitHash = "unknown"
 )
 
 func printBanner() {
 	fmt.Println()
-    fmt.Println("    __  _________ _   ____  ______    ")
-    fmt.Println("   /  |/  /  _/ /| | / / / / / __/    ")
-    fmt.Println("  / /|_/ // // /_| |/ / /_/ /\\ \\    ")
-    fmt.Println(" /_/  /_/___/____/___/\\____/___/     ")
+	fmt.Println("    __  _________ _   ____  ______    ")
+	fmt.Println("   /  |/  /  _/ /| | / / / / / __/    ")
+	fmt.Println("  / /|_/ // // /_| |/ / /_/ /\\ \\    ")
+	fmt.Println(" /_/  /_/___/____/___/\\____/___/     ")
 	fmt.Println()
-    fmt.Println("Welcome to use Milvus!")
-    fmt.Println("Milvus Tag: " + BuildTags)
+	fmt.Println("Welcome to use Milvus!")
+	fmt.Println("Milvus Tag: " + BuildTags)
 	fmt.Println("Built Time: " + BuildTime)
 	fmt.Println("Last Commit Hash: " + LastCommitHash)
 	fmt.Println()
@@ -206,8 +206,6 @@ func main() {
 		os.Exit(-1)
 	}
 
-	printBanner()
-
 	var localMsg = false
 	role := roles.MilvusRoles{}
 	switch serverType {
@@ -261,6 +259,7 @@ func main() {
 	filename := getPidFileName(serverType, svrAlias)
 	switch command {
 	case "run":
+		printBanner()
 		fd, err := createPidFile(filename, runtimeDir)
 		if err != nil {
 			panic(err)
