@@ -130,7 +130,7 @@ func (s *Server) init() error {
 		panic(err)
 	}
 
-	if err := s.SetMasterService(rootCoord); err != nil {
+	if err := s.SetRootCoord(rootCoord); err != nil {
 		panic(err)
 	}
 	log.Debug("QueryService report RootCoord ready")
@@ -215,8 +215,8 @@ func (s *Server) Stop() error {
 	return err
 }
 
-func (s *Server) SetMasterService(m types.MasterService) error {
-	s.queryservice.SetMasterService(m)
+func (s *Server) SetRootCoord(m types.RootCoord) error {
+	s.queryservice.SetRootCoord(m)
 	return nil
 }
 

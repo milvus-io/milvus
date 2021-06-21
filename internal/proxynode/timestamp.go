@@ -22,16 +22,16 @@ import (
 )
 
 type TimestampAllocator struct {
-	ctx           context.Context
-	masterService types.MasterService
-	peerID        UniqueID
+	ctx       context.Context
+	rootCoord types.RootCoord
+	peerID    UniqueID
 }
 
-func NewTimestampAllocator(ctx context.Context, master types.MasterService, peerID UniqueID) (*TimestampAllocator, error) {
+func NewTimestampAllocator(ctx context.Context, rc types.RootCoord, peerID UniqueID) (*TimestampAllocator, error) {
 	a := &TimestampAllocator{
-		ctx:           ctx,
-		peerID:        peerID,
-		masterService: master,
+		ctx:       ctx,
+		peerID:    peerID,
+		rootCoord: rc,
 	}
 	return a, nil
 }
@@ -48,7 +48,7 @@ func (ta *TimestampAllocator) Alloc(count uint32) ([]Timestamp, error) {
 		Count: count,
 	}
 
-	resp, err := ta.masterService.AllocTimestamp(ctx, req)
+	resp, err := ta.rootCoord.AllocTimestamp(ctx, req)
 	defer cancel()
 
 	if err != nil {

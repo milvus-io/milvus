@@ -53,7 +53,7 @@ type IndexNode struct {
 	kv      kv.BaseKV
 	session *sessionutil.Session
 
-	serviceClient types.IndexService // method factory
+	serviceClient types.IndexCoord // method factory
 
 	// Add callback functions at different stages
 	startCallbacks []func()
@@ -104,14 +104,14 @@ func (i *IndexNode) Init() error {
 		return err
 	}
 	log.Debug("IndexNode try connect etcd success")
-	log.Debug("IndexNode start to wait for IndexService ready")
+	log.Debug("IndexNode start to wait for IndexCoord ready")
 
-	err = funcutil.WaitForComponentHealthy(ctx, i.serviceClient, "IndexService", 1000000, time.Millisecond*200)
+	err = funcutil.WaitForComponentHealthy(ctx, i.serviceClient, "IndexCoord", 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("IndexNode wait for IndexService ready failed", zap.Error(err))
+		log.Debug("IndexNode wait for IndexCoord ready failed", zap.Error(err))
 		return err
 	}
-	log.Debug("IndexNode report IndexService is ready")
+	log.Debug("IndexNode report IndexCoord is ready")
 	request := &indexpb.RegisterNodeRequest{
 		Base: nil,
 		Address: &commonpb.Address{
@@ -186,7 +186,7 @@ func (i *IndexNode) UpdateStateCode(code internalpb.StateCode) {
 	i.stateCode.Store(code)
 }
 
-func (i *IndexNode) SetIndexServiceClient(serviceClient types.IndexService) {
+func (i *IndexNode) SetIndexCoordClient(serviceClient types.IndexCoord) {
 	i.serviceClient = serviceClient
 }
 

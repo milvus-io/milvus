@@ -132,7 +132,7 @@ func (q *queryMock) ReleaseCollection(ctx context.Context, req *querypb.ReleaseC
 }
 
 type indexMock struct {
-	types.IndexService
+	types.IndexCoord
 	fileArray  []string
 	idxBuildID []int64
 	idxID      []int64

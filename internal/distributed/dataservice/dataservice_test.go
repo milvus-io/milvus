@@ -26,23 +26,23 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type mockMaster struct {
-	types.MasterService
+type mockRootCoord struct {
+	types.RootCoord
 }
 
-func (m *mockMaster) Init() error {
+func (m *mockRootCoord) Init() error {
 	return nil
 }
 
-func (m *mockMaster) Start() error {
+func (m *mockRootCoord) Start() error {
 	return nil
 }
 
-func (m *mockMaster) Stop() error {
+func (m *mockRootCoord) Stop() error {
 	return fmt.Errorf("stop error")
 }
 
-func (m *mockMaster) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (m *mockRootCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	return &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{
 			StateCode: internalpb.StateCode_Healthy,
@@ -58,7 +58,7 @@ func (m *mockMaster) GetComponentStates(ctx context.Context) (*internalpb.Compon
 	}, nil
 }
 
-func (m *mockMaster) GetDdChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (m *mockRootCoord) GetDdChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -68,7 +68,7 @@ func (m *mockMaster) GetDdChannel(ctx context.Context) (*milvuspb.StringResponse
 	}, nil
 }
 
-func (m *mockMaster) ShowCollections(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
+func (m *mockRootCoord) ShowCollections(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	return &milvuspb.ShowCollectionsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -122,16 +122,6 @@ func TestRun(t *testing.T) {
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
 	})
 
-	//t.Run("register node", func(t *testing.T) {
-	//	req := &datapb.RegisterNodeRequest{
-	//		Base: &commonpb.MsgBase{},
-	//		Address: &commonpb.Address{},
-	//	}
-	//	rsp, err := dsServer.RegisterNode(ctx, req)
-	//	assert.Nil(t, err)
-	//	assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
-	//})
-
 	t.Run("flush", func(t *testing.T) {
 		req := &datapb.FlushRequest{}
 		rsp, err := dsServer.Flush(ctx, req)
@@ -146,13 +136,6 @@ func TestRun(t *testing.T) {
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
 	})
 
-	t.Run("show segments", func(t *testing.T) {
-		req := &datapb.ShowSegmentsRequest{}
-		rsp, err := dsServer.ShowSegments(ctx, req)
-		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
-	})
-
 	t.Run("get segment states", func(t *testing.T) {
 		req := &datapb.GetSegmentStatesRequest{}
 		rsp, err := dsServer.GetSegmentStates(ctx, req)
@@ -163,13 +146,6 @@ func TestRun(t *testing.T) {
 	t.Run("get insert binlog paths", func(t *testing.T) {
 		req := &datapb.GetInsertBinlogPathsRequest{}
 		rsp, err := dsServer.GetInsertBinlogPaths(ctx, req)
-		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
-	})
-
-	t.Run("get insert channels", func(t *testing.T) {
-		req := &datapb.GetInsertChannelsRequest{}
-		rsp, err := dsServer.GetInsertChannels(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
 	})

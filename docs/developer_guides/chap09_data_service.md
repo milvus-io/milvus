@@ -11,22 +11,21 @@
 #### 8.2 Data Service Interface
 
 ```go
-type DataService interface {
+type DataCoord interface {
 	Component
 	TimeTickProvider
 
-	RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error)
 	Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error)
 
 	AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error)
-	ShowSegments(ctx context.Context, req *datapb.ShowSegmentsRequest) (*datapb.ShowSegmentsResponse, error)
 	GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
 	GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error)
 	GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error)
-	GetInsertChannels(ctx context.Context, req *datapb.GetInsertChannelsRequest) (*internalpb.StringList, error)
 	GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error)
 	GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error)
 	GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error)
+	GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error)
+	SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error)
 }
 ```
 
@@ -40,20 +39,6 @@ type MsgBase struct {
 	MsgID	    UniqueID
 	Timestamp Timestamp
 	SourceID  UniqueID
-}
-```
-
-* *RegisterNode*
-
-```go
-type RegisterNodeRequest struct {
-	Base    *commonpb.MsgBase
-	Address *commonpb.Address
-}
-
-type RegisterNodeResponse struct {
-	InitParams *internalpb.InitParams
-	Status     *commonpb.Status
 }
 ```
 
@@ -78,9 +63,9 @@ type SegmentIDRequest struct {
 }
 
 type AssignSegmentIDRequest struct {
-	NodeID        int64
-	PeerRole      string
-	SegIDRequests []*SegmentIDRequest
+	NodeID               int64               
+	PeerRole             string              
+	SegmentIDRequests    []*SegmentIDRequest 
 }
 
 type SegIDAssignment struct {
@@ -99,30 +84,13 @@ type AssignSegmentIDResponse struct {
 }
 ```
 
-* *ShowSegments*
-
-```go
-type ShowSegmentsRequest struct {
-	Base         *commonpb.MsgBase
-	CollectionID UniqueID
-	PartitionID  UniqueID
-	DbID         UniqueID
-}
-
-type ShowSegmentsResponse struct {
-	SegmentIDs []UniqueID
-	Status     *commonpb.Status
-}
-```
-
-
 
 * *GetSegmentStates*
 
 ```go
 type GetSegmentStatesRequest struct {
-	Base      *commonpb.MsgBase
-	SegmentID UniqueID
+	Base                 *commonpb.MsgBase 
+	SegmentIDs           []int64           
 }
 
 type SegmentState int32
@@ -133,14 +101,12 @@ const (
 	SegmentState_Growing          SegmentState = 2
 	SegmentState_Sealed           SegmentState = 3
 	SegmentState_Flushed          SegmentState = 4
+	SegmentState_Flushing         SegmentState = 5
 )
 
 type SegmentStateInfo struct {
 	SegmentID     UniqueID
 	State         commonpb.SegmentState
-	CreateTime    uint64
-	SealedTime    uint64
-	FlushedTime   uint64
 	StartPosition *internalpb.MsgPosition
 	EndPosition   *internalpb.MsgPosition
 	Status        *commonpb.Status
@@ -164,16 +130,6 @@ type GetInsertBinlogPathsResponse struct {
 	FieldIDs []int64
 	Paths    []*internalpb.StringList
 	Status   *commonpb.Status
-}
-```
-
-* *GetInsertChannels*
-
-```go
-type GetInsertChannelsRequest struct {
-	Base         *commonpb.MsgBase
-	DbID         UniqueID
-	CollectionID UniqueID
 }
 ```
 
@@ -217,18 +173,16 @@ type GetSegmentInfoRequest  struct{
 }
 
 type SegmentInfo struct {
-	SegmentID     UniqueID
-	CollectionID  UniqueID
-	PartitionID   UniqueID
-	InsertChannel string
-	OpenTime      Timestamp
-	SealedTime    Timestamp
-	FlushedTime   Timestamp
-	NumRows       int64
-	MemSize       int64
-	State         SegmentState
-	StartPosition []*internalpb.MsgPosition
-	EndPosition   []*internalpb.MsgPosition
+	ID                   int64                   
+	CollectionID         int64                   
+	PartitionID          int64                   
+	InsertChannel        string                  
+	NumOfRows            int64                   
+	State                commonpb.SegmentState   
+	DmlPosition          *internalpb.MsgPosition 
+	MaxRowNum            int64                   
+	LastExpireTime       uint64                  
+	StartPosition        *internalpb.MsgPosition 
 }
 
 type GetSegmentInfoResponse  struct{
@@ -237,6 +191,53 @@ type GetSegmentInfoResponse  struct{
 }
 ```
 
+* *GetRecoveryInfo*
+
+```go
+type GetRecoveryInfoRequest struct {
+	Base                 *commonpb.MsgBase 
+	CollectionID         int64             
+	PartitionID          int64             
+}
+
+
+type VchannelInfo struct {
+	CollectionID         int64                   
+	ChannelName          string                  
+	SeekPosition         *internalpb.MsgPosition 
+	UnflushedSegments    []*SegmentInfo          
+	FlushedSegments      []int64                 
+}
+
+type SegmentBinlogs struct {
+	SegmentID            int64          
+	FieldBinlogs         []*FieldBinlog 
+}
+
+type GetRecoveryInfoResponse struct {
+	Status               *commonpb.Status  
+	Channels             []*VchannelInfo   
+	Binlogs              []*SegmentBinlogs 
+}
+```
+
+* *SaveBinlogPaths*
+```go
+type SegmentStartPosition struct {
+	StartPosition        *internalpb.MsgPosition 
+	SegmentID            int64                   
+}
+
+type SaveBinlogPathsRequest struct {
+	Base                 *commonpb.MsgBase       
+	SegmentID            int64                   
+	CollectionID         int64                   
+	Field2BinlogPaths    []*ID2PathList          
+	CheckPoints          []*CheckPoint           
+	StartPositions       []*SegmentStartPosition 
+	Flushed              bool                    
+}
+```
 
 
 
