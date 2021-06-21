@@ -757,7 +757,7 @@ func (mt *metaTable) AddSegment(segInfos []*datapb.SegmentInfo, msgStartPos stri
 		meta[k] = v
 	}
 
-	// AddSegment is invoked from DataService
+	// AddSegment is invoked from DataCoord
 	if msgStartPos != "" && msgEndPos != "" {
 		meta[SegInfoMsgStartPosPrefix] = msgStartPos
 		meta[SegInfoMsgEndPosPrefix] = msgEndPos

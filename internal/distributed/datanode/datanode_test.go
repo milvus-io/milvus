@@ -71,23 +71,23 @@ func (m *mockRootCoord) ShowCollections(ctx context.Context, req *milvuspb.ShowC
 	}, nil
 }
 
-type mockDataService struct {
-	types.DataService
+type mockDataCoord struct {
+	types.DataCoord
 }
 
-func (m *mockDataService) Init() error {
+func (m *mockDataCoord) Init() error {
 	return nil
 }
 
-func (m *mockDataService) Start() error {
+func (m *mockDataCoord) Start() error {
 	return nil
 }
 
-func (m *mockDataService) Stop() error {
+func (m *mockDataCoord) Stop() error {
 	return fmt.Errorf("stop error")
 }
 
-func (m *mockDataService) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (m *mockDataCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	return &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{
 			StateCode: internalpb.StateCode_Healthy,
@@ -114,8 +114,8 @@ func TestRun(t *testing.T) {
 	dnServer.newRootCoordClient = func() (types.RootCoord, error) {
 		return &mockRootCoord{}, nil
 	}
-	dnServer.newDataServiceClient = func(string, []string, time.Duration) types.DataService {
-		return &mockDataService{}
+	dnServer.newDataCoordClient = func(string, []string, time.Duration) types.DataCoord {
+		return &mockDataCoord{}
 	}
 
 	grpcPort := rand.Int()%100 + 10000

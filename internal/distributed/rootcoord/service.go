@@ -53,12 +53,12 @@ type Server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	dataCoord  types.DataService
+	dataCoord  types.DataCoord
 	indexCoord types.IndexCoord
 	queryCoord types.QueryService
 
 	newIndexCoordClient func(string, []string, time.Duration) types.IndexCoord
-	newDataCoordClient  func(string, []string, time.Duration) types.DataService
+	newDataCoordClient  func(string, []string, time.Duration) types.DataCoord
 	newQueryCoordClient func(string, []string, time.Duration) types.QueryService
 
 	closer io.Closer
@@ -83,7 +83,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 func (s *Server) setClient() {
 	ctx := context.Background()
 
-	s.newDataCoordClient = func(etcdMetaRoot string, etcdEndpoints []string, timeout time.Duration) types.DataService {
+	s.newDataCoordClient = func(etcdMetaRoot string, etcdEndpoints []string, timeout time.Duration) types.DataCoord {
 		dsClient := dsc.NewClient(etcdMetaRoot, etcdEndpoints, timeout)
 		if err := dsClient.Init(); err != nil {
 			panic(err)

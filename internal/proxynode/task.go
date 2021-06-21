@@ -108,8 +108,8 @@ type InsertTask struct {
 	req *milvuspb.InsertRequest
 	Condition
 	ctx            context.Context
-	dataService    types.DataService
 	result         *milvuspb.MutationResult
+	dataCoord      types.DataCoord
 	rowIDAllocator *allocator.IDAllocator
 	segIDAssigner  *SegIDAssigner
 	chMgr          channelsMgr
@@ -916,11 +916,11 @@ func (it *InsertTask) PostExecute(ctx context.Context) error {
 type CreateCollectionTask struct {
 	Condition
 	*milvuspb.CreateCollectionRequest
-	ctx               context.Context
-	rootCoord         types.RootCoord
-	dataServiceClient types.DataService
-	result            *commonpb.Status
-	schema            *schemapb.CollectionSchema
+	ctx             context.Context
+	rootCoord       types.RootCoord
+	dataCoordClient types.DataCoord
+	result          *commonpb.Status
+	schema          *schemapb.CollectionSchema
 }
 
 func (cct *CreateCollectionTask) TraceCtx() context.Context {
@@ -2247,9 +2247,9 @@ func (dct *DescribeCollectionTask) PostExecute(ctx context.Context) error {
 type GetCollectionStatisticsTask struct {
 	Condition
 	*milvuspb.GetCollectionStatisticsRequest
-	ctx         context.Context
-	dataService types.DataService
-	result      *milvuspb.GetCollectionStatisticsResponse
+	ctx       context.Context
+	dataCoord types.DataCoord
+	result    *milvuspb.GetCollectionStatisticsResponse
 }
 
 func (g *GetCollectionStatisticsTask) TraceCtx() context.Context {
@@ -2310,7 +2310,7 @@ func (g *GetCollectionStatisticsTask) Execute(ctx context.Context) error {
 		CollectionID: collID,
 	}
 
-	result, _ := g.dataService.GetCollectionStatistics(ctx, req)
+	result, _ := g.dataCoord.GetCollectionStatistics(ctx, req)
 	if result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -2334,9 +2334,9 @@ func (g *GetCollectionStatisticsTask) PostExecute(ctx context.Context) error {
 type GetPartitionStatisticsTask struct {
 	Condition
 	*milvuspb.GetPartitionStatisticsRequest
-	ctx         context.Context
-	dataService types.DataService
-	result      *milvuspb.GetPartitionStatisticsResponse
+	ctx       context.Context
+	dataCoord types.DataCoord
+	result    *milvuspb.GetPartitionStatisticsResponse
 }
 
 func (g *GetPartitionStatisticsTask) TraceCtx() context.Context {
@@ -2402,7 +2402,7 @@ func (g *GetPartitionStatisticsTask) Execute(ctx context.Context) error {
 		PartitionID:  partitionID,
 	}
 
-	result, _ := g.dataService.GetPartitionStatistics(ctx, req)
+	result, _ := g.dataCoord.GetPartitionStatistics(ctx, req)
 	if result == nil {
 		return errors.New("get partition statistics resp is nil")
 	}
@@ -3079,11 +3079,11 @@ func (dit *DropIndexTask) PostExecute(ctx context.Context) error {
 type GetIndexBuildProgressTask struct {
 	Condition
 	*milvuspb.GetIndexBuildProgressRequest
-	ctx         context.Context
-	indexCoord  types.IndexCoord
-	rootCoord   types.RootCoord
-	dataService types.DataService
-	result      *milvuspb.GetIndexBuildProgressResponse
+	ctx        context.Context
+	indexCoord types.IndexCoord
+	rootCoord  types.RootCoord
+	dataCoord  types.DataCoord
+	result     *milvuspb.GetIndexBuildProgressResponse
 }
 
 func (gibpt *GetIndexBuildProgressTask) TraceCtx() context.Context {
@@ -3259,7 +3259,7 @@ func (gibpt *GetIndexBuildProgressTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	infoResp, err := gibpt.dataService.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
+	infoResp, err := gibpt.dataCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_SegmentInfo,
 			MsgID:     0,
@@ -3526,9 +3526,9 @@ func (gist *GetIndexStateTask) PostExecute(ctx context.Context) error {
 type FlushTask struct {
 	Condition
 	*milvuspb.FlushRequest
-	ctx         context.Context
-	dataService types.DataService
-	result      *commonpb.Status
+	ctx       context.Context
+	dataCoord types.DataCoord
+	result    *commonpb.Status
 }
 
 func (ft *FlushTask) TraceCtx() context.Context {
@@ -3591,7 +3591,7 @@ func (ft *FlushTask) Execute(ctx context.Context) error {
 			CollectionID: collID,
 		}
 		var status *commonpb.Status
-		status, _ = ft.dataService.Flush(ctx, flushReq)
+		status, _ = ft.dataCoord.Flush(ctx, flushReq)
 		if status == nil {
 			return errors.New("flush resp is nil")
 		}

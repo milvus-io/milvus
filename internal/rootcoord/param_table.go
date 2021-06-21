@@ -29,14 +29,14 @@ type ParamTable struct {
 	Address string
 	Port    int
 
-	PulsarAddress             string
-	EtcdEndpoints             []string
-	MetaRootPath              string
-	KvRootPath                string
-	MsgChannelSubName         string
-	TimeTickChannel           string
-	StatisticsChannel         string
-	DataServiceSegmentChannel string // data service create segment, or data node flush segment
+	PulsarAddress           string
+	EtcdEndpoints           []string
+	MetaRootPath            string
+	KvRootPath              string
+	MsgChannelSubName       string
+	TimeTickChannel         string
+	StatisticsChannel       string
+	DataCoordSegmentChannel string // data service create segment, or data node flush segment
 
 	MaxPartitionNum             int64
 	DefaultPartitionName        string
@@ -152,7 +152,7 @@ func (p *ParamTable) initSegmentInfoChannelName() {
 	if err != nil {
 		panic(err)
 	}
-	p.DataServiceSegmentChannel = channel
+	p.DataCoordSegmentChannel = channel
 }
 
 func (p *ParamTable) initMaxPartitionNum() {

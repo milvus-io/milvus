@@ -56,8 +56,8 @@ func newIDLEDataNodeMock(ctx context.Context) *DataNode {
 
 	node.SetRootCoordInterface(rc)
 
-	ds := &DataServiceFactory{}
-	node.SetDataServiceInterface(ds)
+	ds := &DataCoordFactory{}
+	node.SetDataCoordInterface(ds)
 
 	return node
 }
@@ -88,8 +88,8 @@ func newHEALTHDataNodeMock(dmChannelName string) *DataNode {
 
 	node.SetRootCoordInterface(ms)
 
-	ds := &DataServiceFactory{}
-	node.SetDataServiceInterface(ds)
+	ds := &DataCoordFactory{}
+	node.SetDataCoordInterface(ds)
 
 	vchan := &datapb.VchannelInfo{
 		CollectionID:      1,
@@ -163,11 +163,11 @@ type RootCoordFactory struct {
 	collectionID   UniqueID
 }
 
-type DataServiceFactory struct {
-	types.DataService
+type DataCoordFactory struct {
+	types.DataCoord
 }
 
-func (ds *DataServiceFactory) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
+func (ds *DataCoordFactory) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 

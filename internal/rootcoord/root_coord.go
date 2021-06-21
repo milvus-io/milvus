@@ -642,12 +642,12 @@ func (c *Core) setMsgStreams() error {
 		return c.dmlChannels.BroadcastAll(channelNames, &msgPack)
 	}
 
-	if Params.DataServiceSegmentChannel == "" {
-		return fmt.Errorf("DataServiceSegmentChannel is empty")
+	if Params.DataCoordSegmentChannel == "" {
+		return fmt.Errorf("DataCoordSegmentChannel is empty")
 	}
 
 	// data service will put msg into this channel when create segment
-	dsChanName := Params.DataServiceSegmentChannel
+	dsChanName := Params.DataCoordSegmentChannel
 	dsSubName := Params.MsgChannelSubName + "ds"
 	dsStream, err := c.startMsgStreamAndSeek(dsChanName, dsSubName, SegInfoMsgEndPosPrefix)
 	if err != nil {
@@ -656,7 +656,7 @@ func (c *Core) setMsgStreams() error {
 	c.DataCoordSegmentChan = (*dsStream).Chan()
 
 	// data node will put msg into this channel when flush segment
-	dnChanName := Params.DataServiceSegmentChannel
+	dnChanName := Params.DataCoordSegmentChannel
 	dnSubName := Params.MsgChannelSubName + "dn"
 	dnStream, err := c.startMsgStreamAndSeek(dnChanName, dnSubName, FlushedSegMsgEndPosPrefix)
 	if err != nil {
@@ -676,13 +676,13 @@ func (c *Core) SetNewProxyClient(f func(sess *sessionutil.Session) (types.ProxyN
 	}
 }
 
-func (c *Core) SetDataCoord(ctx context.Context, s types.DataService) error {
+func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 	rsp, err := s.GetSegmentInfoChannel(ctx)
 	if err != nil {
 		return err
 	}
-	Params.DataServiceSegmentChannel = rsp.Value
-	log.Debug("data service segment", zap.String("channel name", Params.DataServiceSegmentChannel))
+	Params.DataCoordSegmentChannel = rsp.Value
+	log.Debug("data service segment", zap.String("channel name", Params.DataCoordSegmentChannel))
 
 	c.CallGetBinlogFilePathsService = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) (retFiles []string, retErr error) {
 		defer func() {

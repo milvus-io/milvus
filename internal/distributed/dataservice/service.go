@@ -41,9 +41,9 @@ import (
 )
 
 type Server struct {
-	dataService *dataservice.Server
-	ctx         context.Context
-	cancel      context.CancelFunc
+	dataCoord *dataservice.Server
+	ctx       context.Context
+	cancel    context.CancelFunc
 
 	grpcErrChan chan error
 	wg          sync.WaitGroup
@@ -64,7 +64,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		cancel:      cancel,
 		grpcErrChan: make(chan error),
 	}
-	s.dataService, err = dataservice.CreateServer(s.ctx, factory)
+	s.dataCoord, err = dataservice.CreateServer(s.ctx, factory)
 	if err != nil {
 		return nil, err
 	}
@@ -82,21 +82,21 @@ func (s *Server) init() error {
 	dataservice.Params.IP = Params.IP
 	dataservice.Params.Port = Params.Port
 
-	err := s.dataService.Register()
+	err := s.dataCoord.Register()
 	if err != nil {
-		log.Debug("DataService Register etcd failed", zap.Error(err))
+		log.Debug("DataCoord Register etcd failed", zap.Error(err))
 		return err
 	}
-	log.Debug("DataService Register etcd success")
+	log.Debug("DataCoord Register etcd success")
 
 	err = s.startGrpc()
 	if err != nil {
-		log.Debug("DataService startGrpc failed", zap.Error(err))
+		log.Debug("DataCoord startGrpc failed", zap.Error(err))
 		return err
 	}
 
-	if err := s.dataService.Init(); err != nil {
-		log.Error("dataService init error", zap.Error(err))
+	if err := s.dataCoord.Init(); err != nil {
+		log.Error("dataCoord init error", zap.Error(err))
 		return err
 	}
 	return nil
@@ -134,7 +134,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		grpc.StreamInterceptor(
 			grpc_opentracing.StreamServerInterceptor(opts...)))
 	//grpc.UnaryInterceptor(grpc_prometheus.UnaryServerInterceptor))
-	datapb.RegisterDataServiceServer(s.grpcServer, s)
+	datapb.RegisterDataCoordServer(s.grpcServer, s)
 	grpc_prometheus.Register(s.grpcServer)
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {
@@ -143,7 +143,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 }
 
 func (s *Server) start() error {
-	return s.dataService.Start()
+	return s.dataCoord.Start()
 }
 
 func (s *Server) Stop() error {
@@ -159,7 +159,7 @@ func (s *Server) Stop() error {
 		s.grpcServer.GracefulStop()
 	}
 
-	err = s.dataService.Stop()
+	err = s.dataCoord.Stop()
 	if err != nil {
 		return err
 	}
@@ -173,7 +173,7 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Debug("DataService init done ...")
+	log.Debug("DataCoord init done ...")
 
 	if err := s.start(); err != nil {
 		return err
@@ -182,54 +182,54 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
-	return s.dataService.GetComponentStates(ctx)
+	return s.dataCoord.GetComponentStates(ctx)
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.dataService.GetTimeTickChannel(ctx)
+	return s.dataCoord.GetTimeTickChannel(ctx)
 }
 
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.dataService.GetStatisticsChannel(ctx)
+	return s.dataCoord.GetStatisticsChannel(ctx)
 }
 
 func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
-	return s.dataService.GetSegmentInfo(ctx, req)
+	return s.dataCoord.GetSegmentInfo(ctx, req)
 }
 
 func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error) {
-	return s.dataService.Flush(ctx, req)
+	return s.dataCoord.Flush(ctx, req)
 }
 
 func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
-	return s.dataService.AssignSegmentID(ctx, req)
+	return s.dataCoord.AssignSegmentID(ctx, req)
 }
 
 func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
-	return s.dataService.GetSegmentStates(ctx, req)
+	return s.dataCoord.GetSegmentStates(ctx, req)
 }
 
 func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
-	return s.dataService.GetInsertBinlogPaths(ctx, req)
+	return s.dataCoord.GetInsertBinlogPaths(ctx, req)
 }
 
 func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {
-	return s.dataService.GetCollectionStatistics(ctx, req)
+	return s.dataCoord.GetCollectionStatistics(ctx, req)
 }
 
 func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error) {
-	return s.dataService.GetPartitionStatistics(ctx, req)
+	return s.dataCoord.GetPartitionStatistics(ctx, req)
 }
 
 func (s *Server) GetSegmentInfoChannel(ctx context.Context, req *datapb.GetSegmentInfoChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.dataService.GetSegmentInfoChannel(ctx)
+	return s.dataCoord.GetSegmentInfoChannel(ctx)
 }
 
-//SaveBinlogPaths implement DataServiceServer, saves segment, collection binlog according to datanode request
+//SaveBinlogPaths implement DataCoordServer, saves segment, collection binlog according to datanode request
 func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
-	return s.dataService.SaveBinlogPaths(ctx, req)
+	return s.dataCoord.SaveBinlogPaths(ctx, req)
 }
 
 func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
-	return s.dataService.GetRecoveryInfo(ctx, req)
+	return s.dataCoord.GetRecoveryInfo(ctx, req)
 }

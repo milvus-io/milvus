@@ -51,11 +51,11 @@ type Server struct {
 
 	msFactory msgstream.Factory
 
-	rootCoord   types.RootCoord
-	dataService types.DataService
+	rootCoord types.RootCoord
+	dataCoord types.DataCoord
 
-	newRootCoordClient   func() (types.RootCoord, error)
-	newDataServiceClient func(string, []string, time.Duration) types.DataService
+	newRootCoordClient func() (types.RootCoord, error)
+	newDataCoordClient func(string, []string, time.Duration) types.DataCoord
 
 	closer io.Closer
 }
@@ -71,7 +71,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		newRootCoordClient: func() (types.RootCoord, error) {
 			return rcc.NewClient(ctx1, dn.Params.MetaRootPath, dn.Params.EtcdEndpoints, 3*time.Second)
 		},
-		newDataServiceClient: func(etcdMetaRoot string, etcdEndpoints []string, timeout time.Duration) types.DataService {
+		newDataCoordClient: func(etcdMetaRoot string, etcdEndpoints []string, timeout time.Duration) types.DataCoord {
 			return dsc.NewClient(etcdMetaRoot, etcdEndpoints, timeout)
 		},
 	}
@@ -117,8 +117,8 @@ func (s *Server) SetRootCoordInterface(ms types.RootCoord) error {
 	return s.datanode.SetRootCoordInterface(ms)
 }
 
-func (s *Server) SetDataServiceInterface(ds types.DataService) error {
-	return s.datanode.SetDataServiceInterface(ds)
+func (s *Server) SetDataCoordInterface(ds types.DataCoord) error {
+	return s.datanode.SetDataCoordInterface(ds)
 }
 
 func (s *Server) Run() error {
@@ -202,25 +202,25 @@ func (s *Server) init() error {
 	}
 
 	// --- Data Server Client ---
-	if s.newDataServiceClient != nil {
-		log.Debug("Data service address", zap.String("address", Params.DataServiceAddress))
+	if s.newDataCoordClient != nil {
+		log.Debug("Data service address", zap.String("address", Params.DataCoordAddress))
 		log.Debug("DataNode Init data service client ...")
-		dataServiceClient := s.newDataServiceClient(dn.Params.MetaRootPath, dn.Params.EtcdEndpoints, 10*time.Second)
-		if err = dataServiceClient.Init(); err != nil {
-			log.Debug("DataNode newDataServiceClient failed", zap.Error(err))
+		dataCoordClient := s.newDataCoordClient(dn.Params.MetaRootPath, dn.Params.EtcdEndpoints, 10*time.Second)
+		if err = dataCoordClient.Init(); err != nil {
+			log.Debug("DataNode newDataCoord failed", zap.Error(err))
 			panic(err)
 		}
-		if err = dataServiceClient.Start(); err != nil {
-			log.Debug("DataNode dataServiceClient Start failed", zap.Error(err))
+		if err = dataCoordClient.Start(); err != nil {
+			log.Debug("DataNode dataCoordClient Start failed", zap.Error(err))
 			panic(err)
 		}
-		err = funcutil.WaitForComponentInitOrHealthy(ctx, dataServiceClient, "DataService", 1000000, time.Millisecond*200)
+		err = funcutil.WaitForComponentInitOrHealthy(ctx, dataCoordClient, "DataCoord", 1000000, time.Millisecond*200)
 		if err != nil {
-			log.Debug("DataNode wait dataServiceClient ready failed", zap.Error(err))
+			log.Debug("DataNode wait dataCoordClient ready failed", zap.Error(err))
 			panic(err)
 		}
-		log.Debug("DataNode dataService is ready")
-		if err = s.SetDataServiceInterface(dataServiceClient); err != nil {
+		log.Debug("DataNode dataCoord is ready")
+		if err = s.SetDataCoordInterface(dataCoordClient); err != nil {
 			panic(err)
 		}
 	}

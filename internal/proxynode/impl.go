@@ -116,7 +116,7 @@ func (node *ProxyNode) CreateCollection(ctx context.Context, request *milvuspb.C
 		Condition:               NewTaskCondition(ctx),
 		CreateCollectionRequest: request,
 		rootCoord:               node.rootCoord,
-		dataServiceClient:       node.dataService,
+		dataCoordClient:         node.dataCoord,
 	}
 
 	err := node.sched.DdQueue.Enqueue(cct)
@@ -388,7 +388,7 @@ func (node *ProxyNode) GetCollectionStatistics(ctx context.Context, request *mil
 		ctx:                            ctx,
 		Condition:                      NewTaskCondition(ctx),
 		GetCollectionStatisticsRequest: request,
-		dataService:                    node.dataService,
+		dataCoord:                      node.dataCoord,
 	}
 
 	err := node.sched.DdQueue.Enqueue(g)
@@ -714,7 +714,7 @@ func (node *ProxyNode) GetPartitionStatistics(ctx context.Context, request *milv
 		ctx:                           ctx,
 		Condition:                     NewTaskCondition(ctx),
 		GetPartitionStatisticsRequest: request,
-		dataService:                   node.dataService,
+		dataCoord:                     node.dataCoord,
 	}
 
 	err := node.sched.DdQueue.Enqueue(g)
@@ -962,7 +962,7 @@ func (node *ProxyNode) GetIndexBuildProgress(ctx context.Context, request *milvu
 		GetIndexBuildProgressRequest: request,
 		indexCoord:                   node.indexCoord,
 		rootCoord:                    node.rootCoord,
-		dataService:                  node.dataService,
+		dataCoord:                    node.dataCoord,
 	}
 
 	err := node.sched.DdQueue.Enqueue(gibpt)
@@ -1064,10 +1064,10 @@ func (node *ProxyNode) GetIndexState(ctx context.Context, request *milvuspb.GetI
 
 func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
 	it := &InsertTask{
-		ctx:         ctx,
-		Condition:   NewTaskCondition(ctx),
-		dataService: node.dataService,
-		req:         request,
+		ctx:       ctx,
+		Condition: NewTaskCondition(ctx),
+		dataCoord: node.dataCoord,
+		req:       request,
 		BaseInsertTask: BaseInsertTask{
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: request.HashKeys,
@@ -1292,7 +1292,7 @@ func (node *ProxyNode) Flush(ctx context.Context, request *milvuspb.FlushRequest
 		ctx:          ctx,
 		Condition:    NewTaskCondition(ctx),
 		FlushRequest: request,
-		dataService:  node.dataService,
+		dataCoord:    node.dataCoord,
 	}
 
 	err := node.sched.DdQueue.Enqueue(ft)
@@ -1472,7 +1472,7 @@ func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvus
 		resp.Status.Reason = fmt.Errorf("getSegmentsOfCollection, err:%w", err).Error()
 		return resp, nil
 	}
-	infoResp, err := node.dataService.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
+	infoResp, err := node.dataCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_SegmentInfo,
 			MsgID:     0,
@@ -1483,7 +1483,7 @@ func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvus
 	})
 	log.Debug("GetPersistentSegmentInfo ", zap.Any("infos", infoResp.Infos), zap.Any("status", infoResp.Status))
 	if err != nil {
-		resp.Status.Reason = fmt.Errorf("dataService:GetSegmentInfo, err:%w", err).Error()
+		resp.Status.Reason = fmt.Errorf("dataCoord:GetSegmentInfo, err:%w", err).Error()
 		return resp, nil
 	}
 	if infoResp.Status.ErrorCode != commonpb.ErrorCode_Success {

@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	metaPrefix    = "dataservice-meta"
+	metaPrefix    = "datacoord-meta"
 	segmentPrefix = metaPrefix + "/s"
 )
 
@@ -81,7 +81,7 @@ func (m *meta) reloadFromKV() error {
 		segmentInfo := &datapb.SegmentInfo{}
 		err = proto.UnmarshalText(value, segmentInfo)
 		if err != nil {
-			return fmt.Errorf("DataService reloadFromKV UnMarshalText datapb.SegmentInfo err:%w", err)
+			return fmt.Errorf("DataCoord reloadFromKV UnMarshalText datapb.SegmentInfo err:%w", err)
 		}
 		m.segments[segmentInfo.ID] = segmentInfo
 	}

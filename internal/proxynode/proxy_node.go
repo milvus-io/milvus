@@ -54,7 +54,7 @@ type ProxyNode struct {
 
 	rootCoord    types.RootCoord
 	indexCoord   types.IndexCoord
-	dataService  types.DataService
+	dataCoord    types.DataCoord
 	queryService types.QueryService
 
 	chMgr channelsMgr
@@ -100,15 +100,15 @@ func (node *ProxyNode) Register() error {
 }
 
 func (node *ProxyNode) Init() error {
-	// wait for dataservice state changed to Healthy
-	if node.dataService != nil {
-		log.Debug("ProxyNode wait for dataService ready")
-		err := funcutil.WaitForComponentHealthy(node.ctx, node.dataService, "DataService", 1000000, time.Millisecond*200)
+	// wait for datacoord state changed to Healthy
+	if node.dataCoord != nil {
+		log.Debug("ProxyNode wait for dataCoord ready")
+		err := funcutil.WaitForComponentHealthy(node.ctx, node.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
 		if err != nil {
-			log.Debug("ProxyNode wait for dataService ready failed", zap.Error(err))
+			log.Debug("ProxyNode wait for dataCoord ready failed", zap.Error(err))
 			return err
 		}
-		log.Debug("ProxyNode dataService is ready")
+		log.Debug("ProxyNode dataCoord is ready")
 	}
 
 	// wait for queryService state changed to Healthy
@@ -152,12 +152,6 @@ func (node *ProxyNode) Init() error {
 		log.Debug("ProxyNode CreateQueryChannel success", zap.Any("RetrieveResultChannelNames", Params.RetrieveResultChannelNames))
 	}
 
-	// todo
-	//Params.InsertChannelNames, err = node.dataService.GetInsertChannels()
-	//if err != nil {
-	//	return err
-	//}
-
 	m := map[string]interface{}{
 		"PulsarAddress": Params.PulsarAddress,
 		"PulsarBufSize": 1024}
@@ -180,7 +174,7 @@ func (node *ProxyNode) Init() error {
 	}
 	node.tsoAllocator = tsoAllocator
 
-	segAssigner, err := NewSegIDAssigner(node.ctx, node.dataService, node.lastTick)
+	segAssigner, err := NewSegIDAssigner(node.ctx, node.dataCoord, node.lastTick)
 	if err != nil {
 		panic(err)
 	}
@@ -416,8 +410,8 @@ func (node *ProxyNode) SetIndexCoordClient(cli types.IndexCoord) {
 	node.indexCoord = cli
 }
 
-func (node *ProxyNode) SetDataServiceClient(cli types.DataService) {
-	node.dataService = cli
+func (node *ProxyNode) SetDataCoordClient(cli types.DataCoord) {
+	node.dataCoord = cli
 }
 
 func (node *ProxyNode) SetQueryServiceClient(cli types.QueryService) {

@@ -154,7 +154,7 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 		},
 		LoadCollectionRequest: req,
 		rootCoord:             qs.rootCoordClient,
-		dataService:           qs.dataServiceClient,
+		dataCoord:             qs.dataCoordClient,
 		cluster:               qs.cluster,
 		meta:                  qs.meta,
 	}
@@ -269,7 +269,7 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			LoadPartitionsRequest: req,
-			dataService:           qs.dataServiceClient,
+			dataCoord:             qs.dataCoordClient,
 			cluster:               qs.cluster,
 			meta:                  qs.meta,
 		}

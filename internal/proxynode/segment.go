@@ -139,11 +139,11 @@ type SegIDAssigner struct {
 	getTickFunc func() Timestamp
 	PeerID      UniqueID
 
-	dataService types.DataService
+	dataCoord   types.DataCoord
 	countPerRPC uint32
 }
 
-func NewSegIDAssigner(ctx context.Context, dataService types.DataService, getTickFunc func() Timestamp) (*SegIDAssigner, error) {
+func NewSegIDAssigner(ctx context.Context, dataCoord types.DataCoord, getTickFunc func() Timestamp) (*SegIDAssigner, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	sa := &SegIDAssigner{
 		Allocator: Allocator{
@@ -152,7 +152,7 @@ func NewSegIDAssigner(ctx context.Context, dataService types.DataService, getTic
 			Role:       "SegmentIDAllocator",
 		},
 		countPerRPC: SegCountPerRPC,
-		dataService: dataService,
+		dataCoord:   dataCoord,
 		assignInfos: make(map[UniqueID]*list.List),
 		getTickFunc: getTickFunc,
 	}
@@ -167,8 +167,8 @@ func NewSegIDAssigner(ctx context.Context, dataService types.DataService, getTic
 	return sa, nil
 }
 
-func (sa *SegIDAssigner) SetServiceClient(client types.DataService) {
-	sa.dataService = client
+func (sa *SegIDAssigner) SetServiceClient(client types.DataCoord) {
+	sa.dataCoord = client
 }
 
 func (sa *SegIDAssigner) collectExpired() {
@@ -299,7 +299,7 @@ func (sa *SegIDAssigner) syncSegments() (bool, error) {
 	}
 
 	sa.segReqs = []*datapb.SegmentIDRequest{}
-	resp, err := sa.dataService.AssignSegmentID(context.Background(), req)
+	resp, err := sa.dataCoord.AssignSegmentID(context.Background(), req)
 
 	if err != nil {
 		return false, fmt.Errorf("syncSegmentID Failed:%w", err)

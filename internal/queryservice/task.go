@@ -126,10 +126,10 @@ func (bt *BaseTask) SetState(state taskState) {
 type LoadCollectionTask struct {
 	BaseTask
 	*querypb.LoadCollectionRequest
-	rootCoord   types.RootCoord
-	dataService types.DataService
-	cluster     *queryNodeCluster
-	meta        *meta
+	rootCoord types.RootCoord
+	dataCoord types.DataCoord
+	cluster   *queryNodeCluster
+	meta      *meta
 }
 
 func (lct *LoadCollectionTask) Marshal() string {
@@ -187,7 +187,7 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 			CollectionID: collectionID,
 			PartitionID:  partitionID,
 		}
-		recoveryInfo, err := lct.dataService.GetRecoveryInfo(lct.ctx, getRecoveryInfoRequest)
+		recoveryInfo, err := lct.dataCoord.GetRecoveryInfo(lct.ctx, getRecoveryInfoRequest)
 		if err != nil {
 			status.Reason = err.Error()
 			lct.result = status
@@ -418,9 +418,9 @@ func (rct *ReleaseCollectionTask) PostExecute(ctx context.Context) error {
 type LoadPartitionTask struct {
 	BaseTask
 	*querypb.LoadPartitionsRequest
-	dataService types.DataService
-	cluster     *queryNodeCluster
-	meta        *meta
+	dataCoord types.DataCoord
+	cluster   *queryNodeCluster
+	meta      *meta
 }
 
 func (lpt *LoadPartitionTask) Marshal() string {
@@ -465,7 +465,7 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 			CollectionID: collectionID,
 			PartitionID:  partitionID,
 		}
-		recoveryInfo, err := lpt.dataService.GetRecoveryInfo(lpt.ctx, getRecoveryInfoRequest)
+		recoveryInfo, err := lpt.dataCoord.GetRecoveryInfo(lpt.ctx, getRecoveryInfoRequest)
 		if err != nil {
 			status.Reason = err.Error()
 			lpt.result = status
@@ -1047,10 +1047,10 @@ type HandoffTask struct {
 type LoadBalanceTask struct {
 	BaseTask
 	*querypb.LoadBalanceRequest
-	rootCoord   types.RootCoord
-	dataService types.DataService
-	cluster     *queryNodeCluster
-	meta        *meta
+	rootCoord types.RootCoord
+	dataCoord types.DataCoord
+	cluster   *queryNodeCluster
+	meta      *meta
 }
 
 func (lbt *LoadBalanceTask) Marshal() string {
@@ -1108,7 +1108,7 @@ func (lbt *LoadBalanceTask) Execute(ctx context.Context) error {
 						CollectionID: collectionID,
 						PartitionID:  partitionID,
 					}
-					recoveryInfo, err := lbt.dataService.GetRecoveryInfo(lbt.ctx, getRecoveryInfo)
+					recoveryInfo, err := lbt.dataCoord.GetRecoveryInfo(lbt.ctx, getRecoveryInfo)
 					if err != nil {
 						status.Reason = err.Error()
 						lbt.result = status

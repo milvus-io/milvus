@@ -50,8 +50,8 @@ type Server struct {
 
 	msFactory msgstream.Factory
 
-	dataService *dsc.Client
-	rootCoord   *rcc.GrpcClient
+	dataCoord *dsc.Client
+	rootCoord *rcc.GrpcClient
 
 	closer io.Closer
 }
@@ -136,27 +136,27 @@ func (s *Server) init() error {
 	log.Debug("QueryService report RootCoord ready")
 
 	// --- Data service client ---
-	log.Debug("QueryService try to new DataService client", zap.Any("DataServiceAddress", Params.DataServiceAddress))
+	log.Debug("QueryService try to new DataCoord client", zap.Any("DataCoordAddress", Params.DataCoordAddress))
 
-	dataService := dsc.NewClient(qs.Params.MetaRootPath, qs.Params.EtcdEndpoints, 3*time.Second)
-	if err = dataService.Init(); err != nil {
-		log.Debug("QueryService DataServiceClient Init failed", zap.Error(err))
+	dataCoord := dsc.NewClient(qs.Params.MetaRootPath, qs.Params.EtcdEndpoints, 3*time.Second)
+	if err = dataCoord.Init(); err != nil {
+		log.Debug("QueryService DataCoordClient Init failed", zap.Error(err))
 		panic(err)
 	}
-	if err = dataService.Start(); err != nil {
-		log.Debug("QueryService DataServiceClient Start failed", zap.Error(err))
+	if err = dataCoord.Start(); err != nil {
+		log.Debug("QueryService DataCoordClient Start failed", zap.Error(err))
 		panic(err)
 	}
-	log.Debug("QueryService try to wait for DataService ready")
-	err = funcutil.WaitForComponentInitOrHealthy(s.loopCtx, dataService, "DataService", 1000000, time.Millisecond*200)
+	log.Debug("QueryService try to wait for DataCoord ready")
+	err = funcutil.WaitForComponentInitOrHealthy(s.loopCtx, dataCoord, "DataCoord", 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("QueryService wait for DataService ready failed", zap.Error(err))
+		log.Debug("QueryService wait for DataCoord ready failed", zap.Error(err))
 		panic(err)
 	}
-	if err := s.SetDataService(dataService); err != nil {
+	if err := s.SetDataCoord(dataCoord); err != nil {
 		panic(err)
 	}
-	log.Debug("QueryService report DataService ready")
+	log.Debug("QueryService report DataCoord ready")
 
 	s.queryservice.UpdateStateCode(internalpb.StateCode_Initializing)
 	log.Debug("QueryService", zap.Any("State", internalpb.StateCode_Initializing))
@@ -220,8 +220,8 @@ func (s *Server) SetRootCoord(m types.RootCoord) error {
 	return nil
 }
 
-func (s *Server) SetDataService(d types.DataService) error {
-	s.queryservice.SetDataService(d)
+func (s *Server) SetDataCoord(d types.DataCoord) error {
+	s.queryservice.SetDataCoord(d)
 	return nil
 }
 

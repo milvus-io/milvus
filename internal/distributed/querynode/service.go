@@ -56,7 +56,7 @@ type Server struct {
 
 	grpcServer *grpc.Server
 
-	dataService  *dsc.Client
+	dataCoord    *dsc.Client
 	rootCoord    *rcc.GrpcClient
 	indexCoord   *isc.Client
 	queryService *qsc.Client
@@ -189,26 +189,26 @@ func (s *Server) init() error {
 		panic(err)
 	}
 
-	// --- DataService ---
-	log.Debug("QueryNode start to new DataServiceClient", zap.Any("DataServiceAddress", Params.DataServiceAddress))
-	dataService := dsc.NewClient(qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
-	if err = dataService.Init(); err != nil {
-		log.Debug("QueryNode DataServiceClient Init failed", zap.Error(err))
+	// --- DataCoord ---
+	log.Debug("QueryNode start to new DataCoordClient", zap.Any("DataCoordAddress", Params.DataCoordAddress))
+	dataCoord := dsc.NewClient(qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
+	if err = dataCoord.Init(); err != nil {
+		log.Debug("QueryNode DataCoordClient Init failed", zap.Error(err))
 		panic(err)
 	}
-	if err = dataService.Start(); err != nil {
-		log.Debug("QueryNode DataServiceClient Start failed", zap.Error(err))
+	if err = dataCoord.Start(); err != nil {
+		log.Debug("QueryNode DataCoordClient Start failed", zap.Error(err))
 		panic(err)
 	}
-	log.Debug("QueryNode start to wait for DataService ready")
-	err = funcutil.WaitForComponentInitOrHealthy(s.ctx, dataService, "DataService", 1000000, time.Millisecond*200)
+	log.Debug("QueryNode start to wait for DataCoord ready")
+	err = funcutil.WaitForComponentInitOrHealthy(s.ctx, dataCoord, "DataCoord", 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("QueryNode wait for DataService ready failed", zap.Error(err))
+		log.Debug("QueryNode wait for DataCoord ready failed", zap.Error(err))
 		panic(err)
 	}
-	log.Debug("QueryNode report DataService is ready")
+	log.Debug("QueryNode report DataCoord is ready")
 
-	if err := s.SetDataService(dataService); err != nil {
+	if err := s.SetDataCoord(dataCoord); err != nil {
 		panic(err)
 	}
 
@@ -314,8 +314,8 @@ func (s *Server) SetIndexCoord(indexCoord types.IndexCoord) error {
 	return s.querynode.SetIndexCoord(indexCoord)
 }
 
-func (s *Server) SetDataService(dataService types.DataService) error {
-	return s.querynode.SetDataService(dataService)
+func (s *Server) SetDataCoord(dataCoord types.DataCoord) error {
+	return s.querynode.SetDataCoord(dataCoord)
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {

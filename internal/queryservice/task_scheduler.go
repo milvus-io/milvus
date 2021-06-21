@@ -126,15 +126,15 @@ type TaskScheduler struct {
 	taskIDAllocator  func() (UniqueID, error)
 	client           *etcdkv.EtcdKV
 
-	rootCoord   types.RootCoord
-	dataService types.DataService
+	rootCoord types.RootCoord
+	dataCoord types.DataCoord
 
 	wg     sync.WaitGroup
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-func NewTaskScheduler(ctx context.Context, meta *meta, cluster *queryNodeCluster, kv *etcdkv.EtcdKV, rootCoord types.RootCoord, dataService types.DataService) (*TaskScheduler, error) {
+func NewTaskScheduler(ctx context.Context, meta *meta, cluster *queryNodeCluster, kv *etcdkv.EtcdKV, rootCoord types.RootCoord, dataCoord types.DataCoord) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	taskChan := make(chan task, 1024)
 	s := &TaskScheduler{
@@ -145,7 +145,7 @@ func NewTaskScheduler(ctx context.Context, meta *meta, cluster *queryNodeCluster
 		activateTaskChan: taskChan,
 		client:           kv,
 		rootCoord:        rootCoord,
-		dataService:      dataService,
+		dataCoord:        dataCoord,
 	}
 	s.triggerTaskQueue = NewTaskQueue()
 	idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "queryService task id"))
@@ -259,7 +259,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 			},
 			LoadCollectionRequest: &loadReq,
 			rootCoord:             scheduler.rootCoord,
-			dataService:           scheduler.dataService,
+			dataCoord:             scheduler.dataCoord,
 			cluster:               scheduler.cluster,
 			meta:                  scheduler.meta,
 		}
@@ -277,7 +277,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			LoadPartitionsRequest: &loadReq,
-			dataService:           scheduler.dataService,
+			dataCoord:             scheduler.dataCoord,
 			cluster:               scheduler.cluster,
 			meta:                  scheduler.meta,
 		}
@@ -394,7 +394,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 			},
 			LoadBalanceRequest: &loadReq,
 			rootCoord:          scheduler.rootCoord,
-			dataService:        scheduler.dataService,
+			dataCoord:          scheduler.dataCoord,
 			cluster:            scheduler.cluster,
 			meta:               scheduler.meta,
 		}
