@@ -36,6 +36,7 @@ message FieldSchema {
   DataType data_type = 5;
   repeated common.KeyValuePair type_params = 6;
   repeated common.KeyValuePair index_params = 7;
+  bool autoID = 8;
 }
 
 /**
@@ -44,7 +45,7 @@ message FieldSchema {
 message CollectionSchema {
   string name = 1;
   string description = 2;
-  bool autoID = 3;
+  bool autoID = 3; // deprecated later, keep compatible with c++ part now
   repeated FieldSchema fields = 4;
 }
 

@@ -359,7 +359,7 @@ func (s *Server) GetIndexState(ctx context.Context, request *milvuspb.GetIndexSt
 	return s.proxynode.GetIndexState(ctx, request)
 }
 
-func (s *Server) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.InsertResponse, error) {
+func (s *Server) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
 	return s.proxynode.Insert(ctx, request)
 }
 

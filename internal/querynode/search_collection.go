@@ -415,7 +415,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	sp, ctx := trace.StartSpanFromContext(searchMsg.TraceCtx())
 	defer sp.Finish()
 	searchMsg.SetTraceCtx(ctx)
-	searchTimestamp := searchMsg.Base.Timestamp
+	searchTimestamp := searchMsg.SearchRequest.TravelTimestamp
 
 	collectionID := searchMsg.CollectionID
 	collection, err := s.streaming.replica.getCollectionByID(collectionID)

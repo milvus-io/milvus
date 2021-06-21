@@ -16,7 +16,7 @@ set -x
 
 MILVUS_HELM_REPO="https://github.com/zilliztech/milvus-helm-charts.git"
 MILVUS_HELM_RELEASE_NAME="${MILVUS_HELM_RELEASE_NAME:-milvus-testing}"
-MILVUS_STANDALONE_ENABLED="${MILVUS_STANDALONE_ENABLED:-true}"
+MILVUS_CLUSTER_ENABLED="${MILVUS_CLUSTER_ENABLED:-false}"
 MILVUS_IMAGE_REPO="${MILVUS_IMAGE_REPO:-milvusdb/milvus}"
 MILVUS_IMAGE_TAG="${MILVUS_IMAGE_TAG:-latest}"
 MILVUS_HELM_NAMESPACE="${MILVUS_HELM_NAMESPACE:-default}"
@@ -50,7 +50,7 @@ helm install --wait --timeout "${MILVUS_INSTALL_TIMEOUT}" \
                                --set image.all.repository="${MILVUS_IMAGE_REPO}" \
                                --set image.all.tag="${MILVUS_IMAGE_TAG}" \
                                --set image.all.pullPolicy="${MILVUS_PULL_POLICY:-Always}" \
-                               --set standalone.enabled="${MILVUS_STANDALONE_ENABLED}" \
+                               --set cluster.enabled="${MILVUS_CLUSTER_ENABLED}" \
                                --set service.type="${MILVUS_SERVICE_TYPE}" \
                                --namespace "${MILVUS_HELM_NAMESPACE}" \
                                "${MILVUS_HELM_RELEASE_NAME}" \

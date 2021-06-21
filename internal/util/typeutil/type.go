@@ -22,6 +22,6 @@ const (
 	QueryNodeRole    = "QueryNode"
 	IndexServiceRole = "IndexService"
 	IndexNodeRole    = "IndexNode"
-	DataServiceRole  = "DataService"
+	DataCoordRole    = "DataCoord"
 	DataNodeRole     = "DataNode"
 )

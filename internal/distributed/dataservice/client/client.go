@@ -45,7 +45,7 @@ type Client struct {
 }
 
 func getDataServiceAddress(sess *sessionutil.Session) (string, error) {
-	key := typeutil.DataServiceRole
+	key := typeutil.DataCoordRole
 	msess, _, err := sess.GetSessions(key)
 	if err != nil {
 		log.Debug("DataServiceClient, getSessions failed", zap.Any("key", key), zap.Error(err))
