@@ -286,7 +286,7 @@ type DataNode interface {
 ```go
 type WatchDmChannelRequest struct {
 	Base         *commonpb.MsgBase
-	ChannelNames []string
+	Vchannels    []*VchannelInfo
 }
 ```
 
@@ -325,6 +325,18 @@ type SegmentStatistics struct {
 type SegmentStatisticsMsg struct {
 	BaseMsg
 	SegmentStatistics
+}
+
+```
+#### 8.3 DataNode Time Tick Channel
+
+* *DataNode Tt Msg*
+
+```go
+message DataNodeTtMsg {
+    Base        *commonpb.MsgBase
+    ChannelName string
+    Timestamp   uint64
 }
 ```
 
