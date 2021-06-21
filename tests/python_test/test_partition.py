@@ -121,7 +121,7 @@ class TestCreateBase:
         '''
         connect.create_partition(id_collection, default_tag)
         ids = [i for i in range(default_nb)]
-        insert_ids = connect.insert(id_collection, default_entities, ids)
+        insert_ids = connect.insert(id_collection, default_entities)
         assert len(insert_ids) == len(ids)
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
@@ -133,7 +133,7 @@ class TestCreateBase:
         '''
         connect.create_partition(id_collection, default_tag)
         ids = [i for i in range(default_nb)]
-        insert_ids = connect.insert(id_collection, default_entities, ids, partition_name=default_tag)
+        insert_ids = connect.insert(id_collection, default_entities, partition_name=default_tag)
         assert len(insert_ids) == len(ids)
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
@@ -147,7 +147,7 @@ class TestCreateBase:
         connect.create_partition(collection, default_tag)
         ids = [i for i in range(default_nb)]
         try:
-            connect.insert(collection, default_entities, ids, partition_name=tag_new)
+            connect.insert(collection, default_entities, partition_name=tag_new)
         except Exception as e:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
@@ -163,10 +163,10 @@ class TestCreateBase:
         '''
         connect.create_partition(id_collection, default_tag)
         ids = [i for i in range(default_nb)]
-        insert_ids = connect.insert(id_collection, default_entities, ids, partition_name=default_tag)
+        insert_ids = connect.insert(id_collection, default_entities, partition_name=default_tag)
         assert len(insert_ids) == default_nb
         ids = [(i+default_nb) for i in range(default_nb)]
-        new_insert_ids = connect.insert(id_collection, default_entities, ids, partition_name=default_tag)
+        new_insert_ids = connect.insert(id_collection, default_entities, partition_name=default_tag)
         assert len(new_insert_ids) == default_nb
         connect.flush([id_collection])
         res = connect.get_collection_stats(id_collection)

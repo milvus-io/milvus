@@ -90,11 +90,11 @@ class TestFlushBase:
         '''
         connect.create_partition(id_collection, default_tag)
         ids = [i for i in range(default_nb)]
-        ids = connect.insert(id_collection, default_entities, ids)
+        ids = connect.insert(id_collection, default_entities)
         connect.flush([id_collection])
         res_count = connect.get_collection_stats(id_collection)
         assert res_count["row_count"] == default_nb
-        ids = connect.insert(id_collection, default_entities, ids, partition_name=default_tag)
+        ids = connect.insert(id_collection, default_entities, partition_name=default_tag)
         assert len(ids) == default_nb
         connect.flush([id_collection])
         res_count = connect.get_collection_stats(id_collection)
@@ -110,9 +110,9 @@ class TestFlushBase:
         connect.create_partition(id_collection, default_tag)
         connect.create_partition(id_collection, tag_new)
         ids = [i for i in range(default_nb)]
-        connect.insert(id_collection, default_entities, ids, partition_name=default_tag)
+        connect.insert(id_collection, default_entities, partition_name=default_tag)
         connect.flush([id_collection])
-        connect.insert(id_collection, default_entities, ids, partition_name=tag_new)
+        connect.insert(id_collection, default_entities, partition_name=tag_new)
         connect.flush([id_collection])
         res = connect.get_collection_stats(id_collection)
         assert res["row_count"] == 2 * default_nb
@@ -131,8 +131,8 @@ class TestFlushBase:
         ids = [i for i in range(default_nb)]
         # ids = connect.insert(id_collection, default_entities, ids, partition_name=default_tag)
         # ids = connect.insert(collection_new, default_entities, ids, partition_name=default_tag)
-        connect.insert(id_collection, default_entities, ids, partition_name=default_tag)
-        connect.insert(collection_new, default_entities, ids, partition_name=default_tag)
+        connect.insert(id_collection, default_entities, partition_name=default_tag)
+        connect.insert(collection_new, default_entities, partition_name=default_tag)
         connect.flush([id_collection])
         connect.flush([collection_new])
         res = connect.get_collection_stats(id_collection)
@@ -150,7 +150,7 @@ class TestFlushBase:
         vector_field = get_vector_field
         collection_new = gen_unique_str("test_flush")
         fields = {
-            "fields": [filter_field, vector_field],
+            "fields": [gen_primary_field(), filter_field, vector_field],
             "segment_row_limit": default_segment_row_limit,
             "auto_id": False
         }
@@ -158,12 +158,8 @@ class TestFlushBase:
         connect.create_partition(id_collection, default_tag)
         connect.create_partition(collection_new, default_tag)
         entities_new = gen_entities_by_fields(fields["fields"], nb_new, default_dim)
-        ids = [i for i in range(default_nb)]
-        ids_new = [i for i in range(nb_new)]
-        # ids = connect.insert(id_collection, default_entities, ids, partition_name=default_tag)
-        # ids = connect.insert(collection_new, entities_new, ids_new, partition_name=default_tag)
-        connect.insert(id_collection, default_entities, ids, partition_name=default_tag)
-        connect.insert(collection_new, entities_new, ids_new, partition_name=default_tag)
+        connect.insert(id_collection, default_entities, partition_name=default_tag)
+        connect.insert(collection_new, entities_new, partition_name=default_tag)
         connect.flush([id_collection])
         connect.flush([collection_new])
         res = connect.get_collection_stats(id_collection)
@@ -197,7 +193,7 @@ class TestFlushBase:
         expected: no error raised
         '''
         ids = [i for i in range(default_nb)]
-        ids = connect.insert(id_collection, default_entities, ids)
+        ids = connect.insert(id_collection, default_entities)
         # add flush
         connect.flush([id_collection])
         timeout = 20
@@ -230,7 +226,7 @@ class TestFlushBase:
         for i, item in enumerate(ids):
             if item <= same_ids:
                 ids[i] = 0
-        ids = connect.insert(id_collection, default_entities, ids)
+        ids = connect.insert(id_collection, default_entities)
         connect.flush([id_collection])
         res = connect.get_collection_stats(id_collection)
         assert res["row_count"] == default_nb

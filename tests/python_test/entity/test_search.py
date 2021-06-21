@@ -35,15 +35,9 @@ def init_data(connect, collection, nb=3000, partition_names=None, auto_id=True):
     else:
         insert_entities = gen_entities(nb, is_normal=True)
     if partition_names is None:
-        if auto_id:
-            ids = connect.insert(collection, insert_entities)
-        else:
-            ids = connect.insert(collection, insert_entities, ids=[i for i in range(nb)])
+        ids = connect.insert(collection, insert_entities)
     else:
-        if auto_id:
-            ids = connect.insert(collection, insert_entities, partition_name=partition_names)
-        else:
-            ids = connect.insert(collection, insert_entities, ids=[i for i in range(nb)], partition_name=partition_names)
+        ids = connect.insert(collection, insert_entities, partition_name=partition_names)
     connect.flush([collection])
     return insert_entities, ids
 
@@ -446,18 +440,24 @@ class TestSearchBase:
         new_entities, new_ids = init_data(connect, collection, nb=6001, partition_names=new_tag)
         connect.create_index(collection, field_name, get_simple_index)
         search_param = get_search_param(index_type)
-        query, vecs = gen_query_vectors(field_name, new_entities, top_k, nq, search_params=search_param)
+        print(f'entities[-1]["values"][:1]: {entities[-1]["values"][:1]}')
+        print(f'new_entities[-1]["values"][:1]: {new_entities[-1]["values"][:1]}')
+        query, vecs = gen_query_vectors(field_name, new_entities, top_k, nq, search_params=search_param,
+                                        replace_vecs=[entities[-1]["values"][:1][0], new_entities[-1]["values"][:1][0]])
         if top_k > max_top_k:
             with pytest.raises(Exception) as e:
                 res = connect.search(collection, query)
         else:
             connect.load_collection(collection)
             res = connect.search(collection, query, partition_names=["(.*)tag"])
-            assert not check_id_result(res[0], ids[0])
+            assert check_id_result(res[0], ids[0])
+            assert check_id_result(res[0], new_ids[0])
             assert res[0]._distances[0] < epsilon
             assert res[1]._distances[0] < epsilon
             res = connect.search(collection, query, partition_names=["new(.*)"])
-            assert res[0]._distances[0] < epsilon
+            assert not check_id_result(res[0], ids[0])
+            assert check_id_result(res[1], new_ids[0])
+            assert res[0]._distances[0] > epsilon
             assert res[1]._distances[0] < epsilon
             connect.release_collection(collection)
 

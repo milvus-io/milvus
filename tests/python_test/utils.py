@@ -230,6 +230,10 @@ def gen_unique_str(str_value=None):
     return "test_" + prefix if str_value is None else str_value + "_" + prefix
 
 
+def gen_primary_field():
+    return {"name": gen_unique_str(), "type": DataType.INT64, "is_primary": True}
+
+
 def gen_single_filter_fields():
     fields = []
     for data_type in DataType:
@@ -249,12 +253,11 @@ def gen_single_vector_fields():
 def gen_default_fields(auto_id=True):
     default_fields = {
         "fields": [
-            {"name": "int64", "type": DataType.INT64},
+            {"name": "int64", "type": DataType.INT64, "is_primary": True},
             {"name": "float", "type": DataType.FLOAT},
             {"name": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "params": {"dim": default_dim}},
         ],
         "segment_row_limit": default_segment_row_limit,
-        "auto_id": auto_id
     }
     return default_fields
 
@@ -262,7 +265,7 @@ def gen_default_fields(auto_id=True):
 def gen_binary_default_fields(auto_id=True):
     default_fields = {
         "fields": [
-            {"name": "int64", "type": DataType.INT64},
+            {"name": "int64", "type": DataType.INT64, "is_primary": True},
             {"name": "float", "type": DataType.FLOAT},
             {"name": default_binary_vec_field_name, "type": DataType.BINARY_VECTOR, "params": {"dim": default_dim}}
         ],
