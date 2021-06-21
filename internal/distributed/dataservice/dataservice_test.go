@@ -122,16 +122,6 @@ func TestRun(t *testing.T) {
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
 	})
 
-	//t.Run("register node", func(t *testing.T) {
-	//	req := &datapb.RegisterNodeRequest{
-	//		Base: &commonpb.MsgBase{},
-	//		Address: &commonpb.Address{},
-	//	}
-	//	rsp, err := dsServer.RegisterNode(ctx, req)
-	//	assert.Nil(t, err)
-	//	assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
-	//})
-
 	t.Run("flush", func(t *testing.T) {
 		req := &datapb.FlushRequest{}
 		rsp, err := dsServer.Flush(ctx, req)
@@ -146,13 +136,6 @@ func TestRun(t *testing.T) {
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
 	})
 
-	t.Run("show segments", func(t *testing.T) {
-		req := &datapb.ShowSegmentsRequest{}
-		rsp, err := dsServer.ShowSegments(ctx, req)
-		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
-	})
-
 	t.Run("get segment states", func(t *testing.T) {
 		req := &datapb.GetSegmentStatesRequest{}
 		rsp, err := dsServer.GetSegmentStates(ctx, req)
@@ -163,13 +146,6 @@ func TestRun(t *testing.T) {
 	t.Run("get insert binlog paths", func(t *testing.T) {
 		req := &datapb.GetInsertBinlogPathsRequest{}
 		rsp, err := dsServer.GetInsertBinlogPaths(ctx, req)
-		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
-	})
-
-	t.Run("get insert channels", func(t *testing.T) {
-		req := &datapb.GetInsertChannelsRequest{}
-		rsp, err := dsServer.GetInsertChannels(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
 	})

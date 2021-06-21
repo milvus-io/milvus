@@ -105,57 +105,6 @@ func TestAssignSegmentID(t *testing.T) {
 	}
 }
 
-func TestShowSegments(t *testing.T) {
-	svr := newTestServer(t, nil)
-	defer closeTestServer(t, svr)
-	segments := []struct {
-		id           UniqueID
-		collectionID UniqueID
-		partitionID  UniqueID
-	}{
-		{0, 0, 0},
-		{1, 0, 0},
-		{2, 0, 1},
-		{3, 1, 1},
-	}
-	for _, segment := range segments {
-		err := svr.meta.AddSegment(&datapb.SegmentInfo{
-			ID:           segment.id,
-			CollectionID: segment.collectionID,
-			PartitionID:  segment.partitionID,
-		})
-		assert.Nil(t, err)
-	}
-	cases := []struct {
-		description  string
-		collectionID UniqueID
-		partitionID  UniqueID
-		expected     []UniqueID
-	}{
-		{"show segments normally", 0, 0, []UniqueID{0, 1}},
-		{"show non-existed segments", 1, 2, []UniqueID{}},
-	}
-
-	for _, test := range cases {
-		t.Run(test.description, func(t *testing.T) {
-			resp, err := svr.ShowSegments(context.TODO(), &datapb.ShowSegmentsRequest{
-				Base: &commonpb.MsgBase{
-					MsgType:   0,
-					MsgID:     0,
-					Timestamp: 0,
-					SourceID:  0,
-				},
-				CollectionID: test.collectionID,
-				PartitionID:  test.partitionID,
-				DbID:         0,
-			})
-			assert.Nil(t, err)
-			assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-			assert.ElementsMatch(t, test.expected, resp.SegmentIDs)
-		})
-	}
-}
-
 func TestFlush(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)

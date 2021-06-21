@@ -157,11 +157,3 @@ func (data *DataMock) GetSegmentStates(ctx context.Context, req *datapb.GetSegme
 
 	return ret, nil
 }
-func (data *DataMock) GetInsertChannels(ctx context.Context, req *datapb.GetInsertChannelsRequest) (*internalpb.StringList, error) {
-	return &internalpb.StringList{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Values: []string{"insert-0", "insert-1", "insert-2", "insert-3"},
-	}, nil
-}
