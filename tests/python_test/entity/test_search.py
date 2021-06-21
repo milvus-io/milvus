@@ -962,7 +962,6 @@ class TestSearchDSL(object):
     ******************************************************************
     """
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     def test_query_no_must(self, connect, collection):
         '''
         method: build query without must expr
@@ -973,7 +972,6 @@ class TestSearchDSL(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_query_no_vector_term_only(self, connect, collection):
         '''
@@ -988,7 +986,6 @@ class TestSearchDSL(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_query_no_vector_range_only(self, connect, collection):
         '''
@@ -1011,7 +1008,6 @@ class TestSearchDSL(object):
         assert len(res) == nq
         assert len(res[0]) == default_top_k
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_query_wrong_format(self, connect, collection):
         '''
@@ -1026,7 +1022,6 @@ class TestSearchDSL(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_query_empty(self, connect, collection):
         '''
@@ -1178,7 +1173,6 @@ class TestSearchDSL(object):
     ******************************************************************
     """
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.level(2)
     def test_query_term_key_error(self, connect, collection):
         '''
@@ -1198,7 +1192,6 @@ class TestSearchDSL(object):
     def get_invalid_term(self, request):
         return request.param
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.level(2)
     def test_query_term_wrong_format(self, connect, collection, get_invalid_term):
         '''
@@ -1239,7 +1232,6 @@ class TestSearchDSL(object):
         assert len(res[0]) == default_top_k
         connect.drop_collection(collection_term)
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.level(2)
     def test_query_term_one_field_not_existed(self, connect, collection):
         '''
@@ -1260,7 +1252,6 @@ class TestSearchDSL(object):
     ******************************************************************
     """
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_query_range_key_error(self, connect, collection):
         '''
@@ -1280,7 +1271,6 @@ class TestSearchDSL(object):
     def get_invalid_range(self, request):
         return request.param
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.level(2)
     def test_query_range_wrong_format(self, connect, collection, get_invalid_range):
         '''
@@ -1294,7 +1284,6 @@ class TestSearchDSL(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.level(2)
     def test_query_range_string_ranges(self, connect, collection):
         '''
@@ -1347,7 +1336,6 @@ class TestSearchDSL(object):
         assert len(res) == nq
         assert len(res[0]) == default_top_k
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_query_range_one_field_not_existed(self, connect, collection):
         '''
@@ -1415,7 +1403,6 @@ class TestSearchDSL(object):
         assert len(res) == nq
         assert len(res[0]) == 0
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.level(2)
     def test_query_single_term_multi_fields(self, connect, collection):
         '''
@@ -1479,7 +1466,6 @@ class TestSearchDSL(object):
         assert len(res) == nq
         assert len(res[0]) == 0
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.level(2)
     def test_query_single_range_multi_fields(self, connect, collection):
         '''
@@ -1537,7 +1523,6 @@ class TestSearchDSL(object):
     ******************************************************************
     """
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     def test_query_multi_vectors_same_field(self, connect, collection):
         '''
         method: build query with two vectors same field
@@ -1561,7 +1546,6 @@ class TestSearchDSLBools(object):
     ******************************************************************
     """
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.level(2)
     def test_query_no_bool(self, connect, collection):
         '''
@@ -1574,7 +1558,6 @@ class TestSearchDSLBools(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_query_should_only_term(self, connect, collection):
         '''
@@ -1586,7 +1569,6 @@ class TestSearchDSLBools(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_query_should_only_vector(self, connect, collection):
         '''
@@ -1598,7 +1580,6 @@ class TestSearchDSLBools(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     def test_query_must_not_only_term(self, connect, collection):
         '''
         method: build query without must, with must_not.term instead
@@ -1609,7 +1590,6 @@ class TestSearchDSLBools(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     def test_query_must_not_vector(self, connect, collection):
         '''
         method: build query without must, with must_not.vector instead
@@ -1620,7 +1600,6 @@ class TestSearchDSLBools(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, query)
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     def test_query_must_should(self, connect, collection):
         '''
         method: build query must, and with should.term
@@ -1675,14 +1654,12 @@ class TestSearchInvalid(object):
         #         pytest.skip("sq8h not support in CPU mode")
         return request.param
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.level(2)
     def test_search_with_invalid_collection(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             res = connect.search(collection_name, default_query)
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.level(2)
     def test_search_with_invalid_partition(self, connect, collection, get_invalid_partition):
         # tag = " "
@@ -1690,14 +1667,12 @@ class TestSearchInvalid(object):
         with pytest.raises(Exception) as e:
             res = connect.search(collection, default_query, partition_names=tag)
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.level(2)
     def test_search_with_invalid_field_name(self, connect, collection, get_invalid_field):
         fields = [get_invalid_field]
         with pytest.raises(Exception) as e:
             res = connect.search(collection, default_query, fields=fields)
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.level(1)
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_search_with_not_existed_field(self, connect, collection):
@@ -1716,7 +1691,6 @@ class TestSearchInvalid(object):
     def get_top_k(self, request):
         yield request.param
 
-    @pytest.mark.skip("bigsheep-search-without-load")
     @pytest.mark.level(1)
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_search_with_invalid_top_k(self, connect, collection, get_top_k):
