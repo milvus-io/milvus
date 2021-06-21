@@ -13,11 +13,15 @@ package querynode
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
 	"reflect"
 	"sync"
+
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/log"
@@ -409,6 +413,228 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 	}
 }
 
+func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]byte) (*schemapb.SearchResultData, error) {
+	if len(rawHits) == 0 {
+		return nil, fmt.Errorf("empty results")
+	}
+
+	var hits []*milvuspb.Hits
+	for _, rawHit := range rawHits {
+		var hit milvuspb.Hits
+		err := proto.Unmarshal(rawHit, &hit)
+		if err != nil {
+			return nil, err
+		}
+		hits = append(hits, &hit)
+	}
+
+	blobOffset := 0
+	// skip id
+	numQuereis := len(rawHits)
+	pbHits := &milvuspb.Hits{}
+	err := proto.Unmarshal(rawHits[0], pbHits)
+	if err != nil {
+		return nil, err
+	}
+	topK := len(pbHits.IDs)
+
+	blobOffset += 8
+	var ids []int64
+	var scores []float32
+	for _, hit := range hits {
+		ids = append(ids, hit.IDs...)
+		scores = append(scores, hit.Scores...)
+	}
+
+	finalResult := &schemapb.SearchResultData{
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: ids,
+				},
+			},
+		},
+		Scores:     scores,
+		TopK:       int64(topK),
+		NumQueries: int64(numQuereis),
+	}
+
+	for _, fieldID := range fieldIDs {
+		fieldMeta, err := schema.GetFieldFromID(fieldID)
+		if err != nil {
+			return nil, err
+		}
+		switch fieldMeta.DataType {
+		case schemapb.DataType_Bool:
+			blobLen := 1
+			var colData []bool
+			for _, hit := range hits {
+				for _, row := range hit.RowData {
+					dataBlob := row[blobOffset : blobOffset+blobLen]
+					data := dataBlob[0]
+					colData = append(colData, data != 0)
+				}
+			}
+			newCol := &schemapb.FieldData{
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_BoolData{
+							BoolData: &schemapb.BoolArray{
+								Data: colData,
+							},
+						},
+					},
+				},
+			}
+			finalResult.FieldsData = append(finalResult.FieldsData, newCol)
+			blobOffset += blobLen
+		case schemapb.DataType_Int8:
+			blobLen := 1
+			var colData []int32
+			for _, hit := range hits {
+				for _, row := range hit.RowData {
+					dataBlob := row[blobOffset : blobOffset+blobLen]
+					data := int32(dataBlob[0])
+					colData = append(colData, data)
+				}
+			}
+			newCol := &schemapb.FieldData{
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{
+								Data: colData,
+							},
+						},
+					},
+				},
+			}
+			finalResult.FieldsData = append(finalResult.FieldsData, newCol)
+			blobOffset += blobLen
+		case schemapb.DataType_Int16:
+			blobLen := 2
+			var colData []int32
+			for _, hit := range hits {
+				for _, row := range hit.RowData {
+					dataBlob := row[blobOffset : blobOffset+blobLen]
+					data := int32(int16(binary.LittleEndian.Uint16(dataBlob)))
+					colData = append(colData, data)
+				}
+			}
+			newCol := &schemapb.FieldData{
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{
+								Data: colData,
+							},
+						},
+					},
+				},
+			}
+			finalResult.FieldsData = append(finalResult.FieldsData, newCol)
+			blobOffset += blobLen
+		case schemapb.DataType_Int32:
+			blobLen := 4
+			var colData []int32
+			for _, hit := range hits {
+				for _, row := range hit.RowData {
+					dataBlob := row[blobOffset : blobOffset+blobLen]
+					data := int32(binary.LittleEndian.Uint32(dataBlob))
+					colData = append(colData, data)
+				}
+			}
+			newCol := &schemapb.FieldData{
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{
+								Data: colData,
+							},
+						},
+					},
+				},
+			}
+			finalResult.FieldsData = append(finalResult.FieldsData, newCol)
+			blobOffset += blobLen
+		case schemapb.DataType_Int64:
+			blobLen := 8
+			var colData []int64
+			for _, hit := range hits {
+				for _, row := range hit.RowData {
+					dataBlob := row[blobOffset : blobOffset+blobLen]
+					data := int64(binary.LittleEndian.Uint64(dataBlob))
+					colData = append(colData, data)
+				}
+			}
+			newCol := &schemapb.FieldData{
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: colData,
+							},
+						},
+					},
+				},
+			}
+			finalResult.FieldsData = append(finalResult.FieldsData, newCol)
+			blobOffset += blobLen
+		case schemapb.DataType_Float:
+			blobLen := 4
+			var colData []float32
+			for _, hit := range hits {
+				for _, row := range hit.RowData {
+					dataBlob := row[blobOffset : blobOffset+blobLen]
+					data := math.Float32frombits(binary.LittleEndian.Uint32(dataBlob))
+					colData = append(colData, data)
+				}
+			}
+			newCol := &schemapb.FieldData{
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_FloatData{
+							FloatData: &schemapb.FloatArray{
+								Data: colData,
+							},
+						},
+					},
+				},
+			}
+			finalResult.FieldsData = append(finalResult.FieldsData, newCol)
+			blobOffset += blobLen
+		case schemapb.DataType_Double:
+			blobLen := 8
+			var colData []float64
+			for _, hit := range hits {
+				for _, row := range hit.RowData {
+					dataBlob := row[blobOffset : blobOffset+blobLen]
+					data := math.Float64frombits(binary.LittleEndian.Uint64(dataBlob))
+					colData = append(colData, data)
+				}
+			}
+			newCol := &schemapb.FieldData{
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_DoubleData{
+							DoubleData: &schemapb.DoubleArray{
+								Data: colData,
+							},
+						},
+					},
+				},
+			}
+			finalResult.FieldsData = append(finalResult.FieldsData, newCol)
+			blobOffset += blobLen
+		case schemapb.DataType_FloatVector:
+		case schemapb.DataType_BinaryVector:
+			return nil, fmt.Errorf("unsupported")
+		default:
+		}
+	}
+	return finalResult, nil
+}
+
 // TODO:: cache map[dsl]plan
 // TODO: reBatched search requests
 func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
@@ -422,6 +648,11 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 	if err != nil {
 		return err
 	}
+	schema, err := typeutil.CreateSchemaHelper(collection.schema)
+	if err != nil {
+		return err
+	}
+
 	var plan *Plan
 	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
 		expr := searchMsg.SerializedExprPlan
@@ -589,6 +820,20 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 			//log.Debug("hits msg  = ", unMarshaledHit)
 			offset += len
 		}
+
+		// TODO: remove inefficient code in cgo and use SearchResultData directly
+		// TODO: Currently add a translate layer from hits to SearchResultData
+		// TODO: hits marshal and unmarshal is likely bottleneck
+
+		transformed, err := translateHits(schema, searchMsg.OutputFieldsId, hits)
+		if err != nil {
+			return err
+		}
+		byteBlobs, err := proto.Marshal(transformed)
+		if err != nil {
+			return err
+		}
+
 		resultChannelInt := 0
 		searchResultMsg := &msgstream.SearchResultMsg{
 			BaseMsg: msgstream.BaseMsg{Ctx: searchMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}},
@@ -602,6 +847,9 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 				Status:                   &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 				ResultChannelID:          searchMsg.ResultChannelID,
 				Hits:                     hits,
+				SlicedBlob:               byteBlobs,
+				SlicedOffset:             1,
+				SlicedNumCount:           1,
 				MetricType:               plan.getMetricType(),
 				SealedSegmentIDsSearched: sealedSegmentSearched,
 				ChannelIDsSearched:       collection.getPChannels(),
@@ -686,7 +934,6 @@ func (s *searchCollection) publishFailedSearchResult(searchMsg *msgstream.Search
 			},
 			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: errMsg},
 			ResultChannelID: searchMsg.ResultChannelID,
-			Hits:            [][]byte{},
 		},
 	}
 
