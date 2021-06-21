@@ -188,6 +188,9 @@ func (m *meta) addCollection(collectionID UniqueID, schema *schemapb.CollectionS
 		if err != nil {
 			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
 		}
+		log.Debug("add collection",
+			zap.Any("collectionID", collectionID),
+		)
 		return nil
 	}
 
