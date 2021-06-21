@@ -4,11 +4,12 @@
 
 <img src="./figs/root_coord.png">
 
-#### 10.1 Master Interface
+#### 10.1 Root Coordinator Interface
 
 ```go
-type MasterService interface {
+type RootCoord interface {
 	Component
+	TimeTickProvider
 
 	//DDL request
 	CreateCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
@@ -29,12 +30,12 @@ type MasterService interface {
 	//global timestamp allocator
 	AllocTimestamp(ctx context.Context, req *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error)
 	AllocID(ctx context.Context, req *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error)
+	UpdateChannelTimeTick(ctx context.Context, req *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error)
 
 	//segment
 	DescribeSegment(ctx context.Context, req *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
 	ShowSegments(ctx context.Context, req *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error)
-
-	GetDdChannel(ctx context.Context) (*milvuspb.StringResponse, error)
+	ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error)
 }
 ```
 
@@ -53,12 +54,15 @@ type MsgBase struct {
 
 * *CreateCollection*
 
+<img src="./figs/root_coord_create_collection.png">
+
 ```go
 type CreateCollectionRequest struct {
 	Base           *commonpb.MsgBase
 	DbName         string
 	CollectionName string
 	Schema         []byte
+    ShardsNum      int32
 }
 ```
 
@@ -79,6 +83,7 @@ type HasCollectionRequest struct {
 	Base           *commonpb.MsgBase
 	DbName         string
 	CollectionName string
+    TimeStamp      Timestamp
 }
 ```
 
@@ -90,6 +95,7 @@ type DescribeCollectionRequest struct {
 	DbName         string
 	CollectionName string
 	CollectionID   UniqueID
+    TimeStamp      Timestamp
 }
 
 type CollectionSchema struct {
@@ -102,21 +108,24 @@ type CollectionSchema struct {
 type DescribeCollectionResponse struct {
 	Status       *commonpb.Status
 	Schema       *schemapb.CollectionSchema
-	CollectionID int64
+	CollectionID UniqueID
 }
 ```
 
 * *ShowCollections*
 
 ```go
-type ShowCollectionRequest struct {
+type ShowCollectionsRequest struct {
 	Base   *commonpb.MsgBase
 	DbName string
+    Timestamp Timestamp
+    Type ShowCollectionsType
 }
 
 type ShowCollectionResponse struct {
 	Status          *commonpb.Status
 	CollectionNames []string
+    CollectionIds   []UniqueID
 }
 ```
 
@@ -202,7 +211,18 @@ type ShowSegmentsResponse struct {
 }
 ```
 
+* *ReleaseDQLMessageStream*	
+```go
+type ReleaseDQLMessageStreamRequest struct {
+	Base         *commonpb.MsgBase
+	DbID         UniqueID
+	CollectionID UniqueID
+}
+
+```
+
 * *CreateIndex*
+<img src="./figs/root_coord_create_index.png">
 
 ```go
 type CreateIndexRequest struct {
@@ -227,8 +247,9 @@ type DescribeIndexRequest struct {
 
 type IndexDescription struct {
 	IndexName string
-	IndexID   UniqueID
+	IndexID   UniqueID 
 	Params    []*commonpb.KeyValuePair
+	FieldName string
 }
 
 type DescribeIndexResponse struct {
@@ -252,37 +273,46 @@ type DropIndexRequest struct {
 * *AllocTimestamp*
 
 ```go
-
-type BaseRequest struct {
-	Done  chan error
-	Valid bool
+type AllocTimestampRequest struct {
+	Base  *commonpb.MsgBase
+	Count uint32
 }
 
-type TSORequest struct {
-	BaseRequest
-	timestamp Timestamp
-	count     uint32
+type AllocTimestampResponse struct {
+	Status    *commonpb.Status
+	Timestamp UniqueID 
+	Count     uint32
 }
 ```
 
 * *AllocID*
 
 ```go
-type BaseRequest struct {
-	Done  chan error
-	Valid bool
+type AllocIDRequest struct {
+	Base  *commonpb.MsgBase
+	Count uint32
 }
 
-type IDRequest struct {
-	BaseRequest
-	id    UniqueID
-	count uint32
+type AllocIDResponse struct {
+	Status *commonpb.Status
+	ID     UniqueID
+	Count  uint32
 }
 ```
 
+* *UpdateChannelTimeTick*
+```go
+type ChannelTimeTickMsg struct {
+	Base             *commonpb.MsgBase
+	ChannelNames     []string
+	Timestamps       []Timestamp
+	DefaultTimestamp Timestamp 
+}
+```
 
+#### 10.2 Dd (Data definitions) Message 
 
-#### 10.2 Dd (Data definitions) Channel
+`RC` would put `Dd Message` into the `DML MsgSteams`
 
 * *CreateCollectionMsg*
 
