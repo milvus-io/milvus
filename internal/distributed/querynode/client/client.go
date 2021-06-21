@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/milvus-io/milvus/internal/log"
@@ -95,6 +96,9 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	ret, err := caller()
 	if err == nil {
 		return ret, nil
+	}
+	if c.conn.GetState() == connectivity.Shutdown {
+		return ret, err
 	}
 	for i := 0; i < c.recallTry; i++ {
 		err = c.connect()
