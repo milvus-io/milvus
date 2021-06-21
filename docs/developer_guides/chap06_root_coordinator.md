@@ -403,106 +403,111 @@ type DropPartitionMsg struct {
 ```
 
 #### 10.3 Create Index automatically 
+`RC` would notify `IC(Index Coord)` to build index automatically when the segment has been flushed.
+<img src="./figs/root_coord_create_index_automatically.png">
 
-
-
-
-#### 10.2 Master Instance
+#### 10.4 RootCoord Instance
 
 ```go
-type Master interface {
+type Core struct {
 	MetaTable *metaTable
 	//id allocator
-	idAllocator *allocator.GlobalIDAllocator
+	IDAllocator       func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error)
+	IDAllocatorUpdate func() error
+
 	//tso allocator
-	tsoAllocator *tso.GlobalTSOAllocator
-	
+	TSOAllocator       func(count uint32) (typeutil.Timestamp, error)
+	TSOAllocatorUpdate func() error
+
 	//inner members
 	ctx     context.Context
 	cancel  context.CancelFunc
 	etcdCli *clientv3.Client
 	kvBase  *etcdkv.EtcdKV
-	metaKV  *etcdkv.EtcdKV
-	
-	//setMsgStreams, receive time tick from proxy service time tick channel
-	ProxyTimeTickChan chan typeutil.Timestamp
-	
+
 	//setMsgStreams, send time tick into dd channel and time tick channel
 	SendTimeTick func(t typeutil.Timestamp) error
-	
+
 	//setMsgStreams, send create collection into dd channel
-	DdCreateCollectionReq func(req *internalpb.CreateCollectionRequest) error
-	
+	SendDdCreateCollectionReq func(ctx context.Context, req *internalpb.CreateCollectionRequest, channelNames []string) error
+
 	//setMsgStreams, send drop collection into dd channel, and notify the proxy to delete this collection
-	DdDropCollectionReq func(req *internalpb.DropCollectionRequest) error
-	
+	SendDdDropCollectionReq func(ctx context.Context, req *internalpb.DropCollectionRequest, channelNames []string) error
+
 	//setMsgStreams, send create partition into dd channel
-	DdCreatePartitionReq func(req *internalpb.CreatePartitionRequest) error
-	
+	SendDdCreatePartitionReq func(ctx context.Context, req *internalpb.CreatePartitionRequest, channelNames []string) error
+
 	//setMsgStreams, send drop partition into dd channel
-	DdDropPartitionReq func(req *internalpb.DropPartitionRequest) error
-	
-	//setMsgStreams segment channel, receive segment info from data service, if master create segment
-	DataServiceSegmentChan chan *datapb.SegmentInfo
-	
-	//setMsgStreams ,if segment flush completed, data node would put segment id into msg stream
-	DataNodeSegmentFlushCompletedChan chan typeutil.UniqueID
-	
+	SendDdDropPartitionReq func(ctx context.Context, req *internalpb.DropPartitionRequest, channelNames []string) error
+
+	// if rootcoord create segment, datacoord will put segment msg into this channel
+	DataCoordSegmentChan <-chan *ms.MsgPack
+
+	// if segment flush completed, data node would put segment msg into this channel
+	DataNodeFlushedSegmentChan <-chan *ms.MsgPack
+
 	//get binlog file path from data service,
-	GetBinlogFilePathsFromDataServiceReq func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error)
-	
+	CallGetBinlogFilePathsService func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error)
+	CallGetNumRowsService         func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error)
+
 	//call index builder's client to build index, return build id
-	BuildIndexReq func(binlog []string, typeParams []*commonpb.KeyValuePair, indexParams []*commonpb.KeyValuePair, indexID typeutil.UniqueID, indexName string) (typeutil.UniqueID, error)
-	DropIndexReq  func(indexID typeutil.UniqueID) error
-	
-	//proxy service interface, notify proxy service to drop collection
-	InvalidateCollectionMetaCache func(ts typeutil.Timestamp, dbName string, collectionName string) error
-	
+	CallBuildIndexService func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error)
+	CallDropIndexService  func(ctx context.Context, indexID typeutil.UniqueID) error
+
+	NewProxyClient func(sess *sessionutil.Session) (types.ProxyNode, error)
+
 	//query service interface, notify query service to release collection
-	ReleaseCollection func(ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error
-	
-	// put create index task into this chan
-	indexTaskQueue chan *CreateIndexTask
-	
+	CallReleaseCollectionService func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error
+
 	//dd request scheduler
-	ddReqQueue      chan reqTask //dd request will be push into this chan
-	lastDdTimeStamp typeutil.Timestamp
-	
+	ddReqQueue chan reqTask //dd request will be push into this chan
+
+	//dml channels
+	dmlChannels *dmlChannels
+
+	//ProxyNode manager
+	proxyNodeManager *proxyNodeManager
+
+	// proxy clients
+	proxyClientManager *proxyClientManager
+
+	// channel timetick
+	chanTimeTick *timetickSync
+
 	//time tick loop
 	lastTimeTick typeutil.Timestamp
-	
+
 	//states code
 	stateCode atomic.Value
-	
+
 	//call once
 	initOnce  sync.Once
 	startOnce sync.Once
 	//isInit    atomic.Value
-	
+
+	session     *sessionutil.Session
+	sessCloseCh <-chan bool
+
 	msFactory ms.Factory
 }
 ```
 
 
-#### 10.3 Data definition Request Scheduler
+#### 10.5 Data definition Request Scheduler
 
-###### 10.2.1 Task
+###### 10.5.1 Task
 
-Master receives data definition requests via grpc. Each request (described by a proto) will be wrapped as a task for further scheduling. The task interface is
+RootCoord receives data definition requests via grpc. Each request (described by a proto) will be wrapped as a task for further scheduling. The task interface is
 
 ```go
 type reqTask interface {
 	Ctx() context.Context
 	Type() commonpb.MsgType
-	Ts() (typeutil.Timestamp, error)
-	IgnoreTimeStamp() bool
 	Execute(ctx context.Context) error
 	WaitToFinish() error
 	Notify(err error)
 }
 ```
-
-
 
 A task example is as follows. In this example, we wrap a CreateCollectionRequest (a proto) as a createCollectionTask. The wrapper need to implement task interfaces.
 
@@ -513,45 +518,22 @@ type CreateCollectionReqTask struct {
 }
 
 // Task interfaces
-func (task *createCollectionTask) Ctx() context.Context
-func (task *createCollectionTask) Type() ReqType
-func (task *createCollectionTask) Ts() Timestamp
-func (task *createCollectionTask) IgnoreTimeStamp() bool
-func (task *createCollectionTask) Execute() error
-func (task *createCollectionTask) WaitToFinish() error
-func (task *createCollectionTask) Notify() error
-```
-
-
-
-// TODO remove?
-###### 10.2.3 Scheduler
-
-```go
-type ddRequestScheduler struct {
-	reqQueue *task chan
-	ddStream *MsgStream
-}
-
-func (rs *ddRequestScheduler) Enqueue(task *task) error
-func (rs *ddRequestScheduler) schedule() *task // implement scheduling policy
+func (t *CreateCollectionReqTask) Ctx() context.Context
+func (t *CreateCollectionReqTask) Type() commonpb.MsgType
+func (t *CreateCollectionReqTask) Execute(ctx context.Context) error
+func (t *CreateCollectionReqTask) WaitToFinish() error
+func (t *CreateCollectionReqTask) Notify(err error)
 ```
 
 In most cases, a data definition task need to
 
 * update system's meta data (via $metaTable$),
-* and synchronize the data definition request to other related system components so that the quest can take effect system wide.
-
-Master
+* send `DD Message` into related `DML MsgStream`, so that the `Data Node` and `Query Node` would take it 
 
 
+#### 10.6 Meta Table
 
-
-
-//TODO remove?
-#### 10.4 Meta Table
-
-###### 10.4.1 Meta
+###### 10.6.1 Meta
 
 * Tenant Meta
 
@@ -577,96 +559,119 @@ message ProxyMeta {
 * Collection Meta
 
 ```protobuf
-message CollectionMeta {
-  uint64 id=1;
-  schema.CollectionSchema schema=2;
-  uint64 create_time=3;
-  repeated uint64 segment_ids=4;
-  repeated string partition_tags=5;
+message PartitionInfo {
+  string partition_name = 1;
+  int64 partitionID = 2;
+  repeated int64 segmentIDs = 3;
+}
+
+message IndexInfo {
+  string index_name = 1;
+  int64 indexID = 2;
+  repeated common.KeyValuePair index_params = 3;
+}
+
+message FieldIndexInfo{
+  int64 filedID = 1;
+  int64 indexID = 2;
+}
+
+message CollectionInfo {
+  int64 ID = 1;
+  schema.CollectionSchema schema = 2;
+  uint64 create_time = 3;
+  repeated int64 partitionIDs = 4;
+  repeated FieldIndexInfo field_indexes = 5;
+  repeated string virtual_channel_names = 6;
+  repeated string physical_channel_names = 7;
 }
 ```
 
 * Segment Meta
 
 ```protobuf
-message SegmentMeta {
-  uint64 segment_id=1;
-  uint64 collection_id =2;
-  string partition_tag=3;
-  int32 channel_start=4;
-  int32 channel_end=5;
-  uint64 open_time=6;
-  uint64 close_time=7;
-  int64 num_rows=8;
+message SegmentIndexInfo {
+  int64 segmentID = 1;
+  int64 fieldID = 2;
+  int64 indexID = 3;
+  int64 buildID = 4;
+  bool enable_index = 5;
 }
 ```
 
-
-
-###### 10.4.2 KV pairs in EtcdKV
+###### 10.6.2 KV pairs in EtcdKV
 
 ```go
 "tenant/$tenantId" string -> tenantMetaBlob string
 "proxy/$proxyId" string -> proxyMetaBlob string
-"collection/$collectionId" string -> collectionMetaBlob string
-"segment/$segmentId" string -> segmentMetaBlob string
+"collection/$collectionId" string -> collectionInfoBlob string
+"partition/$collectionId/$partitionId" string -> partitionInfoBlob string
+"index/$collectionId/$indexId" string -> IndexInfoBlob string
+"segment-index/$collectionId/$indexId/$partitionId/$segmentId" -> segmentIndexInfoBlog string
+""
 ```
 
-Note that *tenantId*, *proxyId*, *collectionId*, *segmentId* are unique strings converted from int64.
+Note that *tenantId*, *proxyId*, *collectionId*, *partitionId*, *indexId*, *segmentId* are unique strings converted from int64.
 
-*tenantMeta*, *proxyMeta*, *collectionMeta*, *segmentMeta* are serialized protos.
+*tenantMetaBlob*, *proxyMetaBlob*, *collectionInfoBlob*, *partitionInfoBlob*, *IndexInfoBlob*, *segmentIndexInfoBlog* are serialized protos.
 
 
-
-###### 10.4.3 Meta Table
+###### 10.6.3 Meta Table
 
 ```go
 type metaTable struct {
-	client             kv.TxnBase                                                       // client of a reliable kv service, i.e. etcd client
-	tenantID2Meta      map[typeutil.UniqueID]pb.TenantMeta                              // tenant id to tenant meta
-	proxyID2Meta       map[typeutil.UniqueID]pb.ProxyMeta                               // proxy id to proxy meta
-	collID2Meta        map[typeutil.UniqueID]pb.CollectionInfo                          // collection id to collection meta,
-	collName2ID        map[string]typeutil.UniqueID                                     // collection name to collection id
-	partitionID2Meta   map[typeutil.UniqueID]pb.PartitionInfo                           // partition id -> partition meta
-	segID2IndexMeta    map[typeutil.UniqueID]*map[typeutil.UniqueID]pb.SegmentIndexInfo // segment id -> index id -> segment index meta
-	indexID2Meta       map[typeutil.UniqueID]pb.IndexInfo                               // index id ->index meta
-	segID2CollID       map[typeutil.UniqueID]typeutil.UniqueID                          // segment id -> collection id
-	partitionID2CollID map[typeutil.UniqueID]typeutil.UniqueID                          // partition id -> collection id
-	
+	client             kv.SnapShotKV
+	tenantID2Meta      map[typeutil.UniqueID]pb.TenantMeta
+	proxyID2Meta       map[typeutil.UniqueID]pb.ProxyMeta
+	collID2Meta        map[typeutil.UniqueID]pb.CollectionInfo
+	collName2ID        map[string]typeutil.UniqueID
+	partitionID2Meta   map[typeutil.UniqueID]pb.PartitionInfo
+	segID2IndexMeta    map[typeutil.UniqueID]*map[typeutil.UniqueID]pb.SegmentIndexInfo
+	indexID2Meta       map[typeutil.UniqueID]pb.IndexInfo
+	segID2CollID       map[typeutil.UniqueID]typeutil.UniqueID
+	segID2PartitionID  map[typeutil.UniqueID]typeutil.UniqueID
+	flushedSegID       map[typeutil.UniqueID]bool
+	partitionID2CollID map[typeutil.UniqueID]typeutil.UniqueID
+	vChan2Chan         map[string]string
+
 	tenantLock sync.RWMutex
 	proxyLock  sync.RWMutex
 	ddLock     sync.RWMutex
 }
 
-func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionInfo, idx []*pb.IndexInfo) error
-func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID) error
-func (mt *metaTable) HasCollection(collID typeutil.UniqueID) bool
-func (mt *metaTable) GetCollectionByID(collectionID typeutil.UniqueID) (*pb.CollectionInfo, error)
-func (mt *metaTable) GetCollectionByName(collectionName string) (*pb.CollectionInfo, error)
+func NewMetaTable(kv kv.SnapShotKV) (*metaTable, error)
+
+func (mt *metaTable) AddTenant(te *pb.TenantMeta) (typeutil.Timestamp, error)
+func (mt *metaTable) AddProxy(po *pb.ProxyMeta) (typeutil.Timestamp, error)
+func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionInfo, idx []*pb.IndexInfo, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, error)
+func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, error)
+func (mt *metaTable) HasCollection(collID typeutil.UniqueID, ts typeutil.Timestamp) bool
+func (mt *metaTable) GetCollectionByID(collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*pb.CollectionInfo, error)
+func (mt *metaTable) GetCollectionByName(collectionName string, ts typeutil.Timestamp) (*pb.CollectionInfo, error)
 func (mt *metaTable) GetCollectionBySegmentID(segID typeutil.UniqueID) (*pb.CollectionInfo, error)
-func (mt *metaTable) ListCollections() ([]string, error)
-func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID) error
-func (mt *metaTable) HasPartition(collID typeutil.UniqueID, partitionName string) bool
-func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName string) (typeutil.UniqueID, error)
-func (mt *metaTable) GetPartitionByID(partitionID typeutil.UniqueID) (pb.PartitionInfo, error)
-func (mt *metaTable) AddSegment(seg *datapb.SegmentInfo) error
-func (mt *metaTable) AddIndex(seg *pb.SegmentIndexInfo) error
-func (mt *metaTable) DropIndex(collName, fieldName, indexName string) (typeutil.UniqueID, bool, error)
+func (mt *metaTable) ListCollections(ts typeutil.Timestamp) (map[string]typeutil.UniqueID, error)
+func (mt *metaTable) ListCollectionVirtualChannels() []string
+func (mt *metaTable) ListCollectionPhysicalChannels() []string
+func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, error)
+func (mt *metaTable) GetPartitionByName(collID typeutil.UniqueID, partitionName string, ts typeutil.Timestamp) (pb.PartitionInfo, error)
+func (mt *metaTable) HasPartition(collID typeutil.UniqueID, partitionName string, ts typeutil.Timestamp) bool
+func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName string, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, typeutil.UniqueID, error)
+func (mt *metaTable) GetPartitionByID(collID typeutil.UniqueID, partitionID typeutil.UniqueID, ts typeutil.Timestamp) (pb.PartitionInfo, error)
+func (mt *metaTable) AddSegment(segInfos []*datapb.SegmentInfo, msgStartPos string, msgEndPos string) (typeutil.Timestamp, error)
+func (mt *metaTable) AddIndex(segIdxInfos []*pb.SegmentIndexInfo, msgStartPos string, msgEndPos string) (typeutil.Timestamp, error)
+func (mt *metaTable) DropIndex(collName, fieldName, indexName string) (typeutil.Timestamp, typeutil.UniqueID, bool, error)
 func (mt *metaTable) GetSegmentIndexInfoByID(segID typeutil.UniqueID, filedID int64, idxName string) (pb.SegmentIndexInfo, error)
 func (mt *metaTable) GetFieldSchema(collName string, fieldName string) (schemapb.FieldSchema, error)
-func (mt *metaTable) unlockGetFieldSchema(collName string, fieldName string) (schemapb.FieldSchema, error)
 func (mt *metaTable) IsSegmentIndexed(segID typeutil.UniqueID, fieldSchema *schemapb.FieldSchema, indexParams []*commonpb.KeyValuePair) bool
-func (mt *metaTable) unlockIsSegmentIndexed(segID typeutil.UniqueID, fieldSchema *schemapb.FieldSchema, indexParams []*commonpb.KeyValuePair) bool
 func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, idxInfo *pb.IndexInfo) ([]typeutil.UniqueID, schemapb.FieldSchema, error)
-func (mt *metaTable) GetIndexByName(collName string, fieldName string, indexName string) ([]pb.IndexInfo, error)
+func (mt *metaTable) GetIndexByName(collName, indexName string) (pb.CollectionInfo, []pb.IndexInfo, error)
 func (mt *metaTable) GetIndexByID(indexID typeutil.UniqueID) (*pb.IndexInfo, error)
-
-func NewMetaTable(kv kv.TxnBase) (*metaTable, error)
+func (mt *metaTable) AddFlushedSegment(segID typeutil.UniqueID) error
 ```
 
-*metaTable* maintains meta both in memory and *etcdKV*. It keeps meta's consistency in both sides. All its member functions may be called concurrently.
-
-*  *AddSegment(seg \*SegmentMeta)* first update *CollectionMeta* by adding the segment id, then it adds a new SegmentMeta to *kv*. All the modifications are done transactionally.
+* *metaTable* maintains meta both in memory and *etcdKV*. It keeps meta's consistency in both sides. All its member functions may be called concurrently.
+ 
+* for *HasCollection*, *GetCollectionByID*, *GetCollectionByName*, *ListCollections*, if the argument of `ts` is none-zero, then *metaTable* would return the meta on the timestamp of `ts`; if `ts` is zero, *metaTable* would return the lastest meta
 
 
 
