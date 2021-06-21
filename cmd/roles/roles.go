@@ -251,10 +251,10 @@ func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *compon
 
 	wg.Add(1)
 	go func() {
-		indexservice.Params.Init()
+		indexcoord.Params.Init()
 
 		if !localMsg {
-			logutil.SetupLogger(&indexservice.Params.Log)
+			logutil.SetupLogger(&indexcoord.Params.Log)
 			defer log.Sync()
 		}
 

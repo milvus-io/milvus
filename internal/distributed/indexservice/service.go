@@ -38,7 +38,7 @@ type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
 type Server struct {
-	indexservice *indexservice.IndexService
+	indexcoord *indexcoord.IndexService
 
 	grpcServer  *grpc.Server
 	grpcErrChan chan error
@@ -64,14 +64,14 @@ func (s *Server) Run() error {
 
 func (s *Server) init() error {
 	Params.Init()
-	indexservice.Params.Init()
-	indexservice.Params.Address = Params.ServiceAddress
-	indexservice.Params.Port = Params.ServicePort
+	indexcoord.Params.Init()
+	indexcoord.Params.Address = Params.ServiceAddress
+	indexcoord.Params.Port = Params.ServicePort
 
-	closer := trace.InitTracing("index_service")
+	closer := trace.InitTracing("index_coord")
 	s.closer = closer
 
-	if err := s.indexservice.Register(); err != nil {
+	if err := s.indexcoord.Register(); err != nil {
 		return err
 	}
 
@@ -81,16 +81,16 @@ func (s *Server) init() error {
 	if err := <-s.grpcErrChan; err != nil {
 		return err
 	}
-	s.indexservice.UpdateStateCode(internalpb.StateCode_Initializing)
+	s.indexcoord.UpdateStateCode(internalpb.StateCode_Initializing)
 
-	if err := s.indexservice.Init(); err != nil {
+	if err := s.indexcoord.Init(); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (s *Server) start() error {
-	if err := s.indexservice.Start(); err != nil {
+	if err := s.indexcoord.Start(); err != nil {
 		return err
 	}
 	log.Debug("indexService started")
@@ -103,8 +103,8 @@ func (s *Server) Stop() error {
 			return err
 		}
 	}
-	if s.indexservice != nil {
-		s.indexservice.Stop()
+	if s.indexcoord != nil {
+		s.indexcoord.Stop()
 	}
 
 	s.loopCancel()
@@ -117,35 +117,35 @@ func (s *Server) Stop() error {
 }
 
 func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
-	return s.indexservice.GetComponentStates(ctx)
+	return s.indexcoord.GetComponentStates(ctx)
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.indexservice.GetTimeTickChannel(ctx)
+	return s.indexcoord.GetTimeTickChannel(ctx)
 }
 
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.indexservice.GetStatisticsChannel(ctx)
+	return s.indexcoord.GetStatisticsChannel(ctx)
 }
 
 func (s *Server) RegisterNode(ctx context.Context, req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
-	return s.indexservice.RegisterNode(ctx, req)
+	return s.indexcoord.RegisterNode(ctx, req)
 }
 
 func (s *Server) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
-	return s.indexservice.BuildIndex(ctx, req)
+	return s.indexcoord.BuildIndex(ctx, req)
 }
 
 func (s *Server) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
-	return s.indexservice.GetIndexStates(ctx, req)
+	return s.indexcoord.GetIndexStates(ctx, req)
 }
 
 func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	return s.indexservice.DropIndex(ctx, request)
+	return s.indexcoord.DropIndex(ctx, request)
 }
 
 func (s *Server) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
-	return s.indexservice.GetIndexFilePaths(ctx, req)
+	return s.indexcoord.GetIndexFilePaths(ctx, req)
 }
 
 func (s *Server) startGrpcLoop(grpcPort int) {
@@ -183,16 +183,16 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 func NewServer(ctx context.Context) (*Server, error) {
 
 	ctx1, cancel := context.WithCancel(ctx)
-	serverImp, err := indexservice.NewIndexService(ctx)
+	serverImp, err := indexcoord.NewIndexService(ctx)
 	if err != nil {
 		defer cancel()
 		return nil, err
 	}
 	s := &Server{
-		loopCtx:      ctx1,
-		loopCancel:   cancel,
-		indexservice: serverImp,
-		grpcErrChan:  make(chan error),
+		loopCtx:     ctx1,
+		loopCancel:  cancel,
+		indexcoord:  serverImp,
+		grpcErrChan: make(chan error),
 	}
 
 	return s, nil
