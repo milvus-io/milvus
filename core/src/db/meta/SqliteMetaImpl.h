@@ -160,12 +160,6 @@ class SqliteMetaImpl : public Meta {
     Status
     GetGlobalLastLSN(uint64_t& lsn) override;
 
-    Status
-    CreateHybridCollection(CollectionSchema& collection_schema, hybrid::FieldsSchema& fields_schema) override;
-
-    Status
-    DescribeHybridCollection(CollectionSchema& collection_schema, hybrid::FieldsSchema& fields_schema) override;
-
  private:
     Status
     NextFileId(std::string& file_id);

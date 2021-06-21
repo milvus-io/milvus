@@ -23,7 +23,7 @@ class Server {
     GetInstance();
 
     void
-    Init(int64_t daemonized, const std::string& pid_filename, const std::string& config_filename);
+    Init(const std::string& config_filename);
 
     Status
     Start();
@@ -34,9 +34,6 @@ class Server {
     Server() = default;
     ~Server() = default;
 
-    void
-    Daemonize();
-
     Status
     LoadConfig();
 
@@ -46,9 +43,6 @@ class Server {
     StopService();
 
  private:
-    int64_t daemonized_ = 0;
-    int pid_fd_ = -1;
-    std::string pid_filename_;
     std::string config_filename_;
 };  // Server
 

@@ -31,11 +31,11 @@
 #include "Utils.h"
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
+#include "codecs/default/DefaultCodec.h"
 #include "db/IDGenerator.h"
 #include "db/merge/MergeManagerFactory.h"
 #include "engine/EngineFactory.h"
 #include "index/knowhere/knowhere/index/vector_index/helpers/BuilderSuspend.h"
-#include "index/knowhere/knowhere/index/vector_index/helpers/FaissIO.h"
 #include "index/thirdparty/faiss/utils/distances.h"
 #include "insert/MemManagerFactory.h"
 #include "meta/MetaConsts.h"
@@ -93,7 +93,6 @@ DBImpl::DBImpl(const DBOptions& options)
     SetIdentity("DBImpl");
     AddCacheInsertDataListener();
     AddUseBlasThresholdListener();
-    knowhere::enable_faiss_logging();
 
     Start();
 }
@@ -234,33 +233,15 @@ DBImpl::CreateCollection(meta::CollectionSchema& collection_schema) {
     meta::CollectionSchema temp_schema = collection_schema;
     temp_schema.index_file_size_ *= MB;  // store as MB
     if (options_.wal_enable_) {
-        temp_schema.flush_lsn_ = wal_mgr_->CreateCollection(collection_schema.collection_id_);
+        temp_schema.flush_lsn_ = wal_mgr_->GetLastAppliedLsn();
     }
 
-    return meta_ptr_->CreateCollection(temp_schema);
-}
-
-Status
-DBImpl::CreateHybridCollection(meta::CollectionSchema& collection_schema, meta::hybrid::FieldsSchema& fields_schema) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
+    auto status = meta_ptr_->CreateCollection(temp_schema);
+    if (options_.wal_enable_ && status.ok()) {
+        wal_mgr_->CreateCollection(collection_schema.collection_id_);
     }
 
-    meta::CollectionSchema temp_schema = collection_schema;
-    temp_schema.index_file_size_ *= MB;
-
-    return meta_ptr_->CreateHybridCollection(temp_schema, fields_schema);
-}
-
-Status
-DBImpl::DescribeHybridCollection(meta::CollectionSchema& collection_schema,
-                                 milvus::engine::meta::hybrid::FieldsSchema& fields_schema) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
-
-    auto stat = meta_ptr_->DescribeHybridCollection(collection_schema, fields_schema);
-    return stat;
+    return status;
 }
 
 Status
@@ -479,8 +460,8 @@ DBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const
         }
 
         auto json = milvus::json::parse(file.index_params_);
-        ExecutionEnginePtr engine =
-            EngineFactory::Build(file.dimension_, file.location_, engine_type, (MetricType)file.metric_type_, json);
+        ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, engine_type,
+                                                         (MetricType)file.metric_type_, json, file.updated_time_);
         fiu_do_on("DBImpl.PreloadCollection.null_engine", engine = nullptr);
         if (engine == nullptr) {
             LOG_ENGINE_ERROR_ << "Invalid engine type";
@@ -493,7 +474,7 @@ DBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const
             fiu_do_on("DBImpl.PreloadCollection.engine_throw_exception", throw std::exception());
             std::string msg = "Pre-loaded file: " + file.file_id_ + " size: " + std::to_string(file.file_size_);
             TimeRecorderAuto rc_1(msg);
-            status = engine->Load(true);
+            status = engine->Load(false, true);
             if (!status.ok()) {
                 return status;
             }
@@ -552,8 +533,8 @@ DBImpl::ReleaseCollection(const std::shared_ptr<server::Context>& context, const
         }
 
         auto json = milvus::json::parse(file.index_params_);
-        ExecutionEnginePtr engine =
-            EngineFactory::Build(file.dimension_, file.location_, engine_type, (MetricType)file.metric_type_, json);
+        ExecutionEnginePtr engine = EngineFactory::Build(file.dimension_, file.location_, engine_type,
+                                                         (MetricType)file.metric_type_, json, file.updated_time_);
 
         if (engine == nullptr) {
             LOG_ENGINE_ERROR_ << "Invalid engine type";
@@ -574,7 +555,7 @@ DBImpl::ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::v
     if (!initialized_.load(std::memory_order_acquire)) {
         return SHUTDOWN_ERROR;
     }
-
+#if 0  // todo
     meta::FilesHolder files_holder;
     std::vector<size_t> file_ids;
     for (auto& id : segment_ids) {
@@ -624,7 +605,7 @@ DBImpl::ReLoadSegmentsDeletedDocs(const std::string& collection_id, const std::v
             blacklist->set(i);
         }
     }
-
+#endif
     return Status::OK();
 }
 
@@ -655,11 +636,16 @@ DBImpl::CreatePartition(const std::string& collection_id, const std::string& par
 
     uint64_t lsn = 0;
     if (options_.wal_enable_) {
-        lsn = wal_mgr_->CreatePartition(collection_id, partition_tag);
+        lsn = wal_mgr_->GetLastAppliedLsn();
     } else {
         meta_ptr_->GetCollectionFlushLSN(collection_id, lsn);
     }
-    return meta_ptr_->CreatePartition(collection_id, partition_name, partition_tag, lsn);
+
+    auto status = meta_ptr_->CreatePartition(collection_id, partition_name, partition_tag, lsn);
+    if (options_.wal_enable_ && status.ok()) {
+        wal_mgr_->CreatePartition(collection_id, partition_tag);
+    }
+    return status;
 }
 
 Status
@@ -912,101 +898,6 @@ CopyToAttr(std::vector<uint8_t>& record, uint64_t row_num, const std::vector<std
         }
     }
     return Status::OK();
-}
-
-Status
-DBImpl::InsertEntities(const std::string& collection_id, const std::string& partition_tag,
-                       const std::vector<std::string>& field_names, Entity& entity,
-                       std::unordered_map<std::string, meta::hybrid::DataType>& attr_types) {
-    if (!initialized_.load(std::memory_order_acquire)) {
-        return SHUTDOWN_ERROR;
-    }
-
-    // Generate id
-    if (entity.id_array_.empty()) {
-        SafeIDGenerator& id_generator = SafeIDGenerator::GetInstance();
-        Status status = id_generator.GetNextIDNumbers(entity.entity_count_, entity.id_array_);
-        if (!status.ok()) {
-            return status;
-        }
-    }
-
-    Status status;
-    std::unordered_map<std::string, std::vector<uint8_t>> attr_data;
-    std::unordered_map<std::string, uint64_t> attr_nbytes;
-    std::unordered_map<std::string, uint64_t> attr_data_size;
-    status = CopyToAttr(entity.attr_value_, entity.entity_count_, field_names, attr_types, attr_data, attr_nbytes,
-                        attr_data_size);
-    if (!status.ok()) {
-        return status;
-    }
-
-    wal::MXLogRecord record;
-    record.lsn = 0;
-    record.collection_id = collection_id;
-    record.partition_tag = partition_tag;
-    record.ids = entity.id_array_.data();
-    record.length = entity.entity_count_;
-
-    auto vector_it = entity.vector_data_.begin();
-    if (vector_it->second.binary_data_.empty()) {
-        record.type = wal::MXLogType::Entity;
-        record.data = vector_it->second.float_data_.data();
-        record.data_size = vector_it->second.float_data_.size() * sizeof(float);
-    } else {
-        //        record.type = wal::MXLogType::InsertBinary;
-        //        record.data = entities.vector_data_[0].binary_data_.data();
-        //        record.length = entities.vector_data_[0].binary_data_.size() * sizeof(uint8_t);
-    }
-
-    status = ExecWalRecord(record);
-
-#if 0
-    if (options_.wal_enable_) {
-        std::string target_collection_name;
-        status = GetPartitionByTag(collection_id, partition_tag, target_collection_name);
-        if (!status.ok()) {
-            LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] Get partition fail: %s", "insert", 0, status.message().c_str());
-            return status;
-        }
-
-        auto vector_it = entity.vector_data_.begin();
-        if (!vector_it->second.binary_data_.empty()) {
-            wal_mgr_->InsertEntities(collection_id, partition_tag, entity.id_array_, vector_it->second.binary_data_,
-                                     attr_nbytes, attr_data);
-        } else if (!vector_it->second.float_data_.empty()) {
-            wal_mgr_->InsertEntities(collection_id, partition_tag, entity.id_array_, vector_it->second.float_data_,
-                                     attr_nbytes, attr_data);
-        }
-        swn_wal_.Notify();
-    } else {
-        // insert entities: collection_name is field id
-        wal::MXLogRecord record;
-        record.lsn = 0;
-        record.collection_id = collection_id;
-        record.partition_tag = partition_tag;
-        record.ids = entity.id_array_.data();
-        record.length = entity.entity_count_;
-
-        auto vector_it = entity.vector_data_.begin();
-        if (vector_it->second.binary_data_.empty()) {
-            record.type = wal::MXLogType::Entity;
-            record.data = vector_it->second.float_data_.data();
-            record.data_size = vector_it->second.float_data_.size() * sizeof(float);
-            record.attr_data = attr_data;
-            record.attr_nbytes = attr_nbytes;
-            record.attr_data_size = attr_data_size;
-        } else {
-            //        record.type = wal::MXLogType::InsertBinary;
-            //        record.data = entities.vector_data_[0].binary_data_.data();
-            //        record.length = entities.vector_data_[0].binary_data_.size() * sizeof(uint8_t);
-        }
-
-        status = ExecWalRecord(record);
-    }
-#endif
-
-    return status;
 }
 
 Status
@@ -1497,18 +1388,51 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
         if (temp_ids.empty()) {
             break;  // all vectors found, no need to continue
         }
-        // Load bloom filter
+
+        // SegmentReader
         std::string segment_dir;
         engine::utils::GetParentPath(file.location_, segment_dir);
         segment::SegmentReader segment_reader(segment_dir);
-        segment::IdBloomFilterPtr id_bloom_filter_ptr;
-        auto status = segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
-        if (!status.ok()) {
-            return status;
-        }
 
-        std::shared_ptr<std::vector<segment::doc_id_t>> uids_ptr = nullptr;
+        // uids_ptr
+        segment::UidsPtr uids_ptr = nullptr;
+        auto LoadUid = [&]() {
+            auto index = cache::CpuCacheMgr::GetInstance()->GetItem(file.location_);
+            if (index != nullptr) {
+                uids_ptr = std::static_pointer_cast<knowhere::VecIndex>(index)->GetUids();
+                return Status::OK();
+            }
+
+            return segment_reader.LoadUids(uids_ptr);
+        };
+
+        // deleted_docs_ptr
         segment::DeletedDocsPtr deleted_docs_ptr = nullptr;
+        auto LoadDeleteDoc = [&]() { return segment_reader.LoadDeletedDocs(deleted_docs_ptr); };
+
+        // id_bloom_filter_ptr
+        segment::IdBloomFilterPtr id_bloom_filter_ptr;
+        auto status = segment_reader.LoadBloomFilter(id_bloom_filter_ptr, false);
+        fiu_do_on("DBImpl.GetVectorsByIdHelper.FailedToLoadBloomFilter",
+                  (status = Status(DB_ERROR, ""), id_bloom_filter_ptr = nullptr));
+        if (!status.ok()) {
+            // Some accidents may cause the bloom filter file destroyed.
+            // If failed to load bloom filter, just to create a new one.
+            if (!(status = LoadUid()).ok()) {
+                return status;
+            }
+            if (!(status = LoadDeleteDoc()).ok()) {
+                return status;
+            }
+
+            codec::DefaultCodec default_codec;
+            default_codec.GetIdBloomFilterFormat()->create(uids_ptr->size(), id_bloom_filter_ptr);
+            id_bloom_filter_ptr->Add(*uids_ptr, deleted_docs_ptr->GetMutableDeletedDocs());
+            LOG_ENGINE_DEBUG_ << "A new bloom filter is created";
+
+            segment::SegmentWriter segment_writer(segment_dir);
+            segment_writer.WriteBloomFilter(id_bloom_filter_ptr);
+        }
 
         for (size_t i = 0; i < temp_ids.size();) {
             // each id must has a VectorsData
@@ -1519,16 +1443,8 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
             // Check if the id is present in bloom filter.
             if (id_bloom_filter_ptr->Check(vector_id)) {
                 // Load uids and check if the id is indeed present. If yes, find its offset.
-                if (uids_ptr == nullptr) {
-                    auto index = cache::CpuCacheMgr::GetInstance()->GetItem(file.location_);
-                    if (index != nullptr) {
-                        uids_ptr = std::static_pointer_cast<knowhere::VecIndex>(index)->GetUids();
-                    } else {
-                        status = segment_reader.LoadUids(uids_ptr);
-                        if (!status.ok()) {
-                            return status;
-                        }
-                    }
+                if (uids_ptr == nullptr && !(status = LoadUid()).ok()) {
+                    return status;
                 }
 
                 auto found = std::find(uids_ptr->begin(), uids_ptr->end(), vector_id);
@@ -1536,8 +1452,7 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
                     auto offset = std::distance(uids_ptr->begin(), found);
 
                     // Check whether the id has been deleted
-                    if (!deleted_docs_ptr && !(status = segment_reader.LoadDeletedDocs(deleted_docs_ptr)).ok()) {
-                        LOG_ENGINE_ERROR_ << status.message();
+                    if (!deleted_docs_ptr && !(status = LoadDeleteDoc()).ok()) {
                         return status;
                     }
                     auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
@@ -1546,8 +1461,8 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
                     if (deleted == deleted_docs.end()) {
                         // Load raw vector
                         std::vector<uint8_t> raw_vector;
-                        status =
-                            segment_reader.LoadVectors(offset * single_vector_bytes, single_vector_bytes, raw_vector);
+                        status = segment_reader.LoadsSingleVector(offset * single_vector_bytes, single_vector_bytes,
+                                                                  raw_vector);
                         if (!status.ok()) {
                             LOG_ENGINE_ERROR_ << status.message();
                             return status;
@@ -2015,102 +1930,6 @@ DBImpl::StartMergeTask(const std::set<std::string>& merge_collection_ids, bool f
 
     // LOG_ENGINE_DEBUG_ << "End StartMergeTask";
 }
-
-// Status
-// DBImpl::MergeHybridFiles(const std::string& collection_id, meta::FilesHolder& files_holder) {
-//    // const std::lock_guard<std::mutex> lock(flush_merge_compact_mutex_);
-//
-//    LOG_ENGINE_DEBUG_ << "Merge files for collection: " << collection_id;
-//
-//    // step 1: create table file
-//    meta::SegmentSchema table_file;
-//    table_file.collection_id_ = collection_id;
-//    table_file.file_type_ = meta::SegmentSchema::NEW_MERGE;
-//    Status status = meta_ptr_->CreateHybridCollectionFile(table_file);
-//
-//    if (!status.ok()) {
-//        LOG_ENGINE_ERROR_ << "Failed to create collection: " << status.ToString();
-//        return status;
-//    }
-//
-//    // step 2: merge files
-//    /*
-//    ExecutionEnginePtr index =
-//        EngineFactory::Build(table_file.dimension_, table_file.location_, (EngineType)table_file.engine_type_,
-//                             (MetricType)table_file.metric_type_, table_file.nlist_);
-//*/
-//    meta::SegmentsSchema updated;
-//
-//    std::string new_segment_dir;
-//    utils::GetParentPath(table_file.location_, new_segment_dir);
-//    auto segment_writer_ptr = std::make_shared<segment::SegmentWriter>(new_segment_dir);
-//
-//    // attention: here is a copy, not reference, since files_holder.UnmarkFile will change the array internal
-//    milvus::engine::meta::SegmentsSchema files = files_holder.HoldFiles();
-//    for (auto& file : files) {
-//        server::CollectMergeFilesMetrics metrics;
-//        std::string segment_dir_to_merge;
-//        utils::GetParentPath(file.location_, segment_dir_to_merge);
-//        segment_writer_ptr->Merge(segment_dir_to_merge, table_file.file_id_);
-//
-//        files_holder.UnmarkFile(file);
-//
-//        auto file_schema = file;
-//        file_schema.file_type_ = meta::SegmentSchema::TO_DELETE;
-//        updated.push_back(file_schema);
-//        int64_t size = segment_writer_ptr->Size();
-//        if (size >= file_schema.index_file_size_) {
-//            break;
-//        }
-//    }
-//
-//    // step 3: serialize to disk
-//    try {
-//        status = segment_writer_ptr->Serialize();
-//        fiu_do_on("DBImpl.MergeFiles.Serialize_ThrowException", throw std::exception());
-//        fiu_do_on("DBImpl.MergeFiles.Serialize_ErrorStatus", status = Status(DB_ERROR, ""));
-//    } catch (std::exception& ex) {
-//        std::string msg = "Serialize merged index encounter exception: " + std::string(ex.what());
-//        LOG_ENGINE_ERROR_ << msg;
-//        status = Status(DB_ERROR, msg);
-//    }
-//
-//    if (!status.ok()) {
-//        LOG_ENGINE_ERROR_ << "Failed to persist merged segment: " << new_segment_dir << ". Error: " <<
-//        status.message();
-//
-//        // if failed to serialize merge file to disk
-//        // typical error: out of disk space, out of memory or permission denied
-//        table_file.file_type_ = meta::SegmentSchema::TO_DELETE;
-//        status = meta_ptr_->UpdateCollectionFile(table_file);
-//        LOG_ENGINE_DEBUG_ << "Failed to update file to index, mark file: " << table_file.file_id_ << " to to_delete";
-//
-//        return status;
-//    }
-//
-//    // step 4: update table files state
-//    // if index type isn't IDMAP, set file type to TO_INDEX if file size exceed index_file_size
-//    // else set file type to RAW, no need to build index
-//    if (!utils::IsRawIndexType(table_file.engine_type_)) {
-//        table_file.file_type_ = (segment_writer_ptr->Size() >= (size_t)(table_file.index_file_size_))
-//                                    ? meta::SegmentSchema::TO_INDEX
-//                                    : meta::SegmentSchema::RAW;
-//    } else {
-//        table_file.file_type_ = meta::SegmentSchema::RAW;
-//    }
-//    table_file.file_size_ = segment_writer_ptr->Size();
-//    table_file.row_count_ = segment_writer_ptr->VectorCount();
-//    updated.push_back(table_file);
-//    status = meta_ptr_->UpdateCollectionFiles(updated);
-//    LOG_ENGINE_DEBUG_ << "New merged segment " << table_file.segment_id_ << " of size " << segment_writer_ptr->Size()
-//                      << " bytes";
-//
-//    if (options_.insert_cache_immediately_) {
-//        segment_writer_ptr->Cache();
-//    }
-//
-//    return status;
-//}
 
 void
 DBImpl::BackgroundMerge(std::set<std::string> collection_ids, bool force_merge_all) {

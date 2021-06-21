@@ -64,9 +64,24 @@ network:
 #                      | flushes data to disk.                                      |            |                 |
 #                      | 0 means disable the regular flush.                         |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# s3_enabled           | If using s3 storage backend.                               | Boolean    | false           |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# s3_address           | The s3 server address, support domain/hostname/ipaddress   | String     | 127.0.0.1       |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# s3_port              | The s3 server port.                                        | Integer    | 80              |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# s3_access_key        | The access key for accessing s3 service.                   | String     | s3_access_key   |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# s3_secret_key        | The secrey key for accessing s3 service.                   | String     | s3_secret_key   |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# s3_bucket            | The s3 bucket name for store milvus's data.                | String     | s3_bucket       |
+#                      | Note: please using differnet bucket for different milvus   |            |                 |
+#                      |       cluster.                                             |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 storage:
   path: /var/lib/milvus
   auto_flush_interval: 1
+
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # WAL Config           | Description                                                | Type       | Default         |

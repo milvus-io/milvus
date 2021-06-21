@@ -22,7 +22,7 @@
 namespace milvus {
 namespace server {
 
-constexpr int64_t QUERY_MAX_TOPK = 16384;
+constexpr int64_t QUERY_MAX_TOPK = 1024 * 1024;
 constexpr int64_t GPU_QUERY_MAX_TOPK = 16384;
 constexpr int64_t GPU_QUERY_MAX_NPROBE = 2048;
 
@@ -64,6 +64,9 @@ class ValidationUtil {
     ValidateSearchTopk(int64_t top_k);
 
     static Status
+    ValidateResultSize(int64_t vector_count, int64_t top_k);
+
+    static Status
     ValidatePartitionName(const std::string& partition_name);
 
     static Status
@@ -79,6 +82,9 @@ class ValidationUtil {
 
     static Status
     ValidateIpAddress(const std::string& ip_address);
+
+    static Status
+    ValidateHostname(const std::string& hostname);
 
     static Status
     ValidateStringIsNumber(const std::string& str);

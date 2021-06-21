@@ -21,7 +21,7 @@
 namespace milvus {
 namespace engine {
 
-const int64_t FORCE_MERGE_THREASHOLD = 30;  // force merge files older this time(in second)
+const int64_t FORCE_MERGE_THREASHOLD = 300;  // force merge files older this time(in second)
 
 Status
 MergeLayeredStrategy::RegroupFiles(meta::FilesHolder& files_holder, MergeFilesGroups& files_groups) {
@@ -33,6 +33,9 @@ MergeLayeredStrategy::RegroupFiles(meta::FilesHolder& files_holder, MergeFilesGr
         {1UL << 26, meta::SegmentsSchema()},  // 64MB
         {1UL << 28, meta::SegmentsSchema()},  // 256MB
         {1UL << 30, meta::SegmentsSchema()},  // 1GB
+        {1UL << 32, meta::SegmentsSchema()},  // 4GB
+        {1UL << 34, meta::SegmentsSchema()},  // 16GB
+        {1UL << 36, meta::SegmentsSchema()},  // 64GB
     };
 
     meta::SegmentsSchema sort_files = files_holder.HoldFiles();

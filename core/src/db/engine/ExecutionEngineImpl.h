@@ -28,10 +28,10 @@ namespace engine {
 class ExecutionEngineImpl : public ExecutionEngine {
  public:
     ExecutionEngineImpl(uint16_t dimension, const std::string& location, EngineType index_type, MetricType metric_type,
-                        const milvus::json& index_params);
+                        const milvus::json& index_params, int64_t time_stamp);
 
     ExecutionEngineImpl(knowhere::VecIndexPtr index, const std::string& location, EngineType index_type,
-                        MetricType metric_type, const milvus::json& index_params);
+                        MetricType metric_type, const milvus::json& index_params, int64_t time_stamp);
 
     size_t
     Count() const override;
@@ -46,7 +46,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Serialize() override;
 
     Status
-    Load(bool to_cache) override;
+    Load(bool load_blacklist, bool to_cache) override;
 
     Status
     CopyToGpu(uint64_t device_id, bool hybrid = false) override;
@@ -125,6 +125,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
     HybridUnset() const;
 
  protected:
+    knowhere::BlacklistPtr blacklist_ = nullptr;
     knowhere::VecIndexPtr index_ = nullptr;
 #ifdef MILVUS_GPU_VERSION
     knowhere::VecIndexPtr index_reserve_ = nullptr;  // reserve the cpu index before copying it to gpu
@@ -134,12 +135,10 @@ class ExecutionEngineImpl : public ExecutionEngine {
     EngineType index_type_;
     MetricType metric_type_;
 
-    int64_t vector_count_;
-
     milvus::json index_params_;
     int64_t gpu_num_ = 0;
 
-    bool gpu_cache_enable_ = false;
+    int64_t time_stamp_;
 };
 
 }  // namespace engine

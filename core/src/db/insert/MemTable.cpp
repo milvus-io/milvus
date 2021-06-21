@@ -16,6 +16,7 @@
 #include <utility>
 
 #include "cache/CpuCacheMgr.h"
+#include "codecs/default/DefaultCodec.h"
 #include "db/Utils.h"
 #include "db/insert/MemTable.h"
 #include "db/meta/FilesHolder.h"
@@ -185,19 +186,18 @@ MemTable::GetCurrentMem() {
 
 Status
 MemTable::ApplyDeletes() {
-    // Applying deletes to other segments on disk and their corresponding cache:
+    // Applying deletes to other segments on disk:
     // For each segment in collection:
     //     Load its bloom filter
     //     For each id in delete list:
-    //         If present, add the uid to segment's uid list
-    // For each segment
-    //     Get its cache if exists
-    //     Load its uids file.
-    //     Scan the uids, if any uid in segment's uid list exists:
+    //         If present, add the uid to segment's delete list
+    //     if segment delete list is empty
+    //         continue
+    //     Load its uids and deleted docs file
+    //     Scan the uids, if any un-deleted uid in segment's delete list
     //         add its offset to deletedDoc
     //         remove the id from bloom filter
-    //         set black list in cache
-    //     Serialize segment's deletedDoc TODO(zhiru): append directly to previous file for now, may have duplicates
+    //     Serialize segment's deletedDoc
     //     Serialize bloom filter
 
     LOG_ENGINE_DEBUG_ << "Applying " << doc_ids_to_delete_.size() << " deletes in collection: " << collection_id_;
@@ -217,155 +217,143 @@ MemTable::ApplyDeletes() {
     // attention: here is a copy, not reference, since files_holder.UnmarkFile will change the array internal
     milvus::engine::meta::SegmentsSchema files = files_holder.HoldFiles();
 
-    // which file need to be apply delete
-    std::vector<std::pair<segment::IdBloomFilterPtr, std::vector<segment::doc_id_t>>> ids_check_pair;
-    ids_check_pair.resize(files.size());
+    meta::SegmentsSchema files_to_update;
 
-    size_t unmark_file_cnt = 0;
-    for (size_t file_i = 0; file_i < files.size(); file_i++) {
-        auto& file = files[file_i];
-        auto& id_bloom_filter_ptr = ids_check_pair[file_i].first;
-        auto& ids_to_check = ids_check_pair[file_i].second;
-        ids_to_check.reserve(doc_ids_to_delete_.size());
+    for (auto& file : files) {
+        LOG_ENGINE_DEBUG_ << "Applying deletes in segment: " << file.segment_id_;
 
+        segment::IdBloomFilterPtr id_bloom_filter_ptr = nullptr;
+        segment::UidsPtr uids_ptr = nullptr;
+        segment::DeletedDocsPtr deleted_docs_ptr = nullptr;
+
+        std::vector<segment::doc_id_t> ids_to_check;
+
+        TimeRecorder rec("handle segment " + file.segment_id_);
+
+        // segment reader
         std::string segment_dir;
         utils::GetParentPath(file.location_, segment_dir);
-
         segment::SegmentReader segment_reader(segment_dir);
-        segment_reader.LoadBloomFilter(id_bloom_filter_ptr);
 
+        // prepare segment_files
+        meta::FilesHolder segment_holder;
+        status = meta_->GetCollectionFilesBySegmentId(file.segment_id_, segment_holder);
+        if (!status.ok()) {
+            break;
+        }
+        milvus::engine::meta::SegmentsSchema& segment_files = segment_holder.HoldFiles();
+
+        // Lamda: LoadUid
+        auto LoadUid = [&]() {
+            for (auto& segment_file : segment_files) {
+                auto data_obj_ptr = cache::CpuCacheMgr::GetInstance()->GetItem(segment_file.location_);
+                auto index = std::static_pointer_cast<knowhere::VecIndex>(data_obj_ptr);
+                if (index != nullptr) {
+                    uids_ptr = index->GetUids();
+                    return Status::OK();
+                }
+            }
+
+            return segment_reader.LoadUids(uids_ptr);
+        };
+
+        // Lamda: LoadDeleteDoc
+        auto LoadDeleteDoc = [&]() { return segment_reader.LoadDeletedDocs(deleted_docs_ptr); };
+
+        // load bloom filter
+        status = segment_reader.LoadBloomFilter(id_bloom_filter_ptr, true);
+        if (!status.ok()) {
+            // Some accidents may cause the bloom filter file destroyed.
+            // If failed to load bloom filter, just to create a new one.
+            if (!(status = LoadUid()).ok()) {
+                return status;
+            }
+            if (!(status = LoadDeleteDoc()).ok()) {
+                return status;
+            }
+
+            codec::DefaultCodec default_codec;
+            default_codec.GetIdBloomFilterFormat()->create(uids_ptr->size(), id_bloom_filter_ptr);
+            id_bloom_filter_ptr->Add(*uids_ptr, deleted_docs_ptr->GetMutableDeletedDocs());
+            LOG_ENGINE_DEBUG_ << "A new bloom filter is created";
+
+            segment::SegmentWriter segment_writer(segment_dir);
+            segment_writer.WriteBloomFilter(id_bloom_filter_ptr);
+        }
+
+        // check ids by bloom filter
         for (auto& id : doc_ids_to_delete_) {
             if (id_bloom_filter_ptr->Check(id)) {
                 ids_to_check.emplace_back(id);
             }
         }
 
+        rec.RecordSection("bloom filter check end, segment delete list cnt " + std::to_string(ids_to_check.size()));
+
         // release unused files
         if (ids_to_check.empty()) {
-            id_bloom_filter_ptr = nullptr;
             files_holder.UnmarkFile(file);
-            ++unmark_file_cnt;
-        }
-    }
-
-    recorder.RecordSection("Found " + std::to_string(files.size() - unmark_file_cnt) + " segment to apply deletes");
-
-    meta::SegmentsSchema files_to_update;
-    for (size_t file_i = 0; file_i < files.size(); file_i++) {
-        auto& file = files[file_i];
-        auto& id_bloom_filter_ptr = ids_check_pair[file_i].first;
-        auto& ids_to_check = ids_check_pair[file_i].second;
-        if (id_bloom_filter_ptr == nullptr) {
             continue;
         }
 
-        LOG_ENGINE_DEBUG_ << "Applying deletes in segment: " << file.segment_id_;
+        // Load its uids and deleted docs file
+        if (uids_ptr == nullptr && !(status = LoadUid()).ok()) {
+            return status;
+        }
+        if (deleted_docs_ptr == nullptr && !(status = LoadDeleteDoc()).ok()) {
+            return status;
+        }
+        auto& deleted_docs = deleted_docs_ptr->GetMutableDeletedDocs();
 
-        TimeRecorder rec("handle segment " + file.segment_id_);
+        rec.RecordSection("load uids and deleted docs");
 
-        auto& segment_id = file.segment_id_;
-        meta::FilesHolder segment_holder;
-        status = meta_->GetCollectionFilesBySegmentId(segment_id, segment_holder);
-        if (!status.ok()) {
-            break;
+        // sort ids_to_check
+        bool ids_sorted = false;
+        if (ids_to_check.size() >= 64) {
+            std::sort(ids_to_check.begin(), ids_to_check.end());
+            ids_sorted = true;
+            rec.RecordSection("Sorting " + std::to_string(ids_to_check.size()) + " ids");
         }
 
-        segment::UidsPtr uids_ptr = nullptr;
-
-        // Get all index that contains blacklist in cache
-        std::vector<knowhere::VecIndexPtr> indexes;
-        std::vector<faiss::ConcurrentBitsetPtr> blacklists;
-        milvus::engine::meta::SegmentsSchema& segment_files = segment_holder.HoldFiles();
-        for (auto& segment_file : segment_files) {
-            auto data_obj_ptr = cache::CpuCacheMgr::GetInstance()->GetItem(segment_file.location_);
-            auto index = std::static_pointer_cast<knowhere::VecIndex>(data_obj_ptr);
-            if (index != nullptr) {
-                faiss::ConcurrentBitsetPtr blacklist = index->GetBlacklist();
-                if (blacklist == nullptr) {
-                    // to update and set the blacklist
-                    blacklist = std::make_shared<faiss::ConcurrentBitset>(index->Count());
-                    indexes.emplace_back(index);
-                    blacklists.emplace_back(blacklist);
-                } else {
-                    // just to update the blacklist
-                    indexes.emplace_back(nullptr);
-                    blacklists.emplace_back(blacklist);
-                }
-
-                // load uids from cache
-                uids_ptr = index->GetUids();
-            }
-        }
-
-        std::string segment_dir;
-        utils::GetParentPath(file.location_, segment_dir);
-        if (uids_ptr == nullptr) {
-            // load uids from disk
-            segment::SegmentReader segment_reader(segment_dir);
-            status = segment_reader.LoadUids(uids_ptr);
-            if (!status.ok()) {
-                return status;
-            }
-        }
-
-        segment::DeletedDocsPtr deleted_docs = std::make_shared<segment::DeletedDocs>();
-
-        rec.RecordSection("Loading uids and deleted docs");
-
-        std::sort(ids_to_check.begin(), ids_to_check.end());
-
-        rec.RecordSection("Sorting " + std::to_string(ids_to_check.size()) + " ids");
-
-        auto find_diff = std::chrono::duration<double>::zero();
-        auto set_diff = std::chrono::duration<double>::zero();
-
+        // for each id
+        int64_t segment_deleted_count = 0;
         for (size_t i = 0; i < uids_ptr->size(); ++i) {
-            auto find_start = std::chrono::high_resolution_clock::now();
-
-            auto found = std::binary_search(ids_to_check.begin(), ids_to_check.end(), (*uids_ptr)[i]);
-
-            auto find_end = std::chrono::high_resolution_clock::now();
-            find_diff += (find_end - find_start);
-
-            if (found) {
-                auto set_start = std::chrono::high_resolution_clock::now();
-
-                deleted_docs->AddDeletedDoc(i);
-                id_bloom_filter_ptr->Remove((*uids_ptr)[i]);
-
-                for (auto& blacklist : blacklists) {
-                    blacklist->set(i);
+            if (std::find(deleted_docs.begin(), deleted_docs.end(), i) != deleted_docs.end()) {
+                continue;
+            }
+            if (ids_sorted) {
+                if (!std::binary_search(ids_to_check.begin(), ids_to_check.end(), (*uids_ptr)[i])) {
+                    continue;
                 }
-                auto set_end = std::chrono::high_resolution_clock::now();
-                set_diff += (set_end - set_start);
+            } else {
+                if (std::find(ids_to_check.begin(), ids_to_check.end(), (*uids_ptr)[i]) == ids_to_check.end()) {
+                    continue;
+                }
             }
+
+            // delete
+            id_bloom_filter_ptr->Remove((*uids_ptr)[i]);
+            deleted_docs.push_back(i);
+            segment_deleted_count++;
         }
 
-        LOG_ENGINE_DEBUG_ << "Finding " << ids_to_check.size() << " uids in " << uids_ptr->size() << " uids took "
-                          << find_diff.count() << " s in total";
-        LOG_ENGINE_DEBUG_ << "Setting deleted docs and bloom filter took " << set_diff.count() << " s in total";
+        rec.RecordSection("Find uids and set deleted docs and bloom filter, append " +
+                          std::to_string(segment_deleted_count) + " offsets");
 
-        rec.RecordSection("Find uids and set deleted docs and bloom filter");
-
-        if (deleted_docs->GetSize() == 0) {
+        if (segment_deleted_count == 0) {
             LOG_ENGINE_DEBUG_ << "deleted_docs does not need to be updated";
+            files_holder.UnmarkFile(file);
             continue;
-        }
-
-        for (size_t i = 0; i < indexes.size(); ++i) {
-            if (indexes[i]) {
-                indexes[i]->SetBlacklist(blacklists[i]);
-            }
         }
 
         segment::Segment tmp_segment;
         segment::SegmentWriter segment_writer(segment_dir);
-        status = segment_writer.WriteDeletedDocs(deleted_docs);
+        status = segment_writer.WriteDeletedDocs(deleted_docs_ptr);
         if (!status.ok()) {
             break;
         }
 
-        rec.RecordSection("Appended " + std::to_string(deleted_docs->GetSize()) + " offsets to deleted docs");
+        rec.RecordSection("Updated deleted docs");
 
         status = segment_writer.WriteBloomFilter(id_bloom_filter_ptr);
         if (!status.ok()) {
@@ -380,14 +368,14 @@ MemTable::ApplyDeletes() {
                 segment_file.file_type_ == meta::SegmentSchema::TO_INDEX ||
                 segment_file.file_type_ == meta::SegmentSchema::INDEX ||
                 segment_file.file_type_ == meta::SegmentSchema::BACKUP) {
-                segment_file.row_count_ -= deleted_docs->GetSize();
+                segment_file.row_count_ -= segment_deleted_count;
                 files_to_update.emplace_back(segment_file);
             }
         }
         rec.RecordSection("Update collection file row count in vector");
     }
 
-    recorder.RecordSection("Finished " + std::to_string(files.size() - unmark_file_cnt) + " segment to apply deletes");
+    recorder.RecordSection("Finished " + std::to_string(files.size()) + " segment to apply deletes");
 
     status = meta_->UpdateCollectionFilesRowCount(files_to_update);
 

@@ -29,9 +29,17 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
     def _reduce(self, source_ids, ids, source_diss, diss, k, reverse):
         sort_f = (lambda x, y: x >= y) if reverse else (lambda x, y: x <= y)
 
-        if sort_f(source_diss[k - 1], diss[0]):
+        if len(ids) == 0:
             return source_ids, source_diss
-        if sort_f(diss[k - 1], source_diss[0]):
+
+        if len(source_ids) == 0:
+            return ids, diss
+
+        src_last = len(source_diss) - 1
+        if sort_f(source_diss[src_last], diss[0]) and len(source_ids) >= k:
+            return source_ids, source_diss
+        last = len(diss) - 1
+        if sort_f(diss[last], source_diss[0]) and len(ids) >= k:
             return ids, diss
 
         source_diss.extend(diss)
@@ -86,7 +94,7 @@ class ServiceHandler(milvus_pb2_grpc.MilvusServiceServicer):
                     merge_id_results[row_index], merge_dis_results[row_index] = \
                         self._reduce(merge_id_results[row_index], id_batch,
                                      merge_dis_results[row_index], dis_batch,
-                                     batch_len,
+                                     topk,
                                      reverse)
 
         calc_time = time.time() - calc_time

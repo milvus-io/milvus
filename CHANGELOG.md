@@ -2,7 +2,28 @@
 
 Please mark all change in change log and use the issue from GitHub
 
-# Milvus 1.1.0 (2021-04-29)
+# Milvus 1.1.1 (2021-06-16)
+## Bug
+-   \#4897 Query results contain some deleted ids
+-   \#5164 Exception should be raised if insert or delete entity on the none-existed partition
+-   \#5191 Mishards throw "index out of range" error after continually search/insert for a period of time
+-   \#5398 Random crash after request is executed
+-   \#5537 Failed to load bloom filter after suddenly power off
+-   \#5574 IVF_SQ8 and IVF_PQ cannot be built on multiple GPUs
+-   \#5747 Search with big nq and topk crash milvus
+
+## Feature
+-   \#1434 Storage: enabling s3 storage support (implemented by Unisinsight)
+-   \#5142 Support keeping index in GPU memory
+
+## Improvement
+-   \#5115 Relax the topk limit from 16384 to 1M for CPU search
+-   \#5204 Improve IVF query on GPU when no entity deleted
+-   \#5544 Relax the index_file_size limit from 4GB to 128Gb
+
+## Task
+
+# Milvus 1.1.0 (2021-05-07)
 ## Bug
 -   \#4778 Failed to open vector index in mishards
 -   \#4797 Wrong results returned for merged different 'topk' queries
@@ -17,7 +38,7 @@ Please mark all change in change log and use the issue from GitHub
 -   \#5010 IVF_PQ failed to query on GPU if 'nbits' doesn't equal to 8
 -   \#5050 Index type returned by get_collection_stats() is incorrect
 -   \#5063 Empty segment is serialized and crash milvus
--   \#5078 Server crashed when creaing a GPU IVF index whose dimension is 2048/4086/8192
+-   \#5078 Server crashed when creaing a GPU IVF index whose dimension is 2048/4096/8192
 
 ## Feature
 -   \#4564 Allow get_entity_by_id() in a specified partition

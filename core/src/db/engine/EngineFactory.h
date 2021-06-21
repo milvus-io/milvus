@@ -24,15 +24,7 @@ class EngineFactory {
  public:
     static ExecutionEnginePtr
     Build(uint16_t dimension, const std::string& location, EngineType index_type, MetricType metric_type,
-          const milvus::json& index_params);
-
-    //    static ExecutionEnginePtr
-    //    Build(uint16_t dimension,
-    //          const std::string& location,
-    //          EngineType index_type,
-    //          MetricType metric_type,
-    //          std::unordered_map<std::string, DataType>& attr_type,
-    //          const milvus::json& index_params);
+          const milvus::json& index_params, int64_t time_stamp);
 };
 
 }  // namespace engine

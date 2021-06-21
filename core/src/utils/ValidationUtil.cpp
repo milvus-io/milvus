@@ -19,6 +19,7 @@
 #include "utils/StringHelpFunctions.h"
 
 #include <arpa/inet.h>
+#include <netdb.h>
 
 #ifdef MILVUS_GPU_VERSION
 
@@ -43,10 +44,14 @@ constexpr int64_t COLLECTION_DIMENSION_LIMIT = 32768;
 #ifdef MILVUS_FPGA_VERSION
 constexpr int32_t INDEX_FILE_SIZE_LIMIT = 65536;  // due to max size memory of fpga is 64G
 #else
-constexpr int32_t INDEX_FILE_SIZE_LIMIT = 4096;  // index trigger size max = 4096 MB
+constexpr int32_t INDEX_FILE_SIZE_LIMIT = 131072;  // index trigger size max = 128G
 #endif
 constexpr int64_t M_BYTE = 1024 * 1024;
+constexpr int64_t G_BYTE = M_BYTE * 1024;
 constexpr int64_t MAX_INSERT_DATA_SIZE = 256 * M_BYTE;
+// search result size limited by grpc message size
+// consider the result struct contains members such as row_count/status, subtract 1MB
+constexpr int64_t MAX_SEARCH_RESULT_SIZE = 2 * G_BYTE - M_BYTE;
 
 Status
 CheckParameterRange(const milvus::json& json_params, const std::string& param_name, int64_t min, int64_t max,
@@ -397,7 +402,7 @@ ValidationUtil::ValidateCollectionIndexFileSize(int64_t index_file_size) {
     if (index_file_size <= 0 || index_file_size > INDEX_FILE_SIZE_LIMIT) {
         std::string msg = "Invalid index file size: " + std::to_string(index_file_size) + ". " +
                           "The index file size must be within the range of 1 ~ " +
-                          std::to_string(INDEX_FILE_SIZE_LIMIT) + ".";
+                          std::to_string(INDEX_FILE_SIZE_LIMIT) + "(MB).";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_INDEX_FILE_SIZE, msg);
     }
@@ -419,8 +424,22 @@ ValidationUtil::ValidateCollectionIndexMetricType(int32_t metric_type) {
 Status
 ValidationUtil::ValidateSearchTopk(int64_t top_k) {
     if (top_k <= 0 || top_k > QUERY_MAX_TOPK) {
-        std::string msg =
-            "Invalid topk: " + std::to_string(top_k) + ". " + "The topk must be within the range of 1 ~ 16384.";
+        std::string msg = "Invalid topk: " + std::to_string(top_k) + ". " +
+                          "The topk must be within the range of 1 ~ " + std::to_string(QUERY_MAX_TOPK) + ".";
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_TOPK, msg);
+    }
+
+    return Status::OK();
+}
+
+Status
+ValidationUtil::ValidateResultSize(int64_t vector_count, int64_t top_k) {
+    // each id-distance pair is 12 bytes (sizeof(int64) + sizeof(float))
+    int64_t result_size = vector_count * top_k * 12;
+    if (result_size >= MAX_SEARCH_RESULT_SIZE) {
+        std::string msg = "Invalid nq " + std::to_string(vector_count) + " topk " + std::to_string(top_k) +
+                          ". The search result size may exceed the RPC transmission limit.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_TOPK, msg);
     }
@@ -554,6 +573,18 @@ ValidationUtil::ValidateIpAddress(const std::string& ip_address) {
             return Status(SERVER_UNEXPECTED_ERROR, msg);
         }
     }
+}
+
+Status
+ValidationUtil::ValidateHostname(const std::string& hostname) {
+    struct hostent* hent = gethostbyname(hostname.c_str());
+    fiu_do_on("ValidationUtil.ValidateHostname.invalid_hostname", hent = nullptr);
+    if (!hent) {
+        std::string msg = "Unresolvable hostname: " + hostname;
+        LOG_SERVER_ERROR_ << msg;
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
 }
 
 Status

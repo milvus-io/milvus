@@ -153,22 +153,24 @@ class CachedQuantizer : public cache::DataObj {
 #endif
 
 ExecutionEngineImpl::ExecutionEngineImpl(uint16_t dimension, const std::string& location, EngineType index_type,
-                                         MetricType metric_type, const milvus::json& index_params)
+                                         MetricType metric_type, const milvus::json& index_params, int64_t time_stamp)
     : location_(location),
       dim_(dimension),
       index_type_(index_type),
       metric_type_(metric_type),
-      index_params_(index_params) {
+      index_params_(index_params),
+      time_stamp_(time_stamp) {
 }
 
 ExecutionEngineImpl::ExecutionEngineImpl(knowhere::VecIndexPtr index, const std::string& location,
                                          EngineType index_type, MetricType metric_type,
-                                         const milvus::json& index_params)
+                                         const milvus::json& index_params, int64_t time_stamp)
     : index_(std::move(index)),
       location_(location),
       index_type_(index_type),
       metric_type_(metric_type),
-      index_params_(index_params) {
+      index_params_(index_params),
+      time_stamp_(time_stamp) {
 }
 
 knowhere::IndexMode
@@ -381,13 +383,16 @@ ExecutionEngineImpl::Serialize() {
 }
 
 Status
-ExecutionEngineImpl::Load(bool to_cache) {
-    index_ = std::static_pointer_cast<knowhere::VecIndex>(cache::CpuCacheMgr::GetInstance()->GetItem(location_));
+ExecutionEngineImpl::Load(bool load_blacklist, bool to_cache) {
+    std::string segment_dir;
+    utils::GetParentPath(location_, segment_dir);
+    auto segment_reader_ptr = std::make_shared<segment::SegmentReader>(segment_dir);
+    auto cpu_cache_mgr = cache::CpuCacheMgr::GetInstance();
+
+    // step 1: Load index
+    index_ = std::static_pointer_cast<knowhere::VecIndex>(cpu_cache_mgr->GetItem(location_));
     if (!index_) {
         // not in the cache
-        std::string segment_dir;
-        utils::GetParentPath(location_, segment_dir);
-        auto segment_reader_ptr = std::make_shared<segment::SegmentReader>(segment_dir);
         knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
 
         if (utils::IsRawIndexType((int32_t)index_type_)) {
@@ -405,17 +410,13 @@ ExecutionEngineImpl::Load(bool to_cache) {
                 throw Exception(DB_ERROR, "Illegal index params");
             }
 
-            auto status = segment_reader_ptr->Load();
+            segment::VectorsPtr vectors = nullptr;
+            auto status = segment_reader_ptr->LoadsVectors(vectors);
             if (!status.ok()) {
-                std::string msg = "Failed to load segment from " + location_;
+                std::string msg = "Failed to load vectors from " + location_;
                 LOG_ENGINE_ERROR_ << msg;
                 return Status(DB_ERROR, msg);
             }
-
-            segment::SegmentPtr segment_ptr;
-            segment_reader_ptr->GetSegment(segment_ptr);
-            auto& vectors = segment_ptr->vectors_ptr_;
-            auto& deleted_docs = segment_ptr->deleted_docs_ptr_->GetDeletedDocs();
 
             auto& vectors_uids = vectors->GetMutableUids();
             std::shared_ptr<std::vector<int64_t>> vector_uids_ptr = std::make_shared<std::vector<int64_t>>();
@@ -424,28 +425,16 @@ ExecutionEngineImpl::Load(bool to_cache) {
             LOG_ENGINE_DEBUG_ << "set uids " << vector_uids_ptr->size() << " for index " << location_;
 
             auto& vectors_data = vectors->GetData();
-
             auto count = vector_uids_ptr->size();
-
-            faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = nullptr;
-            if (!deleted_docs.empty()) {
-                concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(count);
-                for (auto& offset : deleted_docs) {
-                    concurrent_bitset_ptr->set(offset);
-                }
-            }
-
             auto dataset = knowhere::GenDataset(count, this->dim_, vectors_data.data());
             if (index_type_ == EngineType::FAISS_IDMAP) {
                 auto bf_index = std::static_pointer_cast<knowhere::IDMAP>(index_);
                 bf_index->Train(knowhere::DatasetPtr(), conf);
                 bf_index->AddWithoutIds(dataset, conf);
-                bf_index->SetBlacklist(concurrent_bitset_ptr);
             } else if (index_type_ == EngineType::FAISS_BIN_IDMAP) {
                 auto bin_bf_index = std::static_pointer_cast<knowhere::BinaryIDMAP>(index_);
                 bin_bf_index->Train(knowhere::DatasetPtr(), conf);
                 bin_bf_index->AddWithoutIds(dataset, conf);
-                bin_bf_index->SetBlacklist(concurrent_bitset_ptr);
             }
 
             LOG_ENGINE_DEBUG_ << "Finished loading raw data from segment " << segment_dir;
@@ -455,38 +444,18 @@ ExecutionEngineImpl::Load(bool to_cache) {
                 segment_reader_ptr->GetSegment(segment_ptr);
                 auto status = segment_reader_ptr->LoadVectorIndex(location_, segment_ptr->vector_index_ptr_);
                 index_ = segment_ptr->vector_index_ptr_->GetVectorIndex();
-
                 if (index_ == nullptr) {
                     std::string msg = "Failed to load index from " + location_;
                     LOG_ENGINE_ERROR_ << msg;
                     return Status(DB_ERROR, msg);
-                } else {
-                    segment::DeletedDocsPtr deleted_docs_ptr;
-                    auto status = segment_reader_ptr->LoadDeletedDocs(deleted_docs_ptr);
-                    if (!status.ok()) {
-                        std::string msg = "Failed to load deleted docs from " + location_;
-                        LOG_ENGINE_ERROR_ << msg;
-                        return Status(DB_ERROR, msg);
-                    }
-                    auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
-
-                    faiss::ConcurrentBitsetPtr concurrent_bitset_ptr = nullptr;
-                    if (!deleted_docs.empty()) {
-                        concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(index_->Count());
-                        for (auto& offset : deleted_docs) {
-                            if (!concurrent_bitset_ptr->test(offset)) {
-                                concurrent_bitset_ptr->set(offset);
-                            }
-                        }
-                    }
-                    index_->SetBlacklist(concurrent_bitset_ptr);
-                    segment::UidsPtr uids_ptr = nullptr;
-                    segment_reader_ptr->LoadUids(uids_ptr);
-                    index_->SetUids(uids_ptr);
-                    LOG_ENGINE_DEBUG_ << "set uids " << index_->GetUids()->size() << " for index " << location_;
-
-                    LOG_ENGINE_DEBUG_ << "Finished loading index file from segment " << segment_dir;
                 }
+
+                segment::UidsPtr uids_ptr = nullptr;
+                segment_reader_ptr->LoadUids(uids_ptr);
+                index_->SetUids(uids_ptr);
+                LOG_ENGINE_DEBUG_ << "set uids " << index_->GetUids()->size() << " for index " << location_;
+
+                LOG_ENGINE_DEBUG_ << "Finished loading index file from segment " << segment_dir;
             } catch (std::exception& e) {
                 LOG_ENGINE_ERROR_ << e.what();
                 return Status(DB_ERROR, e.what());
@@ -494,12 +463,54 @@ ExecutionEngineImpl::Load(bool to_cache) {
         }
 
         if (to_cache) {
-            Cache();
+            cpu_cache_mgr->InsertItem(location_, index_);
+        }
+    }
+
+    // step 2: Load blacklist
+    if (load_blacklist) {
+        auto blacklist_cache_key = segment_dir + cache::Blacklist_Suffix;
+        blacklist_ = std::static_pointer_cast<knowhere::Blacklist>(cpu_cache_mgr->GetItem(blacklist_cache_key));
+
+        bool cache_miss = true;
+        if (blacklist_ != nullptr) {
+            if (blacklist_->time_stamp_ == time_stamp_) {
+                cache_miss = false;
+            } else {
+                LOG_ENGINE_DEBUG_ << "Mismatched time stamp  " << blacklist_->time_stamp_ << " < " << time_stamp_;
+            }
+        }
+
+        if (cache_miss) {
+            segment::DeletedDocsPtr deleted_docs_ptr;
+            auto status = segment_reader_ptr->LoadDeletedDocs(deleted_docs_ptr);
+            if (!status.ok()) {
+                std::string msg = "Failed to load deleted docs from " + location_;
+                LOG_ENGINE_ERROR_ << msg;
+                return Status(DB_ERROR, msg);
+            }
+            auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
+
+            blacklist_ = std::make_shared<knowhere::Blacklist>();
+            blacklist_->time_stamp_ = time_stamp_;
+            if (!deleted_docs.empty()) {
+                auto concurrent_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(index_->Count());
+                for (auto& offset : deleted_docs) {
+                    concurrent_bitset_ptr->set(offset);
+                }
+                blacklist_->bitset_ = concurrent_bitset_ptr;
+            }
+
+            LOG_ENGINE_DEBUG_ << "Finished loading blacklist_ deleted docs size " << deleted_docs.size();
+
+            if (to_cache) {
+                cpu_cache_mgr->InsertItem(blacklist_cache_key, blacklist_);
+            }
         }
     }
 
     return Status::OK();
-}  // namespace engine
+}
 
 Status
 ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
@@ -508,6 +519,7 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
     auto index = std::static_pointer_cast<knowhere::VecIndex>(data_obj_ptr);
     bool already_in_cache = (index != nullptr);
     if (already_in_cache) {
+        LOG_ENGINE_DEBUG_ << "ExecutionEngineImpl::CopyToGpu: already_in_cache in gpu" << device_id;
         index_ = index;
     } else {
         if (index_ == nullptr) {
@@ -541,6 +553,7 @@ ExecutionEngineImpl::CopyToGpu(uint64_t device_id, bool hybrid) {
             } else {
                 if (gpu_cache_enable) {
                     gpu_cache_mgr->InsertItem(location_, std::static_pointer_cast<cache::DataObj>(index_));
+                    LOG_ENGINE_DEBUG_ << "ExecutionEngineImpl::CopyToGpu: Gpu cache in device " << device_id;
                 }
                 LOG_ENGINE_DEBUG_ << "CPU to GPU" << device_id << " finished";
             }
@@ -655,12 +668,10 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
         auto dataset = knowhere::GenDataset(Count(), Dimension(), from_index->GetRawVectors());
         to_index->BuildAll(dataset, conf);
         uids = from_index->GetUids();
-        blacklist = from_index->GetBlacklist();
     } else if (bin_from_index) {
         auto dataset = knowhere::GenDataset(Count(), Dimension(), bin_from_index->GetRawVectors());
         to_index->BuildAll(dataset, conf);
         uids = bin_from_index->GetUids();
-        blacklist = bin_from_index->GetBlacklist();
     }
 
 #ifdef MILVUS_GPU_VERSION
@@ -673,12 +684,10 @@ ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_t
 
     to_index->SetUids(uids);
     LOG_ENGINE_DEBUG_ << "Set " << to_index->UidsSize() << "uids for " << location;
-    if (blacklist != nullptr) {
-        to_index->SetBlacklist(blacklist);
-        LOG_ENGINE_DEBUG_ << "Set blacklist for index " << location;
-    }
+
     LOG_ENGINE_DEBUG_ << "Finish build index: " << location;
-    return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, index_params_);
+    return std::make_shared<ExecutionEngineImpl>(to_index, location, engine_type, metric_type_, index_params_,
+                                                 time_stamp_);
 }
 
 void
@@ -719,7 +728,7 @@ ExecutionEngineImpl::Search(int64_t n, const float* data, int64_t k, const milvu
 
     rc.RecordSection("query prepare");
     auto dataset = knowhere::GenDataset(n, index_->Dim(), data);
-    auto result = index_->Query(dataset, conf);
+    auto result = index_->Query(dataset, conf, (blacklist_ ? blacklist_->bitset_ : nullptr));
     rc.RecordSection("query done");
 
     LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] get %ld uids from index %s", "search", 0, index_->GetUids()->size(),
@@ -760,7 +769,7 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
 
     rc.RecordSection("query prepare");
     auto dataset = knowhere::GenDataset(n, index_->Dim(), data);
-    auto result = index_->Query(dataset, conf);
+    auto result = index_->Query(dataset, conf, (blacklist_ ? blacklist_->bitset_ : nullptr));
     rc.RecordSection("query done");
 
     LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] get %ld uids from index %s", "search", 0, index_->GetUids()->size(),
@@ -778,8 +787,15 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
 Status
 ExecutionEngineImpl::Cache() {
     auto cpu_cache_mgr = milvus::cache::CpuCacheMgr::GetInstance();
-    cache::DataObjPtr obj = std::static_pointer_cast<cache::DataObj>(index_);
-    cpu_cache_mgr->InsertItem(location_, obj);
+    if (index_) {
+        cpu_cache_mgr->InsertItem(location_, index_);
+    }
+
+    if (blacklist_) {
+        std::string segment_dir;
+        utils::GetParentPath(location_, segment_dir);
+        cpu_cache_mgr->InsertItem(segment_dir + cache::Blacklist_Suffix, blacklist_);
+    }
     return Status::OK();
 }
 

@@ -1297,7 +1297,7 @@ Config::CheckStorageConfigS3Enable(const std::string& value) {
 
 Status
 Config::CheckStorageConfigS3Address(const std::string& value) {
-    if (!ValidationUtil::ValidateIpAddress(value).ok()) {
+    if (!ValidationUtil::ValidateHostname(value).ok()) {
         std::string msg = "Invalid s3 address: " + value + ". Possible reason: storage_config.s3_address is invalid.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }

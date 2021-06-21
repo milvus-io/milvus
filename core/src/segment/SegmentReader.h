@@ -40,7 +40,10 @@ class SegmentReader {
     Load();
 
     Status
-    LoadVectors(off_t offset, size_t num_bytes, std::vector<uint8_t>& raw_vectors);
+    LoadsVectors(VectorsPtr& vectors_ptr);
+
+    Status
+    LoadsSingleVector(off_t offset, size_t num_bytes, std::vector<uint8_t>& raw_vectors);
 
     Status
     LoadUids(UidsPtr& uids);
@@ -49,7 +52,7 @@ class SegmentReader {
     LoadVectorIndex(const std::string& location, segment::VectorIndexPtr& vector_index_ptr);
 
     Status
-    LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr);
+    LoadBloomFilter(segment::IdBloomFilterPtr& id_bloom_filter_ptr, bool cache_force);
 
     Status
     LoadDeletedDocs(segment::DeletedDocsPtr& deleted_docs_ptr);

@@ -86,7 +86,7 @@ class ExecutionEngine {
     Serialize() = 0;
 
     virtual Status
-    Load(bool to_cache = true) = 0;
+    Load(bool load_blacklist, bool to_cache = true) = 0;
 
     virtual Status
     CopyToFpga() = 0;

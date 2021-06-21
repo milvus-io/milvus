@@ -117,7 +117,6 @@ class BaseRequest {
         kDeleteByID,
         kGetVectorByID,
         kGetVectorIDs,
-        kInsertEntity,
 
         // collection operations
         kShowCollections = 300,
@@ -128,9 +127,6 @@ class BaseRequest {
         kShowCollectionInfo,
         kDropCollection,
         kPreloadCollection,
-        kCreateHybridCollection,
-        kHasHybridCollection,
-        kDescribeHybridCollection,
         kReloadSegments,
         kReleaseCollection,
 
@@ -148,7 +144,6 @@ class BaseRequest {
         kSearchByID = 600,
         kSearch,
         kSearchCombine,
-        kHybridSearch,
     };
 
  protected:
@@ -209,18 +204,21 @@ class BaseRequest {
     std::string
     CollectionNotExistMsg(const std::string& collection_name);
 
+    std::string
+    PartitionNotExistMsg(const std::string& collection_name, const std::string& partition_tag);
+
  protected:
     const std::shared_ptr<milvus::server::Context> context_;
 
     RequestType type_;
     std::string request_group_;
     bool async_;
-    Status status_;
 
  private:
     mutable std::mutex finish_mtx_;
     std::condition_variable finish_cond_;
     bool done_;
+    Status status_;
 
  public:
     const std::shared_ptr<milvus::server::Context>&

@@ -39,7 +39,6 @@ RequestGroup(BaseRequest::RequestType type) {
         {BaseRequest::kDeleteByID, DDL_DML_REQUEST_GROUP},
         {BaseRequest::kGetVectorByID, INFO_REQUEST_GROUP},
         {BaseRequest::kGetVectorIDs, INFO_REQUEST_GROUP},
-        {BaseRequest::kInsertEntity, DDL_DML_REQUEST_GROUP},
 
         // collection operations
         {BaseRequest::kShowCollections, INFO_REQUEST_GROUP},
@@ -51,8 +50,6 @@ RequestGroup(BaseRequest::RequestType type) {
         {BaseRequest::kDropCollection, DDL_DML_REQUEST_GROUP},
         {BaseRequest::kPreloadCollection, DQL_REQUEST_GROUP},
         {BaseRequest::kReleaseCollection, DQL_REQUEST_GROUP},
-        {BaseRequest::kCreateHybridCollection, DDL_DML_REQUEST_GROUP},
-        {BaseRequest::kDescribeHybridCollection, INFO_REQUEST_GROUP},
         {BaseRequest::kReloadSegments, DQL_REQUEST_GROUP},
 
         // partition operations
@@ -69,7 +66,6 @@ RequestGroup(BaseRequest::RequestType type) {
         {BaseRequest::kSearchByID, DQL_REQUEST_GROUP},
         {BaseRequest::kSearch, DQL_REQUEST_GROUP},
         {BaseRequest::kSearchCombine, DQL_REQUEST_GROUP},
-        {BaseRequest::kHybridSearch, DQL_REQUEST_GROUP},
     };
 
     auto iter = s_map_type_group.find(type);
@@ -112,8 +108,8 @@ BaseRequest::Execute() {
 
 Status
 BaseRequest::PostExecute() {
-    status_ = OnPostExecute();
-    return status_;
+    // not allow assign status_ here, because PostExecute() and Execute() are running on different threads
+    return OnPostExecute();
 }
 
 Status
@@ -146,6 +142,13 @@ BaseRequest::CollectionNotExistMsg(const std::string& collection_name) {
     return "Collection " + collection_name +
            " does not exist. Use milvus.has_collection to verify whether the collection exists. "
            "You also can check whether the collection name exists.";
+}
+
+std::string
+BaseRequest::PartitionNotExistMsg(const std::string& collection_name, const std::string& partition_tag) {
+    return "Collection " + collection_name + " partition_tag " + partition_tag +
+           " does not exist. Use milvus.partition to verify whether the partition exists. "
+           "You also can check whether the partition name exists.";
 }
 
 Status

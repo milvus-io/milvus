@@ -18,7 +18,6 @@
 
 #include "Options.h"
 #include "Types.h"
-#include "context/HybridSearchContext.h"
 #include "meta/Meta.h"
 #include "query/GeneralQuery.h"
 #include "server/context/Context.h"
@@ -159,17 +158,6 @@ class DB {
 
     virtual Status
     DropAll() = 0;
-
-    virtual Status
-    CreateHybridCollection(meta::CollectionSchema& collection_schema, meta::hybrid::FieldsSchema& fields_schema) = 0;
-
-    virtual Status
-    DescribeHybridCollection(meta::CollectionSchema& collection_schema, meta::hybrid::FieldsSchema& fields_schema) = 0;
-
-    virtual Status
-    InsertEntities(const std::string& collection_id, const std::string& partition_tag,
-                   const std::vector<std::string>& field_names, Entity& entity,
-                   std::unordered_map<std::string, meta::hybrid::DataType>& field_types) = 0;
 };  // DB
 
 using DBPtr = std::shared_ptr<DB>;

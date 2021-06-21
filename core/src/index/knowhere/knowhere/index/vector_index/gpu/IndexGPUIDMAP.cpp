@@ -97,13 +97,14 @@ GPUIDMAP::GetRawVectors() {
 }
 
 void
-GPUIDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
+GPUIDMAP::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config,
+                    faiss::ConcurrentBitsetPtr blacklist) {
     ResScope rs(res_, gpu_id_);
 
     auto default_type = index_->metric_type;
     if (config.contains(Metric::TYPE))
         index_->metric_type = GetMetricType(config[Metric::TYPE].get<std::string>());
-    index_->search(n, (float*)data, k, distances, labels, GetBlacklist());
+    index_->search(n, (float*)data, k, distances, labels, blacklist);
     index_->metric_type = default_type;
 }
 
@@ -128,7 +129,7 @@ GPUIDMAP::GenGraph(const float* data, const int64_t k, GraphType& graph, const C
         res.resize(K * b_size);
 
         auto xq = data + batch_size * dim * i;
-        QueryImpl(b_size, (float*)xq, K, res_dis.data(), res.data(), config);
+        QueryImpl(b_size, (float*)xq, K, res_dis.data(), res.data(), config, nullptr);
 
         for (int j = 0; j < b_size; ++j) {
             auto& node = graph[batch_size * i + j];

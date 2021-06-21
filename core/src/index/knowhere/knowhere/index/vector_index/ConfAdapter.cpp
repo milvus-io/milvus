@@ -25,7 +25,7 @@ namespace milvus {
 namespace knowhere {
 
 static const int64_t MIN_K = 0;
-static const int64_t MAX_K = 16384;
+static const int64_t MAX_K = 1024 * 1024;
 static const int64_t MIN_NBITS = 1;
 static const int64_t MAX_NBITS = 16;
 static const int64_t DEFAULT_NBITS = 8;
@@ -175,7 +175,7 @@ IVFPQConfAdapter::CheckTrain(Config& oricfg, IndexMode& mode) {
             return true;
         }
         // else try CPU Mode
-        mode == IndexMode::MODE_CPU;
+        mode = IndexMode::MODE_CPU;
     }
 #endif
     return IsValidForCPU(dimension, m);

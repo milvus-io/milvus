@@ -60,12 +60,12 @@ For GPU-enabled version, you will also need:
 
 #### Step 1 Download Milvus source code and specify version 
 
-Download Milvus source code, change directory and specify version (for example, 0.10.3):
+Download Milvus source code, change directory and specify version (for example, 1.1):
 
 ```shell
 $ git clone https://github.com/milvus-io/milvus
 $ cd ./milvus/core
-$ git checkout 0.10.3
+$ git checkout 1.1
 ```
 
 #### Step 2 Install dependencies
@@ -215,10 +215,10 @@ To enter its core directory:
 $ cd ./milvus/core
 ```
 
-Specify version (for example, 0.10.3):
+Specify version (for example, 1.1):
 
 ```shell
-$ git checkout 0.10.3
+$ git checkout 1.1
 ```
 
 ### Step 4 Compile Milvus in the container

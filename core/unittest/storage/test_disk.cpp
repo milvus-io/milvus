@@ -69,9 +69,9 @@ TEST_F(StorageTest, DISK_OPERATION_TEST) {
 
     fiu_init(0);
     fiu_enable("DiskOperation.CreateDirectory.is_directory", 1, NULL, 0);
-    fiu_enable("DiskOperation.CreateDirectory.create_directory", 1, NULL, 0);
+    fiu_enable("DiskOperation.CreateDirectory.create_directories", 1, NULL, 0);
     ASSERT_ANY_THROW(disk_operation.CreateDirectory());
-    fiu_disable("DiskOperation.CreateDirectory.create_directory");
+    fiu_disable("DiskOperation.CreateDirectory.create_directories");
     fiu_disable("DiskOperation.CreateDirectory.is_directory");
 
     std::vector<std::string> file_paths;

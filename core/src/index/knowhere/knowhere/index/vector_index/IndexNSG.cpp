@@ -71,7 +71,7 @@ NSG::Load(const BinarySet& index_binary) {
 }
 
 DatasetPtr
-NSG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
+NSG::Query(const DatasetPtr& dataset_ptr, const Config& config, faiss::ConcurrentBitsetPtr blacklist) {
     if (!index_ || !index_->is_trained) {
         KNOWHERE_THROW_MSG("index not initialize or trained");
     }
@@ -84,8 +84,6 @@ NSG::Query(const DatasetPtr& dataset_ptr, const Config& config) {
         size_t p_dist_size = sizeof(float) * elems;
         auto p_id = (int64_t*)malloc(p_id_size);
         auto p_dist = (float*)malloc(p_dist_size);
-
-        faiss::ConcurrentBitsetPtr blacklist = GetBlacklist();
 
         impl::SearchParams s_params;
         s_params.search_length = config[IndexParams::search_length];

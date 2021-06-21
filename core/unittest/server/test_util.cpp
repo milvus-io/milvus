@@ -702,8 +702,14 @@ TEST(ValidationUtilTest, VALIDATE_VECTOR_DATA_TEST) {
 
 TEST(ValidationUtilTest, VALIDATE_TOPK_TEST) {
     ASSERT_EQ(milvus::server::ValidationUtil::ValidateSearchTopk(10).code(), milvus::SERVER_SUCCESS);
-    ASSERT_NE(milvus::server::ValidationUtil::ValidateSearchTopk(65536).code(), milvus::SERVER_SUCCESS);
     ASSERT_NE(milvus::server::ValidationUtil::ValidateSearchTopk(0).code(), milvus::SERVER_SUCCESS);
+    int64_t max_topk = milvus::server::QUERY_MAX_TOPK;
+    ASSERT_EQ(milvus::server::ValidationUtil::ValidateSearchTopk(max_topk).code(), milvus::SERVER_SUCCESS);
+    ASSERT_NE(milvus::server::ValidationUtil::ValidateSearchTopk(max_topk + 1).code(), milvus::SERVER_SUCCESS);
+
+    int64_t count = 171; // this value is 2GB/QUERY_MAX_TOPK/12
+    ASSERT_EQ(milvus::server::ValidationUtil::ValidateResultSize(count - 1, max_topk).code(), milvus::SERVER_SUCCESS);
+    ASSERT_NE(milvus::server::ValidationUtil::ValidateResultSize(count, max_topk).code(), milvus::SERVER_SUCCESS);
 }
 
 TEST(ValidationUtilTest, VALIDATE_PARTITION_TAGS) {
@@ -743,6 +749,18 @@ TEST(ValidationUtilTest, VALIDATE_IPADDRESS_TEST) {
     fiu_enable("ValidationUtil.ValidateIpAddress.error_ip_result", 1, NULL, 0);
     ASSERT_NE(milvus::server::ValidationUtil::ValidateIpAddress("not ip").code(), milvus::SERVER_SUCCESS);
     fiu_disable("ValidationUtil.ValidateIpAddress.error_ip_result");
+}
+
+TEST(ValidationUtilTest, VALIDATE_HOSTNAME_TEST) {
+    ASSERT_EQ(milvus::server::ValidationUtil::ValidateHostname("127.0.0.1").code(), milvus::SERVER_SUCCESS);
+    ASSERT_EQ(milvus::server::ValidationUtil::ValidateHostname("localhost").code(), milvus::SERVER_SUCCESS);
+    ASSERT_EQ(milvus::server::ValidationUtil::ValidateHostname("192.168.100.100").code(), milvus::SERVER_SUCCESS);
+    ASSERT_NE(milvus::server::ValidationUtil::ValidateHostname("not a domain").code(), milvus::SERVER_SUCCESS);
+
+    fiu_init(0);
+    fiu_enable("ValidationUtil.ValidateHostname.invalid_hostname", 1, NULL, 0);
+    ASSERT_NE(milvus::server::ValidationUtil::ValidateIpAddress("not a hostname").code(), milvus::SERVER_SUCCESS);
+    fiu_disable("ValidationUtil.ValidateHostname.invalid_hostname");
 }
 
 TEST(ValidationUtilTest, VALIDATE_NUMBER_TEST) {
