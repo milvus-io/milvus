@@ -185,8 +185,9 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 			zap.Int64("SegmentID", us.GetID()),
 			zap.Int64("NumOfRows", us.GetNumOfRows()),
 		)
-		dsService.replica.addSegment(us.GetID(), us.CollectionID, us.PartitionID, us.GetInsertChannel())
-		dsService.replica.updateStatistics(us.GetID(), us.GetNumOfRows())
+
+		dsService.replica.addNormalSegment(us.GetID(), us.CollectionID, us.PartitionID, us.GetInsertChannel(),
+			us.GetNumOfRows(), &segmentCheckPoint{us.GetNumOfRows(), *us.GetDmlPosition()})
 	}
 
 	dsService.fg.AddNode(dmStreamNode)

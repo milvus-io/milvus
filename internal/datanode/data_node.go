@@ -339,18 +339,6 @@ func (node *DataNode) ReadyToFlush() error {
 	return nil
 }
 
-func (node *DataNode) getSegmentPositionPair(segmentID UniqueID, chanName string) ([]*internalpb.MsgPosition, []*internalpb.MsgPosition) {
-	node.chanMut.Lock()
-	defer node.chanMut.Unlock()
-	sync, ok := node.vchan2SyncService[chanName]
-	if !ok {
-		return nil, nil
-	}
-
-	starts, ends := sync.replica.getSegmentPositions(segmentID)
-	return starts, ends
-}
-
 // FlushSegments packs flush messages into flowgraph through flushChan.
 //   If DataNode receives a valid segment to flush, new flush message for the segment should be ignored.
 //   So if receiving calls to flush segment A, DataNode should guarantee the segment to be flushed.
