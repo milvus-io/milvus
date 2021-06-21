@@ -6,7 +6,7 @@
 
 #### 8.1 Overview
 
-<img src="./figs/data_service.png" width=700>
+<img src="./figs/data_coord.png" width=700>
 
 #### 8.2 Data Service Interface
 
