@@ -18,7 +18,7 @@ import (
 )
 
 func TestAllocator_Basic(t *testing.T) {
-	ms := newMockMasterService()
+	ms := newMockRootCoordService()
 	allocator := newAllocator(ms)
 
 	t.Run("Test allocTimestamp", func(t *testing.T) {

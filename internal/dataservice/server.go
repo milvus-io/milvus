@@ -37,9 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
-const role = "dataservice"
-
-const masterClientTimout = 20 * time.Second
+const rootCoordClientTimout = 20 * time.Second
 
 type (
 	UniqueID  = typeutil.UniqueID
@@ -58,7 +56,7 @@ type Server struct {
 	segmentManager    Manager
 	allocator         allocator
 	cluster           *cluster
-	masterClient      types.MasterService
+	rootCoordClient   types.RootCoord
 	ddChannelName     string
 
 	flushCh        chan UniqueID
@@ -69,8 +67,8 @@ type Server struct {
 	activeCh <-chan bool
 	eventCh  <-chan *sessionutil.SessionEvent
 
-	dataClientCreator   func(addr string) (types.DataNode, error)
-	masterClientCreator func(addr string) (types.MasterService, error)
+	dataClientCreator      func(addr string) (types.DataNode, error)
+	rootCoordClientCreator func(addr string) (types.RootCoord, error)
 }
 
 func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
@@ -83,8 +81,8 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 	s.dataClientCreator = func(addr string) (types.DataNode, error) {
 		return datanodeclient.NewClient(addr, 3*time.Second)
 	}
-	s.masterClientCreator = func(addr string) (types.MasterService, error) {
-		return rootcoordclient.NewClient(ctx, Params.MetaRootPath, Params.EtcdEndpoints, masterClientTimout)
+	s.rootCoordClientCreator = func(addr string) (types.RootCoord, error) {
+		return rootcoordclient.NewClient(ctx, Params.MetaRootPath, Params.EtcdEndpoints, rootCoordClientTimout)
 	}
 
 	return s, nil
@@ -93,7 +91,7 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 // Register register data service at etcd
 func (s *Server) Register() error {
 	s.session = sessionutil.NewSession(s.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
-	s.activeCh = s.session.Init(typeutil.DataServiceRole, Params.IP, true)
+	s.activeCh = s.session.Init(typeutil.DataCoordRole, Params.IP, true)
 	Params.NodeID = s.session.ServerID
 	return nil
 }
@@ -113,7 +111,7 @@ func (s *Server) Start() error {
 	if err != nil {
 		return err
 	}
-	if err = s.initMasterClient(); err != nil {
+	if err = s.initRootCoordClient(); err != nil {
 		return err
 	}
 
@@ -129,7 +127,7 @@ func (s *Server) Start() error {
 		return err
 	}
 
-	s.allocator = newAllocator(s.masterClient)
+	s.allocator = newAllocator(s.rootCoordClient)
 
 	s.startSegmentManager()
 	if err = s.initFlushMsgStream(); err != nil {
@@ -160,7 +158,7 @@ func (s *Server) initCluster() error {
 func (s *Server) initServiceDiscovery() error {
 	sessions, rev, err := s.session.GetSessions(typeutil.DataNodeRole)
 	if err != nil {
-		log.Debug("DataService initMeta failed", zap.Error(err))
+		log.Debug("DataCoord initMeta failed", zap.Error(err))
 		return err
 	}
 	log.Debug("registered sessions", zap.Any("sessions", sessions))
@@ -175,7 +173,7 @@ func (s *Server) initServiceDiscovery() error {
 	}
 
 	if err := s.cluster.startup(datanodes); err != nil {
-		log.Debug("DataService loadMetaFromMaster failed", zap.Error(err))
+		log.Debug("DataCoord loadMetaFromRootCoord failed", zap.Error(err))
 		return err
 	}
 
@@ -195,7 +193,7 @@ func (s *Server) initSegmentInfoChannel() error {
 		return err
 	}
 	s.segmentInfoStream.AsProducer([]string{Params.SegmentInfoChannelName})
-	log.Debug("DataService AsProducer: " + Params.SegmentInfoChannelName)
+	log.Debug("DataCoord AsProducer: " + Params.SegmentInfoChannelName)
 	s.segmentInfoStream.Start()
 	return nil
 }
@@ -224,7 +222,7 @@ func (s *Server) initFlushMsgStream() error {
 		return err
 	}
 	s.flushMsgStream.AsProducer([]string{Params.SegmentInfoChannelName})
-	log.Debug("dataservice AsProducer:" + Params.SegmentInfoChannelName)
+	log.Debug("DataCoord AsProducer:" + Params.SegmentInfoChannelName)
 	s.flushMsgStream.Start()
 
 	return nil
@@ -244,10 +242,10 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 	statsStream, _ := s.msFactory.NewMsgStream(ctx)
-	statsStream.AsConsumer([]string{Params.StatisticsChannelName}, Params.DataServiceSubscriptionName)
-	log.Debug("dataservce stats stream",
+	statsStream.AsConsumer([]string{Params.StatisticsChannelName}, Params.DataCoordSubscriptionName)
+	log.Debug("DataCoord stats stream",
 		zap.String("channelName", Params.StatisticsChannelName),
-		zap.String("descriptionName", Params.DataServiceSubscriptionName))
+		zap.String("descriptionName", Params.DataCoordSubscriptionName))
 	statsStream.Start()
 	defer statsStream.Close()
 	for {
@@ -284,9 +282,9 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 		return
 	}
 	ttMsgStream.AsConsumer([]string{Params.TimeTickChannelName},
-		Params.DataServiceSubscriptionName)
-	log.Debug(fmt.Sprintf("dataservice AsConsumer:%s:%s",
-		Params.TimeTickChannelName, Params.DataServiceSubscriptionName))
+		Params.DataCoordSubscriptionName)
+	log.Debug(fmt.Sprintf("DataCoord AsConsumer:%s:%s",
+		Params.TimeTickChannelName, Params.DataCoordSubscriptionName))
 	ttMsgStream.Start()
 	defer ttMsgStream.Close()
 	for {
@@ -438,23 +436,23 @@ func (s *Server) handleFlushingSegments(ctx context.Context) {
 	}
 }
 
-func (s *Server) initMasterClient() error {
+func (s *Server) initRootCoordClient() error {
 	var err error
-	s.masterClient, err = s.masterClientCreator("")
+	s.rootCoordClient, err = s.rootCoordClientCreator("")
 	if err != nil {
 		return err
 	}
-	if err = s.masterClient.Init(); err != nil {
+	if err = s.rootCoordClient.Init(); err != nil {
 		return err
 	}
-	return s.masterClient.Start()
+	return s.rootCoordClient.Start()
 }
 
 func (s *Server) Stop() error {
 	if !atomic.CompareAndSwapInt64(&s.isServing, 2, 0) {
 		return nil
 	}
-	log.Debug("dataservice server shutdown")
+	log.Debug("DataCoord server shutdown")
 	atomic.StoreInt64(&s.isServing, 0)
 	s.cluster.releaseSessions()
 	s.segmentInfoStream.Close()
@@ -489,8 +487,8 @@ func (s *Server) stopServerLoop() {
 //	return fmt.Errorf("can not find channel %s", channelName)
 //}
 
-func (s *Server) loadCollectionFromMaster(ctx context.Context, collectionID int64) error {
-	resp, err := s.masterClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID int64) error {
+	resp, err := s.rootCoordClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_DescribeCollection,
 			SourceID: Params.NodeID,
@@ -501,7 +499,7 @@ func (s *Server) loadCollectionFromMaster(ctx context.Context, collectionID int6
 	if err = VerifyResponse(resp, err); err != nil {
 		return err
 	}
-	presp, err := s.masterClient.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
+	presp, err := s.rootCoordClient.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_ShowPartitions,
 			MsgID:     -1, // todo

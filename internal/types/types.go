@@ -45,19 +45,16 @@ type DataNode interface {
 	FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error)
 }
 
-type DataService interface {
+type DataCoord interface {
 	Component
 	TimeTickProvider
 
 	Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error)
 
-	RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error)
 	AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error)
-	ShowSegments(ctx context.Context, req *datapb.ShowSegmentsRequest) (*datapb.ShowSegmentsResponse, error)
 	GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
 	GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error)
 	GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error)
-	GetInsertChannels(ctx context.Context, req *datapb.GetInsertChannelsRequest) (*internalpb.StringList, error)
 	GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error)
 	GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error)
 	GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error)
@@ -72,7 +69,7 @@ type IndexNode interface {
 	CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error)
 }
 
-type IndexService interface {
+type IndexCoord interface {
 	Component
 	TimeTickProvider
 
@@ -83,7 +80,7 @@ type IndexService interface {
 	GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error)
 }
 
-type MasterService interface {
+type RootCoord interface {
 	Component
 	TimeTickProvider
 
@@ -114,13 +111,13 @@ type MasterService interface {
 	ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error)
 }
 
-// MasterComponent is used by grpc server of master service
-type MasterComponent interface {
-	MasterService
+// RootCoordComponent is used by grpc server of master service
+type RootCoordComponent interface {
+	RootCoord
 
 	UpdateStateCode(internalpb.StateCode)
-	SetDataCoord(context.Context, DataService) error
-	SetIndexCoord(IndexService) error
+	SetDataCoord(context.Context, DataCoord) error
+	SetIndexCoord(IndexCoord) error
 	SetQueryCoord(QueryService) error
 	SetNewProxyClient(func(sess *sessionutil.Session) (ProxyNode, error))
 }

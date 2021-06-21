@@ -53,100 +53,6 @@ func (ChannelWatchState) EnumDescriptor() ([]byte, []int) {
 	return fileDescriptor_3385cd32ad6cfe64, []int{0}
 }
 
-type RegisterNodeRequest struct {
-	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	Address              *commonpb.Address `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
-	XXX_unrecognized     []byte            `json:"-"`
-	XXX_sizecache        int32             `json:"-"`
-}
-
-func (m *RegisterNodeRequest) Reset()         { *m = RegisterNodeRequest{} }
-func (m *RegisterNodeRequest) String() string { return proto.CompactTextString(m) }
-func (*RegisterNodeRequest) ProtoMessage()    {}
-func (*RegisterNodeRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{0}
-}
-
-func (m *RegisterNodeRequest) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_RegisterNodeRequest.Unmarshal(m, b)
-}
-func (m *RegisterNodeRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_RegisterNodeRequest.Marshal(b, m, deterministic)
-}
-func (m *RegisterNodeRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_RegisterNodeRequest.Merge(m, src)
-}
-func (m *RegisterNodeRequest) XXX_Size() int {
-	return xxx_messageInfo_RegisterNodeRequest.Size(m)
-}
-func (m *RegisterNodeRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_RegisterNodeRequest.DiscardUnknown(m)
-}
-
-var xxx_messageInfo_RegisterNodeRequest proto.InternalMessageInfo
-
-func (m *RegisterNodeRequest) GetBase() *commonpb.MsgBase {
-	if m != nil {
-		return m.Base
-	}
-	return nil
-}
-
-func (m *RegisterNodeRequest) GetAddress() *commonpb.Address {
-	if m != nil {
-		return m.Address
-	}
-	return nil
-}
-
-type RegisterNodeResponse struct {
-	InitParams           *internalpb.InitParams `protobuf:"bytes,1,opt,name=init_params,json=initParams,proto3" json:"init_params,omitempty"`
-	Status               *commonpb.Status       `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}               `json:"-"`
-	XXX_unrecognized     []byte                 `json:"-"`
-	XXX_sizecache        int32                  `json:"-"`
-}
-
-func (m *RegisterNodeResponse) Reset()         { *m = RegisterNodeResponse{} }
-func (m *RegisterNodeResponse) String() string { return proto.CompactTextString(m) }
-func (*RegisterNodeResponse) ProtoMessage()    {}
-func (*RegisterNodeResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{1}
-}
-
-func (m *RegisterNodeResponse) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_RegisterNodeResponse.Unmarshal(m, b)
-}
-func (m *RegisterNodeResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_RegisterNodeResponse.Marshal(b, m, deterministic)
-}
-func (m *RegisterNodeResponse) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_RegisterNodeResponse.Merge(m, src)
-}
-func (m *RegisterNodeResponse) XXX_Size() int {
-	return xxx_messageInfo_RegisterNodeResponse.Size(m)
-}
-func (m *RegisterNodeResponse) XXX_DiscardUnknown() {
-	xxx_messageInfo_RegisterNodeResponse.DiscardUnknown(m)
-}
-
-var xxx_messageInfo_RegisterNodeResponse proto.InternalMessageInfo
-
-func (m *RegisterNodeResponse) GetInitParams() *internalpb.InitParams {
-	if m != nil {
-		return m.InitParams
-	}
-	return nil
-}
-
-func (m *RegisterNodeResponse) GetStatus() *commonpb.Status {
-	if m != nil {
-		return m.Status
-	}
-	return nil
-}
-
 type FlushRequest struct {
 	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	DbID                 int64             `protobuf:"varint,2,opt,name=dbID,proto3" json:"dbID,omitempty"`
@@ -160,7 +66,7 @@ func (m *FlushRequest) Reset()         { *m = FlushRequest{} }
 func (m *FlushRequest) String() string { return proto.CompactTextString(m) }
 func (*FlushRequest) ProtoMessage()    {}
 func (*FlushRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{2}
+	return fileDescriptor_3385cd32ad6cfe64, []int{0}
 }
 
 func (m *FlushRequest) XXX_Unmarshal(b []byte) error {
@@ -216,7 +122,7 @@ func (m *SegmentIDRequest) Reset()         { *m = SegmentIDRequest{} }
 func (m *SegmentIDRequest) String() string { return proto.CompactTextString(m) }
 func (*SegmentIDRequest) ProtoMessage()    {}
 func (*SegmentIDRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{3}
+	return fileDescriptor_3385cd32ad6cfe64, []int{1}
 }
 
 func (m *SegmentIDRequest) XXX_Unmarshal(b []byte) error {
@@ -278,7 +184,7 @@ func (m *AssignSegmentIDRequest) Reset()         { *m = AssignSegmentIDRequest{}
 func (m *AssignSegmentIDRequest) String() string { return proto.CompactTextString(m) }
 func (*AssignSegmentIDRequest) ProtoMessage()    {}
 func (*AssignSegmentIDRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{4}
+	return fileDescriptor_3385cd32ad6cfe64, []int{2}
 }
 
 func (m *AssignSegmentIDRequest) XXX_Unmarshal(b []byte) error {
@@ -337,7 +243,7 @@ func (m *SegmentIDAssignment) Reset()         { *m = SegmentIDAssignment{} }
 func (m *SegmentIDAssignment) String() string { return proto.CompactTextString(m) }
 func (*SegmentIDAssignment) ProtoMessage()    {}
 func (*SegmentIDAssignment) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{5}
+	return fileDescriptor_3385cd32ad6cfe64, []int{3}
 }
 
 func (m *SegmentIDAssignment) XXX_Unmarshal(b []byte) error {
@@ -419,7 +325,7 @@ func (m *AssignSegmentIDResponse) Reset()         { *m = AssignSegmentIDResponse
 func (m *AssignSegmentIDResponse) String() string { return proto.CompactTextString(m) }
 func (*AssignSegmentIDResponse) ProtoMessage()    {}
 func (*AssignSegmentIDResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{6}
+	return fileDescriptor_3385cd32ad6cfe64, []int{4}
 }
 
 func (m *AssignSegmentIDResponse) XXX_Unmarshal(b []byte) error {
@@ -454,116 +360,6 @@ func (m *AssignSegmentIDResponse) GetStatus() *commonpb.Status {
 	return nil
 }
 
-type ShowSegmentsRequest struct {
-	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	CollectionID         int64             `protobuf:"varint,2,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
-	PartitionID          int64             `protobuf:"varint,3,opt,name=partitionID,proto3" json:"partitionID,omitempty"`
-	DbID                 int64             `protobuf:"varint,4,opt,name=dbID,proto3" json:"dbID,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
-	XXX_unrecognized     []byte            `json:"-"`
-	XXX_sizecache        int32             `json:"-"`
-}
-
-func (m *ShowSegmentsRequest) Reset()         { *m = ShowSegmentsRequest{} }
-func (m *ShowSegmentsRequest) String() string { return proto.CompactTextString(m) }
-func (*ShowSegmentsRequest) ProtoMessage()    {}
-func (*ShowSegmentsRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{7}
-}
-
-func (m *ShowSegmentsRequest) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_ShowSegmentsRequest.Unmarshal(m, b)
-}
-func (m *ShowSegmentsRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_ShowSegmentsRequest.Marshal(b, m, deterministic)
-}
-func (m *ShowSegmentsRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_ShowSegmentsRequest.Merge(m, src)
-}
-func (m *ShowSegmentsRequest) XXX_Size() int {
-	return xxx_messageInfo_ShowSegmentsRequest.Size(m)
-}
-func (m *ShowSegmentsRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_ShowSegmentsRequest.DiscardUnknown(m)
-}
-
-var xxx_messageInfo_ShowSegmentsRequest proto.InternalMessageInfo
-
-func (m *ShowSegmentsRequest) GetBase() *commonpb.MsgBase {
-	if m != nil {
-		return m.Base
-	}
-	return nil
-}
-
-func (m *ShowSegmentsRequest) GetCollectionID() int64 {
-	if m != nil {
-		return m.CollectionID
-	}
-	return 0
-}
-
-func (m *ShowSegmentsRequest) GetPartitionID() int64 {
-	if m != nil {
-		return m.PartitionID
-	}
-	return 0
-}
-
-func (m *ShowSegmentsRequest) GetDbID() int64 {
-	if m != nil {
-		return m.DbID
-	}
-	return 0
-}
-
-type ShowSegmentsResponse struct {
-	SegmentIDs           []int64          `protobuf:"varint,1,rep,packed,name=segmentIDs,proto3" json:"segmentIDs,omitempty"`
-	Status               *commonpb.Status `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
-	XXX_unrecognized     []byte           `json:"-"`
-	XXX_sizecache        int32            `json:"-"`
-}
-
-func (m *ShowSegmentsResponse) Reset()         { *m = ShowSegmentsResponse{} }
-func (m *ShowSegmentsResponse) String() string { return proto.CompactTextString(m) }
-func (*ShowSegmentsResponse) ProtoMessage()    {}
-func (*ShowSegmentsResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{8}
-}
-
-func (m *ShowSegmentsResponse) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_ShowSegmentsResponse.Unmarshal(m, b)
-}
-func (m *ShowSegmentsResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_ShowSegmentsResponse.Marshal(b, m, deterministic)
-}
-func (m *ShowSegmentsResponse) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_ShowSegmentsResponse.Merge(m, src)
-}
-func (m *ShowSegmentsResponse) XXX_Size() int {
-	return xxx_messageInfo_ShowSegmentsResponse.Size(m)
-}
-func (m *ShowSegmentsResponse) XXX_DiscardUnknown() {
-	xxx_messageInfo_ShowSegmentsResponse.DiscardUnknown(m)
-}
-
-var xxx_messageInfo_ShowSegmentsResponse proto.InternalMessageInfo
-
-func (m *ShowSegmentsResponse) GetSegmentIDs() []int64 {
-	if m != nil {
-		return m.SegmentIDs
-	}
-	return nil
-}
-
-func (m *ShowSegmentsResponse) GetStatus() *commonpb.Status {
-	if m != nil {
-		return m.Status
-	}
-	return nil
-}
-
 type GetSegmentStatesRequest struct {
 	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	SegmentIDs           []int64           `protobuf:"varint,2,rep,packed,name=segmentIDs,proto3" json:"segmentIDs,omitempty"`
@@ -576,7 +372,7 @@ func (m *GetSegmentStatesRequest) Reset()         { *m = GetSegmentStatesRequest
 func (m *GetSegmentStatesRequest) String() string { return proto.CompactTextString(m) }
 func (*GetSegmentStatesRequest) ProtoMessage()    {}
 func (*GetSegmentStatesRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{9}
+	return fileDescriptor_3385cd32ad6cfe64, []int{5}
 }
 
 func (m *GetSegmentStatesRequest) XXX_Unmarshal(b []byte) error {
@@ -626,7 +422,7 @@ func (m *SegmentStateInfo) Reset()         { *m = SegmentStateInfo{} }
 func (m *SegmentStateInfo) String() string { return proto.CompactTextString(m) }
 func (*SegmentStateInfo) ProtoMessage()    {}
 func (*SegmentStateInfo) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{10}
+	return fileDescriptor_3385cd32ad6cfe64, []int{6}
 }
 
 func (m *SegmentStateInfo) XXX_Unmarshal(b []byte) error {
@@ -694,7 +490,7 @@ func (m *GetSegmentStatesResponse) Reset()         { *m = GetSegmentStatesRespon
 func (m *GetSegmentStatesResponse) String() string { return proto.CompactTextString(m) }
 func (*GetSegmentStatesResponse) ProtoMessage()    {}
 func (*GetSegmentStatesResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{11}
+	return fileDescriptor_3385cd32ad6cfe64, []int{7}
 }
 
 func (m *GetSegmentStatesResponse) XXX_Unmarshal(b []byte) error {
@@ -741,7 +537,7 @@ func (m *GetSegmentInfoRequest) Reset()         { *m = GetSegmentInfoRequest{} }
 func (m *GetSegmentInfoRequest) String() string { return proto.CompactTextString(m) }
 func (*GetSegmentInfoRequest) ProtoMessage()    {}
 func (*GetSegmentInfoRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{12}
+	return fileDescriptor_3385cd32ad6cfe64, []int{8}
 }
 
 func (m *GetSegmentInfoRequest) XXX_Unmarshal(b []byte) error {
@@ -788,7 +584,7 @@ func (m *GetSegmentInfoResponse) Reset()         { *m = GetSegmentInfoResponse{}
 func (m *GetSegmentInfoResponse) String() string { return proto.CompactTextString(m) }
 func (*GetSegmentInfoResponse) ProtoMessage()    {}
 func (*GetSegmentInfoResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{13}
+	return fileDescriptor_3385cd32ad6cfe64, []int{9}
 }
 
 func (m *GetSegmentInfoResponse) XXX_Unmarshal(b []byte) error {
@@ -835,7 +631,7 @@ func (m *GetInsertBinlogPathsRequest) Reset()         { *m = GetInsertBinlogPath
 func (m *GetInsertBinlogPathsRequest) String() string { return proto.CompactTextString(m) }
 func (*GetInsertBinlogPathsRequest) ProtoMessage()    {}
 func (*GetInsertBinlogPathsRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{14}
+	return fileDescriptor_3385cd32ad6cfe64, []int{10}
 }
 
 func (m *GetInsertBinlogPathsRequest) XXX_Unmarshal(b []byte) error {
@@ -883,7 +679,7 @@ func (m *GetInsertBinlogPathsResponse) Reset()         { *m = GetInsertBinlogPat
 func (m *GetInsertBinlogPathsResponse) String() string { return proto.CompactTextString(m) }
 func (*GetInsertBinlogPathsResponse) ProtoMessage()    {}
 func (*GetInsertBinlogPathsResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{15}
+	return fileDescriptor_3385cd32ad6cfe64, []int{11}
 }
 
 func (m *GetInsertBinlogPathsResponse) XXX_Unmarshal(b []byte) error {
@@ -925,61 +721,6 @@ func (m *GetInsertBinlogPathsResponse) GetStatus() *commonpb.Status {
 	return nil
 }
 
-type GetInsertChannelsRequest struct {
-	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	DbID                 int64             `protobuf:"varint,2,opt,name=dbID,proto3" json:"dbID,omitempty"`
-	CollectionID         int64             `protobuf:"varint,3,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
-	XXX_unrecognized     []byte            `json:"-"`
-	XXX_sizecache        int32             `json:"-"`
-}
-
-func (m *GetInsertChannelsRequest) Reset()         { *m = GetInsertChannelsRequest{} }
-func (m *GetInsertChannelsRequest) String() string { return proto.CompactTextString(m) }
-func (*GetInsertChannelsRequest) ProtoMessage()    {}
-func (*GetInsertChannelsRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{16}
-}
-
-func (m *GetInsertChannelsRequest) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_GetInsertChannelsRequest.Unmarshal(m, b)
-}
-func (m *GetInsertChannelsRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_GetInsertChannelsRequest.Marshal(b, m, deterministic)
-}
-func (m *GetInsertChannelsRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_GetInsertChannelsRequest.Merge(m, src)
-}
-func (m *GetInsertChannelsRequest) XXX_Size() int {
-	return xxx_messageInfo_GetInsertChannelsRequest.Size(m)
-}
-func (m *GetInsertChannelsRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_GetInsertChannelsRequest.DiscardUnknown(m)
-}
-
-var xxx_messageInfo_GetInsertChannelsRequest proto.InternalMessageInfo
-
-func (m *GetInsertChannelsRequest) GetBase() *commonpb.MsgBase {
-	if m != nil {
-		return m.Base
-	}
-	return nil
-}
-
-func (m *GetInsertChannelsRequest) GetDbID() int64 {
-	if m != nil {
-		return m.DbID
-	}
-	return 0
-}
-
-func (m *GetInsertChannelsRequest) GetCollectionID() int64 {
-	if m != nil {
-		return m.CollectionID
-	}
-	return 0
-}
-
 type GetCollectionStatisticsRequest struct {
 	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	DbID                 int64             `protobuf:"varint,2,opt,name=dbID,proto3" json:"dbID,omitempty"`
@@ -993,7 +734,7 @@ func (m *GetCollectionStatisticsRequest) Reset()         { *m = GetCollectionSta
 func (m *GetCollectionStatisticsRequest) String() string { return proto.CompactTextString(m) }
 func (*GetCollectionStatisticsRequest) ProtoMessage()    {}
 func (*GetCollectionStatisticsRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{17}
+	return fileDescriptor_3385cd32ad6cfe64, []int{12}
 }
 
 func (m *GetCollectionStatisticsRequest) XXX_Unmarshal(b []byte) error {
@@ -1047,7 +788,7 @@ func (m *GetCollectionStatisticsResponse) Reset()         { *m = GetCollectionSt
 func (m *GetCollectionStatisticsResponse) String() string { return proto.CompactTextString(m) }
 func (*GetCollectionStatisticsResponse) ProtoMessage()    {}
 func (*GetCollectionStatisticsResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{18}
+	return fileDescriptor_3385cd32ad6cfe64, []int{13}
 }
 
 func (m *GetCollectionStatisticsResponse) XXX_Unmarshal(b []byte) error {
@@ -1096,7 +837,7 @@ func (m *GetPartitionStatisticsRequest) Reset()         { *m = GetPartitionStati
 func (m *GetPartitionStatisticsRequest) String() string { return proto.CompactTextString(m) }
 func (*GetPartitionStatisticsRequest) ProtoMessage()    {}
 func (*GetPartitionStatisticsRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{19}
+	return fileDescriptor_3385cd32ad6cfe64, []int{14}
 }
 
 func (m *GetPartitionStatisticsRequest) XXX_Unmarshal(b []byte) error {
@@ -1157,7 +898,7 @@ func (m *GetPartitionStatisticsResponse) Reset()         { *m = GetPartitionStat
 func (m *GetPartitionStatisticsResponse) String() string { return proto.CompactTextString(m) }
 func (*GetPartitionStatisticsResponse) ProtoMessage()    {}
 func (*GetPartitionStatisticsResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{20}
+	return fileDescriptor_3385cd32ad6cfe64, []int{15}
 }
 
 func (m *GetPartitionStatisticsResponse) XXX_Unmarshal(b []byte) error {
@@ -1202,7 +943,7 @@ func (m *GetSegmentInfoChannelRequest) Reset()         { *m = GetSegmentInfoChan
 func (m *GetSegmentInfoChannelRequest) String() string { return proto.CompactTextString(m) }
 func (*GetSegmentInfoChannelRequest) ProtoMessage()    {}
 func (*GetSegmentInfoChannelRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{21}
+	return fileDescriptor_3385cd32ad6cfe64, []int{16}
 }
 
 func (m *GetSegmentInfoChannelRequest) XXX_Unmarshal(b []byte) error {
@@ -1238,7 +979,7 @@ func (m *VchannelInfo) Reset()         { *m = VchannelInfo{} }
 func (m *VchannelInfo) String() string { return proto.CompactTextString(m) }
 func (*VchannelInfo) ProtoMessage()    {}
 func (*VchannelInfo) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{22}
+	return fileDescriptor_3385cd32ad6cfe64, []int{17}
 }
 
 func (m *VchannelInfo) XXX_Unmarshal(b []byte) error {
@@ -1306,7 +1047,7 @@ func (m *WatchDmChannelsRequest) Reset()         { *m = WatchDmChannelsRequest{}
 func (m *WatchDmChannelsRequest) String() string { return proto.CompactTextString(m) }
 func (*WatchDmChannelsRequest) ProtoMessage()    {}
 func (*WatchDmChannelsRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{23}
+	return fileDescriptor_3385cd32ad6cfe64, []int{18}
 }
 
 func (m *WatchDmChannelsRequest) XXX_Unmarshal(b []byte) error {
@@ -1355,7 +1096,7 @@ func (m *FlushSegmentsRequest) Reset()         { *m = FlushSegmentsRequest{} }
 func (m *FlushSegmentsRequest) String() string { return proto.CompactTextString(m) }
 func (*FlushSegmentsRequest) ProtoMessage()    {}
 func (*FlushSegmentsRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{24}
+	return fileDescriptor_3385cd32ad6cfe64, []int{19}
 }
 
 func (m *FlushSegmentsRequest) XXX_Unmarshal(b []byte) error {
@@ -1416,7 +1157,7 @@ func (m *SegmentMsg) Reset()         { *m = SegmentMsg{} }
 func (m *SegmentMsg) String() string { return proto.CompactTextString(m) }
 func (*SegmentMsg) ProtoMessage()    {}
 func (*SegmentMsg) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{25}
+	return fileDescriptor_3385cd32ad6cfe64, []int{20}
 }
 
 func (m *SegmentMsg) XXX_Unmarshal(b []byte) error {
@@ -1464,7 +1205,7 @@ func (m *SegmentFieldBinlogMeta) Reset()         { *m = SegmentFieldBinlogMeta{}
 func (m *SegmentFieldBinlogMeta) String() string { return proto.CompactTextString(m) }
 func (*SegmentFieldBinlogMeta) ProtoMessage()    {}
 func (*SegmentFieldBinlogMeta) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{26}
+	return fileDescriptor_3385cd32ad6cfe64, []int{21}
 }
 
 func (m *SegmentFieldBinlogMeta) XXX_Unmarshal(b []byte) error {
@@ -1512,7 +1253,7 @@ func (m *DDLBinlogMeta) Reset()         { *m = DDLBinlogMeta{} }
 func (m *DDLBinlogMeta) String() string { return proto.CompactTextString(m) }
 func (*DDLBinlogMeta) ProtoMessage()    {}
 func (*DDLBinlogMeta) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{27}
+	return fileDescriptor_3385cd32ad6cfe64, []int{22}
 }
 
 func (m *DDLBinlogMeta) XXX_Unmarshal(b []byte) error {
@@ -1559,7 +1300,7 @@ func (m *FieldFlushMeta) Reset()         { *m = FieldFlushMeta{} }
 func (m *FieldFlushMeta) String() string { return proto.CompactTextString(m) }
 func (*FieldFlushMeta) ProtoMessage()    {}
 func (*FieldFlushMeta) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{28}
+	return fileDescriptor_3385cd32ad6cfe64, []int{23}
 }
 
 func (m *FieldFlushMeta) XXX_Unmarshal(b []byte) error {
@@ -1607,7 +1348,7 @@ func (m *SegmentFlushMeta) Reset()         { *m = SegmentFlushMeta{} }
 func (m *SegmentFlushMeta) String() string { return proto.CompactTextString(m) }
 func (*SegmentFlushMeta) ProtoMessage()    {}
 func (*SegmentFlushMeta) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{29}
+	return fileDescriptor_3385cd32ad6cfe64, []int{24}
 }
 
 func (m *SegmentFlushMeta) XXX_Unmarshal(b []byte) error {
@@ -1661,7 +1402,7 @@ func (m *DDLFlushMeta) Reset()         { *m = DDLFlushMeta{} }
 func (m *DDLFlushMeta) String() string { return proto.CompactTextString(m) }
 func (*DDLFlushMeta) ProtoMessage()    {}
 func (*DDLFlushMeta) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{30}
+	return fileDescriptor_3385cd32ad6cfe64, []int{25}
 }
 
 func (m *DDLFlushMeta) XXX_Unmarshal(b []byte) error {
@@ -1709,7 +1450,7 @@ func (m *CollectionInfo) Reset()         { *m = CollectionInfo{} }
 func (m *CollectionInfo) String() string { return proto.CompactTextString(m) }
 func (*CollectionInfo) ProtoMessage()    {}
 func (*CollectionInfo) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{31}
+	return fileDescriptor_3385cd32ad6cfe64, []int{26}
 }
 
 func (m *CollectionInfo) XXX_Unmarshal(b []byte) error {
@@ -1771,7 +1512,7 @@ func (m *SegmentInfo) Reset()         { *m = SegmentInfo{} }
 func (m *SegmentInfo) String() string { return proto.CompactTextString(m) }
 func (*SegmentInfo) ProtoMessage()    {}
 func (*SegmentInfo) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{32}
+	return fileDescriptor_3385cd32ad6cfe64, []int{27}
 }
 
 func (m *SegmentInfo) XXX_Unmarshal(b []byte) error {
@@ -1874,7 +1615,7 @@ func (m *ID2PathList) Reset()         { *m = ID2PathList{} }
 func (m *ID2PathList) String() string { return proto.CompactTextString(m) }
 func (*ID2PathList) ProtoMessage()    {}
 func (*ID2PathList) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{33}
+	return fileDescriptor_3385cd32ad6cfe64, []int{28}
 }
 
 func (m *ID2PathList) XXX_Unmarshal(b []byte) error {
@@ -1921,7 +1662,7 @@ func (m *SegmentStartPosition) Reset()         { *m = SegmentStartPosition{} }
 func (m *SegmentStartPosition) String() string { return proto.CompactTextString(m) }
 func (*SegmentStartPosition) ProtoMessage()    {}
 func (*SegmentStartPosition) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{34}
+	return fileDescriptor_3385cd32ad6cfe64, []int{29}
 }
 
 func (m *SegmentStartPosition) XXX_Unmarshal(b []byte) error {
@@ -1973,7 +1714,7 @@ func (m *SaveBinlogPathsRequest) Reset()         { *m = SaveBinlogPathsRequest{}
 func (m *SaveBinlogPathsRequest) String() string { return proto.CompactTextString(m) }
 func (*SaveBinlogPathsRequest) ProtoMessage()    {}
 func (*SaveBinlogPathsRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{35}
+	return fileDescriptor_3385cd32ad6cfe64, []int{30}
 }
 
 func (m *SaveBinlogPathsRequest) XXX_Unmarshal(b []byte) error {
@@ -2056,7 +1797,7 @@ func (m *CheckPoint) Reset()         { *m = CheckPoint{} }
 func (m *CheckPoint) String() string { return proto.CompactTextString(m) }
 func (*CheckPoint) ProtoMessage()    {}
 func (*CheckPoint) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{36}
+	return fileDescriptor_3385cd32ad6cfe64, []int{31}
 }
 
 func (m *CheckPoint) XXX_Unmarshal(b []byte) error {
@@ -2111,7 +1852,7 @@ func (m *DataNodeTtMsg) Reset()         { *m = DataNodeTtMsg{} }
 func (m *DataNodeTtMsg) String() string { return proto.CompactTextString(m) }
 func (*DataNodeTtMsg) ProtoMessage()    {}
 func (*DataNodeTtMsg) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{37}
+	return fileDescriptor_3385cd32ad6cfe64, []int{32}
 }
 
 func (m *DataNodeTtMsg) XXX_Unmarshal(b []byte) error {
@@ -2166,7 +1907,7 @@ func (m *ChannelStatus) Reset()         { *m = ChannelStatus{} }
 func (m *ChannelStatus) String() string { return proto.CompactTextString(m) }
 func (*ChannelStatus) ProtoMessage()    {}
 func (*ChannelStatus) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{38}
+	return fileDescriptor_3385cd32ad6cfe64, []int{33}
 }
 
 func (m *ChannelStatus) XXX_Unmarshal(b []byte) error {
@@ -2221,7 +1962,7 @@ func (m *DataNodeInfo) Reset()         { *m = DataNodeInfo{} }
 func (m *DataNodeInfo) String() string { return proto.CompactTextString(m) }
 func (*DataNodeInfo) ProtoMessage()    {}
 func (*DataNodeInfo) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{39}
+	return fileDescriptor_3385cd32ad6cfe64, []int{34}
 }
 
 func (m *DataNodeInfo) XXX_Unmarshal(b []byte) error {
@@ -2275,7 +2016,7 @@ func (m *SegmentBinlogs) Reset()         { *m = SegmentBinlogs{} }
 func (m *SegmentBinlogs) String() string { return proto.CompactTextString(m) }
 func (*SegmentBinlogs) ProtoMessage()    {}
 func (*SegmentBinlogs) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{40}
+	return fileDescriptor_3385cd32ad6cfe64, []int{35}
 }
 
 func (m *SegmentBinlogs) XXX_Unmarshal(b []byte) error {
@@ -2322,7 +2063,7 @@ func (m *FieldBinlog) Reset()         { *m = FieldBinlog{} }
 func (m *FieldBinlog) String() string { return proto.CompactTextString(m) }
 func (*FieldBinlog) ProtoMessage()    {}
 func (*FieldBinlog) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{41}
+	return fileDescriptor_3385cd32ad6cfe64, []int{36}
 }
 
 func (m *FieldBinlog) XXX_Unmarshal(b []byte) error {
@@ -2370,7 +2111,7 @@ func (m *GetRecoveryInfoResponse) Reset()         { *m = GetRecoveryInfoResponse
 func (m *GetRecoveryInfoResponse) String() string { return proto.CompactTextString(m) }
 func (*GetRecoveryInfoResponse) ProtoMessage()    {}
 func (*GetRecoveryInfoResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{42}
+	return fileDescriptor_3385cd32ad6cfe64, []int{37}
 }
 
 func (m *GetRecoveryInfoResponse) XXX_Unmarshal(b []byte) error {
@@ -2425,7 +2166,7 @@ func (m *GetRecoveryInfoRequest) Reset()         { *m = GetRecoveryInfoRequest{}
 func (m *GetRecoveryInfoRequest) String() string { return proto.CompactTextString(m) }
 func (*GetRecoveryInfoRequest) ProtoMessage()    {}
 func (*GetRecoveryInfoRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_3385cd32ad6cfe64, []int{43}
+	return fileDescriptor_3385cd32ad6cfe64, []int{38}
 }
 
 func (m *GetRecoveryInfoRequest) XXX_Unmarshal(b []byte) error {
@@ -2469,15 +2210,11 @@ func (m *GetRecoveryInfoRequest) GetPartitionID() int64 {
 
 func init() {
 	proto.RegisterEnum("milvus.proto.data.ChannelWatchState", ChannelWatchState_name, ChannelWatchState_value)
-	proto.RegisterType((*RegisterNodeRequest)(nil), "milvus.proto.data.RegisterNodeRequest")
-	proto.RegisterType((*RegisterNodeResponse)(nil), "milvus.proto.data.RegisterNodeResponse")
 	proto.RegisterType((*FlushRequest)(nil), "milvus.proto.data.FlushRequest")
 	proto.RegisterType((*SegmentIDRequest)(nil), "milvus.proto.data.SegmentIDRequest")
 	proto.RegisterType((*AssignSegmentIDRequest)(nil), "milvus.proto.data.AssignSegmentIDRequest")
 	proto.RegisterType((*SegmentIDAssignment)(nil), "milvus.proto.data.SegmentIDAssignment")
 	proto.RegisterType((*AssignSegmentIDResponse)(nil), "milvus.proto.data.AssignSegmentIDResponse")
-	proto.RegisterType((*ShowSegmentsRequest)(nil), "milvus.proto.data.ShowSegmentsRequest")
-	proto.RegisterType((*ShowSegmentsResponse)(nil), "milvus.proto.data.ShowSegmentsResponse")
 	proto.RegisterType((*GetSegmentStatesRequest)(nil), "milvus.proto.data.GetSegmentStatesRequest")
 	proto.RegisterType((*SegmentStateInfo)(nil), "milvus.proto.data.SegmentStateInfo")
 	proto.RegisterType((*GetSegmentStatesResponse)(nil), "milvus.proto.data.GetSegmentStatesResponse")
@@ -2485,7 +2222,6 @@ func init() {
 	proto.RegisterType((*GetSegmentInfoResponse)(nil), "milvus.proto.data.GetSegmentInfoResponse")
 	proto.RegisterType((*GetInsertBinlogPathsRequest)(nil), "milvus.proto.data.GetInsertBinlogPathsRequest")
 	proto.RegisterType((*GetInsertBinlogPathsResponse)(nil), "milvus.proto.data.GetInsertBinlogPathsResponse")
-	proto.RegisterType((*GetInsertChannelsRequest)(nil), "milvus.proto.data.GetInsertChannelsRequest")
 	proto.RegisterType((*GetCollectionStatisticsRequest)(nil), "milvus.proto.data.GetCollectionStatisticsRequest")
 	proto.RegisterType((*GetCollectionStatisticsResponse)(nil), "milvus.proto.data.GetCollectionStatisticsResponse")
 	proto.RegisterType((*GetPartitionStatisticsRequest)(nil), "milvus.proto.data.GetPartitionStatisticsRequest")
@@ -2518,138 +2254,129 @@ func init() {
 func init() { proto.RegisterFile("data_service.proto", fileDescriptor_3385cd32ad6cfe64) }
 
 var fileDescriptor_3385cd32ad6cfe64 = []byte{
-	// 2095 bytes of a gzipped FileDescriptorProto
+	// 1943 bytes of a gzipped FileDescriptorProto
 	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xc4, 0x19, 0x5b, 0x6f, 0x1b, 0x59,
-	0x39, 0xe3, 0x4b, 0x12, 0x7f, 0x1e, 0x3b, 0xc9, 0xd9, 0x90, 0xb5, 0xdc, 0x36, 0x4d, 0x87, 0xdd,
-	0x36, 0xdb, 0x15, 0xc9, 0xd6, 0x45, 0xdc, 0xca, 0x82, 0x9a, 0xba, 0x8d, 0x2c, 0x92, 0x12, 0x4e,
-	0xba, 0xbb, 0x12, 0x2b, 0x64, 0x4d, 0x3c, 0x27, 0xce, 0x90, 0xb9, 0x78, 0xe7, 0x8c, 0xd3, 0xf4,
-	0xa9, 0xab, 0x05, 0x09, 0x81, 0x10, 0x0b, 0x0f, 0xbc, 0x03, 0x12, 0x12, 0x12, 0x2f, 0xfc, 0x03,
-	0x5e, 0xf9, 0x05, 0xfc, 0x1e, 0x74, 0x2e, 0x73, 0x1f, 0xdb, 0x53, 0x87, 0x2a, 0x6f, 0x3e, 0xc7,
-	0xdf, 0xed, 0x7c, 0xf7, 0xef, 0x1b, 0x40, 0x86, 0xee, 0xeb, 0x7d, 0x4a, 0xbc, 0x0b, 0x73, 0x40,
-	0x76, 0x46, 0x9e, 0xeb, 0xbb, 0x68, 0xcd, 0x36, 0xad, 0x8b, 0x31, 0x15, 0xa7, 0x1d, 0x06, 0xd0,
-	0x56, 0x07, 0xae, 0x6d, 0xbb, 0x8e, 0xb8, 0x6a, 0x37, 0x4d, 0xc7, 0x27, 0x9e, 0xa3, 0x5b, 0xf2,
-	0xac, 0xc6, 0x11, 0xda, 0x2a, 0x1d, 0x9c, 0x11, 0x5b, 0x17, 0x27, 0xed, 0x35, 0xbc, 0x83, 0xc9,
-	0xd0, 0xa4, 0x3e, 0xf1, 0x9e, 0xbb, 0x06, 0xc1, 0xe4, 0x8b, 0x31, 0xa1, 0x3e, 0xfa, 0x08, 0x2a,
-	0x27, 0x3a, 0x25, 0x2d, 0x65, 0x4b, 0xd9, 0xae, 0x77, 0x6e, 0xee, 0x24, 0x58, 0x4a, 0x66, 0x87,
-	0x74, 0xb8, 0xa7, 0x53, 0x82, 0x39, 0x24, 0xfa, 0x0e, 0x2c, 0xe9, 0x86, 0xe1, 0x11, 0x4a, 0x5b,
-	0xa5, 0x29, 0x48, 0x8f, 0x05, 0x0c, 0x0e, 0x80, 0xb5, 0xaf, 0x15, 0x58, 0x4f, 0x4a, 0x40, 0x47,
-	0xae, 0x43, 0x09, 0xda, 0x83, 0xba, 0xe9, 0x98, 0x7e, 0x7f, 0xa4, 0x7b, 0xba, 0x4d, 0xa5, 0x24,
-	0x77, 0x92, 0x44, 0xc3, 0x87, 0xf6, 0x1c, 0xd3, 0x3f, 0xe2, 0x80, 0x18, 0xcc, 0xf0, 0x37, 0x7a,
-	0x08, 0x8b, 0xd4, 0xd7, 0xfd, 0x71, 0x20, 0xd3, 0x8d, 0x5c, 0x99, 0x8e, 0x39, 0x08, 0x96, 0xa0,
-	0xda, 0x25, 0xa8, 0xcf, 0xac, 0x31, 0x3d, 0x9b, 0x5f, 0x17, 0x08, 0x2a, 0xc6, 0x49, 0xaf, 0xcb,
-	0x99, 0x96, 0x31, 0xff, 0x8d, 0x34, 0x50, 0x07, 0xae, 0x65, 0x91, 0x81, 0x6f, 0xba, 0x4e, 0xaf,
-	0xdb, 0xaa, 0xf0, 0xff, 0x12, 0x77, 0xda, 0x9f, 0x14, 0x58, 0x3d, 0x26, 0x43, 0x9b, 0x38, 0x7e,
-	0xaf, 0x1b, 0xb0, 0x5f, 0x87, 0xea, 0xc0, 0x1d, 0x3b, 0x3e, 0xe7, 0xdf, 0xc0, 0xe2, 0x80, 0xee,
-	0x80, 0x3a, 0x38, 0xd3, 0x1d, 0x87, 0x58, 0x7d, 0x47, 0xb7, 0x09, 0x67, 0x55, 0xc3, 0x75, 0x79,
-	0xf7, 0x5c, 0xb7, 0x49, 0x86, 0x63, 0x39, 0xcb, 0x11, 0x6d, 0x41, 0x7d, 0xa4, 0x7b, 0xbe, 0x99,
-	0x10, 0x2a, 0x7e, 0xa5, 0xfd, 0x45, 0x81, 0x8d, 0xc7, 0x94, 0x9a, 0x43, 0x27, 0x23, 0xd9, 0x06,
-	0x2c, 0x3a, 0xae, 0x41, 0x7a, 0x5d, 0x2e, 0x5a, 0x19, 0xcb, 0x13, 0xba, 0x01, 0xb5, 0x11, 0x21,
-	0x5e, 0xdf, 0x73, 0xad, 0x40, 0xb0, 0x65, 0x76, 0x81, 0x5d, 0x8b, 0xa0, 0x9f, 0xc1, 0x1a, 0x4d,
-	0x11, 0xa2, 0xad, 0xf2, 0x56, 0x79, 0xbb, 0xde, 0xf9, 0xe6, 0x4e, 0xc6, 0xb3, 0x77, 0xd2, 0x4c,
-	0x71, 0x16, 0x5b, 0xfb, 0xb2, 0x04, 0xef, 0x84, 0x70, 0x42, 0x56, 0xf6, 0x9b, 0x69, 0x8e, 0x92,
-	0x61, 0x28, 0x9e, 0x38, 0x14, 0xd1, 0x5c, 0xa8, 0xf2, 0x72, 0x5c, 0xe5, 0x05, 0x2c, 0x98, 0xd6,
-	0x67, 0x35, 0xa3, 0x4f, 0x74, 0x1b, 0xea, 0xe4, 0x72, 0x64, 0x7a, 0xa4, 0xef, 0x9b, 0x36, 0x69,
-	0x2d, 0x6e, 0x29, 0xdb, 0x15, 0x0c, 0xe2, 0xea, 0x85, 0x69, 0x93, 0x98, 0xcf, 0x2e, 0x15, 0xf7,
-	0xd9, 0xbf, 0x29, 0xf0, 0x6e, 0xc6, 0x4a, 0x32, 0x90, 0x30, 0xac, 0xf2, 0x97, 0x47, 0x9a, 0x61,
-	0xd1, 0xc4, 0x14, 0x7e, 0x77, 0x9a, 0xc2, 0x23, 0x70, 0x9c, 0xc1, 0x9f, 0x2f, 0xb0, 0xfe, 0xaa,
-	0xc0, 0x3b, 0xc7, 0x67, 0xee, 0x4b, 0xc9, 0x82, 0xce, 0x1f, 0x60, 0x69, 0x53, 0x94, 0x66, 0x9b,
-	0xa2, 0x9c, 0x35, 0x45, 0x10, 0xa6, 0x95, 0x28, 0x4c, 0xb5, 0x73, 0x58, 0x4f, 0x8a, 0x28, 0x95,
-	0xb8, 0x09, 0x10, 0x3a, 0x9e, 0x50, 0x5f, 0x19, 0xc7, 0x6e, 0xe6, 0x53, 0xc8, 0x39, 0xbc, 0xbb,
-	0x4f, 0x7c, 0xc9, 0x8b, 0xfd, 0x47, 0xae, 0xa0, 0x93, 0xa4, 0x84, 0xa5, 0xb4, 0x84, 0xda, 0xbf,
-	0x4a, 0x61, 0x72, 0xe1, 0xac, 0x7a, 0xce, 0xa9, 0x8b, 0x6e, 0x42, 0x2d, 0x04, 0x91, 0x61, 0x12,
-	0x5d, 0xa0, 0xef, 0x42, 0x95, 0x49, 0x2a, 0x62, 0xa4, 0x99, 0x4e, 0xbe, 0xc1, 0x9b, 0x62, 0x34,
-	0xb1, 0x80, 0x47, 0x3d, 0x68, 0x52, 0x5f, 0xf7, 0xfc, 0xfe, 0xc8, 0xa5, 0x5c, 0xdb, 0x5c, 0xfd,
-	0xf5, 0x8e, 0x36, 0x21, 0x7d, 0x1f, 0xd2, 0xe1, 0x91, 0x84, 0xc4, 0x0d, 0x8e, 0x19, 0x1c, 0xd1,
-	0x53, 0x50, 0x89, 0x63, 0x44, 0x84, 0x2a, 0x85, 0x09, 0xd5, 0x89, 0x63, 0x84, 0x64, 0x22, 0xfb,
-	0x54, 0x8b, 0xdb, 0xe7, 0xf7, 0x0a, 0xb4, 0xb2, 0x06, 0x92, 0x1e, 0x11, 0x51, 0x54, 0x0a, 0x53,
-	0x44, 0x8f, 0x04, 0x12, 0x11, 0x06, 0x9a, 0x9a, 0xf2, 0x42, 0x23, 0x61, 0x89, 0xa2, 0x99, 0xf0,
-	0x8d, 0x48, 0x1a, 0xfe, 0xcf, 0x5b, 0x73, 0x96, 0x5f, 0x29, 0xb0, 0x91, 0xe6, 0x75, 0x95, 0x77,
-	0x7f, 0x1b, 0xaa, 0xa6, 0x73, 0xea, 0x06, 0xcf, 0xde, 0x9c, 0x92, 0x78, 0x18, 0x2f, 0x01, 0xac,
-	0xd9, 0x70, 0x63, 0x9f, 0xf8, 0x3d, 0x87, 0x12, 0xcf, 0xdf, 0x33, 0x1d, 0xcb, 0x1d, 0x1e, 0xe9,
-	0xfe, 0xd9, 0x15, 0x62, 0x24, 0xe1, 0xee, 0xa5, 0x94, 0xbb, 0x6b, 0xff, 0x50, 0xe0, 0x66, 0x3e,
-	0x3f, 0xf9, 0xf4, 0x36, 0x2c, 0x9f, 0x9a, 0xc4, 0x32, 0xa2, 0x14, 0x10, 0x9e, 0x59, 0xac, 0x8c,
-	0x18, 0xb0, 0x7c, 0xe1, 0xa4, 0x46, 0xe5, 0xd8, 0xf7, 0x4c, 0x67, 0x78, 0x60, 0x52, 0x1f, 0x0b,
-	0xf8, 0x98, 0x3e, 0xcb, 0xc5, 0x3d, 0xf3, 0xd7, 0xc2, 0x33, 0x85, 0xa8, 0x4f, 0x44, 0xe9, 0xa2,
-	0x6f, 0xb7, 0x61, 0xc9, 0x69, 0x1f, 0xb4, 0xdf, 0x29, 0xb0, 0xb9, 0x4f, 0xfc, 0x27, 0xe1, 0x1d,
-	0x13, 0xd3, 0xa4, 0xbe, 0x39, 0xb8, 0x06, 0x61, 0xbe, 0x56, 0xe0, 0xf6, 0x44, 0x61, 0xa4, 0x05,
-	0x65, 0x46, 0x0b, 0x0a, 0x60, 0x7e, 0x46, 0xfb, 0x09, 0x79, 0xf5, 0xa9, 0x6e, 0x8d, 0xc9, 0x91,
-	0x6e, 0x7a, 0x22, 0xa3, 0xcd, 0x99, 0xdf, 0xff, 0xa9, 0xc0, 0xad, 0x7d, 0xc2, 0x9a, 0x51, 0x51,
-	0x73, 0xae, 0x51, 0x3b, 0x05, 0x3a, 0xbd, 0x3f, 0x08, 0x63, 0xe6, 0x4a, 0x7b, 0x2d, 0xea, 0xdb,
-	0xe4, 0xe1, 0x18, 0xcb, 0x0b, 0xd2, 0xd1, 0xa5, 0xf2, 0xb4, 0x3f, 0x97, 0x40, 0xfd, 0x54, 0xf6,
-	0x6d, 0xbc, 0x9a, 0xa5, 0xf5, 0xa0, 0xe4, 0xeb, 0x21, 0xd6, 0xea, 0xe5, 0x75, 0x7f, 0xfb, 0xd0,
-	0xa0, 0x84, 0x9c, 0xcf, 0x53, 0xbb, 0x54, 0x86, 0x18, 0xd6, 0x9c, 0x03, 0x58, 0x1b, 0x3b, 0xa7,
-	0x6c, 0x94, 0x20, 0x46, 0xd0, 0x50, 0xb4, 0x2a, 0x85, 0x12, 0x60, 0x16, 0x11, 0x6d, 0xc3, 0x4a,
-	0x9a, 0x56, 0x95, 0xe7, 0xa0, 0xf4, 0xb5, 0xf6, 0x5b, 0x05, 0x36, 0x3e, 0xd3, 0xfd, 0xc1, 0x59,
-	0xd7, 0xbe, 0x7a, 0x6a, 0xf8, 0x18, 0x6a, 0x17, 0x52, 0x3b, 0x41, 0x6e, 0xbb, 0x9d, 0x23, 0x7c,
-	0xdc, 0x0e, 0x38, 0xc2, 0x60, 0xe3, 0xc3, 0x3a, 0x9f, 0xa6, 0xae, 0xde, 0xf4, 0xcd, 0xeb, 0xf9,
-	0xc9, 0x5a, 0x57, 0xc9, 0xd4, 0xba, 0x4b, 0x00, 0x29, 0xdc, 0x21, 0x1d, 0xce, 0x21, 0xd7, 0xf7,
-	0x60, 0x49, 0x52, 0x93, 0xce, 0x3d, 0xcb, 0xb8, 0x01, 0xb8, 0x76, 0x0c, 0x1b, 0xf2, 0xfe, 0x19,
-	0x2b, 0x23, 0xa2, 0xe4, 0x1c, 0x12, 0x5f, 0x47, 0x2d, 0x58, 0x92, 0x95, 0x45, 0x3a, 0x71, 0x70,
-	0x64, 0xf3, 0xc3, 0x09, 0x87, 0xeb, 0xb3, 0xf2, 0x21, 0xfd, 0x17, 0x4e, 0xc2, 0x6a, 0xa5, 0xfd,
-	0x02, 0x1a, 0xdd, 0xee, 0x41, 0x8c, 0xd6, 0x5d, 0x58, 0x31, 0x0c, 0xab, 0x1f, 0xc7, 0x52, 0x38,
-	0x56, 0xc3, 0x30, 0xac, 0xa8, 0xcc, 0xa1, 0xf7, 0xa0, 0xe9, 0xd3, 0x7e, 0x96, 0xb8, 0xea, 0xd3,
-	0x08, 0x4a, 0x3b, 0x84, 0x26, 0x17, 0x96, 0x1b, 0x75, 0x86, 0xac, 0x77, 0x40, 0x8d, 0x91, 0x13,
-	0xee, 0x53, 0xc3, 0xf5, 0x48, 0x58, 0xca, 0x2a, 0x48, 0xd0, 0x95, 0x46, 0x14, 0xa7, 0x77, 0xa5,
-	0xb7, 0x00, 0x4c, 0xda, 0x97, 0x4e, 0xcf, 0x65, 0x5c, 0xc6, 0x35, 0x93, 0x3e, 0x13, 0x17, 0xe8,
-	0xfb, 0xb0, 0xc8, 0xf9, 0x8b, 0xf0, 0xc8, 0x24, 0x29, 0x6e, 0x8d, 0xe4, 0x0b, 0xb0, 0x44, 0xd0,
-	0x3e, 0x01, 0xb5, 0xdb, 0x3d, 0x88, 0xe4, 0x28, 0x92, 0x4f, 0x0a, 0xbc, 0xf1, 0x35, 0x34, 0xa3,
-	0xa2, 0xc4, 0x13, 0x55, 0x13, 0x4a, 0x21, 0xb9, 0x52, 0xaf, 0x8b, 0x3e, 0x86, 0x45, 0xb1, 0x95,
-	0x91, 0x1e, 0xf4, 0x7e, 0x52, 0x66, 0xb9, 0xb1, 0x89, 0x55, 0x36, 0x7e, 0x81, 0x25, 0x12, 0xf3,
-	0xf0, 0x30, 0x91, 0x8b, 0x61, 0xba, 0x8c, 0x63, 0x37, 0xda, 0xbf, 0xcb, 0x50, 0x8f, 0x39, 0x60,
-	0x86, 0xfd, 0xff, 0x67, 0x9c, 0x7a, 0x1f, 0x9a, 0x26, 0xef, 0x47, 0xfa, 0x32, 0xfa, 0x79, 0x91,
-	0xa9, 0xe1, 0x86, 0x19, 0xef, 0x52, 0xd0, 0x26, 0xd4, 0x9d, 0xb1, 0xdd, 0x77, 0x4f, 0xfb, 0x9e,
-	0xfb, 0x92, 0xca, 0x11, 0xb9, 0xe6, 0x8c, 0xed, 0x9f, 0x9e, 0x62, 0xf7, 0x25, 0x8d, 0x86, 0x8e,
-	0xc5, 0x37, 0x1c, 0x3a, 0x9e, 0x82, 0x6a, 0xd8, 0x56, 0x94, 0xb6, 0x97, 0x8a, 0x4f, 0x0a, 0x86,
-	0x6d, 0x85, 0x59, 0x7b, 0x13, 0xea, 0xb6, 0x7e, 0xc9, 0x84, 0xeb, 0x3b, 0x63, 0xbb, 0xb5, 0x2c,
-	0xe4, 0xb3, 0xf5, 0x4b, 0xec, 0xbe, 0x7c, 0x3e, 0xb6, 0xd1, 0x36, 0xac, 0x5a, 0x3a, 0xf5, 0xfb,
-	0xf1, 0x29, 0xbe, 0xc6, 0xa7, 0xf8, 0x26, 0xbb, 0x7f, 0x1a, 0x4d, 0xf2, 0xd9, 0x29, 0x08, 0xe6,
-	0x9c, 0x82, 0xb4, 0x87, 0x50, 0xef, 0x75, 0x3b, 0xcc, 0x9d, 0x58, 0xeb, 0x98, 0x31, 0xe0, 0x3a,
-	0x54, 0x8f, 0x62, 0xde, 0x57, 0x0d, 0xfc, 0x6e, 0x3d, 0xd2, 0x53, 0x6c, 0xa4, 0xca, 0xca, 0xa5,
-	0xcc, 0x3b, 0x9d, 0x4d, 0x6f, 0xa8, 0x7f, 0x53, 0x86, 0x8d, 0x63, 0xfd, 0x82, 0xbc, 0xfd, 0xde,
-	0xbd, 0x50, 0x21, 0x38, 0x80, 0x35, 0x1e, 0xe8, 0x9d, 0x98, 0x3c, 0x53, 0xea, 0x71, 0x4c, 0xe1,
-	0x38, 0x8b, 0x88, 0x7e, 0xcc, 0x1a, 0x09, 0x32, 0x38, 0x3f, 0x72, 0xcd, 0xa0, 0x16, 0xd7, 0x3b,
-	0xb7, 0x72, 0xe8, 0x3c, 0x09, 0xa1, 0x70, 0x1c, 0x03, 0x1d, 0xc1, 0x4a, 0xd2, 0x0c, 0xb4, 0xb5,
-	0xc8, 0x89, 0xdc, 0x9b, 0x3a, 0x14, 0x46, 0xda, 0xc7, 0xcd, 0x84, 0x31, 0x28, 0xcf, 0xc4, 0x32,
-	0x2d, 0x2e, 0xf1, 0xb4, 0x18, 0x1c, 0x59, 0x9a, 0x85, 0x48, 0x8e, 0x19, 0x09, 0xf6, 0x47, 0xb0,
-	0x1c, 0x7a, 0x46, 0xa9, 0xb0, 0x67, 0x84, 0x38, 0xe9, 0x08, 0x2f, 0xa7, 0x22, 0x5c, 0xfb, 0x4a,
-	0x81, 0x46, 0x57, 0xf7, 0xf5, 0xe7, 0xae, 0x41, 0x5e, 0xcc, 0x59, 0x74, 0x0b, 0x6c, 0xf1, 0x6e,
-	0x42, 0x8d, 0x05, 0x27, 0xf5, 0x75, 0x7b, 0xc4, 0x85, 0xa8, 0xe0, 0xe8, 0x82, 0x4d, 0xb8, 0x0d,
-	0x99, 0x92, 0x44, 0xdb, 0xc9, 0xfa, 0x0b, 0x4e, 0x4a, 0x14, 0x47, 0xfe, 0x1b, 0xfd, 0x20, 0xb9,
-	0x01, 0x79, 0x2f, 0xd7, 0xbc, 0x9c, 0x08, 0x6f, 0xb8, 0x12, 0xf9, 0xa8, 0xc8, 0xcc, 0xf2, 0xa5,
-	0x02, 0x6a, 0xa0, 0x0a, 0x9e, 0x9a, 0x5b, 0xd1, 0x1a, 0x5d, 0xc8, 0x11, 0x1c, 0xd9, 0x3f, 0x17,
-	0xc4, 0xa3, 0x81, 0x51, 0xca, 0x38, 0x38, 0xa2, 0x1f, 0xc2, 0x72, 0xd8, 0xa1, 0x89, 0x4d, 0xea,
-	0xd6, 0x64, 0x39, 0x65, 0x8f, 0x1d, 0x62, 0x68, 0x1e, 0x34, 0xa5, 0x73, 0x09, 0xef, 0xa6, 0x33,
-	0xbc, 0x63, 0x0f, 0xd4, 0xd3, 0xa8, 0x5b, 0x99, 0x36, 0xd1, 0xc7, 0x9a, 0x1a, 0x9c, 0xc0, 0xd1,
-	0x1e, 0x43, 0x3d, 0xf6, 0xe7, 0x94, 0x0e, 0xa2, 0x05, 0x4b, 0x27, 0x31, 0x3e, 0x35, 0x1c, 0x1c,
-	0xb5, 0xff, 0x28, 0x7c, 0x79, 0x86, 0xc9, 0xc0, 0xbd, 0x20, 0xde, 0xab, 0xab, 0xaf, 0x28, 0x1e,
-	0xc5, 0xb4, 0x58, 0xb0, 0xcf, 0x0d, 0x11, 0xd0, 0xa3, 0x48, 0xce, 0xf2, 0xc4, 0xae, 0x23, 0xa9,
-	0xe6, 0xe8, 0x29, 0x7f, 0x14, 0xcb, 0x96, 0xe4, 0x53, 0xae, 0x75, 0x35, 0x7a, 0xff, 0x01, 0xac,
-	0x65, 0xfc, 0x1a, 0x35, 0x01, 0x3e, 0x71, 0x06, 0xae, 0x3d, 0xb2, 0x88, 0x4f, 0x56, 0x17, 0x90,
-	0x0a, 0xcb, 0x4f, 0x82, 0x93, 0xd2, 0xf9, 0x6f, 0x03, 0xea, 0xcc, 0x95, 0x8f, 0xc5, 0xc7, 0x2a,
-	0x34, 0x02, 0xc4, 0xa7, 0x71, 0x7b, 0xe4, 0x3a, 0xe1, 0xf6, 0x0c, 0x7d, 0x34, 0x21, 0x93, 0x64,
-	0x41, 0xa5, 0x0a, 0xda, 0x77, 0x27, 0x60, 0xa4, 0xc0, 0xb5, 0x05, 0x64, 0x73, 0x8e, 0xac, 0xf4,
-	0xbe, 0x30, 0x07, 0xe7, 0x41, 0xbf, 0x31, 0x85, 0x63, 0x0a, 0x34, 0xe0, 0x98, 0x5a, 0xca, 0xc9,
-	0x83, 0xd8, 0xdc, 0x04, 0x3e, 0xa6, 0x2d, 0xa0, 0x2f, 0x60, 0x9d, 0x8d, 0xa7, 0xe1, 0x94, 0x1c,
-	0x30, 0xec, 0x4c, 0x66, 0x98, 0x01, 0x7e, 0x43, 0x96, 0x3a, 0xa8, 0xf1, 0x6f, 0x65, 0x28, 0x6f,
-	0x81, 0x9f, 0xf3, 0x39, 0xaf, 0x7d, 0x6f, 0x26, 0x5c, 0xc8, 0x62, 0x1f, 0xaa, 0xbc, 0x01, 0x46,
-	0x79, 0xde, 0x1f, 0xff, 0x2e, 0xd6, 0x9e, 0x16, 0x55, 0xda, 0x02, 0xfa, 0x25, 0xac, 0xa4, 0xbe,
-	0x48, 0xa0, 0x0f, 0x72, 0x48, 0xe6, 0x7f, 0x5b, 0x6a, 0xdf, 0x2f, 0x02, 0x1a, 0xd7, 0x4b, 0x7c,
-	0x6b, 0x9f, 0xab, 0x97, 0x9c, 0x2f, 0x0f, 0xb9, 0x7a, 0xc9, 0x5b, 0xff, 0x6b, 0x0b, 0x68, 0x08,
-	0xcd, 0xe4, 0x32, 0x02, 0x6d, 0xe7, 0x20, 0xe7, 0xee, 0x67, 0xdb, 0x1f, 0x14, 0x80, 0x0c, 0x19,
-	0xd9, 0xb0, 0x9a, 0xde, 0x39, 0xa3, 0xfb, 0x53, 0x09, 0x24, 0xe3, 0xe5, 0xc3, 0x42, 0xb0, 0x21,
-	0xbb, 0x57, 0xdc, 0x8b, 0x33, 0x3b, 0x4f, 0xb4, 0x93, 0x4f, 0x66, 0xd2, 0x32, 0xb6, 0xbd, 0x5b,
-	0x18, 0x3e, 0x64, 0x4d, 0x60, 0x2d, 0xb3, 0xc3, 0x44, 0x1f, 0x4e, 0xa3, 0x93, 0x5a, 0x67, 0xb4,
-	0x67, 0x6f, 0x59, 0xb5, 0x05, 0xf4, 0x95, 0xa8, 0x14, 0x79, 0x7b, 0x41, 0xf4, 0x20, 0x9f, 0xdb,
-	0x94, 0x85, 0x66, 0xbb, 0xf3, 0x26, 0x28, 0xe1, 0x5b, 0x5f, 0xf3, 0x14, 0x9f, 0xb3, 0x5b, 0x4b,
-	0xe7, 0xa7, 0x80, 0xde, 0xe4, 0xa5, 0x61, 0xfb, 0xc1, 0x1b, 0x60, 0x84, 0x02, 0xb8, 0xe9, 0x8f,
-	0x07, 0x41, 0xba, 0xda, 0x9d, 0xe9, 0x9c, 0xf3, 0xe5, 0xaa, 0xcf, 0x61, 0x25, 0xd5, 0xfb, 0xe7,
-	0xc6, 0x7f, 0xfe, 0x7c, 0x50, 0x20, 0xb9, 0xa4, 0x2a, 0x26, 0x9a, 0x10, 0x64, 0x39, 0x55, 0xb5,
-	0x7d, 0xbf, 0x08, 0x68, 0xf0, 0x90, 0xce, 0xdf, 0xcb, 0xb0, 0x1c, 0xf4, 0x68, 0xd7, 0x50, 0xd5,
-	0xae, 0xa1, 0xcc, 0x7c, 0x0e, 0x2b, 0xa9, 0xfd, 0x61, 0xae, 0x76, 0xf3, 0x77, 0x8c, 0xb3, 0x4c,
-	0xf7, 0x19, 0x34, 0x12, 0x0b, 0x41, 0x74, 0x6f, 0x52, 0xa1, 0x49, 0x67, 0xeb, 0xe9, 0x84, 0xf7,
-	0x1e, 0xfe, 0xfc, 0xc1, 0xd0, 0xf4, 0xcf, 0xc6, 0x27, 0xec, 0x9f, 0x5d, 0x01, 0xfa, 0x2d, 0xd3,
-	0x95, 0xbf, 0x76, 0x03, 0x05, 0xed, 0x72, 0xec, 0x5d, 0xc6, 0x66, 0x74, 0x72, 0xb2, 0xc8, 0x4f,
-	0x0f, 0xff, 0x17, 0x00, 0x00, 0xff, 0xff, 0xfb, 0xbe, 0x88, 0x02, 0x69, 0x23, 0x00, 0x00,
+	0xb9, 0xe3, 0x89, 0x93, 0xf8, 0xf3, 0xd8, 0x49, 0x0e, 0x21, 0x6b, 0xb9, 0x6d, 0x9a, 0x0e, 0xbb,
+	0x5d, 0x6f, 0x11, 0xc9, 0xd6, 0x45, 0xe2, 0x52, 0x16, 0xb4, 0x8d, 0xdb, 0xc8, 0x22, 0x29, 0xe1,
+	0xa4, 0xbb, 0x2b, 0xb1, 0x42, 0xd6, 0xd8, 0x73, 0xe2, 0x0c, 0x9d, 0x8b, 0x77, 0xce, 0x38, 0x4d,
+	0x9f, 0x76, 0x55, 0x1e, 0x10, 0x08, 0x71, 0x79, 0xe0, 0x1d, 0x21, 0x21, 0x90, 0x78, 0xe1, 0x1f,
+	0xf0, 0xca, 0xcf, 0x42, 0xe7, 0x32, 0xf7, 0xb1, 0x3d, 0x75, 0xe9, 0xf6, 0xcd, 0xe7, 0xcc, 0x77,
+	0x3b, 0xdf, 0xfd, 0xfb, 0x0c, 0xc8, 0x34, 0x02, 0x63, 0x40, 0x89, 0x7f, 0x69, 0x8d, 0xc8, 0xfe,
+	0xc4, 0xf7, 0x02, 0x0f, 0x6d, 0x39, 0x96, 0x7d, 0x39, 0xa5, 0xe2, 0xb4, 0xcf, 0x00, 0xda, 0xda,
+	0xc8, 0x73, 0x1c, 0xcf, 0x15, 0x57, 0xed, 0xa6, 0xe5, 0x06, 0xc4, 0x77, 0x0d, 0x5b, 0x9e, 0xb5,
+	0x24, 0x42, 0x5b, 0xa3, 0xa3, 0x0b, 0xe2, 0x18, 0xe2, 0xa4, 0x5f, 0x81, 0xf6, 0xd8, 0x9e, 0xd2,
+	0x0b, 0x4c, 0xbe, 0x98, 0x12, 0x1a, 0xa0, 0x0f, 0x61, 0x65, 0x68, 0x50, 0xd2, 0x52, 0xf6, 0x94,
+	0x4e, 0xbd, 0x7b, 0x63, 0x3f, 0xc5, 0x4b, 0x72, 0x39, 0xa1, 0xe3, 0x87, 0x06, 0x25, 0x98, 0x43,
+	0x22, 0x04, 0x2b, 0xe6, 0xb0, 0xdf, 0x6b, 0x55, 0xf6, 0x94, 0x8e, 0x8a, 0xf9, 0x6f, 0xa4, 0x83,
+	0x36, 0xf2, 0x6c, 0x9b, 0x8c, 0x02, 0xcb, 0x73, 0xfb, 0xbd, 0xd6, 0x0a, 0xff, 0x96, 0xba, 0xd3,
+	0xff, 0xac, 0xc0, 0xe6, 0x19, 0x19, 0x3b, 0xc4, 0x0d, 0xfa, 0xbd, 0x90, 0xfd, 0x36, 0x54, 0x47,
+	0xde, 0xd4, 0x0d, 0x38, 0xff, 0x06, 0x16, 0x07, 0x74, 0x1b, 0xb4, 0xd1, 0x85, 0xe1, 0xba, 0xc4,
+	0x1e, 0xb8, 0x86, 0x43, 0x38, 0xab, 0x1a, 0xae, 0xcb, 0xbb, 0x27, 0x86, 0x43, 0x72, 0x1c, 0xd5,
+	0x3c, 0x47, 0xb4, 0x07, 0xf5, 0x89, 0xe1, 0x07, 0x56, 0x4a, 0xa8, 0xe4, 0x95, 0xfe, 0x57, 0x05,
+	0x76, 0x3e, 0xa6, 0xd4, 0x1a, 0xbb, 0x39, 0xc9, 0x76, 0x60, 0xd5, 0xf5, 0x4c, 0xd2, 0xef, 0x71,
+	0xd1, 0x54, 0x2c, 0x4f, 0xe8, 0x3a, 0xd4, 0x26, 0x84, 0xf8, 0x03, 0xdf, 0xb3, 0x43, 0xc1, 0xd6,
+	0xd9, 0x05, 0xf6, 0x6c, 0x82, 0x7e, 0x0e, 0x5b, 0x34, 0x43, 0x88, 0xb6, 0xd4, 0x3d, 0xb5, 0x53,
+	0xef, 0x7e, 0x6b, 0x3f, 0x67, 0xc6, 0xfd, 0x2c, 0x53, 0x9c, 0xc7, 0xd6, 0xbf, 0xaa, 0xc0, 0x37,
+	0x22, 0x38, 0x21, 0x2b, 0xfb, 0xcd, 0x34, 0x47, 0xc9, 0x38, 0x12, 0x4f, 0x1c, 0xca, 0x68, 0x2e,
+	0x52, 0xb9, 0x9a, 0x54, 0x79, 0x09, 0x0b, 0x66, 0xf5, 0x59, 0xcd, 0xe9, 0x13, 0xdd, 0x82, 0x3a,
+	0xb9, 0x9a, 0x58, 0x3e, 0x19, 0x04, 0x96, 0x43, 0x5a, 0xab, 0x7b, 0x4a, 0x67, 0x05, 0x83, 0xb8,
+	0x7a, 0x6a, 0x39, 0x04, 0xdd, 0x87, 0x55, 0x1a, 0x18, 0xc1, 0x94, 0xb6, 0xd6, 0xb8, 0xc3, 0x5d,
+	0x2f, 0x74, 0xb8, 0x33, 0x0e, 0x82, 0x25, 0xa8, 0xfe, 0x37, 0x05, 0xde, 0xc9, 0x59, 0x89, 0x4e,
+	0x3c, 0x97, 0x12, 0x84, 0x61, 0x93, 0xbf, 0x3c, 0xd6, 0x0c, 0x6d, 0x29, 0x5c, 0xe1, 0x77, 0xe6,
+	0x29, 0x3c, 0x06, 0xc7, 0x39, 0xfc, 0x84, 0x90, 0x95, 0xf2, 0x42, 0x3e, 0x83, 0x77, 0x8e, 0x48,
+	0x20, 0x19, 0xb0, 0x6f, 0x84, 0x2e, 0x1f, 0x63, 0xbb, 0x00, 0x91, 0x27, 0x30, 0x29, 0xd4, 0x8e,
+	0x8a, 0x13, 0x37, 0xfa, 0xbf, 0x2b, 0x51, 0x2c, 0x71, 0x56, 0x7d, 0xf7, 0xdc, 0x43, 0x37, 0xa0,
+	0x16, 0x81, 0x48, 0xaf, 0x88, 0x2f, 0xd0, 0xf7, 0xa0, 0xca, 0x24, 0x15, 0x2e, 0xd1, 0xec, 0xde,
+	0x2e, 0x7e, 0x53, 0x82, 0x26, 0x16, 0xf0, 0xa8, 0x0f, 0x4d, 0x1a, 0x18, 0x7e, 0x30, 0x98, 0x78,
+	0x94, 0xdb, 0x99, 0x3b, 0x4e, 0xbd, 0xab, 0xa7, 0x29, 0x44, 0x39, 0xe8, 0x84, 0x8e, 0x4f, 0x25,
+	0x24, 0x6e, 0x70, 0xcc, 0xf0, 0x88, 0x1e, 0x81, 0x46, 0x5c, 0x33, 0x26, 0xb4, 0x52, 0x9a, 0x50,
+	0x9d, 0xb8, 0x66, 0x44, 0x26, 0xb6, 0x4f, 0xb5, 0xbc, 0x7d, 0x7e, 0xaf, 0x40, 0x2b, 0x6f, 0x20,
+	0xe9, 0x45, 0x31, 0x45, 0xa5, 0x34, 0x45, 0xf4, 0x40, 0x20, 0x11, 0x61, 0xa0, 0xb9, 0x11, 0x1e,
+	0x19, 0x09, 0x4b, 0x14, 0xdd, 0x82, 0x6f, 0xc6, 0xd2, 0xf0, 0x2f, 0x6f, 0xcc, 0x59, 0x7e, 0xad,
+	0xc0, 0x4e, 0x96, 0xd7, 0xeb, 0xbc, 0xfb, 0xbb, 0x50, 0xb5, 0xdc, 0x73, 0x2f, 0x7c, 0xf6, 0xee,
+	0x9c, 0x38, 0x63, 0xbc, 0x04, 0xb0, 0xee, 0xc0, 0xf5, 0x23, 0x12, 0xf4, 0x5d, 0x4a, 0xfc, 0xe0,
+	0xa1, 0xe5, 0xda, 0xde, 0xf8, 0xd4, 0x08, 0x2e, 0x5e, 0x23, 0x46, 0x52, 0xee, 0x5e, 0xc9, 0xb8,
+	0xbb, 0xfe, 0x4f, 0x05, 0x6e, 0x14, 0xf3, 0x93, 0x4f, 0x6f, 0xc3, 0xfa, 0xb9, 0x45, 0x6c, 0x93,
+	0xe9, 0x4c, 0xe1, 0x3a, 0x8b, 0xce, 0x2c, 0x56, 0x26, 0x0c, 0x58, 0xbe, 0xf0, 0xf6, 0x0c, 0x07,
+	0x3d, 0x0b, 0x7c, 0xcb, 0x1d, 0x1f, 0x5b, 0x34, 0xc0, 0x02, 0x3e, 0xa1, 0x4f, 0xb5, 0xbc, 0x67,
+	0xfe, 0x4e, 0x81, 0xdd, 0x23, 0x12, 0x1c, 0x46, 0xa9, 0x96, 0x7d, 0xb7, 0x68, 0x60, 0x8d, 0xe8,
+	0x9b, 0xad, 0xd2, 0x05, 0x35, 0x53, 0xff, 0xa3, 0x02, 0xb7, 0x66, 0x0a, 0x23, 0x55, 0x27, 0x53,
+	0x49, 0x98, 0x68, 0x8b, 0x53, 0xc9, 0x4f, 0xc9, 0x8b, 0x4f, 0x0d, 0x7b, 0x4a, 0x4e, 0x0d, 0xcb,
+	0x17, 0xa9, 0x64, 0xc9, 0xc4, 0xfa, 0x2f, 0x05, 0x6e, 0x1e, 0x91, 0xe0, 0x34, 0x2c, 0x33, 0x6f,
+	0x51, 0x3b, 0x25, 0x3a, 0x8a, 0x3f, 0x08, 0x63, 0x16, 0x4a, 0xfb, 0x56, 0xd4, 0xb7, 0xcb, 0xe3,
+	0x20, 0x11, 0x90, 0x87, 0xa2, 0x17, 0x90, 0xca, 0xd3, 0xff, 0x52, 0x01, 0xed, 0x53, 0xd9, 0x1f,
+	0xf0, 0x32, 0x92, 0xd5, 0x83, 0x52, 0xac, 0x87, 0x44, 0x4b, 0x51, 0xd4, 0x65, 0x1c, 0x41, 0x83,
+	0x12, 0xf2, 0x6c, 0x99, 0xa2, 0xa1, 0x31, 0xc4, 0x28, 0xd9, 0x1f, 0xc3, 0xd6, 0xd4, 0x3d, 0x67,
+	0x2d, 0x2b, 0x31, 0xe5, 0x2b, 0x68, 0x6b, 0xa5, 0x54, 0xe6, 0xc9, 0x23, 0xa2, 0x0e, 0x6c, 0x64,
+	0x69, 0x55, 0x79, 0xf0, 0x67, 0xaf, 0xf5, 0xdf, 0x2a, 0xb0, 0xf3, 0x99, 0x11, 0x8c, 0x2e, 0x7a,
+	0x8e, 0xd4, 0xd8, 0x6b, 0xf8, 0xdb, 0x47, 0x50, 0xbb, 0x94, 0xda, 0x09, 0x93, 0xca, 0xad, 0x02,
+	0xe1, 0x93, 0x76, 0xc0, 0x31, 0x06, 0x6b, 0x53, 0xb7, 0x79, 0xd7, 0x1e, 0x4a, 0xf7, 0xf5, 0x7b,
+	0x7e, 0xba, 0xc8, 0xac, 0xe4, 0x8a, 0xcc, 0x15, 0x80, 0x14, 0xee, 0x84, 0x8e, 0x97, 0x90, 0xeb,
+	0xfb, 0xb0, 0x26, 0xa9, 0x49, 0xe7, 0x5e, 0x64, 0xdc, 0x10, 0x5c, 0x3f, 0x83, 0x1d, 0x79, 0xff,
+	0x98, 0xe5, 0x6f, 0x91, 0xeb, 0x4f, 0x48, 0x60, 0xa0, 0x16, 0xac, 0xc9, 0x94, 0x2e, 0x9d, 0x38,
+	0x3c, 0xb2, 0x3e, 0x75, 0xc8, 0xe1, 0x06, 0x2c, 0x6f, 0x4b, 0xff, 0x85, 0x61, 0x54, 0x26, 0xf4,
+	0x5f, 0x42, 0xa3, 0xd7, 0x3b, 0x4e, 0xd0, 0xba, 0x03, 0x1b, 0xa6, 0x69, 0x0f, 0x92, 0x58, 0x0a,
+	0xc7, 0x6a, 0x98, 0xa6, 0x1d, 0xd7, 0x17, 0xf4, 0x2e, 0x34, 0x03, 0x3a, 0xc8, 0x13, 0xd7, 0x02,
+	0x1a, 0x43, 0xe9, 0x27, 0xd0, 0xe4, 0xc2, 0x72, 0xa3, 0x2e, 0x90, 0xf5, 0x36, 0x68, 0x09, 0x72,
+	0xc2, 0x7d, 0x6a, 0xb8, 0x1e, 0x0b, 0xcb, 0x2b, 0x48, 0xd8, 0x0e, 0xc6, 0x14, 0xe7, 0xb7, 0x83,
+	0x37, 0x01, 0x2c, 0x3a, 0x90, 0x4e, 0xcf, 0x65, 0x5c, 0xc7, 0x35, 0x8b, 0x3e, 0x16, 0x17, 0xe8,
+	0x07, 0xb0, 0xca, 0xf9, 0x8b, 0xf0, 0xc8, 0x25, 0x29, 0x6e, 0x8d, 0xf4, 0x0b, 0xb0, 0x44, 0xd0,
+	0x3f, 0x01, 0xad, 0xd7, 0x3b, 0x8e, 0xe5, 0x28, 0x93, 0x4f, 0x4a, 0xbc, 0xf1, 0x4b, 0x68, 0xc6,
+	0x45, 0x89, 0x27, 0xaa, 0x26, 0x54, 0x22, 0x72, 0x95, 0x7e, 0x0f, 0x7d, 0x04, 0xab, 0x62, 0xd4,
+	0x95, 0x1e, 0xf4, 0x5e, 0x5a, 0x66, 0x39, 0x06, 0x27, 0x2a, 0x1b, 0xbf, 0xc0, 0x12, 0x89, 0x79,
+	0x78, 0x94, 0xc8, 0xc5, 0xd0, 0xa6, 0xe2, 0xc4, 0x8d, 0xfe, 0x1f, 0x15, 0xea, 0x09, 0x07, 0xcc,
+	0xb1, 0xcf, 0xbe, 0xb3, 0xb2, 0xb8, 0x7e, 0xa8, 0xf9, 0x09, 0xea, 0x3d, 0x68, 0x5a, 0xbc, 0x67,
+	0x19, 0xc8, 0xe8, 0xe7, 0x45, 0xa6, 0x86, 0x1b, 0xe2, 0x56, 0xa6, 0x22, 0xb4, 0x0b, 0x75, 0x77,
+	0xea, 0x0c, 0xbc, 0xf3, 0x81, 0xef, 0x3d, 0xa7, 0x72, 0x14, 0xab, 0xb9, 0x53, 0xe7, 0x67, 0xe7,
+	0xd8, 0x7b, 0x4e, 0xe3, 0x6e, 0x7f, 0xf5, 0x15, 0xbb, 0xfd, 0x47, 0xa0, 0x99, 0x8e, 0x1d, 0xa7,
+	0xed, 0xb5, 0xf2, 0x2d, 0xba, 0xe9, 0xd8, 0x51, 0xd6, 0xde, 0x85, 0xba, 0x63, 0x5c, 0x31, 0xe1,
+	0x06, 0xee, 0xd4, 0x69, 0xad, 0x0b, 0xf9, 0x1c, 0xe3, 0x0a, 0x7b, 0xcf, 0x9f, 0x4c, 0x1d, 0xd4,
+	0x81, 0x4d, 0xdb, 0xa0, 0xc1, 0x20, 0x39, 0x2d, 0xd6, 0xf8, 0xb4, 0xd8, 0x64, 0xf7, 0x8f, 0xe2,
+	0x89, 0x31, 0x3f, 0x7e, 0xc0, 0x92, 0xe3, 0x87, 0x7e, 0x1f, 0xea, 0xfd, 0x5e, 0x97, 0xb9, 0x13,
+	0xeb, 0xd9, 0x72, 0x06, 0xdc, 0x86, 0xea, 0x69, 0xc2, 0xfb, 0xaa, 0xa1, 0xdf, 0x6d, 0xc7, 0x7a,
+	0x4a, 0xcc, 0x32, 0x79, 0xb9, 0x94, 0x65, 0xc7, 0xa2, 0xf9, 0x9d, 0xec, 0x6f, 0x54, 0xd8, 0x39,
+	0x33, 0x2e, 0xc9, 0x9b, 0x6f, 0x9a, 0x4b, 0x15, 0x82, 0x63, 0xd8, 0xe2, 0x81, 0xde, 0x4d, 0xc8,
+	0x33, 0xa7, 0x1e, 0x27, 0x14, 0x8e, 0xf3, 0x88, 0xe8, 0x27, 0xac, 0x91, 0x20, 0xa3, 0x67, 0xa7,
+	0x9e, 0x15, 0xd6, 0xe2, 0x7a, 0xf7, 0x66, 0x01, 0x9d, 0xc3, 0x08, 0x0a, 0x27, 0x31, 0xd0, 0x29,
+	0x6c, 0xa4, 0xcd, 0x40, 0x5b, 0xab, 0x9c, 0xc8, 0xfb, 0x73, 0xa7, 0xb1, 0x58, 0xfb, 0xb8, 0x99,
+	0x32, 0x06, 0xe5, 0x99, 0x58, 0xa6, 0xc5, 0x35, 0x9e, 0x16, 0xc3, 0x23, 0x4b, 0xb3, 0x10, 0xcb,
+	0xb1, 0x20, 0xc1, 0xfe, 0x18, 0xd6, 0x23, 0xcf, 0xa8, 0x94, 0xf6, 0x8c, 0x08, 0x27, 0x1b, 0xe1,
+	0x6a, 0x26, 0xc2, 0xf5, 0x97, 0x0a, 0x34, 0x7a, 0x46, 0x60, 0x3c, 0xf1, 0x4c, 0xf2, 0x74, 0xc9,
+	0xa2, 0x5b, 0x62, 0x5b, 0x74, 0x03, 0x6a, 0x2c, 0x38, 0x69, 0x60, 0x38, 0x13, 0x2e, 0xc4, 0x0a,
+	0x8e, 0x2f, 0xd8, 0x68, 0xd9, 0x90, 0x29, 0x49, 0xb4, 0x9d, 0xac, 0xbf, 0xe0, 0xa4, 0x44, 0x71,
+	0xe4, 0xbf, 0xd1, 0x0f, 0xd3, 0xab, 0x87, 0x77, 0x0b, 0xcd, 0xcb, 0x89, 0xf0, 0x86, 0x2b, 0x95,
+	0x8f, 0xca, 0xcc, 0x2c, 0x5f, 0x29, 0xa0, 0x85, 0xaa, 0xe0, 0xa9, 0xb9, 0x05, 0x6b, 0x86, 0x69,
+	0xfa, 0x84, 0x52, 0x29, 0x47, 0x78, 0x64, 0x5f, 0x2e, 0x89, 0x4f, 0x43, 0xa3, 0xa8, 0x38, 0x3c,
+	0xa2, 0x1f, 0xc1, 0x7a, 0xd4, 0xa1, 0x89, 0x8d, 0xdd, 0xde, 0x6c, 0x39, 0x65, 0x8f, 0x1d, 0x61,
+	0xe8, 0x3e, 0x34, 0xa5, 0x73, 0x09, 0xef, 0xa6, 0x0b, 0xbc, 0xe3, 0x21, 0x68, 0xe7, 0x71, 0xb7,
+	0x32, 0x6f, 0x94, 0x4e, 0x34, 0x35, 0x38, 0x85, 0xa3, 0x7f, 0x0c, 0xf5, 0xc4, 0xc7, 0x39, 0x1d,
+	0x44, 0x0b, 0xd6, 0x86, 0x09, 0x3e, 0x35, 0x1c, 0x1e, 0xf5, 0xff, 0x2a, 0x7c, 0x6b, 0x85, 0xc9,
+	0xc8, 0xbb, 0x24, 0xfe, 0x8b, 0xd7, 0xdf, 0x0d, 0x3c, 0x48, 0x68, 0xb1, 0x64, 0x9f, 0x1b, 0x21,
+	0xa0, 0x07, 0xb1, 0x9c, 0xea, 0xcc, 0xae, 0x23, 0xad, 0xe6, 0xf8, 0x29, 0x7f, 0x12, 0x5b, 0x8e,
+	0xf4, 0x53, 0x96, 0x4d, 0x93, 0xff, 0x97, 0x5a, 0x7e, 0xf7, 0x1e, 0x6c, 0xe5, 0xfc, 0x1a, 0x35,
+	0x01, 0x3e, 0x71, 0x47, 0x9e, 0x33, 0xb1, 0x49, 0x40, 0x36, 0xaf, 0x21, 0x0d, 0xd6, 0x0f, 0xc3,
+	0x93, 0xd2, 0xfd, 0x47, 0x1d, 0x6a, 0xcc, 0x95, 0x0f, 0x3d, 0xcf, 0x37, 0xd1, 0x04, 0x10, 0x9f,
+	0xc5, 0x9d, 0x89, 0xe7, 0x46, 0x4b, 0x2b, 0xf4, 0xe1, 0x8c, 0x3c, 0x92, 0x07, 0x95, 0x0a, 0x68,
+	0xdf, 0x99, 0x81, 0x91, 0x01, 0xd7, 0xaf, 0x21, 0x87, 0x73, 0x64, 0x85, 0xf7, 0xa9, 0x35, 0x7a,
+	0x16, 0x76, 0x1b, 0x73, 0x38, 0x66, 0x40, 0x43, 0x8e, 0x99, 0x5d, 0x98, 0x3c, 0x88, 0x85, 0x49,
+	0xe8, 0x61, 0xfa, 0x35, 0xf4, 0x05, 0x6c, 0xb3, 0xe1, 0x34, 0x9a, 0x91, 0x43, 0x86, 0xdd, 0xd9,
+	0x0c, 0x73, 0xc0, 0xaf, 0xc8, 0xf2, 0x08, 0xaa, 0xbc, 0x37, 0x45, 0x45, 0x8e, 0x99, 0xfc, 0x6b,
+	0xa4, 0x3d, 0xcf, 0xe1, 0xf5, 0x6b, 0xe8, 0x57, 0xb0, 0x91, 0x59, 0x4a, 0xa3, 0x0f, 0x0a, 0x48,
+	0x16, 0xff, 0xbd, 0xd0, 0xbe, 0x5b, 0x06, 0x34, 0x12, 0x7a, 0x0c, 0xcd, 0xf4, 0x10, 0x8f, 0x3a,
+	0x05, 0xf8, 0x85, 0x0b, 0xc5, 0xf6, 0x07, 0x25, 0x20, 0x23, 0x46, 0x0e, 0x6c, 0x66, 0x97, 0xa4,
+	0xe8, 0xee, 0x5c, 0x02, 0x69, 0x4f, 0xfb, 0x76, 0x29, 0xd8, 0x88, 0xdd, 0x0b, 0x6e, 0xff, 0xdc,
+	0x92, 0x0e, 0xed, 0x17, 0x93, 0x99, 0xb5, 0x3d, 0x6c, 0x1f, 0x94, 0x86, 0x8f, 0x58, 0xbf, 0x14,
+	0xa9, 0xaf, 0x68, 0xd1, 0x85, 0xee, 0x15, 0x93, 0x9b, 0xb3, 0xa1, 0x6b, 0x77, 0x5f, 0x05, 0x25,
+	0x12, 0xe2, 0x4b, 0x9e, 0xb3, 0x0a, 0x96, 0x45, 0xd9, 0x90, 0x0b, 0xe9, 0xcd, 0xde, 0x82, 0xb5,
+	0xef, 0xbd, 0x02, 0x46, 0x24, 0x80, 0x97, 0x5d, 0x43, 0x87, 0x11, 0x78, 0xb0, 0xd0, 0x6b, 0x96,
+	0x0b, 0xbf, 0xcf, 0x61, 0x23, 0xd3, 0xcc, 0x16, 0x46, 0x4d, 0x71, 0xc3, 0x5b, 0x22, 0x24, 0x33,
+	0x25, 0x00, 0xcd, 0xf0, 0xfe, 0x82, 0x32, 0xd1, 0xbe, 0x5b, 0x06, 0x34, 0x7c, 0x48, 0xf7, 0xef,
+	0x2a, 0xac, 0x87, 0x4d, 0xc7, 0x5b, 0x48, 0xd4, 0x6f, 0x21, 0x73, 0x7e, 0x0e, 0x1b, 0x99, 0x85,
+	0x58, 0xa1, 0x76, 0x8b, 0x97, 0x66, 0x8b, 0x4c, 0xf7, 0x19, 0x34, 0x52, 0x1b, 0x2e, 0xf4, 0xfe,
+	0xac, 0xf4, 0x9c, 0xd9, 0x81, 0x2d, 0x20, 0xfc, 0xf0, 0xfe, 0x2f, 0xee, 0x8d, 0xad, 0xe0, 0x62,
+	0x3a, 0x64, 0x5f, 0x0e, 0x04, 0xe8, 0x77, 0x2c, 0x4f, 0xfe, 0x3a, 0x08, 0x15, 0x74, 0xc0, 0xb1,
+	0x0f, 0x18, 0x9b, 0xc9, 0x70, 0xb8, 0xca, 0x4f, 0xf7, 0xff, 0x17, 0x00, 0x00, 0xff, 0xff, 0x30,
+	0x3a, 0xc3, 0x19, 0x8f, 0x1f, 0x00, 0x00,
 }
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -2660,21 +2387,18 @@ var _ grpc.ClientConn
 // is compatible with the grpc package it is being compiled against.
 const _ = grpc.SupportPackageIsVersion4
 
-// DataServiceClient is the client API for DataService service.
+// DataCoordClient is the client API for DataCoord service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://godoc.org/google.golang.org/grpc#ClientConn.NewStream.
-type DataServiceClient interface {
+type DataCoordClient interface {
 	GetComponentStates(ctx context.Context, in *internalpb.GetComponentStatesRequest, opts ...grpc.CallOption) (*internalpb.ComponentStates, error)
 	GetTimeTickChannel(ctx context.Context, in *internalpb.GetTimeTickChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error)
 	GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error)
-	RegisterNode(ctx context.Context, in *RegisterNodeRequest, opts ...grpc.CallOption) (*RegisterNodeResponse, error)
 	Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	AssignSegmentID(ctx context.Context, in *AssignSegmentIDRequest, opts ...grpc.CallOption) (*AssignSegmentIDResponse, error)
-	ShowSegments(ctx context.Context, in *ShowSegmentsRequest, opts ...grpc.CallOption) (*ShowSegmentsResponse, error)
 	GetSegmentInfo(ctx context.Context, in *GetSegmentInfoRequest, opts ...grpc.CallOption) (*GetSegmentInfoResponse, error)
 	GetSegmentStates(ctx context.Context, in *GetSegmentStatesRequest, opts ...grpc.CallOption) (*GetSegmentStatesResponse, error)
 	GetInsertBinlogPaths(ctx context.Context, in *GetInsertBinlogPathsRequest, opts ...grpc.CallOption) (*GetInsertBinlogPathsResponse, error)
-	GetInsertChannels(ctx context.Context, in *GetInsertChannelsRequest, opts ...grpc.CallOption) (*internalpb.StringList, error)
 	GetCollectionStatistics(ctx context.Context, in *GetCollectionStatisticsRequest, opts ...grpc.CallOption) (*GetCollectionStatisticsResponse, error)
 	GetPartitionStatistics(ctx context.Context, in *GetPartitionStatisticsRequest, opts ...grpc.CallOption) (*GetPartitionStatisticsResponse, error)
 	GetSegmentInfoChannel(ctx context.Context, in *GetSegmentInfoChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error)
@@ -2682,171 +2406,141 @@ type DataServiceClient interface {
 	GetRecoveryInfo(ctx context.Context, in *GetRecoveryInfoRequest, opts ...grpc.CallOption) (*GetRecoveryInfoResponse, error)
 }
 
-type dataServiceClient struct {
+type dataCoordClient struct {
 	cc *grpc.ClientConn
 }
 
-func NewDataServiceClient(cc *grpc.ClientConn) DataServiceClient {
-	return &dataServiceClient{cc}
+func NewDataCoordClient(cc *grpc.ClientConn) DataCoordClient {
+	return &dataCoordClient{cc}
 }
 
-func (c *dataServiceClient) GetComponentStates(ctx context.Context, in *internalpb.GetComponentStatesRequest, opts ...grpc.CallOption) (*internalpb.ComponentStates, error) {
+func (c *dataCoordClient) GetComponentStates(ctx context.Context, in *internalpb.GetComponentStatesRequest, opts ...grpc.CallOption) (*internalpb.ComponentStates, error) {
 	out := new(internalpb.ComponentStates)
-	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataService/GetComponentStates", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataCoord/GetComponentStates", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *dataServiceClient) GetTimeTickChannel(ctx context.Context, in *internalpb.GetTimeTickChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
+func (c *dataCoordClient) GetTimeTickChannel(ctx context.Context, in *internalpb.GetTimeTickChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
 	out := new(milvuspb.StringResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataService/GetTimeTickChannel", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataCoord/GetTimeTickChannel", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *dataServiceClient) GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
+func (c *dataCoordClient) GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
 	out := new(milvuspb.StringResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataService/GetStatisticsChannel", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataCoord/GetStatisticsChannel", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *dataServiceClient) RegisterNode(ctx context.Context, in *RegisterNodeRequest, opts ...grpc.CallOption) (*RegisterNodeResponse, error) {
-	out := new(RegisterNodeResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataService/RegisterNode", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *dataServiceClient) Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (c *dataCoordClient) Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataService/Flush", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataCoord/Flush", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *dataServiceClient) AssignSegmentID(ctx context.Context, in *AssignSegmentIDRequest, opts ...grpc.CallOption) (*AssignSegmentIDResponse, error) {
+func (c *dataCoordClient) AssignSegmentID(ctx context.Context, in *AssignSegmentIDRequest, opts ...grpc.CallOption) (*AssignSegmentIDResponse, error) {
 	out := new(AssignSegmentIDResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataService/AssignSegmentID", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataCoord/AssignSegmentID", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *dataServiceClient) ShowSegments(ctx context.Context, in *ShowSegmentsRequest, opts ...grpc.CallOption) (*ShowSegmentsResponse, error) {
-	out := new(ShowSegmentsResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataService/ShowSegments", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *dataServiceClient) GetSegmentInfo(ctx context.Context, in *GetSegmentInfoRequest, opts ...grpc.CallOption) (*GetSegmentInfoResponse, error) {
+func (c *dataCoordClient) GetSegmentInfo(ctx context.Context, in *GetSegmentInfoRequest, opts ...grpc.CallOption) (*GetSegmentInfoResponse, error) {
 	out := new(GetSegmentInfoResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataService/GetSegmentInfo", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataCoord/GetSegmentInfo", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *dataServiceClient) GetSegmentStates(ctx context.Context, in *GetSegmentStatesRequest, opts ...grpc.CallOption) (*GetSegmentStatesResponse, error) {
+func (c *dataCoordClient) GetSegmentStates(ctx context.Context, in *GetSegmentStatesRequest, opts ...grpc.CallOption) (*GetSegmentStatesResponse, error) {
 	out := new(GetSegmentStatesResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataService/GetSegmentStates", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataCoord/GetSegmentStates", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *dataServiceClient) GetInsertBinlogPaths(ctx context.Context, in *GetInsertBinlogPathsRequest, opts ...grpc.CallOption) (*GetInsertBinlogPathsResponse, error) {
+func (c *dataCoordClient) GetInsertBinlogPaths(ctx context.Context, in *GetInsertBinlogPathsRequest, opts ...grpc.CallOption) (*GetInsertBinlogPathsResponse, error) {
 	out := new(GetInsertBinlogPathsResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataService/GetInsertBinlogPaths", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataCoord/GetInsertBinlogPaths", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *dataServiceClient) GetInsertChannels(ctx context.Context, in *GetInsertChannelsRequest, opts ...grpc.CallOption) (*internalpb.StringList, error) {
-	out := new(internalpb.StringList)
-	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataService/GetInsertChannels", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *dataServiceClient) GetCollectionStatistics(ctx context.Context, in *GetCollectionStatisticsRequest, opts ...grpc.CallOption) (*GetCollectionStatisticsResponse, error) {
+func (c *dataCoordClient) GetCollectionStatistics(ctx context.Context, in *GetCollectionStatisticsRequest, opts ...grpc.CallOption) (*GetCollectionStatisticsResponse, error) {
 	out := new(GetCollectionStatisticsResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataService/GetCollectionStatistics", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataCoord/GetCollectionStatistics", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *dataServiceClient) GetPartitionStatistics(ctx context.Context, in *GetPartitionStatisticsRequest, opts ...grpc.CallOption) (*GetPartitionStatisticsResponse, error) {
+func (c *dataCoordClient) GetPartitionStatistics(ctx context.Context, in *GetPartitionStatisticsRequest, opts ...grpc.CallOption) (*GetPartitionStatisticsResponse, error) {
 	out := new(GetPartitionStatisticsResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataService/GetPartitionStatistics", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataCoord/GetPartitionStatistics", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *dataServiceClient) GetSegmentInfoChannel(ctx context.Context, in *GetSegmentInfoChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
+func (c *dataCoordClient) GetSegmentInfoChannel(ctx context.Context, in *GetSegmentInfoChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
 	out := new(milvuspb.StringResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataService/GetSegmentInfoChannel", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataCoord/GetSegmentInfoChannel", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *dataServiceClient) SaveBinlogPaths(ctx context.Context, in *SaveBinlogPathsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (c *dataCoordClient) SaveBinlogPaths(ctx context.Context, in *SaveBinlogPathsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataService/SaveBinlogPaths", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataCoord/SaveBinlogPaths", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *dataServiceClient) GetRecoveryInfo(ctx context.Context, in *GetRecoveryInfoRequest, opts ...grpc.CallOption) (*GetRecoveryInfoResponse, error) {
+func (c *dataCoordClient) GetRecoveryInfo(ctx context.Context, in *GetRecoveryInfoRequest, opts ...grpc.CallOption) (*GetRecoveryInfoResponse, error) {
 	out := new(GetRecoveryInfoResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataService/GetRecoveryInfo", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/milvus.proto.data.DataCoord/GetRecoveryInfo", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// DataServiceServer is the server API for DataService service.
-type DataServiceServer interface {
+// DataCoordServer is the server API for DataCoord service.
+type DataCoordServer interface {
 	GetComponentStates(context.Context, *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error)
 	GetTimeTickChannel(context.Context, *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error)
 	GetStatisticsChannel(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error)
-	RegisterNode(context.Context, *RegisterNodeRequest) (*RegisterNodeResponse, error)
 	Flush(context.Context, *FlushRequest) (*commonpb.Status, error)
 	AssignSegmentID(context.Context, *AssignSegmentIDRequest) (*AssignSegmentIDResponse, error)
-	ShowSegments(context.Context, *ShowSegmentsRequest) (*ShowSegmentsResponse, error)
 	GetSegmentInfo(context.Context, *GetSegmentInfoRequest) (*GetSegmentInfoResponse, error)
 	GetSegmentStates(context.Context, *GetSegmentStatesRequest) (*GetSegmentStatesResponse, error)
 	GetInsertBinlogPaths(context.Context, *GetInsertBinlogPathsRequest) (*GetInsertBinlogPathsResponse, error)
-	GetInsertChannels(context.Context, *GetInsertChannelsRequest) (*internalpb.StringList, error)
 	GetCollectionStatistics(context.Context, *GetCollectionStatisticsRequest) (*GetCollectionStatisticsResponse, error)
 	GetPartitionStatistics(context.Context, *GetPartitionStatisticsRequest) (*GetPartitionStatisticsResponse, error)
 	GetSegmentInfoChannel(context.Context, *GetSegmentInfoChannelRequest) (*milvuspb.StringResponse, error)
@@ -2854,418 +2548,343 @@ type DataServiceServer interface {
 	GetRecoveryInfo(context.Context, *GetRecoveryInfoRequest) (*GetRecoveryInfoResponse, error)
 }
 
-// UnimplementedDataServiceServer can be embedded to have forward compatible implementations.
-type UnimplementedDataServiceServer struct {
+// UnimplementedDataCoordServer can be embedded to have forward compatible implementations.
+type UnimplementedDataCoordServer struct {
 }
 
-func (*UnimplementedDataServiceServer) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+func (*UnimplementedDataCoordServer) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetComponentStates not implemented")
 }
-func (*UnimplementedDataServiceServer) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
+func (*UnimplementedDataCoordServer) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTimeTickChannel not implemented")
 }
-func (*UnimplementedDataServiceServer) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
+func (*UnimplementedDataCoordServer) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetStatisticsChannel not implemented")
 }
-func (*UnimplementedDataServiceServer) RegisterNode(ctx context.Context, req *RegisterNodeRequest) (*RegisterNodeResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method RegisterNode not implemented")
-}
-func (*UnimplementedDataServiceServer) Flush(ctx context.Context, req *FlushRequest) (*commonpb.Status, error) {
+func (*UnimplementedDataCoordServer) Flush(ctx context.Context, req *FlushRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Flush not implemented")
 }
-func (*UnimplementedDataServiceServer) AssignSegmentID(ctx context.Context, req *AssignSegmentIDRequest) (*AssignSegmentIDResponse, error) {
+func (*UnimplementedDataCoordServer) AssignSegmentID(ctx context.Context, req *AssignSegmentIDRequest) (*AssignSegmentIDResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AssignSegmentID not implemented")
 }
-func (*UnimplementedDataServiceServer) ShowSegments(ctx context.Context, req *ShowSegmentsRequest) (*ShowSegmentsResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ShowSegments not implemented")
-}
-func (*UnimplementedDataServiceServer) GetSegmentInfo(ctx context.Context, req *GetSegmentInfoRequest) (*GetSegmentInfoResponse, error) {
+func (*UnimplementedDataCoordServer) GetSegmentInfo(ctx context.Context, req *GetSegmentInfoRequest) (*GetSegmentInfoResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetSegmentInfo not implemented")
 }
-func (*UnimplementedDataServiceServer) GetSegmentStates(ctx context.Context, req *GetSegmentStatesRequest) (*GetSegmentStatesResponse, error) {
+func (*UnimplementedDataCoordServer) GetSegmentStates(ctx context.Context, req *GetSegmentStatesRequest) (*GetSegmentStatesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetSegmentStates not implemented")
 }
-func (*UnimplementedDataServiceServer) GetInsertBinlogPaths(ctx context.Context, req *GetInsertBinlogPathsRequest) (*GetInsertBinlogPathsResponse, error) {
+func (*UnimplementedDataCoordServer) GetInsertBinlogPaths(ctx context.Context, req *GetInsertBinlogPathsRequest) (*GetInsertBinlogPathsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetInsertBinlogPaths not implemented")
 }
-func (*UnimplementedDataServiceServer) GetInsertChannels(ctx context.Context, req *GetInsertChannelsRequest) (*internalpb.StringList, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetInsertChannels not implemented")
-}
-func (*UnimplementedDataServiceServer) GetCollectionStatistics(ctx context.Context, req *GetCollectionStatisticsRequest) (*GetCollectionStatisticsResponse, error) {
+func (*UnimplementedDataCoordServer) GetCollectionStatistics(ctx context.Context, req *GetCollectionStatisticsRequest) (*GetCollectionStatisticsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetCollectionStatistics not implemented")
 }
-func (*UnimplementedDataServiceServer) GetPartitionStatistics(ctx context.Context, req *GetPartitionStatisticsRequest) (*GetPartitionStatisticsResponse, error) {
+func (*UnimplementedDataCoordServer) GetPartitionStatistics(ctx context.Context, req *GetPartitionStatisticsRequest) (*GetPartitionStatisticsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetPartitionStatistics not implemented")
 }
-func (*UnimplementedDataServiceServer) GetSegmentInfoChannel(ctx context.Context, req *GetSegmentInfoChannelRequest) (*milvuspb.StringResponse, error) {
+func (*UnimplementedDataCoordServer) GetSegmentInfoChannel(ctx context.Context, req *GetSegmentInfoChannelRequest) (*milvuspb.StringResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetSegmentInfoChannel not implemented")
 }
-func (*UnimplementedDataServiceServer) SaveBinlogPaths(ctx context.Context, req *SaveBinlogPathsRequest) (*commonpb.Status, error) {
+func (*UnimplementedDataCoordServer) SaveBinlogPaths(ctx context.Context, req *SaveBinlogPathsRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SaveBinlogPaths not implemented")
 }
-func (*UnimplementedDataServiceServer) GetRecoveryInfo(ctx context.Context, req *GetRecoveryInfoRequest) (*GetRecoveryInfoResponse, error) {
+func (*UnimplementedDataCoordServer) GetRecoveryInfo(ctx context.Context, req *GetRecoveryInfoRequest) (*GetRecoveryInfoResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetRecoveryInfo not implemented")
 }
 
-func RegisterDataServiceServer(s *grpc.Server, srv DataServiceServer) {
-	s.RegisterService(&_DataService_serviceDesc, srv)
+func RegisterDataCoordServer(s *grpc.Server, srv DataCoordServer) {
+	s.RegisterService(&_DataCoord_serviceDesc, srv)
 }
 
-func _DataService_GetComponentStates_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _DataCoord_GetComponentStates_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(internalpb.GetComponentStatesRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DataServiceServer).GetComponentStates(ctx, in)
+		return srv.(DataCoordServer).GetComponentStates(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.data.DataService/GetComponentStates",
+		FullMethod: "/milvus.proto.data.DataCoord/GetComponentStates",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataServiceServer).GetComponentStates(ctx, req.(*internalpb.GetComponentStatesRequest))
+		return srv.(DataCoordServer).GetComponentStates(ctx, req.(*internalpb.GetComponentStatesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DataService_GetTimeTickChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _DataCoord_GetTimeTickChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(internalpb.GetTimeTickChannelRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DataServiceServer).GetTimeTickChannel(ctx, in)
+		return srv.(DataCoordServer).GetTimeTickChannel(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.data.DataService/GetTimeTickChannel",
+		FullMethod: "/milvus.proto.data.DataCoord/GetTimeTickChannel",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataServiceServer).GetTimeTickChannel(ctx, req.(*internalpb.GetTimeTickChannelRequest))
+		return srv.(DataCoordServer).GetTimeTickChannel(ctx, req.(*internalpb.GetTimeTickChannelRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DataService_GetStatisticsChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _DataCoord_GetStatisticsChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(internalpb.GetStatisticsChannelRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DataServiceServer).GetStatisticsChannel(ctx, in)
+		return srv.(DataCoordServer).GetStatisticsChannel(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.data.DataService/GetStatisticsChannel",
+		FullMethod: "/milvus.proto.data.DataCoord/GetStatisticsChannel",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataServiceServer).GetStatisticsChannel(ctx, req.(*internalpb.GetStatisticsChannelRequest))
+		return srv.(DataCoordServer).GetStatisticsChannel(ctx, req.(*internalpb.GetStatisticsChannelRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DataService_RegisterNode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RegisterNodeRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DataServiceServer).RegisterNode(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.data.DataService/RegisterNode",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataServiceServer).RegisterNode(ctx, req.(*RegisterNodeRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DataService_Flush_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _DataCoord_Flush_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(FlushRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DataServiceServer).Flush(ctx, in)
+		return srv.(DataCoordServer).Flush(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.data.DataService/Flush",
+		FullMethod: "/milvus.proto.data.DataCoord/Flush",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataServiceServer).Flush(ctx, req.(*FlushRequest))
+		return srv.(DataCoordServer).Flush(ctx, req.(*FlushRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DataService_AssignSegmentID_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _DataCoord_AssignSegmentID_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AssignSegmentIDRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DataServiceServer).AssignSegmentID(ctx, in)
+		return srv.(DataCoordServer).AssignSegmentID(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.data.DataService/AssignSegmentID",
+		FullMethod: "/milvus.proto.data.DataCoord/AssignSegmentID",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataServiceServer).AssignSegmentID(ctx, req.(*AssignSegmentIDRequest))
+		return srv.(DataCoordServer).AssignSegmentID(ctx, req.(*AssignSegmentIDRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DataService_ShowSegments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ShowSegmentsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DataServiceServer).ShowSegments(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.data.DataService/ShowSegments",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataServiceServer).ShowSegments(ctx, req.(*ShowSegmentsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DataService_GetSegmentInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _DataCoord_GetSegmentInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetSegmentInfoRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DataServiceServer).GetSegmentInfo(ctx, in)
+		return srv.(DataCoordServer).GetSegmentInfo(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.data.DataService/GetSegmentInfo",
+		FullMethod: "/milvus.proto.data.DataCoord/GetSegmentInfo",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataServiceServer).GetSegmentInfo(ctx, req.(*GetSegmentInfoRequest))
+		return srv.(DataCoordServer).GetSegmentInfo(ctx, req.(*GetSegmentInfoRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DataService_GetSegmentStates_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _DataCoord_GetSegmentStates_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetSegmentStatesRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DataServiceServer).GetSegmentStates(ctx, in)
+		return srv.(DataCoordServer).GetSegmentStates(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.data.DataService/GetSegmentStates",
+		FullMethod: "/milvus.proto.data.DataCoord/GetSegmentStates",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataServiceServer).GetSegmentStates(ctx, req.(*GetSegmentStatesRequest))
+		return srv.(DataCoordServer).GetSegmentStates(ctx, req.(*GetSegmentStatesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DataService_GetInsertBinlogPaths_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _DataCoord_GetInsertBinlogPaths_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetInsertBinlogPathsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DataServiceServer).GetInsertBinlogPaths(ctx, in)
+		return srv.(DataCoordServer).GetInsertBinlogPaths(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.data.DataService/GetInsertBinlogPaths",
+		FullMethod: "/milvus.proto.data.DataCoord/GetInsertBinlogPaths",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataServiceServer).GetInsertBinlogPaths(ctx, req.(*GetInsertBinlogPathsRequest))
+		return srv.(DataCoordServer).GetInsertBinlogPaths(ctx, req.(*GetInsertBinlogPathsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DataService_GetInsertChannels_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetInsertChannelsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DataServiceServer).GetInsertChannels(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.data.DataService/GetInsertChannels",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataServiceServer).GetInsertChannels(ctx, req.(*GetInsertChannelsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DataService_GetCollectionStatistics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _DataCoord_GetCollectionStatistics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetCollectionStatisticsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DataServiceServer).GetCollectionStatistics(ctx, in)
+		return srv.(DataCoordServer).GetCollectionStatistics(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.data.DataService/GetCollectionStatistics",
+		FullMethod: "/milvus.proto.data.DataCoord/GetCollectionStatistics",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataServiceServer).GetCollectionStatistics(ctx, req.(*GetCollectionStatisticsRequest))
+		return srv.(DataCoordServer).GetCollectionStatistics(ctx, req.(*GetCollectionStatisticsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DataService_GetPartitionStatistics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _DataCoord_GetPartitionStatistics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetPartitionStatisticsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DataServiceServer).GetPartitionStatistics(ctx, in)
+		return srv.(DataCoordServer).GetPartitionStatistics(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.data.DataService/GetPartitionStatistics",
+		FullMethod: "/milvus.proto.data.DataCoord/GetPartitionStatistics",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataServiceServer).GetPartitionStatistics(ctx, req.(*GetPartitionStatisticsRequest))
+		return srv.(DataCoordServer).GetPartitionStatistics(ctx, req.(*GetPartitionStatisticsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DataService_GetSegmentInfoChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _DataCoord_GetSegmentInfoChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetSegmentInfoChannelRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DataServiceServer).GetSegmentInfoChannel(ctx, in)
+		return srv.(DataCoordServer).GetSegmentInfoChannel(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.data.DataService/GetSegmentInfoChannel",
+		FullMethod: "/milvus.proto.data.DataCoord/GetSegmentInfoChannel",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataServiceServer).GetSegmentInfoChannel(ctx, req.(*GetSegmentInfoChannelRequest))
+		return srv.(DataCoordServer).GetSegmentInfoChannel(ctx, req.(*GetSegmentInfoChannelRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DataService_SaveBinlogPaths_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _DataCoord_SaveBinlogPaths_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SaveBinlogPathsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DataServiceServer).SaveBinlogPaths(ctx, in)
+		return srv.(DataCoordServer).SaveBinlogPaths(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.data.DataService/SaveBinlogPaths",
+		FullMethod: "/milvus.proto.data.DataCoord/SaveBinlogPaths",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataServiceServer).SaveBinlogPaths(ctx, req.(*SaveBinlogPathsRequest))
+		return srv.(DataCoordServer).SaveBinlogPaths(ctx, req.(*SaveBinlogPathsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DataService_GetRecoveryInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _DataCoord_GetRecoveryInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetRecoveryInfoRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DataServiceServer).GetRecoveryInfo(ctx, in)
+		return srv.(DataCoordServer).GetRecoveryInfo(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.data.DataService/GetRecoveryInfo",
+		FullMethod: "/milvus.proto.data.DataCoord/GetRecoveryInfo",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DataServiceServer).GetRecoveryInfo(ctx, req.(*GetRecoveryInfoRequest))
+		return srv.(DataCoordServer).GetRecoveryInfo(ctx, req.(*GetRecoveryInfoRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-var _DataService_serviceDesc = grpc.ServiceDesc{
-	ServiceName: "milvus.proto.data.DataService",
-	HandlerType: (*DataServiceServer)(nil),
+var _DataCoord_serviceDesc = grpc.ServiceDesc{
+	ServiceName: "milvus.proto.data.DataCoord",
+	HandlerType: (*DataCoordServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
 			MethodName: "GetComponentStates",
-			Handler:    _DataService_GetComponentStates_Handler,
+			Handler:    _DataCoord_GetComponentStates_Handler,
 		},
 		{
 			MethodName: "GetTimeTickChannel",
-			Handler:    _DataService_GetTimeTickChannel_Handler,
+			Handler:    _DataCoord_GetTimeTickChannel_Handler,
 		},
 		{
 			MethodName: "GetStatisticsChannel",
-			Handler:    _DataService_GetStatisticsChannel_Handler,
-		},
-		{
-			MethodName: "RegisterNode",
-			Handler:    _DataService_RegisterNode_Handler,
+			Handler:    _DataCoord_GetStatisticsChannel_Handler,
 		},
 		{
 			MethodName: "Flush",
-			Handler:    _DataService_Flush_Handler,
+			Handler:    _DataCoord_Flush_Handler,
 		},
 		{
 			MethodName: "AssignSegmentID",
-			Handler:    _DataService_AssignSegmentID_Handler,
-		},
-		{
-			MethodName: "ShowSegments",
-			Handler:    _DataService_ShowSegments_Handler,
+			Handler:    _DataCoord_AssignSegmentID_Handler,
 		},
 		{
 			MethodName: "GetSegmentInfo",
-			Handler:    _DataService_GetSegmentInfo_Handler,
+			Handler:    _DataCoord_GetSegmentInfo_Handler,
 		},
 		{
 			MethodName: "GetSegmentStates",
-			Handler:    _DataService_GetSegmentStates_Handler,
+			Handler:    _DataCoord_GetSegmentStates_Handler,
 		},
 		{
 			MethodName: "GetInsertBinlogPaths",
-			Handler:    _DataService_GetInsertBinlogPaths_Handler,
-		},
-		{
-			MethodName: "GetInsertChannels",
-			Handler:    _DataService_GetInsertChannels_Handler,
+			Handler:    _DataCoord_GetInsertBinlogPaths_Handler,
 		},
 		{
 			MethodName: "GetCollectionStatistics",
-			Handler:    _DataService_GetCollectionStatistics_Handler,
+			Handler:    _DataCoord_GetCollectionStatistics_Handler,
 		},
 		{
 			MethodName: "GetPartitionStatistics",
-			Handler:    _DataService_GetPartitionStatistics_Handler,
+			Handler:    _DataCoord_GetPartitionStatistics_Handler,
 		},
 		{
 			MethodName: "GetSegmentInfoChannel",
-			Handler:    _DataService_GetSegmentInfoChannel_Handler,
+			Handler:    _DataCoord_GetSegmentInfoChannel_Handler,
 		},
 		{
 			MethodName: "SaveBinlogPaths",
-			Handler:    _DataService_SaveBinlogPaths_Handler,
+			Handler:    _DataCoord_SaveBinlogPaths_Handler,
 		},
 		{
 			MethodName: "GetRecoveryInfo",
-			Handler:    _DataService_GetRecoveryInfo_Handler,
+			Handler:    _DataCoord_GetRecoveryInfo_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

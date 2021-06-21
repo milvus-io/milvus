@@ -53,7 +53,7 @@ class TestCreateCollection:
         vector_field = get_vector_field
         collection_name = gen_unique_str(uid)
         fields = {
-            "fields": [filter_field, vector_field],
+            "fields": [gen_primary_field(), filter_field, vector_field],
             # "segment_row_limit": default_segment_row_limit
         }
         logging.getLogger().info(fields)

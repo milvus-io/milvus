@@ -31,7 +31,7 @@ import (
 )
 
 type tbd struct {
-	types.DataService
+	types.DataCoord
 }
 
 func (*tbd) GetInsertBinlogPaths(context.Context, *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
@@ -60,7 +60,7 @@ func (*tbq) ReleaseCollection(context.Context, *querypb.ReleaseCollectionRequest
 }
 
 type tbi struct {
-	types.IndexService
+	types.IndexCoord
 }
 
 func (*tbi) BuildIndex(context.Context, *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {

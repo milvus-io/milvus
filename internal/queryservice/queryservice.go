@@ -55,8 +55,8 @@ type QueryService struct {
 	cluster        *queryNodeCluster
 	scheduler      *TaskScheduler
 
-	dataServiceClient   types.DataService
-	masterServiceClient types.MasterService
+	dataCoordClient types.DataCoord
+	rootCoordClient types.RootCoord
 
 	session   *sessionutil.Session
 	eventChan <-chan *sessionutil.SessionEvent
@@ -94,7 +94,7 @@ func (qs *QueryService) Init() error {
 			return err
 		}
 
-		qs.scheduler, err = NewTaskScheduler(qs.loopCtx, metaKV, qs.cluster, etcdKV, qs.masterServiceClient, qs.dataServiceClient)
+		qs.scheduler, err = NewTaskScheduler(qs.loopCtx, metaKV, qs.cluster, etcdKV, qs.rootCoordClient, qs.dataCoordClient)
 		return err
 	}
 	log.Debug("queryService try to connect etcd")
@@ -161,12 +161,12 @@ func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryServ
 	return service, nil
 }
 
-func (qs *QueryService) SetMasterService(masterService types.MasterService) {
-	qs.masterServiceClient = masterService
+func (qs *QueryService) SetRootCoord(rootCoord types.RootCoord) {
+	qs.rootCoordClient = rootCoord
 }
 
-func (qs *QueryService) SetDataService(dataService types.DataService) {
-	qs.dataServiceClient = dataService
+func (qs *QueryService) SetDataCoord(dataCoord types.DataCoord) {
+	qs.dataCoordClient = dataCoord
 }
 
 func (qs *QueryService) watchNodeLoop() {
@@ -210,8 +210,8 @@ func (qs *QueryService) watchNodeLoop() {
 					triggerCondition: querypb.TriggerCondition_nodeDown,
 				},
 				LoadBalanceRequest: loadBalanceSegment,
-				master:             qs.masterServiceClient,
-				dataService:        qs.dataServiceClient,
+				rootCoord:          qs.rootCoordClient,
+				dataCoord:          qs.dataCoordClient,
 				cluster:            qs.cluster,
 				meta:               qs.meta,
 			}
@@ -254,8 +254,8 @@ func (qs *QueryService) watchNodeLoop() {
 						triggerCondition: querypb.TriggerCondition_nodeDown,
 					},
 					LoadBalanceRequest: loadBalanceSegment,
-					master:             qs.masterServiceClient,
-					dataService:        qs.dataServiceClient,
+					rootCoord:          qs.rootCoordClient,
+					dataCoord:          qs.dataCoordClient,
 					cluster:            qs.cluster,
 					meta:               qs.meta,
 				}

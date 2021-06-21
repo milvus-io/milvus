@@ -84,10 +84,10 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			zap.Uint32("count", r.GetCount()))
 
 		if !s.meta.HasCollection(r.CollectionID) {
-			if err := s.loadCollectionFromMaster(ctx, r.CollectionID); err != nil {
+			if err := s.loadCollectionFromRootCoord(ctx, r.CollectionID); err != nil {
 				errMsg := fmt.Sprintf("can not load collection %d", r.CollectionID)
 				appendFailedAssignment(errMsg)
-				log.Error("load collection from master error",
+				log.Error("load collection from rootcoord error",
 					zap.Int64("collectionID", r.CollectionID),
 					zap.Error(err))
 				continue
@@ -133,22 +133,6 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 		},
 		SegIDAssignments: assigns,
 	}, nil
-}
-
-func (s *Server) ShowSegments(ctx context.Context, req *datapb.ShowSegmentsRequest) (*datapb.ShowSegmentsResponse, error) {
-	resp := &datapb.ShowSegmentsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
-	}
-	if s.isClosed() {
-		resp.Status.Reason = "server is initializing"
-		return resp, nil
-	}
-	ids := s.meta.GetSegmentsOfPartition(req.CollectionID, req.PartitionID)
-	resp.Status.ErrorCode = commonpb.ErrorCode_Success
-	resp.SegmentIDs = ids
-	return resp, nil
 }
 
 func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
@@ -203,7 +187,7 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 	tMeta := &datapb.SegmentFieldBinlogMeta{}
 	for _, v := range values {
 		if err := proto.UnmarshalText(v, tMeta); err != nil {
-			resp.Status.Reason = fmt.Errorf("DataService GetInsertBinlogPaths UnmarshalText datapb.SegmentFieldBinlogMeta err:%w", err).Error()
+			resp.Status.Reason = fmt.Errorf("DataCoord GetInsertBinlogPaths UnmarshalText datapb.SegmentFieldBinlogMeta err:%w", err).Error()
 			return resp, nil
 		}
 		m[tMeta.FieldID] = append(m[tMeta.FieldID], tMeta.BinlogPath)
@@ -219,15 +203,6 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 	resp.FieldIDs = fids
 	resp.Paths = paths
 	return resp, nil
-}
-
-func (s *Server) GetInsertChannels(ctx context.Context, req *datapb.GetInsertChannelsRequest) (*internalpb.StringList, error) {
-	return &internalpb.StringList{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Values: []string{},
-	}, nil
 }
 
 func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {
@@ -303,7 +278,6 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	return resp, nil
 }
 
-// SaveBinlogPaths implement DataServiceServer
 func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
 	resp := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -358,7 +332,7 @@ func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 	resp := &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{
 			NodeID:    Params.NodeID,
-			Role:      "dataservice",
+			Role:      "datacoord",
 			StateCode: 0,
 		},
 		Status: &commonpb.Status{
@@ -435,7 +409,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		binlogs = append(binlogs, sbl)
 	}
 
-	dresp, err := s.masterClient.DescribeCollection(s.ctx, &milvuspb.DescribeCollectionRequest{
+	dresp, err := s.rootCoordClient.DescribeCollection(s.ctx, &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_DescribeCollection,
 			SourceID: Params.NodeID,
@@ -473,13 +447,4 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	resp.Channels = channelInfos
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
-}
-
-func (s *Server) RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
-	return &datapb.RegisterNodeResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-	}, nil
-
 }

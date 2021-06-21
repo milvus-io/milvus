@@ -1,5 +1,6 @@
 import pdb
 import logging
+import functools
 import socket
 import pytest
 from utils import gen_unique_str
@@ -74,10 +75,37 @@ def check_server_connection(request):
     return connected
 
 
+@pytest.fixture(scope="session", autouse=True)
+def change_mutation_result_to_primary_keys():
+    def insert_future_decorator(func):
+        @functools.wraps(func)
+        def change(*args, **kwargs):
+            try:
+                return func(*args, **kwargs).primary_keys
+            except Exception as e:
+                raise e
+        return change
+
+    from pymilvus import InsertFuture
+    InsertFuture.result = insert_future_decorator(InsertFuture.result)
+
+    def insert_decorator(func):
+        @functools.wraps(func)
+        def change(*args, **kwargs):
+            if kwargs.get("_async", False):
+                return func(*args, **kwargs)
+            try:
+                return func(*args, **kwargs).primary_keys
+            except Exception as e:
+                raise e
+        return change
+    Milvus.insert = insert_decorator(Milvus.insert)
+    yield
+
+
 @pytest.fixture(scope="module")
 def connect(request):
     ip = request.config.getoption("--ip")
-    print("[debug] ip: ", ip)
     service_name = request.config.getoption("--service")
     port = request.config.getoption("--port")
     http_port = request.config.getoption("--http-port")
@@ -86,7 +114,6 @@ def connect(request):
         port = http_port
     try:
         milvus = get_milvus(host=ip, port=port, handler=handler)
-        print("[debug] collections: ", milvus.list_collections())
         # reset_build_index_threshold(milvus)
     except Exception as e:
         logging.getLogger().error(str(e))

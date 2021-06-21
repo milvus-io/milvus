@@ -31,15 +31,15 @@ type ParamTable struct {
 	Port     int
 	listener net.Listener
 
-	MasterAddress      string
-	DataServiceAddress string
+	MasterAddress    string
+	DataCoordAddress string
 }
 
 func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
 		pt.initMasterAddress()
-		pt.initDataServiceAddress()
+		pt.initDataCoordAddress()
 		pt.initPort()
 	})
 }
@@ -72,10 +72,10 @@ func (pt *ParamTable) initMasterAddress() {
 	pt.MasterAddress = ret
 }
 
-func (pt *ParamTable) initDataServiceAddress() {
-	ret, err := pt.Load("_DataServiceAddress")
+func (pt *ParamTable) initDataCoordAddress() {
+	ret, err := pt.Load("_DataCoordAddress")
 	if err != nil {
 		panic(err)
 	}
-	pt.DataServiceAddress = ret
+	pt.DataCoordAddress = ret
 }

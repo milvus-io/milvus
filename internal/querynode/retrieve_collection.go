@@ -352,7 +352,7 @@ func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error
 	sp, ctx := trace.StartSpanFromContext(retrieveMsg.TraceCtx())
 	defer sp.Finish()
 	retrieveMsg.SetTraceCtx(ctx)
-	timestamp := retrieveMsg.Base.Timestamp
+	timestamp := retrieveMsg.RetrieveRequest.TravelTimestamp
 
 	collectionID := retrieveMsg.CollectionID
 	collection, err := rc.streaming.replica.getCollectionByID(collectionID)

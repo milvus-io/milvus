@@ -1,6 +1,7 @@
 # DataNode Flowgraph Recovery Design
 
 update: 6.4.2021, by [Goose](https://github.com/XuanYang-cn)
+update: 6.21.2021, by [Goose](https://github.com/XuanYang-cn)
 
 ## 1. Common Sense
 A. 1 message stream to 1 vchannel, so there are 1 start position and 1 end position in 1 message pack
@@ -11,7 +12,11 @@ An optimization: update position of
 C. DataNode auto-flush is a valid flush.
 D. DDL messages are now in DML Vchannels.
 
-## 2. Flowgraph Recovery
+## 2. Segments in Flowgraph
+
+![segments](graphs/segments.png)
+
+## 3. Flowgraph Recovery
 ### A. Save checkpoints
 When a flowgraph flushes a segment, we need to save these things:
 - current segment's binlog paths,
@@ -27,7 +32,21 @@ Whether save successfully:
 ### B. Recovery from a set of checkpoints
 1. We need all positions of all segments in this vchannel `p1, p2, ... pn`
 
-    [TBD] A design of WatchDmChannelReq
+A design of WatchDmChannelReq
+``` proto
+message VchannelInfo {
+  int64 collectionID = 1;
+  string channelName = 2;
+  internal.MsgPosition seek_position = 3;
+  repeated SegmentInfo unflushedSegments = 4;
+  repeated int64 flushedSegments = 5;
+}
+
+message WatchDmChannelsRequest {
+  common.MsgBase base = 1;
+  repeated VchannelInfo vchannels = 2;
+}
+```
 
 2. We want to filter msgPacks based on these positions.
 

@@ -1849,8 +1849,20 @@ class PlanNode :
   // accessors -------------------------------------------------------
 
   enum : int {
+    kOutputFieldIdsFieldNumber = 2,
     kVectorAnnsFieldNumber = 1,
   };
+  // repeated int64 output_field_ids = 2;
+  int output_field_ids_size() const;
+  void clear_output_field_ids();
+  ::PROTOBUF_NAMESPACE_ID::int64 output_field_ids(int index) const;
+  void set_output_field_ids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_output_field_ids(::PROTOBUF_NAMESPACE_ID::int64 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+      output_field_ids() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+      mutable_output_field_ids();
+
   // .milvus.proto.plan.VectorANNS vector_anns = 1;
   bool has_vector_anns() const;
   void clear_vector_anns();
@@ -1870,6 +1882,8 @@ class PlanNode :
   inline void clear_has_node();
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > output_field_ids_;
+  mutable std::atomic<int> _output_field_ids_cached_byte_size_;
   union NodeUnion {
     NodeUnion() {}
     ::milvus::proto::plan::VectorANNS* vector_anns_;
@@ -2960,6 +2974,36 @@ inline ::milvus::proto::plan::VectorANNS* PlanNode::mutable_vector_anns() {
   }
   // @@protoc_insertion_point(field_mutable:milvus.proto.plan.PlanNode.vector_anns)
   return node_.vector_anns_;
+}
+
+// repeated int64 output_field_ids = 2;
+inline int PlanNode::output_field_ids_size() const {
+  return output_field_ids_.size();
+}
+inline void PlanNode::clear_output_field_ids() {
+  output_field_ids_.Clear();
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 PlanNode::output_field_ids(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.PlanNode.output_field_ids)
+  return output_field_ids_.Get(index);
+}
+inline void PlanNode::set_output_field_ids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
+  output_field_ids_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.plan.PlanNode.output_field_ids)
+}
+inline void PlanNode::add_output_field_ids(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  output_field_ids_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.plan.PlanNode.output_field_ids)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+PlanNode::output_field_ids() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.plan.PlanNode.output_field_ids)
+  return output_field_ids_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+PlanNode::mutable_output_field_ids() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.plan.PlanNode.output_field_ids)
+  return &output_field_ids_;
 }
 
 inline bool PlanNode::has_node() const {

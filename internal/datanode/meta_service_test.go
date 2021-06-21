@@ -29,7 +29,7 @@ func TestMetaService_All(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mFactory := &MasterServiceFactory{}
+	mFactory := &RootCoordFactory{}
 	mFactory.setCollectionID(collectionID0)
 	mFactory.setCollectionName(collectionName0)
 	ms := newMetaService(mFactory, collectionID0)

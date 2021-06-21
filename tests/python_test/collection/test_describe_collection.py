@@ -50,14 +50,13 @@ class TestDescribeCollection:
         vector_field = get_vector_field
         collection_name = gen_unique_str(uid)
         fields = {
-            "fields": [filter_field, vector_field],
+            "fields": [gen_primary_field(), filter_field, vector_field],
             # "segment_row_limit": default_segment_row_limit
         }
         connect.create_collection(collection_name, fields)
         res = connect.describe_collection(collection_name)
-        assert res['auto_id'] == True
         # assert res['segment_row_limit'] == default_segment_row_limit
-        assert len(res["fields"]) == 2
+        assert len(res["fields"]) == len(fields.get("fields"))
         for field in res["fields"]:
             if field["type"] == filter_field:
                 assert field["name"] == filter_field["name"]
@@ -143,7 +142,7 @@ class TestDescribeCollection:
         vector_field = get_vector_field
         collection_name = gen_unique_str(uid)
         fields = {
-            "fields": [filter_field, vector_field],
+            "fields": [gen_primary_field(), filter_field, vector_field],
             # "segment_row_limit": default_segment_row_limit
         }
         connect.create_collection(collection_name, fields)
@@ -151,9 +150,8 @@ class TestDescribeCollection:
         res_ids = connect.insert(collection_name, entities)
         connect.flush([collection_name])
         res = connect.describe_collection(collection_name)
-        assert res['auto_id'] is True
         # assert res['segment_row_limit'] == default_segment_row_limit
-        assert len(res["fields"]) == 2
+        assert len(res["fields"]) == len(fields.get("fields"))
         for field in res["fields"]:
             if field["type"] == filter_field:
                 assert field["name"] == filter_field["name"]

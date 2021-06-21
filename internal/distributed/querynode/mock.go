@@ -110,11 +110,11 @@ func (m *MasterServiceMock) DescribeSegment(in *milvuspb.DescribeSegmentRequest)
 	return rsp, nil
 }
 
-type DataServiceMock struct {
+type DataCoordMock struct {
 	Count int
 }
 
-func (data *DataServiceMock) GetInsertBinlogPaths(req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
+func (data *DataCoordMock) GetInsertBinlogPaths(req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
 	if data.Count < 10 {
 		data.Count++
 		return nil, errors.New("binlog not exist")
@@ -136,7 +136,7 @@ func (data *DataServiceMock) GetInsertBinlogPaths(req *datapb.GetInsertBinlogPat
 	return rsp, nil
 }
 
-func (data *DataServiceMock) GetSegmentStates(req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
+func (data *DataCoordMock) GetSegmentStates(req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 	segmentGrowingInfo := &datapb.SegmentStateInfo{
 		State: commonpb.SegmentState_Growing,
 	}
@@ -156,11 +156,11 @@ func (data *DataServiceMock) GetSegmentStates(req *datapb.GetSegmentStatesReques
 	}, nil
 }
 
-type IndexServiceMock struct {
+type IndexCoordMock struct {
 	Count int
 }
 
-func (index *IndexServiceMock) GetIndexFilePaths(req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
+func (index *IndexCoordMock) GetIndexFilePaths(req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
 	if index.Count < 30 {
 		index.Count++
 		return nil, errors.New("index path not exist")

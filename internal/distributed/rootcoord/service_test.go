@@ -130,7 +130,7 @@ func TestGrpcService(t *testing.T) {
 	rootcoord.Params.MsgChannelSubName = fmt.Sprintf("msgChannel%d", randVal)
 	rootcoord.Params.TimeTickChannel = fmt.Sprintf("timeTick%d", randVal)
 	rootcoord.Params.StatisticsChannel = fmt.Sprintf("stateChannel%d", randVal)
-	rootcoord.Params.DataServiceSegmentChannel = fmt.Sprintf("segmentChannel%d", randVal)
+	rootcoord.Params.DataCoordSegmentChannel = fmt.Sprintf("segmentChannel%d", randVal)
 
 	rootcoord.Params.MaxPartitionNum = 64
 	rootcoord.Params.DefaultPartitionName = "_default"
@@ -815,16 +815,16 @@ func TestGrpcService(t *testing.T) {
 }
 
 type mockCore struct {
-	types.MasterComponent
+	types.RootCoordComponent
 }
 
 func (m *mockCore) UpdateStateCode(internalpb.StateCode) {
 }
 
-func (m *mockCore) SetDataCoord(context.Context, types.DataService) error {
+func (m *mockCore) SetDataCoord(context.Context, types.DataCoord) error {
 	return nil
 }
-func (m *mockCore) SetIndexCoord(types.IndexService) error {
+func (m *mockCore) SetIndexCoord(types.IndexCoord) error {
 	return nil
 }
 
@@ -852,7 +852,7 @@ func (m *mockCore) SetNewProxyClient(func(sess *sessionutil.Session) (types.Prox
 }
 
 type mockDataCoord struct {
-	types.DataService
+	types.DataCoord
 }
 
 func (m *mockDataCoord) Init() error {
@@ -881,7 +881,7 @@ func (m *mockDataCoord) Stop() error {
 }
 
 type mockIndex struct {
-	types.IndexService
+	types.IndexCoord
 }
 
 func (m *mockIndex) Init() error {
@@ -922,10 +922,10 @@ func TestRun(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "listen tcp: address 1000000: invalid port")
 
-	svr.newDataCoordClient = func(string, []string, time.Duration) types.DataService {
+	svr.newDataCoordClient = func(string, []string, time.Duration) types.DataCoord {
 		return &mockDataCoord{}
 	}
-	svr.newIndexCoordClient = func(string, []string, time.Duration) types.IndexService {
+	svr.newIndexCoordClient = func(string, []string, time.Duration) types.IndexCoord {
 		return &mockIndex{}
 	}
 	svr.newQueryCoordClient = func(string, []string, time.Duration) types.QueryService {
