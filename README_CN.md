@@ -94,9 +94,7 @@ $ sudo docker-compose up -d
 
 使用 Helm Chart 安装
 
-```bash
-$ helm install -n milvus --set image.all.repository=registry.zilliz.com/milvus/milvus --set image.all.tag=master-latest milvus milvus-helm-charts/charts/milvus-ha
-```
+敬请期待。
 
 从源码编译 Milvus
 
@@ -126,9 +124,7 @@ $ sudo docker-compose up -d
 
 使用 Helm Chart 安装
 
-```bash
-$ helm install -n milvus --set image.all.repository=registry.zilliz.com/milvus/milvus --set image.all.tag=master-latest --set standalone.enabled=false milvus milvus-helm-charts/charts/milvus-ha
-```
+敬请期待。
 
 从源码编译 Milvus
 
