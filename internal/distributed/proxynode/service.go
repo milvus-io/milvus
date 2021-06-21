@@ -25,7 +25,7 @@ import (
 	"google.golang.org/grpc"
 
 	grpcdataserviceclient "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
-	grpcindexserviceclient "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
+	grpcindexcoordclient "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	grpcqueryserviceclient "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 
@@ -57,7 +57,7 @@ type Server struct {
 	rootCoordClient    *rcc.GrpcClient
 	dataServiceClient  *grpcdataserviceclient.Client
 	queryServiceClient *grpcqueryserviceclient.Client
-	indexServiceClient *grpcindexserviceclient.Client
+	indexCoordClient   *grpcindexcoordclient.Client
 
 	tracer opentracing.Tracer
 	closer io.Closer
@@ -185,8 +185,8 @@ func (s *Server) init() error {
 		log.Debug("ProxyNode WaitForComponentHealthy RootCoord failed ", zap.Error(err))
 		panic(err)
 	}
-	s.proxynode.SetMasterClient(s.rootCoordClient)
-	log.Debug("set master client ...")
+	s.proxynode.SetRootCoordClient(s.rootCoordClient)
+	log.Debug("set rootcoord client ...")
 
 	dataServiceAddr := Params.DataServiceAddress
 	log.Debug("ProxyNode", zap.String("data service address", dataServiceAddr))
@@ -201,13 +201,13 @@ func (s *Server) init() error {
 
 	indexServiceAddr := Params.IndexServerAddress
 	log.Debug("ProxyNode", zap.String("index server address", indexServiceAddr))
-	s.indexServiceClient = grpcindexserviceclient.NewClient(proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
-	err = s.indexServiceClient.Init()
+	s.indexCoordClient = grpcindexcoordclient.NewClient(proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
+	err = s.indexCoordClient.Init()
 	if err != nil {
-		log.Debug("ProxyNode indexServiceClient init failed ", zap.Error(err))
+		log.Debug("ProxyNode indexCoordClient init failed ", zap.Error(err))
 		return err
 	}
-	s.proxynode.SetIndexServiceClient(s.indexServiceClient)
+	s.proxynode.SetIndexCoordClient(s.indexCoordClient)
 	log.Debug("set index service client ...")
 
 	queryServiceAddr := Params.QueryServiceAddress

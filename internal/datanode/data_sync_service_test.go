@@ -39,11 +39,11 @@ func TestDataSyncService_Start(t *testing.T) {
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
-	mockMaster := &MasterServiceFactory{}
+	mockRootCoord := &RootCoordFactory{}
 	collectionID := UniqueID(1)
 
 	flushChan := make(chan *flushMsg, 100)
-	replica := newReplica(mockMaster, collectionID)
+	replica := newReplica(mockRootCoord, collectionID)
 
 	allocFactory := NewAllocatorFactory(1)
 	msFactory := msgstream.NewPmsFactory()

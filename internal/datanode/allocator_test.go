@@ -18,7 +18,7 @@ import (
 )
 
 func TestAllocator_Basic(t *testing.T) {
-	ms := &MasterServiceFactory{}
+	ms := &RootCoordFactory{}
 	allocator := newAllocator(ms)
 
 	t.Run("Test allocID", func(t *testing.T) {
@@ -88,7 +88,7 @@ func TestAllocator_Basic(t *testing.T) {
 			assert.Errorf(t, err, "number: %d", i)
 		}
 
-		// MasterService's unavailability doesn't affects genKey when alloc == false
+		// RootCoord's unavailability doesn't affects genKey when alloc == false
 		tests = []Test{
 			{in{false, []UniqueID{1, 2, 3}}, out{"1/2/3", nil}},
 			{in{false, []UniqueID{1}}, out{"1", nil}},

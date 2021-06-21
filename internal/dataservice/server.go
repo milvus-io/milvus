@@ -37,7 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
-const masterClientTimout = 20 * time.Second
+const rootCoordClientTimout = 20 * time.Second
 
 type (
 	UniqueID  = typeutil.UniqueID
@@ -56,7 +56,7 @@ type Server struct {
 	segmentManager    Manager
 	allocator         allocator
 	cluster           *cluster
-	masterClient      types.MasterService
+	rootCoordClient   types.RootCoord
 	ddChannelName     string
 
 	flushCh        chan UniqueID
@@ -67,8 +67,8 @@ type Server struct {
 	activeCh <-chan bool
 	eventCh  <-chan *sessionutil.SessionEvent
 
-	dataClientCreator   func(addr string) (types.DataNode, error)
-	masterClientCreator func(addr string) (types.MasterService, error)
+	dataClientCreator      func(addr string) (types.DataNode, error)
+	rootCoordClientCreator func(addr string) (types.RootCoord, error)
 }
 
 func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
@@ -81,8 +81,8 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 	s.dataClientCreator = func(addr string) (types.DataNode, error) {
 		return datanodeclient.NewClient(addr, 3*time.Second)
 	}
-	s.masterClientCreator = func(addr string) (types.MasterService, error) {
-		return rootcoordclient.NewClient(ctx, Params.MetaRootPath, Params.EtcdEndpoints, masterClientTimout)
+	s.rootCoordClientCreator = func(addr string) (types.RootCoord, error) {
+		return rootcoordclient.NewClient(ctx, Params.MetaRootPath, Params.EtcdEndpoints, rootCoordClientTimout)
 	}
 
 	return s, nil
@@ -111,7 +111,7 @@ func (s *Server) Start() error {
 	if err != nil {
 		return err
 	}
-	if err = s.initMasterClient(); err != nil {
+	if err = s.initRootCoordClient(); err != nil {
 		return err
 	}
 
@@ -127,7 +127,7 @@ func (s *Server) Start() error {
 		return err
 	}
 
-	s.allocator = newAllocator(s.masterClient)
+	s.allocator = newAllocator(s.rootCoordClient)
 
 	s.startSegmentManager()
 	if err = s.initFlushMsgStream(); err != nil {
@@ -173,7 +173,7 @@ func (s *Server) initServiceDiscovery() error {
 	}
 
 	if err := s.cluster.startup(datanodes); err != nil {
-		log.Debug("DataCoord loadMetaFromMaster failed", zap.Error(err))
+		log.Debug("DataCoord loadMetaFromRootCoord failed", zap.Error(err))
 		return err
 	}
 
@@ -436,16 +436,16 @@ func (s *Server) handleFlushingSegments(ctx context.Context) {
 	}
 }
 
-func (s *Server) initMasterClient() error {
+func (s *Server) initRootCoordClient() error {
 	var err error
-	s.masterClient, err = s.masterClientCreator("")
+	s.rootCoordClient, err = s.rootCoordClientCreator("")
 	if err != nil {
 		return err
 	}
-	if err = s.masterClient.Init(); err != nil {
+	if err = s.rootCoordClient.Init(); err != nil {
 		return err
 	}
-	return s.masterClient.Start()
+	return s.rootCoordClient.Start()
 }
 
 func (s *Server) Stop() error {
@@ -487,8 +487,8 @@ func (s *Server) stopServerLoop() {
 //	return fmt.Errorf("can not find channel %s", channelName)
 //}
 
-func (s *Server) loadCollectionFromMaster(ctx context.Context, collectionID int64) error {
-	resp, err := s.masterClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID int64) error {
+	resp, err := s.rootCoordClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_DescribeCollection,
 			SourceID: Params.NodeID,
@@ -499,7 +499,7 @@ func (s *Server) loadCollectionFromMaster(ctx context.Context, collectionID int6
 	if err = VerifyResponse(resp, err); err != nil {
 		return err
 	}
-	presp, err := s.masterClient.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
+	presp, err := s.rootCoordClient.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_ShowPartitions,
 			MsgID:     -1, // todo

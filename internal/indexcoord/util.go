@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package indexservice
+package indexcoord
 
 import (
 	"github.com/milvus-io/milvus/internal/log"
@@ -41,7 +41,7 @@ func compare2Array(arr1, arr2 interface{}) bool {
 			}
 			return true
 		}
-		log.Error("IndexService compare2Array arr2 should be commonpb.KeyValuePair")
+		log.Error("IndexCoord compare2Array arr2 should be commonpb.KeyValuePair")
 		return false
 	}
 	v1, ok2 := arr1.([]string)
@@ -61,9 +61,9 @@ func compare2Array(arr1, arr2 interface{}) bool {
 			}
 			return true
 		}
-		log.Error("IndexService compare2Array arr2 type should be string array")
+		log.Error("IndexCoord compare2Array arr2 type should be string array")
 		return false
 	}
-	log.Error("IndexService compare2Array param type should be commonpb.KeyValuePair or string array")
+	log.Error("IndexCoord compare2Array param type should be commonpb.KeyValuePair or string array")
 	return false
 }

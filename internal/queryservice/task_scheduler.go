@@ -126,7 +126,7 @@ type TaskScheduler struct {
 	taskIDAllocator  func() (UniqueID, error)
 	client           *etcdkv.EtcdKV
 
-	master      types.MasterService
+	rootCoord   types.RootCoord
 	dataService types.DataService
 
 	wg     sync.WaitGroup
@@ -134,7 +134,7 @@ type TaskScheduler struct {
 	cancel context.CancelFunc
 }
 
-func NewTaskScheduler(ctx context.Context, meta *meta, cluster *queryNodeCluster, kv *etcdkv.EtcdKV, master types.MasterService, dataService types.DataService) (*TaskScheduler, error) {
+func NewTaskScheduler(ctx context.Context, meta *meta, cluster *queryNodeCluster, kv *etcdkv.EtcdKV, rootCoord types.RootCoord, dataService types.DataService) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	taskChan := make(chan task, 1024)
 	s := &TaskScheduler{
@@ -144,7 +144,7 @@ func NewTaskScheduler(ctx context.Context, meta *meta, cluster *queryNodeCluster
 		cluster:          cluster,
 		activateTaskChan: taskChan,
 		client:           kv,
-		master:           master,
+		rootCoord:        rootCoord,
 		dataService:      dataService,
 	}
 	s.triggerTaskQueue = NewTaskQueue()
@@ -258,7 +258,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			LoadCollectionRequest: &loadReq,
-			masterService:         scheduler.master,
+			rootCoord:             scheduler.rootCoord,
 			dataService:           scheduler.dataService,
 			cluster:               scheduler.cluster,
 			meta:                  scheduler.meta,
@@ -393,7 +393,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 				triggerCondition: loadReq.BalanceReason,
 			},
 			LoadBalanceRequest: &loadReq,
-			master:             scheduler.master,
+			rootCoord:          scheduler.rootCoord,
 			dataService:        scheduler.dataService,
 			cluster:            scheduler.cluster,
 			meta:               scheduler.meta,
@@ -419,7 +419,7 @@ func (scheduler *TaskScheduler) Enqueue(tasks []task) {
 		taskKey := fmt.Sprintf("%s/%d", triggerTaskPrefix, t.ID())
 		kvs[taskKey] = t.Marshal()
 		stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
-		kvs[stateKey] = string(taskUndo)
+		kvs[stateKey] = strconv.Itoa(int(taskUndo))
 		err = scheduler.client.MultiSave(kvs)
 		if err != nil {
 			log.Error("error when save trigger task to etcd", zap.Int64("taskID", t.ID()))
@@ -439,7 +439,7 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 	defer span.Finish()
 	span.LogFields(oplog.Int64("processTask: scheduler process PreExecute", t.ID()))
 	key := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
-	err := scheduler.client.Save(key, string(taskDoing))
+	err := scheduler.client.Save(key, strconv.Itoa(int(taskDoing)))
 
 	if err != nil {
 		log.Debug("processTask: update task state err", zap.String("reason", err.Error()))
@@ -484,7 +484,7 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 		taskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, childTask.ID())
 		kvs[taskKey] = t.Marshal()
 		stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, childTask.ID())
-		kvs[stateKey] = string(taskUndo)
+		kvs[stateKey] = strconv.Itoa(int(taskUndo))
 		err = scheduler.client.MultiSave(kvs)
 		if err != nil {
 			return err
@@ -492,7 +492,7 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 		log.Debug("processTask: save active task to etcd", zap.Int64("parent taskID", t.ID()), zap.Int64("child taskID", childTask.ID()))
 	}
 
-	err = scheduler.client.Save(key, string(taskDone))
+	err = scheduler.client.Save(key, strconv.Itoa(int(taskDone)))
 	if err != nil {
 		log.Debug("processTask: update task state err", zap.String("reason", err.Error()))
 		trace.LogError(span, err)
@@ -577,7 +577,7 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task)
 						taskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, rt.ID())
 						saves[taskKey] = rt.Marshal()
 						stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, rt.ID())
-						saves[stateKey] = string(taskUndo)
+						saves[stateKey] = strconv.Itoa(int(taskUndo))
 						reSchedID = append(reSchedID, rt.ID())
 					}
 				}
@@ -655,7 +655,7 @@ func (scheduler *TaskScheduler) processActivateTaskLoop() {
 				continue
 			}
 			stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
-			err := scheduler.client.Save(stateKey, string(taskDoing))
+			err := scheduler.client.Save(stateKey, strconv.Itoa(int(taskDoing)))
 			if err != nil {
 				t.Notify(err)
 				continue

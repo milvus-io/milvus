@@ -170,13 +170,6 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 	return ret.(*milvuspb.StringResponse), err
 }
 
-func (c *Client) RegisterNode(ctx context.Context, req *datapb.RegisterNodeRequest) (*datapb.RegisterNodeResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.RegisterNode(ctx, req)
-	})
-	return ret.(*datapb.RegisterNodeResponse), err
-}
-
 func (c *Client) Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		return c.grpcClient.Flush(ctx, req)
@@ -191,13 +184,6 @@ func (c *Client) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 	return ret.(*datapb.AssignSegmentIDResponse), err
 }
 
-func (c *Client) ShowSegments(ctx context.Context, req *datapb.ShowSegmentsRequest) (*datapb.ShowSegmentsResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.ShowSegments(ctx, req)
-	})
-	return ret.(*datapb.ShowSegmentsResponse), err
-}
-
 func (c *Client) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		return c.grpcClient.GetSegmentStates(ctx, req)
@@ -210,13 +196,6 @@ func (c *Client) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 		return c.grpcClient.GetInsertBinlogPaths(ctx, req)
 	})
 	return ret.(*datapb.GetInsertBinlogPathsResponse), err
-}
-
-func (c *Client) GetInsertChannels(ctx context.Context, req *datapb.GetInsertChannelsRequest) (*internalpb.StringList, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetInsertChannels(ctx, req)
-	})
-	return ret.(*internalpb.StringList), err
 }
 
 func (c *Client) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {

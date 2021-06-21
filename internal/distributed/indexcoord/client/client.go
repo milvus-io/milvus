@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package grpcindexserviceclient
+package grpcindexcoordclient
 
 import (
 	"context"
@@ -47,18 +47,18 @@ type Client struct {
 	reconnTry int
 }
 
-func getIndexServiceaddr(sess *sessionutil.Session) (string, error) {
-	key := typeutil.IndexServiceRole
+func getIndexCoordAddr(sess *sessionutil.Session) (string, error) {
+	key := typeutil.IndexCoordRole
 	msess, _, err := sess.GetSessions(key)
 	if err != nil {
-		log.Debug("IndexServiceClient GetSessions failed", zap.Any("key", key), zap.Error(err))
+		log.Debug("IndexCoordClient GetSessions failed", zap.Any("key", key), zap.Error(err))
 		return "", err
 	}
-	log.Debug("IndexServiceClient GetSessions success", zap.Any("key", key), zap.Any("msess", msess))
+	log.Debug("IndexCoordClient GetSessions success", zap.Any("key", key), zap.Any("msess", msess))
 	ms, ok := msess[key]
 	if !ok {
-		log.Debug("IndexServiceClient msess key not existed", zap.Any("key", key), zap.Any("len of msess", len(msess)))
-		return "", fmt.Errorf("number of indexservice is incorrect, %d", len(msess))
+		log.Debug("IndexCoordClient msess key not existed", zap.Any("key", key), zap.Any("len of msess", len(msess)))
+		return "", fmt.Errorf("number of indexcoord is incorrect, %d", len(msess))
 	}
 	return ms.Address, nil
 }
@@ -85,24 +85,24 @@ func (c *Client) Init() error {
 
 func (c *Client) connect() error {
 	var err error
-	getIndexServiceaddrFn := func() error {
-		c.addr, err = getIndexServiceaddr(c.sess)
+	getIndexCoordaddrFn := func() error {
+		c.addr, err = getIndexCoordAddr(c.sess)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
-	err = retry.Retry(c.reconnTry, 3*time.Second, getIndexServiceaddrFn)
+	err = retry.Retry(c.reconnTry, 3*time.Second, getIndexCoordaddrFn)
 	if err != nil {
-		log.Debug("IndexServiceClient getIndexServiceAddress failed", zap.Error(err))
+		log.Debug("IndexCoordClient getIndexCoordAddress failed", zap.Error(err))
 		return err
 	}
-	log.Debug("IndexServiceClient getIndexServiceAddress success")
+	log.Debug("IndexCoordClient getIndexCoordAddress success")
 	connectGrpcFunc := func() error {
 		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
 		defer cancelFunc()
 		opts := trace.GetInterceptorOpts()
-		log.Debug("IndexServiceClient try connect ", zap.String("address", c.addr))
+		log.Debug("IndexCoordClient try connect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				grpc_opentracing.UnaryClientInterceptor(opts...)),
@@ -117,10 +117,10 @@ func (c *Client) connect() error {
 
 	err = retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
 	if err != nil {
-		log.Debug("IndexServiceClient try connect failed", zap.Error(err))
+		log.Debug("IndexCoordClient try connect failed", zap.Error(err))
 		return err
 	}
-	log.Debug("IndexServiceClient connect success")
+	log.Debug("IndexCoordClient connect success")
 	c.grpcClient = indexpb.NewIndexServiceClient(c.conn)
 	return nil
 }

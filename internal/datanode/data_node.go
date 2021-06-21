@@ -48,7 +48,7 @@ const (
 // services of data node.
 //
 // DataNode struct implements `types.Component`, `types.DataNode` interfaces.
-//  `masterService` holds a grpc client of master service.
+//  `rootCoord` holds a grpc client of root coordinator.
 //  `dataService` holds a grpc client of data service.
 //  `NodeID` is unique to each data node.
 //  `State` is current statement of this data node, indicating whether it's healthy.
@@ -70,8 +70,8 @@ type DataNode struct {
 	clearSignal       chan UniqueID               // collection ID
 	segmentCache      *Cache
 
-	masterService types.MasterService
-	dataService   types.DataService
+	rootCoord   types.RootCoord
+	dataService types.DataService
 
 	session *sessionutil.Session
 
@@ -90,10 +90,10 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 		Role:    typeutil.DataNodeRole,
 		watchDm: make(chan struct{}, 1),
 
-		masterService: nil,
-		dataService:   nil,
-		msFactory:     factory,
-		segmentCache:  newCache(),
+		rootCoord:    nil,
+		dataService:  nil,
+		msFactory:    factory,
+		segmentCache: newCache(),
 
 		vchan2SyncService: make(map[string]*dataSyncService),
 		vchan2FlushCh:     make(map[string]chan<- *flushMsg),
@@ -103,13 +103,13 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 	return node
 }
 
-// SetMasterServiceInterface sets master service's grpc client, error is returned if repeatedly set.
-func (node *DataNode) SetMasterServiceInterface(ms types.MasterService) error {
+// SetRootCoordInterface sets master service's grpc client, error is returned if repeatedly set.
+func (node *DataNode) SetRootCoordInterface(rc types.RootCoord) error {
 	switch {
-	case ms == nil, node.masterService != nil:
+	case rc == nil, node.rootCoord != nil:
 		return errors.New("Nil parameter or repeatly set")
 	default:
-		node.masterService = ms
+		node.rootCoord = rc
 		return nil
 	}
 }
@@ -156,9 +156,9 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 		return nil
 	}
 
-	replica := newReplica(node.masterService, vchan.CollectionID)
+	replica := newReplica(node.rootCoord, vchan.CollectionID)
 
-	var alloc allocatorInterface = newAllocator(node.masterService)
+	var alloc allocatorInterface = newAllocator(node.rootCoord)
 
 	log.Debug("Received Vchannel Info",
 		zap.Int("Unflushed Segment Number", len(vchan.GetUnflushedSegments())),
@@ -218,7 +218,7 @@ var FilterThreshold Timestamp
 // Start will update DataNode state to HEALTHY
 func (node *DataNode) Start() error {
 
-	rep, err := node.masterService.AllocTimestamp(node.ctx, &masterpb.AllocTimestampRequest{
+	rep, err := node.rootCoord.AllocTimestamp(node.ctx, &masterpb.AllocTimestampRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_RequestTSO,
 			MsgID:     0,

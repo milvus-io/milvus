@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package indexservice
+package indexcoord
 
 import (
 	"path"
@@ -164,7 +164,7 @@ func (pt *ParamTable) initLogCfg() {
 		panic(err)
 	}
 	if len(rootPath) != 0 {
-		pt.Log.File.Filename = path.Join(rootPath, "indexservice.log")
+		pt.Log.File.Filename = path.Join(rootPath, "indexcoord.log")
 	} else {
 		pt.Log.File.Filename = ""
 	}
