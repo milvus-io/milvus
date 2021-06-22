@@ -95,9 +95,7 @@ $ sudo docker-compose up -d
 
 Install with Helm
 
-```bash
-$ helm install -n milvus --set image.all.repository=registry.zilliz.com/milvus/milvus --set image.all.tag=master-latest milvus milvus-helm-charts/charts/milvus-ha
-```
+Coming soon.
 
 Build from source code
 
@@ -127,9 +125,7 @@ $ sudo docker-compose up -d
 
 Install with Helm
 
-```bash
-$ helm install -n milvus --set image.all.repository=registry.zilliz.com/milvus/milvus --set image.all.tag=master-latest --set standalone.enabled=false milvus milvus-helm-charts/charts/milvus-ha
-```
+Coming soon.
 
 Build from source code
 
