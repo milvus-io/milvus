@@ -131,6 +131,13 @@ func (q *queryMock) ReleaseCollection(ctx context.Context, req *querypb.ReleaseC
 	}, nil
 }
 
+func (q *queryMock) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
 type indexMock struct {
 	types.IndexCoord
 	fileArray  []string
@@ -1961,6 +1968,12 @@ func TestCheckInit(t *testing.T) {
 	assert.NotNil(t, err)
 
 	c.CallReleaseCollectionService = func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID) error {
+		return nil
+	}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.CallReleasePartitionService = func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID, partitionIDs []typeutil.UniqueID) error {
 		return nil
 	}
 	err = c.checkInit()
