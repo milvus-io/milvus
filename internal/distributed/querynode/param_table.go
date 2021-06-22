@@ -41,7 +41,7 @@ func (pt *ParamTable) Init() {
 		pt.initMasterAddress()
 		pt.initIndexServiceAddress()
 		pt.initDataCoordAddress()
-		pt.initQueryServiceAddress()
+		pt.initQueryCoordAddress()
 
 	})
 }
@@ -78,7 +78,7 @@ func (pt *ParamTable) initDataCoordAddress() {
 	pt.DataCoordAddress = ret
 }
 
-func (pt *ParamTable) initQueryServiceAddress() {
+func (pt *ParamTable) initQueryCoordAddress() {
 	ret, err := pt.Load("_QueryCoordAddress")
 	if err != nil {
 		panic(err)
