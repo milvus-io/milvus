@@ -9,13 +9,13 @@ x-ccache: &ccache
 
 services:
   ubuntu:
-    image: ${IMAGE_REPO}/milvus-dev:${IMAGE_ARCH}-ubuntu${UBUNTU}-${DATE_VERSION}
+    image: ${IMAGE_REPO}/milvus-env:${IMAGE_ARCH}-ubuntu${UBUNTU}-${DATE_VERSION}
     # Build devcontainer
     build:
       context: .
       dockerfile: build/docker/builder/cpu/ubuntu${UBUNTU}/Dockerfile
       cache_from:
-        - ${IMAGE_REPO}/milvus-dev:${IMAGE_ARCH}-ubuntu${UBUNTU}-${LATEST_DATE_VERSION}
+        - ${IMAGE_REPO}/milvus-env:${IMAGE_ARCH}-ubuntu${UBUNTU}-${LATEST_DATE_VERSION}
     # user: {{ CURRENT_ID }}
     shm_size: 2G
     environment:
