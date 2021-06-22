@@ -38,13 +38,6 @@ class TestIndexParams(TestcaseBase):
         scope="function",
         params=ct.get_invalid_strs
     )
-    def get_invalid_index_name(self, request):
-        yield request.param
-
-    @pytest.fixture(
-        scope="function",
-        params=ct.get_invalid_strs
-    )
     def get_invalid_index_type(self, request):
         yield request.param
 
@@ -79,8 +72,7 @@ class TestIndexParams(TestcaseBase):
         expected: raise exception
         """
         self._connect()
-        index_name = cf.gen_unique_str(prefix)
-        self.index_wrap.init_index(None, default_field_name, default_index_params, name=index_name, check_task=CheckTasks.err_res,
+        self.index_wrap.init_index(None, default_field_name, default_index_params, check_task=CheckTasks.err_res,
                                            err_code=1, err_msg="Collection")
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -91,10 +83,9 @@ class TestIndexParams(TestcaseBase):
         expected: raise exception
         """
         f_name = get_invalid_field_name
-        index_name = cf.gen_unique_str(prefix)
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        self.index_wrap.init_index(collection_w.collection, f_name, default_index_params, name=index_name, check_task=CheckTasks.err_res,
+        self.index_wrap.init_index(collection_w.collection, f_name, default_index_params, check_task=CheckTasks.err_res,
                                             check_items={"err_code": 1, "err_msg": "must be str"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -106,9 +97,8 @@ class TestIndexParams(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         f_name = cf.gen_unique_str(prefix)
-        index_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        self.index_wrap.init_index(collection_w.collection, f_name, default_index_params, name=index_name, check_task=CheckTasks.err_res,
+        self.index_wrap.init_index(collection_w.collection, f_name, default_index_params, check_task=CheckTasks.err_res,
                                            check_items={"err_code": 1, "err_msg": "CreateIndex failed"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -119,11 +109,10 @@ class TestIndexParams(TestcaseBase):
         expected: raise exception
         """
         c_name = cf.gen_unique_str(prefix)
-        index_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         index_params = copy.deepcopy(default_index_params)
         index_params["index_type"] = get_invalid_index_type
-        self.index_wrap.init_index(collection_w.collection, default_field_name, index_params, name=index_name, check_task=CheckTasks.err_res,
+        self.index_wrap.init_index(collection_w.collection, default_field_name, index_params, check_task=CheckTasks.err_res,
                                         check_items={"err_code": 1, "err_msg": "must be str"})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -134,11 +123,10 @@ class TestIndexParams(TestcaseBase):
         expected: raise exception
         """
         c_name = cf.gen_unique_str(prefix)
-        index_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         index_params = copy.deepcopy(default_index_params)
         index_params["index_type"] = "IVFFFFFFF"
-        self.index_wrap.init_index(collection_w.collection, default_field_name, index_params, name=index_name, check_task=CheckTasks.err_res,
+        self.index_wrap.init_index(collection_w.collection, default_field_name, index_params, check_task=CheckTasks.err_res,
                                         check_items={"err_code": 1, "err_msg": ""})
 
     @pytest.mark.xfail(reason="issue #5653")
@@ -150,10 +138,9 @@ class TestIndexParams(TestcaseBase):
         expected: raise exception
         """
         c_name = cf.gen_unique_str(prefix)
-        index_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         index_params = get_invalid_index_params
-        self.index_wrap.init_index(collection_w.collection, default_field_name, index_params, name=index_name, check_task=CheckTasks.err_res,
+        self.index_wrap.init_index(collection_w.collection, default_field_name, index_params, check_task=CheckTasks.err_res,
                                         check_items={"err_code": 1, "err_msg": ""})
 
     # TODO: not supported
@@ -167,7 +154,7 @@ class TestIndexParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         index_name = get_invalid_index_name
         collection_w = self.init_collection_wrap(name=c_name)
-        self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params, name=index_name, check_task=CheckTasks.err_res,
+        self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params, check_task=CheckTasks.err_res,
                                         check_items={"err_code": 1, "err_msg": ""})
 
 
@@ -182,9 +169,8 @@ class TestIndexBase(TestcaseBase):
         expected: no exception raised
         """
         c_name = cf.gen_unique_str(prefix)
-        index_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        index, _ = self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params, name=index_name)
+        index, _ = self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params)
         # TODO: assert index
         cf.assert_equal_index(index, collection_w.collection.indexes[0])
 
@@ -196,10 +182,9 @@ class TestIndexBase(TestcaseBase):
         expected: no exception raised
         """
         c_name = cf.gen_unique_str(prefix)
-        index_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         index_params = get_valid_index_params
-        index, _ = self.index_wrap.init_index(collection_w.collection, default_field_name, index_params, name=index_name)
+        index, _ = self.index_wrap.init_index(collection_w.collection, default_field_name, index_params)
         # TODO: assert index
         cf.assert_equal_index(index, collection_w.collection.indexes[0])
 
@@ -215,7 +200,7 @@ class TestIndexBase(TestcaseBase):
         index_name = ct.default_index_name
         collection_w = self.init_collection_wrap(name=c_name)
         collection_w.collection.create_index(default_field_name, default_index_params, index_name=index_name)
-        self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params, name=index_name, check_task=CheckTasks.err_res,
+        self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params, check_task=CheckTasks.err_res,
                                         check_items={"err_code": 1, "err_msg": ""})
 
     # TODO: server not supported
@@ -268,20 +253,6 @@ class TestIndexBase(TestcaseBase):
         """
         pass
 
-    # TODO: server not supported
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_index_concurrently(self):
-        """
-        target: test index concurrently, on one field
-        method: create index with different indexes with multi threads
-        expected: no exception raised
-        """
-        c_name = cf.gen_unique_str(prefix)
-        index_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name)
-        ex, _ = self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params, name=index_name)
-        assert "dup" in str(ex)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_drop(self):
         """
@@ -290,9 +261,8 @@ class TestIndexBase(TestcaseBase):
         expected: no exception raised
         """
         c_name = cf.gen_unique_str(prefix)
-        index_name = ct.default_index_name
         collection_w = self.init_collection_wrap(name=c_name)
-        index, _ = self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params, name=index_name)
+        index, _ = self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params)
         cf.assert_equal_index(index, collection_w.collection.indexes[0])
         self.index_wrap.drop()
         assert len(collection_w.collection.indexes) == 0
@@ -305,9 +275,8 @@ class TestIndexBase(TestcaseBase):
         expected: exception raised
         """
         c_name = cf.gen_unique_str(prefix)       
-        index_name = ct.default_index_name
         collection_w = self.init_collection_wrap(name=c_name)
-        _, _ = self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params, name=index_name)
+        _, _ = self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params)
         self.index_wrap.drop()
         self.index_wrap.drop(check_task=CheckTasks.err_res,
                                         check_items={"err_code": 1, "err_msg": "Index doesn't exist"})
@@ -326,12 +295,11 @@ class TestIndexAdvanced(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         c_name_2 = cf.gen_unique_str(prefix)
-        index_name = ct.default_index_name
         cw = self.init_collection_wrap(name=c_name)
         cw2 = self.init_collection_wrap(name=c_name_2)
         iw_2 = ApiIndexWrapper()
-        self.index_wrap.init_index(cw.collection, default_field_name, default_index_params, name=index_name)
-        index_2, _ = iw_2.init_index(cw2.collection, default_field_name, default_index_params, name=index_name)
+        self.index_wrap.init_index(cw.collection, default_field_name, default_index_params)
+        index_2, _ = iw_2.init_index(cw2.collection, default_field_name, default_index_params)
         self.index_wrap.drop()
         assert cf.assert_equal_index(index_2, cw2.collection.indexes[0])
         assert len(cw.collection.indexes) == 0
