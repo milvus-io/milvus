@@ -504,8 +504,9 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 func (scheduler *TaskScheduler) scheduleLoop() {
 	defer scheduler.wg.Done()
 	activeTaskWg := &sync.WaitGroup{}
-	var err error = nil
+
 	for {
+		var err error = nil
 		select {
 		case <-scheduler.ctx.Done():
 			return
@@ -516,6 +517,7 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 				err = scheduler.processTask(t)
 				if err != nil {
 					log.Error("scheduleLoop: process task error", zap.Any("error", err.Error()))
+					t.Notify(err)
 					continue
 				}
 				if t.Type() == commonpb.MsgType_LoadCollection || t.Type() == commonpb.MsgType_LoadPartitions {
@@ -532,9 +534,9 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 				}
 			}
 			activeTaskWg.Wait()
-			if t.Type() == commonpb.MsgType_ReleaseCollection || t.Type() == commonpb.MsgType_ReleasePartitions {
-				t.Notify(err)
-			}
+			//if t.Type() == commonpb.MsgType_ReleaseCollection || t.Type() == commonpb.MsgType_ReleasePartitions {
+			//	t.Notify(err)
+			//}
 			keys := make([]string, 0)
 			taskKey := fmt.Sprintf("%s/%d", triggerTaskPrefix, t.ID())
 			stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
@@ -543,8 +545,11 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 			err = scheduler.client.MultiRemove(keys)
 			if err != nil {
 				log.Error("scheduleLoop: error when remove trigger task to etcd", zap.Int64("taskID", t.ID()))
+				t.Notify(err)
+				continue
 			}
 			log.Debug("scheduleLoop: trigger task done and delete from etcd", zap.Int64("taskID", t.ID()))
+			t.Notify(err)
 		}
 	}
 }

@@ -234,19 +234,18 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, binlogPaths
 			zap.Any("fieldID", fieldID),
 			zap.String("paths", fmt.Sprintln(paths)),
 		)
-		blob := &storage.Blob{
-			Key:   strconv.FormatInt(fieldID, 10),
-			Value: make([]byte, 0),
-		}
 		for _, path := range paths {
 			binLog, err := loader.minioKV.Load(path)
 			if err != nil {
 				// TODO: return or continue?
 				return err
 			}
-			blob.Value = append(blob.Value, []byte(binLog)...)
+			blob := &storage.Blob{
+				Key:   strconv.FormatInt(fieldID, 10),
+				Value: []byte(binLog),
+			}
+			blobs = append(blobs, blob)
 		}
-		blobs = append(blobs, blob)
 	}
 
 	_, _, insertData, err := iCodec.Deserialize(blobs)
