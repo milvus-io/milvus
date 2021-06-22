@@ -17,13 +17,15 @@ import (
 	"fmt"
 	"time"
 
+	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -34,7 +36,7 @@ import (
 
 // GrpcClient grpc client
 type GrpcClient struct {
-	grpcClient masterpb.MasterServiceClient
+	grpcClient rootcoordpb.RootCoordClient
 	conn       *grpc.ClientConn
 	ctx        context.Context
 
@@ -122,9 +124,16 @@ func (c *GrpcClient) connect() error {
 		go func() {
 			conn, err = grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 				grpc.WithUnaryInterceptor(
-					grpc_opentracing.UnaryClientInterceptor(opts...)),
+					grpc_middleware.ChainUnaryClient(
+						grpc_retry.UnaryClientInterceptor(),
+						grpc_opentracing.UnaryClientInterceptor(opts...),
+					)),
 				grpc.WithStreamInterceptor(
-					grpc_opentracing.StreamClientInterceptor(opts...)))
+					grpc_middleware.ChainStreamClient(
+						grpc_retry.StreamClientInterceptor(),
+						grpc_opentracing.StreamClientInterceptor(opts...),
+					)),
+			)
 			ch <- struct{}{}
 		}()
 		select {
@@ -144,7 +153,7 @@ func (c *GrpcClient) connect() error {
 		return err
 	}
 	log.Debug("RootCoordClient try reconnect success")
-	c.grpcClient = masterpb.NewMasterServiceClient(c.conn)
+	c.grpcClient = rootcoordpb.NewRootCoordClient(c.conn)
 	return nil
 }
 
@@ -174,14 +183,18 @@ func (c *GrpcClient) recall(caller func() (interface{}, error)) (interface{}, er
 	if err == nil {
 		return ret, nil
 	}
-	for i := 0; i < c.recallTry; i++ {
+	for i := 0; i < c.reconnTry; i++ {
 		err = c.connect()
 		if err == nil {
-			ret, err = caller()
-			if err == nil {
-				return ret, nil
-			}
+			break
 		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	ret, err = caller()
+	if err == nil {
+		return ret, nil
 	}
 	return ret, err
 }
@@ -293,18 +306,18 @@ func (c *GrpcClient) DescribeIndex(ctx context.Context, in *milvuspb.DescribeInd
 }
 
 // AllocTimestamp global timestamp allocator
-func (c *GrpcClient) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
+func (c *GrpcClient) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		return c.grpcClient.AllocTimestamp(ctx, in)
 	})
-	return ret.(*masterpb.AllocTimestampResponse), err
+	return ret.(*rootcoordpb.AllocTimestampResponse), err
 }
 
-func (c *GrpcClient) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
+func (c *GrpcClient) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		return c.grpcClient.AllocID(ctx, in)
 	})
-	return ret.(*masterpb.AllocIDResponse), err
+	return ret.(*rootcoordpb.AllocIDResponse), err
 }
 
 // UpdateChannelTimeTick used to handle ChannelTimeTickMsg

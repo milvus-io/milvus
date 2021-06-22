@@ -390,6 +390,7 @@ class TestCollectionParams(TestcaseBase):
         assert not self.utility_wrap.has_collection(c_name)[0]
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.skip(reason="waiting for required int primary field")
     @pytest.mark.parametrize("field", [cf.gen_float_vec_field(), cf.gen_binary_vec_field()])
     def test_collection_only_vector_field(self, field):
         """

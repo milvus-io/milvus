@@ -87,16 +87,11 @@ Milvus 基于 [Apache 2.0 License](https://github.com/milvus-io/milvus/blob/mast
 
 使用 Docker-Compose 安装
 
-```bash
-$ cd milvus/deployments/docker/standalone
-$ sudo docker-compose up -d
-```
+敬请期待。
 
 使用 Helm Chart 安装
 
-```bash
-$ helm install -n milvus --set image.all.repository=registry.zilliz.com/milvus/milvus --set image.all.tag=master-latest milvus milvus-helm-charts/charts/milvus-ha
-```
+敬请期待。
 
 从源码编译 Milvus
 
@@ -119,16 +114,11 @@ $ make standalone
 
 使用 Docker-Compose 安装
 
-```bash
-$ cd milvus/deployments/docker/distributed
-$ sudo docker-compose up -d
-```
+敬请期待。
 
 使用 Helm Chart 安装
 
-```bash
-$ helm install -n milvus --set image.all.repository=registry.zilliz.com/milvus/milvus --set image.all.tag=master-latest --set standalone.enabled=false milvus milvus-helm-charts/charts/milvus-ha
-```
+敬请期待。
 
 从源码编译 Milvus
 

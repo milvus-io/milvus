@@ -32,10 +32,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
@@ -46,14 +46,6 @@ import (
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
-
-//  internalpb -> internalpb
-//  proxypb(proxy_service)
-//  querypb(query_service)
-//  datapb(data_service)
-//  indexpb(index_service)
-//  milvuspb -> milvuspb
-//  masterpb2 -> masterpb (master_service)
 
 // ------------------ struct -----------------------
 
@@ -125,7 +117,8 @@ type Core struct {
 	NewProxyClient func(sess *sessionutil.Session) (types.ProxyNode, error)
 
 	//query service interface, notify query service to release collection
-	CallReleaseCollectionService func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error
+	CallReleaseCollectionService func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID) error
+	CallReleasePartitionService  func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID, partitionIDs []typeutil.UniqueID) error
 
 	//dd request scheduler
 	ddReqQueue chan reqTask //dd request will be push into this chan
@@ -231,6 +224,9 @@ func (c *Core) checkInit() error {
 	}
 	if c.CallReleaseCollectionService == nil {
 		return fmt.Errorf("CallReleaseCollectionService is nil")
+	}
+	if c.CallReleasePartitionService == nil {
+		return fmt.Errorf("CallReleasePartitionService is nil")
 	}
 	if c.DataCoordSegmentChan == nil {
 		return fmt.Errorf("DataCoordSegmentChan is nil")
@@ -507,6 +503,7 @@ func (c *Core) startMsgStreamAndSeek(chanName string, subName string, key string
 			return nil, fmt.Errorf("decode msg positions fail, err %s", err.Error())
 		}
 		if len(msgPositions) > 0 {
+			log.Debug("msgstream seek to position", zap.String("chanName", chanName), zap.String("SubName", subName))
 			if err := stream.Seek(msgPositions); err != nil {
 				return nil, fmt.Errorf("msg stream seek fail, err %s", err.Error())
 			}
@@ -514,6 +511,7 @@ func (c *Core) startMsgStreamAndSeek(chanName string, subName string, key string
 		}
 	}
 	stream.Start()
+	log.Debug("Start Consumer", zap.String("chanName", chanName), zap.String("SubName", subName))
 	return &stream, nil
 }
 
@@ -864,6 +862,35 @@ func (c *Core) SetQueryCoord(s types.QueryService) error {
 		retErr = nil
 		return
 	}
+	c.CallReleasePartitionService = func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID, partitionIDs []typeutil.UniqueID) (retErr error) {
+		defer func() {
+			if err := recover(); err != nil {
+				retErr = fmt.Errorf("release partition from query service panic, msg = %v", err)
+			}
+		}()
+		req := &querypb.ReleasePartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_ReleasePartitions,
+				MsgID:     0, //TODO, msg ID
+				Timestamp: ts,
+				SourceID:  c.session.ServerID,
+			},
+			DbID:         dbID,
+			CollectionID: collectionID,
+			PartitionIDs: partitionIDs,
+		}
+		rsp, err := s.ReleasePartitions(ctx, req)
+		if err != nil {
+			retErr = err
+			return
+		}
+		if rsp.ErrorCode != commonpb.ErrorCode_Success {
+			retErr = fmt.Errorf("ReleasePartitions from query service failed, error = %s", rsp.Reason)
+			return
+		}
+		retErr = nil
+		return
+	}
 	return nil
 }
 
@@ -934,11 +961,13 @@ func (c *Core) Init() error {
 			c.kvBase = etcdkv.NewEtcdKV(c.etcdCli, Params.KvRootPath)
 			return nil
 		}
+		log.Debug("RootCoord, Connect to Etcd")
 		err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
 		if err != nil {
 			return
 		}
 
+		log.Debug("RootCoord, Set TSO and ID Allocator")
 		idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "gid"))
 		if initError = idAllocator.Initialize(); initError != nil {
 			return
@@ -977,6 +1006,7 @@ func (c *Core) Init() error {
 		c.chanTimeTick.AddProxyNode(c.session)
 		c.proxyClientManager = newProxyClientManager(c)
 
+		log.Debug("RootCoord, set proxy manager")
 		c.proxyNodeManager, initError = newProxyNodeManager(
 			c.ctx,
 			Params.EtcdEndpoints,
@@ -991,6 +1021,8 @@ func (c *Core) Init() error {
 	})
 	if initError == nil {
 		log.Debug(typeutil.RootCoordRole, zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Initializing)]))
+	} else {
+		log.Debug("RootCoord init error", zap.Error(initError))
 	}
 	return initError
 }
@@ -1786,10 +1818,10 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 	return t.Rsp, nil
 }
 
-func (c *Core) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
+func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		return &masterpb.AllocTimestampResponse{
+		return &rootcoordpb.AllocTimestampResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
@@ -1801,7 +1833,7 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRe
 	ts, err := c.TSOAllocator(in.Count)
 	if err != nil {
 		log.Debug("AllocTimestamp failed", zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
-		return &masterpb.AllocTimestampResponse{
+		return &rootcoordpb.AllocTimestampResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    "AllocTimestamp failed: " + err.Error(),
@@ -1811,7 +1843,7 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRe
 		}, nil
 	}
 	// log.Printf("AllocTimestamp : %d", ts)
-	return &masterpb.AllocTimestampResponse{
+	return &rootcoordpb.AllocTimestampResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
@@ -1821,10 +1853,10 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRe
 	}, nil
 }
 
-func (c *Core) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
+func (c *Core) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		return &masterpb.AllocIDResponse{
+		return &rootcoordpb.AllocIDResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
@@ -1836,7 +1868,7 @@ func (c *Core) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*maste
 	start, _, err := c.IDAllocator(in.Count)
 	if err != nil {
 		log.Debug("AllocID failed", zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
-		return &masterpb.AllocIDResponse{
+		return &rootcoordpb.AllocIDResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    "AllocID failed: " + err.Error(),
@@ -1846,7 +1878,7 @@ func (c *Core) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*maste
 		}, nil
 	}
 	log.Debug("AllocID", zap.Int64("id start", start), zap.Uint32("count", in.Count))
-	return &masterpb.AllocIDResponse{
+	return &rootcoordpb.AllocIDResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",

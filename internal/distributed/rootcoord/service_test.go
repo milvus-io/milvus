@@ -30,9 +30,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
@@ -160,7 +160,7 @@ func TestGrpcService(t *testing.T) {
 		},
 	)
 	assert.Nil(t, err)
-	_, err = etcdCli.Put(ctx, path.Join(sessKey, typeutil.ProxyNodeRole+"-100"), string(pnb))
+	_, err = etcdCli.Put(ctx, path.Join(sessKey, typeutil.ProxyRole+"-100"), string(pnb))
 	assert.Nil(t, err)
 
 	err = core.Init()
@@ -245,6 +245,9 @@ func TestGrpcService(t *testing.T) {
 	core.CallReleaseCollectionService = func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
 		return nil
 	}
+	core.CallReleasePartitionService = func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID, partitionIDs []typeutil.UniqueID) error {
+		return nil
+	}
 
 	rootcoord.Params.Address = Params.Address
 	err = svr.rootCoord.Register()
@@ -286,7 +289,7 @@ func TestGrpcService(t *testing.T) {
 	})
 
 	t.Run("alloc time stamp", func(t *testing.T) {
-		req := &masterpb.AllocTimestampRequest{
+		req := &rootcoordpb.AllocTimestampRequest{
 			Count: 1,
 		}
 		rsp, err := svr.AllocTimestamp(ctx, req)
@@ -295,7 +298,7 @@ func TestGrpcService(t *testing.T) {
 	})
 
 	t.Run("alloc id", func(t *testing.T) {
-		req := &masterpb.AllocIDRequest{
+		req := &rootcoordpb.AllocIDRequest{
 			Count: 1,
 		}
 		rsp, err := svr.AllocID(ctx, req)

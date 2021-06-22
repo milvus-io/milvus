@@ -88,16 +88,11 @@ Milvus was released under the [open-source Apache License 2.0](https://github.co
 Install with Docker-Compose
     
 
-```bash
-$ cd milvus/deployments/docker/standalone
-$ sudo docker-compose up -d
-```
+Coming soon.
 
 Install with Helm
 
-```bash
-$ helm install -n milvus --set image.all.repository=registry.zilliz.com/milvus/milvus --set image.all.tag=master-latest milvus milvus-helm-charts/charts/milvus-ha
-```
+Coming soon.
 
 Build from source code
 
@@ -120,16 +115,11 @@ $ make standalone
 
 Install with Docker-Compose
 
-```bash
-$ cd milvus/deployments/docker/distributed
-$ sudo docker-compose up -d
-```
+Coming soon.
 
 Install with Helm
 
-```bash
-$ helm install -n milvus --set image.all.repository=registry.zilliz.com/milvus/milvus --set image.all.tag=master-latest --set standalone.enabled=false milvus milvus-helm-charts/charts/milvus-ha
-```
+Coming soon.
 
 Build from source code
 
