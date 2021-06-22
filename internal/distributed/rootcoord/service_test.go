@@ -89,12 +89,12 @@ func GenFlushedSegMsgPack(segID typeutil.UniqueID) *msgstream.MsgPack {
 	return &msgPack
 }
 
-type proxyNodeMock struct {
-	types.ProxyNode
+type proxyMock struct {
+	types.Proxy
 	invalidateCollectionMetaCache func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
 }
 
-func (p *proxyNodeMock) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+func (p *proxyMock) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	return p.invalidateCollectionMetaCache(ctx, request)
 }
 
@@ -231,8 +231,8 @@ func TestGrpcService(t *testing.T) {
 	}
 
 	collectionMetaCache := make([]string, 0, 16)
-	pnm := proxyNodeMock{}
-	core.NewProxyClient = func(*sessionutil.Session) (types.ProxyNode, error) {
+	pnm := proxyMock{}
+	core.NewProxyClient = func(*sessionutil.Session) (types.Proxy, error) {
 		return &pnm, nil
 	}
 	pnm.invalidateCollectionMetaCache = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
@@ -851,7 +851,7 @@ func (m *mockCore) Stop() error {
 	return fmt.Errorf("stop error")
 }
 
-func (m *mockCore) SetNewProxyClient(func(sess *sessionutil.Session) (types.ProxyNode, error)) {
+func (m *mockCore) SetNewProxyClient(func(sess *sessionutil.Session) (types.Proxy, error)) {
 }
 
 type mockDataCoord struct {

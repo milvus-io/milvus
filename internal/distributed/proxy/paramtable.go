@@ -94,6 +94,6 @@ func (pt *ParamTable) initQueryCoordAddress() {
 }
 
 func (pt *ParamTable) initPort() {
-	port := pt.ParseInt("proxyNode.port")
+	port := pt.ParseInt("proxy.port")
 	pt.Port = port
 }

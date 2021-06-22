@@ -159,7 +159,7 @@ func (s *Server) init() error {
 	s.rootCoord.UpdateStateCode(internalpb.StateCode_Initializing)
 	log.Debug("RootCoord", zap.Any("State", internalpb.StateCode_Initializing))
 	s.rootCoord.SetNewProxyClient(
-		func(s *sessionutil.Session) (types.ProxyNode, error) {
+		func(s *sessionutil.Session) (types.Proxy, error) {
 			cli := pnc.NewClient(s.Address, 3*time.Second)
 			if err := cli.Init(); err != nil {
 				return nil, err

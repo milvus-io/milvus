@@ -38,7 +38,7 @@ rootCoord:
   address: localhost
   port: 53100
 
-proxyNode:
+proxy:
   port: 19530
 
 queryCoord:
