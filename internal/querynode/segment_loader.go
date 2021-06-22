@@ -33,7 +33,7 @@ import (
 
 const (
 	queryCoordSegmentMetaPrefix = "queryCoord-segmentMeta"
-	queryNodeSegmentMetaPrefix    = "queryNode-segmentMeta"
+	queryNodeSegmentMetaPrefix  = "queryNode-segmentMeta"
 )
 
 // segmentLoader is only responsible for loading the field data from binlog
