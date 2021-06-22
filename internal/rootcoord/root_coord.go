@@ -507,6 +507,7 @@ func (c *Core) startMsgStreamAndSeek(chanName string, subName string, key string
 			return nil, fmt.Errorf("decode msg positions fail, err %s", err.Error())
 		}
 		if len(msgPositions) > 0 {
+			log.Debug("msgstream seek to position", zap.String("chanName", chanName), zap.String("SubName", subName))
 			if err := stream.Seek(msgPositions); err != nil {
 				return nil, fmt.Errorf("msg stream seek fail, err %s", err.Error())
 			}
@@ -514,6 +515,7 @@ func (c *Core) startMsgStreamAndSeek(chanName string, subName string, key string
 		}
 	}
 	stream.Start()
+	log.Debug("Start Consumer", zap.String("chanName", chanName), zap.String("SubName", subName))
 	return &stream, nil
 }
 
@@ -934,11 +936,13 @@ func (c *Core) Init() error {
 			c.kvBase = etcdkv.NewEtcdKV(c.etcdCli, Params.KvRootPath)
 			return nil
 		}
+		log.Debug("RootCoord, Connect to Etcd")
 		err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
 		if err != nil {
 			return
 		}
 
+		log.Debug("RootCoord, Set TSO and ID Allocator")
 		idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "gid"))
 		if initError = idAllocator.Initialize(); initError != nil {
 			return
@@ -977,6 +981,7 @@ func (c *Core) Init() error {
 		c.chanTimeTick.AddProxyNode(c.session)
 		c.proxyClientManager = newProxyClientManager(c)
 
+		log.Debug("RootCoord, set proxy manager")
 		c.proxyNodeManager, initError = newProxyNodeManager(
 			c.ctx,
 			Params.EtcdEndpoints,
@@ -991,6 +996,8 @@ func (c *Core) Init() error {
 	})
 	if initError == nil {
 		log.Debug(typeutil.RootCoordRole, zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Initializing)]))
+	} else {
+		log.Debug("RootCoord init error", zap.Error(initError))
 	}
 	return initError
 }
