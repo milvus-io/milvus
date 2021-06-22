@@ -83,9 +83,16 @@ binlog:
 	@echo "Building binlog ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/binlog $(PWD)/cmd/binlog/main.go 1>/dev/null
 
+BUILD_TAGS = $(shell git describe --tags --always --dirty="-dev")
+BUILD_TIME = $(shell date)
+GIT_COMMIT = $(shell git rev-parse --short HEAD)
+GO_VERSION = $(shell go version)
+
 milvus: build-cpp
 	@echo "Building Milvus ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build \
+		-ldflags="-X 'main.BuildTags=$(BUILD_TAGS)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)' -X 'main.GoVersion=$(GO_VERSION)'" \
+		-o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
 
 build-go: milvus
 
