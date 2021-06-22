@@ -14,18 +14,18 @@ package components
 import (
 	"context"
 
-	grpcdataserviceclient "github.com/milvus-io/milvus/internal/distributed/dataservice"
+	grpcdatacoordclient "github.com/milvus-io/milvus/internal/distributed/datacoord"
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
 type DataCoord struct {
 	ctx context.Context
-	svr *grpcdataserviceclient.Server
+	svr *grpcdatacoordclient.Server
 }
 
 // NewDataCoord creates a new DataCoord
 func NewDataCoord(ctx context.Context, factory msgstream.Factory) (*DataCoord, error) {
-	s, err := grpcdataserviceclient.NewServer(ctx, factory)
+	s, err := grpcdatacoordclient.NewServer(ctx, factory)
 	if err != nil {
 		return nil, err
 	}
