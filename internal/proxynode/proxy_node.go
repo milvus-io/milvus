@@ -52,10 +52,10 @@ type ProxyNode struct {
 
 	stateCode atomic.Value
 
-	rootCoord    types.RootCoord
-	indexCoord   types.IndexCoord
-	dataCoord    types.DataCoord
-	queryCoord  types.QueryCoord
+	rootCoord  types.RootCoord
+	indexCoord types.IndexCoord
+	dataCoord  types.DataCoord
+	queryCoord types.QueryCoord
 
 	chMgr channelsMgr
 

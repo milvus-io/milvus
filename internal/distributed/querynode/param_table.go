@@ -31,7 +31,7 @@ type ParamTable struct {
 	IndexServiceAddress string
 	MasterAddress       string
 	DataCoordAddress    string
-	QueryCoordAddress string
+	QueryCoordAddress   string
 }
 
 func (pt *ParamTable) Init() {

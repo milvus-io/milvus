@@ -24,7 +24,7 @@ type ParamTable struct {
 	IndexServerAddress string
 	MasterAddress      string
 
-	DataCoordAddress    string
+	DataCoordAddress  string
 	QueryCoordAddress string
 
 	IP      string

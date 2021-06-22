@@ -63,9 +63,9 @@ type QueryNode struct {
 
 	// clients
 	queryCoord types.QueryCoord
-	rootCoord    types.RootCoord
-	indexCoord   types.IndexCoord
-	dataCoord    types.DataCoord
+	rootCoord  types.RootCoord
+	indexCoord types.IndexCoord
+	dataCoord  types.DataCoord
 
 	msFactory msgstream.Factory
 	scheduler *taskScheduler
@@ -260,7 +260,6 @@ func (node *QueryNode) Stop() error {
 func (node *QueryNode) UpdateStateCode(code internalpb.StateCode) {
 	node.stateCode.Store(code)
 }
-
 
 func (node *QueryNode) SetRootCoord(rc types.RootCoord) error {
 	if rc == nil {

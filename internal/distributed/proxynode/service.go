@@ -54,10 +54,10 @@ type Server struct {
 
 	grpcErrChan chan error
 
-	rootCoordClient    *rcc.GrpcClient
-	dataCoordClient    *grpcdatacoordclient.Client
+	rootCoordClient  *rcc.GrpcClient
+	dataCoordClient  *grpcdatacoordclient.Client
 	queryCooedClient *grpcquerycoordclient.Client
-	indexCoordClient   *grpcindexcoordclient.Client
+	indexCoordClient *grpcindexcoordclient.Client
 
 	tracer opentracing.Tracer
 	closer io.Closer

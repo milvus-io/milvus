@@ -107,7 +107,7 @@ type InsertTask struct {
 	BaseInsertTask
 	req *milvuspb.InsertRequest
 	Condition
-	ctx            context.Context
+	ctx context.Context
 
 	result         *milvuspb.MutationResult
 	dataCoord      types.DataCoord
@@ -2646,10 +2646,10 @@ func (g *GetPartitionStatisticsTask) PostExecute(ctx context.Context) error {
 type ShowCollectionsTask struct {
 	Condition
 	*milvuspb.ShowCollectionsRequest
-	ctx          context.Context
-	rootCoord    types.RootCoord
+	ctx        context.Context
+	rootCoord  types.RootCoord
 	queryCoord types.QueryCoord
-	result       *milvuspb.ShowCollectionsResponse
+	result     *milvuspb.ShowCollectionsResponse
 }
 
 func (sct *ShowCollectionsTask) TraceCtx() context.Context {
