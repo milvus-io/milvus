@@ -450,7 +450,6 @@ func (it *InsertTask) checkFieldAutoID() error {
 	autoIDFieldName := ""
 	autoIDLoc := -1
 	primaryLoc := -1
-	var fieldType schemapb.DataType
 	fields := it.schema.Fields
 
 	for loc, field := range fields {
@@ -520,7 +519,7 @@ func (it *InsertTask) checkFieldAutoID() error {
 	if autoIDLoc >= 0 {
 		fieldData := schemapb.FieldData{
 			FieldName: primaryFieldName,
-			Type:      fieldType,
+			Type:      schemapb.DataType_Int64,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_LongData{
