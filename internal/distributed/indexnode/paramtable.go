@@ -21,7 +21,7 @@ import (
 type ParamTable struct {
 	paramtable.BaseTable
 
-	IndexServerAddress string
+	IndexCoordAddress string
 
 	IP      string
 	Port    int
@@ -48,16 +48,16 @@ func (pt *ParamTable) LoadFromEnv() {
 
 func (pt *ParamTable) initParams() {
 	pt.initPort()
-	pt.initIndexServerAddress()
+	pt.initIndexCoordAddress()
 }
 
 // todo remove and use load from env
-func (pt *ParamTable) initIndexServerAddress() {
-	ret, err := pt.Load("IndexServiceAddress")
+func (pt *ParamTable) initIndexCoordAddress() {
+	ret, err := pt.Load("_IndexCoordAddress")
 	if err != nil {
 		panic(err)
 	}
-	pt.IndexServerAddress = ret
+	pt.IndexCoordAddress = ret
 }
 
 func (pt *ParamTable) initPort() {

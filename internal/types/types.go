@@ -111,7 +111,7 @@ type RootCoord interface {
 	ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error)
 }
 
-// RootCoordComponent is used by grpc server of master service
+// RootCoordComponent is used by grpc server of RootCoord
 type RootCoordComponent interface {
 	RootCoord
 

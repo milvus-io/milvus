@@ -131,9 +131,9 @@ func (s *Server) init() error {
 		panic(err)
 	}
 
-	// --- Master Server Client ---
+	// --- RootCoord Client ---
 	//ms.Params.Init()
-	addr := Params.MasterAddress
+	addr := Params.RootCoordAddress
 
 	log.Debug("QueryNode start to new RootCoordClient", zap.Any("QueryCoordAddress", addr))
 	rootCoord, err := rcc.NewClient(s.ctx, qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
@@ -164,7 +164,7 @@ func (s *Server) init() error {
 	}
 
 	// --- IndexCoord ---
-	log.Debug("Index coord", zap.String("address", Params.IndexServiceAddress))
+	log.Debug("Index coord", zap.String("address", Params.IndexCoordAddress))
 	indexCoord := isc.NewClient(qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
 
 	if err := indexCoord.Init(); err != nil {

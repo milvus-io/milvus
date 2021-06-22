@@ -20,9 +20,9 @@ import (
 type ParamTable struct {
 	paramtable.BaseTable
 
-	IP            string
-	Port          int
-	MasterAddress string
+	IP               string
+	Port             int
+	RootCoordAddress string
 }
 
 var Params ParamTable
@@ -38,7 +38,7 @@ func (pt *ParamTable) Init() {
 }
 
 func (pt *ParamTable) initParams() {
-	pt.initMasterAddress()
+	pt.initRootCoordAddress()
 	pt.initDataCoordAddress()
 }
 
@@ -50,12 +50,12 @@ func (pt *ParamTable) initPort() {
 	pt.Port = pt.ParseInt("dataCoord.port")
 }
 
-func (pt *ParamTable) initMasterAddress() {
-	ret, err := pt.Load("_MasterAddress")
+func (pt *ParamTable) initRootCoordAddress() {
+	ret, err := pt.Load("_RootCoordAddress")
 	if err != nil {
 		panic(err)
 	}
-	pt.MasterAddress = ret
+	pt.RootCoordAddress = ret
 }
 
 func (pt *ParamTable) initDataCoordAddress() {

@@ -26,9 +26,9 @@ type ParamTable struct {
 	Address string // ip:port
 	Port    int
 
-	IndexServiceAddress string
-	QueryCoordAddress   string
-	DataCoordAddress    string
+	IndexCoordAddress string
+	QueryCoordAddress string
+	DataCoordAddress  string
 }
 
 func (p *ParamTable) Init() {
@@ -40,15 +40,14 @@ func (p *ParamTable) Init() {
 		}
 		p.initAddress()
 		p.initPort()
-		p.initIndexServiceAddress()
+		p.initIndexCoordAddress()
 		p.initQueryCoordAddress()
 		p.initDataCoordAddress()
-
 	})
 }
 
 func (p *ParamTable) initAddress() {
-	ret, err := p.Load("_MasterAddress")
+	ret, err := p.Load("_RootCoordAddress")
 	if err != nil {
 		panic(err)
 	}
@@ -56,15 +55,15 @@ func (p *ParamTable) initAddress() {
 }
 
 func (p *ParamTable) initPort() {
-	p.Port = p.ParseInt("master.port")
+	p.Port = p.ParseInt("rootCoord.port")
 }
 
-func (p *ParamTable) initIndexServiceAddress() {
-	ret, err := p.Load("IndexServiceAddress")
+func (p *ParamTable) initIndexCoordAddress() {
+	ret, err := p.Load("_IndexCoordAddress")
 	if err != nil {
 		panic(err)
 	}
-	p.IndexServiceAddress = ret
+	p.IndexCoordAddress = ret
 }
 
 func (p *ParamTable) initQueryCoordAddress() {

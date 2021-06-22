@@ -36,10 +36,10 @@ type ParamTable struct {
 	NetworkAddress string
 	Alias          string
 
-	EtcdEndpoints []string
-	MetaRootPath  string
-	MasterAddress string
-	PulsarAddress string
+	EtcdEndpoints    []string
+	MetaRootPath     string
+	RootCoordAddress string
+	PulsarAddress    string
 
 	ProxyID                    UniqueID
 	TimeTickInterval           time.Duration
