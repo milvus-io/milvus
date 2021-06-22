@@ -162,7 +162,7 @@ func defaultSealPolicy() sealPolicy {
 }
 
 func defaultSegmentSealPolicy() segmentSealPolicy {
-	return getSegmentCapacityPolicy(Params.SegmentSizeFactor)
+	return getSegmentCapacityPolicy(Params.SegmentSealProportion)
 }
 
 func defaultFlushPolicy() flushPolicy {
@@ -287,7 +287,7 @@ func (s *SegmentManager) genExpireTs() (Timestamp, error) {
 		return 0, err
 	}
 	physicalTs, logicalTs := tsoutil.ParseTS(ts)
-	expirePhysicalTs := physicalTs.Add(time.Duration(Params.SegIDAssignExpiration) * time.Millisecond)
+	expirePhysicalTs := physicalTs.Add(time.Duration(Params.SegAssignmentExpiration) * time.Millisecond)
 	expireTs := tsoutil.ComposeTS(expirePhysicalTs.UnixNano()/int64(time.Millisecond), int64(logicalTs))
 	return expireTs, nil
 }

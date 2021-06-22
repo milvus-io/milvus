@@ -59,7 +59,7 @@ func TestAssignSegmentID(t *testing.T) {
 	})
 	recordSize, err := typeutil.EstimateSizePerRecord(schema)
 	assert.Nil(t, err)
-	maxCount := int(Params.SegmentSize * 1024 * 1024 / float64(recordSize))
+	maxCount := int(Params.SegmentMaxSize * 1024 * 1024 / float64(recordSize))
 
 	cases := []struct {
 		Description  string
