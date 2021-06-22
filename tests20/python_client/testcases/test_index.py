@@ -129,7 +129,6 @@ class TestIndexParams(TestcaseBase):
         self.index_wrap.init_index(collection_w.collection, default_field_name, index_params, check_task=CheckTasks.err_res,
                                         check_items={"err_code": 1, "err_msg": ""})
 
-    @pytest.mark.xfail(reason="issue #5653")
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_params_invalid(self, get_invalid_index_params):
         """
