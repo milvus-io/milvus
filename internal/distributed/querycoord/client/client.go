@@ -34,15 +34,16 @@ import (
 )
 
 type Client struct {
-	ctx        context.Context
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	grpcClient querypb.QueryCoordClient
 	conn       *grpc.ClientConn
 
-	addr      string
-	timeout   time.Duration
-	sess      *sessionutil.Session
-	reconnTry int
-	recallTry int
+	sess *sessionutil.Session
+	addr string
+
+	retryOptions []retry.Option
 }
 
 func getQueryCoordAddress(sess *sessionutil.Session) (string, error) {
@@ -61,27 +62,24 @@ func getQueryCoordAddress(sess *sessionutil.Session) (string, error) {
 }
 
 // NewClient creates a client for QueryService grpc call.
-func NewClient(metaRootPath string, etcdEndpoints []string, timeout time.Duration) (*Client, error) {
-	sess := sessionutil.NewSession(context.Background(), metaRootPath, etcdEndpoints)
-
+func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string, retryOptions ...retry.Option) (*Client, error) {
+	sess := sessionutil.NewSession(ctx, metaRoot, etcdEndpoints)
+	if sess == nil {
+		err := fmt.Errorf("new session error, maybe can not connect to etcd")
+		log.Debug("QueryCoordClient NewClient failed", zap.Error(err))
+		return nil, err
+	}
+	ctx, cancel := context.WithCancel(ctx)
 	return &Client{
-		ctx:        context.Background(),
-		grpcClient: nil,
-		conn:       nil,
-		timeout:    timeout,
-		reconnTry:  10,
-		recallTry:  3,
-		sess:       sess,
+		ctx:          ctx,
+		cancel:       cancel,
+		sess:         sess,
+		retryOptions: retryOptions,
 	}, nil
 }
 
 func (c *Client) Init() error {
-	// for now, we must try many times in Init Stage
-	initFunc := func() error {
-		return c.connect()
-	}
-	err := retry.Retry(10000, 3*time.Second, initFunc)
-	return err
+	return c.connect()
 }
 
 func (c *Client) connect() error {
@@ -93,17 +91,16 @@ func (c *Client) connect() error {
 		}
 		return nil
 	}
-	err = retry.Retry(c.reconnTry, 3*time.Second, getQueryCoordAddressFn)
+	err = retry.Do(c.ctx, getQueryCoordAddressFn, c.retryOptions...)
 	if err != nil {
 		log.Debug("QueryCoordClient getQueryCoordAddress failed", zap.Error(err))
 		return err
 	}
 	connectGrpcFunc := func() error {
-		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
-		defer cancelFunc()
 		opts := trace.GetInterceptorOpts()
 		log.Debug("QueryCoordClient try reconnect ", zap.String("address", c.addr))
-		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
+		conn, err := grpc.DialContext(c.ctx, c.addr,
+			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(5*time.Second),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
 					grpc_retry.UnaryClientInterceptor(),
@@ -122,7 +119,7 @@ func (c *Client) connect() error {
 		return nil
 	}
 
-	err = retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
+	err = retry.Do(c.ctx, connectGrpcFunc, c.retryOptions...)
 	if err != nil {
 		log.Debug("QueryCoordClient try reconnect failed", zap.Error(err))
 		return err
@@ -131,19 +128,15 @@ func (c *Client) connect() error {
 	c.grpcClient = querypb.NewQueryCoordClient(c.conn)
 	return nil
 }
+
 func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error) {
 	ret, err := caller()
 	if err == nil {
 		return ret, nil
 	}
-	for i := 0; i < c.reconnTry; i++ {
-		err = c.connect()
-		if err == nil {
-			break
-		}
-	}
+	err = c.connect()
 	if err != nil {
-		return nil, err
+		return ret, err
 	}
 	ret, err = caller()
 	if err == nil {
@@ -157,6 +150,7 @@ func (c *Client) Start() error {
 }
 
 func (c *Client) Stop() error {
+	c.cancel()
 	return c.conn.Close()
 }
 

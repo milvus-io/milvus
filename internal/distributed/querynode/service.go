@@ -103,7 +103,7 @@ func (s *Server) init() error {
 	}
 	// --- QueryCoord ---
 	log.Debug("QueryNode start to new QueryCoordClient", zap.Any("QueryCoordAddress", Params.QueryCoordAddress))
-	queryCoord, err := qcc.NewClient(qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
+	queryCoord, err := qcc.NewClient(s.ctx, qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, retry.Attempts(300))
 	if err != nil {
 		log.Debug("QueryNode new QueryCoordClient failed", zap.Error(err))
 		panic(err)
@@ -136,7 +136,7 @@ func (s *Server) init() error {
 	addr := Params.RootCoordAddress
 
 	log.Debug("QueryNode start to new RootCoordClient", zap.Any("QueryCoordAddress", addr))
-	rootCoord, err := rcc.NewClient(s.ctx, qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
+	rootCoord, err := rcc.NewClient(s.ctx, qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, retry.Attempts(300))
 	if err != nil {
 		log.Debug("QueryNode new RootCoordClient failed", zap.Error(err))
 		panic(err)
@@ -165,7 +165,12 @@ func (s *Server) init() error {
 
 	// --- IndexCoord ---
 	log.Debug("Index coord", zap.String("address", Params.IndexCoordAddress))
-	indexCoord := isc.NewClient(qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
+	indexCoord, err := isc.NewClient(s.ctx, qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, retry.Attempts(300))
+
+	if err != nil {
+		log.Debug("QueryNode new IndexCoordClient failed", zap.Error(err))
+		panic(err)
+	}
 
 	if err := indexCoord.Init(); err != nil {
 		log.Debug("QueryNode IndexCoordClient Init failed", zap.Error(err))
@@ -191,7 +196,11 @@ func (s *Server) init() error {
 
 	// --- DataCoord ---
 	log.Debug("QueryNode start to new DataCoordClient", zap.Any("DataCoordAddress", Params.DataCoordAddress))
-	dataCoord := dsc.NewClient(qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
+	dataCoord, err := dsc.NewClient(s.ctx, qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, retry.Attempts(300))
+	if err != nil {
+		log.Debug("QueryNode new DataCoordClient failed", zap.Error(err))
+		panic(err)
+	}
 	if err = dataCoord.Init(); err != nil {
 		log.Debug("QueryNode DataCoordClient Init failed", zap.Error(err))
 		panic(err)
@@ -230,7 +239,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	var lis net.Listener
 	var err error
-	err = retry.Retry(10, 0, func() error {
+	err = retry.Do(s.ctx, func() error {
 		addr := ":" + strconv.Itoa(grpcPort)
 		lis, err = net.Listen("tcp", addr)
 		if err == nil {
@@ -240,7 +249,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 			grpcPort = 0
 		}
 		return err
-	})
+	}, retry.Attempts(10))
 	if err != nil {
 		log.Error("QueryNode GrpcServer:failed to listen", zap.Error(err))
 		s.grpcErrChan <- err

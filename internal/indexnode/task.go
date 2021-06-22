@@ -16,7 +16,6 @@ import (
 	"errors"
 	"runtime"
 	"strconv"
-	"time"
 
 	"github.com/milvus-io/milvus/internal/util/retry"
 
@@ -115,7 +114,7 @@ func (it *IndexBuildTask) OnEnqueue() error {
 	return nil
 }
 
-func (it *IndexBuildTask) checkIndexMeta(pre bool) error {
+func (it *IndexBuildTask) checkIndexMeta(ctx context.Context, pre bool) error {
 	fn := func() error {
 		indexMeta := indexpb.IndexMeta{}
 		_, values, versions, err := it.etcdKV.LoadWithPrefix2(it.req.MetaPath)
@@ -158,7 +157,7 @@ func (it *IndexBuildTask) checkIndexMeta(pre bool) error {
 		return err
 	}
 
-	err := retry.Retry(3, time.Millisecond*200, fn)
+	err := retry.Do(ctx, fn, retry.Attempts(3))
 	log.Debug("IndexNode checkIndexMeta final", zap.Error(err))
 	return err
 
@@ -166,13 +165,13 @@ func (it *IndexBuildTask) checkIndexMeta(pre bool) error {
 
 func (it *IndexBuildTask) PreExecute(ctx context.Context) error {
 	log.Debug("IndexNode IndexBuildTask preExecute...")
-	return it.checkIndexMeta(true)
+	return it.checkIndexMeta(ctx, true)
 }
 
 func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 	log.Debug("IndexNode IndexBuildTask PostExecute...")
 
-	return it.checkIndexMeta(false)
+	return it.checkIndexMeta(ctx, false)
 }
 
 func (it *IndexBuildTask) Execute(ctx context.Context) error {
@@ -360,7 +359,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 				}
 				return saveBlob(savePath, value)
 			}
-			err := retry.Retry(5, time.Millisecond*200, saveIndexFileFn)
+			err := retry.Do(ctx, saveIndexFileFn, retry.Attempts(5))
 			log.Debug("IndexNode try saveIndexFile final", zap.Error(err), zap.Any("savePath", savePath))
 			if err != nil {
 				return err

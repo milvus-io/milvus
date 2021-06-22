@@ -12,10 +12,10 @@
 package querycoord
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -41,7 +41,7 @@ type queryNode struct {
 }
 
 func newQueryNode(address string, id UniqueID, kv *etcdkv.EtcdKV) (*queryNode, error) {
-	client, err := nodeclient.NewClient(address, 3*time.Second)
+	client, err := nodeclient.NewClient(context.TODO(), address, 300)
 	if err != nil {
 		return nil, err
 	}

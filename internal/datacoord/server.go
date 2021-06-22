@@ -48,8 +48,8 @@ type (
 	Timestamp = typeutil.Timestamp
 )
 
-type dataNodeCreatorFunc func(ctx context.Context, addr string) (types.DataNode, error)
-type rootCoordCreatorFunc func(ctx context.Context) (types.RootCoord, error)
+type dataNodeCreatorFunc func(ctx context.Context, addr string, retryOptions ...retry.Option) (types.DataNode, error)
+type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdEndpoints []string, retryOptions ...retry.Option) (types.RootCoord, error)
 
 type Server struct {
 	ctx              context.Context
@@ -91,12 +91,12 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 	return s, nil
 }
 
-func defaultDataNodeCreatorFunc(ctx context.Context, addr string) (types.DataNode, error) {
-	return datanodeclient.NewClient(ctx, addr, 3*time.Second)
+func defaultDataNodeCreatorFunc(ctx context.Context, addr string, retryOptions ...retry.Option) (types.DataNode, error) {
+	return datanodeclient.NewClient(ctx, addr, retryOptions)
 }
 
-func defaultRootCoordCreatorFunc(ctx context.Context) (types.RootCoord, error) {
-	return rootcoordclient.NewClient(ctx, Params.MetaRootPath, Params.EtcdEndpoints, rootCoordClientTimout)
+func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string, etcdEndpoints []string, retryOptions ...retry.Option) (types.RootCoord, error) {
+	return rootcoordclient.NewClient(ctx, metaRootPath, etcdEndpoints, retryOptions...)
 }
 
 // Register register data service at etcd
@@ -222,7 +222,7 @@ func (s *Server) initMeta() error {
 		}
 		return nil
 	}
-	return retry.Retry(connEtcdMaxRetryTime, connEtcdRetryInterval, connectEtcdFn)
+	return retry.Do(s.ctx, connectEtcdFn, retry.Attempts(connEtcdMaxRetryTime))
 }
 
 func (s *Server) initFlushMsgStream() error {
@@ -449,7 +449,7 @@ func (s *Server) handleFlushingSegments(ctx context.Context) {
 
 func (s *Server) initRootCoordClient() error {
 	var err error
-	if s.rootCoordClient, err = s.rootCoordClientCreator(s.ctx); err != nil {
+	if s.rootCoordClient, err = s.rootCoordClientCreator(s.ctx, Params.MetaRootPath, Params.EtcdEndpoints, retry.Attempts(300)); err != nil {
 		return err
 	}
 	if err = s.rootCoordClient.Init(); err != nil {
