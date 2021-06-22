@@ -107,18 +107,16 @@ class ResponseChecker:
             raise Exception("The result to check isn't collection type object")
         if len(check_items) == 0:
             raise Exception("No expect values found in the check task")
-        name = check_items.get("name", None)
-        schema = check_items.get("schema", None)
-        num_entities = check_items.get("num_entities", 0)
-        primary = check_items.get("primary", ct.default_int64_field_name)
-        if name:
-            assert collection.name == name
-        if schema:
-            assert collection.schema == schema
-        if num_entities == 0:
-            assert collection.is_empty
-        assert collection.num_entities == num_entities
-        assert collection.primary_field.name == primary
+        if check_items.get("name", None):
+            assert collection.name == check_items.get("name")
+        if check_items.get("schema", None):
+            assert collection.schema == check_items.get("schema")
+        if check_items.get("num_entities", None):
+            if check_items.get("num_entities") == 0:
+                assert collection.is_empty
+            assert collection.num_entities == check_items.get("num_entities")
+        if check_items.get("primary", None):
+            assert collection.primary_field.name == check_items.get("primary")
         return True
 
     @staticmethod
