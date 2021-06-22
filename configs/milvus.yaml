@@ -56,7 +56,7 @@ indexService:
 indexNode:
   port: 21121
 
-dataService:
+dataCoord:
   address: localhost
   port: 13333
 

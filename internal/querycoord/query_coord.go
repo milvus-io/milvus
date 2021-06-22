@@ -55,8 +55,8 @@ type QueryCoord struct {
 	cluster      *queryNodeCluster
 	scheduler    *TaskScheduler
 
-	dataCoordClient types.DataService
-	rootCoordClient types.MasterService
+	dataCoordClient types.DataCoord
+	rootCoordClient types.RootCoord
 
 	session   *sessionutil.Session
 	eventChan <-chan *sessionutil.SessionEvent
@@ -161,11 +161,11 @@ func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord,
 	return service, nil
 }
 
-func (qc *QueryCoord) SetRootCoord(rootCoord types.MasterService) {
+func (qc *QueryCoord) SetRootCoord(rootCoord types.RootCoord) {
 	qc.rootCoordClient = rootCoord
 }
 
-func (qc *QueryCoord) SetDataCoord(dataCoord types.DataService) {
+func (qc *QueryCoord) SetDataCoord(dataCoord types.DataCoord) {
 	qc.dataCoordClient = dataCoord
 }
 

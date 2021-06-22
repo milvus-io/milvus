@@ -24,8 +24,8 @@ import (
 	"google.golang.org/grpc"
 
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
-	dsc "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
-	isc "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
+	dsc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
+	isc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	pnc "github.com/milvus-io/milvus/internal/distributed/proxynode/client"
 	qsc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 	"github.com/milvus-io/milvus/internal/log"
@@ -44,7 +44,7 @@ import (
 
 // Server grpc wrapper
 type Server struct {
-	rootCoord   types.MasterComponent
+	rootCoord   types.RootCoordComponent
 	grpcServer  *grpc.Server
 	grpcErrChan chan error
 
@@ -53,12 +53,12 @@ type Server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	dataCoord  types.DataService
-	indexCoord types.IndexService
+	dataCoord  types.DataCoord
+	indexCoord types.IndexCoord
 	queryCoord types.QueryCoord
 
-	newIndexCoordClient func(string, []string, time.Duration) types.IndexService
-	newDataCoordClient  func(string, []string, time.Duration) types.DataService
+	newIndexCoordClient func(string, []string, time.Duration) types.IndexCoord
+	newDataCoordClient  func(string, []string, time.Duration) types.DataCoord
 	newQueryCoordClient func(string, []string, time.Duration) types.QueryCoord
 
 	closer io.Closer
@@ -83,7 +83,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 func (s *Server) setClient() {
 	ctx := context.Background()
 
-	s.newDataCoordClient = func(etcdMetaRoot string, etcdEndpoints []string, timeout time.Duration) types.DataService {
+	s.newDataCoordClient = func(etcdMetaRoot string, etcdEndpoints []string, timeout time.Duration) types.DataCoord {
 		dsClient := dsc.NewClient(etcdMetaRoot, etcdEndpoints, timeout)
 		if err := dsClient.Init(); err != nil {
 			panic(err)
@@ -96,7 +96,7 @@ func (s *Server) setClient() {
 		}
 		return dsClient
 	}
-	s.newIndexCoordClient = func(metaRootPath string, etcdEndpoints []string, timeout time.Duration) types.IndexService {
+	s.newIndexCoordClient = func(metaRootPath string, etcdEndpoints []string, timeout time.Duration) types.IndexCoord {
 		isClient := isc.NewClient(metaRootPath, etcdEndpoints, timeout)
 		if err := isClient.Init(); err != nil {
 			panic(err)

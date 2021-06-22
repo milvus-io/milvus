@@ -27,15 +27,16 @@ import "C"
 import (
 	"context"
 	"errors"
+	"math/rand"
+	"strconv"
+	"sync/atomic"
+	"time"
+
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
-	"math/rand"
-	"strconv"
-	"sync/atomic"
-	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -61,10 +62,10 @@ type QueryNode struct {
 	retrieveService *retrieveService
 
 	// clients
-	rootCoord  types.MasterService
 	queryCoord types.QueryCoord
-	indexCoord types.IndexService
-	dataCoord  types.DataService
+	rootCoord    types.RootCoord
+	indexCoord   types.IndexCoord
+	dataCoord    types.DataCoord
 
 	msFactory msgstream.Factory
 	scheduler *taskScheduler
@@ -260,11 +261,12 @@ func (node *QueryNode) UpdateStateCode(code internalpb.StateCode) {
 	node.stateCode.Store(code)
 }
 
-func (node *QueryNode) SetRootCoord(rootCoord types.MasterService) error {
-	if rootCoord == nil {
+
+func (node *QueryNode) SetRootCoord(rc types.RootCoord) error {
+	if rc == nil {
 		return errors.New("null root coordinator interface")
 	}
-	node.rootCoord = rootCoord
+	node.rootCoord = rc
 	return nil
 }
 
@@ -276,7 +278,7 @@ func (node *QueryNode) SetQueryCoord(query types.QueryCoord) error {
 	return nil
 }
 
-func (node *QueryNode) SetIndexCoord(index types.IndexService) error {
+func (node *QueryNode) SetIndexCoord(index types.IndexCoord) error {
 	if index == nil {
 		return errors.New("null index coordinator interface")
 	}
@@ -284,7 +286,7 @@ func (node *QueryNode) SetIndexCoord(index types.IndexService) error {
 	return nil
 }
 
-func (node *QueryNode) SetDataCoord(data types.DataService) error {
+func (node *QueryNode) SetDataCoord(data types.DataCoord) error {
 	if data == nil {
 		return errors.New("null data coordinator interface")
 	}

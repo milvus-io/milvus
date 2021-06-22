@@ -21,8 +21,8 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 )
 
-func newSegmentReplica(ms types.MasterService, collID UniqueID) *SegmentReplica {
-	metaService := newMetaService(ms, collID)
+func newSegmentReplica(rc types.RootCoord, collID UniqueID) *SegmentReplica {
+	metaService := newMetaService(rc, collID)
 
 	var replica = &SegmentReplica{
 		collectionID: collID,
@@ -37,11 +37,11 @@ func newSegmentReplica(ms types.MasterService, collID UniqueID) *SegmentReplica 
 }
 
 func TestSegmentReplica(t *testing.T) {
-	mockMaster := &MasterServiceFactory{}
+	rc := &RootCoordFactory{}
 	collID := UniqueID(1)
 
 	t.Run("Test inner function segment", func(t *testing.T) {
-		replica := newSegmentReplica(mockMaster, collID)
+		replica := newSegmentReplica(rc, collID)
 		assert.False(t, replica.hasSegment(0))
 
 		startPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(100)}

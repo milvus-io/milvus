@@ -126,8 +126,8 @@ func (bt *BaseTask) SetState(state taskState) {
 type LoadCollectionTask struct {
 	BaseTask
 	*querypb.LoadCollectionRequest
-	rootCoord types.MasterService
-	dataCoord types.DataService
+	rootCoord types.RootCoord
+	dataCoord types.DataCoord
 	cluster   *queryNodeCluster
 	meta      *meta
 }
@@ -418,7 +418,7 @@ func (rct *ReleaseCollectionTask) PostExecute(ctx context.Context) error {
 type LoadPartitionTask struct {
 	BaseTask
 	*querypb.LoadPartitionsRequest
-	dataCoord types.DataService
+	dataCoord types.DataCoord
 	cluster   *queryNodeCluster
 	meta      *meta
 }
@@ -1047,8 +1047,8 @@ type HandoffTask struct {
 type LoadBalanceTask struct {
 	BaseTask
 	*querypb.LoadBalanceRequest
-	rootCoord types.MasterService
-	dataCoord types.DataService
+	rootCoord types.RootCoord
+	dataCoord types.DataCoord
 	cluster   *queryNodeCluster
 	meta      *meta
 }

@@ -187,7 +187,6 @@ class TestInsertBase:
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.tags_smoke)
-    @pytest.mark.skip("TODO: change these cases to use ids in primary field")
     def test_insert_ids(self, connect, id_collection, insert_count):
         '''
         target: test insert entities in collection, use customize ids
@@ -196,7 +195,9 @@ class TestInsertBase:
         '''
         nb = insert_count
         ids = [i for i in range(nb)]
-        res_ids = connect.insert(id_collection, gen_entities(nb))
+        entities = gen_entities(nb)
+        entities[0]["values"] = ids
+        res_ids = connect.insert(id_collection, entities)
         connect.flush([id_collection])
         assert len(res_ids) == nb
         assert res_ids == ids
@@ -204,7 +205,6 @@ class TestInsertBase:
         assert stats[row_count] == nb
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    @pytest.mark.skip("TODO: change these cases to use ids in primary field")
     def test_insert_the_same_ids(self, connect, id_collection, insert_count):
         '''
         target: test insert vectors in collection, use customize the same ids
@@ -213,7 +213,9 @@ class TestInsertBase:
         '''
         nb = insert_count
         ids = [1 for i in range(nb)]
-        res_ids = connect.insert(id_collection, gen_entities(nb), ids)
+        entities = gen_entities(nb)
+        entities[0]["values"] = ids
+        res_ids = connect.insert(id_collection, entities)
         connect.flush([id_collection])
         assert len(res_ids) == nb
         assert res_ids == ids
@@ -222,7 +224,6 @@ class TestInsertBase:
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.tags_smoke)
-    @pytest.mark.skip("TODO: change these cases to use ids in primary field")
     def test_insert_ids_fields(self, connect, get_filter_field, get_vector_field):
         '''
         target: test create normal collection with different fields, insert entities into id with ids
@@ -234,21 +235,20 @@ class TestInsertBase:
         vector_field = get_vector_field
         collection_name = gen_unique_str("test_collection")
         fields = {
-            "fields": [filter_field, vector_field],
+            "fields": [gen_primary_field(), filter_field, vector_field],
             "auto_id": False
         }
         connect.create_collection(collection_name, fields)
         ids = [i for i in range(nb)]
-        entities = gen_entities_by_fields(fields["fields"], nb, default_dim)
+        entities = gen_entities_by_fields(fields["fields"], nb, default_dim, ids)
         logging.getLogger().info(entities)
-        res_ids = connect.insert(collection_name, entities, ids)
+        res_ids = connect.insert(collection_name, entities)
         assert res_ids == ids
         connect.flush([collection_name])
         stats = connect.get_collection_stats(collection_name)
         assert stats[row_count] == nb
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    @pytest.mark.skip("TODO: change these cases to use ids in primary field")
     def test_insert_ids_not_match(self, connect, id_collection, insert_count):
         '''
         target: test insert entities in collection without ids
@@ -257,12 +257,13 @@ class TestInsertBase:
         '''
         nb = insert_count
         with pytest.raises(Exception) as e:
-            connect.insert(id_collection, gen_entities(nb))
+            entities = gen_entities(nb)
+            del entities[0]
+            connect.insert(id_collection, entities)
 
     # TODO
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.tags_smoke)
-    @pytest.mark.skip("TODO: change these cases to use ids in primary field")
     def test_insert_twice_ids_no_ids(self, connect, id_collection):
         '''
         target: check the result of insert, with params ids and no ids
@@ -270,24 +271,27 @@ class TestInsertBase:
         expected:  BaseException raised
         '''
         ids = [i for i in range(default_nb)]
-        connect.insert(id_collection, default_entities, ids)
+        entities = copy.deepcopy(default_entities)
+        entities[0]["values"] = ids
+        connect.insert(id_collection, entities)
         with pytest.raises(Exception) as e:
-            connect.insert(id_collection, default_entities)
+            del entities[0]
+            connect.insert(id_collection, entities)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    @pytest.mark.skip("TODO: change these cases to use ids in primary field")
     def test_insert_not_ids(self, connect, id_collection):
         '''
         target: check the result of insert, with params ids and no ids
         method: test insert vectors twice, use not ids first, and then use customize ids
         expected:  error raised
         '''
+        entities = copy.deepcopy(default_entities)
+        del entities[0]
         with pytest.raises(Exception) as e:
-            connect.insert(id_collection, default_entities)
+            connect.insert(id_collection, entities)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.tags_smoke)
-    @pytest.mark.skip("TODO: change these cases to use ids in primary field")
     def test_insert_ids_length_not_match_batch(self, connect, id_collection):
         '''
         target: test insert vectors in collection, use customize ids, len(ids) != len(vectors)
@@ -296,11 +300,12 @@ class TestInsertBase:
         '''
         ids = [i for i in range(1, default_nb)]
         logging.getLogger().info(len(ids))
+        entities = copy.deepcopy(default_entities)
+        entities[0]["values"] = ids
         with pytest.raises(Exception) as e:
-            connect.insert(id_collection, default_entities, ids)
+            connect.insert(id_collection, entities)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
-    @pytest.mark.skip("TODO: change these cases to use ids in primary field")
     def test_insert_ids_length_not_match_single(self, connect, id_collection):
         '''
         target: test insert vectors in collection, use customize ids, len(ids) != len(vectors)
@@ -309,8 +314,10 @@ class TestInsertBase:
         '''
         ids = [i for i in range(1, default_nb)]
         logging.getLogger().info(len(ids))
+        entity = copy.deepcopy(default_entity)
+        entity[0]["values"] = ids
         with pytest.raises(BaseException) as e:
-            connect.insert(id_collection, default_entity, ids)
+            connect.insert(id_collection, entity)
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.tags_smoke)
@@ -331,7 +338,6 @@ class TestInsertBase:
     # TODO
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.tags_smoke)
-    @pytest.mark.skip("TODO: change these cases to use ids in primary field")
     def test_insert_partition_with_ids(self, connect, id_collection):
         '''
         target: test insert entities in collection created before, insert with ids
@@ -340,7 +346,9 @@ class TestInsertBase:
         '''
         connect.create_partition(id_collection, default_tag)
         ids = [i for i in range(default_nb)]
-        res_ids = connect.insert(id_collection, gen_entities(default_nb), ids=ids, partition_name=default_tag)
+        entities = gen_entities(default_nb)
+        entities[0]["values"] = ids
+        res_ids = connect.insert(id_collection, entities, partition_name=default_tag)
         assert res_ids == ids
         logging.getLogger().info(connect.describe_collection(id_collection))
 

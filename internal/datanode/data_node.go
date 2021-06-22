@@ -28,6 +28,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -42,14 +43,20 @@ import (
 
 const (
 	RPCConnectionTimeout = 30 * time.Second
+
+	// MetricRequestsTotal used to count the num of total requests
+	MetricRequestsTotal = "total"
+
+	// MetricRequestsSuccess used to count the num of successful requests
+	MetricRequestsSuccess = "success"
 )
 
 // DataNode struct communicates with outside services and unioun all
 // services of data node.
 //
 // DataNode struct implements `types.Component`, `types.DataNode` interfaces.
-//  `masterService` holds a grpc client of master service.
-//  `dataService` holds a grpc client of data service.
+//  `rootCoord` holds a grpc client of root coordinator.
+//  `dataCoord` holds a grpc client of data service.
 //  `NodeID` is unique to each data node.
 //  `State` is current statement of this data node, indicating whether it's healthy.
 //
@@ -70,8 +77,8 @@ type DataNode struct {
 	clearSignal       chan UniqueID               // collection ID
 	segmentCache      *Cache
 
-	masterService types.MasterService
-	dataService   types.DataService
+	rootCoord types.RootCoord
+	dataCoord types.DataCoord
 
 	session *sessionutil.Session
 
@@ -90,10 +97,10 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 		Role:    typeutil.DataNodeRole,
 		watchDm: make(chan struct{}, 1),
 
-		masterService: nil,
-		dataService:   nil,
-		msFactory:     factory,
-		segmentCache:  newCache(),
+		rootCoord:    nil,
+		dataCoord:    nil,
+		msFactory:    factory,
+		segmentCache: newCache(),
 
 		vchan2SyncService: make(map[string]*dataSyncService),
 		vchan2FlushCh:     make(map[string]chan<- *flushMsg),
@@ -103,24 +110,24 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 	return node
 }
 
-// SetMasterServiceInterface sets master service's grpc client, error is returned if repeatedly set.
-func (node *DataNode) SetMasterServiceInterface(ms types.MasterService) error {
+// SetRootCoordInterface sets master service's grpc client, error is returned if repeatedly set.
+func (node *DataNode) SetRootCoordInterface(rc types.RootCoord) error {
 	switch {
-	case ms == nil, node.masterService != nil:
+	case rc == nil, node.rootCoord != nil:
 		return errors.New("Nil parameter or repeatly set")
 	default:
-		node.masterService = ms
+		node.rootCoord = rc
 		return nil
 	}
 }
 
-// SetDataServiceInterface sets data service's grpc client, error is returned if repeatedly set.
-func (node *DataNode) SetDataServiceInterface(ds types.DataService) error {
+// SetDataCoordInterface sets data service's grpc client, error is returned if repeatedly set.
+func (node *DataNode) SetDataCoordInterface(ds types.DataCoord) error {
 	switch {
-	case ds == nil, node.dataService != nil:
+	case ds == nil, node.dataCoord != nil:
 		return errors.New("Nil parameter or repeatly set")
 	default:
-		node.dataService = ds
+		node.dataCoord = ds
 		return nil
 	}
 }
@@ -156,9 +163,9 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 		return nil
 	}
 
-	replica := newReplica(node.masterService, vchan.CollectionID)
+	replica := newReplica(node.rootCoord, vchan.CollectionID)
 
-	var alloc allocatorInterface = newAllocator(node.masterService)
+	var alloc allocatorInterface = newAllocator(node.rootCoord)
 
 	log.Debug("Received Vchannel Info",
 		zap.Int("Unflushed Segment Number", len(vchan.GetUnflushedSegments())),
@@ -166,7 +173,7 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 	)
 
 	flushChan := make(chan *flushMsg, 100)
-	dataSyncService, err := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataService)
+	dataSyncService, err := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataCoord)
 	if err != nil {
 		return err
 	}
@@ -218,7 +225,7 @@ var FilterThreshold Timestamp
 // Start will update DataNode state to HEALTHY
 func (node *DataNode) Start() error {
 
-	rep, err := node.masterService.AllocTimestamp(node.ctx, &masterpb.AllocTimestampRequest{
+	rep, err := node.rootCoord.AllocTimestamp(node.ctx, &masterpb.AllocTimestampRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_RequestTSO,
 			MsgID:     0,
@@ -246,6 +253,7 @@ func (node *DataNode) UpdateStateCode(code internalpb.StateCode) {
 
 // WatchDmChannels create a new dataSyncService for every unique dmlVchannel name, ignore if dmlVchannel existed.
 func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
+	metrics.DataNodeWatchDmChannelsCounter.WithLabelValues(MetricRequestsTotal).Inc()
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
@@ -253,11 +261,11 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 	switch {
 	case node.State.Load() != internalpb.StateCode_Healthy:
 		status.Reason = fmt.Sprintf("DataNode %d not healthy, please re-send message", node.NodeID)
-		return status, errors.New(status.GetReason())
+		return status, nil
 
 	case len(in.GetVchannels()) == 0:
 		status.Reason = "Illegal request"
-		return status, errors.New(status.GetReason())
+		return status, nil
 
 	default:
 		for _, chanInfo := range in.GetVchannels() {
@@ -272,6 +280,7 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 
 		status.ErrorCode = commonpb.ErrorCode_Success
 		log.Debug("DataNode WatchDmChannels Done")
+		metrics.DataNodeWatchDmChannelsCounter.WithLabelValues(MetricRequestsSuccess).Inc()
 		return status, nil
 	}
 }
@@ -345,6 +354,7 @@ func (node *DataNode) ReadyToFlush() error {
 //
 //   There are 1 precondition: The segmentID in req is in ascending order.
 func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
+	metrics.DataNodeFlushSegmentsCounter.WithLabelValues(MetricRequestsTotal).Inc()
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
@@ -411,6 +421,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 	log.Debug("FlushSegments Done")
 
 	status.ErrorCode = commonpb.ErrorCode_Success
+	metrics.DataNodeFlushSegmentsCounter.WithLabelValues(MetricRequestsSuccess).Inc()
 	return status, nil
 }
 

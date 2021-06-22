@@ -21,7 +21,7 @@ import (
 	"time"
 
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
-	dsc "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
+	dsc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -130,33 +130,33 @@ func (s *Server) init() error {
 		panic(err)
 	}
 
-	if err := s.SetMasterService(rootCoord); err != nil {
+	if err := s.SetRootCoord(rootCoord); err != nil {
 		panic(err)
 	}
 	log.Debug("QueryCoord report RootCoord ready")
 
 	// --- Data service client ---
-	log.Debug("QueryCoord try to new DataService client", zap.Any("DataServiceAddress", Params.DataServiceAddress))
+	log.Debug("QueryService try to new DataCoord client", zap.Any("DataCoordAddress", Params.DataCoordAddress))
 
-	dataService := dsc.NewClient(qc.Params.MetaRootPath, qc.Params.EtcdEndpoints, 3*time.Second)
-	if err = dataService.Init(); err != nil {
-		log.Debug("QueryCoord DataServiceClient Init failed", zap.Error(err))
+	dataCoord := dsc.NewClient(qc.Params.MetaRootPath, qc.Params.EtcdEndpoints, 3*time.Second)
+	if err = dataCoord.Init(); err != nil {
+		log.Debug("QueryService DataCoordClient Init failed", zap.Error(err))
 		panic(err)
 	}
-	if err = dataService.Start(); err != nil {
-		log.Debug("QueryCoord DataServiceClient Start failed", zap.Error(err))
+	if err = dataCoord.Start(); err != nil {
+		log.Debug("QueryService DataCoordClient Start failed", zap.Error(err))
 		panic(err)
 	}
-	log.Debug("QueryCoord try to wait for DataService ready")
-	err = funcutil.WaitForComponentInitOrHealthy(s.loopCtx, dataService, "DataService", 1000000, time.Millisecond*200)
+	log.Debug("QueryService try to wait for DataCoord ready")
+	err = funcutil.WaitForComponentInitOrHealthy(s.loopCtx, dataCoord, "DataCoord", 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("QueryCoord wait for DataService ready failed", zap.Error(err))
+		log.Debug("QueryService wait for DataCoord ready failed", zap.Error(err))
 		panic(err)
 	}
-	if err := s.SetDataService(dataService); err != nil {
+	if err := s.SetDataCoord(dataCoord); err != nil {
 		panic(err)
 	}
-	log.Debug("QueryCoord report DataService ready")
+	log.Debug("Query coordinator report DataCoord ready")
 
 	s.queryCoord.UpdateStateCode(internalpb.StateCode_Initializing)
 	log.Debug("QueryCoord", zap.Any("State", internalpb.StateCode_Initializing))
@@ -215,12 +215,12 @@ func (s *Server) Stop() error {
 	return err
 }
 
-func (s *Server) SetMasterService(m types.MasterService) error {
+func (s *Server) SetRootCoord(m types.RootCoord) error {
 	s.queryCoord.SetRootCoord(m)
 	return nil
 }
 
-func (s *Server) SetDataService(d types.DataService) error {
+func (s *Server) SetDataCoord(d types.DataCoord) error {
 	s.queryCoord.SetDataCoord(d)
 	return nil
 }

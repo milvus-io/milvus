@@ -34,9 +34,9 @@ type historical struct {
 }
 
 func newHistorical(ctx context.Context,
-	rootCoord types.MasterService,
-	dataCoord types.DataService,
-	indexCoord types.IndexService,
+	rootCoord types.RootCoord,
+	dataCoord types.DataCoord,
+	indexCoord types.IndexCoord,
 	factory msgstream.Factory,
 	etcdKV *etcdkv.EtcdKV) *historical {
 	replica := newCollectionReplica(etcdKV)

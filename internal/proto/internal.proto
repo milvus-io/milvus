@@ -132,7 +132,8 @@ message SearchRequest {
   bytes placeholder_group = 7;
   common.DslType dsl_type = 8;
   bytes serialized_expr_plan = 9;
-  uint64 travel_timestamp = 10;
+  repeated int64 output_fields_id = 10;
+  uint64 travel_timestamp = 11;
 }
 
 message SearchResults {
@@ -140,7 +141,14 @@ message SearchResults {
   common.Status status = 2;
   string result_channelID = 3;
   string metric_type = 4;
+
   repeated bytes hits = 5;
+
+  // schema.SearchResultsData inside
+  bytes sliced_blob = 9;
+  int64 sliced_num_count = 10;
+  int64 sliced_offset = 11;
+
   repeated int64 sealed_segmentIDs_searched = 6;
   repeated string channelIDs_searched = 7;
   repeated int64 global_sealed_segmentIDs = 8;

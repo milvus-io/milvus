@@ -44,8 +44,8 @@ type indexLoader struct {
 	fieldIndexes   map[string][]*internalpb.IndexStats
 	fieldStatsChan chan []*internalpb.FieldStats
 
-	rootCoord  types.MasterService
-	indexCoord types.IndexService
+	rootCoord  types.RootCoord
+	indexCoord types.IndexCoord
 
 	kv kv.BaseKV // minio kv
 }
@@ -357,7 +357,7 @@ func (loader *indexLoader) getIndexPaths(indexBuildID UniqueID) ([]string, error
 	return pathResponse.FilePaths[0].IndexFilePaths, nil
 }
 
-func newIndexLoader(ctx context.Context, rootCoord types.MasterService, indexCoord types.IndexService, replica ReplicaInterface) *indexLoader {
+func newIndexLoader(ctx context.Context, rootCoord types.RootCoord, indexCoord types.IndexCoord, replica ReplicaInterface) *indexLoader {
 	option := &minioKV.Option{
 		Address:           Params.MinioEndPoint,
 		AccessKeyID:       Params.MinioAccessKeyID,

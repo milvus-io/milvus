@@ -14,6 +14,7 @@ const (
 	milvusNamespace    = "milvus"
 	subSystemRootCoord = "rootcoord"
 	subSystemDataCoord = "dataCoord"
+	subSystemDataNode  = "dataNode"
 )
 
 /*
@@ -242,14 +243,35 @@ var (
 	)
 )
 
-//RegisterDataCoord register DataService metrics
+//RegisterDataCoord register DataCoord metrics
 func RegisterDataCoord() {
 	prometheus.Register(DataCoordDataNodeList)
 }
 
+var (
+	// DataNodeFlushSegmentsCounter used to count the num of calls of FlushSegments
+	DataNodeFlushSegmentsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: subSystemDataNode,
+			Name:      "flush_segments_total",
+			Help:      "Counter of flush segments",
+		}, []string{"type"})
+
+	// DataNodeWatchDmChannelCounter used to count the num of calls of WatchDmChannels
+	DataNodeWatchDmChannelsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: subSystemDataNode,
+			Name:      "watch_dm_channels_total",
+			Help:      "Counter of watch dm channel",
+		}, []string{"type"})
+)
+
 //RegisterDataNode register DataNode metrics
 func RegisterDataNode() {
-
+	prometheus.Register(DataNodeFlushSegmentsCounter)
+	prometheus.Register(DataNodeWatchDmChannelsCounter)
 }
 
 //RegisterIndexCoord register IndexCoord metrics

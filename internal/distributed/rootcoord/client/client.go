@@ -17,6 +17,8 @@ import (
 	"fmt"
 	"time"
 
+	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -122,9 +124,16 @@ func (c *GrpcClient) connect() error {
 		go func() {
 			conn, err = grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 				grpc.WithUnaryInterceptor(
-					grpc_opentracing.UnaryClientInterceptor(opts...)),
+					grpc_middleware.ChainUnaryClient(
+						grpc_retry.UnaryClientInterceptor(),
+						grpc_opentracing.UnaryClientInterceptor(opts...),
+					)),
 				grpc.WithStreamInterceptor(
-					grpc_opentracing.StreamClientInterceptor(opts...)))
+					grpc_middleware.ChainStreamClient(
+						grpc_retry.StreamClientInterceptor(),
+						grpc_opentracing.StreamClientInterceptor(opts...),
+					)),
+			)
 			ch <- struct{}{}
 		}()
 		select {
@@ -174,14 +183,18 @@ func (c *GrpcClient) recall(caller func() (interface{}, error)) (interface{}, er
 	if err == nil {
 		return ret, nil
 	}
-	for i := 0; i < c.recallTry; i++ {
+	for i := 0; i < c.reconnTry; i++ {
 		err = c.connect()
 		if err == nil {
-			ret, err = caller()
-			if err == nil {
-				return ret, nil
-			}
+			break
 		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	ret, err = caller()
+	if err == nil {
+		return ret, nil
 	}
 	return ret, err
 }

@@ -29,8 +29,8 @@ import (
 	"google.golang.org/grpc"
 
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
-	dsc "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
-	isc "github.com/milvus-io/milvus/internal/distributed/indexservice/client"
+	dsc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
+	isc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	qsc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/log"
@@ -56,10 +56,10 @@ type Server struct {
 
 	grpcServer *grpc.Server
 
-	dataService   *dsc.Client
-	masterService *rcc.GrpcClient
-	indexService  *isc.Client
-	queryService  *qsc.Client
+	dataCoord    *dsc.Client
+	rootCoord    *rcc.GrpcClient
+	indexCoord   *isc.Client
+	queryService *qsc.Client
 
 	closer io.Closer
 }
@@ -102,32 +102,32 @@ func (s *Server) init() error {
 		return err
 	}
 	// --- QueryService ---
-	log.Debug("QueryNode start to new QueryServiceClient", zap.Any("QueryServiceAddress", Params.QueryServiceAddress))
-	queryService, err := qsc.NewClient(qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
+	log.Debug("QueryNode start to new QueryCoordClient", zap.Any("QueryCoordAddress", Params.QueryCoordAddress))
+	queryCoord, err := qsc.NewClient(qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
 	if err != nil {
-		log.Debug("QueryNode new QueryServiceClient failed", zap.Error(err))
+		log.Debug("QueryNode new QueryCoordClient failed", zap.Error(err))
 		panic(err)
 	}
 
-	if err = queryService.Init(); err != nil {
-		log.Debug("QueryNode QueryServiceClient Init failed", zap.Error(err))
+	if err = queryCoord.Init(); err != nil {
+		log.Debug("QueryNode QueryCoordClient Init failed", zap.Error(err))
 		panic(err)
 	}
 
-	if err = queryService.Start(); err != nil {
-		log.Debug("QueryNode QueryServiceClient Start failed", zap.Error(err))
+	if err = queryCoord.Start(); err != nil {
+		log.Debug("QueryNode QueryCoordClient Start failed", zap.Error(err))
 		panic(err)
 	}
 
-	log.Debug("QueryNode start to wait for QueryService ready")
-	err = funcutil.WaitForComponentInitOrHealthy(s.ctx, queryService, "QueryService", 1000000, time.Millisecond*200)
+	log.Debug("QueryNode start to wait for QueryCoord ready")
+	err = funcutil.WaitForComponentInitOrHealthy(s.ctx, queryCoord, "QueryCoord", 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("QueryNode wait for QueryService ready failed", zap.Error(err))
+		log.Debug("QueryNode wait for QueryCoord ready failed", zap.Error(err))
 		panic(err)
 	}
-	log.Debug("QueryNode report QueryService is ready")
+	log.Debug("QueryNode report QueryCoord is ready")
 
-	if err := s.SetQueryService(queryService); err != nil {
+	if err := s.SetQueryCoord(queryCoord); err != nil {
 		panic(err)
 	}
 
@@ -135,7 +135,7 @@ func (s *Server) init() error {
 	//ms.Params.Init()
 	addr := Params.MasterAddress
 
-	log.Debug("QueryNode start to new RootCoordClient", zap.Any("QueryServiceAddress", addr))
+	log.Debug("QueryNode start to new RootCoordClient", zap.Any("QueryCoordAddress", addr))
 	rootCoord, err := rcc.NewClient(s.ctx, qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
 	if err != nil {
 		log.Debug("QueryNode new RootCoordClient failed", zap.Error(err))
@@ -159,56 +159,56 @@ func (s *Server) init() error {
 	}
 	log.Debug("QueryNode report RootCoord is ready")
 
-	if err := s.SetMasterService(rootCoord); err != nil {
+	if err := s.SetRootCoord(rootCoord); err != nil {
 		panic(err)
 	}
 
-	// --- IndexService ---
-	log.Debug("Index service", zap.String("address", Params.IndexServiceAddress))
-	indexService := isc.NewClient(qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
+	// --- IndexCoord ---
+	log.Debug("Index coord", zap.String("address", Params.IndexServiceAddress))
+	indexCoord := isc.NewClient(qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
 
-	if err := indexService.Init(); err != nil {
-		log.Debug("QueryNode IndexServiceClient Init failed", zap.Error(err))
+	if err := indexCoord.Init(); err != nil {
+		log.Debug("QueryNode IndexCoordClient Init failed", zap.Error(err))
 		panic(err)
 	}
 
-	if err := indexService.Start(); err != nil {
-		log.Debug("QueryNode IndexServiceClient Start failed", zap.Error(err))
+	if err := indexCoord.Start(); err != nil {
+		log.Debug("QueryNode IndexCoordClient Start failed", zap.Error(err))
 		panic(err)
 	}
-	// wait IndexService healthy
-	log.Debug("QueryNode start to wait for IndexService ready")
-	err = funcutil.WaitForComponentHealthy(s.ctx, indexService, "IndexService", 1000000, time.Millisecond*200)
+	// wait IndexCoord healthy
+	log.Debug("QueryNode start to wait for IndexCoord ready")
+	err = funcutil.WaitForComponentHealthy(s.ctx, indexCoord, "IndexCoord", 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("QueryNode wait for IndexService ready failed", zap.Error(err))
+		log.Debug("QueryNode wait for IndexCoord ready failed", zap.Error(err))
 		panic(err)
 	}
-	log.Debug("QueryNode report IndexService is ready")
+	log.Debug("QueryNode report IndexCoord is ready")
 
-	if err := s.SetIndexService(indexService); err != nil {
+	if err := s.SetIndexCoord(indexCoord); err != nil {
 		panic(err)
 	}
 
-	// --- DataService ---
-	log.Debug("QueryNode start to new DataServiceClient", zap.Any("DataServiceAddress", Params.DataServiceAddress))
-	dataService := dsc.NewClient(qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
-	if err = dataService.Init(); err != nil {
-		log.Debug("QueryNode DataServiceClient Init failed", zap.Error(err))
+	// --- DataCoord ---
+	log.Debug("QueryNode start to new DataCoordClient", zap.Any("DataCoordAddress", Params.DataCoordAddress))
+	dataCoord := dsc.NewClient(qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
+	if err = dataCoord.Init(); err != nil {
+		log.Debug("QueryNode DataCoordClient Init failed", zap.Error(err))
 		panic(err)
 	}
-	if err = dataService.Start(); err != nil {
-		log.Debug("QueryNode DataServiceClient Start failed", zap.Error(err))
+	if err = dataCoord.Start(); err != nil {
+		log.Debug("QueryNode DataCoordClient Start failed", zap.Error(err))
 		panic(err)
 	}
-	log.Debug("QueryNode start to wait for DataService ready")
-	err = funcutil.WaitForComponentInitOrHealthy(s.ctx, dataService, "DataService", 1000000, time.Millisecond*200)
+	log.Debug("QueryNode start to wait for DataCoord ready")
+	err = funcutil.WaitForComponentInitOrHealthy(s.ctx, dataCoord, "DataCoord", 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("QueryNode wait for DataService ready failed", zap.Error(err))
+		log.Debug("QueryNode wait for DataCoord ready failed", zap.Error(err))
 		panic(err)
 	}
-	log.Debug("QueryNode report DataService is ready")
+	log.Debug("QueryNode report DataCoord is ready")
 
-	if err := s.SetDataService(dataService); err != nil {
+	if err := s.SetDataCoord(dataCoord); err != nil {
 		panic(err)
 	}
 
@@ -302,19 +302,19 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-func (s *Server) SetMasterService(rootCoord types.MasterService) error {
+func (s *Server) SetRootCoord(rootCoord types.RootCoord) error {
 	return s.querynode.SetRootCoord(rootCoord)
 }
 
-func (s *Server) SetQueryService(queryCoord types.QueryCoord) error {
+func (s *Server) SetQueryCoord(queryCoord types.QueryCoord) error {
 	return s.querynode.SetQueryCoord(queryCoord)
 }
 
-func (s *Server) SetIndexService(indexCoord types.IndexService) error {
+func (s *Server) SetIndexCoord(indexCoord types.IndexCoord) error {
 	return s.querynode.SetIndexCoord(indexCoord)
 }
 
-func (s *Server) SetDataService(dataCoord types.DataService) error {
+func (s *Server) SetDataCoord(dataCoord types.DataCoord) error {
 	return s.querynode.SetDataCoord(dataCoord)
 }
 

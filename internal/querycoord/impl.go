@@ -160,11 +160,11 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 	}
 	qc.scheduler.Enqueue([]task{loadCollectionTask})
 
-	//err := loadCollectionTask.WaitToFinish()
-	//if err != nil {
-	//	status.Reason = err.Error()
-	//	return status, err
-	//}
+	err := loadCollectionTask.WaitToFinish()
+	if err != nil {
+		status.Reason = err.Error()
+		return status, err
+	}
 	//qs.meta.setLoadCollection(collectionID, true)
 
 	log.Debug("LoadCollectionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID))
@@ -275,12 +275,12 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 		}
 		qc.scheduler.Enqueue([]task{loadPartitionTask})
 
-		//err := loadPartitionTask.WaitToFinish()
-		//if err != nil {
-		//	status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		//	status.Reason = err.Error()
-		//	return status, err
-		//}
+		err := loadPartitionTask.WaitToFinish()
+		if err != nil {
+			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			status.Reason = err.Error()
+			return status, err
+		}
 	}
 
 	status.ErrorCode = commonpb.ErrorCode_Success

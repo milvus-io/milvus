@@ -60,7 +60,7 @@ func TestQueryCoord_load(t *testing.T) {
 	assert.Nil(t, err)
 	service.Init()
 	service.Start()
-	service.SetRootCoord(NewMasterMock())
+	service.SetRootCoord(NewRootCoordMock())
 	service.SetDataCoord(NewDataMock())
 	registerNodeRequest := &querypb.RegisterNodeRequest{
 		Address: &commonpb.Address{},

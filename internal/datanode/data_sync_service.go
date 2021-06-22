@@ -35,7 +35,7 @@ type dataSyncService struct {
 	idAllocator  allocatorInterface
 	msFactory    msgstream.Factory
 	collectionID UniqueID
-	dataService  types.DataService
+	dataCoord    types.DataCoord
 	clearSignal  chan<- UniqueID
 }
 
@@ -46,7 +46,7 @@ func newDataSyncService(ctx context.Context,
 	factory msgstream.Factory,
 	vchan *datapb.VchannelInfo,
 	clearSignal chan<- UniqueID,
-	dataService types.DataService,
+	dataCoord types.DataCoord,
 
 ) (*dataSyncService, error) {
 
@@ -61,7 +61,7 @@ func newDataSyncService(ctx context.Context,
 		idAllocator:  alloc,
 		msFactory:    factory,
 		collectionID: vchan.GetCollectionID(),
-		dataService:  dataService,
+		dataCoord:    dataCoord,
 		clearSignal:  clearSignal,
 	}
 
@@ -139,7 +139,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 			StartPositions:    fu.startPositions,
 			Flushed:           fu.flushed,
 		}
-		rsp, err := dsService.dataService.SaveBinlogPaths(dsService.ctx, req)
+		rsp, err := dsService.dataCoord.SaveBinlogPaths(dsService.ctx, req)
 		if err != nil {
 			return fmt.Errorf(err.Error())
 		}

@@ -22,10 +22,10 @@ import (
 	"syscall"
 
 	"github.com/milvus-io/milvus/cmd/components"
+	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/datanode"
-	"github.com/milvus-io/milvus/internal/dataservice"
+	"github.com/milvus-io/milvus/internal/indexcoord"
 	"github.com/milvus-io/milvus/internal/indexnode"
-	"github.com/milvus-io/milvus/internal/indexservice"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/logutil"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -194,10 +194,10 @@ func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *compone
 
 	wg.Add(1)
 	go func() {
-		dataservice.Params.Init()
+		datacoord.Params.Init()
 
 		if !localMsg {
-			logutil.SetupLogger(&dataservice.Params.Log)
+			logutil.SetupLogger(&datacoord.Params.Log)
 			defer log.Sync()
 		}
 
@@ -251,10 +251,10 @@ func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *compon
 
 	wg.Add(1)
 	go func() {
-		indexservice.Params.Init()
+		indexcoord.Params.Init()
 
 		if !localMsg {
-			logutil.SetupLogger(&indexservice.Params.Log)
+			logutil.SetupLogger(&indexcoord.Params.Log)
 			defer log.Sync()
 		}
 

@@ -25,9 +25,9 @@ def gen_str_by_length(length=8):
     return "".join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
 
 
-def gen_int64_field(name=ct.default_int64_field_name, is_primary=False, description=ct.default_desc):
+def gen_int64_field(name=ct.default_int64_field_name, description=ct.default_desc, is_primary=False, **kwargs):
     int64_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.INT64, description=description,
-                                                               is_primary=is_primary)
+                                                               is_primary=is_primary, **kwargs)
     return int64_field
 
 
@@ -53,16 +53,16 @@ def gen_binary_vec_field(name=ct.default_binary_vec_field_name, is_primary=False
     return binary_vec_field
 
 
-def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name):
+def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name, auto_id=False):
     fields = [gen_int64_field(), gen_float_field(), gen_float_vec_field()]
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
-                                                                    primary_field=primary_field)
+                                                                    primary_field=primary_field, auto_id=auto_id)
     return schema
 
 
-def gen_collection_schema(fields, primary_field=None, description=ct.default_desc):
+def gen_collection_schema(fields, primary_field=None, description=ct.default_desc, auto_id=False):
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, primary_field=primary_field,
-                                                                    description=description)
+                                                                    description=description, auto_id=auto_id)
     return schema
 
 

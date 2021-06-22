@@ -52,9 +52,9 @@ type ProxyNode struct {
 
 	stateCode atomic.Value
 
-	masterCoord types.MasterService
-	indexCoord  types.IndexService
-	dataCoord   types.DataService
+	rootCoord    types.RootCoord
+	indexCoord   types.IndexCoord
+	dataCoord    types.DataCoord
 	queryCoord  types.QueryCoord
 
 	chMgr channelsMgr
@@ -100,37 +100,37 @@ func (node *ProxyNode) Register() error {
 }
 
 func (node *ProxyNode) Init() error {
-	// wait for dataservice state changed to Healthy
+	// wait for datacoord state changed to Healthy
 	if node.dataCoord != nil {
-		log.Debug("ProxyNode wait for dataService ready")
-		err := funcutil.WaitForComponentHealthy(node.ctx, node.dataCoord, "DataService", 1000000, time.Millisecond*200)
+		log.Debug("ProxyNode wait for dataCoord ready")
+		err := funcutil.WaitForComponentHealthy(node.ctx, node.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
 		if err != nil {
-			log.Debug("ProxyNode wait for dataService ready failed", zap.Error(err))
+			log.Debug("ProxyNode wait for dataCoord ready failed", zap.Error(err))
 			return err
 		}
-		log.Debug("ProxyNode dataService is ready")
+		log.Debug("ProxyNode dataCoord is ready")
 	}
 
 	// wait for queryService state changed to Healthy
 	if node.queryCoord != nil {
 		log.Debug("ProxyNode wait for queryService ready")
-		err := funcutil.WaitForComponentHealthy(node.ctx, node.queryCoord, "QueryService", 1000000, time.Millisecond*200)
+		err := funcutil.WaitForComponentHealthy(node.ctx, node.queryCoord, "QueryCoord", 1000000, time.Millisecond*200)
 		if err != nil {
-			log.Debug("ProxyNode wait for queryService ready failed", zap.Error(err))
+			log.Debug("ProxyNode wait for queryCoord ready failed", zap.Error(err))
 			return err
 		}
-		log.Debug("ProxyNode queryService is ready")
+		log.Debug("ProxyNode queryCoord is ready")
 	}
 
-	// wait for indexservice state changed to Healthy
+	// wait for indexcoord state changed to Healthy
 	if node.indexCoord != nil {
-		log.Debug("ProxyNode wait for indexService ready")
-		err := funcutil.WaitForComponentHealthy(node.ctx, node.indexCoord, "IndexService", 1000000, time.Millisecond*200)
+		log.Debug("ProxyNode wait for indexCoord ready")
+		err := funcutil.WaitForComponentHealthy(node.ctx, node.indexCoord, "IndexCoord", 1000000, time.Millisecond*200)
 		if err != nil {
-			log.Debug("ProxyNode wait for indexService ready failed", zap.Error(err))
+			log.Debug("ProxyNode wait for indexCoord ready failed", zap.Error(err))
 			return err
 		}
-		log.Debug("ProxyNode indexService is ready")
+		log.Debug("ProxyNode indexCoord is ready")
 	}
 
 	if node.queryCoord != nil {
@@ -152,12 +152,6 @@ func (node *ProxyNode) Init() error {
 		log.Debug("ProxyNode CreateQueryChannel success", zap.Any("RetrieveResultChannelNames", Params.RetrieveResultChannelNames))
 	}
 
-	// todo
-	//Params.InsertChannelNames, err = node.dataService.GetInsertChannels()
-	//if err != nil {
-	//	return err
-	//}
-
 	m := map[string]interface{}{
 		"PulsarAddress": Params.PulsarAddress,
 		"PulsarBufSize": 1024}
@@ -174,7 +168,7 @@ func (node *ProxyNode) Init() error {
 	node.idAllocator = idAllocator
 	node.idAllocator.PeerID = Params.ProxyID
 
-	tsoAllocator, err := NewTimestampAllocator(node.ctx, node.masterCoord, Params.ProxyID)
+	tsoAllocator, err := NewTimestampAllocator(node.ctx, node.rootCoord, Params.ProxyID)
 	if err != nil {
 		return err
 	}
@@ -200,7 +194,7 @@ func (node *ProxyNode) Init() error {
 			CollectionID:   collectionID,
 			TimeStamp:      0, // todo
 		}
-		resp, err := node.masterCoord.DescribeCollection(node.ctx, req)
+		resp, err := node.rootCoord.DescribeCollection(node.ctx, req)
 		if err != nil {
 			log.Warn("DescribeCollection", zap.Error(err))
 			return nil, err
@@ -319,7 +313,7 @@ func (node *ProxyNode) sendChannelsTimeTickLoop() {
 					DefaultTimestamp: maxTs,
 				}
 
-				status, err := node.masterCoord.UpdateChannelTimeTick(node.ctx, req)
+				status, err := node.rootCoord.UpdateChannelTimeTick(node.ctx, req)
 				if err != nil {
 					log.Warn("sendChannelsTimeTickLoop.UpdateChannelTimeTick", zap.Error(err))
 					continue
@@ -336,7 +330,7 @@ func (node *ProxyNode) sendChannelsTimeTickLoop() {
 }
 
 func (node *ProxyNode) Start() error {
-	err := InitMetaCache(node.masterCoord)
+	err := InitMetaCache(node.rootCoord)
 	if err != nil {
 		return err
 	}
@@ -408,18 +402,18 @@ func (node *ProxyNode) AddCloseCallback(callbacks ...func()) {
 	node.closeCallbacks = append(node.closeCallbacks, callbacks...)
 }
 
-func (node *ProxyNode) SetMasterClient(cli types.MasterService) {
-	node.masterCoord = cli
+func (node *ProxyNode) SetRootCoordClient(cli types.RootCoord) {
+	node.rootCoord = cli
 }
 
-func (node *ProxyNode) SetIndexServiceClient(cli types.IndexService) {
+func (node *ProxyNode) SetIndexCoordClient(cli types.IndexCoord) {
 	node.indexCoord = cli
 }
 
-func (node *ProxyNode) SetDataServiceClient(cli types.DataService) {
+func (node *ProxyNode) SetDataCoordClient(cli types.DataCoord) {
 	node.dataCoord = cli
 }
 
-func (node *ProxyNode) SetQueryServiceClient(cli types.QueryCoord) {
+func (node *ProxyNode) SetQueryCoordClient(cli types.QueryCoord) {
 	node.queryCoord = cli
 }

@@ -40,7 +40,7 @@ const (
 type segmentLoader struct {
 	historicalReplica ReplicaInterface
 
-	dataCoord types.DataService
+	dataCoord types.DataCoord
 
 	minioKV kv.BaseKV // minio minioKV
 	etcdKV  *etcdkv.EtcdKV
@@ -302,7 +302,7 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, binlogPaths
 	return nil
 }
 
-func newSegmentLoader(ctx context.Context, rootCoord types.MasterService, indexCoord types.IndexService, dataCoord types.DataService, replica ReplicaInterface, etcdKV *etcdkv.EtcdKV) *segmentLoader {
+func newSegmentLoader(ctx context.Context, rootCoord types.RootCoord, indexCoord types.IndexCoord, dataCoord types.DataCoord, replica ReplicaInterface, etcdKV *etcdkv.EtcdKV) *segmentLoader {
 	option := &minioKV.Option{
 		Address:           Params.MinioEndPoint,
 		AccessKeyID:       Params.MinioAccessKeyID,
