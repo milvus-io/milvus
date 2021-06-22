@@ -143,9 +143,9 @@ func (s *Server) init() error {
 	proxy.Params.IP = Params.IP
 	proxy.Params.NetworkAddress = Params.Address
 	// for purpose of ID Allocator
-	proxy.Params.MasterAddress = Params.MasterAddress
+	proxy.Params.RootCoordAddress = Params.RootCoordAddress
 
-	closer := trace.InitTracing(fmt.Sprintf("proxy_node ip: %s, port: %d", Params.IP, Params.Port))
+	closer := trace.InitTracing(fmt.Sprintf("proxy ip: %s, port: %d", Params.IP, Params.Port))
 	s.closer = closer
 
 	log.Debug("proxy", zap.String("proxy host", Params.IP))
@@ -167,7 +167,7 @@ func (s *Server) init() error {
 		return err
 	}
 
-	rootCoordAddr := Params.MasterAddress
+	rootCoordAddr := Params.RootCoordAddress
 	log.Debug("Proxy", zap.String("RootCoord address", rootCoordAddr))
 	timeout := 3 * time.Second
 	s.rootCoordClient, err = rcc.NewClient(s.ctx, proxy.Params.MetaRootPath, proxy.Params.EtcdEndpoints, timeout)
@@ -200,8 +200,8 @@ func (s *Server) init() error {
 	s.proxy.SetDataCoordClient(s.dataCoordClient)
 	log.Debug("set data coordinator address ...")
 
-	indexServiceAddr := Params.IndexServerAddress
-	log.Debug("Proxy", zap.String("index coordinator address", indexServiceAddr))
+	indexCoordAddr := Params.IndexCoordAddress
+	log.Debug("Proxy", zap.String("index coordinator address", indexCoordAddr))
 	s.indexCoordClient = grpcindexcoordclient.NewClient(proxy.Params.MetaRootPath, proxy.Params.EtcdEndpoints, timeout)
 
 	err = s.indexCoordClient.Init()

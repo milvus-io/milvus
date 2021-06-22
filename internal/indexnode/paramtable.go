@@ -42,7 +42,7 @@ type ParamTable struct {
 	NodeID int64
 	Alias  string
 
-	MasterAddress string
+	RootCoordAddress string
 
 	EtcdEndpoints []string
 	MetaRootPath  string

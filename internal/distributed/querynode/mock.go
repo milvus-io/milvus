@@ -72,11 +72,11 @@ indexParams:
 	indexParams["SLICE_SIZE"] = "4"
 */
 
-type MasterServiceMock struct {
+type RootCoordMock struct {
 	Count int
 }
 
-func (m *MasterServiceMock) DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
+func (m *RootCoordMock) DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
 	if m.Count < 20 {
 		m.Count++
 		return nil, errors.New("index not exit")

@@ -106,7 +106,7 @@ func (s *Server) init() error {
 	}
 
 	// --- Master Server Client ---
-	log.Debug("QueryCoord try to new RootCoord client", zap.Any("RootCoordAddress", Params.MasterAddress))
+	log.Debug("QueryCoord try to new RootCoord client", zap.Any("RootCoordAddress", Params.RootCoordAddress))
 	rootCoord, err := rcc.NewClient(s.loopCtx, qc.Params.MetaRootPath, qc.Params.EtcdEndpoints, 3*time.Second)
 	if err != nil {
 		log.Debug("QueryCoord try to new RootCoord client failed", zap.Error(err))

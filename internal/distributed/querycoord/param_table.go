@@ -24,36 +24,35 @@ type ParamTable struct {
 	paramtable.BaseTable
 	Port int
 
-	IndexServiceAddress string
-	MasterAddress       string
-	DataCoordAddress    string
+	IndexCoordAddress string
+	RootCoordAddress  string
+	DataCoordAddress  string
 }
 
 func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
 		pt.initPort()
-		pt.initMasterAddress()
-		pt.initIndexServiceAddress()
+		pt.initRootCoordAddress()
+		pt.initIndexCoordAddress()
 		pt.initDataCoordAddress()
-
 	})
 }
 
-func (pt *ParamTable) initMasterAddress() {
-	ret, err := pt.Load("_MasterAddress")
+func (pt *ParamTable) initRootCoordAddress() {
+	ret, err := pt.Load("_RootCoordAddress")
 	if err != nil {
 		panic(err)
 	}
-	pt.MasterAddress = ret
+	pt.RootCoordAddress = ret
 }
 
-func (pt *ParamTable) initIndexServiceAddress() {
-	ret, err := pt.Load("IndexServiceAddress")
+func (pt *ParamTable) initIndexCoordAddress() {
+	ret, err := pt.Load("IndexCoordAddress")
 	if err != nil {
 		panic(err)
 	}
-	pt.IndexServiceAddress = ret
+	pt.IndexCoordAddress = ret
 }
 
 func (pt *ParamTable) initDataCoordAddress() {

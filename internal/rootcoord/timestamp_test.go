@@ -101,11 +101,11 @@ func BenchmarkAllocTimestamp(b *testing.B) {
 	err = core.Register()
 	assert.Nil(b, err)
 
-	pnm := &proxyNodeMock{
+	pnm := &proxyMock{
 		collArray: make([]string, 0, 16),
 		mutex:     sync.Mutex{},
 	}
-	core.NewProxyClient = func(*sessionutil.Session) (types.ProxyNode, error) {
+	core.NewProxyClient = func(*sessionutil.Session) (types.Proxy, error) {
 		return pnm, nil
 	}
 

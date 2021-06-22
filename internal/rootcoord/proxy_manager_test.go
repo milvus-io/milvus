@@ -24,7 +24,7 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
-func TestProxyNodeManager(t *testing.T) {
+func TestProxyManager(t *testing.T) {
 	Params.Init()
 	cli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
 	assert.Nil(t, err)
@@ -60,7 +60,7 @@ func TestProxyNodeManager(t *testing.T) {
 		t.Log("get sessions", sess[0], sess[1])
 	}
 
-	pm, err := newProxyNodeManager(ctx, Params.EtcdEndpoints, f1)
+	pm, err := newProxyManager(ctx, Params.EtcdEndpoints, f1)
 	assert.Nil(t, err)
 	fa := func(sess *sessionutil.Session) {
 		assert.Equal(t, int64(101), sess.ServerID)
@@ -73,9 +73,9 @@ func TestProxyNodeManager(t *testing.T) {
 	pm.AddSession(fa)
 	pm.DelSession(fd)
 
-	err = pm.WatchProxyNode()
+	err = pm.WatchProxy()
 	assert.Nil(t, err)
-	t.Log("======== start watch proxy node ==========")
+	t.Log("======== start watch proxy ==========")
 
 	s2 := sessionutil.Session{
 		ServerID: 101,

@@ -27,7 +27,7 @@ import (
 	"go.uber.org/zap"
 )
 
-type proxyNodeManager struct {
+type proxyManager struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	lock        sync.Mutex
@@ -37,13 +37,13 @@ type proxyNodeManager struct {
 	delSessions []func(*sessionutil.Session)
 }
 
-func newProxyNodeManager(ctx context.Context, etcdEndpoints []string, fns ...func([]*sessionutil.Session)) (*proxyNodeManager, error) {
+func newProxyManager(ctx context.Context, etcdEndpoints []string, fns ...func([]*sessionutil.Session)) (*proxyManager, error) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
 	if err != nil {
 		return nil, err
 	}
 	ctx2, cancel2 := context.WithCancel(ctx)
-	p := &proxyNodeManager{
+	p := &proxyManager{
 		ctx:     ctx2,
 		cancel:  cancel2,
 		lock:    sync.Mutex{},
@@ -53,19 +53,19 @@ func newProxyNodeManager(ctx context.Context, etcdEndpoints []string, fns ...fun
 	return p, nil
 }
 
-func (p *proxyNodeManager) AddSession(fns ...func(*sessionutil.Session)) {
+func (p *proxyManager) AddSession(fns ...func(*sessionutil.Session)) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	p.addSessions = append(p.addSessions, fns...)
 }
 
-func (p *proxyNodeManager) DelSession(fns ...func(*sessionutil.Session)) {
+func (p *proxyManager) DelSession(fns ...func(*sessionutil.Session)) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	p.delSessions = append(p.delSessions, fns...)
 }
 
-func (p *proxyNodeManager) WatchProxyNode() error {
+func (p *proxyManager) WatchProxy() error {
 	ctx2, cancel := context.WithTimeout(p.ctx, RequestTimeout)
 	defer cancel()
 	resp, err := p.etcdCli.Get(
@@ -75,7 +75,7 @@ func (p *proxyNodeManager) WatchProxyNode() error {
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
 	)
 	if err != nil {
-		return fmt.Errorf("proxyNodeManager,watch proxy node failed, error = %w", err)
+		return fmt.Errorf("proxyManager, watch proxy failed, error = %w", err)
 	}
 	sessions := []*sessionutil.Session{}
 	for _, v := range resp.Kvs {
@@ -91,10 +91,10 @@ func (p *proxyNodeManager) WatchProxyNode() error {
 		f(sessions)
 	}
 	for _, s := range sessions {
-		metrics.RootCoordProxyNodeLister.WithLabelValues(metricProxyNode(s.ServerID)).Set(1)
+		metrics.RootCoordProxyLister.WithLabelValues(metricProxy(s.ServerID)).Set(1)
 	}
 	for _, s := range sessions {
-		log.Debug("Get proxy node", zap.Int64("node id", s.ServerID), zap.String("node addr", s.Address), zap.String("node name", s.ServerName))
+		log.Debug("Get proxy", zap.Int64("id", s.ServerID), zap.String("addr", s.Address), zap.String("name", s.ServerName))
 	}
 
 	rch := p.etcdCli.Watch(
@@ -114,7 +114,7 @@ func (p *proxyNodeManager) WatchProxyNode() error {
 				return
 			case wresp, ok := <-rch:
 				if !ok {
-					log.Debug("watch proxy node failed")
+					log.Debug("watch proxy failed")
 					return
 				}
 				for _, ev := range wresp.Events {
@@ -123,7 +123,7 @@ func (p *proxyNodeManager) WatchProxyNode() error {
 						sess := new(sessionutil.Session)
 						err := json.Unmarshal(ev.Kv.Value, sess)
 						if err != nil {
-							log.Debug("watch proxy node, unmarshal failed", zap.Error(err))
+							log.Debug("watch proxy, unmarshal failed", zap.Error(err))
 							continue
 						}
 						p.lock.Lock()
@@ -131,12 +131,12 @@ func (p *proxyNodeManager) WatchProxyNode() error {
 							f(sess)
 						}
 						p.lock.Unlock()
-						metrics.RootCoordProxyNodeLister.WithLabelValues(metricProxyNode(sess.ServerID)).Set(1)
+						metrics.RootCoordProxyLister.WithLabelValues(metricProxy(sess.ServerID)).Set(1)
 					case mvccpb.DELETE:
 						sess := new(sessionutil.Session)
 						err := json.Unmarshal(ev.PrevKv.Value, sess)
 						if err != nil {
-							log.Debug("watch proxy node, unmarshal failed", zap.Error(err))
+							log.Debug("watch proxy, unmarshal failed", zap.Error(err))
 							continue
 						}
 						p.lock.Lock()
@@ -144,7 +144,7 @@ func (p *proxyNodeManager) WatchProxyNode() error {
 							f(sess)
 						}
 						p.lock.Unlock()
-						metrics.RootCoordProxyNodeLister.WithLabelValues(metricProxyNode(sess.ServerID)).Set(0)
+						metrics.RootCoordProxyLister.WithLabelValues(metricProxy(sess.ServerID)).Set(0)
 					}
 				}
 			}
@@ -154,6 +154,6 @@ func (p *proxyNodeManager) WatchProxyNode() error {
 	return nil
 }
 
-func (p *proxyNodeManager) Stop() {
+func (p *proxyManager) Stop() {
 	p.cancel()
 }

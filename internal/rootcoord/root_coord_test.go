@@ -41,13 +41,13 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
-type proxyNodeMock struct {
-	types.ProxyNode
+type proxyMock struct {
+	types.Proxy
 	collArray []string
 	mutex     sync.Mutex
 }
 
-func (p *proxyNodeMock) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+func (p *proxyMock) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	p.collArray = append(p.collArray, request.CollectionName)
@@ -55,7 +55,7 @@ func (p *proxyNodeMock) InvalidateCollectionMetaCache(ctx context.Context, reque
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
 }
-func (p *proxyNodeMock) GetCollArray() []string {
+func (p *proxyMock) GetCollArray() []string {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	ret := make([]string, 0, len(p.collArray))
@@ -305,11 +305,11 @@ func TestMasterService(t *testing.T) {
 	_, err = etcdCli.Put(ctx, path.Join(sessKey, typeutil.ProxyRole+"-100"), string(pnb))
 	assert.Nil(t, err)
 
-	pnm := &proxyNodeMock{
+	pnm := &proxyMock{
 		collArray: make([]string, 0, 16),
 		mutex:     sync.Mutex{},
 	}
-	core.NewProxyClient = func(*sessionutil.Session) (types.ProxyNode, error) {
+	core.NewProxyClient = func(*sessionutil.Session) (types.Proxy, error) {
 		return pnm, nil
 	}
 
@@ -1469,15 +1469,15 @@ func TestMasterService(t *testing.T) {
 
 	t.Run("channel timetick", func(t *testing.T) {
 		const (
-			proxyNodeIDInvalid = 102
-			proxyNodeName0     = "proxynode_0"
-			proxyNodeName1     = "proxynode_1"
-			chanName0          = "c0"
-			chanName1          = "c1"
-			chanName2          = "c2"
-			ts0                = uint64(100)
-			ts1                = uint64(120)
-			ts2                = uint64(150)
+			proxyIDInvalid = 102
+			proxyName0     = "proxy_0"
+			proxyName1     = "proxy_1"
+			chanName0      = "c0"
+			chanName1      = "c1"
+			chanName2      = "c2"
+			ts0            = uint64(100)
+			ts1            = uint64(120)
+			ts2            = uint64(150)
 		)
 		p1 := sessionutil.Session{
 			ServerID: 100,
@@ -1529,7 +1529,7 @@ func TestMasterService(t *testing.T) {
 		msgInvalid := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_TimeTick,
-				SourceID: proxyNodeIDInvalid,
+				SourceID: proxyIDInvalid,
 			},
 			ChannelNames: []string{"test"},
 			Timestamps:   []uint64{0},
@@ -1539,7 +1539,7 @@ func TestMasterService(t *testing.T) {
 		time.Sleep(1 * time.Second)
 
 		// 2 proxy nodes, 1 master
-		assert.Equal(t, 3, core.chanTimeTick.GetProxyNodeNum())
+		assert.Equal(t, 3, core.chanTimeTick.GetProxyNum())
 
 		// 3 proxy node channels, 2 master channels
 		assert.Equal(t, 5, core.chanTimeTick.GetChanNum())
@@ -1790,7 +1790,7 @@ func TestMasterService2(t *testing.T) {
 	err = core.SetQueryCoord(qm)
 	assert.Nil(t, err)
 
-	core.NewProxyClient = func(*sessionutil.Session) (types.ProxyNode, error) {
+	core.NewProxyClient = func(*sessionutil.Session) (types.Proxy, error) {
 		return nil, nil
 	}
 
@@ -1961,7 +1961,7 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.NewProxyClient = func(*sessionutil.Session) (types.ProxyNode, error) {
+	c.NewProxyClient = func(*sessionutil.Session) (types.Proxy, error) {
 		return nil, nil
 	}
 	err = c.checkInit()

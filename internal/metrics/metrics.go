@@ -31,12 +31,12 @@ var (
 */
 
 var (
-	// RootCoordProxyNodeLister used to count the num of registered proxy nodes
-	RootCoordProxyNodeLister = prometheus.NewGaugeVec(
+	// RootCoordProxyLister used to count the num of registered proxy nodes
+	RootCoordProxyLister = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: subSystemRootCoord,
-			Name:      "list_of_proxy_node",
+			Name:      "list_of_proxy",
 			Help:      "List of proxy nodes which has register with etcd",
 		}, []string{"client_id"})
 
@@ -193,7 +193,7 @@ var (
 
 //RegisterRootCoord register RootCoord metrics
 func RegisterRootCoord() {
-	prometheus.MustRegister(RootCoordProxyNodeLister)
+	prometheus.MustRegister(RootCoordProxyLister)
 
 	// for grpc
 	prometheus.MustRegister(RootCoordCreateCollectionCounter)
@@ -525,7 +525,7 @@ var (
 		}, []string{"status"})
 )
 
-//RegisterProxy register ProxyNode metrics
+//RegisterProxy register Proxy metrics
 func RegisterProxy() {
 	prometheus.MustRegister(ProxyCreateCollectionCounter)
 	prometheus.MustRegister(ProxyDropCollectionCounter)

@@ -36,10 +36,10 @@ type ParamTable struct {
 	NetworkAddress string
 	Alias          string
 
-	EtcdEndpoints []string
-	MetaRootPath  string
-	MasterAddress string
-	PulsarAddress string
+	EtcdEndpoints    []string
+	MetaRootPath     string
+	RootCoordAddress string
+	PulsarAddress    string
 
 	ProxyID                    UniqueID
 	TimeTickInterval           time.Duration
@@ -65,7 +65,7 @@ var once sync.Once
 func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
-		err := pt.LoadYaml("advanced/proxy_node.yaml")
+		err := pt.LoadYaml("advanced/proxy.yaml")
 		if err != nil {
 			panic(err)
 		}
@@ -105,7 +105,7 @@ func (pt *ParamTable) initPulsarAddress() {
 }
 
 func (pt *ParamTable) initTimeTickInterval() {
-	intervalStr, err := pt.Load("proxyNode.timeTickInterval")
+	intervalStr, err := pt.Load("proxy.timeTickInterval")
 	if err != nil {
 		panic(err)
 	}
@@ -134,11 +134,11 @@ func (pt *ParamTable) initProxyTimeTickChannelNames() {
 }
 
 func (pt *ParamTable) initMsgStreamTimeTickBufSize() {
-	pt.MsgStreamTimeTickBufSize = pt.ParseInt64("proxyNode.msgStream.timeTick.bufSize")
+	pt.MsgStreamTimeTickBufSize = pt.ParseInt64("proxy.msgStream.timeTick.bufSize")
 }
 
 func (pt *ParamTable) initMaxNameLength() {
-	str, err := pt.Load("proxyNode.maxNameLength")
+	str, err := pt.Load("proxy.maxNameLength")
 	if err != nil {
 		panic(err)
 	}
@@ -150,7 +150,7 @@ func (pt *ParamTable) initMaxNameLength() {
 }
 
 func (pt *ParamTable) initMaxFieldNum() {
-	str, err := pt.Load("proxyNode.maxFieldNum")
+	str, err := pt.Load("proxy.maxFieldNum")
 	if err != nil {
 		panic(err)
 	}
@@ -162,7 +162,7 @@ func (pt *ParamTable) initMaxFieldNum() {
 }
 
 func (pt *ParamTable) initMaxDimension() {
-	str, err := pt.Load("proxyNode.maxDimension")
+	str, err := pt.Load("proxy.maxDimension")
 	if err != nil {
 		panic(err)
 	}
@@ -245,7 +245,7 @@ func (pt *ParamTable) initLogCfg() {
 		panic(err)
 	}
 	if len(rootPath) != 0 {
-		pt.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("proxynode%s.log", pt.Alias))
+		pt.Log.File.Filename = path.Join(rootPath, fmt.Sprintf("proxy-%s.log", pt.Alias))
 	} else {
 		pt.Log.File.Filename = ""
 	}

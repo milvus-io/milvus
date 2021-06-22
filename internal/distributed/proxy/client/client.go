@@ -64,7 +64,7 @@ func (c *Client) connect() error {
 		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
 		defer cancelFunc()
 		opts := trace.GetInterceptorOpts()
-		log.Debug("ProxyNodeClient try connect ", zap.String("address", c.addr))
+		log.Debug("ProxyClient try connect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
@@ -86,10 +86,10 @@ func (c *Client) connect() error {
 
 	err := retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
 	if err != nil {
-		log.Debug("ProxyNodeClient try connect failed", zap.Error(err))
+		log.Debug("ProxyClient try connect failed", zap.Error(err))
 		return err
 	}
-	log.Debug("ProxyNodeClient connect success")
+	log.Debug("ProxyClient connect success")
 	c.grpcClient = proxypb.NewProxyClient(c.conn)
 	return nil
 }

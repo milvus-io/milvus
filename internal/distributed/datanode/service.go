@@ -173,9 +173,9 @@ func (s *Server) init() error {
 		return err
 	}
 
-	// --- Master Server Client ---
+	// --- RootCoord Client ---
 	if s.newRootCoordClient != nil {
-		log.Debug("RootCoord address", zap.String("address", Params.MasterAddress))
+		log.Debug("RootCoord address", zap.String("address", Params.RootCoordAddress))
 		log.Debug("Init root coord client ...")
 		rootCoordClient, err := s.newRootCoordClient()
 		if err != nil {
