@@ -118,7 +118,7 @@ func (queue *BaseTaskQueue) AddActiveTask(t task) {
 	tID := t.ID()
 	_, ok := queue.activeTasks[tID]
 	if ok {
-		log.Debug("ProxyNode task with tID already in active task list!", zap.Any("ID", tID))
+		log.Debug("Proxy task with tID already in active task list!", zap.Any("ID", tID))
 	}
 
 	queue.activeTasks[tID] = t
@@ -133,7 +133,7 @@ func (queue *BaseTaskQueue) PopActiveTask(tID UniqueID) task {
 		return t
 	}
 
-	log.Debug("ProxyNode task not in active task list! ts", zap.Any("tID", tID))
+	log.Debug("Proxy task not in active task list! ts", zap.Any("tID", tID))
 	return t
 }
 
@@ -254,10 +254,10 @@ func (queue *DmTaskQueue) PopActiveTask(tID UniqueID) task {
 	t, ok := queue.activeTasks[tID]
 	if ok {
 		delete(queue.activeTasks, tID)
-		log.Debug("ProxyNode DmTaskQueue popPChanStats", zap.Any("tID", t.ID()))
+		log.Debug("Proxy DmTaskQueue popPChanStats", zap.Any("tID", t.ID()))
 		queue.popPChanStats(t)
 	} else {
-		log.Debug("ProxyNode task not in active task list!", zap.Any("tID", tID))
+		log.Debug("Proxy task not in active task list!", zap.Any("tID", tID))
 	}
 	return t
 }
@@ -268,7 +268,7 @@ func (queue *DmTaskQueue) addPChanStats(t task) error {
 		if err != nil {
 			return err
 		}
-		log.Debug("ProxyNode DmTaskQueue addPChanStats", zap.Any("tID", t.ID()),
+		log.Debug("Proxy DmTaskQueue addPChanStats", zap.Any("tID", t.ID()),
 			zap.Any("stats", stats))
 		queue.statsLock.Lock()
 		for cName, stat := range stats {
@@ -291,7 +291,7 @@ func (queue *DmTaskQueue) addPChanStats(t task) error {
 		}
 		queue.statsLock.Unlock()
 	} else {
-		return fmt.Errorf("ProxyNode addUnissuedTask reflect to dmlTask failed, tID:%v", t.ID())
+		return fmt.Errorf("Proxy addUnissuedTask reflect to dmlTask failed, tID:%v", t.ID())
 	}
 	return nil
 }
@@ -314,7 +314,7 @@ func (queue *DmTaskQueue) popPChanStats(t task) error {
 		}
 		queue.statsLock.Unlock()
 	} else {
-		return fmt.Errorf("ProxyNode DmTaskQueue popPChanStats reflect to dmlTask failed, tID:%v", t.ID())
+		return fmt.Errorf("Proxy DmTaskQueue popPChanStats reflect to dmlTask failed, tID:%v", t.ID())
 	}
 	return nil
 }
@@ -570,7 +570,7 @@ func newQueryResultBuf() *queryResultBuf {
 }
 
 func setContain(m1, m2 map[interface{}]struct{}) bool {
-	log.Debug("ProxyNode task_scheduler setContain", zap.Any("len(m1)", len(m1)),
+	log.Debug("Proxy task_scheduler setContain", zap.Any("len(m1)", len(m1)),
 		zap.Any("len(m2)", len(m2)))
 	if len(m1) < len(m2) {
 		return false
@@ -578,7 +578,7 @@ func setContain(m1, m2 map[interface{}]struct{}) bool {
 
 	for k2 := range m2 {
 		_, ok := m1[k2]
-		log.Debug("ProxyNode task_scheduler setContain", zap.Any("k2", fmt.Sprintf("%v", k2)),
+		log.Debug("Proxy task_scheduler setContain", zap.Any("k2", fmt.Sprintf("%v", k2)),
 			zap.Any("ok", ok))
 		if !ok {
 			return false
@@ -590,7 +590,7 @@ func setContain(m1, m2 map[interface{}]struct{}) bool {
 
 func (sr *resultBufHeader) readyToReduce() bool {
 	if sr.haveError {
-		log.Debug("ProxyNode searchResultBuf readyToReduce", zap.Any("haveError", true))
+		log.Debug("Proxy searchResultBuf readyToReduce", zap.Any("haveError", true))
 		return true
 	}
 
@@ -623,7 +623,7 @@ func (sr *resultBufHeader) readyToReduce() bool {
 
 	ret1 := setContain(sr.receivedVChansSet, sr.usedVChans)
 	ret2 := setContain(sr.receivedVChansSet, sr.usedChans)
-	log.Debug("ProxyNode searchResultBuf readyToReduce", zap.Any("receivedVChansSet", receivedVChansSetStrMap),
+	log.Debug("Proxy searchResultBuf readyToReduce", zap.Any("receivedVChansSet", receivedVChansSetStrMap),
 		zap.Any("usedVChans", usedVChansSetStrMap),
 		zap.Any("usedChans", usedChansSetStrMap),
 		zap.Any("receivedSealedSegmentIDsSet", sealedSegmentIDsStrMap),
@@ -634,7 +634,7 @@ func (sr *resultBufHeader) readyToReduce() bool {
 		return false
 	}
 	ret := setContain(sr.receivedSealedSegmentIDsSet, sr.receivedGlobalSegmentIDsSet)
-	log.Debug("ProxyNode searchResultBuf readyToReduce", zap.Any("ret", ret))
+	log.Debug("Proxy searchResultBuf readyToReduce", zap.Any("ret", ret))
 	return ret
 }
 
@@ -678,7 +678,7 @@ func (sched *TaskScheduler) collectResultLoop() {
 
 	queryResultMsgStream, _ := sched.msFactory.NewQueryMsgStream(sched.ctx)
 	queryResultMsgStream.AsConsumer(Params.SearchResultChannelNames, Params.ProxySubName)
-	log.Debug("ProxyNode", zap.Strings("SearchResultChannelNames", Params.SearchResultChannelNames),
+	log.Debug("Proxy", zap.Strings("SearchResultChannelNames", Params.SearchResultChannelNames),
 		zap.Any("ProxySubName", Params.ProxySubName))
 
 	queryResultMsgStream.Start()
@@ -693,7 +693,7 @@ func (sched *TaskScheduler) collectResultLoop() {
 		select {
 		case msgPack, ok := <-queryResultMsgStream.Chan():
 			if !ok {
-				log.Debug("ProxyNode collectResultLoop exit Chan closed")
+				log.Debug("Proxy collectResultLoop exit Chan closed")
 				return
 			}
 			if msgPack == nil {
@@ -712,13 +712,13 @@ func (sched *TaskScheduler) collectResultLoop() {
 						ignoreThisResult = false
 					}
 					if ignoreThisResult {
-						log.Debug("ProxyNode collectResultLoop Got a SearchResultMsg, but we should ignore", zap.Any("ReqID", reqID))
+						log.Debug("Proxy collectResultLoop Got a SearchResultMsg, but we should ignore", zap.Any("ReqID", reqID))
 						continue
 					}
 					t := sched.getTaskByReqID(reqID)
-					log.Debug("ProxyNode collectResultLoop Got a SearchResultMsg", zap.Any("ReqID", reqID), zap.Any("t", t))
+					log.Debug("Proxy collectResultLoop Got a SearchResultMsg", zap.Any("ReqID", reqID), zap.Any("t", t))
 					if t == nil {
-						log.Debug("ProxyNode collectResultLoop GetTaskByReqID failed", zap.String("reqID", reqIDStr))
+						log.Debug("Proxy collectResultLoop GetTaskByReqID failed", zap.String("reqID", reqIDStr))
 						delete(searchResultBufs, reqID)
 						searchResultBufFlags[reqID] = true
 						continue
@@ -726,7 +726,7 @@ func (sched *TaskScheduler) collectResultLoop() {
 
 					st, ok := t.(*SearchTask)
 					if !ok {
-						log.Debug("ProxyNode collectResultLoop type assert t as SearchTask failed", zap.Any("t", t))
+						log.Debug("Proxy collectResultLoop type assert t as SearchTask failed", zap.Any("t", t))
 						delete(searchResultBufs, reqID)
 						searchResultBufFlags[reqID] = true
 						continue
@@ -736,7 +736,7 @@ func (sched *TaskScheduler) collectResultLoop() {
 					if !ok {
 						resultBuf = newSearchResultBuf()
 						vchans, err := st.getVChannels()
-						log.Debug("ProxyNode collectResultLoop, first receive", zap.Any("reqID", reqID), zap.Any("vchans", vchans),
+						log.Debug("Proxy collectResultLoop, first receive", zap.Any("reqID", reqID), zap.Any("vchans", vchans),
 							zap.Error(err))
 						if err != nil {
 							delete(searchResultBufs, reqID)
@@ -746,7 +746,7 @@ func (sched *TaskScheduler) collectResultLoop() {
 							resultBuf.usedVChans[vchan] = struct{}{}
 						}
 						pchans, err := st.getChannels()
-						log.Debug("ProxyNode collectResultLoop, first receive", zap.Any("reqID", reqID), zap.Any("pchans", pchans),
+						log.Debug("Proxy collectResultLoop, first receive", zap.Any("reqID", reqID), zap.Any("pchans", pchans),
 							zap.Error(err))
 						if err != nil {
 							delete(searchResultBufs, reqID)
@@ -762,11 +762,11 @@ func (sched *TaskScheduler) collectResultLoop() {
 					//t := sched.getTaskByReqID(reqID)
 					{
 						colName := t.(*SearchTask).query.CollectionName
-						log.Debug("ProxyNode collectResultLoop", zap.String("collection name", colName), zap.String("reqID", reqIDStr), zap.Int("answer cnt", len(searchResultBufs[reqID].resultBuf)))
+						log.Debug("Proxy collectResultLoop", zap.String("collection name", colName), zap.String("reqID", reqIDStr), zap.Int("answer cnt", len(searchResultBufs[reqID].resultBuf)))
 					}
 
 					if resultBuf.readyToReduce() {
-						log.Debug("ProxyNode collectResultLoop readyToReduce and assign to reduce")
+						log.Debug("Proxy collectResultLoop readyToReduce and assign to reduce")
 						searchResultBufFlags[reqID] = true
 						st.resultBuf <- resultBuf.resultBuf
 						delete(searchResultBufs, reqID)
@@ -779,7 +779,7 @@ func (sched *TaskScheduler) collectResultLoop() {
 					//reqIDStr := strconv.FormatInt(reqID, 10)
 					//t := sched.getTaskByReqID(reqID)
 					//if t == nil {
-					//	log.Debug("proxynode", zap.String("RetrieveResult GetTaskByReqID failed, reqID = ", reqIDStr))
+					//	log.Debug("proxy", zap.String("RetrieveResult GetTaskByReqID failed, reqID = ", reqIDStr))
 					//	delete(queryResultBufs, reqID)
 					//	continue
 					//}
@@ -814,13 +814,13 @@ func (sched *TaskScheduler) collectResultLoop() {
 						ignoreThisResult = false
 					}
 					if ignoreThisResult {
-						log.Debug("ProxyNode collectResultLoop Got a queryResultMsg, but we should ignore", zap.Any("ReqID", reqID))
+						log.Debug("Proxy collectResultLoop Got a queryResultMsg, but we should ignore", zap.Any("ReqID", reqID))
 						continue
 					}
 					t := sched.getTaskByReqID(reqID)
-					log.Debug("ProxyNode collectResultLoop Got a queryResultMsg", zap.Any("ReqID", reqID), zap.Any("t", t))
+					log.Debug("Proxy collectResultLoop Got a queryResultMsg", zap.Any("ReqID", reqID), zap.Any("t", t))
 					if t == nil {
-						log.Debug("ProxyNode collectResultLoop GetTaskByReqID failed", zap.String("reqID", reqIDStr))
+						log.Debug("Proxy collectResultLoop GetTaskByReqID failed", zap.String("reqID", reqIDStr))
 						delete(queryResultBufs, reqID)
 						queryResultBufFlags[reqID] = true
 						continue
@@ -828,7 +828,7 @@ func (sched *TaskScheduler) collectResultLoop() {
 
 					st, ok := t.(*RetrieveTask)
 					if !ok {
-						log.Debug("ProxyNode collectResultLoop type assert t as RetrieveTask failed", zap.Any("t", t))
+						log.Debug("Proxy collectResultLoop type assert t as RetrieveTask failed", zap.Any("t", t))
 						delete(queryResultBufs, reqID)
 						queryResultBufFlags[reqID] = true
 						continue
@@ -838,7 +838,7 @@ func (sched *TaskScheduler) collectResultLoop() {
 					if !ok {
 						resultBuf = newQueryResultBuf()
 						vchans, err := st.getVChannels()
-						log.Debug("ProxyNode collectResultLoop, first receive", zap.Any("reqID", reqID), zap.Any("vchans", vchans),
+						log.Debug("Proxy collectResultLoop, first receive", zap.Any("reqID", reqID), zap.Any("vchans", vchans),
 							zap.Error(err))
 						if err != nil {
 							delete(queryResultBufs, reqID)
@@ -848,7 +848,7 @@ func (sched *TaskScheduler) collectResultLoop() {
 							resultBuf.usedVChans[vchan] = struct{}{}
 						}
 						pchans, err := st.getChannels()
-						log.Debug("ProxyNode collectResultLoop, first receive", zap.Any("reqID", reqID), zap.Any("pchans", pchans),
+						log.Debug("Proxy collectResultLoop, first receive", zap.Any("reqID", reqID), zap.Any("pchans", pchans),
 							zap.Error(err))
 						if err != nil {
 							delete(queryResultBufs, reqID)
@@ -864,11 +864,11 @@ func (sched *TaskScheduler) collectResultLoop() {
 					//t := sched.getTaskByReqID(reqID)
 					{
 						colName := t.(*RetrieveTask).retrieve.CollectionName
-						log.Debug("ProxyNode collectResultLoop", zap.String("collection name", colName), zap.String("reqID", reqIDStr), zap.Int("answer cnt", len(queryResultBufs[reqID].resultBuf)))
+						log.Debug("Proxy collectResultLoop", zap.String("collection name", colName), zap.String("reqID", reqIDStr), zap.Int("answer cnt", len(queryResultBufs[reqID].resultBuf)))
 					}
 
 					if resultBuf.readyToReduce() {
-						log.Debug("ProxyNode collectResultLoop readyToReduce and assign to reduce")
+						log.Debug("Proxy collectResultLoop readyToReduce and assign to reduce")
 						queryResultBufFlags[reqID] = true
 						st.resultBuf <- resultBuf.resultBuf
 						delete(queryResultBufs, reqID)
@@ -877,7 +877,7 @@ func (sched *TaskScheduler) collectResultLoop() {
 				}
 			}
 		case <-sched.ctx.Done():
-			log.Debug("ProxyNode collectResultLoop is closed ...")
+			log.Debug("Proxy collectResultLoop is closed ...")
 			return
 		}
 	}

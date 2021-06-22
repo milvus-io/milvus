@@ -33,11 +33,11 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-func (node *ProxyNode) UpdateStateCode(code internalpb.StateCode) {
+func (node *Proxy) UpdateStateCode(code internalpb.StateCode) {
 	node.stateCode.Store(code)
 }
 
-func (node *ProxyNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (node *Proxy) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	stats := &internalpb.ComponentStates{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -54,14 +54,14 @@ func (node *ProxyNode) GetComponentStates(ctx context.Context) (*internalpb.Comp
 	}
 	info := &internalpb.ComponentInfo{
 		NodeID:    Params.ProxyID,
-		Role:      typeutil.ProxyNodeRole,
+		Role:      typeutil.ProxyRole,
 		StateCode: code,
 	}
 	stats.State = info
 	return stats, nil
 }
 
-func (node *ProxyNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (node *Proxy) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -71,7 +71,7 @@ func (node *ProxyNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.Stri
 	}, nil
 }
 
-func (node *ProxyNode) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	log.Debug("InvalidateCollectionMetaCache",
 		zap.String("role", Params.RoleName),
 		zap.String("db", request.DbName),
@@ -92,7 +92,7 @@ func (node *ProxyNode) InvalidateCollectionMetaCache(ctx context.Context, reques
 	}, nil
 }
 
-func (node *ProxyNode) ReleaseDQLMessageStream(ctx context.Context, request *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
+func (node *Proxy) ReleaseDQLMessageStream(ctx context.Context, request *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
 	log.Debug("ReleaseDQLMessageStream",
 		zap.Any("role", Params.RoleName),
 		zap.Any("db", request.DbID),
@@ -115,7 +115,7 @@ func (node *ProxyNode) ReleaseDQLMessageStream(ctx context.Context, request *pro
 	}, nil
 }
 
-func (node *ProxyNode) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
+func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
@@ -164,7 +164,7 @@ func (node *ProxyNode) CreateCollection(ctx context.Context, request *milvuspb.C
 	return cct.result, nil
 }
 
-func (node *ProxyNode) DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
@@ -212,7 +212,7 @@ func (node *ProxyNode) DropCollection(ctx context.Context, request *milvuspb.Dro
 	return dct.result, nil
 }
 
-func (node *ProxyNode) HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
+func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.BoolResponse{
 			Status: unhealthyStatus(),
@@ -264,7 +264,7 @@ func (node *ProxyNode) HasCollection(ctx context.Context, request *milvuspb.HasC
 	return hct.result, nil
 }
 
-func (node *ProxyNode) LoadCollection(ctx context.Context, request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
+func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
@@ -310,7 +310,7 @@ func (node *ProxyNode) LoadCollection(ctx context.Context, request *milvuspb.Loa
 	return lct.result, nil
 }
 
-func (node *ProxyNode) ReleaseCollection(ctx context.Context, request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
@@ -357,7 +357,7 @@ func (node *ProxyNode) ReleaseCollection(ctx context.Context, request *milvuspb.
 	return rct.result, nil
 }
 
-func (node *ProxyNode) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.DescribeCollectionResponse{
 			Status: unhealthyStatus(),
@@ -409,7 +409,7 @@ func (node *ProxyNode) DescribeCollection(ctx context.Context, request *milvuspb
 	return dct.result, nil
 }
 
-func (node *ProxyNode) GetCollectionStatistics(ctx context.Context, request *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
+func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.GetCollectionStatisticsResponse{
 			Status: unhealthyStatus(),
@@ -461,7 +461,7 @@ func (node *ProxyNode) GetCollectionStatistics(ctx context.Context, request *mil
 	return g.result, nil
 }
 
-func (node *ProxyNode) ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
+func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.ShowCollectionsResponse{
 			Status: unhealthyStatus(),
@@ -512,7 +512,7 @@ func (node *ProxyNode) ShowCollections(ctx context.Context, request *milvuspb.Sh
 	return sct.result, nil
 }
 
-func (node *ProxyNode) CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
+func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
@@ -560,7 +560,7 @@ func (node *ProxyNode) CreatePartition(ctx context.Context, request *milvuspb.Cr
 	return cpt.result, nil
 }
 
-func (node *ProxyNode) DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
+func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
@@ -609,7 +609,7 @@ func (node *ProxyNode) DropPartition(ctx context.Context, request *milvuspb.Drop
 	return dpt.result, nil
 }
 
-func (node *ProxyNode) HasPartition(ctx context.Context, request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
+func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.BoolResponse{
 			Status: unhealthyStatus(),
@@ -666,7 +666,7 @@ func (node *ProxyNode) HasPartition(ctx context.Context, request *milvuspb.HasPa
 	return hpt.result, nil
 }
 
-func (node *ProxyNode) LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitionsRequest) (*commonpb.Status, error) {
+func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitionsRequest) (*commonpb.Status, error) {
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
@@ -714,7 +714,7 @@ func (node *ProxyNode) LoadPartitions(ctx context.Context, request *milvuspb.Loa
 	return lpt.result, nil
 }
 
-func (node *ProxyNode) ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionsRequest) (*commonpb.Status, error) {
+func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
@@ -762,7 +762,7 @@ func (node *ProxyNode) ReleasePartitions(ctx context.Context, request *milvuspb.
 	return rpt.result, nil
 }
 
-func (node *ProxyNode) GetPartitionStatistics(ctx context.Context, request *milvuspb.GetPartitionStatisticsRequest) (*milvuspb.GetPartitionStatisticsResponse, error) {
+func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb.GetPartitionStatisticsRequest) (*milvuspb.GetPartitionStatisticsResponse, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.GetPartitionStatisticsResponse{
 			Status: unhealthyStatus(),
@@ -816,7 +816,7 @@ func (node *ProxyNode) GetPartitionStatistics(ctx context.Context, request *milv
 	return g.result, nil
 }
 
-func (node *ProxyNode) ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.ShowPartitionsResponse{
 			Status: unhealthyStatus(),
@@ -869,7 +869,7 @@ func (node *ProxyNode) ShowPartitions(ctx context.Context, request *milvuspb.Sho
 	return spt.result, nil
 }
 
-func (node *ProxyNode) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
+func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
@@ -919,7 +919,7 @@ func (node *ProxyNode) CreateIndex(ctx context.Context, request *milvuspb.Create
 	return cit.result, nil
 }
 
-func (node *ProxyNode) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
+func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.DescribeIndexResponse{
 			Status: unhealthyStatus(),
@@ -979,7 +979,7 @@ func (node *ProxyNode) DescribeIndex(ctx context.Context, request *milvuspb.Desc
 	return dit.result, nil
 }
 
-func (node *ProxyNode) DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
+func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
@@ -1029,7 +1029,7 @@ func (node *ProxyNode) DropIndex(ctx context.Context, request *milvuspb.DropInde
 
 // GetIndexBuildProgress gets index build progress with filed_name and index_name.
 // IndexRows is the num of indexed rows. And TotalRows is the total number of segment rows.
-func (node *ProxyNode) GetIndexBuildProgress(ctx context.Context, request *milvuspb.GetIndexBuildProgressRequest) (*milvuspb.GetIndexBuildProgressResponse, error) {
+func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.GetIndexBuildProgressRequest) (*milvuspb.GetIndexBuildProgressResponse, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.GetIndexBuildProgressResponse{
 			Status: unhealthyStatus(),
@@ -1089,7 +1089,7 @@ func (node *ProxyNode) GetIndexBuildProgress(ctx context.Context, request *milvu
 	return gibpt.result, nil
 }
 
-func (node *ProxyNode) GetIndexState(ctx context.Context, request *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error) {
+func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.GetIndexStateResponse{
 			Status: unhealthyStatus(),
@@ -1146,7 +1146,7 @@ func (node *ProxyNode) GetIndexState(ctx context.Context, request *milvuspb.GetI
 	return dipt.result, nil
 }
 
-func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
+func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.MutationResult{
 			Status: unhealthyStatus(),
@@ -1244,7 +1244,7 @@ func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertReque
 	return it.result, nil
 }
 
-func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.SearchResults{
 			Status: unhealthyStatus(),
@@ -1322,7 +1322,7 @@ func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchReque
 	return qt.result, nil
 }
 
-func (node *ProxyNode) Retrieve(ctx context.Context, request *milvuspb.RetrieveRequest) (*milvuspb.RetrieveResults, error) {
+func (node *Proxy) Retrieve(ctx context.Context, request *milvuspb.RetrieveRequest) (*milvuspb.RetrieveResults, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.RetrieveResults{
 			Status: unhealthyStatus(),
@@ -1386,7 +1386,7 @@ func (node *ProxyNode) Retrieve(ctx context.Context, request *milvuspb.RetrieveR
 	return rt.result, nil
 }
 
-func (node *ProxyNode) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*commonpb.Status, error) {
+func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*commonpb.Status, error) {
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
@@ -1432,7 +1432,7 @@ func (node *ProxyNode) Flush(ctx context.Context, request *milvuspb.FlushRequest
 	return ft.result, nil
 }
 
-func (node *ProxyNode) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.QueryResults{
 			Status: unhealthyStatus(),
@@ -1559,11 +1559,11 @@ func (node *ProxyNode) Query(ctx context.Context, request *milvuspb.QueryRequest
 
 }
 
-func (node *ProxyNode) GetDdChannel(ctx context.Context, request *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {
+func (node *Proxy) GetDdChannel(ctx context.Context, request *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {
 	panic("implement me")
 }
 
-func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error) {
+func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error) {
 	log.Debug("GetPersistentSegmentInfo",
 		zap.String("role", Params.RoleName),
 		zap.String("db", req.DbName),
@@ -1616,7 +1616,7 @@ func (node *ProxyNode) GetPersistentSegmentInfo(ctx context.Context, req *milvus
 	return resp, nil
 }
 
-func (node *ProxyNode) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQuerySegmentInfoRequest) (*milvuspb.GetQuerySegmentInfoResponse, error) {
+func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQuerySegmentInfoRequest) (*milvuspb.GetQuerySegmentInfoResponse, error) {
 	log.Debug("GetQuerySegmentInfo",
 		zap.String("role", Params.RoleName),
 		zap.String("db", req.DbName),
@@ -1674,7 +1674,7 @@ func (node *ProxyNode) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.Ge
 	return resp, nil
 }
 
-func (node *ProxyNode) getSegmentsOfCollection(ctx context.Context, dbName string, collectionName string) ([]UniqueID, error) {
+func (node *Proxy) getSegmentsOfCollection(ctx context.Context, dbName string, collectionName string) ([]UniqueID, error) {
 	describeCollectionResponse, err := node.rootCoord.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DescribeCollection,
@@ -1733,7 +1733,7 @@ func (node *ProxyNode) getSegmentsOfCollection(ctx context.Context, dbName strin
 	return ret, nil
 }
 
-func (node *ProxyNode) Dummy(ctx context.Context, req *milvuspb.DummyRequest) (*milvuspb.DummyResponse, error) {
+func (node *Proxy) Dummy(ctx context.Context, req *milvuspb.DummyRequest) (*milvuspb.DummyResponse, error) {
 	failedResponse := &milvuspb.DummyResponse{
 		Response: `{"status": "fail"}`,
 	}
@@ -1781,18 +1781,18 @@ func (node *ProxyNode) Dummy(ctx context.Context, req *milvuspb.DummyRequest) (*
 	return failedResponse, nil
 }
 
-func (node *ProxyNode) RegisterLink(ctx context.Context, req *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error) {
+func (node *Proxy) RegisterLink(ctx context.Context, req *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	log.Debug("RegisterLink",
 		zap.String("role", Params.RoleName),
-		zap.Any("state code of proxynode", code))
+		zap.Any("state code of proxy", code))
 
 	if code != internalpb.StateCode_Healthy {
 		return &milvuspb.RegisterLinkResponse{
 			Address: nil,
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "proxy node not healthy",
+				Reason:    "proxy not healthy",
 			},
 		}, nil
 	}
@@ -1805,8 +1805,8 @@ func (node *ProxyNode) RegisterLink(ctx context.Context, req *milvuspb.RegisterL
 	}, nil
 }
 
-// checkHealthy checks proxy node state is Healthy
-func (node *ProxyNode) checkHealthy() bool {
+// checkHealthy checks proxy state is Healthy
+func (node *Proxy) checkHealthy() bool {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	return code == internalpb.StateCode_Healthy
 }
@@ -1814,6 +1814,6 @@ func (node *ProxyNode) checkHealthy() bool {
 func unhealthyStatus() *commonpb.Status {
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		Reason:    "proxy node not healthy",
+		Reason:    "proxy not healthy",
 	}
 }

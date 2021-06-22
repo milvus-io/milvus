@@ -93,7 +93,7 @@ func (ticker *channelsTimeTickerImpl) initCurrents(current Timestamp) {
 func (ticker *channelsTimeTickerImpl) tick() error {
 	now, err := ticker.tso.AllocOne()
 	if err != nil {
-		log.Warn("ProxyNode channelsTimeTickerImpl failed to get ts from tso", zap.Error(err))
+		log.Warn("Proxy channelsTimeTickerImpl failed to get ts from tso", zap.Error(err))
 		return err
 	}
 	//nowPTime, _ := tsoutil.ParseTS(now)
@@ -106,14 +106,14 @@ func (ticker *channelsTimeTickerImpl) tick() error {
 
 	stats, err := ticker.getStatisticsFunc()
 	if err != nil {
-		log.Debug("ProxyNode channelsTimeTickerImpl failed to getStatistics", zap.Error(err))
+		log.Debug("Proxy channelsTimeTickerImpl failed to getStatistics", zap.Error(err))
 	}
 
 	for pchan := range ticker.currents {
 		current := ticker.currents[pchan]
 		//currentPTime, _ := tsoutil.ParseTS(current)
 		stat, ok := stats[pchan]
-		//log.Debug("ProxyNode channelsTimeTickerImpl", zap.Any("pchan", pchan),
+		//log.Debug("Proxy channelsTimeTickerImpl", zap.Any("pchan", pchan),
 		//	zap.Any("TaskInQueue", ok),
 		//	zap.Any("current", currentPTime),
 		//	zap.Any("now", nowPTime))
@@ -136,7 +136,7 @@ func (ticker *channelsTimeTickerImpl) tick() error {
 				}
 				ticker.currents[pchan] = next
 				//nextPTime, _ := tsoutil.ParseTS(next)
-				//log.Debug("ProxyNode channelsTimeTickerImpl",
+				//log.Debug("Proxy channelsTimeTickerImpl",
 				//	zap.Any("pchan", pchan),
 				//	zap.Any("minPTime", minPTime),
 				//	zap.Any("maxPTime", maxPTime),

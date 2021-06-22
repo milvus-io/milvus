@@ -294,7 +294,7 @@ func (sa *SegIDAssigner) syncSegments() (bool, error) {
 	sa.reduceSegReqs()
 	req := &datapb.AssignSegmentIDRequest{
 		NodeID:            sa.PeerID,
-		PeerRole:          typeutil.ProxyNodeRole,
+		PeerRole:          typeutil.ProxyRole,
 		SegmentIDRequests: sa.segReqs,
 	}
 
@@ -309,7 +309,7 @@ func (sa *SegIDAssigner) syncSegments() (bool, error) {
 	success := false
 	for _, info := range resp.SegIDAssignments {
 		if info.Status.GetErrorCode() != commonpb.ErrorCode_Success {
-			log.Debug("proxynode", zap.String("SyncSegment Error", info.Status.Reason))
+			log.Debug("proxy", zap.String("SyncSegment Error", info.Status.Reason))
 			continue
 		}
 		assign, err := sa.getAssign(info.CollectionID, info.PartitionID, info.ChannelName)

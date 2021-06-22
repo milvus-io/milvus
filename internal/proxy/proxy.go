@@ -41,7 +41,7 @@ type Timestamp = typeutil.Timestamp
 const sendTimeTickMsgInterval = 200 * time.Millisecond
 const channelMgrTickerInterval = 100 * time.Millisecond
 
-type ProxyNode struct {
+type Proxy struct {
 	ctx    context.Context
 	cancel func()
 	wg     sync.WaitGroup
@@ -77,79 +77,79 @@ type ProxyNode struct {
 	closeCallbacks []func()
 }
 
-func NewProxyNode(ctx context.Context, factory msgstream.Factory) (*ProxyNode, error) {
+func NewProxy(ctx context.Context, factory msgstream.Factory) (*Proxy, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
-	node := &ProxyNode{
+	node := &Proxy{
 		ctx:       ctx1,
 		cancel:    cancel,
 		msFactory: factory,
 	}
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
-	log.Debug("ProxyNode", zap.Any("State", node.stateCode.Load()))
+	log.Debug("Proxy", zap.Any("State", node.stateCode.Load()))
 	return node, nil
 
 }
 
-// Register register proxy node at etcd
-func (node *ProxyNode) Register() error {
+// Register register proxy at etcd
+func (node *Proxy) Register() error {
 	node.session = sessionutil.NewSession(node.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
-	node.session.Init(typeutil.ProxyNodeRole, Params.NetworkAddress, false)
+	node.session.Init(typeutil.ProxyRole, Params.NetworkAddress, false)
 	Params.ProxyID = node.session.ServerID
 	return nil
 }
 
-func (node *ProxyNode) Init() error {
+func (node *Proxy) Init() error {
 	// wait for datacoord state changed to Healthy
 	if node.dataCoord != nil {
-		log.Debug("ProxyNode wait for dataCoord ready")
+		log.Debug("Proxy wait for dataCoord ready")
 		err := funcutil.WaitForComponentHealthy(node.ctx, node.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
 		if err != nil {
-			log.Debug("ProxyNode wait for dataCoord ready failed", zap.Error(err))
+			log.Debug("Proxy wait for dataCoord ready failed", zap.Error(err))
 			return err
 		}
-		log.Debug("ProxyNode dataCoord is ready")
+		log.Debug("Proxy dataCoord is ready")
 	}
 
 	// wait for queryService state changed to Healthy
 	if node.queryService != nil {
-		log.Debug("ProxyNode wait for queryService ready")
+		log.Debug("Proxy wait for queryService ready")
 		err := funcutil.WaitForComponentHealthy(node.ctx, node.queryService, "QueryService", 1000000, time.Millisecond*200)
 		if err != nil {
-			log.Debug("ProxyNode wait for queryService ready failed", zap.Error(err))
+			log.Debug("Proxy wait for queryService ready failed", zap.Error(err))
 			return err
 		}
-		log.Debug("ProxyNode queryService is ready")
+		log.Debug("Proxy queryService is ready")
 	}
 
 	// wait for indexcoord state changed to Healthy
 	if node.indexCoord != nil {
-		log.Debug("ProxyNode wait for indexCoord ready")
+		log.Debug("Proxy wait for indexCoord ready")
 		err := funcutil.WaitForComponentHealthy(node.ctx, node.indexCoord, "IndexCoord", 1000000, time.Millisecond*200)
 		if err != nil {
-			log.Debug("ProxyNode wait for indexCoord ready failed", zap.Error(err))
+			log.Debug("Proxy wait for indexCoord ready failed", zap.Error(err))
 			return err
 		}
-		log.Debug("ProxyNode indexCoord is ready")
+		log.Debug("Proxy indexCoord is ready")
 	}
 
 	if node.queryService != nil {
 		resp, err := node.queryService.CreateQueryChannel(node.ctx, &querypb.CreateQueryChannelRequest{})
 		if err != nil {
-			log.Debug("ProxyNode CreateQueryChannel failed", zap.Error(err))
+			log.Debug("Proxy CreateQueryChannel failed", zap.Error(err))
 			return err
 		}
 		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			log.Debug("ProxyNode CreateQueryChannel failed", zap.String("reason", resp.Status.Reason))
+			log.Debug("Proxy CreateQueryChannel failed", zap.String("reason", resp.Status.Reason))
 
 			return errors.New(resp.Status.Reason)
 		}
-		log.Debug("ProxyNode CreateQueryChannel success")
+		log.Debug("Proxy CreateQueryChannel success")
 
 		Params.SearchResultChannelNames = []string{resp.ResultChannel}
 		Params.RetrieveResultChannelNames = []string{resp.ResultChannel}
-		log.Debug("ProxyNode CreateQueryChannel success", zap.Any("SearchResultChannelNames", Params.SearchResultChannelNames))
-		log.Debug("ProxyNode CreateQueryChannel success", zap.Any("RetrieveResultChannelNames", Params.RetrieveResultChannelNames))
+		log.Debug("Proxy CreateQueryChannel success", zap.Any("SearchResultChannelNames", Params.SearchResultChannelNames))
+		log.Debug("Proxy CreateQueryChannel success", zap.Any("RetrieveResultChannelNames", Params.RetrieveResultChannelNames))
 	}
 
 	m := map[string]interface{}{
@@ -262,7 +262,7 @@ func (node *ProxyNode) Init() error {
 	return nil
 }
 
-func (node *ProxyNode) sendChannelsTimeTickLoop() {
+func (node *Proxy) sendChannelsTimeTickLoop() {
 	node.wg.Add(1)
 	go func() {
 		defer node.wg.Done()
@@ -329,7 +329,7 @@ func (node *ProxyNode) sendChannelsTimeTickLoop() {
 	}()
 }
 
-func (node *ProxyNode) Start() error {
+func (node *Proxy) Start() error {
 	err := InitMetaCache(node.rootCoord)
 	if err != nil {
 		return err
@@ -362,12 +362,12 @@ func (node *ProxyNode) Start() error {
 	}
 
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
-	log.Debug("ProxyNode", zap.Any("State", node.stateCode.Load()))
+	log.Debug("Proxy", zap.Any("State", node.stateCode.Load()))
 
 	return nil
 }
 
-func (node *ProxyNode) Stop() error {
+func (node *Proxy) Stop() error {
 	node.cancel()
 
 	node.idAllocator.Close()
@@ -389,31 +389,31 @@ func (node *ProxyNode) Stop() error {
 }
 
 // AddStartCallback adds a callback in the startServer phase.
-func (node *ProxyNode) AddStartCallback(callbacks ...func()) {
+func (node *Proxy) AddStartCallback(callbacks ...func()) {
 	node.startCallbacks = append(node.startCallbacks, callbacks...)
 }
 
-func (node *ProxyNode) lastTick() Timestamp {
+func (node *Proxy) lastTick() Timestamp {
 	return node.tick.LastTick()
 }
 
 // AddCloseCallback adds a callback in the Close phase.
-func (node *ProxyNode) AddCloseCallback(callbacks ...func()) {
+func (node *Proxy) AddCloseCallback(callbacks ...func()) {
 	node.closeCallbacks = append(node.closeCallbacks, callbacks...)
 }
 
-func (node *ProxyNode) SetRootCoordClient(cli types.RootCoord) {
+func (node *Proxy) SetRootCoordClient(cli types.RootCoord) {
 	node.rootCoord = cli
 }
 
-func (node *ProxyNode) SetIndexCoordClient(cli types.IndexCoord) {
+func (node *Proxy) SetIndexCoordClient(cli types.IndexCoord) {
 	node.indexCoord = cli
 }
 
-func (node *ProxyNode) SetDataCoordClient(cli types.DataCoord) {
+func (node *Proxy) SetDataCoordClient(cli types.DataCoord) {
 	node.dataCoord = cli
 }
 
-func (node *ProxyNode) SetQueryServiceClient(cli types.QueryService) {
+func (node *Proxy) SetQueryServiceClient(cli types.QueryService) {
 	node.queryService = cli
 }

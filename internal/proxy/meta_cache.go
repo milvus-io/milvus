@@ -143,9 +143,9 @@ func (m *MetaCache) GetPartitionID(ctx context.Context, collectionName string, p
 
 		m.mu.Lock()
 		defer m.mu.Unlock()
-		log.Debug("proxynode", zap.Any("GetPartitionID:partitions before update", partitions), zap.Any("collectionName", collectionName))
+		log.Debug("proxy", zap.Any("GetPartitionID:partitions before update", partitions), zap.Any("collectionName", collectionName))
 		m.updatePartitions(partitions, collectionName)
-		log.Debug("proxynode", zap.Any("GetPartitionID:partitions after update", partitions), zap.Any("collectionName", collectionName))
+		log.Debug("proxy", zap.Any("GetPartitionID:partitions after update", partitions), zap.Any("collectionName", collectionName))
 
 		partInfo := m.collInfo[collectionName].partInfo
 		_, ok := partInfo[partitionName]

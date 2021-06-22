@@ -65,7 +65,7 @@ func newTimeTick(ctx context.Context,
 
 	t.tickMsgStream, _ = t.msFactory.NewMsgStream(t.ctx)
 	t.tickMsgStream.AsProducer(Params.ProxyTimeTickChannelNames)
-	log.Debug("proxynode", zap.Strings("proxynode AsProducer", Params.ProxyTimeTickChannelNames))
+	log.Debug("proxy", zap.Strings("proxy AsProducer", Params.ProxyTimeTickChannelNames))
 	return t
 }
 
@@ -98,7 +98,7 @@ func (tt *timeTick) tick() error {
 	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
 	err := tt.tickMsgStream.Produce(&msgPack)
 	if err != nil {
-		log.Warn("proxynode", zap.String("error", err.Error()))
+		log.Warn("proxy", zap.String("error", err.Error()))
 	}
 	tt.tickLock.Lock()
 	defer tt.tickLock.Unlock()

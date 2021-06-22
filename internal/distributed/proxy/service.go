@@ -49,7 +49,7 @@ const (
 type Server struct {
 	ctx        context.Context
 	wg         sync.WaitGroup
-	proxy      *proxy.ProxyNode
+	proxy      *proxy.Proxy
 	grpcServer *grpc.Server
 
 	grpcErrChan chan error
@@ -71,7 +71,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		grpcErrChan: make(chan error),
 	}
 
-	server.proxy, err = proxy.NewProxyNode(server.ctx, factory)
+	server.proxy, err = proxy.NewProxy(server.ctx, factory)
 	if err != nil {
 		return nil, err
 	}

@@ -32,7 +32,7 @@ func GetPulsarConfig(protocol, ip, port, url string) (map[string]interface{}, er
 	var err error
 
 	getResp := func() error {
-		log.Debug("proxynode util", zap.String("url", protocol+"://"+ip+":"+port+url))
+		log.Debug("proxy util", zap.String("url", protocol+"://"+ip+":"+port+url))
 		resp, err = http.Get(protocol + "://" + ip + ":" + port + url)
 		return err
 	}

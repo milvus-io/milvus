@@ -13,5 +13,5 @@ approvers:
   - scsven
 
 labels:
-- component/proxynode
+- component/proxy
 

@@ -33,7 +33,7 @@ type insertChannelsMap struct {
 	usageHistogram              []int                 // message stream can be closed only when the use count is zero
 	// TODO: use fine grained lock
 	mtx          sync.RWMutex
-	nodeInstance *ProxyNode
+	nodeInstance *Proxy
 	msFactory    msgstream.Factory
 }
 
@@ -60,7 +60,7 @@ func (m *insertChannelsMap) CreateInsertMsgStream(collID UniqueID, channels []st
 
 	stream, _ := m.msFactory.NewMsgStream(context.Background())
 	stream.AsProducer(channels)
-	log.Debug("proxynode", zap.Strings("proxynode AsProducer: ", channels))
+	log.Debug("proxy", zap.Strings("proxy AsProducer: ", channels))
 	stream.SetRepackFunc(insertRepackFunc)
 	stream.Start()
 	m.insertMsgStreams = append(m.insertMsgStreams, stream)
@@ -146,7 +146,7 @@ func (m *insertChannelsMap) CloseAllMsgStream() {
 	m.usageHistogram = make([]int, 0)
 }
 
-func newInsertChannelsMap(node *ProxyNode) *insertChannelsMap {
+func newInsertChannelsMap(node *Proxy) *insertChannelsMap {
 	return &insertChannelsMap{
 		collectionID2InsertChannels: make(map[UniqueID]int),
 		insertChannels:              make([][]string, 0),
@@ -162,7 +162,7 @@ var globalInsertChannelsMap *insertChannelsMap
 var initGlobalInsertChannelsMapOnce sync.Once
 
 // change to singleton mode later? Such as GetInsertChannelsMapInstance like GetConfAdapterMgrInstance.
-func initGlobalInsertChannelsMap(node *ProxyNode) {
+func initGlobalInsertChannelsMap(node *Proxy) {
 	initGlobalInsertChannelsMapOnce.Do(func() {
 		globalInsertChannelsMap = newInsertChannelsMap(node)
 	})

@@ -427,7 +427,7 @@ func (it *InsertTask) transferColumnBasedRequestToRowBasedData() error {
 			}
 		}
 		if !printed {
-			log.Debug("ProxyNode, transform", zap.Any("ID", it.ID()), zap.Any("BlobLen", len(blob.Value)), zap.Any("dTypes", dTypes))
+			log.Debug("Proxy, transform", zap.Any("ID", it.ID()), zap.Any("BlobLen", len(blob.Value)), zap.Any("dTypes", dTypes))
 			printed = true
 		}
 		it.RowData = append(it.RowData, blob)
@@ -603,7 +603,7 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 	}
 
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
-	log.Debug("ProxyNode Insert PreExecute", zap.Any("collSchema", collSchema))
+	log.Debug("Proxy Insert PreExecute", zap.Any("collSchema", collSchema))
 	if err != nil {
 		return err
 	}
@@ -688,7 +688,7 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 		}
 		channelName := channelNames[channelID]
 		if channelName == "" {
-			return nil, fmt.Errorf("ProxyNode, repack_func, can not found channelName")
+			return nil, fmt.Errorf("Proxy, repack_func, can not found channelName")
 		}
 		mapInfo, err := it.segIDAssigner.GetSegmentID(it.CollectionID, it.PartitionID, channelName, count, ts)
 		if err != nil {
@@ -696,7 +696,7 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 		}
 		reqSegCountMap[channelID] = make(map[UniqueID]uint32)
 		reqSegCountMap[channelID] = mapInfo
-		log.Debug("ProxyNode", zap.Int64("repackFunc, reqSegCountMap, reqID", reqID), zap.Any("mapinfo", mapInfo))
+		log.Debug("Proxy", zap.Int64("repackFunc, reqSegCountMap, reqID", reqID), zap.Any("mapinfo", mapInfo))
 	}
 
 	reqSegAccumulateCountMap := make(map[int32][]uint32)
@@ -748,7 +748,7 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 
 	factor := 10
 	threshold := Params.PulsarMaxMessageSize / factor
-	log.Debug("ProxyNode", zap.Int("threshold of message size: ", threshold))
+	log.Debug("Proxy", zap.Int("threshold of message size: ", threshold))
 	// not accurate
 	getFixedSizeOfInsertMsg := func(msg *msgstream.InsertMsg) int {
 		size := 0
@@ -888,7 +888,7 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 		return err
 	}
 	for _, pchan := range pchans {
-		log.Debug("ProxyNode InsertTask add pchan", zap.Any("pchan", pchan))
+		log.Debug("Proxy InsertTask add pchan", zap.Any("pchan", pchan))
 		_ = it.chTicker.addPChan(pchan)
 	}
 
@@ -1396,13 +1396,13 @@ func (st *SearchTask) Execute(ctx context.Context) error {
 		}
 	}
 	err = stream.Produce(&msgPack)
-	log.Debug("proxynode", zap.Int("length of searchMsg", len(msgPack.Msgs)))
-	log.Debug("proxy node sent one searchMsg",
+	log.Debug("proxy", zap.Int("length of searchMsg", len(msgPack.Msgs)))
+	log.Debug("proxy sent one searchMsg",
 		zap.Any("collectionID", st.CollectionID),
 		zap.Any("msgID", tsMsg.ID()),
 	)
 	if err != nil {
-		log.Debug("proxynode", zap.String("send search request failed", err.Error()))
+		log.Debug("proxy", zap.String("send search request failed", err.Error()))
 	}
 	return err
 }
@@ -1790,7 +1790,7 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 	for {
 		select {
 		case <-st.TraceCtx().Done():
-			log.Debug("ProxyNode", zap.Int64("SearchTask PostExecute Loop exit caused by ctx.Done", st.ID()))
+			log.Debug("Proxy", zap.Int64("SearchTask PostExecute Loop exit caused by ctx.Done", st.ID()))
 			return fmt.Errorf("SearchTask:wait to finish failed, timeout: %d", st.ID())
 		case searchResults := <-st.resultBuf:
 			// fmt.Println("searchResults: ", searchResults)
@@ -1807,9 +1807,9 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 			}
 
 			availableQueryNodeNum := len(filterSearchResult)
-			log.Debug("ProxyNode Search PostExecute stage1", zap.Any("availableQueryNodeNum", availableQueryNodeNum))
+			log.Debug("Proxy Search PostExecute stage1", zap.Any("availableQueryNodeNum", availableQueryNodeNum))
 			if availableQueryNodeNum <= 0 {
-				log.Debug("ProxyNode Search PostExecute failed", zap.Any("filterReason", filterReason))
+				log.Debug("Proxy Search PostExecute failed", zap.Any("filterReason", filterReason))
 				st.result = &milvuspb.SearchResults{
 					Status: &commonpb.Status{
 						ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1827,10 +1827,10 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 				}
 				availableQueryNodeNum++
 			}
-			log.Debug("ProxyNode Search PostExecute stage2", zap.Any("availableQueryNodeNum", availableQueryNodeNum))
+			log.Debug("Proxy Search PostExecute stage2", zap.Any("availableQueryNodeNum", availableQueryNodeNum))
 
 			if availableQueryNodeNum <= 0 {
-				log.Debug("ProxyNode Search PostExecute stage2 failed", zap.Any("filterReason", filterReason))
+				log.Debug("Proxy Search PostExecute stage2 failed", zap.Any("filterReason", filterReason))
 
 				st.result = &milvuspb.SearchResults{
 					Status: &commonpb.Status{
@@ -1842,7 +1842,7 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 			}
 
 			results, err := decodeSearchResults(filterSearchResult)
-			log.Debug("ProxyNode Search PostExecute decodeSearchResults", zap.Error(err))
+			log.Debug("Proxy Search PostExecute decodeSearchResults", zap.Error(err))
 			if err != nil {
 				return err
 			}
@@ -1874,7 +1874,7 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 				}
 			}
 
-			log.Debug("ProxyNode Search PostExecute Done")
+			log.Debug("Proxy Search PostExecute Done")
 			return nil
 		}
 	}
@@ -2129,7 +2129,7 @@ func (rt *RetrieveTask) Execute(ctx context.Context) error {
 		}
 	}
 	err = stream.Produce(&msgPack)
-	log.Debug("proxynode", zap.Int("length of retrieveMsg", len(msgPack.Msgs)))
+	log.Debug("proxy", zap.Int("length of retrieveMsg", len(msgPack.Msgs)))
 	if err != nil {
 		log.Debug("Failed to send retrieve request.",
 			zap.Any("requestID", rt.Base.MsgID), zap.Any("requestType", "retrieve"))
@@ -2147,7 +2147,7 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 	}()
 	select {
 	case <-rt.TraceCtx().Done():
-		log.Debug("proxynode", zap.Int64("Retrieve: wait to finish failed, timeout!, taskID:", rt.ID()))
+		log.Debug("proxy", zap.Int64("Retrieve: wait to finish failed, timeout!, taskID:", rt.ID()))
 		return fmt.Errorf("RetrieveTask:wait to finish failed, timeout : %d", rt.ID())
 	case retrieveResults := <-rt.resultBuf:
 		retrieveResult := make([]*internalpb.RetrieveResults, 0)
@@ -3687,7 +3687,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 		State: commonpb.IndexState_Finished,
 	}
 
-	log.Debug("ProxyNode GetIndexState", zap.Int("IndexBuildIDs", len(getIndexStatesRequest.IndexBuildIDs)), zap.Error(err))
+	log.Debug("Proxy GetIndexState", zap.Int("IndexBuildIDs", len(getIndexStatesRequest.IndexBuildIDs)), zap.Error(err))
 
 	if len(getIndexStatesRequest.IndexBuildIDs) == 0 {
 		return nil

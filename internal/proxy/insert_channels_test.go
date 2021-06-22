@@ -23,7 +23,7 @@ import (
 
 func TestInsertChannelsMap_CreateInsertMsgStream(t *testing.T) {
 	msFactory := msgstream.NewSimpleMsgStreamFactory()
-	node := &ProxyNode{
+	node := &Proxy{
 		segAssigner: nil,
 		msFactory:   msFactory,
 	}
@@ -52,7 +52,7 @@ func TestInsertChannelsMap_CreateInsertMsgStream(t *testing.T) {
 
 func TestInsertChannelsMap_CloseInsertMsgStream(t *testing.T) {
 	msFactory := msgstream.NewSimpleMsgStreamFactory()
-	node := &ProxyNode{
+	node := &Proxy{
 		segAssigner: nil,
 		msFactory:   msFactory,
 	}
@@ -92,7 +92,7 @@ func TestInsertChannelsMap_CloseInsertMsgStream(t *testing.T) {
 
 func TestInsertChannelsMap_GetInsertChannels(t *testing.T) {
 	msFactory := msgstream.NewSimpleMsgStreamFactory()
-	node := &ProxyNode{
+	node := &Proxy{
 		segAssigner: nil,
 		msFactory:   msFactory,
 	}
@@ -140,7 +140,7 @@ func TestInsertChannelsMap_GetInsertChannels(t *testing.T) {
 
 func TestInsertChannelsMap_GetInsertMsgStream(t *testing.T) {
 	msFactory := msgstream.NewSimpleMsgStreamFactory()
-	node := &ProxyNode{
+	node := &Proxy{
 		segAssigner: nil,
 		msFactory:   msFactory,
 	}
@@ -188,7 +188,7 @@ func TestInsertChannelsMap_GetInsertMsgStream(t *testing.T) {
 
 func TestInsertChannelsMap_CloseAllMsgStream(t *testing.T) {
 	msFactory := msgstream.NewSimpleMsgStreamFactory()
-	node := &ProxyNode{
+	node := &Proxy{
 		segAssigner: nil,
 		msFactory:   msFactory,
 	}

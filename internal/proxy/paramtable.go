@@ -252,7 +252,7 @@ func (pt *ParamTable) initLogCfg() {
 }
 
 func (pt *ParamTable) initRoleName() {
-	pt.RoleName = fmt.Sprintf("%s-%s", "ProxyNode", pt.Alias)
+	pt.RoleName = fmt.Sprintf("%s-%s", "Proxy", pt.Alias)
 }
 
 func (pt *ParamTable) initEtcdEndpoints() {
