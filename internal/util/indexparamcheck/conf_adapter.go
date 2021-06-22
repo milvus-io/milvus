@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package proxy
+package indexparamcheck
 
 import (
 	"strconv"
@@ -87,7 +87,7 @@ const (
 )
 
 var METRICS = []string{L2, IP}                                                             // const
-var BinIDMapMetrics = []string{HAMMING, JACCARD, TANIMOTO, SUBSTRUCTURE, SUBSTRUCTURE}     // const
+var BinIDMapMetrics = []string{HAMMING, JACCARD, TANIMOTO, SUBSTRUCTURE, SUPERSTRUCTURE}   // const
 var BinIvfMetrics = []string{HAMMING, JACCARD, TANIMOTO}                                   // const
 var supportDimPerSubQuantizer = []int{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1}        // const
 var supportSubQuantizer = []int{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1} // const
@@ -100,9 +100,10 @@ type BaseConfAdapter struct {
 }
 
 func (adapter *BaseConfAdapter) CheckTrain(params map[string]string) bool {
-	if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
-		return false
-	}
+	// dimension is specified when create collection
+	//if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
+	//	return false
+	//}
 
 	return CheckStrByValues(params, Metric, METRICS)
 }
@@ -138,7 +139,9 @@ func (adapter *IVFPQConfAdapter) CheckTrain(params map[string]string) bool {
 		return false
 	}
 
-	if !CheckIntByRange(params, NBITS, MinNBits, MaxNBits) {
+	// nbits can be set to default: 8
+	_, nbitsExist := params[NBITS]
+	if nbitsExist && !CheckIntByRange(params, NBITS, MinNBits, MaxNBits) {
 		return false
 	}
 
@@ -205,9 +208,10 @@ type BinIDMAPConfAdapter struct {
 }
 
 func (adapter *BinIDMAPConfAdapter) CheckTrain(params map[string]string) bool {
-	if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
-		return false
-	}
+	// dimension is specified when create collection
+	//if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
+	//	return false
+	//}
 
 	return CheckStrByValues(params, Metric, BinIDMapMetrics)
 }
@@ -220,9 +224,10 @@ type BinIVFConfAdapter struct {
 }
 
 func (adapter *BinIVFConfAdapter) CheckTrain(params map[string]string) bool {
-	if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
-		return false
-	}
+	// dimension is specified when create collection
+	//if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
+	//	return false
+	//}
 
 	if !CheckIntByRange(params, NLIST, MinNList, MaxNList) {
 		return false

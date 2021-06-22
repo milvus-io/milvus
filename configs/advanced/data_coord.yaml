@@ -11,6 +11,6 @@
 
 datacoord:
   segment:
-    size: 512 # MB
-    sizeFactor: 0.75
-    IDAssignExpiration: 2000 # ms
+    maxSize: 512 # MB
+    sealProportion: 0.75
+    assignmentExpiration: 2000 # ms

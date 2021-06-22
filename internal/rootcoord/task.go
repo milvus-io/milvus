@@ -580,6 +580,13 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	// error doesn't matter here
 	t.core.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
 
+	//notify query service to release partition
+	go func() {
+		if err = t.core.CallReleasePartitionService(t.core.ctx, ts, 0, collInfo.ID, []typeutil.UniqueID{partInfo.PartitionID}); err != nil {
+			log.Warn("CallReleaseCollectionService failed", zap.String("error", err.Error()))
+		}
+	}()
+
 	// Update DDOperation in etcd
 	return t.core.setDdMsgSendFlag(true)
 }

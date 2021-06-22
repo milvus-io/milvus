@@ -102,7 +102,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 			grpc_opentracing.UnaryServerInterceptor(opts...)),
 		grpc.StreamInterceptor(
 			grpc_opentracing.StreamServerInterceptor(opts...)))
-	proxypb.RegisterProxyNodeServiceServer(s.grpcServer, s)
+	proxypb.RegisterProxyServer(s.grpcServer, s)
 	milvuspb.RegisterMilvusServiceServer(s.grpcServer, s)
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
