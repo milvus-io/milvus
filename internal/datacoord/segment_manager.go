@@ -68,7 +68,7 @@ type segmentStatus struct {
 }
 
 type allocation struct {
-	rowNums    int64
+	numOfRows  int64
 	expireTime Timestamp
 }
 
@@ -250,16 +250,15 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	segID = status.id
 	retCount = requestRows
 	expireTime = status.lastExpireTime
-
 	return
 }
 
-func (s *SegmentManager) alloc(segStatus *segmentStatus, numRows int64) (bool, error) {
+func (s *SegmentManager) alloc(status *segmentStatus, numOfRows int64) (bool, error) {
 	var allocSize int64
-	for _, allocation := range segStatus.allocations {
-		allocSize += allocation.rowNums
+	for _, allocItem := range status.allocations {
+		allocSize += allocItem.numOfRows
 	}
-	if !s.allocPolicy.apply(segStatus.total, segStatus.currentRows, allocSize, numRows) {
+	if !s.allocPolicy.apply(status.total, status.currentRows, allocSize, numOfRows) {
 		return false, nil
 	}
 
@@ -269,13 +268,13 @@ func (s *SegmentManager) alloc(segStatus *segmentStatus, numRows int64) (bool, e
 	}
 
 	alloc := &allocation{
-		rowNums:    numRows,
+		numOfRows:  numOfRows,
 		expireTime: expireTs,
 	}
-	segStatus.lastExpireTime = expireTs
-	segStatus.allocations = append(segStatus.allocations, alloc)
+	status.lastExpireTime = expireTs
+	status.allocations = append(status.allocations, alloc)
 
-	if err := s.meta.SetLastExpireTime(segStatus.id, expireTs); err != nil {
+	if err := s.meta.SetLastExpireTime(status.id, expireTs); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -299,22 +298,22 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 	if err != nil {
 		return nil, err
 	}
-	totalRows, err := s.estimateTotalRows(collectionID)
+	maxNumOfRows, err := s.estimateMaxNumOfRows(collectionID)
 	if err != nil {
 		return nil, err
 	}
-	segStatus := &segmentStatus{
+	status := &segmentStatus{
 		id:             id,
 		collectionID:   collectionID,
 		partitionID:    partitionID,
 		sealed:         false,
-		total:          int64(totalRows),
+		total:          int64(maxNumOfRows),
 		insertChannel:  channelName,
 		allocations:    []*allocation{},
 		lastExpireTime: 0,
 		currentRows:    0,
 	}
-	s.stats[id] = segStatus
+	s.stats[id] = status
 
 	segmentInfo := &datapb.SegmentInfo{
 		ID:             id,
@@ -323,7 +322,7 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 		InsertChannel:  channelName,
 		NumOfRows:      0,
 		State:          commonpb.SegmentState_Growing,
-		MaxRowNum:      int64(totalRows),
+		MaxRowNum:      int64(maxNumOfRows),
 		LastExpireTime: 0,
 		StartPosition: &internalpb.MsgPosition{
 			ChannelName: channelName,
@@ -339,15 +338,14 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 	log.Debug("datacoord: estimateTotalRows: ",
 		zap.Int64("CollectionID", segmentInfo.CollectionID),
 		zap.Int64("SegmentID", segmentInfo.ID),
-		zap.Int("Rows", totalRows),
-		zap.String("channel", segmentInfo.InsertChannel))
+		zap.Int("Rows", maxNumOfRows),
+		zap.String("Channel", segmentInfo.InsertChannel))
 
 	s.helper.afterCreateSegment(segmentInfo)
-
-	return segStatus, nil
+	return status, nil
 }
 
-func (s *SegmentManager) estimateTotalRows(collectionID UniqueID) (int, error) {
+func (s *SegmentManager) estimateMaxNumOfRows(collectionID UniqueID) (int, error) {
 	collMeta, err := s.meta.GetCollection(collectionID)
 	if err != nil {
 		return -1, err
@@ -391,12 +389,12 @@ func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel strin
 	}
 
 	ret := make([]UniqueID, 0)
-	for _, segStatus := range s.stats {
-		if segStatus.insertChannel != channel {
+	for _, status := range s.stats {
+		if status.insertChannel != channel {
 			continue
 		}
-		if s.flushPolicy.apply(segStatus, t) {
-			ret = append(ret, segStatus.id)
+		if s.flushPolicy.apply(status, t) {
+			ret = append(ret, status.id)
 		}
 	}
 
@@ -416,34 +414,34 @@ func (s *SegmentManager) UpdateSegmentStats(stat *internalpb.SegmentStatisticsUp
 // tryToSealSegment applies segment & channel seal policies
 func (s *SegmentManager) tryToSealSegment(ts Timestamp) error {
 	channelInfo := make(map[string][]*segmentStatus)
-	for _, segStatus := range s.stats {
-		channelInfo[segStatus.insertChannel] = append(channelInfo[segStatus.insertChannel], segStatus)
-		if segStatus.sealed {
+	for _, status := range s.stats {
+		channelInfo[status.insertChannel] = append(channelInfo[status.insertChannel], status)
+		if status.sealed {
 			continue
 		}
 		// change shouldSeal to segment seal policy logic
 		for _, policy := range s.segmentSealPolicies {
-			if policy(segStatus, ts) {
-				if err := s.meta.SealSegment(segStatus.id); err != nil {
+			if policy(status, ts) {
+				if err := s.meta.SealSegment(status.id); err != nil {
 					return err
 				}
-				segStatus.sealed = true
+				status.sealed = true
 				break
 			}
 		}
 
 	}
-	for channel, segs := range channelInfo {
+	for channel, segmentStats := range channelInfo {
 		for _, policy := range s.channelSealPolicies {
-			vs := policy(channel, segs, ts)
-			for _, seg := range vs {
-				if seg.sealed {
+			vs := policy(channel, segmentStats, ts)
+			for _, status := range vs {
+				if status.sealed {
 					continue
 				}
-				if err := s.meta.SealSegment(seg.id); err != nil {
+				if err := s.meta.SealSegment(status.id); err != nil {
 					return err
 				}
-				seg.sealed = true
+				status.sealed = true
 			}
 		}
 	}

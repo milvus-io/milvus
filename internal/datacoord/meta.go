@@ -32,15 +32,6 @@ const (
 type errSegmentNotFound struct {
 	segmentID UniqueID
 }
-type errCollectionNotFound struct {
-	collectionID UniqueID
-}
-type meta struct {
-	sync.RWMutex
-	client      kv.TxnKV                            // client of a reliable kv service, i.e. etcd client
-	collections map[UniqueID]*datapb.CollectionInfo // collection id to collection info
-	segments    map[UniqueID]*datapb.SegmentInfo    // segment id to segment info
-}
 
 func newErrSegmentNotFound(segmentID UniqueID) errSegmentNotFound {
 	return errSegmentNotFound{segmentID: segmentID}
@@ -50,12 +41,72 @@ func (err errSegmentNotFound) Error() string {
 	return fmt.Sprintf("segment %d not found", err.segmentID)
 }
 
+type errCollectionNotFound struct {
+	collectionID UniqueID
+}
+
 func newErrCollectionNotFound(collectionID UniqueID) errCollectionNotFound {
 	return errCollectionNotFound{collectionID: collectionID}
 }
 
 func (err errCollectionNotFound) Error() string {
 	return fmt.Sprintf("collection %d not found", err.collectionID)
+}
+
+type errPartitionNotFound struct {
+	partitionID UniqueID
+}
+
+func newErrPartitionNotFound(partitionID UniqueID) errPartitionNotFound {
+	return errPartitionNotFound{partitionID: partitionID}
+}
+
+func (err errPartitionNotFound) Error() string {
+	return fmt.Sprintf("partition %d not found", err.partitionID)
+}
+
+type errCollectionExist struct {
+	name string
+	id   UniqueID
+}
+
+func newErrCollectionExist(collectionName string, collectionID UniqueID) errCollectionExist {
+	return errCollectionExist{name: collectionName, id: collectionID}
+}
+
+func (err errCollectionExist) Error() string {
+	return fmt.Sprintf("collection %s with id %d already exist", err.name, err.id)
+}
+
+type errPartitionExist struct {
+	id UniqueID
+}
+
+func newErrPartitionExist(partitionID UniqueID) errPartitionExist {
+	return errPartitionExist{id: partitionID}
+}
+
+func (err errPartitionExist) Error() string {
+	return fmt.Sprintf("partition %d already exist", err.id)
+}
+
+type errSegmentExist struct {
+	id UniqueID
+}
+
+func newErrSegmentExist(segmentID UniqueID) errSegmentExist {
+	return errSegmentExist{id: segmentID}
+}
+
+func (err errSegmentExist) Error() string {
+	return fmt.Sprintf("segment %d already exist", err.id)
+}
+
+type meta struct {
+	sync.RWMutex
+	client      kv.TxnKV                            // client of a reliable kv service, i.e. etcd client
+	collections map[UniqueID]*datapb.CollectionInfo // collection id to collection info
+	segments    map[UniqueID]*datapb.SegmentInfo    // segment id to segment info
 }
 
 func newMeta(kv kv.TxnKV) (*meta, error) {
@@ -93,27 +144,27 @@ func (m *meta) AddCollection(collection *datapb.CollectionInfo) error {
 	m.Lock()
 	defer m.Unlock()
 	if _, ok := m.collections[collection.ID]; ok {
-		return fmt.Errorf("collection %s with id %d already exist", collection.Schema.Name, collection.ID)
+		return newErrCollectionExist(collection.GetSchema().GetName(), collection.GetID())
 	}
 	m.collections[collection.ID] = collection
 	return nil
 }
 
-func (m *meta) DropCollection(collID UniqueID) error {
+func (m *meta) DropCollection(collectionID UniqueID) error {
 	m.Lock()
 	defer m.Unlock()
 
-	if _, ok := m.collections[collID]; !ok {
-		return newErrCollectionNotFound(collID)
+	if _, ok := m.collections[collectionID]; !ok {
+		return newErrCollectionNotFound(collectionID)
 	}
-	key := fmt.Sprintf("%s/%d/", segmentPrefix, collID)
+	key := buildCollectionPath(collectionID)
 	if err := m.client.RemoveWithPrefix(key); err != nil {
 		return err
 	}
-	delete(m.collections, collID)
+	delete(m.collections, collectionID)
 
 	for i, info := range m.segments {
-		if info.CollectionID == collID {
+		if info.CollectionID == collectionID {
 			delete(m.segments, i)
 		}
 	}
@@ -141,9 +192,9 @@ func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) (int64, error) {
 	m.RLock()
 	defer m.RUnlock()
 	var ret int64 = 0
-	for _, info := range m.segments {
-		if info.CollectionID == collectionID {
-			ret += info.NumOfRows
+	for _, segment := range m.segments {
+		if segment.CollectionID == collectionID {
+			ret += segment.GetNumOfRows()
 		}
 	}
 	return ret, nil
@@ -153,7 +204,7 @@ func (m *meta) AddSegment(segment *datapb.SegmentInfo) error {
 	m.Lock()
 	defer m.Unlock()
 	if _, ok := m.segments[segment.ID]; ok {
-		return fmt.Errorf("segment %d already exist", segment.ID)
+		return newErrSegmentExist(segment.GetID())
 	}
 	m.segments[segment.ID] = segment
 	if err := m.saveSegmentInfo(segment); err != nil {
@@ -179,13 +230,13 @@ func (m *meta) UpdateSegmentStatistic(stats *internalpb.SegmentStatisticsUpdates
 func (m *meta) SetLastExpireTime(segmentID UniqueID, expireTs Timestamp) error {
 	m.Lock()
 	defer m.Unlock()
-	seg, ok := m.segments[segmentID]
+	segment, ok := m.segments[segmentID]
 	if !ok {
 		return newErrSegmentNotFound(segmentID)
 	}
-	seg.LastExpireTime = expireTs
+	segment.LastExpireTime = expireTs
 
-	if err := m.saveSegmentInfo(seg); err != nil {
+	if err := m.saveSegmentInfo(segment); err != nil {
 		return err
 	}
 	return nil
@@ -238,7 +289,7 @@ func (m *meta) SaveBinlogAndCheckPoints(segID UniqueID, flushed bool,
 	startPositions []*datapb.SegmentStartPosition) error {
 	m.Lock()
 	defer m.Unlock()
-	segInfo, ok := m.segments[segID]
+	segment, ok := m.segments[segID]
 	if !ok {
 		return newErrSegmentNotFound(segID)
 	}
@@ -247,7 +298,7 @@ func (m *meta) SaveBinlogAndCheckPoints(segID UniqueID, flushed bool,
 		kv[k] = v
 	}
 	if flushed {
-		segInfo.State = commonpb.SegmentState_Flushing
+		segment.State = commonpb.SegmentState_Flushing
 	}
 
 	modifiedSegments := make(map[UniqueID]struct{})
@@ -281,9 +332,9 @@ func (m *meta) SaveBinlogAndCheckPoints(segID UniqueID, flushed bool,
 	}
 
 	for id := range modifiedSegments {
-		segInfo = m.segments[id]
-		segBytes := proto.MarshalTextString(segInfo)
-		key := m.prepareSegmentPath(segInfo)
+		segment = m.segments[id]
+		segBytes := proto.MarshalTextString(segment)
+		key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
 		kv[key] = segBytes
 	}
 
@@ -355,20 +406,20 @@ func (m *meta) AddPartition(collectionID UniqueID, partitionID UniqueID) error {
 
 	for _, t := range coll.Partitions {
 		if t == partitionID {
-			return fmt.Errorf("partition %d already exists", partitionID)
+			return newErrPartitionExist(partitionID)
 		}
 	}
 	coll.Partitions = append(coll.Partitions, partitionID)
 	return nil
 }
 
-func (m *meta) DropPartition(collID UniqueID, partitionID UniqueID) error {
+func (m *meta) DropPartition(collectionID UniqueID, partitionID UniqueID) error {
 	m.Lock()
 	defer m.Unlock()
 
-	collection, ok := m.collections[collID]
+	collection, ok := m.collections[collectionID]
 	if !ok {
-		return newErrCollectionNotFound(collID)
+		return newErrCollectionNotFound(collectionID)
 	}
 	idx := -1
 	for i, id := range collection.Partitions {
@@ -378,10 +429,10 @@ func (m *meta) DropPartition(collID UniqueID, partitionID UniqueID) error {
 		}
 	}
 	if idx == -1 {
-		return fmt.Errorf("cannot find partition id %d", partitionID)
+		return newErrPartitionNotFound(partitionID)
 	}
 
-	prefix := fmt.Sprintf("%s/%d/%d/", segmentPrefix, collID, partitionID)
+	prefix := buildPartitionPath(collectionID, partitionID)
 	if err := m.client.RemoveWithPrefix(prefix); err != nil {
 		return err
 	}
@@ -451,24 +502,32 @@ func (m *meta) GetFlushingSegments() []*datapb.SegmentInfo {
 func (m *meta) saveSegmentInfo(segment *datapb.SegmentInfo) error {
 	segBytes := proto.MarshalTextString(segment)
 
-	key := m.prepareSegmentPath(segment)
+	key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
 	return m.client.Save(key, segBytes)
 }
 
 func (m *meta) removeSegmentInfo(segment *datapb.SegmentInfo) error {
-	key := m.prepareSegmentPath(segment)
+	key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
 	return m.client.Remove(key)
-}
-
-func (m *meta) prepareSegmentPath(segInfo *datapb.SegmentInfo) string {
-	return fmt.Sprintf("%s/%d/%d/%d", segmentPrefix, segInfo.CollectionID, segInfo.PartitionID, segInfo.ID)
 }
 
 func (m *meta) saveKvTxn(kv map[string]string) error {
 	return m.client.MultiSave(kv)
 }
 
-func BuildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, channelName string) (*datapb.SegmentInfo, error) {
+func buildSegmentPath(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID) string {
+	return fmt.Sprintf("%s/%d/%d/%d", segmentPrefix, collectionID, partitionID, segmentID)
+}
+
+func buildCollectionPath(collectionID UniqueID) string {
+	return fmt.Sprintf("%s/%d/", segmentPrefix, collectionID)
+}
+
+func buildPartitionPath(collectionID UniqueID, partitionID UniqueID) string {
+	return fmt.Sprintf("%s/%d/%d/", segmentPrefix, collectionID, partitionID)
+}
+
+func buildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, channelName string) (*datapb.SegmentInfo, error) {
 	return &datapb.SegmentInfo{
 		ID:            segmentID,
 		CollectionID:  collectionID,

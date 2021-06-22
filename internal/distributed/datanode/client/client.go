@@ -45,7 +45,7 @@ type Client struct {
 	recallTry int
 }
 
-func NewClient(addr string, timeout time.Duration) (*Client, error) {
+func NewClient(ctx context.Context, addr string, timeout time.Duration) (*Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("address is empty")
 	}
@@ -54,7 +54,7 @@ func NewClient(addr string, timeout time.Duration) (*Client, error) {
 		grpc:      nil,
 		conn:      nil,
 		addr:      addr,
-		ctx:       context.Background(),
+		ctx:       ctx,
 		timeout:   timeout,
 		recallTry: 3,
 		reconnTry: 10,
