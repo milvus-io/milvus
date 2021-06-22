@@ -194,6 +194,7 @@ func (qs *QueryService) watchNodeLoop() {
 	for nodeID := range qs.cluster.nodes {
 		if _, ok := sessionMap[nodeID]; !ok {
 			qs.cluster.nodes[nodeID].setNodeState(false)
+			qs.cluster.nodes[nodeID].client.Stop()
 			loadBalanceSegment := &querypb.LoadBalanceRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_LoadBalanceSegments,
@@ -236,6 +237,7 @@ func (qs *QueryService) watchNodeLoop() {
 				serverID := event.Session.ServerID
 				log.Debug("QueryService", zap.Any("The QueryNode crashed with ID", serverID))
 				qs.cluster.nodes[serverID].setNodeState(false)
+				qs.cluster.nodes[serverID].client.Stop()
 				loadBalanceSegment := &querypb.LoadBalanceRequest{
 					Base: &commonpb.MsgBase{
 						MsgType:  commonpb.MsgType_LoadBalanceSegments,

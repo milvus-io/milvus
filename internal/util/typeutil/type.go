@@ -17,7 +17,7 @@ type UniqueID = int64
 
 const (
 	RootCoordRole    = "RootCoord"
-	ProxyNodeRole    = "ProxyNode"
+	ProxyRole        = "Proxy"
 	QueryServiceRole = "QueryService"
 	QueryNodeRole    = "QueryNode"
 	IndexCoordRole   = "IndexCoord"

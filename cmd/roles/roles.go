@@ -22,15 +22,15 @@ import (
 	"syscall"
 
 	"github.com/milvus-io/milvus/cmd/components"
+	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/datanode"
-	"github.com/milvus-io/milvus/internal/dataservice"
 	"github.com/milvus-io/milvus/internal/indexcoord"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/logutil"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/proxynode"
+	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/querynode"
 	"github.com/milvus-io/milvus/internal/queryservice"
 	"github.com/milvus-io/milvus/internal/rootcoord"
@@ -108,11 +108,11 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string
 
 	wg.Add(1)
 	go func() {
-		proxynode.Params.InitAlias(alias)
-		proxynode.Params.Init()
+		proxy.Params.InitAlias(alias)
+		proxy.Params.Init()
 
 		if !localMsg {
-			logutil.SetupLogger(&proxynode.Params.Log)
+			logutil.SetupLogger(&proxy.Params.Log)
 			defer log.Sync()
 		}
 
@@ -194,10 +194,10 @@ func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *compone
 
 	wg.Add(1)
 	go func() {
-		dataservice.Params.Init()
+		datacoord.Params.Init()
 
 		if !localMsg {
-			logutil.SetupLogger(&dataservice.Params.Log)
+			logutil.SetupLogger(&datacoord.Params.Log)
 			defer log.Sync()
 		}
 

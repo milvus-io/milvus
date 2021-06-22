@@ -37,6 +37,28 @@ const (
 	roleStandalone = "standalone"
 )
 
+var (
+	BuildTags = "unknown"
+	BuildTime = "unknown"
+	GitCommit = "unknown"
+	GoVersion = "unknown"
+)
+
+func printBanner() {
+	fmt.Println()
+	fmt.Println("    __  _________ _   ____  ______    ")
+	fmt.Println("   /  |/  /  _/ /| | / / / / / __/    ")
+	fmt.Println("  / /|_/ // // /_| |/ / /_/ /\\ \\    ")
+	fmt.Println(" /_/  /_/___/____/___/\\____/___/     ")
+	fmt.Println()
+	fmt.Println("Welcome to use Milvus!")
+	fmt.Println("Version:   " + BuildTags)
+	fmt.Println("Built:     " + BuildTime)
+	fmt.Println("GitCommit: " + GitCommit)
+	fmt.Println("GoVersion: " + GoVersion)
+	fmt.Println()
+}
+
 func getPidFileName(serverType string, alias string) string {
 	var filename string
 	if len(alias) != 0 {
@@ -239,6 +261,7 @@ func main() {
 	filename := getPidFileName(serverType, svrAlias)
 	switch command {
 	case "run":
+		printBanner()
 		fd, err := createPidFile(filename, runtimeDir)
 		if err != nil {
 			panic(err)

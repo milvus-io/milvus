@@ -295,7 +295,7 @@ func TestMasterService(t *testing.T) {
 		},
 	)
 	assert.Nil(t, err)
-	_, err = etcdCli.Put(ctx, path.Join(sessKey, typeutil.ProxyNodeRole+"-100"), string(pnb))
+	_, err = etcdCli.Put(ctx, path.Join(sessKey, typeutil.ProxyRole+"-100"), string(pnb))
 	assert.Nil(t, err)
 
 	pnm := &proxyNodeMock{
@@ -1486,9 +1486,9 @@ func TestMasterService(t *testing.T) {
 		s2, err := json.Marshal(&p2)
 		assert.Nil(t, err)
 
-		_, err = core.etcdCli.Put(ctx2, path.Join(sessKey, typeutil.ProxyNodeRole)+"-1", string(s1))
+		_, err = core.etcdCli.Put(ctx2, path.Join(sessKey, typeutil.ProxyRole)+"-1", string(s1))
 		assert.Nil(t, err)
-		_, err = core.etcdCli.Put(ctx2, path.Join(sessKey, typeutil.ProxyNodeRole)+"-2", string(s2))
+		_, err = core.etcdCli.Put(ctx2, path.Join(sessKey, typeutil.ProxyRole)+"-2", string(s2))
 		assert.Nil(t, err)
 		time.Sleep(time.Second)
 

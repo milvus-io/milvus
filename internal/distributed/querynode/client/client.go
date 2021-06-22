@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
@@ -104,6 +105,9 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	ret, err := caller()
 	if err == nil {
 		return ret, nil
+	}
+	if c.conn.GetState() == connectivity.Shutdown {
+		return ret, err
 	}
 	for i := 0; i < c.reconnTry; i++ {
 		err = c.connect()
