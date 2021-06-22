@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package proxy
+package indexparamcheck
 
 import (
 	"strconv"
@@ -68,11 +68,19 @@ func TestIVFPQConfAdapter_CheckTrain(t *testing.T) {
 		NBITS:  strconv.Itoa(8),
 		Metric: L2,
 	}
+	validParamsWithoutNbits := map[string]string{
+		DIM:    strconv.Itoa(128),
+		NLIST:  strconv.Itoa(1024),
+		IVFM:   strconv.Itoa(4),
+		Metric: L2,
+	}
+
 	cases := []struct {
 		params map[string]string
 		want   bool
 	}{
 		{validParams, true},
+		{validParamsWithoutNbits, true},
 	}
 
 	adapter := newIVFPQConfAdapter()

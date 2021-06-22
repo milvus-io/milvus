@@ -16,14 +16,12 @@ import (
 	"errors"
 	"io/ioutil"
 	"net/http"
-	"strconv"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
@@ -69,29 +67,6 @@ func getMin(a, b int) int {
 		return a
 	}
 	return b
-}
-
-func CheckIntByRange(params map[string]string, key string, min, max int) bool {
-	valueStr, ok := params[key]
-	if !ok {
-		return false
-	}
-
-	value, err := strconv.Atoi(valueStr)
-	if err != nil {
-		return false
-	}
-
-	return value >= min && value <= max
-}
-
-func CheckStrByValues(params map[string]string, key string, container []string) bool {
-	value, ok := params[key]
-	if !ok {
-		return false
-	}
-
-	return funcutil.SliceContain(container, value)
 }
 
 func GetAttrByKeyFromRepeatedKV(key string, kvs []*commonpb.KeyValuePair) (string, error) {
