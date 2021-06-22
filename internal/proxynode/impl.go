@@ -78,8 +78,9 @@ func (node *ProxyNode) InvalidateCollectionMetaCache(ctx context.Context, reques
 		zap.String("collection", request.CollectionName))
 
 	collectionName := request.CollectionName
-	globalMetaCache.RemoveCollection(ctx, collectionName) // no need to return error, though collection may be not cached
-
+	if globalMetaCache != nil {
+		globalMetaCache.RemoveCollection(ctx, collectionName) // no need to return error, though collection may be not cached
+	}
 	log.Debug("InvalidateCollectionMetaCache Done",
 		zap.String("role", Params.RoleName),
 		zap.String("db", request.DbName),

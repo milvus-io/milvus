@@ -84,6 +84,7 @@ type ReplicaInterface interface {
 	replaceGrowingSegmentBySealedSegment(segment *Segment) error
 
 	freeAll()
+	printReplica()
 }
 
 type collectionReplica struct {
@@ -97,6 +98,16 @@ type collectionReplica struct {
 	excludedSegments map[UniqueID][]*datapb.SegmentInfo // map[collectionID]segmentIDs
 
 	etcdKV *etcdkv.EtcdKV
+}
+
+func (colReplica *collectionReplica) printReplica() {
+	colReplica.mu.Lock()
+	defer colReplica.mu.Unlock()
+
+	log.Debug("collections in collectionReplica", zap.Any("info", colReplica.collections))
+	log.Debug("partitions in collectionReplica", zap.Any("info", colReplica.partitions))
+	log.Debug("segments in collectionReplica", zap.Any("info", colReplica.segments))
+	log.Debug("excludedSegments in collectionReplica", zap.Any("info", colReplica.excludedSegments))
 }
 
 //----------------------------------------------------------------------------------------------------- collection
