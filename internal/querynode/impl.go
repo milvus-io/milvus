@@ -374,6 +374,7 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 		return info
 	}
 	// get info from historical
+	node.historical.replica.printReplica()
 	for _, id := range in.SegmentIDs {
 		log.Debug("QueryNode::Impl::GetSegmentInfo for historical", zap.Any("SegmentID", id))
 		segment, err := node.historical.replica.getSegmentByID(id)
@@ -387,8 +388,10 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 		infos = append(infos, info)
 	}
 	// get info from streaming
+	node.streaming.replica.printReplica()
 	for _, id := range in.SegmentIDs {
 		log.Debug("QueryNode::Impl::GetSegmentInfo for streaming", zap.Any("SegmentID", id))
+
 		segment, err := node.streaming.replica.getSegmentByID(id)
 		if err != nil {
 			log.Debug("QueryNode::Impl::GetSegmentInfo, for streaming segmentID not exist", zap.Any("SegmentID", id))

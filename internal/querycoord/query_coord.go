@@ -194,6 +194,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 	for nodeID := range qc.cluster.nodes {
 		if _, ok := sessionMap[nodeID]; !ok {
 			qc.cluster.nodes[nodeID].setNodeState(false)
+			qc.cluster.nodes[nodeID].client.Stop()
 			loadBalanceSegment := &querypb.LoadBalanceRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_LoadBalanceSegments,
@@ -236,6 +237,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 				serverID := event.Session.ServerID
 				log.Debug("query coordinator", zap.Any("The QueryNode crashed with ID", serverID))
 				qc.cluster.nodes[serverID].setNodeState(false)
+				qc.cluster.nodes[serverID].client.Stop()
 				loadBalanceSegment := &querypb.LoadBalanceRequest{
 					Base: &commonpb.MsgBase{
 						MsgType:  commonpb.MsgType_LoadBalanceSegments,

@@ -406,8 +406,23 @@ func (c *queryNodeCluster) RegisterNode(session *sessionutil.Session, id UniqueI
 }
 
 func (c *queryNodeCluster) removeNodeInfo(nodeID int64) error {
+	c.Lock()
+	defer c.Unlock()
+
 	key := fmt.Sprintf("%s/%d", queryNodeInfoPrefix, nodeID)
-	return c.client.Remove(key)
+	err := c.client.Remove(key)
+	if err != nil {
+		return err
+	}
+
+	err = c.nodes[nodeID].clearNodeInfo()
+	if err != nil {
+		return err
+	}
+	delete(c.nodes, nodeID)
+	log.Debug("delete nodeInfo in cluster meta and etcd", zap.Int64("nodeID", nodeID))
+
+	return nil
 }
 
 func (c *queryNodeCluster) onServiceNodeIDs() ([]int64, error) {

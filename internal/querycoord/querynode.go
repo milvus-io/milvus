@@ -310,6 +310,17 @@ func (qn *queryNode) removeCollectionInfo(collectionID UniqueID) error {
 	return qn.kvClient.Remove(key)
 }
 
+func (qn *queryNode) clearNodeInfo() error {
+	for collectionID := range qn.collectionInfos {
+		err := qn.removeCollectionInfo(collectionID)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (qn *queryNode) setNodeState(onService bool) {
 	qn.Lock()
 	defer qn.Unlock()
