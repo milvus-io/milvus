@@ -169,7 +169,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		grpc.MaxSendMsgSize(math.MaxInt32),
 		grpc.UnaryInterceptor(ot.UnaryServerInterceptor(opts...)),
 		grpc.StreamInterceptor(ot.StreamServerInterceptor(opts...)))
-	indexpb.RegisterIndexServiceServer(s.grpcServer, s)
+	indexpb.RegisterIndexCoordServer(s.grpcServer, s)
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {

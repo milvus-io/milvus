@@ -29,10 +29,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -1429,7 +1429,7 @@ func TestMasterService(t *testing.T) {
 	})
 
 	t.Run("alloc time tick", func(t *testing.T) {
-		req := &masterpb.AllocTimestampRequest{
+		req := &rootcoordpb.AllocTimestampRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Undefined,
 				MsgID:     3000,
@@ -1445,7 +1445,7 @@ func TestMasterService(t *testing.T) {
 	})
 
 	t.Run("alloc id", func(t *testing.T) {
-		req := &masterpb.AllocIDRequest{
+		req := &rootcoordpb.AllocIDRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Undefined,
 				MsgID:     3001,
@@ -1716,7 +1716,7 @@ func TestMasterService(t *testing.T) {
 		core.TSOAllocator = func(count uint32) (typeutil.Timestamp, error) {
 			return 0, fmt.Errorf("tso allcoator error test")
 		}
-		r1 := &masterpb.AllocTimestampRequest{
+		r1 := &rootcoordpb.AllocTimestampRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Undefined,
 				MsgID:     5000,
@@ -1729,7 +1729,7 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, p1.Status.ErrorCode)
 
-		r2 := &masterpb.AllocIDRequest{
+		r2 := &rootcoordpb.AllocIDRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Undefined,
 				MsgID:     3001,

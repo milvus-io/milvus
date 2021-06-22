@@ -16,7 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/masterpb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 )
 
 type allocator interface {
@@ -36,7 +36,7 @@ func newAllocator(rootCoordClient types.RootCoord) *rootCoordAllocator {
 
 func (allocator *rootCoordAllocator) allocTimestamp() (Timestamp, error) {
 	ctx := context.TODO()
-	resp, err := allocator.rootCoordClient.AllocTimestamp(ctx, &masterpb.AllocTimestampRequest{
+	resp, err := allocator.rootCoordClient.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_RequestTSO,
 			MsgID:     -1, // todo add msg id
@@ -53,7 +53,7 @@ func (allocator *rootCoordAllocator) allocTimestamp() (Timestamp, error) {
 
 func (allocator *rootCoordAllocator) allocID() (UniqueID, error) {
 	ctx := context.TODO()
-	resp, err := allocator.rootCoordClient.AllocID(ctx, &masterpb.AllocIDRequest{
+	resp, err := allocator.rootCoordClient.AllocID(ctx, &rootcoordpb.AllocIDRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_RequestID,
 			MsgID:     -1, // todo add msg id

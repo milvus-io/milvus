@@ -23,9 +23,9 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -36,7 +36,7 @@ import (
 
 // GrpcClient grpc client
 type GrpcClient struct {
-	grpcClient masterpb.MasterServiceClient
+	grpcClient rootcoordpb.RootCoordClient
 	conn       *grpc.ClientConn
 	ctx        context.Context
 
@@ -153,7 +153,7 @@ func (c *GrpcClient) connect() error {
 		return err
 	}
 	log.Debug("RootCoordClient try reconnect success")
-	c.grpcClient = masterpb.NewMasterServiceClient(c.conn)
+	c.grpcClient = rootcoordpb.NewRootCoordClient(c.conn)
 	return nil
 }
 
@@ -306,18 +306,18 @@ func (c *GrpcClient) DescribeIndex(ctx context.Context, in *milvuspb.DescribeInd
 }
 
 // AllocTimestamp global timestamp allocator
-func (c *GrpcClient) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
+func (c *GrpcClient) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		return c.grpcClient.AllocTimestamp(ctx, in)
 	})
-	return ret.(*masterpb.AllocTimestampResponse), err
+	return ret.(*rootcoordpb.AllocTimestampResponse), err
 }
 
-func (c *GrpcClient) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
+func (c *GrpcClient) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		return c.grpcClient.AllocID(ctx, in)
 	})
-	return ret.(*masterpb.AllocIDResponse), err
+	return ret.(*rootcoordpb.AllocIDResponse), err
 }
 
 // UpdateChannelTimeTick used to handle ChannelTimeTickMsg

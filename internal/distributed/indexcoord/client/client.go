@@ -38,7 +38,7 @@ type UniqueID = typeutil.UniqueID
 
 type Client struct {
 	ctx        context.Context
-	grpcClient indexpb.IndexServiceClient
+	grpcClient indexpb.IndexCoordClient
 	conn       *grpc.ClientConn
 
 	addr string
@@ -130,7 +130,7 @@ func (c *Client) connect() error {
 		return err
 	}
 	log.Debug("IndexCoordClient connect success")
-	c.grpcClient = indexpb.NewIndexServiceClient(c.conn)
+	c.grpcClient = indexpb.NewIndexCoordClient(c.conn)
 	return nil
 }
 

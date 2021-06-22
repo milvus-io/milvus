@@ -32,10 +32,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
@@ -46,14 +46,6 @@ import (
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
-
-//  internalpb -> internalpb
-//  proxypb(proxy_service)
-//  querypb(query_service)
-//  datapb(data_service)
-//  indexpb(index_service)
-//  milvuspb -> milvuspb
-//  masterpb2 -> masterpb (master_service)
 
 // ------------------ struct -----------------------
 
@@ -1826,10 +1818,10 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 	return t.Rsp, nil
 }
 
-func (c *Core) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
+func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		return &masterpb.AllocTimestampResponse{
+		return &rootcoordpb.AllocTimestampResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
@@ -1841,7 +1833,7 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRe
 	ts, err := c.TSOAllocator(in.Count)
 	if err != nil {
 		log.Debug("AllocTimestamp failed", zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
-		return &masterpb.AllocTimestampResponse{
+		return &rootcoordpb.AllocTimestampResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    "AllocTimestamp failed: " + err.Error(),
@@ -1851,7 +1843,7 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRe
 		}, nil
 	}
 	// log.Printf("AllocTimestamp : %d", ts)
-	return &masterpb.AllocTimestampResponse{
+	return &rootcoordpb.AllocTimestampResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
@@ -1861,10 +1853,10 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRe
 	}, nil
 }
 
-func (c *Core) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
+func (c *Core) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		return &masterpb.AllocIDResponse{
+		return &rootcoordpb.AllocIDResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
@@ -1876,7 +1868,7 @@ func (c *Core) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*maste
 	start, _, err := c.IDAllocator(in.Count)
 	if err != nil {
 		log.Debug("AllocID failed", zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
-		return &masterpb.AllocIDResponse{
+		return &rootcoordpb.AllocIDResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    "AllocID failed: " + err.Error(),
@@ -1886,7 +1878,7 @@ func (c *Core) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*maste
 		}, nil
 	}
 	log.Debug("AllocID", zap.Int64("id start", start), zap.Uint32("count", in.Count))
-	return &masterpb.AllocIDResponse{
+	return &rootcoordpb.AllocIDResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
