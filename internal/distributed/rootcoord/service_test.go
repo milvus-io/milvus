@@ -245,6 +245,9 @@ func TestGrpcService(t *testing.T) {
 	core.CallReleaseCollectionService = func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
 		return nil
 	}
+	core.CallReleasePartitionService = func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID, partitionIDs []typeutil.UniqueID) error {
+		return nil
+	}
 
 	rootcoord.Params.Address = Params.Address
 	err = svr.rootCoord.Register()

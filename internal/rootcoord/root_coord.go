@@ -125,7 +125,8 @@ type Core struct {
 	NewProxyClient func(sess *sessionutil.Session) (types.ProxyNode, error)
 
 	//query service interface, notify query service to release collection
-	CallReleaseCollectionService func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error
+	CallReleaseCollectionService func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID) error
+	CallReleasePartitionService  func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID, partitionIDs []typeutil.UniqueID) error
 
 	//dd request scheduler
 	ddReqQueue chan reqTask //dd request will be push into this chan
@@ -231,6 +232,9 @@ func (c *Core) checkInit() error {
 	}
 	if c.CallReleaseCollectionService == nil {
 		return fmt.Errorf("CallReleaseCollectionService is nil")
+	}
+	if c.CallReleasePartitionService == nil {
+		return fmt.Errorf("CallReleasePartitionService is nil")
 	}
 	if c.DataCoordSegmentChan == nil {
 		return fmt.Errorf("DataCoordSegmentChan is nil")
@@ -861,6 +865,35 @@ func (c *Core) SetQueryCoord(s types.QueryService) error {
 		}
 		if rsp.ErrorCode != commonpb.ErrorCode_Success {
 			retErr = fmt.Errorf("ReleaseCollection from query service failed, error = %s", rsp.Reason)
+			return
+		}
+		retErr = nil
+		return
+	}
+	c.CallReleasePartitionService = func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID, partitionIDs []typeutil.UniqueID) (retErr error) {
+		defer func() {
+			if err := recover(); err != nil {
+				retErr = fmt.Errorf("release partition from query service panic, msg = %v", err)
+			}
+		}()
+		req := &querypb.ReleasePartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_ReleasePartitions,
+				MsgID:     0, //TODO, msg ID
+				Timestamp: ts,
+				SourceID:  c.session.ServerID,
+			},
+			DbID:         dbID,
+			CollectionID: collectionID,
+			PartitionIDs: partitionIDs,
+		}
+		rsp, err := s.ReleasePartitions(ctx, req)
+		if err != nil {
+			retErr = err
+			return
+		}
+		if rsp.ErrorCode != commonpb.ErrorCode_Success {
+			retErr = fmt.Errorf("ReleasePartitions from query service failed, error = %s", rsp.Reason)
 			return
 		}
 		retErr = nil
