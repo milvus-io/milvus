@@ -31,7 +31,7 @@ func (p *calBySchemaPolicy) apply(schema *schemapb.CollectionSchema) (int, error
 	if err != nil {
 		return -1, err
 	}
-	threshold := Params.SegmentSize * 1024 * 1024
+	threshold := Params.SegmentMaxSize * 1024 * 1024
 	return int(threshold / float64(sizePerRecord)), nil
 }
 
@@ -108,7 +108,7 @@ type sealPolicyV1 struct {
 }
 
 func (p *sealPolicyV1) apply(maxCount, writtenCount, allocatedCount int64) bool {
-	return float64(writtenCount) >= Params.SegmentSizeFactor*float64(maxCount)
+	return float64(writtenCount) >= Params.SegmentSealProportion*float64(maxCount)
 }
 
 func newSealPolicyV1() sealPolicy {
