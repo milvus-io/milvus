@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package grpcproxynode
+package grpcproxy
 
 import (
 	"context"
@@ -49,7 +49,7 @@ const (
 type Server struct {
 	ctx        context.Context
 	wg         sync.WaitGroup
-	proxynode  *proxynode.ProxyNode
+	proxy      *proxy.ProxyNode
 	grpcServer *grpc.Server
 
 	grpcErrChan chan error
@@ -71,7 +71,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		grpcErrChan: make(chan error),
 	}
 
-	server.proxynode, err = proxynode.NewProxyNode(server.ctx, factory)
+	server.proxy, err = proxy.NewProxyNode(server.ctx, factory)
 	if err != nil {
 		return nil, err
 	}
@@ -82,10 +82,10 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	defer s.wg.Done()
 
-	log.Debug("proxynode", zap.Int("network port", grpcPort))
+	log.Debug("proxy", zap.Int("network port", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
-		log.Warn("proxynode", zap.String("Server:failed to listen:", err.Error()))
+		log.Warn("proxy", zap.String("Server:failed to listen:", err.Error()))
 		s.grpcErrChan <- err
 		return
 	}
@@ -131,30 +131,30 @@ func (s *Server) init() error {
 	Params.Init()
 	if !funcutil.CheckPortAvailable(Params.Port) {
 		Params.Port = funcutil.GetAvailablePort()
-		log.Warn("ProxyNode init", zap.Any("Port", Params.Port))
+		log.Warn("Proxy init", zap.Any("Port", Params.Port))
 	}
 	Params.LoadFromEnv()
 	Params.LoadFromArgs()
 	Params.Address = Params.IP + ":" + strconv.FormatInt(int64(Params.Port), 10)
 
-	proxynode.Params.Init()
+	proxy.Params.Init()
 	log.Debug("init params done ...")
-	proxynode.Params.NetworkPort = Params.Port
-	proxynode.Params.IP = Params.IP
-	proxynode.Params.NetworkAddress = Params.Address
+	proxy.Params.NetworkPort = Params.Port
+	proxy.Params.IP = Params.IP
+	proxy.Params.NetworkAddress = Params.Address
 	// for purpose of ID Allocator
-	proxynode.Params.MasterAddress = Params.MasterAddress
+	proxy.Params.MasterAddress = Params.MasterAddress
 
 	closer := trace.InitTracing(fmt.Sprintf("proxy_node ip: %s, port: %d", Params.IP, Params.Port))
 	s.closer = closer
 
-	log.Debug("proxynode", zap.String("proxy host", Params.IP))
-	log.Debug("proxynode", zap.Int("proxy port", Params.Port))
-	log.Debug("proxynode", zap.String("proxy address", Params.Address))
+	log.Debug("proxy", zap.String("proxy host", Params.IP))
+	log.Debug("proxy", zap.Int("proxy port", Params.Port))
+	log.Debug("proxy", zap.String("proxy address", Params.Address))
 
-	err = s.proxynode.Register()
+	err = s.proxy.Register()
 	if err != nil {
-		log.Debug("ProxyNode Register etcd failed ", zap.Error(err))
+		log.Debug("Proxy Register etcd failed ", zap.Error(err))
 		return err
 	}
 
@@ -168,51 +168,51 @@ func (s *Server) init() error {
 	}
 
 	rootCoordAddr := Params.MasterAddress
-	log.Debug("ProxyNode", zap.String("RootCoord address", rootCoordAddr))
+	log.Debug("Proxy", zap.String("RootCoord address", rootCoordAddr))
 	timeout := 3 * time.Second
-	s.rootCoordClient, err = rcc.NewClient(s.ctx, proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
+	s.rootCoordClient, err = rcc.NewClient(s.ctx, proxy.Params.MetaRootPath, proxy.Params.EtcdEndpoints, timeout)
 	if err != nil {
-		log.Debug("ProxyNode new rootCoordClient failed ", zap.Error(err))
+		log.Debug("Proxy new rootCoordClient failed ", zap.Error(err))
 		return err
 	}
 	err = s.rootCoordClient.Init()
 	if err != nil {
-		log.Debug("ProxyNode new rootCoordClient Init ", zap.Error(err))
+		log.Debug("Proxy new rootCoordClient Init ", zap.Error(err))
 		return err
 	}
 	err = funcutil.WaitForComponentHealthy(s.ctx, s.rootCoordClient, "RootCoord", 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("ProxyNode WaitForComponentHealthy RootCoord failed ", zap.Error(err))
+		log.Debug("Proxy WaitForComponentHealthy RootCoord failed ", zap.Error(err))
 		panic(err)
 	}
-	s.proxynode.SetRootCoordClient(s.rootCoordClient)
+	s.proxy.SetRootCoordClient(s.rootCoordClient)
 	log.Debug("set rootcoord client ...")
 
 	dataCoordAddr := Params.DataCoordAddress
-	log.Debug("ProxyNode", zap.String("data service address", dataCoordAddr))
-	s.dataCoordClient = grpcdatacoordclient.NewClient(proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
+	log.Debug("Proxy", zap.String("datacoord address", dataCoordAddr))
+	s.dataCoordClient = grpcdatacoordclient.NewClient(proxy.Params.MetaRootPath, proxy.Params.EtcdEndpoints, timeout)
 	err = s.dataCoordClient.Init()
 	if err != nil {
-		log.Debug("ProxyNode dataCoordClient init failed ", zap.Error(err))
+		log.Debug("Proxy dataCoordClient init failed ", zap.Error(err))
 		return err
 	}
-	s.proxynode.SetDataCoordClient(s.dataCoordClient)
-	log.Debug("set data service address ...")
+	s.proxy.SetDataCoordClient(s.dataCoordClient)
+	log.Debug("set datacoord address ...")
 
 	indexServiceAddr := Params.IndexServerAddress
-	log.Debug("ProxyNode", zap.String("index server address", indexServiceAddr))
-	s.indexCoordClient = grpcindexcoordclient.NewClient(proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
+	log.Debug("Proxy", zap.String("indexcoord address", indexServiceAddr))
+	s.indexCoordClient = grpcindexcoordclient.NewClient(proxy.Params.MetaRootPath, proxy.Params.EtcdEndpoints, timeout)
 	err = s.indexCoordClient.Init()
 	if err != nil {
-		log.Debug("ProxyNode indexCoordClient init failed ", zap.Error(err))
+		log.Debug("Proxy indexCoordClient init failed ", zap.Error(err))
 		return err
 	}
-	s.proxynode.SetIndexCoordClient(s.indexCoordClient)
-	log.Debug("set index service client ...")
+	s.proxy.SetIndexCoordClient(s.indexCoordClient)
+	log.Debug("set indexcoord client ...")
 
 	queryServiceAddr := Params.QueryServiceAddress
-	log.Debug("ProxyNode", zap.String("query server address", queryServiceAddr))
-	s.queryServiceClient, err = grpcqueryserviceclient.NewClient(proxynode.Params.MetaRootPath, proxynode.Params.EtcdEndpoints, timeout)
+	log.Debug("Proxy", zap.String("querycoord address", queryServiceAddr))
+	s.queryServiceClient, err = grpcqueryserviceclient.NewClient(proxy.Params.MetaRootPath, proxy.Params.EtcdEndpoints, timeout)
 	if err != nil {
 		return err
 	}
@@ -220,15 +220,14 @@ func (s *Server) init() error {
 	if err != nil {
 		return err
 	}
-	s.proxynode.SetQueryServiceClient(s.queryServiceClient)
+	s.proxy.SetQueryServiceClient(s.queryServiceClient)
 	log.Debug("set query service client ...")
 
-	s.proxynode.UpdateStateCode(internalpb.StateCode_Initializing)
-	log.Debug("proxynode",
-		zap.Any("state of proxynode", internalpb.StateCode_Initializing))
+	s.proxy.UpdateStateCode(internalpb.StateCode_Initializing)
+	log.Debug("proxy", zap.Any("state of proxy", internalpb.StateCode_Initializing))
 
-	if err := s.proxynode.Init(); err != nil {
-		log.Debug("proxynode", zap.String("proxynode init error", err.Error()))
+	if err := s.proxy.Init(); err != nil {
+		log.Debug("proxy", zap.String("proxy init error", err.Error()))
 		return err
 	}
 
@@ -236,7 +235,7 @@ func (s *Server) init() error {
 }
 
 func (s *Server) start() error {
-	return s.proxynode.Start()
+	return s.proxy.Start()
 }
 
 func (s *Server) Stop() error {
@@ -251,7 +250,7 @@ func (s *Server) Stop() error {
 		s.grpcServer.GracefulStop()
 	}
 
-	err = s.proxynode.Stop()
+	err = s.proxy.Stop()
 	if err != nil {
 		return err
 	}
@@ -262,140 +261,140 @@ func (s *Server) Stop() error {
 }
 
 func (s *Server) GetComponentStates(ctx context.Context, request *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
-	return s.proxynode.GetComponentStates(ctx)
+	return s.proxy.GetComponentStates(ctx)
 }
 
 func (s *Server) GetStatisticsChannel(ctx context.Context, request *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.proxynode.GetStatisticsChannel(ctx)
+	return s.proxy.GetStatisticsChannel(ctx)
 }
 
 func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-	return s.proxynode.InvalidateCollectionMetaCache(ctx, request)
+	return s.proxy.InvalidateCollectionMetaCache(ctx, request)
 }
 
 func (s *Server) ReleaseDQLMessageStream(ctx context.Context, request *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
-	return s.proxynode.ReleaseDQLMessageStream(ctx, request)
+	return s.proxy.ReleaseDQLMessageStream(ctx, request)
 }
 
 func (s *Server) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
-	return s.proxynode.CreateCollection(ctx, request)
+	return s.proxy.CreateCollection(ctx, request)
 }
 
 func (s *Server) DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
-	return s.proxynode.DropCollection(ctx, request)
+	return s.proxy.DropCollection(ctx, request)
 }
 
 func (s *Server) HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
-	return s.proxynode.HasCollection(ctx, request)
+	return s.proxy.HasCollection(ctx, request)
 }
 
 func (s *Server) LoadCollection(ctx context.Context, request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
-	return s.proxynode.LoadCollection(ctx, request)
+	return s.proxy.LoadCollection(ctx, request)
 }
 
 func (s *Server) ReleaseCollection(ctx context.Context, request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	return s.proxynode.ReleaseCollection(ctx, request)
+	return s.proxy.ReleaseCollection(ctx, request)
 }
 
 func (s *Server) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-	return s.proxynode.DescribeCollection(ctx, request)
+	return s.proxy.DescribeCollection(ctx, request)
 }
 
 func (s *Server) GetCollectionStatistics(ctx context.Context, request *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
-	return s.proxynode.GetCollectionStatistics(ctx, request)
+	return s.proxy.GetCollectionStatistics(ctx, request)
 }
 
 func (s *Server) ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
-	return s.proxynode.ShowCollections(ctx, request)
+	return s.proxy.ShowCollections(ctx, request)
 }
 
 func (s *Server) CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
-	return s.proxynode.CreatePartition(ctx, request)
+	return s.proxy.CreatePartition(ctx, request)
 }
 
 func (s *Server) DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
-	return s.proxynode.DropPartition(ctx, request)
+	return s.proxy.DropPartition(ctx, request)
 }
 
 func (s *Server) HasPartition(ctx context.Context, request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
-	return s.proxynode.HasPartition(ctx, request)
+	return s.proxy.HasPartition(ctx, request)
 }
 
 func (s *Server) LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitionsRequest) (*commonpb.Status, error) {
-	return s.proxynode.LoadPartitions(ctx, request)
+	return s.proxy.LoadPartitions(ctx, request)
 }
 
 func (s *Server) ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionsRequest) (*commonpb.Status, error) {
-	return s.proxynode.ReleasePartitions(ctx, request)
+	return s.proxy.ReleasePartitions(ctx, request)
 }
 
 func (s *Server) GetPartitionStatistics(ctx context.Context, request *milvuspb.GetPartitionStatisticsRequest) (*milvuspb.GetPartitionStatisticsResponse, error) {
-	return s.proxynode.GetPartitionStatistics(ctx, request)
+	return s.proxy.GetPartitionStatistics(ctx, request)
 }
 
 func (s *Server) ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
-	return s.proxynode.ShowPartitions(ctx, request)
+	return s.proxy.ShowPartitions(ctx, request)
 }
 
 func (s *Server) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
-	return s.proxynode.CreateIndex(ctx, request)
+	return s.proxy.CreateIndex(ctx, request)
 }
 
 func (s *Server) DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
-	return s.proxynode.DropIndex(ctx, request)
+	return s.proxy.DropIndex(ctx, request)
 }
 
 func (s *Server) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
-	return s.proxynode.DescribeIndex(ctx, request)
+	return s.proxy.DescribeIndex(ctx, request)
 }
 
 // GetIndexBuildProgress gets index build progress with filed_name and index_name.
 // IndexRows is the num of indexed rows. And TotalRows is the total number of segment rows.
 func (s *Server) GetIndexBuildProgress(ctx context.Context, request *milvuspb.GetIndexBuildProgressRequest) (*milvuspb.GetIndexBuildProgressResponse, error) {
-	return s.proxynode.GetIndexBuildProgress(ctx, request)
+	return s.proxy.GetIndexBuildProgress(ctx, request)
 }
 
 func (s *Server) GetIndexState(ctx context.Context, request *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error) {
-	return s.proxynode.GetIndexState(ctx, request)
+	return s.proxy.GetIndexState(ctx, request)
 }
 
 func (s *Server) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
-	return s.proxynode.Insert(ctx, request)
+	return s.proxy.Insert(ctx, request)
 }
 
 func (s *Server) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-	return s.proxynode.Search(ctx, request)
+	return s.proxy.Search(ctx, request)
 }
 
 func (s *Server) Retrieve(ctx context.Context, request *milvuspb.RetrieveRequest) (*milvuspb.RetrieveResults, error) {
-	return s.proxynode.Retrieve(ctx, request)
+	return s.proxy.Retrieve(ctx, request)
 }
 
 func (s *Server) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*commonpb.Status, error) {
-	return s.proxynode.Flush(ctx, request)
+	return s.proxy.Flush(ctx, request)
 }
 
 func (s *Server) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
-	return s.proxynode.Query(ctx, request)
+	return s.proxy.Query(ctx, request)
 }
 
 func (s *Server) GetDdChannel(ctx context.Context, request *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.proxynode.GetDdChannel(ctx, request)
+	return s.proxy.GetDdChannel(ctx, request)
 }
 
 func (s *Server) GetPersistentSegmentInfo(ctx context.Context, request *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error) {
-	return s.proxynode.GetPersistentSegmentInfo(ctx, request)
+	return s.proxy.GetPersistentSegmentInfo(ctx, request)
 }
 
 func (s *Server) GetQuerySegmentInfo(ctx context.Context, request *milvuspb.GetQuerySegmentInfoRequest) (*milvuspb.GetQuerySegmentInfoResponse, error) {
-	return s.proxynode.GetQuerySegmentInfo(ctx, request)
+	return s.proxy.GetQuerySegmentInfo(ctx, request)
 
 }
 
 func (s *Server) Dummy(ctx context.Context, request *milvuspb.DummyRequest) (*milvuspb.DummyResponse, error) {
-	return s.proxynode.Dummy(ctx, request)
+	return s.proxy.Dummy(ctx, request)
 }
 
 func (s *Server) RegisterLink(ctx context.Context, request *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error) {
-	return s.proxynode.RegisterLink(ctx, request)
+	return s.proxy.RegisterLink(ctx, request)
 }
