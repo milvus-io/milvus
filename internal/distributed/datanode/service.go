@@ -26,7 +26,7 @@ import (
 	"google.golang.org/grpc"
 
 	dn "github.com/milvus-io/milvus/internal/datanode"
-	dsc "github.com/milvus-io/milvus/internal/distributed/dataservice/client"
+	dsc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"

@@ -3656,8 +3656,6 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 	getIndexStatesRequest := &indexpb.GetIndexStatesRequest{
 		IndexBuildIDs: make([]UniqueID, 0),
 	}
-	enableIndexBitMap := make([]bool, 0)
-	indexBuildIDs := make([]UniqueID, 0)
 
 	for _, segmentID := range allSegmentIDs {
 		describeSegmentRequest := &milvuspb.DescribeSegmentRequest{
@@ -3675,32 +3673,24 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 			return err
 		}
 		if segmentDesc.IndexID == matchIndexID {
-			indexBuildIDs = append(indexBuildIDs, segmentDesc.BuildID)
 			if segmentDesc.EnableIndex {
-				enableIndexBitMap = append(enableIndexBitMap, true)
-			} else {
-				enableIndexBitMap = append(enableIndexBitMap, false)
+				getIndexStatesRequest.IndexBuildIDs = append(getIndexStatesRequest.IndexBuildIDs, segmentDesc.BuildID)
 			}
 		}
 	}
 
-	log.Debug("proxynode", zap.Int("GetIndexState:: len of allSegmentIDs", len(allSegmentIDs)))
-	log.Debug("proxynode", zap.Int("GetIndexState:: len of IndexBuildIDs", len(indexBuildIDs)))
-	if len(allSegmentIDs) != len(indexBuildIDs) {
-		gist.result = &milvuspb.GetIndexStateResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    "",
-			},
-			State: commonpb.IndexState_InProgress,
-		}
-		return err
+	gist.result = &milvuspb.GetIndexStateResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		State: commonpb.IndexState_Finished,
 	}
 
-	for idx, enableIndex := range enableIndexBitMap {
-		if enableIndex {
-			getIndexStatesRequest.IndexBuildIDs = append(getIndexStatesRequest.IndexBuildIDs, indexBuildIDs[idx])
-		}
+	log.Debug("ProxyNode GetIndexState", zap.Int("IndexBuildIDs", len(getIndexStatesRequest.IndexBuildIDs)), zap.Error(err))
+
+	if len(getIndexStatesRequest.IndexBuildIDs) == 0 {
+		return nil
 	}
 	states, err := gist.indexCoord.GetIndexStates(ctx, getIndexStatesRequest)
 	if err != nil {
@@ -3712,7 +3702,6 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 			Status: states.Status,
 			State:  commonpb.IndexState_Failed,
 		}
-
 		return nil
 	}
 
@@ -3722,17 +3711,8 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 				Status: states.Status,
 				State:  state.State,
 			}
-
 			return nil
 		}
-	}
-
-	gist.result = &milvuspb.GetIndexStateResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
-		State: commonpb.IndexState_Finished,
 	}
 
 	return nil

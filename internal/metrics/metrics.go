@@ -243,7 +243,7 @@ var (
 	)
 )
 
-//RegisterDataCoord register DataService metrics
+//RegisterDataCoord register DataCoord metrics
 func RegisterDataCoord() {
 	prometheus.Register(DataCoordDataNodeList)
 }

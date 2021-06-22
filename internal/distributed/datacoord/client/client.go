@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package grpcqueryserviceclient
+package grpcdatacoordclient
 
 import (
 	"context"
@@ -19,6 +19,8 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -26,53 +28,48 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
 type Client struct {
-	ctx        context.Context
-	grpcClient querypb.QueryServiceClient
+	grpcClient datapb.DataCoordClient
 	conn       *grpc.ClientConn
+	ctx        context.Context
+	addr       string
 
-	addr      string
+	sess *sessionutil.Session
+
 	timeout   time.Duration
-	sess      *sessionutil.Session
-	reconnTry int
 	recallTry int
+	reconnTry int
 }
 
-func getQueryServiceAddress(sess *sessionutil.Session) (string, error) {
-	key := typeutil.QueryServiceRole
+func getDataCoordAddress(sess *sessionutil.Session) (string, error) {
+	key := typeutil.DataCoordRole
 	msess, _, err := sess.GetSessions(key)
 	if err != nil {
-		log.Debug("QueryServiceClient GetSessions failed", zap.Error(err))
+		log.Debug("DataCoordClient, getSessions failed", zap.Any("key", key), zap.Error(err))
 		return "", err
 	}
 	ms, ok := msess[key]
 	if !ok {
-		log.Debug("QueryServiceClient msess key not existed", zap.Any("key", key))
-		return "", fmt.Errorf("number of queryservice is incorrect, %d", len(msess))
+		log.Debug("DataCoordClient, not existed in msess ", zap.Any("key", key), zap.Any("len of msess", len(msess)))
+		return "", fmt.Errorf("number of datacoord is incorrect, %d", len(msess))
 	}
 	return ms.Address, nil
 }
 
-// NewClient creates a client for QueryService grpc call.
-func NewClient(metaRootPath string, etcdEndpoints []string, timeout time.Duration) (*Client, error) {
-	sess := sessionutil.NewSession(context.Background(), metaRootPath, etcdEndpoints)
-
+func NewClient(metaRoot string, etcdEndpoints []string, timeout time.Duration) *Client {
+	sess := sessionutil.NewSession(context.Background(), metaRoot, etcdEndpoints)
 	return &Client{
-		ctx:        context.Background(),
-		grpcClient: nil,
-		conn:       nil,
-		timeout:    timeout,
-		reconnTry:  10,
-		recallTry:  3,
-		sess:       sess,
-	}, nil
+		ctx:       context.Background(),
+		sess:      sess,
+		timeout:   timeout,
+		recallTry: 3,
+		reconnTry: 10,
+	}
 }
 
 func (c *Client) Init() error {
@@ -86,23 +83,23 @@ func (c *Client) Init() error {
 
 func (c *Client) connect() error {
 	var err error
-	getQueryServiceAddressFn := func() error {
-		c.addr, err = getQueryServiceAddress(c.sess)
+	getDataCoordAddressFn := func() error {
+		c.addr, err = getDataCoordAddress(c.sess)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
-	err = retry.Retry(c.reconnTry, 3*time.Second, getQueryServiceAddressFn)
+	err = retry.Retry(c.reconnTry, 3*time.Second, getDataCoordAddressFn)
 	if err != nil {
-		log.Debug("QueryServiceClient getQueryServiceAddress failed", zap.Error(err))
+		log.Debug("DataCoordClient try reconnect getDataCoordAddressFn failed", zap.Error(err))
 		return err
 	}
 	connectGrpcFunc := func() error {
 		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
 		defer cancelFunc()
 		opts := trace.GetInterceptorOpts()
-		log.Debug("QueryServiceClient try reconnect ", zap.String("address", c.addr))
+		log.Debug("DataCoordClient try reconnect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
@@ -124,13 +121,13 @@ func (c *Client) connect() error {
 
 	err = retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
 	if err != nil {
-		log.Debug("QueryServiceClient try reconnect failed", zap.Error(err))
+		log.Debug("DataCoord try reconnect failed", zap.Error(err))
 		return err
 	}
-	log.Debug("QueryServiceClient try reconnect success")
-	c.grpcClient = querypb.NewQueryServiceClient(c.conn)
+	c.grpcClient = datapb.NewDataCoordClient(c.conn)
 	return nil
 }
+
 func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error) {
 	ret, err := caller()
 	if err == nil {
@@ -160,7 +157,7 @@ func (c *Client) Stop() error {
 	return c.conn.Close()
 }
 
-// Register dummy
+// Register dumy
 func (c *Client) Register() error {
 	return nil
 }
@@ -186,72 +183,69 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 	return ret.(*milvuspb.StringResponse), err
 }
 
-func (c *Client) RegisterNode(ctx context.Context, req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
+func (c *Client) Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.RegisterNode(ctx, req)
-	})
-	return ret.(*querypb.RegisterNodeResponse), err
-}
-
-func (c *Client) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.ShowCollections(ctx, req)
-	})
-	return ret.(*querypb.ShowCollectionsResponse), err
-}
-
-func (c *Client) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.LoadCollection(ctx, req)
+		return c.grpcClient.Flush(ctx, req)
 	})
 	return ret.(*commonpb.Status), err
 }
 
-func (c *Client) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+func (c *Client) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.ReleaseCollection(ctx, req)
+		return c.grpcClient.AssignSegmentID(ctx, req)
 	})
-	return ret.(*commonpb.Status), err
+	return ret.(*datapb.AssignSegmentIDResponse), err
 }
 
-func (c *Client) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
+func (c *Client) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.ShowPartitions(ctx, req)
+		return c.grpcClient.GetSegmentStates(ctx, req)
 	})
-	return ret.(*querypb.ShowPartitionsResponse), err
+	return ret.(*datapb.GetSegmentStatesResponse), err
 }
 
-func (c *Client) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
+func (c *Client) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.LoadPartitions(ctx, req)
+		return c.grpcClient.GetInsertBinlogPaths(ctx, req)
 	})
-	return ret.(*commonpb.Status), err
+	return ret.(*datapb.GetInsertBinlogPathsResponse), err
 }
 
-func (c *Client) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
+func (c *Client) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.ReleasePartitions(ctx, req)
+		return c.grpcClient.GetCollectionStatistics(ctx, req)
 	})
-	return ret.(*commonpb.Status), err
+	return ret.(*datapb.GetCollectionStatisticsResponse), err
 }
 
-func (c *Client) CreateQueryChannel(ctx context.Context, req *querypb.CreateQueryChannelRequest) (*querypb.CreateQueryChannelResponse, error) {
+func (c *Client) GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.CreateQueryChannel(ctx, req)
+		return c.grpcClient.GetPartitionStatistics(ctx, req)
 	})
-	return ret.(*querypb.CreateQueryChannelResponse), err
+	return ret.(*datapb.GetPartitionStatisticsResponse), err
 }
 
-func (c *Client) GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error) {
+func (c *Client) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.GetPartitionStates(ctx, req)
+		return c.grpcClient.GetSegmentInfoChannel(ctx, &datapb.GetSegmentInfoChannelRequest{})
 	})
-	return ret.(*querypb.GetPartitionStatesResponse), err
+	return ret.(*milvuspb.StringResponse), err
 }
 
-func (c *Client) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
+func (c *Client) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		return c.grpcClient.GetSegmentInfo(ctx, req)
 	})
-	return ret.(*querypb.GetSegmentInfoResponse), err
+	return ret.(*datapb.GetSegmentInfoResponse), err
+}
+
+func (c *Client) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
+	return c.grpcClient.SaveBinlogPaths(ctx, req)
+}
+
+func (c *Client) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
+	ret, err := c.recall(func() (interface{}, error) {
+		return c.grpcClient.GetRecoveryInfo(ctx, req)
+	})
+	return ret.(*datapb.GetRecoveryInfoResponse), err
 }

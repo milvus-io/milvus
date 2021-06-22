@@ -37,5 +37,5 @@ go test -race -cover "${MILVUS_DIR}/querynode/..." -failfast
 
 go test -race -cover -v "${MILVUS_DIR}/distributed/rootcoord" -failfast
 go test -race -cover -v "${MILVUS_DIR}/rootcoord" -failfast
-go test -race -cover -v "${MILVUS_DIR}/dataservice/..." -failfast
+go test -race -cover -v "${MILVUS_DIR}/datacoord/..." -failfast
 go test -race -cover -v "${MILVUS_DIR}/indexcoord/..." -failfast
