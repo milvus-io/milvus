@@ -24,8 +24,8 @@ type ParamTable struct {
 	IndexServerAddress string
 	MasterAddress      string
 
-	DataCoordAddress    string
-	QueryServiceAddress string
+	DataCoordAddress  string
+	QueryCoordAddress string
 
 	IP      string
 	Port    int
@@ -55,7 +55,7 @@ func (pt *ParamTable) initParams() {
 	pt.initMasterAddress()
 	pt.initIndexServerAddress()
 	pt.initDataCoordAddress()
-	pt.initQueryServiceAddress()
+	pt.initQueryCoordAddress()
 }
 
 // todo remove and use load from env
@@ -86,12 +86,12 @@ func (pt *ParamTable) initDataCoordAddress() {
 }
 
 // todo remove and use load from env
-func (pt *ParamTable) initQueryServiceAddress() {
-	ret, err := pt.Load("_QueryServiceAddress")
+func (pt *ParamTable) initQueryCoordAddress() {
+	ret, err := pt.Load("_QueryCoordAddress")
 	if err != nil {
 		panic(err)
 	}
-	pt.QueryServiceAddress = ret
+	pt.QueryCoordAddress = ret
 }
 
 func (pt *ParamTable) initPort() {

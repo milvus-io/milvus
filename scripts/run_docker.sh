@@ -13,7 +13,7 @@ echo "starting indexnode docker"
 nohup docker-compose -p milvus up  indexnode > ~/indexnode_docker.log 2>&1 &
 
 echo "starting queryservice docker"
-nohup docker-compose -p milvus up queryservice > ~/queryservice_docker.log 2>&1 &
+nohup docker-compose -p milvus up querycoord > ~/queryservice_docker.log 2>&1 &
 
 echo "starting dataservice docker"
 nohup docker-compose -p milvus up datacoord > ~/dataservice_docker.log 2>&1 &

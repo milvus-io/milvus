@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package queryservice
+package querycoord
 
 import (
 	"context"
@@ -22,10 +22,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
-func TestQueryService_Init(t *testing.T) {
+func TestQueryCoord_Init(t *testing.T) {
 	ctx := context.Background()
 	msFactory := msgstream.NewPmsFactory()
-	service, err := NewQueryService(context.Background(), msFactory)
+	service, err := NewQueryCoord(context.Background(), msFactory)
 	assert.Nil(t, err)
 	service.Init()
 	service.Start()
@@ -53,10 +53,10 @@ func TestQueryService_Init(t *testing.T) {
 	service.Stop()
 }
 
-func TestQueryService_load(t *testing.T) {
+func TestQueryCoord_load(t *testing.T) {
 	ctx := context.Background()
 	msFactory := msgstream.NewPmsFactory()
-	service, err := NewQueryService(context.Background(), msFactory)
+	service, err := NewQueryCoord(context.Background(), msFactory)
 	assert.Nil(t, err)
 	service.Init()
 	service.Start()

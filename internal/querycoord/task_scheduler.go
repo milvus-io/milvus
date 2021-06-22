@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package queryservice
+package querycoord
 
 import (
 	"container/list"
@@ -148,9 +148,9 @@ func NewTaskScheduler(ctx context.Context, meta *meta, cluster *queryNodeCluster
 		dataCoord:        dataCoord,
 	}
 	s.triggerTaskQueue = NewTaskQueue()
-	idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "queryService task id"))
+	idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "query coordinator task id"))
 	if err := idAllocator.Initialize(); err != nil {
-		log.Debug("QueryService idAllocator initialize failed", zap.Error(err))
+		log.Debug("query coordinator idAllocator initialize failed", zap.Error(err))
 		return nil, err
 	}
 	s.taskIDAllocator = func() (UniqueID, error) {

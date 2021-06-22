@@ -109,7 +109,8 @@ type InsertTask struct {
 	BaseInsertTask
 	req *milvuspb.InsertRequest
 	Condition
-	ctx            context.Context
+	ctx context.Context
+
 	result         *milvuspb.MutationResult
 	dataCoord      types.DataCoord
 	rowIDAllocator *allocator.IDAllocator
@@ -1134,7 +1135,7 @@ type SearchTask struct {
 	result    *milvuspb.SearchResults
 	query     *milvuspb.SearchRequest
 	chMgr     channelsMgr
-	qs        types.QueryService
+	qc        types.QueryCoord
 }
 
 func (st *SearchTask) TraceCtx() context.Context {
@@ -1221,7 +1222,7 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 	}
 
 	// check if collection was already loaded into query node
-	showResp, err := st.qs.ShowCollections(st.ctx, &querypb.ShowCollectionsRequest{
+	showResp, err := st.qc.ShowCollections(st.ctx, &querypb.ShowCollectionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_ShowCollections,
 			MsgID:     st.Base.MsgID,
@@ -1236,7 +1237,7 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 	if showResp.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(showResp.Status.Reason)
 	}
-	log.Debug("query service show collections",
+	log.Debug("query coordinator show collections",
 		zap.Any("collID", collID),
 		zap.Any("collections", showResp.CollectionIDs),
 	)
@@ -1890,7 +1891,7 @@ type RetrieveTask struct {
 	result    *milvuspb.RetrieveResults
 	retrieve  *milvuspb.RetrieveRequest
 	chMgr     channelsMgr
-	qs        types.QueryService
+	qc        types.QueryCoord
 }
 
 func (rt *RetrieveTask) TraceCtx() context.Context {
@@ -1989,7 +1990,7 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 		zap.Any("requestID", rt.Base.MsgID), zap.Any("requestType", "retrieve"))
 
 	// check if collection was already loaded into query node
-	showResp, err := rt.qs.ShowCollections(rt.ctx, &querypb.ShowCollectionsRequest{
+	showResp, err := rt.qc.ShowCollections(rt.ctx, &querypb.ShowCollectionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_ShowCollections,
 			MsgID:     rt.Base.MsgID,
@@ -2004,7 +2005,7 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 	if showResp.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(showResp.Status.Reason)
 	}
-	log.Debug("query service show collections",
+	log.Debug("query coordinator show collections",
 		zap.Any("collections", showResp.CollectionIDs),
 		zap.Any("collID", collectionID))
 	collectionLoaded := false
@@ -2647,10 +2648,10 @@ func (g *GetPartitionStatisticsTask) PostExecute(ctx context.Context) error {
 type ShowCollectionsTask struct {
 	Condition
 	*milvuspb.ShowCollectionsRequest
-	ctx          context.Context
-	rootCoord    types.RootCoord
-	queryService types.QueryService
-	result       *milvuspb.ShowCollectionsResponse
+	ctx        context.Context
+	rootCoord  types.RootCoord
+	queryCoord types.QueryCoord
+	result     *milvuspb.ShowCollectionsResponse
 }
 
 func (sct *ShowCollectionsTask) TraceCtx() context.Context {
@@ -2715,7 +2716,7 @@ func (sct *ShowCollectionsTask) Execute(ctx context.Context) error {
 	}
 
 	if sct.ShowCollectionsRequest.Type == milvuspb.ShowCollectionsType_InMemory {
-		resp, err := sct.queryService.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
+		resp, err := sct.queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_ShowCollections,
 				MsgID:     sct.ShowCollectionsRequest.Base.MsgID,
@@ -3849,9 +3850,9 @@ func (ft *FlushTask) PostExecute(ctx context.Context) error {
 type LoadCollectionTask struct {
 	Condition
 	*milvuspb.LoadCollectionRequest
-	ctx          context.Context
-	queryService types.QueryService
-	result       *commonpb.Status
+	ctx        context.Context
+	queryCoord types.QueryCoord
+	result     *commonpb.Status
 }
 
 func (lct *LoadCollectionTask) TraceCtx() context.Context {
@@ -3927,11 +3928,11 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) (err error) {
 		CollectionID: collID,
 		Schema:       collSchema,
 	}
-	log.Debug("send LoadCollectionRequest to query service", zap.String("role", Params.RoleName), zap.Int64("msgID", request.Base.MsgID), zap.Int64("collectionID", request.CollectionID),
+	log.Debug("send LoadCollectionRequest to query coordinator", zap.String("role", Params.RoleName), zap.Int64("msgID", request.Base.MsgID), zap.Int64("collectionID", request.CollectionID),
 		zap.Any("schema", request.Schema))
-	lct.result, err = lct.queryService.LoadCollection(ctx, request)
+	lct.result, err = lct.queryCoord.LoadCollection(ctx, request)
 	if err != nil {
-		return fmt.Errorf("call query service LoadCollection: %s", err)
+		return fmt.Errorf("call query coordinator LoadCollection: %s", err)
 	}
 	return nil
 }
@@ -3944,10 +3945,10 @@ func (lct *LoadCollectionTask) PostExecute(ctx context.Context) error {
 type ReleaseCollectionTask struct {
 	Condition
 	*milvuspb.ReleaseCollectionRequest
-	ctx          context.Context
-	queryService types.QueryService
-	result       *commonpb.Status
-	chMgr        channelsMgr
+	ctx        context.Context
+	queryCoord types.QueryCoord
+	result     *commonpb.Status
+	chMgr      channelsMgr
 }
 
 func (rct *ReleaseCollectionTask) TraceCtx() context.Context {
@@ -4016,7 +4017,7 @@ func (rct *ReleaseCollectionTask) Execute(ctx context.Context) (err error) {
 		CollectionID: collID,
 	}
 
-	rct.result, err = rct.queryService.ReleaseCollection(ctx, request)
+	rct.result, err = rct.queryCoord.ReleaseCollection(ctx, request)
 
 	_ = rct.chMgr.removeDQLStream(collID)
 
@@ -4030,9 +4031,9 @@ func (rct *ReleaseCollectionTask) PostExecute(ctx context.Context) error {
 type LoadPartitionTask struct {
 	Condition
 	*milvuspb.LoadPartitionsRequest
-	ctx          context.Context
-	queryService types.QueryService
-	result       *commonpb.Status
+	ctx        context.Context
+	queryCoord types.QueryCoord
+	result     *commonpb.Status
 }
 
 func (lpt *LoadPartitionTask) TraceCtx() context.Context {
@@ -4114,7 +4115,7 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 		PartitionIDs: partitionIDs,
 		Schema:       collSchema,
 	}
-	lpt.result, err = lpt.queryService.LoadPartitions(ctx, request)
+	lpt.result, err = lpt.queryCoord.LoadPartitions(ctx, request)
 	return err
 }
 
@@ -4125,9 +4126,9 @@ func (lpt *LoadPartitionTask) PostExecute(ctx context.Context) error {
 type ReleasePartitionTask struct {
 	Condition
 	*milvuspb.ReleasePartitionsRequest
-	ctx          context.Context
-	queryService types.QueryService
-	result       *commonpb.Status
+	ctx        context.Context
+	queryCoord types.QueryCoord
+	result     *commonpb.Status
 }
 
 func (rpt *ReleasePartitionTask) TraceCtx() context.Context {
@@ -4204,7 +4205,7 @@ func (rpt *ReleasePartitionTask) Execute(ctx context.Context) (err error) {
 		CollectionID: collID,
 		PartitionIDs: partitionIDs,
 	}
-	rpt.result, err = rpt.queryService.ReleasePartitions(ctx, request)
+	rpt.result, err = rpt.queryCoord.ReleasePartitions(ctx, request)
 	return err
 }
 

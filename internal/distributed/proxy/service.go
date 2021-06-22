@@ -26,7 +26,7 @@ import (
 
 	grpcdatacoordclient "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	grpcindexcoordclient "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
-	grpcqueryserviceclient "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
+	grpcquerycoordclient "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
@@ -54,10 +54,10 @@ type Server struct {
 
 	grpcErrChan chan error
 
-	rootCoordClient    *rcc.GrpcClient
-	dataCoordClient    *grpcdatacoordclient.Client
-	queryServiceClient *grpcqueryserviceclient.Client
-	indexCoordClient   *grpcindexcoordclient.Client
+	rootCoordClient  *rcc.GrpcClient
+	dataCoordClient  *grpcdatacoordclient.Client
+	queryCooedClient *grpcquerycoordclient.Client
+	indexCoordClient *grpcindexcoordclient.Client
 
 	tracer opentracing.Tracer
 	closer io.Closer
@@ -189,39 +189,42 @@ func (s *Server) init() error {
 	log.Debug("set rootcoord client ...")
 
 	dataCoordAddr := Params.DataCoordAddress
-	log.Debug("Proxy", zap.String("datacoord address", dataCoordAddr))
+	log.Debug("Proxy", zap.String("data coordinator address", dataCoordAddr))
 	s.dataCoordClient = grpcdatacoordclient.NewClient(proxy.Params.MetaRootPath, proxy.Params.EtcdEndpoints, timeout)
 	err = s.dataCoordClient.Init()
 	if err != nil {
 		log.Debug("Proxy dataCoordClient init failed ", zap.Error(err))
 		return err
 	}
+
 	s.proxy.SetDataCoordClient(s.dataCoordClient)
-	log.Debug("set datacoord address ...")
+	log.Debug("set data coordinator address ...")
 
 	indexServiceAddr := Params.IndexServerAddress
-	log.Debug("Proxy", zap.String("indexcoord address", indexServiceAddr))
+	log.Debug("Proxy", zap.String("index coordinator address", indexServiceAddr))
 	s.indexCoordClient = grpcindexcoordclient.NewClient(proxy.Params.MetaRootPath, proxy.Params.EtcdEndpoints, timeout)
+
 	err = s.indexCoordClient.Init()
 	if err != nil {
 		log.Debug("Proxy indexCoordClient init failed ", zap.Error(err))
 		return err
 	}
-	s.proxy.SetIndexCoordClient(s.indexCoordClient)
-	log.Debug("set indexcoord client ...")
 
-	queryServiceAddr := Params.QueryServiceAddress
-	log.Debug("Proxy", zap.String("querycoord address", queryServiceAddr))
-	s.queryServiceClient, err = grpcqueryserviceclient.NewClient(proxy.Params.MetaRootPath, proxy.Params.EtcdEndpoints, timeout)
+	s.proxy.SetIndexCoordClient(s.indexCoordClient)
+	log.Debug("set index coordinator client ...")
+
+	queryCoordAddr := Params.QueryCoordAddress
+	log.Debug("Proxy", zap.String("query coordinator address", queryCoordAddr))
+	s.queryCooedClient, err = grpcquerycoordclient.NewClient(proxy.Params.MetaRootPath, proxy.Params.EtcdEndpoints, timeout)
 	if err != nil {
 		return err
 	}
-	err = s.queryServiceClient.Init()
+	err = s.queryCooedClient.Init()
 	if err != nil {
 		return err
 	}
-	s.proxy.SetQueryServiceClient(s.queryServiceClient)
-	log.Debug("set query service client ...")
+	s.proxy.SetQueryCoordClient(s.queryCooedClient)
+	log.Debug("set query coordinator client ...")
 
 	s.proxy.UpdateStateCode(internalpb.StateCode_Initializing)
 	log.Debug("proxy", zap.Any("state of proxy", internalpb.StateCode_Initializing))

@@ -831,7 +831,7 @@ func (m *mockCore) SetIndexCoord(types.IndexCoord) error {
 	return nil
 }
 
-func (m *mockCore) SetQueryCoord(types.QueryService) error {
+func (m *mockCore) SetQueryCoord(types.QueryCoord) error {
 	return nil
 }
 
@@ -896,7 +896,7 @@ func (m *mockIndex) Stop() error {
 }
 
 type mockQuery struct {
-	types.QueryService
+	types.QueryCoord
 }
 
 func (m *mockQuery) Init() error {
@@ -931,7 +931,7 @@ func TestRun(t *testing.T) {
 	svr.newIndexCoordClient = func(string, []string, time.Duration) types.IndexCoord {
 		return &mockIndex{}
 	}
-	svr.newQueryCoordClient = func(string, []string, time.Duration) types.QueryService {
+	svr.newQueryCoordClient = func(string, []string, time.Duration) types.QueryCoord {
 		return &mockQuery{}
 	}
 

@@ -832,7 +832,7 @@ func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 	return nil
 }
 
-func (c *Core) SetQueryCoord(s types.QueryService) error {
+func (c *Core) SetQueryCoord(s types.QueryCoord) error {
 	c.CallReleaseCollectionService = func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) (retErr error) {
 		defer func() {
 			if err := recover(); err != nil {

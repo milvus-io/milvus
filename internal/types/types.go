@@ -118,7 +118,7 @@ type RootCoordComponent interface {
 	UpdateStateCode(internalpb.StateCode)
 	SetDataCoord(context.Context, DataCoord) error
 	SetIndexCoord(IndexCoord) error
-	SetQueryCoord(QueryService) error
+	SetQueryCoord(QueryCoord) error
 	SetNewProxyClient(func(sess *sessionutil.Session) (ProxyNode, error))
 }
 
@@ -177,7 +177,7 @@ type QueryNode interface {
 	GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error)
 }
 
-type QueryService interface {
+type QueryCoord interface {
 	Component
 	TimeTickProvider
 
