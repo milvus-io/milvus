@@ -11,6 +11,7 @@
 package datacoord
 
 import (
+	"context"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/types"
@@ -26,12 +27,14 @@ type sessionManager interface {
 
 type clusterSessionManager struct {
 	sync.RWMutex
+	ctx               context.Context
 	sessions          map[string]types.DataNode
-	dataClientCreator func(addr string) (types.DataNode, error)
+	dataClientCreator dataNodeCreatorFunc
 }
 
-func newClusterSessionManager(dataClientCreator func(addr string) (types.DataNode, error)) *clusterSessionManager {
+func newClusterSessionManager(ctx context.Context, dataClientCreator dataNodeCreatorFunc) *clusterSessionManager {
 	return &clusterSessionManager{
+		ctx:               ctx,
 		sessions:          make(map[string]types.DataNode),
 		dataClientCreator: dataClientCreator,
 	}
@@ -39,7 +42,7 @@ func newClusterSessionManager(dataClientCreator func(addr string) (types.DataNod
 
 // lock acquired
 func (m *clusterSessionManager) createSession(addr string) (types.DataNode, error) {
-	cli, err := m.dataClientCreator(addr)
+	cli, err := m.dataClientCreator(m.ctx, addr)
 	if err != nil {
 		return nil, err
 	}
