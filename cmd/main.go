@@ -38,9 +38,10 @@ const (
 )
 
 var (
-	BuildTags      = "unknown"
-	BuildTime      = "unknown"
-	LastCommitHash = "unknown"
+	BuildTags = "unknown"
+	BuildTime = "unknown"
+	GitCommit = "unknown"
+	GoVersion = "unknown"
 )
 
 func printBanner() {
@@ -51,9 +52,10 @@ func printBanner() {
 	fmt.Println(" /_/  /_/___/____/___/\\____/___/     ")
 	fmt.Println()
 	fmt.Println("Welcome to use Milvus!")
-	fmt.Println("Milvus Tag: " + BuildTags)
-	fmt.Println("Built Time: " + BuildTime)
-	fmt.Println("Last Commit Hash: " + LastCommitHash)
+	fmt.Println("Version:   " + BuildTags)
+	fmt.Println("Built:     " + BuildTime)
+	fmt.Println("GitCommit: " + GitCommit)
+	fmt.Println("GoVersion: " + GoVersion)
 	fmt.Println()
 }
 
