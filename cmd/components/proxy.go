@@ -14,12 +14,12 @@ package components
 import (
 	"context"
 
-	grpcproxynode "github.com/milvus-io/milvus/internal/distributed/proxynode"
+	grpcproxy "github.com/milvus-io/milvus/internal/distributed/proxy"
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
 type Proxy struct {
-	svr *grpcproxynode.Server
+	svr *grpcproxy.Server
 }
 
 // NewProxy creates a new Proxy
@@ -27,7 +27,7 @@ func NewProxy(ctx context.Context, factory msgstream.Factory) (*Proxy, error) {
 	var err error
 	n := &Proxy{}
 
-	svr, err := grpcproxynode.NewServer(ctx, factory)
+	svr, err := grpcproxy.NewServer(ctx, factory)
 	if err != nil {
 		return nil, err
 	}
