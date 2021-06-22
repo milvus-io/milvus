@@ -3445,7 +3445,7 @@ func (gibpt *GetIndexBuildProgressTask) Execute(ctx context.Context) error {
 		}
 	}
 	if !foundIndexID {
-		return errors.New(fmt.Sprint("Can't found IndexID for indexName", gibpt.IndexName))
+		return fmt.Errorf("no index is created")
 	}
 
 	var allSegmentIDs []UniqueID
@@ -3666,7 +3666,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 		}
 	}
 	if !foundIndexID {
-		return errors.New(fmt.Sprint("Can't found IndexID for indexName", gist.IndexName))
+		return fmt.Errorf("no index is created")
 	}
 
 	var allSegmentIDs []UniqueID
