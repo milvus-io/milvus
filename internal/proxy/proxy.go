@@ -370,13 +370,23 @@ func (node *Proxy) Start() error {
 func (node *Proxy) Stop() error {
 	node.cancel()
 
-	node.idAllocator.Close()
-	node.segAssigner.Close()
-	node.sched.Close()
-	node.tick.Close()
-	err := node.chTicker.close()
-	if err != nil {
-		return err
+	if node.idAllocator != nil {
+		node.idAllocator.Close()
+	}
+	if node.segAssigner != nil {
+		node.segAssigner.Close()
+	}
+	if node.sched != nil {
+		node.sched.Close()
+	}
+	if node.tick != nil {
+		node.tick.Close()
+	}
+	if node.chTicker != nil {
+		err := node.chTicker.close()
+		if err != nil {
+			return err
+		}
 	}
 
 	node.wg.Wait()
