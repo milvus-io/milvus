@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package queryservice
+package querycoord
 
 import (
 	"context"
@@ -32,8 +32,8 @@ import (
 )
 
 const (
-	queryNodeMetaPrefix = "queryService-queryNodeMeta"
-	queryNodeInfoPrefix = "queryService-queryNodeInfo"
+	queryNodeMetaPrefix = "queryCoord-queryNodeMeta"
+	queryNodeInfoPrefix = "queryCoord-queryNodeInfo"
 )
 
 type queryNodeCluster struct {
@@ -450,11 +450,11 @@ func (c *queryNodeCluster) printMeta() {
 	for id, node := range c.nodes {
 		if node.isOnService() {
 			for collectionID, info := range node.collectionInfos {
-				log.Debug("queryService cluster info: collectionInfo", zap.Int64("nodeID", id), zap.Int64("collectionID", collectionID), zap.Any("info", info))
+				log.Debug("query coordinator cluster info: collectionInfo", zap.Int64("nodeID", id), zap.Int64("collectionID", collectionID), zap.Any("info", info))
 			}
 
 			for collectionID, info := range node.watchedQueryChannels {
-				log.Debug("queryService cluster info: watchedQueryChannelInfo", zap.Int64("nodeID", id), zap.Int64("collectionID", collectionID), zap.Any("info", info))
+				log.Debug("query coordinator cluster info: watchedQueryChannelInfo", zap.Int64("nodeID", id), zap.Int64("collectionID", collectionID), zap.Any("info", info))
 			}
 		}
 	}

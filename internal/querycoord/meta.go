@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package queryservice
+package querycoord
 
 import (
 	"errors"
@@ -28,9 +28,9 @@ import (
 )
 
 const (
-	collectionMetaPrefix   = "queryService-collectionMeta"
-	segmentMetaPrefix      = "queryService-segmentMeta"
-	queryChannelMetaPrefix = "queryService-queryChannel"
+	collectionMetaPrefix   = "queryCoord-collectionMeta"
+	segmentMetaPrefix      = "queryCoord-segmentMeta"
+	queryChannelMetaPrefix = "queryCoord-queryChannel"
 )
 
 type meta struct {
@@ -516,7 +516,7 @@ func (m *meta) GetQueryChannel(collectionID UniqueID) (string, string) {
 	searchResultPrefix := Params.SearchResultChannelPrefix
 	allocatedQueryChannel := searchPrefix + "-" + strconv.FormatInt(collectionID, 10)
 	allocatedQueryResultChannel := searchResultPrefix + "-" + strconv.FormatInt(collectionID, 10)
-	log.Debug("query service create query channel", zap.String("queryChannelName", allocatedQueryChannel), zap.String("queryResultChannelName", allocatedQueryResultChannel))
+	log.Debug("query coordinator create query channel", zap.String("queryChannelName", allocatedQueryChannel), zap.String("queryResultChannelName", allocatedQueryResultChannel))
 
 	queryChannelInfo := &querypb.QueryChannelInfo{
 		CollectionID:         collectionID,
@@ -581,14 +581,14 @@ func (m *meta) setLoadCollection(collectionID UniqueID, state bool) error {
 
 func (m *meta) printMeta() {
 	for id, info := range m.collectionInfos {
-		log.Debug("queryService meta: collectionInfo", zap.Int64("collectionID", id), zap.Any("info", info))
+		log.Debug("query coordinator meta: collectionInfo", zap.Int64("collectionID", id), zap.Any("info", info))
 	}
 
 	for id, info := range m.segmentInfos {
-		log.Debug("queryService meta: segmentInfo", zap.Int64("segmentID", id), zap.Any("info", info))
+		log.Debug("query coordinator meta: segmentInfo", zap.Int64("segmentID", id), zap.Any("info", info))
 	}
 
 	for id, info := range m.queryChannelInfos {
-		log.Debug("queryService meta: queryChannelInfo", zap.Int64("collectionID", id), zap.Any("info", info))
+		log.Debug("query coordinator meta: queryChannelInfo", zap.Int64("collectionID", id), zap.Any("info", info))
 	}
 }

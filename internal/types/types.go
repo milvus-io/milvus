@@ -18,10 +18,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
@@ -101,8 +101,8 @@ type RootCoord interface {
 	DropIndex(ctx context.Context, req *milvuspb.DropIndexRequest) (*commonpb.Status, error)
 
 	//global timestamp allocator
-	AllocTimestamp(ctx context.Context, req *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error)
-	AllocID(ctx context.Context, req *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error)
+	AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error)
+	AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error)
 	UpdateChannelTimeTick(ctx context.Context, req *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error)
 
 	//segment
@@ -118,7 +118,7 @@ type RootCoordComponent interface {
 	UpdateStateCode(internalpb.StateCode)
 	SetDataCoord(context.Context, DataCoord) error
 	SetIndexCoord(IndexCoord) error
-	SetQueryCoord(QueryService) error
+	SetQueryCoord(QueryCoord) error
 	SetNewProxyClient(func(sess *sessionutil.Session) (ProxyNode, error))
 }
 
@@ -177,7 +177,7 @@ type QueryNode interface {
 	GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error)
 }
 
-type QueryService interface {
+type QueryCoord interface {
 	Component
 	TimeTickProvider
 

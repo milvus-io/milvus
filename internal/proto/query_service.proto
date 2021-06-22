@@ -10,7 +10,7 @@ import "internal.proto";
 import "schema.proto";
 import "data_coord.proto";
 
-service QueryService {
+service QueryCoord {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
   rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
@@ -45,7 +45,7 @@ service QueryNode {
   rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
 }
 
-//--------------------query service proto------------------
+//--------------------query coordinator proto------------------
 message RegisterNodeRequest {
   common.MsgBase base = 1;
   common.Address address = 2;

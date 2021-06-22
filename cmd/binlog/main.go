@@ -24,5 +24,7 @@ func main() {
 	}
 	if err := storage.PrintBinlogFiles(os.Args[1:]); err != nil {
 		fmt.Printf("error: %s\n", err.Error())
+	} else {
+		fmt.Printf("print binlog complete.\n")
 	}
 }

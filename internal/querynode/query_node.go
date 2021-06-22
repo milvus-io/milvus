@@ -62,10 +62,10 @@ type QueryNode struct {
 	retrieveService *retrieveService
 
 	// clients
-	rootCoord    types.RootCoord
-	queryService types.QueryService
-	indexCoord   types.IndexCoord
-	dataCoord    types.DataCoord
+	queryCoord types.QueryCoord
+	rootCoord  types.RootCoord
+	indexCoord types.IndexCoord
+	dataCoord  types.DataCoord
 
 	msFactory msgstream.Factory
 	scheduler *taskScheduler
@@ -189,15 +189,15 @@ func (node *QueryNode) Init() error {
 	//log.Debug("QueryNode Init ", zap.Int64("QueryNodeID", Params.QueryNodeID), zap.Any("searchChannelNames", Params.SearchChannelNames))
 
 	if node.rootCoord == nil {
-		log.Error("null rootCoord detected")
+		log.Error("null root coordinator detected")
 	}
 
 	if node.indexCoord == nil {
-		log.Error("null indexCoord detected")
+		log.Error("null index coordinator detected")
 	}
 
 	if node.dataCoord == nil {
-		log.Error("null data service detected")
+		log.Error("null data coordinator detected")
 	}
 
 	return nil
@@ -263,23 +263,23 @@ func (node *QueryNode) UpdateStateCode(code internalpb.StateCode) {
 
 func (node *QueryNode) SetRootCoord(rc types.RootCoord) error {
 	if rc == nil {
-		return errors.New("null root coord interface")
+		return errors.New("null root coordinator interface")
 	}
 	node.rootCoord = rc
 	return nil
 }
 
-func (node *QueryNode) SetQueryService(query types.QueryService) error {
+func (node *QueryNode) SetQueryCoord(query types.QueryCoord) error {
 	if query == nil {
-		return errors.New("null query service interface")
+		return errors.New("null query coordinator interface")
 	}
-	node.queryService = query
+	node.queryCoord = query
 	return nil
 }
 
 func (node *QueryNode) SetIndexCoord(index types.IndexCoord) error {
 	if index == nil {
-		return errors.New("null indexCoord interface")
+		return errors.New("null index coordinator interface")
 	}
 	node.indexCoord = index
 	return nil
@@ -287,7 +287,7 @@ func (node *QueryNode) SetIndexCoord(index types.IndexCoord) error {
 
 func (node *QueryNode) SetDataCoord(data types.DataCoord) error {
 	if data == nil {
-		return errors.New("null data service interface")
+		return errors.New("null data coordinator interface")
 	}
 	node.dataCoord = data
 	return nil

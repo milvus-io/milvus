@@ -27,14 +27,14 @@ import (
 	dsc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	isc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	pnc "github.com/milvus-io/milvus/internal/distributed/proxy/client"
-	qsc "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
+	qsc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -55,11 +55,11 @@ type Server struct {
 
 	dataCoord  types.DataCoord
 	indexCoord types.IndexCoord
-	queryCoord types.QueryService
+	queryCoord types.QueryCoord
 
 	newIndexCoordClient func(string, []string, time.Duration) types.IndexCoord
 	newDataCoordClient  func(string, []string, time.Duration) types.DataCoord
-	newQueryCoordClient func(string, []string, time.Duration) types.QueryService
+	newQueryCoordClient func(string, []string, time.Duration) types.QueryCoord
 
 	closer io.Closer
 }
@@ -106,7 +106,7 @@ func (s *Server) setClient() {
 		}
 		return isClient
 	}
-	s.newQueryCoordClient = func(metaRootPath string, etcdEndpoints []string, timeout time.Duration) types.QueryService {
+	s.newQueryCoordClient = func(metaRootPath string, etcdEndpoints []string, timeout time.Duration) types.QueryCoord {
 		qsClient, err := qsc.NewClient(metaRootPath, etcdEndpoints, timeout)
 		if err != nil {
 			panic(err)
@@ -226,11 +226,9 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	s.grpcServer = grpc.NewServer(
 		grpc.MaxRecvMsgSize(math.MaxInt32),
 		grpc.MaxSendMsgSize(math.MaxInt32),
-		grpc.UnaryInterceptor(
-			grpc_opentracing.UnaryServerInterceptor(opts...)),
-		grpc.StreamInterceptor(
-			grpc_opentracing.StreamServerInterceptor(opts...)))
-	masterpb.RegisterMasterServiceServer(s.grpcServer, s)
+		grpc.UnaryInterceptor(grpc_opentracing.UnaryServerInterceptor(opts...)),
+		grpc.StreamInterceptor(grpc_opentracing.StreamServerInterceptor(opts...)))
+	rootcoordpb.RegisterRootCoordServer(s.grpcServer, s)
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {
@@ -346,11 +344,11 @@ func (s *Server) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRe
 }
 
 // AllocTimestamp global timestamp allocator
-func (s *Server) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
+func (s *Server) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	return s.rootCoord.AllocTimestamp(ctx, in)
 }
 
-func (s *Server) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
+func (s *Server) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 	return s.rootCoord.AllocID(ctx, in)
 }
 

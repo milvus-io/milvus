@@ -52,10 +52,10 @@ type Proxy struct {
 
 	stateCode atomic.Value
 
-	rootCoord    types.RootCoord
-	indexCoord   types.IndexCoord
-	dataCoord    types.DataCoord
-	queryService types.QueryService
+	rootCoord  types.RootCoord
+	indexCoord types.IndexCoord
+	dataCoord  types.DataCoord
+	queryCoord types.QueryCoord
 
 	chMgr channelsMgr
 
@@ -112,14 +112,14 @@ func (node *Proxy) Init() error {
 	}
 
 	// wait for queryService state changed to Healthy
-	if node.queryService != nil {
-		log.Debug("Proxy wait for queryService ready")
-		err := funcutil.WaitForComponentHealthy(node.ctx, node.queryService, "QueryService", 1000000, time.Millisecond*200)
+	if node.queryCoord != nil {
+		log.Debug("Proxy wait for queryCoord ready")
+		err := funcutil.WaitForComponentHealthy(node.ctx, node.queryCoord, "QueryCoord", 1000000, time.Millisecond*200)
 		if err != nil {
-			log.Debug("Proxy wait for queryService ready failed", zap.Error(err))
+			log.Debug("Proxy wait for queryCoord ready failed", zap.Error(err))
 			return err
 		}
-		log.Debug("Proxy queryService is ready")
+		log.Debug("Proxy queryCoord is ready")
 	}
 
 	// wait for indexcoord state changed to Healthy
@@ -133,8 +133,8 @@ func (node *Proxy) Init() error {
 		log.Debug("Proxy indexCoord is ready")
 	}
 
-	if node.queryService != nil {
-		resp, err := node.queryService.CreateQueryChannel(node.ctx, &querypb.CreateQueryChannelRequest{})
+	if node.queryCoord != nil {
+		resp, err := node.queryCoord.CreateQueryChannel(node.ctx, &querypb.CreateQueryChannelRequest{})
 		if err != nil {
 			log.Debug("Proxy CreateQueryChannel failed", zap.Error(err))
 			return err
@@ -233,7 +233,7 @@ func (node *Proxy) Init() error {
 			CollectionID: collectionID,
 			ProxyID:      node.session.ServerID,
 		}
-		resp, err := node.queryService.CreateQueryChannel(node.ctx, req)
+		resp, err := node.queryCoord.CreateQueryChannel(node.ctx, req)
 		if err != nil {
 			return nil, err
 		}
@@ -414,6 +414,6 @@ func (node *Proxy) SetDataCoordClient(cli types.DataCoord) {
 	node.dataCoord = cli
 }
 
-func (node *Proxy) SetQueryServiceClient(cli types.QueryService) {
-	node.queryService = cli
+func (node *Proxy) SetQueryCoordClient(cli types.QueryCoord) {
+	node.queryCoord = cli
 }

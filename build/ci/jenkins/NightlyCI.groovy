@@ -44,7 +44,7 @@ pipeline {
                     DOCKER_CREDENTIALS_ID = "ba070c98-c8cc-4f7c-b657-897715f359fc"
                     DOKCER_REGISTRY_URL = "registry.zilliz.com"
                     TARGET_REPO = "${DOKCER_REGISTRY_URL}/milvus"
-                    MILVUS_HELM_BRANCH = "datacoord"
+                    MILVUS_HELM_BRANCH = "querycoord"
                 }
                 stages {
                     stage('Test') {

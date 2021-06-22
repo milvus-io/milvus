@@ -31,7 +31,7 @@ import (
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	dsc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	isc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
-	qsc "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
+	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -56,10 +56,10 @@ type Server struct {
 
 	grpcServer *grpc.Server
 
-	dataCoord    *dsc.Client
-	rootCoord    *rcc.GrpcClient
-	indexCoord   *isc.Client
-	queryService *qsc.Client
+	dataCoord  *dsc.Client
+	rootCoord  *rcc.GrpcClient
+	indexCoord *isc.Client
+	queryCoord *qcc.Client
 
 	closer io.Closer
 }
@@ -101,33 +101,33 @@ func (s *Server) init() error {
 	if err := s.querynode.Register(); err != nil {
 		return err
 	}
-	// --- QueryService ---
-	log.Debug("QueryNode start to new QueryServiceClient", zap.Any("QueryServiceAddress", Params.QueryServiceAddress))
-	queryService, err := qsc.NewClient(qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
+	// --- QueryCoord ---
+	log.Debug("QueryNode start to new QueryCoordClient", zap.Any("QueryCoordAddress", Params.QueryCoordAddress))
+	queryCoord, err := qcc.NewClient(qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
 	if err != nil {
-		log.Debug("QueryNode new QueryServiceClient failed", zap.Error(err))
+		log.Debug("QueryNode new QueryCoordClient failed", zap.Error(err))
 		panic(err)
 	}
 
-	if err = queryService.Init(); err != nil {
-		log.Debug("QueryNode QueryServiceClient Init failed", zap.Error(err))
+	if err = queryCoord.Init(); err != nil {
+		log.Debug("QueryNode QueryCoordClient Init failed", zap.Error(err))
 		panic(err)
 	}
 
-	if err = queryService.Start(); err != nil {
-		log.Debug("QueryNode QueryServiceClient Start failed", zap.Error(err))
+	if err = queryCoord.Start(); err != nil {
+		log.Debug("QueryNode QueryCoordClient Start failed", zap.Error(err))
 		panic(err)
 	}
 
-	log.Debug("QueryNode start to wait for QueryService ready")
-	err = funcutil.WaitForComponentInitOrHealthy(s.ctx, queryService, "QueryService", 1000000, time.Millisecond*200)
+	log.Debug("QueryNode start to wait for QueryCoord ready")
+	err = funcutil.WaitForComponentInitOrHealthy(s.ctx, queryCoord, "QueryCoord", 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("QueryNode wait for QueryService ready failed", zap.Error(err))
+		log.Debug("QueryNode wait for QueryCoord ready failed", zap.Error(err))
 		panic(err)
 	}
-	log.Debug("QueryNode report QueryService is ready")
+	log.Debug("QueryNode report QueryCoord is ready")
 
-	if err := s.SetQueryService(queryService); err != nil {
+	if err := s.SetQueryCoord(queryCoord); err != nil {
 		panic(err)
 	}
 
@@ -135,7 +135,7 @@ func (s *Server) init() error {
 	//ms.Params.Init()
 	addr := Params.MasterAddress
 
-	log.Debug("QueryNode start to new RootCoordClient", zap.Any("QueryServiceAddress", addr))
+	log.Debug("QueryNode start to new RootCoordClient", zap.Any("QueryCoordAddress", addr))
 	rootCoord, err := rcc.NewClient(s.ctx, qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
 	if err != nil {
 		log.Debug("QueryNode new RootCoordClient failed", zap.Error(err))
@@ -159,7 +159,7 @@ func (s *Server) init() error {
 	}
 	log.Debug("QueryNode report RootCoord is ready")
 
-	if err := s.SetMasterService(rootCoord); err != nil {
+	if err := s.SetRootCoord(rootCoord); err != nil {
 		panic(err)
 	}
 
@@ -302,12 +302,12 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-func (s *Server) SetMasterService(rootCoord types.RootCoord) error {
+func (s *Server) SetRootCoord(rootCoord types.RootCoord) error {
 	return s.querynode.SetRootCoord(rootCoord)
 }
 
-func (s *Server) SetQueryService(queryService types.QueryService) error {
-	return s.querynode.SetQueryService(queryService)
+func (s *Server) SetQueryCoord(queryCoord types.QueryCoord) error {
+	return s.querynode.SetQueryCoord(queryCoord)
 }
 
 func (s *Server) SetIndexCoord(indexCoord types.IndexCoord) error {

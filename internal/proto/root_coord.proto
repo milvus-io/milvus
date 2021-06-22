@@ -1,14 +1,14 @@
 syntax = "proto3";
-package milvus.proto.master;
+package milvus.proto.rootcoord;
 
-option go_package="github.com/milvus-io/milvus/internal/proto/masterpb";
+option go_package="github.com/milvus-io/milvus/internal/proto/rootcoordpb";
 
 import "common.proto";
 import "milvus.proto";
 import "internal.proto";
-import "proxy_service.proto";
+import "proxy.proto";
 
-service MasterService {
+service RootCoord {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
   rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}

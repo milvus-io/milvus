@@ -193,9 +193,9 @@ func (index *IndexCoordMock) GetIndexFilePaths(req *indexpb.GetIndexFilePathsReq
 	return rsp, nil
 }
 
-type queryServiceMock struct{}
+type queryCoordMock struct{}
 
-func (q *queryServiceMock) RegisterNode(req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
+func (q *queryCoordMock) RegisterNode(req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
 	return &querypb.RegisterNodeResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,

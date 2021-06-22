@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/masterpb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
 )
 
@@ -38,7 +38,7 @@ func NewTimestampAllocator(ctx context.Context, rc types.RootCoord, peerID Uniqu
 
 func (ta *TimestampAllocator) Alloc(count uint32) ([]Timestamp, error) {
 	ctx, cancel := context.WithTimeout(ta.ctx, 5*time.Second)
-	req := &masterpb.AllocTimestampRequest{
+	req := &rootcoordpb.AllocTimestampRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_RequestTSO,
 			MsgID:     0,

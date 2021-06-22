@@ -20,7 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/masterpb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 )
 
 type allocatorInterface interface {
@@ -42,7 +42,7 @@ func newAllocator(s types.RootCoord) *allocator {
 
 func (alloc *allocator) allocID() (UniqueID, error) {
 	ctx := context.TODO()
-	resp, err := alloc.rootCoord.AllocID(ctx, &masterpb.AllocIDRequest{
+	resp, err := alloc.rootCoord.AllocID(ctx, &rootcoordpb.AllocIDRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_RequestID,
 			MsgID:     1, // GOOSE TODO

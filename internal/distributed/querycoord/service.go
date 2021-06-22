@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package grpcqueryservice
+package grpcquerycoord
 
 import (
 	"context"
@@ -25,7 +25,7 @@ import (
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	qs "github.com/milvus-io/milvus/internal/queryservice"
+	qc "github.com/milvus-io/milvus/internal/querycoord"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -46,7 +46,7 @@ type Server struct {
 
 	grpcErrChan chan error
 
-	queryservice *qs.QueryService
+	queryCoord *qc.QueryCoord
 
 	msFactory msgstream.Factory
 
@@ -58,18 +58,18 @@ type Server struct {
 
 func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
-	svr, err := qs.NewQueryService(ctx1, factory)
+	svr, err := qc.NewQueryCoord(ctx1, factory)
 	if err != nil {
 		cancel()
 		return nil, err
 	}
 
 	return &Server{
-		queryservice: svr,
-		loopCtx:      ctx1,
-		loopCancel:   cancel,
-		msFactory:    factory,
-		grpcErrChan:  make(chan error),
+		queryCoord:  svr,
+		loopCtx:     ctx1,
+		loopCancel:  cancel,
+		msFactory:   factory,
+		grpcErrChan: make(chan error),
 	}, nil
 }
 
@@ -78,7 +78,7 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Debug("QueryService init done ...")
+	log.Debug("QueryCoord init done ...")
 
 	if err := s.start(); err != nil {
 		return err
@@ -88,13 +88,13 @@ func (s *Server) Run() error {
 
 func (s *Server) init() error {
 	Params.Init()
-	qs.Params.Init()
-	qs.Params.Port = Params.Port
+	qc.Params.Init()
+	qc.Params.Port = Params.Port
 
 	closer := trace.InitTracing("query_service")
 	s.closer = closer
 
-	if err := s.queryservice.Register(); err != nil {
+	if err := s.queryCoord.Register(); err != nil {
 		return err
 	}
 
@@ -106,61 +106,61 @@ func (s *Server) init() error {
 	}
 
 	// --- Master Server Client ---
-	log.Debug("QueryService try to new RootCoord client", zap.Any("RootCoordAddress", Params.MasterAddress))
-	rootCoord, err := rcc.NewClient(s.loopCtx, qs.Params.MetaRootPath, qs.Params.EtcdEndpoints, 3*time.Second)
+	log.Debug("QueryCoord try to new RootCoord client", zap.Any("RootCoordAddress", Params.MasterAddress))
+	rootCoord, err := rcc.NewClient(s.loopCtx, qc.Params.MetaRootPath, qc.Params.EtcdEndpoints, 3*time.Second)
 	if err != nil {
-		log.Debug("QueryService try to new RootCoord client failed", zap.Error(err))
+		log.Debug("QueryCoord try to new RootCoord client failed", zap.Error(err))
 		panic(err)
 	}
 
 	if err = rootCoord.Init(); err != nil {
-		log.Debug("QueryService RootCoordClient Init failed", zap.Error(err))
+		log.Debug("QueryCoord RootCoordClient Init failed", zap.Error(err))
 		panic(err)
 	}
 
 	if err = rootCoord.Start(); err != nil {
-		log.Debug("QueryService RootCoordClient Start failed", zap.Error(err))
+		log.Debug("QueryCoord RootCoordClient Start failed", zap.Error(err))
 		panic(err)
 	}
 	// wait for master init or healthy
-	log.Debug("QueryService try to wait for RootCoord ready")
+	log.Debug("QueryCoord try to wait for RootCoord ready")
 	err = funcutil.WaitForComponentInitOrHealthy(s.loopCtx, rootCoord, "RootCoord", 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("QueryService wait for RootCoord ready failed", zap.Error(err))
+		log.Debug("QueryCoord wait for RootCoord ready failed", zap.Error(err))
 		panic(err)
 	}
 
 	if err := s.SetRootCoord(rootCoord); err != nil {
 		panic(err)
 	}
-	log.Debug("QueryService report RootCoord ready")
+	log.Debug("QueryCoord report RootCoord ready")
 
 	// --- Data service client ---
-	log.Debug("QueryService try to new DataCoord client", zap.Any("DataCoordAddress", Params.DataCoordAddress))
+	log.Debug("QueryCoord try to new DataCoord client", zap.Any("DataCoordAddress", Params.DataCoordAddress))
 
-	dataCoord := dsc.NewClient(qs.Params.MetaRootPath, qs.Params.EtcdEndpoints, 3*time.Second)
+	dataCoord := dsc.NewClient(qc.Params.MetaRootPath, qc.Params.EtcdEndpoints, 3*time.Second)
 	if err = dataCoord.Init(); err != nil {
-		log.Debug("QueryService DataCoordClient Init failed", zap.Error(err))
+		log.Debug("QueryCoord DataCoordClient Init failed", zap.Error(err))
 		panic(err)
 	}
 	if err = dataCoord.Start(); err != nil {
-		log.Debug("QueryService DataCoordClient Start failed", zap.Error(err))
+		log.Debug("QueryCoord DataCoordClient Start failed", zap.Error(err))
 		panic(err)
 	}
-	log.Debug("QueryService try to wait for DataCoord ready")
+	log.Debug("QueryCoord try to wait for DataCoord ready")
 	err = funcutil.WaitForComponentInitOrHealthy(s.loopCtx, dataCoord, "DataCoord", 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("QueryService wait for DataCoord ready failed", zap.Error(err))
+		log.Debug("QueryCoord wait for DataCoord ready failed", zap.Error(err))
 		panic(err)
 	}
 	if err := s.SetDataCoord(dataCoord); err != nil {
 		panic(err)
 	}
-	log.Debug("QueryService report DataCoord ready")
+	log.Debug("QueryCoord report DataCoord ready")
 
-	s.queryservice.UpdateStateCode(internalpb.StateCode_Initializing)
-	log.Debug("QueryService", zap.Any("State", internalpb.StateCode_Initializing))
-	if err := s.queryservice.Init(); err != nil {
+	s.queryCoord.UpdateStateCode(internalpb.StateCode_Initializing)
+	log.Debug("QueryCoord", zap.Any("State", internalpb.StateCode_Initializing))
+	if err := s.queryCoord.Init(); err != nil {
 		return err
 	}
 	return nil
@@ -189,7 +189,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 			grpc_opentracing.UnaryServerInterceptor(opts...)),
 		grpc.StreamInterceptor(
 			grpc_opentracing.StreamServerInterceptor(opts...)))
-	querypb.RegisterQueryServiceServer(s.grpcServer, s)
+	querypb.RegisterQueryCoordServer(s.grpcServer, s)
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {
@@ -198,7 +198,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 }
 
 func (s *Server) start() error {
-	return s.queryservice.Start()
+	return s.queryCoord.Start()
 }
 
 func (s *Server) Stop() error {
@@ -207,7 +207,7 @@ func (s *Server) Stop() error {
 			return err
 		}
 	}
-	err := s.queryservice.Stop()
+	err := s.queryCoord.Stop()
 	s.loopCancel()
 	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()
@@ -216,63 +216,63 @@ func (s *Server) Stop() error {
 }
 
 func (s *Server) SetRootCoord(m types.RootCoord) error {
-	s.queryservice.SetRootCoord(m)
+	s.queryCoord.SetRootCoord(m)
 	return nil
 }
 
 func (s *Server) SetDataCoord(d types.DataCoord) error {
-	s.queryservice.SetDataCoord(d)
+	s.queryCoord.SetDataCoord(d)
 	return nil
 }
 
 func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
-	return s.queryservice.GetComponentStates(ctx)
+	return s.queryCoord.GetComponentStates(ctx)
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.queryservice.GetTimeTickChannel(ctx)
+	return s.queryCoord.GetTimeTickChannel(ctx)
 }
 
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.queryservice.GetStatisticsChannel(ctx)
+	return s.queryCoord.GetStatisticsChannel(ctx)
 }
 
 func (s *Server) RegisterNode(ctx context.Context, req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
-	return s.queryservice.RegisterNode(ctx, req)
+	return s.queryCoord.RegisterNode(ctx, req)
 }
 
 func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-	return s.queryservice.ShowCollections(ctx, req)
+	return s.queryCoord.ShowCollections(ctx, req)
 }
 
 func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
-	return s.queryservice.LoadCollection(ctx, req)
+	return s.queryCoord.LoadCollection(ctx, req)
 }
 
 func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	return s.queryservice.ReleaseCollection(ctx, req)
+	return s.queryCoord.ReleaseCollection(ctx, req)
 }
 
 func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-	return s.queryservice.ShowPartitions(ctx, req)
+	return s.queryCoord.ShowPartitions(ctx, req)
 }
 
 func (s *Server) GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error) {
-	return s.queryservice.GetPartitionStates(ctx, req)
+	return s.queryCoord.GetPartitionStates(ctx, req)
 }
 
 func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
-	return s.queryservice.LoadPartitions(ctx, req)
+	return s.queryCoord.LoadPartitions(ctx, req)
 }
 
 func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
-	return s.queryservice.ReleasePartitions(ctx, req)
+	return s.queryCoord.ReleasePartitions(ctx, req)
 }
 
 func (s *Server) CreateQueryChannel(ctx context.Context, req *querypb.CreateQueryChannelRequest) (*querypb.CreateQueryChannelResponse, error) {
-	return s.queryservice.CreateQueryChannel(ctx, req)
+	return s.queryCoord.CreateQueryChannel(ctx, req)
 }
 
 func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
-	return s.queryservice.GetSegmentInfo(ctx, req)
+	return s.queryCoord.GetSegmentInfo(ctx, req)
 }

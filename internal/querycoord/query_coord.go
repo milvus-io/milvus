@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package queryservice
+package querycoord
 
 import (
 	"context"
@@ -44,16 +44,16 @@ type queryChannelInfo struct {
 	responseChannel string
 }
 
-type QueryService struct {
+type QueryCoord struct {
 	loopCtx    context.Context
 	loopCancel context.CancelFunc
 	loopWg     sync.WaitGroup
 	kvClient   *etcdkv.EtcdKV
 
-	queryServiceID uint64
-	meta           *meta
-	cluster        *queryNodeCluster
-	scheduler      *TaskScheduler
+	queryCoordID uint64
+	meta         *meta
+	cluster      *queryNodeCluster
+	scheduler    *TaskScheduler
 
 	dataCoordClient types.DataCoord
 	rootCoordClient types.RootCoord
@@ -69,73 +69,73 @@ type QueryService struct {
 }
 
 // Register register query service at etcd
-func (qs *QueryService) Register() error {
-	qs.session = sessionutil.NewSession(qs.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
-	qs.session.Init(typeutil.QueryServiceRole, Params.Address, true)
-	Params.NodeID = uint64(qs.session.ServerID)
+func (qc *QueryCoord) Register() error {
+	qc.session = sessionutil.NewSession(qc.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
+	qc.session.Init(typeutil.QueryCoordRole, Params.Address, true)
+	Params.NodeID = uint64(qc.session.ServerID)
 	return nil
 }
 
-func (qs *QueryService) Init() error {
+func (qc *QueryCoord) Init() error {
 	connectEtcdFn := func() error {
 		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
 		if err != nil {
 			return err
 		}
 		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
-		qs.kvClient = etcdKV
+		qc.kvClient = etcdKV
 		metaKV, err := newMeta(etcdKV)
 		if err != nil {
 			return err
 		}
-		qs.meta = metaKV
-		qs.cluster, err = newQueryNodeCluster(metaKV, etcdKV)
+		qc.meta = metaKV
+		qc.cluster, err = newQueryNodeCluster(metaKV, etcdKV)
 		if err != nil {
 			return err
 		}
 
-		qs.scheduler, err = NewTaskScheduler(qs.loopCtx, metaKV, qs.cluster, etcdKV, qs.rootCoordClient, qs.dataCoordClient)
+		qc.scheduler, err = NewTaskScheduler(qc.loopCtx, metaKV, qc.cluster, etcdKV, qc.rootCoordClient, qc.dataCoordClient)
 		return err
 	}
-	log.Debug("queryService try to connect etcd")
+	log.Debug("query coordinator try to connect etcd")
 	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
 	if err != nil {
-		log.Debug("queryService try to connect etcd failed", zap.Error(err))
+		log.Debug("query coordinator try to connect etcd failed", zap.Error(err))
 		return err
 	}
-	log.Debug("queryService try to connect etcd success")
+	log.Debug("query coordinator try to connect etcd success")
 	return nil
 }
 
-func (qs *QueryService) Start() error {
-	qs.scheduler.Start()
+func (qc *QueryCoord) Start() error {
+	qc.scheduler.Start()
 	log.Debug("start scheduler ...")
-	qs.UpdateStateCode(internalpb.StateCode_Healthy)
+	qc.UpdateStateCode(internalpb.StateCode_Healthy)
 
-	qs.loopWg.Add(1)
-	go qs.watchNodeLoop()
+	qc.loopWg.Add(1)
+	go qc.watchNodeLoop()
 
-	qs.loopWg.Add(1)
-	go qs.watchMetaLoop()
+	qc.loopWg.Add(1)
+	go qc.watchMetaLoop()
 
 	return nil
 }
 
-func (qs *QueryService) Stop() error {
-	qs.scheduler.Close()
+func (qc *QueryCoord) Stop() error {
+	qc.scheduler.Close()
 	log.Debug("close scheduler ...")
-	qs.loopCancel()
-	qs.UpdateStateCode(internalpb.StateCode_Abnormal)
+	qc.loopCancel()
+	qc.UpdateStateCode(internalpb.StateCode_Abnormal)
 
-	qs.loopWg.Wait()
+	qc.loopWg.Wait()
 	return nil
 }
 
-func (qs *QueryService) UpdateStateCode(code internalpb.StateCode) {
-	qs.stateCode.Store(code)
+func (qc *QueryCoord) UpdateStateCode(code internalpb.StateCode) {
+	qc.stateCode.Store(code)
 }
 
-func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryService, error) {
+func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord, error) {
 	rand.Seed(time.Now().UnixNano())
 	queryChannels := make([]*queryChannelInfo, 0)
 	channelID := len(queryChannels)
@@ -150,98 +150,98 @@ func NewQueryService(ctx context.Context, factory msgstream.Factory) (*QueryServ
 	})
 
 	ctx1, cancel := context.WithCancel(ctx)
-	service := &QueryService{
+	service := &QueryCoord{
 		loopCtx:    ctx1,
 		loopCancel: cancel,
 		msFactory:  factory,
 	}
 
 	service.UpdateStateCode(internalpb.StateCode_Abnormal)
-	log.Debug("QueryService", zap.Any("queryChannels", queryChannels))
+	log.Debug("query coordinator", zap.Any("queryChannels", queryChannels))
 	return service, nil
 }
 
-func (qs *QueryService) SetRootCoord(rootCoord types.RootCoord) {
-	qs.rootCoordClient = rootCoord
+func (qc *QueryCoord) SetRootCoord(rootCoord types.RootCoord) {
+	qc.rootCoordClient = rootCoord
 }
 
-func (qs *QueryService) SetDataCoord(dataCoord types.DataCoord) {
-	qs.dataCoordClient = dataCoord
+func (qc *QueryCoord) SetDataCoord(dataCoord types.DataCoord) {
+	qc.dataCoordClient = dataCoord
 }
 
-func (qs *QueryService) watchNodeLoop() {
-	ctx, cancel := context.WithCancel(qs.loopCtx)
+func (qc *QueryCoord) watchNodeLoop() {
+	ctx, cancel := context.WithCancel(qc.loopCtx)
 	defer cancel()
-	defer qs.loopWg.Done()
-	log.Debug("QueryService start watch node loop")
+	defer qc.loopWg.Done()
+	log.Debug("query coordinator start watch node loop")
 
-	clusterStartSession, version, _ := qs.session.GetSessions(typeutil.QueryNodeRole)
+	clusterStartSession, version, _ := qc.session.GetSessions(typeutil.QueryNodeRole)
 	sessionMap := make(map[int64]*sessionutil.Session)
 	for _, session := range clusterStartSession {
 		nodeID := session.ServerID
 		sessionMap[nodeID] = session
 	}
 	for nodeID, session := range sessionMap {
-		if _, ok := qs.cluster.nodes[nodeID]; !ok {
+		if _, ok := qc.cluster.nodes[nodeID]; !ok {
 			serverID := session.ServerID
-			err := qs.cluster.RegisterNode(session, serverID)
+			err := qc.cluster.RegisterNode(session, serverID)
 			if err != nil {
 				log.Error("register queryNode error", zap.Any("error", err.Error()))
 			}
-			log.Debug("QueryService", zap.Any("Add QueryNode, session serverID", serverID))
+			log.Debug("query coordinator", zap.Any("Add QueryNode, session serverID", serverID))
 		}
 	}
-	for nodeID := range qs.cluster.nodes {
+	for nodeID := range qc.cluster.nodes {
 		if _, ok := sessionMap[nodeID]; !ok {
-			qs.cluster.nodes[nodeID].setNodeState(false)
-			qs.cluster.nodes[nodeID].client.Stop()
+			qc.cluster.nodes[nodeID].setNodeState(false)
+			qc.cluster.nodes[nodeID].client.Stop()
 			loadBalanceSegment := &querypb.LoadBalanceRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_LoadBalanceSegments,
-					SourceID: qs.session.ServerID,
+					SourceID: qc.session.ServerID,
 				},
 				SourceNodeIDs: []int64{nodeID},
 			}
 
 			loadBalanceTask := &LoadBalanceTask{
 				BaseTask: BaseTask{
-					ctx:              qs.loopCtx,
-					Condition:        NewTaskCondition(qs.loopCtx),
+					ctx:              qc.loopCtx,
+					Condition:        NewTaskCondition(qc.loopCtx),
 					triggerCondition: querypb.TriggerCondition_nodeDown,
 				},
 				LoadBalanceRequest: loadBalanceSegment,
-				rootCoord:          qs.rootCoordClient,
-				dataCoord:          qs.dataCoordClient,
-				cluster:            qs.cluster,
-				meta:               qs.meta,
+				rootCoord:          qc.rootCoordClient,
+				dataCoord:          qc.dataCoordClient,
+				cluster:            qc.cluster,
+				meta:               qc.meta,
 			}
-			qs.scheduler.Enqueue([]task{loadBalanceTask})
+			qc.scheduler.Enqueue([]task{loadBalanceTask})
 		}
 	}
 
-	qs.eventChan = qs.session.WatchServices(typeutil.QueryNodeRole, version+1)
+	qc.eventChan = qc.session.WatchServices(typeutil.QueryNodeRole, version+1)
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case event := <-qs.eventChan:
+		case event := <-qc.eventChan:
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:
 				serverID := event.Session.ServerID
-				err := qs.cluster.RegisterNode(event.Session, serverID)
+				err := qc.cluster.RegisterNode(event.Session, serverID)
 				if err != nil {
 					log.Error(err.Error())
 				}
-				log.Debug("QueryService", zap.Any("Add QueryNode, session serverID", serverID))
+				log.Debug("query coordinator", zap.Any("Add QueryNode, session serverID", serverID))
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
-				log.Debug("QueryService", zap.Any("The QueryNode crashed with ID", serverID))
-				qs.cluster.nodes[serverID].setNodeState(false)
-				qs.cluster.nodes[serverID].client.Stop()
+				log.Debug("query coordinator", zap.Any("The QueryNode crashed with ID", serverID))
+				qc.cluster.nodes[serverID].setNodeState(false)
+				qc.cluster.nodes[serverID].client.Stop()
 				loadBalanceSegment := &querypb.LoadBalanceRequest{
 					Base: &commonpb.MsgBase{
 						MsgType:  commonpb.MsgType_LoadBalanceSegments,
-						SourceID: qs.session.ServerID,
+						SourceID: qc.session.ServerID,
 					},
 					SourceNodeIDs: []int64{serverID},
 					BalanceReason: querypb.TriggerCondition_nodeDown,
@@ -249,17 +249,17 @@ func (qs *QueryService) watchNodeLoop() {
 
 				loadBalanceTask := &LoadBalanceTask{
 					BaseTask: BaseTask{
-						ctx:              qs.loopCtx,
-						Condition:        NewTaskCondition(qs.loopCtx),
+						ctx:              qc.loopCtx,
+						Condition:        NewTaskCondition(qc.loopCtx),
 						triggerCondition: querypb.TriggerCondition_nodeDown,
 					},
 					LoadBalanceRequest: loadBalanceSegment,
-					rootCoord:          qs.rootCoordClient,
-					dataCoord:          qs.dataCoordClient,
-					cluster:            qs.cluster,
-					meta:               qs.meta,
+					rootCoord:          qc.rootCoordClient,
+					dataCoord:          qc.dataCoordClient,
+					cluster:            qc.cluster,
+					meta:               qc.meta,
 				}
-				qs.scheduler.Enqueue([]task{loadBalanceTask})
+				qc.scheduler.Enqueue([]task{loadBalanceTask})
 				err := loadBalanceTask.WaitToFinish()
 				if err != nil {
 					log.Error(err.Error())
@@ -271,14 +271,14 @@ func (qs *QueryService) watchNodeLoop() {
 	}
 }
 
-func (qs *QueryService) watchMetaLoop() {
-	ctx, cancel := context.WithCancel(qs.loopCtx)
+func (qc *QueryCoord) watchMetaLoop() {
+	ctx, cancel := context.WithCancel(qc.loopCtx)
 
 	defer cancel()
-	defer qs.loopWg.Done()
-	log.Debug("QueryService start watch meta loop")
+	defer qc.loopWg.Done()
+	log.Debug("query coordinator start watch meta loop")
 
-	watchChan := qs.meta.client.WatchWithPrefix("queryNode-segmentMeta")
+	watchChan := qc.meta.client.WatchWithPrefix("queryNode-segmentMeta")
 
 	for {
 		select {
@@ -299,7 +299,7 @@ func (qs *QueryService) watchMetaLoop() {
 				switch event.Type {
 				case mvccpb.PUT:
 					//TODO::
-					qs.meta.setSegmentInfo(segmentID, segmentInfo)
+					qc.meta.setSegmentInfo(segmentID, segmentInfo)
 				case mvccpb.DELETE:
 					//TODO::
 				}

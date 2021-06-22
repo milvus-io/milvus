@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package grpcqueryserviceclient
+package grpcquerycoordclient
 
 import (
 	"context"
@@ -35,7 +35,7 @@ import (
 
 type Client struct {
 	ctx        context.Context
-	grpcClient querypb.QueryServiceClient
+	grpcClient querypb.QueryCoordClient
 	conn       *grpc.ClientConn
 
 	addr      string
@@ -45,17 +45,17 @@ type Client struct {
 	recallTry int
 }
 
-func getQueryServiceAddress(sess *sessionutil.Session) (string, error) {
-	key := typeutil.QueryServiceRole
+func getQueryCoordAddress(sess *sessionutil.Session) (string, error) {
+	key := typeutil.QueryCoordRole
 	msess, _, err := sess.GetSessions(key)
 	if err != nil {
-		log.Debug("QueryServiceClient GetSessions failed", zap.Error(err))
+		log.Debug("QueryCoordClient GetSessions failed", zap.Error(err))
 		return "", err
 	}
 	ms, ok := msess[key]
 	if !ok {
-		log.Debug("QueryServiceClient msess key not existed", zap.Any("key", key))
-		return "", fmt.Errorf("number of queryservice is incorrect, %d", len(msess))
+		log.Debug("QueryCoordClient msess key not existed", zap.Any("key", key))
+		return "", fmt.Errorf("number of querycoord is incorrect, %d", len(msess))
 	}
 	return ms.Address, nil
 }
@@ -86,23 +86,23 @@ func (c *Client) Init() error {
 
 func (c *Client) connect() error {
 	var err error
-	getQueryServiceAddressFn := func() error {
-		c.addr, err = getQueryServiceAddress(c.sess)
+	getQueryCoordAddressFn := func() error {
+		c.addr, err = getQueryCoordAddress(c.sess)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
-	err = retry.Retry(c.reconnTry, 3*time.Second, getQueryServiceAddressFn)
+	err = retry.Retry(c.reconnTry, 3*time.Second, getQueryCoordAddressFn)
 	if err != nil {
-		log.Debug("QueryServiceClient getQueryServiceAddress failed", zap.Error(err))
+		log.Debug("QueryCoordClient getQueryCoordAddress failed", zap.Error(err))
 		return err
 	}
 	connectGrpcFunc := func() error {
 		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
 		defer cancelFunc()
 		opts := trace.GetInterceptorOpts()
-		log.Debug("QueryServiceClient try reconnect ", zap.String("address", c.addr))
+		log.Debug("QueryCoordClient try reconnect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
@@ -124,11 +124,11 @@ func (c *Client) connect() error {
 
 	err = retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
 	if err != nil {
-		log.Debug("QueryServiceClient try reconnect failed", zap.Error(err))
+		log.Debug("QueryCoordClient try reconnect failed", zap.Error(err))
 		return err
 	}
-	log.Debug("QueryServiceClient try reconnect success")
-	c.grpcClient = querypb.NewQueryServiceClient(c.conn)
+	log.Debug("QueryCoordClient try reconnect success")
+	c.grpcClient = querypb.NewQueryCoordClient(c.conn)
 	return nil
 }
 func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error) {

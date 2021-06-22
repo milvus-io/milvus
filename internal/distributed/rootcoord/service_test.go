@@ -30,9 +30,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
@@ -245,6 +245,9 @@ func TestGrpcService(t *testing.T) {
 	core.CallReleaseCollectionService = func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
 		return nil
 	}
+	core.CallReleasePartitionService = func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID, partitionIDs []typeutil.UniqueID) error {
+		return nil
+	}
 
 	rootcoord.Params.Address = Params.Address
 	err = svr.rootCoord.Register()
@@ -286,7 +289,7 @@ func TestGrpcService(t *testing.T) {
 	})
 
 	t.Run("alloc time stamp", func(t *testing.T) {
-		req := &masterpb.AllocTimestampRequest{
+		req := &rootcoordpb.AllocTimestampRequest{
 			Count: 1,
 		}
 		rsp, err := svr.AllocTimestamp(ctx, req)
@@ -295,7 +298,7 @@ func TestGrpcService(t *testing.T) {
 	})
 
 	t.Run("alloc id", func(t *testing.T) {
-		req := &masterpb.AllocIDRequest{
+		req := &rootcoordpb.AllocIDRequest{
 			Count: 1,
 		}
 		rsp, err := svr.AllocID(ctx, req)
@@ -828,7 +831,7 @@ func (m *mockCore) SetIndexCoord(types.IndexCoord) error {
 	return nil
 }
 
-func (m *mockCore) SetQueryCoord(types.QueryService) error {
+func (m *mockCore) SetQueryCoord(types.QueryCoord) error {
 	return nil
 }
 
@@ -893,7 +896,7 @@ func (m *mockIndex) Stop() error {
 }
 
 type mockQuery struct {
-	types.QueryService
+	types.QueryCoord
 }
 
 func (m *mockQuery) Init() error {
@@ -928,7 +931,7 @@ func TestRun(t *testing.T) {
 	svr.newIndexCoordClient = func(string, []string, time.Duration) types.IndexCoord {
 		return &mockIndex{}
 	}
-	svr.newQueryCoordClient = func(string, []string, time.Duration) types.QueryService {
+	svr.newQueryCoordClient = func(string, []string, time.Duration) types.QueryCoord {
 		return &mockQuery{}
 	}
 
