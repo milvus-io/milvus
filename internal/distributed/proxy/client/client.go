@@ -30,7 +30,7 @@ import (
 )
 
 type Client struct {
-	grpcClient proxypb.ProxyNodeServiceClient
+	grpcClient proxypb.ProxyClient
 	conn       *grpc.ClientConn
 	ctx        context.Context
 
@@ -90,7 +90,7 @@ func (c *Client) connect() error {
 		return err
 	}
 	log.Debug("ProxyNodeClient connect success")
-	c.grpcClient = proxypb.NewProxyNodeServiceClient(c.conn)
+	c.grpcClient = proxypb.NewProxyClient(c.conn)
 	return nil
 }
 

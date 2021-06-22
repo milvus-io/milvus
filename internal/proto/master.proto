@@ -6,7 +6,7 @@ option go_package="github.com/milvus-io/milvus/internal/proto/masterpb";
 import "common.proto";
 import "milvus.proto";
 import "internal.proto";
-import "proxy_service.proto";
+import "proxy.proto";
 
 service MasterService {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}

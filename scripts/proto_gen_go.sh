@@ -46,7 +46,7 @@ ${protoc} --go_out=plugins=grpc,paths=source_relative:./masterpb master.proto
 
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./internalpb internal.proto
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./milvuspb milvus.proto
-${protoc} --go_out=plugins=grpc,paths=source_relative:./proxypb proxy_service.proto
+${protoc} --go_out=plugins=grpc,paths=source_relative:./proxypb proxy.proto
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./indexpb index_service.proto
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./datapb data_coord.proto
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./querypb query_service.proto
