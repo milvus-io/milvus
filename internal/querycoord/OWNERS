@@ -12,5 +12,5 @@ approvers:
   - scsven
 
 labels:
-- component/queryservice
+- component/querycoord
 

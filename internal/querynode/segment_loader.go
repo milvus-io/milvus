@@ -32,7 +32,7 @@ import (
 )
 
 const (
-	queryServiceSegmentMetaPrefix = "queryService-segmentMeta"
+	queryCoordSegmentMetaPrefix = "queryCoord-segmentMeta"
 	queryNodeSegmentMetaPrefix    = "queryNode-segmentMeta"
 )
 
@@ -111,7 +111,7 @@ func (loader *segmentLoader) loadSegment(req *queryPb.LoadSegmentsRequest, onSer
 			continue
 		}
 		if onService {
-			key := fmt.Sprintf("%s/%d", queryServiceSegmentMetaPrefix, segmentID)
+			key := fmt.Sprintf("%s/%d", queryCoordSegmentMetaPrefix, segmentID)
 			value, err := loader.etcdKV.Load(key)
 			if err != nil {
 				deleteSegment(segment)

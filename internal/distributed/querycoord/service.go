@@ -136,27 +136,27 @@ func (s *Server) init() error {
 	log.Debug("QueryCoord report RootCoord ready")
 
 	// --- Data service client ---
-	log.Debug("QueryService try to new DataCoord client", zap.Any("DataCoordAddress", Params.DataCoordAddress))
+	log.Debug("QueryCoord try to new DataCoord client", zap.Any("DataCoordAddress", Params.DataCoordAddress))
 
 	dataCoord := dsc.NewClient(qc.Params.MetaRootPath, qc.Params.EtcdEndpoints, 3*time.Second)
 	if err = dataCoord.Init(); err != nil {
-		log.Debug("QueryService DataCoordClient Init failed", zap.Error(err))
+		log.Debug("QueryCoord DataCoordClient Init failed", zap.Error(err))
 		panic(err)
 	}
 	if err = dataCoord.Start(); err != nil {
-		log.Debug("QueryService DataCoordClient Start failed", zap.Error(err))
+		log.Debug("QueryCoord DataCoordClient Start failed", zap.Error(err))
 		panic(err)
 	}
-	log.Debug("QueryService try to wait for DataCoord ready")
+	log.Debug("QueryCoord try to wait for DataCoord ready")
 	err = funcutil.WaitForComponentInitOrHealthy(s.loopCtx, dataCoord, "DataCoord", 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("QueryService wait for DataCoord ready failed", zap.Error(err))
+		log.Debug("QueryCoord wait for DataCoord ready failed", zap.Error(err))
 		panic(err)
 	}
 	if err := s.SetDataCoord(dataCoord); err != nil {
 		panic(err)
 	}
-	log.Debug("Query coordinator report DataCoord ready")
+	log.Debug("QueryCoord report DataCoord ready")
 
 	s.queryCoord.UpdateStateCode(internalpb.StateCode_Initializing)
 	log.Debug("QueryCoord", zap.Any("State", internalpb.StateCode_Initializing))

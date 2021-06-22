@@ -31,7 +31,7 @@ import (
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	dsc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	isc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
-	qsc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
+	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -56,10 +56,10 @@ type Server struct {
 
 	grpcServer *grpc.Server
 
-	dataCoord    *dsc.Client
-	rootCoord    *rcc.GrpcClient
-	indexCoord   *isc.Client
-	queryService *qsc.Client
+	dataCoord  *dsc.Client
+	rootCoord  *rcc.GrpcClient
+	indexCoord *isc.Client
+	queryCoord *qcc.Client
 
 	closer io.Closer
 }
@@ -101,9 +101,9 @@ func (s *Server) init() error {
 	if err := s.querynode.Register(); err != nil {
 		return err
 	}
-	// --- QueryService ---
+	// --- QueryCoord ---
 	log.Debug("QueryNode start to new QueryCoordClient", zap.Any("QueryCoordAddress", Params.QueryCoordAddress))
-	queryCoord, err := qsc.NewClient(qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
+	queryCoord, err := qcc.NewClient(qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, 3*time.Second)
 	if err != nil {
 		log.Debug("QueryNode new QueryCoordClient failed", zap.Error(err))
 		panic(err)

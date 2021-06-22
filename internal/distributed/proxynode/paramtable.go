@@ -55,7 +55,7 @@ func (pt *ParamTable) initParams() {
 	pt.initMasterAddress()
 	pt.initIndexServerAddress()
 	pt.initDataCoordAddress()
-	pt.initQueryServiceAddress()
+	pt.initQueryCoordAddress()
 }
 
 // todo remove and use load from env
@@ -86,7 +86,7 @@ func (pt *ParamTable) initDataCoordAddress() {
 }
 
 // todo remove and use load from env
-func (pt *ParamTable) initQueryServiceAddress() {
+func (pt *ParamTable) initQueryCoordAddress() {
 	ret, err := pt.Load("_QueryCoordAddress")
 	if err != nil {
 		panic(err)
