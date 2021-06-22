@@ -1447,10 +1447,10 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		return nil, err
 	}
 
-	parseRetrieveTask := func(exprString string) (bool, []int64) {
+	parseRetrieveTask := func(exprString string) ([]int64, error) {
 		expr, err := parseQueryExpr(schema, exprString)
 		if err != nil {
-			return false, nil
+			return nil, err
 		}
 
 		switch xExpr := expr.Expr.(type) {
@@ -1461,18 +1461,23 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 				case *planpb.GenericValue_Int64Val:
 					ids = append(ids, v.Int64Val)
 				default:
-					return false, nil
+					return nil, errors.New("column is not int64")
 				}
 			}
-			return xExpr.TermExpr.ColumnInfo.IsPrimaryKey, ids
+
+			if !xExpr.TermExpr.ColumnInfo.IsPrimaryKey {
+				return nil, errors.New("column is not primary key")
+			}
+
+			return ids, nil
 		default:
-			return false, nil
+			return nil, errors.New("not top level term")
 		}
 	}
 
-	isRetrieveTask, ids := parseRetrieveTask(request.Expr)
+	ids, err := parseRetrieveTask(request.Expr)
 
-	if isRetrieveTask {
+	if err == nil {
 		retrieveRequest := &milvuspb.RetrieveRequest{
 			DbName:         request.DbName,
 			CollectionName: request.CollectionName,
@@ -1549,7 +1554,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		}, nil
 	}
 
-	err = errors.New("Not implemented")
+	err = errors.New("Not implemented because:" + err.Error())
 	return &milvuspb.QueryResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
