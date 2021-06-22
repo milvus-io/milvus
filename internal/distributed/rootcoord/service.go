@@ -32,9 +32,9 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -226,11 +226,9 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	s.grpcServer = grpc.NewServer(
 		grpc.MaxRecvMsgSize(math.MaxInt32),
 		grpc.MaxSendMsgSize(math.MaxInt32),
-		grpc.UnaryInterceptor(
-			grpc_opentracing.UnaryServerInterceptor(opts...)),
-		grpc.StreamInterceptor(
-			grpc_opentracing.StreamServerInterceptor(opts...)))
-	masterpb.RegisterMasterServiceServer(s.grpcServer, s)
+		grpc.UnaryInterceptor(grpc_opentracing.UnaryServerInterceptor(opts...)),
+		grpc.StreamInterceptor(grpc_opentracing.StreamServerInterceptor(opts...)))
+	rootcoordpb.RegisterRootCoordServer(s.grpcServer, s)
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {
@@ -346,11 +344,11 @@ func (s *Server) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRe
 }
 
 // AllocTimestamp global timestamp allocator
-func (s *Server) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
+func (s *Server) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	return s.rootCoord.AllocTimestamp(ctx, in)
 }
 
-func (s *Server) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
+func (s *Server) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 	return s.rootCoord.AllocID(ctx, in)
 }
 

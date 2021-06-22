@@ -24,8 +24,7 @@ mkdir -p indexcgopb
 
 mkdir -p internalpb
 mkdir -p milvuspb
-mkdir -p masterpb
-
+mkdir -p rootcoordpb
 
 mkdir -p milvuspb
 mkdir -p proxypb
@@ -42,7 +41,7 @@ ${protoc} --go_out=plugins=grpc,paths=source_relative:./indexcgopb index_cgo_msg
 
 #${protoc} --go_out=plugins=grpc,paths=source_relative:./internalpb internal_msg.proto
 
-${protoc} --go_out=plugins=grpc,paths=source_relative:./masterpb master.proto
+${protoc} --go_out=plugins=grpc,paths=source_relative:./rootcoordpb root_coord.proto
 
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./internalpb internal.proto
 ${protoc} --go_out=plugins=grpc,paths=source_relative:./milvuspb milvus.proto

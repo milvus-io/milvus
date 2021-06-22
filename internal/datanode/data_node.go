@@ -37,8 +37,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 )
 
 const (
@@ -225,7 +225,7 @@ var FilterThreshold Timestamp
 // Start will update DataNode state to HEALTHY
 func (node *DataNode) Start() error {
 
-	rep, err := node.rootCoord.AllocTimestamp(node.ctx, &masterpb.AllocTimestampRequest{
+	rep, err := node.rootCoord.AllocTimestamp(node.ctx, &rootcoordpb.AllocTimestampRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_RequestTSO,
 			MsgID:     0,
