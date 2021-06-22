@@ -55,7 +55,7 @@ func (p *ParamTable) Init() {
 	once.Do(func() {
 		// load yaml
 		p.BaseTable.Init()
-		err := p.LoadYaml("advanced/master.yaml")
+		err := p.LoadYaml("advanced/root_coord.yaml")
 		if err != nil {
 			panic(err)
 		}

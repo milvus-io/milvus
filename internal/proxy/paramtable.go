@@ -65,7 +65,7 @@ var once sync.Once
 func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
-		err := pt.LoadYaml("advanced/proxy_node.yaml")
+		err := pt.LoadYaml("advanced/proxy.yaml")
 		if err != nil {
 			panic(err)
 		}

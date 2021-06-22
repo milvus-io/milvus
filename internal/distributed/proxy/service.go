@@ -145,7 +145,7 @@ func (s *Server) init() error {
 	// for purpose of ID Allocator
 	proxy.Params.RootCoordAddress = Params.RootCoordAddress
 
-	closer := trace.InitTracing(fmt.Sprintf("proxy_node ip: %s, port: %d", Params.IP, Params.Port))
+	closer := trace.InitTracing(fmt.Sprintf("proxy ip: %s, port: %d", Params.IP, Params.Port))
 	s.closer = closer
 
 	log.Debug("proxy", zap.String("proxy host", Params.IP))
