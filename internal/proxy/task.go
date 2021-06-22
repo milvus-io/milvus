@@ -26,6 +26,8 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -3119,6 +3121,42 @@ func (cit *CreateIndexTask) PreExecute(ctx context.Context) error {
 
 	if err := ValidateFieldName(fieldName); err != nil {
 		return err
+	}
+
+	// check index param, not accurate, only some static rules
+	indexParams := make(map[string]string)
+	for _, kv := range cit.CreateIndexRequest.ExtraParams {
+		if kv.Key == "params" { // TODO(dragondriver): change `params` to const variable
+			params, err := funcutil.ParseIndexParamsMap(kv.Value)
+			if err != nil {
+				log.Warn("Failed to parse index params",
+					zap.String("params", kv.Value),
+					zap.Error(err))
+				continue
+			}
+			for k, v := range params {
+				indexParams[k] = v
+			}
+		} else {
+			indexParams[kv.Key] = kv.Value
+		}
+	}
+
+	indexType, exist := indexParams["index_type"] // TODO(dragondriver): change `index_type` to const variable
+	if !exist {
+		indexType = indexparamcheck.IndexFaissIvfPQ // IVF_PQ is the default index type
+	}
+
+	adapter, err := indexparamcheck.GetConfAdapterMgrInstance().GetAdapter(indexType)
+	if err != nil {
+		log.Warn("Failed to get conf adapter", zap.String("index_type", indexType))
+		return fmt.Errorf("invalid index type: %s", indexType)
+	}
+
+	ok := adapter.CheckTrain(indexParams)
+	if !ok {
+		log.Warn("Create index with invalid params", zap.Any("index_params", indexParams))
+		return fmt.Errorf("invalid index params: %v", cit.CreateIndexRequest.ExtraParams)
 	}
 
 	return nil
