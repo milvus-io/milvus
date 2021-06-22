@@ -160,7 +160,7 @@ func TestGrpcService(t *testing.T) {
 		},
 	)
 	assert.Nil(t, err)
-	_, err = etcdCli.Put(ctx, path.Join(sessKey, typeutil.ProxyNodeRole+"-100"), string(pnb))
+	_, err = etcdCli.Put(ctx, path.Join(sessKey, typeutil.ProxyRole+"-100"), string(pnb))
 	assert.Nil(t, err)
 
 	err = core.Init()

@@ -30,7 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/logutil"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/proxynode"
+	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/querynode"
 	"github.com/milvus-io/milvus/internal/queryservice"
 	"github.com/milvus-io/milvus/internal/rootcoord"
@@ -108,11 +108,11 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string
 
 	wg.Add(1)
 	go func() {
-		proxynode.Params.InitAlias(alias)
-		proxynode.Params.Init()
+		proxy.Params.InitAlias(alias)
+		proxy.Params.Init()
 
 		if !localMsg {
-			logutil.SetupLogger(&proxynode.Params.Log)
+			logutil.SetupLogger(&proxy.Params.Log)
 			defer log.Sync()
 		}
 

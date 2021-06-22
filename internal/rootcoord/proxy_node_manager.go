@@ -70,7 +70,7 @@ func (p *proxyNodeManager) WatchProxyNode() error {
 	defer cancel()
 	resp, err := p.etcdCli.Get(
 		ctx2,
-		path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyNodeRole),
+		path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
 		clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
 	)
@@ -99,7 +99,7 @@ func (p *proxyNodeManager) WatchProxyNode() error {
 
 	rch := p.etcdCli.Watch(
 		p.ctx,
-		path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyNodeRole),
+		path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
 		clientv3.WithPrefix(),
 		clientv3.WithCreatedNotify(),
 		clientv3.WithPrevKV(),
