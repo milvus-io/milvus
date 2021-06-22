@@ -6957,13 +6957,14 @@ class SearchRequest :
 
   enum : int {
     kPartitionNamesFieldNumber = 4,
-    kSearchParamsFieldNumber = 8,
+    kOutputFieldsFieldNumber = 8,
+    kSearchParamsFieldNumber = 9,
     kDbNameFieldNumber = 2,
     kCollectionNameFieldNumber = 3,
     kDslFieldNumber = 5,
     kPlaceholderGroupFieldNumber = 6,
     kBaseFieldNumber = 1,
-    kTravelTimestampFieldNumber = 9,
+    kTravelTimestampFieldNumber = 10,
     kDslTypeFieldNumber = 7,
   };
   // repeated string partition_names = 4;
@@ -6983,7 +6984,24 @@ class SearchRequest :
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& partition_names() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_partition_names();
 
-  // repeated .milvus.proto.common.KeyValuePair search_params = 8;
+  // repeated string output_fields = 8;
+  int output_fields_size() const;
+  void clear_output_fields();
+  const std::string& output_fields(int index) const;
+  std::string* mutable_output_fields(int index);
+  void set_output_fields(int index, const std::string& value);
+  void set_output_fields(int index, std::string&& value);
+  void set_output_fields(int index, const char* value);
+  void set_output_fields(int index, const char* value, size_t size);
+  std::string* add_output_fields();
+  void add_output_fields(const std::string& value);
+  void add_output_fields(std::string&& value);
+  void add_output_fields(const char* value);
+  void add_output_fields(const char* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& output_fields() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_output_fields();
+
+  // repeated .milvus.proto.common.KeyValuePair search_params = 9;
   int search_params_size() const;
   void clear_search_params();
   ::milvus::proto::common::KeyValuePair* mutable_search_params(int index);
@@ -7046,7 +7064,7 @@ class SearchRequest :
   ::milvus::proto::common::MsgBase* mutable_base();
   void set_allocated_base(::milvus::proto::common::MsgBase* base);
 
-  // uint64 travel_timestamp = 9;
+  // uint64 travel_timestamp = 10;
   void clear_travel_timestamp();
   ::PROTOBUF_NAMESPACE_ID::uint64 travel_timestamp() const;
   void set_travel_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
@@ -7062,6 +7080,7 @@ class SearchRequest :
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> partition_names_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> output_fields_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair > search_params_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr db_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
@@ -7731,26 +7750,9 @@ class SearchResults :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kHitsFieldNumber = 2,
     kStatusFieldNumber = 1,
+    kResultsFieldNumber = 2,
   };
-  // repeated bytes hits = 2;
-  int hits_size() const;
-  void clear_hits();
-  const std::string& hits(int index) const;
-  std::string* mutable_hits(int index);
-  void set_hits(int index, const std::string& value);
-  void set_hits(int index, std::string&& value);
-  void set_hits(int index, const char* value);
-  void set_hits(int index, const void* value, size_t size);
-  std::string* add_hits();
-  void add_hits(const std::string& value);
-  void add_hits(std::string&& value);
-  void add_hits(const char* value);
-  void add_hits(const void* value, size_t size);
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& hits() const;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_hits();
-
   // .milvus.proto.common.Status status = 1;
   bool has_status() const;
   void clear_status();
@@ -7759,13 +7761,21 @@ class SearchResults :
   ::milvus::proto::common::Status* mutable_status();
   void set_allocated_status(::milvus::proto::common::Status* status);
 
+  // .milvus.proto.schema.SearchResultData results = 2;
+  bool has_results() const;
+  void clear_results();
+  const ::milvus::proto::schema::SearchResultData& results() const;
+  ::milvus::proto::schema::SearchResultData* release_results();
+  ::milvus::proto::schema::SearchResultData* mutable_results();
+  void set_allocated_results(::milvus::proto::schema::SearchResultData* results);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.SearchResults)
  private:
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> hits_;
   ::milvus::proto::common::Status* status_;
+  ::milvus::proto::schema::SearchResultData* results_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -16258,7 +16268,72 @@ inline void SearchRequest::set_dsl_type(::milvus::proto::common::DslType value) 
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.SearchRequest.dsl_type)
 }
 
-// repeated .milvus.proto.common.KeyValuePair search_params = 8;
+// repeated string output_fields = 8;
+inline int SearchRequest::output_fields_size() const {
+  return output_fields_.size();
+}
+inline void SearchRequest::clear_output_fields() {
+  output_fields_.Clear();
+}
+inline const std::string& SearchRequest::output_fields(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.SearchRequest.output_fields)
+  return output_fields_.Get(index);
+}
+inline std::string* SearchRequest::mutable_output_fields(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.SearchRequest.output_fields)
+  return output_fields_.Mutable(index);
+}
+inline void SearchRequest::set_output_fields(int index, const std::string& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.SearchRequest.output_fields)
+  output_fields_.Mutable(index)->assign(value);
+}
+inline void SearchRequest::set_output_fields(int index, std::string&& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.SearchRequest.output_fields)
+  output_fields_.Mutable(index)->assign(std::move(value));
+}
+inline void SearchRequest::set_output_fields(int index, const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  output_fields_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:milvus.proto.milvus.SearchRequest.output_fields)
+}
+inline void SearchRequest::set_output_fields(int index, const char* value, size_t size) {
+  output_fields_.Mutable(index)->assign(
+    reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.milvus.SearchRequest.output_fields)
+}
+inline std::string* SearchRequest::add_output_fields() {
+  // @@protoc_insertion_point(field_add_mutable:milvus.proto.milvus.SearchRequest.output_fields)
+  return output_fields_.Add();
+}
+inline void SearchRequest::add_output_fields(const std::string& value) {
+  output_fields_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.SearchRequest.output_fields)
+}
+inline void SearchRequest::add_output_fields(std::string&& value) {
+  output_fields_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.SearchRequest.output_fields)
+}
+inline void SearchRequest::add_output_fields(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  output_fields_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:milvus.proto.milvus.SearchRequest.output_fields)
+}
+inline void SearchRequest::add_output_fields(const char* value, size_t size) {
+  output_fields_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:milvus.proto.milvus.SearchRequest.output_fields)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
+SearchRequest::output_fields() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.SearchRequest.output_fields)
+  return output_fields_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
+SearchRequest::mutable_output_fields() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.SearchRequest.output_fields)
+  return &output_fields_;
+}
+
+// repeated .milvus.proto.common.KeyValuePair search_params = 9;
 inline int SearchRequest::search_params_size() const {
   return search_params_.size();
 }
@@ -16285,7 +16360,7 @@ SearchRequest::search_params() const {
   return search_params_;
 }
 
-// uint64 travel_timestamp = 9;
+// uint64 travel_timestamp = 10;
 inline void SearchRequest::clear_travel_timestamp() {
   travel_timestamp_ = PROTOBUF_ULONGLONG(0);
 }
@@ -16938,69 +17013,49 @@ inline void SearchResults::set_allocated_status(::milvus::proto::common::Status*
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.SearchResults.status)
 }
 
-// repeated bytes hits = 2;
-inline int SearchResults::hits_size() const {
-  return hits_.size();
+// .milvus.proto.schema.SearchResultData results = 2;
+inline bool SearchResults::has_results() const {
+  return this != internal_default_instance() && results_ != nullptr;
 }
-inline void SearchResults::clear_hits() {
-  hits_.Clear();
+inline const ::milvus::proto::schema::SearchResultData& SearchResults::results() const {
+  const ::milvus::proto::schema::SearchResultData* p = results_;
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.SearchResults.results)
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::proto::schema::SearchResultData*>(
+      &::milvus::proto::schema::_SearchResultData_default_instance_);
 }
-inline const std::string& SearchResults::hits(int index) const {
-  // @@protoc_insertion_point(field_get:milvus.proto.milvus.SearchResults.hits)
-  return hits_.Get(index);
+inline ::milvus::proto::schema::SearchResultData* SearchResults::release_results() {
+  // @@protoc_insertion_point(field_release:milvus.proto.milvus.SearchResults.results)
+  
+  ::milvus::proto::schema::SearchResultData* temp = results_;
+  results_ = nullptr;
+  return temp;
 }
-inline std::string* SearchResults::mutable_hits(int index) {
-  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.SearchResults.hits)
-  return hits_.Mutable(index);
+inline ::milvus::proto::schema::SearchResultData* SearchResults::mutable_results() {
+  
+  if (results_ == nullptr) {
+    auto* p = CreateMaybeMessage<::milvus::proto::schema::SearchResultData>(GetArenaNoVirtual());
+    results_ = p;
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.SearchResults.results)
+  return results_;
 }
-inline void SearchResults::set_hits(int index, const std::string& value) {
-  // @@protoc_insertion_point(field_set:milvus.proto.milvus.SearchResults.hits)
-  hits_.Mutable(index)->assign(value);
-}
-inline void SearchResults::set_hits(int index, std::string&& value) {
-  // @@protoc_insertion_point(field_set:milvus.proto.milvus.SearchResults.hits)
-  hits_.Mutable(index)->assign(std::move(value));
-}
-inline void SearchResults::set_hits(int index, const char* value) {
-  GOOGLE_DCHECK(value != nullptr);
-  hits_.Mutable(index)->assign(value);
-  // @@protoc_insertion_point(field_set_char:milvus.proto.milvus.SearchResults.hits)
-}
-inline void SearchResults::set_hits(int index, const void* value, size_t size) {
-  hits_.Mutable(index)->assign(
-    reinterpret_cast<const char*>(value), size);
-  // @@protoc_insertion_point(field_set_pointer:milvus.proto.milvus.SearchResults.hits)
-}
-inline std::string* SearchResults::add_hits() {
-  // @@protoc_insertion_point(field_add_mutable:milvus.proto.milvus.SearchResults.hits)
-  return hits_.Add();
-}
-inline void SearchResults::add_hits(const std::string& value) {
-  hits_.Add()->assign(value);
-  // @@protoc_insertion_point(field_add:milvus.proto.milvus.SearchResults.hits)
-}
-inline void SearchResults::add_hits(std::string&& value) {
-  hits_.Add(std::move(value));
-  // @@protoc_insertion_point(field_add:milvus.proto.milvus.SearchResults.hits)
-}
-inline void SearchResults::add_hits(const char* value) {
-  GOOGLE_DCHECK(value != nullptr);
-  hits_.Add()->assign(value);
-  // @@protoc_insertion_point(field_add_char:milvus.proto.milvus.SearchResults.hits)
-}
-inline void SearchResults::add_hits(const void* value, size_t size) {
-  hits_.Add()->assign(reinterpret_cast<const char*>(value), size);
-  // @@protoc_insertion_point(field_add_pointer:milvus.proto.milvus.SearchResults.hits)
-}
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
-SearchResults::hits() const {
-  // @@protoc_insertion_point(field_list:milvus.proto.milvus.SearchResults.hits)
-  return hits_;
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
-SearchResults::mutable_hits() {
-  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.SearchResults.hits)
-  return &hits_;
+inline void SearchResults::set_allocated_results(::milvus::proto::schema::SearchResultData* results) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
+  if (message_arena == nullptr) {
+    delete reinterpret_cast< ::PROTOBUF_NAMESPACE_ID::MessageLite*>(results_);
+  }
+  if (results) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
+    if (message_arena != submessage_arena) {
+      results = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, results, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  results_ = results;
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.SearchResults.results)
 }
 
 // -------------------------------------------------------------------

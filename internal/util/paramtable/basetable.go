@@ -170,19 +170,19 @@ func (gp *BaseTable) tryloadFromEnv() {
 		panic(err)
 	}
 
-	dataServiceAddress := os.Getenv("DATA_SERVICE_ADDRESS")
-	if dataServiceAddress == "" {
-		serviceHost, err := gp.Load("dataService.address")
+	dataCoordAddress := os.Getenv("DATA_SERVICE_ADDRESS")
+	if dataCoordAddress == "" {
+		serviceHost, err := gp.Load("dataCoord.address")
 		if err != nil {
 			panic(err)
 		}
-		port, err := gp.Load("dataService.port")
+		port, err := gp.Load("dataCoord.port")
 		if err != nil {
 			panic(err)
 		}
-		dataServiceAddress = serviceHost + ":" + port
+		dataCoordAddress = serviceHost + ":" + port
 	}
-	err = gp.Save("_DataServiceAddress", dataServiceAddress)
+	err = gp.Save("_DataCoordAddress", dataCoordAddress)
 	if err != nil {
 		panic(err)
 	}

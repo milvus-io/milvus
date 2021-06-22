@@ -6,7 +6,7 @@
 
 #### 8.1 Overview
 
-<img src="./figs/index_service.png" width=700>
+<img src="./figs/index_coord.png" width=700>
 
 #### 8.2 Index Service Interface
 

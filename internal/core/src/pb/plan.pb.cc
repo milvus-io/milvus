@@ -296,6 +296,7 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_plan_2eproto::offsets[] PROTOB
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::PlanNode, _oneof_case_[0]),
   ~0u,  // no _weak_field_map_
   offsetof(::milvus::proto::plan::PlanNodeDefaultTypeInternal, vector_anns_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::PlanNode, output_field_ids_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::PlanNode, node_),
 };
 static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
@@ -361,10 +362,11 @@ const char descriptor_table_protodef_plan_2eproto[] PROTOBUF_SECTION_VARIABLE(pr
   "eld_id\030\002 \001(\003\022+\n\npredicates\030\003 \001(\0132\027.milvu"
   "s.proto.plan.Expr\0220\n\nquery_info\030\004 \001(\0132\034."
   "milvus.proto.plan.QueryInfo\022\027\n\017placehold"
-  "er_tag\030\005 \001(\t\"H\n\010PlanNode\0224\n\013vector_anns\030"
-  "\001 \001(\0132\035.milvus.proto.plan.VectorANNSH\000B\006"
-  "\n\004nodeB3Z1github.com/milvus-io/milvus/in"
-  "ternal/proto/planpbb\006proto3"
+  "er_tag\030\005 \001(\t\"b\n\010PlanNode\0224\n\013vector_anns\030"
+  "\001 \001(\0132\035.milvus.proto.plan.VectorANNSH\000\022\030"
+  "\n\020output_field_ids\030\002 \003(\003B\006\n\004nodeB3Z1gith"
+  "ub.com/milvus-io/milvus/internal/proto/p"
+  "lanpbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_plan_2eproto_deps[1] = {
   &::descriptor_table_schema_2eproto,
@@ -382,7 +384,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_pla
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_plan_2eproto_once;
 static bool descriptor_table_plan_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_plan_2eproto = {
-  &descriptor_table_plan_2eproto_initialized, descriptor_table_protodef_plan_2eproto, "plan.proto", 1587,
+  &descriptor_table_plan_2eproto_initialized, descriptor_table_protodef_plan_2eproto, "plan.proto", 1613,
   &descriptor_table_plan_2eproto_once, descriptor_table_plan_2eproto_sccs, descriptor_table_plan_2eproto_deps, 8, 1,
   schemas, file_default_instances, TableStruct_plan_2eproto::offsets,
   file_level_metadata_plan_2eproto, 10, file_level_enum_descriptors_plan_2eproto, file_level_service_descriptors_plan_2eproto,
@@ -4060,7 +4062,8 @@ PlanNode::PlanNode()
 }
 PlanNode::PlanNode(const PlanNode& from)
   : ::PROTOBUF_NAMESPACE_ID::Message(),
-      _internal_metadata_(nullptr) {
+      _internal_metadata_(nullptr),
+      output_field_ids_(from.output_field_ids_) {
   _internal_metadata_.MergeFrom(from._internal_metadata_);
   clear_has_node();
   switch (from.node_case()) {
@@ -4121,6 +4124,7 @@ void PlanNode::Clear() {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
+  output_field_ids_.Clear();
   clear_node();
   _internal_metadata_.Clear();
 }
@@ -4137,6 +4141,16 @@ const char* PlanNode::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::i
       case 1:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 10)) {
           ptr = ctx->ParseMessage(mutable_vector_anns(), ptr);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      // repeated int64 output_field_ids = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 18)) {
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::PackedInt64Parser(mutable_output_field_ids(), ptr, ctx);
+          CHK_(ptr);
+        } else if (static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 16) {
+          add_output_field_ids(::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr));
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
@@ -4181,6 +4195,22 @@ bool PlanNode::MergePartialFromCodedStream(
         break;
       }
 
+      // repeated int64 output_field_ids = 2;
+      case 2: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (18 & 0xFF)) {
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPackedPrimitive<
+                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
+                 input, this->mutable_output_field_ids())));
+        } else if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (16 & 0xFF)) {
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadRepeatedPrimitiveNoInline<
+                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
+                 1, 18u, input, this->mutable_output_field_ids())));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
       default: {
       handle_unusual:
         if (tag == 0) {
@@ -4214,6 +4244,17 @@ void PlanNode::SerializeWithCachedSizes(
       1, _Internal::vector_anns(this), output);
   }
 
+  // repeated int64 output_field_ids = 2;
+  if (this->output_field_ids_size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTag(2, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WIRETYPE_LENGTH_DELIMITED, output);
+    output->WriteVarint32(_output_field_ids_cached_byte_size_.load(
+        std::memory_order_relaxed));
+  }
+  for (int i = 0, n = this->output_field_ids_size(); i < n; i++) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64NoTag(
+      this->output_field_ids(i), output);
+  }
+
   if (_internal_metadata_.have_unknown_fields()) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFields(
         _internal_metadata_.unknown_fields(), output);
@@ -4232,6 +4273,19 @@ void PlanNode::SerializeWithCachedSizes(
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessageToArray(
         1, _Internal::vector_anns(this), target);
+  }
+
+  // repeated int64 output_field_ids = 2;
+  if (this->output_field_ids_size() > 0) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTagToArray(
+      2,
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WIRETYPE_LENGTH_DELIMITED,
+      target);
+    target = ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream::WriteVarint32ToArray(
+        _output_field_ids_cached_byte_size_.load(std::memory_order_relaxed),
+         target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      WriteInt64NoTagToArray(this->output_field_ids_, target);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -4254,6 +4308,21 @@ size_t PlanNode::ByteSizeLong() const {
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
+
+  // repeated int64 output_field_ids = 2;
+  {
+    size_t data_size = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      Int64Size(this->output_field_ids_);
+    if (data_size > 0) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32Size(
+            static_cast<::PROTOBUF_NAMESPACE_ID::int32>(data_size));
+    }
+    int cached_size = ::PROTOBUF_NAMESPACE_ID::internal::ToCachedSize(data_size);
+    _output_field_ids_cached_byte_size_.store(cached_size,
+                                    std::memory_order_relaxed);
+    total_size += data_size;
+  }
 
   switch (node_case()) {
     // .milvus.proto.plan.VectorANNS vector_anns = 1;
@@ -4294,6 +4363,7 @@ void PlanNode::MergeFrom(const PlanNode& from) {
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
+  output_field_ids_.MergeFrom(from.output_field_ids_);
   switch (from.node_case()) {
     case kVectorAnns: {
       mutable_vector_anns()->::milvus::proto::plan::VectorANNS::MergeFrom(from.vector_anns());
@@ -4326,6 +4396,7 @@ bool PlanNode::IsInitialized() const {
 void PlanNode::InternalSwap(PlanNode* other) {
   using std::swap;
   _internal_metadata_.Swap(&other->_internal_metadata_);
+  output_field_ids_.InternalSwap(&other->output_field_ids_);
   swap(node_, other->node_);
   swap(_oneof_case_[0], other->_oneof_case_[0]);
 }

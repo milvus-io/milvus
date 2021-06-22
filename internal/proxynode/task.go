@@ -108,8 +108,8 @@ type InsertTask struct {
 	req *milvuspb.InsertRequest
 	Condition
 	ctx            context.Context
-	dataService    types.DataService
 	result         *milvuspb.MutationResult
+	dataCoord      types.DataCoord
 	rowIDAllocator *allocator.IDAllocator
 	segIDAssigner  *SegIDAssigner
 	chMgr          channelsMgr
@@ -916,11 +916,11 @@ func (it *InsertTask) PostExecute(ctx context.Context) error {
 type CreateCollectionTask struct {
 	Condition
 	*milvuspb.CreateCollectionRequest
-	ctx               context.Context
-	rootCoord         types.RootCoord
-	dataServiceClient types.DataService
-	result            *commonpb.Status
-	schema            *schemapb.CollectionSchema
+	ctx             context.Context
+	rootCoord       types.RootCoord
+	dataCoordClient types.DataCoord
+	result          *commonpb.Status
+	schema          *schemapb.CollectionSchema
 }
 
 func (cct *CreateCollectionTask) TraceCtx() context.Context {
@@ -1235,8 +1235,9 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 		return errors.New(showResp.Status.Reason)
 	}
 	log.Debug("query service show collections",
+		zap.Any("collID", collID),
 		zap.Any("collections", showResp.CollectionIDs),
-		zap.Any("collID", collID))
+	)
 	collectionLoaded := false
 	for _, collectionID := range showResp.CollectionIDs {
 		if collectionID == collID {
@@ -1252,12 +1253,11 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 
 	st.Base.MsgType = commonpb.MsgType_Search
 
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
+	if err != nil { // err is not nil if collection not exists
+		return err
+	}
 	if st.query.GetDslType() == commonpb.DslType_BoolExprV1 {
-		schema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
-		if err != nil { // err is not nil if collection not exists
-			return err
-		}
-
 		annsField, err := GetAttrByKeyFromRepeatedKV(AnnsFieldKey, st.query.SearchParams)
 		if err != nil {
 			return errors.New(AnnsFieldKey + " not found in search_params")
@@ -1291,6 +1291,15 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 		plan, err := CreateQueryPlan(schema, st.query.Dsl, annsField, queryInfo)
 		if err != nil {
 			return errors.New("invalid expression: " + st.query.Dsl)
+		}
+
+		for _, field := range schema.Fields {
+			for _, name := range st.query.OutputFields {
+				if field.Name == name {
+					st.SearchRequest.OutputFieldsId = append(st.SearchRequest.OutputFieldsId, field.FieldID)
+					plan.OutputFieldIds = append(plan.OutputFieldIds, field.FieldID)
+				}
+			}
 		}
 
 		st.SearchRequest.DslType = commonpb.DslType_BoolExprV1
@@ -1437,8 +1446,24 @@ func decodeSearchResultsParallel(searchResults []*internalpb.SearchResults, maxP
 	return hits, nil
 }
 
-func decodeSearchResultsSerial(searchResults []*internalpb.SearchResults) ([][]*milvuspb.Hits, error) {
-	return decodeSearchResultsParallel(searchResults, 1)
+func decodeSearchResultsSerial(searchResults []*internalpb.SearchResults) ([]*schemapb.SearchResultData, error) {
+	results := make([]*schemapb.SearchResultData, 0)
+	// necessary to parallel this?
+	for _, partialSearchResult := range searchResults {
+		if partialSearchResult.SlicedBlob == nil {
+			continue
+		}
+
+		var partialResultData schemapb.SearchResultData
+		err := proto.Unmarshal(partialSearchResult.SlicedBlob, &partialResultData)
+		if err != nil {
+			return nil, err
+		}
+
+		results = append(results, &partialResultData)
+	}
+
+	return results, nil
 }
 
 // TODO: add benchmark to compare with serial implementation
@@ -1455,12 +1480,13 @@ func decodeSearchResultsParallelByCPU(searchResults []*internalpb.SearchResults)
 	return decodeSearchResultsParallel(searchResults, runtime.NumCPU())
 }
 
-func decodeSearchResults(searchResults []*internalpb.SearchResults) ([][]*milvuspb.Hits, error) {
+func decodeSearchResults(searchResults []*internalpb.SearchResults) ([]*schemapb.SearchResultData, error) {
 	t := time.Now()
 	defer func() {
 		log.Debug("decodeSearchResults", zap.Any("time cost", time.Since(t)))
 	}()
-	return decodeSearchResultsParallelByCPU(searchResults)
+	return decodeSearchResultsSerial(searchResults)
+	// return decodeSearchResultsParallelByCPU(searchResults)
 }
 
 func reduceSearchResultsParallel(hits [][]*milvuspb.Hits, nq, availableQueryNodeNum, topk int, metricType string, maxParallel int) *milvuspb.SearchResults {
@@ -1470,7 +1496,6 @@ func reduceSearchResultsParallel(hits [][]*milvuspb.Hits, nq, availableQueryNode
 		Status: &commonpb.Status{
 			ErrorCode: 0,
 		},
-		Hits: make([][]byte, nq),
 	}
 
 	const minFloat32 = -1 * float32(math.MaxFloat32)
@@ -1520,12 +1545,12 @@ func reduceSearchResultsParallel(hits [][]*milvuspb.Hits, nq, availableQueryNode
 			}
 		}
 
-		reducedHitsBs, err := proto.Marshal(reducedHits)
-		if err != nil {
-			return err
-		}
+		// reducedHitsBs, err := proto.Marshal(reducedHits)
+		// if err != nil {
+		// return err
+		// }
 
-		ret.Hits[idx] = reducedHitsBs
+		// ret.Hits[idx] = reducedHitsBs
 
 		return nil
 	}
@@ -1534,6 +1559,183 @@ func reduceSearchResultsParallel(hits [][]*milvuspb.Hits, nq, availableQueryNode
 	if err != nil {
 		return nil
 	}
+
+	return ret
+}
+
+func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultData, nq, availableQueryNodeNum, topk int, metricType string, maxParallel int) *milvuspb.SearchResults {
+	log.Debug("reduceSearchResultDataParallel", zap.Any("NumOfGoRoutines", maxParallel))
+
+	ret := &milvuspb.SearchResults{
+		Status: &commonpb.Status{
+			ErrorCode: 0,
+		},
+		Results: &schemapb.SearchResultData{
+			NumQueries: int64(nq),
+			TopK:       int64(topk),
+			FieldsData: make([]*schemapb.FieldData, len(searchResultData[0].FieldsData)),
+			Scores:     make([]float32, 0),
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: make([]int64, 0),
+					},
+				},
+			},
+		},
+	}
+
+	const minFloat32 = -1 * float32(math.MaxFloat32)
+
+	// TODO(yukun): Use parallel function
+	for idx := 0; idx < nq; idx++ {
+		locs := make([]int, availableQueryNodeNum)
+
+		for j := 0; j < topk; j++ {
+			valid := false
+			choice, maxDistance := 0, minFloat32
+			for q, loc := range locs { // query num, the number of ways to merge
+				if loc >= topk {
+					continue
+				}
+				distance := searchResultData[q].Scores[idx*topk+loc]
+				if distance > maxDistance || (math.Abs(float64(distance-maxDistance)) < math.SmallestNonzeroFloat32 && choice != q) {
+					choice = q
+					maxDistance = distance
+					valid = true
+				}
+			}
+			if !valid {
+				break
+			}
+			choiceOffset := locs[choice]
+			// check if distance is valid, `invalid` here means very very big,
+			// in this process, distance here is the smallest, so the rest of distance are all invalid
+			if searchResultData[choice].Scores[idx*topk+choiceOffset] <= minFloat32 {
+				break
+			}
+			curIdx := idx*topk + choiceOffset
+			ret.Results.Ids.GetIntId().Data = append(ret.Results.Ids.GetIntId().Data, searchResultData[choice].Ids.GetIntId().Data[curIdx])
+			// TODO(yukun): Process searchResultData.FieldsData
+			for k, fieldData := range searchResultData[choice].FieldsData {
+				switch fieldType := fieldData.Field.(type) {
+				case *schemapb.FieldData_Scalars:
+					if ret.Results.FieldsData[k].GetScalars() == nil {
+						ret.Results.FieldsData[k] = &schemapb.FieldData{
+							FieldName: fieldData.FieldName,
+							Field: &schemapb.FieldData_Scalars{
+								Scalars: &schemapb.ScalarField{},
+							},
+						}
+					}
+					switch scalarType := fieldType.Scalars.Data.(type) {
+					case *schemapb.ScalarField_BoolData:
+						if ret.Results.FieldsData[k].GetScalars().GetBoolData() == nil {
+							ret.Results.FieldsData[k].Field.(*schemapb.FieldData_Scalars).Scalars = &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_BoolData{
+									BoolData: &schemapb.BoolArray{
+										Data: []bool{scalarType.BoolData.Data[curIdx]},
+									},
+								},
+							}
+						} else {
+							ret.Results.FieldsData[k].GetScalars().GetBoolData().Data = append(ret.Results.FieldsData[k].GetScalars().GetBoolData().Data, scalarType.BoolData.Data[curIdx])
+						}
+					case *schemapb.ScalarField_IntData:
+						if ret.Results.FieldsData[k].GetScalars().GetIntData() == nil {
+							ret.Results.FieldsData[k].Field.(*schemapb.FieldData_Scalars).Scalars = &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_IntData{
+									IntData: &schemapb.IntArray{
+										Data: []int32{scalarType.IntData.Data[curIdx]},
+									},
+								},
+							}
+						} else {
+							ret.Results.FieldsData[k].GetScalars().GetIntData().Data = append(ret.Results.FieldsData[k].GetScalars().GetIntData().Data, scalarType.IntData.Data[curIdx])
+						}
+					case *schemapb.ScalarField_LongData:
+						if ret.Results.FieldsData[k].GetScalars().GetLongData() == nil {
+							ret.Results.FieldsData[k].Field.(*schemapb.FieldData_Scalars).Scalars = &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_LongData{
+									LongData: &schemapb.LongArray{
+										Data: []int64{scalarType.LongData.Data[curIdx]},
+									},
+								},
+							}
+						} else {
+							ret.Results.FieldsData[k].GetScalars().GetLongData().Data = append(ret.Results.FieldsData[k].GetScalars().GetLongData().Data, scalarType.LongData.Data[curIdx])
+						}
+					case *schemapb.ScalarField_FloatData:
+						if ret.Results.FieldsData[k].GetScalars().GetFloatData() == nil {
+							ret.Results.FieldsData[k].Field.(*schemapb.FieldData_Scalars).Scalars = &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_FloatData{
+									FloatData: &schemapb.FloatArray{
+										Data: []float32{scalarType.FloatData.Data[curIdx]},
+									},
+								},
+							}
+						} else {
+							ret.Results.FieldsData[k].GetScalars().GetFloatData().Data = append(ret.Results.FieldsData[k].GetScalars().GetFloatData().Data, scalarType.FloatData.Data[curIdx])
+						}
+					case *schemapb.ScalarField_DoubleData:
+						if ret.Results.FieldsData[k].GetScalars().GetDoubleData() == nil {
+							ret.Results.FieldsData[k].Field.(*schemapb.FieldData_Scalars).Scalars = &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_DoubleData{
+									DoubleData: &schemapb.DoubleArray{
+										Data: []float64{scalarType.DoubleData.Data[curIdx]},
+									},
+								},
+							}
+						} else {
+							ret.Results.FieldsData[k].GetScalars().GetDoubleData().Data = append(ret.Results.FieldsData[k].GetScalars().GetDoubleData().Data, scalarType.DoubleData.Data[curIdx])
+						}
+					default:
+						log.Debug("Not supported field type")
+						return nil
+					}
+				case *schemapb.FieldData_Vectors:
+					dim := fieldType.Vectors.Dim
+					if ret.Results.FieldsData[k].GetVectors() == nil {
+						ret.Results.FieldsData[k] = &schemapb.FieldData{
+							FieldName: fieldData.FieldName,
+							Field: &schemapb.FieldData_Vectors{
+								Vectors: &schemapb.VectorField{
+									Dim: dim,
+								},
+							},
+						}
+					}
+					switch vectorType := fieldType.Vectors.Data.(type) {
+					case *schemapb.VectorField_BinaryVector:
+						if ret.Results.FieldsData[k].GetVectors().GetBinaryVector() == nil {
+							ret.Results.FieldsData[k].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector = []byte{vectorType.BinaryVector[curIdx*int((dim/8))]}
+						} else {
+							ret.Results.FieldsData[k].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector = append(ret.Results.FieldsData[k].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector, vectorType.BinaryVector[curIdx*int((dim/8)):(curIdx+1)*int((dim/8))]...)
+						}
+					case *schemapb.VectorField_FloatVector:
+						if ret.Results.FieldsData[k].GetVectors().GetFloatVector() == nil {
+							ret.Results.FieldsData[k].GetVectors().GetFloatVector().Data = []float32{vectorType.FloatVector.Data[curIdx*int(dim)]}
+						} else {
+							ret.Results.FieldsData[k].GetVectors().GetFloatVector().Data = append(ret.Results.FieldsData[k].GetVectors().GetFloatVector().Data, vectorType.FloatVector.Data[curIdx*int(dim):(curIdx+1)*int(dim)]...)
+						}
+					}
+				}
+			}
+			ret.Results.Scores = append(ret.Results.Scores, searchResultData[choice].Scores[idx*topk+choiceOffset])
+			locs[choice]++
+		}
+
+	}
+
+	if metricType != "IP" {
+		for k := range ret.Results.Scores {
+			ret.Results.Scores[k] *= -1
+		}
+	}
+	// err := funcutil.ProcessFuncParallel(nq, maxParallel, f, "reduceSearchResults")
+	// if err != nil {
+	// 	return nil
+	// }
 
 	return ret
 }
@@ -1558,6 +1760,14 @@ func reduceSearchResults(hits [][]*milvuspb.Hits, nq, availableQueryNodeNum, top
 		log.Debug("reduceSearchResults", zap.Any("time cost", time.Since(t)))
 	}()
 	return reduceSearchResultsParallelByCPU(hits, nq, availableQueryNodeNum, topk, metricType)
+}
+
+func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq, availableQueryNodeNum, topk int, metricType string) *milvuspb.SearchResults {
+	t := time.Now()
+	defer func() {
+		log.Debug("reduceSearchResults", zap.Any("time cost", time.Since(t)))
+	}()
+	return reduceSearchResultDataParallel(searchResultData, nq, availableQueryNodeNum, topk, metricType, runtime.NumCPU())
 }
 
 func printSearchResult(partialSearchResult *internalpb.SearchResults) {
@@ -1611,7 +1821,7 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 
 			availableQueryNodeNum = 0
 			for _, partialSearchResult := range filterSearchResult {
-				if partialSearchResult.Hits == nil || len(partialSearchResult.Hits) <= 0 {
+				if partialSearchResult.SlicedBlob == nil {
 					filterReason += "nq is zero\n"
 					continue
 				}
@@ -1631,14 +1841,14 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 				return nil
 			}
 
-			hits, err := decodeSearchResults(filterSearchResult)
+			results, err := decodeSearchResults(filterSearchResult)
 			log.Debug("ProxyNode Search PostExecute decodeSearchResults", zap.Error(err))
 			if err != nil {
 				return err
 			}
 
-			nq := len(hits[0])
-			log.Debug("ProxyNode Search PostExecute", zap.Any("nq", nq))
+			nq := results[0].NumQueries
+			topk := results[0].TopK
 			if nq <= 0 {
 				st.result = &milvuspb.SearchResults{
 					Status: &commonpb.Status{
@@ -1649,12 +1859,21 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 				return nil
 			}
 
-			topk := 0
-			for _, hit := range hits {
-				topk = getMax(topk, len(hit[0].IDs))
+			st.result = reduceSearchResultData(results, int(nq), availableQueryNodeNum, int(topk), searchResults[0].MetricType)
+
+			schema, err := globalMetaCache.GetCollectionSchema(ctx, st.query.CollectionName)
+			if err != nil {
+				return err
+			}
+			for k, fieldName := range st.query.OutputFields {
+				for _, field := range schema.Fields {
+					if field.Name == fieldName {
+						st.result.Results.FieldsData[k].FieldName = fieldName
+						st.result.Results.FieldsData[k].Type = field.DataType
+					}
+				}
 			}
 
-			st.result = reduceSearchResults(hits, nq, availableQueryNodeNum, topk, searchResults[0].MetricType)
 			log.Debug("ProxyNode Search PostExecute Done")
 			return nil
 		}
@@ -2247,9 +2466,9 @@ func (dct *DescribeCollectionTask) PostExecute(ctx context.Context) error {
 type GetCollectionStatisticsTask struct {
 	Condition
 	*milvuspb.GetCollectionStatisticsRequest
-	ctx         context.Context
-	dataService types.DataService
-	result      *milvuspb.GetCollectionStatisticsResponse
+	ctx       context.Context
+	dataCoord types.DataCoord
+	result    *milvuspb.GetCollectionStatisticsResponse
 }
 
 func (g *GetCollectionStatisticsTask) TraceCtx() context.Context {
@@ -2310,7 +2529,7 @@ func (g *GetCollectionStatisticsTask) Execute(ctx context.Context) error {
 		CollectionID: collID,
 	}
 
-	result, _ := g.dataService.GetCollectionStatistics(ctx, req)
+	result, _ := g.dataCoord.GetCollectionStatistics(ctx, req)
 	if result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -2334,9 +2553,9 @@ func (g *GetCollectionStatisticsTask) PostExecute(ctx context.Context) error {
 type GetPartitionStatisticsTask struct {
 	Condition
 	*milvuspb.GetPartitionStatisticsRequest
-	ctx         context.Context
-	dataService types.DataService
-	result      *milvuspb.GetPartitionStatisticsResponse
+	ctx       context.Context
+	dataCoord types.DataCoord
+	result    *milvuspb.GetPartitionStatisticsResponse
 }
 
 func (g *GetPartitionStatisticsTask) TraceCtx() context.Context {
@@ -2402,7 +2621,7 @@ func (g *GetPartitionStatisticsTask) Execute(ctx context.Context) error {
 		PartitionID:  partitionID,
 	}
 
-	result, _ := g.dataService.GetPartitionStatistics(ctx, req)
+	result, _ := g.dataCoord.GetPartitionStatistics(ctx, req)
 	if result == nil {
 		return errors.New("get partition statistics resp is nil")
 	}
@@ -3079,11 +3298,11 @@ func (dit *DropIndexTask) PostExecute(ctx context.Context) error {
 type GetIndexBuildProgressTask struct {
 	Condition
 	*milvuspb.GetIndexBuildProgressRequest
-	ctx         context.Context
-	indexCoord  types.IndexCoord
-	rootCoord   types.RootCoord
-	dataService types.DataService
-	result      *milvuspb.GetIndexBuildProgressResponse
+	ctx        context.Context
+	indexCoord types.IndexCoord
+	rootCoord  types.RootCoord
+	dataCoord  types.DataCoord
+	result     *milvuspb.GetIndexBuildProgressResponse
 }
 
 func (gibpt *GetIndexBuildProgressTask) TraceCtx() context.Context {
@@ -3259,7 +3478,7 @@ func (gibpt *GetIndexBuildProgressTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	infoResp, err := gibpt.dataService.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
+	infoResp, err := gibpt.dataCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_SegmentInfo,
 			MsgID:     0,
@@ -3437,8 +3656,6 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 	getIndexStatesRequest := &indexpb.GetIndexStatesRequest{
 		IndexBuildIDs: make([]UniqueID, 0),
 	}
-	enableIndexBitMap := make([]bool, 0)
-	indexBuildIDs := make([]UniqueID, 0)
 
 	for _, segmentID := range allSegmentIDs {
 		describeSegmentRequest := &milvuspb.DescribeSegmentRequest{
@@ -3456,32 +3673,24 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 			return err
 		}
 		if segmentDesc.IndexID == matchIndexID {
-			indexBuildIDs = append(indexBuildIDs, segmentDesc.BuildID)
 			if segmentDesc.EnableIndex {
-				enableIndexBitMap = append(enableIndexBitMap, true)
-			} else {
-				enableIndexBitMap = append(enableIndexBitMap, false)
+				getIndexStatesRequest.IndexBuildIDs = append(getIndexStatesRequest.IndexBuildIDs, segmentDesc.BuildID)
 			}
 		}
 	}
 
-	log.Debug("proxynode", zap.Int("GetIndexState:: len of allSegmentIDs", len(allSegmentIDs)))
-	log.Debug("proxynode", zap.Int("GetIndexState:: len of IndexBuildIDs", len(indexBuildIDs)))
-	if len(allSegmentIDs) != len(indexBuildIDs) {
-		gist.result = &milvuspb.GetIndexStateResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    "",
-			},
-			State: commonpb.IndexState_InProgress,
-		}
-		return err
+	gist.result = &milvuspb.GetIndexStateResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		State: commonpb.IndexState_Finished,
 	}
 
-	for idx, enableIndex := range enableIndexBitMap {
-		if enableIndex {
-			getIndexStatesRequest.IndexBuildIDs = append(getIndexStatesRequest.IndexBuildIDs, indexBuildIDs[idx])
-		}
+	log.Debug("ProxyNode GetIndexState", zap.Int("IndexBuildIDs", len(getIndexStatesRequest.IndexBuildIDs)), zap.Error(err))
+
+	if len(getIndexStatesRequest.IndexBuildIDs) == 0 {
+		return nil
 	}
 	states, err := gist.indexCoord.GetIndexStates(ctx, getIndexStatesRequest)
 	if err != nil {
@@ -3493,7 +3702,6 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 			Status: states.Status,
 			State:  commonpb.IndexState_Failed,
 		}
-
 		return nil
 	}
 
@@ -3503,17 +3711,8 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 				Status: states.Status,
 				State:  state.State,
 			}
-
 			return nil
 		}
-	}
-
-	gist.result = &milvuspb.GetIndexStateResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
-		State: commonpb.IndexState_Finished,
 	}
 
 	return nil
@@ -3526,9 +3725,9 @@ func (gist *GetIndexStateTask) PostExecute(ctx context.Context) error {
 type FlushTask struct {
 	Condition
 	*milvuspb.FlushRequest
-	ctx         context.Context
-	dataService types.DataService
-	result      *commonpb.Status
+	ctx       context.Context
+	dataCoord types.DataCoord
+	result    *commonpb.Status
 }
 
 func (ft *FlushTask) TraceCtx() context.Context {
@@ -3591,7 +3790,7 @@ func (ft *FlushTask) Execute(ctx context.Context) error {
 			CollectionID: collID,
 		}
 		var status *commonpb.Status
-		status, _ = ft.dataService.Flush(ctx, flushReq)
+		status, _ = ft.dataCoord.Flush(ctx, flushReq)
 		if status == nil {
 			return errors.New("flush resp is nil")
 		}

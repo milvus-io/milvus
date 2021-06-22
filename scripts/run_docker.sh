@@ -16,7 +16,7 @@ echo "starting queryservice docker"
 nohup docker-compose -p milvus up queryservice > ~/queryservice_docker.log 2>&1 &
 
 echo "starting dataservice docker"
-nohup docker-compose -p milvus up dataservice > ~/dataservice_docker.log 2>&1 &
+nohup docker-compose -p milvus up datacoord > ~/dataservice_docker.log 2>&1 &
 
 echo "starting querynode1 docker"
 nohup docker-compose -p milvus run -e QUERY_NODE_ID=1 querynode > ~/querynode1_docker.log 2>&1 &

@@ -101,7 +101,7 @@ func (rc *RootCoordMock) ShowSegments(ctx context.Context, in *milvuspb.ShowSegm
 }
 
 type DataMock struct {
-	types.DataService
+	types.DataCoord
 	SegmentIDs    []UniqueID
 	SegmentStates map[UniqueID]*datapb.SegmentStateInfo
 }

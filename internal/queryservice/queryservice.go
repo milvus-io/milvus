@@ -55,8 +55,8 @@ type QueryService struct {
 	cluster        *queryNodeCluster
 	scheduler      *TaskScheduler
 
-	dataServiceClient types.DataService
-	rootCoordClient   types.RootCoord
+	dataCoordClient types.DataCoord
+	rootCoordClient types.RootCoord
 
 	session   *sessionutil.Session
 	eventChan <-chan *sessionutil.SessionEvent
@@ -94,7 +94,7 @@ func (qs *QueryService) Init() error {
 			return err
 		}
 
-		qs.scheduler, err = NewTaskScheduler(qs.loopCtx, metaKV, qs.cluster, etcdKV, qs.rootCoordClient, qs.dataServiceClient)
+		qs.scheduler, err = NewTaskScheduler(qs.loopCtx, metaKV, qs.cluster, etcdKV, qs.rootCoordClient, qs.dataCoordClient)
 		return err
 	}
 	log.Debug("queryService try to connect etcd")
@@ -165,8 +165,8 @@ func (qs *QueryService) SetRootCoord(rootCoord types.RootCoord) {
 	qs.rootCoordClient = rootCoord
 }
 
-func (qs *QueryService) SetDataService(dataService types.DataService) {
-	qs.dataServiceClient = dataService
+func (qs *QueryService) SetDataCoord(dataCoord types.DataCoord) {
+	qs.dataCoordClient = dataCoord
 }
 
 func (qs *QueryService) watchNodeLoop() {
@@ -210,7 +210,7 @@ func (qs *QueryService) watchNodeLoop() {
 				},
 				LoadBalanceRequest: loadBalanceSegment,
 				rootCoord:          qs.rootCoordClient,
-				dataService:        qs.dataServiceClient,
+				dataCoord:          qs.dataCoordClient,
 				cluster:            qs.cluster,
 				meta:               qs.meta,
 			}
@@ -253,7 +253,7 @@ func (qs *QueryService) watchNodeLoop() {
 					},
 					LoadBalanceRequest: loadBalanceSegment,
 					rootCoord:          qs.rootCoordClient,
-					dataService:        qs.dataServiceClient,
+					dataCoord:          qs.dataCoordClient,
 					cluster:            qs.cluster,
 					meta:               qs.meta,
 				}

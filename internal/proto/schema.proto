@@ -113,3 +113,11 @@ message IDs {
     StringArray str_id = 2;
   }
 }
+
+message SearchResultData {
+  int64 num_queries = 1;
+  int64 top_k = 2;
+  repeated FieldData fields_data = 3;
+  repeated float scores = 4;
+  IDs ids = 5;
+}

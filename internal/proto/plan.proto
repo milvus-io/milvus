@@ -87,4 +87,5 @@ message PlanNode {
   oneof node {
     VectorANNS vector_anns = 1;
   }
+  repeated int64 output_field_ids = 2;
 }

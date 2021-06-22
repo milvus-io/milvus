@@ -126,6 +126,12 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
     plan->plan_node_ = std::move(plan_node);
     plan->extra_info_opt_ = std::move(plan_info);
 
+    for (auto field_id_raw : plan_node_proto.output_field_ids()) {
+        auto field_id = FieldId(field_id_raw);
+        auto offset = schema.get_offset(field_id);
+        plan->target_entries_.push_back(offset);
+    }
+
     return plan;
 }
 ExprPtr

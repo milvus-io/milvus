@@ -154,17 +154,17 @@ func (qs *QueryService) LoadCollection(ctx context.Context, req *querypb.LoadCol
 		},
 		LoadCollectionRequest: req,
 		rootCoord:             qs.rootCoordClient,
-		dataService:           qs.dataServiceClient,
+		dataCoord:             qs.dataCoordClient,
 		cluster:               qs.cluster,
 		meta:                  qs.meta,
 	}
 	qs.scheduler.Enqueue([]task{loadCollectionTask})
 
-	//err := loadCollectionTask.WaitToFinish()
-	//if err != nil {
-	//	status.Reason = err.Error()
-	//	return status, err
-	//}
+	err := loadCollectionTask.WaitToFinish()
+	if err != nil {
+		status.Reason = err.Error()
+		return status, err
+	}
 	//qs.meta.setLoadCollection(collectionID, true)
 
 	log.Debug("LoadCollectionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID))
@@ -269,18 +269,18 @@ func (qs *QueryService) LoadPartitions(ctx context.Context, req *querypb.LoadPar
 				triggerCondition: querypb.TriggerCondition_grpcRequest,
 			},
 			LoadPartitionsRequest: req,
-			dataService:           qs.dataServiceClient,
+			dataCoord:             qs.dataCoordClient,
 			cluster:               qs.cluster,
 			meta:                  qs.meta,
 		}
 		qs.scheduler.Enqueue([]task{loadPartitionTask})
 
-		//err := loadPartitionTask.WaitToFinish()
-		//if err != nil {
-		//	status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		//	status.Reason = err.Error()
-		//	return status, err
-		//}
+		err := loadPartitionTask.WaitToFinish()
+		if err != nil {
+			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			status.Reason = err.Error()
+			return status, err
+		}
 	}
 
 	status.ErrorCode = commonpb.ErrorCode_Success
