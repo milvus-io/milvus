@@ -40,7 +40,7 @@ func TestProxyNodeManager(t *testing.T) {
 	}
 	b1, err := json.Marshal(&s1)
 	assert.Nil(t, err)
-	k1 := path.Join(sessKey, typeutil.ProxyNodeRole+"-100")
+	k1 := path.Join(sessKey, typeutil.ProxyRole+"-100")
 	_, err = cli.Put(ctx, k1, string(b1))
 	assert.Nil(t, err)
 
@@ -49,7 +49,7 @@ func TestProxyNodeManager(t *testing.T) {
 	}
 	b0, err := json.Marshal(&s0)
 	assert.Nil(t, err)
-	k0 := path.Join(sessKey, typeutil.ProxyNodeRole+"-99")
+	k0 := path.Join(sessKey, typeutil.ProxyRole+"-99")
 	_, err = cli.Put(ctx, k0, string(b0))
 	assert.Nil(t, err)
 
@@ -82,7 +82,7 @@ func TestProxyNodeManager(t *testing.T) {
 	}
 	b2, err := json.Marshal(&s2)
 	assert.Nil(t, err)
-	k2 := path.Join(sessKey, typeutil.ProxyNodeRole+"-101")
+	k2 := path.Join(sessKey, typeutil.ProxyRole+"-101")
 	_, err = cli.Put(ctx, k2, string(b2))
 	assert.Nil(t, err)
 
