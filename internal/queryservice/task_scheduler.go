@@ -546,6 +546,7 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 			if err != nil {
 				log.Error("scheduleLoop: error when remove trigger task to etcd", zap.Int64("taskID", t.ID()))
 				t.Notify(err)
+				continue
 			}
 			log.Debug("scheduleLoop: trigger task done and delete from etcd", zap.Int64("taskID", t.ID()))
 			t.Notify(err)
