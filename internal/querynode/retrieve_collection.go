@@ -459,13 +459,13 @@ func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error
 			FieldsData:                result.FieldsData,
 			ResultChannelID:           retrieveMsg.ResultChannelID,
 			SealedSegmentIDsRetrieved: sealedSegmentRetrieved,
-			ChannelIDsRetrieved:       collection.getPChannels(),
+			ChannelIDsRetrieved:       collection.getVChannels(),
 			//TODO(yukun):: get global sealed segment from etcd
 			GlobalSealedSegmentIDs: sealedSegmentRetrieved,
 		},
 	}
 	log.Debug("QueryNode RetrieveResultMsg",
-		zap.Any("pChannels", collection.getPChannels()),
+		zap.Any("vChannels", collection.getVChannels()),
 		zap.Any("collectionID", collection.ID()),
 		zap.Any("sealedSegmentRetrieved", sealedSegmentRetrieved),
 	)
