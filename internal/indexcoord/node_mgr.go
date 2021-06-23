@@ -14,7 +14,6 @@ package indexcoord
 import (
 	"context"
 	"strconv"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -23,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
 func (i *IndexCoord) removeNode(nodeID UniqueID) {
@@ -44,7 +44,7 @@ func (i *IndexCoord) addNode(nodeID UniqueID, req *indexpb.RegisterNodeRequest) 
 	}
 
 	nodeAddress := req.Address.Ip + ":" + strconv.FormatInt(req.Address.Port, 10)
-	nodeClient, err := grpcindexnodeclient.NewClient(nodeAddress, 3*time.Second)
+	nodeClient, err := grpcindexnodeclient.NewClient(context.TODO(), nodeAddress, retry.Attempts(300))
 	if err != nil {
 		return err
 	}

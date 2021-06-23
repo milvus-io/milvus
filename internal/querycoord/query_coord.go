@@ -98,7 +98,7 @@ func (qc *QueryCoord) Init() error {
 		return err
 	}
 	log.Debug("query coordinator try to connect etcd")
-	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
+	err := retry.Do(qc.loopCtx, connectEtcdFn, retry.Attempts(300))
 	if err != nil {
 		log.Debug("query coordinator try to connect etcd failed", zap.Error(err))
 		return err

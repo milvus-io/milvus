@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
@@ -54,8 +55,8 @@ type Server struct {
 	rootCoord types.RootCoord
 	dataCoord types.DataCoord
 
-	newRootCoordClient func() (types.RootCoord, error)
-	newDataCoordClient func(string, []string, time.Duration) types.DataCoord
+	newRootCoordClient func(string, []string, ...retry.Option) (types.RootCoord, error)
+	newDataCoordClient func(string, []string, ...retry.Option) (types.DataCoord, error)
 
 	closer io.Closer
 }
@@ -68,11 +69,11 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		cancel:      cancel,
 		msFactory:   factory,
 		grpcErrChan: make(chan error),
-		newRootCoordClient: func() (types.RootCoord, error) {
-			return rcc.NewClient(ctx1, dn.Params.MetaRootPath, dn.Params.EtcdEndpoints, 3*time.Second)
+		newRootCoordClient: func(etcdMetaRoot string, etcdEndpoints []string, retryOptions ...retry.Option) (types.RootCoord, error) {
+			return rcc.NewClient(ctx1, etcdMetaRoot, etcdEndpoints, retryOptions...)
 		},
-		newDataCoordClient: func(etcdMetaRoot string, etcdEndpoints []string, timeout time.Duration) types.DataCoord {
-			return dsc.NewClient(etcdMetaRoot, etcdEndpoints, timeout)
+		newDataCoordClient: func(etcdMetaRoot string, etcdEndpoints []string, retryOptions ...retry.Option) (types.DataCoord, error) {
+			return dsc.NewClient(ctx1, etcdMetaRoot, etcdEndpoints, retryOptions...)
 		},
 	}
 
@@ -177,7 +178,7 @@ func (s *Server) init() error {
 	if s.newRootCoordClient != nil {
 		log.Debug("RootCoord address", zap.String("address", Params.RootCoordAddress))
 		log.Debug("Init root coord client ...")
-		rootCoordClient, err := s.newRootCoordClient()
+		rootCoordClient, err := s.newRootCoordClient(dn.Params.MetaRootPath, dn.Params.EtcdEndpoints, retry.Attempts(300))
 		if err != nil {
 			log.Debug("DataNode newRootCoordClient failed", zap.Error(err))
 			panic(err)
@@ -205,7 +206,11 @@ func (s *Server) init() error {
 	if s.newDataCoordClient != nil {
 		log.Debug("Data service address", zap.String("address", Params.DataCoordAddress))
 		log.Debug("DataNode Init data service client ...")
-		dataCoordClient := s.newDataCoordClient(dn.Params.MetaRootPath, dn.Params.EtcdEndpoints, 10*time.Second)
+		dataCoordClient, err := s.newDataCoordClient(dn.Params.MetaRootPath, dn.Params.EtcdEndpoints, retry.Attempts(300))
+		if err != nil {
+			log.Debug("DataNode newDataCoordClient failed", zap.Error(err))
+			panic(err)
+		}
 		if err = dataCoordClient.Init(); err != nil {
 			log.Debug("DataNode newDataCoord failed", zap.Error(err))
 			panic(err)
