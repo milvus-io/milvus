@@ -214,5 +214,5 @@ func (p *ParamTable) initLogCfg() {
 }
 
 func (p *ParamTable) initRoleName() {
-	p.RoleName = "MasterService"
+	p.RoleName = "RootCoord"
 }
