@@ -109,24 +109,24 @@ func (q *queryCollection) close() {
 	}
 }
 
-func (s *queryCollection) register() {
-	collection, err := s.streaming.replica.getCollectionByID(s.collectionID)
+func (q *queryCollection) register() {
+	collection, err := q.streaming.replica.getCollectionByID(q.collectionID)
 	if err != nil {
 		log.Error(err.Error())
 		return
 	}
 
-	s.watcherSelectCase = make([]reflect.SelectCase, 0)
+	q.watcherSelectCase = make([]reflect.SelectCase, 0)
 	log.Debug("register tSafe watcher and init watcher select case",
 		zap.Any("collectionID", collection.ID()),
 		zap.Any("dml channels", collection.getVChannels()),
 	)
 	for _, channel := range collection.getVChannels() {
-		s.tSafeWatchers[channel] = newTSafeWatcher()
-		s.streaming.tSafeReplica.registerTSafeWatcher(channel, s.tSafeWatchers[channel])
-		s.watcherSelectCase = append(s.watcherSelectCase, reflect.SelectCase{
+		q.tSafeWatchers[channel] = newTSafeWatcher()
+		q.streaming.tSafeReplica.registerTSafeWatcher(channel, q.tSafeWatchers[channel])
+		q.watcherSelectCase = append(q.watcherSelectCase, reflect.SelectCase{
 			Dir:  reflect.SelectRecv,
-			Chan: reflect.ValueOf(s.tSafeWatchers[channel].watcherChan()),
+			Chan: reflect.ValueOf(q.tSafeWatchers[channel].watcherChan()),
 		})
 	}
 }
