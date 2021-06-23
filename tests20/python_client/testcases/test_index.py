@@ -53,16 +53,6 @@ class TestIndexParams(TestcaseBase):
     def get_invalid_index_params(self, request):
         yield request.param
 
-    # TODO: construct valid index params for all index types
-    @pytest.fixture(
-        scope="function",
-        params=[
-            default_index_params,
-        ]
-    )
-    def get_valid_index_params(self, request):
-        yield request.param
-
     # @pytest.mark.xfail(reason="issue #5646")
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_collection_None(self):
@@ -73,7 +63,7 @@ class TestIndexParams(TestcaseBase):
         """
         self._connect()
         self.index_wrap.init_index(None, default_field_name, default_index_params, check_task=CheckTasks.err_res,
-                                           err_code=1, err_msg="Collection")
+                                            check_items={"err_code": 1, "err_msg": "Collection"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_field_name_invalid(self, get_invalid_field_name):
@@ -86,7 +76,7 @@ class TestIndexParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         self.index_wrap.init_index(collection_w.collection, f_name, default_index_params, check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 1, "err_msg": "must be str"})
+                                            check_items={"err_code": 1, "err_msg": "but expected one of"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_field_name_not_existed(self):
@@ -112,8 +102,12 @@ class TestIndexParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         index_params = copy.deepcopy(default_index_params)
         index_params["index_type"] = get_invalid_index_type
+        if not isinstance(index_params["index_type"], str):
+            msg = "must be str"
+        else:
+            msg = "Invalid index_type"
         self.index_wrap.init_index(collection_w.collection, default_field_name, index_params, check_task=CheckTasks.err_res,
-                                        check_items={"err_code": 1, "err_msg": "must be str"})
+                                        check_items={"err_code": 1, "err_msg": msg})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_type_not_supported(self):
@@ -159,6 +153,16 @@ class TestIndexParams(TestcaseBase):
 
 class TestIndexBase(TestcaseBase):
     """ Test case of index interface """
+    # TODO: construct valid index params for all index types
+    @pytest.fixture(
+        scope="function",
+        params=[
+            default_index_params,
+        ]
+    )
+    def get_valid_index_params(self, request):
+        yield request.param
+
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_collection_empty(self):
@@ -182,10 +186,29 @@ class TestIndexBase(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
+        data = cf.gen_default_list_data(ct.default_nb)
+        collection_w.insert(data=data)
         index_params = get_valid_index_params
         index, _ = self.index_wrap.init_index(collection_w.collection, default_field_name, index_params)
         # TODO: assert index
         cf.assert_equal_index(index, collection_w.collection.indexes[0])
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_index_params_flush(self):
+        """
+        target: test index with all index type/params
+        method: input valid params
+        expected: no exception raised
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        data = cf.gen_default_list_data(ct.default_nb)
+        collection_w.insert(data=data)
+        self._connect().flush([collection_w.name])
+        index, _ = self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params)
+        # TODO: assert index
+        cf.assert_equal_index(index, collection_w.collection.indexes[0])
+        assert collection_w.num_entities == ct.default_nb
 
     # TODO: not support
     @pytest.mark.tags(CaseLabel.L1)
