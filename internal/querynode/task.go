@@ -412,7 +412,7 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 		}
 
 		r.node.streaming.replica.removeExcludedSegments(r.req.CollectionID)
-		r.node.searchService.stopSearchCollection(r.req.CollectionID)
+		r.node.queryService.stopQueryCollection(r.req.CollectionID)
 
 		hasCollectionInHistorical := r.node.historical.replica.hasCollection(r.req.CollectionID)
 		if hasCollectionInHistorical {

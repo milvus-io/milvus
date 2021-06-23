@@ -58,8 +58,7 @@ type QueryNode struct {
 	streaming  *streaming
 
 	// internal services
-	searchService   *searchService
-	retrieveService *retrieveService
+	queryService *queryService
 
 	// clients
 	queryCoord types.QueryCoord
@@ -83,8 +82,7 @@ func NewQueryNode(ctx context.Context, queryNodeID UniqueID, factory msgstream.F
 		queryNodeLoopCtx:    ctx1,
 		queryNodeLoopCancel: cancel,
 		QueryNodeID:         queryNodeID,
-		searchService:       nil,
-		retrieveService:     nil,
+		queryService:        nil,
 		msFactory:           factory,
 	}
 
@@ -99,8 +97,7 @@ func NewQueryNodeWithoutID(ctx context.Context, factory msgstream.Factory) *Quer
 	node := &QueryNode{
 		queryNodeLoopCtx:    ctx1,
 		queryNodeLoopCancel: cancel,
-		searchService:       nil,
-		retrieveService:     nil,
+		queryService:        nil,
 		msFactory:           factory,
 	}
 
@@ -216,22 +213,15 @@ func (node *QueryNode) Start() error {
 
 	// init services and manager
 	// TODO: pass node.streaming.replica to search service
-	node.searchService = newSearchService(node.queryNodeLoopCtx,
+	node.queryService = newQueryService(node.queryNodeLoopCtx,
 		node.historical,
 		node.streaming,
 		node.msFactory)
-
-	node.retrieveService = newRetrieveService(node.queryNodeLoopCtx,
-		node.historical,
-		node.streaming,
-		node.msFactory,
-	)
 
 	// start task scheduler
 	go node.scheduler.Start()
 
 	// start services
-	go node.retrieveService.start()
 	go node.historical.start()
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
 	return nil
@@ -248,11 +238,11 @@ func (node *QueryNode) Stop() error {
 	if node.streaming != nil {
 		node.streaming.close()
 	}
-	if node.searchService != nil {
-		node.searchService.close()
+	if node.queryService != nil {
+		node.queryService.close()
 	}
-	if node.retrieveService != nil {
-		node.retrieveService.close()
+	if node.queryService != nil {
+		node.queryService.close()
 	}
 	return nil
 }

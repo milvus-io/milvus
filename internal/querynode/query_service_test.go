@@ -141,11 +141,11 @@ func TestSearch_Search(t *testing.T) {
 	assert.NoError(t, err)
 
 	// start search service
-	node.searchService = newSearchService(node.queryNodeLoopCtx,
+	node.queryService = newQueryService(node.queryNodeLoopCtx,
 		node.historical,
 		node.streaming,
 		msFactory)
-	node.searchService.addSearchCollection(collectionID)
+	node.queryService.addQueryCollection(collectionID)
 
 	// load segment
 	err = node.historical.replica.addSegment(segmentID, defaultPartitionID, collectionID, "", segmentTypeSealed, true)
@@ -179,11 +179,11 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	assert.NoError(t, err)
 
 	// start search service
-	node.searchService = newSearchService(node.queryNodeLoopCtx,
+	node.queryService = newQueryService(node.queryNodeLoopCtx,
 		node.historical,
 		node.streaming,
 		msFactory)
-	node.searchService.addSearchCollection(collectionID)
+	node.queryService.addQueryCollection(collectionID)
 
 	// load segments
 	err = node.historical.replica.addSegment(segmentID1, defaultPartitionID, collectionID, "", segmentTypeSealed, true)
