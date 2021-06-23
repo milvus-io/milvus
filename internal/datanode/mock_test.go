@@ -35,8 +35,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
@@ -482,8 +482,8 @@ func (m *RootCoordFactory) setCollectionName(name string) {
 	m.collectionName = name
 }
 
-func (m *RootCoordFactory) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
-	resp := &masterpb.AllocIDResponse{
+func (m *RootCoordFactory) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
+	resp := &rootcoordpb.AllocIDResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		}}
@@ -503,8 +503,8 @@ func (m *RootCoordFactory) AllocID(ctx context.Context, in *masterpb.AllocIDRequ
 	return resp, nil
 }
 
-func (m *RootCoordFactory) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
-	resp := &masterpb.AllocTimestampResponse{
+func (m *RootCoordFactory) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
+	resp := &rootcoordpb.AllocTimestampResponse{
 		Status:    &commonpb.Status{},
 		Timestamp: 1000,
 	}

@@ -32,8 +32,8 @@ import (
 )
 
 const (
-	queryServiceSegmentMetaPrefix = "queryService-segmentMeta"
-	queryNodeSegmentMetaPrefix    = "queryNode-segmentMeta"
+	queryCoordSegmentMetaPrefix = "queryCoord-segmentMeta"
+	queryNodeSegmentMetaPrefix  = "queryNode-segmentMeta"
 )
 
 // segmentLoader is only responsible for loading the field data from binlog
@@ -111,7 +111,7 @@ func (loader *segmentLoader) loadSegment(req *queryPb.LoadSegmentsRequest, onSer
 			continue
 		}
 		if onService {
-			key := fmt.Sprintf("%s/%d", queryServiceSegmentMetaPrefix, segmentID)
+			key := fmt.Sprintf("%s/%d", queryCoordSegmentMetaPrefix, segmentID)
 			value, err := loader.etcdKV.Load(key)
 			if err != nil {
 				deleteSegment(segment)

@@ -30,7 +30,7 @@ go test -race -cover "${MILVUS_DIR}/util/trace/..." -failfast
 go test -race -cover "${MILVUS_DIR}/util/typeutil/..." -failfast
 
 # TODO: remove to distributed
-#go test -race -cover "${MILVUS_DIR}/proxynode/..." -failfast
+#go test -race -cover "${MILVUS_DIR}/proxy/..." -failfast
 go test -race -cover "${MILVUS_DIR}/datanode/..." -failfast
 go test -race -cover "${MILVUS_DIR}/indexnode/..." -failfast
 go test -race -cover "${MILVUS_DIR}/querynode/..." -failfast

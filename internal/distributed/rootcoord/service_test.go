@@ -30,9 +30,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
@@ -89,12 +89,12 @@ func GenFlushedSegMsgPack(segID typeutil.UniqueID) *msgstream.MsgPack {
 	return &msgPack
 }
 
-type proxyNodeMock struct {
-	types.ProxyNode
+type proxyMock struct {
+	types.Proxy
 	invalidateCollectionMetaCache func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
 }
 
-func (p *proxyNodeMock) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+func (p *proxyMock) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	return p.invalidateCollectionMetaCache(ctx, request)
 }
 
@@ -160,7 +160,7 @@ func TestGrpcService(t *testing.T) {
 		},
 	)
 	assert.Nil(t, err)
-	_, err = etcdCli.Put(ctx, path.Join(sessKey, typeutil.ProxyNodeRole+"-100"), string(pnb))
+	_, err = etcdCli.Put(ctx, path.Join(sessKey, typeutil.ProxyRole+"-100"), string(pnb))
 	assert.Nil(t, err)
 
 	err = core.Init()
@@ -231,8 +231,8 @@ func TestGrpcService(t *testing.T) {
 	}
 
 	collectionMetaCache := make([]string, 0, 16)
-	pnm := proxyNodeMock{}
-	core.NewProxyClient = func(*sessionutil.Session) (types.ProxyNode, error) {
+	pnm := proxyMock{}
+	core.NewProxyClient = func(*sessionutil.Session) (types.Proxy, error) {
 		return &pnm, nil
 	}
 	pnm.invalidateCollectionMetaCache = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
@@ -245,6 +245,9 @@ func TestGrpcService(t *testing.T) {
 	core.CallReleaseCollectionService = func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error {
 		return nil
 	}
+	core.CallReleasePartitionService = func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID, partitionIDs []typeutil.UniqueID) error {
+		return nil
+	}
 
 	rootcoord.Params.Address = Params.Address
 	err = svr.rootCoord.Register()
@@ -255,7 +258,7 @@ func TestGrpcService(t *testing.T) {
 
 	svr.rootCoord.UpdateStateCode(internalpb.StateCode_Healthy)
 
-	cli, err := rcc.NewClient(context.Background(), rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, 3*time.Second)
+	cli, err := rcc.NewClient(context.Background(), rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, retry.Attempts(300))
 	assert.Nil(t, err)
 
 	err = cli.Init()
@@ -286,7 +289,7 @@ func TestGrpcService(t *testing.T) {
 	})
 
 	t.Run("alloc time stamp", func(t *testing.T) {
-		req := &masterpb.AllocTimestampRequest{
+		req := &rootcoordpb.AllocTimestampRequest{
 			Count: 1,
 		}
 		rsp, err := svr.AllocTimestamp(ctx, req)
@@ -295,7 +298,7 @@ func TestGrpcService(t *testing.T) {
 	})
 
 	t.Run("alloc id", func(t *testing.T) {
-		req := &masterpb.AllocIDRequest{
+		req := &rootcoordpb.AllocIDRequest{
 			Count: 1,
 		}
 		rsp, err := svr.AllocID(ctx, req)
@@ -828,7 +831,7 @@ func (m *mockCore) SetIndexCoord(types.IndexCoord) error {
 	return nil
 }
 
-func (m *mockCore) SetQueryCoord(types.QueryService) error {
+func (m *mockCore) SetQueryCoord(types.QueryCoord) error {
 	return nil
 }
 
@@ -848,7 +851,7 @@ func (m *mockCore) Stop() error {
 	return fmt.Errorf("stop error")
 }
 
-func (m *mockCore) SetNewProxyClient(func(sess *sessionutil.Session) (types.ProxyNode, error)) {
+func (m *mockCore) SetNewProxyClient(func(sess *sessionutil.Session) (types.Proxy, error)) {
 }
 
 type mockDataCoord struct {
@@ -893,7 +896,7 @@ func (m *mockIndex) Stop() error {
 }
 
 type mockQuery struct {
-	types.QueryService
+	types.QueryCoord
 }
 
 func (m *mockQuery) Init() error {
@@ -922,13 +925,13 @@ func TestRun(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "listen tcp: address 1000000: invalid port")
 
-	svr.newDataCoordClient = func(string, []string, time.Duration) types.DataCoord {
+	svr.newDataCoordClient = func(string, []string, ...retry.Option) types.DataCoord {
 		return &mockDataCoord{}
 	}
-	svr.newIndexCoordClient = func(string, []string, time.Duration) types.IndexCoord {
+	svr.newIndexCoordClient = func(string, []string, ...retry.Option) types.IndexCoord {
 		return &mockIndex{}
 	}
-	svr.newQueryCoordClient = func(string, []string, time.Duration) types.QueryService {
+	svr.newQueryCoordClient = func(string, []string, ...retry.Option) types.QueryCoord {
 		return &mockQuery{}
 	}
 
@@ -962,7 +965,7 @@ func initEtcd(etcdEndpoints []string) (*clientv3.Client, error) {
 		etcdCli = etcd
 		return nil
 	}
-	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
+	err := retry.Do(context.TODO(), connectEtcdFn, retry.Attempts(300))
 	if err != nil {
 		return nil, err
 	}

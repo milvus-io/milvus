@@ -18,7 +18,6 @@ import (
 	"net"
 	"strconv"
 	"testing"
-	"time"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -26,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -111,11 +111,11 @@ func TestRun(t *testing.T) {
 
 	Params.Init()
 
-	dnServer.newRootCoordClient = func() (types.RootCoord, error) {
+	dnServer.newRootCoordClient = func(string, []string, ...retry.Option) (types.RootCoord, error) {
 		return &mockRootCoord{}, nil
 	}
-	dnServer.newDataCoordClient = func(string, []string, time.Duration) types.DataCoord {
-		return &mockDataCoord{}
+	dnServer.newDataCoordClient = func(string, []string, ...retry.Option) (types.DataCoord, error) {
+		return &mockDataCoord{}, nil
 	}
 
 	grpcPort := rand.Int()%100 + 10000

@@ -30,9 +30,9 @@ import (
 	"github.com/milvus-io/milvus/internal/logutil"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/proxynode"
+	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/querycoord"
 	"github.com/milvus-io/milvus/internal/querynode"
-	"github.com/milvus-io/milvus/internal/queryservice"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -108,11 +108,11 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string
 
 	wg.Add(1)
 	go func() {
-		proxynode.Params.InitAlias(alias)
-		proxynode.Params.Init()
+		proxy.Params.InitAlias(alias)
+		proxy.Params.Init()
 
 		if !localMsg {
-			logutil.SetupLogger(&proxynode.Params.Log)
+			logutil.SetupLogger(&proxy.Params.Log)
 			defer log.Sync()
 		}
 
@@ -127,7 +127,7 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string
 	}()
 	wg.Wait()
 
-	metrics.RegisterProxyNode()
+	metrics.RegisterProxy()
 	return pn
 }
 
@@ -137,10 +137,10 @@ func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *compon
 
 	wg.Add(1)
 	go func() {
-		queryservice.Params.Init()
+		querycoord.Params.Init()
 
 		if !localMsg {
-			logutil.SetupLogger(&queryservice.Params.Log)
+			logutil.SetupLogger(&querycoord.Params.Log)
 			defer log.Sync()
 		}
 

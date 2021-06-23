@@ -729,6 +729,20 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 				}
 				nilHits[i] = bs
 			}
+
+			// TODO: remove inefficient code in cgo and use SearchResultData directly
+			// TODO: Currently add a translate layer from hits to SearchResultData
+			// TODO: hits marshal and unmarshal is likely bottleneck
+
+			transformed, err := translateHits(schema, searchMsg.OutputFieldsId, nilHits)
+			if err != nil {
+				return err
+			}
+			byteBlobs, err := proto.Marshal(transformed)
+			if err != nil {
+				return err
+			}
+
 			resultChannelInt := 0
 			searchResultMsg := &msgstream.SearchResultMsg{
 				BaseMsg: msgstream.BaseMsg{Ctx: searchMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}},
@@ -742,6 +756,9 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 					Status:                   &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 					ResultChannelID:          searchMsg.ResultChannelID,
 					Hits:                     nilHits,
+					SlicedBlob:               byteBlobs,
+					SlicedOffset:             1,
+					SlicedNumCount:           1,
 					MetricType:               plan.getMetricType(),
 					SealedSegmentIDsSearched: sealedSegmentSearched,
 					ChannelIDsSearched:       collection.getPChannels(),

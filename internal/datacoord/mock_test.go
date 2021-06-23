@@ -22,9 +22,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
@@ -243,11 +243,11 @@ func (m *mockRootCoordService) DropIndex(ctx context.Context, req *milvuspb.Drop
 }
 
 //global timestamp allocator
-func (m *mockRootCoordService) AllocTimestamp(ctx context.Context, req *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
+func (m *mockRootCoordService) AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	val := atomic.AddInt64(&m.cnt, int64(req.Count))
 	phy := time.Now().UnixNano() / int64(time.Millisecond)
 	ts := tsoutil.ComposeTS(phy, val)
-	return &masterpb.AllocTimestampResponse{
+	return &rootcoordpb.AllocTimestampResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
@@ -257,9 +257,9 @@ func (m *mockRootCoordService) AllocTimestamp(ctx context.Context, req *masterpb
 	}, nil
 }
 
-func (m *mockRootCoordService) AllocID(ctx context.Context, req *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
+func (m *mockRootCoordService) AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 	val := atomic.AddInt64(&m.cnt, int64(req.Count))
-	return &masterpb.AllocIDResponse{
+	return &rootcoordpb.AllocIDResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",

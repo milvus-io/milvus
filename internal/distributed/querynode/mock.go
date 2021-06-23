@@ -72,11 +72,11 @@ indexParams:
 	indexParams["SLICE_SIZE"] = "4"
 */
 
-type MasterServiceMock struct {
+type RootCoordMock struct {
 	Count int
 }
 
-func (m *MasterServiceMock) DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
+func (m *RootCoordMock) DescribeSegment(in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
 	if m.Count < 20 {
 		m.Count++
 		return nil, errors.New("index not exit")
@@ -193,9 +193,9 @@ func (index *IndexCoordMock) GetIndexFilePaths(req *indexpb.GetIndexFilePathsReq
 	return rsp, nil
 }
 
-type queryServiceMock struct{}
+type queryCoordMock struct{}
 
-func (q *queryServiceMock) RegisterNode(req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
+func (q *queryCoordMock) RegisterNode(req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
 	return &querypb.RegisterNodeResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,

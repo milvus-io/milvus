@@ -21,8 +21,9 @@ import (
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/masterpb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -71,7 +72,7 @@ func NewIDAllocator(ctx context.Context, metaRoot string, etcdEndpoints []string
 func (ia *IDAllocator) Start() error {
 	var err error
 
-	ia.rootCoordClient, err = rcc.NewClient(ia.Ctx, ia.metaRoot, ia.etcdEndpoints, 3*time.Second)
+	ia.rootCoordClient, err = rcc.NewClient(ia.Ctx, ia.metaRoot, ia.etcdEndpoints, retry.Attempts(300))
 	if err != nil {
 		panic(err)
 	}
@@ -103,7 +104,7 @@ func (ia *IDAllocator) syncID() (bool, error) {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	req := &masterpb.AllocIDRequest{
+	req := &rootcoordpb.AllocIDRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_RequestID,
 			MsgID:     0,

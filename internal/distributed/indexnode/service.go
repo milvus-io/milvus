@@ -19,7 +19,6 @@ import (
 	"net"
 	"strconv"
 	"sync"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -33,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"google.golang.org/grpc"
 )
@@ -136,10 +136,14 @@ func (s *Server) init() error {
 		return err
 	}
 
-	s.indexCoordClient = grpcindexcoordclient.NewClient(indexnode.Params.MetaRootPath, indexnode.Params.EtcdEndpoints, 3*time.Second)
+	s.indexCoordClient, err = grpcindexcoordclient.NewClient(s.loopCtx, indexnode.Params.MetaRootPath, indexnode.Params.EtcdEndpoints, retry.Attempts(300))
+	if err != nil {
+		log.Debug("New indexCoordeClient failed", zap.Error(err))
+		return err
+	}
 	err = s.indexCoordClient.Init()
 	if err != nil {
-		log.Debug("IndexNode indexSerticeClient init failed", zap.Error(err))
+		log.Debug("IndexNode indexCoordeClient init failed", zap.Error(err))
 		return err
 	}
 	s.indexnode.SetIndexCoordClient(s.indexCoordClient)
