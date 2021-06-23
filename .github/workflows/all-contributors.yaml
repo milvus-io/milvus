@@ -1,6 +1,9 @@
 name: add contributor
 
-on: push
+on:
+    schedule:
+    # * is a special character in YAML so you have to quote this string
+    - cron:  '50 11 * * *'
 
 jobs:
   contributor:
