@@ -184,7 +184,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 	for nodeID, session := range sessionMap {
 		if _, ok := qc.cluster.nodes[nodeID]; !ok {
 			serverID := session.ServerID
-			err := qc.cluster.RegisterNode(session, serverID)
+			err := qc.cluster.RegisterNode(ctx, session, serverID)
 			if err != nil {
 				log.Error("register queryNode error", zap.Any("error", err.Error()))
 			}
@@ -228,7 +228,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:
 				serverID := event.Session.ServerID
-				err := qc.cluster.RegisterNode(event.Session, serverID)
+				err := qc.cluster.RegisterNode(ctx, event.Session, serverID)
 				if err != nil {
 					log.Error(err.Error())
 				}

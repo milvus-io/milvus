@@ -92,7 +92,7 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 }
 
 func defaultDataNodeCreatorFunc(ctx context.Context, addr string, retryOptions ...retry.Option) (types.DataNode, error) {
-	return datanodeclient.NewClient(ctx, addr, retryOptions)
+	return datanodeclient.NewClient(ctx, addr, retryOptions...)
 }
 
 func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string, etcdEndpoints []string, retryOptions ...retry.Option) (types.RootCoord, error) {
