@@ -385,22 +385,63 @@ func (mt *metaTable) HasSameReq(req *indexpb.BuildIndexRequest) (bool, UniqueID)
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 
-LOOP:
 	for _, meta := range mt.indexBuildID2Meta {
-		if meta.indexMeta.Req.IndexID == req.IndexID {
-			if len(meta.indexMeta.Req.DataPaths) != len(req.DataPaths) {
-				goto LOOP
-			}
-			if len(meta.indexMeta.Req.IndexParams) == len(req.IndexParams) &&
-				compare2Array(meta.indexMeta.Req.DataPaths, req.DataPaths) {
-				if !compare2Array(meta.indexMeta.Req.IndexParams, req.IndexParams) ||
-					!compare2Array(meta.indexMeta.Req.TypeParams, req.TypeParams) {
-					goto LOOP
-				}
-				return true, meta.indexMeta.IndexBuildID
+		if meta.indexMeta.Req.IndexID != req.IndexID {
+			continue
+		}
+		if meta.indexMeta.Req.IndexName != req.IndexName {
+			continue
+		}
+		if len(meta.indexMeta.Req.DataPaths) != len(req.DataPaths) {
+			continue
+		}
+		notEq := false
+		for i := range meta.indexMeta.Req.DataPaths {
+			if meta.indexMeta.Req.DataPaths[i] != req.DataPaths[i] {
+				notEq = true
+				break
 			}
 		}
+		if notEq {
+			continue
+		}
+		if len(meta.indexMeta.Req.TypeParams) != len(req.TypeParams) {
+			continue
+		}
+		notEq = false
+		for i := range meta.indexMeta.Req.TypeParams {
+			if meta.indexMeta.Req.TypeParams[i].Key != req.TypeParams[i].Key {
+				notEq = true
+				break
+			}
+			if meta.indexMeta.Req.TypeParams[i].Value != req.TypeParams[i].Value {
+				notEq = true
+				break
+			}
+		}
+		if notEq {
+			continue
+		}
+		if len(meta.indexMeta.Req.IndexParams) != len(req.IndexParams) {
+			continue
+		}
+		notEq = false
+		for i := range meta.indexMeta.Req.IndexParams {
+			if meta.indexMeta.Req.IndexParams[i].Key != req.IndexParams[i].Key {
+				notEq = true
+				break
+			}
+			if meta.indexMeta.Req.IndexParams[i].Value != req.IndexParams[i].Value {
+				notEq = true
+				break
+			}
+		}
+		if notEq {
+			continue
+		}
+		return true, meta.indexMeta.IndexBuildID
 	}
+
 	return false, -1
 }
 
