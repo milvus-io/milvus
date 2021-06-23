@@ -11,5 +11,5 @@ approvers:
   - scsven
 
 labels:
-- component/dataservice
+- component/datacoord
 
