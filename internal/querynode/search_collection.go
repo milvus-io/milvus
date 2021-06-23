@@ -761,7 +761,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 					SlicedNumCount:           1,
 					MetricType:               plan.getMetricType(),
 					SealedSegmentIDsSearched: sealedSegmentSearched,
-					ChannelIDsSearched:       collection.getPChannels(),
+					ChannelIDsSearched:       collection.getVChannels(),
 					//TODO:: get global sealed segment from etcd
 					GlobalSealedSegmentIDs: sealedSegmentSearched,
 				},
@@ -769,7 +769,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 			log.Debug("QueryNode Empty SearchResultMsg",
 				zap.Any("collectionID", collection.ID()),
 				zap.Any("msgID", searchMsg.ID()),
-				zap.Any("pChannels", collection.getPChannels()),
+				zap.Any("vChannels", collection.getVChannels()),
 				zap.Any("sealedSegmentSearched", sealedSegmentSearched),
 			)
 			err = s.publishSearchResult(searchResultMsg, searchMsg.CollectionID)
@@ -869,7 +869,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 				SlicedNumCount:           1,
 				MetricType:               plan.getMetricType(),
 				SealedSegmentIDsSearched: sealedSegmentSearched,
-				ChannelIDsSearched:       collection.getPChannels(),
+				ChannelIDsSearched:       collection.getVChannels(),
 				//TODO:: get global sealed segment from etcd
 				GlobalSealedSegmentIDs: sealedSegmentSearched,
 			},
@@ -877,7 +877,7 @@ func (s *searchCollection) search(searchMsg *msgstream.SearchMsg) error {
 		log.Debug("QueryNode SearchResultMsg",
 			zap.Any("collectionID", collection.ID()),
 			zap.Any("msgID", searchMsg.ID()),
-			zap.Any("pChannels", collection.getPChannels()),
+			zap.Any("vChannels", collection.getVChannels()),
 			zap.Any("sealedSegmentSearched", sealedSegmentSearched),
 		)
 

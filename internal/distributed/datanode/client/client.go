@@ -44,7 +44,7 @@ type Client struct {
 	retryOptions []retry.Option
 }
 
-func NewClient(ctx context.Context, addr string, retryOptions []retry.Option) (*Client, error) {
+func NewClient(ctx context.Context, addr string, retryOptions ...retry.Option) (*Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("address is empty")
 	}

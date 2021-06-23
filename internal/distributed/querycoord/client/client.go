@@ -61,7 +61,7 @@ func getQueryCoordAddress(sess *sessionutil.Session) (string, error) {
 	return ms.Address, nil
 }
 
-// NewClient creates a client for QueryService grpc call.
+// NewClient creates a client for QueryCoord grpc call.
 func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string, retryOptions ...retry.Option) (*Client, error) {
 	sess := sessionutil.NewSession(ctx, metaRoot, etcdEndpoints)
 	if sess == nil {
@@ -178,13 +178,6 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 		return c.grpcClient.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
 	return ret.(*milvuspb.StringResponse), err
-}
-
-func (c *Client) RegisterNode(ctx context.Context, req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.RegisterNode(ctx, req)
-	})
-	return ret.(*querypb.RegisterNodeResponse), err
 }
 
 func (c *Client) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {

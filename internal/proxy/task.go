@@ -370,14 +370,14 @@ func (it *InsertTask) transferColumnBasedRequestToRowBasedData() error {
 				}
 				blob.Value = append(blob.Value, buffer.Bytes()...)
 			case schemapb.DataType_Int8:
-				d := datas[j][i].(int8)
+				d := int8(datas[j][i].(int32))
 				err := binary.Write(&buffer, endian, d)
 				if err != nil {
 					log.Warn("ConvertData", zap.Error(err))
 				}
 				blob.Value = append(blob.Value, buffer.Bytes()...)
 			case schemapb.DataType_Int16:
-				d := datas[j][i].(int16)
+				d := int16(datas[j][i].(int32))
 				err := binary.Write(&buffer, endian, d)
 				if err != nil {
 					log.Warn("ConvertData", zap.Error(err))
@@ -3765,7 +3765,7 @@ type FlushTask struct {
 	*milvuspb.FlushRequest
 	ctx       context.Context
 	dataCoord types.DataCoord
-	result    *commonpb.Status
+	result    *milvuspb.FlushResponse
 }
 
 func (ft *FlushTask) TraceCtx() context.Context {
@@ -3812,6 +3812,7 @@ func (ft *FlushTask) PreExecute(ctx context.Context) error {
 }
 
 func (ft *FlushTask) Execute(ctx context.Context) error {
+	coll2Segments := make(map[string]*schemapb.LongArray)
 	for _, collName := range ft.CollectionNames {
 		collID, err := globalMetaCache.GetCollectionID(ctx, collName)
 		if err != nil {
@@ -3827,17 +3828,22 @@ func (ft *FlushTask) Execute(ctx context.Context) error {
 			DbID:         0,
 			CollectionID: collID,
 		}
-		var status *commonpb.Status
-		status, _ = ft.dataCoord.Flush(ctx, flushReq)
-		if status == nil {
-			return errors.New("flush resp is nil")
+		resp, err := ft.dataCoord.Flush(ctx, flushReq)
+		if err != nil {
+			return fmt.Errorf("Failed to call flush to data coordinator: %s", err.Error())
 		}
-		if status.ErrorCode != commonpb.ErrorCode_Success {
-			return errors.New(status.Reason)
+		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+			return errors.New(resp.Status.Reason)
 		}
+		coll2Segments[collName] = &schemapb.LongArray{Data: resp.GetSegmentIDs()}
 	}
-	ft.result = &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
+	ft.result = &milvuspb.FlushResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		DbName:     "",
+		CollSegIDs: coll2Segments,
 	}
 	return nil
 }

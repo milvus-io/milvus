@@ -41,10 +41,8 @@ pipeline {
                     IMAGE_REPO = "dockerhub-mirror-sh.zilliz.cc/milvusdb"
                     DOCKER_BUILDKIT = 1
                     ARTIFACTS = "${env.WORKSPACE}/artifacts"
-                    DOCKER_CREDENTIALS_ID = "ba070c98-c8cc-4f7c-b657-897715f359fc"
-                    DOKCER_REGISTRY_URL = "registry.zilliz.com"
-                    TARGET_REPO = "${DOKCER_REGISTRY_URL}/milvus"
-                    MILVUS_HELM_BRANCH = "rename"
+                    DOCKER_CREDENTIALS_ID = "f0aacc8e-33f2-458a-ba9e-2c44f431b4d2"
+                    TARGET_REPO = "milvusdb"
                 }
                 stages {
                     stage('Test') {
@@ -83,25 +81,30 @@ pipeline {
                     always {
                         container('main') {
                             script {
-                                def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
-                                def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
-
-                                withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
-                                    sh 'docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD} ${DOKCER_REGISTRY_URL}'
-                                    sh """
-                                        docker tag localhost:5000/milvus:latest ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-${date}-${gitShortCommit}
-                                        docker tag localhost:5000/milvus:latest ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-latest
-                                        docker push ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-${date}-${gitShortCommit}
-                                        docker push ${TARGET_REPO}/milvus:${env.BRANCH_NAME}-latest
-                                    """
-                                    sh 'docker logout ${DOKCER_REGISTRY_URL}'
-                                }
-
                                 dir("${env.ARTIFACTS}") {
                                     sh "find ./kind -path '*/history/*' -type f | xargs tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-e2e-nightly-logs.tar.gz --transform='s:^[^/]*/[^/]*/[^/]*/[^/]*/::g' || true"
                                     archiveArtifacts artifacts: "**.tar.gz", allowEmptyArchive: true
                                     sh 'docker rm -f \$(docker network inspect -f \'{{ range \$key, \$value := .Containers }}{{ printf "%s " \$key}}{{ end }}\' kind) || true'
                                     sh 'docker network rm kind 2>&1 > /dev/null || true'
+                                }
+                            }
+                        }
+                    }
+                    success {
+                        container('main') {
+                            script {
+                                def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
+                                def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+
+                                withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
+                                    sh 'docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}'
+                                    sh """
+                                        docker tag localhost:5000/milvus:latest ${TARGET_REPO}/milvus-nightly:${env.BRANCH_NAME}-${date}-${gitShortCommit}
+                                        docker tag localhost:5000/milvus:latest ${TARGET_REPO}/milvus-nightly:${env.BRANCH_NAME}-latest
+                                        docker push ${TARGET_REPO}/milvus-nightly:${env.BRANCH_NAME}-${date}-${gitShortCommit}
+                                        docker push ${TARGET_REPO}/milvus-nightly:${env.BRANCH_NAME}-latest
+                                    """
+                                    sh 'docker logout'
                                 }
                             }
                         }

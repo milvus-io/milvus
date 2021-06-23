@@ -141,7 +141,7 @@ func (s *Server) init() error {
 
 	dataCoord, err := dsc.NewClient(s.loopCtx, qc.Params.MetaRootPath, qc.Params.EtcdEndpoints, retry.Attempts(300))
 	if err != nil {
-		log.Debug("QueryService try to new DataCoord client failed", zap.Error(err))
+		log.Debug("QueryCoord try to new DataCoord client failed", zap.Error(err))
 		panic(err)
 	}
 	if err = dataCoord.Init(); err != nil {
@@ -240,10 +240,6 @@ func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTime
 
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.queryCoord.GetStatisticsChannel(ctx)
-}
-
-func (s *Server) RegisterNode(ctx context.Context, req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
-	return s.queryCoord.RegisterNode(ctx, req)
 }
 
 func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {

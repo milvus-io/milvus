@@ -63,7 +63,7 @@ func (c *Client) Init() error {
 func (c *Client) connect() error {
 	connectGrpcFunc := func() error {
 		opts := trace.GetInterceptorOpts()
-		log.Debug("ProxyNodeClient try connect ", zap.String("address", c.addr))
+		log.Debug("ProxyClient try connect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(c.ctx, c.addr,
 			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(5*time.Second),
 			grpc.WithUnaryInterceptor(
