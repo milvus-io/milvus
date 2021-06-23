@@ -105,7 +105,7 @@ $ cd /home/$USER/milvus/
 $ ./scripts/install_deps.sh
 
 # Compile Milvus standalone.
-$ make standalone
+$ make milvus
 ```
 
 

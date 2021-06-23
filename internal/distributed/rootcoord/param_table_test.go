@@ -26,12 +26,12 @@ func TestParamTable(t *testing.T) {
 	assert.NotEqual(t, Params.Port, 0)
 	t.Logf("master port = %d", Params.Port)
 
-	assert.NotEqual(t, Params.IndexServiceAddress, "")
-	t.Logf("IndexServiceAddress:%s", Params.IndexServiceAddress)
+	assert.NotEqual(t, Params.IndexCoordAddress, "")
+	t.Logf("IndexCoordAddress:%s", Params.IndexCoordAddress)
 
 	assert.NotEqual(t, Params.DataCoordAddress, "")
 	t.Logf("DataCoordAddress:%s", Params.DataCoordAddress)
 
-	assert.NotEqual(t, Params.QueryServiceAddress, "")
-	t.Logf("QueryServiceAddress:%s", Params.QueryServiceAddress)
+	assert.NotEqual(t, Params.QueryCoordAddress, "")
+	t.Logf("QueryCoordAddress:%s", Params.QueryCoordAddress)
 }

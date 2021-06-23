@@ -31,14 +31,14 @@ type ParamTable struct {
 	Port     int
 	listener net.Listener
 
-	MasterAddress    string
+	RootCoordAddress string
 	DataCoordAddress string
 }
 
 func (pt *ParamTable) Init() {
 	once.Do(func() {
 		pt.BaseTable.Init()
-		pt.initMasterAddress()
+		pt.initRootCoordAddress()
 		pt.initDataCoordAddress()
 		pt.initPort()
 	})
@@ -64,12 +64,12 @@ func (pt *ParamTable) initPort() {
 	log.Info("DataNode", zap.Int("port", pt.Port))
 }
 
-func (pt *ParamTable) initMasterAddress() {
-	ret, err := pt.Load("_MasterAddress")
+func (pt *ParamTable) initRootCoordAddress() {
+	ret, err := pt.Load("_RootCoordAddress")
 	if err != nil {
 		panic(err)
 	}
-	pt.MasterAddress = ret
+	pt.RootCoordAddress = ret
 }
 
 func (pt *ParamTable) initDataCoordAddress() {

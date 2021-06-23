@@ -16,6 +16,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const serverNotServingErrMsg = "server is not serving"
+
 func (s *Server) isClosed() bool {
 	return atomic.LoadInt64(&s.isServing) != 2
 }
@@ -44,11 +46,11 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
 	if s.isClosed() {
-		resp.Reason = "server is closed"
+		resp.Reason = serverNotServingErrMsg
 		return resp, nil
 	}
 	if err := s.segmentManager.SealAllSegments(ctx, req.CollectionID); err != nil {
-		resp.Reason = fmt.Sprintf("Seal all segments error %s", err)
+		resp.Reason = fmt.Sprintf("Failed to flush %d, %s", req.CollectionID, err)
 		return resp, nil
 	}
 	return &commonpb.Status{
@@ -60,6 +62,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 	if s.isClosed() {
 		return &datapb.AssignSegmentIDResponse{
 			Status: &commonpb.Status{
+				Reason:    serverNotServingErrMsg,
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			},
 		}, nil
@@ -85,7 +88,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 
 		if !s.meta.HasCollection(r.CollectionID) {
 			if err := s.loadCollectionFromRootCoord(ctx, r.CollectionID); err != nil {
-				errMsg := fmt.Sprintf("can not load collection %d", r.CollectionID)
+				errMsg := fmt.Sprintf("Can not load collection %d", r.CollectionID)
 				appendFailedAssignment(errMsg)
 				log.Error("load collection from rootcoord error",
 					zap.Int64("collectionID", r.CollectionID),
@@ -104,7 +107,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 		segmentID, retCount, expireTs, err := s.segmentManager.AllocSegment(ctx,
 			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
 		if err != nil {
-			errMsg := fmt.Sprintf("allocation of collection %d, partition %d, channel %s, count %d error:  %s",
+			errMsg := fmt.Sprintf("Allocation of collection %d, partition %d, channel %s, count %d error:  %s",
 				r.CollectionID, r.PartitionID, r.ChannelName, r.Count, err.Error())
 			appendFailedAssignment(errMsg)
 			continue
@@ -142,7 +145,7 @@ func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 		},
 	}
 	if s.isClosed() {
-		resp.Status.Reason = "server is initializing"
+		resp.Status.Reason = serverNotServingErrMsg
 		return resp, nil
 	}
 
@@ -154,7 +157,7 @@ func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 		segmentInfo, err := s.meta.GetSegment(segmentID)
 		if err != nil {
 			state.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			state.Status.Reason = "get segment states error: " + err.Error()
+			state.Status.Reason = fmt.Sprintf("Failed to get segment %d, %s", segmentID, err.Error())
 		} else {
 			state.Status.ErrorCode = commonpb.ErrorCode_Success
 			state.State = segmentInfo.GetState()
@@ -174,7 +177,7 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 		},
 	}
 	if s.isClosed() {
-		resp.Status.Reason = "server is initializing"
+		resp.Status.Reason = serverNotServingErrMsg
 		return resp, nil
 	}
 	p := path.Join(Params.SegmentBinlogSubPath, strconv.FormatInt(req.SegmentID, 10)) + "/" // prefix/id/ instead of prefix/id
@@ -212,7 +215,7 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 		},
 	}
 	if s.isClosed() {
-		resp.Status.Reason = "server is initializing"
+		resp.Status.Reason = serverNotServingErrMsg
 		return resp, nil
 	}
 	nums, err := s.meta.GetNumRowsOfCollection(req.CollectionID)
@@ -232,7 +235,7 @@ func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 		},
 	}
 	if s.isClosed() {
-		resp.Status.Reason = "server is initializing"
+		resp.Status.Reason = serverNotServingErrMsg
 		return resp, nil
 	}
 	nums, err := s.meta.GetNumRowsOfPartition(req.CollectionID, req.PartitionID)
@@ -261,7 +264,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 		},
 	}
 	if s.isClosed() {
-		resp.Status.Reason = "data service is not healthy"
+		resp.Status.Reason = serverNotServingErrMsg
 		return resp, nil
 	}
 	infos := make([]*datapb.SegmentInfo, 0, len(req.SegmentIDs))
@@ -283,7 +286,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
 	if s.isClosed() {
-		resp.Reason = "server is closed"
+		resp.Reason = serverNotServingErrMsg
 		return resp, nil
 	}
 	log.Debug("Receive SaveBinlogPaths request",
@@ -364,7 +367,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		},
 	}
 	if s.isClosed() {
-		resp.Status.Reason = "server is initializing"
+		resp.Status.Reason = serverNotServingErrMsg
 		return resp, nil
 	}
 	segmentIDs := s.meta.GetSegmentsOfPartition(collectionID, partitionID)

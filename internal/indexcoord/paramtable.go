@@ -27,7 +27,7 @@ type ParamTable struct {
 	Address string
 	Port    int
 
-	MasterAddress string
+	RootCoordAddress string
 
 	EtcdEndpoints []string
 	KvRootPath    string
@@ -50,7 +50,7 @@ func (pt *ParamTable) Init() {
 		pt.BaseTable.Init()
 		pt.initLogCfg()
 		pt.initEtcdEndpoints()
-		pt.initMasterAddress()
+		pt.initRootCoordAddress()
 		pt.initMetaRootPath()
 		pt.initKvRootPath()
 		pt.initMinIOAddress()
@@ -93,12 +93,12 @@ func (pt *ParamTable) initKvRootPath() {
 	pt.KvRootPath = rootPath + "/" + subPath
 }
 
-func (pt *ParamTable) initMasterAddress() {
-	ret, err := pt.Load("_MasterAddress")
+func (pt *ParamTable) initRootCoordAddress() {
+	ret, err := pt.Load("_RootCoordAddress")
 	if err != nil {
 		panic(err)
 	}
-	pt.MasterAddress = ret
+	pt.RootCoordAddress = ret
 }
 
 func (pt *ParamTable) initMinIOAddress() {

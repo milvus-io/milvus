@@ -13,7 +13,6 @@ package grpcrootcoordclient
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -23,9 +22,9 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -36,17 +35,16 @@ import (
 
 // GrpcClient grpc client
 type GrpcClient struct {
-	grpcClient masterpb.MasterServiceClient
-	conn       *grpc.ClientConn
-	ctx        context.Context
+	ctx    context.Context
+	cancel context.CancelFunc
 
-	//inner member
-	addr      string
-	timeout   time.Duration
-	reconnTry int
-	recallTry int
+	grpcClient rootcoordpb.RootCoordClient
+	conn       *grpc.ClientConn
 
 	sess *sessionutil.Session
+	addr string
+
+	retryOptions []retry.Option
 }
 
 func getRootCoordAddr(sess *sessionutil.Session) (string, error) {
@@ -70,106 +68,80 @@ func getRootCoordAddr(sess *sessionutil.Session) (string, error) {
 // metaRoot is the path in etcd for root coordinator registration
 // etcdEndpoints are the address list for etcd end points
 // timeout is default setting for each grpc call
-func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string, timeout time.Duration) (*GrpcClient, error) {
+func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string, retryOptions ...retry.Option) (*GrpcClient, error) {
 	sess := sessionutil.NewSession(ctx, metaRoot, etcdEndpoints)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
 		log.Debug("RootCoordClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
+	ctx, cancel := context.WithCancel(ctx)
 
 	return &GrpcClient{
-		grpcClient: nil,
-		conn:       nil,
-		ctx:        ctx,
-		timeout:    timeout,
-		reconnTry:  300,
-		recallTry:  3,
-		sess:       sess,
+		ctx:          ctx,
+		cancel:       cancel,
+		sess:         sess,
+		retryOptions: retryOptions,
 	}, nil
+}
+
+func (c *GrpcClient) Init() error {
+	return c.connect()
 }
 
 func (c *GrpcClient) connect() error {
 	var err error
 	getRootCoordAddrFn := func() error {
-		ch := make(chan struct{}, 1)
-		var err error
-		go func() {
-			c.addr, err = getRootCoordAddr(c.sess)
-			ch <- struct{}{}
-		}()
-		select {
-		case <-c.ctx.Done():
-			return retry.NoRetryError(errors.New("context canceled"))
-		case <-ch:
-		}
+		c.addr, err = getRootCoordAddr(c.sess)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
-	err = retry.Retry(c.reconnTry, 3*time.Second, getRootCoordAddrFn)
+	err = retry.Do(c.ctx, getRootCoordAddrFn, c.retryOptions...)
 	if err != nil {
 		log.Debug("RootCoordClient getRootCoordAddr failed", zap.Error(err))
 		return err
 	}
 	connectGrpcFunc := func() error {
-		log.Debug("RootCoordClient try reconnect ", zap.String("address", c.addr))
-		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
-		defer cancelFunc()
-		var conn *grpc.ClientConn
-		var err error
-		ch := make(chan struct{}, 1)
 		opts := trace.GetInterceptorOpts()
-		go func() {
-			conn, err = grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
-				grpc.WithUnaryInterceptor(
-					grpc_middleware.ChainUnaryClient(
-						grpc_retry.UnaryClientInterceptor(),
-						grpc_opentracing.UnaryClientInterceptor(opts...),
-					)),
-				grpc.WithStreamInterceptor(
-					grpc_middleware.ChainStreamClient(
-						grpc_retry.StreamClientInterceptor(),
-						grpc_opentracing.StreamClientInterceptor(opts...),
-					)),
-			)
-			ch <- struct{}{}
-		}()
-		select {
-		case <-c.ctx.Done():
-			return retry.NoRetryError(errors.New("context canceled"))
-		case <-ch:
+		log.Debug("RootCoordClient try reconnect ", zap.String("address", c.addr))
+		conn, err := grpc.DialContext(c.ctx, c.addr,
+			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(5*time.Second),
+			grpc.WithUnaryInterceptor(
+				grpc_middleware.ChainUnaryClient(
+					grpc_retry.UnaryClientInterceptor(),
+					grpc_opentracing.UnaryClientInterceptor(opts...),
+				)),
+			grpc.WithStreamInterceptor(
+				grpc_middleware.ChainStreamClient(
+					grpc_retry.StreamClientInterceptor(),
+					grpc_opentracing.StreamClientInterceptor(opts...),
+				)),
+		)
+		if err != nil {
+			return err
 		}
-		if err == nil {
-			c.conn = conn
-		}
-		return err
+		c.conn = conn
+		return nil
 	}
 
-	err = retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
+	err = retry.Do(c.ctx, connectGrpcFunc, c.retryOptions...)
 	if err != nil {
 		log.Debug("RootCoordClient try reconnect failed", zap.Error(err))
 		return err
 	}
 	log.Debug("RootCoordClient try reconnect success")
-	c.grpcClient = masterpb.NewMasterServiceClient(c.conn)
+	c.grpcClient = rootcoordpb.NewRootCoordClient(c.conn)
 	return nil
-}
-
-func (c *GrpcClient) Init() error {
-	// for now, we must try many times in Init Stage
-	initFunc := func() error {
-		return c.connect()
-	}
-	err := retry.Retry(10000, 3*time.Second, initFunc)
-	return err
 }
 
 func (c *GrpcClient) Start() error {
 	return nil
 }
+
 func (c *GrpcClient) Stop() error {
+	c.cancel()
 	return c.conn.Close()
 }
 
@@ -183,14 +155,9 @@ func (c *GrpcClient) recall(caller func() (interface{}, error)) (interface{}, er
 	if err == nil {
 		return ret, nil
 	}
-	for i := 0; i < c.reconnTry; i++ {
-		err = c.connect()
-		if err == nil {
-			break
-		}
-	}
+	err = c.connect()
 	if err != nil {
-		return nil, err
+		return ret, err
 	}
 	ret, err = caller()
 	if err == nil {
@@ -306,18 +273,18 @@ func (c *GrpcClient) DescribeIndex(ctx context.Context, in *milvuspb.DescribeInd
 }
 
 // AllocTimestamp global timestamp allocator
-func (c *GrpcClient) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
+func (c *GrpcClient) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		return c.grpcClient.AllocTimestamp(ctx, in)
 	})
-	return ret.(*masterpb.AllocTimestampResponse), err
+	return ret.(*rootcoordpb.AllocTimestampResponse), err
 }
 
-func (c *GrpcClient) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
+func (c *GrpcClient) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		return c.grpcClient.AllocID(ctx, in)
 	})
-	return ret.(*masterpb.AllocIDResponse), err
+	return ret.(*rootcoordpb.AllocIDResponse), err
 }
 
 // UpdateChannelTimeTick used to handle ChannelTimeTickMsg

@@ -27,14 +27,14 @@ import (
 type proxyClientManager struct {
 	core        *Core
 	lock        sync.Mutex
-	proxyClient map[int64]types.ProxyNode
+	proxyClient map[int64]types.Proxy
 }
 
 func newProxyClientManager(c *Core) *proxyClientManager {
 	return &proxyClientManager{
 		core:        c,
 		lock:        sync.Mutex{},
-		proxyClient: make(map[int64]types.ProxyNode),
+		proxyClient: make(map[int64]types.Proxy),
 	}
 }
 

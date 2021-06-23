@@ -21,11 +21,10 @@ import (
 type ParamTable struct {
 	paramtable.BaseTable
 
-	IndexServerAddress string
-	MasterAddress      string
-
-	DataCoordAddress    string
-	QueryServiceAddress string
+	RootCoordAddress  string
+	IndexCoordAddress string
+	DataCoordAddress  string
+	QueryCoordAddress string
 
 	IP      string
 	Port    int
@@ -52,28 +51,28 @@ func (pt *ParamTable) LoadFromEnv() {
 
 func (pt *ParamTable) initParams() {
 	pt.initPort()
-	pt.initMasterAddress()
-	pt.initIndexServerAddress()
+	pt.initRootCoordAddress()
+	pt.initIndexCoordAddress()
 	pt.initDataCoordAddress()
-	pt.initQueryServiceAddress()
+	pt.initQueryCoordAddress()
 }
 
 // todo remove and use load from env
-func (pt *ParamTable) initIndexServerAddress() {
-	ret, err := pt.Load("IndexServiceAddress")
+func (pt *ParamTable) initIndexCoordAddress() {
+	ret, err := pt.Load("_IndexCoordAddress")
 	if err != nil {
 		panic(err)
 	}
-	pt.IndexServerAddress = ret
+	pt.IndexCoordAddress = ret
 }
 
 // todo remove and use load from env
-func (pt *ParamTable) initMasterAddress() {
-	ret, err := pt.Load("_MasterAddress")
+func (pt *ParamTable) initRootCoordAddress() {
+	ret, err := pt.Load("_RootCoordAddress")
 	if err != nil {
 		panic(err)
 	}
-	pt.MasterAddress = ret
+	pt.RootCoordAddress = ret
 }
 
 // todo remove and use load from env
@@ -86,15 +85,15 @@ func (pt *ParamTable) initDataCoordAddress() {
 }
 
 // todo remove and use load from env
-func (pt *ParamTable) initQueryServiceAddress() {
-	ret, err := pt.Load("_QueryServiceAddress")
+func (pt *ParamTable) initQueryCoordAddress() {
+	ret, err := pt.Load("_QueryCoordAddress")
 	if err != nil {
 		panic(err)
 	}
-	pt.QueryServiceAddress = ret
+	pt.QueryCoordAddress = ret
 }
 
 func (pt *ParamTable) initPort() {
-	port := pt.ParseInt("proxyNode.port")
+	port := pt.ParseInt("proxy.port")
 	pt.Port = port
 }

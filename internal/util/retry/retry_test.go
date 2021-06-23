@@ -12,65 +12,104 @@
 package retry
 
 import (
-	"errors"
+	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func TestImpl(t *testing.T) {
-	attempts := 10
-	sleep := time.Millisecond * 1
-	maxSleepTime := time.Millisecond * 16
+func TestDo(t *testing.T) {
+	ctx := context.Background()
 
-	var err error
-
-	naiveF := func() error {
+	n := 0
+	testFn := func() error {
+		if n < 3 {
+			n++
+			return fmt.Errorf("some error")
+		}
 		return nil
 	}
-	err = Impl(attempts, sleep, naiveF, maxSleepTime)
-	assert.Equal(t, err, nil)
 
-	errorF := func() error {
-		return errors.New("errorF")
-	}
-	err = Impl(attempts, sleep, errorF, maxSleepTime)
-	assert.NotEqual(t, err, nil)
+	err := Do(ctx, testFn)
+	assert.Nil(t, err)
+}
 
-	begin := 0
-	stop := 2
-	interruptF := func() error {
-		if begin >= stop {
-			return NoRetryError(errors.New("interrupt here"))
-		}
-		begin++
-		return errors.New("interruptF")
-	}
-	err = Impl(attempts, sleep, interruptF, maxSleepTime)
-	assert.NotEqual(t, err, nil)
+func TestAttempts(t *testing.T) {
+	ctx := context.Background()
 
-	begin = 0
-	stop = attempts / 2
-	untilSucceedF := func() error {
-		if begin >= stop {
-			return nil
-		}
-		begin++
-		return errors.New("untilSucceedF")
+	testFn := func() error {
+		return fmt.Errorf("some error")
 	}
-	err = Impl(attempts, sleep, untilSucceedF, maxSleepTime)
-	assert.Equal(t, err, nil)
 
-	begin = 0
-	stop = attempts * 2
-	noRetryF := func() error {
-		if begin >= stop {
-			return nil
-		}
-		begin++
-		return errors.New("noRetryF")
+	err := Do(ctx, testFn, Attempts(1))
+	assert.NotNil(t, err)
+	fmt.Println(err)
+}
+
+func TestMaxSleepTime(t *testing.T) {
+	ctx := context.Background()
+
+	testFn := func() error {
+		return fmt.Errorf("some error")
 	}
-	err = Impl(attempts, sleep, noRetryF, maxSleepTime)
-	assert.NotEqual(t, err, nil)
+
+	err := Do(ctx, testFn, Attempts(3), MaxSleepTime(200*time.Millisecond))
+	assert.NotNil(t, err)
+	fmt.Println(err)
+}
+
+func TestSleep(t *testing.T) {
+	ctx := context.Background()
+
+	testFn := func() error {
+		return fmt.Errorf("some error")
+	}
+
+	err := Do(ctx, testFn, Attempts(3), Sleep(500*time.Millisecond))
+	assert.NotNil(t, err)
+	fmt.Println(err)
+}
+
+func TestAllError(t *testing.T) {
+	ctx := context.Background()
+
+	testFn := func() error {
+		return fmt.Errorf("some error")
+	}
+
+	err := Do(ctx, testFn, Attempts(3))
+	assert.NotNil(t, err)
+	fmt.Println(err)
+}
+
+func TestContextDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	testFn := func() error {
+		return fmt.Errorf("some error")
+	}
+
+	err := Do(ctx, testFn)
+	assert.NotNil(t, err)
+	fmt.Println(err)
+}
+
+func TestContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	testFn := func() error {
+		return fmt.Errorf("some error")
+	}
+
+	go func() {
+		time.Sleep(1 * time.Second)
+		cancel()
+	}()
+
+	err := Do(ctx, testFn)
+	assert.NotNil(t, err)
+	fmt.Println(err)
 }

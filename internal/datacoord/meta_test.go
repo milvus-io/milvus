@@ -122,15 +122,15 @@ func TestMeta_Basic(t *testing.T) {
 		// create seg0 for partition0, seg0/seg1 for partition1
 		segID0_0, err := mockAllocator.allocID()
 		assert.Nil(t, err)
-		segInfo0_0, err := BuildSegment(collID, partID0, segID0_0, channelName)
+		segInfo0_0, err := buildSegment(collID, partID0, segID0_0, channelName)
 		assert.Nil(t, err)
 		segID1_0, err := mockAllocator.allocID()
 		assert.Nil(t, err)
-		segInfo1_0, err := BuildSegment(collID, partID1, segID1_0, channelName)
+		segInfo1_0, err := buildSegment(collID, partID1, segID1_0, channelName)
 		assert.Nil(t, err)
 		segID1_1, err := mockAllocator.allocID()
 		assert.Nil(t, err)
-		segInfo1_1, err := BuildSegment(collID, partID1, segID1_1, channelName)
+		segInfo1_1, err := buildSegment(collID, partID1, segID1_1, channelName)
 		assert.Nil(t, err)
 
 		// check AddSegment
@@ -202,7 +202,7 @@ func TestMeta_Basic(t *testing.T) {
 		// add seg1 with 100 rows
 		segID0, err := mockAllocator.allocID()
 		assert.Nil(t, err)
-		segInfo0, err := BuildSegment(collID, partID0, segID0, channelName)
+		segInfo0, err := buildSegment(collID, partID0, segID0, channelName)
 		assert.Nil(t, err)
 		segInfo0.NumOfRows = rowCount0
 		err = meta.AddSegment(segInfo0)
@@ -211,7 +211,7 @@ func TestMeta_Basic(t *testing.T) {
 		// add seg2 with 300 rows
 		segID1, err := mockAllocator.allocID()
 		assert.Nil(t, err)
-		segInfo1, err := BuildSegment(collID, partID0, segID1, channelName)
+		segInfo1, err := buildSegment(collID, partID0, segID1, channelName)
 		assert.Nil(t, err)
 		segInfo1.NumOfRows = rowCount1
 		err = meta.AddSegment(segInfo1)

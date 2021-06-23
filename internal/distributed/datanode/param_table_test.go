@@ -33,6 +33,6 @@ func TestParamTable(t *testing.T) {
 	assert.NotEqual(t, Params.DataCoordAddress, "")
 	t.Logf("DataCoordAddress:%s", Params.DataCoordAddress)
 
-	assert.NotEqual(t, Params.MasterAddress, "")
-	t.Logf("MasterAddress:%s", Params.MasterAddress)
+	assert.NotEqual(t, Params.RootCoordAddress, "")
+	t.Logf("RootCoordAddress:%s", Params.RootCoordAddress)
 }

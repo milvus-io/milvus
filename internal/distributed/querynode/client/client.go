@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/connectivity"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
@@ -33,46 +32,41 @@ import (
 )
 
 type Client struct {
-	ctx        context.Context
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	grpcClient querypb.QueryNodeClient
 	conn       *grpc.ClientConn
 
 	addr string
 
-	timeout   time.Duration
-	reconnTry int
-	recallTry int
+	retryTimes uint
 }
 
-func NewClient(addr string, timeout time.Duration) (*Client, error) {
+func NewClient(ctx context.Context, addr string, reTryTimes uint) (*Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("addr is empty")
 	}
+	ctx, cancel := context.WithCancel(ctx)
+
 	return &Client{
-		ctx:       context.Background(),
-		addr:      addr,
-		timeout:   timeout,
-		recallTry: 3,
-		reconnTry: 10,
+		ctx:        ctx,
+		cancel:     cancel,
+		addr:       addr,
+		retryTimes: reTryTimes,
 	}, nil
 }
 
 func (c *Client) Init() error {
-	// for now, we must try many times in Init Stage
-	initFunc := func() error {
-		return c.connect()
-	}
-	err := retry.Retry(10000, 3*time.Second, initFunc)
-	return err
+	return c.connect()
 }
 
 func (c *Client) connect() error {
 	connectGrpcFunc := func() error {
-		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
-		defer cancelFunc()
 		opts := trace.GetInterceptorOpts()
 		log.Debug("QueryNodeClient try connect ", zap.String("address", c.addr))
-		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
+		conn, err := grpc.DialContext(c.ctx, c.addr,
+			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(5*time.Second),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
 					grpc_retry.UnaryClientInterceptor(),
@@ -91,7 +85,7 @@ func (c *Client) connect() error {
 		return nil
 	}
 
-	err := retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
+	err := retry.Do(c.ctx, connectGrpcFunc, retry.Attempts(c.retryTimes))
 	if err != nil {
 		log.Debug("QueryNodeClient try connect failed", zap.Error(err))
 		return err
@@ -106,17 +100,9 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	if err == nil {
 		return ret, nil
 	}
-	if c.conn.GetState() == connectivity.Shutdown {
-		return ret, err
-	}
-	for i := 0; i < c.reconnTry; i++ {
-		err = c.connect()
-		if err == nil {
-			break
-		}
-	}
+	err = c.connect()
 	if err != nil {
-		return nil, err
+		return ret, err
 	}
 	ret, err = caller()
 	if err == nil {

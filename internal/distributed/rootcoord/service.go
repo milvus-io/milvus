@@ -27,17 +27,18 @@ import (
 	dsc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	isc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	pnc "github.com/milvus-io/milvus/internal/distributed/proxy/client"
-	qsc "github.com/milvus-io/milvus/internal/distributed/queryservice/client"
+	qsc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
@@ -55,11 +56,11 @@ type Server struct {
 
 	dataCoord  types.DataCoord
 	indexCoord types.IndexCoord
-	queryCoord types.QueryService
+	queryCoord types.QueryCoord
 
-	newIndexCoordClient func(string, []string, time.Duration) types.IndexCoord
-	newDataCoordClient  func(string, []string, time.Duration) types.DataCoord
-	newQueryCoordClient func(string, []string, time.Duration) types.QueryService
+	newIndexCoordClient func(string, []string, ...retry.Option) types.IndexCoord
+	newDataCoordClient  func(string, []string, ...retry.Option) types.DataCoord
+	newQueryCoordClient func(string, []string, ...retry.Option) types.QueryCoord
 
 	closer io.Closer
 }
@@ -83,8 +84,11 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 func (s *Server) setClient() {
 	ctx := context.Background()
 
-	s.newDataCoordClient = func(etcdMetaRoot string, etcdEndpoints []string, timeout time.Duration) types.DataCoord {
-		dsClient := dsc.NewClient(etcdMetaRoot, etcdEndpoints, timeout)
+	s.newDataCoordClient = func(etcdMetaRoot string, etcdEndpoints []string, retryOptions ...retry.Option) types.DataCoord {
+		dsClient, err := dsc.NewClient(s.ctx, etcdMetaRoot, etcdEndpoints, retryOptions...)
+		if err != nil {
+			panic(err)
+		}
 		if err := dsClient.Init(); err != nil {
 			panic(err)
 		}
@@ -96,8 +100,11 @@ func (s *Server) setClient() {
 		}
 		return dsClient
 	}
-	s.newIndexCoordClient = func(metaRootPath string, etcdEndpoints []string, timeout time.Duration) types.IndexCoord {
-		isClient := isc.NewClient(metaRootPath, etcdEndpoints, timeout)
+	s.newIndexCoordClient = func(metaRootPath string, etcdEndpoints []string, retryOptions ...retry.Option) types.IndexCoord {
+		isClient, err := isc.NewClient(s.ctx, metaRootPath, etcdEndpoints, retryOptions...)
+		if err != nil {
+			panic(err)
+		}
 		if err := isClient.Init(); err != nil {
 			panic(err)
 		}
@@ -106,8 +113,8 @@ func (s *Server) setClient() {
 		}
 		return isClient
 	}
-	s.newQueryCoordClient = func(metaRootPath string, etcdEndpoints []string, timeout time.Duration) types.QueryService {
-		qsClient, err := qsc.NewClient(metaRootPath, etcdEndpoints, timeout)
+	s.newQueryCoordClient = func(metaRootPath string, etcdEndpoints []string, retryOptions ...retry.Option) types.QueryCoord {
+		qsClient, err := qsc.NewClient(s.ctx, metaRootPath, etcdEndpoints, retryOptions...)
 		if err != nil {
 			panic(err)
 		}
@@ -159,8 +166,11 @@ func (s *Server) init() error {
 	s.rootCoord.UpdateStateCode(internalpb.StateCode_Initializing)
 	log.Debug("RootCoord", zap.Any("State", internalpb.StateCode_Initializing))
 	s.rootCoord.SetNewProxyClient(
-		func(s *sessionutil.Session) (types.ProxyNode, error) {
-			cli := pnc.NewClient(s.Address, 3*time.Second)
+		func(s *sessionutil.Session) (types.Proxy, error) {
+			cli, err := pnc.NewClient(ctx, s.Address, retry.Attempts(300))
+			if err != nil {
+				return nil, err
+			}
 			if err := cli.Init(); err != nil {
 				return nil, err
 			}
@@ -173,7 +183,7 @@ func (s *Server) init() error {
 
 	if s.newDataCoordClient != nil {
 		log.Debug("RootCoord start to create DataCoord client")
-		dataCoord := s.newDataCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, 3*time.Second)
+		dataCoord := s.newDataCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, retry.Attempts(300))
 		if err := s.rootCoord.SetDataCoord(ctx, dataCoord); err != nil {
 			panic(err)
 		}
@@ -181,7 +191,7 @@ func (s *Server) init() error {
 	}
 	if s.newIndexCoordClient != nil {
 		log.Debug("RootCoord start to create IndexCoord client")
-		indexCoord := s.newIndexCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, 3*time.Second)
+		indexCoord := s.newIndexCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, retry.Attempts(300))
 		if err := s.rootCoord.SetIndexCoord(indexCoord); err != nil {
 			panic(err)
 		}
@@ -189,7 +199,7 @@ func (s *Server) init() error {
 	}
 	if s.newQueryCoordClient != nil {
 		log.Debug("RootCoord start to create QueryCoord client")
-		queryCoord := s.newQueryCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, 3*time.Second)
+		queryCoord := s.newQueryCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, retry.Attempts(300))
 		if err := s.rootCoord.SetQueryCoord(queryCoord); err != nil {
 			panic(err)
 		}
@@ -226,11 +236,9 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	s.grpcServer = grpc.NewServer(
 		grpc.MaxRecvMsgSize(math.MaxInt32),
 		grpc.MaxSendMsgSize(math.MaxInt32),
-		grpc.UnaryInterceptor(
-			grpc_opentracing.UnaryServerInterceptor(opts...)),
-		grpc.StreamInterceptor(
-			grpc_opentracing.StreamServerInterceptor(opts...)))
-	masterpb.RegisterMasterServiceServer(s.grpcServer, s)
+		grpc.UnaryInterceptor(grpc_opentracing.UnaryServerInterceptor(opts...)),
+		grpc.StreamInterceptor(grpc_opentracing.StreamServerInterceptor(opts...)))
+	rootcoordpb.RegisterRootCoordServer(s.grpcServer, s)
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {
@@ -346,11 +354,11 @@ func (s *Server) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRe
 }
 
 // AllocTimestamp global timestamp allocator
-func (s *Server) AllocTimestamp(ctx context.Context, in *masterpb.AllocTimestampRequest) (*masterpb.AllocTimestampResponse, error) {
+func (s *Server) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	return s.rootCoord.AllocTimestamp(ctx, in)
 }
 
-func (s *Server) AllocID(ctx context.Context, in *masterpb.AllocIDRequest) (*masterpb.AllocIDResponse, error) {
+func (s *Server) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 	return s.rootCoord.AllocID(ctx, in)
 }
 
