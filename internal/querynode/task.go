@@ -469,39 +469,49 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 		zap.Any("collectionID", r.req.CollectionID),
 		zap.Any("partitionIDs", r.req.PartitionIDs))
 
-	hCol, err := r.node.historical.replica.getCollectionByID(r.req.CollectionID)
-	if err != nil {
-		log.Error(err.Error())
-		return err
-	}
+	const gracefulReleaseTime = 1
+	func() { // release synchronously
+		errMsg := "release partitions failed, collectionID = " + strconv.FormatInt(r.req.CollectionID, 10) + ", err = "
+		time.Sleep(gracefulReleaseTime * time.Second)
 
-	sCol, err := r.node.streaming.replica.getCollectionByID(r.req.CollectionID)
-	if err != nil {
-		log.Error(err.Error())
-		return err
-	}
-
-	for _, id := range r.req.PartitionIDs {
-		r.node.streaming.dataSyncService.removePartitionFlowGraph(id)
-		hasPartitionInHistorical := r.node.historical.replica.hasPartition(id)
-		if hasPartitionInHistorical {
-			err := r.node.historical.replica.removePartition(id)
-			if err != nil {
-				// not return, try to release all partitions
-				log.Error(err.Error())
-			}
+		hCol, err := r.node.historical.replica.getCollectionByID(r.req.CollectionID)
+		if err != nil {
+			log.Error(errMsg + err.Error())
+			return
 		}
-		hCol.addReleasedPartition(id)
 
-		hasPartitionInStreaming := r.node.streaming.replica.hasPartition(id)
-		if hasPartitionInStreaming {
-			err := r.node.streaming.replica.removePartition(id)
-			if err != nil {
-				log.Error(err.Error())
-			}
+		sCol, err := r.node.streaming.replica.getCollectionByID(r.req.CollectionID)
+		if err != nil {
+			log.Error(errMsg + err.Error())
+			return
 		}
-		sCol.addReleasedPartition(id)
-	}
+
+		for _, id := range r.req.PartitionIDs {
+			r.node.streaming.dataSyncService.removePartitionFlowGraph(id)
+			hasPartitionInHistorical := r.node.historical.replica.hasPartition(id)
+			if hasPartitionInHistorical {
+				err = r.node.historical.replica.removePartition(id)
+				if err != nil {
+					// not return, try to release all partitions
+					log.Error(errMsg + err.Error())
+				}
+			}
+			hCol.addReleasedPartition(id)
+
+			hasPartitionInStreaming := r.node.streaming.replica.hasPartition(id)
+			if hasPartitionInStreaming {
+				err = r.node.streaming.replica.removePartition(id)
+				if err != nil {
+					log.Error(errMsg + err.Error())
+				}
+			}
+			sCol.addReleasedPartition(id)
+		}
+
+		log.Debug("release partition task done",
+			zap.Any("collectionID", r.req.CollectionID),
+			zap.Any("partitionIDs", r.req.PartitionIDs))
+	}()
 
 	log.Debug("release partition task done",
 		zap.Any("collectionID", r.req.CollectionID),
