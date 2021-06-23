@@ -1,0 +1,14 @@
+name: add contributor
+
+on: push
+
+jobs:
+  contributor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: milvus-io/hero-bot@1.3
+        with:
+          token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
+          repos: 'milvus-io/milvus,milvus-io/pymilvus'
+          targetRepo: 'milvus-io/milvus'
+
