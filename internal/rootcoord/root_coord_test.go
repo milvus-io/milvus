@@ -29,10 +29,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -41,13 +41,13 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
-type proxyNodeMock struct {
-	types.ProxyNode
+type proxyMock struct {
+	types.Proxy
 	collArray []string
 	mutex     sync.Mutex
 }
 
-func (p *proxyNodeMock) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+func (p *proxyMock) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	p.collArray = append(p.collArray, request.CollectionName)
@@ -55,7 +55,7 @@ func (p *proxyNodeMock) InvalidateCollectionMetaCache(ctx context.Context, reque
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
 }
-func (p *proxyNodeMock) GetCollArray() []string {
+func (p *proxyMock) GetCollArray() []string {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	ret := make([]string, 0, len(p.collArray))
@@ -116,7 +116,7 @@ func (d *dataMock) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringR
 }
 
 type queryMock struct {
-	types.QueryService
+	types.QueryCoord
 	collID []typeutil.UniqueID
 	mutex  sync.Mutex
 }
@@ -125,6 +125,13 @@ func (q *queryMock) ReleaseCollection(ctx context.Context, req *querypb.ReleaseC
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
 	q.collID = append(q.collID, req.CollectionID)
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+func (q *queryMock) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -298,11 +305,11 @@ func TestMasterService(t *testing.T) {
 	_, err = etcdCli.Put(ctx, path.Join(sessKey, typeutil.ProxyRole+"-100"), string(pnb))
 	assert.Nil(t, err)
 
-	pnm := &proxyNodeMock{
+	pnm := &proxyMock{
 		collArray: make([]string, 0, 16),
 		mutex:     sync.Mutex{},
 	}
-	core.NewProxyClient = func(*sessionutil.Session) (types.ProxyNode, error) {
+	core.NewProxyClient = func(*sessionutil.Session) (types.Proxy, error) {
 		return pnm, nil
 	}
 
@@ -436,7 +443,6 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-		assert.Equal(t, 2, len(core.MetaTable.vChan2Chan))
 		assert.Equal(t, 2, len(core.dmlChannels.dml))
 
 		pChan := core.MetaTable.ListCollectionPhysicalChannels()
@@ -456,9 +462,7 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, 2, len(createMeta.PhysicalChannelNames))
 
 		vChanName := createMeta.VirtualChannelNames[0]
-		chanName, err := core.MetaTable.GetChanNameByVirtualChan(vChanName)
-		assert.Nil(t, err)
-		assert.Equal(t, createMeta.PhysicalChannelNames[0], chanName)
+		assert.Equal(t, createMeta.PhysicalChannelNames[0], ToPhysicalChannel(vChanName))
 
 		// get CreatePartitionMsg
 		msgPack, ok = <-dmlStream.Chan()
@@ -1051,8 +1055,7 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
 		vChanName := collMeta.VirtualChannelNames[0]
-		_, err = core.MetaTable.GetChanNameByVirtualChan(vChanName)
-		assert.NotNil(t, err)
+		assert.Equal(t, collMeta.PhysicalChannelNames[0], ToPhysicalChannel(vChanName))
 
 		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
 		assert.Equal(t, 1, len(msgs))
@@ -1422,7 +1425,7 @@ func TestMasterService(t *testing.T) {
 	})
 
 	t.Run("alloc time tick", func(t *testing.T) {
-		req := &masterpb.AllocTimestampRequest{
+		req := &rootcoordpb.AllocTimestampRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Undefined,
 				MsgID:     3000,
@@ -1438,7 +1441,7 @@ func TestMasterService(t *testing.T) {
 	})
 
 	t.Run("alloc id", func(t *testing.T) {
-		req := &masterpb.AllocIDRequest{
+		req := &rootcoordpb.AllocIDRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Undefined,
 				MsgID:     3001,
@@ -1462,15 +1465,15 @@ func TestMasterService(t *testing.T) {
 
 	t.Run("channel timetick", func(t *testing.T) {
 		const (
-			proxyNodeIDInvalid = 102
-			proxyNodeName0     = "proxynode_0"
-			proxyNodeName1     = "proxynode_1"
-			chanName0          = "c0"
-			chanName1          = "c1"
-			chanName2          = "c2"
-			ts0                = uint64(100)
-			ts1                = uint64(120)
-			ts2                = uint64(150)
+			proxyIDInvalid = 102
+			proxyName0     = "proxy_0"
+			proxyName1     = "proxy_1"
+			chanName0      = "c0"
+			chanName1      = "c1"
+			chanName2      = "c2"
+			ts0            = uint64(100)
+			ts1            = uint64(120)
+			ts2            = uint64(150)
 		)
 		p1 := sessionutil.Session{
 			ServerID: 100,
@@ -1522,7 +1525,7 @@ func TestMasterService(t *testing.T) {
 		msgInvalid := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_TimeTick,
-				SourceID: proxyNodeIDInvalid,
+				SourceID: proxyIDInvalid,
 			},
 			ChannelNames: []string{"test"},
 			Timestamps:   []uint64{0},
@@ -1532,7 +1535,7 @@ func TestMasterService(t *testing.T) {
 		time.Sleep(1 * time.Second)
 
 		// 2 proxy nodes, 1 master
-		assert.Equal(t, 3, core.chanTimeTick.GetProxyNodeNum())
+		assert.Equal(t, 3, core.chanTimeTick.GetProxyNum())
 
 		// 3 proxy node channels, 2 master channels
 		assert.Equal(t, 5, core.chanTimeTick.GetChanNum())
@@ -1709,7 +1712,7 @@ func TestMasterService(t *testing.T) {
 		core.TSOAllocator = func(count uint32) (typeutil.Timestamp, error) {
 			return 0, fmt.Errorf("tso allcoator error test")
 		}
-		r1 := &masterpb.AllocTimestampRequest{
+		r1 := &rootcoordpb.AllocTimestampRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Undefined,
 				MsgID:     5000,
@@ -1722,7 +1725,7 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, p1.Status.ErrorCode)
 
-		r2 := &masterpb.AllocIDRequest{
+		r2 := &rootcoordpb.AllocIDRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Undefined,
 				MsgID:     3001,
@@ -1783,7 +1786,7 @@ func TestMasterService2(t *testing.T) {
 	err = core.SetQueryCoord(qm)
 	assert.Nil(t, err)
 
-	core.NewProxyClient = func(*sessionutil.Session) (types.ProxyNode, error) {
+	core.NewProxyClient = func(*sessionutil.Session) (types.Proxy, error) {
 		return nil, nil
 	}
 
@@ -1954,13 +1957,19 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.NewProxyClient = func(*sessionutil.Session) (types.ProxyNode, error) {
+	c.NewProxyClient = func(*sessionutil.Session) (types.Proxy, error) {
 		return nil, nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
 	c.CallReleaseCollectionService = func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID) error {
+		return nil
+	}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.CallReleasePartitionService = func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID, partitionIDs []typeutil.UniqueID) error {
 		return nil
 	}
 	err = c.checkInit()

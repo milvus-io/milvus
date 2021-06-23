@@ -37,12 +37,20 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
-const rootCoordClientTimout = 20 * time.Second
+const (
+	rootCoordClientTimout = 20 * time.Second
+	connEtcdMaxRetryTime  = 100000
+	connEtcdRetryInterval = 200 * time.Millisecond
+)
 
 type (
 	UniqueID  = typeutil.UniqueID
 	Timestamp = typeutil.Timestamp
 )
+
+type dataNodeCreatorFunc func(ctx context.Context, addr string, retryOptions ...retry.Option) (types.DataNode, error)
+type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdEndpoints []string, retryOptions ...retry.Option) (types.RootCoord, error)
+
 type Server struct {
 	ctx              context.Context
 	serverLoopCtx    context.Context
@@ -67,25 +75,28 @@ type Server struct {
 	activeCh <-chan bool
 	eventCh  <-chan *sessionutil.SessionEvent
 
-	dataClientCreator      func(addr string) (types.DataNode, error)
-	rootCoordClientCreator func(addr string) (types.RootCoord, error)
+	dataClientCreator      dataNodeCreatorFunc
+	rootCoordClientCreator rootCoordCreatorFunc
 }
 
 func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 	rand.Seed(time.Now().UnixNano())
 	s := &Server{
-		ctx:       ctx,
-		msFactory: factory,
-		flushCh:   make(chan UniqueID, 1024),
+		ctx:                    ctx,
+		msFactory:              factory,
+		flushCh:                make(chan UniqueID, 1024),
+		dataClientCreator:      defaultDataNodeCreatorFunc,
+		rootCoordClientCreator: defaultRootCoordCreatorFunc,
 	}
-	s.dataClientCreator = func(addr string) (types.DataNode, error) {
-		return datanodeclient.NewClient(addr, 3*time.Second)
-	}
-	s.rootCoordClientCreator = func(addr string) (types.RootCoord, error) {
-		return rootcoordclient.NewClient(ctx, Params.MetaRootPath, Params.EtcdEndpoints, rootCoordClientTimout)
-	}
-
 	return s, nil
+}
+
+func defaultDataNodeCreatorFunc(ctx context.Context, addr string, retryOptions ...retry.Option) (types.DataNode, error) {
+	return datanodeclient.NewClient(ctx, addr, retryOptions...)
+}
+
+func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string, etcdEndpoints []string, retryOptions ...retry.Option) (types.RootCoord, error) {
+	return rootcoordclient.NewClient(ctx, metaRootPath, etcdEndpoints, retryOptions...)
 }
 
 // Register register data service at etcd
@@ -127,7 +138,7 @@ func (s *Server) Start() error {
 		return err
 	}
 
-	s.allocator = newAllocator(s.rootCoordClient)
+	s.allocator = newRootCoordAllocator(s.ctx, s.rootCoordClient)
 
 	s.startSegmentManager()
 	if err = s.initFlushMsgStream(); err != nil {
@@ -141,7 +152,7 @@ func (s *Server) Start() error {
 	s.startServerLoop()
 
 	atomic.StoreInt64(&s.isServing, 2)
-	log.Debug("start success")
+	log.Debug("DataCoordinator startup success")
 	return nil
 }
 
@@ -150,7 +161,7 @@ func (s *Server) initCluster() error {
 	if err != nil {
 		return err
 	}
-	sManager := newClusterSessionManager(s.dataClientCreator)
+	sManager := newClusterSessionManager(s.ctx, s.dataClientCreator)
 	s.cluster = newCluster(s.ctx, dManager, sManager, s)
 	return nil
 }
@@ -211,7 +222,7 @@ func (s *Server) initMeta() error {
 		}
 		return nil
 	}
-	return retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
+	return retry.Do(s.ctx, connectEtcdFn, retry.Attempts(connEtcdMaxRetryTime))
 }
 
 func (s *Server) initFlushMsgStream() error {
@@ -224,7 +235,6 @@ func (s *Server) initFlushMsgStream() error {
 	s.flushMsgStream.AsProducer([]string{Params.SegmentInfoChannelName})
 	log.Debug("DataCoord AsProducer:" + Params.SegmentInfoChannelName)
 	s.flushMsgStream.Start()
-
 	return nil
 }
 
@@ -251,6 +261,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			log.Debug("stats channel shutdown")
 			return
 		default:
 		}
@@ -290,7 +301,7 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Debug("data node tt loop done")
+			log.Debug("data node tt loop shutdown")
 			return
 		default:
 		}
@@ -381,7 +392,7 @@ func (s *Server) startActiveCheck(ctx context.Context) {
 				continue
 			}
 			s.Stop()
-			log.Debug("disconnect with etcd")
+			log.Debug("disconnect with etcd and shutdown data coordinator")
 			return
 		case <-ctx.Done():
 			log.Debug("connection check shutdown")
@@ -438,8 +449,7 @@ func (s *Server) handleFlushingSegments(ctx context.Context) {
 
 func (s *Server) initRootCoordClient() error {
 	var err error
-	s.rootCoordClient, err = s.rootCoordClientCreator("")
-	if err != nil {
+	if s.rootCoordClient, err = s.rootCoordClientCreator(s.ctx, Params.MetaRootPath, Params.EtcdEndpoints, retry.Attempts(300)); err != nil {
 		return err
 	}
 	if err = s.rootCoordClient.Init(); err != nil {
@@ -502,8 +512,8 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 	presp, err := s.rootCoordClient.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_ShowPartitions,
-			MsgID:     -1, // todo
-			Timestamp: 0,  // todo
+			MsgID:     0,
+			Timestamp: 0,
 			SourceID:  Params.NodeID,
 		},
 		DbName:         "",
@@ -546,8 +556,8 @@ func composeSegmentFlushMsgPack(segmentID UniqueID) msgstream.MsgPack {
 	completeFlushMsg := internalpb.SegmentFlushCompletedMsg{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_SegmentFlushDone,
-			MsgID:     0, // TODO
-			Timestamp: 0, // TODO
+			MsgID:     0,
+			Timestamp: 0,
 			SourceID:  Params.NodeID,
 		},
 		SegmentID: segmentID,

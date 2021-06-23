@@ -37,8 +37,8 @@ const debug = false
 
 const defaultPartitionID = UniqueID(2021)
 
-type queryServiceMock struct {
-	types.QueryService
+type queryCoordMock struct {
+	types.QueryCoord
 }
 
 func setup() {
@@ -176,7 +176,7 @@ func newQueryNodeMock() *QueryNode {
 		panic(err)
 	}
 	svr := NewQueryNode(ctx, Params.QueryNodeID, msFactory)
-	err = svr.SetQueryService(&queryServiceMock{})
+	err = svr.SetQueryCoord(&queryCoordMock{})
 	if err != nil {
 		panic(err)
 	}
@@ -199,7 +199,7 @@ func refreshChannelNames() {
 	Params.StatsChannelName = Params.StatsChannelName + suffix
 }
 
-func (q *queryServiceMock) RegisterNode(ctx context.Context, req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
+func (q *queryCoordMock) RegisterNode(ctx context.Context, req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
 	return &querypb.RegisterNodeResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,

@@ -57,7 +57,7 @@ func TestWatchRestartsPolicy(t *testing.T) {
 }
 
 func TestRandomReassign(t *testing.T) {
-	p := randomAssignUnregisterPolicy{}
+	p := randomAssignRegisterFunc
 
 	clusters := make(map[string]*datapb.DataNodeInfo)
 	clusters["addr1"] = &datapb.DataNodeInfo{

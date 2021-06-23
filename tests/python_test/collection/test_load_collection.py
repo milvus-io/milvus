@@ -251,8 +251,8 @@ class TestLoadCollection:
         connect.flush([collection])
         connect.load_collection(collection)
         connect.release_partitions(collection, [default_partition_name, default_tag])
-        with pytest.raises(Exception) as e:
-            connect.search(collection, default_single_query)
+        res = connect.search(collection, default_single_query)
+        assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_load_partitions_release_collection(self, connect, collection):
@@ -307,8 +307,8 @@ class TestReleaseAdvanced:
         connect.load_partitions(collection, [default_tag])
         res = connect.search(collection, query, _async=True)
         connect.release_partitions(collection, [default_tag])
-        with pytest.raises(Exception):
-            res = connect.search(collection, default_single_query)
+        res = connect.search(collection, default_single_query)
+        assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_release_collection_during_searching_A(self, connect, collection):

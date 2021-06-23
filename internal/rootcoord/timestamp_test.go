@@ -22,9 +22,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/masterpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/stretchr/testify/assert"
@@ -52,7 +52,7 @@ func (*tbd) GetSegmentInfoChannel(context.Context) (*milvuspb.StringResponse, er
 }
 
 type tbq struct {
-	types.QueryService
+	types.QueryCoord
 }
 
 func (*tbq) ReleaseCollection(context.Context, *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
@@ -101,11 +101,11 @@ func BenchmarkAllocTimestamp(b *testing.B) {
 	err = core.Register()
 	assert.Nil(b, err)
 
-	pnm := &proxyNodeMock{
+	pnm := &proxyMock{
 		collArray: make([]string, 0, 16),
 		mutex:     sync.Mutex{},
 	}
-	core.NewProxyClient = func(*sessionutil.Session) (types.ProxyNode, error) {
+	core.NewProxyClient = func(*sessionutil.Session) (types.Proxy, error) {
 		return pnm, nil
 	}
 
@@ -124,7 +124,7 @@ func BenchmarkAllocTimestamp(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		req := masterpb.AllocTimestampRequest{
+		req := rootcoordpb.AllocTimestampRequest{
 			Base: &commonpb.MsgBase{
 				MsgID: int64(i),
 			},

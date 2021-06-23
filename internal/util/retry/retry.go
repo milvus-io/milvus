@@ -12,36 +12,54 @@
 package retry
 
 import (
+	"context"
+	"fmt"
+	"strings"
 	"time"
-
-	"github.com/milvus-io/milvus/internal/log"
-	"go.uber.org/zap"
 )
 
-// Reference: https://blog.cyeam.com/golang/2018/08/27/retry
+func Do(ctx context.Context, fn func() error, opts ...Option) error {
 
-func Impl(attempts int, sleep time.Duration, fn func() error, maxSleepTime time.Duration) error {
-	if err := fn(); err != nil {
-		if s, ok := err.(InterruptError); ok {
-			return s.error
-		}
+	c := NewDefaultConfig()
 
-		if attempts--; attempts > 0 {
-			log.Debug("retry func error", zap.Int("attempts", attempts), zap.Duration("sleep", sleep), zap.Error(err))
-			time.Sleep(sleep)
-			if sleep < maxSleepTime {
-				return Impl(attempts, 2*sleep, fn, maxSleepTime)
-			}
-			return Impl(attempts, maxSleepTime, fn, maxSleepTime)
-		}
-		return err
+	for _, opt := range opts {
+		opt(c)
 	}
-	return nil
+	el := make(ErrorList, c.attempts)
+
+	for i := uint(0); i < c.attempts; i++ {
+		if err := fn(); err != nil {
+			if s, ok := err.(InterruptError); ok {
+				return s.error
+			}
+			el[i] = err
+
+			select {
+			case <-time.After(c.sleep):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+
+			c.sleep *= 2
+			if c.sleep > c.maxSleepTime {
+				c.sleep = c.maxSleepTime
+			}
+		} else {
+			return nil
+		}
+	}
+	return el
 }
 
-func Retry(attempts int, sleep time.Duration, fn func() error) error {
-	maxSleepTime := time.Millisecond * 1000
-	return Impl(attempts, sleep, fn, maxSleepTime)
+type ErrorList []error
+
+func (el ErrorList) Error() string {
+	var builder strings.Builder
+	builder.WriteString("All attempts results:\n")
+	for index, err := range el {
+		builder.WriteString(fmt.Sprintf("attempt #%d:%s\n", index+1, err.Error()))
+	}
+	return builder.String()
 }
 
 type InterruptError struct {

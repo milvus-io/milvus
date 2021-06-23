@@ -12,10 +12,10 @@
 package indexcoord
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"sync"
-	"time"
 
 	"github.com/milvus-io/milvus/internal/util/retry"
 
@@ -169,7 +169,7 @@ func (mt *metaTable) BuildIndex(indexBuildID UniqueID, nodeID int64) error {
 			m.indexMeta.NodeID = nodeID
 			return mt.saveIndexMeta(m)
 		}
-		err2 := retry.Retry(5, time.Millisecond*200, fn)
+		err2 := retry.Do(context.TODO(), fn, retry.Attempts(5))
 		if err2 != nil {
 			return err2
 		}
@@ -207,7 +207,7 @@ func (mt *metaTable) UpdateVersion(indexBuildID UniqueID) error {
 
 			return mt.saveIndexMeta(m)
 		}
-		err2 := retry.Retry(5, time.Millisecond*200, fn)
+		err2 := retry.Do(context.TODO(), fn, retry.Attempts(5))
 		return err2
 	}
 
@@ -234,7 +234,7 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 					m.indexMeta.MarkDeleted = true
 					return mt.saveIndexMeta(m)
 				}
-				err2 := retry.Retry(5, time.Millisecond*200, fn)
+				err2 := retry.Do(context.TODO(), fn, retry.Attempts(5))
 				if err2 != nil {
 					return err2
 				}
@@ -319,7 +319,7 @@ func (mt *metaTable) UpdateRecycleState(indexBuildID UniqueID) error {
 			m.indexMeta.Recycled = true
 			return mt.saveIndexMeta(m)
 		}
-		err2 := retry.Retry(5, time.Millisecond*200, fn)
+		err2 := retry.Do(context.TODO(), fn, retry.Attempts(5))
 		if err2 != nil {
 			meta.indexMeta.Recycled = false
 			log.Debug("IndexCoord metaTable UpdateRecycleState failed", zap.Error(err2))

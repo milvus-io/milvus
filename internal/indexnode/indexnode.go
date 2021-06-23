@@ -98,7 +98,7 @@ func (i *IndexNode) Init() error {
 		i.etcdKV = etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
 		return err
 	}
-	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
+	err := retry.Do(i.loopCtx, connectEtcdFn, retry.Attempts(300))
 	if err != nil {
 		log.Debug("IndexNode try connect etcd failed", zap.Error(err))
 		return err

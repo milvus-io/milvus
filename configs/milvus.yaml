@@ -34,14 +34,14 @@ pulsar:
   port: 6650
   maxMessageSize: 5242880 # 5 * 1024 * 1024 Bytes
 
-master:
+rootCoord:
   address: localhost
   port: 53100
 
-proxyNode:
+proxy:
   port: 19530
 
-queryService:
+queryCoord:
   address: localhost
   port: 19531
 
@@ -49,7 +49,7 @@ queryNode:
   gracefulTime: 1000 # ms, for search
   port: 21123
 
-indexService:
+indexCoord:
   address: localhost
   port: 31000
 

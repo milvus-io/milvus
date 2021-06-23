@@ -14,18 +14,18 @@ package components
 import (
 	"context"
 
-	grpcqueryservice "github.com/milvus-io/milvus/internal/distributed/queryservice"
+	grpcquerycoord "github.com/milvus-io/milvus/internal/distributed/querycoord"
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
 type QueryCoord struct {
 	ctx context.Context
-	svr *grpcqueryservice.Server
+	svr *grpcquerycoord.Server
 }
 
 // NewQueryCoord creates a new QueryCoord
 func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord, error) {
-	svr, err := grpcqueryservice.NewServer(ctx, factory)
+	svr, err := grpcquerycoord.NewServer(ctx, factory)
 	if err != nil {
 		panic(err)
 	}

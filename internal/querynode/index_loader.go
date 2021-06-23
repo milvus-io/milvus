@@ -306,7 +306,7 @@ func (loader *indexLoader) setIndexInfo(collectionID UniqueID, segment *Segment,
 	}
 
 	if loader.indexCoord == nil {
-		return errors.New("null index service client")
+		return errors.New("null index coordinator client")
 	}
 
 	indexFilePathRequest := &indexpb.GetIndexFilePathsRequest{
@@ -339,7 +339,7 @@ func (loader *indexLoader) setIndexInfo(collectionID UniqueID, segment *Segment,
 func (loader *indexLoader) getIndexPaths(indexBuildID UniqueID) ([]string, error) {
 	ctx := context.TODO()
 	if loader.indexCoord == nil {
-		return nil, errors.New("null index service client")
+		return nil, errors.New("null index coordinator client")
 	}
 
 	indexFilePathRequest := &indexpb.GetIndexFilePathsRequest{

@@ -26,29 +26,28 @@ type ParamTable struct {
 	Address string // ip:port
 	Port    int
 
-	IndexServiceAddress string
-	QueryServiceAddress string
-	DataCoordAddress    string
+	IndexCoordAddress string
+	QueryCoordAddress string
+	DataCoordAddress  string
 }
 
 func (p *ParamTable) Init() {
 	once.Do(func() {
 		p.BaseTable.Init()
-		err := p.LoadYaml("advanced/master.yaml")
+		err := p.LoadYaml("advanced/root_coord.yaml")
 		if err != nil {
 			panic(err)
 		}
 		p.initAddress()
 		p.initPort()
-		p.initIndexServiceAddress()
-		p.initQueryServiceAddress()
+		p.initIndexCoordAddress()
+		p.initQueryCoordAddress()
 		p.initDataCoordAddress()
-
 	})
 }
 
 func (p *ParamTable) initAddress() {
-	ret, err := p.Load("_MasterAddress")
+	ret, err := p.Load("_RootCoordAddress")
 	if err != nil {
 		panic(err)
 	}
@@ -56,23 +55,23 @@ func (p *ParamTable) initAddress() {
 }
 
 func (p *ParamTable) initPort() {
-	p.Port = p.ParseInt("master.port")
+	p.Port = p.ParseInt("rootCoord.port")
 }
 
-func (p *ParamTable) initIndexServiceAddress() {
-	ret, err := p.Load("IndexServiceAddress")
+func (p *ParamTable) initIndexCoordAddress() {
+	ret, err := p.Load("_IndexCoordAddress")
 	if err != nil {
 		panic(err)
 	}
-	p.IndexServiceAddress = ret
+	p.IndexCoordAddress = ret
 }
 
-func (p *ParamTable) initQueryServiceAddress() {
-	ret, err := p.Load("_QueryServiceAddress")
+func (p *ParamTable) initQueryCoordAddress() {
+	ret, err := p.Load("_QueryCoordAddress")
 	if err != nil {
 		panic(err)
 	}
-	p.QueryServiceAddress = ret
+	p.QueryCoordAddress = ret
 }
 
 func (p *ParamTable) initDataCoordAddress() {

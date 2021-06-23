@@ -15,11 +15,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/net/context"
 )
 
 func TestAllocator_Basic(t *testing.T) {
 	ms := newMockRootCoordService()
-	allocator := newAllocator(ms)
+	allocator := newRootCoordAllocator(context.Background(), ms)
 
 	t.Run("Test allocTimestamp", func(t *testing.T) {
 		_, err := allocator.allocTimestamp()

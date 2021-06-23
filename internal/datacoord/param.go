@@ -42,9 +42,9 @@ type ParamTable struct {
 	StatsStreamPosSubPath string
 
 	// segment
-	SegmentSize           float64
-	SegmentSizeFactor     float64
-	SegIDAssignExpiration int64
+	SegmentMaxSize          float64
+	SegmentSealProportion   float64
+	SegAssignmentExpiration int64
 
 	InsertChannelPrefixName   string
 	StatisticsChannelName     string
@@ -63,7 +63,7 @@ func (p *ParamTable) Init() {
 		// load yaml
 		p.BaseTable.Init()
 
-		if err := p.LoadYaml("advanced/data_service.yaml"); err != nil {
+		if err := p.LoadYaml("advanced/data_coord.yaml"); err != nil {
 			panic(err)
 		}
 
@@ -76,9 +76,9 @@ func (p *ParamTable) Init() {
 
 		p.initPulsarAddress()
 
-		p.initSegmentSize()
-		p.initSegmentSizeFactor()
-		p.initSegIDAssignExpiration()
+		p.initSegmentMaxSize()
+		p.initSegmentSealProportion()
+		p.initSegAssignmentExpiration()
 		p.initInsertChannelPrefixName()
 		p.initStatisticsChannelName()
 		p.initTimeTickChannelName()
@@ -147,16 +147,16 @@ func (p *ParamTable) initCollectionBinlogSubPath() {
 	p.CollectionBinlogSubPath = subPath
 }
 
-func (p *ParamTable) initSegmentSize() {
-	p.SegmentSize = p.ParseFloat("datacoord.segment.size")
+func (p *ParamTable) initSegmentMaxSize() {
+	p.SegmentMaxSize = p.ParseFloat("datacoord.segment.maxSize")
 }
 
-func (p *ParamTable) initSegmentSizeFactor() {
-	p.SegmentSizeFactor = p.ParseFloat("datacoord.segment.sizeFactor")
+func (p *ParamTable) initSegmentSealProportion() {
+	p.SegmentSealProportion = p.ParseFloat("datacoord.segment.sealProportion")
 }
 
-func (p *ParamTable) initSegIDAssignExpiration() {
-	p.SegIDAssignExpiration = p.ParseInt64("datacoord.segment.IDAssignExpiration") //ms
+func (p *ParamTable) initSegAssignmentExpiration() {
+	p.SegAssignmentExpiration = p.ParseInt64("datacoord.segment.assignmentExpiration")
 }
 
 func (p *ParamTable) initInsertChannelPrefixName() {
