@@ -496,7 +496,6 @@ class TestLoadPartition:
                 connect.create_index(binary_collection, default_binary_vec_field_name, get_binary_index)
             connect.load_partitions(binary_collection, [default_tag])
 
-    @pytest.mark.skip("xige-16-search-without-insert")
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_load_empty_partition(self, connect, collection):
         '''
