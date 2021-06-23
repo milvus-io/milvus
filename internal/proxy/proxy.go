@@ -299,7 +299,7 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 					}
 				}
 
-				log.Debug("send timestamp statistics of pchan", zap.Any("channels", channels), zap.Any("tss", tss))
+				//log.Debug("send timestamp statistics of pchan", zap.Any("channels", channels), zap.Any("tss", tss))
 
 				req := &internalpb.ChannelTimeTickMsg{
 					Base: &commonpb.MsgBase{

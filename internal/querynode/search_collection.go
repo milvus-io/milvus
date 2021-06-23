@@ -346,9 +346,9 @@ func (s *searchCollection) doUnsolvedMsgSearch() {
 			//time.Sleep(10 * time.Millisecond)
 			serviceTime := s.waitNewTSafe()
 			st, _ := tsoutil.ParseTS(serviceTime)
-			log.Debug("get tSafe from flow graph",
-				zap.Int64("collectionID", s.collectionID),
-				zap.Any("tSafe", st))
+			//log.Debug("get tSafe from flow graph",
+			//	zap.Int64("collectionID", s.collectionID),
+			//	zap.Any("tSafe", st))
 
 			s.setServiceableTime(serviceTime)
 			//log.Debug("query node::doUnsolvedMsgSearch: setServiceableTime",

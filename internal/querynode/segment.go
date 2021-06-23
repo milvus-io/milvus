@@ -176,13 +176,13 @@ func (s *Segment) getRowCount() int64 {
 		long int
 		getRowCount(CSegmentInterface c_segment);
 	*/
-	segmentPtrIsNil := s.segmentPtr == nil
-	log.Debug("QueryNode::Segment::getRowCount", zap.Any("segmentPtrIsNil", segmentPtrIsNil))
+	//segmentPtrIsNil := s.segmentPtr == nil
+	//log.Debug("QueryNode::Segment::getRowCount", zap.Any("segmentPtrIsNil", segmentPtrIsNil))
 	if s.segmentPtr == nil {
 		return -1
 	}
 	var rowCount = C.GetRowCount(s.segmentPtr)
-	log.Debug("QueryNode::Segment::getRowCount", zap.Any("rowCount", rowCount))
+	//log.Debug("QueryNode::Segment::getRowCount", zap.Any("rowCount", rowCount))
 	return int64(rowCount)
 }
 
