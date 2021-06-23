@@ -34,19 +34,17 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
-type UniqueID = typeutil.UniqueID
-
 type Client struct {
-	ctx        context.Context
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	grpcClient indexpb.IndexCoordClient
 	conn       *grpc.ClientConn
 
 	addr string
 	sess *sessionutil.Session
 
-	timeout   time.Duration
-	recallTry int
-	reconnTry int
+	retryOptions []retry.Option
 }
 
 func getIndexCoordAddr(sess *sessionutil.Session) (string, error) {
@@ -65,24 +63,24 @@ func getIndexCoordAddr(sess *sessionutil.Session) (string, error) {
 	return ms.Address, nil
 }
 
-func NewClient(metaRoot string, etcdEndpoints []string, timeout time.Duration) *Client {
-	sess := sessionutil.NewSession(context.Background(), metaRoot, etcdEndpoints)
-	return &Client{
-		ctx:       context.Background(),
-		sess:      sess,
-		timeout:   timeout,
-		recallTry: 3,
-		reconnTry: 10,
+func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string, retryOptions ...retry.Option) (*Client, error) {
+	sess := sessionutil.NewSession(ctx, metaRoot, etcdEndpoints)
+	if sess == nil {
+		err := fmt.Errorf("new session error, maybe can not connect to etcd")
+		log.Debug("RootCoordClient NewClient failed", zap.Error(err))
+		return nil, err
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	return &Client{
+		ctx:          ctx,
+		cancel:       cancel,
+		sess:         sess,
+		retryOptions: retryOptions,
+	}, nil
 }
 
 func (c *Client) Init() error {
-	// for now, we must try many times in Init Stage
-	initFunc := func() error {
-		return c.connect()
-	}
-	err := retry.Retry(10000, 3*time.Second, initFunc)
-	return err
+	return c.connect()
 }
 
 func (c *Client) connect() error {
@@ -94,18 +92,17 @@ func (c *Client) connect() error {
 		}
 		return nil
 	}
-	err = retry.Retry(c.reconnTry, 3*time.Second, getIndexCoordaddrFn)
+	err = retry.Do(c.ctx, getIndexCoordaddrFn, c.retryOptions...)
 	if err != nil {
 		log.Debug("IndexCoordClient getIndexCoordAddress failed", zap.Error(err))
 		return err
 	}
 	log.Debug("IndexCoordClient getIndexCoordAddress success")
 	connectGrpcFunc := func() error {
-		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
-		defer cancelFunc()
 		opts := trace.GetInterceptorOpts()
 		log.Debug("IndexCoordClient try connect ", zap.String("address", c.addr))
-		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
+		conn, err := grpc.DialContext(c.ctx, c.addr,
+			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(5*time.Second),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
 					grpc_retry.UnaryClientInterceptor(),
@@ -124,7 +121,7 @@ func (c *Client) connect() error {
 		return nil
 	}
 
-	err = retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
+	err = retry.Do(c.ctx, connectGrpcFunc, c.retryOptions...)
 	if err != nil {
 		log.Debug("IndexCoordClient try connect failed", zap.Error(err))
 		return err
@@ -139,14 +136,9 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	if err == nil {
 		return ret, nil
 	}
-	for i := 0; i < c.reconnTry; i++ {
-		err = c.connect()
-		if err == nil {
-			break
-		}
-	}
+	err = c.connect()
 	if err != nil {
-		return nil, err
+		return ret, err
 	}
 	ret, err = caller()
 	if err == nil {
@@ -160,7 +152,8 @@ func (c *Client) Start() error {
 }
 
 func (c *Client) Stop() error {
-	return nil
+	c.cancel()
+	return c.conn.Close()
 }
 
 // Register dummy

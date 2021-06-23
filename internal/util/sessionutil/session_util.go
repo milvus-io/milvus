@@ -71,7 +71,7 @@ func NewSession(ctx context.Context, metaRoot string, etcdEndpoints []string) *S
 		session.etcdCli = etcdCli
 		return nil
 	}
-	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
+	err := retry.Do(ctx, connectEtcdFn, retry.Attempts(300))
 	if err != nil {
 		return nil
 	}
@@ -113,7 +113,7 @@ func (s *Session) checkIDExist() {
 
 }
 
-func (s *Session) getServerIDWithKey(key string, retryTimes int) (int64, error) {
+func (s *Session) getServerIDWithKey(key string, retryTimes uint) (int64, error) {
 	res := int64(0)
 	getServerIDWithKeyFn := func() error {
 		getResp, err := s.etcdCli.Get(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, key))
@@ -146,7 +146,7 @@ func (s *Session) getServerIDWithKey(key string, retryTimes int) (int64, error) 
 		return nil
 	}
 
-	err := retry.Retry(retryTimes, time.Millisecond*500, getServerIDWithKeyFn)
+	err := retry.Do(s.ctx, getServerIDWithKeyFn, retry.Attempts(retryTimes), retry.Sleep(500*time.Millisecond))
 	return res, err
 }
 
@@ -205,7 +205,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 		}
 		return nil
 	}
-	err := retry.Retry(DefaultRetryTimes, time.Millisecond*500, registerFn)
+	err := retry.Do(s.ctx, registerFn, retry.Attempts(DefaultRetryTimes), retry.Sleep(500*time.Millisecond))
 	if err != nil {
 		return nil, err
 	}
@@ -309,21 +309,4 @@ func (s *Session) WatchServices(prefix string, revision int64) (eventChannel <-c
 		}
 	}()
 	return eventCh
-}
-
-func initEtcd(etcdEndpoints []string) (*clientv3.Client, error) {
-	var etcdCli *clientv3.Client
-	connectEtcdFn := func() error {
-		etcd, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints, DialTimeout: 5 * time.Second})
-		if err != nil {
-			return err
-		}
-		etcdCli = etcd
-		return nil
-	}
-	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
-	if err != nil {
-		return nil, err
-	}
-	return etcdCli, nil
 }

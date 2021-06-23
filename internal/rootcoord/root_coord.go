@@ -962,7 +962,7 @@ func (c *Core) Init() error {
 			return nil
 		}
 		log.Debug("RootCoord, Connect to Etcd")
-		err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
+		err := retry.Do(c.ctx, connectEtcdFn, retry.Attempts(300))
 		if err != nil {
 			return
 		}

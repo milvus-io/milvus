@@ -78,7 +78,9 @@ func defaultAssignPolicy() channelAssignPolicy {
 	return newBalancedAssignPolicy()
 }
 
-func newCluster(ctx context.Context, dataManager *clusterNodeManager, sessionManager sessionManager, posProvider positionProvider, opts ...clusterOption) *cluster {
+func newCluster(ctx context.Context, dataManager *clusterNodeManager,
+	sessionManager sessionManager, posProvider positionProvider,
+	opts ...clusterOption) *cluster {
 	c := &cluster{
 		ctx:              ctx,
 		sessionManager:   sessionManager,

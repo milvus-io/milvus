@@ -76,7 +76,7 @@ func (c *queryNodeCluster) reloadFromKV() error {
 		if err != nil {
 			return err
 		}
-		err = c.RegisterNode(session, nodeID)
+		err = c.RegisterNode(context.Background(), session, nodeID)
 		if err != nil {
 			return err
 		}
@@ -378,7 +378,7 @@ func (c *queryNodeCluster) getNumSegments(nodeID int64) (int, error) {
 	return numSegment, nil
 }
 
-func (c *queryNodeCluster) RegisterNode(session *sessionutil.Session, id UniqueID) error {
+func (c *queryNodeCluster) RegisterNode(ctx context.Context, session *sessionutil.Session, id UniqueID) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -391,7 +391,7 @@ func (c *queryNodeCluster) RegisterNode(session *sessionutil.Session, id UniqueI
 	if err != nil {
 		return err
 	}
-	node, err := newQueryNode(session.Address, id, c.client)
+	node, err := newQueryNode(ctx, session.Address, id, c.client)
 	if err != nil {
 		return err
 	}

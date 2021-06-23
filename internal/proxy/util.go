@@ -12,6 +12,7 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io/ioutil"
@@ -35,7 +36,7 @@ func GetPulsarConfig(protocol, ip, port, url string) (map[string]interface{}, er
 		return err
 	}
 
-	err = retry.Retry(10, time.Second, getResp)
+	err = retry.Do(context.TODO(), getResp, retry.Attempts(10), retry.Sleep(time.Second))
 	if err != nil {
 		return nil, err
 	}

@@ -40,8 +40,8 @@ func (alloc *rootCoordAllocator) allocTimestamp() (Timestamp, error) {
 	resp, err := alloc.rootCoordClient.AllocTimestamp(alloc.ctx, &rootcoordpb.AllocTimestampRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_RequestTSO,
-			MsgID:     -1, // todo add msg id
-			Timestamp: 0,  // todo
+			MsgID:     0,
+			Timestamp: 0,
 			SourceID:  Params.NodeID,
 		},
 		Count: 1,
@@ -56,8 +56,8 @@ func (alloc *rootCoordAllocator) allocID() (UniqueID, error) {
 	resp, err := alloc.rootCoordClient.AllocID(alloc.ctx, &rootcoordpb.AllocIDRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_RequestID,
-			MsgID:     -1, // todo add msg id
-			Timestamp: 0,  // todo
+			MsgID:     0,
+			Timestamp: 0,
 			SourceID:  Params.NodeID,
 		},
 		Count: 1,

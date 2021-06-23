@@ -28,6 +28,7 @@ import (
 	qc "github.com/milvus-io/milvus/internal/querycoord"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -107,7 +108,7 @@ func (s *Server) init() error {
 
 	// --- Master Server Client ---
 	log.Debug("QueryCoord try to new RootCoord client", zap.Any("RootCoordAddress", Params.RootCoordAddress))
-	rootCoord, err := rcc.NewClient(s.loopCtx, qc.Params.MetaRootPath, qc.Params.EtcdEndpoints, 3*time.Second)
+	rootCoord, err := rcc.NewClient(s.loopCtx, qc.Params.MetaRootPath, qc.Params.EtcdEndpoints, retry.Attempts(300))
 	if err != nil {
 		log.Debug("QueryCoord try to new RootCoord client failed", zap.Error(err))
 		panic(err)
@@ -138,7 +139,11 @@ func (s *Server) init() error {
 	// --- Data service client ---
 	log.Debug("QueryCoord try to new DataCoord client", zap.Any("DataCoordAddress", Params.DataCoordAddress))
 
-	dataCoord := dsc.NewClient(qc.Params.MetaRootPath, qc.Params.EtcdEndpoints, 3*time.Second)
+	dataCoord, err := dsc.NewClient(s.loopCtx, qc.Params.MetaRootPath, qc.Params.EtcdEndpoints, retry.Attempts(300))
+	if err != nil {
+		log.Debug("QueryService try to new DataCoord client failed", zap.Error(err))
+		panic(err)
+	}
 	if err = dataCoord.Init(); err != nil {
 		log.Debug("QueryCoord DataCoordClient Init failed", zap.Error(err))
 		panic(err)

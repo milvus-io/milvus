@@ -90,7 +90,7 @@ func (qc *QueryCoord) RegisterNode(ctx context.Context, req *querypb.RegisterNod
 		ServerID: nodeID,
 		Address:  fmt.Sprintf("%s:%d", req.Address.Ip, req.Address.Port),
 	}
-	err := qc.cluster.RegisterNode(session, req.Base.SourceID)
+	err := qc.cluster.RegisterNode(ctx, session, req.Base.SourceID)
 	if err != nil {
 		log.Debug("register query node new NodeClient failed", zap.Any("QueryNodeID", nodeID), zap.String("address", req.Address.String()))
 		return &querypb.RegisterNodeResponse{

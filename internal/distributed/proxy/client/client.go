@@ -13,6 +13,7 @@ package grpcproxyclient
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
@@ -30,42 +31,41 @@ import (
 )
 
 type Client struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	grpcClient proxypb.ProxyClient
 	conn       *grpc.ClientConn
-	ctx        context.Context
 
-	addr      string
-	timeout   time.Duration
-	reconnTry int
-	recallTry int
+	addr string
+
+	retryOptions []retry.Option
 }
 
-func NewClient(addr string, timeout time.Duration) *Client {
-	return &Client{
-		addr:      addr,
-		ctx:       context.Background(),
-		timeout:   timeout,
-		recallTry: 3,
-		reconnTry: 10,
+func NewClient(ctx context.Context, addr string, retryOptions ...retry.Option) (*Client, error) {
+	if addr == "" {
+		return nil, fmt.Errorf("address is empty")
 	}
+	ctx, cancel := context.WithCancel(ctx)
+
+	return &Client{
+		ctx:          ctx,
+		cancel:       cancel,
+		addr:         addr,
+		retryOptions: retryOptions,
+	}, nil
 }
 
 func (c *Client) Init() error {
-	// for now, we must try many times in Init Stage
-	initFunc := func() error {
-		return c.connect()
-	}
-	err := retry.Retry(10000, 3*time.Second, initFunc)
-	return err
+	return c.connect()
 }
 
 func (c *Client) connect() error {
 	connectGrpcFunc := func() error {
-		ctx, cancelFunc := context.WithTimeout(c.ctx, c.timeout)
-		defer cancelFunc()
 		opts := trace.GetInterceptorOpts()
-		log.Debug("ProxyClient try connect ", zap.String("address", c.addr))
-		conn, err := grpc.DialContext(ctx, c.addr, grpc.WithInsecure(), grpc.WithBlock(),
+		log.Debug("ProxyNodeClient try connect ", zap.String("address", c.addr))
+		conn, err := grpc.DialContext(c.ctx, c.addr,
+			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(5*time.Second),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
 					grpc_retry.UnaryClientInterceptor(),
@@ -84,7 +84,7 @@ func (c *Client) connect() error {
 		return nil
 	}
 
-	err := retry.Retry(c.reconnTry, 500*time.Millisecond, connectGrpcFunc)
+	err := retry.Do(c.ctx, connectGrpcFunc, c.retryOptions...)
 	if err != nil {
 		log.Debug("ProxyClient try connect failed", zap.Error(err))
 		return err
@@ -99,14 +99,9 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	if err == nil {
 		return ret, nil
 	}
-	for i := 0; i < c.reconnTry; i++ {
-		err = c.connect()
-		if err == nil {
-			break
-		}
-	}
+	err = c.connect()
 	if err != nil {
-		return nil, err
+		return ret, err
 	}
 	ret, err = caller()
 	if err == nil {

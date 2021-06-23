@@ -636,7 +636,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)
 
-	svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoord, error) {
+	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string, retryOptions ...retry.Option) (types.RootCoord, error) {
 		return newMockRootCoordService(), nil
 	}
 
@@ -773,10 +773,10 @@ func newTestServer(t *testing.T, receiveCh chan interface{}) *Server {
 
 	svr, err := CreateServer(context.TODO(), factory)
 	assert.Nil(t, err)
-	svr.dataClientCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
+	svr.dataClientCreator = func(ctx context.Context, addr string, retryOptions ...retry.Option) (types.DataNode, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
-	svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoord, error) {
+	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string, retryOptions ...retry.Option) (types.RootCoord, error) {
 		return newMockRootCoordService(), nil
 	}
 	assert.Nil(t, err)
@@ -806,7 +806,7 @@ func initEtcd(etcdEndpoints []string) (*clientv3.Client, error) {
 		etcdCli = etcd
 		return nil
 	}
-	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
+	err := retry.Do(context.TODO(), connectEtcdFn, retry.Attempts(300))
 	if err != nil {
 		return nil, err
 	}
