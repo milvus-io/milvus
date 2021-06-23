@@ -6,6 +6,7 @@ from base.client_base import TestcaseBase
 from utils.util_log import test_log as log
 import common.common_type as ct
 import common.common_func as cf
+from common.code_mapping import ConnectionErrorMessage as cem
 
 
 class TestConnectionParams(TestcaseBase):
@@ -14,26 +15,27 @@ class TestConnectionParams(TestcaseBase):
     The author ： Ting.Wang
     """
 
-    @pytest.mark.xfail(reason="Issue #5684")
     @pytest.mark.tags(ct.CaseLabel.L3)
-    def test_connection_add_connection_kwargs_param_check(self):
+    @pytest.mark.parametrize("data", ct.get_dict_without_host_port)
+    def test_connection_add_connection_kwargs_param_check(self, data):
         """
         target: test **kwargs of add_connection
         method: passing wrong parameters of **kwargs
         expected: assert response is error
         """
 
-        # No check for **kwargs
-        self.connection_wrap.add_connection(_kwargs=[1, 2])
+        # check param of **kwargs
+        self.connection_wrap.add_connection(_kwargs=data, check_task=ct.CheckTasks.err_res,
+                                            check_items={ct.err_code: -1, ct.err_msg: cem.NoHostPort})
 
         # get addr of default alias
-        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING)
+        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr,
+                                                 check_items={ct.dict_content: {'host': 'localhost', 'port': '19530'}})
 
         # list all connections and check the response
         self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr,
                                               check_items={ct.list_content: [(DefaultConfig.DEFAULT_USING, None)]})
 
-    @pytest.mark.xfail(reason="Issue #5723")
     @pytest.mark.tags(ct.CaseLabel.L3)
     def test_connection_connect_kwargs_param_check(self):
         """
@@ -46,9 +48,9 @@ class TestConnectionParams(TestcaseBase):
         self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING)
 
         # No check for **kwargs
-        res = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, _kwargs=[1, 2])
-        log.info(res[0].args[0])
-        assert "Fail connecting to server" in res[0].args[0]
+        self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, _kwargs=[1, 2],
+                                     check_task=ct.CheckTasks.err_res,
+                                     check_items={ct.err_code: -1, ct.err_msg: cem.NotHostPort})
 
     @pytest.mark.xfail(reason="Feature #5725")
     @pytest.mark.tags(ct.CaseLabel.L3)
@@ -129,9 +131,10 @@ class TestConnectionOperation(TestcaseBase):
     The author ： Ting.Wang
     """
 
-    @pytest.mark.xfail(reason="#5684")
     @pytest.mark.tags(ct.CaseLabel.L1)
-    def test_connection_add_wrong_format(self):
+    @pytest.mark.parametrize("data, err_msg", [(ct.get_wrong_format_dict[0], cem.PortType),
+                                               (ct.get_wrong_format_dict[1], cem.HostType)])
+    def test_connection_add_wrong_format(self, data, err_msg):
         """
         target: test add_connection, regardless of whether the connection exists
         method: add existing and non-existing configurations at the same time
@@ -141,13 +144,14 @@ class TestConnectionOperation(TestcaseBase):
         # add connections
         self.connection_wrap.add_connection(alias1={"host": "localhost", "port": "1"},
                                             alias2={"port": "-1", "host": "hostlocal"},
-                                            testing={"": ""})
+                                            testing=data,
+                                            check_task=ct.CheckTasks.err_res,
+                                            check_items={ct.err_code: -1, ct.err_msg: err_msg})
 
         # list all connections and check the response
         self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr,
                                               check_items={ct.list_content: [(DefaultConfig.DEFAULT_USING, None),
-                                                                             ('alias1', None), ('alias2', None),
-                                                                             ('testing', None)]})
+                                                                             ('alias1', None), ('alias2', None)]})
 
         # get all addr of alias and check the response
         self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr,
@@ -157,7 +161,7 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.get_connection_addr(alias="alias2", check_task=ct.CheckTasks.ccr,
                                                  check_items={ct.dict_content: {"host": "hostlocal", "port": "-1"}})
         self.connection_wrap.get_connection_addr(alias="testing", check_task=ct.CheckTasks.ccr,
-                                                 check_items={ct.dict_content: {"": ""}})
+                                                 check_items={ct.dict_content: {}})
 
     @pytest.mark.tags(ct.CaseLabel.L1)
     def test_connection_add_more(self):
@@ -289,11 +293,10 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.connect(alias="test_alias_name", host=host, port=port, check_task=ct.CheckTasks.ccr)
 
         # add connection with diff params after that alias has been created
-        err_msg = "alias of 'test_alias_name' already creating connections, "\
-                  + "but the configure is not the same as passed in."
+        err_msg = cem.AliasExist % "test_alias_name"
         self.connection_wrap.add_connection(test_alias_name={"host": "localhost", "port": "1"},
                                             check_task=ct.CheckTasks.err_res,
-                                            check_items={"err_code": -1, "err_msg": err_msg})
+                                            check_items={ct.err_code: -1, ct.err_msg: err_msg})
 
         # add connection with the same params
         self.connection_wrap.add_connection(test_alias_name={"host": host, "port": port})
@@ -310,11 +313,10 @@ class TestConnectionOperation(TestcaseBase):
                                      check_task=ct.CheckTasks.ccr)
 
         # add connection after that alias has been created
-        err_msg = "alias of 'test_alias_name' already creating connections, " \
-                  + "but the configure is not the same as passed in."
+        err_msg = cem.AliasExist % "test_alias_name"
         self.connection_wrap.add_connection(default={"host": "localhost", "port": "1"},
                                             check_task=ct.CheckTasks.err_res,
-                                            check_items={"err_code": -1, "err_msg": err_msg})
+                                            check_items={ct.err_code: -1, ct.err_msg: err_msg})
 
         # add connection with the same params
         self.connection_wrap.add_connection(test_alias_name={"host": host, "port": port})
@@ -378,9 +380,9 @@ class TestConnectionOperation(TestcaseBase):
         """
 
         # create connection that param of alias is not exist
-        err_msg = "You need to pass in the configuration of the connection named '%s'" % ct.Not_Exist
+        err_msg = cem.AliasNotExist % ct.Not_Exist
         self.connection_wrap.connect(alias=ct.Not_Exist, check_task=ct.CheckTasks.err_res,
-                                     check_items={"err_code": -1, "err_msg": err_msg})
+                                     check_items={ct.err_code: -1, ct.err_msg: err_msg})
 
         # list all connections and check the response
         self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr,
@@ -402,9 +404,9 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.add_connection(default={'host': "host", 'port': port})
 
         # using default alias to create connection, the connection does not exist
-        err_msg = "Fail connecting to server on localhost:19530. Timeout"
+        err_msg = cem.FailConnect % ("host", str(port))
         self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.err_res,
-                                     check_items={"err_code": -1, "err_msg": err_msg})
+                                     check_items={ct.err_code: -1, ct.err_msg: err_msg})
 
         # list all connections and check the response
         self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr,
@@ -467,10 +469,10 @@ class TestConnectionOperation(TestcaseBase):
         assert res_obj1 == res_obj2
 
         # connect twice with the different params
-        err_msg = "The connection named default already creating," \
-                  + " but passed parameters don't match the configured parameters,"
+        err_msg = cem.ConnectExist % "default"
         self.connection_wrap.connect(alias=connect_name, host="host", port=port,
-                                     check_task=ct.CheckTasks.err_res, check_items={"err_code": -1, "err_msg": err_msg})
+                                     check_task=ct.CheckTasks.err_res,
+                                     check_items={ct.err_code: -1, ct.err_msg: err_msg})
 
     @pytest.mark.tags(ct.CaseLabel.L2)
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING, "test_alias_nme"])
@@ -498,7 +500,6 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.get_connection_addr(alias=connect_name, check_task=ct.CheckTasks.ccr,
                                                  check_items={ct.dict_content: {'host': host, 'port': port}})
 
-    @pytest.mark.xfail(reason="5697")
     @pytest.mark.tags(ct.CaseLabel.L3)
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING, "test_alias_nme"])
     def test_connection_connect_wrong_params(self, host, port, connect_name):
@@ -510,15 +511,16 @@ class TestConnectionOperation(TestcaseBase):
 
         # created connection with wrong connect name
         self.connection_wrap.connect(alias=connect_name, ip=host, port=port, check_task=ct.CheckTasks.err_res,
-                                     check_items={"err_code": -1,
-                                                  "err_msg": "Param is not complete. Please invoke as follow:"})
+                                     check_items={ct.err_code: -1,
+                                                  ct.err_msg: "Param is not complete. Please invoke as follow:"})
 
         # list all connections and check the response
         self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr,
                                               check_items={ct.list_content: [(DefaultConfig.DEFAULT_USING, None)]})
 
         # get all addr of alias and check the response
-        dict_content = {'host': host, 'port': port} if connect_name == DefaultConfig.DEFAULT_USING else {}
+        dict_content = {'host': DefaultConfig.DEFAULT_HOST,
+                        'port': DefaultConfig.DEFAULT_PORT} if connect_name == DefaultConfig.DEFAULT_USING else {}
         self.connection_wrap.get_connection_addr(alias=connect_name, check_task=ct.CheckTasks.ccr,
                                                  check_items={ct.dict_content: dict_content})
 
