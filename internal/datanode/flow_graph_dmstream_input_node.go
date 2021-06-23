@@ -20,18 +20,20 @@ import (
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
-func newDmInputNode(ctx context.Context, factory msgstream.Factory, vchannelName string, seekPos *internalpb.MsgPosition) *flowgraph.InputNode {
+func newDmInputNode(ctx context.Context, factory msgstream.Factory, pchannelName string, seekPos *internalpb.MsgPosition) *flowgraph.InputNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
 	consumeSubName := Params.MsgChannelSubName
 	insertStream, _ := factory.NewTtMsgStream(ctx)
 
-	insertStream.AsConsumer([]string{vchannelName}, consumeSubName)
-	log.Debug("datanode AsConsumer: " + vchannelName + " : " + consumeSubName)
+	insertStream.AsConsumer([]string{pchannelName}, consumeSubName)
+	log.Debug("datanode AsConsumer physical channel: " + pchannelName + " : " + consumeSubName)
 
 	if seekPos != nil {
+		// ChannelName in seek position is virtual channel name.
+		seekPos.ChannelName = pchannelName
+		log.Debug("datanode Seek: " + seekPos.GetChannelName())
 		insertStream.Seek([]*internalpb.MsgPosition{seekPos})
-		log.Debug("datanode Seek: " + vchannelName)
 	}
 
 	var stream msgstream.MsgStream = insertStream

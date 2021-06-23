@@ -118,13 +118,13 @@ func (t *timetickSync) UpdateTimeTick(in *internalpb.ChannelTimeTickMsg) error {
 	return nil
 }
 
-func (t *timetickSync) AddProxyNode(sess *sessionutil.Session) {
+func (t *timetickSync) AddProxy(sess *sessionutil.Session) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	t.proxyTimeTick[sess.ServerID] = nil
 }
 
-func (t *timetickSync) DelProxyNode(sess *sessionutil.Session) {
+func (t *timetickSync) DelProxy(sess *sessionutil.Session) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	if _, ok := t.proxyTimeTick[sess.ServerID]; ok {
@@ -133,7 +133,7 @@ func (t *timetickSync) DelProxyNode(sess *sessionutil.Session) {
 	}
 }
 
-func (t *timetickSync) GetProxyNodes(sess []*sessionutil.Session) {
+func (t *timetickSync) GetProxy(sess []*sessionutil.Session) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	for _, s := range sess {
@@ -146,7 +146,7 @@ func (t *timetickSync) StartWatch() {
 	for {
 		select {
 		case <-t.core.ctx.Done():
-			log.Debug("master service context done", zap.Error(t.core.ctx.Err()))
+			log.Debug("root coord context done", zap.Error(t.core.ctx.Err()))
 			return
 		case ptt, ok := <-t.sendChan:
 			if !ok {
@@ -202,8 +202,8 @@ func (t *timetickSync) SendChannelTimeTick(chanName string, ts typeutil.Timestam
 	return err
 }
 
-// GetProxyNodeNum return the num of detected proxy node
-func (t *timetickSync) GetProxyNodeNum() int {
+// GetProxyNum return the num of detected proxy node
+func (t *timetickSync) GetProxyNum() int {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	return len(t.proxyTimeTick)

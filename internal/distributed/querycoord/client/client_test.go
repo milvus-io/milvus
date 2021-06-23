@@ -47,9 +47,9 @@ package grpcquerycoordclient
 //		defer cancel()
 //	}
 //
-//	//create queryService client
+//	//create queryCoord client
 //	qs.Params.Init()
-//	log.Println("QueryService address:", qs.Params.Address)
+//	log.Println("QueryCoord address:", qs.Params.Address)
 //	log.Println("Init Query service client ...")
 //	client, err := NewClient(qs.Params.Address, 20*time.Second)
 //	assert.Nil(t, err)
@@ -124,10 +124,10 @@ package grpcquerycoordclient
 //		defer cancel()
 //	}
 //
-//	//create queryService client
+//	//create queryCoord client
 //	qs.Params.Init()
-//	log.Println("QueryService address:", qs.Params.Address)
-//	log.Println("Init Query service client ...")
+//	log.Println("QueryCoord address:", qs.Params.Address)
+//	log.Println("Init Query Coord client ...")
 //	client, err := NewClient(qs.Params.Address, 20*time.Second)
 //	assert.Nil(t, err)
 //	err = client.Init()
@@ -150,9 +150,9 @@ package grpcquerycoordclient
 //		defer cancel()
 //	}
 //
-//	//create queryService client
+//	//create queryCoord client
 //	qs.Params.Init()
-//	log.Println("QueryService address:", qs.Params.Address)
+//	log.Println("QueryCoord address:", qs.Params.Address)
 //	log.Println("Init Query service client ...")
 //	client, err := NewClient(qs.Params.Address, 20*time.Second)
 //	assert.Nil(t, err)
@@ -176,9 +176,9 @@ package grpcquerycoordclient
 //		defer cancel()
 //	}
 //
-//	//create queryService client
+//	//create queryCoord client
 //	qs.Params.Init()
-//	log.Println("QueryService address:", qs.Params.Address)
+//	log.Println("QueryCoord address:", qs.Params.Address)
 //	log.Println("Init Query service client ...")
 //	client, err := NewClient(qs.Params.Address, 20*time.Second)
 //	assert.Nil(t, err)

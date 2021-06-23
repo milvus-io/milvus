@@ -20,14 +20,14 @@ import (
 func TestParamTable(t *testing.T) {
 	Params.Init()
 
-	assert.NotEqual(t, Params.IndexServiceAddress, "")
-	t.Logf("IndexServiceAddress:%s", Params.IndexServiceAddress)
+	assert.NotEqual(t, Params.IndexCoordAddress, "")
+	t.Logf("IndexCoordAddress:%s", Params.IndexCoordAddress)
 
 	assert.NotEqual(t, Params.DataCoordAddress, "")
 	t.Logf("DataCoordAddress:%s", Params.DataCoordAddress)
 
-	assert.NotEqual(t, Params.MasterAddress, "")
-	t.Logf("MasterAddress:%s", Params.MasterAddress)
+	assert.NotEqual(t, Params.RootCoordAddress, "")
+	t.Logf("RootCoordAddress:%s", Params.RootCoordAddress)
 
 	assert.NotEqual(t, Params.QueryCoordAddress, "")
 	t.Logf("QueryCoordAddress:%s", Params.QueryCoordAddress)

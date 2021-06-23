@@ -134,7 +134,7 @@ func (node *QueryNode) Init() error {
 		return err
 	}
 	log.Debug("queryNode try to connect etcd")
-	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
+	err := retry.Do(node.queryNodeLoopCtx, connectEtcdFn, retry.Attempts(300))
 	if err != nil {
 		log.Debug("queryNode try to connect etcd failed", zap.Error(err))
 		return err
@@ -160,7 +160,7 @@ func (node *QueryNode) Init() error {
 	//	},
 	//}
 	//
-	//resp, err := node.queryService.RegisterNode(ctx, registerReq)
+	//resp, err := node.queryCoord.RegisterNode(ctx, registerReq)
 	//if err != nil {
 	//	log.Debug("QueryNode RegisterNode failed", zap.Error(err))
 	//	panic(err)

@@ -68,7 +68,6 @@ type metaTable struct {
 	segID2PartitionID  map[typeutil.UniqueID]typeutil.UniqueID                          // segment id -> partition id
 	flushedSegID       map[typeutil.UniqueID]bool                                       // flushed segment id
 	partitionID2CollID map[typeutil.UniqueID]typeutil.UniqueID                          // partition id -> collection id
-	vChan2Chan         map[string]string                                                // virtual channel name to physical channel name
 
 	tenantLock sync.RWMutex
 	proxyLock  sync.RWMutex
@@ -102,7 +101,6 @@ func (mt *metaTable) reloadFromKV() error {
 	mt.segID2CollID = make(map[typeutil.UniqueID]typeutil.UniqueID)
 	mt.segID2PartitionID = make(map[typeutil.UniqueID]typeutil.UniqueID)
 	mt.flushedSegID = make(map[typeutil.UniqueID]bool)
-	mt.vChan2Chan = make(map[string]string)
 
 	_, values, err := mt.client.LoadWithPrefix(TenantMetaPrefix, 0)
 	if err != nil {
@@ -113,7 +111,7 @@ func (mt *metaTable) reloadFromKV() error {
 		tenantMeta := pb.TenantMeta{}
 		err := proto.UnmarshalText(value, &tenantMeta)
 		if err != nil {
-			return fmt.Errorf("MasterService UnmarshalText pb.TenantMeta err:%w", err)
+			return fmt.Errorf("RootCoord UnmarshalText pb.TenantMeta err:%w", err)
 		}
 		mt.tenantID2Meta[tenantMeta.ID] = tenantMeta
 	}
@@ -127,7 +125,7 @@ func (mt *metaTable) reloadFromKV() error {
 		proxyMeta := pb.ProxyMeta{}
 		err = proto.UnmarshalText(value, &proxyMeta)
 		if err != nil {
-			return fmt.Errorf("MasterService UnmarshalText pb.ProxyMeta err:%w", err)
+			return fmt.Errorf("RootCoord UnmarshalText pb.ProxyMeta err:%w", err)
 		}
 		mt.proxyID2Meta[proxyMeta.ID] = proxyMeta
 	}
@@ -141,16 +139,12 @@ func (mt *metaTable) reloadFromKV() error {
 		collInfo := pb.CollectionInfo{}
 		err = proto.UnmarshalText(value, &collInfo)
 		if err != nil {
-			return fmt.Errorf("MasterService UnmarshalText pb.CollectionInfo err:%w", err)
+			return fmt.Errorf("RootCoord UnmarshalText pb.CollectionInfo err:%w", err)
 		}
 		mt.collID2Meta[collInfo.ID] = collInfo
 		mt.collName2ID[collInfo.Schema.Name] = collInfo.ID
 		for _, partID := range collInfo.PartitionIDs {
 			mt.partitionID2CollID[partID] = collInfo.ID
-		}
-		shardsNum := len(collInfo.VirtualChannelNames)
-		for i := 0; i < shardsNum; i++ {
-			mt.vChan2Chan[collInfo.VirtualChannelNames[i]] = collInfo.PhysicalChannelNames[i]
 		}
 	}
 
@@ -162,7 +156,7 @@ func (mt *metaTable) reloadFromKV() error {
 		partitionInfo := pb.PartitionInfo{}
 		err = proto.UnmarshalText(value, &partitionInfo)
 		if err != nil {
-			return fmt.Errorf("MasterService UnmarshalText pb.PartitionInfo err:%w", err)
+			return fmt.Errorf("RootCoord UnmarshalText pb.PartitionInfo err:%w", err)
 		}
 		collID, ok := mt.partitionID2CollID[partitionInfo.PartitionID]
 		if !ok {
@@ -185,7 +179,7 @@ func (mt *metaTable) reloadFromKV() error {
 		segmentIndexInfo := pb.SegmentIndexInfo{}
 		err = proto.UnmarshalText(value, &segmentIndexInfo)
 		if err != nil {
-			return fmt.Errorf("MasterService UnmarshalText pb.SegmentIndexInfo err:%w", err)
+			return fmt.Errorf("RootCoord UnmarshalText pb.SegmentIndexInfo err:%w", err)
 		}
 		idx, ok := mt.segID2IndexMeta[segmentIndexInfo.SegmentID]
 		if ok {
@@ -205,7 +199,7 @@ func (mt *metaTable) reloadFromKV() error {
 		meta := pb.IndexInfo{}
 		err = proto.UnmarshalText(value, &meta)
 		if err != nil {
-			return fmt.Errorf("MasterService UnmarshalText pb.IndexInfo err:%w", err)
+			return fmt.Errorf("RootCoord UnmarshalText pb.IndexInfo err:%w", err)
 		}
 		mt.indexID2Meta[meta.IndexID] = meta
 	}
@@ -298,11 +292,6 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionIn
 		meta[k] = v
 	}
 
-	shardsNum := len(coll.VirtualChannelNames)
-	for i := 0; i < shardsNum; i++ {
-		mt.vChan2Chan[coll.VirtualChannelNames[i]] = coll.PhysicalChannelNames[i]
-	}
-
 	// save ddOpStr into etcd
 	addition := mt.getAdditionKV(ddOpStr, meta)
 	ts, err := mt.client.MultiSave(meta, addition)
@@ -351,11 +340,6 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ddOpStr func(ts 
 			continue
 		}
 		delete(mt.indexID2Meta, idxInfo.IndexID)
-	}
-
-	shardsNum := len(collMeta.VirtualChannelNames)
-	for i := 0; i < shardsNum; i++ {
-		delete(mt.vChan2Chan, collMeta.VirtualChannelNames[i])
 	}
 
 	delMetakeys := []string{
@@ -1181,16 +1165,4 @@ func (mt *metaTable) AddFlushedSegment(segID typeutil.UniqueID) error {
 	}
 	mt.flushedSegID[segID] = true
 	return nil
-}
-
-// GetChanNameByVirtualChan return physical channel name corresponding the virtual channel
-func (mt *metaTable) GetChanNameByVirtualChan(vname string) (string, error) {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-
-	chanName, ok := mt.vChan2Chan[vname]
-	if !ok {
-		return "", fmt.Errorf("cannot find virtual channel %s", vname)
-	}
-	return chanName, nil
 }

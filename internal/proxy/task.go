@@ -370,14 +370,14 @@ func (it *InsertTask) transferColumnBasedRequestToRowBasedData() error {
 				}
 				blob.Value = append(blob.Value, buffer.Bytes()...)
 			case schemapb.DataType_Int8:
-				d := datas[j][i].(int8)
+				d := int8(datas[j][i].(int32))
 				err := binary.Write(&buffer, endian, d)
 				if err != nil {
 					log.Warn("ConvertData", zap.Error(err))
 				}
 				blob.Value = append(blob.Value, buffer.Bytes()...)
 			case schemapb.DataType_Int16:
-				d := datas[j][i].(int16)
+				d := int16(datas[j][i].(int32))
 				err := binary.Write(&buffer, endian, d)
 				if err != nil {
 					log.Warn("ConvertData", zap.Error(err))
@@ -450,7 +450,6 @@ func (it *InsertTask) checkFieldAutoID() error {
 	autoIDFieldName := ""
 	autoIDLoc := -1
 	primaryLoc := -1
-	var fieldType schemapb.DataType
 	fields := it.schema.Fields
 
 	for loc, field := range fields {
@@ -520,7 +519,7 @@ func (it *InsertTask) checkFieldAutoID() error {
 	if autoIDLoc >= 0 {
 		fieldData := schemapb.FieldData{
 			FieldName: primaryFieldName,
-			Type:      fieldType,
+			Type:      schemapb.DataType_Int64,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_LongData{
@@ -3446,7 +3445,7 @@ func (gibpt *GetIndexBuildProgressTask) Execute(ctx context.Context) error {
 		}
 	}
 	if !foundIndexID {
-		return errors.New(fmt.Sprint("Can't found IndexID for indexName", gibpt.IndexName))
+		return fmt.Errorf("no index is created")
 	}
 
 	var allSegmentIDs []UniqueID
@@ -3667,7 +3666,7 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 		}
 	}
 	if !foundIndexID {
-		return errors.New(fmt.Sprint("Can't found IndexID for indexName", gist.IndexName))
+		return fmt.Errorf("no index is created")
 	}
 
 	var allSegmentIDs []UniqueID

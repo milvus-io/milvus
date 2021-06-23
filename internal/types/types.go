@@ -111,7 +111,7 @@ type RootCoord interface {
 	ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error)
 }
 
-// RootCoordComponent is used by grpc server of master service
+// RootCoordComponent is used by grpc server of RootCoord
 type RootCoordComponent interface {
 	RootCoord
 
@@ -119,10 +119,10 @@ type RootCoordComponent interface {
 	SetDataCoord(context.Context, DataCoord) error
 	SetIndexCoord(IndexCoord) error
 	SetQueryCoord(QueryCoord) error
-	SetNewProxyClient(func(sess *sessionutil.Session) (ProxyNode, error))
+	SetNewProxyClient(func(sess *sessionutil.Session) (Proxy, error))
 }
 
-type ProxyNode interface {
+type Proxy interface {
 	Component
 
 	InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)

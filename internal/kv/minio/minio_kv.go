@@ -62,7 +62,7 @@ func NewMinIOKV(ctx context.Context, option *Option) (*MinIOKV, error) {
 		bucketExists, err = minIOClient.BucketExists(ctx, option.BucketName)
 		return err
 	}
-	err = retry.Retry(100000, time.Millisecond*200, checkBucketFn)
+	err = retry.Do(ctx, checkBucketFn, retry.Attempts(300))
 	if err != nil {
 		return nil, err
 	}

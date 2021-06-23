@@ -42,15 +42,15 @@ func TestFlushMonitor(t *testing.T) {
 	// create seg0 for partition0, seg0/seg1 for partition1
 	segID0_0, err := mockAllocator.allocID()
 	assert.Nil(t, err)
-	segInfo0_0, err := BuildSegment(collID, partID0, segID0_0, channelName)
+	segInfo0_0, err := buildSegment(collID, partID0, segID0_0, channelName)
 	assert.Nil(t, err)
 	segID1_0, err := mockAllocator.allocID()
 	assert.Nil(t, err)
-	segInfo1_0, err := BuildSegment(collID, partID1, segID1_0, channelName)
+	segInfo1_0, err := buildSegment(collID, partID1, segID1_0, channelName)
 	assert.Nil(t, err)
 	segID1_1, err := mockAllocator.allocID()
 	assert.Nil(t, err)
-	segInfo1_1, err := BuildSegment(collID, partID1, segID1_1, channelName)
+	segInfo1_1, err := buildSegment(collID, partID1, segID1_1, channelName)
 	assert.Nil(t, err)
 
 	// check AddSegment
@@ -77,7 +77,7 @@ func TestFlushMonitor(t *testing.T) {
 		fm.segmentPolicy = estSegmentSizePolicy(1024*1024, 1024*1024*2) // row size 1Mib Limit 2 MB
 		segID3Rows, err := mockAllocator.allocID()
 		assert.Nil(t, err)
-		segInfo3Rows, err := BuildSegment(collID, partID1, segID3Rows, channelName)
+		segInfo3Rows, err := buildSegment(collID, partID1, segID3Rows, channelName)
 		segInfo3Rows.NumOfRows = 3
 		assert.Nil(t, err)
 
@@ -95,7 +95,7 @@ func TestFlushMonitor(t *testing.T) {
 		for i := 0; i < 100; i++ {
 			segID, err := mockAllocator.allocID()
 			assert.Nil(t, err)
-			seg, err := BuildSegment(collID, partID0, segID, channelName2)
+			seg, err := buildSegment(collID, partID0, segID, channelName2)
 			assert.Nil(t, err)
 			seg.DmlPosition = &internalpb.MsgPosition{
 				Timestamp: uint64(i + 1),
@@ -108,7 +108,7 @@ func TestFlushMonitor(t *testing.T) {
 
 		exSegID, err := mockAllocator.allocID()
 		assert.Nil(t, err)
-		seg, err := BuildSegment(collID, partID0, exSegID, channelName2)
+		seg, err := buildSegment(collID, partID0, exSegID, channelName2)
 		assert.Nil(t, err)
 		seg.DmlPosition = &internalpb.MsgPosition{
 			Timestamp: uint64(0), // the oldest

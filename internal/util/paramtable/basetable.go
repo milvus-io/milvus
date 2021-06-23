@@ -119,41 +119,41 @@ func (gp *BaseTable) tryloadFromEnv() {
 		panic(err)
 	}
 
-	masterAddress := os.Getenv("MASTER_ADDRESS")
-	if masterAddress == "" {
-		masterHost, err := gp.Load("master.address")
+	rootCoordAddress := os.Getenv("ROOT_COORD_ADDRESS")
+	if rootCoordAddress == "" {
+		rootCoordHost, err := gp.Load("rootCoord.address")
 		if err != nil {
 			panic(err)
 		}
-		port, err := gp.Load("master.port")
+		port, err := gp.Load("rootCoord.port")
 		if err != nil {
 			panic(err)
 		}
-		masterAddress = masterHost + ":" + port
+		rootCoordAddress = rootCoordHost + ":" + port
 	}
-	err = gp.Save("_MasterAddress", masterAddress)
+	err = gp.Save("_RootCoordAddress", rootCoordAddress)
 	if err != nil {
 		panic(err)
 	}
 
-	indexBuilderAddress := os.Getenv("INDEX_SERVICE_ADDRESS")
-	if indexBuilderAddress == "" {
-		indexBuilderHost, err := gp.Load("indexService.address")
+	indexCoordAddress := os.Getenv("INDEX_COORD_ADDRESS")
+	if indexCoordAddress == "" {
+		indexCoordHost, err := gp.Load("indexCoord.address")
 		if err != nil {
 			panic(err)
 		}
-		port, err := gp.Load("indexService.port")
+		port, err := gp.Load("indexCoord.port")
 		if err != nil {
 			panic(err)
 		}
-		indexBuilderAddress = indexBuilderHost + ":" + port
+		indexCoordAddress = indexCoordHost + ":" + port
 	}
-	err = gp.Save("IndexServiceAddress", indexBuilderAddress)
+	err = gp.Save("_IndexCoordAddress", indexCoordAddress)
 	if err != nil {
 		panic(err)
 	}
 
-	queryCoordAddress := os.Getenv("QUERY_SERVICE_ADDRESS")
+	queryCoordAddress := os.Getenv("QUERY_COORD_ADDRESS")
 	if queryCoordAddress == "" {
 		serviceHost, err := gp.Load("queryCoord.address")
 		if err != nil {
@@ -170,7 +170,7 @@ func (gp *BaseTable) tryloadFromEnv() {
 		panic(err)
 	}
 
-	dataCoordAddress := os.Getenv("DATA_SERVICE_ADDRESS")
+	dataCoordAddress := os.Getenv("DATA_COORD_ADDRESS")
 	if dataCoordAddress == "" {
 		serviceHost, err := gp.Load("dataCoord.address")
 		if err != nil {

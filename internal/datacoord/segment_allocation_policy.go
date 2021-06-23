@@ -70,7 +70,7 @@ func getSegmentCapacityPolicy(sizeFactor float64) segmentSealPolicy {
 	return func(status *segmentStatus, ts Timestamp) bool {
 		var allocSize int64
 		for _, allocation := range status.allocations {
-			allocSize += allocation.rowNums
+			allocSize += allocation.numOfRows
 		}
 		// max, written, allocated := status.total, status.currentRows, allocSize
 		// float64(writtenCount) >= Params.SegmentSizeFactor*float64(maxCount)

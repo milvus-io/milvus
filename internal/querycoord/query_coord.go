@@ -98,7 +98,7 @@ func (qc *QueryCoord) Init() error {
 		return err
 	}
 	log.Debug("query coordinator try to connect etcd")
-	err := retry.Retry(100000, time.Millisecond*200, connectEtcdFn)
+	err := retry.Do(qc.loopCtx, connectEtcdFn, retry.Attempts(300))
 	if err != nil {
 		log.Debug("query coordinator try to connect etcd failed", zap.Error(err))
 		return err
@@ -184,7 +184,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 	for nodeID, session := range sessionMap {
 		if _, ok := qc.cluster.nodes[nodeID]; !ok {
 			serverID := session.ServerID
-			err := qc.cluster.RegisterNode(session, serverID)
+			err := qc.cluster.RegisterNode(ctx, session, serverID)
 			if err != nil {
 				log.Error("register queryNode error", zap.Any("error", err.Error()))
 			}
@@ -228,7 +228,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:
 				serverID := event.Session.ServerID
-				err := qc.cluster.RegisterNode(event.Session, serverID)
+				err := qc.cluster.RegisterNode(ctx, event.Session, serverID)
 				if err != nil {
 					log.Error(err.Error())
 				}

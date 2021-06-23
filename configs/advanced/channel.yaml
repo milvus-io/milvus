@@ -12,8 +12,8 @@
 msgChannel:
   # channel name generation rule: ${namePrefix}-${ChannelIdx}
   chanNamePrefix:
-    masterTimeTick: "master-timetick"
-    masterStatistics: "master-statistics"
+    rootCoordTimeTick: "rootcoord-timetick"
+    rootCoordStatistics: "rootcoord-statistics"
     search: "search"
     searchResult: "searchResult"
     proxyTimeTick: "proxyTimeTick"
@@ -28,7 +28,7 @@ msgChannel:
 
   # sub name generation rule: ${subNamePrefix}-${NodeID}
   subNamePrefix:
-    masterSubNamePrefix: "master"
+    rootCoordSubNamePrefix: "rootcoord"
     proxySubNamePrefix: "proxy"
     queryNodeSubNamePrefix: "queryNode"
     dataNodeSubNamePrefix: "dataNode"

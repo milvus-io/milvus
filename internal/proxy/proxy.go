@@ -111,7 +111,7 @@ func (node *Proxy) Init() error {
 		log.Debug("Proxy dataCoord is ready")
 	}
 
-	// wait for queryService state changed to Healthy
+	// wait for queryCoord state changed to Healthy
 	if node.queryCoord != nil {
 		log.Debug("Proxy wait for queryCoord ready")
 		err := funcutil.WaitForComponentHealthy(node.ctx, node.queryCoord, "QueryCoord", 1000000, time.Millisecond*200)
@@ -370,13 +370,23 @@ func (node *Proxy) Start() error {
 func (node *Proxy) Stop() error {
 	node.cancel()
 
-	node.idAllocator.Close()
-	node.segAssigner.Close()
-	node.sched.Close()
-	node.tick.Close()
-	err := node.chTicker.close()
-	if err != nil {
-		return err
+	if node.idAllocator != nil {
+		node.idAllocator.Close()
+	}
+	if node.segAssigner != nil {
+		node.segAssigner.Close()
+	}
+	if node.sched != nil {
+		node.sched.Close()
+	}
+	if node.tick != nil {
+		node.tick.Close()
+	}
+	if node.chTicker != nil {
+		err := node.chTicker.close()
+		if err != nil {
+			return err
+		}
 	}
 
 	node.wg.Wait()

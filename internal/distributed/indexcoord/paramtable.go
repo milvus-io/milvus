@@ -40,11 +40,11 @@ func (pt *ParamTable) initParams() {
 }
 
 func (pt *ParamTable) initServicePort() {
-	pt.ServicePort = pt.ParseInt("indexService.port")
+	pt.ServicePort = pt.ParseInt("indexCoord.port")
 }
 
 func (pt *ParamTable) initServiceAddress() {
-	ret, err := pt.Load("IndexServiceAddress")
+	ret, err := pt.Load("_IndexCoordAddress")
 	if err != nil {
 		panic(err)
 	}

@@ -127,7 +127,7 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string
 	}()
 	wg.Wait()
 
-	metrics.RegisterProxyNode()
+	metrics.RegisterProxy()
 	return pn
 }
 
