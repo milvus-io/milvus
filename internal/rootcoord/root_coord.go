@@ -257,27 +257,15 @@ func (c *Core) startDdScheduler() {
 
 func (c *Core) startTimeTickLoop() {
 	ticker := time.NewTicker(time.Duration(Params.TimeTickInterval) * time.Millisecond)
-	cnt := 0
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Debug("rootcoord context closed", zap.Error(c.ctx.Err()))
 			return
 		case <-ticker.C:
-			if len(c.ddReqQueue) < 2 || cnt > 5 {
-				tt := &TimetickTask{
-					baseReqTask: baseReqTask{
-						ctx:  c.ctx,
-						cv:   make(chan error, 1),
-						core: c,
-					},
-				}
-				c.ddReqQueue <- tt
-				cnt = 0
-			} else {
-				cnt++
+			if ts, err := c.TSOAllocator(1); err == nil {
+				c.SendTimeTick(ts)
 			}
-
 		}
 	}
 }

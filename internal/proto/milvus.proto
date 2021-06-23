@@ -33,7 +33,7 @@ service MilvusService {
   rpc Insert(InsertRequest) returns (MutationResult) {}
   rpc Search(SearchRequest) returns (SearchResults) {}
   rpc Retrieve(RetrieveRequest) returns (RetrieveResults) {}
-  rpc Flush(FlushRequest) returns (common.Status) {}
+  rpc Flush(FlushRequest) returns (FlushResponse) {}
   rpc Query(QueryRequest) returns (QueryResults) {}
 
   rpc GetPersistentSegmentInfo(GetPersistentSegmentInfoRequest) returns (GetPersistentSegmentInfoResponse) {}
@@ -365,6 +365,12 @@ message FlushRequest {
   common.MsgBase base = 1;
   string db_name = 2;
   repeated string collection_names = 3;
+}
+
+message FlushResponse{
+  common.Status status = 1;
+  string db_name = 2;
+  map<string, schema.LongArray> coll_segIDs = 3;
 }
 
 message QueryRequest {

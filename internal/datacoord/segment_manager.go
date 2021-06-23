@@ -47,8 +47,8 @@ type Manager interface {
 	AllocSegment(ctx context.Context, collectionID, partitionID UniqueID, channelName string, requestRows int64) (UniqueID, int64, Timestamp, error)
 	// DropSegment drop the segment from allocator.
 	DropSegment(ctx context.Context, segmentID UniqueID)
-	// SealAllSegments get all opened segment ids of collection. return success and failed segment ids
-	SealAllSegments(ctx context.Context, collectionID UniqueID) error
+	// SealAllSegments sealed all segmetns of collection with collectionID and return sealed segments
+	SealAllSegments(ctx context.Context, collectionID UniqueID) ([]UniqueID, error)
 	// GetFlushableSegments return flushable segment ids
 	GetFlushableSegments(ctx context.Context, channel string, ts Timestamp) ([]UniqueID, error)
 	// UpdateSegmentStats update segment status
@@ -361,21 +361,27 @@ func (s *SegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
 	delete(s.stats, segmentID)
 }
 
-func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID) error {
+func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID) ([]UniqueID, error) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	ret := make([]UniqueID, 0)
 	for _, status := range s.stats {
-		if status.sealed || status.collectionID != collectionID {
+		if status.collectionID != collectionID {
+			continue
+		}
+		if status.sealed {
+			ret = append(ret, status.id)
 			continue
 		}
 		if err := s.meta.SealSegment(status.id); err != nil {
-			return err
+			return nil, err
 		}
 		status.sealed = true
+		ret = append(ret, status.id)
 	}
-	return nil
+	return ret, nil
 }
 
 func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel string,

@@ -160,7 +160,7 @@ func (node *QueryNode) Init() error {
 	//	},
 	//}
 	//
-	//resp, err := node.queryService.RegisterNode(ctx, registerReq)
+	//resp, err := node.queryCoord.RegisterNode(ctx, registerReq)
 	//if err != nil {
 	//	log.Debug("QueryNode RegisterNode failed", zap.Error(err))
 	//	panic(err)

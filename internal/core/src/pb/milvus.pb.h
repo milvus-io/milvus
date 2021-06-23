@@ -31,6 +31,9 @@
 #include <google/protobuf/message.h>
 #include <google/protobuf/repeated_field.h>  // IWYU pragma: export
 #include <google/protobuf/extension_set.h>  // IWYU pragma: export
+#include <google/protobuf/map.h>  // IWYU pragma: export
+#include <google/protobuf/map_entry.h>
+#include <google/protobuf/map_field_inl.h>
 #include <google/protobuf/generated_enum_reflection.h>
 #include <google/protobuf/unknown_field_set.h>
 #include "common.pb.h"
@@ -50,7 +53,7 @@ struct TableStruct_milvus_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[57]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[59]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -108,6 +111,12 @@ extern DummyResponseDefaultTypeInternal _DummyResponse_default_instance_;
 class FlushRequest;
 class FlushRequestDefaultTypeInternal;
 extern FlushRequestDefaultTypeInternal _FlushRequest_default_instance_;
+class FlushResponse;
+class FlushResponseDefaultTypeInternal;
+extern FlushResponseDefaultTypeInternal _FlushResponse_default_instance_;
+class FlushResponse_CollSegIDsEntry_DoNotUse;
+class FlushResponse_CollSegIDsEntry_DoNotUseDefaultTypeInternal;
+extern FlushResponse_CollSegIDsEntry_DoNotUseDefaultTypeInternal _FlushResponse_CollSegIDsEntry_DoNotUse_default_instance_;
 class GetCollectionStatisticsRequest;
 class GetCollectionStatisticsRequestDefaultTypeInternal;
 extern GetCollectionStatisticsRequestDefaultTypeInternal _GetCollectionStatisticsRequest_default_instance_;
@@ -251,6 +260,8 @@ template<> ::milvus::proto::milvus::DropPartitionRequest* Arena::CreateMaybeMess
 template<> ::milvus::proto::milvus::DummyRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::DummyRequest>(Arena*);
 template<> ::milvus::proto::milvus::DummyResponse* Arena::CreateMaybeMessage<::milvus::proto::milvus::DummyResponse>(Arena*);
 template<> ::milvus::proto::milvus::FlushRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::FlushRequest>(Arena*);
+template<> ::milvus::proto::milvus::FlushResponse* Arena::CreateMaybeMessage<::milvus::proto::milvus::FlushResponse>(Arena*);
+template<> ::milvus::proto::milvus::FlushResponse_CollSegIDsEntry_DoNotUse* Arena::CreateMaybeMessage<::milvus::proto::milvus::FlushResponse_CollSegIDsEntry_DoNotUse>(Arena*);
 template<> ::milvus::proto::milvus::GetCollectionStatisticsRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::GetCollectionStatisticsRequest>(Arena*);
 template<> ::milvus::proto::milvus::GetCollectionStatisticsResponse* Arena::CreateMaybeMessage<::milvus::proto::milvus::GetCollectionStatisticsResponse>(Arena*);
 template<> ::milvus::proto::milvus::GetIndexBuildProgressRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::GetIndexBuildProgressRequest>(Arena*);
@@ -7947,6 +7958,201 @@ class FlushRequest :
 };
 // -------------------------------------------------------------------
 
+class FlushResponse_CollSegIDsEntry_DoNotUse : public ::PROTOBUF_NAMESPACE_ID::internal::MapEntry<FlushResponse_CollSegIDsEntry_DoNotUse, 
+    std::string, ::milvus::proto::schema::LongArray,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_MESSAGE,
+    0 > {
+public:
+  typedef ::PROTOBUF_NAMESPACE_ID::internal::MapEntry<FlushResponse_CollSegIDsEntry_DoNotUse, 
+    std::string, ::milvus::proto::schema::LongArray,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_MESSAGE,
+    0 > SuperType;
+  FlushResponse_CollSegIDsEntry_DoNotUse();
+  FlushResponse_CollSegIDsEntry_DoNotUse(::PROTOBUF_NAMESPACE_ID::Arena* arena);
+  void MergeFrom(const FlushResponse_CollSegIDsEntry_DoNotUse& other);
+  static const FlushResponse_CollSegIDsEntry_DoNotUse* internal_default_instance() { return reinterpret_cast<const FlushResponse_CollSegIDsEntry_DoNotUse*>(&_FlushResponse_CollSegIDsEntry_DoNotUse_default_instance_); }
+  static bool ValidateKey(std::string* s) {
+    return ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(s->data(), s->size(), ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE, "milvus.proto.milvus.FlushResponse.CollSegIDsEntry.key");
+ }
+  static bool ValidateValue(void*) { return true; }
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& other) final;
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_milvus_2eproto);
+    return ::descriptor_table_milvus_2eproto.file_level_metadata[45];
+  }
+
+  public:
+};
+
+// -------------------------------------------------------------------
+
+class FlushResponse :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.milvus.FlushResponse) */ {
+ public:
+  FlushResponse();
+  virtual ~FlushResponse();
+
+  FlushResponse(const FlushResponse& from);
+  FlushResponse(FlushResponse&& from) noexcept
+    : FlushResponse() {
+    *this = ::std::move(from);
+  }
+
+  inline FlushResponse& operator=(const FlushResponse& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline FlushResponse& operator=(FlushResponse&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const FlushResponse& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const FlushResponse* internal_default_instance() {
+    return reinterpret_cast<const FlushResponse*>(
+               &_FlushResponse_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    46;
+
+  friend void swap(FlushResponse& a, FlushResponse& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(FlushResponse* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline FlushResponse* New() const final {
+    return CreateMaybeMessage<FlushResponse>(nullptr);
+  }
+
+  FlushResponse* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<FlushResponse>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const FlushResponse& from);
+  void MergeFrom(const FlushResponse& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(FlushResponse* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.milvus.FlushResponse";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_milvus_2eproto);
+    return ::descriptor_table_milvus_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kCollSegIDsFieldNumber = 3,
+    kDbNameFieldNumber = 2,
+    kStatusFieldNumber = 1,
+  };
+  // map<string, .milvus.proto.schema.LongArray> coll_segIDs = 3;
+  int coll_segids_size() const;
+  void clear_coll_segids();
+  const ::PROTOBUF_NAMESPACE_ID::Map< std::string, ::milvus::proto::schema::LongArray >&
+      coll_segids() const;
+  ::PROTOBUF_NAMESPACE_ID::Map< std::string, ::milvus::proto::schema::LongArray >*
+      mutable_coll_segids();
+
+  // string db_name = 2;
+  void clear_db_name();
+  const std::string& db_name() const;
+  void set_db_name(const std::string& value);
+  void set_db_name(std::string&& value);
+  void set_db_name(const char* value);
+  void set_db_name(const char* value, size_t size);
+  std::string* mutable_db_name();
+  std::string* release_db_name();
+  void set_allocated_db_name(std::string* db_name);
+
+  // .milvus.proto.common.Status status = 1;
+  bool has_status() const;
+  void clear_status();
+  const ::milvus::proto::common::Status& status() const;
+  ::milvus::proto::common::Status* release_status();
+  ::milvus::proto::common::Status* mutable_status();
+  void set_allocated_status(::milvus::proto::common::Status* status);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.milvus.FlushResponse)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::internal::MapField<
+      FlushResponse_CollSegIDsEntry_DoNotUse,
+      std::string, ::milvus::proto::schema::LongArray,
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_MESSAGE,
+      0 > coll_segids_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr db_name_;
+  ::milvus::proto::common::Status* status_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_milvus_2eproto;
+};
+// -------------------------------------------------------------------
+
 class QueryRequest :
     public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.milvus.QueryRequest) */ {
  public:
@@ -7989,7 +8195,7 @@ class QueryRequest :
                &_QueryRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    45;
+    47;
 
   friend void swap(QueryRequest& a, QueryRequest& b) {
     a.Swap(&b);
@@ -8200,7 +8406,7 @@ class QueryResults :
                &_QueryResults_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    46;
+    48;
 
   friend void swap(QueryResults& a, QueryResults& b) {
     a.Swap(&b);
@@ -8347,7 +8553,7 @@ class PersistentSegmentInfo :
                &_PersistentSegmentInfo_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    47;
+    49;
 
   friend void swap(PersistentSegmentInfo& a, PersistentSegmentInfo& b) {
     a.Swap(&b);
@@ -8506,7 +8712,7 @@ class GetPersistentSegmentInfoRequest :
                &_GetPersistentSegmentInfoRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    48;
+    50;
 
   friend void swap(GetPersistentSegmentInfoRequest& a, GetPersistentSegmentInfoRequest& b) {
     a.Swap(&b);
@@ -8666,7 +8872,7 @@ class GetPersistentSegmentInfoResponse :
                &_GetPersistentSegmentInfoResponse_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    49;
+    51;
 
   friend void swap(GetPersistentSegmentInfoResponse& a, GetPersistentSegmentInfoResponse& b) {
     a.Swap(&b);
@@ -8813,7 +9019,7 @@ class QuerySegmentInfo :
                &_QuerySegmentInfo_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    50;
+    52;
 
   friend void swap(QuerySegmentInfo& a, QuerySegmentInfo& b) {
     a.Swap(&b);
@@ -8992,7 +9198,7 @@ class GetQuerySegmentInfoRequest :
                &_GetQuerySegmentInfoRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    51;
+    53;
 
   friend void swap(GetQuerySegmentInfoRequest& a, GetQuerySegmentInfoRequest& b) {
     a.Swap(&b);
@@ -9152,7 +9358,7 @@ class GetQuerySegmentInfoResponse :
                &_GetQuerySegmentInfoResponse_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    52;
+    54;
 
   friend void swap(GetQuerySegmentInfoResponse& a, GetQuerySegmentInfoResponse& b) {
     a.Swap(&b);
@@ -9299,7 +9505,7 @@ class DummyRequest :
                &_DummyRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    53;
+    55;
 
   friend void swap(DummyRequest& a, DummyRequest& b) {
     a.Swap(&b);
@@ -9436,7 +9642,7 @@ class DummyResponse :
                &_DummyResponse_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    54;
+    56;
 
   friend void swap(DummyResponse& a, DummyResponse& b) {
     a.Swap(&b);
@@ -9573,7 +9779,7 @@ class RegisterLinkRequest :
                &_RegisterLinkRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    55;
+    57;
 
   friend void swap(RegisterLinkRequest& a, RegisterLinkRequest& b) {
     a.Swap(&b);
@@ -9695,7 +9901,7 @@ class RegisterLinkResponse :
                &_RegisterLinkResponse_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    56;
+    58;
 
   friend void swap(RegisterLinkResponse& a, RegisterLinkResponse& b) {
     a.Swap(&b);
@@ -17225,6 +17431,123 @@ FlushRequest::mutable_collection_names() {
 
 // -------------------------------------------------------------------
 
+// -------------------------------------------------------------------
+
+// FlushResponse
+
+// .milvus.proto.common.Status status = 1;
+inline bool FlushResponse::has_status() const {
+  return this != internal_default_instance() && status_ != nullptr;
+}
+inline const ::milvus::proto::common::Status& FlushResponse::status() const {
+  const ::milvus::proto::common::Status* p = status_;
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.FlushResponse.status)
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::proto::common::Status*>(
+      &::milvus::proto::common::_Status_default_instance_);
+}
+inline ::milvus::proto::common::Status* FlushResponse::release_status() {
+  // @@protoc_insertion_point(field_release:milvus.proto.milvus.FlushResponse.status)
+  
+  ::milvus::proto::common::Status* temp = status_;
+  status_ = nullptr;
+  return temp;
+}
+inline ::milvus::proto::common::Status* FlushResponse::mutable_status() {
+  
+  if (status_ == nullptr) {
+    auto* p = CreateMaybeMessage<::milvus::proto::common::Status>(GetArenaNoVirtual());
+    status_ = p;
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.FlushResponse.status)
+  return status_;
+}
+inline void FlushResponse::set_allocated_status(::milvus::proto::common::Status* status) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
+  if (message_arena == nullptr) {
+    delete reinterpret_cast< ::PROTOBUF_NAMESPACE_ID::MessageLite*>(status_);
+  }
+  if (status) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
+    if (message_arena != submessage_arena) {
+      status = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, status, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  status_ = status;
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.FlushResponse.status)
+}
+
+// string db_name = 2;
+inline void FlushResponse::clear_db_name() {
+  db_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& FlushResponse::db_name() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.FlushResponse.db_name)
+  return db_name_.GetNoArena();
+}
+inline void FlushResponse::set_db_name(const std::string& value) {
+  
+  db_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.FlushResponse.db_name)
+}
+inline void FlushResponse::set_db_name(std::string&& value) {
+  
+  db_name_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.milvus.FlushResponse.db_name)
+}
+inline void FlushResponse::set_db_name(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  db_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.milvus.FlushResponse.db_name)
+}
+inline void FlushResponse::set_db_name(const char* value, size_t size) {
+  
+  db_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.milvus.FlushResponse.db_name)
+}
+inline std::string* FlushResponse::mutable_db_name() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.FlushResponse.db_name)
+  return db_name_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* FlushResponse::release_db_name() {
+  // @@protoc_insertion_point(field_release:milvus.proto.milvus.FlushResponse.db_name)
+  
+  return db_name_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void FlushResponse::set_allocated_db_name(std::string* db_name) {
+  if (db_name != nullptr) {
+    
+  } else {
+    
+  }
+  db_name_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), db_name);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.FlushResponse.db_name)
+}
+
+// map<string, .milvus.proto.schema.LongArray> coll_segIDs = 3;
+inline int FlushResponse::coll_segids_size() const {
+  return coll_segids_.size();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::Map< std::string, ::milvus::proto::schema::LongArray >&
+FlushResponse::coll_segids() const {
+  // @@protoc_insertion_point(field_map:milvus.proto.milvus.FlushResponse.coll_segIDs)
+  return coll_segids_.GetMap();
+}
+inline ::PROTOBUF_NAMESPACE_ID::Map< std::string, ::milvus::proto::schema::LongArray >*
+FlushResponse::mutable_coll_segids() {
+  // @@protoc_insertion_point(field_mutable_map:milvus.proto.milvus.FlushResponse.coll_segIDs)
+  return coll_segids_.MutableMap();
+}
+
+// -------------------------------------------------------------------
+
 // QueryRequest
 
 // .milvus.proto.common.MsgBase base = 1;
@@ -18515,6 +18838,10 @@ inline void RegisterLinkResponse::set_allocated_status(::milvus::proto::common::
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

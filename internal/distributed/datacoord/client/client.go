@@ -178,11 +178,11 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 	return ret.(*milvuspb.StringResponse), err
 }
 
-func (c *Client) Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error) {
+func (c *Client) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		return c.grpcClient.Flush(ctx, req)
 	})
-	return ret.(*commonpb.Status), err
+	return ret.(*datapb.FlushResponse), err
 }
 
 func (c *Client) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {

@@ -141,7 +141,7 @@ func (s *Server) init() error {
 
 	dataCoord, err := dsc.NewClient(s.loopCtx, qc.Params.MetaRootPath, qc.Params.EtcdEndpoints, retry.Attempts(300))
 	if err != nil {
-		log.Debug("QueryService try to new DataCoord client failed", zap.Error(err))
+		log.Debug("QueryCoord try to new DataCoord client failed", zap.Error(err))
 		panic(err)
 	}
 	if err = dataCoord.Init(); err != nil {

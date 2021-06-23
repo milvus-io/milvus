@@ -128,7 +128,7 @@ func TestFlush(t *testing.T) {
 		CollectionID: 0,
 	})
 	assert.Nil(t, err)
-	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	ids, err := svr.segmentManager.GetFlushableSegments(context.TODO(), "channel-1", expireTs)
 	assert.Nil(t, err)
 	assert.EqualValues(t, 1, len(ids))
@@ -546,7 +546,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 			CollectionID: 0,
 		})
 		assert.Nil(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp2.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp2.Status.ErrorCode)
 
 		msgPack := msgstream.MsgPack{}
 		msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", assign.ExpireTime)
