@@ -130,7 +130,7 @@ class TestUtilityParams(TestcaseBase):
         assert "invalid" or "illegal" in str(ex)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_wait_index_invalid_index_name(self, get_invalid_index_name):
+    def _test_wait_index_invalid_index_name(self, get_invalid_index_name):
         """
         target: test wait_index
         method: input invalid index name
