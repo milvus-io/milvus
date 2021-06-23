@@ -1206,10 +1206,10 @@ class TestCollectionDataframe(TestcaseBase):
 
     @pytest.mark.xfail(reason="#5977")
     @pytest.mark.tags(CaseLabel.L1)
-    def test_construct_auto_id_false_repeated_values(self):
+    def test_construct_auto_id_false_same_values(self):
         """
-        target: test construct with false auto_id and repeated values
-        method: auto_id=False, primary field values repeated
+        target: test construct with false auto_id and same value
+        method: auto_id=False, primary field same values
         expected: raise exception
         """
         self._connect()
@@ -1226,7 +1226,7 @@ class TestCollectionDataframe(TestcaseBase):
         """
         target: test construct with negative values
         method: auto_id=False, primary field values is negative
-        expected: todo
+        expected: verify num entities
         """
         self._connect()
         nb = 100
