@@ -380,7 +380,7 @@ func (s *Server) Retrieve(ctx context.Context, request *milvuspb.RetrieveRequest
 	return s.proxy.Retrieve(ctx, request)
 }
 
-func (s *Server) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*commonpb.Status, error) {
+func (s *Server) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*milvuspb.FlushResponse, error) {
 	return s.proxy.Flush(ctx, request)
 }
 
