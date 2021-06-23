@@ -71,7 +71,7 @@ func defaultRegisterPolicy() dataNodeRegisterPolicy {
 }
 
 func defaultUnregisterPolicy() dataNodeUnregisterPolicy {
-	return &randomAssignUnregisterPolicy{}
+	return randomAssignRegisterFunc
 }
 
 func defaultAssignPolicy() channelAssignPolicy {
