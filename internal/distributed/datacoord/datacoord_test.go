@@ -126,7 +126,7 @@ func TestRun(t *testing.T) {
 		req := &datapb.FlushRequest{}
 		rsp, err := dsServer.Flush(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, rsp.ErrorCode, commonpb.ErrorCode_Success)
+		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
 	})
 
 	t.Run("assign segment id", func(t *testing.T) {

@@ -49,7 +49,7 @@ type DataCoord interface {
 	Component
 	TimeTickProvider
 
-	Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error)
+	Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error)
 
 	AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error)
 	GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)

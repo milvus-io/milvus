@@ -135,7 +135,7 @@ func TestSaveSegmentsToMeta(t *testing.T) {
 	assert.Nil(t, err)
 	segStatus := segmentManager.stats[segID]
 	assert.NotNil(t, segStatus)
-	err = segmentManager.SealAllSegments(context.Background(), collID)
+	_, err = segmentManager.SealAllSegments(context.Background(), collID)
 	assert.Nil(t, err)
 
 	segment, err := meta.GetSegment(segID)
