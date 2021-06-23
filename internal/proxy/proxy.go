@@ -111,7 +111,7 @@ func (node *Proxy) Init() error {
 		log.Debug("Proxy dataCoord is ready")
 	}
 
-	// wait for queryService state changed to Healthy
+	// wait for queryCoord state changed to Healthy
 	if node.queryCoord != nil {
 		log.Debug("Proxy wait for queryCoord ready")
 		err := funcutil.WaitForComponentHealthy(node.ctx, node.queryCoord, "QueryCoord", 1000000, time.Millisecond*200)

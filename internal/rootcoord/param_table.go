@@ -124,7 +124,7 @@ func (p *ParamTable) initKvRootPath() {
 }
 
 func (p *ParamTable) initMsgChannelSubName() {
-	name, err := p.Load("msgChannel.subNamePrefix.masterSubNamePrefix")
+	name, err := p.Load("msgChannel.subNamePrefix.rootCoordSubNamePrefix")
 	if err != nil {
 		panic(err)
 	}
@@ -132,7 +132,7 @@ func (p *ParamTable) initMsgChannelSubName() {
 }
 
 func (p *ParamTable) initTimeTickChannel() {
-	channel, err := p.Load("msgChannel.chanNamePrefix.masterTimeTick")
+	channel, err := p.Load("msgChannel.chanNamePrefix.rootCoordTimeTick")
 	if err != nil {
 		panic(err)
 	}
@@ -140,7 +140,7 @@ func (p *ParamTable) initTimeTickChannel() {
 }
 
 func (p *ParamTable) initStatisticsChannelName() {
-	channel, err := p.Load("msgChannel.chanNamePrefix.masterStatistics")
+	channel, err := p.Load("msgChannel.chanNamePrefix.rootCoordStatistics")
 	if err != nil {
 		panic(err)
 	}
@@ -156,11 +156,11 @@ func (p *ParamTable) initSegmentInfoChannelName() {
 }
 
 func (p *ParamTable) initMaxPartitionNum() {
-	p.MaxPartitionNum = p.ParseInt64("master.maxPartitionNum")
+	p.MaxPartitionNum = p.ParseInt64("rootcoord.maxPartitionNum")
 }
 
 func (p *ParamTable) initMinSegmentSizeToEnableIndex() {
-	p.MinSegmentSizeToEnableIndex = p.ParseInt64("master.minSegmentSizeToEnableIndex")
+	p.MinSegmentSizeToEnableIndex = p.ParseInt64("rootcoord.minSegmentSizeToEnableIndex")
 }
 
 func (p *ParamTable) initDefaultPartitionName() {
@@ -180,11 +180,11 @@ func (p *ParamTable) initDefaultIndexName() {
 }
 
 func (p *ParamTable) initTimeout() {
-	p.Timeout = p.ParseInt("master.timeout")
+	p.Timeout = p.ParseInt("rootcoord.timeout")
 }
 
 func (p *ParamTable) initTimeTickInterval() {
-	p.TimeTickInterval = p.ParseInt("master.timeTickInterval")
+	p.TimeTickInterval = p.ParseInt("rootcoord.timeTickInterval")
 }
 
 func (p *ParamTable) initLogCfg() {
@@ -207,7 +207,7 @@ func (p *ParamTable) initLogCfg() {
 		panic(err)
 	}
 	if len(rootPath) != 0 {
-		p.Log.File.Filename = path.Join(rootPath, "masterservice.log")
+		p.Log.File.Filename = path.Join(rootPath, "rootcoord.log")
 	} else {
 		p.Log.File.Filename = ""
 	}

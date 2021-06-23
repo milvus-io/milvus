@@ -61,7 +61,7 @@ func getQueryCoordAddress(sess *sessionutil.Session) (string, error) {
 	return ms.Address, nil
 }
 
-// NewClient creates a client for QueryService grpc call.
+// NewClient creates a client for QueryCoord grpc call.
 func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string, retryOptions ...retry.Option) (*Client, error) {
 	sess := sessionutil.NewSession(ctx, metaRoot, etcdEndpoints)
 	if sess == nil {

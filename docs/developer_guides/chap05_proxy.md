@@ -70,7 +70,7 @@ type InvalidateCollMetaCacheRequest struct {
 #### 6.1 Proxy Node Interface
 
 ```go
-type ProxyNode interface {
+type Proxy interface {
 	Component
 	
 	InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
@@ -89,7 +89,7 @@ type InvalidateCollMetaCacheRequest struct {
 
 #### 6.2 Milvus Service Interface
 
-ProxyNode also implements Milvus Service interface to receive client grpc call.
+Proxy also implements Milvus Service interface to receive client grpc call.
 
 ```go
 type MilvusService interface {
@@ -332,11 +332,10 @@ type Proxy struct {
 	
 	stateCode internalpb.StateCode
 	
-	masterClient       MasterClient
-	indexServiceClient IndexServiceClient
-	dataServiceClient  DataServiceClient
-	proxyServiceClient ProxyServiceClient
-	queryServiceClient QueryServiceClient
+	rootCoordClient  RootCoordClient
+	indexCoordClient IndexCoordClient
+	dataCoordClient  DataCoordClient
+	queryCoordClient QueryCoordClient
 	
 	sched *TaskScheduler
 	tick  *timeTick
@@ -361,13 +360,13 @@ func (node *NodeImpl) AddStartCallback(callbacks ...func())
 func (node *NodeImpl) waitForServiceReady(ctx context.Context, service Component, serviceName string) error
 func (node *NodeImpl) lastTick() Timestamp
 func (node *NodeImpl) AddCloseCallback(callbacks ...func())
-func (node *NodeImpl) SetMasterClient(cli MasterClient)
-func (node *NodeImpl) SetIndexServiceClient(cli IndexServiceClient)
-func (node *NodeImpl) SetDataServiceClient(cli DataServiceClient)
-func (node *NodeImpl) SetProxyServiceClient(cli ProxyServiceClient)
-func (node *NodeImpl) SetQueryServiceClient(cli QueryServiceClient)
+func (node *NodeImpl) SetRootCoordClient(cli RootCoordClient)
+func (node *NodeImpl) SetIndexCoordClient(cli IndexCoordClient)
+func (node *NodeImpl) SetDataCoordClient(cli DataCoordClient)
+func (node *NodeImpl) SetProxyCoordClient(cli ProxyCoordClient)
+func (node *NodeImpl) SetQueryCoordClient(cli QueryCoordClient)
 
-func NewProxyNodeImpl(ctx context.Context, factory msgstream.Factory) (*NodeImpl, error)
+func NewProxyImpl(ctx context.Context, factory msgstream.Factory) (*NodeImpl, error)
 ```
 
 #### Global Parameter Table

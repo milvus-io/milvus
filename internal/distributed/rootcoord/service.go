@@ -244,7 +244,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 }
 
 func (s *Server) start() error {
-	log.Debug("Master Core start ...")
+	log.Debug("RootCoord Core start ...")
 	if err := s.rootCoord.Start(); err != nil {
 		return err
 	}
