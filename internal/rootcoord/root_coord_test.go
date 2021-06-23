@@ -443,7 +443,6 @@ func TestMasterService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-		assert.Equal(t, 2, len(core.MetaTable.vChan2Chan))
 		assert.Equal(t, 2, len(core.dmlChannels.dml))
 
 		pChan := core.MetaTable.ListCollectionPhysicalChannels()
@@ -463,9 +462,7 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, 2, len(createMeta.PhysicalChannelNames))
 
 		vChanName := createMeta.VirtualChannelNames[0]
-		chanName, err := core.MetaTable.GetChanNameByVirtualChan(vChanName)
-		assert.Nil(t, err)
-		assert.Equal(t, createMeta.PhysicalChannelNames[0], chanName)
+		assert.Equal(t, createMeta.PhysicalChannelNames[0], ToPhysicalChannel(vChanName))
 
 		// get CreatePartitionMsg
 		msgPack, ok = <-dmlStream.Chan()
@@ -1058,8 +1055,7 @@ func TestMasterService(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
 		vChanName := collMeta.VirtualChannelNames[0]
-		_, err = core.MetaTable.GetChanNameByVirtualChan(vChanName)
-		assert.NotNil(t, err)
+		assert.Equal(t, collMeta.PhysicalChannelNames[0], ToPhysicalChannel(vChanName))
 
 		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
 		assert.Equal(t, 1, len(msgs))
