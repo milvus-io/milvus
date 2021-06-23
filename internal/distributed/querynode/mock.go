@@ -22,7 +22,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	internalPb "github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
 const (
@@ -191,17 +190,4 @@ func (index *IndexCoordMock) GetIndexFilePaths(req *indexpb.GetIndexFilePathsReq
 		FilePaths: indexPathInfo,
 	}
 	return rsp, nil
-}
-
-type queryCoordMock struct{}
-
-func (q *queryCoordMock) RegisterNode(req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
-	return &querypb.RegisterNodeResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		InitParams: &internalPb.InitParams{
-			NodeID: int64(0),
-		},
-	}, nil
 }
