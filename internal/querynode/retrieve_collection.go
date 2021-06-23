@@ -14,12 +14,10 @@ package querynode
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"reflect"
 	"sync"
 
-	"github.com/golang/protobuf/proto"
 	oplog "github.com/opentracing/opentracing-go/log"
 	"go.uber.org/zap"
 
@@ -315,31 +313,6 @@ func (rc *retrieveCollection) doUnsolvedMsgRetrieve() {
 			log.Debug("doUnsolvedMsgRetrieve, do retrieve done", zap.Int("num of retrieveMsg", len(retrieveMsg)))
 		}
 	}
-}
-
-func mergeRetrieveResults(dataArr []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error) {
-	var final *segcorepb.RetrieveResults
-	for _, data := range dataArr {
-		if data == nil {
-			continue
-		}
-
-		if final == nil {
-			final = proto.Clone(data).(*segcorepb.RetrieveResults)
-			continue
-		}
-
-		proto.Merge(final.Ids, data.Ids)
-		if len(final.FieldsData) != len(data.FieldsData) {
-			return nil, fmt.Errorf("mismatch FieldData in RetrieveResults")
-		}
-
-		for i := range final.FieldsData {
-			proto.Merge(final.FieldsData[i], data.FieldsData[i])
-		}
-	}
-
-	return final, nil
 }
 
 func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error {
