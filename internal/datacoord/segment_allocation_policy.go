@@ -14,6 +14,8 @@ package datacoord
 import (
 	"sort"
 
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -60,27 +62,25 @@ type sealPolicy interface {
 }
 
 // segmentSealPolicy seal policy applies to segment
-type segmentSealPolicy func(*segmentStatus, Timestamp) bool
+type segmentSealPolicy func(status *segmentStatus, info *datapb.SegmentInfo, ts Timestamp) bool
 
 // channelSealPolicy seal policy applies to channel
 type channelSealPolicy func(string, []*segmentStatus, Timestamp) []*segmentStatus
 
 // getSegmentCapacityPolicy get segmentSealPolicy with segment size factor policy
 func getSegmentCapacityPolicy(sizeFactor float64) segmentSealPolicy {
-	return func(status *segmentStatus, ts Timestamp) bool {
+	return func(status *segmentStatus, info *datapb.SegmentInfo, ts Timestamp) bool {
 		var allocSize int64
 		for _, allocation := range status.allocations {
 			allocSize += allocation.numOfRows
 		}
-		// max, written, allocated := status.total, status.currentRows, allocSize
-		// float64(writtenCount) >= Params.SegmentSizeFactor*float64(maxCount)
-		return float64(status.currentRows) >= sizeFactor*float64(status.total)
+		return float64(status.currentRows) >= sizeFactor*float64(info.MaxRowNum)
 	}
 }
 
 // getLastExpiresLifetimePolicy get segmentSealPolicy with lifetime limit compares ts - segment.lastExpireTime
 func getLastExpiresLifetimePolicy(lifetime uint64) segmentSealPolicy {
-	return func(status *segmentStatus, ts Timestamp) bool {
+	return func(status *segmentStatus, info *datapb.SegmentInfo, ts Timestamp) bool {
 		return (ts - status.lastExpireTime) > lifetime
 	}
 }
@@ -116,14 +116,14 @@ func newSealPolicyV1() sealPolicy {
 }
 
 type flushPolicy interface {
-	apply(status *segmentStatus, t Timestamp) bool
+	apply(info *datapb.SegmentInfo, t Timestamp) bool
 }
 
 type flushPolicyV1 struct {
 }
 
-func (p *flushPolicyV1) apply(status *segmentStatus, t Timestamp) bool {
-	return status.sealed && status.lastExpireTime <= t
+func (p *flushPolicyV1) apply(info *datapb.SegmentInfo, t Timestamp) bool {
+	return info.State == commonpb.SegmentState_Sealed && info.LastExpireTime <= t
 }
 
 func newFlushPolicyV1() flushPolicy {

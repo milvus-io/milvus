@@ -141,6 +141,5 @@ func TestSaveSegmentsToMeta(t *testing.T) {
 	segment, err := meta.GetSegment(segID)
 	assert.Nil(t, err)
 	assert.EqualValues(t, segment.LastExpireTime, expireTs)
-	assert.EqualValues(t, segStatus.total, segment.MaxRowNum)
 	assert.EqualValues(t, commonpb.SegmentState_Sealed, segment.State)
 }
