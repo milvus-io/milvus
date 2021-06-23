@@ -73,7 +73,7 @@ func Test_MockKV(t *testing.T) {
 	prefix[TenantMetaPrefix] = []string{"tenant-prefix"}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
-	assert.EqualError(t, err, "MasterService UnmarshalText pb.TenantMeta err:line 1.0: unknown field name \"tenant-prefix\" in milvus.proto.etcd.TenantMeta")
+	assert.EqualError(t, err, "RootCoord UnmarshalText pb.TenantMeta err:line 1.0: unknown field name \"tenant-prefix\" in milvus.proto.etcd.TenantMeta")
 
 	prefix[TenantMetaPrefix] = []string{proto.MarshalTextString(&pb.TenantMeta{})}
 	_, err = NewMetaTable(k1)
@@ -82,7 +82,7 @@ func Test_MockKV(t *testing.T) {
 	prefix[ProxyMetaPrefix] = []string{"porxy-meta"}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
-	assert.EqualError(t, err, "MasterService UnmarshalText pb.ProxyMeta err:line 1.0: unknown field name \"porxy-meta\" in milvus.proto.etcd.ProxyMeta")
+	assert.EqualError(t, err, "RootCoord UnmarshalText pb.ProxyMeta err:line 1.0: unknown field name \"porxy-meta\" in milvus.proto.etcd.ProxyMeta")
 
 	prefix[ProxyMetaPrefix] = []string{proto.MarshalTextString(&pb.ProxyMeta{})}
 	_, err = NewMetaTable(k1)
@@ -91,7 +91,7 @@ func Test_MockKV(t *testing.T) {
 	prefix[CollectionMetaPrefix] = []string{"collection-meta"}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
-	assert.EqualError(t, err, "MasterService UnmarshalText pb.CollectionInfo err:line 1.0: unknown field name \"collection-meta\" in milvus.proto.etcd.CollectionInfo")
+	assert.EqualError(t, err, "RootCoord UnmarshalText pb.CollectionInfo err:line 1.0: unknown field name \"collection-meta\" in milvus.proto.etcd.CollectionInfo")
 
 	prefix[CollectionMetaPrefix] = []string{proto.MarshalTextString(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{}})}
 	_, err = NewMetaTable(k1)
@@ -100,7 +100,7 @@ func Test_MockKV(t *testing.T) {
 	prefix[PartitionMetaPrefix] = []string{"partition-meta"}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
-	assert.EqualError(t, err, "MasterService UnmarshalText pb.PartitionInfo err:line 1.0: unknown field name \"partition-meta\" in milvus.proto.etcd.PartitionInfo")
+	assert.EqualError(t, err, "RootCoord UnmarshalText pb.PartitionInfo err:line 1.0: unknown field name \"partition-meta\" in milvus.proto.etcd.PartitionInfo")
 
 	prefix[PartitionMetaPrefix] = []string{proto.MarshalTextString(&pb.PartitionInfo{})}
 	_, err = NewMetaTable(k1)
@@ -109,7 +109,7 @@ func Test_MockKV(t *testing.T) {
 	prefix[SegmentIndexMetaPrefix] = []string{"segment-index-meta"}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
-	assert.EqualError(t, err, "MasterService UnmarshalText pb.SegmentIndexInfo err:line 1.0: unknown field name \"segment-index-meta\" in milvus.proto.etcd.SegmentIndexInfo")
+	assert.EqualError(t, err, "RootCoord UnmarshalText pb.SegmentIndexInfo err:line 1.0: unknown field name \"segment-index-meta\" in milvus.proto.etcd.SegmentIndexInfo")
 
 	prefix[SegmentIndexMetaPrefix] = []string{proto.MarshalTextString(&pb.SegmentIndexInfo{})}
 	_, err = NewMetaTable(k1)
@@ -123,7 +123,7 @@ func Test_MockKV(t *testing.T) {
 	prefix[IndexMetaPrefix] = []string{"index-meta"}
 	_, err = NewMetaTable(k1)
 	assert.NotNil(t, err)
-	assert.EqualError(t, err, "MasterService UnmarshalText pb.IndexInfo err:line 1.0: unknown field name \"index-meta\" in milvus.proto.etcd.IndexInfo")
+	assert.EqualError(t, err, "RootCoord UnmarshalText pb.IndexInfo err:line 1.0: unknown field name \"index-meta\" in milvus.proto.etcd.IndexInfo")
 
 	prefix[IndexMetaPrefix] = []string{proto.MarshalTextString(&pb.IndexInfo{})}
 	m1, err := NewMetaTable(k1)

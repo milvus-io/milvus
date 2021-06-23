@@ -284,8 +284,8 @@ func (ta *Allocator) CleanCache() error
 type IDAllocator struct {
 	Allocator
 
-	masterAddress string
-	master types.MasterService
+	rootCoordAddress string
+	rootCoord types.RootCoord
 
 	countPerRPC uint32
 
@@ -377,8 +377,8 @@ func (t *timestampOracle) ResetTimestamp()
 type TimestampAllocator struct {
 	Allocator
 
-	masterAddress string
-	masterClient  types.MasterService
+	rootCoordAddress string
+	rootCoordClient  types.RootCoord
 
 	countPerRPC uint32
 	lastTsBegin Timestamp

@@ -111,7 +111,7 @@ func (mt *metaTable) reloadFromKV() error {
 		tenantMeta := pb.TenantMeta{}
 		err := proto.UnmarshalText(value, &tenantMeta)
 		if err != nil {
-			return fmt.Errorf("MasterService UnmarshalText pb.TenantMeta err:%w", err)
+			return fmt.Errorf("RootCoord UnmarshalText pb.TenantMeta err:%w", err)
 		}
 		mt.tenantID2Meta[tenantMeta.ID] = tenantMeta
 	}
@@ -125,7 +125,7 @@ func (mt *metaTable) reloadFromKV() error {
 		proxyMeta := pb.ProxyMeta{}
 		err = proto.UnmarshalText(value, &proxyMeta)
 		if err != nil {
-			return fmt.Errorf("MasterService UnmarshalText pb.ProxyMeta err:%w", err)
+			return fmt.Errorf("RootCoord UnmarshalText pb.ProxyMeta err:%w", err)
 		}
 		mt.proxyID2Meta[proxyMeta.ID] = proxyMeta
 	}
@@ -139,7 +139,7 @@ func (mt *metaTable) reloadFromKV() error {
 		collInfo := pb.CollectionInfo{}
 		err = proto.UnmarshalText(value, &collInfo)
 		if err != nil {
-			return fmt.Errorf("MasterService UnmarshalText pb.CollectionInfo err:%w", err)
+			return fmt.Errorf("RootCoord UnmarshalText pb.CollectionInfo err:%w", err)
 		}
 		mt.collID2Meta[collInfo.ID] = collInfo
 		mt.collName2ID[collInfo.Schema.Name] = collInfo.ID
@@ -156,7 +156,7 @@ func (mt *metaTable) reloadFromKV() error {
 		partitionInfo := pb.PartitionInfo{}
 		err = proto.UnmarshalText(value, &partitionInfo)
 		if err != nil {
-			return fmt.Errorf("MasterService UnmarshalText pb.PartitionInfo err:%w", err)
+			return fmt.Errorf("RootCoord UnmarshalText pb.PartitionInfo err:%w", err)
 		}
 		collID, ok := mt.partitionID2CollID[partitionInfo.PartitionID]
 		if !ok {
@@ -179,7 +179,7 @@ func (mt *metaTable) reloadFromKV() error {
 		segmentIndexInfo := pb.SegmentIndexInfo{}
 		err = proto.UnmarshalText(value, &segmentIndexInfo)
 		if err != nil {
-			return fmt.Errorf("MasterService UnmarshalText pb.SegmentIndexInfo err:%w", err)
+			return fmt.Errorf("RootCoord UnmarshalText pb.SegmentIndexInfo err:%w", err)
 		}
 		idx, ok := mt.segID2IndexMeta[segmentIndexInfo.SegmentID]
 		if ok {
@@ -199,7 +199,7 @@ func (mt *metaTable) reloadFromKV() error {
 		meta := pb.IndexInfo{}
 		err = proto.UnmarshalText(value, &meta)
 		if err != nil {
-			return fmt.Errorf("MasterService UnmarshalText pb.IndexInfo err:%w", err)
+			return fmt.Errorf("RootCoord UnmarshalText pb.IndexInfo err:%w", err)
 		}
 		mt.indexID2Meta[meta.IndexID] = meta
 	}
