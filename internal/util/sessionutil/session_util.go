@@ -259,7 +259,7 @@ func (s *Session) GetSessions(prefix string) (map[string]*Session, int64, error)
 // SessionEvent indicates the changes of other servers.
 // if a server is up, EventType is SessAddEvent.
 // if a server is down, EventType is SessDelEvent.
-// Session Saves the changed server's infomation.
+// Session Saves the changed server's information.
 type SessionEvent struct {
 	EventType SessionEventType
 	Session   *Session
