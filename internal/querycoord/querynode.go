@@ -42,7 +42,7 @@ type queryNode struct {
 }
 
 func newQueryNode(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) (*queryNode, error) {
-	client, err := nodeclient.NewClient(context.TODO(), address, retry.Attempts(300))
+	client, err := nodeclient.NewClient(ctx, address, retry.Attempts(300))
 	if err != nil {
 		return nil, err
 	}
