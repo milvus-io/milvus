@@ -40,20 +40,20 @@ type Client struct {
 
 	addr string
 
-	retryTimes uint
+	retryOptions []retry.Option
 }
 
-func NewClient(ctx context.Context, addr string, reTryTimes uint) (*Client, error) {
+func NewClient(ctx context.Context, addr string, retryOptions ...retry.Option) (*Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("addr is empty")
 	}
 	ctx, cancel := context.WithCancel(ctx)
 
 	return &Client{
-		ctx:        ctx,
-		cancel:     cancel,
-		addr:       addr,
-		retryTimes: reTryTimes,
+		ctx:          ctx,
+		cancel:       cancel,
+		addr:         addr,
+		retryOptions: retryOptions,
 	}, nil
 }
 
@@ -85,7 +85,7 @@ func (c *Client) connect() error {
 		return nil
 	}
 
-	err := retry.Do(c.ctx, connectGrpcFunc, retry.Attempts(c.retryTimes))
+	err := retry.Do(c.ctx, connectGrpcFunc, c.retryOptions...)
 	if err != nil {
 		log.Debug("QueryNodeClient try connect failed", zap.Error(err))
 		return err
