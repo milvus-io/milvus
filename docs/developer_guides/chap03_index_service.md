@@ -11,7 +11,7 @@
 #### 8.2 Index Service Interface
 
 ```go
-type IndexService interface {
+type IndexCoord interface {
 	Component
 	TimeTickProvider
 

@@ -17,8 +17,8 @@ can appear in anywhere in vchannel.**
 
 ## What does DataNode recovery really mean?
 
-DataNode is stateless, but vchannel has states. DataNode's statelessness is guranteed by DataService, which
-means the vchannel's states is maintained by DataService. So DataNode recovery has no different as starting.
+DataNode is stateless, but vchannel has states. DataNode's statelessness is guranteed by DataCoord, which
+means the vchannel's states is maintained by DataCoord. So DataNode recovery has no different as starting.
 
 So what's DataNode's starting procedure?
 
@@ -30,7 +30,7 @@ DataNode registers itself to Etcd after grpc server started, in *INITIALIZING* s
 
 ### 2. Service Discovery
 
-DataNode discovers DataService and MasterService, in *HEALTHY* and *IDLE* state.
+DataNode discovers DataCoord and RootCoord, in *HEALTHY* and *IDLE* state.
 
 ### 3. Flowgraph Recovery
 
@@ -41,10 +41,10 @@ After DataNode subscribes to a stateful vchannel, DataNode starts to work, or mo
 Vchannel is stateful because we don't want to process twice what's already processed. And a "processed" message means its
 already persistant. In DataNode's terminology, a message is processed if it's been flushed.
 
-DataService tells DataNode stateful vchannel infos through RPC `WatchDmChannels`, so that DataNode won't process
+DataCoord tells DataNode stateful vchannel infos through RPC `WatchDmChannels`, so that DataNode won't process
 the same messages over and over again. So flowgraph needs ability to consume messages in the middle of a vchannel.
 
-DataNode tells DataService vchannel states after each flush through RPC `SaveBinlogPaths`, so that DataService
+DataNode tells DataCoord vchannel states after each flush through RPC `SaveBinlogPaths`, so that DataCoord
 keep the vchannel states update.
 
 
@@ -52,12 +52,12 @@ keep the vchannel states update.
 
 ### 1. DataNode no longer interacts with Etcd except service registering
 
-#### DataService rather than DataNode saves binlog paths into Etcd
+#### DataCoord rather than DataNode saves binlog paths into Etcd
     
    ![datanode_design](graphs/datanode_design_01.jpg)
 
 
-##### DataService RPC Design
+##### DataCoord RPC Design
 
 ```proto
 rpc SaveBinlogPaths(SaveBinlogPathsRequest) returns (common.Status){}
