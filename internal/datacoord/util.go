@@ -20,12 +20,15 @@ type Response interface {
 	GetStatus() *commonpb.Status
 }
 
+var errNilResponse = errors.New("response is nil")
+var errUnknownResponseType = errors.New("unknown response type")
+
 func VerifyResponse(response interface{}, err error) error {
 	if err != nil {
 		return err
 	}
 	if response == nil {
-		return errors.New("response is nil")
+		return errNilResponse
 	}
 	switch resp := response.(type) {
 	case Response:
@@ -37,7 +40,7 @@ func VerifyResponse(response interface{}, err error) error {
 			return errors.New(resp.Reason)
 		}
 	default:
-		return errors.New("unknown response type")
+		return errUnknownResponseType
 	}
 	return nil
 }

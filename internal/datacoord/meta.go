@@ -345,6 +345,8 @@ func (m *meta) SaveBinlogAndCheckPoints(segID UniqueID, flushed bool,
 }
 
 func (m *meta) GetSegmentsByChannel(dmlCh string) []*datapb.SegmentInfo {
+	m.RLock()
+	defer m.RUnlock()
 	infos := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range m.segments {
 		if segment.InsertChannel != dmlCh {

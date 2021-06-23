@@ -370,14 +370,14 @@ func (it *InsertTask) transferColumnBasedRequestToRowBasedData() error {
 				}
 				blob.Value = append(blob.Value, buffer.Bytes()...)
 			case schemapb.DataType_Int8:
-				d := datas[j][i].(int8)
+				d := int8(datas[j][i].(int32))
 				err := binary.Write(&buffer, endian, d)
 				if err != nil {
 					log.Warn("ConvertData", zap.Error(err))
 				}
 				blob.Value = append(blob.Value, buffer.Bytes()...)
 			case schemapb.DataType_Int16:
-				d := datas[j][i].(int16)
+				d := int16(datas[j][i].(int32))
 				err := binary.Write(&buffer, endian, d)
 				if err != nil {
 					log.Warn("ConvertData", zap.Error(err))

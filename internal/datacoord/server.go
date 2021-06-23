@@ -92,7 +92,7 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 }
 
 func defaultDataNodeCreatorFunc(ctx context.Context, addr string, retryOptions ...retry.Option) (types.DataNode, error) {
-	return datanodeclient.NewClient(ctx, addr, retryOptions)
+	return datanodeclient.NewClient(ctx, addr, retryOptions...)
 }
 
 func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string, etcdEndpoints []string, retryOptions ...retry.Option) (types.RootCoord, error) {
@@ -512,8 +512,8 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 	presp, err := s.rootCoordClient.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_ShowPartitions,
-			MsgID:     -1, // todo
-			Timestamp: 0,  // todo
+			MsgID:     0,
+			Timestamp: 0,
 			SourceID:  Params.NodeID,
 		},
 		DbName:         "",
@@ -556,8 +556,8 @@ func composeSegmentFlushMsgPack(segmentID UniqueID) msgstream.MsgPack {
 	completeFlushMsg := internalpb.SegmentFlushCompletedMsg{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_SegmentFlushDone,
-			MsgID:     0, // TODO
-			Timestamp: 0, // TODO
+			MsgID:     0,
+			Timestamp: 0,
 			SourceID:  Params.NodeID,
 		},
 		SegmentID: segmentID,

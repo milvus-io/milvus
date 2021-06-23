@@ -146,8 +146,6 @@ func (s *Server) init() error {
 	rootcoord.Params.Port = Params.Port
 	log.Debug("grpc init done ...")
 
-	ctx := context.Background()
-
 	closer := trace.InitTracing("root_coord")
 	s.closer = closer
 
@@ -166,8 +164,8 @@ func (s *Server) init() error {
 	s.rootCoord.UpdateStateCode(internalpb.StateCode_Initializing)
 	log.Debug("RootCoord", zap.Any("State", internalpb.StateCode_Initializing))
 	s.rootCoord.SetNewProxyClient(
-		func(s *sessionutil.Session) (types.Proxy, error) {
-			cli, err := pnc.NewClient(ctx, s.Address, retry.Attempts(300))
+		func(se *sessionutil.Session) (types.Proxy, error) {
+			cli, err := pnc.NewClient(s.ctx, se.Address, retry.Attempts(300))
 			if err != nil {
 				return nil, err
 			}
@@ -184,7 +182,7 @@ func (s *Server) init() error {
 	if s.newDataCoordClient != nil {
 		log.Debug("RootCoord start to create DataCoord client")
 		dataCoord := s.newDataCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, retry.Attempts(300))
-		if err := s.rootCoord.SetDataCoord(ctx, dataCoord); err != nil {
+		if err := s.rootCoord.SetDataCoord(s.ctx, dataCoord); err != nil {
 			panic(err)
 		}
 		s.dataCoord = dataCoord
@@ -218,7 +216,6 @@ func (s *Server) startGrpc() error {
 }
 
 func (s *Server) startGrpcLoop(grpcPort int) {
-
 	defer s.wg.Done()
 
 	log.Debug("start grpc ", zap.Int("port", grpcPort))
@@ -244,7 +241,6 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	if err := s.grpcServer.Serve(lis); err != nil {
 		s.grpcErrChan <- err
 	}
-
 }
 
 func (s *Server) start() error {
