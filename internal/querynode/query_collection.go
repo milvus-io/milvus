@@ -384,9 +384,9 @@ func (q *queryCollection) receiveSearch(msg *msgstream.SearchMsg) {
 	}
 
 	serviceTime := q.getServiceableTime()
+	bt, _ := tsoutil.ParseTS(msg.BeginTs())
+	st, _ := tsoutil.ParseTS(serviceTime)
 	if msg.BeginTs() > serviceTime {
-		bt, _ := tsoutil.ParseTS(msg.BeginTs())
-		st, _ := tsoutil.ParseTS(serviceTime)
 		log.Debug("query node::receiveSearchMsg: add to unsolvedMsg",
 			zap.Any("collectionID", q.collectionID),
 			zap.Any("sm.BeginTs", bt),
@@ -407,6 +407,10 @@ func (q *queryCollection) receiveSearch(msg *msgstream.SearchMsg) {
 	log.Debug("doing search in receiveSearchMsg...",
 		zap.Int64("collectionID", msg.CollectionID),
 		zap.Int64("msgID", msg.ID()),
+		zap.Any("serviceTime_l", serviceTime),
+		zap.Any("searchTime_l", msg.BeginTs()),
+		zap.Any("serviceTime_p", st),
+		zap.Any("searchTime_p", bt),
 	)
 	err = q.search(msg)
 	if err != nil {
@@ -730,7 +734,7 @@ func (q *queryCollection) search(searchMsg *msgstream.SearchMsg) error {
 	sp, ctx := trace.StartSpanFromContext(searchMsg.TraceCtx())
 	defer sp.Finish()
 	searchMsg.SetTraceCtx(ctx)
-	searchTimestamp := searchMsg.SearchRequest.TravelTimestamp
+	searchTimestamp := searchMsg.BeginTs()
 
 	collectionID := searchMsg.CollectionID
 	collection, err := q.streaming.replica.getCollectionByID(collectionID)
