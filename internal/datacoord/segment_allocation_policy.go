@@ -65,7 +65,7 @@ type sealPolicy interface {
 type segmentSealPolicy func(status *segmentStatus, info *datapb.SegmentInfo, ts Timestamp) bool
 
 // channelSealPolicy seal policy applies to channel
-type channelSealPolicy func(string, []*segmentStatus, Timestamp) []*segmentStatus
+type channelSealPolicy func(string, []*datapb.SegmentInfo, Timestamp) []*datapb.SegmentInfo
 
 // getSegmentCapacityPolicy get segmentSealPolicy with segment size factor policy
 func getSegmentCapacityPolicy(sizeFactor float64) segmentSealPolicy {
@@ -81,26 +81,26 @@ func getSegmentCapacityPolicy(sizeFactor float64) segmentSealPolicy {
 // getLastExpiresLifetimePolicy get segmentSealPolicy with lifetime limit compares ts - segment.lastExpireTime
 func getLastExpiresLifetimePolicy(lifetime uint64) segmentSealPolicy {
 	return func(status *segmentStatus, info *datapb.SegmentInfo, ts Timestamp) bool {
-		return (ts - status.lastExpireTime) > lifetime
+		return (ts - info.LastExpireTime) > lifetime
 	}
 }
 
 // getChannelCapacityPolicy get channelSealPolicy with channel segment capacity policy
 func getChannelOpenSegCapacityPolicy(limit int) channelSealPolicy {
-	return func(channel string, segs []*segmentStatus, ts Timestamp) []*segmentStatus {
+	return func(channel string, segs []*datapb.SegmentInfo, ts Timestamp) []*datapb.SegmentInfo {
 		if len(segs) <= limit {
-			return []*segmentStatus{}
+			return []*datapb.SegmentInfo{}
 		}
-		sortSegStatusByLastExpires(segs)
+		sortSegmentsByLastExpires(segs)
 		offLen := len(segs) - limit
 		return segs[0:offLen]
 	}
 }
 
 // sortSegStatusByLastExpires sort segmentStatus with lastExpireTime ascending order
-func sortSegStatusByLastExpires(segs []*segmentStatus) {
+func sortSegmentsByLastExpires(segs []*datapb.SegmentInfo) {
 	sort.Slice(segs, func(i, j int) bool {
-		return segs[i].lastExpireTime < segs[j].lastExpireTime
+		return segs[i].LastExpireTime < segs[j].LastExpireTime
 	})
 }
 

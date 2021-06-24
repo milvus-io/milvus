@@ -59,10 +59,9 @@ type Manager interface {
 
 // segmentStatus stores allocation entries and temporary row count
 type segmentStatus struct {
-	id             UniqueID
-	allocations    []*allocation
-	lastExpireTime Timestamp
-	currentRows    int64
+	id          UniqueID
+	allocations []*allocation
+	currentRows int64
 }
 
 // allcation entry for segment allocation record
@@ -93,62 +92,60 @@ type allocHelper struct {
 	afterCreateSegment func(segment *datapb.SegmentInfo) error
 }
 
-type allocOption struct {
-	apply func(manager *SegmentManager)
+// allocOption allction option applies to `SegmentManager`
+type allocOption interface {
+	apply(manager *SegmentManager)
 }
 
+// allocFunc function shortcut for allocOption
+type allocFunc func(manager *SegmentManager)
+
+// implement allocOption
+func (f allocFunc) apply(manager *SegmentManager) {
+	f(manager)
+}
+
+// get allocOption with allocHelper setting
 func withAllocHelper(helper allocHelper) allocOption {
-	return allocOption{
-		apply: func(manager *SegmentManager) { manager.helper = helper },
-	}
+	return allocFunc(func(manager *SegmentManager) { manager.helper = helper })
 }
 
+// get default allocHelper, which does nothing
 func defaultAllocHelper() allocHelper {
 	return allocHelper{
 		afterCreateSegment: func(segment *datapb.SegmentInfo) error { return nil },
 	}
 }
 
+// get allocOption with estimatePolicy
 func withCalUpperLimitPolicy(policy calUpperLimitPolicy) allocOption {
-	return allocOption{
-		apply: func(manager *SegmentManager) { manager.estimatePolicy = policy },
-	}
+	return allocFunc(func(manager *SegmentManager) { manager.estimatePolicy = policy })
 }
 
+// get allocOption with allocPolicy
 func withAllocPolicy(policy allocatePolicy) allocOption {
-	return allocOption{
-		apply: func(manager *SegmentManager) { manager.allocPolicy = policy },
-	}
+	return allocFunc(func(manager *SegmentManager) { manager.allocPolicy = policy })
 }
 
-// func withSealPolicy(policy sealPolicy) allocOption {
-// 	return allocOption{
-// 		apply: func(manager *SegmentManager) { manager.sealPolicy = policy },
-// 	}
-// }
-
+// get allocOption with segmentSealPolicies
 func withSegmentSealPolices(policies ...segmentSealPolicy) allocOption {
-	return allocOption{
-		apply: func(manager *SegmentManager) {
-			// do override instead of append, to override default options
-			manager.segmentSealPolicies = policies
-		},
-	}
+	return allocFunc(func(manager *SegmentManager) {
+		// do override instead of append, to override default options
+		manager.segmentSealPolicies = policies
+	})
 }
 
+// get allocOption with channelSealPolicies
 func withChannelSealPolices(policies ...channelSealPolicy) allocOption {
-	return allocOption{
-		apply: func(manager *SegmentManager) {
-			// do override instead of append, to override default options
-			manager.channelSealPolicies = policies
-		},
-	}
+	return allocFunc(func(manager *SegmentManager) {
+		// do override instead of append, to override default options
+		manager.channelSealPolicies = policies
+	})
 }
 
+// get allocOption with flushPolicy
 func withFlushPolicy(policy flushPolicy) allocOption {
-	return allocOption{
-		apply: func(manager *SegmentManager) { manager.flushPolicy = policy },
-	}
+	return allocFunc(func(manager *SegmentManager) { manager.flushPolicy = policy })
 }
 
 func defaultCalUpperLimitPolicy() calUpperLimitPolicy {
@@ -272,6 +269,10 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 			return
 		}
 		info, err = s.meta.GetSegment(status.id)
+		if err != nil {
+			log.Warn("Failed to get seg into from meta", zap.Int64("id", status.id), zap.Error(err))
+			return
+		}
 		success, err = s.alloc(status, info, requestRows)
 		if err != nil {
 			return
@@ -284,7 +285,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 
 	segID = status.id
 	retCount = requestRows
-	expireTime = status.lastExpireTime
+	expireTime = info.LastExpireTime
 	return
 }
 
@@ -305,7 +306,8 @@ func (s *SegmentManager) alloc(status *segmentStatus, info *datapb.SegmentInfo, 
 
 	alloc := s.getAllocation(numOfRows, expireTs)
 
-	status.lastExpireTime = expireTs
+	//safe here since info is a clone, used to pass expireTs out
+	info.LastExpireTime = expireTs
 	status.allocations = append(status.allocations, alloc)
 
 	if err := s.meta.SetLastExpireTime(status.id, expireTs); err != nil {
@@ -337,10 +339,9 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 		return nil, err
 	}
 	status := &segmentStatus{
-		id:             id,
-		allocations:    make([]*allocation, 0, 16),
-		lastExpireTime: 0,
-		currentRows:    0,
+		id:          id,
+		allocations: make([]*allocation, 0, 16),
+		currentRows: 0,
 	}
 	s.stats[id] = status
 
@@ -452,6 +453,7 @@ func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel strin
 	return ret, nil
 }
 
+// UpdateSegmentStats update number of rows in memory
 func (s *SegmentManager) UpdateSegmentStats(stat *internalpb.SegmentStatisticsUpdates) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -489,7 +491,7 @@ func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) error {
 
 // tryToSealSegment applies segment & channel seal policies
 func (s *SegmentManager) tryToSealSegment(ts Timestamp) error {
-	channelInfo := make(map[string][]*segmentStatus)
+	channelInfo := make(map[string][]*datapb.SegmentInfo)
 	mIDSegment := make(map[UniqueID]*datapb.SegmentInfo)
 	for _, status := range s.stats {
 		info, err := s.meta.GetSegment(status.id)
@@ -498,7 +500,7 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp) error {
 			continue
 		}
 		mIDSegment[status.id] = info
-		channelInfo[info.InsertChannel] = append(channelInfo[info.InsertChannel], status)
+		channelInfo[info.InsertChannel] = append(channelInfo[info.InsertChannel], info)
 		if info.State == commonpb.SegmentState_Sealed {
 			continue
 		}
@@ -512,19 +514,14 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp) error {
 			}
 		}
 	}
-	for channel, segmentStats := range channelInfo {
+	for channel, segmentInfos := range channelInfo {
 		for _, policy := range s.channelSealPolicies {
-			vs := policy(channel, segmentStats, ts)
-			for _, status := range vs {
-				info, has := mIDSegment[status.id]
-				if !has {
-					log.Warn("segment id not cached", zap.Int64("id", status.id))
-					continue
-				}
+			vs := policy(channel, segmentInfos, ts)
+			for _, info := range vs {
 				if info.State == commonpb.SegmentState_Sealed {
 					continue
 				}
-				if err := s.meta.SealSegment(status.id); err != nil {
+				if err := s.meta.SealSegment(info.ID); err != nil {
 					return err
 				}
 			}
