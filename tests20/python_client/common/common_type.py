@@ -58,6 +58,18 @@ get_invalid_strs = [
     "%$#",
     "a".join("a" for i in range(256))]
 
+
+get_not_string = [
+    [],
+    {},
+    None,
+    (1, ),
+    1,
+    1.0,
+    [1, "2", 3]
+]
+
+
 get_dict_without_host_port = [
     {"host": "host"},
     {"port": "port"},
