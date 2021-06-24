@@ -139,24 +139,38 @@ func (adapter *IVFPQConfAdapter) CheckTrain(params map[string]string) bool {
 		return false
 	}
 
-	// nbits can be set to default: 8
-	_, nbitsExist := params[NBITS]
-	if nbitsExist && !CheckIntByRange(params, NBITS, MinNBits, MaxNBits) {
-		return false
-	}
-
 	return adapter.checkPQParams(params)
 }
 
 func (adapter *IVFPQConfAdapter) checkPQParams(params map[string]string) bool {
-	dimension, _ := strconv.Atoi(params[DIM])
-	nbits, _ := strconv.Atoi(params[NBITS])
+	dimStr, dimensionExist := params[DIM]
+	if !dimensionExist { // dimension is specified when creating collection
+		return true
+	}
+
+	dimension, err := strconv.Atoi(dimStr)
+	if err != nil { // invalid dimension
+		return false
+	}
+
+	// nbits can be set to default: 8
+	nbitsStr, nbitsExist := params[NBITS]
+	var nbits int
+	if !nbitsExist {
+		nbits = 8
+	} else {
+		nbits, err = strconv.Atoi(nbitsStr)
+		if err != nil { // invalid nbits
+			return false
+		}
+	}
+
 	mStr, ok := params[IVFM]
 	if !ok {
 		return false
 	}
 	m, err := strconv.Atoi(mStr)
-	if err != nil {
+	if err != nil { // invalid m
 		return false
 	}
 
