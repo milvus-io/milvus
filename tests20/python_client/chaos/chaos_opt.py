@@ -1,11 +1,8 @@
 from __future__ import print_function
-import logging
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 import constants as cf
-
-
-logger = logging.getLogger("milvus_benchmark.chaos.chaosOpt")
+from utils.util_log import test_log as log
 
 
 class ChaosOpt(object):
@@ -15,35 +12,30 @@ class ChaosOpt(object):
         self.namespace = namespace
         self.plural = kind.lower()
 
-    # def get_metadata_name(self):
-    #     return self.metadata_name
-
     def create_chaos_object(self, body):
-        # body = create_chaos_config(self.plural, self.metadata_name, spec_params)
-        # logger.info(body)
         pretty = 'true'
         config.load_kube_config()
         api_instance = client.CustomObjectsApi()
         try:
             api_response = api_instance.create_namespaced_custom_object(self.group, self.version, self.namespace,
                                                                         plural=self.plural, body=body, pretty=pretty)
-            print(api_response)
-            logging.getLogger().info(api_instance)
+            log.debug(f"create chaos response: {api_response}")
         except ApiException as e:
-            logger.error("Exception when calling CustomObjectsApi->create_namespaced_custom_object: %s\n" % e)
+            log.error("Exception when calling CustomObjectsApi->create_namespaced_custom_object: %s\n" % e)
             raise Exception(str(e))
 
-    def delete_chaos_object(self, metadata_name):
+    def delete_chaos_object(self, metadata_name, raise_ex=True):
         print(metadata_name)
         try:
             config.load_kube_config()
             api_instance = client.CustomObjectsApi()
             data = api_instance.delete_namespaced_custom_object(self.group, self.version, self.namespace, self.plural,
                                                                 metadata_name)
-            logger.info(data)
+            log.debug(f"delete chaos response: {data}")
         except ApiException as e:
-            logger.error("Exception when calling CustomObjectsApi->delete_namespaced_custom_object: %s\n" % e)
-            raise Exception(str(e))
+            log.error("Exception when calling CustomObjectsApi->delete_namespaced_custom_object: %s\n" % e)
+            if raise_ex:
+                raise Exception(str(e))
 
     def list_chaos_object(self):
         try:
@@ -51,9 +43,8 @@ class ChaosOpt(object):
             api_instance = client.CustomObjectsApi()
             data = api_instance.list_namespaced_custom_object(self.group, self.version, self.namespace,
                                                               plural=self.plural)
-            # pprint(data)
         except ApiException as e:
-            logger.error("Exception when calling CustomObjectsApi->list_namespaced_custom_object: %s\n" % e)
+            log.error("Exception when calling CustomObjectsApi->list_namespaced_custom_object: %s\n" % e)
             raise Exception(str(e))
         return data
 

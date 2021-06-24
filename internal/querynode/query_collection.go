@@ -1247,7 +1247,7 @@ func (q *queryCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error {
 			FieldsData:                result.FieldsData,
 			ResultChannelID:           retrieveMsg.ResultChannelID,
 			SealedSegmentIDsRetrieved: sealedSegmentRetrieved,
-			ChannelIDsRetrieved:       collection.getPChannels(),
+			ChannelIDsRetrieved:       collection.getVChannels(),
 			//TODO(yukun):: get global sealed segment from etcd
 			GlobalSealedSegmentIDs: sealedSegmentRetrieved,
 		},

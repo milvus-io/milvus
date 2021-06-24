@@ -100,6 +100,7 @@ class CheckTasks:
     check_collection_property = "check_collection_property"
     check_partition_property = "check_partition_property"
     check_search_results = "check_search_results"
+    check_query_results = "check_query_results"
 
 
 class CaseLabel:

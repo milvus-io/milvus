@@ -16,7 +16,7 @@ def api_request_catch():
         def inner_wrapper(*args, **kwargs):
             try:
                 res = func(*args, **kwargs)
-                log.debug("(api_response) Response : %s " % str(res)[0:log_row_length])
+                # log.debug("(api_response) Response : %s " % str(res)[0:log_row_length])
                 return res, True
             except Exception as e:
                 log.error(traceback.format_exc())
@@ -36,8 +36,8 @@ def api_request(_list, **kwargs):
             if len(_list) > 1:
                 for a in _list[1:]:
                     arg.append(a)
-            log.debug("(api_request) Request: [%s] args: %s, kwargs: %s"
-                      % (str(func), str(arg)[0:log_row_length], str(kwargs)))
+            # log.debug("(api_request) Request: [%s] args: %s, kwargs: %s"
+            #           % (str(func), str(arg)[0:log_row_length], str(kwargs)))
             return func(*arg, **kwargs)
     return False, False
 
