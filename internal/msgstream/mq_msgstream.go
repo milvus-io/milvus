@@ -392,15 +392,16 @@ func (ms *mqMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 		if err != nil {
 			return err
 		}
-		msg, ok := <-consumer.Chan()
-		if !ok {
-			return errors.New("consumer closed")
-		}
-		consumer.Ack(msg)
-
-		if !bytes.Equal(msg.ID().Serialize(), messageID.Serialize()) {
-			err = fmt.Errorf("seek msg not correct")
-			log.Error("msMsgStream seek", zap.Error(err))
+		if _, ok := consumer.(*mqclient.RmqConsumer); !ok {
+			msg, ok := <-consumer.Chan()
+			if !ok {
+				return errors.New("consumer closed")
+			}
+			consumer.Ack(msg)
+			if !bytes.Equal(msg.ID().Serialize(), messageID.Serialize()) {
+				err = fmt.Errorf("seek msg not correct")
+				log.Error("msMsgStream seek", zap.Error(err))
+			}
 		}
 
 		return nil

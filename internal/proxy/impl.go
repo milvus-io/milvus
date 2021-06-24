@@ -1450,6 +1450,11 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		return nil, err
 	}
 
+	if request.Expr == "" {
+		errMsg := "Query expression is empty!"
+		return nil, fmt.Errorf(errMsg)
+	}
+
 	parseRetrieveTask := func(exprString string) ([]int64, error) {
 		expr, err := parseQueryExpr(schema, exprString)
 		if err != nil {
