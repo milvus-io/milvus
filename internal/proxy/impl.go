@@ -1455,6 +1455,9 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		if err != nil {
 			return nil, err
 		}
+		if expr == nil {
+			return nil, errors.New("nil expression")
+		}
 
 		switch xExpr := expr.Expr.(type) {
 		case *planpb.Expr_TermExpr:
