@@ -71,6 +71,7 @@ type RmsFactory struct {
 	// the following members must be public, so that mapstructure.Decode() can access them
 	ReceiveBufSize int64
 	RmqBufSize     int64
+	RocksmqPath    string
 }
 
 func (f *RmsFactory) SetParams(params map[string]interface{}) error {
@@ -108,8 +109,9 @@ func NewRmsFactory() Factory {
 		dispatcherFactory: ProtoUDFactory{},
 		ReceiveBufSize:    1024,
 		RmqBufSize:        1024,
+		RocksmqPath:       "/tmp/milvus_rdb",
 	}
 
-	rocksmqserver.InitRocksMQ("/tmp/milvus_rdb")
+	rocksmqserver.InitRocksMQ(f.RocksmqPath)
 	return f
 }

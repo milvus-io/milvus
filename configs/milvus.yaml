@@ -34,6 +34,9 @@ pulsar:
   port: 6650
   maxMessageSize: 5242880 # 5 * 1024 * 1024 Bytes
 
+rocksmq:
+  path: /tmp/milvus_rdb
+
 rootCoord:
   address: localhost
   port: 53100

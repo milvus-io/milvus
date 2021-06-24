@@ -40,6 +40,7 @@ type ParamTable struct {
 	MetaRootPath     string
 	RootCoordAddress string
 	PulsarAddress    string
+	RocksmqPath      string
 
 	ProxyID                    UniqueID
 	TimeTickInterval           time.Duration
@@ -78,6 +79,7 @@ func (pt *ParamTable) initParams() {
 	pt.initEtcdEndpoints()
 	pt.initMetaRootPath()
 	pt.initPulsarAddress()
+	pt.initRocksmqPath()
 	pt.initTimeTickInterval()
 	pt.initProxySubName()
 	pt.initProxyTimeTickChannelNames()
@@ -102,6 +104,14 @@ func (pt *ParamTable) initPulsarAddress() {
 		panic(err)
 	}
 	pt.PulsarAddress = ret
+}
+
+func (pt *ParamTable) initRocksmqPath() {
+	path, err := pt.Load("_RocksmqPath")
+	if err != nil {
+		panic(err)
+	}
+	pt.RocksmqPath = path
 }
 
 func (pt *ParamTable) initTimeTickInterval() {
