@@ -2026,11 +2026,11 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 		return errors.New(errMsg)
 	}
 	rt.Ids = rt.retrieve.Ids
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
+	if err != nil {
+		return err
+	}
 	if len(rt.retrieve.OutputFields) == 0 {
-		schema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
-		if err != nil {
-			return err
-		}
 		for _, field := range schema.Fields {
 			if field.FieldID >= 100 {
 				rt.OutputFields = append(rt.OutputFields, field.Name)
@@ -2038,6 +2038,20 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 		}
 	} else {
 		rt.OutputFields = rt.retrieve.OutputFields
+		for _, field := range schema.Fields {
+			if field.IsPrimaryKey {
+				containPrimaryKey := false
+				for _, reqFields := range rt.retrieve.OutputFields {
+					if reqFields == field.Name {
+						containPrimaryKey = true
+					}
+				}
+				if !containPrimaryKey {
+					rt.OutputFields = append(rt.OutputFields, field.Name)
+				}
+				break
+			}
+		}
 	}
 
 	travelTimestamp := rt.retrieve.TravelTimestamp
