@@ -1286,6 +1286,14 @@ func mergeRetrieveResults(dataArr []*segcorepb.RetrieveResults) (*segcorepb.Retr
 		}
 	}
 
+	// not found, return default values indicating not result found
+	if final == nil {
+		final = &segcorepb.RetrieveResults{
+			Ids:        nil,
+			FieldsData: []*schemapb.FieldData{},
+		}
+	}
+
 	return final, nil
 }
 
