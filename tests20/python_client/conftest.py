@@ -19,6 +19,7 @@ def pytest_addoption(parser):
     parser.addoption('--data', action='store', default="data", help="data of request")
     parser.addoption('--clean_log', action='store_true', default=False, help="clean log before testing")
     parser.addoption('--schema', action='store', default="schema", help="schema of test interface")
+    parser.addoption('--err_msg', action='store', default="err_msg", help="error message of test")
 
 
 @pytest.fixture
@@ -104,3 +105,8 @@ def clean_log(request):
 @pytest.fixture
 def schema(request):
     return request.config.getoption("--schema")
+
+
+@pytest.fixture
+def err_msg(request):
+    return request.config.getoption("--err_msg")

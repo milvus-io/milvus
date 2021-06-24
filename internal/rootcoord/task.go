@@ -59,26 +59,6 @@ func (bt *baseReqTask) WaitToFinish() error {
 	}
 }
 
-type TimetickTask struct {
-	baseReqTask
-}
-
-func (t *TimetickTask) Ctx() context.Context {
-	return t.ctx
-}
-
-func (t *TimetickTask) Type() commonpb.MsgType {
-	return commonpb.MsgType_TimeTick
-}
-
-func (t *TimetickTask) Execute(ctx context.Context) error {
-	ts, err := t.core.TSOAllocator(1)
-	if err != nil {
-		return err
-	}
-	return t.core.SendTimeTick(ts)
-}
-
 type CreateCollectionReqTask struct {
 	baseReqTask
 	Req *milvuspb.CreateCollectionRequest
@@ -699,7 +679,7 @@ func (t *DescribeSegmentReqTask) Execute(ctx context.Context) error {
 	}
 	//TODO, get filed_id and index_name from request
 	segIdxInfo, err := t.core.MetaTable.GetSegmentIndexInfoByID(t.Req.SegmentID, -1, "")
-	log.Debug("MasterService DescribeSegmentReqTask, MetaTable.GetSegmentIndexInfoByID", zap.Any("SegmentID", t.Req.SegmentID),
+	log.Debug("RootCoord DescribeSegmentReqTask, MetaTable.GetSegmentIndexInfoByID", zap.Any("SegmentID", t.Req.SegmentID),
 		zap.Any("segIdxInfo", segIdxInfo), zap.Error(err))
 	if err != nil {
 		return err
@@ -769,7 +749,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 	}
 	indexName := Params.DefaultIndexName //TODO, get name from request
 	indexID, _, err := t.core.IDAllocator(1)
-	log.Debug("MasterService CreateIndexReqTask", zap.Any("indexID", indexID), zap.Error(err))
+	log.Debug("RootCoord CreateIndexReqTask", zap.Any("indexID", indexID), zap.Error(err))
 	if err != nil {
 		return err
 	}
@@ -779,7 +759,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 		IndexParams: t.Req.ExtraParams,
 	}
 	segIDs, field, err := t.core.MetaTable.GetNotIndexedSegments(t.Req.CollectionName, t.Req.FieldName, idxInfo)
-	log.Debug("MasterService CreateIndexReqTask metaTable.GetNotIndexedSegments", zap.Error(err))
+	log.Debug("RootCoord CreateIndexReqTask metaTable.GetNotIndexedSegments", zap.Error(err))
 	if err != nil {
 		return err
 	}
@@ -806,7 +786,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 	}
 
 	_, err = t.core.MetaTable.AddIndex(segIdxInfos, "", "")
-	log.Debug("MasterService CreateIndexReq", zap.Any("segIdxInfos", segIdxInfos), zap.Error(err))
+	log.Debug("RootCoord CreateIndexReq", zap.Any("segIdxInfos", segIdxInfos), zap.Error(err))
 	return err
 }
 

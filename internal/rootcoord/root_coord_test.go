@@ -260,7 +260,7 @@ func getNotTtMsg(ctx context.Context, n int, ch <-chan *msgstream.MsgPack) []msg
 	}
 }
 
-func TestMasterService(t *testing.T) {
+func TestRootCoord(t *testing.T) {
 	const (
 		dbName   = "testDb"
 		collName = "testColl"
@@ -1740,7 +1740,7 @@ func TestMasterService(t *testing.T) {
 	})
 }
 
-func TestMasterService2(t *testing.T) {
+func TestRootCoord2(t *testing.T) {
 	const (
 		dbName   = "testDb"
 		collName = "testColl"

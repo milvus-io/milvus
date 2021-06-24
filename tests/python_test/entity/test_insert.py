@@ -902,7 +902,6 @@ class TestInsertMultiCollections:
         stats = connect.get_collection_stats(collection_name)
         assert stats[row_count] == 1
 
-    @pytest.mark.skip("xige-16-search-without-insert")
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_insert_entity_search_entity_another(self, connect, collection):

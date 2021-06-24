@@ -58,6 +58,20 @@ get_invalid_strs = [
     "%$#",
     "a".join("a" for i in range(256))]
 
+get_dict_without_host_port = [
+    {"host": "host"},
+    {"port": "port"},
+    # ["host", "port"],
+    # ("host", "port"),
+    {"host": -1},
+    {"port": ["192.168.1.1"]},
+    {"": ""}
+]
+
+get_wrong_format_dict = [
+    {"host": "string_host", "port": {}},
+    {"host": 0, "port": 19520}
+]
 
 """ Specially defined list """
 all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "ANNOY", "RHNSW_FLAT", "RHNSW_PQ", "RHNSW_SQ",

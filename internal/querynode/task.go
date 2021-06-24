@@ -22,11 +22,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/rootcoord"
 )
 
 type task interface {
@@ -118,45 +117,26 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	// get all vChannels
 	vChannels := make([]Channel, 0)
 	pChannels := make([]Channel, 0)
+	VPChannels := make(map[string]string) // map[vChannel]pChannel
 	for _, info := range w.req.Infos {
-		vChannels = append(vChannels, info.ChannelName)
+		v := info.ChannelName
+		p := rootcoord.ToPhysicalChannel(info.ChannelName)
+		vChannels = append(vChannels, v)
+		pChannels = append(pChannels, p)
+		VPChannels[v] = p
 	}
 	log.Debug("starting WatchDmChannels ...",
 		zap.Any("collectionName", w.req.Schema.Name),
 		zap.Any("collectionID", collectionID),
-		zap.String("vChannels", fmt.Sprintln(vChannels)))
-
-	// get physical channels
-	desColReq := &milvuspb.DescribeCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_DescribeCollection,
-		},
-		CollectionID: collectionID,
-	}
-	desColRsp, err := w.node.rootCoord.DescribeCollection(ctx, desColReq)
-	if err != nil {
-		log.Error("get channels failed, err = " + err.Error())
-		return err
-	}
-	log.Debug("get channels from master",
-		zap.Any("collectionID", collectionID),
-		zap.Any("vChannels", desColRsp.VirtualChannelNames),
-		zap.Any("pChannels", desColRsp.PhysicalChannelNames),
+		zap.Any("vChannels", vChannels),
+		zap.Any("pChannels", pChannels),
 	)
-	VPChannels := make(map[string]string) // map[vChannel]pChannel
-	for _, ch := range vChannels {
-		for i := range desColRsp.VirtualChannelNames {
-			if desColRsp.VirtualChannelNames[i] == ch {
-				VPChannels[ch] = desColRsp.PhysicalChannelNames[i]
-				pChannels = append(pChannels, desColRsp.PhysicalChannelNames[i])
-				break
-			}
-		}
-	}
 	if len(VPChannels) != len(vChannels) {
 		return errors.New("get physical channels failed, illegal channel length, collectionID = " + fmt.Sprintln(collectionID))
 	}
-	log.Debug("get physical channels done", zap.Any("collectionID", collectionID))
+	log.Debug("get physical channels done",
+		zap.Any("collectionID", collectionID),
+	)
 
 	// init replica
 	if hasCollectionInStreaming := w.node.streaming.replica.hasCollection(collectionID); !hasCollectionInStreaming {
@@ -432,7 +412,7 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 		}
 
 		r.node.streaming.replica.removeExcludedSegments(r.req.CollectionID)
-		r.node.searchService.stopSearchCollection(r.req.CollectionID)
+		r.node.queryService.stopQueryCollection(r.req.CollectionID)
 
 		hasCollectionInHistorical := r.node.historical.replica.hasCollection(r.req.CollectionID)
 		if hasCollectionInHistorical {
@@ -489,39 +469,49 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 		zap.Any("collectionID", r.req.CollectionID),
 		zap.Any("partitionIDs", r.req.PartitionIDs))
 
-	hCol, err := r.node.historical.replica.getCollectionByID(r.req.CollectionID)
-	if err != nil {
-		log.Error(err.Error())
-		return err
-	}
+	const gracefulReleaseTime = 1
+	func() { // release synchronously
+		errMsg := "release partitions failed, collectionID = " + strconv.FormatInt(r.req.CollectionID, 10) + ", err = "
+		time.Sleep(gracefulReleaseTime * time.Second)
 
-	sCol, err := r.node.streaming.replica.getCollectionByID(r.req.CollectionID)
-	if err != nil {
-		log.Error(err.Error())
-		return err
-	}
-
-	for _, id := range r.req.PartitionIDs {
-		r.node.streaming.dataSyncService.removePartitionFlowGraph(id)
-		hasPartitionInHistorical := r.node.historical.replica.hasPartition(id)
-		if hasPartitionInHistorical {
-			err := r.node.historical.replica.removePartition(id)
-			if err != nil {
-				// not return, try to release all partitions
-				log.Error(err.Error())
-			}
+		hCol, err := r.node.historical.replica.getCollectionByID(r.req.CollectionID)
+		if err != nil {
+			log.Error(errMsg + err.Error())
+			return
 		}
-		hCol.addReleasedPartition(id)
 
-		hasPartitionInStreaming := r.node.streaming.replica.hasPartition(id)
-		if hasPartitionInStreaming {
-			err := r.node.streaming.replica.removePartition(id)
-			if err != nil {
-				log.Error(err.Error())
-			}
+		sCol, err := r.node.streaming.replica.getCollectionByID(r.req.CollectionID)
+		if err != nil {
+			log.Error(errMsg + err.Error())
+			return
 		}
-		sCol.addReleasedPartition(id)
-	}
+
+		for _, id := range r.req.PartitionIDs {
+			r.node.streaming.dataSyncService.removePartitionFlowGraph(id)
+			hasPartitionInHistorical := r.node.historical.replica.hasPartition(id)
+			if hasPartitionInHistorical {
+				err = r.node.historical.replica.removePartition(id)
+				if err != nil {
+					// not return, try to release all partitions
+					log.Error(errMsg + err.Error())
+				}
+			}
+			hCol.addReleasedPartition(id)
+
+			hasPartitionInStreaming := r.node.streaming.replica.hasPartition(id)
+			if hasPartitionInStreaming {
+				err = r.node.streaming.replica.removePartition(id)
+				if err != nil {
+					log.Error(errMsg + err.Error())
+				}
+			}
+			sCol.addReleasedPartition(id)
+		}
+
+		log.Debug("release partition task done",
+			zap.Any("collectionID", r.req.CollectionID),
+			zap.Any("partitionIDs", r.req.PartitionIDs))
+	}()
 
 	log.Debug("release partition task done",
 		zap.Any("collectionID", r.req.CollectionID),

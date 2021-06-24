@@ -14,12 +14,10 @@ package querynode
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"reflect"
 	"sync"
 
-	"github.com/golang/protobuf/proto"
 	oplog "github.com/opentracing/opentracing-go/log"
 	"go.uber.org/zap"
 
@@ -317,31 +315,6 @@ func (rc *retrieveCollection) doUnsolvedMsgRetrieve() {
 	}
 }
 
-func mergeRetrieveResults(dataArr []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error) {
-	var final *segcorepb.RetrieveResults
-	for _, data := range dataArr {
-		if data == nil {
-			continue
-		}
-
-		if final == nil {
-			final = proto.Clone(data).(*segcorepb.RetrieveResults)
-			continue
-		}
-
-		proto.Merge(final.Ids, data.Ids)
-		if len(final.FieldsData) != len(data.FieldsData) {
-			return nil, fmt.Errorf("mismatch FieldData in RetrieveResults")
-		}
-
-		for i := range final.FieldsData {
-			proto.Merge(final.FieldsData[i], data.FieldsData[i])
-		}
-	}
-
-	return final, nil
-}
-
 func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error {
 	// TODO(yukun)
 	// step 1: get retrieve object and defer destruction
@@ -459,13 +432,13 @@ func (rc *retrieveCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error
 			FieldsData:                result.FieldsData,
 			ResultChannelID:           retrieveMsg.ResultChannelID,
 			SealedSegmentIDsRetrieved: sealedSegmentRetrieved,
-			ChannelIDsRetrieved:       collection.getPChannels(),
+			ChannelIDsRetrieved:       collection.getVChannels(),
 			//TODO(yukun):: get global sealed segment from etcd
 			GlobalSealedSegmentIDs: sealedSegmentRetrieved,
 		},
 	}
 	log.Debug("QueryNode RetrieveResultMsg",
-		zap.Any("pChannels", collection.getPChannels()),
+		zap.Any("vChannels", collection.getVChannels()),
 		zap.Any("collectionID", collection.ID()),
 		zap.Any("sealedSegmentRetrieved", sealedSegmentRetrieved),
 	)

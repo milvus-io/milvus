@@ -40,22 +40,31 @@ func (s *Server) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 	}, nil
 }
 
-func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*commonpb.Status, error) {
+func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
 	log.Debug("Receive flush request", zap.Int64("dbID", req.GetDbID()), zap.Int64("collectionID", req.GetCollectionID()))
-	resp := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	resp := &datapb.FlushResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "",
+		},
+		DbID:         0,
+		CollectionID: 0,
+		SegmentIDs:   []int64{},
 	}
 	if s.isClosed() {
-		resp.Reason = serverNotServingErrMsg
+		resp.Status.Reason = serverNotServingErrMsg
 		return resp, nil
 	}
-	if err := s.segmentManager.SealAllSegments(ctx, req.CollectionID); err != nil {
-		resp.Reason = fmt.Sprintf("Failed to flush %d, %s", req.CollectionID, err)
+	sealedSegments, err := s.segmentManager.SealAllSegments(ctx, req.CollectionID)
+	if err != nil {
+		resp.Status.Reason = fmt.Sprintf("Failed to flush %d, %s", req.CollectionID, err)
 		return resp, nil
 	}
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
+	resp.DbID = req.GetDbID()
+	resp.CollectionID = req.GetCollectionID()
+	resp.SegmentIDs = sealedSegments
+	return resp, nil
 }
 
 func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {

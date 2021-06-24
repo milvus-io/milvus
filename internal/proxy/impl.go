@@ -1386,9 +1386,16 @@ func (node *Proxy) Retrieve(ctx context.Context, request *milvuspb.RetrieveReque
 	return rt.result, nil
 }
 
-func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*commonpb.Status, error) {
+func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*milvuspb.FlushResponse, error) {
+	resp := &milvuspb.FlushResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "",
+		},
+	}
 	if !node.checkHealthy() {
-		return unhealthyStatus(), nil
+		resp.Status.Reason = "proxy is not healthy"
+		return resp, nil
 	}
 	ft := &FlushTask{
 		ctx:          ctx,
@@ -1399,10 +1406,8 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 
 	err := node.sched.DdQueue.Enqueue(ft)
 	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		resp.Status.Reason = err.Error()
+		return resp, nil
 	}
 
 	log.Debug("Flush",
@@ -1423,10 +1428,8 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 
 	err = ft.WaitToFinish()
 	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		resp.Status.Reason = err.Error()
+		return resp, nil
 	}
 
 	return ft.result, nil
@@ -1534,8 +1537,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 				zap.Uint64("timestamp", rt.Base.Timestamp),
 				zap.String("db", retrieveRequest.DbName),
 				zap.String("collection", retrieveRequest.CollectionName),
-				zap.Any("partitions", retrieveRequest.PartitionNames),
-				zap.Any("len(Ids)", len(rt.result.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data)))
+				zap.Any("partitions", retrieveRequest.PartitionNames))
 		}()
 
 		err = rt.WaitToFinish()
