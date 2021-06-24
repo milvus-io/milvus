@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -197,17 +196,6 @@ func makeNewChannelNames(names []string, suffix string) []string {
 func refreshChannelNames() {
 	suffix := "-test-query-node" + strconv.FormatInt(rand.Int63n(1000000), 10)
 	Params.StatsChannelName = Params.StatsChannelName + suffix
-}
-
-func (q *queryCoordMock) RegisterNode(ctx context.Context, req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
-	return &querypb.RegisterNodeResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		InitParams: &internalpb.InitParams{
-			NodeID: int64(1),
-		},
-	}, nil
 }
 
 func newMessageStreamFactory() (msgstream.Factory, error) {

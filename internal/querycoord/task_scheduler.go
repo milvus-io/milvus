@@ -438,18 +438,12 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 		})
 	defer span.Finish()
 	span.LogFields(oplog.Int64("processTask: scheduler process PreExecute", t.ID()))
+	t.PreExecute()
+
 	key := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
 	err := scheduler.client.Save(key, strconv.Itoa(int(taskDoing)))
-
 	if err != nil {
 		log.Debug("processTask: update task state err", zap.String("reason", err.Error()))
-		trace.LogError(span, err)
-		return err
-	}
-
-	err = t.PreExecute(ctx)
-	if err != nil {
-		log.Debug("processTask: preExecute err", zap.String("reason", err.Error()))
 		trace.LogError(span, err)
 		return err
 	}
@@ -458,13 +452,6 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 	err = t.Execute(ctx)
 	if err != nil {
 		log.Debug("processTask: execute err", zap.String("reason", err.Error()))
-		trace.LogError(span, err)
-		return err
-	}
-	span.LogFields(oplog.Int64("processTask: scheduler process PostExecute", t.ID()))
-	err = t.PostExecute(ctx)
-	if err != nil {
-		log.Debug("processTask: postExecute err", zap.String("reason", err.Error()))
 		trace.LogError(span, err)
 		return err
 	}
@@ -487,6 +474,8 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 		kvs[stateKey] = strconv.Itoa(int(taskUndo))
 		err = scheduler.client.MultiSave(kvs)
 		if err != nil {
+			log.Debug("processTask: save active task info err", zap.String("reason", err.Error()))
+			trace.LogError(span, err)
 			return err
 		}
 		log.Debug("processTask: save active task to etcd", zap.Int64("parent taskID", t.ID()), zap.Int64("child taskID", childTask.ID()))
@@ -498,7 +487,11 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 		trace.LogError(span, err)
 		return err
 	}
-	return err
+
+	span.LogFields(oplog.Int64("processTask: scheduler process PostExecute", t.ID()))
+	t.PostExecute()
+
+	return nil
 }
 
 func (scheduler *TaskScheduler) scheduleLoop() {
@@ -518,7 +511,7 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 				if err != nil {
 					log.Error("scheduleLoop: process task error", zap.Any("error", err.Error()))
 					t.Notify(err)
-					continue
+					t.PostExecute()
 				}
 				if t.Type() == commonpb.MsgType_LoadCollection || t.Type() == commonpb.MsgType_LoadPartitions {
 					t.Notify(err)
@@ -534,9 +527,6 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 				}
 			}
 			activeTaskWg.Wait()
-			//if t.Type() == commonpb.MsgType_ReleaseCollection || t.Type() == commonpb.MsgType_ReleasePartitions {
-			//	t.Notify(err)
-			//}
 			keys := make([]string, 0)
 			taskKey := fmt.Sprintf("%s/%d", triggerTaskPrefix, t.ID())
 			stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())

@@ -170,6 +170,21 @@ func (m *meta) hasPartition(collectionID UniqueID, partitionID UniqueID) bool {
 	return false
 }
 
+func (m *meta) hasReleasePartition(collectionID UniqueID, partitionID UniqueID) bool {
+	m.RLock()
+	defer m.RUnlock()
+
+	if info, ok := m.collectionInfos[collectionID]; ok {
+		for _, id := range info.ReleasedPartitionIDs {
+			if partitionID == id {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 func (m *meta) addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error {
 	m.Lock()
 	defer m.Unlock()
@@ -208,6 +223,13 @@ func (m *meta) addPartition(collectionID UniqueID, partitionID UniqueID) error {
 			}
 		}
 		col.PartitionIDs = append(col.PartitionIDs, partitionID)
+		releasedPartitionIDs := make([]UniqueID, 0)
+		for _, id := range col.ReleasedPartitionIDs {
+			if id != partitionID {
+				releasedPartitionIDs = append(releasedPartitionIDs, id)
+			}
+		}
+		col.ReleasedPartitionIDs = releasedPartitionIDs
 		m.partitionStates[partitionID] = querypb.PartitionState_NotPresent
 		log.Debug("add a  partition to meta", zap.Int64s("partitionIDs", col.PartitionIDs))
 		err := m.saveCollectionInfo(collectionID, col)
@@ -381,9 +403,26 @@ func (m *meta) releasePartition(collectionID UniqueID, partitionID UniqueID) {
 			}
 		}
 		info.PartitionIDs = newPartitionIDs
+
+		releasedPartitionIDs := make([]UniqueID, 0)
+		for _, id := range info.ReleasedPartitionIDs {
+			if id != partitionID {
+				releasedPartitionIDs = append(releasedPartitionIDs, id)
+			}
+		}
+		releasedPartitionIDs = append(releasedPartitionIDs, partitionID)
+		info.ReleasedPartitionIDs = releasedPartitionIDs
+		err := m.saveCollectionInfo(collectionID, info)
+		if err != nil {
+			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+		}
 	}
 	for id, info := range m.segmentInfos {
 		if info.PartitionID == partitionID {
+			err := m.removeSegmentInfo(id)
+			if err != nil {
+				log.Error("delete segmentInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID), zap.Int64("segmentID", id))
+			}
 			delete(m.segmentInfos, id)
 		}
 	}
@@ -577,6 +616,17 @@ func (m *meta) setLoadCollection(collectionID UniqueID, state bool) error {
 	}
 
 	return errors.New("setLoadCollection: can't find collection in collectionInfos")
+}
+
+func (m *meta) getLoadCollection(collectionID UniqueID) (bool, error) {
+	m.RLock()
+	defer m.RUnlock()
+
+	if info, ok := m.collectionInfos[collectionID]; ok {
+		return info.LoadCollection, nil
+	}
+
+	return false, errors.New("getLoadCollection: can't find collection in collectionInfos")
 }
 
 func (m *meta) printMeta() {

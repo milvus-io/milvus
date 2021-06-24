@@ -524,7 +524,6 @@ func (sched *TaskScheduler) queryLoop() {
 
 type resultBufHeader struct {
 	usedVChans                  map[interface{}]struct{} // set of vChan
-	usedChans                   map[interface{}]struct{} // set of pChan todo
 	receivedVChansSet           map[interface{}]struct{} // set of vChan
 	receivedSealedSegmentIDsSet map[interface{}]struct{} // set of UniqueID
 	receivedGlobalSegmentIDsSet map[interface{}]struct{} // set of UniqueID
@@ -545,7 +544,6 @@ func newSearchResultBuf() *searchResultBuf {
 	return &searchResultBuf{
 		resultBufHeader: resultBufHeader{
 			usedVChans:                  make(map[interface{}]struct{}),
-			usedChans:                   make(map[interface{}]struct{}),
 			receivedVChansSet:           make(map[interface{}]struct{}),
 			receivedSealedSegmentIDsSet: make(map[interface{}]struct{}),
 			receivedGlobalSegmentIDsSet: make(map[interface{}]struct{}),
@@ -559,7 +557,6 @@ func newQueryResultBuf() *queryResultBuf {
 	return &queryResultBuf{
 		resultBufHeader: resultBufHeader{
 			usedVChans:                  make(map[interface{}]struct{}),
-			usedChans:                   make(map[interface{}]struct{}),
 			receivedVChansSet:           make(map[interface{}]struct{}),
 			receivedSealedSegmentIDsSet: make(map[interface{}]struct{}),
 			receivedGlobalSegmentIDsSet: make(map[interface{}]struct{}),
@@ -594,11 +591,6 @@ func (sr *resultBufHeader) readyToReduce() bool {
 		return true
 	}
 
-	usedChansSetStrMap := make(map[string]int)
-	for x := range sr.usedChans {
-		usedChansSetStrMap[x.(string)] = 1
-	}
-
 	receivedVChansSetStrMap := make(map[string]int)
 
 	for x := range sr.receivedVChansSet {
@@ -622,15 +614,13 @@ func (sr *resultBufHeader) readyToReduce() bool {
 	}
 
 	ret1 := setContain(sr.receivedVChansSet, sr.usedVChans)
-	ret2 := setContain(sr.receivedVChansSet, sr.usedChans)
 	log.Debug("Proxy searchResultBuf readyToReduce", zap.Any("receivedVChansSet", receivedVChansSetStrMap),
 		zap.Any("usedVChans", usedVChansSetStrMap),
-		zap.Any("usedChans", usedChansSetStrMap),
 		zap.Any("receivedSealedSegmentIDsSet", sealedSegmentIDsStrMap),
 		zap.Any("receivedGlobalSegmentIDsSet", sealedGlobalSegmentIDsStrMap),
 		zap.Any("ret1", ret1),
-		zap.Any("ret2", ret2))
-	if !ret1 && !ret2 {
+	)
+	if !ret1 {
 		return false
 	}
 	ret := setContain(sr.receivedSealedSegmentIDsSet, sr.receivedGlobalSegmentIDsSet)
@@ -752,9 +742,6 @@ func (sched *TaskScheduler) collectResultLoop() {
 							delete(searchResultBufs, reqID)
 							continue
 						}
-						for _, pchan := range pchans {
-							resultBuf.usedChans[pchan] = struct{}{}
-						}
 						searchResultBufs[reqID] = resultBuf
 					}
 					resultBuf.addPartialResult(&searchResultMsg.SearchResults)
@@ -853,9 +840,6 @@ func (sched *TaskScheduler) collectResultLoop() {
 						if err != nil {
 							delete(queryResultBufs, reqID)
 							continue
-						}
-						for _, pchan := range pchans {
-							resultBuf.usedChans[pchan] = struct{}{}
 						}
 						queryResultBufs[reqID] = resultBuf
 					}

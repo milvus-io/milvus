@@ -1149,7 +1149,6 @@ class TestSearchDSL(object):
         assert len(res) == nq
         assert len(res[0]) == 0
 
-    @pytest.mark.skip("xige-16-search-without-insert")
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_query_complex_dsl(self, connect, collection):
         '''

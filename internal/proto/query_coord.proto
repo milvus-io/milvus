@@ -15,8 +15,6 @@ service QueryCoord {
   rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
 
-  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
-
   rpc ShowCollections(ShowCollectionsRequest) returns (ShowCollectionsResponse) {}
   rpc ShowPartitions(ShowPartitionsRequest) returns (ShowPartitionsResponse) {}
 
@@ -46,16 +44,6 @@ service QueryNode {
 }
 
 //--------------------query coordinator proto------------------
-message RegisterNodeRequest {
-  common.MsgBase base = 1;
-  common.Address address = 2;
-}
-
-message RegisterNodeResponse {
-  common.Status status = 1;
-  internal.InitParams init_params = 2;
-}
-
 message ShowCollectionsRequest {
   common.MsgBase base = 1;
   int64 dbID = 2;
@@ -270,6 +258,7 @@ message CollectionInfo {
   repeated DmChannelInfo channel_infos = 3;
   bool load_collection = 4;
   schema.CollectionSchema schema = 5;
+  repeated int64 released_partitionIDs = 6;
 }
 
 message HandoffSegments {

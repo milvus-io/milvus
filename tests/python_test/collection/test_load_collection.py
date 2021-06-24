@@ -252,7 +252,7 @@ class TestLoadCollection:
         connect.load_collection(collection)
         connect.release_partitions(collection, [default_partition_name, default_tag])
         res = connect.search(collection, default_single_query)
-        assert len(res) == 0
+        assert len(res[0]) == 0
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_load_partitions_release_collection(self, connect, collection):
@@ -308,7 +308,7 @@ class TestReleaseAdvanced:
         res = connect.search(collection, query, _async=True)
         connect.release_partitions(collection, [default_tag])
         res = connect.search(collection, default_single_query)
-        assert len(res) == 0
+        assert len(res[0]) == 0
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_release_collection_during_searching_A(self, connect, collection):
@@ -496,7 +496,6 @@ class TestLoadPartition:
                 connect.create_index(binary_collection, default_binary_vec_field_name, get_binary_index)
             connect.load_partitions(binary_collection, [default_tag])
 
-    @pytest.mark.skip("xige-16-search-without-insert")
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_load_empty_partition(self, connect, collection):
         '''

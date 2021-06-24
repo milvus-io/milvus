@@ -1,7 +1,7 @@
 apiVersion: chaos-mesh.org/v1alpha1
 kind: PodChaos
 metadata:
-  name: test-querynode-podkill
+  name: test-indexcoord-podkill
   namespace: chaos-testing
 spec:
   action: pod-kill
@@ -12,6 +12,6 @@ spec:
     labelSelectors:
       app.kubernetes.io/instance: milvus-chaos
       app.kubernetes.io/name: milvus
-      component: querynode
+      component: indexcoord
   scheduler:
     cron: '@every 2s'

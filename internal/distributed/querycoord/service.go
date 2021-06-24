@@ -242,10 +242,6 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 	return s.queryCoord.GetStatisticsChannel(ctx)
 }
 
-func (s *Server) RegisterNode(ctx context.Context, req *querypb.RegisterNodeRequest) (*querypb.RegisterNodeResponse, error) {
-	return s.queryCoord.RegisterNode(ctx, req)
-}
-
 func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
 	return s.queryCoord.ShowCollections(ctx, req)
 }

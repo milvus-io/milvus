@@ -1,0 +1,17 @@
+name: all-contributors
+
+on:
+    schedule:
+    # * is a special character in YAML so you have to quote this string
+    - cron:  '10 3 * * *'
+
+jobs:
+  contributor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: milvus-io/hero-bot@1.3
+        with:
+          token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
+          repos: 'milvus-io/milvus,milvus-io/milvus-helm,milvus-io/bootcamp,milvus-io/milvus.io,milvus-io/milvus-sdk-java,milvus-io/pymilvus'
+          targetRepo: 'milvus-io/milvus'
+

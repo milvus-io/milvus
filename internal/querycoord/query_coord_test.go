@@ -18,7 +18,6 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
@@ -53,36 +52,36 @@ func TestQueryCoord_Init(t *testing.T) {
 	service.Stop()
 }
 
-func TestQueryCoord_load(t *testing.T) {
-	ctx := context.Background()
-	msFactory := msgstream.NewPmsFactory()
-	service, err := NewQueryCoord(context.Background(), msFactory)
-	assert.Nil(t, err)
-	service.Init()
-	service.Start()
-	service.SetRootCoord(NewRootCoordMock())
-	service.SetDataCoord(NewDataMock())
-	registerNodeRequest := &querypb.RegisterNodeRequest{
-		Address: &commonpb.Address{},
-	}
-	service.RegisterNode(ctx, registerNodeRequest)
-
-	t.Run("Test LoadSegment", func(t *testing.T) {
-		loadCollectionRequest := &querypb.LoadCollectionRequest{
-			CollectionID: 1,
-		}
-		response, err := service.LoadCollection(ctx, loadCollectionRequest)
-		assert.Nil(t, err)
-		assert.Equal(t, response.ErrorCode, commonpb.ErrorCode_Success)
-	})
-
-	t.Run("Test LoadPartition", func(t *testing.T) {
-		loadPartitionRequest := &querypb.LoadPartitionsRequest{
-			CollectionID: 1,
-			PartitionIDs: []UniqueID{1},
-		}
-		response, err := service.LoadPartitions(ctx, loadPartitionRequest)
-		assert.Nil(t, err)
-		assert.Equal(t, response.ErrorCode, commonpb.ErrorCode_Success)
-	})
-}
+//func TestQueryCoord_load(t *testing.T) {
+//	ctx := context.Background()
+//	msFactory := msgstream.NewPmsFactory()
+//	service, err := NewQueryCoord(context.Background(), msFactory)
+//	assert.Nil(t, err)
+//	service.Init()
+//	service.Start()
+//	service.SetRootCoord(NewRootCoordMock())
+//	service.SetDataCoord(NewDataMock())
+//	registerNodeRequest := &querypb.RegisterNodeRequest{
+//		Address: &commonpb.Address{},
+//	}
+//	service.RegisterNode(ctx, registerNodeRequest)
+//
+//	t.Run("Test LoadSegment", func(t *testing.T) {
+//		loadCollectionRequest := &querypb.LoadCollectionRequest{
+//			CollectionID: 1,
+//		}
+//		response, err := service.LoadCollection(ctx, loadCollectionRequest)
+//		assert.Nil(t, err)
+//		assert.Equal(t, response.ErrorCode, commonpb.ErrorCode_Success)
+//	})
+//
+//	t.Run("Test LoadPartition", func(t *testing.T) {
+//		loadPartitionRequest := &querypb.LoadPartitionsRequest{
+//			CollectionID: 1,
+//			PartitionIDs: []UniqueID{1},
+//		}
+//		response, err := service.LoadPartitions(ctx, loadPartitionRequest)
+//		assert.Nil(t, err)
+//		assert.Equal(t, response.ErrorCode, commonpb.ErrorCode_Success)
+//	})
+//}

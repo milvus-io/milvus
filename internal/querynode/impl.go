@@ -75,8 +75,8 @@ func (node *QueryNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.Stri
 
 func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQueryChannelRequest) (*commonpb.Status, error) {
 	collectionID := in.CollectionID
-	if node.searchService == nil {
-		errMsg := "null search service, collectionID = " + fmt.Sprintln(collectionID)
+	if node.queryService == nil {
+		errMsg := "null query service, collectionID = " + fmt.Sprintln(collectionID)
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    errMsg,
@@ -94,34 +94,32 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 	//}
 
 	// add search collection
-	if !node.searchService.hasSearchCollection(collectionID) {
-		node.searchService.addSearchCollection(collectionID)
-		log.Debug("add search collection", zap.Any("collectionID", collectionID))
+	if !node.queryService.hasQueryCollection(collectionID) {
+		node.queryService.addQueryCollection(collectionID)
+		log.Debug("add query collection", zap.Any("collectionID", collectionID))
 	}
 
 	// add request channel
-	sc := node.searchService.searchCollections[in.CollectionID]
+	sc := node.queryService.queryCollections[in.CollectionID]
 	consumeChannels := []string{in.RequestChannelID}
 	//consumeSubName := Params.MsgChannelSubName
 	consumeSubName := Params.MsgChannelSubName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
-	sc.searchMsgStream.AsConsumer(consumeChannels, consumeSubName)
-	node.retrieveService.retrieveMsgStream.AsConsumer(consumeChannels, "RetrieveSubName")
+	sc.queryMsgStream.AsConsumer(consumeChannels, consumeSubName)
 	log.Debug("querynode AsConsumer: " + strings.Join(consumeChannels, ", ") + " : " + consumeSubName)
 
 	// add result channel
 	producerChannels := []string{in.ResultChannelID}
-	sc.searchResultMsgStream.AsProducer(producerChannels)
-	node.retrieveService.retrieveResultMsgStream.AsProducer(producerChannels)
+	sc.queryResultMsgStream.AsProducer(producerChannels)
 	log.Debug("querynode AsProducer: " + strings.Join(producerChannels, ", "))
 
 	// message stream need to asConsumer before start
 	// add search collection
-	if !node.searchService.hasSearchCollection(collectionID) {
-		node.searchService.addSearchCollection(collectionID)
-		log.Debug("add search collection", zap.Any("collectionID", collectionID))
+	if !node.queryService.hasQueryCollection(collectionID) {
+		node.queryService.addQueryCollection(collectionID)
+		log.Debug("add query collection", zap.Any("collectionID", collectionID))
 	}
 	sc.start()
-	log.Debug("start search collection", zap.Any("collectionID", collectionID))
+	log.Debug("start query collection", zap.Any("collectionID", collectionID))
 
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,

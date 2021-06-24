@@ -1537,8 +1537,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 				zap.Uint64("timestamp", rt.Base.Timestamp),
 				zap.String("db", retrieveRequest.DbName),
 				zap.String("collection", retrieveRequest.CollectionName),
-				zap.Any("partitions", retrieveRequest.PartitionNames),
-				zap.Any("len(Ids)", len(rt.result.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data)))
+				zap.Any("partitions", retrieveRequest.PartitionNames))
 		}()
 
 		err = rt.WaitToFinish()

@@ -152,7 +152,7 @@ func (ia *IDAllocator) pickCanDoFunc() {
 func (ia *IDAllocator) processFunc(req Request) error {
 	idRequest := req.(*IDRequest)
 	idRequest.id = ia.idStart
-	ia.idStart++
+	ia.idStart += int64(idRequest.count)
 	return nil
 }
 

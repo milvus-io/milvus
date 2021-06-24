@@ -53,5 +53,5 @@ RUN wget -qO- "https://github.com/jeffoverflow/autouseradd/releases/download/1.2
 RUN wget -O /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini && \
     chmod +x /tini
 
-ENTRYPOINT [ "/tini", "--", "autouseradd", "--no-create-home", "--user", "milvus", "--", "/entrypoint.sh" ]
+ENTRYPOINT [ "/tini", "--", "autouseradd", "--user", "milvus", "--", "/entrypoint.sh" ]
 CMD ["tail", "-f", "/dev/null"]

@@ -53,7 +53,8 @@ def gen_binary_vec_field(name=ct.default_binary_vec_field_name, is_primary=False
     return binary_vec_field
 
 
-def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name, auto_id=False):
+def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
+                                  auto_id=False):
     fields = [gen_int64_field(), gen_float_field(), gen_float_vec_field()]
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id)

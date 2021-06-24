@@ -64,7 +64,7 @@ The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/servic
 
 * The service creates a lease with etcd and stores a key-value pair in etcd. If the lease expires or the service goes offline, etcd will delete the key-value pair. You can judge whether this service is avaliable through the key.
 
-* key: "/session" + "/ServerName(-ServerID)(optional)"
+* key: metaRoot + "/session" + "/ServerName(-ServerID)(optional)"
 
 * value: json format
 
@@ -91,14 +91,16 @@ The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/servic
 ###### Interface
 
 ```go
-const DefaultServiceRoot = "/session/"
-const DefaultIDKey = "id"
-const DefaultRetryTimes = 30
-const DefaultTTL = 10
+const (
+	DefaultServiceRoot = "session/"
+	DefaultIDKey       = "id"
+	DefaultRetryTimes  = 30
+	DefaultTTL         = 10
+)
 
 // Session is a struct to store service's session, including ServerID, ServerName,
 // Address.
-// LeaseID will be assigned after registered in etcd.
+// Exclusive indicates that this server can only start one.
 type Session struct {
 	ctx        context.Context
 	ServerID   int64  `json:"ServerID,omitempty"`
@@ -106,27 +108,36 @@ type Session struct {
 	Address    string `json:"Address,omitempty"`
 	Exclusive  bool   `json:"Exclusive,omitempty"`
 
-	etcdCli *clientv3.Client
-	leaseID clientv3.LeaseID
-	cancel  context.CancelFunc
+	etcdCli  *clientv3.Client
+	leaseID  clientv3.LeaseID
+	cancel   context.CancelFunc
+	metaRoot string
 }
 
-// NewSession is a helper to build Session object.LeaseID will be assigned after
-// registeration.
-func NewSession(ctx context.Context, etcdAddress []string) *Session {}
+// NewSession is a helper to build Session object.
+// ServerID, ServerName, Address, Exclusive will be assigned after registeration.
+// metaRoot is a path in etcd to save session information.
+// etcdEndpoints is to init etcdCli when NewSession
+func NewSession(ctx context.Context, metaRoot string, etcdEndpoints []string) *Session {}
 
-// GetSessions will get all sessions registered in etcd.
-func (s *Session) GetSessions(prefix string) (map[string]*Session, error) {}
-
-// Init will initialize base struct in the SessionManager, including getServerID,
-// and process keepAliveResponse
+// Init will initialize base struct of the Session, including ServerName, ServerID,
+// Address, Exclusive. ServerID is obtained in getServerID.
+// Finally it will process keepAliveResponse to keep alive with etcd.
 func (s *Session) Init(serverName, address string, exclusive bool) <-chan bool {}
 
-// WatchServices watch the service's up and down in etcd, and saves it into local
-// sessions.
-// If a server up, it will be add to addChannel.
-// If a server is offline, it will be add to delChannel.
-func (s *Session) WatchServices(prefix string) (addChannel <-chan *Session, delChannel <-chan *Session) {}
+// GetSessions will get all sessions registered in etcd.
+// Revision is returned for WatchServices to prevent key events from being missed.
+func (s *Session) GetSessions(prefix string) (map[string]*Session, int64, error) {}
+
+// WatchServices watch the service's up and down in etcd, and send event to
+// eventChannel.
+// prefix is a parameter to know which service to watch and can be obtained in
+// typeutil.type.go.
+// revision is a etcd reversion to prevent missing key events and can be obtained
+// in GetSessions.
+// If a server up, a event will be add to channel with eventType SessionAddType.
+// If a server down, a event will be add to channel with eventType SessionDelType.
+func (s *Session) WatchServices(prefix string, revision int64) (eventChannel <-chan *SessionEvent) {}
 
 
 #### A.3 Global Parameter Table
