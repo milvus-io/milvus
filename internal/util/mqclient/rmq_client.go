@@ -55,7 +55,7 @@ func (rc *rmqClient) Subscribe(options ConsumerOptions) (Consumer, error) {
 		return nil, err
 	}
 
-	rConsumer := &rmqConsumer{c: cli}
+	rConsumer := &RmqConsumer{c: cli}
 
 	return rConsumer, nil
 }
