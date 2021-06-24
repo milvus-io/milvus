@@ -344,6 +344,7 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 			if len(segmentInfos) > 0 {
 				s.cluster.flush(segmentInfos)
 			}
+			s.segmentManager.ExpireAllocations(ch, ts)
 		}
 	}
 }
