@@ -84,19 +84,12 @@ func (c *Client) Init() error {
 
 func (c *Client) connect() error {
 	var err error
-	getQueryCoordAddressFn := func() error {
+	connectQueryCoordAddressFn := func() error {
 		c.addr, err = getQueryCoordAddress(c.sess)
 		if err != nil {
+			log.Debug("QueryCoordClient getQueryCoordAddress failed", zap.Error(err))
 			return err
 		}
-		return nil
-	}
-	err = retry.Do(c.ctx, getQueryCoordAddressFn, c.retryOptions...)
-	if err != nil {
-		log.Debug("QueryCoordClient getQueryCoordAddress failed", zap.Error(err))
-		return err
-	}
-	connectGrpcFunc := func() error {
 		opts := trace.GetInterceptorOpts()
 		log.Debug("QueryCoordClient try reconnect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(c.ctx, c.addr,
@@ -119,7 +112,7 @@ func (c *Client) connect() error {
 		return nil
 	}
 
-	err = retry.Do(c.ctx, connectGrpcFunc, c.retryOptions...)
+	err = retry.Do(c.ctx, connectQueryCoordAddressFn, c.retryOptions...)
 	if err != nil {
 		log.Debug("QueryCoordClient try reconnect failed", zap.Error(err))
 		return err

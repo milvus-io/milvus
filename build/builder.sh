@@ -38,7 +38,6 @@ chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}"
 
 docker-compose pull --ignore-pull-failures ubuntu
 if [[ "${CHECK_BUILDER:-}" == "1" ]]; then
-    DATE_VERSION=latest docker-compose pull --ignore-pull-failures ubuntu
     docker-compose build ubuntu
 fi
 

@@ -91,19 +91,12 @@ func (c *GrpcClient) Init() error {
 
 func (c *GrpcClient) connect() error {
 	var err error
-	getRootCoordAddrFn := func() error {
+	connectRootCoordAddrFn := func() error {
 		c.addr, err = getRootCoordAddr(c.sess)
 		if err != nil {
+			log.Debug("RootCoordClient getRootCoordAddr failed", zap.Error(err))
 			return err
 		}
-		return nil
-	}
-	err = retry.Do(c.ctx, getRootCoordAddrFn, c.retryOptions...)
-	if err != nil {
-		log.Debug("RootCoordClient getRootCoordAddr failed", zap.Error(err))
-		return err
-	}
-	connectGrpcFunc := func() error {
 		opts := trace.GetInterceptorOpts()
 		log.Debug("RootCoordClient try reconnect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(c.ctx, c.addr,
@@ -126,7 +119,7 @@ func (c *GrpcClient) connect() error {
 		return nil
 	}
 
-	err = retry.Do(c.ctx, connectGrpcFunc, c.retryOptions...)
+	err = retry.Do(c.ctx, connectRootCoordAddrFn, c.retryOptions...)
 	if err != nil {
 		log.Debug("RootCoordClient try reconnect failed", zap.Error(err))
 		return err

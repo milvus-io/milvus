@@ -191,6 +191,12 @@ func (i *IndexNode) SetIndexCoordClient(serviceClient types.IndexCoord) {
 }
 
 func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
+	if i.stateCode.Load().(internalpb.StateCode) != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "state code is not healthy",
+		}, nil
+	}
 	log.Debug("IndexNode building index ...",
 		zap.Int64("IndexBuildID", request.IndexBuildID),
 		zap.String("IndexName", request.IndexName),
