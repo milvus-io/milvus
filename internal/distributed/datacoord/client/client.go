@@ -42,8 +42,6 @@ type Client struct {
 
 	sess *sessionutil.Session
 	addr string
-
-	retryOptions []retry.Option
 }
 
 func getDataCoordAddress(sess *sessionutil.Session) (string, error) {
@@ -61,7 +59,7 @@ func getDataCoordAddress(sess *sessionutil.Session) (string, error) {
 	return ms.Address, nil
 }
 
-func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string, retryOptions ...retry.Option) (*Client, error) {
+func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*Client, error) {
 	sess := sessionutil.NewSession(ctx, metaRoot, etcdEndpoints)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
@@ -70,18 +68,17 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string, ret
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	return &Client{
-		ctx:          ctx,
-		cancel:       cancel,
-		sess:         sess,
-		retryOptions: retryOptions,
+		ctx:    ctx,
+		cancel: cancel,
+		sess:   sess,
 	}, nil
 }
 
 func (c *Client) Init() error {
-	return c.connect()
+	return c.connect(retry.Attempts(300))
 }
 
-func (c *Client) connect() error {
+func (c *Client) connect(retryOptions ...retry.Option) error {
 	var err error
 	connectDataCoordFn := func() error {
 		c.addr, err = getDataCoordAddress(c.sess)
@@ -111,7 +108,7 @@ func (c *Client) connect() error {
 		return nil
 	}
 
-	err = retry.Do(c.ctx, connectDataCoordFn, c.retryOptions...)
+	err = retry.Do(c.ctx, connectDataCoordFn, retryOptions...)
 	if err != nil {
 		log.Debug("DataCoord try reconnect failed", zap.Error(err))
 		return err

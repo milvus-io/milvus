@@ -25,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -111,10 +110,10 @@ func TestRun(t *testing.T) {
 
 	Params.Init()
 
-	dnServer.newRootCoordClient = func(string, []string, ...retry.Option) (types.RootCoord, error) {
+	dnServer.newRootCoordClient = func(string, []string) (types.RootCoord, error) {
 		return &mockRootCoord{}, nil
 	}
-	dnServer.newDataCoordClient = func(string, []string, ...retry.Option) (types.DataCoord, error) {
+	dnServer.newDataCoordClient = func(string, []string) (types.DataCoord, error) {
 		return &mockDataCoord{}, nil
 	}
 

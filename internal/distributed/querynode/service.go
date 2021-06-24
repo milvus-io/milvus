@@ -103,7 +103,7 @@ func (s *Server) init() error {
 	}
 	// --- QueryCoord ---
 	log.Debug("QueryNode start to new QueryCoordClient", zap.Any("QueryCoordAddress", Params.QueryCoordAddress))
-	queryCoord, err := qcc.NewClient(s.ctx, qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, retry.Attempts(300))
+	queryCoord, err := qcc.NewClient(s.ctx, qn.Params.MetaRootPath, qn.Params.EtcdEndpoints)
 	if err != nil {
 		log.Debug("QueryNode new QueryCoordClient failed", zap.Error(err))
 		panic(err)
@@ -136,7 +136,7 @@ func (s *Server) init() error {
 	addr := Params.RootCoordAddress
 
 	log.Debug("QueryNode start to new RootCoordClient", zap.Any("QueryCoordAddress", addr))
-	rootCoord, err := rcc.NewClient(s.ctx, qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, retry.Attempts(300))
+	rootCoord, err := rcc.NewClient(s.ctx, qn.Params.MetaRootPath, qn.Params.EtcdEndpoints)
 	if err != nil {
 		log.Debug("QueryNode new RootCoordClient failed", zap.Error(err))
 		panic(err)
@@ -165,7 +165,7 @@ func (s *Server) init() error {
 
 	// --- IndexCoord ---
 	log.Debug("Index coord", zap.String("address", Params.IndexCoordAddress))
-	indexCoord, err := isc.NewClient(s.ctx, qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, retry.Attempts(300))
+	indexCoord, err := isc.NewClient(s.ctx, qn.Params.MetaRootPath, qn.Params.EtcdEndpoints)
 
 	if err != nil {
 		log.Debug("QueryNode new IndexCoordClient failed", zap.Error(err))
@@ -196,7 +196,7 @@ func (s *Server) init() error {
 
 	// --- DataCoord ---
 	log.Debug("QueryNode start to new DataCoordClient", zap.Any("DataCoordAddress", Params.DataCoordAddress))
-	dataCoord, err := dsc.NewClient(s.ctx, qn.Params.MetaRootPath, qn.Params.EtcdEndpoints, retry.Attempts(300))
+	dataCoord, err := dsc.NewClient(s.ctx, qn.Params.MetaRootPath, qn.Params.EtcdEndpoints)
 	if err != nil {
 		log.Debug("QueryNode new DataCoordClient failed", zap.Error(err))
 		panic(err)
