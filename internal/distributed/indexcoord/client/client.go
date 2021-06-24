@@ -85,24 +85,16 @@ func (c *Client) Init() error {
 
 func (c *Client) connect() error {
 	var err error
-	getIndexCoordaddrFn := func() error {
+	connectIndexCoordaddrFn := func() error {
 		c.addr, err = getIndexCoordAddr(c.sess)
 		if err != nil {
+			log.Debug("IndexCoordClient getIndexCoordAddress failed")
 			return err
 		}
-		return nil
-	}
-	err = retry.Do(c.ctx, getIndexCoordaddrFn, c.retryOptions...)
-	if err != nil {
-		log.Debug("IndexCoordClient getIndexCoordAddress failed", zap.Error(err))
-		return err
-	}
-	log.Debug("IndexCoordClient getIndexCoordAddress success")
-	connectGrpcFunc := func() error {
 		opts := trace.GetInterceptorOpts()
 		log.Debug("IndexCoordClient try connect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(c.ctx, c.addr,
-			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(5*time.Second),
+			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(3*time.Second),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
 					grpc_retry.UnaryClientInterceptor(),
@@ -121,7 +113,7 @@ func (c *Client) connect() error {
 		return nil
 	}
 
-	err = retry.Do(c.ctx, connectGrpcFunc, c.retryOptions...)
+	err = retry.Do(c.ctx, connectIndexCoordaddrFn, c.retryOptions...)
 	if err != nil {
 		log.Debug("IndexCoordClient try connect failed", zap.Error(err))
 		return err
