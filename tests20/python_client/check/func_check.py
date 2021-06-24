@@ -43,6 +43,9 @@ class ResponseChecker:
         elif self.check_task == CheckTasks.check_search_results:
             result = self.check_search_results(self.response, self.check_items)
 
+        elif self.check_task == CheckTasks.check_query_results:
+            result = self.check_query_results(self.response, self.func_name, self.check_items)
+
         # Add check_items here if something new need verify
 
         return result
@@ -167,3 +170,36 @@ class ResponseChecker:
                          "searched for each query is correct")
         log.info("search_results_check: search_results_check: checked the searching results")
         return True
+
+    @staticmethod
+    def check_query_results(query_res, func_name, check_items):
+        if func_name != 'query':
+            log.warning("The function name is {} rather than {}".format(func_name, "query"))
+        if not isinstance(query_res, list):
+            raise Exception("The query result to check isn't list type object")
+        if len(check_items) == 0:
+            raise Exception("No expect values found in the check task")
+        exp_res = check_items.get("exp_res", None)
+        if exp_res and isinstance(query_res, list):
+            # assert exp_res == query_res
+            assert len(exp_res) == len(query_res)
+            for i in range(len(exp_res)):
+                assert_entity_equal(exp=exp_res[i], actual=query_res[i])
+
+
+def assert_entity_equal(exp, actual):
+    """
+    compare two entities
+    {"int64": 0, "float": 0.0, "float_vec": [0.09111554112502457, ..., 0.08652634258062468]}
+    :param exp: exp entity
+    :param actual: actual entity
+    :return: bool
+    """
+    assert actual.keys() == exp.keys()
+    for field, value in exp.items():
+        if isinstance(value, list):
+            assert len(actual[field]) == len(exp[field])
+            for i in range(len(exp[field])):
+                assert abs(actual[field][i] - exp[field][i]) < ct.epsilon
+        else:
+            assert actual[field] == exp[field]
