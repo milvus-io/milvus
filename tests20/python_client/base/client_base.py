@@ -143,7 +143,8 @@ class TestcaseBase(Base):
                                       **kwargs)
         return partition_wrap
 
-    def init_collection_general(self, prefix, insert_data=False, nb=ct.default_nb, partition_num=0, is_binary=False):
+    def init_collection_general(self, prefix, insert_data=False, nb=ct.default_nb,
+                                partition_num=0, is_binary=False, is_all_data_type=False):
         """
         target: create specified collections
         method: 1. create collections (binary/non-binary)
@@ -158,10 +159,11 @@ class TestcaseBase(Base):
         vectors = []
         binary_raw_vectors = []
         # 1 create collection
+        default_schema = cf.gen_default_collection_schema()
         if is_binary:
             default_schema = cf.gen_default_binary_collection_schema()
-        else:
-            default_schema = cf.gen_default_collection_schema()
+        if is_all_data_type:
+            default_schema = cf.gen_collection_schema_all_datatype()
         log.info("init_collection_general: collection creation")
         collection_w = self.init_collection_wrap(name=collection_name,
                                                  schema=default_schema)
@@ -170,11 +172,10 @@ class TestcaseBase(Base):
             cf.gen_partitions(collection_w, partition_num)
         # 3 insert data if specified
         if insert_data:
-            collection_w, vectors, binary_raw_vectors = cf.insert_data(collection_w, nb, is_binary)
-            if nb <= 32000:
-                conn.flush([collection_w.name])
-                assert collection_w.is_empty == False
-                assert collection_w.num_entities == nb
+            collection_w, vectors, binary_raw_vectors = \
+                cf.insert_data(collection_w, nb, is_binary, is_all_data_type)
+            assert collection_w.is_empty == False
+            assert collection_w.num_entities == nb
             collection_w.load()
 
         return collection_w, vectors, binary_raw_vectors
