@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
 type queryNode struct {
@@ -42,7 +41,7 @@ type queryNode struct {
 }
 
 func newQueryNode(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) (*queryNode, error) {
-	client, err := nodeclient.NewClient(ctx, address, retry.Attempts(300))
+	client, err := nodeclient.NewClient(ctx, address)
 	if err != nil {
 		return nil, err
 	}
