@@ -98,11 +98,9 @@ func (f *RmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
 }
 
 func (f *RmsFactory) NewQueryMsgStream(ctx context.Context) (MsgStream, error) {
-	rmqClient, err := mqclient.NewRmqClient(rocksmq.ClientOptions{Server: rocksmqserver.Rmq})
-	if err != nil {
-		return nil, err
-	}
-	return NewMqMsgStream(ctx, f.ReceiveBufSize, f.RmqBufSize, rmqClient, f.dispatcherFactory.NewUnmarshalDispatcher())
+	InitMmq()
+
+	return NewMemMsgStream(ctx, f.ReceiveBufSize)
 }
 
 func NewRmsFactory() Factory {

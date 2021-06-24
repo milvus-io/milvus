@@ -164,7 +164,7 @@ func (q *queryCollection) waitNewTSafe() Timestamp {
 	_, _, recvOK := reflect.Select(q.watcherSelectCase)
 	if !recvOK {
 		log.Error("tSafe has been closed", zap.Any("collectionID", q.collectionID))
-		return invalidTimestamp
+		return Timestamp(math.MaxInt64)
 	}
 	//log.Debug("wait new tSafe", zap.Any("collectionID", s.collectionID))
 	t := Timestamp(math.MaxInt64)
@@ -1283,6 +1283,14 @@ func mergeRetrieveResults(dataArr []*segcorepb.RetrieveResults) (*segcorepb.Retr
 
 		for i := range final.FieldsData {
 			proto.Merge(final.FieldsData[i], data.FieldsData[i])
+		}
+	}
+
+	// not found, return default values indicating not result found
+	if final == nil {
+		final = &segcorepb.RetrieveResults{
+			Ids:        nil,
+			FieldsData: []*schemapb.FieldData{},
 		}
 	}
 

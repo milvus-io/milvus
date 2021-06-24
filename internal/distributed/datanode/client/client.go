@@ -59,10 +59,10 @@ func NewClient(ctx context.Context, addr string, retryOptions ...retry.Option) (
 }
 
 func (c *Client) Init() error {
-	return c.connect()
+	return c.connect(retry.Attempts(300))
 }
 
-func (c *Client) connect() error {
+func (c *Client) connect(retryOptions ...retry.Option) error {
 	connectGrpcFunc := func() error {
 		opts := trace.GetInterceptorOpts()
 		log.Debug("DataNode connect ", zap.String("address", c.addr))
@@ -86,7 +86,7 @@ func (c *Client) connect() error {
 		return nil
 	}
 
-	err := retry.Do(c.ctx, connectGrpcFunc, c.retryOptions...)
+	err := retry.Do(c.ctx, connectGrpcFunc, retryOptions...)
 	if err != nil {
 		log.Debug("DataNodeClient try connect failed", zap.Error(err))
 		return err

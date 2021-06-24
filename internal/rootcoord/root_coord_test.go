@@ -1844,7 +1844,7 @@ func TestRootCoord2(t *testing.T) {
 
 		pChan := core.MetaTable.ListCollectionPhysicalChannels()
 		dmlStream, _ := msFactory.NewMsgStream(ctx)
-		dmlStream.AsConsumer(pChan, Params.MsgChannelSubName)
+		dmlStream.AsConsumer([]string{pChan[0]}, Params.MsgChannelSubName)
 		dmlStream.Start()
 
 		msgs := getNotTtMsg(ctx, 2, dmlStream.Chan())

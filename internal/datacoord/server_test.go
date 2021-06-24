@@ -636,7 +636,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)
 
-	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string, retryOptions ...retry.Option) (types.RootCoord, error) {
+	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
 		return newMockRootCoordService(), nil
 	}
 
@@ -773,10 +773,10 @@ func newTestServer(t *testing.T, receiveCh chan interface{}) *Server {
 
 	svr, err := CreateServer(context.TODO(), factory)
 	assert.Nil(t, err)
-	svr.dataClientCreator = func(ctx context.Context, addr string, retryOptions ...retry.Option) (types.DataNode, error) {
+	svr.dataClientCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
-	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string, retryOptions ...retry.Option) (types.RootCoord, error) {
+	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
 		return newMockRootCoordService(), nil
 	}
 	assert.Nil(t, err)
