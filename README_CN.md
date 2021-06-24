@@ -254,6 +254,8 @@ Milvus 训练营能够帮助你了解向量数据库的操作及各种应用场�
 
 欢迎向 Milvus 社区贡献你的代码。代码贡献流程或提交补丁等相关信息详见 [代码贡献准则](https://github.com/milvus-io/milvus/blob/master/CONTRIBUTING.md)。参考 [社区仓库](https://github.com/milvus-io/community) 了解社区管理准则并获取更多社区资源。
 
+<br><!-- Do not remove start of hero-bot --><br><br><!-- Do not remove end of hero-bot --><br>
+
 ## Milvus 文档
 
 ### SDK
