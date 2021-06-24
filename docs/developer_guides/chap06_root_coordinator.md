@@ -454,7 +454,7 @@ type Core struct {
 	CallBuildIndexService func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error)
 	CallDropIndexService  func(ctx context.Context, indexID typeutil.UniqueID) error
 
-	NewProxyClient func(sess *sessionutil.Session) (types.ProxyNode, error)
+	NewProxyClient func(sess *sessionutil.Session) (types.Proxy, error)
 
 	//query service interface, notify query service to release collection
 	CallReleaseCollectionService func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) error
@@ -465,8 +465,8 @@ type Core struct {
 	//dml channels
 	dmlChannels *dmlChannels
 
-	//ProxyNode manager
-	proxyNodeManager *proxyNodeManager
+	//Proxy manager
+	proxyManager *proxyManager
 
 	// proxy clients
 	proxyClientManager *proxyClientManager
@@ -689,11 +689,11 @@ type timetickSync struct {
 func newTimeTickSync(core *Core) *timetickSync
 
 func (t *timetickSync) UpdateTimeTick(in *internalpb.ChannelTimeTickMsg) error
-func (t *timetickSync) AddProxyNode(sess *sessionutil.Session)
-func (t *timetickSync) DelProxyNode(sess *sessionutil.Session)
-func (t *timetickSync) GetProxyNodes(sess []*sessionutil.Session)
+func (t *timetickSync) AddProxy(sess *sessionutil.Session)
+func (t *timetickSync) DelProxy(sess *sessionutil.Session)
+func (t *timetickSync) GetProxy(sess []*sessionutil.Session)
 func (t *timetickSync) StartWatch()
 func (t *timetickSync) SendChannelTimeTick(chanName string, ts typeutil.Timestamp) error
-func (t *timetickSync) GetProxyNodeNum()
+func (t *timetickSync) GetProxyNum()
 func (t *timetickSync) GetChanNum() int 
 ```

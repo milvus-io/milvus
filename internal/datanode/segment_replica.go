@@ -332,7 +332,7 @@ func (replica *SegmentReplica) getCollectionID() UniqueID {
 	return replica.collectionID
 }
 
-// getCollectionSchema will get collection schema from masterservice for a certain time.
+// getCollectionSchema will get collection schema from rootcoord for a certain time.
 // If you want the latest collection schema, ts should be 0
 func (replica *SegmentReplica) getCollectionSchema(collID UniqueID, ts Timestamp) (*schemapb.CollectionSchema, error) {
 	replica.segMu.Lock()

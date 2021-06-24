@@ -48,7 +48,7 @@ RUN mkdir -p /home/milvus/.vscode-server/extensions \
 
 COPY --chown=0:0 build/docker/builder/entrypoint.sh /
 
-RUN wget -qO- "https://github.com/benesch/autouseradd/releases/download/1.2.0/autouseradd-1.2.0-amd64.tar.gz" | tar xz -C / --strip-components 1
+RUN wget -qO- "https://github.com/jeffoverflow/autouseradd/releases/download/1.2.0/autouseradd-1.2.0-amd64.tar.gz" | tar xz -C / --strip-components 1
 
 RUN wget -O /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini && \
     chmod +x /tini

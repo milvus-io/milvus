@@ -308,13 +308,13 @@ class TestPartitionParams(TestcaseBase):
 
         # insert data
         partition_w.insert(data)
-        self._connect().flush([collection_w.name])
+        # self._connect().flush([collection_w.name])     # don't need flush for issue #5737
         assert not partition_w.is_empty
         assert partition_w.num_entities == nums
 
         # insert data
         partition_w.insert(data)
-        self._connect().flush([collection_w.name])
+        # self._connect().flush([collection_w.name])
         assert not partition_w.is_empty
         assert partition_w.num_entities == (nums + nums)
 
@@ -481,9 +481,9 @@ class TestPartitionOperations(TestcaseBase):
             assert not collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("flush", [True, False])
+    # @pytest.mark.parametrize("flush", [True, False])
     @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
-    def test_partition_drop_non_empty_partition(self, flush, partition_name):
+    def test_partition_drop_non_empty_partition(self, partition_name):
         """
         target: verify drop a partition which has data inserted
         method: 1.create a partition with default schema
@@ -502,25 +502,25 @@ class TestPartitionOperations(TestcaseBase):
         # insert data to partition
         partition_w.insert(cf.gen_default_dataframe_data())
 
-        # flush
-        if flush:
-            self._connect().flush([collection_w.name])
+        # # flush   remove flush for issue #5837
+        # if flush:
+        #      self._connect().flush([collection_w.name])
 
         # drop partition
         partition_w.drop()
         assert not collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("flush", [True, False])
+    # @pytest.mark.parametrize("flush", [True, False])
     @pytest.mark.parametrize("partition_name, data", [(cf.gen_unique_str(prefix), cf.gen_default_list_data(nb=10))])
     @pytest.mark.parametrize("index_param", cf.gen_simple_index())
-    def test_partition_drop_indexed_partition(self, flush, partition_name, data, index_param):
+    def test_partition_drop_indexed_partition(self, partition_name, data, index_param):
         """
         target: verify drop an indexed partition
         method: 1.create a partition
                 2. insert same data
                 3. create an index
-                4. flush or not flush
+                4. flush or not flush (remove flush step for issue # 5837)
                 5. drop the partition
         expected: drop successfully
         """
@@ -537,9 +537,9 @@ class TestPartitionOperations(TestcaseBase):
         # create index of collection
         collection_w.create_index(ct.default_float_vec_field_name, index_param)
 
-        # flush
-        if flush:
-            self._connect().flush([collection_w.name])
+        # # flush
+        # if flush:
+        #     self._connect().flush([collection_w.name])
 
         # drop partition
         partition_w.drop()
@@ -624,7 +624,10 @@ class TestPartitionOperations(TestcaseBase):
         assert collection_w.has_partition(partition_name)[0]
 
         # insert data to partition
-        partition_w.insert(cf.gen_default_list_data())
+        data = cf.gen_default_list_data()
+        partition_w.insert(data)
+        assert partition_w.num_entities == len(data[0])
+        assert collection_w.num_entities == len(data[0])
 
         # load partition
         partition_w.load()
@@ -635,6 +638,7 @@ class TestPartitionOperations(TestcaseBase):
                                       params={"nprobe": 32}, limit=1)
         assert len(res_1) == 1
 
+
         # release collection
         collection_w.release()
 
@@ -643,8 +647,8 @@ class TestPartitionOperations(TestcaseBase):
                                       anns_field=ct.default_float_vec_field_name,
                                       params={"nprobe": 32}, limit=1,
                                       check_task=ct.CheckTasks.err_res,
-                                      check_items={ct.err_code: 1,
-                                                   ct.err_msg: "collection has been released"})
+                                      check_items={ct.err_code: 0,
+                                                   ct.err_msg: "not loaded into memory"})
         # release partition
         partition_w.release()
 
@@ -666,7 +670,7 @@ class TestPartitionOperations(TestcaseBase):
 
         # insert data to partition
         partition_w.insert(data)
-        self._connect().flush([collection_w.name])
+        # self._connect().flush([collection_w.name])
         assert partition_w.num_entities == len(data)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -730,7 +734,7 @@ class TestPartitionOperations(TestcaseBase):
         # insert data to partition
         max_size = 100000  # TODO: clarify the max size of data
         partition_w.insert(cf.gen_default_dataframe_data(max_size))
-        self._connect().flush([collection_w.name])
+        # self._connect().flush([collection_w.name])
         assert partition_w.num_entities == max_size
 
     @pytest.mark.tags(CaseLabel.L1)

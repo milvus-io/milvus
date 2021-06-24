@@ -43,6 +43,8 @@ func TestValidateArrayLength(t *testing.T) {
 	assert.Error(t, err)
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
 func CreateFloatArray(n int64, dim int64) []float32 {
 	rand.Seed(time.Now().UnixNano())
 	num := n * dim
@@ -153,4 +155,23 @@ func TestCalcFloatDistance(t *testing.T) {
 			assert.Less(t, math.Abs(float64(sum-distances[i*rightNum+j])), precision)
 		}
 	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+func CreateBinaryArray(n int64, dim int64) []byte {
+	rand.Seed(time.Now().UnixNano())
+	num := int64(n * dim / 8)
+	if num*8 < n*dim {
+		num = num + 1
+	}
+	array := make([]byte, num)
+	for i := int64(0); i < num; i++ {
+
+	}
+
+	return array
+}
+
+func TestCalcBinaryDistance(t *testing.T) {
+
 }

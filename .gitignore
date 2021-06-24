@@ -23,7 +23,7 @@ cmake_build
 # Docker generated cache file
 .docker/
 
-# proxynode
+# proxy
 proxy/milvus
 proxy/cmake_build
 proxy/cmake-build-debug
