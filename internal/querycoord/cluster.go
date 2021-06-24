@@ -159,8 +159,8 @@ func (c *queryNodeCluster) LoadSegments(ctx context.Context, nodeID int64, in *q
 		status, err := node.client.LoadSegments(ctx, in)
 		if err == nil && status.ErrorCode == commonpb.ErrorCode_Success {
 			for _, info := range in.Infos {
-				c.clusterMeta.addCollection(info.CollectionID, in.Schema)
-				c.clusterMeta.addPartition(info.CollectionID, info.PartitionID)
+				//c.clusterMeta.addCollection(info.CollectionID, in.Schema)
+				//c.clusterMeta.addPartition(info.CollectionID, info.PartitionID)
 
 				node.addCollection(info.CollectionID, in.Schema)
 				node.addPartition(info.CollectionID, info.PartitionID)
@@ -225,8 +225,8 @@ func (c *queryNodeCluster) WatchDmChannels(ctx context.Context, nodeID int64, in
 		log.Debug("queryNode watch dm channel done")
 		if err == nil && status.ErrorCode == commonpb.ErrorCode_Success {
 			collectionID := in.CollectionID
-			c.clusterMeta.addCollection(collectionID, in.Schema)
-			c.clusterMeta.addDmChannel(collectionID, nodeID, channels)
+			//c.clusterMeta.addCollection(collectionID, in.Schema)
+			//c.clusterMeta.addDmChannel(collectionID, nodeID, channels)
 
 			node.addCollection(collectionID, in.Schema)
 			node.addDmChannel(collectionID, channels)

@@ -164,8 +164,6 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
 
-	lct.meta.addCollection(collectionID, lct.Schema)
-	lct.meta.setLoadCollection(collectionID, true)
 	showPartitionRequest := &milvuspb.ShowPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_ShowPartitions,
@@ -178,14 +176,38 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 		lct.result = status
 		return err
 	}
-	log.Debug("loadCollectionTask: get recovery info", zap.Int64s("partitionIDs", showPartitionResponse.PartitionIDs))
+	log.Debug("loadCollectionTask: get collection's all partitionIDs", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", showPartitionResponse.PartitionIDs))
+
+	partitionIDs := showPartitionResponse.PartitionIDs
 	toLoadPartitionIDs := make([]UniqueID, 0)
-	for _, id := range showPartitionResponse.PartitionIDs {
-		if !lct.meta.hasPartition(collectionID, id) {
-			toLoadPartitionIDs = append(toLoadPartitionIDs, id)
+	hasCollection := lct.meta.hasCollection(collectionID)
+	if hasCollection {
+		loadCollection, _ := lct.meta.getLoadCollection(collectionID)
+		if loadCollection {
+			for _, partitionID := range partitionIDs {
+				hasReleasePartition := lct.meta.hasReleasePartition(collectionID, partitionID)
+				if hasReleasePartition {
+					toLoadPartitionIDs = append(toLoadPartitionIDs, partitionID)
+				}
+			}
+		} else {
+			for _, partitionID := range partitionIDs {
+				hasPartition := lct.meta.hasPartition(collectionID, partitionID)
+				if !hasPartition {
+					toLoadPartitionIDs = append(toLoadPartitionIDs, partitionID)
+				}
+			}
 		}
+	} else {
+		toLoadPartitionIDs = partitionIDs
 	}
+
 	log.Debug("loadCollectionTask: toLoadPartitionIDs", zap.Int64s("partitionIDs", toLoadPartitionIDs))
+	lct.meta.addCollection(collectionID, lct.Schema)
+	lct.meta.setLoadCollection(collectionID, true)
+	for _, id := range toLoadPartitionIDs {
+		lct.meta.addPartition(collectionID, id)
+	}
 
 	segment2Binlog := make(map[UniqueID]*querypb.SegmentLoadInfo)
 	watchRequests := make(map[string]*querypb.WatchDmChannelsRequest)
