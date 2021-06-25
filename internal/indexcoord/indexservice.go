@@ -268,7 +268,7 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 		zap.Any("IndexParams", req.IndexParams))
 	hasIndex, indexBuildID := i.metaTable.HasSameReq(req)
 	if hasIndex {
-		log.Debug("IndexCoord", zap.Any("hasIndex true", indexBuildID))
+		log.Debug("IndexCoord", zap.Int64("hasIndex true", indexBuildID), zap.Strings("data paths", req.DataPaths))
 		return &indexpb.BuildIndexResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,

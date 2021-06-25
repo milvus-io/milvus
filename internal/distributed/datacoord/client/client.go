@@ -42,8 +42,6 @@ type Client struct {
 
 	sess *sessionutil.Session
 	addr string
-
-	retryOptions []retry.Option
 }
 
 func getDataCoordAddress(sess *sessionutil.Session) (string, error) {
@@ -61,7 +59,7 @@ func getDataCoordAddress(sess *sessionutil.Session) (string, error) {
 	return ms.Address, nil
 }
 
-func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string, retryOptions ...retry.Option) (*Client, error) {
+func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*Client, error) {
 	sess := sessionutil.NewSession(ctx, metaRoot, etcdEndpoints)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
@@ -70,36 +68,28 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string, ret
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	return &Client{
-		ctx:          ctx,
-		cancel:       cancel,
-		sess:         sess,
-		retryOptions: retryOptions,
+		ctx:    ctx,
+		cancel: cancel,
+		sess:   sess,
 	}, nil
 }
 
 func (c *Client) Init() error {
-	return c.connect()
+	return c.connect(retry.Attempts(300))
 }
 
-func (c *Client) connect() error {
+func (c *Client) connect(retryOptions ...retry.Option) error {
 	var err error
-	getDataCoordAddressFn := func() error {
+	connectDataCoordFn := func() error {
 		c.addr, err = getDataCoordAddress(c.sess)
 		if err != nil {
+			log.Debug("DataCoordClient getDataCoordAddr failed", zap.Error(err))
 			return err
 		}
-		return nil
-	}
-	err = retry.Do(c.ctx, getDataCoordAddressFn, c.retryOptions...)
-	if err != nil {
-		log.Debug("DataCoordClient try reconnect getDataCoordAddressFn failed", zap.Error(err))
-		return err
-	}
-	connectGrpcFunc := func() error {
 		opts := trace.GetInterceptorOpts()
 		log.Debug("DataCoordClient try reconnect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(c.ctx, c.addr,
-			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(5*time.Second),
+			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(3*time.Second),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
 					grpc_retry.UnaryClientInterceptor(),
@@ -118,7 +108,7 @@ func (c *Client) connect() error {
 		return nil
 	}
 
-	err = retry.Do(c.ctx, connectGrpcFunc, c.retryOptions...)
+	err = retry.Do(c.ctx, connectDataCoordFn, retryOptions...)
 	if err != nil {
 		log.Debug("DataCoord try reconnect failed", zap.Error(err))
 		return err
