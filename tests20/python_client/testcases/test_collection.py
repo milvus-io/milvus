@@ -1096,7 +1096,6 @@ class TestCollectionDataframe(TestcaseBase):
                                                       check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #6077")
     def test_construct_with_none_auto_id(self):
         """
         target: test construct with non-int64 as primary field

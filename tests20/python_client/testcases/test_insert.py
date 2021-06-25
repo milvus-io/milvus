@@ -1,9 +1,12 @@
+import threading
+
 import numpy as np
 import pandas as pd
 import pytest
+from pymilvus_orm import Index
 
 from base.client_base import TestcaseBase
-# from utils.util_log import test_log as log
+from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
@@ -15,6 +18,8 @@ exp_num = "num_entities"
 exp_primary = "primary"
 default_schema = cf.gen_default_collection_schema()
 default_binary_schema = cf.gen_default_binary_collection_schema()
+default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+default_binary_index_params = {"index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD", "params": {"nlist": 64}}
 
 
 class TestInsertParams(TestcaseBase):
@@ -426,45 +431,80 @@ class TestInsertOperation(TestcaseBase):
         collection_list, _ = self.utility_wrap.list_collections()
         assert collection_w.name not in collection_list
 
+    @pytest.mark.tags(CaseLabel.L1)
     def test_insert_create_index(self):
         """
         target: test insert and create index
         method: 1. insert 2. create index
         expected: verify num entities and index
         """
-        pass
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        df = cf.gen_default_dataframe_data(ct.default_nb)
+        collection_w.insert(data=df)
+        assert collection_w.num_entities == ct.default_nb
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+        assert collection_w.has_index()
+        index, _ = collection_w.index()
+        assert index == Index(collection_w.collection, ct.default_float_vec_field_name, default_index_params)
+        assert collection_w.indexes[0] == index
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="#6118")
     def test_insert_after_create_index(self):
         """
         target: test insert after create index
         method: 1. create index 2. insert data
         expected: verify index and num entities
         """
-        pass
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+        assert collection_w.has_index()
+        index, _ = collection_w.index()
+        assert index == Index(collection_w.collection, ct.default_float_vec_field_name, default_index_params)
+        assert collection_w.indexes[0] == index
+        df = cf.gen_default_dataframe_data(ct.default_nb)
+        collection_w.insert(data=df)
+        assert collection_w.num_entities == ct.default_nb
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="#6118")
     def test_insert_binary_after_index(self):
         """
         target: test insert binary after index
         method: 1.create index 2.insert binary data
         expected: 1.index ok 2.num entities correct
         """
-        pass
+        schema = cf.gen_default_binary_collection_schema()
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        collection_w.create_index(ct.default_binary_vec_field_name, default_binary_index_params)
+        assert collection_w.has_index()
+        index, _ = collection_w.index()
+        assert index == Index(collection_w.collection, ct.default_binary_vec_field_name, default_binary_index_params)
+        assert collection_w.indexes[0] == index
+        df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb)
+        collection_w.insert(data=df)
+        assert collection_w.num_entities == ct.default_nb
 
-    def test_insert_search(self):
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_insert_auto_id_create_index(self):
         """
-        target: test insert and search
-        method: 1.insert data 2.search
-        expected: verify search result
+        target: test create index in auto_id=True collection
+        method: 1.create auto_id=True collection and insert 2.create index
+        expected: index correct
         """
-        pass
-
-    def test_insert_binary_search(self):
-        """
-        target: test insert and search
-        method: 1.insert binary data 2.search
-        expected: search result correct
-        """
-        pass
+        schema = cf.gen_default_collection_schema(auto_id=True)
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        df = cf.gen_default_dataframe_data(ct.default_nb)
+        df.drop(ct.default_int64_field_name, axis=1, inplace=True)
+        mutation_res, _ = collection_w.insert(data=df)
+        assert cf._check_primary_keys(mutation_res.primary_keys, ct.default_nb)
+        assert collection_w.num_entities == ct.default_nb
+        # create index
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+        assert collection_w.has_index()
+        index, _ = collection_w.index()
+        assert index == Index(collection_w.collection, ct.default_float_vec_field_name, default_index_params)
+        assert collection_w.indexes[0] == index
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_auto_id_true(self):
@@ -500,8 +540,8 @@ class TestInsertOperation(TestcaseBase):
         assert cf._check_primary_keys(primary_keys, nb)
         mutation_res_1, _ = collection_w.insert(data=df)
         primary_keys.extend(mutation_res_1.primary_keys)
-        assert cf._check_primary_keys(primary_keys, nb*2)
-        assert collection_w.num_entities == nb*2
+        assert cf._check_primary_keys(primary_keys, nb * 2)
+        assert collection_w.num_entities == nb * 2
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_auto_id_true_list_data(self):
@@ -581,11 +621,40 @@ class TestInsertOperation(TestcaseBase):
         assert mutation_res.primary_keys == data[0]
         assert collection_w.num_entities == nb
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_insert_multi_threading(self):
         """
         target: test concurrent insert
         method: multi threads insert
         expected: verify num entities
+        """
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        df = cf.gen_default_dataframe_data(ct.default_nb)
+        thread_num = 4
+        threads = []
+        primary_keys = df[ct.default_int64_field_name].values.tolist()
+
+        def insert(thread_i):
+            log.debug(f'In thread-{thread_i}')
+            mutation_res, _ = collection_w.insert(df)
+            assert mutation_res.insert_count == ct.default_nb
+            assert mutation_res.primary_keys == primary_keys
+
+        for i in range(thread_num):
+            x = threading.Thread(target=insert, args=(i, ))
+            threads.append(x)
+            x.start()
+        for t in threads:
+            t.join()
+        assert collection_w.num_entities == ct.default_nb * thread_num
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="Currently primary keys are not unique")
+    def test_insert_multi_threading_auto_id(self):
+        """
+        target: test concurrent insert auto_id=True collection
+        method: 1.create auto_id=True collection 2.concurrent insert
+        expected: verify primary keys unique
         """
         pass
 
@@ -608,6 +677,7 @@ class TestInsertOperation(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
 
 
+@pytest.mark.skip(reason="waiting for MutationFuture")
 class TestInsertAsync(TestcaseBase):
     """
     ******************************************************************
@@ -621,7 +691,16 @@ class TestInsertAsync(TestcaseBase):
         method: insert with async=True
         expected: verify num entities
         """
-        pass
+        # c_name = cf.gen_unique_str(prefix)
+        # collection_w = self.init_collection_wrap(name=c_name)
+        # df = cf.gen_default_dataframe_data(nb=100)
+        # future, _ = collection_w.insert(data=df, _async=True)
+        # future.done()
+        # res = future.result()
+        # log.debug(res.primary_keys)
+        # assert mutation_res.insert_count == ct.default_nb
+        # assert mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
+        # assert collection_w.num_entities == ct.default_nb
 
     def test_insert_async_false(self):
         """
