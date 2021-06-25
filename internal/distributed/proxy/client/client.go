@@ -54,7 +54,7 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 }
 
 func (c *Client) Init() error {
-	return c.connect(retry.Attempts(300))
+	return c.connect(retry.Attempts(20))
 }
 
 func (c *Client) connect(retryOptions ...retry.Option) error {
@@ -62,7 +62,7 @@ func (c *Client) connect(retryOptions ...retry.Option) error {
 		opts := trace.GetInterceptorOpts()
 		log.Debug("ProxyClient try connect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(c.ctx, c.addr,
-			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(5*time.Second),
+			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(2*time.Second),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
 					grpc_retry.UnaryClientInterceptor(),
