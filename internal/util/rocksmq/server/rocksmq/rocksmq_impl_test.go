@@ -183,8 +183,8 @@ func TestRocksMQ_Goroutines(t *testing.T) {
 	msgChan := make(chan string, loopNum)
 	var wg sync.WaitGroup
 	for i := 0; i < loopNum; i += 2 {
-		go func(i int, group *sync.WaitGroup, mq RocksMQ) {
-			group.Add(2)
+		wg.Add(2)
+		go func(i int, mq RocksMQ) {
 			msg0 := "message_" + strconv.Itoa(i)
 			msg1 := "message_" + strconv.Itoa(i+1)
 			pMsg0 := ProducerMessage{Payload: []byte(msg0)}
@@ -197,7 +197,7 @@ func TestRocksMQ_Goroutines(t *testing.T) {
 			assert.Nil(t, err)
 			msgChan <- msg0
 			msgChan <- msg1
-		}(i, &wg, rmq)
+		}(i, rmq)
 	}
 
 	groupName := "test_group"

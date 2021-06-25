@@ -83,7 +83,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*G
 }
 
 func (c *GrpcClient) Init() error {
-	return c.connect(retry.Attempts(300))
+	return c.connect(retry.Attempts(20))
 }
 
 func (c *GrpcClient) connect(retryOptions ...retry.Option) error {
@@ -97,7 +97,7 @@ func (c *GrpcClient) connect(retryOptions ...retry.Option) error {
 		opts := trace.GetInterceptorOpts()
 		log.Debug("RootCoordClient try reconnect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(c.ctx, c.addr,
-			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(5*time.Second),
+			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(2*time.Second),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
 					grpc_retry.UnaryClientInterceptor(),
