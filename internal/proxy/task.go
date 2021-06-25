@@ -2032,24 +2032,23 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 	}
 	if len(rt.retrieve.OutputFields) == 0 {
 		for _, field := range schema.Fields {
-			if field.FieldID >= 100 {
+			if field.FieldID >= 100 && field.DataType != schemapb.DataType_FloatVector && field.DataType != schemapb.DataType_BinaryVector {
 				rt.OutputFields = append(rt.OutputFields, field.Name)
 			}
 		}
 	} else {
 		rt.OutputFields = rt.retrieve.OutputFields
-		for _, field := range schema.Fields {
-			if field.IsPrimaryKey {
-				containPrimaryKey := false
-				for _, reqFields := range rt.retrieve.OutputFields {
-					if reqFields == field.Name {
-						containPrimaryKey = true
+		for _, reqField := range rt.retrieve.OutputFields {
+			for _, field := range schema.Fields {
+				if reqField == field.Name {
+					if field.DataType != schemapb.DataType_FloatVector && field.DataType != schemapb.DataType_BinaryVector {
+						rt.OutputFields = append(rt.OutputFields, reqField)
+					}
+				} else {
+					if field.IsPrimaryKey {
+						rt.OutputFields = append(rt.OutputFields, field.Name)
 					}
 				}
-				if !containPrimaryKey {
-					rt.OutputFields = append(rt.OutputFields, field.Name)
-				}
-				break
 			}
 		}
 	}
