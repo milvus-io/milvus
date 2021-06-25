@@ -277,8 +277,8 @@ func TestRootCoord(t *testing.T) {
 	assert.Nil(t, err)
 	randVal := rand.Int()
 
-	Params.TimeTickChannel = fmt.Sprintf("master-time-tick-%d", randVal)
-	Params.StatisticsChannel = fmt.Sprintf("master-statistics-%d", randVal)
+	Params.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
@@ -1534,10 +1534,10 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, s.ErrorCode)
 		time.Sleep(1 * time.Second)
 
-		// 2 proxy nodes, 1 master
+		// 2 proxy, 1 rootcoord
 		assert.Equal(t, 3, core.chanTimeTick.GetProxyNum())
 
-		// 3 proxy node channels, 2 master channels
+		// 3 proxy channels, 2 rootcoord channels
 		assert.Equal(t, 5, core.chanTimeTick.GetChanNum())
 	})
 
@@ -1756,8 +1756,8 @@ func TestRootCoord2(t *testing.T) {
 	assert.Nil(t, err)
 	randVal := rand.Int()
 
-	Params.TimeTickChannel = fmt.Sprintf("master-time-tick-%d", randVal)
-	Params.StatisticsChannel = fmt.Sprintf("master-statistics-%d", randVal)
+	Params.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
