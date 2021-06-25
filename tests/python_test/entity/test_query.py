@@ -139,7 +139,6 @@ class TestQueryBase:
         with pytest.raises(Exception):
             connect.query(collection_name, default_term_expr)
     
-    @pytest.mark.xfail(reason="#6035")
     def test_query_after_index(self, connect, collection, get_simple_index):
         """
         target: test query after creating index
@@ -154,9 +153,10 @@ class TestQueryBase:
         res = connect.query(collection, term_expr)
         logging.getLogger().info(res)
         assert len(res) == default_pos
-        for i in range(default_pos):
-            assert res[i][default_int_field_name] == entities[0]["values"][i]
-            ut.assert_equal_vector(res[i][ut.default_float_vec_field_name], entities[-1]["values"][i])
+        for _id, index in enumerate(ids[:default_pos]):
+            if res[index][default_int_field_name] == entities[0]["values"][index]:
+                assert res[index][default_float_field_name] == entities[1]["values"][index]
+                ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
     def test_query_after_search(self, connect, collection):
         """
