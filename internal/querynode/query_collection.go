@@ -758,10 +758,10 @@ func (q *queryCollection) search(searchMsg *msgstream.SearchMsg) error {
 	}
 	topK := plan.getTopK()
 	if topK == 0 {
-		return errors.New("limit must be greater than 0")
+		return fmt.Errorf("limit must be greater than 0")
 	}
 	if topK >= 16385 {
-		return errors.New(fmt.Sprintf("limit %d is too large", topK))
+		return fmt.Errorf("limit %d is too large", topK)
 	}
 	searchRequestBlob := searchMsg.PlaceholderGroup
 	searchReq, err := parseSearchRequest(plan, searchRequestBlob)
