@@ -182,7 +182,6 @@ class TestQueryBase:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
                 ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
-    @pytest.mark.xfail(reason="#6053")
     def test_query_empty_collection(self, connect, collection):
         """
         target: test query empty collection
