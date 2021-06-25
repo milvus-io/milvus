@@ -40,6 +40,9 @@ type ParamTable struct {
 	// --- Pulsar ---
 	PulsarAddress string
 
+	// --- Rocksmq ---
+	RocksmqPath string
+
 	// - seg statistics channel -
 	SegmentStatisticsChannelName string
 
@@ -87,6 +90,8 @@ func (p *ParamTable) Init() {
 		// === DataNode External Components Configs ===
 		// --- Pulsar ---
 		p.initPulsarAddress()
+
+		p.initRocksmqPath()
 
 		// - seg statistics channel -
 		p.initSegmentStatisticsChannelName()
@@ -146,6 +151,14 @@ func (p *ParamTable) initPulsarAddress() {
 		panic(err)
 	}
 	p.PulsarAddress = url
+}
+
+func (p *ParamTable) initRocksmqPath() {
+	path, err := p.Load("_RocksmqPath")
+	if err != nil {
+		panic(err)
+	}
+	p.RocksmqPath = path
 }
 
 func (p *ParamTable) initSegmentStatisticsChannelName() {

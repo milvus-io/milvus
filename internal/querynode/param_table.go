@@ -26,6 +26,7 @@ type ParamTable struct {
 	paramtable.BaseTable
 
 	PulsarAddress string
+	RocksmqPath   string
 	EtcdEndpoints []string
 	MetaRootPath  string
 
@@ -94,6 +95,7 @@ func (p *ParamTable) Init() {
 		p.initMinioBucketName()
 
 		p.initPulsarAddress()
+		p.initRocksmqPath()
 		p.initEtcdEndpoints()
 		p.initMetaRootPath()
 
@@ -173,6 +175,14 @@ func (p *ParamTable) initPulsarAddress() {
 		panic(err)
 	}
 	p.PulsarAddress = url
+}
+
+func (p *ParamTable) initRocksmqPath() {
+	path, err := p.Load("_RocksmqPath")
+	if err != nil {
+		panic(err)
+	}
+	p.RocksmqPath = path
 }
 
 // advanced params
