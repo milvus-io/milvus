@@ -20,6 +20,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+const PRECISION = 1e-6
+
 func TestValidateMetricType(t *testing.T) {
 	invalid_metric := []string{"", "aaa"}
 	for _, str := range invalid_metric {
@@ -35,11 +37,11 @@ func TestValidateMetricType(t *testing.T) {
 	}
 }
 
-func TestValidateArrayLength(t *testing.T) {
-	err := ValidateArrayLength(3, 12)
+func TestValidateFloatArrayLength(t *testing.T) {
+	err := ValidateFloatArrayLength(3, 12)
 	assert.Nil(t, err)
 
-	err = ValidateArrayLength(5, 11)
+	err = ValidateFloatArrayLength(5, 11)
 	assert.Error(t, err)
 }
 
@@ -92,11 +94,10 @@ func TestCalcL2(t *testing.T) {
 	sum := DistanceL2(left, right)
 
 	distance := CalcL2(dim, left, 0, right, 0)
-	precision := 1e-6
-	assert.Less(t, math.Abs(float64(sum-distance)), precision)
+	assert.Less(t, math.Abs(float64(sum-distance)), PRECISION)
 
 	distance = CalcL2(dim, left, 0, left, 0)
-	assert.Less(t, float64(distance), precision)
+	assert.Less(t, float64(distance), PRECISION)
 }
 
 func TestCalcIP(t *testing.T) {
@@ -110,8 +111,7 @@ func TestCalcIP(t *testing.T) {
 	sum := DistanceIP(left, right)
 
 	distance := CalcIP(dim, left, 0, right, 0)
-	precision := 1e-6
-	assert.Less(t, math.Abs(float64(sum-distance)), precision)
+	assert.Less(t, math.Abs(float64(sum-distance)), PRECISION)
 }
 
 func TestCalcFloatDistance(t *testing.T) {
@@ -131,28 +131,30 @@ func TestCalcFloatDistance(t *testing.T) {
 	_, err = CalcFloatDistance(dim, left, right, "HAMMIN")
 	assert.Error(t, err)
 
-	distances, e := CalcFloatDistance(dim, left, right, "L2")
-	assert.Nil(t, e)
+	_, err = CalcFloatDistance(0, left, right, "L2")
+	assert.Error(t, err)
 
-	precision := 1e-6
+	distances, err := CalcFloatDistance(dim, left, right, "L2")
+	assert.Nil(t, err)
+
 	for i := int64(0); i < leftNum; i++ {
 		for j := int64(0); j < rightNum; j++ {
 			v1 := left[i*dim : (i+1)*dim]
 			v2 := right[j*dim : (j+1)*dim]
 			sum := DistanceL2(v1, v2)
-			assert.Less(t, math.Abs(float64(sum-distances[i*rightNum+j])), precision)
+			assert.Less(t, math.Abs(float64(sum-distances[i*rightNum+j])), PRECISION)
 		}
 	}
 
-	distances, e = CalcFloatDistance(dim, left, right, "IP")
-	assert.Nil(t, e)
+	distances, err = CalcFloatDistance(dim, left, right, "IP")
+	assert.Nil(t, err)
 
 	for i := int64(0); i < leftNum; i++ {
 		for j := int64(0); j < rightNum; j++ {
 			v1 := left[i*dim : (i+1)*dim]
 			v2 := right[j*dim : (j+1)*dim]
 			sum := DistanceIP(v1, v2)
-			assert.Less(t, math.Abs(float64(sum-distances[i*rightNum+j])), precision)
+			assert.Less(t, math.Abs(float64(sum-distances[i*rightNum+j])), PRECISION)
 		}
 	}
 }
@@ -173,28 +175,84 @@ func CreateBinaryArray(n int64, dim int64) []byte {
 	return array
 }
 
+func TestSingleBitLen(t *testing.T) {
+	n := SingleBitLen(125)
+	assert.Equal(t, n, int64(128))
+
+	n = SingleBitLen(133)
+	assert.Equal(t, n, int64(136))
+}
+
+func TestVectorCount(t *testing.T) {
+	n := VectorCount(15, 20)
+	assert.Equal(t, n, int64(10))
+
+	n = VectorCount(8, 3)
+	assert.Equal(t, n, int64(3))
+}
+
+func TestValidateBinaryArrayLength(t *testing.T) {
+	err := ValidateBinaryArrayLength(21, 12)
+	assert.Nil(t, err)
+
+	err = ValidateBinaryArrayLength(21, 11)
+	assert.Error(t, err)
+}
+
 func TestCountOne(t *testing.T) {
 	n := CountOne(6)
-	assert.Equal(t, n, 2)
+	assert.Equal(t, n, int32(2))
 
 	n = CountOne(0)
-	assert.Equal(t, n, 0)
+	assert.Equal(t, n, int32(0))
 
 	n = CountOne(255)
-	assert.Equal(t, n, 8)
+	assert.Equal(t, n, int32(8))
 }
 
-func TestBinaryVectorXOR(t *testing.T) {
-	var dim int64 = 128
-	v1 := CreateBinaryArray(1, dim)
-	v2 := CreateBinaryArray(1, dim)
-	_, err := BinaryVectorXOR(dim, v1, v2)
+func TestCalcHammin(t *testing.T) {
+	var dim int64 = 22
+	// v1 = 00000010 00000110 00001000
+	v1 := make([]uint8, 3)
+	v1[0] = 2
+	v1[1] = 6
+	v1[2] = 8
+	// v2 = 00000001 00000111 00011011
+	v2 := make([]uint8, 3)
+	v2[0] = 1
+	v2[1] = 7
+	v2[2] = 27
+	n := CalcHammin(dim, v1, 0, v2, 0)
+	assert.Equal(t, n, int32(4))
+
+	hammin := make([]int32, 1)
+	hammin[0] = n
+	tanimoto, err := CalcTanimotoCoefficient(dim, hammin)
 	assert.Nil(t, err)
+	assert.Less(t, math.Abs(float64(tanimoto[0]-float32(n/(int32(dim)*2-n)))), float64(PRECISION))
 }
 
-func TestCalcBinaryDistance(t *testing.T) {
+func TestCalcHamminDistance(t *testing.T) {
+	var dim int64 = 125
+	var leftNum int64 = 2
 
-	// var d uint8 = 1
-	// b := XOR(k, d)
-	// fmt.Printf("XOR %d\n", b)
+	left := CreateBinaryArray(leftNum, dim)
+
+	distances, err := CalcHamminDistance(0, left, left)
+	assert.Error(t, err)
+
+	distances, err = CalcHamminDistance(dim, left, left)
+	assert.Nil(t, err)
+
+	n := CalcHammin(dim, left, 0, left, 0)
+	assert.Equal(t, n, int32(0))
+
+	n = CalcHammin(dim, left, 1, left, 1)
+	assert.Equal(t, n, int32(0))
+
+	n = CalcHammin(dim, left, 0, left, 1)
+	assert.Equal(t, n, distances[1])
+
+	n = CalcHammin(dim, left, 1, left, 0)
+	assert.Equal(t, n, distances[2])
 }

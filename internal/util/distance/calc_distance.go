@@ -39,9 +39,8 @@ func ValidateMetricType(metric string) (string, error) {
 	return metric, err
 }
 
-func ValidateArrayLength(dim int64, length int64) error {
-	n := length % dim
-	if n != 0 {
+func ValidateFloatArrayLength(dim int64, length int) error {
+	if length == 0 || int64(length)%dim != 0 {
 		err := errors.New("Invalid float vector length")
 		return err
 	}
@@ -86,18 +85,23 @@ func CalcFFBatch(dim int64, left []float32, lIndex int64, right []float32, metri
 }
 
 func CalcFloatDistance(dim int64, left []float32, right []float32, metric string) ([]float32, error) {
+	if dim <= 0 {
+		err := errors.New("Invalid dimension")
+		return nil, err
+	}
+
 	metricUpper := strings.ToUpper(metric)
 	if metricUpper != L2 && metricUpper != IP {
 		err := errors.New("Invalid metric type")
 		return nil, err
 	}
 
-	err := ValidateArrayLength(dim, int64(len(left)))
+	err := ValidateFloatArrayLength(dim, len(left))
 	if err != nil {
 		return nil, err
 	}
 
-	err = ValidateArrayLength(dim, int64(len(right)))
+	err = ValidateFloatArrayLength(dim, len(right))
 	if err != nil {
 		return nil, err
 	}
@@ -122,11 +126,35 @@ func CalcFloatDistance(dim int64, left []float32, right []float32, metric string
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+func SingleBitLen(dim int64) int64 {
+	if dim%8 == 0 {
+		return dim
+	} else {
+		return dim + 8 - dim%8
+	}
+}
+
+func VectorCount(dim int64, length int) int64 {
+	singleBitLen := SingleBitLen(dim)
+	return int64(length*8) / singleBitLen
+}
+
+func ValidateBinaryArrayLength(dim int64, length int) error {
+	singleBitLen := SingleBitLen(dim)
+	totalBitLen := int64(length * 8)
+	if length == 0 || totalBitLen%singleBitLen != 0 {
+		err := errors.New("Invalid binary vector length")
+		return err
+	}
+
+	return nil
+}
+
 // Count 1 of uint8
 // For 00000010, return 1
 // Fro 11111111, return 8
-func CountOne(n uint8) int {
-	count := 0
+func CountOne(n uint8) int32 {
+	count := int32(0)
 	for n != 0 {
 		count++
 		n = n & (n - 1)
@@ -135,35 +163,88 @@ func CountOne(n uint8) int {
 }
 
 // HAMMIN distance
-func BinaryVectorXOR(dim int64, v1 []byte, v2 []byte) ([]byte, error) {
-	if len(v1) != len(v2) || len(v1)*8 < int(dim) {
-		err := errors.New("Binary vectors length not equal")
-		return nil, err
-	}
+func CalcHammin(dim int64, left []byte, lIndex int64, right []byte, rIndex int64) int32 {
+	singleBitLen := SingleBitLen(dim)
+	numBytes := int64(singleBitLen / 8)
+	lFrom := lIndex * numBytes
+	rFrom := rIndex * numBytes
 
-	num := len(v1)
-	array := make([]byte, num)
-	for i := 0; i < num; i++ {
-		array[i] = v1[i] ^ v2[i]
+	var hammin int32 = 0
+	for i := int64(0); i < numBytes; i++ {
+		var xor uint8 = left[lFrom+i] ^ right[rFrom+i]
 
 		// The dimension "dim" may not be an integer multiple of 8
 		// For example:
-		//   dim = 11, each vector has 2 unint8 value
+		//   dim = 11, each vector has 2 uint8 value
 		//   the second uint8, only need to calculate 3 bits, the other 5 bits will be set to 0
-		if i == num-1 && num*8 > int(dim) {
-
+		if i == numBytes-1 && numBytes*8 > dim {
+			offset := numBytes*8 - dim
+			xor = xor & (255 << offset)
 		}
+
+		hammin += CountOne(xor)
 	}
 
-	return array, nil
+	return hammin
 }
 
-func CalcBinaryDistance(dim int64, left []byte, right []byte, metric string) ([]int32, error) {
-	metricUpper := strings.ToUpper(metric)
-	if metricUpper != HAMMING && metricUpper != TANIMOTO {
-		err := errors.New("Invalid metric type")
+func CalcHamminBatch(dim int64, left []byte, lIndex int64, right []byte, result *[]int32) {
+	rightNum := VectorCount(dim, len(right))
+
+	for i := int64(0); i < rightNum; i++ {
+		hammin := CalcHammin(dim, left, lIndex, right, i)
+		(*result)[lIndex*rightNum+i] = hammin
+	}
+}
+
+func CalcHamminDistance(dim int64, left []byte, right []byte) ([]int32, error) {
+	if dim <= 0 {
+		err := errors.New("Invalid dimension")
 		return nil, err
 	}
 
-	return nil, nil
+	err := ValidateBinaryArrayLength(dim, len(left))
+	if err != nil {
+		return nil, err
+	}
+
+	err = ValidateBinaryArrayLength(dim, len(right))
+	if err != nil {
+		return nil, err
+	}
+
+	leftNum := VectorCount(dim, len(left))
+	rightNum := VectorCount(dim, len(right))
+	distArray := make([]int32, leftNum*rightNum)
+
+	var waitGroup sync.WaitGroup
+	CalcWorker := func(index int64) {
+		CalcHamminBatch(dim, left, index, right, &distArray)
+		waitGroup.Done()
+	}
+	for i := int64(0); i < leftNum; i++ {
+		waitGroup.Add(1)
+		go CalcWorker(i)
+	}
+	waitGroup.Wait()
+
+	return distArray, nil
+}
+
+func CalcTanimotoCoefficient(dim int64, hammin []int32) ([]float32, error) {
+	if dim <= 0 || len(hammin) == 0 {
+		err := errors.New("Invalid input for tanimoto")
+		return nil, err
+	}
+
+	array := make([]float32, len(hammin))
+	for i := 0; i < len(hammin); i++ {
+		if hammin[i] >= int32(dim)*2 {
+			err := errors.New("Invalid hammin for tanimoto")
+			return nil, err
+		}
+		array[i] = float32(hammin[i] / (int32(dim)*2 - hammin[i]))
+	}
+
+	return array, nil
 }

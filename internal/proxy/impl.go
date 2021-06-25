@@ -1661,7 +1661,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 	}
 
 	if vectorsLeft.Dim == vectorsRight.Dim && vectorsLeft.GetBinaryVector() != nil && vectorsRight.GetBinaryVector() != nil {
-		distances, err := distance.CalcBinaryDistance(vectorsLeft.Dim, vectorsLeft.GetBinaryVector(), vectorsRight.GetBinaryVector(), metric)
+		hammin, err := distance.CalcHamminDistance(vectorsLeft.Dim, vectorsLeft.GetBinaryVector(), vectorsRight.GetBinaryVector())
 		if err != nil {
 			return &milvuspb.CalcDistanceResults{
 				Status: &commonpb.Status{
@@ -1671,14 +1671,37 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			}, nil
 		}
 
-		return &milvuspb.CalcDistanceResults{
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success, Reason: ""},
-			Array: &milvuspb.CalcDistanceResults_IntDist{
-				IntDist: &schemapb.IntArray{
-					Data: distances,
+		if metric == distance.HAMMING {
+			return &milvuspb.CalcDistanceResults{
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success, Reason: ""},
+				Array: &milvuspb.CalcDistanceResults_IntDist{
+					IntDist: &schemapb.IntArray{
+						Data: hammin,
+					},
 				},
-			},
-		}, nil
+			}, nil
+		}
+
+		if metric == distance.TANIMOTO {
+			tanimoto, err := distance.CalcTanimotoCoefficient(vectorsLeft.Dim, hammin)
+			if err != nil {
+				return &milvuspb.CalcDistanceResults{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_UnexpectedError,
+						Reason:    err.Error(),
+					},
+				}, nil
+			}
+
+			return &milvuspb.CalcDistanceResults{
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success, Reason: ""},
+				Array: &milvuspb.CalcDistanceResults_FloatDist{
+					FloatDist: &schemapb.FloatArray{
+						Data: tanimoto,
+					},
+				},
+			}, nil
+		}
 	}
 
 	err = errors.New("Unexpected error")
