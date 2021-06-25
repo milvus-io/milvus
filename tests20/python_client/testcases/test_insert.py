@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from base.client_base import TestcaseBase
-from utils.util_log import test_log as log
+# from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
@@ -15,16 +15,6 @@ exp_num = "num_entities"
 exp_primary = "primary"
 default_schema = cf.gen_default_collection_schema()
 default_binary_schema = cf.gen_default_binary_collection_schema()
-
-
-def _check_primary_keys(primary_keys, nb):
-    if primary_keys is None:
-        raise Exception("The primary_keys is None")
-    assert len(primary_keys) == nb
-    for i in range(nb - 1):
-        if primary_keys[i] >= primary_keys[i + 1]:
-            return False
-    return True
 
 
 class TestInsertParams(TestcaseBase):
@@ -148,7 +138,6 @@ class TestInsertParams(TestcaseBase):
         pass
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="#5995")
     def test_insert_none(self):
         """
         target: test insert None
@@ -158,7 +147,6 @@ class TestInsertParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         mutation_res, _ = collection_w.insert(data=None)
-        log.debug(f'mutation result: {mutation_res}')
         assert mutation_res.insert_count == 0
         assert len(mutation_res.primary_keys) == 0
         assert collection_w.is_empty
@@ -491,11 +479,10 @@ class TestInsertOperation(TestcaseBase):
         df = cf.gen_default_dataframe_data(ct.default_nb)
         df.drop(ct.default_int64_field_name, axis=1, inplace=True)
         mutation_res, _ = collection_w.insert(data=df)
-        assert _check_primary_keys(mutation_res.primary_keys, ct.default_nb)
+        assert cf._check_primary_keys(mutation_res.primary_keys, ct.default_nb)
         assert collection_w.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="#6007")
     def test_insert_twice_auto_id_true(self):
         """
         target: test insert ids fields twice when auto_id=True
@@ -510,10 +497,10 @@ class TestInsertOperation(TestcaseBase):
         df.drop(ct.default_int64_field_name, axis=1, inplace=True)
         mutation_res, _ = collection_w.insert(data=df)
         primary_keys = mutation_res.primary_keys
-        assert _check_primary_keys(primary_keys, nb)
+        assert cf._check_primary_keys(primary_keys, nb)
         mutation_res_1, _ = collection_w.insert(data=df)
         primary_keys.extend(mutation_res_1.primary_keys)
-        assert _check_primary_keys(primary_keys, nb*2)
+        assert cf._check_primary_keys(primary_keys, nb*2)
         assert collection_w.num_entities == nb*2
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -529,7 +516,7 @@ class TestInsertOperation(TestcaseBase):
         data = cf.gen_default_list_data(nb=ct.default_nb)
         mutation_res, _ = collection_w.insert(data=data[1:])
         # assert mutation_res.insert_count == ct.default_nb
-        assert _check_primary_keys(mutation_res.primary_keys, ct.default_nb)
+        assert cf._check_primary_keys(mutation_res.primary_keys, ct.default_nb)
         assert collection_w.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -562,7 +549,6 @@ class TestInsertOperation(TestcaseBase):
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
         assert collection_w.is_empty
 
-    @pytest.mark.xfail(reason="#5977")
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_auto_id_false_same_values(self):
         """
@@ -572,10 +558,12 @@ class TestInsertOperation(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        data = cf.gen_default_list_data(nb=100)
-        data[0] = [1 for i in range(100)]
-        # error = {ct.err_code: 0, ct.err_msg: "Primary key type must be DataType.INT64"}
-        collection_w.insert(data)
+        nb = 100
+        data = cf.gen_default_list_data(nb=nb)
+        data[0] = [1 for i in range(nb)]
+        mutation_res, _ = collection_w.insert(data)
+        # assert mutation_res.insert_count == nb
+        assert mutation_res.primary_keys == data[0]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_auto_id_false_negative_values(self):

@@ -101,12 +101,17 @@ class ResponseChecker:
         return True
 
     @staticmethod
-    def check_collection_property(collection, func_name, check_items):
+    def check_collection_property(res, func_name, check_items):
         exp_func_name = "init_collection"
         exp_func_name_2 = "construct_from_dataframe"
         if func_name != exp_func_name and func_name != exp_func_name_2:
             log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
-        if not isinstance(collection, Collection):
+        if isinstance(res, Collection):
+            collection = res
+        elif isinstance(res, tuple):
+            collection = res[0]
+            log.debug(collection.schema)
+        else:
             raise Exception("The result to check isn't collection type object")
         if len(check_items) == 0:
             raise Exception("No expect values found in the check task")

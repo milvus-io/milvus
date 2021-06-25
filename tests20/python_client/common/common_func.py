@@ -362,3 +362,13 @@ def insert_data(collection_w, nb=3000, is_binary=False, is_all_data_type=False):
     log.info("insert_data: inserted data into collection %s (num_entities: %s)"
              % (collection_w.name, nb))
     return collection_w, vectors, binary_raw_vectors
+
+
+def _check_primary_keys(primary_keys, nb):
+    if primary_keys is None:
+        raise Exception("The primary_keys is None")
+    assert len(primary_keys) == nb
+    for i in range(nb - 1):
+        if primary_keys[i] >= primary_keys[i + 1]:
+            return False
+    return True
