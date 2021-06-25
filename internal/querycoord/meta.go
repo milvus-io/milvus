@@ -137,6 +137,7 @@ func (m *meta) showPartitions(collectionID UniqueID) ([]UniqueID, error) {
 	m.RLock()
 	defer m.RUnlock()
 
+	//TODO::should update after load collection
 	if info, ok := m.collectionInfos[collectionID]; ok {
 		return info.PartitionIDs, nil
 	}

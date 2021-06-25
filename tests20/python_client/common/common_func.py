@@ -25,6 +25,30 @@ def gen_str_by_length(length=8):
     return "".join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
 
 
+def gen_bool_field(name=ct.default_bool_field_name, description=ct.default_desc, is_primary=False, **kwargs):
+    bool_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.BOOL, description=description,
+                                                              is_primary=is_primary, **kwargs)
+    return bool_field
+
+
+def gen_int8_field(name=ct.default_int8_field_name, description=ct.default_desc, is_primary=False, **kwargs):
+    int8_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.INT8, description=description,
+                                                              is_primary=is_primary, **kwargs)
+    return int8_field
+
+
+def gen_int16_field(name=ct.default_int16_field_name, description=ct.default_desc, is_primary=False, **kwargs):
+    int16_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.INT16, description=description,
+                                                               is_primary=is_primary, **kwargs)
+    return int16_field
+
+
+def gen_int32_field(name=ct.default_int32_field_name, description=ct.default_desc, is_primary=False, **kwargs):
+    int32_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.INT32, description=description,
+                                                               is_primary=is_primary, **kwargs)
+    return int32_field
+
+
 def gen_int64_field(name=ct.default_int64_field_name, description=ct.default_desc, is_primary=False, **kwargs):
     int64_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.INT64, description=description,
                                                                is_primary=is_primary, **kwargs)
@@ -35,6 +59,12 @@ def gen_float_field(name=ct.default_float_field_name, is_primary=False, descript
     float_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.FLOAT, description=description,
                                                                is_primary=is_primary)
     return float_field
+
+
+def gen_double_field(name=ct.default_double_field_name, is_primary=False, description=ct.default_desc):
+    double_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.DOUBLE,
+                                                                description=description, is_primary=is_primary)
+    return double_field
 
 
 def gen_float_vec_field(name=ct.default_float_vec_field_name, is_primary=False, dim=ct.default_dim,
@@ -56,6 +86,16 @@ def gen_binary_vec_field(name=ct.default_binary_vec_field_name, is_primary=False
 def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
                                   auto_id=False):
     fields = [gen_int64_field(), gen_float_field(), gen_float_vec_field()]
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
+                                                                    primary_field=primary_field, auto_id=auto_id)
+    return schema
+
+
+def gen_collection_schema_all_datatype(description=ct.default_desc,
+                                       primary_field=ct.default_int64_field_name,
+                                       auto_id=False):
+    fields = [gen_int64_field(), gen_int32_field(), gen_int16_field(), gen_int8_field(),
+              gen_bool_field(), gen_float_field(), gen_double_field(), gen_float_vec_field()]
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id)
     return schema
@@ -97,6 +137,27 @@ def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0):
     df = pd.DataFrame({
         ct.default_int64_field_name: int_values,
         ct.default_float_field_name: float_values,
+        ct.default_float_vec_field_name: float_vec_values
+    })
+    return df
+
+def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0):
+    int64_values = pd.Series(data=[i for i in range(start, start + nb)])
+    int32_values = pd.Series(data=[np.int32(i) for i in range(start, start + nb)], dtype="int32")
+    int16_values = pd.Series(data=[np.int16(i) for i in range(start, start + nb)], dtype="int16")
+    int8_values = pd.Series(data=[np.int8(i) for i in range(start, start + nb)], dtype="int8")
+    bool_values = pd.Series(data=[np.bool(i) for i in range(start, start + nb)], dtype="bool")
+    float_values = pd.Series(data=[float(i) for i in range(start, start + nb)], dtype="float32")
+    double_values = pd.Series(data=[np.double(i) for i in range(start, start + nb)], dtype="double")
+    float_vec_values = gen_vectors(nb, dim)
+    df = pd.DataFrame({
+        ct.default_int64_field_name: int64_values,
+        ct.default_int32_field_name: int32_values,
+        ct.default_int16_field_name: int16_values,
+        ct.default_int8_field_name: int8_values,
+        ct.default_bool_field_name: bool_values,
+        ct.default_float_field_name: float_values,
+        ct.default_double_field_name: double_values,
         ct.default_float_vec_field_name: float_vec_values
     })
     return df
@@ -190,7 +251,6 @@ def gen_normal_expressions():
     ]
     return expressions
 
-
 def jaccard(x, y):
     x = np.asarray(x, np.bool)
     y = np.asarray(y, np.bool)
@@ -278,7 +338,7 @@ def gen_partitions(collection_w, partition_num=1):
     log.info("gen_partitions: created partitions %s" % par)
 
 
-def insert_data(collection_w, nb=3000, is_binary=False):
+def insert_data(collection_w, nb=3000, is_binary=False, is_all_data_type=False):
     """
     target: insert non-binary/binary data
     method: insert non-binary/binary data into partitions if any
@@ -291,13 +351,24 @@ def insert_data(collection_w, nb=3000, is_binary=False):
     log.info("insert_data: inserting data into collection %s (num_entities: %s)"
              % (collection_w.name, nb))
     for i in range(num):
+        default_data = gen_default_dataframe_data(nb // num)
         if is_binary:
             default_data, binary_raw_data = gen_default_binary_dataframe_data(nb // num)
             binary_raw_vectors.extend(binary_raw_data)
-        else:
-            default_data = gen_default_dataframe_data(nb // num)
+        if is_all_data_type:
+            default_data = gen_dataframe_all_data_type(nb // num)
         collection_w.insert(default_data, par[i].name)
         vectors.append(default_data)
     log.info("insert_data: inserted data into collection %s (num_entities: %s)"
              % (collection_w.name, nb))
     return collection_w, vectors, binary_raw_vectors
+
+
+def _check_primary_keys(primary_keys, nb):
+    if primary_keys is None:
+        raise Exception("The primary_keys is None")
+    assert len(primary_keys) == nb
+    for i in range(nb - 1):
+        if primary_keys[i] >= primary_keys[i + 1]:
+            return False
+    return True

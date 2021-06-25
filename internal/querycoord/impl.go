@@ -108,15 +108,6 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 		return status, err
 	}
 
-	hasCollection := qc.meta.hasCollection(collectionID)
-	if hasCollection {
-		loadCollection, _ := qc.meta.getLoadCollection(collectionID)
-		if loadCollection {
-			status.Reason = "collection has been loaded"
-			return status, nil
-		}
-	}
-
 	loadCollectionTask := &LoadCollectionTask{
 		BaseTask: BaseTask{
 			ctx:              qc.loopCtx,

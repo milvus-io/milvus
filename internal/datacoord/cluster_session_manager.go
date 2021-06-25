@@ -15,7 +15,6 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
 const retryTimes = 2
@@ -43,7 +42,7 @@ func newClusterSessionManager(ctx context.Context, dataClientCreator dataNodeCre
 
 // lock acquired
 func (m *clusterSessionManager) createSession(addr string) (types.DataNode, error) {
-	cli, err := m.dataClientCreator(m.ctx, addr, retry.Attempts(300))
+	cli, err := m.dataClientCreator(m.ctx, addr)
 	if err != nil {
 		return nil, err
 	}

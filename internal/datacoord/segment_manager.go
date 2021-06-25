@@ -29,16 +29,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
-type errRemainInSufficient struct {
-	requestRows int64
-}
-
-func newErrRemainInSufficient(requestRows int64) errRemainInSufficient {
-	return errRemainInSufficient{requestRows: requestRows}
-}
-
-func (err errRemainInSufficient) Error() string {
-	return fmt.Sprintf("segment remaining is insufficient for %d", err.requestRows)
+var errRemainInSufficient = func(requestRows int64) error {
+	return fmt.Errorf("segment remaining is insufficient for %d", requestRows)
 }
 
 // Manager manage segment related operations.
@@ -278,7 +270,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 			return
 		}
 		if !success {
-			err = newErrRemainInSufficient(requestRows)
+			err = errRemainInSufficient(requestRows)
 			return
 		}
 	}

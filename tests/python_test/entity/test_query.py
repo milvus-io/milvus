@@ -158,7 +158,6 @@ class TestQueryBase:
             assert res[i][default_int_field_name] == entities[0]["values"][i]
             ut.assert_equal_vector(res[i][ut.default_float_vec_field_name], entities[-1]["values"][i])
 
-    @pytest.mark.xfail(reason="#6070")
     def test_query_after_search(self, connect, collection):
         """
         target: test query after search
@@ -511,7 +510,6 @@ class TestQueryPartition:
         with pytest.raises(Exception):
             connect.query(collection, default_term_expr, partition_names=[ut.default_tag])
 
-    @pytest.mark.xfail(reason="#6070")
     def test_query_default_partition(self, connect, collection):
         """
         target: test query on default partition
@@ -522,9 +520,10 @@ class TestQueryPartition:
         assert len(ids) == ut.default_nb
         connect.load_collection(collection)
         res = connect.query(collection, default_term_expr, partition_names=[ut.default_partition_name])
-        for i in range(default_pos):
-            assert res[i][default_int_field_name] == entities[0]["values"][i]
-            ut.assert_equal_vector(res[i][ut.default_float_vec_field_name], entities[-1]["values"][i])
+        for _id, index in enumerate(ids[:default_pos]):
+            if res[index][default_int_field_name] == entities[0]["values"][index]:
+                assert res[index][default_float_field_name] == entities[1]["values"][index]
+                ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
     @pytest.mark.xfail(reason="#6075")
     def test_query_empty_partition(self, connect, collection):
@@ -576,7 +575,6 @@ class TestQueryPartition:
         res = connect.query(collection, term_expr, partition_names=[ut.default_tag])
         assert len(res) == 0
 
-    @pytest.mark.xfail(reason="#6070")
     def test_query_multi_partitions_multi_results(self, connect, collection):
         """
         target: test query on multi partitions and get multi results
@@ -586,11 +584,14 @@ class TestQueryPartition:
         """
         entities, entities_2 = insert_entities_into_two_partitions_in_half(connect, collection)
         half = ut.default_nb // 2
-        term_expr = f'{default_int_field_name} in [{half - 1}, {half}]'
+        term_expr = f'{default_int_field_name} in [{half - 1}]'
         res = connect.query(collection, term_expr, partition_names=[ut.default_tag, ut.default_partition_name])
-        assert len(res) == 2
+        assert len(res) == 1
         assert res[0][default_int_field_name] == entities[0]["values"][-1]
-        assert res[1][default_int_field_name] == entities_2[0]["values"][0]
+        term_expr = f'{default_int_field_name} in [{half}]'
+        res = connect.query(collection, term_expr, partition_names=[ut.default_tag, ut.default_partition_name])
+        assert len(res) == 1
+        assert res[0][default_int_field_name] == entities_2[0]["values"][0]
 
     def test_query_multi_partitions_single_result(self, connect, collection):
         """

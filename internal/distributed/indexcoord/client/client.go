@@ -43,8 +43,6 @@ type Client struct {
 
 	addr string
 	sess *sessionutil.Session
-
-	retryOptions []retry.Option
 }
 
 func getIndexCoordAddr(sess *sessionutil.Session) (string, error) {
@@ -63,7 +61,7 @@ func getIndexCoordAddr(sess *sessionutil.Session) (string, error) {
 	return ms.Address, nil
 }
 
-func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string, retryOptions ...retry.Option) (*Client, error) {
+func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*Client, error) {
 	sess := sessionutil.NewSession(ctx, metaRoot, etcdEndpoints)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
@@ -72,18 +70,17 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string, ret
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	return &Client{
-		ctx:          ctx,
-		cancel:       cancel,
-		sess:         sess,
-		retryOptions: retryOptions,
+		ctx:    ctx,
+		cancel: cancel,
+		sess:   sess,
 	}, nil
 }
 
 func (c *Client) Init() error {
-	return c.connect()
+	return c.connect(retry.Attempts(300))
 }
 
-func (c *Client) connect() error {
+func (c *Client) connect(retryOptions ...retry.Option) error {
 	var err error
 	connectIndexCoordaddrFn := func() error {
 		c.addr, err = getIndexCoordAddr(c.sess)
@@ -113,7 +110,7 @@ func (c *Client) connect() error {
 		return nil
 	}
 
-	err = retry.Do(c.ctx, connectIndexCoordaddrFn, c.retryOptions...)
+	err = retry.Do(c.ctx, connectIndexCoordaddrFn, retryOptions...)
 	if err != nil {
 		log.Debug("IndexCoordClient try connect failed", zap.Error(err))
 		return err

@@ -43,8 +43,6 @@ type GrpcClient struct {
 
 	sess *sessionutil.Session
 	addr string
-
-	retryOptions []retry.Option
 }
 
 func getRootCoordAddr(sess *sessionutil.Session) (string, error) {
@@ -68,7 +66,7 @@ func getRootCoordAddr(sess *sessionutil.Session) (string, error) {
 // metaRoot is the path in etcd for root coordinator registration
 // etcdEndpoints are the address list for etcd end points
 // timeout is default setting for each grpc call
-func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string, retryOptions ...retry.Option) (*GrpcClient, error) {
+func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*GrpcClient, error) {
 	sess := sessionutil.NewSession(ctx, metaRoot, etcdEndpoints)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
@@ -78,18 +76,17 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string, ret
 	ctx, cancel := context.WithCancel(ctx)
 
 	return &GrpcClient{
-		ctx:          ctx,
-		cancel:       cancel,
-		sess:         sess,
-		retryOptions: retryOptions,
+		ctx:    ctx,
+		cancel: cancel,
+		sess:   sess,
 	}, nil
 }
 
 func (c *GrpcClient) Init() error {
-	return c.connect()
+	return c.connect(retry.Attempts(300))
 }
 
-func (c *GrpcClient) connect() error {
+func (c *GrpcClient) connect(retryOptions ...retry.Option) error {
 	var err error
 	connectRootCoordAddrFn := func() error {
 		c.addr, err = getRootCoordAddr(c.sess)
@@ -119,7 +116,7 @@ func (c *GrpcClient) connect() error {
 		return nil
 	}
 
-	err = retry.Do(c.ctx, connectRootCoordAddrFn, c.retryOptions...)
+	err = retry.Do(c.ctx, connectRootCoordAddrFn, retryOptions...)
 	if err != nil {
 		log.Debug("RootCoordClient try reconnect failed", zap.Error(err))
 		return err
