@@ -1,5 +1,8 @@
 import pytest
+from pymilvus_orm.default_config import DefaultConfig
+
 from base.client_base import TestcaseBase
+from common.code_mapping import ConnectionErrorMessage as cem
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
@@ -422,7 +425,7 @@ class TestQueryBase(TestcaseBase):
                            check_items=CheckTasks.err_res, check_task=error)
 
 
-@pytest.mark.skip(reason="waiting for debug")
+# @pytest.mark.skip(reason="waiting for debug")
 class TestQueryOperation(TestcaseBase):
     """
     ******************************************************************
@@ -430,19 +433,27 @@ class TestQueryOperation(TestcaseBase):
     ******************************************************************
     """
 
-    def test_query_without_connection(self):
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("collection_name", [cf.gen_unique_str(prefix)])
+    def test_query_without_connection(self, collection_name):
         """
         target: test query without connection
         method: close connect and query
         expected: raise exception
         """
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name)
-        self.connection_wrap.remove_connection(ct.default_alias)
-        res_list, _ = self.connection_wrap.list_connections()
-        assert ct.default_alias not in res_list
-        error = {ct.err_code: 1, ct.err_msg: 'should create connect first'}
-        collection_w.query(default_term_expr, check_task=CheckTasks.err_res, check_items=error)
+
+        # init a collection with default connection
+        collection_w = self.init_collection_wrap(name=collection_name)
+
+        # remove default connection
+        self.connection_wrap.remove_connection(alias=DefaultConfig.DEFAULT_USING)
+
+        # list connection to check
+        self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr, check_items={ct.list_content: []})
+
+        # query after remove default connection
+        collection_w.query(default_term_expr, check_task=CheckTasks.err_res,
+                           check_items={ct.err_code: 0, ct.err_msg: cem.ConnectFirst})
 
     def test_query_without_loading(self):
         """
