@@ -42,7 +42,7 @@ func ValidateMetricType(metric string) (string, error) {
 func ValidateArrayLength(dim int64, length int64) error {
 	n := length % dim
 	if n != 0 {
-		err := errors.New("Invalid vector length")
+		err := errors.New("Invalid float vector length")
 		return err
 	}
 
@@ -119,6 +119,43 @@ func CalcFloatDistance(dim int64, left []float32, right []float32, metric string
 	waitGroup.Wait()
 
 	return distArray, nil
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Count 1 of uint8
+// For 00000010, return 1
+// Fro 11111111, return 8
+func CountOne(n uint8) int {
+	count := 0
+	for n != 0 {
+		count++
+		n = n & (n - 1)
+	}
+	return count
+}
+
+// HAMMIN distance
+func BinaryVectorXOR(dim int64, v1 []byte, v2 []byte) ([]byte, error) {
+	if len(v1) != len(v2) || len(v1)*8 < int(dim) {
+		err := errors.New("Binary vectors length not equal")
+		return nil, err
+	}
+
+	num := len(v1)
+	array := make([]byte, num)
+	for i := 0; i < num; i++ {
+		array[i] = v1[i] ^ v2[i]
+
+		// The dimension "dim" may not be an integer multiple of 8
+		// For example:
+		//   dim = 11, each vector has 2 unint8 value
+		//   the second uint8, only need to calculate 3 bits, the other 5 bits will be set to 0
+		if i == num-1 && num*8 > int(dim) {
+
+		}
+	}
+
+	return array, nil
 }
 
 func CalcBinaryDistance(dim int64, left []byte, right []byte, metric string) ([]int32, error) {

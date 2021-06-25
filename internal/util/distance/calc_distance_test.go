@@ -166,12 +166,35 @@ func CreateBinaryArray(n int64, dim int64) []byte {
 	}
 	array := make([]byte, num)
 	for i := int64(0); i < num; i++ {
-
+		n := rand.Intn(256)
+		array[i] = uint8(n)
 	}
 
 	return array
 }
 
+func TestCountOne(t *testing.T) {
+	n := CountOne(6)
+	assert.Equal(t, n, 2)
+
+	n = CountOne(0)
+	assert.Equal(t, n, 0)
+
+	n = CountOne(255)
+	assert.Equal(t, n, 8)
+}
+
+func TestBinaryVectorXOR(t *testing.T) {
+	var dim int64 = 128
+	v1 := CreateBinaryArray(1, dim)
+	v2 := CreateBinaryArray(1, dim)
+	_, err := BinaryVectorXOR(dim, v1, v2)
+	assert.Nil(t, err)
+}
+
 func TestCalcBinaryDistance(t *testing.T) {
 
+	// var d uint8 = 1
+	// b := XOR(k, d)
+	// fmt.Printf("XOR %d\n", b)
 }
