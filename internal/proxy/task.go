@@ -2032,24 +2032,23 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 	}
 	if len(rt.retrieve.OutputFields) == 0 {
 		for _, field := range schema.Fields {
-			if field.FieldID >= 100 {
+			if field.FieldID >= 100 && field.DataType != schemapb.DataType_FloatVector && field.DataType != schemapb.DataType_BinaryVector {
 				rt.OutputFields = append(rt.OutputFields, field.Name)
 			}
 		}
 	} else {
 		rt.OutputFields = rt.retrieve.OutputFields
-		for _, field := range schema.Fields {
-			if field.IsPrimaryKey {
-				containPrimaryKey := false
-				for _, reqFields := range rt.retrieve.OutputFields {
-					if reqFields == field.Name {
-						containPrimaryKey = true
+		for _, reqField := range rt.retrieve.OutputFields {
+			for _, field := range schema.Fields {
+				if reqField == field.Name {
+					if field.DataType != schemapb.DataType_FloatVector && field.DataType != schemapb.DataType_BinaryVector {
+						rt.OutputFields = append(rt.OutputFields, reqField)
+					}
+				} else {
+					if field.IsPrimaryKey {
+						rt.OutputFields = append(rt.OutputFields, field.Name)
 					}
 				}
-				if !containPrimaryKey {
-					rt.OutputFields = append(rt.OutputFields, field.Name)
-				}
-				break
 			}
 		}
 	}
@@ -2198,6 +2197,7 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 		}
 		for idx, partialRetrieveResult := range retrieveResult {
 			log.Debug("Index-" + strconv.Itoa(idx))
+			availableQueryNodeNum++
 			if partialRetrieveResult.Ids == nil {
 				reason += "ids is nil\n"
 				continue
@@ -2264,7 +2264,6 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 				}
 				// rt.result.FieldsData = append(rt.result.FieldsData, partialRetrieveResult.FieldsData...)
 			}
-			availableQueryNodeNum++
 		}
 
 		if availableQueryNodeNum == 0 {
@@ -2273,6 +2272,18 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 			rt.result = &milvuspb.RetrieveResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    reason,
+				},
+			}
+			return nil
+		}
+
+		if len(rt.result.FieldsData) == 0 {
+			log.Info("Retrieve result is nil.",
+				zap.Any("requestID", rt.Base.MsgID), zap.Any("requestType", "retrieve"))
+			rt.result = &milvuspb.RetrieveResults{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_EmptyCollection,
 					Reason:    reason,
 				},
 			}

@@ -1168,9 +1168,6 @@ func (q *queryCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error {
 		if err1 != nil && err2 != nil {
 			return err2
 		}
-		if len(partitionIDsInHistoricalCol) == 0 {
-			return errors.New("none of this collection's partition has been loaded")
-		}
 		partitionIDsInHistorical = partitionIDsInHistoricalCol
 		partitionIDsInStreaming = partitionIDsInStreamingCol
 	} else {
@@ -1228,6 +1225,8 @@ func (q *queryCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error {
 		}
 	}
 
+	log.Debug("1111", zap.Any("len of mergeList", len(mergeList)))
+
 	result, err := mergeRetrieveResults(mergeList)
 	if err != nil {
 		return err
@@ -1253,7 +1252,7 @@ func (q *queryCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error {
 		},
 	}
 	log.Debug("QueryNode RetrieveResultMsg",
-		zap.Any("pChannels", collection.getPChannels()),
+		zap.Any("vChannels", collection.getVChannels()),
 		zap.Any("collectionID", collection.ID()),
 		zap.Any("sealedSegmentRetrieved", sealedSegmentRetrieved),
 	)
