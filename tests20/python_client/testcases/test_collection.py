@@ -42,7 +42,7 @@ class TestCollectionParams(TestcaseBase):
     @pytest.fixture(scope="function", params=ct.get_invalid_strs)
     def get_invalid_dim(self, request):
         if request.param == 1:
-            request.param = 0
+            pytest.skip("i is valid dim")
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -253,7 +253,7 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 1, ct.err_msg: "schema type must be schema.CollectionSchema"}
+        error = {ct.err_code: 0, ct.err_msg: "Schema type must be schema.CollectionSchema"}
         self.collection_wrap.init_collection(c_name, schema=get_none_removed_invalid_strings,
                                              check_task=CheckTasks.err_res, check_items=error)
 
@@ -380,12 +380,11 @@ class TestCollectionParams(TestcaseBase):
         field_one = cf.gen_int64_field(is_primary=True)
         field_two = cf.gen_int64_field()
         schema = cf.gen_collection_schema(fields=[field_one, field_two, cf.gen_float_vec_field()])
-        error = {ct.err_code: 0, ct.err_msg: "duplicated field name"}
+        error = {ct.err_code: 1, ct.err_msg: "duplicated field name"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
         assert not self.utility_wrap.has_collection(c_name)[0]
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(reason="waiting for required int primary field")
     @pytest.mark.parametrize("field", [cf.gen_float_vec_field(), cf.gen_binary_vec_field()])
     def test_collection_only_vector_field(self, field):
         """
@@ -394,7 +393,7 @@ class TestCollectionParams(TestcaseBase):
         expected: raise exception
         """
         self._connect()
-        error = {ct.err_code: 0, ct.err_msg: "Must be have a primary key field"}
+        error = {ct.err_code: 0, ct.err_msg: "Primary field must in dataframe"}
         self.collection_schema_wrap.init_collection_schema([field], check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -758,7 +757,6 @@ class TestCollectionParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="#5950")
     def test_collection_vector_invalid_dim(self, get_invalid_dim):
         """
         target: test collection with invalid dimension
@@ -769,11 +767,11 @@ class TestCollectionParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         float_vec_field = cf.gen_float_vec_field(dim=get_invalid_dim)
         schema = cf.gen_collection_schema(fields=[cf.gen_int64_field(is_primary=True), float_vec_field])
-        error = {ct.err_code: 0, ct.err_msg: "dim must be of int"}
+        error = {ct.err_code: 0, ct.err_msg: f'invalid dim: {get_invalid_dim}'}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("dim", [-1, 32769])
+    @pytest.mark.parametrize("dim", [-1, 0, 32769])
     def test_collection_vector_out_bounds_dim(self, dim):
         """
         target: test collection with out of bounds dim
@@ -788,7 +786,6 @@ class TestCollectionParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="waiting for primary field")
     def test_collection_non_vector_field_dim(self):
         """
         target: test collection with dim for non-vector field
@@ -797,9 +794,10 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        int_field, _ = self.field_schema_wrap.init_field_schema(name="int", dtype=DataType.INT64, dim=ct.default_dim)
+        int_field, _ = self.field_schema_wrap.init_field_schema(name=ct.default_int64_field_name, dtype=DataType.INT64,
+                                                                dim=ct.default_dim)
         float_vec_field = cf.gen_float_vec_field()
-        schema = cf.gen_collection_schema(fields=[int_field, float_vec_field])
+        schema = cf.gen_collection_schema(fields=[int_field, float_vec_field], primary_field=ct.default_int64_field_name)
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: schema})
 

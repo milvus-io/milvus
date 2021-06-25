@@ -76,7 +76,7 @@ class TestInsertParams(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        error = {ct.err_code: 1, ct.err_msg: "Datas must be list"}
+        error = {ct.err_code: 0, ct.err_msg: "Data type is not support"}
         collection_w.insert(data=get_non_data_type, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -89,7 +89,7 @@ class TestInsertParams(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        error = {ct.err_code: 1, ct.err_msg: "Column cnt not match with schema"}
+        error = {ct.err_code: 0, ct.err_msg: "The data fields number is not match with schema"}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -449,7 +449,6 @@ class TestInsertOperation(TestcaseBase):
         assert collection_w.indexes[0] == index
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="#6118")
     def test_insert_after_create_index(self):
         """
         target: test insert after create index
@@ -467,7 +466,6 @@ class TestInsertOperation(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="#6118")
     def test_insert_binary_after_index(self):
         """
         target: test insert binary after index
