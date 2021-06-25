@@ -35,7 +35,7 @@ pulsar:
   maxMessageSize: 5242880 # 5 * 1024 * 1024 Bytes
 
 rocksmq:
-  path: /tmp/milvus_rdb
+  path: /var/lib/milvus/rdb_data
 
 rootCoord:
   address: localhost
