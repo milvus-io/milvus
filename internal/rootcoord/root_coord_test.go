@@ -68,6 +68,14 @@ type dataMock struct {
 	randVal int
 }
 
+func (d *dataMock) Init() error {
+	return nil
+}
+
+func (d *dataMock) Start() error {
+	return nil
+}
+
 func (d *dataMock) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
 	rst := &datapb.GetInsertBinlogPathsResponse{
 		FieldIDs: []int64{},
@@ -121,6 +129,14 @@ type queryMock struct {
 	mutex  sync.Mutex
 }
 
+func (q *queryMock) Init() error {
+	return nil
+}
+
+func (q *queryMock) Start() error {
+	return nil
+}
+
 func (q *queryMock) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
@@ -145,6 +161,14 @@ type indexMock struct {
 	idxID      []int64
 	idxDropID  []int64
 	mutex      sync.Mutex
+}
+
+func (idx *indexMock) Init() error {
+	return nil
+}
+
+func (idx *indexMock) Start() error {
+	return nil
 }
 
 func (idx *indexMock) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
