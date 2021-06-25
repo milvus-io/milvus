@@ -2197,6 +2197,7 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 		}
 		for idx, partialRetrieveResult := range retrieveResult {
 			log.Debug("Index-" + strconv.Itoa(idx))
+			availableQueryNodeNum++
 			if partialRetrieveResult.Ids == nil {
 				reason += "ids is nil\n"
 				continue
@@ -2263,7 +2264,6 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 				}
 				// rt.result.FieldsData = append(rt.result.FieldsData, partialRetrieveResult.FieldsData...)
 			}
-			availableQueryNodeNum++
 		}
 
 		if availableQueryNodeNum == 0 {
@@ -2272,6 +2272,18 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 			rt.result = &milvuspb.RetrieveResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    reason,
+				},
+			}
+			return nil
+		}
+
+		if len(rt.result.FieldsData) == 0 {
+			log.Info("Retrieve result is nil.",
+				zap.Any("requestID", rt.Base.MsgID), zap.Any("requestType", "retrieve"))
+			rt.result = &milvuspb.RetrieveResults{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_EmptyCollection,
 					Reason:    reason,
 				},
 			}
