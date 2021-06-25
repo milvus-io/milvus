@@ -42,9 +42,9 @@ services:
     environment:
       ETCD_ENDPOINTS: etcd:2379
       PULSAR_ADDRESS: pulsar://pulsar:6650
-      DATA_SERVICE_ADDRESS: datacoord:13333
-      INDEX_SERVICE_ADDRESS: indexcoord:31000
-      QUERY_SERVICE_ADDRESS: querycoord:19531
+      DATA_COORD_ADDRESS: datacoord:13333
+      INDEX_COORD_ADDRESS: indexcoord:31000
+      QUERY_COORD_ADDRESS: querycoord:19531
     depends_on:
       - "etcd"
       - "pulsar"
@@ -59,10 +59,10 @@ services:
     environment:
       ETCD_ENDPOINTS: etcd:2379
       PULSAR_ADDRESS: pulsar://pulsar:6650
-      MASTER_ADDRESS: master:53100
-      DATA_SERVICE_ADDRESS: datacoord:13333
-      INDEX_SERVICE_ADDRESS: indexcoord:31000
-      QUERY_SERVICE_ADDRESS: querycoord:19531
+      ROOT_COORD_ADDRESS: rootcoord:53100
+      DATA_COORD_ADDRESS: datacoord:13333
+      INDEX_COORD_ADDRESS: indexcoord:31000
+      QUERY_COORD_ADDRESS: querycoord:19531
     ports:
       - "19530:19530"
     networks:
@@ -73,8 +73,8 @@ services:
     image: milvusdb/milvus:latest
     command: ["milvus", "run", "querycoord"]
     environment:
-      MASTER_ADDRESS: master:53100
-      DATA_SERVICE_ADDRESS: datacoord:13333
+      ROOT_COORD_ADDRESS: rootcoord:53100
+      DATA_COORD_ADDRESS: datacoord:13333
     depends_on:
       - "etcd"
       - "pulsar"
@@ -89,10 +89,10 @@ services:
     environment:
       MINIO_ADDRESS: minio:9000
       PULSAR_ADDRESS: pulsar://pulsar:6650
-      MASTER_ADDRESS: master:53100
-      DATA_SERVICE_ADDRESS: datacoord:13333
-      INDEX_SERVICE_ADDRESS: indexcoord:31000
-      QUERY_SERVICE_ADDRESS: querycoord:19531
+      ROOT_COORD_ADDRESS: rootcoord:53100
+      DATA_COORD_ADDRESS: datacoord:13333
+      INDEX_COORD_ADDRESS: indexcoord:31000
+      QUERY_COORD_ADDRESS: querycoord:19531
     depends_on:
       - "querycoord"
     networks:
@@ -105,7 +105,7 @@ services:
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
-      MASTER_ADDRESS: master:53100
+      ROOT_COORD_ADDRESS: rootcoord:53100
     depends_on:
       - "etcd"
       - "pulsar"
@@ -119,7 +119,7 @@ services:
     command: ["milvus", "run", "indexnode"]
     environment:
       MINIO_ADDRESS: minio:9000
-      INDEX_SERVICE_ADDRESS: indexcoord:31000
+      INDEX_COORD_ADDRESS: indexcoord:31000
     depends_on:
       - "indexcoord"
     networks:
@@ -133,7 +133,7 @@ services:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
       PULSAR_ADDRESS: pulsar://pulsar:6650
-      MASTER_ADDRESS: master:53100
+      ROOT_COORD_ADDRESS: rootcoord:53100
     depends_on:
       - "etcd"
       - "pulsar"
@@ -149,8 +149,8 @@ services:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
       PULSAR_ADDRESS: pulsar://pulsar:6650
-      MASTER_ADDRESS: master:53100
-      DATA_SERVICE_ADDRESS: datacoord:13333
+      ROOT_COORD_ADDRESS: rootcoord:53100
+      DATA_COORD_ADDRESS: datacoord:13333
     depends_on:
       - "datacoord"
     networks:
