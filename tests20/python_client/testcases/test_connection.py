@@ -1,7 +1,6 @@
 import pytest
-import os
-
 from pymilvus_orm.default_config import DefaultConfig
+
 from base.client_base import TestcaseBase
 from utils.util_log import test_log as log
 import common.common_type as ct
@@ -26,7 +25,7 @@ class TestConnectionParams(TestcaseBase):
 
         # check param of **kwargs
         self.connection_wrap.add_connection(_kwargs=data, check_task=ct.CheckTasks.err_res,
-                                            check_items={ct.err_code: -1, ct.err_msg: cem.NoHostPort})
+                                            check_items={ct.err_code: 0, ct.err_msg: cem.NoHostPort})
 
         # get addr of default alias
         self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr,
@@ -50,11 +49,10 @@ class TestConnectionParams(TestcaseBase):
         # No check for **kwargs
         self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, _kwargs=[1, 2],
                                      check_task=ct.CheckTasks.err_res,
-                                     check_items={ct.err_code: -1, ct.err_msg: cem.NotHostPort})
+                                     check_items={ct.err_code: 0, ct.err_msg: cem.NoHostPort})
 
-    @pytest.mark.xfail(reason="Feature #5725")
     @pytest.mark.tags(ct.CaseLabel.L3)
-    @pytest.mark.parametrize("alias", ct.get_invalid_strs)
+    @pytest.mark.parametrize("alias", ct.get_not_string)
     def test_connection_connect_alias_param_check(self, alias):
         """
         target: test connect passes wrong params of alias
@@ -62,13 +60,12 @@ class TestConnectionParams(TestcaseBase):
         expected: assert response is error
         """
 
-        # No check for alias
-        res = self.connection_wrap.connect(alias=alias)
-        log.info(res[0])
+        # check for alias
+        self.connection_wrap.connect(alias=alias, check_task=ct.CheckTasks.err_res,
+                                     check_items={ct.err_code: 0, ct.err_msg: cem.AliasType % type(alias)})
 
-    @pytest.mark.xfail(reason="Feature #5725")
-    @pytest.mark.parametrize("alias", ct.get_invalid_strs)
     @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("alias", ct.get_not_string)
     def test_connection_get_alias_param_check(self, alias):
         """
         target: test get connection passes wrong params of alias
@@ -76,13 +73,12 @@ class TestConnectionParams(TestcaseBase):
         expected: assert response is error
         """
 
-        # not check for alias
-        res = self.connection_wrap.get_connection(alias=alias)
-        log.info(res[0])
+        # check for alias
+        self.connection_wrap.get_connection(alias=alias, check_task=ct.CheckTasks.err_res,
+                                            check_items={ct.err_code: 0, ct.err_msg: cem.AliasType % type(alias)})
 
-    @pytest.mark.xfail(reason="Feature #5725")
-    @pytest.mark.parametrize("alias", ct.get_invalid_strs)
     @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("alias", ct.get_not_string)
     def test_connection_get_addr_alias_param_check(self, alias):
         """
         target: test get connection addr passes wrong params of alias
@@ -90,13 +86,12 @@ class TestConnectionParams(TestcaseBase):
         expected: assert response is error
         """
 
-        # not check for alias
-        res = self.connection_wrap.get_connection_addr(alias=alias)
-        log.info(res[0])
+        # check for alias
+        self.connection_wrap.get_connection_addr(alias=alias, check_task=ct.CheckTasks.err_res,
+                                                 check_items={ct.err_code: 0, ct.err_msg: cem.AliasType % type(alias)})
 
-    @pytest.mark.xfail(reason="Feature #5725")
-    @pytest.mark.parametrize("alias", ct.get_invalid_strs)
     @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("alias", ct.get_not_string)
     def test_connection_remove_alias_param_check(self, alias):
         """
         target: test remove connection passes wrong params of alias
@@ -104,14 +99,13 @@ class TestConnectionParams(TestcaseBase):
         expected: assert response is error
         """
 
-        # not check for alias
+        # check for alias
         self._connect()
-        res = self.connection_wrap.remove_connection(alias=alias)
-        log.info(res[0])
+        self.connection_wrap.remove_connection(alias=alias, check_task=ct.CheckTasks.err_res,
+                                               check_items={ct.err_code: 0, ct.err_msg: cem.AliasType % type(alias)})
 
-    @pytest.mark.xfail(reason="Feature #5725")
-    @pytest.mark.parametrize("alias", ct.get_invalid_strs)
     @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("alias", ct.get_not_string)
     def test_connection_disconnect_alias_param_check(self, alias):
         """
         target: test disconnect passes wrong params of alias
@@ -119,10 +113,10 @@ class TestConnectionParams(TestcaseBase):
         expected: assert response is error
         """
 
-        # not check for alias
+        # check for alias
         self._connect()
-        res = self.connection_wrap.disconnect(alias=alias)
-        log.info(res[0])
+        self.connection_wrap.disconnect(alias=alias, check_task=ct.CheckTasks.err_res,
+                                        check_items={ct.err_code: 0, ct.err_msg: cem.AliasType % type(alias)})
 
 
 class TestConnectionOperation(TestcaseBase):
@@ -146,7 +140,7 @@ class TestConnectionOperation(TestcaseBase):
                                             alias2={"port": "-1", "host": "hostlocal"},
                                             testing=data,
                                             check_task=ct.CheckTasks.err_res,
-                                            check_items={ct.err_code: -1, ct.err_msg: err_msg})
+                                            check_items={ct.err_code: 0, ct.err_msg: err_msg})
 
         # list all connections and check the response
         self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr,
@@ -293,10 +287,10 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.connect(alias="test_alias_name", host=host, port=port, check_task=ct.CheckTasks.ccr)
 
         # add connection with diff params after that alias has been created
-        err_msg = cem.AliasExist % "test_alias_name"
+        err_msg = cem.ConnDiffConf % "test_alias_name"
         self.connection_wrap.add_connection(test_alias_name={"host": "localhost", "port": "1"},
                                             check_task=ct.CheckTasks.err_res,
-                                            check_items={ct.err_code: -1, ct.err_msg: err_msg})
+                                            check_items={ct.err_code: 0, ct.err_msg: err_msg})
 
         # add connection with the same params
         self.connection_wrap.add_connection(test_alias_name={"host": host, "port": port})
@@ -313,10 +307,10 @@ class TestConnectionOperation(TestcaseBase):
                                      check_task=ct.CheckTasks.ccr)
 
         # add connection after that alias has been created
-        err_msg = cem.AliasExist % "test_alias_name"
+        err_msg = cem.ConnDiffConf % DefaultConfig.DEFAULT_USING
         self.connection_wrap.add_connection(default={"host": "localhost", "port": "1"},
                                             check_task=ct.CheckTasks.err_res,
-                                            check_items={ct.err_code: -1, ct.err_msg: err_msg})
+                                            check_items={ct.err_code: 0, ct.err_msg: err_msg})
 
         # add connection with the same params
         self.connection_wrap.add_connection(test_alias_name={"host": host, "port": port})
@@ -380,9 +374,9 @@ class TestConnectionOperation(TestcaseBase):
         """
 
         # create connection that param of alias is not exist
-        err_msg = cem.AliasNotExist % ct.Not_Exist
+        err_msg = cem.ConnLackConf % ct.Not_Exist
         self.connection_wrap.connect(alias=ct.Not_Exist, check_task=ct.CheckTasks.err_res,
-                                     check_items={ct.err_code: -1, ct.err_msg: err_msg})
+                                     check_items={ct.err_code: 0, ct.err_msg: err_msg})
 
         # list all connections and check the response
         self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr,
@@ -469,10 +463,10 @@ class TestConnectionOperation(TestcaseBase):
         assert res_obj1 == res_obj2
 
         # connect twice with the different params
-        err_msg = cem.ConnectExist % "default"
+        err_msg = cem.ConnDiffConf % "default"
         self.connection_wrap.connect(alias=connect_name, host="host", port=port,
                                      check_task=ct.CheckTasks.err_res,
-                                     check_items={ct.err_code: -1, ct.err_msg: err_msg})
+                                     check_items={ct.err_code: 0, ct.err_msg: err_msg})
 
     @pytest.mark.tags(ct.CaseLabel.L2)
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING, "test_alias_nme"])
@@ -511,8 +505,8 @@ class TestConnectionOperation(TestcaseBase):
 
         # created connection with wrong connect name
         self.connection_wrap.connect(alias=connect_name, ip=host, port=port, check_task=ct.CheckTasks.err_res,
-                                     check_items={ct.err_code: -1,
-                                                  ct.err_msg: "Param is not complete. Please invoke as follow:"})
+                                     check_items={ct.err_code: 0,
+                                                  ct.err_msg: cem.NoHostPort})
 
         # list all connections and check the response
         self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr,
@@ -710,7 +704,7 @@ class TestConnectionOperation(TestcaseBase):
         # init collection failed
         self.collection_wrap.init_collection(name=collection_name, schema=schema, check_task=ct.CheckTasks.err_res,
                                              check_items={ct.err_code: 0,
-                                                          ct.err_msg: "object has no attribute 'has_collection'"},
+                                                          ct.err_msg: cem.ConnectFirst},
                                              _using=ct.Not_Exist)
 
     @pytest.mark.tags(ct.CaseLabel.L1)

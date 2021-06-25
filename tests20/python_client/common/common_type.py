@@ -17,8 +17,13 @@ max_partition_num = 4096  # 256
 default_segment_row_limit = 1000
 default_server_segment_row_limit = 1024 * 512
 default_alias = "default"
+default_bool_field_name = "bool"
+default_int8_field_name = "int8"
+default_int16_field_name = "int16"
+default_int32_field_name = "int32"
 default_int64_field_name = "int64"
 default_float_field_name = "float"
+default_double_field_name = "double"
 default_float_vec_field_name = "float_vector"
 default_binary_vec_field_name = "binary_vector"
 default_partition_name = "_default"
@@ -57,6 +62,18 @@ get_invalid_strs = [
     "中文",
     "%$#",
     "a".join("a" for i in range(256))]
+
+
+get_not_string = [
+    [],
+    {},
+    None,
+    (1, ),
+    1,
+    1.0,
+    [1, "2", 3]
+]
+
 
 get_dict_without_host_port = [
     {"host": "host"},
@@ -100,6 +117,7 @@ class CheckTasks:
     check_collection_property = "check_collection_property"
     check_partition_property = "check_partition_property"
     check_search_results = "check_search_results"
+    check_query_results = "check_query_results"
 
 
 class CaseLabel:

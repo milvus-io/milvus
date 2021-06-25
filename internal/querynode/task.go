@@ -404,7 +404,7 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 		r.node.streaming.dataSyncService.removeCollectionFlowGraph(r.req.CollectionID)
 		// remove all tSafes of the target collection
 		for _, channel := range collection.getVChannels() {
-			log.Debug("releasing tSafe...",
+			log.Debug("releasing tSafe in releaseCollectionTask...",
 				zap.Any("collectionID", r.req.CollectionID),
 				zap.Any("vChannel", channel),
 			)
@@ -486,8 +486,21 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 			return
 		}
 
+		vChannels := sCol.getVChannels()
 		for _, id := range r.req.PartitionIDs {
-			r.node.streaming.dataSyncService.removePartitionFlowGraph(id)
+			if _, err = r.node.streaming.dataSyncService.getPartitionFlowGraphs(id, vChannels); err == nil {
+				r.node.streaming.dataSyncService.removePartitionFlowGraph(id)
+				// remove all tSafes of the target partition
+				for _, channel := range vChannels {
+					log.Debug("releasing tSafe in releasePartitionTask...",
+						zap.Any("collectionID", r.req.CollectionID),
+						zap.Any("partitionID", id),
+						zap.Any("vChannel", channel),
+					)
+					r.node.streaming.tSafeReplica.removeTSafe(channel)
+				}
+			}
+
 			hasPartitionInHistorical := r.node.historical.replica.hasPartition(id)
 			if hasPartitionInHistorical {
 				err = r.node.historical.replica.removePartition(id)

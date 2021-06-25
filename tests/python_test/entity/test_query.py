@@ -1,3 +1,4 @@
+import pdb
 import logging
 
 import pytest
@@ -9,7 +10,8 @@ default_entities = ut.gen_entities(ut.default_nb, is_normal=True)
 raw_vectors, default_binary_entities = ut.gen_binary_entities(ut.default_nb)
 default_int_field_name = "int64"
 default_float_field_name = "float"
-default_term_expr = f'{default_int_field_name} in [0, 1]'
+default_pos = 5 
+default_term_expr = f'{default_int_field_name} in {[i for i in range(default_pos)]}'
 
 
 def init_data(connect, collection, nb=ut.default_nb, partition_names=None, auto_id=True):
@@ -56,7 +58,6 @@ def init_binary_data(connect, collection, nb=3000, insert=True, partition_names=
     return insert_raw_vectors, insert_entities, ids
 
 
-@pytest.mark.skip(reason="waiting for collection update")
 class TestQueryBase:
     """
     test Query interface
@@ -77,7 +78,7 @@ class TestQueryBase:
     def get_simple_index(self, request, connect):
         return request.param
 
-    def test_query(self, connect, collection):
+    def test_query_invalid(self, connect, collection):
         """
         target: test query
         method: query with term expr
@@ -85,11 +86,27 @@ class TestQueryBase:
         """
         entities, ids = init_data(connect, collection)
         assert len(ids) == ut.default_nb
-        pos = 5
         connect.load_collection(collection)
-        term_expr = f'{default_int_field_name} in {entities[:pos]}'
+        term_expr = f'{default_int_field_name} in {entities[:default_pos]}'
+        with pytest.raises(Exception):
+            res = connect.query(collection, term_expr)
+
+    def test_query_valid(self, connect, collection):
+        """
+        target: test query
+        method: query with term expr
+        expected: verify query result
+        """
+        entities, ids = init_data(connect, collection)
+        assert len(ids) == ut.default_nb
+        connect.load_collection(collection)
+        term_expr = f'{default_int_field_name} in {ids[:default_pos]}'
         res = connect.query(collection, term_expr)
-        logging.getLogger().debug(res)
+        assert len(res) == default_pos
+        for _id, index in enumerate(ids[:default_pos]):
+            if res[index][default_int_field_name] == entities[0]["values"][index]:
+                assert res[index][default_float_field_name] == entities[1]["values"][index]
+                ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
     def test_query_collection_not_existed(self, connect):
         """
@@ -97,7 +114,7 @@ class TestQueryBase:
         method: query not existed collection
         expected: raise exception
         """
-        ex_msg = 'can not found collection'
+        ex_msg = 'find collection'
         collection = "not_exist"
         with pytest.raises(Exception, match=ex_msg):
             connect.query(collection, default_term_expr)
@@ -108,7 +125,7 @@ class TestQueryBase:
         method: close connect and query
         expected: raise exception
         """
-        ex_msg = 'todo'
+        ex_msg = 'NoneType'
         with pytest.raises(Exception, match=ex_msg):
             dis_connect.query(collection, default_term_expr)
 
@@ -119,10 +136,10 @@ class TestQueryBase:
         expected: raise exception
         """
         collection_name = get_collection_name
-        msg = 'invalid collection name'
-        with pytest.raises(Exception, match=msg):
+        with pytest.raises(Exception):
             connect.query(collection_name, default_term_expr)
-
+    
+    @pytest.mark.xfail(reason="#6035")
     def test_query_after_index(self, connect, collection, get_simple_index):
         """
         target: test query after creating index
@@ -133,8 +150,13 @@ class TestQueryBase:
         assert len(ids) == ut.default_nb
         connect.create_index(collection, ut.default_float_vec_field_name, get_simple_index)
         connect.load_collection(collection)
-        res = connect.query(collection, default_term_expr)
+        term_expr = f'{default_int_field_name} in {ids[:default_pos]}'
+        res = connect.query(collection, term_expr)
         logging.getLogger().info(res)
+        assert len(res) == default_pos
+        for i in range(default_pos):
+            assert res[i][default_int_field_name] == entities[0]["values"][i]
+            ut.assert_equal_vector(res[i][ut.default_float_vec_field_name], entities[-1]["values"][i])
 
     def test_query_after_search(self, connect, collection):
         """
@@ -151,9 +173,16 @@ class TestQueryBase:
         search_res = connect.search(collection, query)
         assert len(search_res) == nq
         assert len(search_res[0]) == top_k
-        query_res = connect.query(collection, default_term_expr)
-        logging.getLogger().info(query_res)
+        term_expr = f'{default_int_field_name} in {ids[:default_pos]}'
+        res = connect.query(collection, term_expr)
+        logging.getLogger().info(res)
+        assert len(res) == default_pos
+        for _id, index in enumerate(ids[:default_pos]):
+            if res[index][default_int_field_name] == entities[0]["values"][index]:
+                assert res[index][default_float_field_name] == entities[1]["values"][index]
+                ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
+    @pytest.mark.xfail(reason="#6053")
     def test_query_empty_collection(self, connect, collection):
         """
         target: test query empty collection
@@ -163,6 +192,7 @@ class TestQueryBase:
         connect.load_collection(collection)
         res = connect.query(collection, default_term_expr)
         logging.getLogger().info(res)
+        assert len(res) == 0
 
     def test_query_without_loading(self, connect, collection):
         """
@@ -172,17 +202,21 @@ class TestQueryBase:
         """
         entities, ids = init_data(connect, collection)
         assert len(ids) == ut.default_nb
-        msg = 'can not find collection'
-        with pytest.raises(Exception, match=msg):
+        with pytest.raises(Exception):
             connect.query(collection, default_term_expr)
 
-    def test_query_auto_id_collection(self, connect, id_collection):
+    def test_query_collection_not_primary_key(self, connect, collection):
         """
-        target: test query on collection that primary field auto_id=True
-        method: 1.create collection with auto_id=True 2.query on primary field
-        expected: todo
+        target: test query on collection that not on the primary field
+        method: 1.create collection with auto_id=True 2.query on the other field
+        expected: exception raised
         """
-        pass
+        entities, ids = init_data(connect, collection)
+        assert len(ids) == ut.default_nb
+        connect.load_collection(collection)
+        term_expr = f'{default_float_field_name} in {entities[:default_pos]}'
+        with pytest.raises(Exception):
+            connect.query(collection, term_expr)
 
     def test_query_expr_none(self, connect, collection):
         """
@@ -192,50 +226,22 @@ class TestQueryBase:
         """
         entities, ids = init_data(connect, collection)
         assert len(ids) == ut.default_nb
-        connect.flush(collection)
-        msg = 'invalid expr'
-        with pytest.raises(Exception, match=msg):
+        connect.load_collection(collection)
+        with pytest.raises(Exception):
             connect.query(collection, None)
 
-    @pytest.mark.parametrize("expr", [1, 2., [], {}, ()])
-    def test_query_expr_non_string(self, connect, collection, expr):
+    @pytest.mark.parametrize("expr", [1, "1", "12-s", "中文", [], {}, ()])
+    def test_query_expr_invalid_string(self, connect, collection, expr):
         """
         target: test query with non-string expr
         method: query with non-string expr, eg 1, [] ..
         expected: raise exception
         """
-        entities, ids = init_data(connect, collection)
-        assert len(ids) == ut.default_nb
-        connect.flush(collection)
-        msg = 'invalid expr'
-        with pytest.raises(Exception, match=msg):
+        # entities, ids = init_data(connect, collection)
+        # assert len(ids) == ut.default_nb
+        connect.load_collection(collection)
+        with pytest.raises(Exception):
             connect.query(collection, expr)
-
-    @pytest.mark.parametrize("expr", ["12-s", "中文", "a", " "])
-    def test_query_expr_invalid_string(self, connect, collection, expr):
-        """
-        target: test query with invalid expr
-        method: query with invalid string expr
-        expected: raise exception
-        """
-        entities, ids = init_data(connect, collection)
-        assert len(ids) == ut.default_nb
-        connect.flush(collection)
-        msg = 'invalid expr'
-        with pytest.raises(Exception, match=msg):
-            connect.query(collection, expr)
-
-    def test_query_expr_term(self, connect, collection):
-        """
-        target: test query with TermExpr
-        method: query with TermExpr
-        expected: query result is correct
-        """
-        entities, ids = init_data(connect, collection)
-        assert len(ids) == ut.default_nb
-        connect.flush(collection)
-        res = connect.query(collection, default_term_expr)
-        logging.getLogger().info(res)
 
     def test_query_expr_not_existed_field(self, connect, collection):
         """
@@ -245,42 +251,9 @@ class TestQueryBase:
         """
         entities, ids = init_data(connect, collection)
         assert len(ids) == ut.default_nb
-        connect.flush(collection)
+        connect.load_collection(collection)
         term_expr = 'field in [1, 2]'
-        msg = 'field not existed'
-        with pytest.raises(Exception, match=msg):
-            connect.query(collection, term_expr)
-
-    def test_query_expr_unsupported_field(self, connect, collection):
-        """
-        target: test query on unsupported field
-        method: query on float field
-        expected: raise exception
-        """
-        entities, ids = init_data(connect, collection)
-        assert len(ids) == ut.default_nb
-        connect.flush(collection)
-        term_expr = f'{default_float_field_name} in [1., 2.]'
-        msg = 'only supported on int field'
-        with pytest.raises(Exception, match=msg):
-            connect.query(collection, term_expr)
-
-    def test_query_expr_non_primary_field(self, connect, collection):
-        """
-        target: test query on non-primary field
-        method: query on non-primary int field
-        expected: raise exception
-        """
-        field_name = "int2"
-        fields = ut.add_field_default(field_name=field_name)
-        c_name = ut.gen_unique_str()
-        connect.create_collection(c_name, fields)
-        entities = ut.add_field(field_name=field_name)
-        connect.insert(collection, entities)
-        connect.flush(c_name)
-        term_expr = f'{field_name} in [1, 2]'
-        msg = 'only supported on primary field'
-        with pytest.raises(Exception, match=msg):
+        with pytest.raises(Exception):
             connect.query(collection, term_expr)
 
     @pytest.mark.parametrize("expr", [f'{default_int_field_name} inn [1, 2]',
@@ -292,11 +265,8 @@ class TestQueryBase:
         method: query with wrong keyword term expr
         expected: raise exception
         """
-        entities, ids = init_data(connect, collection)
-        assert len(ids) == ut.default_nb
-        connect.flush(collection)
-        msg = 'invalid expr'
-        with pytest.raises(Exception, match=msg):
+        connect.load_collection(collection)
+        with pytest.raises(Exception):
             connect.query(collection, expr)
 
     @pytest.mark.parametrize("expr", [f'{default_int_field_name} in 1',
@@ -308,11 +278,8 @@ class TestQueryBase:
         method: query with non-array term expr
         expected: raise exception
         """
-        entities, ids = init_data(connect, collection)
-        assert len(ids) == ut.default_nb
-        connect.flush(collection)
-        msg = 'invalid expr'
-        with pytest.raises(Exception, match=msg):
+        connect.load_collection(collection)
+        with pytest.raises(Exception):
             connect.query(collection, expr)
 
     def test_query_expr_empty_term_array(self, connect, collection):
@@ -323,7 +290,7 @@ class TestQueryBase:
         """
         entities, ids = init_data(connect, collection)
         assert len(ids) == ut.default_nb
-        connect.flush(collection)
+        connect.load_collection(collection)
         term_expr = f'{default_int_field_name} in []'
         res = connect.query(collection, term_expr)
         assert len(res) == 0
@@ -336,14 +303,15 @@ class TestQueryBase:
         """
         entities, ids = init_data(connect, collection)
         assert len(ids) == ut.default_nb
-        connect.flush(collection)
+        connect.load_collection(collection)
         term_expr = f'{default_int_field_name} in [0]'
         res = connect.query(collection, term_expr)
         assert len(res) == 1
         assert res[0][default_int_field_name] == entities[0]["values"][0]
-        assert res[1][default_float_field_name] == entities[1]["values"][0]
-        assert res[2][ut.default_float_vec_field_name] == entities[2]["values"][0]
+        assert res[0][default_float_field_name] == entities[1]["values"][0]
+        ut.assert_equal_vector(res[0][ut.default_float_vec_field_name], entities[2]["values"][0])
 
+    @pytest.mark.xfail(reason="#6072")
     def test_query_binary_expr_single_term_array(self, connect, binary_collection):
         """
         target: test query with single array term expr
@@ -352,7 +320,7 @@ class TestQueryBase:
         """
         _, binary_entities, ids = init_binary_data(connect, binary_collection)
         assert len(ids) == ut.default_nb
-        connect.flush(binary_collection)
+        connect.load_collection(binary_collection)
         term_expr = f'{default_int_field_name} in [0]'
         res = connect.query(binary_collection, term_expr)
         assert len(res) == 1
@@ -360,6 +328,7 @@ class TestQueryBase:
         assert res[1][default_float_field_name] == binary_entities[1]["values"][0]
         assert res[2][ut.default_float_vec_field_name] == binary_entities[2]["values"][0]
 
+    @pytest.mark.level(2)
     def test_query_expr_all_term_array(self, connect, collection):
         """
         target: test query with all array term expr
@@ -368,32 +337,14 @@ class TestQueryBase:
         """
         entities, ids = init_data(connect, collection)
         assert len(ids) == ut.default_nb
-        connect.flush(collection)
-        int_values = entities[0]["values"]
-        term_expr = f'{default_int_field_name} in {int_values}'
+        connect.load_collection(collection)
+        term_expr = f'{default_int_field_name} in {ids}'
         res = connect.query(collection, term_expr)
         assert len(res) == ut.default_nb
-        for i in ut.default_nb:
-            assert res[i][default_int_field_name] == int_values[i]
-
-    def test_query_expr_half_term_array(self, connect, collection):
-        """
-        target: test query with half array term expr
-        method: query with half array value
-        expected: verify query result
-        """
-        entities, ids = init_data(connect, collection)
-        assert len(ids) == ut.default_nb
-        half = ut.default_nb // 2
-        connect.flush(collection)
-        int_values = entities[0]["values"][:half]
-        term_expr = f'{default_int_field_name} in {int_values}'
-        res = connect.query(collection, term_expr)
-        assert len(res) == half
-        for i in half:
-            assert res[i][default_int_field_name] == entities[0]["values"][i]
-            assert res[i][default_float_field_name] == entities[1]["values"][i]
-            assert res[i][ut.default_float_vec_field_name] == entities[2]["values"][i]
+        for _id, index in enumerate(ids):
+            if res[index][default_int_field_name] == entities[0]["values"][index]:
+                assert res[index][default_float_field_name] == entities[1]["values"][index]
+                ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
     def test_query_expr_repeated_term_array(self, connect, collection):
         """
@@ -403,10 +354,11 @@ class TestQueryBase:
         """
         entities, ids = init_data(connect, collection)
         assert len(ids) == ut.default_nb
+        connect.load_collection(collection)
         int_values = [0, 0]
         term_expr = f'{default_int_field_name} in {int_values}'
         res = connect.query(collection, term_expr)
-        assert len(res) == 1
+        assert len(res) == 2 
 
     def test_query_expr_inconstant_term_array(self, connect, collection):
         """
@@ -416,10 +368,9 @@ class TestQueryBase:
         """
         entities, ids = init_data(connect, collection)
         assert len(ids) == ut.default_nb
-        connect.flush(collection)
-        expr = f'{default_int_field_name} in [1., 2.]'
-        msg = 'invalid expr'
-        with pytest.raises(Exception, match=msg):
+        connect.load_collection(collection)
+        expr = f'{default_int_field_name} in [1.0, 2.0]'
+        with pytest.raises(Exception):
             connect.query(collection, expr)
 
     def test_query_expr_mix_term_array(self, connect, collection):
@@ -430,13 +381,12 @@ class TestQueryBase:
         """
         entities, ids = init_data(connect, collection)
         assert len(ids) == ut.default_nb
-        connect.flush(collection)
+        connect.load_collection(collection)
         expr = f'{default_int_field_name} in [1, 2.]'
-        msg = 'invalid expr'
-        with pytest.raises(Exception, match=msg):
+        with pytest.raises(Exception):
             connect.query(collection, expr)
 
-    @pytest.mark.parametrize("constant", [[1], (), {}, " "])
+    @pytest.mark.parametrize("constant", [[1], (), {}])
     def test_query_expr_non_constant_array_term(self, connect, collection, constant):
         """
         target: test query with non-constant array term expr
@@ -445,13 +395,12 @@ class TestQueryBase:
         """
         entities, ids = init_data(connect, collection)
         assert len(ids) == ut.default_nb
-        connect.flush(collection)
+        connect.load_collection(collection)
         expr = f'{default_int_field_name} in [{constant}]'
-        msg = 'invalid expr'
-        with pytest.raises(Exception, match=msg):
+        with pytest.raises(Exception):
             connect.query(collection, expr)
 
-    def test_query_output_field_none(self, connect, collection):
+    def test_query_output_field_empty(self, connect, collection):
         """
         target: test query with none output field
         method: query with output field=None
@@ -459,10 +408,11 @@ class TestQueryBase:
         """
         entities, ids = init_data(connect, collection)
         assert len(ids) == ut.default_nb
-        connect.flush(collection)
-        res = connect.query(collection, default_term_expr, output_fields=None)
+        connect.load_collection(collection)
+        res = connect.query(collection, default_term_expr, output_fields=[])
         fields = [default_int_field_name, default_float_field_name, ut.default_float_vec_field_name]
-        assert res[0].keys() == fields
+        for field in fields:
+            assert field in res[0].keys()
 
     def test_query_output_one_field(self, connect, collection):
         """
@@ -472,9 +422,10 @@ class TestQueryBase:
         """
         entities, ids = init_data(connect, collection)
         assert len(ids) == ut.default_nb
-        connect.flush(collection)
+        connect.load_collection(collection)
         res = connect.query(collection, default_term_expr, output_fields=[default_int_field_name])
-        assert res[0].keys() == [default_int_field_name]
+        assert default_int_field_name in res[0].keys()
+        assert len(res[0].keys()) == 1
 
     def test_query_output_all_fields(self, connect, collection):
         """
@@ -484,10 +435,11 @@ class TestQueryBase:
         """
         entities, ids = init_data(connect, collection)
         assert len(ids) == ut.default_nb
-        connect.flush(collection)
+        connect.load_collection(collection)
         fields = [default_int_field_name, default_float_field_name, ut.default_float_vec_field_name]
         res = connect.query(collection, default_term_expr, output_fields=fields)
-        assert res[0].keys() == fields
+        for field in fields:
+            assert field in res[0].keys()
 
     def test_query_output_not_existed_field(self, connect, collection):
         """
@@ -496,12 +448,11 @@ class TestQueryBase:
         expected: raise exception
         """
         entities, ids = init_data(connect, collection)
-        assert len(ids) == ut.default_nb
-        connect.flush(collection)
-        msg = 'cannot find field'
-        with pytest.raises(Exception, match=msg):
+        connect.load_collection(collection)
+        with pytest.raises(Exception):
             connect.query(collection, default_term_expr, output_fields=["int"])
 
+    @pytest.mark.xfail(reason="#6074")
     def test_query_output_part_not_existed_field(self, connect, collection):
         """
         target: test query output part not existed field
@@ -509,24 +460,9 @@ class TestQueryBase:
         expected: raise exception
         """
         entities, ids = init_data(connect, collection)
-        assert len(ids) == ut.default_nb
-        connect.flush(collection)
-        msg = 'cannot find field'
-        with pytest.raises(Exception, match=msg):
+        connect.load_collection(collection)
+        with pytest.raises(Exception):
             connect.query(collection, default_term_expr, output_fields=[default_int_field_name, "int"])
-
-    def test_query_empty_output_fields(self, connect, collection):
-        """
-        target: test query with empty output fields
-        method: query with empty output fields
-        expected: raise exception
-        """
-        entities, ids = init_data(connect, collection)
-        assert len(ids) == ut.default_nb
-        connect.flush(collection)
-        msg = 'output fields is empty'
-        with pytest.raises(Exception, match=msg):
-            connect.query(collection, default_term_expr, output_fields=[])
 
     @pytest.mark.parametrize("fields", ut.gen_invalid_strs())
     def test_query_invalid_output_fields(self, connect, collection, fields):
@@ -536,20 +472,16 @@ class TestQueryBase:
         expected: raise exception
         """
         entities, ids = init_data(connect, collection)
-        assert len(ids) == ut.default_nb
-        connect.flush(collection)
-        msg = 'invalid output fields'
-        with pytest.raises(Exception, match=msg):
-            connect.query(collection, default_term_expr, output_fields=fields)
+        connect.load_collection(collection)
+        with pytest.raises(Exception):
+            connect.query(collection, default_term_expr, output_fields=[fields])
 
 
-@pytest.mark.skip(reason="waiting for collection update")
 class TestQueryPartition:
     """
     test Query interface
     query(collection_name, expr, output_fields=None, partition_names=None, timeout=None)
     """
-
     def test_query_partition(self, connect, collection):
         """
         target: test query on partition
@@ -557,11 +489,14 @@ class TestQueryPartition:
         expected: verify query result
         """
         connect.create_partition(collection, ut.default_tag)
-        entities, ids = init_data(connect, collection, ut.default_tag)
+        entities, ids = init_data(connect, collection, partition_names=ut.default_tag)
         assert len(ids) == ut.default_nb
         connect.load_partitions(collection, [ut.default_tag])
         res = connect.query(collection, default_term_expr, partition_names=[ut.default_tag])
-        # todo res
+        for _id, index in enumerate(ids[:default_pos]):
+            if res[index][default_int_field_name] == entities[0]["values"][index]:
+                assert res[index][default_float_field_name] == entities[1]["values"][index]
+                ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
     def test_query_partition_without_loading(self, connect, collection):
         """
@@ -570,10 +505,9 @@ class TestQueryPartition:
         expected: raise exception
         """
         connect.create_partition(collection, ut.default_tag)
-        entities, ids = init_data(connect, collection, ut.default_tag)
+        entities, ids = init_data(connect, collection, partition_names=ut.default_tag)
         assert len(ids) == ut.default_nb
-        msg = 'cannot find collection'
-        with pytest.raises(Exception, match=msg):
+        with pytest.raises(Exception):
             connect.query(collection, default_term_expr, partition_names=[ut.default_tag])
 
     def test_query_default_partition(self, connect, collection):
@@ -584,10 +518,14 @@ class TestQueryPartition:
         """
         entities, ids = init_data(connect, collection)
         assert len(ids) == ut.default_nb
-        connect.load_partitions(collection, [ut.default_tag])
+        connect.load_collection(collection)
         res = connect.query(collection, default_term_expr, partition_names=[ut.default_partition_name])
-        # todo res
+        for _id, index in enumerate(ids[:default_pos]):
+            if res[index][default_int_field_name] == entities[0]["values"][index]:
+                assert res[index][default_float_field_name] == entities[1]["values"][index]
+                ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
+    @pytest.mark.xfail(reason="#6075")
     def test_query_empty_partition(self, connect, collection):
         """
         target: test query on empty partition
@@ -595,7 +533,7 @@ class TestQueryPartition:
         expected: empty query result
         """
         connect.create_partition(collection, ut.default_tag)
-        connect.load_partitions(collection, [ut.default_tag])
+        connect.load_partitions(collection, [ut.default_partition_name])
         res = connect.query(collection, default_term_expr, partition_names=[ut.default_partition_name])
         assert len(res) == 0
 
@@ -605,10 +543,9 @@ class TestQueryPartition:
         method: query on not existed partition
         expected: raise exception
         """
-        connect.load_partitions(collection, [ut.default_tag])
-        msg = 'cannot find partition'
+        connect.load_partitions(collection, [ut.default_partition_name])
         tag = ut.gen_unique_str()
-        with pytest.raises(Exception, match=msg):
+        with pytest.raises(Exception):
             connect.query(collection, default_term_expr, partition_names=[tag])
 
     def test_query_partition_repeatedly(self, connect, collection):
@@ -618,7 +555,7 @@ class TestQueryPartition:
         expected: verify query result
         """
         connect.create_partition(collection, ut.default_tag)
-        entities, ids = init_data(connect, collection, ut.default_tag)
+        entities, ids = init_data(connect, collection, partition_names=ut.default_tag)
         assert len(ids) == ut.default_nb
         connect.load_partitions(collection, [ut.default_tag])
         res_one = connect.query(collection, default_term_expr, partition_names=[ut.default_tag])
@@ -629,7 +566,7 @@ class TestQueryPartition:
         """
         target: test query another partition
         method: 1. insert entities into two partitions
-                2.query on one partition and query result empty
+                2. query on one partition and query result empty
         expected: query result is empty
         """
         insert_entities_into_two_partitions_in_half(connect, collection)
@@ -647,11 +584,14 @@ class TestQueryPartition:
         """
         entities, entities_2 = insert_entities_into_two_partitions_in_half(connect, collection)
         half = ut.default_nb // 2
-        term_expr = f'{default_int_field_name} in [{half - 1}, {half}]'
+        term_expr = f'{default_int_field_name} in [{half - 1}]'
         res = connect.query(collection, term_expr, partition_names=[ut.default_tag, ut.default_partition_name])
-        assert len(res) == 2
+        assert len(res) == 1
         assert res[0][default_int_field_name] == entities[0]["values"][-1]
-        assert res[1][default_int_field_name] == entities_2[0]["values"][0]
+        term_expr = f'{default_int_field_name} in [{half}]'
+        res = connect.query(collection, term_expr, partition_names=[ut.default_tag, ut.default_partition_name])
+        assert len(res) == 1
+        assert res[0][default_int_field_name] == entities_2[0]["values"][0]
 
     def test_query_multi_partitions_single_result(self, connect, collection):
         """

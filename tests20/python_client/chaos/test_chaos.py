@@ -2,7 +2,8 @@ import pytest
 from time import sleep
 
 from pymilvus_orm import connections
-from checker import CreateChecker, Op
+from checker import CreateChecker, InsertFlushChecker, \
+    SearchChecker, QueryChecker, IndexChecker, Op
 from chaos_opt import ChaosOpt
 from utils.util_log import test_log as log
 from base.collection_wrapper import ApiCollectionWrapper
@@ -12,6 +13,18 @@ from common.common_type import CaseLabel
 import constants
 
 
+def assert_statistic(checkers, expectations={}):
+    for k in checkers.keys():
+        # expect succ if no expectations
+        succ_rate = checkers[k].succ_rate()
+        if expectations.get(k, '') == constants.FAIL:
+            log.debug(f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {checkers[k].total()}")
+            delayed_assert.expect(succ_rate < 0.49)
+        else:
+            log.debug(f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {checkers[k].total()}")
+            delayed_assert.expect(succ_rate > 0.90)
+
+
 class TestChaosBase:
     expect_create = constants.SUCC
     expect_insert = constants.SUCC
@@ -19,8 +32,11 @@ class TestChaosBase:
     expect_index = constants.SUCC
     expect_search = constants.SUCC
     expect_query = constants.SUCC
-    chaos_location = ''
+    host = 'localhost'
+    port = 19530
+    _chaos_config = None
     health_checkers = {}
+    checker_threads = {}
 
     def parser_testcase_config(self, chaos_yaml):
         tests_yaml = constants.TESTS_CONFIG_LOCATION + 'testcases.yaml'
@@ -31,12 +47,16 @@ class TestChaosBase:
             if test_chaos in chaos_yaml:
                 expects = t.get('testcase', {}).get('expectation', {}) \
                     .get('cluster_1_node', {})
-                self.expect_create = expects.get(Op.create, constants.SUCC)
-                self.expect_insert = expects.get(Op.insert, constants.SUCC)
-                self.expect_flush = expects.get(Op.flush, constants.SUCC)
-                self.expect_index = expects.get(Op.index, constants.SUCC)
-                self.expect_search = expects.get(Op.search, constants.SUCC)
-                self.expect_query = expects.get(Op.query, constants.SUCC)
+                log.debug(f"yaml.expects: {expects}")
+                self.expect_create = expects.get(Op.create.value, constants.SUCC)
+                self.expect_insert = expects.get(Op.insert.value, constants.SUCC)
+                self.expect_flush = expects.get(Op.flush.value, constants.SUCC)
+                self.expect_index = expects.get(Op.index.value, constants.SUCC)
+                self.expect_search = expects.get(Op.search.value, constants.SUCC)
+                self.expect_query = expects.get(Op.query.value, constants.SUCC)
+                log.debug(f"self.expects: create:{self.expect_create}, insert:{self.expect_insert}, "
+                          f"flush:{self.expect_flush}, index:{self.expect_index}, "
+                          f"search:{self.expect_search}, query:{self.expect_query}")
                 return True
 
         return False
@@ -44,117 +64,110 @@ class TestChaosBase:
 
 class TestChaos(TestChaosBase):
 
-    @pytest.mark.tags(CaseLabel.L3)
     @pytest.fixture(scope="function", autouse=True)
-    def connection(self):
-        connections.add_connection(default={"host": "192.168.1.239", "port": 19530})
+    def connection(self, host, port):
+        connections.add_connection(default={"host": host, "port": port})
         conn = connections.connect(alias='default')
         if conn is None:
             raise Exception("no connections")
+        self.host = host
+        self.port = port
         return conn
 
-    @pytest.fixture(scope="function")
-    def collection_wrap_4_insert(self, connection):
-        c_wrap = ApiCollectionWrapper()
-        c_wrap.init_collection(name=cf.gen_unique_str("collection_4_insert"),
-                               schema=cf.gen_default_collection_schema(),
-                               check_task="check_nothing")
-        return c_wrap
-
-    @pytest.fixture(scope="function")
-    def collection_wrap_4_flush(self, connection):
-        c_wrap = ApiCollectionWrapper()
-        c_wrap.init_collection(name=cf.gen_unique_str("collection_4_insert"),
-                               schema=cf.gen_default_collection_schema(),
-                               check_task="check_nothing")
-        return c_wrap
-
-    @pytest.fixture(scope="function")
-    def collection_wrap_4_search(self, connection):
-        c_wrap = ApiCollectionWrapper()
-        c_wrap.init_collection(name=cf.gen_unique_str("collection_4_search_"),
-                               schema=cf.gen_default_collection_schema(),
-                               check_task="check_nothing")
-        c_wrap.insert(data=cf.gen_default_dataframe_data(nb=10000))
-        return c_wrap
-
     @pytest.fixture(scope="function", autouse=True)
-    def init_health_checkers(self, connection, collection_wrap_4_insert,
-                             collection_wrap_4_flush, collection_wrap_4_search):
-        checkers = {}
-        # search_ch = SearchChecker(collection_wrap=collection_wrap_4_search)
-        # checkers[Op.search] = search_ch
-        # insert_ch = InsertFlushChecker(connection=connection,
-        #                                collection_wrap=collection_wrap_4_insert)
-        # checkers[Op.insert] = insert_ch
-        # flush_ch = InsertFlushChecker(connection=connection,
-        #                               collection_wrap=collection_wrap_4_flush,
-        #                               do_flush=True)
-        # checkers[Op.flush] = flush_ch
-        create_ch = CreateChecker()
-        checkers[Op.create] = create_ch
-
+    def init_health_checkers(self, connection):
+        checkers = {
+            Op.create: CreateChecker(),
+            Op.insert: InsertFlushChecker(),
+            Op.flush: InsertFlushChecker(flush=True),
+            Op.index: IndexChecker(),
+            Op.search: SearchChecker(),
+            Op.query: QueryChecker()
+        }
         self.health_checkers = checkers
 
     def teardown(self):
-        for ch in self.health_checkers.values():
+        chaos_opt = ChaosOpt(self._chaos_config['kind'])
+        meta_name = self._chaos_config.get('metadata', None).get('name', None)
+        chaos_opt.delete_chaos_object(meta_name, raise_ex=False)
+        for k, ch in self.health_checkers.items():
             ch.terminate()
-        pass
+            log.debug(f"tear down: checker {k} terminated")
+        sleep(2)
+        for k, t in self.checker_threads.items():
+            log.debug(f"Thread {k} is_alive(): {t.is_alive()}")
 
+    @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize('chaos_yaml', get_chaos_yamls())
     def test_chaos(self, chaos_yaml):
         # start the monitor threads to check the milvus ops
-        start_monitor_threads(self.health_checkers)
+        log.debug("*********************Chaos Test Start**********************")
+        log.debug(connections.get_connection_addr('default'))
+        self.checker_threads = start_monitor_threads(self.health_checkers)
 
         # parse chaos object
-        print("test.start")
         chaos_config = gen_experiment_config(chaos_yaml)
+        self._chaos_config = chaos_config   # cache the chaos config for tear down
         log.debug(chaos_config)
 
         # parse the test expectations in testcases.yaml
-        self.parser_testcase_config(chaos_yaml)
+        if self.parser_testcase_config(chaos_yaml) is False:
+            log.error("Fail to get the testcase info in testcases.yaml")
+            assert False
 
         # wait 120s
-        sleep(1)
+        sleep(constants.WAIT_PER_OP*2)
 
         # assert statistic:all ops 100% succ
+        log.debug("******1st assert before chaos: ")
         assert_statistic(self.health_checkers)
 
         # reset counting
         reset_counting(self.health_checkers)
 
         # apply chaos object
-        # chaos_opt = ChaosOpt(chaos_config['kind'])
-        # chaos_opt.create_chaos_object(chaos_config)
+        chaos_opt = ChaosOpt(chaos_config['kind'])
+        chaos_opt.create_chaos_object(chaos_config)
+        log.debug("chaos injected")
 
         # wait 120s
-        sleep(1)
+        sleep(constants.WAIT_PER_OP*4)
+
+        for k, t in self.checker_threads.items():
+            log.debug(f"10s later: Thread {k} is_alive(): {t.is_alive()}")
 
         # assert statistic
-        assert_statistic(self.health_checkers, expectations={Op.create: self.expect_create,
-                                                             Op.insert: self.expect_insert,
-                                                             Op.flush: self.expect_flush,
-                                                             Op.index: self.expect_index,
-                                                             Op.search: self.expect_search,
-                                                             Op.query: self.expect_query
-                                                             })
-        #
+        log.debug("******2nd assert after chaos injected: ")
+        assert_statistic(self.health_checkers,
+                         expectations={Op.create: self.expect_create,
+                                       Op.insert: self.expect_insert,
+                                       Op.flush: self.expect_flush,
+                                       Op.index: self.expect_index,
+                                       Op.search: self.expect_search,
+                                       Op.query: self.expect_query
+                                       })
+
         # delete chaos
-        # meta_name = chaos_config.get('metadata', None).get('name', None)
-        # chaos_opt.delete_chaos_object(meta_name)
+        meta_name = chaos_config.get('metadata', None).get('name', None)
+        chaos_opt.delete_chaos_object(meta_name)
+        log.debug("chaos deleted")
+        for k, t in self.checker_threads.items():
+            log.debug(f"Thread {k} is_alive(): {t.is_alive()}")
+        sleep(2)
+        # reconnect if needed
+        sleep(constants.WAIT_PER_OP)
+        reconnect(connections, self.host, self.port)
 
         # reset counting again
         reset_counting(self.health_checkers)
 
         # wait 300s (varies by feature)
-        sleep(1)
+        sleep(constants.WAIT_PER_OP*1.5)
 
         # assert statistic: all ops success again
+        log.debug("******3rd assert after chaos deleted: ")
         assert_statistic(self.health_checkers)
 
-        # terminate thread
-        for ch in self.health_checkers.values():
-            ch.terminate()
-        # log.debug("*******************Test Completed.*******************")
+        log.debug("*********************Chaos Test Completed**********************")
 
 

@@ -99,6 +99,7 @@ func (f *RmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
 
 func (f *RmsFactory) NewQueryMsgStream(ctx context.Context) (MsgStream, error) {
 	InitMmq()
+
 	return NewMemMsgStream(ctx, f.ReceiveBufSize)
 }
 
