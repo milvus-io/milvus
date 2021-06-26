@@ -1,4 +1,3 @@
-import pytest
 import sys
 import operator
 from common import common_type as ct
