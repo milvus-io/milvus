@@ -1602,7 +1602,9 @@ func (c *Core) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest)
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Debug("CreateIndex Failed", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.Int64("msgID", in.Base.MsgID))
+		log.Debug("CreateIndex Failed", zap.String("collection name", in.CollectionName),
+			zap.String("field name", in.FieldName), zap.Int64("msgID", in.Base.MsgID),
+			zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "CreateIndex failed, error = " + err.Error(),
