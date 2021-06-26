@@ -158,7 +158,6 @@ class TestQueryBase:
             assert res[i][default_int_field_name] == entities[0]["values"][i]
             # not support
             # ut.assert_equal_vector(res[i][ut.default_float_vec_field_name], entities[-1]["values"][i])
->>>>>>> 6ba9fb2e9a8d1720630c0c535ad8985b58f7fc45
 
     def test_query_after_search(self, connect, collection):
         """
