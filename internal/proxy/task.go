@@ -2037,7 +2037,6 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 			}
 		}
 	} else {
-		rt.OutputFields = rt.retrieve.OutputFields
 		for _, reqField := range rt.retrieve.OutputFields {
 			for _, field := range schema.Fields {
 				if reqField == field.Name {
