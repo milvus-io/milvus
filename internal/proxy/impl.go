@@ -1241,6 +1241,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		}
 		it.result.ErrIndex = errIndex
 	}
+	it.result.InsertCnt = int64(it.req.NumRows)
 	return it.result, nil
 }
 
