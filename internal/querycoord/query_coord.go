@@ -184,11 +184,13 @@ func (qc *QueryCoord) watchNodeLoop() {
 	for nodeID, session := range sessionMap {
 		if _, ok := qc.cluster.nodes[nodeID]; !ok {
 			serverID := session.ServerID
-			err := qc.cluster.RegisterNode(ctx, session, serverID)
-			if err != nil {
-				log.Error("register queryNode error", zap.Any("error", err.Error()))
-			}
-			log.Debug("query coordinator", zap.Any("Add QueryNode, session serverID", serverID))
+			go func() {
+				err := qc.cluster.RegisterNode(ctx, session, serverID)
+				if err != nil {
+					log.Error("register queryNode error", zap.Any("error", err.Error()))
+				}
+				log.Debug("query coordinator", zap.Any("Add QueryNode, session serverID", serverID))
+			}()
 		}
 	}
 	for nodeID := range qc.cluster.nodes {
@@ -228,11 +230,13 @@ func (qc *QueryCoord) watchNodeLoop() {
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:
 				serverID := event.Session.ServerID
-				err := qc.cluster.RegisterNode(ctx, event.Session, serverID)
-				if err != nil {
-					log.Error(err.Error())
-				}
-				log.Debug("query coordinator", zap.Any("Add QueryNode, session serverID", serverID))
+				go func() {
+					err := qc.cluster.RegisterNode(ctx, event.Session, serverID)
+					if err != nil {
+						log.Error(err.Error())
+					}
+					log.Debug("query coordinator", zap.Any("Add QueryNode, session serverID", serverID))
+				}()
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
 				log.Debug("query coordinator", zap.Any("The QueryNode crashed with ID", serverID))
@@ -260,12 +264,14 @@ func (qc *QueryCoord) watchNodeLoop() {
 					meta:               qc.meta,
 				}
 				qc.scheduler.Enqueue([]task{loadBalanceTask})
-				err := loadBalanceTask.WaitToFinish()
-				if err != nil {
-					log.Error(err.Error())
-				}
-				log.Debug("load balance done after queryNode down", zap.Int64s("nodeIDs", loadBalanceTask.SourceNodeIDs))
-				//TODO::remove nodeInfo and clear etcd
+				go func() {
+					err := loadBalanceTask.WaitToFinish()
+					if err != nil {
+						log.Error(err.Error())
+					}
+					log.Debug("load balance done after queryNode down", zap.Int64s("nodeIDs", loadBalanceTask.SourceNodeIDs))
+					//TODO::remove nodeInfo and clear etcd
+				}()
 			}
 		}
 	}

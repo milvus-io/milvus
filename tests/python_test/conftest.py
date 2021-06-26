@@ -86,8 +86,8 @@ def change_mutation_result_to_primary_keys():
                 raise e
         return change
 
-    from pymilvus import InsertFuture
-    InsertFuture.result = insert_future_decorator(InsertFuture.result)
+    from pymilvus import MutationFuture
+    MutationFuture.result = insert_future_decorator(MutationFuture.result)
 
     def insert_decorator(func):
         @functools.wraps(func)
