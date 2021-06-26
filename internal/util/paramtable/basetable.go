@@ -119,6 +119,19 @@ func (gp *BaseTable) tryloadFromEnv() {
 		panic(err)
 	}
 
+	rocksmqPath := os.Getenv("ROCKSMQ_PATH")
+	if rocksmqPath == "" {
+		path, err := gp.Load("rocksmq.path")
+		if err != nil {
+			panic(err)
+		}
+		rocksmqPath = path
+	}
+	err = gp.Save("_RocksmqPath", rocksmqPath)
+	if err != nil {
+		panic(err)
+	}
+
 	rootCoordAddress := os.Getenv("ROOT_COORD_ADDRESS")
 	if rootCoordAddress == "" {
 		rootCoordHost, err := gp.Load("rootCoord.address")

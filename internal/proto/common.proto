@@ -30,6 +30,7 @@ enum ErrorCode {
     IllegalMetricType = 23;
     OutOfMemory = 24;
     IndexNotExist = 25;
+    EmptyCollection = 26;
 
     // internal error code.
     DDRequestRace = 1000;
