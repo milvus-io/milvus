@@ -38,6 +38,9 @@ type ParamTable struct {
 	// --- Pulsar ---
 	PulsarAddress string
 
+	// --- Rocksmq ---
+	RocksmqPath string
+
 	FlushStreamPosSubPath string
 	StatsStreamPosSubPath string
 
@@ -75,6 +78,7 @@ func (p *ParamTable) Init() {
 		p.initCollectionBinlogSubPath()
 
 		p.initPulsarAddress()
+		p.initRocksmqPath()
 
 		p.initSegmentMaxSize()
 		p.initSegmentSealProportion()
@@ -105,6 +109,14 @@ func (p *ParamTable) initPulsarAddress() {
 		panic(err)
 	}
 	p.PulsarAddress = addr
+}
+
+func (p *ParamTable) initRocksmqPath() {
+	path, err := p.Load("_RocksmqPath")
+	if err != nil {
+		panic(err)
+	}
+	p.RocksmqPath = path
 }
 
 func (p *ParamTable) initMetaRootPath() {

@@ -172,7 +172,10 @@ func TestGrpcService(t *testing.T) {
 	core.DataCoordSegmentChan = SegmentInfoChan
 
 	timeTickArray := make([]typeutil.Timestamp, 0, 16)
+	timeTickLock := sync.Mutex{}
 	core.SendTimeTick = func(ts typeutil.Timestamp) error {
+		timeTickLock.Lock()
+		defer timeTickLock.Unlock()
 		t.Logf("send time tick %d", ts)
 		timeTickArray = append(timeTickArray, ts)
 		return nil

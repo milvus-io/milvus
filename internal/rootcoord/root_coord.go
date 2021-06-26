@@ -120,9 +120,6 @@ type Core struct {
 	CallReleaseCollectionService func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID) error
 	CallReleasePartitionService  func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID, partitionIDs []typeutil.UniqueID) error
 
-	//dd request scheduler
-	ddReqQueue chan reqTask //dd request will be push into this chan
-
 	//dml channels
 	dmlChannels *dmlChannels
 
@@ -192,9 +189,6 @@ func (c *Core) checkInit() error {
 	if c.kvBase == nil {
 		return fmt.Errorf("kvBase is nil")
 	}
-	if c.ddReqQueue == nil {
-		return fmt.Errorf("ddReqQueue is nil")
-	}
 	if c.SendDdCreateCollectionReq == nil {
 		return fmt.Errorf("SendDdCreateCollectionReq is nil")
 	}
@@ -236,23 +230,6 @@ func (c *Core) checkInit() error {
 	}
 
 	return nil
-}
-
-func (c *Core) startDdScheduler() {
-	for {
-		select {
-		case <-c.ctx.Done():
-			log.Debug("close dd scheduler, exit task execution loop")
-			return
-		case task, ok := <-c.ddReqQueue:
-			if !ok {
-				log.Debug("dd chan is closed, exit task execution loop")
-				return
-			}
-			err := task.Execute(task.Ctx())
-			task.Notify(err)
-		}
-	}
 }
 
 func (c *Core) startTimeTickLoop() {
@@ -395,7 +372,7 @@ func (c *Core) startDataNodeFlushedSegmentLoop() {
 					if err == nil && info.BuildID != 0 {
 						info.EnableIndex = true
 					} else {
-						log.Error("build index fail", zap.String("error", err.Error()))
+						log.Error("build index fail", zap.Int64("buildid", info.BuildID), zap.Error(err))
 					}
 
 					segIdxInfos = append(segIdxInfos, &info)
@@ -1043,7 +1020,6 @@ func (c *Core) Init() error {
 		c.proxyManager.AddSession(c.chanTimeTick.AddProxy, c.proxyClientManager.AddProxyClient)
 		c.proxyManager.DelSession(c.chanTimeTick.DelProxy, c.proxyClientManager.DelProxyClient)
 
-		c.ddReqQueue = make(chan reqTask, 1024)
 		initError = c.setMsgStreams()
 	})
 	if initError == nil {
@@ -1188,7 +1164,6 @@ func (c *Core) Start() error {
 			log.Debug("RootCoord Start reSendDdMsg failed", zap.Error(err))
 			return
 		}
-		go c.startDdScheduler()
 		go c.startTimeTickLoop()
 		go c.startDataCoordSegmentLoop()
 		go c.startDataNodeFlushedSegmentLoop()
@@ -1266,13 +1241,11 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 	t := &CreateCollectionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
 	}
-	c.ddReqQueue <- t
-	err := t.WaitToFinish()
+	err := executeTask(t)
 	if err != nil {
 		log.Debug("CreateCollection failed", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 		return &commonpb.Status{
@@ -1301,13 +1274,11 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 	t := &DropCollectionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
 	}
-	c.ddReqQueue <- t
-	err := t.WaitToFinish()
+	err := executeTask(t)
 	if err != nil {
 		log.Debug("DropCollection Failed", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 		return &commonpb.Status{
@@ -1339,14 +1310,12 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 	t := &HasCollectionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req:           in,
 		HasCollection: false,
 	}
-	c.ddReqQueue <- t
-	err := t.WaitToFinish()
+	err := executeTask(t)
 	if err != nil {
 		log.Debug("HasCollection Failed", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 		return &milvuspb.BoolResponse{
@@ -1385,14 +1354,12 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 	t := &DescribeCollectionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
 		Rsp: &milvuspb.DescribeCollectionResponse{},
 	}
-	c.ddReqQueue <- t
-	err := t.WaitToFinish()
+	err := executeTask(t)
 	if err != nil {
 		log.Debug("DescribeCollection Failed", zap.String("name", in.CollectionName), zap.Error(err), zap.Int64("msgID", in.Base.MsgID))
 		return &milvuspb.DescribeCollectionResponse{
@@ -1429,7 +1396,6 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 	t := &ShowCollectionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
@@ -1438,8 +1404,7 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 			CollectionIds:   nil,
 		},
 	}
-	c.ddReqQueue <- t
-	err := t.WaitToFinish()
+	err := executeTask(t)
 	if err != nil {
 		log.Debug("ShowCollections failed", zap.String("dbname", in.DbName), zap.Int64("msgID", in.Base.MsgID))
 		return &milvuspb.ShowCollectionsResponse{
@@ -1472,13 +1437,11 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 	t := &CreatePartitionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
 	}
-	c.ddReqQueue <- t
-	err := t.WaitToFinish()
+	err := executeTask(t)
 	if err != nil {
 		log.Debug("CreatePartition Failed", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
 		return &commonpb.Status{
@@ -1507,13 +1470,11 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 	t := &DropPartitionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
 	}
-	c.ddReqQueue <- t
-	err := t.WaitToFinish()
+	err := executeTask(t)
 	if err != nil {
 		log.Debug("DropPartition Failed", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
 		return &commonpb.Status{
@@ -1545,14 +1506,12 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 	t := &HasPartitionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req:          in,
 		HasPartition: false,
 	}
-	c.ddReqQueue <- t
-	err := t.WaitToFinish()
+	err := executeTask(t)
 	if err != nil {
 		log.Debug("HasPartition Failed", zap.String("collection name", in.CollectionName), zap.String("partition name", in.PartitionName), zap.Int64("msgID", in.Base.MsgID))
 		return &milvuspb.BoolResponse{
@@ -1594,7 +1553,6 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRe
 	t := &ShowPartitionReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
@@ -1603,8 +1561,7 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRe
 			Status:         nil,
 		},
 	}
-	c.ddReqQueue <- t
-	err := t.WaitToFinish()
+	err := executeTask(t)
 	if err != nil {
 		log.Debug("ShowPartitionsRequest failed", zap.String("role", Params.RoleName), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &milvuspb.ShowPartitionsResponse{
@@ -1639,13 +1596,11 @@ func (c *Core) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest)
 	t := &CreateIndexReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
 	}
-	c.ddReqQueue <- t
-	err := t.WaitToFinish()
+	err := executeTask(t)
 	if err != nil {
 		log.Debug("CreateIndex Failed", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.Int64("msgID", in.Base.MsgID))
 		return &commonpb.Status{
@@ -1677,7 +1632,6 @@ func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequ
 	t := &DescribeIndexReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
@@ -1686,8 +1640,7 @@ func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequ
 			IndexDescriptions: nil,
 		},
 	}
-	c.ddReqQueue <- t
-	err := t.WaitToFinish()
+	err := executeTask(t)
 	if err != nil {
 		log.Debug("DescribeIndex Failed", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.Int64("msgID", in.Base.MsgID))
 		return &milvuspb.DescribeIndexResponse{
@@ -1731,13 +1684,11 @@ func (c *Core) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*c
 	t := &DropIndexReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
 	}
-	c.ddReqQueue <- t
-	err := t.WaitToFinish()
+	err := executeTask(t)
 	if err != nil {
 		log.Debug("DropIndex Failed", zap.String("collection name", in.CollectionName), zap.String("field name", in.FieldName), zap.String("index name", in.IndexName), zap.Int64("msgID", in.Base.MsgID))
 		return &commonpb.Status{
@@ -1769,7 +1720,6 @@ func (c *Core) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegment
 	t := &DescribeSegmentReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
@@ -1778,8 +1728,7 @@ func (c *Core) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegment
 			IndexID: 0,
 		},
 	}
-	c.ddReqQueue <- t
-	err := t.WaitToFinish()
+	err := executeTask(t)
 	if err != nil {
 		log.Debug("DescribeSegment Failed", zap.Int64("collection id", in.CollectionID), zap.Int64("segment id", in.SegmentID), zap.Int64("msgID", in.Base.MsgID))
 		return &milvuspb.DescribeSegmentResponse{
@@ -1815,7 +1764,6 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 	t := &ShowSegmentReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
-			cv:   make(chan error, 1),
 			core: c,
 		},
 		Req: in,
@@ -1824,8 +1772,7 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 			SegmentIDs: nil,
 		},
 	}
-	c.ddReqQueue <- t
-	err := t.WaitToFinish()
+	err := executeTask(t)
 	if err != nil {
 		log.Debug("ShowSegments Failed", zap.Int64("collection id", in.CollectionID), zap.Int64("partition id", in.PartitionID), zap.Int64("msgID", in.Base.MsgID))
 		return &milvuspb.ShowSegmentsResponse{
