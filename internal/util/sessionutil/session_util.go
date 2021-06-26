@@ -112,7 +112,7 @@ func (s *Session) checkIDExist() {
 
 func (s *Session) getServerIDWithKey(key string, retryTimes uint) (int64, error) {
 	for {
-		log.Debug("Session try to get servdeID")
+		log.Debug("Session try to get serverID")
 		getResp, err := s.etcdCli.Get(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, key))
 		if err != nil {
 			log.Debug("Session get etcd key error", zap.String("key", key), zap.Error(err))

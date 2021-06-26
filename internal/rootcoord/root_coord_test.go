@@ -1288,6 +1288,7 @@ func TestRootCoord(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp8.Status.ErrorCode)
+		time.Sleep(10 * time.Second)
 
 	})
 
@@ -1445,7 +1446,6 @@ func TestRootCoord(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp8.Status.ErrorCode)
-		time.Sleep(5 * time.Second)
 
 	})
 
