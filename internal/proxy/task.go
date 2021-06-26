@@ -2051,7 +2051,6 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 					}
 					findField = true
 					rt.OutputFields = append(rt.OutputFields, reqField)
-					break
 				} else {
 					if field.IsPrimaryKey && !addPrimaryKey {
 						rt.OutputFields = append(rt.OutputFields, field.Name)
