@@ -56,7 +56,7 @@ func getRootCoordAddr(sess *sessionutil.Session) (string, error) {
 	ms, ok := msess[key]
 	if !ok {
 		log.Debug("RootCoordClient mess key not exist", zap.Any("key", key))
-		return "", fmt.Errorf("number of master service is incorrect, %d", len(msess))
+		return "", fmt.Errorf("number of RootCoord is incorrect, %d", len(msess))
 	}
 	return ms.Address, nil
 }

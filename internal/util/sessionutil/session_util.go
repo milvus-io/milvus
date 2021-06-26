@@ -101,18 +101,19 @@ func (s *Session) getServerID() (int64, error) {
 }
 
 func (s *Session) checkIDExist() {
+	log.Debug("Session checkIDExist Begin")
 	s.etcdCli.Txn(s.ctx).If(
 		clientv3.Compare(
 			clientv3.Version(path.Join(s.metaRoot, DefaultServiceRoot, DefaultIDKey)),
 			"=",
 			0)).
 		Then(clientv3.OpPut(path.Join(s.metaRoot, DefaultServiceRoot, DefaultIDKey), "1")).Commit()
-
+	log.Debug("Session checkIDExist End")
 }
 
 func (s *Session) getServerIDWithKey(key string, retryTimes uint) (int64, error) {
 	for {
-		log.Debug("Session try to get servdeID")
+		log.Debug("Session try to get serverID")
 		getResp, err := s.etcdCli.Get(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, key))
 		if err != nil {
 			log.Debug("Session get etcd key error", zap.String("key", key), zap.Error(err))
@@ -143,6 +144,7 @@ func (s *Session) getServerIDWithKey(key string, retryTimes uint) (int64, error)
 			log.Debug("Session Txn unsuccess", zap.String("key", key))
 			continue
 		}
+		log.Debug("Session get serverID success")
 		return valueInt, nil
 	}
 }
