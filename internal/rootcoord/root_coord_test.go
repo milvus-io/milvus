@@ -1445,6 +1445,7 @@ func TestRootCoord(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp8.Status.ErrorCode)
+		time.Sleep(5 * time.Second)
 
 	})
 
@@ -1499,6 +1500,7 @@ func TestRootCoord(t *testing.T) {
 			ts1            = uint64(120)
 			ts2            = uint64(150)
 		)
+		numChan := core.chanTimeTick.GetChanNum()
 		p1 := sessionutil.Session{
 			ServerID: 100,
 		}
@@ -1561,8 +1563,8 @@ func TestRootCoord(t *testing.T) {
 		// 2 proxy, 1 rootcoord
 		assert.Equal(t, 3, core.chanTimeTick.GetProxyNum())
 
-		// 3 proxy channels, 2 rootcoord channels
-		assert.Equal(t, 5, core.chanTimeTick.GetChanNum())
+		// add 3 proxy channels
+		assert.Equal(t, 3, core.chanTimeTick.GetChanNum()-numChan)
 	})
 
 	err = core.Stop()
@@ -1926,10 +1928,6 @@ func TestCheckInit(t *testing.T) {
 	assert.NotNil(t, err)
 
 	c.kvBase = &etcdkv.EtcdKV{}
-	err = c.checkInit()
-	assert.NotNil(t, err)
-
-	c.ddReqQueue = make(chan reqTask)
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
