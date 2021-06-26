@@ -173,6 +173,8 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	hCol.addPChannels(pChannels)
 	hCol.setLoadType(l)
 	if loadPartition {
+		sCol.deleteReleasedPartition(partitionID)
+		hCol.deleteReleasedPartition(partitionID)
 		if hasPartitionInStreaming := w.node.streaming.replica.hasPartition(partitionID); !hasPartitionInStreaming {
 			err := w.node.streaming.replica.addPartition(collectionID, partitionID)
 			if err != nil {
@@ -352,6 +354,21 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 	if err != nil {
 		log.Error(err.Error())
 		return err
+	}
+
+	for _, info := range l.req.Infos {
+		collectionID := info.CollectionID
+		partitionID := info.PartitionID
+		sCol, err := l.node.streaming.replica.getCollectionByID(collectionID)
+		if err != nil {
+			return err
+		}
+		sCol.deleteReleasedPartition(partitionID)
+		hCol, err := l.node.historical.replica.getCollectionByID(collectionID)
+		if err != nil {
+			return err
+		}
+		hCol.deleteReleasedPartition(partitionID)
 	}
 
 	log.Debug("LoadSegments done", zap.String("SegmentLoadInfos", fmt.Sprintln(l.req.Infos)))
