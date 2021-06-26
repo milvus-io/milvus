@@ -2046,6 +2046,9 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 						errMsg := "Query does not support vector field currently"
 						return errors.New(errMsg)
 					}
+					if field.IsPrimaryKey {
+						addPrimaryKey = true
+					}
 					findField = true
 					rt.OutputFields = append(rt.OutputFields, reqField)
 					break
