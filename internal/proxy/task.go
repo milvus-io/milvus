@@ -2777,9 +2777,9 @@ func (sct *ShowCollectionsTask) Execute(ctx context.Context) error {
 			sct.result.CollectionIds = append(sct.result.CollectionIds, id)
 			sct.result.CollectionNames = append(sct.result.CollectionNames, idMap[id])
 		}
+	} else {
+		sct.result = respFromRootCoord
 	}
-
-	sct.result = respFromRootCoord
 
 	return nil
 }
