@@ -140,7 +140,6 @@ class TestQueryBase:
         with pytest.raises(Exception):
             connect.query(collection_name, default_term_expr)
     
-    @pytest.mark.xfail(reason="#6035")
     def test_query_after_index(self, connect, collection, get_simple_index):
         """
         target: test query after creating index
@@ -185,7 +184,6 @@ class TestQueryBase:
                 # not support
                 # ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
-    @pytest.mark.xfail(reason="#6053")
     def test_query_empty_collection(self, connect, collection):
         """
         target: test query empty collection
