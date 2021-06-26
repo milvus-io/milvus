@@ -186,25 +186,7 @@ class ResponseChecker:
             raise Exception("No expect values found in the check task")
         exp_res = check_items.get("exp_res", None)
         if exp_res and isinstance(query_res, list):
-            # assert exp_res == query_res
-            assert len(exp_res) == len(query_res)
-            for i in range(len(exp_res)):
-                assert_entity_equal(exp=exp_res[i], actual=query_res[i])
-
-
-def assert_entity_equal(exp, actual):
-    """
-    compare two entities
-    {"int64": 0, "float": 0.0, "float_vec": [0.09111554112502457, ..., 0.08652634258062468]}
-    :param exp: exp entity
-    :param actual: actual entity
-    :return: bool
-    """
-    assert actual.keys() == exp.keys()
-    for field, value in exp.items():
-        if isinstance(value, list):
-            assert len(actual[field]) == len(exp[field])
-            for i in range(len(exp[field])):
-                assert abs(actual[field][i] - exp[field][i]) < ct.epsilon
-        else:
-            assert actual[field] == exp[field]
+            assert pc.equal_entities_list(exp=exp_res, actual=query_res)
+            # assert len(exp_res) == len(query_res)
+            # for i in range(len(exp_res)):
+            #     assert_entity_equal(exp=exp_res[i], actual=query_res[i])

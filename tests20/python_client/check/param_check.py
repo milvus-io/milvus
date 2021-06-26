@@ -1,6 +1,7 @@
 import pytest
 import sys
 import operator
+from common import common_type as ct
 
 sys.path.append("..")
 from utils.util_log import test_log as log
@@ -63,7 +64,8 @@ def list_de_duplication(_list):
     # Keep the order of the elements unchanged
     result.sort(key=_list.index)
 
-    log.debug("[LIST_DE_DUPLICATION] %s after removing the duplicate elements, the list becomes %s" % (str(_list), str(result)))
+    log.debug("[LIST_DE_DUPLICATION] %s after removing the duplicate elements, the list becomes %s" % (
+        str(_list), str(result)))
     return result
 
 
@@ -116,3 +118,86 @@ def get_connect_object_name(_list):
 
     log.debug("[GET_CONNECT_OBJECT_NAME] list:%s is reset to list:%s" % (str(_list), str(new_list)))
     return new_list
+
+
+def equal_entity(exp, actual):
+    """
+    compare two entities containing vector field
+    {"int64": 0, "float": 0.0, "float_vec": [0.09111554112502457, ..., 0.08652634258062468]}
+    :param exp: exp entity
+    :param actual: actual entity
+    :return: bool
+    """
+    assert actual.keys() == exp.keys()
+    for field, value in exp.items():
+        if isinstance(value, list):
+            assert len(actual[field]) == len(exp[field])
+            for i in range(len(exp[field])):
+                assert abs(actual[field][i] - exp[field][i]) < ct.epsilon
+        else:
+            assert actual[field] == exp[field]
+
+
+def entity_in(entity, entities, primary_field=ct.default_int64_field_name):
+    """
+    according to the primary key to judge entity in the entities list
+    :param entity: dict
+            {"int": 0, "vec": [0.999999, 0.111111]}
+    :param entities: list of dict
+            [{"int": 0, "vec": [0.999999, 0.111111]}, {"int": 1, "vec": [0.888888, 0.222222]}]
+    :param primary_field: collection primary field
+    :return: True or False
+    """
+    primary_key = entity.get(primary_field, None)
+    primary_keys = []
+    for e in entities:
+        primary_keys.append(e[primary_field])
+    if primary_key not in primary_keys:
+        return False
+    index = primary_key.index(primary_key)
+    return equal_entity(entities[index], entity)
+
+
+def remove_entity(entity, entities, primary_field=ct.default_int64_field_name):
+    """
+    according to the primary key to remove an entity from an entities list
+    :param entity: dict
+            {"int": 0, "vec": [0.999999, 0.111111]}
+    :param entities: list of dict
+            [{"int": 0, "vec": [0.999999, 0.111111]}, {"int": 1, "vec": [0.888888, 0.222222]}]
+    :param primary_field: collection primary field
+    :return: entities of removed entity
+    """
+    primary_key = entity.get(primary_field, None)
+    primary_keys = []
+    for e in entities:
+        primary_keys.append(e[primary_field])
+    index = primary_keys.index(primary_key)
+    entities.pop(index)
+    return entities
+
+
+def equal_entities_list(exp, actual):
+    """
+    compare two entities lists in inconsistent order
+    :param exp: exp entities list, list of dict
+    :param actual: actual entities list, list of dict
+    :return: True or False
+    example:
+    exp = [{"int": 0, "vec": [0.999999, 0.111111]}, {"int": 1, "vec": [0.888888, 0.222222]}]
+    actual = [{"int": 1, "vec": [0.888888, 0.222222]}, {"int": 0, "vec": [0.999999, 0.111111]}]
+    exp = actual
+    """
+    if len(exp) != len(actual):
+        return False
+    for a in actual:
+        # if vec field returned in query res
+        # if entity_in_entities(a, exp):
+        if a in exp:
+            try:
+                exp.remove(a)
+                # if vec field returned in query res
+                # remove_entity(a, exp)
+            except Exception as ex:
+                print(ex)
+    return True if len(exp) == 0 else False
