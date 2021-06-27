@@ -239,39 +239,41 @@ func (qc *QueryCoord) watchNodeLoop() {
 				}()
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
-				log.Debug("query coordinator", zap.Any("The QueryNode crashed with ID", serverID))
-				qc.cluster.nodes[serverID].setNodeState(false)
-				qc.cluster.nodes[serverID].client.Stop()
-				loadBalanceSegment := &querypb.LoadBalanceRequest{
-					Base: &commonpb.MsgBase{
-						MsgType:  commonpb.MsgType_LoadBalanceSegments,
-						SourceID: qc.session.ServerID,
-					},
-					SourceNodeIDs: []int64{serverID},
-					BalanceReason: querypb.TriggerCondition_nodeDown,
-				}
-
-				loadBalanceTask := &LoadBalanceTask{
-					BaseTask: BaseTask{
-						ctx:              qc.loopCtx,
-						Condition:        NewTaskCondition(qc.loopCtx),
-						triggerCondition: querypb.TriggerCondition_nodeDown,
-					},
-					LoadBalanceRequest: loadBalanceSegment,
-					rootCoord:          qc.rootCoordClient,
-					dataCoord:          qc.dataCoordClient,
-					cluster:            qc.cluster,
-					meta:               qc.meta,
-				}
-				qc.scheduler.Enqueue([]task{loadBalanceTask})
-				go func() {
-					err := loadBalanceTask.WaitToFinish()
-					if err != nil {
-						log.Error(err.Error())
+				if _, ok := qc.cluster.nodes[serverID]; ok {
+					log.Debug("query coordinator", zap.Any("The QueryNode crashed with ID", serverID))
+					qc.cluster.nodes[serverID].setNodeState(false)
+					qc.cluster.nodes[serverID].client.Stop()
+					loadBalanceSegment := &querypb.LoadBalanceRequest{
+						Base: &commonpb.MsgBase{
+							MsgType:  commonpb.MsgType_LoadBalanceSegments,
+							SourceID: qc.session.ServerID,
+						},
+						SourceNodeIDs: []int64{serverID},
+						BalanceReason: querypb.TriggerCondition_nodeDown,
 					}
-					log.Debug("load balance done after queryNode down", zap.Int64s("nodeIDs", loadBalanceTask.SourceNodeIDs))
-					//TODO::remove nodeInfo and clear etcd
-				}()
+
+					loadBalanceTask := &LoadBalanceTask{
+						BaseTask: BaseTask{
+							ctx:              qc.loopCtx,
+							Condition:        NewTaskCondition(qc.loopCtx),
+							triggerCondition: querypb.TriggerCondition_nodeDown,
+						},
+						LoadBalanceRequest: loadBalanceSegment,
+						rootCoord:          qc.rootCoordClient,
+						dataCoord:          qc.dataCoordClient,
+						cluster:            qc.cluster,
+						meta:               qc.meta,
+					}
+					qc.scheduler.Enqueue([]task{loadBalanceTask})
+					go func() {
+						err := loadBalanceTask.WaitToFinish()
+						if err != nil {
+							log.Error(err.Error())
+						}
+						log.Debug("load balance done after queryNode down", zap.Int64s("nodeIDs", loadBalanceTask.SourceNodeIDs))
+						//TODO::remove nodeInfo and clear etcd
+					}()
+				}
 			}
 		}
 	}
