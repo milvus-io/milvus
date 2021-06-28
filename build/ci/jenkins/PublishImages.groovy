@@ -15,7 +15,7 @@ pipeline {
 
     options {
         timestamps()
-        timeout(time: 30, unit: 'MINUTES')
+        timeout(time: 36, unit: 'MINUTES')
         // parallelsAlwaysFailFast()
     }
 

@@ -1294,10 +1294,13 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 		if err != nil {
 			return errors.New("invalid expression: " + st.query.Dsl)
 		}
-
-		for _, field := range schema.Fields {
-			for _, name := range st.query.OutputFields {
+		for _, name := range st.query.OutputFields {
+			for _, field := range schema.Fields {
 				if field.Name == name {
+					if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
+						return errors.New("Search doesn't support vector field as output_fields")
+					}
+
 					st.SearchRequest.OutputFieldsId = append(st.SearchRequest.OutputFieldsId, field.FieldID)
 					plan.OutputFieldIds = append(plan.OutputFieldIds, field.FieldID)
 				}
@@ -1867,11 +1870,13 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			for k, fieldName := range st.query.OutputFields {
-				for _, field := range schema.Fields {
-					if field.Name == fieldName {
-						st.result.Results.FieldsData[k].FieldName = fieldName
-						st.result.Results.FieldsData[k].Type = field.DataType
+			if len(st.query.OutputFields) != 0 {
+				for k, fieldName := range st.query.OutputFields {
+					for _, field := range schema.Fields {
+						if field.Name == fieldName {
+							st.result.Results.FieldsData[k].FieldName = fieldName
+							st.result.Results.FieldsData[k].Type = field.DataType
+						}
 					}
 				}
 			}
@@ -2037,18 +2042,30 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 			}
 		}
 	} else {
-		rt.OutputFields = rt.retrieve.OutputFields
 		for _, reqField := range rt.retrieve.OutputFields {
+			findField := false
+			addPrimaryKey := false
 			for _, field := range schema.Fields {
 				if reqField == field.Name {
-					if field.DataType != schemapb.DataType_FloatVector && field.DataType != schemapb.DataType_BinaryVector {
-						rt.OutputFields = append(rt.OutputFields, reqField)
+					if field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_BinaryVector {
+						errMsg := "Query does not support vector field currently"
+						return errors.New(errMsg)
 					}
-				} else {
 					if field.IsPrimaryKey {
+						addPrimaryKey = true
+					}
+					findField = true
+					rt.OutputFields = append(rt.OutputFields, reqField)
+				} else {
+					if field.IsPrimaryKey && !addPrimaryKey {
 						rt.OutputFields = append(rt.OutputFields, field.Name)
+						addPrimaryKey = true
 					}
 				}
+			}
+			if !findField {
+				errMsg := "Field " + reqField + " not exist"
+				return errors.New(errMsg)
 			}
 		}
 	}
