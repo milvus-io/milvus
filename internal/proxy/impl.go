@@ -1242,6 +1242,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		}
 		it.result.ErrIndex = errIndex
 	}
+	it.result.InsertCnt = int64(it.req.NumRows)
 	return it.result, nil
 }
 
@@ -1562,7 +1563,8 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		}, nil
 	}
 
-	err = errors.New("Not implemented because:" + err.Error())
+	errMsg := "Invalid expression!"
+	err = errors.New(errMsg)
 	return &milvuspb.QueryResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,

@@ -451,16 +451,19 @@ func (mt *metaTable) GetCollectionBySegmentID(segID typeutil.UniqueID) (*pb.Coll
 func (mt *metaTable) ListCollections(ts typeutil.Timestamp) (map[string]typeutil.UniqueID, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
+	colls := make(map[string]typeutil.UniqueID)
 
 	if ts == 0 {
-		return mt.collName2ID, nil
+		for k, v := range mt.collName2ID {
+			colls[k] = v
+		}
+		return colls, nil
 	}
 	_, vals, err := mt.client.LoadWithPrefix(CollectionMetaPrefix, ts)
 	if err != nil {
 		log.Debug("load with prefix error", zap.Uint64("timestamp", ts), zap.Error(err))
 		return nil, nil
 	}
-	colls := make(map[string]typeutil.UniqueID)
 	for _, val := range vals {
 		collMeta := pb.CollectionInfo{}
 		err := proto.UnmarshalText(val, &collMeta)

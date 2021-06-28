@@ -1,5 +1,8 @@
 import pytest
 
+import common.common_type as ct
+import common.common_func as cf
+
 
 def pytest_addoption(parser):
     parser.addoption("--ip", action="store", default="localhost", help="service's ip")
@@ -20,6 +23,8 @@ def pytest_addoption(parser):
     parser.addoption('--clean_log', action='store_true', default=False, help="clean log before testing")
     parser.addoption('--schema', action='store', default="schema", help="schema of test interface")
     parser.addoption('--err_msg', action='store', default="err_msg", help="error message of test")
+    parser.addoption('--term_expr', action='store', default="term_expr", help="expr of query quest")
+    parser.addoption('--check_content', action='store', default="check_content", help="content of check")
 
 
 @pytest.fixture
@@ -110,3 +115,26 @@ def schema(request):
 @pytest.fixture
 def err_msg(request):
     return request.config.getoption("--err_msg")
+
+
+@pytest.fixture
+def term_expr(request):
+    return request.config.getoption("--term_expr")
+
+
+@pytest.fixture
+def check_content(request):
+    return request.config.getoption("--check_content")
+
+
+""" fixture func """
+
+
+@pytest.fixture(params=ct.get_invalid_strs)
+def get_invalid_string(request):
+    yield request.param
+
+
+@pytest.fixture(params=cf.gen_simple_index())
+def get_index_param(request):
+    yield request.param

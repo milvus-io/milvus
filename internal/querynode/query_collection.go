@@ -384,9 +384,9 @@ func (q *queryCollection) receiveSearch(msg *msgstream.SearchMsg) {
 	}
 
 	serviceTime := q.getServiceableTime()
+	bt, _ := tsoutil.ParseTS(msg.BeginTs())
+	st, _ := tsoutil.ParseTS(serviceTime)
 	if msg.BeginTs() > serviceTime {
-		bt, _ := tsoutil.ParseTS(msg.BeginTs())
-		st, _ := tsoutil.ParseTS(serviceTime)
 		log.Debug("query node::receiveSearchMsg: add to unsolvedMsg",
 			zap.Any("collectionID", q.collectionID),
 			zap.Any("sm.BeginTs", bt),
@@ -407,6 +407,10 @@ func (q *queryCollection) receiveSearch(msg *msgstream.SearchMsg) {
 	log.Debug("doing search in receiveSearchMsg...",
 		zap.Int64("collectionID", msg.CollectionID),
 		zap.Int64("msgID", msg.ID()),
+		zap.Any("serviceTime_l", serviceTime),
+		zap.Any("searchTime_l", msg.BeginTs()),
+		zap.Any("serviceTime_p", st),
+		zap.Any("searchTime_p", bt),
 	)
 	err = q.search(msg)
 	if err != nil {
@@ -730,7 +734,7 @@ func (q *queryCollection) search(searchMsg *msgstream.SearchMsg) error {
 	sp, ctx := trace.StartSpanFromContext(searchMsg.TraceCtx())
 	defer sp.Finish()
 	searchMsg.SetTraceCtx(ctx)
-	searchTimestamp := searchMsg.SearchRequest.TravelTimestamp
+	searchTimestamp := searchMsg.BeginTs()
 
 	collectionID := searchMsg.CollectionID
 	collection, err := q.streaming.replica.getCollectionByID(collectionID)
@@ -755,6 +759,13 @@ func (q *queryCollection) search(searchMsg *msgstream.SearchMsg) error {
 		if err != nil {
 			return err
 		}
+	}
+	topK := plan.getTopK()
+	if topK == 0 {
+		return fmt.Errorf("limit must be greater than 0")
+	}
+	if topK >= 16385 {
+		return fmt.Errorf("limit %d is too large", topK)
 	}
 	searchRequestBlob := searchMsg.PlaceholderGroup
 	searchReq, err := parseSearchRequest(plan, searchRequestBlob)
@@ -1168,9 +1179,6 @@ func (q *queryCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error {
 		if err1 != nil && err2 != nil {
 			return err2
 		}
-		if len(partitionIDsInHistoricalCol) == 0 {
-			return errors.New("none of this collection's partition has been loaded")
-		}
 		partitionIDsInHistorical = partitionIDsInHistoricalCol
 		partitionIDsInStreaming = partitionIDsInStreamingCol
 	} else {
@@ -1228,6 +1236,8 @@ func (q *queryCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error {
 		}
 	}
 
+	log.Debug("1111", zap.Any("len of mergeList", len(mergeList)))
+
 	result, err := mergeRetrieveResults(mergeList)
 	if err != nil {
 		return err
@@ -1253,7 +1263,7 @@ func (q *queryCollection) retrieve(retrieveMsg *msgstream.RetrieveMsg) error {
 		},
 	}
 	log.Debug("QueryNode RetrieveResultMsg",
-		zap.Any("pChannels", collection.getPChannels()),
+		zap.Any("vChannels", collection.getVChannels()),
 		zap.Any("collectionID", collection.ID()),
 		zap.Any("sealedSegmentRetrieved", sealedSegmentRetrieved),
 	)

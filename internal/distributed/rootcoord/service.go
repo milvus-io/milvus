@@ -18,7 +18,6 @@ import (
 	"net"
 	"strconv"
 	"sync"
-	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -81,20 +80,9 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 }
 
 func (s *Server) setClient() {
-	ctx := context.Background()
-
 	s.newDataCoordClient = func(etcdMetaRoot string, etcdEndpoints []string) types.DataCoord {
 		dsClient, err := dsc.NewClient(s.ctx, etcdMetaRoot, etcdEndpoints)
 		if err != nil {
-			panic(err)
-		}
-		if err := dsClient.Init(); err != nil {
-			panic(err)
-		}
-		if err := dsClient.Start(); err != nil {
-			panic(err)
-		}
-		if err := funcutil.WaitForComponentInitOrHealthy(ctx, dsClient, "DataCoord", 1000000, 200*time.Millisecond); err != nil {
 			panic(err)
 		}
 		return dsClient
@@ -104,23 +92,11 @@ func (s *Server) setClient() {
 		if err != nil {
 			panic(err)
 		}
-		if err := isClient.Init(); err != nil {
-			panic(err)
-		}
-		if err := isClient.Start(); err != nil {
-			panic(err)
-		}
 		return isClient
 	}
 	s.newQueryCoordClient = func(metaRootPath string, etcdEndpoints []string) types.QueryCoord {
 		qsClient, err := qsc.NewClient(s.ctx, metaRootPath, etcdEndpoints)
 		if err != nil {
-			panic(err)
-		}
-		if err := qsClient.Init(); err != nil {
-			panic(err)
-		}
-		if err := qsClient.Start(); err != nil {
 			panic(err)
 		}
 		return qsClient

@@ -106,7 +106,8 @@ class TestQueryBase:
         for _id, index in enumerate(ids[:default_pos]):
             if res[index][default_int_field_name] == entities[0]["values"][index]:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
-                ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
+                # not support
+                # ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
     def test_query_collection_not_existed(self, connect):
         """
@@ -139,7 +140,6 @@ class TestQueryBase:
         with pytest.raises(Exception):
             connect.query(collection_name, default_term_expr)
     
-    @pytest.mark.xfail(reason="#6035")
     def test_query_after_index(self, connect, collection, get_simple_index):
         """
         target: test query after creating index
@@ -154,9 +154,10 @@ class TestQueryBase:
         res = connect.query(collection, term_expr)
         logging.getLogger().info(res)
         assert len(res) == default_pos
-        for i in range(default_pos):
-            assert res[i][default_int_field_name] == entities[0]["values"][i]
-            ut.assert_equal_vector(res[i][ut.default_float_vec_field_name], entities[-1]["values"][i])
+        for _id, index in enumerate(ids):
+            if res[index][default_int_field_name] == entities[0]["values"][index]:
+                assert res[index][default_float_field_name] == entities[1]["values"][index]
+        #     # ut.assert_equal_vector(res[i][ut.default_float_vec_field_name], entities[-1]["values"][i])
 
     def test_query_after_search(self, connect, collection):
         """
@@ -180,9 +181,9 @@ class TestQueryBase:
         for _id, index in enumerate(ids[:default_pos]):
             if res[index][default_int_field_name] == entities[0]["values"][index]:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
-                ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
+                # not support
+                # ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
-    @pytest.mark.xfail(reason="#6053")
     def test_query_empty_collection(self, connect, collection):
         """
         target: test query empty collection
@@ -309,7 +310,8 @@ class TestQueryBase:
         assert len(res) == 1
         assert res[0][default_int_field_name] == entities[0]["values"][0]
         assert res[0][default_float_field_name] == entities[1]["values"][0]
-        ut.assert_equal_vector(res[0][ut.default_float_vec_field_name], entities[2]["values"][0])
+        # not support
+        # ut.assert_equal_vector(res[0][ut.default_float_vec_field_name], entities[2]["values"][0])
 
     @pytest.mark.xfail(reason="#6072")
     def test_query_binary_expr_single_term_array(self, connect, binary_collection):
@@ -326,7 +328,8 @@ class TestQueryBase:
         assert len(res) == 1
         assert res[0][default_int_field_name] == binary_entities[0]["values"][0]
         assert res[1][default_float_field_name] == binary_entities[1]["values"][0]
-        assert res[2][ut.default_float_vec_field_name] == binary_entities[2]["values"][0]
+        # not support
+        # assert res[2][ut.default_float_vec_field_name] == binary_entities[2]["values"][0]
 
     @pytest.mark.level(2)
     def test_query_expr_all_term_array(self, connect, collection):
@@ -344,7 +347,8 @@ class TestQueryBase:
         for _id, index in enumerate(ids):
             if res[index][default_int_field_name] == entities[0]["values"][index]:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
-                ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
+                # not support
+                # ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
     def test_query_expr_repeated_term_array(self, connect, collection):
         """
@@ -410,7 +414,8 @@ class TestQueryBase:
         assert len(ids) == ut.default_nb
         connect.load_collection(collection)
         res = connect.query(collection, default_term_expr, output_fields=[])
-        fields = [default_int_field_name, default_float_field_name, ut.default_float_vec_field_name]
+        # not support float_vector
+        fields = [default_int_field_name, default_float_field_name]
         for field in fields:
             assert field in res[0].keys()
 
@@ -436,7 +441,8 @@ class TestQueryBase:
         entities, ids = init_data(connect, collection)
         assert len(ids) == ut.default_nb
         connect.load_collection(collection)
-        fields = [default_int_field_name, default_float_field_name, ut.default_float_vec_field_name]
+        # fields = [default_int_field_name, default_float_field_name, ut.default_float_vec_field_name]
+        fields = [default_int_field_name, default_float_field_name]
         res = connect.query(collection, default_term_expr, output_fields=fields)
         for field in fields:
             assert field in res[0].keys()
@@ -496,7 +502,8 @@ class TestQueryPartition:
         for _id, index in enumerate(ids[:default_pos]):
             if res[index][default_int_field_name] == entities[0]["values"][index]:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
-                ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
+                # not support
+                # ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
     def test_query_partition_without_loading(self, connect, collection):
         """
@@ -523,7 +530,8 @@ class TestQueryPartition:
         for _id, index in enumerate(ids[:default_pos]):
             if res[index][default_int_field_name] == entities[0]["values"][index]:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
-                ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
+                # not support
+                # ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
     @pytest.mark.xfail(reason="#6075")
     def test_query_empty_partition(self, connect, collection):
