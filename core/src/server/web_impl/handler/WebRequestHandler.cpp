@@ -534,8 +534,12 @@ WebRequestHandler::Search(const std::string& collection_name, const nlohmann::js
     for (int64_t i = 0; i < result.row_num_; i++) {
         nlohmann::json raw_result_json;
         for (size_t j = 0; j < step; j++) {
+            auto id = result.id_list_.at(i * step + j);
+            if (id < 0) {
+                continue;
+            }
             nlohmann::json one_result_json;
-            one_result_json["id"] = std::to_string(result.id_list_.at(i * step + j));
+            one_result_json["id"] = std::to_string(id);
             one_result_json["distance"] = std::to_string(result.distance_list_.at(i * step + j));
             raw_result_json.emplace_back(one_result_json);
         }
