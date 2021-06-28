@@ -41,13 +41,21 @@ func newProxyClientManager(c *Core) *proxyClientManager {
 func (p *proxyClientManager) GetProxyClients(sess []*sessionutil.Session) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
+	var pl map[int64]*sessionutil.Session
 	for _, s := range sess {
 		if _, ok := p.proxyClient[s.ServerID]; ok {
 			continue
 		}
+		if len(pl) > 0 {
+			if _, ok := pl[s.ServerID]; !ok {
+				continue
+			}
+		}
+
 		pc, err := p.core.NewProxyClient(s)
 		if err != nil {
 			log.Debug("create proxy client failed", zap.String("proxy address", s.Address), zap.Int64("proxy id", s.ServerID), zap.Error(err))
+			pl, _ = listProxyInEtcd(p.core.ctx, p.core.etcdCli)
 			continue
 		}
 		p.proxyClient[s.ServerID] = pc

@@ -1288,7 +1288,7 @@ func TestRootCoord(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp8.Status.ErrorCode)
-		time.Sleep(10 * time.Second)
+		time.Sleep(5 * time.Second)
 
 	})
 
@@ -1732,12 +1732,15 @@ func TestRootCoord(t *testing.T) {
 	})
 
 	t.Run("alloc_error", func(t *testing.T) {
+		core.Stop()
 		core.IDAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 			return 0, 0, fmt.Errorf("id allocator error test")
 		}
 		core.TSOAllocator = func(count uint32) (typeutil.Timestamp, error) {
 			return 0, fmt.Errorf("tso allcoator error test")
 		}
+		core.Init()
+		core.Start()
 		r1 := &rootcoordpb.AllocTimestampRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Undefined,
