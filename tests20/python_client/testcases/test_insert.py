@@ -289,7 +289,7 @@ class TestInsertParams(TestcaseBase):
         float_values = [np.float32(i) for i in range(nb)]
         float_vec_values = cf.gen_vectors(nb, ct.default_dim)
         data = [int_values, float_values, float_vec_values]
-        error = {ct.err_code: 1, ct.err_msg: 'arrays must all be same length'}
+        error = {ct.err_code: 0, ct.err_msg: 'Arrays must all be same length.'}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -306,7 +306,7 @@ class TestInsertParams(TestcaseBase):
         float_values = [np.float32(i) for i in range(nb)]
         float_vec_values = cf.gen_vectors(nb - 1, ct.default_dim)
         data = [int_values, float_values, float_vec_values]
-        error = {ct.err_code: 1, ct.err_msg: 'arrays must all be same length'}
+        error = {ct.err_code: 0, ct.err_msg: 'Arrays must all be same length.'}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -321,7 +321,7 @@ class TestInsertParams(TestcaseBase):
         df = cf.gen_default_dataframe_data(ct.default_nb)
         new_values = [i for i in range(ct.default_nb)]
         df.insert(3, 'new', new_values)
-        error = {ct.err_code: 1, ct.err_msg: 'Column cnt not match with schema'}
+        error = {ct.err_code: 0, ct.err_msg: 'The data fields number is not match with schema.'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -335,7 +335,7 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         df = cf.gen_default_dataframe_data(ct.default_nb)
         df.drop(ct.default_float_vec_field_name, axis=1, inplace=True)
-        error = {ct.err_code: 1, ct.err_msg: 'Column cnt not match with schema'}
+        error = {ct.err_code: 0, ct.err_msg: 'The data fields number is not match with schema.'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
