@@ -111,10 +111,12 @@ int getDeviceForAddress(const void* p) {
     FAISS_ASSERT_FMT(err == cudaErrorInvalidValue,
                      "unknown error %d", (int) err);
     return -1;
-  } else if (att.memoryType == cudaMemoryTypeHost) {
-    return -1;
+  }
+
+  if (att.type == cudaMemoryTypeDevice) {
+      return att.device;
   } else {
-    return att.device;
+      return -1;
   }
 }
 
