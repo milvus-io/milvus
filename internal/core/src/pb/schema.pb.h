@@ -2366,6 +2366,7 @@ class SearchResultData :
   enum : int {
     kFieldsDataFieldNumber = 3,
     kScoresFieldNumber = 4,
+    kTopksFieldNumber = 6,
     kIdsFieldNumber = 5,
     kNumQueriesFieldNumber = 1,
     kTopKFieldNumber = 2,
@@ -2391,6 +2392,17 @@ class SearchResultData :
       scores() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >*
       mutable_scores();
+
+  // repeated int64 topks = 6;
+  int topks_size() const;
+  void clear_topks();
+  ::PROTOBUF_NAMESPACE_ID::int64 topks(int index) const;
+  void set_topks(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_topks(::PROTOBUF_NAMESPACE_ID::int64 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+      topks() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+      mutable_topks();
 
   // .milvus.proto.schema.IDs ids = 5;
   bool has_ids() const;
@@ -2418,6 +2430,8 @@ class SearchResultData :
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::FieldData > fields_data_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< float > scores_;
   mutable std::atomic<int> _scores_cached_byte_size_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > topks_;
+  mutable std::atomic<int> _topks_cached_byte_size_;
   ::milvus::proto::schema::IDs* ids_;
   ::PROTOBUF_NAMESPACE_ID::int64 num_queries_;
   ::PROTOBUF_NAMESPACE_ID::int64 top_k_;
@@ -3959,6 +3973,36 @@ inline void SearchResultData::set_allocated_ids(::milvus::proto::schema::IDs* id
   }
   ids_ = ids;
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.schema.SearchResultData.ids)
+}
+
+// repeated int64 topks = 6;
+inline int SearchResultData::topks_size() const {
+  return topks_.size();
+}
+inline void SearchResultData::clear_topks() {
+  topks_.Clear();
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 SearchResultData::topks(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.SearchResultData.topks)
+  return topks_.Get(index);
+}
+inline void SearchResultData::set_topks(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
+  topks_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.SearchResultData.topks)
+}
+inline void SearchResultData::add_topks(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  topks_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.schema.SearchResultData.topks)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+SearchResultData::topks() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.schema.SearchResultData.topks)
+  return topks_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+SearchResultData::mutable_topks() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.schema.SearchResultData.topks)
+  return &topks_;
 }
 
 #ifdef __GNUC__

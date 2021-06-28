@@ -1587,6 +1587,7 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 					},
 				},
 			},
+			Topks: make([]int64, 0),
 		},
 	}
 
@@ -1736,6 +1737,7 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 			// return nil, errors.New("the length (topk) between all result of query is different")
 		}
 		realTopK = j
+		ret.Results.Topks = append(ret.Results.Topks, int64(realTopK))
 	}
 
 	ret.Results.TopK = int64(realTopK)
