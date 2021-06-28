@@ -203,7 +203,7 @@ if (MILVUS_GPU_VERSION)
     include_directories(${CUDA_INCLUDE_DIRS})
     link_directories("${CUDA_TOOLKIT_ROOT_DIR}/lib64")
     set(cuda_lib
-            ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libnvidia-ml.so
+            nvidia-ml
             cudart
             cublas
             )
