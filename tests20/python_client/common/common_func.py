@@ -141,6 +141,7 @@ def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0):
     })
     return df
 
+
 def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0):
     int64_values = pd.Series(data=[i for i in range(start, start + nb)])
     int32_values = pd.Series(data=[np.int32(i) for i in range(start, start + nb)], dtype="int32")
@@ -250,6 +251,7 @@ def gen_normal_expressions():
         "int64 == 0 || int64 == 1 || int64 == 2",
     ]
     return expressions
+
 
 def jaccard(x, y):
     x = np.asarray(x, np.bool)

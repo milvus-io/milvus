@@ -63,8 +63,10 @@ class Base:
 
         try:
             """ Drop collection before disconnect """
-            # if self.collection_wrap is not None and self.collection_wrap.collection is not None:
-            #     self.collection_wrap.drop()
+            if self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING)[0] is None:
+                self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=param_info.param_host,
+                                             port=param_info.param_port)
+
             if self.collection_wrap is not None:
                 collection_list = self.utility_wrap.list_collections()[0]
                 for i in collection_list:
@@ -111,13 +113,14 @@ class TestcaseBase(Base):
     Public methods that can be used to add cases.
     """
 
-    @pytest.fixture(scope="module", params=ct.get_invalid_strs)
-    def get_invalid_string(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="module", params=cf.gen_simple_index())
-    def get_index_param(self, request):
-        yield request.param
+    # move to conftest.py
+    # @pytest.fixture(scope="module", params=ct.get_invalid_strs)
+    # def get_invalid_string(self, request):
+    #     yield request.param
+    #
+    # @pytest.fixture(scope="module", params=cf.gen_simple_index())
+    # def get_index_param(self, request):
+    #     yield request.param
 
     def _connect(self):
         """ Add an connection and create the connect """
@@ -176,7 +179,7 @@ class TestcaseBase(Base):
         if insert_data:
             collection_w, vectors, binary_raw_vectors = \
                 cf.insert_data(collection_w, nb, is_binary, is_all_data_type)
-            assert collection_w.is_empty == False
+            assert collection_w.is_empty is False
             assert collection_w.num_entities == nb
             collection_w.load()
 
