@@ -154,10 +154,10 @@ class TestQueryBase:
         res = connect.query(collection, term_expr)
         logging.getLogger().info(res)
         assert len(res) == default_pos
-        for i in range(default_pos):
-            assert res[i][default_int_field_name] == entities[0]["values"][i]
-            # not support
-            # ut.assert_equal_vector(res[i][ut.default_float_vec_field_name], entities[-1]["values"][i])
+        for _id, index in enumerate(ids):
+            if res[index][default_int_field_name] == entities[0]["values"][index]:
+                assert res[index][default_float_field_name] == entities[1]["values"][index]
+        #     # ut.assert_equal_vector(res[i][ut.default_float_vec_field_name], entities[-1]["values"][i])
 
     def test_query_after_search(self, connect, collection):
         """

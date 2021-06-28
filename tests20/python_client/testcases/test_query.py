@@ -555,19 +555,6 @@ class TestQueryOperation(TestcaseBase):
         res, _ = collection_w.query(term_expr)
         assert len(res) == len(int_values)
 
-        # half = ct.default_nb // 2
-        # collection_w, partition_w, _, df_default = self.insert_entities_into_two_partitions_in_half(half)
-        # int_values = df_default[ct.default_int64_field_name].values.tolist()
-        # float_values = df_default[ct.default_float_field_name].values.tolist()
-        # vec_values = df_default[ct.default_float_vec_field_name].values.tolist()
-        # term_expr = f'{ct.default_int64_field_name} in {int_values}'
-        # res, _ = collection_w.query(term_expr)
-        # assert len(res) == half
-        # for i in half:
-        #     assert res[i][ct.default_int64_field_name] == int_values[i]
-        #     assert res[i][ct.default_float_field_name] == float_values[i]
-        #     assert res[i][ct.default_float_vec_field_name] == vec_values[i]
-
     @pytest.mark.xfail(reason="fail")
     @pytest.mark.tags(ct.CaseLabel.L3)
     def test_query_expr_repeated_term_array(self):

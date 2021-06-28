@@ -19,7 +19,8 @@ Milvus is written in Go and C++, compiling it can use a lot of resources. We rec
 
 In fact, all Linux distributions is available to develop Milvus. The following only contains commands on Ubuntu, because we mainly use it. If you develop Milvus on other distributions, you are welcome to improve this document.
 
-#### Debian/Ubuntu
+#### Dependencies
+- Debian/Ubuntu
 
 ```shell
 sudo apt update
@@ -27,6 +28,21 @@ sudo apt install -y build-essential ccache gfortran \
     libssl-dev zlib1g-dev python3-dev libcurl4-openssl-dev libtbb-dev\
     libboost-regex-dev libboost-program-options-dev libboost-system-dev \
     libboost-filesystem-dev libboost-serialization-dev libboost-python-dev
+```
+
+- CentOS
+
+```shell
+sudo yum install -y epel-release centos-release-scl-rh \
+    && sudo yum install -y make automake openssl-devel zlib-devel tbb-devel \
+    libcurl-devel python3-devel boost-devel boost-python \
+    devtoolset-7-gcc devtoolset-7-gcc-c++ devtoolset-7-gcc-gfortran \
+    llvm-toolset-7.0-clang llvm-toolset-7.0-clang-tools-extra
+
+echo "source scl_source enable devtoolset-7" | sudo tee -a /etc/profile.d/devtoolset-7.sh
+echo "source scl_source enable llvm-toolset-7.0" | sudo tee -a /etc/profile.d/llvm-toolset-7.sh
+echo "export CLANG_TOOLS_PATH=/opt/rh/llvm-toolset-7.0/root/usr/bin" | sudo tee -a /etc/profile.d/llvm-toolset-7.sh
+source "/etc/profile.d/llvm-toolset-7.sh"
 ```
 
 Once you have finished, confirm that `gcc` and `make` are installed:
@@ -100,16 +116,19 @@ Milvus uses Python SDK to write test cases to verify the correctness of Milvus f
 #### Standalone
 
 ```shell
-cd deployments/docker/standalone
+cd deployments/docker/dev
 docker-compose up -d
 cd ../../../
-./bin/milvus run standalone
+./scripts/start_standalone.sh
 ```
 
 #### Cluster
 
 ```shell
-./scripts/start.sh
+cd deployments/docker/dev
+docker-compose up -d
+cd ../../../
+./scripts/start_cluster.sh
 ```
 
 To run E2E tests, use these command:

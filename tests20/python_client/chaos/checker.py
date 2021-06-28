@@ -141,14 +141,13 @@ class QueryChecker(Checker):
             int_values = []
             for _ in range(5):
                 int_values.append(randint(0, constants.ENTITIES_FOR_SEARCH))
-            # term_expr = f'{ct.default_int64_field_name} in {int_values}'
-            # _, result = self.c_wrap.query(term_expr, check_task='check_nothing')
-            result = False
-            sleep(constants.WAIT_PER_OP/10)
+            term_expr = f'{ct.default_int64_field_name} in {int_values}'
+            _, result = self.c_wrap.query(term_expr, check_task='check_nothing')
             if result:
                 self._succ += 1
             else:
                 self._fail += 1
+            sleep(constants.WAIT_PER_OP / 10)
 
 #
 # if __name__ == '__main__':

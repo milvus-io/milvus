@@ -37,7 +37,7 @@ class TestPartitionParams(TestcaseBase):
         assert collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #5375")
+    # @pytest.mark.xfail(reason="issue #5375")
     @pytest.mark.parametrize("partition_name", [""])
     def test_partition_empty_name(self, partition_name):
         """
@@ -455,7 +455,7 @@ class TestPartitionOperations(TestcaseBase):
 
         # verify that drop the partition again with exception
         partition_w.drop(check_task=CheckTasks.err_res,
-                         check_items={ct.err_code: 1, ct.err_msg: "None Type"})
+                         check_items={ct.err_code: 1, ct.err_msg: "Partition doesn't exist"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
@@ -578,7 +578,7 @@ class TestPartitionOperations(TestcaseBase):
 
         # release the dropped partition and check err response
         partition_w.release(check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: "None Type"})
+                            check_items={ct.err_code: 1, ct.err_msg: "Partition doesn't exist"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
@@ -690,7 +690,7 @@ class TestPartitionOperations(TestcaseBase):
         # insert data to partition
         partition_w.insert(cf.gen_default_dataframe_data(),
                            check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1, ct.err_msg: "can not be find"})
+                           check_items={ct.err_code: 1, ct.err_msg: "Partition doesn't exist"})
         # TODO: update the assert error
 
     @pytest.mark.tags(CaseLabel.L1)

@@ -13,7 +13,7 @@ pipeline {
     }
     options {
         timestamps()
-        timeout(time: 1, unit: 'HOURS')
+        timeout(time: 90, unit: 'MINUTES')
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         // parallelsAlwaysFailFast()
     }

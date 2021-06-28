@@ -192,6 +192,27 @@ func (s *Server) initServiceDiscovery() error {
 	return nil
 }
 
+func (s *Server) loadDataNodes() []*datapb.DataNodeInfo {
+	if s.session == nil {
+		log.Warn("load data nodes but session is nil")
+		return []*datapb.DataNodeInfo{}
+	}
+	sessions, _, err := s.session.GetSessions(typeutil.DataNodeRole)
+	if err != nil {
+		log.Warn("load data nodes faild", zap.Error(err))
+		return []*datapb.DataNodeInfo{}
+	}
+	datanodes := make([]*datapb.DataNodeInfo, 0, len(sessions))
+	for _, session := range sessions {
+		datanodes = append(datanodes, &datapb.DataNodeInfo{
+			Address:  session.Address,
+			Version:  session.ServerID,
+			Channels: []*datapb.ChannelStatus{},
+		})
+	}
+	return datanodes
+}
+
 func (s *Server) startSegmentManager() {
 	helper := createNewSegmentHelper(s.segmentInfoStream)
 	s.segmentManager = newSegmentManager(s.meta, s.allocator, withAllocHelper(helper))
@@ -368,12 +389,14 @@ func (s *Server) startWatchService(ctx context.Context) {
 				log.Info("Received datanode register",
 					zap.String("address", datanode.Address),
 					zap.Int64("serverID", datanode.Version))
-				s.cluster.register(datanode)
+				//s.cluster.register(datanode)
+				s.cluster.refresh(s.loadDataNodes())
 			case sessionutil.SessionDelEvent:
 				log.Info("Received datanode unregister",
 					zap.String("address", datanode.Address),
 					zap.Int64("serverID", datanode.Version))
-				s.cluster.unregister(datanode)
+				//s.cluster.unregister(datanode)
+				s.cluster.refresh(s.loadDataNodes())
 			default:
 				log.Warn("receive unknown service event type",
 					zap.Any("type", event.EventType))
