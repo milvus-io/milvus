@@ -604,14 +604,6 @@ class TestQueryOperation(TestcaseBase):
         check_vec = vectors[0].iloc[:, [0, 1]][0:len(int_values)].to_dict('records')
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: check_vec})
 
-        # entities, ids = init_data(connect, collection)
-        # assert len(ids) == ut.default_nb
-        # connect.create_index(collection, ut.default_float_vec_field_name, get_simple_index)
-        # connect.load_collection(collection)
-        # res = connect.query(collection, default_term_expr)
-        # logging.getLogger().info(res)
-
-    @pytest.mark.xfail(reason='')
     @pytest.mark.tags(ct.CaseLabel.L3)
     def test_query_after_search(self):
         """
@@ -634,21 +626,9 @@ class TestQueryOperation(TestcaseBase):
         # check number of entities and that method calls the flush interface
         assert collection_w.num_entities == nb_old
 
-        term_expr = f'{ct.default_int64_field_name} in {default_term_expr}'
-        check_vec = vectors[0].iloc[:, [0, 1]][0:len(default_term_expr)].to_dict('records')
+        term_expr = f'{ct.default_int64_field_name} in [0, 1]'
+        check_vec = vectors[0].iloc[:, [0, 1]][0:2].to_dict('records')
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: check_vec})
-
-        # entities, ids = init_data(connect, collection)
-        # assert len(ids) == ut.default_nb
-        # top_k = 10
-        # nq = 2
-        # query, _ = ut.gen_query_vectors(ut.default_float_vec_field_name, entities, top_k=top_k, nq=nq)
-        # connect.load_collection(collection)
-        # search_res = connect.search(collection, query)
-        # assert len(search_res) == nq
-        # assert len(search_res[0]) == top_k
-        # query_res = connect.query(collection, default_term_expr)
-        # logging.getLogger().info(query_res)
 
     @pytest.mark.tags(ct.CaseLabel.L3)
     def test_query_partition_repeatedly(self):
@@ -681,17 +661,6 @@ class TestQueryOperation(TestcaseBase):
         res_one, _ = collection_w.query(default_term_expr, partition_names=[partition_w.name])
         res_two, _ = collection_w.query(default_term_expr, partition_names=[partition_w.name])
         assert res_one == res_two
-
-        # conn = self._connect()
-        # collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
-        # partition_w = self.init_partition_wrap(collection_wrap=collection_w)
-        # df = cf.gen_default_dataframe_data(ct.default_nb)
-        # partition_w.insert(df)
-        # conn.flush([collection_w.name])
-        # partition_w.load()
-        # res_one, _ = collection_w.query(default_term_expr, partition_names=[partition_w.name])
-        # res_two, _ = collection_w.query(default_term_expr, partition_names=[partition_w.name])
-        # assert res_one == res_two
 
     @pytest.mark.tags(ct.CaseLabel.L3)
     def test_query_another_partition(self):
