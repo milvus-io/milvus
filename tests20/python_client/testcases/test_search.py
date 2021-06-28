@@ -226,6 +226,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "err_msg": "metric type not found"})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue 6170")
     def test_search_param_invalid_limit(self):
         """
         target: test search with invalid parameter values
@@ -400,7 +401,6 @@ class TestCollectionSearch(TestcaseBase):
                                          "err_msg": "Search failed"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="issue 5992")
     def test_search_output_field_vector(self):
         """
         target: test search with vector as output field
@@ -418,7 +418,8 @@ class TestCollectionSearch(TestcaseBase):
                                      default_search_exp, output_fields=[default_search_field],
                                      check_task=CheckTasks.err_res,
                                      check_items={"err_code": 1,
-                                                  "err_msg": "unsupported"})
+                                                  "err_msg": "Search doesn't support "
+                                                             "vector field as output_fields"})
 
     """
     ******************************************************************
@@ -577,7 +578,6 @@ class TestCollectionSearch(TestcaseBase):
                                          "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue 6045")
     def test_search_partition_after_release_load(self):
         """
         target: search the pre-released collection after load
@@ -589,26 +589,32 @@ class TestCollectionSearch(TestcaseBase):
         """
         log.info("Test case of search interface: test_search_partition_after_release_load")
         # 1. initialize without data
-        collection_w = self.init_collection_general(prefix, True, 10, 1)[0]
+        collection_w = self.init_collection_general(prefix, True, 1000, 1)[0]
         # 2. release collection
         log.info("test_search_partition_after_release_load: releasing a partition")
         par = collection_w.partitions
         conn = self.connection_wrap.get_connection()[0]
         conn.release_partitions(collection_w.name, [par[1].name])
         log.info("test_search_partition_after_release_load: released a partition")
-        # 3. Search the pre-released partition after load
+        # 3. Search the collection after load
+        limit = 1000
         collection_w.load()
         log.info("test_search_partition_after_release_load: searching after load")
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
-                            default_limit, default_search_exp,
+                            limit, default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": limit})
+        # 4. Search the pre-released partition after load
+        collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
+                            limit, default_search_exp,
                             [par[1].name],
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
-                                         "limit": default_limit})
+                                         "limit": par[1].num_entities})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue 6065")
     def test_search_load_flush_load(self):
         """
         target: test search when load before flush
