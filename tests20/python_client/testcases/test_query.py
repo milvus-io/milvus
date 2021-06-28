@@ -1,8 +1,10 @@
 import pytest
+import random
 from pymilvus_orm.default_config import DefaultConfig
 
 from base.client_base import TestcaseBase
 from common.code_mapping import ConnectionErrorMessage as cem
+from common.code_mapping import CollectionErrorMessage as clem
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
@@ -433,7 +435,6 @@ class TestQueryBase(TestcaseBase):
                            check_items=CheckTasks.err_res, check_task=error)
 
 
-# @pytest.mark.skip(reason="waiting for debug")
 class TestQueryOperation(TestcaseBase):
     """
     ******************************************************************
@@ -463,106 +464,146 @@ class TestQueryOperation(TestcaseBase):
         collection_w.query(default_term_expr, check_task=CheckTasks.err_res,
                            check_items={ct.err_code: 0, ct.err_msg: cem.ConnectFirst})
 
-    def test_query_without_loading(self):
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("collection_name, data",
+                             [(cf.gen_unique_str(prefix), cf.gen_default_list_data(ct.default_nb))])
+    def test_query_without_loading(self, collection_name, data):
         """
         target: test query without loading
         method: no loading before query
         expected: raise exception
         """
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name)
-        data = cf.gen_default_list_data(ct.default_nb)
+
+        # init a collection with default connection
+        collection_w = self.init_collection_wrap(name=collection_name)
+
+        # insert data to collection
         collection_w.insert(data=data)
-        conn, _ = self.connection_wrap.get_connection()
-        conn.flush([c_name])
+
+        # check number of entities and that method calls the flush interface
         assert collection_w.num_entities == ct.default_nb
-        error = {ct.err_code: 1, ct.err_msg: "can not find collection"}
-        collection_w.query(default_term_expr, check_task=CheckTasks.err_res, check_items=error)
 
-    def test_query_expr_single_term_array(self):
+        # query without load
+        collection_w.query(default_term_expr, check_task=CheckTasks.err_res,
+                           check_items={ct.err_code: 1, ct.err_msg: clem.CollNotLoaded % collection_name})
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("term_expr", [f'{ct.default_int64_field_name} in [0]'])
+    def test_query_expr_single_term_array(self, term_expr):
         """
         target: test query with single array term expr
         method: query with single array value
         expected: query result is one entity
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
-        term_expr = f'{ct.default_int64_field_name} in [0]'
-        res, _ = collection_w.query(term_expr)
-        assert len(res) == 1
-        df = vectors[0]
-        assert res[0][ct.default_int64_field_name] == df[ct.default_int64_field_name].values.tolist()[0]
-        assert res[1][ct.default_float_field_name] == df[ct.default_float_field_name].values.tolist()[0]
-        assert res[2][ct.default_float_vec_field_name] == df[ct.default_float_vec_field_name].values.tolist()[0]
 
-    def test_query_binary_expr_single_term_array(self):
+        # init a collection and insert data
+        collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True)
+
+        # query the first row of data
+        check_vec = vectors[0].iloc[:, [0, 1]][0:1].to_dict('records')
+        collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: check_vec})
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("term_expr", [f'{ct.default_int64_field_name} in [0]'])
+    def test_query_binary_expr_single_term_array(self, term_expr, check_content):
         """
         target: test query with single array term expr
         method: query with single array value
         expected: query result is one entity
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True, is_binary=True)
-        term_expr = f'{ct.default_int64_field_name} in [0]'
-        res, _ = collection_w.query(term_expr)
-        assert len(res) == 1
-        int_values = vectors[0][ct.default_int64_field_name].values.tolist()
-        float_values = vectors[0][ct.default_float_field_name].values.tolist()
-        vec_values = vectors[0][ct.default_float_vec_field_name].values.tolist()
-        assert res[0][ct.default_int64_field_name] == int_values[0]
-        assert res[1][ct.default_float_field_name] == float_values[0]
-        assert res[2][ct.default_float_vec_field_name] == vec_values[0]
 
+        # init a collection and insert data
+        collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True,
+                                                                                 is_binary=True)
+
+        # query the first row of data
+        check_vec = vectors[0].iloc[:, [0, 1]][0:1].to_dict('records')
+        collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: check_vec})
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
     def test_query_expr_all_term_array(self):
         """
         target: test query with all array term expr
         method: query with all array value
         expected: verify query result
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+
+        # init a collection and insert data
+        collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True)
+
+        # data preparation
         int_values = vectors[0][ct.default_int64_field_name].values.tolist()
         term_expr = f'{ct.default_int64_field_name} in {int_values}'
-        res, _ = collection_w.query(term_expr)
-        assert len(res) == ct.default_nb
-        for i in ct.default_nb:
-            assert res[i][ct.default_int64_field_name] == int_values[i]
+        check_vec = vectors[0].iloc[:, [0, 1]][0:len(int_values)].to_dict('records')
 
+        # query all array value
+        collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: check_vec})
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
     def test_query_expr_half_term_array(self):
         """
         target: test query with half array term expr
         method: query with half array value
         expected: verify query result
         """
+
         half = ct.default_nb // 2
-        collection_w, partition_w, _, df_default = self.insert_entities_into_two_partitions_in_half(half)
+        collection_w, partition_w, df_partition, df_default = self.insert_entities_into_two_partitions_in_half(half)
+
         int_values = df_default[ct.default_int64_field_name].values.tolist()
-        float_values = df_default[ct.default_float_field_name].values.tolist()
-        vec_values = df_default[ct.default_float_vec_field_name].values.tolist()
         term_expr = f'{ct.default_int64_field_name} in {int_values}'
         res, _ = collection_w.query(term_expr)
-        assert len(res) == half
-        for i in half:
-            assert res[i][ct.default_int64_field_name] == int_values[i]
-            assert res[i][ct.default_float_field_name] == float_values[i]
-            assert res[i][ct.default_float_vec_field_name] == vec_values[i]
+        assert len(res) == len(int_values)
 
+        # half = ct.default_nb // 2
+        # collection_w, partition_w, _, df_default = self.insert_entities_into_two_partitions_in_half(half)
+        # int_values = df_default[ct.default_int64_field_name].values.tolist()
+        # float_values = df_default[ct.default_float_field_name].values.tolist()
+        # vec_values = df_default[ct.default_float_vec_field_name].values.tolist()
+        # term_expr = f'{ct.default_int64_field_name} in {int_values}'
+        # res, _ = collection_w.query(term_expr)
+        # assert len(res) == half
+        # for i in half:
+        #     assert res[i][ct.default_int64_field_name] == int_values[i]
+        #     assert res[i][ct.default_float_field_name] == float_values[i]
+        #     assert res[i][ct.default_float_vec_field_name] == vec_values[i]
+
+    @pytest.mark.xfail(reason="fail")
+    @pytest.mark.tags(ct.CaseLabel.L3)
     def test_query_expr_repeated_term_array(self):
         """
         target: test query with repeated term array on primary field with unique value
         method: query with repeated array value
         expected: verify query result
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
-        int_values = [0, 0]
+        collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True)
+        int_values = [0, 0, 0, 0]
         term_expr = f'{ct.default_int64_field_name} in {int_values}'
         res, _ = collection_w.query(term_expr)
         assert len(res) == 1
         assert res[0][ct.default_int64_field_name] == int_values[0]
 
-    def test_query_after_index(self, get_simple_index):
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    def test_query_after_index(self):
         """
         target: test query after creating index
         method: query after index
         expected: query result is correct
         """
+        collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True)
+
+        default_field_name = ct.default_float_vec_field_name
+        default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+        index_name = ct.default_index_name
+        collection_w.create_index(default_field_name, default_index_params, index_name=index_name)
+
+        collection_w.load()
+
+        int_values = [0]
+        term_expr = f'{ct.default_int64_field_name} in {int_values}'
+        check_vec = vectors[0].iloc[:, [0, 1]][0:len(int_values)].to_dict('records')
+        collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: check_vec})
+
         # entities, ids = init_data(connect, collection)
         # assert len(ids) == ut.default_nb
         # connect.create_index(collection, ut.default_float_vec_field_name, get_simple_index)
@@ -570,12 +611,33 @@ class TestQueryOperation(TestcaseBase):
         # res = connect.query(collection, default_term_expr)
         # logging.getLogger().info(res)
 
+    @pytest.mark.xfail(reason='')
+    @pytest.mark.tags(ct.CaseLabel.L3)
     def test_query_after_search(self):
         """
         target: test query after search
         method: query after search
         expected: query result is correct
         """
+
+        limit = 1000
+        nb_old = 500
+        collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, True, nb_old)
+
+        # 2. search for original data after load
+        vectors_s = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
+        collection_w.search(vectors_s[:ct.default_nq], ct.default_float_vec_field_name,
+                            ct.default_search_params, limit, "int64 >= 0",
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": ct.default_nq, "limit": nb_old})
+
+        # check number of entities and that method calls the flush interface
+        assert collection_w.num_entities == nb_old
+
+        term_expr = f'{ct.default_int64_field_name} in {default_term_expr}'
+        check_vec = vectors[0].iloc[:, [0, 1]][0:len(default_term_expr)].to_dict('records')
+        collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: check_vec})
+
         # entities, ids = init_data(connect, collection)
         # assert len(ids) == ut.default_nb
         # top_k = 10
@@ -588,23 +650,50 @@ class TestQueryOperation(TestcaseBase):
         # query_res = connect.query(collection, default_term_expr)
         # logging.getLogger().info(query_res)
 
+    @pytest.mark.tags(ct.CaseLabel.L3)
     def test_query_partition_repeatedly(self):
         """
         target: test query repeatedly on partition
         method: query on partition twice
         expected: verify query result
         """
-        conn = self._connect()
+
+        # create connection
+        self._connect()
+
+        # init collection
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+
+        # init partition
         partition_w = self.init_partition_wrap(collection_wrap=collection_w)
+
+        # insert data to partition
         df = cf.gen_default_dataframe_data(ct.default_nb)
         partition_w.insert(df)
-        conn.flush([collection_w.name])
+
+        # check number of entities and that method calls the flush interface
+        assert collection_w.num_entities == ct.default_nb
+
+        # load partition
         partition_w.load()
+
+        # query twice
         res_one, _ = collection_w.query(default_term_expr, partition_names=[partition_w.name])
         res_two, _ = collection_w.query(default_term_expr, partition_names=[partition_w.name])
         assert res_one == res_two
 
+        # conn = self._connect()
+        # collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        # partition_w = self.init_partition_wrap(collection_wrap=collection_w)
+        # df = cf.gen_default_dataframe_data(ct.default_nb)
+        # partition_w.insert(df)
+        # conn.flush([collection_w.name])
+        # partition_w.load()
+        # res_one, _ = collection_w.query(default_term_expr, partition_names=[partition_w.name])
+        # res_two, _ = collection_w.query(default_term_expr, partition_names=[partition_w.name])
+        # assert res_one == res_two
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
     def test_query_another_partition(self):
         """
         target: test query another partition
@@ -614,11 +703,13 @@ class TestQueryOperation(TestcaseBase):
         """
         half = ct.default_nb // 2
         collection_w, partition_w, _, _ = self.insert_entities_into_two_partitions_in_half(half)
+
         term_expr = f'{ct.default_int64_field_name} in [{half}]'
         # half entity in _default partition rather than partition_w
-        res, _ = collection_w.query(term_expr, partition_names=[partition_w.name])
-        assert len(res) == 0
+        collection_w.query(term_expr, partition_names=[partition_w.name], check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: []})
 
+    @pytest.mark.tags(ct.CaseLabel.L3)
     def test_query_multi_partitions_multi_results(self):
         """
         target: test query on multi partitions and get multi results
@@ -628,11 +719,13 @@ class TestQueryOperation(TestcaseBase):
         """
         half = ct.default_nb // 2
         collection_w, partition_w, _, _ = self.insert_entities_into_two_partitions_in_half(half)
+
         term_expr = f'{ct.default_int64_field_name} in [{half - 1}, {half}]'
         # half entity in _default, half-1 entity in partition_w
         res, _ = collection_w.query(term_expr, partition_names=[ct.default_partition_name, partition_w.name])
         assert len(res) == 2
 
+    @pytest.mark.tags(ct.CaseLabel.L3)
     def test_query_multi_partitions_single_result(self):
         """
         target: test query on multi partitions and get single result
@@ -641,7 +734,8 @@ class TestQueryOperation(TestcaseBase):
         expected: query from two partitions and get single result
         """
         half = ct.default_nb // 2
-        collection_w, partition_w = self.insert_entities_into_two_partitions_in_half(half)
+        collection_w, partition_w, df_partition, df_default = self.insert_entities_into_two_partitions_in_half(half)
+
         term_expr = f'{ct.default_int64_field_name} in [{half}]'
         # half entity in _default
         res, _ = collection_w.query(term_expr, partition_names=[ct.default_partition_name, partition_w.name])

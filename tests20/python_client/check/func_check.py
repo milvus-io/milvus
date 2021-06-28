@@ -61,7 +61,7 @@ class ResponseChecker:
         assert len(error_dict) > 0
         if isinstance(res, Error):
             error_code = error_dict[ct.err_code]
-            assert res.code == error_code or error_dict[ct.err_msg] in res.message
+            assert res.code == error_code and error_dict[ct.err_msg] in res.message
         else:
             log.error("[CheckFunc] Response of API is not an error: %s" % str(res))
             assert False
@@ -190,3 +190,4 @@ class ResponseChecker:
             # assert len(exp_res) == len(query_res)
             # for i in range(len(exp_res)):
             #     assert_entity_equal(exp=exp_res[i], actual=query_res[i])
+
