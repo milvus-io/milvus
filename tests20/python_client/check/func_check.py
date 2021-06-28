@@ -208,3 +208,7 @@ def assert_entity_equal(exp, actual):
                 assert abs(actual[field][i] - exp[field][i]) < ct.epsilon
         else:
             assert actual[field] == exp[field]
+            # assert pc.equal_entities_list(exp=exp_res, actual=query_res)
+            # assert len(exp_res) == len(query_res)
+            # for i in range(len(exp_res)):
+            #     assert_entity_equal(exp=exp_res[i], actual=query_res[i])

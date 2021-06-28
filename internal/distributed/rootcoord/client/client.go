@@ -56,7 +56,7 @@ func getRootCoordAddr(sess *sessionutil.Session) (string, error) {
 	ms, ok := msess[key]
 	if !ok {
 		log.Debug("RootCoordClient mess key not exist", zap.Any("key", key))
-		return "", fmt.Errorf("number of master service is incorrect, %d", len(msess))
+		return "", fmt.Errorf("number of RootCoord is incorrect, %d", len(msess))
 	}
 	return ms.Address, nil
 }
@@ -83,7 +83,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*G
 }
 
 func (c *GrpcClient) Init() error {
-	return c.connect(retry.Attempts(300))
+	return c.connect(retry.Attempts(20))
 }
 
 func (c *GrpcClient) connect(retryOptions ...retry.Option) error {
@@ -97,7 +97,7 @@ func (c *GrpcClient) connect(retryOptions ...retry.Option) error {
 		opts := trace.GetInterceptorOpts()
 		log.Debug("RootCoordClient try reconnect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(c.ctx, c.addr,
-			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(5*time.Second),
+			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(2*time.Second),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
 					grpc_retry.UnaryClientInterceptor(),

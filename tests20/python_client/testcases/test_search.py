@@ -244,7 +244,7 @@ class TestCollectionSearch(TestcaseBase):
                             limit, default_search_exp,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
-                                         "err_msg": "division by zero"})
+                                         "err_msg": "limit must be greater than 0"})
         limit = 16385
         log.info("test_search_param_invalid_limit: searching with invalid max limit (topK) = %s" % limit)
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,

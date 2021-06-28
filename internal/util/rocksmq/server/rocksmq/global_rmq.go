@@ -12,6 +12,7 @@
 package rocksmq
 
 import (
+	"os"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -31,6 +32,15 @@ func InitRmq(rocksdbName string, idAllocator allocator.GIDAllocator) error {
 func InitRocksMQ(rocksdbName string) error {
 	var err error
 	once.Do(func() {
+		_, err := os.Stat(rocksdbName)
+		if os.IsNotExist(err) {
+			err = os.MkdirAll(rocksdbName, os.ModePerm)
+			if err != nil {
+				errMsg := "Create dir " + rocksdbName + " failed"
+				panic(errMsg)
+			}
+		}
+
 		kvname := rocksdbName + "_kv"
 		rocksdbKV, err := rocksdbkv.NewRocksdbKV(kvname)
 		if err != nil {

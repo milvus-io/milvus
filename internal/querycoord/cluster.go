@@ -70,7 +70,7 @@ func (c *queryNodeCluster) reloadFromKV() error {
 		if err != nil {
 			return err
 		}
-		nodeIDs = append(nodeIDs, nodeID)
+
 		session := &sessionutil.Session{}
 		err = json.Unmarshal([]byte(values[index]), session)
 		if err != nil {
@@ -78,8 +78,10 @@ func (c *queryNodeCluster) reloadFromKV() error {
 		}
 		err = c.RegisterNode(context.Background(), session, nodeID)
 		if err != nil {
-			return err
+			log.Debug("query node failed to register")
+			continue
 		}
+		nodeIDs = append(nodeIDs, nodeID)
 	}
 	for _, nodeID := range nodeIDs {
 		infoPrefix := fmt.Sprintf("%s/%d", queryNodeMetaPrefix, nodeID)

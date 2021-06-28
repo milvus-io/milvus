@@ -33,11 +33,10 @@ class TestQueryBase(TestcaseBase):
         int_values = vectors[0][ct.default_int64_field_name].values.tolist()
         pos = 5
         term_expr = f'{ct.default_int64_field_name} in {int_values[:pos]}'
-        res = vectors[0].iloc[0:pos].to_dict('records')
+        res = vectors[0].iloc[0:pos, :2].to_dict('records')
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="#6028")
     def test_query_empty_collection(self):
         """
         target: test query empty collection
@@ -87,7 +86,6 @@ class TestQueryBase(TestcaseBase):
         assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="#6033")
     def test_query_expr_none(self):
         """
         target: test query with none expr
@@ -95,11 +93,10 @@ class TestQueryBase(TestcaseBase):
         expected: raise exception
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
-        error = {ct.err_code: 1, ct.err_msg: "invalid expr"}
+        error = {ct.err_code: 0, ct.err_msg: "The type of expr must be string"}
         collection_w.query(None, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="#6044")
     @pytest.mark.parametrize("expr", [1, 2., [], {}, ()])
     def test_query_expr_non_string(self, expr):
         """
@@ -108,7 +105,7 @@ class TestQueryBase(TestcaseBase):
         expected: raise exception
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
-        error = {ct.err_code: 1, ct.err_msg: "expr must string type"}
+        error = {ct.err_code: 0, ct.err_msg: "The type of expr must be string"}
         collection_w.query(expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -132,7 +129,7 @@ class TestQueryBase(TestcaseBase):
         expected: query result is correct
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
-        res = vectors[0].iloc[0:2].to_dict('records')
+        res = vectors[0].iloc[:2, :2].to_dict('records')
         collection_w.query(default_term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -216,7 +213,7 @@ class TestQueryBase(TestcaseBase):
         """
         target: test query with empty array term expr
         method: query with empty term expr
-        expected: empty rsult
+        expected: empty result
         """
         term_expr = f'{ct.default_int64_field_name} in []'
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
@@ -272,8 +269,8 @@ class TestQueryBase(TestcaseBase):
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
         res, _ = collection_w.query(default_term_expr, output_fields=None)
-        fields = [ct.default_int64_field_name, ct.default_float_field_name, ct.default_float_vec_field_name]
-        assert list(res[0].keys()) == fields
+        fields = [ct.default_int64_field_name, ct.default_float_field_name]
+        assert set(res[0].keys()) == set(fields)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_output_one_field(self):
@@ -284,7 +281,7 @@ class TestQueryBase(TestcaseBase):
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
         res, _ = collection_w.query(default_term_expr, output_fields=[ct.default_int64_field_name])
-        assert list(res[0].keys()) == [ct.default_int64_field_name]
+        assert set(res[0].keys()) == set([ct.default_int64_field_name])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_output_all_fields(self):
@@ -294,15 +291,43 @@ class TestQueryBase(TestcaseBase):
         expected: return all fields
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
-        fields = [ct.default_int64_field_name, ct.default_float_field_name, ct.default_float_vec_field_name]
-        log.debug(collection_w.num_entities)
+        fields = [ct.default_int64_field_name, ct.default_float_field_name]
         res, _ = collection_w.query(default_term_expr, output_fields=fields)
-        log.debug(res)
-        assert list(res[0].keys()) == fields
+        assert set(res[0].keys()) == set(fields)
+        res_1, _ = collection_w.query(default_term_expr, output_fields=[ct.default_float_field_name])
+        assert set(res_1[0].keys()) == set(fields)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #6049")
-    def test_query_output_not_existed_field(self):
+    @pytest.mark.xfail(reason="issue #6143")
+    @pytest.mark.parametrize("output_fields", [[ct.default_float_vec_field_name],
+                                               [ct.default_int64_field_name, ct.default_float_vec_field_name]])
+    def test_query_output_vec_field(self, output_fields):
+        """
+        target: test query with vec output field
+        method: specify vec field as output field
+        expected: raise exception
+        """
+        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        error = {ct.err_code: 1, ct.err_msg: "unsupported leaf node"}
+        collection_w.query(default_term_expr, output_fields=output_fields,
+                           check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_output_primary_field(self):
+        """
+        target: test query with output field only primary field
+        method: specify int64 primary field as output field
+        expected: return int64 field
+        """
+        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        res, _ = collection_w.query(default_term_expr, output_fields=[ct.default_int64_field_name])
+        assert list(res[0].keys()) == [ct.default_int64_field_name]
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #6074")
+    @pytest.mark.parametrize("output_fields", [["int"],
+                                               [ct.default_int64_field_name, "int"]])
+    def test_query_output_not_existed_field(self, output_fields):
         """
         target: test query output not existed field
         method: query with not existed output field
@@ -310,20 +335,7 @@ class TestQueryBase(TestcaseBase):
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
         error = {ct.err_code: 1, ct.err_msg: 'cannot find field'}
-        collection_w.query(default_term_expr, output_fields=["int"], check_items=CheckTasks.err_res, check_task=error)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #6049")
-    def test_query_output_part_not_existed_field(self):
-        """
-        target: test query output part not existed field
-        method: query with part not existed field
-        expected: raise exception
-        """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
-        error = {ct.err_code: 1, ct.err_msg: 'cannot find field'}
-        fields = [ct.default_int64_field_name, "int"]
-        collection_w.query(default_term_expr, output_fields=fields, check_items=CheckTasks.err_res, check_task=error)
+        collection_w.query(default_term_expr, output_fields=output_fields, check_items=CheckTasks.err_res, check_task=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_empty_output_fields(self):
@@ -334,10 +346,9 @@ class TestQueryBase(TestcaseBase):
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
         query_res, _ = collection_w.query(default_term_expr, output_fields=[])
-        fields = [ct.default_int64_field_name, ct.default_float_field_name, ct.default_float_vec_field_name]
+        fields = [ct.default_int64_field_name, ct.default_float_field_name]
         assert list(query_res[0].keys()) == fields
 
-    @pytest.mark.xfail(reason="issue #6056")
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("fields", ct.get_invalid_strs)
     def test_query_invalid_output_fields(self, fields):
@@ -347,7 +358,7 @@ class TestQueryBase(TestcaseBase):
         expected: raise exception
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
-        error = {ct.err_code: 1, ct.err_msg: 'invalid output fields'}
+        error = {ct.err_code: 1, ct.err_msg: 'Invalid query format. must be a list'}
         collection_w.query(default_term_expr, output_fields=fields, check_items=CheckTasks.err_res, check_task=error)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -363,12 +374,11 @@ class TestQueryBase(TestcaseBase):
         partition_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
         partition_w.load()
-        res = df.iloc[0:2].to_dict('records')
+        res = df.iloc[:2, :2].to_dict('records')
         collection_w.query(default_term_expr, partition_names=[partition_w.name],
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #6059")
     def test_query_partition_without_loading(self):
         """
         target: test query on partition without loading
@@ -380,7 +390,7 @@ class TestQueryBase(TestcaseBase):
         df = cf.gen_default_dataframe_data(ct.default_nb)
         partition_w.insert(df)
         assert partition_w.num_entities == ct.default_nb
-        error = {ct.err_code: 1, ct.err_msg: 'cannot find collection'}
+        error = {ct.err_code: 1, ct.err_msg: f'collection {collection_w.name} was not loaded into memory'}
         collection_w.query(default_term_expr, partition_names=[partition_w.name],
                            check_items=CheckTasks.err_res, check_task=error)
 
@@ -392,12 +402,11 @@ class TestQueryBase(TestcaseBase):
         expected: verify query result
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
-        res = vectors[0].iloc[0:2].to_dict('records')
+        res = vectors[0].iloc[:2, :2].to_dict('records')
         collection_w.query(default_term_expr, partition_names=[ct.default_partition_name],
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #6028")
     def test_query_empty_partition(self):
         """
         target: test query on empty partition
@@ -412,7 +421,6 @@ class TestQueryBase(TestcaseBase):
         assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #6061")
     def test_query_not_existed_partition(self):
         """
         target: test query on a not existed partition
@@ -422,7 +430,7 @@ class TestQueryBase(TestcaseBase):
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
         collection_w.load()
         partition_names = cf.gen_unique_str()
-        error = {ct.err_code: 1, ct.err_msg: 'cannot find partition'}
+        error = {ct.err_code: 1, ct.err_msg: f'PartitonName: {partition_names} not found'}
         collection_w.query(default_term_expr, partition_names=[partition_names],
                            check_items=CheckTasks.err_res, check_task=error)
 
