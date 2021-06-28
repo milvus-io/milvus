@@ -33,8 +33,8 @@ class ChaosOpt(object):
                                                                 metadata_name)
             log.debug(f"delete chaos response: {data}")
         except ApiException as e:
-            log.error("Exception when calling CustomObjectsApi->delete_namespaced_custom_object: %s\n" % e)
             if raise_ex:
+                log.error("Exception when calling CustomObjectsApi->delete_namespaced_custom_object: %s\n" % e)
                 raise Exception(str(e))
 
     def list_chaos_object(self):
