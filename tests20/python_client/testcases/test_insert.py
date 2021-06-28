@@ -789,9 +789,8 @@ class TestInsertAsync(TestcaseBase):
             future.result()
 
 
-# todo
 def assert_mutation_result(mutation_res):
-    log.info("In callback check status")
+    # todo
     log.info(f"The result is {mutation_res}")
     # mutation_res = future.result()
     # assert mutation_res.insert_count == 100
