@@ -117,6 +117,7 @@ func (p *proxyManager) WatchProxy() error {
 					log.Debug("watch proxy failed")
 					return
 				}
+				pl, _ := listProxyInEtcd(p.ctx, p.etcdCli)
 				for _, ev := range wresp.Events {
 					switch ev.Type {
 					case mvccpb.PUT:
@@ -125,6 +126,11 @@ func (p *proxyManager) WatchProxy() error {
 						if err != nil {
 							log.Debug("watch proxy, unmarshal failed", zap.Error(err))
 							continue
+						}
+						if len(pl) > 0 {
+							if _, ok := pl[sess.ServerID]; !ok {
+								continue
+							}
 						}
 						p.lock.Lock()
 						for _, f := range p.addSessions {
@@ -156,4 +162,29 @@ func (p *proxyManager) WatchProxy() error {
 
 func (p *proxyManager) Stop() {
 	p.cancel()
+}
+
+func listProxyInEtcd(ctx context.Context, cli *clientv3.Client) (map[int64]*sessionutil.Session, error) {
+	ctx2, cancel := context.WithTimeout(ctx, RequestTimeout)
+	defer cancel()
+	resp, err := cli.Get(
+		ctx2,
+		path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
+		clientv3.WithPrefix(),
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list proxy failed, etcd error = %w", err)
+	}
+	sess := make(map[int64]*sessionutil.Session)
+	for _, v := range resp.Kvs {
+		var s sessionutil.Session
+		err := json.Unmarshal(v.Value, &s)
+		if err != nil {
+			log.Debug("unmarshal SvrSession failed", zap.Error(err))
+			continue
+		}
+		sess[s.ServerID] = &s
+	}
+	return sess, nil
 }
