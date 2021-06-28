@@ -2037,18 +2037,30 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 			}
 		}
 	} else {
-		rt.OutputFields = rt.retrieve.OutputFields
 		for _, reqField := range rt.retrieve.OutputFields {
+			findField := false
+			addPrimaryKey := false
 			for _, field := range schema.Fields {
 				if reqField == field.Name {
-					if field.DataType != schemapb.DataType_FloatVector && field.DataType != schemapb.DataType_BinaryVector {
-						rt.OutputFields = append(rt.OutputFields, reqField)
+					if field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_BinaryVector {
+						errMsg := "Query does not support vector field currently"
+						return errors.New(errMsg)
 					}
-				} else {
 					if field.IsPrimaryKey {
+						addPrimaryKey = true
+					}
+					findField = true
+					rt.OutputFields = append(rt.OutputFields, reqField)
+				} else {
+					if field.IsPrimaryKey && !addPrimaryKey {
 						rt.OutputFields = append(rt.OutputFields, field.Name)
+						addPrimaryKey = true
 					}
 				}
+			}
+			if !findField {
+				errMsg := "Field " + reqField + " not exist"
+				return errors.New(errMsg)
 			}
 		}
 	}
