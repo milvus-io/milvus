@@ -1294,10 +1294,13 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 		if err != nil {
 			return errors.New("invalid expression: " + st.query.Dsl)
 		}
-
-		for _, field := range schema.Fields {
-			for _, name := range st.query.OutputFields {
+		for _, name := range st.query.OutputFields {
+			for _, field := range schema.Fields {
 				if field.Name == name {
+					if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
+						return errors.New("Search doesn't support vector field as output_fields")
+					}
+
 					st.SearchRequest.OutputFieldsId = append(st.SearchRequest.OutputFieldsId, field.FieldID)
 					plan.OutputFieldIds = append(plan.OutputFieldIds, field.FieldID)
 				}
@@ -1867,11 +1870,13 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			for k, fieldName := range st.query.OutputFields {
-				for _, field := range schema.Fields {
-					if field.Name == fieldName {
-						st.result.Results.FieldsData[k].FieldName = fieldName
-						st.result.Results.FieldsData[k].Type = field.DataType
+			if len(st.query.OutputFields) != 0 {
+				for k, fieldName := range st.query.OutputFields {
+					for _, field := range schema.Fields {
+						if field.Name == fieldName {
+							st.result.Results.FieldsData[k].FieldName = fieldName
+							st.result.Results.FieldsData[k].Type = field.DataType
+						}
 					}
 				}
 			}
