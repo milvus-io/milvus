@@ -211,7 +211,7 @@ func (s *Server) initServiceDiscovery() error {
 		return err
 	}
 
-	s.eventCh = s.session.WatchServices(typeutil.DataNodeRole, rev)
+	s.eventCh = s.session.WatchServices(typeutil.DataNodeRole, rev+1)
 	return nil
 }
 
