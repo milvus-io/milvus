@@ -19,7 +19,7 @@ import (
 const serverNotServingErrMsg = "server is not serving"
 
 func (s *Server) isClosed() bool {
-	return atomic.LoadInt64(&s.isServing) != 2
+	return atomic.LoadInt64(&s.isServing) != ServerStateHealthy
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
@@ -354,9 +354,9 @@ func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 	}
 	state := atomic.LoadInt64(&s.isServing)
 	switch state {
-	case 1:
+	case ServerStateInitializing:
 		resp.State.StateCode = internalpb.StateCode_Initializing
-	case 2:
+	case ServerStateHealthy:
 		resp.State.StateCode = internalpb.StateCode_Healthy
 	default:
 		resp.State.StateCode = internalpb.StateCode_Abnormal

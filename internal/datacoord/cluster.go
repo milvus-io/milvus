@@ -133,10 +133,13 @@ func (c *cluster) refresh(dataNodes []*datapb.DataNodeInfo) error {
 }
 
 // paraRun parallel run, with max Parallel limit
-func parraRun(works []func(), maxRunner int) {
+func paraRun(works []func(), maxRunner int) {
 	wg := sync.WaitGroup{}
 	ch := make(chan func())
 	wg.Add(len(works))
+	if maxRunner > len(works) {
+		maxRunner = len(works)
+	}
 
 	for i := 0; i < maxRunner; i++ {
 		go func() {
@@ -210,6 +213,7 @@ func (c *cluster) watch(nodes []*datapb.DataNodeInfo) ([]*datapb.DataNodeInfo, e
 				mut.Lock()
 				errs = append(errs, err)
 				mut.Unlock()
+				return
 			}
 			if resp.ErrorCode != commonpb.ErrorCode_Success {
 				log.Warn("watch channels failed", zap.String("address", n.Address), zap.Error(err))
@@ -225,8 +229,11 @@ func (c *cluster) watch(nodes []*datapb.DataNodeInfo) ([]*datapb.DataNodeInfo, e
 			}
 		})
 	}
-	parraRun(works, 3)
-	return nodes, retry.ErrorList(errs)
+	paraRun(works, 20)
+	if len(errs) > 0 {
+		return nodes, retry.ErrorList(errs)
+	}
+	return nodes, nil
 }
 
 func (c *cluster) register(n *datapb.DataNodeInfo) {
