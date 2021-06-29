@@ -8,6 +8,7 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
+
 package datacoord
 
 import (
@@ -23,11 +24,12 @@ import (
 )
 
 type cluster struct {
-	mu             sync.RWMutex
-	ctx            context.Context
-	dataManager    *clusterNodeManager
-	sessionManager sessionManager
-	posProvider    positionProvider
+	mu               sync.RWMutex
+	ctx              context.Context
+	dataManager      *clusterNodeManager
+	sessionManager   sessionManager
+	candidateManager *candidateManager
+	posProvider      positionProvider
 
 	startupPolicy    clusterStartupPolicy
 	registerPolicy   dataNodeRegisterPolicy
@@ -92,13 +94,16 @@ func newCluster(ctx context.Context, dataManager *clusterNodeManager,
 		unregisterPolicy: defaultUnregisterPolicy(),
 		assignPolicy:     defaultAssignPolicy(),
 	}
+
 	for _, opt := range opts {
 		opt.apply(c)
 	}
 
+	c.candidateManager = newCandidateManager(20, c.validateDataNode, c.enableDataNode)
 	return c
 }
 
+// startup applies statup policy
 func (c *cluster) startup(dataNodes []*datapb.DataNodeInfo) error {
 	deltaChange := c.dataManager.updateCluster(dataNodes)
 	nodes, chanBuffer := c.dataManager.getDataNodes(false)
@@ -117,18 +122,68 @@ func (c *cluster) startup(dataNodes []*datapb.DataNodeInfo) error {
 
 // refresh rough refresh datanode status after event received
 func (c *cluster) refresh(dataNodes []*datapb.DataNodeInfo) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	deltaChange := c.dataManager.updateCluster(dataNodes)
-	nodes, chanBuffer := c.dataManager.getDataNodes(false)
-	var rets []*datapb.DataNodeInfo
-	var err error
-	rets, chanBuffer = c.startupPolicy.apply(nodes, deltaChange, chanBuffer)
-	c.dataManager.updateDataNodes(rets, chanBuffer)
-	rets, err = c.watch(rets)
-	if err != nil {
-		log.Warn("Failed to watch all the status change", zap.Error(err))
-		//does not trigger new another refresh, pending evt will do
+	log.Debug("refresh delta", zap.Any("new", deltaChange.newNodes),
+		zap.Any("restart", deltaChange.restarts),
+		zap.Any("offline", deltaChange.offlines))
+
+	// cannot use startup policy directly separate into three parts:
+	// 1. add new nodes into candidates list
+	for _, dn := range dataNodes {
+		for _, newAddr := range deltaChange.newNodes {
+			if dn.Address == newAddr {
+				c.candidateManager.add(dn)
+			}
+		}
 	}
-	c.dataManager.updateDataNodes(rets, chanBuffer) // even if some watch failed, status should sync into etcd
+
+	// 2. restart nodes try to watch
+	restartNodes := make([]*datapb.DataNodeInfo, 0, len(deltaChange.restarts))
+	for _, node := range deltaChange.restarts {
+		info, ok := c.dataManager.dataNodes[node]
+		if ok {
+			restartNodes = append(restartNodes, info.info)
+			for _, cs := range info.info.Channels {
+				cs.State = datapb.ChannelWatchState_Uncomplete
+			}
+		}
+	}
+	_, buffer := c.dataManager.getDataNodes(true)
+	c.updateNodeWatch(restartNodes, buffer)
+
+	// 3. offline do unregister
+	unregisterNodes := make([]*datapb.DataNodeInfo, 0, len(deltaChange.offlines)) // possible nodes info to unregister
+	for _, node := range deltaChange.offlines {
+		info := c.dataManager.unregister(node)
+		if info != nil {
+			unregisterNodes = append(unregisterNodes, info)
+		}
+	}
+	for _, node := range unregisterNodes {
+		cluster, buffer := c.dataManager.getDataNodes(true)
+		if len(cluster) > 0 { // cluster has online nodes, migrate channels
+			ret := c.unregisterPolicy.apply(cluster, node)
+			c.updateNodeWatch(ret, buffer)
+		} else {
+			// no online node, put all watched channels to buffer
+			buffer = append(buffer, node.Channels...)
+			c.updateNodeWatch([]*datapb.DataNodeInfo{}, buffer)
+		}
+	}
+
+	return nil
+}
+
+// updateNodeWatch save nodes uncomplete status and try to watch channels which is unwatched, save the execution result
+func (c *cluster) updateNodeWatch(nodes []*datapb.DataNodeInfo, buffer []*datapb.ChannelStatus) error {
+	c.dataManager.updateDataNodes(nodes, buffer)
+	rets, err := c.watch(nodes)
+	if err != nil {
+		log.Warn("Failed to watch all the status change", zap.Error(err)) //
+	}
+	c.dataManager.updateDataNodes(rets, buffer)
 	return err
 }
 
@@ -158,13 +213,29 @@ func paraRun(works []func(), maxRunner int) {
 	close(ch)
 }
 
+func (c *cluster) validateDataNode(dn *datapb.DataNodeInfo) error {
+	log.Warn("[CM] start validate candidate", zap.String("addr", dn.Address))
+	_, err := c.sessionManager.getOrCreateSession(dn.Address) // this might take time if address went offline
+	log.Warn("[CM] candidate validation finished", zap.String("addr", dn.Address), zap.Error(err))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *cluster) enableDataNode(dn *datapb.DataNodeInfo) error {
+	log.Warn("[CM] enabling candidate", zap.String("addr", dn.Address))
+	c.register(dn)
+	return nil
+}
+
 func (c *cluster) watch(nodes []*datapb.DataNodeInfo) ([]*datapb.DataNodeInfo, error) {
 	works := make([]func(), 0, len(nodes))
 	mut := sync.Mutex{}
 	errs := make([]error, 0, len(nodes))
 	for _, n := range nodes {
 		works = append(works, func() {
-			logMsg := fmt.Sprintf("Begin to watch channels for node %s:", n.Address)
+			logMsg := fmt.Sprintf("Begin to watch channels for node %s, channels:", n.Address)
 			uncompletes := make([]vchannel, 0, len(n.Channels))
 			for _, ch := range n.Channels {
 				if ch.State == datapb.ChannelWatchState_Uncomplete {
@@ -260,7 +331,7 @@ func (c *cluster) unregister(n *datapb.DataNodeInfo) {
 	defer c.mu.Unlock()
 
 	c.sessionManager.releaseSession(n.Address)
-	oldNode := c.dataManager.unregister(n)
+	oldNode := c.dataManager.unregister(n.Address)
 	if oldNode != nil {
 		n = oldNode
 	}
@@ -338,7 +409,7 @@ func (c *cluster) flush(segments []*datapb.SegmentInfo) {
 		if !ok {
 			continue
 		}
-		cli, err := c.sessionManager.getOrCreateSession(node)
+		cli, err := c.sessionManager.getSession(node)
 		if err != nil {
 			log.Warn("get session failed", zap.String("addr", node), zap.Error(err))
 			continue
@@ -370,4 +441,5 @@ func (c *cluster) releaseSessions() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.sessionManager.release()
+	c.candidateManager.dispose()
 }
