@@ -67,10 +67,11 @@ func (c *Client) connect(retryOptions ...retry.Option) error {
 		opts := trace.GetInterceptorOpts()
 		log.Debug("DataNode connect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(c.ctx, c.addr,
-			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(2*time.Second),
+			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(200*time.Millisecond),
+			grpc.WithDisableRetry(),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
-					grpc_retry.UnaryClientInterceptor(),
+					//grpc_retry.UnaryClientInterceptor(grpc_retry.WithMax(3), grpc_retry.WithPerRetryTimeout(time.Millisecond*50)),
 					grpc_opentracing.UnaryClientInterceptor(opts...),
 				)),
 			grpc.WithStreamInterceptor(
