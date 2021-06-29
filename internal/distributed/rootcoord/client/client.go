@@ -13,6 +13,7 @@ package grpcrootcoordclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -147,7 +148,7 @@ func (c *GrpcClient) recall(caller func() (interface{}, error)) (interface{}, er
 	}
 	err = c.connect()
 	if err != nil {
-		return ret, err
+		return ret, errors.New("Connect to rootcoord failed with error:\n" + err.Error())
 	}
 	ret, err = caller()
 	if err == nil {
