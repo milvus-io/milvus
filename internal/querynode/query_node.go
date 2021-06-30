@@ -61,7 +61,6 @@ type QueryNode struct {
 	queryService *queryService
 
 	// clients
-	queryCoord types.QueryCoord
 	rootCoord  types.RootCoord
 	indexCoord types.IndexCoord
 	dataCoord  types.DataCoord
@@ -147,43 +146,6 @@ func (node *QueryNode) Init() error {
 	node.streaming = newStreaming(node.queryNodeLoopCtx, node.msFactory, node.etcdKV)
 
 	C.SegcoreInit()
-	//registerReq := &queryPb.RegisterNodeRequest{
-	//	Base: &commonpb.MsgBase{
-	//		SourceID: Params.QueryNodeID,
-	//	},
-	//	Address: &commonpb.Address{
-	//		Ip:   Params.QueryNodeIP,
-	//		Port: Params.QueryNodePort,
-	//	},
-	//}
-	//
-	//resp, err := node.queryCoord.RegisterNode(ctx, registerReq)
-	//if err != nil {
-	//	log.Debug("QueryNode RegisterNode failed", zap.Error(err))
-	//	panic(err)
-	//}
-	//if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-	//	log.Debug("QueryNode RegisterNode failed", zap.Any("Reason", resp.Status.Reason))
-	//	panic(resp.Status.Reason)
-	//}
-	//log.Debug("QueryNode RegisterNode success")
-	//
-	//for _, kv := range resp.InitParams.StartParams {
-	//	switch kv.Key {
-	//	case "StatsChannelName":
-	//		Params.StatsChannelName = kv.Value
-	//	case "TimeTickChannelName":
-	//		Params.QueryTimeTickChannelName = kv.Value
-	//	case "SearchChannelName":
-	//		Params.SearchChannelNames = append(Params.SearchChannelNames, kv.Value)
-	//	case "SearchResultChannelName":
-	//		Params.SearchResultChannelNames = append(Params.SearchResultChannelNames, kv.Value)
-	//	default:
-	//		return fmt.Errorf("Invalid key: %v", kv.Key)
-	//	}
-	//}
-	//
-	//log.Debug("QueryNode Init ", zap.Int64("QueryNodeID", Params.QueryNodeID), zap.Any("searchChannelNames", Params.SearchChannelNames))
 
 	if node.rootCoord == nil {
 		log.Error("null root coordinator detected")
@@ -256,14 +218,6 @@ func (node *QueryNode) SetRootCoord(rc types.RootCoord) error {
 		return errors.New("null root coordinator interface")
 	}
 	node.rootCoord = rc
-	return nil
-}
-
-func (node *QueryNode) SetQueryCoord(query types.QueryCoord) error {
-	if query == nil {
-		return errors.New("null query coordinator interface")
-	}
-	node.queryCoord = query
 	return nil
 }
 

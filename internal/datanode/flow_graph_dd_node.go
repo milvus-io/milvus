@@ -22,6 +22,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/opentracing/opentracing-go"
 )
 
 type ddNode struct {
@@ -56,6 +58,13 @@ func (ddn *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	if !ok {
 		log.Error("type assertion failed for MsgStreamMsg")
 		// TODO: add error handling
+	}
+
+	var spans []opentracing.Span
+	for _, msg := range msMsg.TsMessages() {
+		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		spans = append(spans, sp)
+		msg.SetTraceCtx(ctx)
 	}
 
 	if msMsg == nil {
@@ -98,6 +107,10 @@ func (ddn *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	iMsg.endPositions = append(iMsg.endPositions, msMsg.EndPositions()...)
 
 	var res Msg = &iMsg
+
+	for _, sp := range spans {
+		sp.Finish()
+	}
 
 	return []Msg{res}
 }

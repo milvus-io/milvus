@@ -333,25 +333,38 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 }
 
 func (i *IndexCoord) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
-	log.Debug("IndexCoord get index states ...", zap.Int64s("IndexBuildIDs", req.IndexBuildIDs))
-	var indexStates []*indexpb.IndexInfo
-	for _, indexID := range req.IndexBuildIDs {
-		indexState, err := i.metaTable.GetIndexState(indexID)
-		if err != nil {
-			indexState.Reason = err.Error()
+	var (
+		cntNone       = 0
+		cntUnissued   = 0
+		cntInprogress = 0
+		cntFinished   = 0
+		cntFailed     = 0
+	)
+	indexStates := i.metaTable.GetIndexStates(req.IndexBuildIDs)
+	for _, state := range indexStates {
+		switch state.State {
+		case commonpb.IndexState_IndexStateNone:
+			cntNone++
+		case commonpb.IndexState_Unissued:
+			cntUnissued++
+		case commonpb.IndexState_InProgress:
+			cntInprogress++
+		case commonpb.IndexState_Finished:
+			cntFinished++
+		case commonpb.IndexState_Failed:
+			cntFailed++
 		}
-		indexStates = append(indexStates, indexState)
 	}
+	log.Debug("IndexCoord get index states success",
+		zap.Int("total", len(indexStates)), zap.Int("None", cntNone), zap.Int("Unissued", cntUnissued),
+		zap.Int("InProgress", cntInprogress), zap.Int("Finished", cntFinished), zap.Int("Failed", cntFailed))
+
 	ret := &indexpb.GetIndexStatesResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 		States: indexStates,
 	}
-	log.Debug("IndexCoord get index states success",
-		zap.Any("index status", ret.Status),
-		zap.Any("index states", ret.States))
-
 	return ret, nil
 }
 

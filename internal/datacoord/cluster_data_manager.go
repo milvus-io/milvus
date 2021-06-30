@@ -126,6 +126,7 @@ func (c *clusterNodeManager) updateCluster(dataNodes []*datapb.DataNodeInfo) *cl
 	}
 }
 
+// updateDataNodes update dataNodes input mereged with existing cluster and buffer
 func (c *clusterNodeManager) updateDataNodes(dataNodes []*datapb.DataNodeInfo, buffer []*datapb.ChannelStatus) error {
 	for _, node := range dataNodes {
 		c.dataNodes[node.Address].info = node
@@ -134,6 +135,7 @@ func (c *clusterNodeManager) updateDataNodes(dataNodes []*datapb.DataNodeInfo, b
 	return c.txnSaveNodes(dataNodes, buffer)
 }
 
+// getDataNodes get current synced data nodes with buffered channel
 func (c *clusterNodeManager) getDataNodes(onlyOnline bool) (map[string]*datapb.DataNodeInfo, []*datapb.ChannelStatus) {
 	ret := make(map[string]*datapb.DataNodeInfo)
 	for k, v := range c.dataNodes {
@@ -158,8 +160,9 @@ func (c *clusterNodeManager) register(n *datapb.DataNodeInfo) {
 	c.updateMetrics()
 }
 
-func (c *clusterNodeManager) unregister(n *datapb.DataNodeInfo) *datapb.DataNodeInfo {
-	node, ok := c.dataNodes[n.Address]
+// unregister removes node with specified address, returns node info if exists
+func (c *clusterNodeManager) unregister(addr string) *datapb.DataNodeInfo {
+	node, ok := c.dataNodes[addr]
 	if !ok {
 		return nil
 	}

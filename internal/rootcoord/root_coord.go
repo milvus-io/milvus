@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.etcd.io/etcd/clientv3"
@@ -107,8 +108,8 @@ type Core struct {
 	DataNodeFlushedSegmentChan <-chan *ms.MsgPack
 
 	//get binlog file path from data service,
-	CallGetBinlogFilePathsService func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error)
-	CallGetNumRowsService         func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error)
+	CallGetBinlogFilePathsService func(ctx context.Context, segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error)
+	CallGetNumRowsService         func(ctx context.Context, segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error)
 
 	//call index builder's client to build index, return build id
 	CallBuildIndexService func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error)
@@ -368,7 +369,7 @@ func (c *Core) startDataNodeFlushedSegmentLoop() {
 						IndexID:     idxInfo.IndexID,
 						EnableIndex: false,
 					}
-					info.BuildID, err = c.BuildIndex(segID, fieldSch, idxInfo, true)
+					info.BuildID, err = c.BuildIndex(c.ctx, segID, fieldSch, idxInfo, true)
 					if err == nil && info.BuildID != 0 {
 						info.EnableIndex = true
 					} else {
@@ -653,7 +654,7 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 			log.Debug("RootCoord connect to DataCoord, retry")
 		}
 	}()
-	c.CallGetBinlogFilePathsService = func(segID typeutil.UniqueID, fieldID typeutil.UniqueID) (retFiles []string, retErr error) {
+	c.CallGetBinlogFilePathsService = func(ctx context.Context, segID typeutil.UniqueID, fieldID typeutil.UniqueID) (retFiles []string, retErr error) {
 		defer func() {
 			if err := recover(); err != nil {
 				retFiles = nil
@@ -698,7 +699,7 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 		return
 	}
 
-	c.CallGetNumRowsService = func(segID typeutil.UniqueID, isFromFlushedChan bool) (retRows int64, retErr error) {
+	c.CallGetNumRowsService = func(ctx context.Context, segID typeutil.UniqueID, isFromFlushedChan bool) (retRows int64, retErr error) {
 		defer func() {
 			if err := recover(); err != nil {
 				retRows = 0
@@ -899,11 +900,13 @@ func (c *Core) SetQueryCoord(s types.QueryCoord) error {
 }
 
 // BuildIndex will check row num and call build index service
-func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, isFlush bool) (typeutil.UniqueID, error) {
+func (c *Core) BuildIndex(ctx context.Context, segID typeutil.UniqueID, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, isFlush bool) (typeutil.UniqueID, error) {
+	sp, ctx := trace.StartSpanFromContext(ctx)
+	defer sp.Finish()
 	if c.MetaTable.IsSegmentIndexed(segID, field, idxInfo.IndexParams) {
 		return 0, nil
 	}
-	rows, err := c.CallGetNumRowsService(segID, isFlush)
+	rows, err := c.CallGetNumRowsService(ctx, segID, isFlush)
 	if err != nil {
 		return 0, err
 	}
@@ -911,11 +914,11 @@ func (c *Core) BuildIndex(segID typeutil.UniqueID, field *schemapb.FieldSchema, 
 	if rows < Params.MinSegmentSizeToEnableIndex {
 		log.Debug("num of rows is less than MinSegmentSizeToEnableIndex", zap.Int64("num rows", rows))
 	} else {
-		binlogs, err := c.CallGetBinlogFilePathsService(segID, field.FieldID)
+		binlogs, err := c.CallGetBinlogFilePathsService(ctx, segID, field.FieldID)
 		if err != nil {
 			return 0, err
 		}
-		bldID, err = c.CallBuildIndexService(c.ctx, binlogs, field, idxInfo)
+		bldID, err = c.CallBuildIndexService(ctx, binlogs, field, idxInfo)
 		if err != nil {
 			return 0, err
 		}

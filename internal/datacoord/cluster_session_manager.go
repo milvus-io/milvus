@@ -12,14 +12,16 @@ package datacoord
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/types"
 )
 
-const retryTimes = 2
-
 type sessionManager interface {
+	// try get session, without retry
+	getSession(addr string) (types.DataNode, error)
+	// try get session from manager with addr, if not exists, create one
 	getOrCreateSession(addr string) (types.DataNode, error)
 	releaseSession(addr string)
 	release()
@@ -40,7 +42,17 @@ func newClusterSessionManager(ctx context.Context, dataClientCreator dataNodeCre
 	}
 }
 
-// lock acquired
+// getSession with out creation if not found
+func (m *clusterSessionManager) getSession(addr string) (types.DataNode, error) {
+	m.RLock()
+	defer m.RUnlock()
+	cli, has := m.sessions[addr]
+	if has {
+		return cli, nil
+	}
+	return nil, errors.New("not found")
+}
+
 func (m *clusterSessionManager) createSession(addr string) (types.DataNode, error) {
 	cli, err := m.dataClientCreator(m.ctx, addr)
 	if err != nil {
@@ -52,7 +64,9 @@ func (m *clusterSessionManager) createSession(addr string) (types.DataNode, erro
 	if err := cli.Start(); err != nil {
 		return nil, err
 	}
+	m.Lock()
 	m.sessions[addr] = cli
+	m.Unlock()
 	return cli, nil
 }
 
@@ -64,12 +78,7 @@ func (m *clusterSessionManager) getOrCreateSession(addr string) (types.DataNode,
 	if has {
 		return dn, nil
 	}
-	m.Lock()
-	defer m.Unlock()
-	dn, has = m.sessions[addr]
-	if has {
-		return dn, nil
-	}
+	// does not need double check, addr has outer sync.Map
 	dn, err := m.createSession(addr)
 	return dn, err
 }

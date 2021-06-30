@@ -216,10 +216,10 @@ ProtoParser::ParseTermExpr(const proto::plan::TermExpr& expr_pb) {
 
 ExprPtr
 ProtoParser::ParseUnaryExpr(const proto::plan::UnaryExpr& expr_pb) {
-    auto op = static_cast<BoolUnaryExpr::OpType>(expr_pb.op());
-    Assert(op == BoolUnaryExpr::OpType::LogicalNot);
+    auto op = static_cast<LogicalUnaryExpr::OpType>(expr_pb.op());
+    Assert(op == LogicalUnaryExpr::OpType::LogicalNot);
     auto expr = this->ParseExpr(expr_pb.child());
-    auto result = std::make_unique<BoolUnaryExpr>();
+    auto result = std::make_unique<LogicalUnaryExpr>();
     result->child_ = std::move(expr);
     result->op_type_ = op;
     return result;
@@ -227,10 +227,10 @@ ProtoParser::ParseUnaryExpr(const proto::plan::UnaryExpr& expr_pb) {
 
 ExprPtr
 ProtoParser::ParseBinaryExpr(const proto::plan::BinaryExpr& expr_pb) {
-    auto op = static_cast<BoolBinaryExpr::OpType>(expr_pb.op());
+    auto op = static_cast<LogicalBinaryExpr::OpType>(expr_pb.op());
     auto left_expr = this->ParseExpr(expr_pb.left());
     auto right_expr = this->ParseExpr(expr_pb.right());
-    auto result = std::make_unique<BoolBinaryExpr>();
+    auto result = std::make_unique<LogicalBinaryExpr>();
     result->op_type_ = op;
     result->left_ = std::move(left_expr);
     result->right_ = std::move(right_expr);

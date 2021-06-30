@@ -422,8 +422,8 @@ ExprPtr
 Parser::ParseMustNode(const Json& body) {
     auto item_list = ParseItemList(body);
     auto merger = [](ExprPtr left, ExprPtr right) {
-        using OpType = BoolBinaryExpr::OpType;
-        auto res = std::make_unique<BoolBinaryExpr>();
+        using OpType = LogicalBinaryExpr::OpType;
+        auto res = std::make_unique<LogicalBinaryExpr>();
         res->op_type_ = OpType::LogicalAnd;
         res->left_ = std::move(left);
         res->right_ = std::move(right);
@@ -437,8 +437,8 @@ Parser::ParseShouldNode(const Json& body) {
     auto item_list = ParseItemList(body);
     Assert(item_list.size() >= 1);
     auto merger = [](ExprPtr left, ExprPtr right) {
-        using OpType = BoolBinaryExpr::OpType;
-        auto res = std::make_unique<BoolBinaryExpr>();
+        using OpType = LogicalBinaryExpr::OpType;
+        auto res = std::make_unique<LogicalBinaryExpr>();
         res->op_type_ = OpType::LogicalOr;
         res->left_ = std::move(left);
         res->right_ = std::move(right);
@@ -452,8 +452,8 @@ Parser::ParseMustNotNode(const Json& body) {
     auto item_list = ParseItemList(body);
     Assert(item_list.size() >= 1);
     auto merger = [](ExprPtr left, ExprPtr right) {
-        using OpType = BoolBinaryExpr::OpType;
-        auto res = std::make_unique<BoolBinaryExpr>();
+        using OpType = LogicalBinaryExpr::OpType;
+        auto res = std::make_unique<LogicalBinaryExpr>();
         res->op_type_ = OpType::LogicalAnd;
         res->left_ = std::move(left);
         res->right_ = std::move(right);
@@ -461,8 +461,8 @@ Parser::ParseMustNotNode(const Json& body) {
     };
     auto subtree = ConstructTree(merger, std::move(item_list));
 
-    using OpType = BoolUnaryExpr::OpType;
-    auto res = std::make_unique<BoolUnaryExpr>();
+    using OpType = LogicalUnaryExpr::OpType;
+    auto res = std::make_unique<LogicalUnaryExpr>();
     res->op_type_ = OpType::LogicalNot;
     res->child_ = std::move(subtree);
 
