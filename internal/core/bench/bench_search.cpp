@@ -82,10 +82,9 @@ Search_SmallIndex(benchmark::State& state) {
     segment->Insert(0, N, dataset_.row_ids_.data(), dataset_.timestamps_.data(), raw_data);
 
     Timestamp time = 10000000;
-    std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
     for (auto _ : state) {
-        auto qr = segment->Search(plan.get(), ph_group_arr.data(), &time, 1);
+        auto qr = segment->Search(plan.get(), *ph_group, time);
     }
 }
 
@@ -110,10 +109,8 @@ Search_Sealed(benchmark::State& state) {
         segment->LoadIndex(info);
     }
     Timestamp time = 10000000;
-    std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
-
     for (auto _ : state) {
-        auto qr = segment->Search(plan.get(), ph_group_arr.data(), &time, 1);
+        auto qr = segment->Search(plan.get(), *ph_group, time);
     }
 }
 
