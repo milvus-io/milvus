@@ -13,6 +13,7 @@ package grpcdatanodeclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -66,7 +67,9 @@ func (c *Client) connect(retryOptions ...retry.Option) error {
 	connectGrpcFunc := func() error {
 		opts := trace.GetInterceptorOpts()
 		log.Debug("DataNode connect ", zap.String("address", c.addr))
-		conn, err := grpc.DialContext(c.ctx, c.addr,
+		ctx, cancel := context.WithTimeout(c.ctx, time.Millisecond*200)
+		defer cancel()
+		conn, err := grpc.DialContext(ctx, c.addr,
 			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(200*time.Millisecond),
 			grpc.WithDisableRetry(),
 			grpc.WithUnaryInterceptor(
@@ -104,7 +107,7 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	}
 	err = c.connect()
 	if err != nil {
-		return ret, err
+		return ret, errors.New("Connect to datanode failed with error:\n" + err.Error())
 	}
 	ret, err = caller()
 	if err == nil {

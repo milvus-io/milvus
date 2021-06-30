@@ -13,7 +13,7 @@ jobs:
       - uses: milvus-io/hero-bot@1.4
         with:
           token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
-          repos: 'milvus-io/milvus,milvus-helm,bootcamp,milvus.io,milvus-sdk-java,pymilvus'
+          repos: 'milvus-io/milvus,bootcamp,community,docs,milvus-helm,milvus-sdk-go,milvus-sdk-java,milvus-sdk-node,milvus.io,pymilvus,pymilvus-orm'
           targetRepo: 'milvus-io/milvus'
           filePath: 'README.md'
 
@@ -21,7 +21,7 @@ jobs:
       - uses: milvus-io/hero-bot@1.4
         with:
           token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
-          repos: 'milvus-io/milvus,milvus-helm,bootcamp,milvus.io,milvus-sdk-java,pymilvus'
+          repos: 'milvus-io/milvus,bootcamp,community,docs,milvus-helm,milvus-sdk-go,milvus-sdk-java,milvus-sdk-node,milvus.io,pymilvus,pymilvus-orm'
           targetRepo: 'milvus-io/milvus'
           filePath: 'README_CN.md'
 

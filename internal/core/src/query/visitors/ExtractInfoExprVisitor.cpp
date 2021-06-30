@@ -29,12 +29,12 @@ class ExtractInfoExprVisitor : ExprVisitor {
 #endif
 
 void
-ExtractInfoExprVisitor::visit(BoolUnaryExpr& expr) {
+ExtractInfoExprVisitor::visit(LogicalUnaryExpr& expr) {
     expr.child_->accept(*this);
 }
 
 void
-ExtractInfoExprVisitor::visit(BoolBinaryExpr& expr) {
+ExtractInfoExprVisitor::visit(LogicalBinaryExpr& expr) {
     expr.left_->accept(*this);
     expr.right_->accept(*this);
 }

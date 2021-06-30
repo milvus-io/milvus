@@ -22,10 +22,10 @@ namespace milvus::query {
 class ShowExprVisitor : public ExprVisitor {
  public:
     void
-    visit(BoolUnaryExpr& expr) override;
+    visit(LogicalUnaryExpr& expr) override;
 
     void
-    visit(BoolBinaryExpr& expr) override;
+    visit(LogicalBinaryExpr& expr) override;
 
     void
     visit(TermExpr& expr) override;
@@ -48,14 +48,14 @@ class ShowExprVisitor : public ExprVisitor {
     }
 
     Json
-    combine(Json&& extra, UnaryExpr& expr) {
+    combine(Json&& extra, UnaryExprBase& expr) {
         auto result = std::move(extra);
         result["child"] = call_child(*expr.child_);
         return result;
     }
 
     Json
-    combine(Json&& extra, BinaryExpr& expr) {
+    combine(Json&& extra, BinaryExprBase& expr) {
         auto result = std::move(extra);
         result["left_child"] = call_child(*expr.left_);
         result["right_child"] = call_child(*expr.right_);

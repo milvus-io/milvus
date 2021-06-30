@@ -13,6 +13,7 @@ package grpcquerynodeclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -99,7 +100,7 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	}
 	err = c.connect()
 	if err != nil {
-		return ret, err
+		return ret, errors.New("Connect to querynode failed with error:\n" + err.Error())
 	}
 	ret, err = caller()
 	if err == nil {

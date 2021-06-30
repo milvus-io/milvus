@@ -60,8 +60,8 @@ class ExecExprVisitor : ExprVisitor {
 #endif
 
 void
-ExecExprVisitor::visit(BoolUnaryExpr& expr) {
-    using OpType = BoolUnaryExpr::OpType;
+ExecExprVisitor::visit(LogicalUnaryExpr& expr) {
+    using OpType = LogicalUnaryExpr::OpType;
     auto vec = call_child(*expr.child_);
     RetType ret;
     for (int chunk_id = 0; chunk_id < vec.size(); ++chunk_id) {
@@ -81,8 +81,8 @@ ExecExprVisitor::visit(BoolUnaryExpr& expr) {
 }
 
 void
-ExecExprVisitor::visit(BoolBinaryExpr& expr) {
-    using OpType = BoolBinaryExpr::OpType;
+ExecExprVisitor::visit(LogicalBinaryExpr& expr) {
+    using OpType = LogicalBinaryExpr::OpType;
     RetType ret;
     auto left = call_child(*expr.left_);
     auto right = call_child(*expr.right_);

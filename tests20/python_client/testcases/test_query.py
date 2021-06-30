@@ -109,7 +109,6 @@ class TestQueryBase(TestcaseBase):
         collection_w.query(expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="#6046")
     @pytest.mark.parametrize("expr", ["12-s", "中文", "a", " "])
     def test_query_expr_invalid_string(self, expr):
         """
@@ -118,7 +117,7 @@ class TestQueryBase(TestcaseBase):
         expected: raise exception
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
-        error = {ct.err_code: 1, ct.err_msg: "invalid expr"}
+        error = {ct.err_code: 1, ct.err_msg: "Invalid expression!"}
         collection_w.query(expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -298,7 +297,6 @@ class TestQueryBase(TestcaseBase):
         assert set(res_1[0].keys()) == set(fields)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #6143")
     @pytest.mark.parametrize("output_fields", [[ct.default_float_vec_field_name],
                                                [ct.default_int64_field_name, ct.default_float_vec_field_name]])
     def test_query_output_vec_field(self, output_fields):
@@ -308,7 +306,7 @@ class TestQueryBase(TestcaseBase):
         expected: raise exception
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
-        error = {ct.err_code: 1, ct.err_msg: "unsupported leaf node"}
+        error = {ct.err_code: 1, ct.err_msg: "Query does not support vector field currently"}
         collection_w.query(default_term_expr, output_fields=output_fields,
                            check_task=CheckTasks.err_res, check_items=error)
 

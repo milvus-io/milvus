@@ -15,7 +15,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -235,13 +234,14 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, binlogPaths
 			zap.String("paths", fmt.Sprintln(paths)),
 		)
 		for _, path := range paths {
+			p := path
 			binLog, err := loader.minioKV.Load(path)
 			if err != nil {
 				// TODO: return or continue?
 				return err
 			}
 			blob := &storage.Blob{
-				Key:   strconv.FormatInt(fieldID, 10),
+				Key:   p,
 				Value: []byte(binLog),
 			}
 			blobs = append(blobs, blob)

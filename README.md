@@ -171,6 +171,8 @@ Milvus [bootcamp](https://github.com/milvus-io/bootcamp/tree/new-bootcamp) are d
 
 Contributions to Milvus are welcome from everyone. See [Guidelines for Contributing](https://github.com/milvus-io/milvus/blob/master/CONTRIBUTING.md) for details on submitting patches and the contribution workflow. See our [community repository](https://github.com/milvus-io/community) to learn about our governance and access more community resources.
 
+### All contributors
+
 <br><!-- Do not remove start of hero-bot --><br>
 <img src="https://img.shields.io/badge/all--contributors-138-orange"><br>
 <a href="https://github.com/ABNER-1"><img src="https://avatars.githubusercontent.com/u/24547351?v=4" width="40px" /></a>
@@ -354,7 +356,7 @@ Zilliz, the company behind Milvus, is [actively hiring](https://app.mokahr.com/a
 
 Reference to cite when you use Milvus in a research paper:
 
-```json
+```
 @inproceedings{2021milvus,
   title={Milvus: A Purpose-Built Vector Data Management System},
   author={Wang, Jianguo and Yi, Xiaomeng and Guo, Rentong and Jin, Hai and Xu, Peng and Li, Shengjun and Wang, Xiangyu and Guo, Xiangzhou and Li, Chengming and Xu, Xiaohai and others},
