@@ -3372,6 +3372,10 @@ func (dit *DropIndexTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	if dit.IndexName == "" {
+		dit.IndexName = Params.DefaultIndexName
+	}
+
 	return nil
 }
 
