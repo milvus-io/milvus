@@ -65,6 +65,11 @@ func NewSession(ctx context.Context, metaRoot string, etcdEndpoints []string) *S
 		if err != nil {
 			return err
 		}
+		ctx2, cancel2 := context.WithTimeout(session.ctx, 5*time.Second)
+		defer cancel2()
+		if _, err = etcdCli.Get(ctx2, "health"); err != nil {
+			return err
+		}
 		session.etcdCli = etcdCli
 		return nil
 	}
