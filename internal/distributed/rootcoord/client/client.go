@@ -101,12 +101,12 @@ func (c *GrpcClient) connect(retryOptions ...retry.Option) error {
 			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(2*time.Second),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
-					grpc_retry.UnaryClientInterceptor(grpc_retry.WithMax(3), grpc_retry.WithPerRetryTimeout(time.Millisecond*500)),
+					grpc_retry.UnaryClientInterceptor(grpc_retry.WithMax(3), grpc_retry.WithPerRetryTimeout(time.Second*1)),
 					grpc_opentracing.UnaryClientInterceptor(opts...),
 				)),
 			grpc.WithStreamInterceptor(
 				grpc_middleware.ChainStreamClient(
-					grpc_retry.StreamClientInterceptor(grpc_retry.WithMax(3), grpc_retry.WithPerRetryTimeout(time.Millisecond*500)),
+					grpc_retry.StreamClientInterceptor(grpc_retry.WithMax(3), grpc_retry.WithPerRetryTimeout(time.Second*1)),
 					grpc_opentracing.StreamClientInterceptor(opts...),
 				)),
 		)
