@@ -264,7 +264,7 @@ func (c *cluster) watch(nodes []*datapb.DataNodeInfo) ([]*datapb.DataNodeInfo, e
 				mut.Unlock()
 				return
 			}
-			cli, err := c.sessionManager.getOrCreateSession(n.Address) // this might take time if address went offline
+			cli, err := c.sessionManager.getSession(n.Address) //fail fast, don't create session
 			if err != nil {
 				log.Warn("get session failed", zap.String("addr", n.Address), zap.Error(err))
 				mut.Lock()
