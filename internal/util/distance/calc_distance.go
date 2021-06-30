@@ -129,9 +129,9 @@ func CalcFloatDistance(dim int64, left []float32, right []float32, metric string
 func SingleBitLen(dim int64) int64 {
 	if dim%8 == 0 {
 		return dim
-	} else {
-		return dim + 8 - dim%8
 	}
+
+	return dim + 8 - dim%8
 }
 
 func VectorCount(dim int64, length int) int64 {

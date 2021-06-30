@@ -23,14 +23,14 @@ import (
 const PRECISION = 1e-6
 
 func TestValidateMetricType(t *testing.T) {
-	invalid_metric := []string{"", "aaa"}
-	for _, str := range invalid_metric {
+	invalidMetric := []string{"", "aaa"}
+	for _, str := range invalidMetric {
 		_, err := ValidateMetricType(str)
 		assert.Error(t, err)
 	}
 
-	valid_metric := []string{"L2", "ip", "Hammin", "Tanimoto"}
-	for _, str := range valid_metric {
+	validMetric := []string{"L2", "ip", "Hammin", "Tanimoto"}
+	for _, str := range validMetric {
 		metric, err := ValidateMetricType(str)
 		assert.Nil(t, err)
 		assert.True(t, metric == L2 || metric == IP || metric == HAMMING || metric == TANIMOTO)
