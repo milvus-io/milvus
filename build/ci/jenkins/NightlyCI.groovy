@@ -58,6 +58,7 @@ pipeline {
                                         sh """
                                         MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
                                         ./e2e-k8s.sh \
+                                        --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
                                         --node-image registry.zilliz.com/kindest/node:v1.20.2
                                         """
                                     }
