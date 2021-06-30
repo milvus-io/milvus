@@ -116,6 +116,7 @@ func (q *queryCollection) register() {
 		return
 	}
 
+	//TODO:: can't add new vChannel to selectCase
 	q.watcherSelectCase = make([]reflect.SelectCase, 0)
 	log.Debug("register tSafe watcher and init watcher select case",
 		zap.Any("collectionID", collection.ID()),
