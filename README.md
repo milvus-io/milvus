@@ -356,7 +356,7 @@ Zilliz, the company behind Milvus, is [actively hiring](https://app.mokahr.com/a
 
 Reference to cite when you use Milvus in a research paper:
 
-```json
+```
 @inproceedings{2021milvus,
   title={Milvus: A Purpose-Built Vector Data Management System},
   author={Wang, Jianguo and Yi, Xiaomeng and Guo, Rentong and Jin, Hai and Xu, Peng and Li, Shengjun and Wang, Xiangyu and Guo, Xiangzhou and Li, Chengming and Xu, Xiaohai and others},
