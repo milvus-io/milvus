@@ -16,12 +16,12 @@
 
 namespace milvus::query {
 void
-BoolUnaryExpr::accept(ExprVisitor& visitor) {
+LogicalUnaryExpr::accept(ExprVisitor& visitor) {
     visitor.visit(*this);
 }
 
 void
-BoolBinaryExpr::accept(ExprVisitor& visitor) {
+LogicalBinaryExpr::accept(ExprVisitor& visitor) {
     visitor.visit(*this);
 }
 
