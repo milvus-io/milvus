@@ -425,7 +425,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 		log.Print("marshal placeholderGroup failed")
 	}
 
-	searchTimestamp := Timestamp(1020)
+	travelTimestamp := Timestamp(1020)
 	plan, err := createPlan(collection, dslString)
 	assert.NoError(t, err)
 	holder, err := parseSearchRequest(plan, placeHolderGroupBlob)
@@ -436,7 +436,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 	searchResults := make([]*SearchResult, 0)
 	matchedSegments := make([]*Segment, 0)
 
-	searchResult, err := segment.segmentSearch(plan, placeholderGroups, []Timestamp{searchTimestamp})
+	searchResult, err := segment.segmentSearch(plan, placeholderGroups, []Timestamp{travelTimestamp})
 	assert.Nil(t, err)
 
 	searchResults = append(searchResults, searchResult)
