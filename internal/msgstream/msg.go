@@ -32,6 +32,7 @@ type TsMsg interface {
 	BeginTs() Timestamp
 	EndTs() Timestamp
 	Type() MsgType
+	SourceID() int64
 	HashKeys() []uint32
 	Marshal(TsMsg) (MarshalType, error)
 	Unmarshal(MarshalType) (TsMsg, error)
@@ -97,6 +98,10 @@ func (it *InsertMsg) Type() MsgType {
 	return it.Base.MsgType
 }
 
+func (it *InsertMsg) SourceID() int64 {
+	return it.Base.SourceID
+}
+
 func (it *InsertMsg) Marshal(input TsMsg) (MarshalType, error) {
 	insertMsg := input.(*InsertMsg)
 	insertRequest := &insertMsg.InsertRequest
@@ -157,6 +162,10 @@ func (fl *FlushCompletedMsg) Type() MsgType {
 	return fl.Base.MsgType
 }
 
+func (fl *FlushCompletedMsg) SourceID() int64 {
+	return fl.Base.SourceID
+}
+
 func (fl *FlushCompletedMsg) Marshal(input TsMsg) (MarshalType, error) {
 	flushCompletedMsgTask := input.(*FlushCompletedMsg)
 	flushCompletedMsg := &flushCompletedMsgTask.SegmentFlushCompletedMsg
@@ -204,6 +213,10 @@ func (dt *DeleteMsg) ID() UniqueID {
 
 func (dt *DeleteMsg) Type() MsgType {
 	return dt.Base.MsgType
+}
+
+func (dt *DeleteMsg) SourceID() int64 {
+	return dt.Base.SourceID
 }
 
 func (dt *DeleteMsg) Marshal(input TsMsg) (MarshalType, error) {
@@ -267,6 +280,10 @@ func (st *SearchMsg) Type() MsgType {
 	return st.Base.MsgType
 }
 
+func (st *SearchMsg) SourceID() int64 {
+	return st.Base.SourceID
+}
+
 func (st *SearchMsg) Marshal(input TsMsg) (MarshalType, error) {
 	searchTask := input.(*SearchMsg)
 	searchRequest := &searchTask.SearchRequest
@@ -314,6 +331,10 @@ func (srt *SearchResultMsg) ID() UniqueID {
 
 func (srt *SearchResultMsg) Type() MsgType {
 	return srt.Base.MsgType
+}
+
+func (srt *SearchResultMsg) SourceID() int64 {
+	return srt.Base.SourceID
 }
 
 func (srt *SearchResultMsg) Marshal(input TsMsg) (MarshalType, error) {
@@ -365,6 +386,10 @@ func (rm *RetrieveMsg) Type() MsgType {
 	return rm.Base.MsgType
 }
 
+func (rm *RetrieveMsg) SourceID() int64 {
+	return rm.Base.SourceID
+}
+
 func (rm *RetrieveMsg) Marshal(input TsMsg) (MarshalType, error) {
 	retrieveTask := input.(*RetrieveMsg)
 	retrieveRequest := &retrieveTask.RetrieveRequest
@@ -414,6 +439,10 @@ func (rrm *RetrieveResultMsg) Type() MsgType {
 	return rrm.Base.MsgType
 }
 
+func (rrm *RetrieveResultMsg) SourceID() int64 {
+	return rrm.Base.SourceID
+}
+
 func (rrm *RetrieveResultMsg) Marshal(input TsMsg) (MarshalType, error) {
 	retrieveResultTask := input.(*RetrieveResultMsg)
 	retrieveResultRequest := &retrieveResultTask.RetrieveResults
@@ -461,6 +490,10 @@ func (tst *TimeTickMsg) ID() UniqueID {
 
 func (tst *TimeTickMsg) Type() MsgType {
 	return tst.Base.MsgType
+}
+
+func (tst *TimeTickMsg) SourceID() int64 {
+	return tst.Base.SourceID
 }
 
 func (tst *TimeTickMsg) Marshal(input TsMsg) (MarshalType, error) {
@@ -513,6 +546,10 @@ func (qs *QueryNodeStatsMsg) Type() MsgType {
 	return qs.Base.MsgType
 }
 
+func (qs *QueryNodeStatsMsg) SourceID() int64 {
+	return qs.Base.SourceID
+}
+
 func (qs *QueryNodeStatsMsg) Marshal(input TsMsg) (MarshalType, error) {
 	queryNodeSegStatsTask := input.(*QueryNodeStatsMsg)
 	queryNodeSegStats := &queryNodeSegStatsTask.QueryNodeStats
@@ -560,6 +597,10 @@ func (ss *SegmentStatisticsMsg) Type() MsgType {
 	return ss.Base.MsgType
 }
 
+func (ss *SegmentStatisticsMsg) SourceID() int64 {
+	return ss.Base.SourceID
+}
+
 func (ss *SegmentStatisticsMsg) Marshal(input TsMsg) (MarshalType, error) {
 	segStatsTask := input.(*SegmentStatisticsMsg)
 	segStats := &segStatsTask.SegmentStatistics
@@ -605,6 +646,10 @@ func (cc *CreateCollectionMsg) ID() UniqueID {
 
 func (cc *CreateCollectionMsg) Type() MsgType {
 	return cc.Base.MsgType
+}
+
+func (cc *CreateCollectionMsg) SourceID() int64 {
+	return cc.Base.SourceID
 }
 
 func (cc *CreateCollectionMsg) Marshal(input TsMsg) (MarshalType, error) {
@@ -656,6 +701,10 @@ func (dc *DropCollectionMsg) Type() MsgType {
 	return dc.Base.MsgType
 }
 
+func (dc *DropCollectionMsg) SourceID() int64 {
+	return dc.Base.SourceID
+}
+
 func (dc *DropCollectionMsg) Marshal(input TsMsg) (MarshalType, error) {
 	dropCollectionMsg := input.(*DropCollectionMsg)
 	dropCollectionRequest := &dropCollectionMsg.DropCollectionRequest
@@ -703,6 +752,10 @@ func (cp *CreatePartitionMsg) ID() UniqueID {
 
 func (cp *CreatePartitionMsg) Type() MsgType {
 	return cp.Base.MsgType
+}
+
+func (cp *CreatePartitionMsg) SourceID() int64 {
+	return cp.Base.SourceID
 }
 
 func (cp *CreatePartitionMsg) Marshal(input TsMsg) (MarshalType, error) {
@@ -754,6 +807,10 @@ func (dp *DropPartitionMsg) Type() MsgType {
 	return dp.Base.MsgType
 }
 
+func (dp *DropPartitionMsg) SourceID() int64 {
+	return dp.Base.SourceID
+}
+
 func (dp *DropPartitionMsg) Marshal(input TsMsg) (MarshalType, error) {
 	dropPartitionMsg := input.(*DropPartitionMsg)
 	dropPartitionRequest := &dropPartitionMsg.DropPartitionRequest
@@ -803,6 +860,10 @@ func (lim *LoadIndexMsg) Type() MsgType {
 	return lim.Base.MsgType
 }
 
+func (lim *LoadIndexMsg) SourceID() int64 {
+	return lim.Base.SourceID
+}
+
 func (lim *LoadIndexMsg) Marshal(input TsMsg) (MarshalType, error) {
 	loadIndexMsg := input.(*LoadIndexMsg)
 	loadIndexRequest := &loadIndexMsg.LoadIndex
@@ -848,6 +909,10 @@ func (sim *SegmentInfoMsg) ID() UniqueID {
 
 func (sim *SegmentInfoMsg) Type() MsgType {
 	return sim.Base.MsgType
+}
+
+func (sim *SegmentInfoMsg) SourceID() int64 {
+	return sim.Base.SourceID
 }
 
 func (sim *SegmentInfoMsg) Marshal(input TsMsg) (MarshalType, error) {
@@ -896,6 +961,10 @@ func (l *LoadBalanceSegmentsMsg) Type() MsgType {
 	return l.Base.MsgType
 }
 
+func (l *LoadBalanceSegmentsMsg) SourceID() int64 {
+	return l.Base.SourceID
+}
+
 func (l *LoadBalanceSegmentsMsg) Marshal(input TsMsg) (MarshalType, error) {
 	load := input.(*LoadBalanceSegmentsMsg)
 	loadReq := &load.LoadBalanceSegmentsRequest
@@ -942,6 +1011,10 @@ func (m *DataNodeTtMsg) ID() UniqueID {
 
 func (m *DataNodeTtMsg) Type() MsgType {
 	return m.Base.MsgType
+}
+
+func (m *DataNodeTtMsg) SourceID() int64 {
+	return m.Base.SourceID
 }
 
 func (m *DataNodeTtMsg) Marshal(input TsMsg) (MarshalType, error) {
