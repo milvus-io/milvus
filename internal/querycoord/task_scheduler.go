@@ -438,7 +438,7 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 		})
 	defer span.Finish()
 	span.LogFields(oplog.Int64("processTask: scheduler process PreExecute", t.ID()))
-	t.PreExecute()
+	t.PreExecute(ctx)
 
 	key := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
 	err := scheduler.client.Save(key, strconv.Itoa(int(taskDoing)))
@@ -489,7 +489,7 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 	}
 
 	span.LogFields(oplog.Int64("processTask: scheduler process PostExecute", t.ID()))
-	t.PostExecute()
+	t.PostExecute(ctx)
 
 	return nil
 }
@@ -511,7 +511,7 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 				if err != nil {
 					log.Error("scheduleLoop: process task error", zap.Any("error", err.Error()))
 					t.Notify(err)
-					t.PostExecute()
+					t.PostExecute(scheduler.ctx)
 				}
 				if t.Type() == commonpb.MsgType_LoadCollection || t.Type() == commonpb.MsgType_LoadPartitions {
 					t.Notify(err)

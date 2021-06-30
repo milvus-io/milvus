@@ -1958,13 +1958,13 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.CallGetBinlogFilePathsService = func(segID, fieldID typeutil.UniqueID) ([]string, error) {
+	c.CallGetBinlogFilePathsService = func(ctx context.Context, segID, fieldID typeutil.UniqueID) ([]string, error) {
 		return []string{}, nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.CallGetNumRowsService = func(segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error) {
+	c.CallGetNumRowsService = func(ctx context.Context, segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error) {
 		return 0, nil
 	}
 	err = c.checkInit()

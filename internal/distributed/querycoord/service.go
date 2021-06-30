@@ -91,7 +91,7 @@ func (s *Server) init() error {
 	qc.Params.Init()
 	qc.Params.Port = Params.Port
 
-	closer := trace.InitTracing("query_service")
+	closer := trace.InitTracing("querycoord")
 	s.closer = closer
 
 	if err := s.queryCoord.Register(); err != nil {

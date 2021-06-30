@@ -51,6 +51,7 @@ pipeline {
                                         MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
                                         ./e2e-k8s.sh \
                                         --node-image registry.zilliz.com/kindest/node:v1.20.2 \
+                                        --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
                                         --test-extra-arg "--tags=smoke"
                                         """
                                     }
