@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
+	oplog "github.com/opentracing/opentracing-go/log"
 )
 
 type InputNode struct {
@@ -52,6 +53,7 @@ func (inNode *InputNode) Operate(in []Msg) []Msg {
 	var spans []opentracing.Span
 	for _, msg := range msgPack.Msgs {
 		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		sp.LogFields(oplog.String("input_node name", inNode.Name()))
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}

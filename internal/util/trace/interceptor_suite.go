@@ -26,8 +26,8 @@ type InterceptorSuite struct {
 
 var (
 	filterFunc = func(ctx context.Context, fullMethodName string) bool {
-		if fullMethodName == `/milvus.proto.root_coord.RootCoord/UpdateChannelTimeTick` ||
-			fullMethodName == `/milvus.proto.root_coord.RootCoord/AllocTimestamp` {
+		if fullMethodName == `/milvus.proto.rootcoord.RootCoord/UpdateChannelTimeTick` ||
+			fullMethodName == `/milvus.proto.rootcoord.RootCoord/AllocTimestamp` {
 			return false
 		}
 		return true
