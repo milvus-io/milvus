@@ -14,8 +14,8 @@
 
 
 <div class="column" align="middle">
-  <a href="https://internal.zilliz.com:18080/jenkins/job/milvus-ha-ci/job/master/badge/">
-        <img src="https://internal.zilliz.com:18080/jenkins/job/milvus-ha-ci/job/master/badge/icon" />
+  <a href="https://ci.milvus.io:18080/jenkins/job/milvus-ha-ci/job/master/badge/">
+        <img src="https://ci.milvus.io:18080/jenkins/job/milvus-ha-ci/job/master/badge/icon" />
   </a>
   <a href="https://bestpractices.coreinfrastructure.org/projects/3563">
         <img src="https://bestpractices.coreinfrastructure.org/projects/3563/badge" />
@@ -84,62 +84,29 @@ Milvus was released under the [open-source Apache License 2.0](https://github.co
 
 
 
-## Installation
+## Quick start
 
-### Install Milvus Standalone
+### To start using Milvus
 
-#### Install with Docker-Compose
+- [Standalone Quick Start Guide](https://milvus.io/docs/v2.0.0/install_standalone-docker.md)
 
+- [Cluster Quick Start Guide](https://milvus.io/docs/v2.0.0/install_cluster-docker.md)
 
->  Coming soon.
-
-#### Install with Helm
-
-
-
-> Coming soon.
-
-Build from source code
+### To start developing Milvus
 
 ```bash
 # Clone github repository.
-$ cd /home/$USER/
 $ git clone https://github.com/milvus-io/milvus.git
 
 # Install third-party dependencies.
-$ cd /home/$USER/milvus/
+$ cd milvus/
 $ ./scripts/install_deps.sh
 
-# Compile Milvus standalone.
-$ make milvus
+# Compile Milvus.
+$ make
 ```
 
-
-
-### Install Milvus Cluster
-
-#### Install with Docker-Compose
-
-> Coming soon.
-
-#### Install with Helm
-
-> Coming soon.
-
-Build from source code
-
-```bash
-# Clone github repository.
-$ cd /home/$USER
-$ git clone https://github.com/milvus-io/milvus.git
-
-# Install third-party dependencies.
-$ cd milvus
-$ ./scripts/install_deps.sh
-
-# Compile Milvus Cluster.
-$ make milvus
-```
+For the full story, see [developer's documentation](https://github.com/milvus-io/milvus/blob/master/DEVELOPMENT.md).
 
 > **IMPORTANT** The master branch is for the development of Milvus v2.0. On March 9th, 2021, we released Milvus v1.0, the first stable version of Milvus with long-term support. To use Milvus v1.0, switch to [branch 1.0](https://github.com/milvus-io/milvus/tree/1.0).
 
@@ -203,6 +170,8 @@ Milvus [bootcamp](https://github.com/milvus-io/bootcamp/tree/new-bootcamp) are d
 ## Contributing
 
 Contributions to Milvus are welcome from everyone. See [Guidelines for Contributing](https://github.com/milvus-io/milvus/blob/master/CONTRIBUTING.md) for details on submitting patches and the contribution workflow. See our [community repository](https://github.com/milvus-io/community) to learn about our governance and access more community resources.
+
+### All contributors
 
 <br><!-- Do not remove start of hero-bot --><br>
 <img src="https://img.shields.io/badge/all--contributors-138-orange"><br>
@@ -387,7 +356,7 @@ Zilliz, the company behind Milvus, is [actively hiring](https://app.mokahr.com/a
 
 Reference to cite when you use Milvus in a research paper:
 
-```json
+```
 @inproceedings{2021milvus,
   title={Milvus: A Purpose-Built Vector Data Management System},
   author={Wang, Jianguo and Yi, Xiaomeng and Guo, Rentong and Jin, Hai and Xu, Peng and Li, Shengjun and Wang, Xiangyu and Guo, Xiangzhou and Li, Chengming and Xu, Xiaohai and others},

@@ -504,7 +504,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 			},
 		}
 	}
-
+	svr.cluster.sessionManager.getOrCreateSession("localhost:7777") // trigger create session manually
 	svr.cluster.register(&datapb.DataNodeInfo{
 		Address: "localhost:7777",
 		Version: 0,

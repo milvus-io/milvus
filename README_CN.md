@@ -14,8 +14,8 @@
 
 
 <div class="column" align="middle">
-  <a href="https://internal.zilliz.com:18080/jenkins/job/milvus-ha-ci/job/master/badge/">
-        <img src="https://internal.zilliz.com:18080/jenkins/job/milvus-ha-ci/job/master/badge/icon" />
+  <a href="https://ci.milvus.io:18080/jenkins/job/milvus-ha-ci/job/master/badge/">
+        <img src="https://ci.milvus.io:18080/jenkins/job/milvus-ha-ci/job/master/badge/icon" />
   </a>
   <a href="https://bestpractices.coreinfrastructure.org/projects/3563">
         <img src="https://bestpractices.coreinfrastructure.org/projects/3563/badge" />
@@ -85,61 +85,30 @@ Milvus 基于 [Apache 2.0 License](https://github.com/milvus-io/milvus/blob/mast
 
 
 
-## 安装
+## 快速开始
 
-### 安装 Milvus 单机版
+### 开始使用 Milvus
 
-#### 使用 Docker-Compose 安装
+- [Standalone Quick Start Guide](https://milvus.io/cn/docs/v2.0.0/install_standalone-docker.md)
 
-> 敬请期待。
+- [Cluster Quick Start Guide](https://milvus.io/cn/docs/v2.0.0/install_cluster-docker.md)
 
-#### 使用 Helm Chart 安装
 
-> 敬请期待。
-
-从源码编译 Milvus
+### 开发 Milvus
 
 ```bash
 # Clone github repository.
-$ cd /home/$USER/
 $ git clone https://github.com/milvus-io/milvus.git
 
 # Install third-party dependencies.
-$ cd /home/$USER/milvus/
+$ cd milvus/
 $ ./scripts/install_deps.sh
 
 # Compile Milvus standalone.
 $ make milvus
 ```
 
-
-
-### 安装 Milvus 分布式版
-
-#### 使用 Docker-Compose 安装
-
-
-
-> 敬请期待。
-
-#### 使用 Helm Chart 安装
-
-> 敬请期待。
-
-从源码编译 Milvus
-
-```bash
-# Clone github repository.
-$ cd /home/$USER
-$ git clone https://github.com/milvus-io/milvus.git
-
-# Install third-party dependencies.
-$ cd milvus
-$ ./scripts/install_deps.sh
-
-# Compile Milvus Cluster.
-$ make milvus
-```
+获取更多内容，请阅读 [开发者文档](https://github.com/milvus-io/milvus/blob/master/DEVELOPMENT.md)
 
 > **注意** 主分支用于 Milvus v2.0 代码开发。Milvus v1.0 于 2021 年 3 月 9 日发布，是 Milvus 的首个长期支持（LTS）版本。如需使用 Milvus 1.0，请切换至 [1.0 分支](https://github.com/milvus-io/milvus/tree/1.0)。
 
@@ -205,6 +174,8 @@ Milvus 训练营能够帮助你了解向量数据库的操作及各种应用场�
 ## 贡献代码
 
 欢迎向 Milvus 社区贡献你的代码。代码贡献流程或提交补丁等相关信息详见 [代码贡献准则](https://github.com/milvus-io/milvus/blob/master/CONTRIBUTING.md)。参考 [社区仓库](https://github.com/milvus-io/community) 了解社区管理准则并获取更多社区资源。
+
+### All contributors
 
 <br><!-- Do not remove start of hero-bot --><br>
 <img src="https://img.shields.io/badge/all--contributors-138-orange"><br>

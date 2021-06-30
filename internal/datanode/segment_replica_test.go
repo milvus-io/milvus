@@ -40,6 +40,73 @@ func TestSegmentReplica(t *testing.T) {
 	rc := &RootCoordFactory{}
 	collID := UniqueID(1)
 
+	t.Run("Test segmentFlushed", func(t *testing.T) {
+		testReplica := &SegmentReplica{
+			newSegments:     make(map[UniqueID]*Segment),
+			normalSegments:  make(map[UniqueID]*Segment),
+			flushedSegments: make(map[UniqueID]*Segment),
+		}
+
+		type Test struct {
+			inisNew     bool
+			inisFlushed bool
+			inSegID     UniqueID
+
+			expectedisNew     bool
+			expectedisFlushed bool
+			expectedSegID     UniqueID
+		}
+
+		tests := []Test{
+			// new segment
+			{true, false, 1, false, true, 1},
+			{true, false, 2, false, true, 2},
+			{true, false, 3, false, true, 3},
+			// normal segment
+			{false, false, 10, false, true, 10},
+			{false, false, 20, false, true, 20},
+			{false, false, 30, false, true, 30},
+			// flushed segment
+			{false, true, 100, false, true, 100},
+			{false, true, 200, false, true, 200},
+			{false, true, 300, false, true, 300},
+		}
+
+		newSeg := func(sr *SegmentReplica, isNew, isFlushed bool, id UniqueID) {
+			ns := &Segment{segmentID: id}
+			ns.isNew.Store(isNew)
+			ns.isFlushed.Store(isFlushed)
+
+			if isNew && !isFlushed {
+				sr.newSegments[id] = ns
+				return
+			}
+
+			if !isNew && !isFlushed {
+				sr.normalSegments[id] = ns
+				return
+			}
+
+			if !isNew && isFlushed {
+				sr.flushedSegments[id] = ns
+				return
+			}
+		}
+
+		for _, te := range tests {
+			// prepare case
+			newSeg(testReplica, te.inisNew, te.inisFlushed, te.inSegID)
+
+			testReplica.segmentFlushed(te.inSegID)
+
+			flushedSeg := testReplica.flushedSegments[te.inSegID]
+			assert.Equal(t, te.expectedSegID, flushedSeg.segmentID)
+			assert.Equal(t, te.expectedisNew, flushedSeg.isNew.Load().(bool))
+			assert.Equal(t, te.expectedisFlushed, flushedSeg.isFlushed.Load().(bool))
+		}
+
+	})
+
 	t.Run("Test inner function segment", func(t *testing.T) {
 		replica := newSegmentReplica(rc, collID)
 		assert.False(t, replica.hasSegment(0))
@@ -121,6 +188,5 @@ func TestSegmentReplica(t *testing.T) {
 		assert.Equal(t, int64(10), replica.normalSegments[UniqueID(0)].checkPoint.numRows)
 		replica.updateSegmentCheckPoint(1)
 		assert.Equal(t, int64(20), replica.normalSegments[UniqueID(1)].checkPoint.numRows)
-
 	})
 }

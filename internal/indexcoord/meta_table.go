@@ -245,24 +245,28 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 	return nil
 }
 
-func (mt *metaTable) GetIndexState(indexBuildID UniqueID) (*indexpb.IndexInfo, error) {
+func (mt *metaTable) GetIndexStates(indexBuildIDs []UniqueID) []*indexpb.IndexInfo {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
-	ret := &indexpb.IndexInfo{
-		IndexBuildID: indexBuildID,
+	var indexStates []*indexpb.IndexInfo
+	for _, id := range indexBuildIDs {
+		state := &indexpb.IndexInfo{
+			IndexBuildID: id,
+		}
+		meta, ok := mt.indexBuildID2Meta[id]
+		if !ok {
+			state.Reason = fmt.Sprintf("index %d not exists", id)
+		} else if meta.indexMeta.MarkDeleted {
+			state.Reason = fmt.Sprintf("index %d has been deleted", id)
+		} else {
+			state.State = meta.indexMeta.State
+			state.IndexID = meta.indexMeta.Req.IndexID
+			state.IndexName = meta.indexMeta.Req.IndexName
+			state.Reason = meta.indexMeta.FailReason
+		}
+		indexStates = append(indexStates, state)
 	}
-	meta, ok := mt.indexBuildID2Meta[indexBuildID]
-	if !ok {
-		return ret, fmt.Errorf("index not exists with ID = %d", indexBuildID)
-	}
-	if meta.indexMeta.MarkDeleted {
-		return ret, fmt.Errorf("index not exists with ID = %d", indexBuildID)
-	}
-	ret.IndexID = meta.indexMeta.Req.IndexID
-	ret.IndexName = meta.indexMeta.Req.IndexName
-	ret.Reason = meta.indexMeta.FailReason
-	ret.State = meta.indexMeta.State
-	return ret, nil
+	return indexStates
 }
 
 func (mt *metaTable) GetIndexFilePathInfo(indexBuildID UniqueID) (*indexpb.IndexFilePathInfo, error) {

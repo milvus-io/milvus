@@ -317,6 +317,10 @@ func newMockSessionManager(ch chan interface{}) sessionManager {
 	}
 }
 
+func (m *mockSessionManager) getSession(addr string) (types.DataNode, error) {
+	return newMockDataNodeClient(0, m.ch)
+}
+
 func (m *mockSessionManager) getOrCreateSession(addr string) (types.DataNode, error) {
 	return newMockDataNodeClient(0, m.ch)
 }

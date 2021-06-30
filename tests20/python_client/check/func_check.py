@@ -61,7 +61,7 @@ class ResponseChecker:
         assert len(error_dict) > 0
         if isinstance(res, Error):
             error_code = error_dict[ct.err_code]
-            assert res.code == error_code and error_dict[ct.err_msg] in res.message
+            assert res.code == error_code or error_dict[ct.err_msg] in res.message
         else:
             log.error("[CheckFunc] Response of API is not an error: %s" % str(res))
             assert False
