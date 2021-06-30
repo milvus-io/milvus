@@ -175,10 +175,6 @@ func newQueryNodeMock() *QueryNode {
 		panic(err)
 	}
 	svr := NewQueryNode(ctx, Params.QueryNodeID, msFactory)
-	err = svr.SetQueryCoord(&queryCoordMock{})
-	if err != nil {
-		panic(err)
-	}
 	svr.historical = newHistorical(svr.queryNodeLoopCtx, nil, nil, nil, svr.msFactory, etcdKV)
 	svr.streaming = newStreaming(ctx, msFactory, etcdKV)
 

@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -304,10 +305,11 @@ func (lct *LoadCollectionTask) PostExecute() {
 	lct.meta.addCollection(collectionID, lct.Schema)
 	if lct.result.ErrorCode != commonpb.ErrorCode_Success {
 		lct.childTasks = make([]task, 0)
-		for nodeID, node := range lct.cluster.nodes {
-			if !node.isOnService() {
-				continue
-			}
+		nodes, err := lct.cluster.onServiceNodes()
+		if err != nil {
+			log.Debug(err.Error())
+		}
+		for nodeID := range nodes {
 			req := &querypb.ReleaseCollectionRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:   commonpb.MsgType_ReleaseCollection,
@@ -377,10 +379,11 @@ func (rct *ReleaseCollectionTask) Execute(ctx context.Context) error {
 	}
 
 	if rct.NodeID <= 0 {
-		for nodeID, node := range rct.cluster.nodes {
-			if !node.isOnService() {
-				continue
-			}
+		nodes, err := rct.cluster.onServiceNodes()
+		if err != nil {
+			log.Debug(err.Error())
+		}
+		for nodeID := range nodes {
 			req := proto.Clone(rct.ReleaseCollectionRequest).(*querypb.ReleaseCollectionRequest)
 			req.NodeID = nodeID
 			releaseCollectionTask := &ReleaseCollectionTask{
@@ -545,10 +548,11 @@ func (lpt *LoadPartitionTask) PostExecute() {
 	if lpt.result.ErrorCode != commonpb.ErrorCode_Success {
 		lpt.childTasks = make([]task, 0)
 		if lpt.addCol {
-			for nodeID, node := range lpt.cluster.nodes {
-				if !node.isOnService() {
-					continue
-				}
+			nodes, err := lpt.cluster.onServiceNodes()
+			if err != nil {
+				log.Debug(err.Error())
+			}
+			for nodeID := range nodes {
 				req := &querypb.ReleaseCollectionRequest{
 					Base: &commonpb.MsgBase{
 						MsgType:   commonpb.MsgType_ReleaseCollection,
@@ -573,10 +577,11 @@ func (lpt *LoadPartitionTask) PostExecute() {
 				log.Debug("loadPartitionTask: add a releaseCollectionTask to loadPartitionTask's childTask", zap.Any("task", releaseCollectionTask))
 			}
 		} else {
-			for nodeID, node := range lpt.cluster.nodes {
-				if !node.isOnService() {
-					continue
-				}
+			nodes, err := lpt.cluster.onServiceNodes()
+			if err != nil {
+				log.Debug(err.Error())
+			}
+			for nodeID := range nodes {
 				req := &querypb.ReleasePartitionsRequest{
 					Base: &commonpb.MsgBase{
 						MsgType:   commonpb.MsgType_ReleasePartitions,
@@ -652,10 +657,11 @@ func (rpt *ReleasePartitionTask) Execute(ctx context.Context) error {
 	}
 
 	if rpt.NodeID <= 0 {
-		for nodeID, node := range rpt.cluster.nodes {
-			if !node.isOnService() {
-				continue
-			}
+		nodes, err := rpt.cluster.onServiceNodes()
+		if err != nil {
+			log.Debug(err.Error())
+		}
+		for nodeID := range nodes {
 			req := proto.Clone(rpt.ReleasePartitionsRequest).(*querypb.ReleasePartitionsRequest)
 			req.NodeID = nodeID
 			releasePartitionTask := &ReleasePartitionTask{
@@ -724,7 +730,12 @@ func (lst *LoadSegmentTask) Marshal() string {
 }
 
 func (lst *LoadSegmentTask) IsValid() bool {
-	return lst.ctx != nil && lst.cluster.nodes[lst.NodeID].isOnService()
+	onService, err := lst.cluster.isOnService(lst.NodeID)
+	if err != nil {
+		return false
+	}
+
+	return lst.ctx != nil && onService
 }
 
 func (lst *LoadSegmentTask) Type() commonpb.MsgType {
@@ -842,7 +853,11 @@ func (rst *ReleaseSegmentTask) Marshal() string {
 }
 
 func (rst *ReleaseSegmentTask) IsValid() bool {
-	return rst.ctx != nil && rst.cluster.nodes[rst.NodeID].isOnService()
+	onService, err := rst.cluster.isOnService(rst.NodeID)
+	if err != nil {
+		return false
+	}
+	return rst.ctx != nil && onService
 }
 
 func (rst *ReleaseSegmentTask) Type() commonpb.MsgType {
@@ -898,7 +913,11 @@ func (wdt *WatchDmChannelTask) Marshal() string {
 }
 
 func (wdt *WatchDmChannelTask) IsValid() bool {
-	return wdt.ctx != nil && wdt.cluster.nodes[wdt.NodeID].isOnService()
+	onService, err := wdt.cluster.isOnService(wdt.NodeID)
+	if err != nil {
+		return false
+	}
+	return wdt.ctx != nil && onService
 }
 
 func (wdt *WatchDmChannelTask) Type() commonpb.MsgType {
@@ -1020,7 +1039,12 @@ func (wqt *WatchQueryChannelTask) Marshal() string {
 }
 
 func (wqt *WatchQueryChannelTask) IsValid() bool {
-	return wqt.ctx != nil && wqt.cluster.nodes[wqt.NodeID].isOnService()
+	onService, err := wqt.cluster.isOnService(wqt.NodeID)
+	if err != nil {
+		return false
+	}
+
+	return wqt.ctx != nil && onService
 }
 
 func (wqt *WatchQueryChannelTask) Type() commonpb.MsgType {
@@ -1108,18 +1132,27 @@ func (lbt *LoadBalanceTask) Execute(ctx context.Context) error {
 
 	if lbt.triggerCondition == querypb.TriggerCondition_nodeDown {
 		for _, nodeID := range lbt.SourceNodeIDs {
+			node, err := lbt.cluster.getNodeByID(nodeID)
+			if err != nil {
+				log.Error(err.Error())
+				continue
+			}
 			lbt.meta.deleteSegmentInfoByNodeID(nodeID)
-			collectionInfos := lbt.cluster.nodes[nodeID].collectionInfos
+			collectionInfos := node.collectionInfos
 			for collectionID, info := range collectionInfos {
-				loadCollection := lbt.meta.collectionInfos[collectionID].LoadCollection
-				schema := lbt.meta.collectionInfos[collectionID].Schema
+				metaInfo, err := lbt.meta.getCollectionInfoByID(collectionID)
+				if err != nil {
+					log.Error(err.Error())
+					continue
+				}
+				loadCollection := metaInfo.LoadCollection
+				schema := metaInfo.Schema
 				partitionIDs := info.PartitionIDs
 
 				segmentsToLoad := make([]UniqueID, 0)
-				segment2BingLog := make(map[UniqueID]*querypb.SegmentLoadInfo)
+				loadSegmentReqs := make([]*querypb.LoadSegmentsRequest, 0)
 				channelsToWatch := make([]string, 0)
-				watchRequestsInPartition := make([]*querypb.WatchDmChannelsRequest, 0)
-				watchRequestsInCollection := make(map[string]*querypb.WatchDmChannelsRequest)
+				watchDmChannelReqs := make([]*querypb.WatchDmChannelsRequest, 0)
 
 				dmChannels, err := lbt.meta.getDmChannelsByNodeID(collectionID, nodeID)
 				if err != nil {
@@ -1143,148 +1176,68 @@ func (lbt *LoadBalanceTask) Execute(ctx context.Context) error {
 						return err
 					}
 
+					for _, segmentBingLog := range recoveryInfo.Binlogs {
+						segmentID := segmentBingLog.SegmentID
+						segmentLoadInfo := &querypb.SegmentLoadInfo{
+							SegmentID:    segmentID,
+							PartitionID:  partitionID,
+							CollectionID: collectionID,
+							BinlogPaths:  segmentBingLog.FieldBinlogs,
+						}
+
+						loadSegmentReq := &querypb.LoadSegmentsRequest{
+							Base:          lbt.Base,
+							Infos:         []*querypb.SegmentLoadInfo{segmentLoadInfo},
+							Schema:        schema,
+							LoadCondition: querypb.TriggerCondition_nodeDown,
+						}
+
+						segmentsToLoad = append(segmentsToLoad, segmentID)
+						loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
+					}
+
 					for _, channelInfo := range recoveryInfo.Channels {
 						for _, channel := range dmChannels {
 							if channelInfo.ChannelName == channel {
-								watchRequest := &querypb.WatchDmChannelsRequest{
-									Base:         lbt.Base,
-									CollectionID: collectionID,
-									Infos:        []*datapb.VchannelInfo{channelInfo},
-									Schema:       schema,
-								}
 								if loadCollection {
-									if _, ok := watchRequestsInCollection[channel]; !ok {
-										watchRequestsInCollection[channel] = watchRequest
+									merged := false
+									for index, channelName := range channelsToWatch {
+										if channel == channelName {
+											merged = true
+											oldInfo := watchDmChannelReqs[index].Infos[0]
+											newInfo := mergeVChannelInfo(oldInfo, channelInfo)
+											watchDmChannelReqs[index].Infos = []*datapb.VchannelInfo{newInfo}
+											break
+										}
+									}
+									if !merged {
+										watchRequest := &querypb.WatchDmChannelsRequest{
+											Base:         lbt.Base,
+											CollectionID: collectionID,
+											Infos:        []*datapb.VchannelInfo{channelInfo},
+											Schema:       schema,
+										}
 										channelsToWatch = append(channelsToWatch, channel)
-									} else {
-										oldInfo := watchRequestsInCollection[channel].Infos[0]
-										newInfo := mergeVChannelInfo(oldInfo, channelInfo)
-										watchRequestsInCollection[channel].Infos = []*datapb.VchannelInfo{newInfo}
+										watchDmChannelReqs = append(watchDmChannelReqs, watchRequest)
 									}
 								} else {
-									watchRequest.PartitionID = partitionID
+									watchRequest := &querypb.WatchDmChannelsRequest{
+										Base:         lbt.Base,
+										CollectionID: collectionID,
+										PartitionID:  partitionID,
+										Infos:        []*datapb.VchannelInfo{channelInfo},
+										Schema:       schema,
+									}
 									channelsToWatch = append(channelsToWatch, channel)
-									watchRequestsInPartition = append(watchRequestsInPartition, watchRequest)
+									watchDmChannelReqs = append(watchDmChannelReqs, watchRequest)
 								}
 								break
 							}
 						}
 					}
-
-					for _, binlog := range recoveryInfo.Binlogs {
-						segmentID := binlog.SegmentID
-						if lbt.meta.hasSegmentInfo(segmentID) {
-							continue
-						}
-						segmentLoadInfo := &querypb.SegmentLoadInfo{
-							SegmentID:    segmentID,
-							PartitionID:  partitionID,
-							CollectionID: collectionID,
-							BinlogPaths:  make([]*datapb.FieldBinlog, 0),
-						}
-						segmentLoadInfo.BinlogPaths = append(segmentLoadInfo.BinlogPaths, binlog.FieldBinlogs...)
-						segmentsToLoad = append(segmentsToLoad, segmentID)
-						segment2BingLog[segmentID] = segmentLoadInfo
-					}
 				}
-
-				segment2Nodes := shuffleSegmentsToQueryNode(segmentsToLoad, lbt.cluster)
-				watchRequest2Nodes := shuffleChannelsToQueryNode(channelsToWatch, lbt.cluster)
-
-				watchQueryChannelInfo := make(map[int64]bool)
-				node2Segments := make(map[int64][]*querypb.SegmentLoadInfo)
-				for index, id := range segment2Nodes {
-					if _, ok := node2Segments[id]; !ok {
-						node2Segments[id] = make([]*querypb.SegmentLoadInfo, 0)
-					}
-					segmentID := segmentsToLoad[index]
-					node2Segments[id] = append(node2Segments[id], segment2BingLog[segmentID])
-					if lbt.cluster.hasWatchedQueryChannel(lbt.ctx, id, collectionID) {
-						watchQueryChannelInfo[id] = true
-						continue
-					}
-					watchQueryChannelInfo[id] = false
-				}
-				for _, id := range watchRequest2Nodes {
-					if lbt.cluster.hasWatchedQueryChannel(lbt.ctx, id, collectionID) {
-						watchQueryChannelInfo[id] = true
-						continue
-					}
-					watchQueryChannelInfo[id] = false
-				}
-
-				for id, segmentInfos := range node2Segments {
-					loadSegmentsRequest := &querypb.LoadSegmentsRequest{
-						Base:          lbt.Base,
-						NodeID:        id,
-						Infos:         segmentInfos,
-						Schema:        schema,
-						LoadCondition: querypb.TriggerCondition_grpcRequest,
-					}
-
-					loadSegmentTask := &LoadSegmentTask{
-						BaseTask: BaseTask{
-							ctx:              lbt.ctx,
-							Condition:        NewTaskCondition(lbt.ctx),
-							triggerCondition: querypb.TriggerCondition_grpcRequest,
-						},
-
-						LoadSegmentsRequest: loadSegmentsRequest,
-						meta:                lbt.meta,
-						cluster:             lbt.cluster,
-					}
-					lbt.AddChildTask(loadSegmentTask)
-					log.Debug("LoadBalanceTask: add a loadSegmentTask to loadBalanceTask's childTask", zap.Any("task", loadSegmentTask))
-				}
-
-				for index, id := range watchRequest2Nodes {
-					var watchRequest *querypb.WatchDmChannelsRequest
-					if loadCollection {
-						channel := channelsToWatch[index]
-						watchRequest = watchRequestsInCollection[channel]
-					} else {
-						watchRequest = watchRequestsInPartition[index]
-					}
-					watchRequest.NodeID = id
-					watchDmChannelTask := &WatchDmChannelTask{
-						BaseTask: BaseTask{
-							ctx:              lbt.ctx,
-							Condition:        NewTaskCondition(lbt.ctx),
-							triggerCondition: querypb.TriggerCondition_grpcRequest,
-						},
-						WatchDmChannelsRequest: watchRequest,
-						meta:                   lbt.meta,
-						cluster:                lbt.cluster,
-					}
-					lbt.AddChildTask(watchDmChannelTask)
-					log.Debug("LoadBalanceTask: add a watchDmChannelTask to loadBalanceTask's childTask", zap.Any("task", watchDmChannelTask))
-				}
-
-				for id, watched := range watchQueryChannelInfo {
-					if !watched {
-						queryChannel, queryResultChannel := lbt.meta.GetQueryChannel(collectionID)
-
-						addQueryChannelRequest := &querypb.AddQueryChannelRequest{
-							Base:             lbt.Base,
-							NodeID:           id,
-							CollectionID:     collectionID,
-							RequestChannelID: queryChannel,
-							ResultChannelID:  queryResultChannel,
-						}
-						watchQueryChannelTask := &WatchQueryChannelTask{
-							BaseTask: BaseTask{
-								ctx:              lbt.ctx,
-								Condition:        NewTaskCondition(lbt.ctx),
-								triggerCondition: querypb.TriggerCondition_grpcRequest,
-							},
-
-							AddQueryChannelRequest: addQueryChannelRequest,
-							cluster:                lbt.cluster,
-						}
-						lbt.AddChildTask(watchQueryChannelTask)
-						log.Debug("LoadBalanceTask: add a watchQueryChannelTask to loadBalanceTask's childTask", zap.Any("task", watchQueryChannelTask))
-					}
-				}
+				assignInternalTask(collectionID, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, watchDmChannelReqs)
+				log.Debug("loadBalanceTask: assign child task done", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
 			}
 		}
 	}
@@ -1316,10 +1269,19 @@ func (lbt *LoadBalanceTask) PostExecute() {
 
 func shuffleChannelsToQueryNode(dmChannels []string, cluster *queryNodeCluster) []int64 {
 	maxNumChannels := 0
-	for nodeID, node := range cluster.nodes {
-		if !node.onService {
+	nodes := make(map[int64]*queryNode)
+	var err error
+	for {
+		nodes, err = cluster.onServiceNodes()
+		if err != nil {
+			log.Debug(err.Error())
+			time.Sleep(1 * time.Second)
 			continue
 		}
+		break
+	}
+
+	for nodeID := range nodes {
 		numChannels, _ := cluster.getNumDmChannels(nodeID)
 		if numChannels > maxNumChannels {
 			maxNumChannels = numChannels
@@ -1335,26 +1297,20 @@ func shuffleChannelsToQueryNode(dmChannels []string, cluster *queryNodeCluster) 
 	for {
 		lastOffset := offset
 		if !loopAll {
-			for id, node := range cluster.nodes {
-				if !node.isOnService() {
-					continue
-				}
-				numSegments, _ := cluster.getNumSegments(id)
+			for nodeID := range nodes {
+				numSegments, _ := cluster.getNumSegments(nodeID)
 				if numSegments >= maxNumChannels {
 					continue
 				}
-				res = append(res, id)
+				res = append(res, nodeID)
 				offset++
 				if offset == len(dmChannels) {
 					return res
 				}
 			}
 		} else {
-			for id, node := range cluster.nodes {
-				if !node.isOnService() {
-					continue
-				}
-				res = append(res, id)
+			for nodeID := range nodes {
+				res = append(res, nodeID)
 				offset++
 				if offset == len(dmChannels) {
 					return res
@@ -1369,10 +1325,18 @@ func shuffleChannelsToQueryNode(dmChannels []string, cluster *queryNodeCluster) 
 
 func shuffleSegmentsToQueryNode(segmentIDs []UniqueID, cluster *queryNodeCluster) []int64 {
 	maxNumSegments := 0
-	for nodeID, node := range cluster.nodes {
-		if !node.isOnService() {
+	nodes := make(map[int64]*queryNode)
+	var err error
+	for {
+		nodes, err = cluster.onServiceNodes()
+		if err != nil {
+			log.Debug(err.Error())
+			time.Sleep(1 * time.Second)
 			continue
 		}
+		break
+	}
+	for nodeID := range nodes {
 		numSegments, _ := cluster.getNumSegments(nodeID)
 		if numSegments > maxNumSegments {
 			maxNumSegments = numSegments
@@ -1389,26 +1353,20 @@ func shuffleSegmentsToQueryNode(segmentIDs []UniqueID, cluster *queryNodeCluster
 	for {
 		lastOffset := offset
 		if !loopAll {
-			for id, node := range cluster.nodes {
-				if !node.isOnService() {
-					continue
-				}
-				numSegments, _ := cluster.getNumSegments(id)
+			for nodeID := range nodes {
+				numSegments, _ := cluster.getNumSegments(nodeID)
 				if numSegments >= maxNumSegments {
 					continue
 				}
-				res = append(res, id)
+				res = append(res, nodeID)
 				offset++
 				if offset == len(segmentIDs) {
 					return res
 				}
 			}
 		} else {
-			for id, node := range cluster.nodes {
-				if !node.isOnService() {
-					continue
-				}
-				res = append(res, id)
+			for nodeID := range nodes {
+				res = append(res, nodeID)
 				offset++
 				if offset == len(segmentIDs) {
 					return res
