@@ -106,7 +106,7 @@ func (s *Server) init() error {
 	indexnode.Params.IP = Params.IP
 	indexnode.Params.Address = Params.Address
 
-	closer := trace.InitTracing(fmt.Sprintf("index_node_%d", indexnode.Params.NodeID))
+	closer := trace.InitTracing(fmt.Sprintf("index_node ip: %s, port: %d", Params.IP, Params.Port))
 	s.closer = closer
 
 	Params.Address = Params.IP + ":" + strconv.FormatInt(int64(Params.Port), 10)

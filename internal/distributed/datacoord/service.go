@@ -75,7 +75,7 @@ func (s *Server) init() error {
 	Params.Init()
 	Params.LoadFromEnv()
 
-	closer := trace.InitTracing("data_service")
+	closer := trace.InitTracing("datacoord")
 	s.closer = closer
 
 	datacoord.Params.Init()

@@ -732,7 +732,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 			IndexID:     idxInfo.IndexID,
 			EnableIndex: false,
 		}
-		info.BuildID, err = t.core.BuildIndex(segID, &field, idxInfo, false)
+		info.BuildID, err = t.core.BuildIndex(ctx, segID, &field, idxInfo, false)
 		if err != nil {
 			return err
 		}
