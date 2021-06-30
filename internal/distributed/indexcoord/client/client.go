@@ -13,6 +13,7 @@ package grpcindexcoordclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -43,8 +44,6 @@ type Client struct {
 
 	addr string
 	sess *sessionutil.Session
-
-	retryOptions []retry.Option
 }
 
 func getIndexCoordAddr(sess *sessionutil.Session) (string, error) {
@@ -63,7 +62,7 @@ func getIndexCoordAddr(sess *sessionutil.Session) (string, error) {
 	return ms.Address, nil
 }
 
-func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string, retryOptions ...retry.Option) (*Client, error) {
+func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*Client, error) {
 	sess := sessionutil.NewSession(ctx, metaRoot, etcdEndpoints)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
@@ -72,37 +71,28 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string, ret
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	return &Client{
-		ctx:          ctx,
-		cancel:       cancel,
-		sess:         sess,
-		retryOptions: retryOptions,
+		ctx:    ctx,
+		cancel: cancel,
+		sess:   sess,
 	}, nil
 }
 
 func (c *Client) Init() error {
-	return c.connect()
+	return c.connect(retry.Attempts(20))
 }
 
-func (c *Client) connect() error {
+func (c *Client) connect(retryOptions ...retry.Option) error {
 	var err error
-	getIndexCoordaddrFn := func() error {
+	connectIndexCoordaddrFn := func() error {
 		c.addr, err = getIndexCoordAddr(c.sess)
 		if err != nil {
+			log.Debug("IndexCoordClient getIndexCoordAddress failed")
 			return err
 		}
-		return nil
-	}
-	err = retry.Do(c.ctx, getIndexCoordaddrFn, c.retryOptions...)
-	if err != nil {
-		log.Debug("IndexCoordClient getIndexCoordAddress failed", zap.Error(err))
-		return err
-	}
-	log.Debug("IndexCoordClient getIndexCoordAddress success")
-	connectGrpcFunc := func() error {
 		opts := trace.GetInterceptorOpts()
 		log.Debug("IndexCoordClient try connect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(c.ctx, c.addr,
-			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(5*time.Second),
+			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(2*time.Second),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
 					grpc_retry.UnaryClientInterceptor(),
@@ -121,7 +111,7 @@ func (c *Client) connect() error {
 		return nil
 	}
 
-	err = retry.Do(c.ctx, connectGrpcFunc, c.retryOptions...)
+	err = retry.Do(c.ctx, connectIndexCoordaddrFn, retryOptions...)
 	if err != nil {
 		log.Debug("IndexCoordClient try connect failed", zap.Error(err))
 		return err
@@ -138,7 +128,7 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	}
 	err = c.connect()
 	if err != nil {
-		return ret, err
+		return ret, errors.New("Connect to indexcoord failed with error:\n" + err.Error())
 	}
 	ret, err = caller()
 	if err == nil {

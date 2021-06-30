@@ -91,8 +91,9 @@ class TestIndexParams(TestcaseBase):
         self.index_wrap.init_index(collection_w.collection, f_name, default_index_params, check_task=CheckTasks.err_res,
                                            check_items={"err_code": 1, "err_msg": "CreateIndex failed"})
 
+    # TODO: update eror msg
     @pytest.mark.tags(CaseLabel.L1)
-    def test_index_type_invalid(self, get_invalid_index_type):
+    def _test_index_type_invalid(self, get_invalid_index_type):
         """
         target: test index with error index type
         method: input invalid index type

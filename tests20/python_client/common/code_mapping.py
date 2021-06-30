@@ -1,4 +1,5 @@
 from enum import Enum
+from pymilvus_orm.exceptions import ExceptionsMessage
 
 
 class ErrorCode(Enum):
@@ -10,12 +11,16 @@ ErrorMessage = {ErrorCode.ErrorOk: "",
                 ErrorCode.Error: "is illegal"}
 
 
-class ConnectionErrorMessage:
-    NoHostPort = "connection configuration must contain 'host' and 'port'"
-    HostType = "Type of 'host' must be str!"
-    PortType = "Type of port type must be str or int!"
-    NotHostPort = "Connection configuration must be contained host and port"
-    AliasExist = "alias of '%s' already creating connections, but the configure is not the same as passed in."
-    AliasNotExist = "You need to pass in the configuration of the connection named '%s'"
+class ErrorMap:
+    def __init__(self, err_code, err_msg):
+        self.err_code = err_code
+        self.err_msg = err_msg
+
+
+class ConnectionErrorMessage(ExceptionsMessage):
     FailConnect = "Fail connecting to server on %s:%s. Timeout"
     ConnectExist = "The connection named %s already creating, but passed parameters don't match the configured parameters"
+
+
+class CollectionErrorMessage(ExceptionsMessage):
+    CollNotLoaded = "collection %s was not loaded into memory"

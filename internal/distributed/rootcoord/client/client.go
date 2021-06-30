@@ -13,6 +13,7 @@ package grpcrootcoordclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -43,8 +44,6 @@ type GrpcClient struct {
 
 	sess *sessionutil.Session
 	addr string
-
-	retryOptions []retry.Option
 }
 
 func getRootCoordAddr(sess *sessionutil.Session) (string, error) {
@@ -58,7 +57,7 @@ func getRootCoordAddr(sess *sessionutil.Session) (string, error) {
 	ms, ok := msess[key]
 	if !ok {
 		log.Debug("RootCoordClient mess key not exist", zap.Any("key", key))
-		return "", fmt.Errorf("number of master service is incorrect, %d", len(msess))
+		return "", fmt.Errorf("number of RootCoord is incorrect, %d", len(msess))
 	}
 	return ms.Address, nil
 }
@@ -68,7 +67,7 @@ func getRootCoordAddr(sess *sessionutil.Session) (string, error) {
 // metaRoot is the path in etcd for root coordinator registration
 // etcdEndpoints are the address list for etcd end points
 // timeout is default setting for each grpc call
-func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string, retryOptions ...retry.Option) (*GrpcClient, error) {
+func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*GrpcClient, error) {
 	sess := sessionutil.NewSession(ctx, metaRoot, etcdEndpoints)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
@@ -78,36 +77,28 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string, ret
 	ctx, cancel := context.WithCancel(ctx)
 
 	return &GrpcClient{
-		ctx:          ctx,
-		cancel:       cancel,
-		sess:         sess,
-		retryOptions: retryOptions,
+		ctx:    ctx,
+		cancel: cancel,
+		sess:   sess,
 	}, nil
 }
 
 func (c *GrpcClient) Init() error {
-	return c.connect()
+	return c.connect(retry.Attempts(20))
 }
 
-func (c *GrpcClient) connect() error {
+func (c *GrpcClient) connect(retryOptions ...retry.Option) error {
 	var err error
-	getRootCoordAddrFn := func() error {
+	connectRootCoordAddrFn := func() error {
 		c.addr, err = getRootCoordAddr(c.sess)
 		if err != nil {
+			log.Debug("RootCoordClient getRootCoordAddr failed", zap.Error(err))
 			return err
 		}
-		return nil
-	}
-	err = retry.Do(c.ctx, getRootCoordAddrFn, c.retryOptions...)
-	if err != nil {
-		log.Debug("RootCoordClient getRootCoordAddr failed", zap.Error(err))
-		return err
-	}
-	connectGrpcFunc := func() error {
 		opts := trace.GetInterceptorOpts()
 		log.Debug("RootCoordClient try reconnect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(c.ctx, c.addr,
-			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(5*time.Second),
+			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(2*time.Second),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
 					grpc_retry.UnaryClientInterceptor(),
@@ -126,7 +117,7 @@ func (c *GrpcClient) connect() error {
 		return nil
 	}
 
-	err = retry.Do(c.ctx, connectGrpcFunc, c.retryOptions...)
+	err = retry.Do(c.ctx, connectRootCoordAddrFn, retryOptions...)
 	if err != nil {
 		log.Debug("RootCoordClient try reconnect failed", zap.Error(err))
 		return err
@@ -157,7 +148,7 @@ func (c *GrpcClient) recall(caller func() (interface{}, error)) (interface{}, er
 	}
 	err = c.connect()
 	if err != nil {
-		return ret, err
+		return ret, errors.New("Connect to rootcoord failed with error:\n" + err.Error())
 	}
 	ret, err = caller()
 	if err == nil {

@@ -13,6 +13,7 @@ package grpcproxyclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -38,34 +39,31 @@ type Client struct {
 	conn       *grpc.ClientConn
 
 	addr string
-
-	retryOptions []retry.Option
 }
 
-func NewClient(ctx context.Context, addr string, retryOptions ...retry.Option) (*Client, error) {
+func NewClient(ctx context.Context, addr string) (*Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("address is empty")
 	}
 	ctx, cancel := context.WithCancel(ctx)
 
 	return &Client{
-		ctx:          ctx,
-		cancel:       cancel,
-		addr:         addr,
-		retryOptions: retryOptions,
+		ctx:    ctx,
+		cancel: cancel,
+		addr:   addr,
 	}, nil
 }
 
 func (c *Client) Init() error {
-	return c.connect()
+	return c.connect(retry.Attempts(20))
 }
 
-func (c *Client) connect() error {
+func (c *Client) connect(retryOptions ...retry.Option) error {
 	connectGrpcFunc := func() error {
 		opts := trace.GetInterceptorOpts()
 		log.Debug("ProxyClient try connect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(c.ctx, c.addr,
-			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(5*time.Second),
+			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(2*time.Second),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
 					grpc_retry.UnaryClientInterceptor(),
@@ -84,7 +82,7 @@ func (c *Client) connect() error {
 		return nil
 	}
 
-	err := retry.Do(c.ctx, connectGrpcFunc, c.retryOptions...)
+	err := retry.Do(c.ctx, connectGrpcFunc, retryOptions...)
 	if err != nil {
 		log.Debug("ProxyClient try connect failed", zap.Error(err))
 		return err
@@ -101,7 +99,7 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	}
 	err = c.connect()
 	if err != nil {
-		return ret, err
+		return ret, errors.New("Connect to proxy failed with error:\n" + err.Error())
 	}
 	ret, err = caller()
 	if err == nil {

@@ -45,7 +45,7 @@ class ApiCollectionWrapper:
     def construct_from_dataframe(self, name, dataframe, check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, is_succ = api_request([Collection.construct_from_dataframe, name, dataframe], **kwargs)
-        self.collection = res if is_succ else None
+        self.collection = res[0] if is_succ else None
         check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
                                        name=name, dataframe=dataframe, **kwargs).run()
         return res, check_result

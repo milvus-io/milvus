@@ -31,30 +31,35 @@ type reqTask interface {
 	Ctx() context.Context
 	Type() commonpb.MsgType
 	Execute(ctx context.Context) error
-	WaitToFinish() error
-	Notify(err error)
+	Core() *Core
 }
 
 type baseReqTask struct {
 	ctx  context.Context
-	cv   chan error
 	core *Core
 }
 
-func (bt *baseReqTask) Notify(err error) {
-	bt.cv <- err
+func (b *baseReqTask) Core() *Core {
+	return b.core
 }
 
-func (bt *baseReqTask) WaitToFinish() error {
+func (b *baseReqTask) Ctx() context.Context {
+	return b.ctx
+}
+
+func executeTask(t reqTask) error {
+	errChan := make(chan error)
+
+	go func() {
+		err := t.Execute(t.Ctx())
+		errChan <- err
+	}()
 	select {
-	case <-bt.core.ctx.Done():
-		return fmt.Errorf("core context done, %w", bt.core.ctx.Err())
-	case <-bt.ctx.Done():
-		return fmt.Errorf("request context done, %w", bt.ctx.Err())
-	case err, ok := <-bt.cv:
-		if !ok {
-			return fmt.Errorf("notify chan closed")
-		}
+	case <-t.Core().ctx.Done():
+		return fmt.Errorf("context canceled")
+	case <-t.Ctx().Done():
+		return fmt.Errorf("context canceled")
+	case err := <-errChan:
 		return err
 	}
 }
@@ -62,10 +67,6 @@ func (bt *baseReqTask) WaitToFinish() error {
 type CreateCollectionReqTask struct {
 	baseReqTask
 	Req *milvuspb.CreateCollectionRequest
-}
-
-func (t *CreateCollectionReqTask) Ctx() context.Context {
-	return t.ctx
 }
 
 func (t *CreateCollectionReqTask) Type() commonpb.MsgType {
@@ -244,10 +245,6 @@ type DropCollectionReqTask struct {
 	Req *milvuspb.DropCollectionRequest
 }
 
-func (t *DropCollectionReqTask) Ctx() context.Context {
-	return t.ctx
-}
-
 func (t *DropCollectionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
@@ -322,10 +319,6 @@ type HasCollectionReqTask struct {
 	HasCollection bool
 }
 
-func (t *HasCollectionReqTask) Ctx() context.Context {
-	return t.ctx
-}
-
 func (t *HasCollectionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
@@ -347,10 +340,6 @@ type DescribeCollectionReqTask struct {
 	baseReqTask
 	Req *milvuspb.DescribeCollectionRequest
 	Rsp *milvuspb.DescribeCollectionResponse
-}
-
-func (t *DescribeCollectionReqTask) Ctx() context.Context {
-	return t.ctx
 }
 
 func (t *DescribeCollectionReqTask) Type() commonpb.MsgType {
@@ -397,10 +386,6 @@ type ShowCollectionReqTask struct {
 	Rsp *milvuspb.ShowCollectionsResponse
 }
 
-func (t *ShowCollectionReqTask) Ctx() context.Context {
-	return t.ctx
-}
-
 func (t *ShowCollectionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
@@ -423,10 +408,6 @@ func (t *ShowCollectionReqTask) Execute(ctx context.Context) error {
 type CreatePartitionReqTask struct {
 	baseReqTask
 	Req *milvuspb.CreatePartitionRequest
-}
-
-func (t *CreatePartitionReqTask) Ctx() context.Context {
-	return t.ctx
 }
 
 func (t *CreatePartitionReqTask) Type() commonpb.MsgType {
@@ -495,10 +476,6 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 type DropPartitionReqTask struct {
 	baseReqTask
 	Req *milvuspb.DropPartitionRequest
-}
-
-func (t *DropPartitionReqTask) Ctx() context.Context {
-	return t.ctx
 }
 
 func (t *DropPartitionReqTask) Type() commonpb.MsgType {
@@ -577,10 +554,6 @@ type HasPartitionReqTask struct {
 	HasPartition bool
 }
 
-func (t *HasPartitionReqTask) Ctx() context.Context {
-	return t.ctx
-}
-
 func (t *HasPartitionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
@@ -601,10 +574,6 @@ type ShowPartitionReqTask struct {
 	baseReqTask
 	Req *milvuspb.ShowPartitionsRequest
 	Rsp *milvuspb.ShowPartitionsResponse
-}
-
-func (t *ShowPartitionReqTask) Ctx() context.Context {
-	return t.ctx
 }
 
 func (t *ShowPartitionReqTask) Type() commonpb.MsgType {
@@ -640,10 +609,6 @@ type DescribeSegmentReqTask struct {
 	baseReqTask
 	Req *milvuspb.DescribeSegmentRequest
 	Rsp *milvuspb.DescribeSegmentResponse //TODO,return repeated segment id in the future
-}
-
-func (t *DescribeSegmentReqTask) Ctx() context.Context {
-	return t.ctx
 }
 
 func (t *DescribeSegmentReqTask) Type() commonpb.MsgType {
@@ -696,10 +661,6 @@ type ShowSegmentReqTask struct {
 	Rsp *milvuspb.ShowSegmentsResponse
 }
 
-func (t *ShowSegmentReqTask) Ctx() context.Context {
-	return t.ctx
-}
-
 func (t *ShowSegmentReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
@@ -733,10 +694,6 @@ func (t *ShowSegmentReqTask) Execute(ctx context.Context) error {
 type CreateIndexReqTask struct {
 	baseReqTask
 	Req *milvuspb.CreateIndexRequest
-}
-
-func (t *CreateIndexReqTask) Ctx() context.Context {
-	return t.ctx
 }
 
 func (t *CreateIndexReqTask) Type() commonpb.MsgType {
@@ -796,10 +753,6 @@ type DescribeIndexReqTask struct {
 	Rsp *milvuspb.DescribeIndexResponse
 }
 
-func (t *DescribeIndexReqTask) Ctx() context.Context {
-	return t.ctx
-}
-
 func (t *DescribeIndexReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
@@ -832,10 +785,6 @@ func (t *DescribeIndexReqTask) Execute(ctx context.Context) error {
 type DropIndexReqTask struct {
 	baseReqTask
 	Req *milvuspb.DropIndexRequest
-}
-
-func (t *DropIndexReqTask) Ctx() context.Context {
-	return t.ctx
 }
 
 func (t *DropIndexReqTask) Type() commonpb.MsgType {

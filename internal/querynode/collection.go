@@ -60,7 +60,12 @@ func (c *Collection) Schema() *schemapb.CollectionSchema {
 }
 
 func (c *Collection) addPartitionID(partitionID UniqueID) {
+	c.releaseMu.Lock()
+	defer c.releaseMu.Unlock()
+
+	log.Debug("queryNode collection add a partition", zap.Int64("collection", c.id), zap.Int64("partitionID", partitionID))
 	c.partitionIDs = append(c.partitionIDs, partitionID)
+	log.Debug("queryNode collection info after add a partition", zap.Int64("collectionID", c.id), zap.Int64s("partitions", c.partitionIDs), zap.Any("releasePartitions", c.releasedPartitions))
 }
 
 func (c *Collection) removePartitionID(partitionID UniqueID) {
@@ -110,7 +115,26 @@ func (c *Collection) getReleaseTime() Timestamp {
 func (c *Collection) addReleasedPartition(partitionID UniqueID) {
 	c.releaseMu.Lock()
 	defer c.releaseMu.Unlock()
+
+	log.Debug("queryNode collection release a partition", zap.Int64("collectionID", c.id), zap.Int64("partition", partitionID))
 	c.releasedPartitions[partitionID] = struct{}{}
+	partitions := make([]UniqueID, 0)
+	for _, id := range c.partitionIDs {
+		if id != partitionID {
+			partitions = append(partitions, id)
+		}
+	}
+	c.partitionIDs = partitions
+	log.Debug("queryNode collection info after release a partition", zap.Int64("collectionID", c.id), zap.Int64s("partitions", c.partitionIDs), zap.Any("releasePartitions", c.releasedPartitions))
+}
+
+func (c *Collection) deleteReleasedPartition(partitionID UniqueID) {
+	c.releaseMu.Lock()
+	defer c.releaseMu.Unlock()
+
+	log.Debug("queryNode collection reload a released partition", zap.Int64("collectionID", c.id), zap.Int64("partition", partitionID))
+	delete(c.releasedPartitions, partitionID)
+	log.Debug("queryNode collection info after reload a released partition", zap.Int64("collectionID", c.id), zap.Int64s("partitions", c.partitionIDs), zap.Any("releasePartitions", c.releasedPartitions))
 }
 
 func (c *Collection) checkReleasedPartitions(partitionIDs []UniqueID) error {

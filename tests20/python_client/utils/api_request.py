@@ -8,7 +8,7 @@ class Error:
         self.message = getattr(error, 'message', str(error))
 
 
-log_row_length = 300
+log_row_length = 3000
 
 
 def api_request_catch():
@@ -16,12 +16,13 @@ def api_request_catch():
         def inner_wrapper(*args, **kwargs):
             try:
                 res = func(*args, **kwargs)
-                # log.debug("(api_response) Response : %s " % str(res)[0:log_row_length])
+                log_res = str(res)[0:log_row_length] + '......' if len(str(res)) > log_row_length else str(res)
+                log.debug("(api_response) Response : %s " % log_res)
                 return res, True
             except Exception as e:
+                log_e = str(e)[0:log_row_length] + '......' if len(str(e)) > log_row_length else str(e)
                 log.error(traceback.format_exc())
-                log.error("(api_response) [Milvus API Exception]%s: %s"
-                          % (str(func), str(e)[0:log_row_length]))
+                log.error("(api_response) [Milvus API Exception]%s: %s" % (str(func), log_e))
                 return Error(e), False
         return inner_wrapper
     return wrapper
@@ -36,8 +37,8 @@ def api_request(_list, **kwargs):
             if len(_list) > 1:
                 for a in _list[1:]:
                     arg.append(a)
-            # log.debug("(api_request) Request: [%s] args: %s, kwargs: %s"
-            #           % (str(func), str(arg)[0:log_row_length], str(kwargs)))
+            log_arg = str(arg)[0:log_row_length] + '......' if len(str(arg)) > log_row_length else str(arg)
+            log.debug("(api_request) Request: [%s] args: %s, kwargs: %s" % (str(func), log_arg, str(kwargs)))
             return func(*arg, **kwargs)
     return False, False
 

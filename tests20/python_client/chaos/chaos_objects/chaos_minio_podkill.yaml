@@ -1,7 +1,7 @@
 apiVersion: chaos-mesh.org/v1alpha1
 kind: PodChaos
 metadata:
-  name: test-standalone-podkill
+  name: test-minio-podkill
   namespace: chaos-testing
 spec:
   action: pod-kill
@@ -10,8 +10,7 @@ spec:
     namespaces:
       - chaos-testing         # target namespace of milvus deployment
     labelSelectors:
-      app.kubernetes.io/instance: milvus-chaos
-      app.kubernetes.io/name: milvus
-      component: standalone
+      release: milvus-chaos
+      app: minio
   scheduler:
-    cron: '@every 3s'
+    cron: '@every 5s'

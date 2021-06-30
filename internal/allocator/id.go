@@ -23,7 +23,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -72,7 +71,7 @@ func NewIDAllocator(ctx context.Context, metaRoot string, etcdEndpoints []string
 func (ia *IDAllocator) Start() error {
 	var err error
 
-	ia.rootCoordClient, err = rcc.NewClient(ia.Ctx, ia.metaRoot, ia.etcdEndpoints, retry.Attempts(300))
+	ia.rootCoordClient, err = rcc.NewClient(ia.Ctx, ia.metaRoot, ia.etcdEndpoints)
 	if err != nil {
 		panic(err)
 	}

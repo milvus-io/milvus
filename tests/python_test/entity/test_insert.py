@@ -316,7 +316,7 @@ class TestInsertBase:
         logging.getLogger().info(len(ids))
         entity = copy.deepcopy(default_entity)
         entity[0]["values"] = ids
-        with pytest.raises(BaseException) as e:
+        with pytest.raises(Exception) as e:
             connect.insert(id_collection, entity)
 
     @pytest.mark.timeout(ADD_TIMEOUT)

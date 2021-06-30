@@ -172,7 +172,10 @@ func TestGrpcService(t *testing.T) {
 	core.DataCoordSegmentChan = SegmentInfoChan
 
 	timeTickArray := make([]typeutil.Timestamp, 0, 16)
+	timeTickLock := sync.Mutex{}
 	core.SendTimeTick = func(ts typeutil.Timestamp) error {
+		timeTickLock.Lock()
+		defer timeTickLock.Unlock()
 		t.Logf("send time tick %d", ts)
 		timeTickArray = append(timeTickArray, ts)
 		return nil
@@ -258,7 +261,7 @@ func TestGrpcService(t *testing.T) {
 
 	svr.rootCoord.UpdateStateCode(internalpb.StateCode_Healthy)
 
-	cli, err := rcc.NewClient(context.Background(), rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, retry.Attempts(300))
+	cli, err := rcc.NewClient(context.Background(), rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints)
 	assert.Nil(t, err)
 
 	err = cli.Init()
@@ -925,13 +928,13 @@ func TestRun(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "listen tcp: address 1000000: invalid port")
 
-	svr.newDataCoordClient = func(string, []string, ...retry.Option) types.DataCoord {
+	svr.newDataCoordClient = func(string, []string) types.DataCoord {
 		return &mockDataCoord{}
 	}
-	svr.newIndexCoordClient = func(string, []string, ...retry.Option) types.IndexCoord {
+	svr.newIndexCoordClient = func(string, []string) types.IndexCoord {
 		return &mockIndex{}
 	}
-	svr.newQueryCoordClient = func(string, []string, ...retry.Option) types.QueryCoord {
+	svr.newQueryCoordClient = func(string, []string) types.QueryCoord {
 		return &mockQuery{}
 	}
 

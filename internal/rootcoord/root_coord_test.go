@@ -68,6 +68,14 @@ type dataMock struct {
 	randVal int
 }
 
+func (d *dataMock) Init() error {
+	return nil
+}
+
+func (d *dataMock) Start() error {
+	return nil
+}
+
 func (d *dataMock) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
 	rst := &datapb.GetInsertBinlogPathsResponse{
 		FieldIDs: []int64{},
@@ -121,6 +129,14 @@ type queryMock struct {
 	mutex  sync.Mutex
 }
 
+func (q *queryMock) Init() error {
+	return nil
+}
+
+func (q *queryMock) Start() error {
+	return nil
+}
+
 func (q *queryMock) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
@@ -145,6 +161,14 @@ type indexMock struct {
 	idxID      []int64
 	idxDropID  []int64
 	mutex      sync.Mutex
+}
+
+func (idx *indexMock) Init() error {
+	return nil
+}
+
+func (idx *indexMock) Start() error {
+	return nil
 }
 
 func (idx *indexMock) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
@@ -277,8 +301,8 @@ func TestRootCoord(t *testing.T) {
 	assert.Nil(t, err)
 	randVal := rand.Int()
 
-	Params.TimeTickChannel = fmt.Sprintf("master-time-tick-%d", randVal)
-	Params.StatisticsChannel = fmt.Sprintf("master-statistics-%d", randVal)
+	Params.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
@@ -1264,6 +1288,7 @@ func TestRootCoord(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp8.Status.ErrorCode)
+		time.Sleep(5 * time.Second)
 
 	})
 
@@ -1475,6 +1500,7 @@ func TestRootCoord(t *testing.T) {
 			ts1            = uint64(120)
 			ts2            = uint64(150)
 		)
+		numChan := core.chanTimeTick.GetChanNum()
 		p1 := sessionutil.Session{
 			ServerID: 100,
 		}
@@ -1534,11 +1560,11 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, s.ErrorCode)
 		time.Sleep(1 * time.Second)
 
-		// 2 proxy nodes, 1 master
+		// 2 proxy, 1 rootcoord
 		assert.Equal(t, 3, core.chanTimeTick.GetProxyNum())
 
-		// 3 proxy node channels, 2 master channels
-		assert.Equal(t, 5, core.chanTimeTick.GetChanNum())
+		// add 3 proxy channels
+		assert.Equal(t, 3, core.chanTimeTick.GetChanNum()-numChan)
 	})
 
 	err = core.Stop()
@@ -1706,12 +1732,15 @@ func TestRootCoord(t *testing.T) {
 	})
 
 	t.Run("alloc_error", func(t *testing.T) {
+		core.Stop()
 		core.IDAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 			return 0, 0, fmt.Errorf("id allocator error test")
 		}
 		core.TSOAllocator = func(count uint32) (typeutil.Timestamp, error) {
 			return 0, fmt.Errorf("tso allcoator error test")
 		}
+		core.Init()
+		core.Start()
 		r1 := &rootcoordpb.AllocTimestampRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Undefined,
@@ -1756,8 +1785,8 @@ func TestRootCoord2(t *testing.T) {
 	assert.Nil(t, err)
 	randVal := rand.Int()
 
-	Params.TimeTickChannel = fmt.Sprintf("master-time-tick-%d", randVal)
-	Params.StatisticsChannel = fmt.Sprintf("master-statistics-%d", randVal)
+	Params.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
@@ -1844,7 +1873,7 @@ func TestRootCoord2(t *testing.T) {
 
 		pChan := core.MetaTable.ListCollectionPhysicalChannels()
 		dmlStream, _ := msFactory.NewMsgStream(ctx)
-		dmlStream.AsConsumer(pChan, Params.MsgChannelSubName)
+		dmlStream.AsConsumer([]string{pChan[0]}, Params.MsgChannelSubName)
 		dmlStream.Start()
 
 		msgs := getNotTtMsg(ctx, 2, dmlStream.Chan())
@@ -1902,10 +1931,6 @@ func TestCheckInit(t *testing.T) {
 	assert.NotNil(t, err)
 
 	c.kvBase = &etcdkv.EtcdKV{}
-	err = c.checkInit()
-	assert.NotNil(t, err)
-
-	c.ddReqQueue = make(chan reqTask)
 	err = c.checkInit()
 	assert.NotNil(t, err)
 

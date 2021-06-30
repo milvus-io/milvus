@@ -15,16 +15,16 @@ import (
 	"github.com/milvus-io/milvus/internal/util/rocksmq/client/rocksmq"
 )
 
-type rmqConsumer struct {
+type RmqConsumer struct {
 	c          rocksmq.Consumer
 	msgChannel chan ConsumerMessage
 }
 
-func (rc *rmqConsumer) Subscription() string {
+func (rc *RmqConsumer) Subscription() string {
 	return rc.c.Subscription()
 }
 
-func (rc *rmqConsumer) Chan() <-chan ConsumerMessage {
+func (rc *RmqConsumer) Chan() <-chan ConsumerMessage {
 
 	if rc.msgChannel == nil {
 		rc.msgChannel = make(chan ConsumerMessage)
@@ -44,13 +44,13 @@ func (rc *rmqConsumer) Chan() <-chan ConsumerMessage {
 	return rc.msgChannel
 }
 
-func (rc *rmqConsumer) Seek(id MessageID) error {
+func (rc *RmqConsumer) Seek(id MessageID) error {
 	msgID := id.(*rmqID).messageID
 	return rc.c.Seek(msgID)
 }
 
-func (rc *rmqConsumer) Ack(message ConsumerMessage) {
+func (rc *RmqConsumer) Ack(message ConsumerMessage) {
 }
 
-func (rc *rmqConsumer) Close() {
+func (rc *RmqConsumer) Close() {
 }

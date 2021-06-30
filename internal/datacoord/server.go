@@ -48,15 +48,29 @@ type (
 	Timestamp = typeutil.Timestamp
 )
 
-type dataNodeCreatorFunc func(ctx context.Context, addr string, retryOptions ...retry.Option) (types.DataNode, error)
-type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdEndpoints []string, retryOptions ...retry.Option) (types.RootCoord, error)
+// ServerState type alias
+type ServerState = int64
 
+const (
+	// ServerStateStopped state stands for just created or stopped `Server` instance
+	ServerStateStopped ServerState = 0
+	// ServerStateInitializing state stands initializing `Server` instance
+	ServerStateInitializing ServerState = 1
+	// ServerStateHealthy state stands for healthy `Server` instance
+	ServerStateHealthy ServerState = 2
+)
+
+type dataNodeCreatorFunc func(ctx context.Context, addr string) (types.DataNode, error)
+type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error)
+
+// Server implements `types.Datacoord`
+// handles Data Cooridinator related jobs
 type Server struct {
 	ctx              context.Context
 	serverLoopCtx    context.Context
 	serverLoopCancel context.CancelFunc
 	serverLoopWg     sync.WaitGroup
-	isServing        int64
+	isServing        ServerState
 
 	kvClient          *etcdkv.EtcdKV
 	meta              *meta
@@ -79,6 +93,7 @@ type Server struct {
 	rootCoordClientCreator rootCoordCreatorFunc
 }
 
+// CreateServer create `Server` instance
 func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 	rand.Seed(time.Now().UnixNano())
 	s := &Server{
@@ -91,12 +106,12 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 	return s, nil
 }
 
-func defaultDataNodeCreatorFunc(ctx context.Context, addr string, retryOptions ...retry.Option) (types.DataNode, error) {
-	return datanodeclient.NewClient(ctx, addr, retryOptions...)
+func defaultDataNodeCreatorFunc(ctx context.Context, addr string) (types.DataNode, error) {
+	return datanodeclient.NewClient(ctx, addr)
 }
 
-func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string, etcdEndpoints []string, retryOptions ...retry.Option) (types.RootCoord, error) {
-	return rootcoordclient.NewClient(ctx, metaRootPath, etcdEndpoints, retryOptions...)
+func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
+	return rootcoordclient.NewClient(ctx, metaRootPath, etcdEndpoints)
 }
 
 // Register register data service at etcd
@@ -107,11 +122,19 @@ func (s *Server) Register() error {
 	return nil
 }
 
+// Init change server state to Initializing
 func (s *Server) Init() error {
-	atomic.StoreInt64(&s.isServing, 1)
+	atomic.StoreInt64(&s.isServing, ServerStateInitializing)
 	return nil
 }
 
+// Start initialize `Server` members and start loops, follow steps are taken:
+// 1. initialize message factory parameters
+// 2. initialize root coord client, meta, datanode cluster, segment info channel,
+//		allocator, segment manager
+// 3. start service discovery and server loops, which includes message stream handler (segment statistics,datanode tt)
+//		datanodes etcd watch, etcd alive check and flush completed status check
+// 4. set server state to Healthy
 func (s *Server) Start() error {
 	var err error
 	m := map[string]interface{}{
@@ -151,7 +174,7 @@ func (s *Server) Start() error {
 
 	s.startServerLoop()
 
-	atomic.StoreInt64(&s.isServing, 2)
+	atomic.StoreInt64(&s.isServing, ServerStateHealthy)
 	log.Debug("DataCoordinator startup success")
 	return nil
 }
@@ -188,8 +211,29 @@ func (s *Server) initServiceDiscovery() error {
 		return err
 	}
 
-	s.eventCh = s.session.WatchServices(typeutil.DataNodeRole, rev)
+	s.eventCh = s.session.WatchServices(typeutil.DataNodeRole, rev+1)
 	return nil
+}
+
+func (s *Server) loadDataNodes() []*datapb.DataNodeInfo {
+	if s.session == nil {
+		log.Warn("load data nodes but session is nil")
+		return []*datapb.DataNodeInfo{}
+	}
+	sessions, _, err := s.session.GetSessions(typeutil.DataNodeRole)
+	if err != nil {
+		log.Warn("load data nodes faild", zap.Error(err))
+		return []*datapb.DataNodeInfo{}
+	}
+	datanodes := make([]*datapb.DataNodeInfo, 0, len(sessions))
+	for _, session := range sessions {
+		datanodes = append(datanodes, &datapb.DataNodeInfo{
+			Address:  session.Address,
+			Version:  session.ServerID,
+			Channels: []*datapb.ChannelStatus{},
+		})
+	}
+	return datanodes
 }
 
 func (s *Server) startSegmentManager() {
@@ -368,12 +412,14 @@ func (s *Server) startWatchService(ctx context.Context) {
 				log.Info("Received datanode register",
 					zap.String("address", datanode.Address),
 					zap.Int64("serverID", datanode.Version))
-				s.cluster.register(datanode)
+				//s.cluster.register(datanode)
+				s.cluster.refresh(s.loadDataNodes())
 			case sessionutil.SessionDelEvent:
 				log.Info("Received datanode unregister",
 					zap.String("address", datanode.Address),
 					zap.Int64("serverID", datanode.Version))
-				s.cluster.unregister(datanode)
+				//s.cluster.unregister(datanode)
+				s.cluster.refresh(s.loadDataNodes())
 			default:
 				log.Warn("receive unknown service event type",
 					zap.Any("type", event.EventType))
@@ -450,7 +496,7 @@ func (s *Server) handleFlushingSegments(ctx context.Context) {
 
 func (s *Server) initRootCoordClient() error {
 	var err error
-	if s.rootCoordClient, err = s.rootCoordClientCreator(s.ctx, Params.MetaRootPath, Params.EtcdEndpoints, retry.Attempts(300)); err != nil {
+	if s.rootCoordClient, err = s.rootCoordClientCreator(s.ctx, Params.MetaRootPath, Params.EtcdEndpoints); err != nil {
 		return err
 	}
 	if err = s.rootCoordClient.Init(); err != nil {
@@ -459,12 +505,16 @@ func (s *Server) initRootCoordClient() error {
 	return s.rootCoordClient.Start()
 }
 
+// Stop do the Server finalize processes
+// it checks the server status is healthy, if not, just quit
+// if Server is healthy, set server state to stopped, release etcd session,
+//	stop message stream client and stop server loops
 func (s *Server) Stop() error {
-	if !atomic.CompareAndSwapInt64(&s.isServing, 2, 0) {
+	if !atomic.CompareAndSwapInt64(&s.isServing, ServerStateHealthy, ServerStateStopped) {
 		return nil
 	}
 	log.Debug("DataCoord server shutdown")
-	atomic.StoreInt64(&s.isServing, 0)
+	atomic.StoreInt64(&s.isServing, ServerStateStopped)
 	s.cluster.releaseSessions()
 	s.segmentInfoStream.Close()
 	s.flushMsgStream.Close()

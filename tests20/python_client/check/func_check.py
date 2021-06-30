@@ -101,12 +101,17 @@ class ResponseChecker:
         return True
 
     @staticmethod
-    def check_collection_property(collection, func_name, check_items):
+    def check_collection_property(res, func_name, check_items):
         exp_func_name = "init_collection"
         exp_func_name_2 = "construct_from_dataframe"
         if func_name != exp_func_name and func_name != exp_func_name_2:
             log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
-        if not isinstance(collection, Collection):
+        if isinstance(res, Collection):
+            collection = res
+        elif isinstance(res, tuple):
+            collection = res[0]
+            log.debug(collection.schema)
+        else:
             raise Exception("The result to check isn't collection type object")
         if len(check_items) == 0:
             raise Exception("No expect values found in the check task")
@@ -181,25 +186,8 @@ class ResponseChecker:
             raise Exception("No expect values found in the check task")
         exp_res = check_items.get("exp_res", None)
         if exp_res and isinstance(query_res, list):
-            # assert exp_res == query_res
-            assert len(exp_res) == len(query_res)
-            for i in range(len(exp_res)):
-                assert_entity_equal(exp=exp_res[i], actual=query_res[i])
+            assert pc.equal_entities_list(exp=exp_res, actual=query_res)
+            # assert len(exp_res) == len(query_res)
+            # for i in range(len(exp_res)):
+            #     assert_entity_equal(exp=exp_res[i], actual=query_res[i])
 
-
-def assert_entity_equal(exp, actual):
-    """
-    compare two entities
-    {"int64": 0, "float": 0.0, "float_vec": [0.09111554112502457, ..., 0.08652634258062468]}
-    :param exp: exp entity
-    :param actual: actual entity
-    :return: bool
-    """
-    assert actual.keys() == exp.keys()
-    for field, value in exp.items():
-        if isinstance(value, list):
-            assert len(actual[field]) == len(exp[field])
-            for i in range(len(exp[field])):
-                assert abs(actual[field][i] - exp[field][i]) < ct.epsilon
-        else:
-            assert actual[field] == exp[field]

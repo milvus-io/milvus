@@ -6,7 +6,6 @@ from checker import CreateChecker, InsertFlushChecker, \
     SearchChecker, QueryChecker, IndexChecker, Op
 from chaos_opt import ChaosOpt
 from utils.util_log import test_log as log
-from base.collection_wrapper import ApiCollectionWrapper
 from common import common_func as cf
 from chaos_commons import *
 from common.common_type import CaseLabel
@@ -122,13 +121,13 @@ class TestChaos(TestChaosBase):
         log.debug("******1st assert before chaos: ")
         assert_statistic(self.health_checkers)
 
-        # reset counting
-        reset_counting(self.health_checkers)
-
         # apply chaos object
         chaos_opt = ChaosOpt(chaos_config['kind'])
         chaos_opt.create_chaos_object(chaos_config)
         log.debug("chaos injected")
+
+        # reset counting
+        reset_counting(self.health_checkers)
 
         # wait 120s
         sleep(constants.WAIT_PER_OP*4)
@@ -155,19 +154,17 @@ class TestChaos(TestChaosBase):
             log.debug(f"Thread {k} is_alive(): {t.is_alive()}")
         sleep(2)
         # reconnect if needed
-        sleep(constants.WAIT_PER_OP)
+        sleep(constants.WAIT_PER_OP*2)
         reconnect(connections, self.host, self.port)
 
         # reset counting again
         reset_counting(self.health_checkers)
 
         # wait 300s (varies by feature)
-        sleep(constants.WAIT_PER_OP*1.5)
+        sleep(constants.WAIT_PER_OP*2.5)
 
         # assert statistic: all ops success again
         log.debug("******3rd assert after chaos deleted: ")
         assert_statistic(self.health_checkers)
 
         log.debug("*********************Chaos Test Completed**********************")
-
-

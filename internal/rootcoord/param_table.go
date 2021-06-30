@@ -30,6 +30,7 @@ type ParamTable struct {
 	Port    int
 
 	PulsarAddress           string
+	RocksmqPath             string
 	EtcdEndpoints           []string
 	MetaRootPath            string
 	KvRootPath              string
@@ -61,6 +62,7 @@ func (p *ParamTable) Init() {
 		}
 
 		p.initPulsarAddress()
+		p.initRocksmqPath()
 		p.initEtcdEndpoints()
 		p.initMetaRootPath()
 		p.initKvRootPath()
@@ -89,6 +91,14 @@ func (p *ParamTable) initPulsarAddress() {
 		panic(err)
 	}
 	p.PulsarAddress = addr
+}
+
+func (p *ParamTable) initRocksmqPath() {
+	path, err := p.Load("_RocksmqPath")
+	if err != nil {
+		panic(err)
+	}
+	p.RocksmqPath = path
 }
 
 func (p *ParamTable) initEtcdEndpoints() {

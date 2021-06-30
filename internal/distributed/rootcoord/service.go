@@ -18,7 +18,6 @@ import (
 	"net"
 	"strconv"
 	"sync"
-	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -38,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
@@ -58,9 +56,9 @@ type Server struct {
 	indexCoord types.IndexCoord
 	queryCoord types.QueryCoord
 
-	newIndexCoordClient func(string, []string, ...retry.Option) types.IndexCoord
-	newDataCoordClient  func(string, []string, ...retry.Option) types.DataCoord
-	newQueryCoordClient func(string, []string, ...retry.Option) types.QueryCoord
+	newIndexCoordClient func(string, []string) types.IndexCoord
+	newDataCoordClient  func(string, []string) types.DataCoord
+	newQueryCoordClient func(string, []string) types.QueryCoord
 
 	closer io.Closer
 }
@@ -82,46 +80,23 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 }
 
 func (s *Server) setClient() {
-	ctx := context.Background()
-
-	s.newDataCoordClient = func(etcdMetaRoot string, etcdEndpoints []string, retryOptions ...retry.Option) types.DataCoord {
-		dsClient, err := dsc.NewClient(s.ctx, etcdMetaRoot, etcdEndpoints, retryOptions...)
+	s.newDataCoordClient = func(etcdMetaRoot string, etcdEndpoints []string) types.DataCoord {
+		dsClient, err := dsc.NewClient(s.ctx, etcdMetaRoot, etcdEndpoints)
 		if err != nil {
-			panic(err)
-		}
-		if err := dsClient.Init(); err != nil {
-			panic(err)
-		}
-		if err := dsClient.Start(); err != nil {
-			panic(err)
-		}
-		if err := funcutil.WaitForComponentInitOrHealthy(ctx, dsClient, "DataCoord", 1000000, 200*time.Millisecond); err != nil {
 			panic(err)
 		}
 		return dsClient
 	}
-	s.newIndexCoordClient = func(metaRootPath string, etcdEndpoints []string, retryOptions ...retry.Option) types.IndexCoord {
-		isClient, err := isc.NewClient(s.ctx, metaRootPath, etcdEndpoints, retryOptions...)
+	s.newIndexCoordClient = func(metaRootPath string, etcdEndpoints []string) types.IndexCoord {
+		isClient, err := isc.NewClient(s.ctx, metaRootPath, etcdEndpoints)
 		if err != nil {
-			panic(err)
-		}
-		if err := isClient.Init(); err != nil {
-			panic(err)
-		}
-		if err := isClient.Start(); err != nil {
 			panic(err)
 		}
 		return isClient
 	}
-	s.newQueryCoordClient = func(metaRootPath string, etcdEndpoints []string, retryOptions ...retry.Option) types.QueryCoord {
-		qsClient, err := qsc.NewClient(s.ctx, metaRootPath, etcdEndpoints, retryOptions...)
+	s.newQueryCoordClient = func(metaRootPath string, etcdEndpoints []string) types.QueryCoord {
+		qsClient, err := qsc.NewClient(s.ctx, metaRootPath, etcdEndpoints)
 		if err != nil {
-			panic(err)
-		}
-		if err := qsClient.Init(); err != nil {
-			panic(err)
-		}
-		if err := qsClient.Start(); err != nil {
 			panic(err)
 		}
 		return qsClient
@@ -165,7 +140,7 @@ func (s *Server) init() error {
 	log.Debug("RootCoord", zap.Any("State", internalpb.StateCode_Initializing))
 	s.rootCoord.SetNewProxyClient(
 		func(se *sessionutil.Session) (types.Proxy, error) {
-			cli, err := pnc.NewClient(s.ctx, se.Address, retry.Attempts(300))
+			cli, err := pnc.NewClient(s.ctx, se.Address)
 			if err != nil {
 				return nil, err
 			}
@@ -181,7 +156,7 @@ func (s *Server) init() error {
 
 	if s.newDataCoordClient != nil {
 		log.Debug("RootCoord start to create DataCoord client")
-		dataCoord := s.newDataCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, retry.Attempts(300))
+		dataCoord := s.newDataCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints)
 		if err := s.rootCoord.SetDataCoord(s.ctx, dataCoord); err != nil {
 			panic(err)
 		}
@@ -189,7 +164,7 @@ func (s *Server) init() error {
 	}
 	if s.newIndexCoordClient != nil {
 		log.Debug("RootCoord start to create IndexCoord client")
-		indexCoord := s.newIndexCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, retry.Attempts(300))
+		indexCoord := s.newIndexCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints)
 		if err := s.rootCoord.SetIndexCoord(indexCoord); err != nil {
 			panic(err)
 		}
@@ -197,7 +172,7 @@ func (s *Server) init() error {
 	}
 	if s.newQueryCoordClient != nil {
 		log.Debug("RootCoord start to create QueryCoord client")
-		queryCoord := s.newQueryCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints, retry.Attempts(300))
+		queryCoord := s.newQueryCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints)
 		if err := s.rootCoord.SetQueryCoord(queryCoord); err != nil {
 			panic(err)
 		}

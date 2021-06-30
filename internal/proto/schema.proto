@@ -120,4 +120,5 @@ message SearchResultData {
   repeated FieldData fields_data = 3;
   repeated float scores = 4;
   IDs ids = 5;
+  repeated int64 topks = 6;
 }

@@ -138,6 +138,7 @@ func TestStream_GlobalMmq_Func(t *testing.T) {
 	assert.Equal(t, len(Mmq.consumers), 0, "global mmq channel error")
 }
 
+// produce msg after consumer created
 func TestStream_MemMsgStream_Produce(t *testing.T) {
 	channels := []string{"red", "blue", "black", "green"}
 	produceStream := createProducer(channels)
@@ -154,6 +155,33 @@ func TestStream_MemMsgStream_Produce(t *testing.T) {
 	err := produceStream.Produce(&msgPack)
 	if err != nil {
 		log.Fatalf("new msgstream error = %v", err)
+	}
+
+	msg := consumerStreams[hashValue].Consume()
+	if msg == nil {
+		log.Fatalf("msgstream consume error")
+	}
+
+	produceStream.Close()
+}
+
+// produce msg begore consumer created
+func TestStream_MemMsgStream_Consume(t *testing.T) {
+	channels := []string{"red", "blue", "black", "green"}
+	produceStream := createProducer(channels)
+	defer produceStream.Close()
+
+	msgPack := MsgPack{}
+	var hashValue uint32 = 3
+	msgPack.Msgs = append(msgPack.Msgs, mGetTsMsg(commonpb.MsgType_Search, 1, hashValue))
+	err := produceStream.Produce(&msgPack)
+	if err != nil {
+		log.Fatalf("new msgstream error = %v", err)
+	}
+
+	consumerStreams := createCondumers(channels)
+	for _, cs := range consumerStreams {
+		defer cs.Close()
 	}
 
 	msg := consumerStreams[hashValue].Consume()

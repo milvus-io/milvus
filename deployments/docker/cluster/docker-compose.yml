@@ -10,15 +10,11 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
-    networks:
-      - milvus
 
   pulsar:
     container_name: milvus-pulsar
     image: apachepulsar/pulsar:latest
     command: bin/pulsar standalone
-    networks:
-      - milvus
 
   minio:
     container_name: milvus-minio
@@ -32,129 +28,108 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
-    networks:
-      - milvus
 
   rootcoord:
     container_name: milvus-rootcoord
-    image: milvusdb/milvus:latest
+    image: milvusdb/milvus:v2.0.0-rc1-20210628-b87baa1
     command: ["milvus", "run", "rootcoord"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
       PULSAR_ADDRESS: pulsar://pulsar:6650
-      DATA_SERVICE_ADDRESS: datacoord:13333
-      INDEX_SERVICE_ADDRESS: indexcoord:31000
-      QUERY_SERVICE_ADDRESS: querycoord:19531
+      ROOT_COORD_ADDRESS: rootcoord:53100
     depends_on:
       - "etcd"
       - "pulsar"
       - "minio"
-    networks:
-      - milvus
 
   proxy:
     container_name: milvus-proxy
-    image: milvusdb/milvus:latest
+    image: milvusdb/milvus:v2.0.0-rc1-20210628-b87baa1
     command: ["milvus", "run", "proxy"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
       PULSAR_ADDRESS: pulsar://pulsar:6650
-      MASTER_ADDRESS: master:53100
-      DATA_SERVICE_ADDRESS: datacoord:13333
-      INDEX_SERVICE_ADDRESS: indexcoord:31000
-      QUERY_SERVICE_ADDRESS: querycoord:19531
     ports:
       - "19530:19530"
-    networks:
-      - milvus
 
   querycoord:
     container_name: milvus-querycoord
-    image: milvusdb/milvus:latest
+    image: milvusdb/milvus:v2.0.0-rc1-20210628-b87baa1
     command: ["milvus", "run", "querycoord"]
     environment:
-      MASTER_ADDRESS: master:53100
-      DATA_SERVICE_ADDRESS: datacoord:13333
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      PULSAR_ADDRESS: pulsar://pulsar:6650
+      QUERY_COORD_ADDRESS: querycoord:19531
     depends_on:
       - "etcd"
       - "pulsar"
       - "minio"
-    networks:
-      - milvus
 
   querynode:
     container_name: milvus-querynode
-    image: milvusdb/milvus:latest
+    image: milvusdb/milvus:v2.0.0-rc1-20210628-b87baa1
     command: ["milvus", "run", "querynode"]
     environment:
+      ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
       PULSAR_ADDRESS: pulsar://pulsar:6650
-      MASTER_ADDRESS: master:53100
-      DATA_SERVICE_ADDRESS: datacoord:13333
-      INDEX_SERVICE_ADDRESS: indexcoord:31000
-      QUERY_SERVICE_ADDRESS: querycoord:19531
     depends_on:
       - "querycoord"
-    networks:
-      - milvus
 
   indexcoord:
     container_name: milvus-indexcoord
-    image: milvusdb/milvus:latest
+    image: milvusdb/milvus:v2.0.0-rc1-20210628-b87baa1
     command: ["milvus", "run", "indexcoord"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
-      MASTER_ADDRESS: master:53100
+      PULSAR_ADDRESS: pulsar://pulsar:6650
+      INDEX_COORD_ADDRESS: indexcoord:31000
     depends_on:
       - "etcd"
       - "pulsar"
       - "minio"
-    networks:
-      - milvus
 
   indexnode:
     container_name: milvus-indexnode
-    image: milvusdb/milvus:latest
+    image: milvusdb/milvus:v2.0.0-rc1-20210628-b87baa1
     command: ["milvus", "run", "indexnode"]
     environment:
+      ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
-      INDEX_SERVICE_ADDRESS: indexcoord:31000
+      PULSAR_ADDRESS: pulsar://pulsar:6650
+      INDEX_COORD_ADDRESS: indexcoord:31000
     depends_on:
       - "indexcoord"
-    networks:
-      - milvus
 
   datacoord:
     container_name: milvus-datacoord
-    image: milvusdb/milvus:latest
+    image: milvusdb/milvus:v2.0.0-rc1-20210628-b87baa1
     command: ["milvus", "run", "datacoord"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
       PULSAR_ADDRESS: pulsar://pulsar:6650
-      MASTER_ADDRESS: master:53100
+      DATA_COORD_ADDRESS: datacoord:13333
     depends_on:
       - "etcd"
       - "pulsar"
       - "minio"
-    networks:
-      - milvus
 
   datanode:
     container_name: milvus-datanode
-    image: milvusdb/milvus:latest
+    image: milvusdb/milvus:v2.0.0-rc1-20210628-b87baa1
     command: ["milvus", "run", "datanode"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
       PULSAR_ADDRESS: pulsar://pulsar:6650
-      MASTER_ADDRESS: master:53100
-      DATA_SERVICE_ADDRESS: datacoord:13333
     depends_on:
       - "datacoord"
-    networks:
-      - milvus
 
 networks:
-  milvus:
+  default:
+    name: milvus
