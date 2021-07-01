@@ -165,7 +165,7 @@ func CountOne(n uint8) int32 {
 // HAMMIN distance
 func CalcHammin(dim int64, left []byte, lIndex int64, right []byte, rIndex int64) int32 {
 	singleBitLen := SingleBitLen(dim)
-	numBytes := int64(singleBitLen / 8)
+	numBytes := singleBitLen / 8
 	lFrom := lIndex * numBytes
 	rFrom := rIndex * numBytes
 

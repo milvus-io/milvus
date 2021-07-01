@@ -162,7 +162,7 @@ func TestCalcFloatDistance(t *testing.T) {
 ////////////////////////////////////////////////////////////////////////////////
 func CreateBinaryArray(n int64, dim int64) []byte {
 	rand.Seed(time.Now().UnixNano())
-	num := int64(n * dim / 8)
+	num := n * dim / 8
 	if num*8 < n*dim {
 		num = num + 1
 	}
