@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
@@ -348,4 +349,10 @@ func (s *Server) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequ
 
 func (s *Server) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
 	return s.rootCoord.ReleaseDQLMessageStream(ctx, in)
+}
+func (s *Server) SegmentFlushCompleted(ctx context.Context, in *internalpb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
+	return s.rootCoord.SegmentFlushCompleted(ctx, in)
+}
+func (s *Server) AddNewSegment(ctx context.Context, in *datapb.SegmentMsg) (*commonpb.Status, error) {
+	return s.rootCoord.AddNewSegment(ctx, in)
 }

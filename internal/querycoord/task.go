@@ -180,7 +180,7 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 		},
 		CollectionID: collectionID,
 	}
-	showPartitionResponse, err := lct.rootCoord.ShowPartitions(lct.ctx, showPartitionRequest)
+	showPartitionResponse, err := lct.rootCoord.ShowPartitions(ctx, showPartitionRequest)
 	if err != nil {
 		status.Reason = err.Error()
 		lct.result = status
@@ -703,8 +703,8 @@ func (rpt *ReleasePartitionTask) Execute(ctx context.Context) error {
 			req.NodeID = nodeID
 			releasePartitionTask := &ReleasePartitionTask{
 				BaseTask: BaseTask{
-					ctx:              rpt.ctx,
-					Condition:        NewTaskCondition(rpt.ctx),
+					ctx:              ctx,
+					Condition:        NewTaskCondition(ctx),
 					triggerCondition: querypb.TriggerCondition_grpcRequest,
 				},
 
@@ -1216,7 +1216,7 @@ func (lbt *LoadBalanceTask) Execute(ctx context.Context) error {
 						CollectionID: collectionID,
 						PartitionID:  partitionID,
 					}
-					recoveryInfo, err := lbt.dataCoord.GetRecoveryInfo(lbt.ctx, getRecoveryInfo)
+					recoveryInfo, err := lbt.dataCoord.GetRecoveryInfo(ctx, getRecoveryInfo)
 					if err != nil {
 						status.Reason = err.Error()
 						lbt.result = status

@@ -11,7 +11,14 @@ services:
 
   pulsar:
     image: apachepulsar/pulsar:latest
-    command: bin/pulsar standalone
+    command: >
+      /bin/sh -c "
+                  echo "" >> /pulsar/conf/standalone.conf &&
+                  echo "maxMessageSize=104857600" >> /pulsar/conf/standalone.conf &&
+                  echo "" >> /pulsar/conf/standalone.conf &&
+                  echo "nettyMaxFrameSizeBytes=104857600" >> /pulsar/conf/standalone.conf &&
+                  sed -i 's/^defaultRetentionTimeInMinutes=.*/defaultRetentionTimeInMinutes=10080/' /pulsar/conf/broker.conf && \
+                  bin/pulsar standalone"
     ports:
       - "6650:6650"
       - "18080:8080"

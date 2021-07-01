@@ -1907,3 +1907,113 @@ func (c *Core) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseD
 	}
 	return c.proxyClientManager.ReleaseDQLMessageStream(ctx, in)
 }
+
+func (c *Core) SegmentFlushCompleted(ctx context.Context, in *internalpb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
+	code := c.stateCode.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+	if in.Base.MsgType != commonpb.MsgType_SegmentFlushDone {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("SegmentFlushDone with incorrect msgtype = %s", commonpb.MsgType_name[int32(in.Base.MsgType)]),
+		}, nil
+	}
+	segID := in.SegmentID
+	log.Debug("flush segment", zap.Int64("id", segID))
+
+	coll, err := c.MetaTable.GetCollectionBySegmentID(segID)
+	if err != nil {
+		log.Warn("GetCollectionBySegmentID error", zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("GetCollectionBySegmentID error = %v", err),
+		}, nil
+	}
+	err = c.MetaTable.AddFlushedSegment(segID)
+	if err != nil {
+		log.Warn("AddFlushedSegment error", zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("AddFlushedSegment error = %v", err),
+		}, nil
+	}
+
+	if len(coll.FieldIndexes) == 0 {
+		log.Debug("no index params on collection", zap.String("collection_name", coll.Schema.Name))
+	}
+
+	var segIdxInfos []*etcdpb.SegmentIndexInfo
+	for _, f := range coll.FieldIndexes {
+		fieldSch, err := GetFieldSchemaByID(coll, f.FiledID)
+		if err != nil {
+			log.Warn("field schema not found", zap.Int64("field id", f.FiledID))
+			continue
+		}
+
+		idxInfo, err := c.MetaTable.GetIndexByID(f.IndexID)
+		if err != nil {
+			log.Warn("index not found", zap.Int64("index id", f.IndexID))
+			continue
+		}
+
+		info := etcdpb.SegmentIndexInfo{
+			SegmentID:   segID,
+			FieldID:     fieldSch.FieldID,
+			IndexID:     idxInfo.IndexID,
+			EnableIndex: false,
+		}
+		info.BuildID, err = c.BuildIndex(ctx, segID, fieldSch, idxInfo, true)
+		if err == nil && info.BuildID != 0 {
+			info.EnableIndex = true
+		} else {
+			log.Error("build index fail", zap.Int64("buildid", info.BuildID), zap.Error(err))
+		}
+
+		segIdxInfos = append(segIdxInfos, &info)
+	}
+	if len(segIdxInfos) > 0 {
+		_, err = c.MetaTable.AddIndex(segIdxInfos, "", "")
+		if err != nil {
+			log.Error("AddIndex fail", zap.String("err", err.Error()))
+			return &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("AddIndex error = %v", err),
+			}, nil
+		}
+	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+func (c *Core) AddNewSegment(ctx context.Context, in *datapb.SegmentMsg) (*commonpb.Status, error) {
+	code := c.stateCode.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+	if in.Base.MsgType != commonpb.MsgType_SegmentInfo {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("AddNewSegment with incorrect msgtype = %s", commonpb.MsgType_name[int32(in.Base.MsgType)]),
+		}, nil
+	}
+	if _, err := c.MetaTable.AddSegment([]*datapb.SegmentInfo{in.Segment}, "", ""); err != nil {
+		log.Debug("add segment info meta table failed ", zap.String("error", err.Error()))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("add segment info meta table failed, error = %v", err),
+		}, nil
+	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}

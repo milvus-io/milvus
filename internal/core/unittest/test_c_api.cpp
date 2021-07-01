@@ -227,7 +227,7 @@ TEST(CApiTest, SearchTest) {
     timestamps.push_back(1);
 
     CQueryResult search_result;
-    auto res = Search(segment, plan, placeholderGroups.data(), timestamps.data(), 1, &search_result);
+    auto res = Search(segment, plan, placeholderGroup, timestamps[0], &search_result);
     ASSERT_EQ(res.error_code, Success);
 
     DeletePlan(plan);
@@ -310,7 +310,7 @@ TEST(CApiTest, SearchTestWithExpr) {
     timestamps.push_back(1);
 
     CQueryResult search_result;
-    auto res = Search(segment, plan, placeholderGroups.data(), timestamps.data(), 1, &search_result);
+    auto res = Search(segment, plan, placeholderGroup, timestamps[0], &search_result);
     ASSERT_EQ(res.error_code, Success);
 
     DeletePlan(plan);
@@ -626,9 +626,9 @@ TEST(CApiTest, Reduce) {
     std::vector<CQueryResult> results;
     CQueryResult res1;
     CQueryResult res2;
-    auto res = Search(segment, plan, placeholderGroups.data(), timestamps.data(), 1, &res1);
+    auto res = Search(segment, plan, placeholderGroup, timestamps[0], &res1);
     assert(res.error_code == Success);
-    res = Search(segment, plan, placeholderGroups.data(), timestamps.data(), 1, &res2);
+    res = Search(segment, plan, placeholderGroup, timestamps[0], &res2);
     assert(res.error_code == Success);
     results.push_back(res1);
     results.push_back(res2);
@@ -738,9 +738,9 @@ TEST(CApiTest, ReduceSearchWithExpr) {
     std::vector<CQueryResult> results;
     CQueryResult res1;
     CQueryResult res2;
-    auto res = Search(segment, plan, placeholderGroups.data(), timestamps.data(), 1, &res1);
+    auto res = Search(segment, plan, placeholderGroup, timestamps[0], &res1);
     assert(res.error_code == Success);
-    res = Search(segment, plan, placeholderGroups.data(), timestamps.data(), 1, &res2);
+    res = Search(segment, plan, placeholderGroup, timestamps[0], &res2);
     assert(res.error_code == Success);
     results.push_back(res1);
     results.push_back(res2);
@@ -924,8 +924,7 @@ TEST(CApiTest, UpdateSegmentIndex_Without_Predicate) {
     Timestamp time = 10000000;
 
     CQueryResult c_search_result_on_smallIndex;
-    auto res_before_load_index =
-        Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     assert(res_before_load_index.error_code == Success);
 
     // load index to segment
@@ -975,7 +974,7 @@ TEST(CApiTest, UpdateSegmentIndex_Without_Predicate) {
     assert(status.error_code == Success);
 
     CQueryResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     auto search_result_on_raw_index_json = QueryResultToJson(*search_result_on_raw_index);
@@ -1045,8 +1044,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_Without_Predicate) {
     Timestamp time = 10000000;
 
     CQueryResult c_search_result_on_smallIndex;
-    auto res_before_load_index =
-        Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     assert(res_before_load_index.error_code == Success);
 
     // load index to segment
@@ -1096,7 +1094,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_Without_Predicate) {
     assert(status.error_code == Success);
 
     CQueryResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     auto search_result_on_raw_index_json = QueryResultToJson(*search_result_on_raw_index);
@@ -1182,8 +1180,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Range) {
     Timestamp time = 10000000;
 
     CQueryResult c_search_result_on_smallIndex;
-    auto res_before_load_index =
-        Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     assert(res_before_load_index.error_code == Success);
 
     // load index to segment
@@ -1234,7 +1231,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Range) {
     assert(status.error_code == Success);
 
     CQueryResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
@@ -1334,8 +1331,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Range) {
     Timestamp time = 10000000;
 
     CQueryResult c_search_result_on_smallIndex;
-    auto res_before_load_index =
-        Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     assert(res_before_load_index.error_code == Success);
 
     // load index to segment
@@ -1386,7 +1382,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Range) {
     assert(status.error_code == Success);
 
     CQueryResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
@@ -1472,8 +1468,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Term) {
     Timestamp time = 10000000;
 
     CQueryResult c_search_result_on_smallIndex;
-    auto res_before_load_index =
-        Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     assert(res_before_load_index.error_code == Success);
 
     // load index to segment
@@ -1524,7 +1519,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Term) {
     assert(status.error_code == Success);
 
     CQueryResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
@@ -1675,8 +1670,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Term) {
     Timestamp time = 10000000;
 
     CQueryResult c_search_result_on_smallIndex;
-    auto res_before_load_index =
-        Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     assert(res_before_load_index.error_code == Success);
 
     // load index to segment
@@ -1727,7 +1721,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Term) {
     assert(status.error_code == Success);
 
     CQueryResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
@@ -1814,8 +1808,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Range) {
     Timestamp time = 10000000;
 
     CQueryResult c_search_result_on_smallIndex;
-    auto res_before_load_index =
-        Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     assert(res_before_load_index.error_code == Success);
 
     // load index to segment
@@ -1867,7 +1860,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Range) {
     assert(status.error_code == Success);
 
     CQueryResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
@@ -1967,8 +1960,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Range) {
     Timestamp time = 10000000;
 
     CQueryResult c_search_result_on_smallIndex;
-    auto res_before_load_index =
-        Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     ASSERT_TRUE(res_before_load_index.error_code == Success) << res_before_load_index.error_msg;
 
     // load index to segment
@@ -2020,7 +2012,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Range) {
     assert(status.error_code == Success);
 
     CQueryResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
@@ -2106,8 +2098,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Term) {
     Timestamp time = 10000000;
 
     CQueryResult c_search_result_on_smallIndex;
-    auto res_before_load_index =
-        Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     assert(res_before_load_index.error_code == Success);
 
     // load index to segment
@@ -2159,7 +2150,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Term) {
     assert(status.error_code == Success);
 
     CQueryResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     std::vector<CQueryResult> results;
@@ -2317,8 +2308,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Term) {
     Timestamp time = 10000000;
 
     CQueryResult c_search_result_on_smallIndex;
-    auto res_before_load_index =
-        Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     assert(res_before_load_index.error_code == Success);
 
     // load index to segment
@@ -2370,7 +2360,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Term) {
     assert(status.error_code == Success);
 
     CQueryResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     std::vector<CQueryResult> results;
@@ -2581,7 +2571,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     assert(status.error_code == Success);
 
     CQueryResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
@@ -2748,7 +2738,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     assert(status.error_code == Success);
 
     CQueryResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroups.data(), &time, 1, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
