@@ -238,10 +238,10 @@ func TestCalcHamminDistance(t *testing.T) {
 
 	left := CreateBinaryArray(leftNum, dim)
 
-	_, err := CalcHamminDistance(0, left, left)
-	assert.Error(t, err)
+	_, e := CalcHamminDistance(0, left, left)
+	assert.Error(t, e)
 
-	distances, err = CalcHamminDistance(dim, left, left)
+	distances, err := CalcHamminDistance(dim, left, left)
 	assert.Nil(t, err)
 
 	n := CalcHammin(dim, left, 0, left, 0)
