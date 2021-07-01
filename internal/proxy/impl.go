@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/distance"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -1571,6 +1572,147 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		},
 	}, nil
 
+}
+
+func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error) {
+	param, _ := GetAttrByKeyFromRepeatedKV("metric", request.GetParams())
+	metric, err := distance.ValidateMetricType(param)
+	if err != nil {
+		return &milvuspb.CalcDistanceResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	retrieveTask := func(ids *milvuspb.VectorIDs) (*milvuspb.RetrieveResults, error) {
+		outputFields := []string{ids.FieldName}
+		retrieveRequest := &milvuspb.RetrieveRequest{
+			DbName:         "",
+			CollectionName: ids.CollectionName,
+			PartitionNames: ids.PartitionNames,
+			Ids:            ids.IdArray,
+			OutputFields:   outputFields,
+		}
+
+		return node.Retrieve(ctx, retrieveRequest)
+	}
+
+	vectorsLeft := request.GetOpLeft().GetDataArray()
+	opLeft := request.GetOpLeft().GetIdArray()
+	if opLeft != nil {
+		result, err := retrieveTask(opLeft)
+		if err != nil {
+			return &milvuspb.CalcDistanceResults{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+			}, nil
+		}
+
+		for _, fieldData := range result.FieldsData {
+			if fieldData.FieldName == opLeft.FieldName {
+				vectorsLeft = fieldData.GetVectors()
+				break
+			}
+		}
+	}
+
+	vectorsRight := request.GetOpRight().GetDataArray()
+	opRight := request.GetOpRight().GetIdArray()
+	if opRight != nil {
+		result, err := retrieveTask(opRight)
+		if err != nil {
+			return &milvuspb.CalcDistanceResults{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+			}, nil
+		}
+
+		for _, fieldData := range result.FieldsData {
+			if fieldData.FieldName == opRight.FieldName {
+				vectorsRight = fieldData.GetVectors()
+				break
+			}
+		}
+	}
+
+	if vectorsLeft.Dim == vectorsRight.Dim && vectorsLeft.GetFloatVector() != nil && vectorsRight.GetFloatVector() != nil {
+		distances, err := distance.CalcFloatDistance(vectorsLeft.Dim, vectorsLeft.GetFloatVector().Data, vectorsRight.GetFloatVector().Data, metric)
+		if err != nil {
+			return &milvuspb.CalcDistanceResults{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+			}, nil
+		}
+
+		return &milvuspb.CalcDistanceResults{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success, Reason: ""},
+			Array: &milvuspb.CalcDistanceResults_FloatDist{
+				FloatDist: &schemapb.FloatArray{
+					Data: distances,
+				},
+			},
+		}, nil
+	}
+
+	if vectorsLeft.Dim == vectorsRight.Dim && vectorsLeft.GetBinaryVector() != nil && vectorsRight.GetBinaryVector() != nil {
+		hammin, err := distance.CalcHamminDistance(vectorsLeft.Dim, vectorsLeft.GetBinaryVector(), vectorsRight.GetBinaryVector())
+		if err != nil {
+			return &milvuspb.CalcDistanceResults{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+			}, nil
+		}
+
+		if metric == distance.HAMMING {
+			return &milvuspb.CalcDistanceResults{
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success, Reason: ""},
+				Array: &milvuspb.CalcDistanceResults_IntDist{
+					IntDist: &schemapb.IntArray{
+						Data: hammin,
+					},
+				},
+			}, nil
+		}
+
+		if metric == distance.TANIMOTO {
+			tanimoto, err := distance.CalcTanimotoCoefficient(vectorsLeft.Dim, hammin)
+			if err != nil {
+				return &milvuspb.CalcDistanceResults{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_UnexpectedError,
+						Reason:    err.Error(),
+					},
+				}, nil
+			}
+
+			return &milvuspb.CalcDistanceResults{
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success, Reason: ""},
+				Array: &milvuspb.CalcDistanceResults_FloatDist{
+					FloatDist: &schemapb.FloatArray{
+						Data: tanimoto,
+					},
+				},
+			}, nil
+		}
+	}
+
+	err = errors.New("Unexpected error")
+	return &milvuspb.CalcDistanceResults{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		},
+	}, nil
 }
 
 func (node *Proxy) GetDdChannel(ctx context.Context, request *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {
