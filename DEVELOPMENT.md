@@ -89,6 +89,12 @@ make all
 
 If this command succeed, you will now have an executable at `bin/milvus` off of your Milvus project directory.
 
+
+## Building Milvus with Docker
+
+Official releases are built using Docker containers. To build Milvus using Docker please follow [these instructions](https://github.com/milvus-io/milvus/blob/master/build/README.md).
+
+
 ## A Quick Start for Testing Milvus
 
 ### Presubmission Verification
@@ -113,28 +119,22 @@ make unittest
 
 Milvus uses Python SDK to write test cases to verify the correctness of Milvus functions. Before run E2E tests, you need a running Milvus:
 
-#### Standalone
-
 ```shell
 cd deployments/docker/dev
 docker-compose up -d
 cd ../../../
+# Running Milvus
 ./scripts/start_standalone.sh
-```
 
-#### Cluster
+# or
 
-```shell
-cd deployments/docker/dev
-docker-compose up -d
-cd ../../../
 ./scripts/start_cluster.sh
 ```
 
 To run E2E tests, use these command:
 
 ```shell
-cd test20/python_client
+cd tests20/python_client
 pip install -r requirements.txt
 pytest .
 ```

@@ -109,11 +109,11 @@ func (c *queryNodeCluster) GetComponentInfos(ctx context.Context) ([]*internalpb
 	c.RLock()
 	defer c.RUnlock()
 	subComponentInfos := make([]*internalpb.ComponentInfo, 0)
-	nodeIDs, err := c.getOnServiceNodeIDs()
+	nodes, err := c.getOnServiceNodes()
 	if err != nil {
 		return nil, err
 	}
-	for _, nodeID := range nodeIDs {
+	for nodeID := range nodes {
 		node := c.nodes[nodeID]
 		componentStates, err := node.client.GetComponentStates(ctx)
 		if err != nil {
@@ -228,7 +228,7 @@ func (c *queryNodeCluster) WatchDmChannels(ctx context.Context, nodeID int64, in
 		if err == nil && status.ErrorCode == commonpb.ErrorCode_Success {
 			collectionID := in.CollectionID
 			//c.clusterMeta.addCollection(collectionID, in.Schema)
-			//c.clusterMeta.addDmChannel(collectionID, nodeID, channels)
+			c.clusterMeta.addDmChannel(collectionID, nodeID, channels)
 
 			node.addCollection(collectionID, in.Schema)
 			node.addDmChannel(collectionID, channels)
@@ -328,12 +328,12 @@ func (c *queryNodeCluster) getSegmentInfo(ctx context.Context, in *querypb.GetSe
 	defer c.Unlock()
 
 	segmentInfos := make([]*querypb.SegmentInfo, 0)
-	nodes, err := c.getOnServiceNodeIDs()
+	nodes, err := c.getOnServiceNodes()
 	if err != nil {
 		log.Warn(err.Error())
 		return segmentInfos, nil
 	}
-	for _, nodeID := range nodes {
+	for nodeID := range nodes {
 		res, err := c.nodes[nodeID].client.GetSegmentInfo(ctx, in)
 		if err != nil {
 			return nil, err
@@ -407,6 +407,17 @@ func (c *queryNodeCluster) RegisterNode(ctx context.Context, session *sessionuti
 	return fmt.Errorf("node %d alredy exists in cluster", id)
 }
 
+func (c *queryNodeCluster) getNodeByID(nodeID int64) (*queryNode, error) {
+	c.RLock()
+	defer c.RUnlock()
+
+	if node, ok := c.nodes[nodeID]; ok {
+		return node, nil
+	}
+
+	return nil, fmt.Errorf("query node %d not exist", nodeID)
+}
+
 func (c *queryNodeCluster) removeNodeInfo(nodeID int64) error {
 	c.Lock()
 	defer c.Unlock()
@@ -427,25 +438,36 @@ func (c *queryNodeCluster) removeNodeInfo(nodeID int64) error {
 	return nil
 }
 
-func (c *queryNodeCluster) onServiceNodeIDs() ([]int64, error) {
-	c.Lock()
-	defer c.Unlock()
+func (c *queryNodeCluster) onServiceNodes() (map[int64]*queryNode, error) {
+	c.RLock()
+	defer c.RUnlock()
 
-	return c.getOnServiceNodeIDs()
+	return c.getOnServiceNodes()
 }
 
-func (c *queryNodeCluster) getOnServiceNodeIDs() ([]int64, error) {
-	nodeIDs := make([]int64, 0)
+func (c *queryNodeCluster) getOnServiceNodes() (map[int64]*queryNode, error) {
+	nodes := make(map[int64]*queryNode)
 	for nodeID, node := range c.nodes {
 		if node.isOnService() {
-			nodeIDs = append(nodeIDs, nodeID)
+			nodes[nodeID] = node
 		}
 	}
-	if len(nodeIDs) == 0 {
+	if len(nodes) == 0 {
 		return nil, errors.New("no queryNode is alive")
 	}
 
-	return nodeIDs, nil
+	return nodes, nil
+}
+
+func (c *queryNodeCluster) isOnService(nodeID int64) (bool, error) {
+	c.Lock()
+	defer c.Unlock()
+
+	if node, ok := c.nodes[nodeID]; ok {
+		return node.isOnService(), nil
+	}
+
+	return false, fmt.Errorf("query node %d not exist", nodeID)
 }
 
 func (c *queryNodeCluster) printMeta() {

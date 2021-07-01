@@ -6992,6 +6992,7 @@ class SearchRequest :
     kPlaceholderGroupFieldNumber = 6,
     kBaseFieldNumber = 1,
     kTravelTimestampFieldNumber = 10,
+    kGuaranteeTimestampFieldNumber = 11,
     kDslTypeFieldNumber = 7,
   };
   // repeated string partition_names = 4;
@@ -7096,6 +7097,11 @@ class SearchRequest :
   ::PROTOBUF_NAMESPACE_ID::uint64 travel_timestamp() const;
   void set_travel_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
 
+  // uint64 guarantee_timestamp = 11;
+  void clear_guarantee_timestamp();
+  ::PROTOBUF_NAMESPACE_ID::uint64 guarantee_timestamp() const;
+  void set_guarantee_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
+
   // .milvus.proto.common.DslType dsl_type = 7;
   void clear_dsl_type();
   ::milvus::proto::common::DslType dsl_type() const;
@@ -7115,6 +7121,7 @@ class SearchRequest :
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr placeholder_group_;
   ::milvus::proto::common::MsgBase* base_;
   ::PROTOBUF_NAMESPACE_ID::uint64 travel_timestamp_;
+  ::PROTOBUF_NAMESPACE_ID::uint64 guarantee_timestamp_;
   int dsl_type_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
@@ -7241,6 +7248,7 @@ class RetrieveRequest :
     kBaseFieldNumber = 1,
     kIdsFieldNumber = 5,
     kTravelTimestampFieldNumber = 7,
+    kGuaranteeTimestampFieldNumber = 8,
   };
   // repeated string partition_names = 4;
   int partition_names_size() const;
@@ -7319,6 +7327,11 @@ class RetrieveRequest :
   ::PROTOBUF_NAMESPACE_ID::uint64 travel_timestamp() const;
   void set_travel_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
 
+  // uint64 guarantee_timestamp = 8;
+  void clear_guarantee_timestamp();
+  ::PROTOBUF_NAMESPACE_ID::uint64 guarantee_timestamp() const;
+  void set_guarantee_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.RetrieveRequest)
  private:
   class _Internal;
@@ -7331,6 +7344,7 @@ class RetrieveRequest :
   ::milvus::proto::common::MsgBase* base_;
   ::milvus::proto::schema::IDs* ids_;
   ::PROTOBUF_NAMESPACE_ID::uint64 travel_timestamp_;
+  ::PROTOBUF_NAMESPACE_ID::uint64 guarantee_timestamp_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -17276,6 +17290,20 @@ inline void SearchRequest::set_travel_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.SearchRequest.travel_timestamp)
 }
 
+// uint64 guarantee_timestamp = 11;
+inline void SearchRequest::clear_guarantee_timestamp() {
+  guarantee_timestamp_ = PROTOBUF_ULONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::uint64 SearchRequest::guarantee_timestamp() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.SearchRequest.guarantee_timestamp)
+  return guarantee_timestamp_;
+}
+inline void SearchRequest::set_guarantee_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value) {
+  
+  guarantee_timestamp_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.SearchRequest.guarantee_timestamp)
+}
+
 // -------------------------------------------------------------------
 
 // RetrieveRequest
@@ -17614,6 +17642,20 @@ inline void RetrieveRequest::set_travel_timestamp(::PROTOBUF_NAMESPACE_ID::uint6
   
   travel_timestamp_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.RetrieveRequest.travel_timestamp)
+}
+
+// uint64 guarantee_timestamp = 8;
+inline void RetrieveRequest::clear_guarantee_timestamp() {
+  guarantee_timestamp_ = PROTOBUF_ULONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::uint64 RetrieveRequest::guarantee_timestamp() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.RetrieveRequest.guarantee_timestamp)
+  return guarantee_timestamp_;
+}
+inline void RetrieveRequest::set_guarantee_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value) {
+  
+  guarantee_timestamp_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.RetrieveRequest.guarantee_timestamp)
 }
 
 // -------------------------------------------------------------------

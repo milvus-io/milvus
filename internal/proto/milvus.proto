@@ -333,6 +333,7 @@ message SearchRequest {
   repeated string output_fields = 8;
   repeated common.KeyValuePair search_params = 9; // must
   uint64 travel_timestamp = 10;
+  uint64 guarantee_timestamp = 11; // guarantee_timestamp
 }
 
 message RetrieveRequest {
@@ -343,6 +344,7 @@ message RetrieveRequest {
   schema.IDs ids = 5; // must
   repeated string output_fields = 6; // must
   uint64 travel_timestamp = 7;
+  uint64 guarantee_timestamp = 8; // guarantee_timestamp
 }
 
 message RetrieveResults {

@@ -67,19 +67,15 @@ DeleteQueryResult(CQueryResult query_result) {
 CStatus
 Search(CSegmentInterface c_segment,
        CPlan c_plan,
-       CPlaceholderGroup* c_placeholder_groups,
-       uint64_t* timestamps,
-       int num_groups,
+       CPlaceholderGroup c_placeholder_group,
+       uint64_t timestamp,
        CQueryResult* result) {
     auto query_result = std::make_unique<milvus::QueryResult>();
     try {
         auto segment = (milvus::segcore::SegmentInterface*)c_segment;
         auto plan = (milvus::query::Plan*)c_plan;
-        std::vector<const milvus::query::PlaceholderGroup*> placeholder_groups;
-        for (int i = 0; i < num_groups; ++i) {
-            placeholder_groups.push_back((const milvus::query::PlaceholderGroup*)c_placeholder_groups[i]);
-        }
-        *query_result = segment->Search(plan, placeholder_groups.data(), timestamps, num_groups);
+        auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(c_placeholder_group);
+        *query_result = segment->Search(plan, *phg_ptr, timestamp);
         if (plan->plan_node_->query_info_.metric_type_ != milvus::MetricType::METRIC_INNER_PRODUCT) {
             for (auto& dis : query_result->result_distances_) {
                 dis *= -1;

@@ -1317,7 +1317,12 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 	if travelTimestamp == 0 {
 		travelTimestamp = st.BeginTs()
 	}
+	guaranteeTimestamp := st.query.GuaranteeTimestamp
+	if guaranteeTimestamp == 0 {
+		guaranteeTimestamp = st.BeginTs()
+	}
 	st.SearchRequest.TravelTimestamp = travelTimestamp
+	st.SearchRequest.GuaranteeTimestamp = guaranteeTimestamp
 
 	st.SearchRequest.ResultChannelID = Params.SearchResultChannelNames[0]
 	st.SearchRequest.DbID = 0 // todo
@@ -2090,7 +2095,12 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 	if travelTimestamp == 0 {
 		travelTimestamp = rt.BeginTs()
 	}
+	guaranteeTimestamp := rt.retrieve.GuaranteeTimestamp
+	if guaranteeTimestamp == 0 {
+		guaranteeTimestamp = rt.BeginTs()
+	}
 	rt.RetrieveRequest.TravelTimestamp = travelTimestamp
+	rt.RetrieveRequest.GuaranteeTimestamp = guaranteeTimestamp
 
 	rt.ResultChannelID = Params.RetrieveResultChannelNames[0]
 	rt.DbID = 0 // todo(yukun)
@@ -3370,6 +3380,10 @@ func (dit *DropIndexTask) PreExecute(ctx context.Context) error {
 
 	if err := ValidateFieldName(fieldName); err != nil {
 		return err
+	}
+
+	if dit.IndexName == "" {
+		dit.IndexName = Params.DefaultIndexName
 	}
 
 	return nil
