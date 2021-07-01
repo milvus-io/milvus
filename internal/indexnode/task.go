@@ -14,10 +14,9 @@ package indexnode
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime"
 	"strconv"
-
-	"github.com/milvus-io/milvus/internal/util/retry"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -29,6 +28,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
 
 const (
@@ -176,6 +177,7 @@ func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 
 func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	log.Debug("IndexNode IndexBuildTask Execute ...")
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildTask %d", it.req.IndexBuildID))
 	var err error
 
 	typeParams := make(map[string]string)
@@ -275,6 +277,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	tr.Record("loadKey done")
 
 	storageBlobs := getStorageBlobs(blobs)
 	var insertCodec storage.InsertCodec
@@ -286,6 +289,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	if len(insertData.Data) != 1 {
 		return errors.New("we expect only one field in deserialized insert data")
 	}
+	tr.Record("deserialize storage blobs done")
 
 	for _, value := range insertData.Data {
 		// TODO: BinaryVectorFieldData
@@ -296,6 +300,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 				log.Error("IndexNode BuildFloatVecIndexWithoutIds failed", zap.Error(err))
 				return err
 			}
+			tr.Record("build float vector index done")
 		}
 
 		binaryVectorFieldData, bOk := value.(*storage.BinaryVectorFieldData)
@@ -305,6 +310,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 				log.Error("IndexNode BuildBinaryVecIndexWithoutIds failed", zap.Error(err))
 				return err
 			}
+			tr.Record("build binary vector index done")
 		}
 
 		if !fOk && !bOk {
@@ -314,15 +320,16 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 		indexBlobs, err := it.index.Serialize()
 		if err != nil {
 			log.Error("IndexNode index Serialize failed", zap.Error(err))
-
 			return err
 		}
+		tr.Record("serialize index done")
 
 		var indexCodec storage.IndexCodec
 		serializedIndexBlobs, err := indexCodec.Serialize(getStorageBlobs(indexBlobs), indexParams, it.req.IndexName, it.req.IndexID)
 		if err != nil {
 			return err
 		}
+		tr.Record("serialize index codec done")
 
 		getSavePathByKey := func(key string) string {
 			// TODO: fix me, use more reasonable method
@@ -351,7 +358,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 					log.Debug("IndexNode Unmarshal indexMeta error ", zap.Error(err))
 					return err
 				}
-				log.Debug("IndexNode Unmarshal indexMeta success ", zap.Any("meta", indexMeta))
+				//log.Debug("IndexNode Unmarshal indexMeta success ", zap.Any("meta", indexMeta))
 				if indexMeta.Version > it.req.Version {
 					log.Debug("IndexNode try saveIndexFile failed req.Version is low", zap.Any("req.Version", it.req.Version),
 						zap.Any("indexMeta.Version", indexMeta.Version))
@@ -373,10 +380,8 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		tr.Record("save index file done")
 	}
-	// err = it.index.Delete()
-	// if err != nil {
-	// 	log.Print("CIndexDelete Failed")
-	// }
+	tr.Elapse("all done")
 	return nil
 }

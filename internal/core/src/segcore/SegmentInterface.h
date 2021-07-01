@@ -37,10 +37,7 @@ class SegmentInterface {
     FillTargetEntry(const query::Plan* plan, QueryResult& results) const = 0;
 
     virtual QueryResult
-    Search(const query::Plan* Plan,
-           const query::PlaceholderGroup* placeholder_groups[],
-           const Timestamp timestamps[],
-           int64_t num_groups) const = 0;
+    Search(const query::Plan* Plan, const query::PlaceholderGroup& placeholder_group, Timestamp timestamp) const = 0;
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
     GetEntityById(const std::vector<FieldOffset>& field_offsets,
@@ -84,9 +81,8 @@ class SegmentInternalInterface : public SegmentInterface {
 
     QueryResult
     Search(const query::Plan* Plan,
-           const query::PlaceholderGroup* placeholder_groups[],
-           const Timestamp timestamps[],
-           int64_t num_groups) const override;
+           const query::PlaceholderGroup& placeholder_group,
+           Timestamp timestamp) const override;
 
     void
     FillTargetEntry(const query::Plan* plan, QueryResult& results) const override;

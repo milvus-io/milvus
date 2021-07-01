@@ -14,7 +14,13 @@ services:
   pulsar:
     container_name: milvus-pulsar
     image: apachepulsar/pulsar:latest
-    command: bin/pulsar standalone
+    command: >
+      /bin/sh -c "
+                  echo "" >> /pulsar/conf/standalone.conf && \
+                  echo "maxMessageSize=1073741824" >> /pulsar/conf/standalone.conf && \
+                  echo "" >> /pulsar/conf/standalone.conf && \
+                  echo "nettyMaxFrameSizeBytes=1073741824" >> /pulsar/conf/standalone.conf && \
+                  bin/pulsar standalone"
 
   minio:
     container_name: milvus-minio

@@ -38,10 +38,9 @@ DeleteQueryResult(CQueryResult query_result);
 
 CStatus
 Search(CSegmentInterface c_segment,
-       CPlan plan,
-       CPlaceholderGroup* placeholder_groups,
-       uint64_t* timestamps,
-       int num_groups,
+       CPlan c_plan,
+       CPlaceholderGroup c_placeholder_group,
+       uint64_t timestamp,
        CQueryResult* result);
 
 CProtoResult
