@@ -1255,7 +1255,7 @@ func (lbt *LoadBalanceTask) Execute(ctx context.Context) error {
 						}
 					}
 				}
-				assignInternalTask(collectionID, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, watchDmChannelReqs)
+				assignInternalTask(ctx, collectionID, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, watchDmChannelReqs)
 				log.Debug("loadBalanceTask: assign child task done", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
 			}
 		}

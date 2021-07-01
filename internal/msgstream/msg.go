@@ -284,6 +284,14 @@ func (st *SearchMsg) SourceID() int64 {
 	return st.Base.SourceID
 }
 
+func (st *SearchMsg) GuaranteeTs() Timestamp {
+	return st.GetGuaranteeTimestamp()
+}
+
+func (st *SearchMsg) TravelTs() Timestamp {
+	return st.GetTravelTimestamp()
+}
+
 func (st *SearchMsg) Marshal(input TsMsg) (MarshalType, error) {
 	searchTask := input.(*SearchMsg)
 	searchRequest := &searchTask.SearchRequest
@@ -388,6 +396,14 @@ func (rm *RetrieveMsg) Type() MsgType {
 
 func (rm *RetrieveMsg) SourceID() int64 {
 	return rm.Base.SourceID
+}
+
+func (rm *RetrieveMsg) GuaranteeTs() Timestamp {
+	return rm.GetGuaranteeTimestamp()
+}
+
+func (rm *RetrieveMsg) TravelTs() Timestamp {
+	return rm.GetTravelTimestamp()
 }
 
 func (rm *RetrieveMsg) Marshal(input TsMsg) (MarshalType, error) {
