@@ -111,17 +111,12 @@ func stopPid(filename string, runtimeDir string) error {
 	}
 	defer closePidFile(fd)
 
-	_, err = fmt.Fscanf(fd, "%d", &pid)
-	if err != nil {
+	if _, err = fmt.Fscanf(fd, "%d", &pid); err != nil {
 		return err
 	}
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return err
-	}
-	err = process.Signal(syscall.SIGTERM)
-	if err != nil {
-		return err
+
+	if process, err := os.FindProcess(pid); err == nil {
+		return process.Signal(syscall.SIGTERM)
 	}
 	return nil
 }
@@ -270,9 +265,9 @@ func main() {
 		role.Run(localMsg, svrAlias)
 	case "stop":
 		if err := stopPid(filename, runtimeDir); err != nil {
-			panic(err)
+			fmt.Fprintf(os.Stderr, "%s\n\n", err.Error())
 		}
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command : %s", command)
+		fmt.Fprintf(os.Stderr, "unknown command : %s\n", command)
 	}
 }
