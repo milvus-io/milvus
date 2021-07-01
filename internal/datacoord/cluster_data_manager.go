@@ -97,15 +97,6 @@ func (c *clusterNodeManager) updateCluster(dataNodes []*datapb.DataNodeInfo) *cl
 			continue
 		}
 
-		newNode := &dataNodeInfo{
-			info: &datapb.DataNodeInfo{
-				Address:  n.Address,
-				Version:  n.Version,
-				Channels: []*datapb.ChannelStatus{},
-			},
-			status: online,
-		}
-		c.dataNodes[n.Address] = newNode
 		newNodes = append(newNodes, n.Address)
 	}
 
@@ -166,6 +157,7 @@ func (c *clusterNodeManager) unregister(addr string) *datapb.DataNodeInfo {
 	if !ok {
 		return nil
 	}
+	delete(c.dataNodes, addr)
 	node.status = offline
 	c.updateMetrics()
 	return node.info
