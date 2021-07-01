@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -346,7 +347,9 @@ func (lct *LoadCollectionTask) PostExecute(ctx context.Context) error {
 type ReleaseCollectionTask struct {
 	BaseTask
 	*querypb.ReleaseCollectionRequest
-	cluster *queryNodeCluster
+	cluster   *queryNodeCluster
+	meta      *meta
+	rootCoord types.RootCoord
 }
 
 func (rct *ReleaseCollectionTask) MsgBase() *commonpb.MsgBase {
@@ -382,8 +385,33 @@ func (rct *ReleaseCollectionTask) Execute(ctx context.Context) error {
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
-
 	if rct.NodeID <= 0 {
+		rct.meta.releaseCollection(collectionID)
+		releaseDQLMessageStreamReq := &proxypb.ReleaseDQLMessageStreamRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_RemoveQueryChannels,
+				MsgID:     rct.Base.MsgID,
+				Timestamp: rct.Base.Timestamp,
+				SourceID:  rct.Base.SourceID,
+			},
+			DbID:         rct.DbID,
+			CollectionID: rct.CollectionID,
+		}
+		res, err := rct.rootCoord.ReleaseDQLMessageStream(rct.ctx, releaseDQLMessageStreamReq)
+		if err != nil {
+			log.Error("ReleaseCollectionTask: release collection end, releaseDQLMessageStream occur error", zap.Int64("collectionID", rct.CollectionID))
+			status.Reason = err.Error()
+			rct.result = status
+			return err
+		}
+		if res.ErrorCode != commonpb.ErrorCode_Success {
+			log.Error("ReleaseCollectionTask: release collection end, releaseDQLMessageStream occur error", zap.Int64("collectionID", rct.CollectionID))
+			err = errors.New("rootCoord releaseDQLMessageStream failed")
+			status.Reason = err.Error()
+			rct.result = status
+			return err
+		}
+
 		nodes, err := rct.cluster.onServiceNodes()
 		if err != nil {
 			log.Debug(err.Error())
@@ -406,13 +434,13 @@ func (rct *ReleaseCollectionTask) Execute(ctx context.Context) error {
 	} else {
 		res, err := rct.cluster.releaseCollection(ctx, rct.NodeID, rct.ReleaseCollectionRequest)
 		if err != nil {
-			log.Error("ReleaseCollectionTask: release collection end, node occur error", zap.String("nodeID", fmt.Sprintln(rct.NodeID)))
+			log.Error("ReleaseCollectionTask: release collection end, node occur error", zap.Int64("nodeID", rct.NodeID))
 			status.Reason = err.Error()
 			rct.result = status
 			return err
 		}
 		if res.ErrorCode != commonpb.ErrorCode_Success {
-			log.Error("ReleaseCollectionTask: release collection end, node occur error", zap.String("nodeID", fmt.Sprintln(rct.NodeID)))
+			log.Error("ReleaseCollectionTask: release collection end, node occur error", zap.Int64("nodeID", rct.NodeID))
 			err = errors.New("queryNode releaseCollection failed")
 			status.Reason = err.Error()
 			rct.result = status
