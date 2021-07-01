@@ -150,8 +150,10 @@ func (c *cluster) refresh(dataNodes []*datapb.DataNodeInfo) error {
 			}
 		}
 	}
-	_, buffer := c.dataManager.getDataNodes(true)
-	c.updateNodeWatch(restartNodes, buffer)
+	if len(restartNodes) > 0 {
+		_, buffer := c.dataManager.getDataNodes(true)
+		c.updateNodeWatch(restartNodes, buffer)
+	}
 
 	// 3. offline do unregister
 	unregisterNodes := make([]*datapb.DataNodeInfo, 0, len(deltaChange.offlines)) // possible nodes info to unregister
