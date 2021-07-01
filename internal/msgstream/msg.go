@@ -143,7 +143,7 @@ func (it *InsertMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 /////////////////////////////////////////FlushCompletedMsg//////////////////////////////////////////
 type FlushCompletedMsg struct {
 	BaseMsg
-	internalpb.SegmentFlushCompletedMsg
+	datapb.SegmentFlushCompletedMsg
 }
 
 func (fl *FlushCompletedMsg) TraceCtx() context.Context {
@@ -177,7 +177,7 @@ func (fl *FlushCompletedMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (fl *FlushCompletedMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	flushCompletedMsg := internalpb.SegmentFlushCompletedMsg{}
+	flushCompletedMsg := datapb.SegmentFlushCompletedMsg{}
 	in, err := ConvertToByteArray(input)
 	if err != nil {
 		return nil, err

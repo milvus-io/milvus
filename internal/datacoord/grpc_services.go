@@ -460,3 +460,28 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }
+
+func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
+	collectionID := req.GetCollectionID()
+	partitionID := req.GetPartitionID()
+	var segmentIDs []UniqueID
+	if partitionID < 0 {
+		segmentIDs = s.meta.GetSegmentsOfCollection(collectionID)
+	} else {
+		segmentIDs = s.meta.GetSegmentsOfPartition(collectionID, partitionID)
+	}
+	ret := make([]UniqueID, 0, len(segmentIDs))
+	for _, id := range segmentIDs {
+		s, err := s.meta.GetSegment(id)
+		if err != nil || s.GetState() != commonpb.SegmentState_Flushed {
+			continue
+		}
+		ret = append(ret, id)
+	}
+	return &datapb.GetFlushedSegmentsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		Segments: ret,
+	}, nil
+}
