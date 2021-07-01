@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 )
 
 // GrpcClient grpc client
@@ -102,12 +103,19 @@ func (c *GrpcClient) connect(retryOptions ...retry.Option) error {
 			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(2*time.Second),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
-					grpc_retry.UnaryClientInterceptor(),
+					grpc_retry.UnaryClientInterceptor(
+						grpc_retry.WithMax(3),
+						grpc_retry.WithPerRetryTimeout(time.Second*3),
+						grpc_retry.WithCodes(codes.Aborted, codes.Unavailable),
+					),
 					grpc_opentracing.UnaryClientInterceptor(opts...),
 				)),
 			grpc.WithStreamInterceptor(
 				grpc_middleware.ChainStreamClient(
-					grpc_retry.StreamClientInterceptor(),
+					grpc_retry.StreamClientInterceptor(grpc_retry.WithMax(3),
+						grpc_retry.WithPerRetryTimeout(time.Second*3),
+						grpc_retry.WithCodes(codes.Aborted, codes.Unavailable),
+					),
 					grpc_opentracing.StreamClientInterceptor(opts...),
 				)),
 		)
