@@ -95,17 +95,18 @@ func newCluster(ctx context.Context, dataManager *clusterNodeManager,
 		assignPolicy:     defaultAssignPolicy(),
 	}
 
+	c.candidateManager = newCandidateManager(20, c.validateDataNode, c.enableDataNode)
+
 	for _, opt := range opts {
 		opt.apply(c)
 	}
 
-	c.candidateManager = newCandidateManager(20, c.validateDataNode, c.enableDataNode)
 	return c
 }
 
 // startup applies statup policy
 func (c *cluster) startup(dataNodes []*datapb.DataNodeInfo) error {
-	deltaChange := c.dataManager.updateCluster(dataNodes)
+	/*deltaChange := c.dataManager.updateCluster(dataNodes)
 	nodes, chanBuffer := c.dataManager.getDataNodes(false)
 	var rets []*datapb.DataNodeInfo
 	var err error
@@ -117,7 +118,8 @@ func (c *cluster) startup(dataNodes []*datapb.DataNodeInfo) error {
 		//does not trigger new another refresh, pending evt will do
 	}
 	c.dataManager.updateDataNodes(rets, chanBuffer)
-	return nil
+	return nil*/
+	return c.refresh(dataNodes)
 }
 
 // refresh rough refresh datanode status after event received
