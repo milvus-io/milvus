@@ -73,13 +73,11 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan, QueryResult& 
 
 QueryResult
 SegmentInternalInterface::Search(const query::Plan* plan,
-                                 const query::PlaceholderGroup** placeholder_groups,
-                                 const Timestamp* timestamps,
-                                 int64_t num_groups) const {
+                                 const query::PlaceholderGroup& placeholder_group,
+                                 Timestamp timestamp) const {
     std::shared_lock lck(mutex_);
     check_search(plan);
-    Assert(num_groups == 1);
-    query::ExecPlanNodeVisitor visitor(*this, timestamps[0], *placeholder_groups[0]);
+    query::ExecPlanNodeVisitor visitor(*this, timestamp, placeholder_group);
     auto results = visitor.get_moved_result(*plan->plan_node_);
     return results;
 }
