@@ -97,7 +97,7 @@ func (c *Client) connect(retryOptions ...retry.Option) error {
 				grpc_middleware.ChainUnaryClient(
 					grpc_retry.UnaryClientInterceptor(
 						grpc_retry.WithMax(3),
-						grpc_retry.WithPerRetryTimeout(time.Second*3),
+						grpc_retry.WithPerRetryTimeout(time.Second*10),
 						grpc_retry.WithCodes(codes.Aborted, codes.Unavailable),
 					),
 					grpc_opentracing.UnaryClientInterceptor(opts...),
@@ -106,7 +106,7 @@ func (c *Client) connect(retryOptions ...retry.Option) error {
 				grpc_middleware.ChainStreamClient(
 					grpc_retry.StreamClientInterceptor(
 						grpc_retry.WithMax(3),
-						grpc_retry.WithPerRetryTimeout(time.Second*3),
+						grpc_retry.WithPerRetryTimeout(time.Second*10),
 						grpc_retry.WithCodes(codes.Aborted, codes.Unavailable),
 					),
 					grpc_opentracing.StreamClientInterceptor(opts...),
