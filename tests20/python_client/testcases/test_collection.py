@@ -677,7 +677,7 @@ class TestCollectionParams(TestcaseBase):
         schema, _ = self.collection_schema_wrap.init_collection_schema(fields)
         assert not schema.auto_id
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_collection_auto_id_inconsistent(self):
         """
         target: test collection auto_id with both collection schema and field schema
@@ -747,7 +747,7 @@ class TestCollectionParams(TestcaseBase):
         self.field_schema_wrap.init_field_schema(name="int", dtype=DataType.INT64, auto_id=True,
                                                  check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("dtype", [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR])
     def test_collection_vector_without_dim(self, dtype):
         """
@@ -1032,7 +1032,7 @@ class TestCollectionDataframe(TestcaseBase):
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field='A', check_task=CheckTasks.err_res,
                                                       check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_construct_from_non_dataframe(self, get_non_df):
         """
         target: test create collection by invalid dataframe
@@ -1115,7 +1115,7 @@ class TestCollectionDataframe(TestcaseBase):
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
                                                       auto_id=None, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_construct_auto_id_true_insert(self):
         """
         target: test construct with true auto_id
@@ -1129,7 +1129,7 @@ class TestCollectionDataframe(TestcaseBase):
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
                                                       auto_id=True, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="#5967")
     def test_construct_auto_id_true_no_insert(self):
         """
@@ -1163,7 +1163,7 @@ class TestCollectionDataframe(TestcaseBase):
         assert cf._check_primary_keys(mutation_res.primary_keys, 100)
         assert self.collection_wrap.num_entities == nb
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_construct_auto_id_false(self):
         """
         target: test construct with false auto_id

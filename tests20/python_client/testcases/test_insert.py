@@ -541,7 +541,7 @@ class TestInsertOperation(TestcaseBase):
         assert cf._check_primary_keys(primary_keys, nb * 2)
         assert collection_w.num_entities == nb * 2
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_insert_auto_id_true_list_data(self):
         """
         target: test insert ids fields values when auto_id=True
