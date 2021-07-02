@@ -1,0 +1,21 @@
+accuracy:
+  collections:
+    -
+      server:
+        db_config.primary_path: /test/milvus/db_data_7/sift_1m_256_128_l2_sq8
+        cache_config.cpu_cache_capacity: 16
+        engine_config.use_blas_threshold: 1100
+        engine_config.gpu_search_threshold: 1
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 4
+        gpu_resource_config.search_resources:
+          - gpu0
+          - gpu1
+        gpu_resource_config.build_index_resources:
+          - gpu0
+          - gpu1
+      collection_name: sift_1m_256_128_l2
+      top_ks: [64]
+      nqs: [1000]
+      search_params:
+        nprobe: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
