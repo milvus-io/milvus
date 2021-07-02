@@ -447,7 +447,7 @@ class TestCollectionSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": 0})
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_search_before_after_delete(self):
         """
         target: test search function before and after deletion
@@ -747,7 +747,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "nb": default_nb,
                                          "limit": default_limit})
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_search_collection_multiple_times(self):
         """
         target: test search for multiple times
@@ -1127,7 +1127,6 @@ class TestCollectionSearch(TestcaseBase):
                                              "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(300)
     def test_search_concurrent_multi_threads(self):
         """
         target: test concurrent search with multi-processes
