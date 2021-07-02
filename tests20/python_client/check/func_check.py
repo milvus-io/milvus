@@ -41,7 +41,7 @@ class ResponseChecker:
             result = self.check_partition_property(self.response, self.func_name, self.check_items)
 
         elif self.check_task == CheckTasks.check_search_results:
-            result = self.check_search_results(self.response, self.check_items)
+            result = self.check_search_results(self.response, self.func_name, self.check_items)
 
         elif self.check_task == CheckTasks.check_query_results:
             result = self.check_query_results(self.response, self.func_name, self.check_items)
@@ -147,7 +147,7 @@ class ResponseChecker:
         return True
 
     @staticmethod
-    def check_search_results(search_res, check_items):
+    def check_search_results(search_res, func_name, check_items):
         """
         target: check the search results
         method: 1. check the query number
@@ -156,6 +156,10 @@ class ResponseChecker:
         expected: check the search is ok
         """
         log.info("search_results_check: checking the searching results")
+        if func_name != 'search':
+            log.warning("The function name is {} rather than {}".format(func_name, "search"))
+        if len(check_items) == 0:
+            raise Exception("No expect values found in the check task")
         if len(search_res) != check_items["nq"]:
             log.error("search_results_check: Numbers of query searched (%d) "
                       "is not equal with expected (%d)"
@@ -164,13 +168,16 @@ class ResponseChecker:
         else:
             log.info("search_results_check: Numbers of query searched is correct")
         for hits in search_res:
-            if len(hits) != check_items["limit"]:
+            if (len(hits) != check_items["limit"]) \
+                    or (len(hits.ids) != check_items["limit"]):
                 log.error("search_results_check: limit(topK) searched (%d) "
                           "is not equal with expected (%d)"
                           % (len(hits), check_items["limit"]))
                 assert len(hits) == check_items["limit"]
                 assert len(hits.ids) == check_items["limit"]
             else:
+                for i in hits.ids:
+                    assert i in range(check_items["nb"])
                 log.info("search_results_check: limit (topK) "
                          "searched for each query is correct")
         log.info("search_results_check: search_results_check: checked the searching results")
