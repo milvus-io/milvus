@@ -332,7 +332,7 @@ Milvus 训练营能够帮助你了解向量数据库的操作及各种应用场�
 
 ## Milvus 文档
 
-有关安装、开发、部署和管理的指南，请查看 [Milvus 文档](https://milvus.io/cn/docs/home).
+获取更多有关安装、开发、部署和管理的指南，请查看 [Milvus 文档](https://milvus.io/cn/docs/home).
 
 ### SDK
 
