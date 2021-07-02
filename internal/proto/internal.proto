@@ -134,6 +134,7 @@ message SearchRequest {
   bytes serialized_expr_plan = 9;
   repeated int64 output_fields_id = 10;
   uint64 travel_timestamp = 11;
+  uint64 guarantee_timestamp = 12;
 }
 
 message SearchResults {
@@ -163,6 +164,7 @@ message RetrieveRequest {
   schema.IDs ids = 6;
   repeated string output_fields = 7;
   uint64 travel_timestamp = 8;
+  uint64 guarantee_timestamp = 9;
 }
 
 message RetrieveResults {
@@ -211,11 +213,6 @@ message SegmentStatisticsUpdates {
 message SegmentStatistics {
   common.MsgBase base = 1;
   repeated SegmentStatisticsUpdates SegStats = 2;
-}
-
-message SegmentFlushCompletedMsg {
-  common.MsgBase base = 1;
-  int64 segmentID = 2;
 }
 
 message IndexStats {

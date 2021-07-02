@@ -14,7 +14,7 @@
 set -e
 set -x
 
-MILVUS_HELM_REPO="https://github.com/zilliztech/milvus-helm-charts.git"
+MILVUS_HELM_REPO="https://github.com/milvus-io/milvus-helm.git"
 MILVUS_HELM_RELEASE_NAME="${MILVUS_HELM_RELEASE_NAME:-milvus-testing}"
 MILVUS_CLUSTER_ENABLED="${MILVUS_CLUSTER_ENABLED:-false}"
 MILVUS_IMAGE_REPO="${MILVUS_IMAGE_REPO:-milvusdb/milvus}"
@@ -40,8 +40,8 @@ fi
 
 if [[ ! -d "${MILVUS_HELM_CHART_PATH:-}" ]]; then
   TMP_DIR="$(mktemp -d)"
-  git clone --depth=1 -b "${MILVUS_HELM_BRANCH:-main}" "${MILVUS_HELM_REPO}" "${TMP_DIR}"
-  MILVUS_HELM_CHART_PATH="${TMP_DIR}/charts/milvus-ha"
+  git clone --depth=1 -b "${MILVUS_HELM_BRANCH:-master}" "${MILVUS_HELM_REPO}" "${TMP_DIR}"
+  MILVUS_HELM_CHART_PATH="${TMP_DIR}/charts/milvus"
 fi
 
 kubectl create namespace "${MILVUS_HELM_NAMESPACE}" || true

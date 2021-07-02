@@ -176,13 +176,13 @@ func (s *Segment) getRowCount() int64 {
 		long int
 		getRowCount(CSegmentInterface c_segment);
 	*/
-	segmentPtrIsNil := s.segmentPtr == nil
-	log.Debug("QueryNode::Segment::getRowCount", zap.Any("segmentPtrIsNil", segmentPtrIsNil))
+	//segmentPtrIsNil := s.segmentPtr == nil
+	//log.Debug("QueryNode::Segment::getRowCount", zap.Any("segmentPtrIsNil", segmentPtrIsNil))
 	if s.segmentPtr == nil {
 		return -1
 	}
 	var rowCount = C.GetRowCount(s.segmentPtr)
-	log.Debug("QueryNode::Segment::getRowCount", zap.Any("rowCount", rowCount))
+	//log.Debug("QueryNode::Segment::getRowCount", zap.Any("rowCount", rowCount))
 	return int64(rowCount)
 }
 
@@ -232,12 +232,11 @@ func (s *Segment) segmentSearch(plan *Plan,
 	}
 
 	var searchResult SearchResult
-	var cTimestamp = (*C.ulong)(&timestamp[0])
-	var cPlaceHolder = (*C.CPlaceholderGroup)(&cPlaceholderGroups[0])
-	var cNumGroups = C.int(len(searchRequests))
+	ts := C.uint64_t(timestamp[0])
+	cPlaceHolderGroup := cPlaceholderGroups[0]
 
 	log.Debug("do search on segment", zap.Int64("segmentID", s.segmentID), zap.Int32("segmentType", int32(s.segmentType)))
-	var status = C.Search(s.segmentPtr, plan.cPlan, cPlaceHolder, cTimestamp, cNumGroups, &searchResult.cQueryResult)
+	var status = C.Search(s.segmentPtr, plan.cPlan, cPlaceHolderGroup, ts, &searchResult.cQueryResult)
 	errorCode := status.error_code
 
 	if errorCode != 0 {

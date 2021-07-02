@@ -19,9 +19,8 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/segcorepb"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	oplog "github.com/opentracing/opentracing-go/log"
+	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/log"
@@ -29,11 +28,19 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	oplog "github.com/opentracing/opentracing-go/log"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
+
+type queryMsg interface {
+	msgstream.TsMsg
+	GuaranteeTs() Timestamp
+	TravelTs() Timestamp
+}
 
 type queryCollection struct {
 	releaseCtx context.Context
@@ -44,7 +51,7 @@ type queryCollection struct {
 	streaming    *streaming
 
 	unsolvedMsgMu sync.Mutex // guards unsolvedMsg
-	unsolvedMsg   []msgstream.TsMsg
+	unsolvedMsg   []queryMsg
 
 	tSafeWatchers     map[Channel]*tSafeWatcher
 	watcherSelectCase []reflect.SelectCase
@@ -65,7 +72,7 @@ func newQueryCollection(releaseCtx context.Context,
 	streaming *streaming,
 	factory msgstream.Factory) *queryCollection {
 
-	unsolvedMsg := make([]msgstream.TsMsg, 0)
+	unsolvedMsg := make([]queryMsg, 0)
 
 	queryStream, _ := factory.NewQueryMsgStream(releaseCtx)
 	queryResultStream, _ := factory.NewQueryMsgStream(releaseCtx)
@@ -129,13 +136,13 @@ func (q *queryCollection) register() {
 	}
 }
 
-func (q *queryCollection) addToUnsolvedMsg(msg msgstream.TsMsg) {
+func (q *queryCollection) addToUnsolvedMsg(msg queryMsg) {
 	q.unsolvedMsgMu.Lock()
 	defer q.unsolvedMsgMu.Unlock()
 	q.unsolvedMsg = append(q.unsolvedMsg, msg)
 }
 
-func (q *queryCollection) popAllUnsolvedMsg() []msgstream.TsMsg {
+func (q *queryCollection) popAllUnsolvedMsg() []queryMsg {
 	q.unsolvedMsgMu.Lock()
 	defer q.unsolvedMsgMu.Unlock()
 	tmp := q.unsolvedMsg
@@ -249,7 +256,7 @@ func (q *queryCollection) loadBalance(msg *msgstream.LoadBalanceSegmentsMsg) {
 	//	zap.Int("num of segment", len(msg.Infos)))
 }
 
-func (q *queryCollection) receiveQueryMsg(msg msgstream.TsMsg) {
+func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
 	msgType := msg.Type()
 	var collectionID UniqueID
 	var msgTypeStr string
@@ -285,6 +292,7 @@ func (q *queryCollection) receiveQueryMsg(msg msgstream.TsMsg) {
 
 	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 	msg.SetTraceCtx(ctx)
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("receiveQueryMsg %d", msg.ID()))
 
 	// check if collection has been released
 	collection, err := q.historical.replica.getCollectionByID(collectionID)
@@ -302,7 +310,8 @@ func (q *queryCollection) receiveQueryMsg(msg msgstream.TsMsg) {
 		}
 		return
 	}
-	if msg.BeginTs() >= collection.getReleaseTime() {
+	guaranteeTs := msg.GuaranteeTs()
+	if guaranteeTs >= collection.getReleaseTime() {
 		err = fmt.Errorf("retrieve failed, collection has been released, msgID = %d, collectionID = %d", msg.ID(), collectionID)
 		log.Error(err.Error())
 		err = q.publishFailedQueryResult(msg, err.Error())
@@ -319,27 +328,29 @@ func (q *queryCollection) receiveQueryMsg(msg msgstream.TsMsg) {
 	}
 
 	serviceTime := q.getServiceableTime()
-	if msg.BeginTs() > serviceTime {
-		bt, _ := tsoutil.ParseTS(msg.BeginTs())
+	if guaranteeTs > serviceTime {
+		gt, _ := tsoutil.ParseTS(guaranteeTs)
 		st, _ := tsoutil.ParseTS(serviceTime)
 		log.Debug("query node::receiveQueryMsg: add to unsolvedMsg",
 			zap.Any("collectionID", q.collectionID),
-			zap.Any("sm.BeginTs", bt),
+			zap.Any("sm.GuaranteeTimestamp", gt),
 			zap.Any("serviceTime", st),
-			zap.Any("delta seconds", (msg.BeginTs()-serviceTime)/(1000*1000*1000)),
+			zap.Any("delta seconds", (guaranteeTs-serviceTime)/(1000*1000*1000)),
 			zap.Any("msgID", msg.ID()),
 			zap.String("msgType", msgTypeStr),
 		)
 		q.addToUnsolvedMsg(msg)
 		sp.LogFields(
 			oplog.String("send to unsolved buffer", "send to unsolved buffer"),
-			oplog.Object("begin ts", bt),
+			oplog.Object("guarantee ts", gt),
 			oplog.Object("serviceTime", st),
-			oplog.Float64("delta seconds", float64(msg.BeginTs()-serviceTime)/(1000.0*1000.0*1000.0)),
+			oplog.Float64("delta seconds", float64(guaranteeTs-serviceTime)/(1000.0*1000.0*1000.0)),
 		)
 		sp.Finish()
 		return
 	}
+	tr.Record("get searchable time done")
+
 	log.Debug("doing query in receiveQueryMsg...",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("msgID", msg.ID()),
@@ -355,6 +366,7 @@ func (q *queryCollection) receiveQueryMsg(msg msgstream.TsMsg) {
 		log.Error(err.Error())
 		return
 	}
+	tr.Record("operation done")
 
 	if err != nil {
 		log.Error(err.Error())
@@ -374,6 +386,7 @@ func (q *queryCollection) receiveQueryMsg(msg msgstream.TsMsg) {
 		zap.Int64("msgID", msg.ID()),
 		zap.String("msgType", msgTypeStr),
 	)
+	tr.Elapse("all done")
 	sp.Finish()
 }
 
@@ -393,33 +406,32 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 				zap.Any("tSafe", st))
 
 			q.setServiceableTime(serviceTime)
-			//log.Debug("query node::doUnsolvedMsg: setServiceableTime",
-			//	zap.Any("serviceTime", st),
-			//)
+			//log.Debug("query node::doUnsolvedMsg: setServiceableTime", zap.Any("serviceTime", st))
 
-			unSolvedMsg := make([]msgstream.TsMsg, 0)
+			unSolvedMsg := make([]queryMsg, 0)
 			tempMsg := q.popAllUnsolvedMsg()
 
 			for _, m := range tempMsg {
-				bt, _ := tsoutil.ParseTS(m.EndTs())
+				guaranteeTs := m.GuaranteeTs()
+				gt, _ := tsoutil.ParseTS(guaranteeTs)
 				st, _ = tsoutil.ParseTS(serviceTime)
 				log.Debug("get query message from unsolvedMsg",
 					zap.Int64("collectionID", q.collectionID),
 					zap.Int64("msgID", m.ID()),
-					zap.Any("reqTime_p", bt),
+					zap.Any("reqTime_p", gt),
 					zap.Any("serviceTime_p", st),
-					zap.Any("reqTime_l", m.EndTs()),
+					zap.Any("guaranteeTime_l", guaranteeTs),
 					zap.Any("serviceTime_l", serviceTime),
 				)
-				if m.EndTs() <= serviceTime {
+				if guaranteeTs <= serviceTime {
 					unSolvedMsg = append(unSolvedMsg, m)
 					continue
 				}
 				log.Debug("query node::doUnsolvedMsg: add to unsolvedMsg",
 					zap.Any("collectionID", q.collectionID),
-					zap.Any("sm.BeginTs", bt),
+					zap.Any("sm.BeginTs", gt),
 					zap.Any("serviceTime", st),
-					zap.Any("delta seconds", (m.BeginTs()-serviceTime)/(1000*1000*1000)),
+					zap.Any("delta seconds", (guaranteeTs-serviceTime)/(1000*1000*1000)),
 					zap.Any("msgID", m.ID()),
 				)
 				q.addToUnsolvedMsg(m)
@@ -695,12 +707,13 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 
 // TODO:: cache map[dsl]plan
 // TODO: reBatched search requests
-func (q *queryCollection) search(msg msgstream.TsMsg) error {
+func (q *queryCollection) search(msg queryMsg) error {
 	searchMsg := msg.(*msgstream.SearchMsg)
 	sp, ctx := trace.StartSpanFromContext(searchMsg.TraceCtx())
 	defer sp.Finish()
 	searchMsg.SetTraceCtx(ctx)
 	searchTimestamp := searchMsg.BeginTs()
+	travelTimestamp := searchMsg.TravelTimestamp
 
 	collectionID := searchMsg.CollectionID
 	collection, err := q.streaming.replica.getCollectionByID(collectionID)
@@ -752,12 +765,14 @@ func (q *queryCollection) search(msg msgstream.TsMsg) error {
 			oplog.Object("dsl", searchMsg.Dsl))
 	}
 
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("search %d(nq=%d, k=%d)", searchMsg.CollectionID, queryNum, topK))
+
 	searchResults := make([]*SearchResult, 0)
 	matchedSegments := make([]*Segment, 0)
 	sealedSegmentSearched := make([]UniqueID, 0)
 
 	// historical search
-	hisSearchResults, hisSegmentResults, err1 := q.historical.search(searchRequests, collectionID, searchMsg.PartitionIDs, plan, searchTimestamp)
+	hisSearchResults, hisSegmentResults, err1 := q.historical.search(searchRequests, collectionID, searchMsg.PartitionIDs, plan, travelTimestamp)
 	if err1 != nil {
 		log.Error(err1.Error())
 		return err1
@@ -767,13 +782,14 @@ func (q *queryCollection) search(msg msgstream.TsMsg) error {
 	for _, seg := range hisSegmentResults {
 		sealedSegmentSearched = append(sealedSegmentSearched, seg.segmentID)
 	}
+	tr.Record("historical search done")
 
 	// streaming search
 	var err2 error
 	for _, channel := range collection.getVChannels() {
 		var strSearchResults []*SearchResult
 		var strSegmentResults []*Segment
-		strSearchResults, strSegmentResults, err2 = q.streaming.search(searchRequests, collectionID, searchMsg.PartitionIDs, channel, plan, searchTimestamp)
+		strSearchResults, strSegmentResults, err2 = q.streaming.search(searchRequests, collectionID, searchMsg.PartitionIDs, channel, plan, travelTimestamp)
 		if err2 != nil {
 			log.Error(err2.Error())
 			return err2
@@ -781,6 +797,7 @@ func (q *queryCollection) search(msg msgstream.TsMsg) error {
 		searchResults = append(searchResults, strSearchResults...)
 		matchedSegments = append(matchedSegments, strSegmentResults...)
 	}
+	tr.Record("streaming search done")
 
 	sp.LogFields(oplog.String("statistical time", "segment search end"))
 	if len(searchResults) <= 0 {
@@ -842,6 +859,8 @@ func (q *queryCollection) search(msg msgstream.TsMsg) error {
 			if err != nil {
 				return err
 			}
+			tr.Record("publish empty search result done")
+			tr.Elapse("all done")
 			return nil
 		}
 	}
@@ -883,6 +902,7 @@ func (q *queryCollection) search(msg msgstream.TsMsg) error {
 	if err != nil {
 		return err
 	}
+	tr.Record("reduce result done")
 
 	var offset int64 = 0
 	for index := range searchRequests {
@@ -962,6 +982,7 @@ func (q *queryCollection) search(msg msgstream.TsMsg) error {
 		if err != nil {
 			return err
 		}
+		tr.Record("publish search result")
 	}
 
 	sp.LogFields(oplog.String("statistical time", "before free c++ memory"))
@@ -970,10 +991,11 @@ func (q *queryCollection) search(msg msgstream.TsMsg) error {
 	sp.LogFields(oplog.String("statistical time", "stats done"))
 	plan.delete()
 	searchReq.delete()
+	tr.Elapse("all done")
 	return nil
 }
 
-func (q *queryCollection) retrieve(msg msgstream.TsMsg) error {
+func (q *queryCollection) retrieve(msg queryMsg) error {
 	// TODO(yukun)
 	// step 1: get retrieve object and defer destruction
 	// step 2: for each segment, call retrieve to get ids proto buffer
@@ -1003,6 +1025,8 @@ func (q *queryCollection) retrieve(msg msgstream.TsMsg) error {
 	}
 	defer plan.delete()
 
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("retrieve %d", retrieveMsg.CollectionID))
+
 	var partitionIDsInHistorical []UniqueID
 	var partitionIDsInStreaming []UniqueID
 	partitionIDsInQuery := retrieveMsg.PartitionIDs
@@ -1029,7 +1053,6 @@ func (q *queryCollection) retrieve(msg msgstream.TsMsg) error {
 			}
 		}
 	}
-
 	sealedSegmentRetrieved := make([]UniqueID, 0)
 	var mergeList []*segcorepb.RetrieveResults
 	for _, partitionID := range partitionIDsInHistorical {
@@ -1050,6 +1073,7 @@ func (q *queryCollection) retrieve(msg msgstream.TsMsg) error {
 			sealedSegmentRetrieved = append(sealedSegmentRetrieved, segmentID)
 		}
 	}
+	tr.Record("historical retrieve done")
 
 	for _, partitionID := range partitionIDsInStreaming {
 		segmentIDs, err := q.streaming.replica.getSegmentIDs(partitionID)
@@ -1068,11 +1092,13 @@ func (q *queryCollection) retrieve(msg msgstream.TsMsg) error {
 			mergeList = append(mergeList, result)
 		}
 	}
+	tr.Record("streaming retrieve done")
 
 	result, err := mergeRetrieveResults(mergeList)
 	if err != nil {
 		return err
 	}
+	tr.Record("merge result done")
 
 	resultChannelInt := 0
 	retrieveResultMsg := &msgstream.RetrieveResultMsg{
@@ -1094,15 +1120,16 @@ func (q *queryCollection) retrieve(msg msgstream.TsMsg) error {
 		},
 	}
 
-	err3 := q.publishQueryResult(retrieveResultMsg, retrieveMsg.CollectionID)
-	if err3 != nil {
-		return err3
+	err = q.publishQueryResult(retrieveResultMsg, retrieveMsg.CollectionID)
+	if err != nil {
+		return err
 	}
 	log.Debug("QueryNode publish RetrieveResultMsg",
 		zap.Any("vChannels", collection.getVChannels()),
 		zap.Any("collectionID", collection.ID()),
 		zap.Any("sealedSegmentRetrieved", sealedSegmentRetrieved),
 	)
+	tr.Elapse("all done")
 	return nil
 }
 

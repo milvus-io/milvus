@@ -34,21 +34,23 @@ else
   MILVUS_LABELS="app.kubernetes.io/instance=${MILVUS_HELM_RELEASE_NAME},component=proxy"
 fi
 
-SERVICE_TYPE=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.type}')
+if [[ "${TEST_ENV:-}" =~ ^kind*  ]]; then
+  SERVICE_TYPE=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.type}')
 
-if [[ "${SERVICE_TYPE}" == "LoadBalancer" ]]; then
-  SERVICE_IP=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}')
-  SERVICE_PORT=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.ports[0].port}')
-elif [[ "${SERVICE_TYPE}" == "NodePort" ]]; then
-  SERVICE_IP=$(kubectl get nodes --namespace "${MILVUS_HELM_NAMESPACE}" -o jsonpath='{.items[0].status.addresses[0].address}')
-  SERVICE_PORT=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.ports[0].nodePort}')
-else
-  SERVICE_IP="127.0.0.1"
-  POD_NAME=$(kubectl get pods --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].metadata.name}')
-  SERVICE_PORT=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.ports[0].port}')
-  kubectl --namespace "${MILVUS_HELM_NAMESPACE}" port-forward "${POD_NAME}" "${SERVICE_PORT}" &
-  PORT_FORWARD_PID=$!
-  trap "kill -TERM ${PORT_FORWARD_PID}" EXIT
+  if [[ "${SERVICE_TYPE}" == "LoadBalancer" ]]; then
+    SERVICE_IP=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}')
+    SERVICE_PORT=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.ports[0].port}')
+  elif [[ "${SERVICE_TYPE}" == "NodePort" ]]; then
+    SERVICE_IP=$(kubectl get nodes --namespace "${MILVUS_HELM_NAMESPACE}" -o jsonpath='{.items[0].status.addresses[0].address}')
+    SERVICE_PORT=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.ports[0].nodePort}')
+  else
+    SERVICE_IP="127.0.0.1"
+    POD_NAME=$(kubectl get pods --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].metadata.name}')
+    SERVICE_PORT=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.ports[0].port}')
+    kubectl --namespace "${MILVUS_HELM_NAMESPACE}" port-forward "${POD_NAME}" "${SERVICE_PORT}" &
+    PORT_FORWARD_PID=$!
+    trap "kill -TERM ${PORT_FORWARD_PID}" EXIT
+  fi
 fi
 
 pushd "${ROOT}/tests/docker"

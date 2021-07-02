@@ -1,3 +1,0 @@
-
-class BaseExecutor(object):
-    pass

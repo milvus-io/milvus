@@ -143,7 +143,7 @@ func (it *InsertMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 /////////////////////////////////////////FlushCompletedMsg//////////////////////////////////////////
 type FlushCompletedMsg struct {
 	BaseMsg
-	internalpb.SegmentFlushCompletedMsg
+	datapb.SegmentFlushCompletedMsg
 }
 
 func (fl *FlushCompletedMsg) TraceCtx() context.Context {
@@ -177,7 +177,7 @@ func (fl *FlushCompletedMsg) Marshal(input TsMsg) (MarshalType, error) {
 }
 
 func (fl *FlushCompletedMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	flushCompletedMsg := internalpb.SegmentFlushCompletedMsg{}
+	flushCompletedMsg := datapb.SegmentFlushCompletedMsg{}
 	in, err := ConvertToByteArray(input)
 	if err != nil {
 		return nil, err
@@ -284,6 +284,14 @@ func (st *SearchMsg) SourceID() int64 {
 	return st.Base.SourceID
 }
 
+func (st *SearchMsg) GuaranteeTs() Timestamp {
+	return st.GetGuaranteeTimestamp()
+}
+
+func (st *SearchMsg) TravelTs() Timestamp {
+	return st.GetTravelTimestamp()
+}
+
 func (st *SearchMsg) Marshal(input TsMsg) (MarshalType, error) {
 	searchTask := input.(*SearchMsg)
 	searchRequest := &searchTask.SearchRequest
@@ -388,6 +396,14 @@ func (rm *RetrieveMsg) Type() MsgType {
 
 func (rm *RetrieveMsg) SourceID() int64 {
 	return rm.Base.SourceID
+}
+
+func (rm *RetrieveMsg) GuaranteeTs() Timestamp {
+	return rm.GetGuaranteeTimestamp()
+}
+
+func (rm *RetrieveMsg) TravelTs() Timestamp {
+	return rm.GetTravelTimestamp()
 }
 
 func (rm *RetrieveMsg) Marshal(input TsMsg) (MarshalType, error) {

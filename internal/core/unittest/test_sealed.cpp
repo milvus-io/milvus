@@ -73,7 +73,7 @@ TEST(Sealed, without_predicate) {
     Timestamp time = 1000000;
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
-    qr = segment->Search(plan.get(), ph_group_arr.data(), &time, 1);
+    qr = segment->Search(plan.get(), *ph_group, time);
     auto pre_result = QueryResultToJson(qr);
     auto indexing = std::make_shared<knowhere::IVF>();
 
@@ -112,7 +112,7 @@ TEST(Sealed, without_predicate) {
     segment->LoadIndexing(load_info);
     qr = QueryResult();
 
-    qr = segment->Search(plan.get(), ph_group_arr.data(), &time, 1);
+    qr = segment->Search(plan.get(), *ph_group, time);
 
     auto post_result = QueryResultToJson(qr);
     std::cout << ref_result.dump(1);
@@ -174,7 +174,7 @@ TEST(Sealed, with_predicate) {
     Timestamp time = 10000000;
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
-    qr = segment->Search(plan.get(), ph_group_arr.data(), &time, 1);
+    qr = segment->Search(plan.get(), *ph_group, time);
     auto pre_qr = qr;
     auto indexing = std::make_shared<knowhere::IVF>();
 
@@ -204,7 +204,7 @@ TEST(Sealed, with_predicate) {
     segment->LoadIndexing(load_info);
     qr = QueryResult();
 
-    qr = segment->Search(plan.get(), ph_group_arr.data(), &time, 1);
+    qr = segment->Search(plan.get(), *ph_group, time);
 
     auto post_qr = qr;
     for (int i = 0; i < num_queries; ++i) {
@@ -264,16 +264,15 @@ TEST(Sealed, LoadFieldData) {
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group_arr.data(), &time, 1));
+    ASSERT_ANY_THROW(segment->Search(plan.get(), *ph_group, time));
 
     SealedLoader(dataset, *segment);
     segment->DropFieldData(nothing_id);
-    segment->Search(plan.get(), ph_group_arr.data(), &time, 1);
+    segment->Search(plan.get(), *ph_group, time);
 
     segment->DropFieldData(fakevec_id);
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group_arr.data(), &time, 1));
+    ASSERT_ANY_THROW(segment->Search(plan.get(), *ph_group, time));
 
     LoadIndexInfo vec_info;
     vec_info.field_id = fakevec_id.get();
@@ -291,18 +290,18 @@ TEST(Sealed, LoadFieldData) {
         ASSERT_EQ(chunk_span2[i], ref2[i]);
     }
 
-    auto qr = segment->Search(plan.get(), ph_group_arr.data(), &time, 1);
+    auto qr = segment->Search(plan.get(), *ph_group, time);
     auto json = QueryResultToJson(qr);
     std::cout << json.dump(1);
 
     segment->DropIndex(fakevec_id);
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group_arr.data(), &time, 1));
+    ASSERT_ANY_THROW(segment->Search(plan.get(), *ph_group, time));
     segment->LoadIndex(vec_info);
-    auto qr2 = segment->Search(plan.get(), ph_group_arr.data(), &time, 1);
+    auto qr2 = segment->Search(plan.get(), *ph_group, time);
     auto json2 = QueryResultToJson(qr);
     ASSERT_EQ(json.dump(-2), json2.dump(-2));
     segment->DropFieldData(double_id);
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group_arr.data(), &time, 1));
+    ASSERT_ANY_THROW(segment->Search(plan.get(), *ph_group, time));
     auto std_json = Json::parse(R"(
 [
  [
