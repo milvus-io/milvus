@@ -68,11 +68,13 @@ class Base:
             if self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING)[0] is None:
                 self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=param_info.param_host,
                                              port=param_info.param_port)
+            if self.collection_wrap.collection is not None:
+                self.collection_wrap.drop(check_task='check_nothing')
 
             for collection_object in self.collection_object_list:
-                if collection_object is not None \
+                if collection_object.collection is not None \
                         and collection_object.name in self.utility_wrap.list_collections()[0]:
-                    collection_object.drop()
+                    collection_object.drop(check_task='check_nothing')
 
         except Exception as e:
             log.debug(str(e))
