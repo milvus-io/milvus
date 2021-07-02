@@ -1,0 +1,17 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: milvus-podchaos
+  namespace: chaos-testing
+spec:
+  action: pod-kill
+  duration: 30s
+  mode: one
+  scheduler:
+    cron: '@every 20s'
+  selector:
+    labelSelectors:
+      app.kubernetes.io/name: zong-single-etcd-0
+    namespaces:
+    - milvus
+  value: ''
