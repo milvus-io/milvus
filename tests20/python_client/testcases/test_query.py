@@ -606,7 +606,7 @@ class TestQueryOperation(TestcaseBase):
         collection_w.search(vectors_s[:ct.default_nq], ct.default_float_vec_field_name,
                             ct.default_search_params, limit, "int64 >= 0",
                             check_task=CheckTasks.check_search_results,
-                            check_items={"nq": ct.default_nq, "limit": nb_old})
+                            check_items={"nq": ct.default_nq, "limit": nb_old, "nb": nb_old})
 
         # check number of entities and that method calls the flush interface
         assert collection_w.num_entities == nb_old
