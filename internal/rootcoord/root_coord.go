@@ -332,7 +332,7 @@ func (c *Core) startDataNodeFlushedSegmentLoop() {
 					log.Debug("input msg is not FlushCompletedMsg")
 					continue
 				}
-				segID := flushMsg.SegmentID
+				segID := flushMsg.Segment.GetID()
 				log.Debug("flush segment", zap.Int64("id", segID))
 
 				coll, err := c.MetaTable.GetCollectionBySegmentID(segID)
@@ -1908,7 +1908,7 @@ func (c *Core) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseD
 	return c.proxyClientManager.ReleaseDQLMessageStream(ctx, in)
 }
 
-func (c *Core) SegmentFlushCompleted(ctx context.Context, in *internalpb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
+func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
 		return &commonpb.Status{
@@ -1922,7 +1922,7 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *internalpb.Segment
 			Reason:    fmt.Sprintf("SegmentFlushDone with incorrect msgtype = %s", commonpb.MsgType_name[int32(in.Base.MsgType)]),
 		}, nil
 	}
-	segID := in.SegmentID
+	segID := in.Segment.GetID()
 	log.Debug("flush segment", zap.Int64("id", segID))
 
 	coll, err := c.MetaTable.GetCollectionBySegmentID(segID)

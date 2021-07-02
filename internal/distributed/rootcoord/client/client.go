@@ -315,7 +315,7 @@ func (c *GrpcClient) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.Re
 	})
 	return ret.(*commonpb.Status), err
 }
-func (c *GrpcClient) SegmentFlushCompleted(ctx context.Context, in *internalpb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
+func (c *GrpcClient) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		return c.grpcClient.SegmentFlushCompleted(ctx, in)
 	})

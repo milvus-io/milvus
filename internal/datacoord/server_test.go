@@ -329,14 +329,14 @@ func TestChannel(t *testing.T) {
 				BaseMsg: msgstream.BaseMsg{
 					HashValues: []uint32{0},
 				},
-				SegmentFlushCompletedMsg: internalpb.SegmentFlushCompletedMsg{
+				SegmentFlushCompletedMsg: datapb.SegmentFlushCompletedMsg{
 					Base: &commonpb.MsgBase{
 						MsgType:   msgType,
 						MsgID:     0,
 						Timestamp: t,
 						SourceID:  0,
 					},
-					SegmentID: 0,
+					Segment: &datapb.SegmentInfo{},
 				},
 			}
 		}

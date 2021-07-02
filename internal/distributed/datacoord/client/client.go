@@ -243,3 +243,10 @@ func (c *Client) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	})
 	return ret.(*datapb.GetRecoveryInfoResponse), err
 }
+
+func (c *Client) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
+	ret, err := c.recall(func() (interface{}, error) {
+		return c.grpcClient.GetFlushedSegments(ctx, req)
+	})
+	return ret.(*datapb.GetFlushedSegmentsResponse), err
+}
