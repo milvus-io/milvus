@@ -47,16 +47,16 @@ class Base:
         log.info("[setup_class] Start setup class...")
 
     def teardown_class(self):
+        log.info("[teardown_class] Start teardown class...")
         pass
 
     def setup(self):
         log.info(("*" * 35) + " setup " + ("*" * 35))
         self.connection_wrap = ApiConnectionsWrapper()
+        self.utility_wrap = ApiUtilityWrapper()
         self.collection_wrap = ApiCollectionWrapper()
-        self.collection_object_list.append(self.collection_wrap)
         self.partition_wrap = ApiPartitionWrapper()
         self.index_wrap = ApiIndexWrapper()
-        self.utility_wrap = ApiUtilityWrapper()
         self.collection_schema_wrap = ApiCollectionSchemaWrapper()
         self.field_schema_wrap = ApiFieldSchemaWrapper()
 
@@ -70,17 +70,12 @@ class Base:
                                              port=param_info.param_port)
 
             for collection_object in self.collection_object_list:
-                if collection_object is not None and collection_object.collection is not None:
+                if collection_object is not None \
+                        and collection_object.name in self.utility_wrap.list_collections()[0]:
                     collection_object.drop()
 
-            # if self.collection_wrap is not None:
-            #     collection_list = self.utility_wrap.list_collections()[0]
-            #     for i in collection_list:
-            #         collection_wrap = ApiCollectionWrapper()
-            #         collection_wrap.init_collection(name=i)
-            #         collection_wrap.drop()
         except Exception as e:
-            pass
+            log.debug(str(e))
 
         try:
             """ Delete connection and reset configuration"""
@@ -92,7 +87,7 @@ class Base:
             self.connection_wrap.add_connection(default={"host": DefaultConfig.DEFAULT_HOST,
                                                          "port": DefaultConfig.DEFAULT_PORT})
         except Exception as e:
-            pass
+            log.debug(str(e))
 
     @pytest.fixture(scope="module", autouse=True)
     def initialize_env(self, request):
@@ -140,8 +135,8 @@ class TestcaseBase(Base):
         if self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING)[0] is None:
             self._connect()
         collection_w = ApiCollectionWrapper()
-        self.collection_object_list.append(collection_w)
         collection_w.init_collection(name=name, schema=schema, check_task=check_task, check_items=check_items, **kwargs)
+        self.collection_object_list.append(collection_w)
         return collection_w
 
     def init_partition_wrap(self, collection_wrap=None, name=None, description=None,

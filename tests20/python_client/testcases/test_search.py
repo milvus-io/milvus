@@ -426,7 +426,7 @@ class TestCollectionSearch(TestcaseBase):
     #  The following are valid base cases
     ******************************************************************
     """
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_empty_vectors(self):
         """
         target: test search with empty query vector
@@ -444,7 +444,7 @@ class TestCollectionSearch(TestcaseBase):
                                      check_items={"nq": 0})
         log.info("test_search_with_empty_vectors: test PASS with %s results" % len(res))
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_search_before_after_delete(self):
         """
         target: test search function before and after deletion
@@ -728,7 +728,7 @@ class TestCollectionSearch(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "limit": default_limit})
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_search_collection_multiple_times(self):
         """
         target: test search for multiple times
@@ -1103,7 +1103,6 @@ class TestCollectionSearch(TestcaseBase):
         log.info("test_search_multi_collections: searched %s collections" % connection_num)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(300)
     def test_search_concurrent_multi_threads(self):
         """
         target: test concurrent search with multi-processes
@@ -1120,6 +1119,7 @@ class TestCollectionSearch(TestcaseBase):
             vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
             res, _ = collection_w.search(vectors[:default_nq], default_search_field,
                                          default_search_params, default_limit, default_search_exp,
+                                         timeout=60,
                                          check_task=CheckTasks.check_search_results,
                                          check_items={"nq": default_nq,
                                                       "limit": default_limit})

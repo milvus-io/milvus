@@ -10,18 +10,22 @@ from common import common_func as cf
 from chaos_commons import *
 from common.common_type import CaseLabel
 import constants
+from delayed_assert import expect, assert_expectations
 
 
 def assert_statistic(checkers, expectations={}):
     for k in checkers.keys():
         # expect succ if no expectations
         succ_rate = checkers[k].succ_rate()
+        total = checkers[k].total()
         if expectations.get(k, '') == constants.FAIL:
-            log.debug(f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {checkers[k].total()}")
-            delayed_assert.expect(succ_rate < 0.49)
+            log.debug(f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}")
+            expect(succ_rate < 0.49 or total < 2,
+                   f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}")
         else:
-            log.debug(f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {checkers[k].total()}")
-            delayed_assert.expect(succ_rate > 0.90)
+            log.debug(f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}")
+            expect(succ_rate > 0.90 or total > 2,
+                   f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}")
 
 
 class TestChaosBase:
@@ -166,5 +170,8 @@ class TestChaos(TestChaosBase):
         # assert statistic: all ops success again
         log.debug("******3rd assert after chaos deleted: ")
         assert_statistic(self.health_checkers)
+
+        # assert all expectations
+        assert_expectations()
 
         log.debug("*********************Chaos Test Completed**********************")
