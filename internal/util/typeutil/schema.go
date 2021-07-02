@@ -61,16 +61,17 @@ func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 }
 
 type SchemaHelper struct {
-	schema     *schemapb.CollectionSchema
-	nameOffset map[string]int
-	idOffset   map[int64]int
+	schema           *schemapb.CollectionSchema
+	nameOffset       map[string]int
+	idOffset         map[int64]int
+	primaryKeyOffset int
 }
 
 func CreateSchemaHelper(schema *schemapb.CollectionSchema) (*SchemaHelper, error) {
 	if schema == nil {
 		return nil, errors.New("schema is nil")
 	}
-	schemaHelper := SchemaHelper{schema: schema, nameOffset: make(map[string]int), idOffset: make(map[int64]int)}
+	schemaHelper := SchemaHelper{schema: schema, nameOffset: make(map[string]int), idOffset: make(map[int64]int), primaryKeyOffset: -1}
 	for offset, field := range schema.Fields {
 		if _, ok := schemaHelper.nameOffset[field.Name]; ok {
 			return nil, errors.New("duplicated fieldName: " + field.Name)
@@ -80,8 +81,21 @@ func CreateSchemaHelper(schema *schemapb.CollectionSchema) (*SchemaHelper, error
 		}
 		schemaHelper.nameOffset[field.Name] = offset
 		schemaHelper.idOffset[field.FieldID] = offset
+		if field.IsPrimaryKey {
+			if schemaHelper.primaryKeyOffset != -1 {
+				return nil, errors.New("primary key is not unique")
+			}
+			schemaHelper.primaryKeyOffset = offset
+		}
 	}
 	return &schemaHelper, nil
+}
+
+func (helper *SchemaHelper) GetPrimaryKeyField() (*schemapb.FieldSchema, error) {
+	if helper.primaryKeyOffset == -1 {
+		return nil, fmt.Errorf("no primary in schema")
+	}
+	return helper.schema.Fields[helper.primaryKeyOffset], nil
 }
 
 func (helper *SchemaHelper) GetFieldFromName(fieldName string) (*schemapb.FieldSchema, error) {
