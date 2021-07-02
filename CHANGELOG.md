@@ -2,6 +2,17 @@
 
 Please mark all change in change log and use the issue from GitHub
 
+# Milvus 1.1.2 (TBD)
+## Bug
+-   \#6085 Search result of restful API contains id -1
+-   \#6266 Insert or delete entities will fail if the partition tag is specified as "_default"
+
+## Feature
+
+## Improvement
+
+## Task
+
 # Milvus 1.1.1 (2021-06-16)
 ## Bug
 -   \#4897 Query results contain some deleted ids
