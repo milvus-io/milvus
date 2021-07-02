@@ -15,8 +15,8 @@ import (
 	"context"
 	"errors"
 	"math/rand"
+	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -64,8 +64,6 @@ type IndexCoord struct {
 
 	eventChan <-chan *sessionutil.SessionEvent
 
-	assignChan chan []UniqueID
-
 	idAllocator *allocator.GlobalIDAllocator
 
 	kv kv.BaseKV
@@ -108,7 +106,6 @@ func (i *IndexCoord) Register() error {
 func (i *IndexCoord) Init() error {
 	log.Debug("IndexCoord", zap.Any("etcd endpoints", Params.EtcdEndpoints))
 
-	i.assignChan = make(chan []UniqueID, 1024)
 	connectEtcdFn := func() error {
 		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
 		if err != nil {
@@ -170,11 +167,6 @@ func (i *IndexCoord) Init() error {
 
 	i.nodeTasks = NewNodeTasks()
 
-	err = i.assignTasksServerStart()
-	if err != nil {
-		log.Debug("IndexCoord assign tasks server start failed", zap.Error(err))
-		return err
-	}
 	log.Debug("IndexCoord assign tasks server success", zap.Error(err))
 	return nil
 }
@@ -187,7 +179,7 @@ func (i *IndexCoord) Start() error {
 	go i.recycleUnusedIndexFiles()
 
 	i.loopWg.Add(1)
-	go i.assignmentTasksLoop()
+	go i.assignTaskLoop()
 
 	i.loopWg.Add(1)
 	go i.watchNodeLoop()
@@ -326,7 +318,6 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 		ret.Status.Reason = err.Error()
 		return ret, nil
 	}
-	i.assignChan <- []UniqueID{t.indexBuildID}
 	ret.Status.ErrorCode = commonpb.ErrorCode_Success
 	ret.IndexBuildID = t.indexBuildID
 	return ret, nil
@@ -479,63 +470,6 @@ func (i *IndexCoord) recycleUnusedIndexFiles() {
 	}
 }
 
-func (i *IndexCoord) assignmentTasksLoop() {
-	ctx, cancel := context.WithCancel(i.loopCtx)
-
-	defer cancel()
-	defer i.loopWg.Done()
-
-	log.Debug("IndexCoord start assignmentTasksLoop start")
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case indexBuildIDs := <-i.assignChan:
-			for _, indexBuildID := range indexBuildIDs {
-				meta := i.metaTable.GetIndexMeta(indexBuildID)
-				log.Debug("IndexCoord assignmentTasksLoop ", zap.Any("Meta", meta))
-				if meta.indexMeta.State == commonpb.IndexState_Finished {
-					continue
-				}
-				if err := i.metaTable.UpdateVersion(indexBuildID); err != nil {
-					log.Debug("IndexCoord assignmentTasksLoop metaTable.UpdateVersion failed", zap.Error(err))
-				}
-				nodeID, builderClient := i.nodeClients.PeekClient()
-				if builderClient == nil {
-					log.Debug("IndexCoord assignmentTasksLoop can not find available IndexNode")
-					i.assignChan <- []UniqueID{indexBuildID}
-					continue
-				}
-				i.nodeTasks.assignTask(nodeID, indexBuildID)
-				req := &indexpb.CreateIndexRequest{
-					IndexBuildID: indexBuildID,
-					IndexName:    meta.indexMeta.Req.IndexName,
-					IndexID:      meta.indexMeta.Req.IndexID,
-					Version:      meta.indexMeta.Version + 1,
-					MetaPath:     "/indexes/" + strconv.FormatInt(indexBuildID, 10),
-					DataPaths:    meta.indexMeta.Req.DataPaths,
-					TypeParams:   meta.indexMeta.Req.TypeParams,
-					IndexParams:  meta.indexMeta.Req.IndexParams,
-				}
-				resp, err := builderClient.CreateIndex(ctx, req)
-				if err != nil {
-					log.Debug("IndexCoord assignmentTasksLoop builderClient.CreateIndex failed", zap.Error(err))
-					continue
-				}
-				if resp.ErrorCode != commonpb.ErrorCode_Success {
-					log.Debug("IndexCoord assignmentTasksLoop builderClient.CreateIndex failed", zap.String("Reason", resp.Reason))
-					continue
-				}
-				if err = i.metaTable.BuildIndex(indexBuildID, nodeID); err != nil {
-					log.Debug("IndexCoord assignmentTasksLoop metaTable.BuildIndex failed", zap.Error(err))
-				}
-				i.nodeClients.IncPriority(nodeID, 1)
-			}
-		}
-	}
-}
-
 func (i *IndexCoord) watchNodeLoop() {
 	ctx, cancel := context.WithCancel(i.loopCtx)
 
@@ -558,7 +492,6 @@ func (i *IndexCoord) watchNodeLoop() {
 				log.Debug("IndexCoord watchNodeLoop SessionDelEvent ", zap.Any("serverID", serverID))
 				indexBuildIDs := i.nodeTasks.getTasksByNodeID(serverID)
 				log.Debug("IndexNode crashed", zap.Any("IndexNode ID", serverID), zap.Any("task IDs", indexBuildIDs))
-				i.assignChan <- indexBuildIDs
 				i.nodeTasks.delete(serverID)
 			}
 		}
@@ -602,38 +535,70 @@ func (i *IndexCoord) watchMetaLoop() {
 	}
 }
 
-func (i *IndexCoord) assignTasksServerStart() error {
-	sessions, _, err := i.session.GetSessions(typeutil.IndexNodeRole)
-	if err != nil {
-		return err
-	}
-	for _, session := range sessions {
-		addrs := strings.Split(session.Address, ":")
-		ip := addrs[0]
-		port, err := strconv.ParseInt(addrs[1], 10, 64)
-		if err != nil {
-			return err
-		}
+func (i *IndexCoord) assignTaskLoop() {
+	ctx, cancel := context.WithCancel(i.loopCtx)
 
-		req := &indexpb.RegisterNodeRequest{
-			Address: &commonpb.Address{
-				Ip:   ip,
-				Port: port,
-			},
-			NodeID: session.ServerID,
-		}
-		if err = i.addNode(session.ServerID, req); err != nil {
-			log.Debug("IndexCoord", zap.Any("IndexCoord start find node fatal, err = ", err))
-		}
-	}
-	var serverIDs []int64
-	for _, session := range sessions {
-		serverIDs = append(serverIDs, session.ServerID)
-	}
-	tasks := i.metaTable.GetUnassignedTasks(serverIDs)
-	for _, taskQueue := range tasks {
-		i.assignChan <- taskQueue
-	}
+	defer cancel()
+	defer i.loopWg.Done()
 
-	return nil
+	timeTicker := time.NewTicker(durationInterval)
+	log.Debug("IndexCoord start assignTask loop")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timeTicker.C:
+			sessions, _, err := i.session.GetSessions(typeutil.IndexNodeRole)
+			if err != nil {
+				log.Debug("IndexCoord assignTaskLoop", zap.Any("GetSessions error", err))
+			}
+			var serverIDs []int64
+			for _, session := range sessions {
+				serverIDs = append(serverIDs, session.ServerID)
+			}
+			metas := i.metaTable.GetUnassignedTasks(serverIDs)
+			sort.Slice(metas, func(i, j int) bool {
+				return metas[i].indexMeta.Version <= metas[j].indexMeta.Version
+			})
+			log.Debug("IndexCoord assignTaskLoop", zap.Any("Unassign tasks number", len(metas)))
+			for index, meta := range metas {
+				indexBuildID := meta.indexMeta.IndexBuildID
+				if err = i.metaTable.UpdateVersion(indexBuildID); err != nil {
+					log.Debug("IndexCoord assignmentTasksLoop metaTable.UpdateVersion failed", zap.Error(err))
+				}
+				nodeID, builderClient := i.nodeClients.PeekClient()
+				if builderClient == nil {
+					log.Debug("IndexCoord assignmentTasksLoop can not find available IndexNode")
+					break
+				}
+				req := &indexpb.CreateIndexRequest{
+					IndexBuildID: indexBuildID,
+					IndexName:    meta.indexMeta.Req.IndexName,
+					IndexID:      meta.indexMeta.Req.IndexID,
+					Version:      meta.indexMeta.Version + 1,
+					MetaPath:     "/indexes/" + strconv.FormatInt(indexBuildID, 10),
+					DataPaths:    meta.indexMeta.Req.DataPaths,
+					TypeParams:   meta.indexMeta.Req.TypeParams,
+					IndexParams:  meta.indexMeta.Req.IndexParams,
+				}
+				resp, err := builderClient.CreateIndex(ctx, req)
+				if err != nil {
+					log.Debug("IndexCoord assignmentTasksLoop builderClient.CreateIndex failed", zap.Error(err))
+					continue
+				}
+				if resp.ErrorCode != commonpb.ErrorCode_Success {
+					log.Debug("IndexCoord assignmentTasksLoop builderClient.CreateIndex failed", zap.String("Reason", resp.Reason))
+					continue
+				}
+				if err = i.metaTable.BuildIndex(indexBuildID, nodeID); err != nil {
+					log.Debug("IndexCoord assignmentTasksLoop metaTable.BuildIndex failed", zap.Error(err))
+				}
+				i.nodeClients.IncPriority(nodeID, 1)
+				if index > 50 {
+					break
+				}
+			}
+		}
+	}
 }

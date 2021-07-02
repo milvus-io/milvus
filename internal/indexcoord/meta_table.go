@@ -361,11 +361,17 @@ func (mt *metaTable) GetIndexMeta(indexBuildID UniqueID) Meta {
 	return meta
 }
 
-func (mt *metaTable) GetUnassignedTasks(nodeIDs []int64) [][]UniqueID {
-	var tasks [][]UniqueID
-	var indexBuildIDs []UniqueID
+func (mt *metaTable) GetUnassignedTasks(nodeIDs []int64) []Meta {
+	var metas []Meta
 
-	for indexBuildID, meta := range mt.indexBuildID2Meta {
+	for _, meta := range mt.indexBuildID2Meta {
+		if meta.indexMeta.State == commonpb.IndexState_Unissued {
+			metas = append(metas, meta)
+			continue
+		}
+		if meta.indexMeta.State == commonpb.IndexState_Finished || meta.indexMeta.State == commonpb.IndexState_Failed {
+			continue
+		}
 		alive := false
 		for _, serverID := range nodeIDs {
 			if meta.indexMeta.NodeID == serverID {
@@ -373,16 +379,11 @@ func (mt *metaTable) GetUnassignedTasks(nodeIDs []int64) [][]UniqueID {
 			}
 		}
 		if !alive {
-			indexBuildIDs = append(indexBuildIDs, indexBuildID)
-		}
-		if len(indexBuildIDs) >= 10 {
-			tasks = append(tasks, indexBuildIDs)
-			indexBuildIDs = []UniqueID{}
+			metas = append(metas, meta)
 		}
 	}
-	tasks = append(tasks, indexBuildIDs)
 
-	return tasks
+	return metas
 }
 
 func (mt *metaTable) HasSameReq(req *indexpb.BuildIndexRequest) (bool, UniqueID) {
