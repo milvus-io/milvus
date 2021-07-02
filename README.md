@@ -328,7 +328,7 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 
 ## Documentation
 
-
+For guidance on installation, development, deployment, and administration, check out [Milvus Docs](https://milvus.io/docs/home).
 
 ### SDK
 
