@@ -161,7 +161,7 @@ class TestUtilityBase(TestcaseBase):
         res, _ = self.utility_wrap.has_collection(cw.name)
         assert res is True
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_has_collection_not_created(self):
         """
         target: test has_collection with collection name which is not created
@@ -188,7 +188,7 @@ class TestUtilityBase(TestcaseBase):
         res, _ = self.utility_wrap.has_collection(c_name)
         assert res is False
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_has_partition(self):
         """
         target: test has_partition with partition name
@@ -368,6 +368,7 @@ class TestUtilityBase(TestcaseBase):
         assert res is None
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason='hang issue #6272')
     def test_wait_index_collection_index(self):
         """
         target: test wait_index
