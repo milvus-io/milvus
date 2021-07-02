@@ -14,9 +14,10 @@ services:
     command: >
       /bin/sh -c "
                   echo "" >> /pulsar/conf/standalone.conf &&
-                  echo "maxMessageSize=1073741824" >> /pulsar/conf/standalone.conf &&
+                  echo "maxMessageSize=104857600" >> /pulsar/conf/standalone.conf &&
                   echo "" >> /pulsar/conf/standalone.conf &&
-                  echo "nettyMaxFrameSizeBytes=1073741824" >> /pulsar/conf/standalone.conf &&
+                  echo "nettyMaxFrameSizeBytes=104857600" >> /pulsar/conf/standalone.conf &&
+                  sed -i 's/^defaultRetentionTimeInMinutes=.*/defaultRetentionTimeInMinutes=10080/' /pulsar/conf/broker.conf && \
                   bin/pulsar standalone"
     ports:
       - "6650:6650"

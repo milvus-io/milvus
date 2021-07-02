@@ -11,15 +11,16 @@ from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 
 prefix = "search_collection"
-default_search_field = ct.default_float_vec_field_name
-default_search_exp = "int64 >= 0"
-default_dim = ct.default_dim
+epsilon = ct.epsilon
+default_nb = ct.default_nb
 default_nq = ct.default_nq
+default_dim = ct.default_dim
 default_limit = ct.default_limit
+default_search_exp = "int64 >= 0"
+default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
 default_int64_field_name = ct.default_int64_field_name
 default_float_field_name = ct.default_float_field_name
-epsilon = ct.epsilon
 
 
 class TestCollectionSearch(TestcaseBase):
@@ -37,24 +38,16 @@ class TestCollectionSearch(TestcaseBase):
         method: create and delete connection, then search
         expected: raise exception and report the error
         """
-        log.info("Test case of search interface: test_search_no_connection (searching without connection)")
+        log.info("Test case of search interface: test_search_no_connection")
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix, True)[0]
-        # 2. search
-        log.info("test_search_no_connection: searching collection %s" % collection_w.name)
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                                     default_search_params, default_limit,
-                                     default_search_exp,
-                                     check_task=CheckTasks.check_search_results,
-                                     check_items={"nq": default_nq,
-                                                  "limit": default_limit})
-        # 3. remove connection
+        collection_w = self.init_collection_general(prefix)[0]
+        # 2. remove connection
         log.info("test_search_no_connection: removing connection")
         self.connection_wrap.remove_connection(alias='default')
         log.info("test_search_no_connection: removed connection")
-        # 4. search without connection
+        # 3. search without connection
         log.info("test_search_no_connection: searching without connection")
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
                             default_search_exp,
@@ -106,7 +99,8 @@ class TestCollectionSearch(TestcaseBase):
                             default_search_params, default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
-                                         "err_msg": "collection %s was not loaded into memory" % collection_w.name})
+                                         "err_msg": "collection %s was not loaded "
+                                                    "into memory" % collection_w.name})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_release_partition(self):
@@ -145,9 +139,9 @@ class TestCollectionSearch(TestcaseBase):
         expected: raise exception and report the error
         """
         log.info("Test case of search interface: test_search_with_empty_collection")
-        # 1 initialize without data
+        # 1. initialize without data
         collection_w = self.init_collection_general(prefix)[0]
-        # 2 search collection without data before load
+        # 2. search collection without data before load
         log.info("test_search_with_empty_collection: Searching empty collection %s"
                  % collection_w.name)
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
@@ -157,7 +151,7 @@ class TestCollectionSearch(TestcaseBase):
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
                                          "err_msg": err_msg})
-        # 3 search collection without data after load
+        # 3. search collection without data after load
         collection_w.load()
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
                             default_limit, default_search_exp,
@@ -173,9 +167,9 @@ class TestCollectionSearch(TestcaseBase):
         expected: raise exception and report the error
         """
         log.info("Test case of search interface: test_search_param_missing")
-        # 1 initialize without data
+        # 1. initialize without data
         collection_w = self.init_collection_general(prefix, True)[0]
-        # 2 search collection with missing parameters
+        # 2. search collection with missing parameters
         log.info("test_search_param_missing: Searching collection %s "
                  "with missing parameters" % collection_w.name)
         try:
@@ -183,9 +177,9 @@ class TestCollectionSearch(TestcaseBase):
         except TypeError as e:
             assert "missing 4 required positional arguments: 'data', " \
                    "'anns_field', 'param', and 'limit'" in str(e)
-            log.info("test_search_no_collection: test PASS with expected assertion: %s" % e)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue 6257")
     def test_search_param_invalid_dim(self):
         """
         target: test search with invalid parameter values
@@ -215,7 +209,7 @@ class TestCollectionSearch(TestcaseBase):
         log.info("Test case of search interface: test_search_param_invalid_metric_type")
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix, True)[0]
-        # 2.2 search with invalid metric_type
+        # 2. search with invalid metric_type
         log.info("test_search_param_invalid_metric_type: searching with invalid metric_type")
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         search_params = {"metric_type": "L10", "params": {"nprobe": 10}}
@@ -226,8 +220,8 @@ class TestCollectionSearch(TestcaseBase):
                                          "err_msg": "metric type not found"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue 6170")
-    def test_search_param_invalid_limit(self):
+    @pytest.mark.parametrize("limit", [0, 16385])
+    def test_search_param_invalid_limit(self, limit):
         """
         target: test search with invalid parameter values
         method: search with invalid limit: 0 and maximum
@@ -236,26 +230,24 @@ class TestCollectionSearch(TestcaseBase):
         log.info("Test case of search interface: test_search_param_invalid_limit")
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix, True)[0]
-        # 2 search with invalid limit (topK)
-        log.info("test_search_param_invalid_limit: searching with invalid limit (topK)")
-        limit = 0
+        # 2. search with invalid limit (topK)
+        log.info("test_search_param_invalid_limit: searching with "
+                 "invalid limit (topK) = %s" % limit)
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        log.info("test_search_param_invalid_limit: searching with invalid limit (topK) = %s" % limit)
+        err_msg = "limit %d is too large!" % limit
+        if limit == 0:
+            err_msg = "`limit` value 0 is illegal"
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
                             limit, default_search_exp,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
-                                         "err_msg": "limit must be greater than 0"})
-        limit = 16385
-        log.info("test_search_param_invalid_limit: searching with invalid max limit (topK) = %s" % limit)
-        collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
-                            limit, default_search_exp,
-                            check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "limit %d is too large" % limit})
+                                         "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_search_param_invalid_field(self):
+    @pytest.mark.xfail(reason="issue 6259")
+    @pytest.mark.parametrize("invalid_search_field",
+                             ["", " ", "float-vector"])
+    def test_search_param_invalid_field(self, invalid_search_field):
         """
         target: test search with invalid parameter values
         method: search with invalid field
@@ -264,17 +256,10 @@ class TestCollectionSearch(TestcaseBase):
         log.info("Test case of search interface: test_search_param_invalid_field")
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix, True)[0]
-        # 2 search with invalid field
-        log.info("test_search_param_invalid_field: searching with invalid field")
+        # 2. search with invalid field
+        log.info("test_search_param_invalid_field: searching with "
+                 "invalid field: %s" % invalid_search_field)
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        log.info("test_search_param_invalid_field: searching with invalid field (empty)")
-        collection_w.search(vectors[:default_nq], " ", default_search_params,
-                            default_limit, default_search_exp,
-                            check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "invalid search field"})
-        log.info("test_search_param_invalid_field: searching with invalid field")
-        invalid_search_field = "floatvector"
         collection_w.search(vectors[:default_nq], invalid_search_field, default_search_params,
                             default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
@@ -282,7 +267,9 @@ class TestCollectionSearch(TestcaseBase):
                                          "err_msg": "invalid search field"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_search_param_invalid_expr(self):
+    @pytest.mark.parametrize("invalid_search_expr",
+                             [" ", "int63 >= 0"])
+    def test_search_param_invalid_expr(self, invalid_search_expr):
         """
         target: test search with invalid parameter values
         method: search with invalid search expressions
@@ -292,20 +279,15 @@ class TestCollectionSearch(TestcaseBase):
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix, True)[0]
         # 2 search with invalid expr
-        log.info("test_search_param_invalid_expr: searching with invalid expression")
+        log.info("test_search_param_invalid_expr: searching with "
+                 "invalid expr: %s" % invalid_search_expr)
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        log.info("test_search_param_invalid_expr: searching with invalid expr (empty)")
         collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit, " ",
+                            default_search_params, default_limit, invalid_search_expr,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
-                                         "err_msg": "invalid expression"})
-        log.info("test_search_param_invalid_expr: searching with invalid expr")
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit, "int63 >= 0",
-                            check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "invalid expression"})
+                                         "err_msg": "invalid expression %s"
+                                                    % invalid_search_expr})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_partition_deleted(self):
@@ -320,14 +302,14 @@ class TestCollectionSearch(TestcaseBase):
         # 1. initialize with data
         partition_num = 1
         collection_w = self.init_collection_general(prefix, True, 1000, partition_num)[0]
-        # 3. delete partitions
+        # 2. delete partitions
         log.info("test_search_partition_deleted: deleting a partition")
         par = collection_w.partitions
         deleted_par_name = par[partition_num].name
         collection_w.drop_partition(deleted_par_name)
         log.info("test_search_partition_deleted: deleted a partition")
         collection_w.load()
-        # 4. search after delete partitions
+        # 3. search after delete partitions
         log.info("test_search_partition_deleted: searching deleted partition")
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
@@ -413,19 +395,40 @@ class TestCollectionSearch(TestcaseBase):
         # 2. search
         log.info("test_search_output_field_vector: Searching collection %s" % collection_w.name)
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                                     default_search_params, default_limit,
-                                     default_search_exp, output_fields=[default_search_field],
-                                     check_task=CheckTasks.err_res,
-                                     check_items={"err_code": 1,
-                                                  "err_msg": "Search doesn't support "
-                                                             "vector field as output_fields"})
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp, output_fields=[default_search_field],
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": "Search doesn't support "
+                                                    "vector field as output_fields"})
 
     """
     ******************************************************************
     #  The following are valid base cases
     ******************************************************************
     """
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_search_normal(self):
+        """
+        target: test search normal case
+        method: create connection, collection, insert and search
+        expected: search successfully with limit(topK)
+        """
+        log.info("Test case of search interface: test_search_normal")
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True)[0]
+        # 2. search
+        log.info("test_search_normal: searching collection %s" % collection_w.name)
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "nb": default_nb,
+                                         "limit": default_limit})
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_empty_vectors(self):
         """
@@ -434,38 +437,40 @@ class TestCollectionSearch(TestcaseBase):
         expected: search successfully with 0 results
         """
         log.info("Test case of search interface: test_search_with_empty_vectors")
-        # 1 initialize without data
-        collection_w = self.init_collection_general(prefix, True, 10)[0]
-        # 2 search collection without data
-        log.info("test_search_with_empty_vectors: Searching collection %s using empty vector" % collection_w.name)
-        res, _ = collection_w.search([], default_search_field, default_search_params,
-                                     default_limit, default_search_exp,
-                                     check_task=CheckTasks.check_search_results,
-                                     check_items={"nq": 0})
-        log.info("test_search_with_empty_vectors: test PASS with %s results" % len(res))
+        # 1. initialize without data
+        collection_w = self.init_collection_general(prefix, True)[0]
+        # 2. search collection without data
+        log.info("test_search_with_empty_vectors: Searching collection %s "
+                 "using empty vector" % collection_w.name)
+        collection_w.search([], default_search_field, default_search_params,
+                            default_limit, default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 0})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_before_after_delete(self):
         """
         target: test search function before and after deletion
-        method: 1 search the collection
-                2 delete a partition
-                3 search the collection
+        method: 1. search the collection
+                2. delete a partition
+                3. search the collection
         expected: the deleted entities should not be searched
         """
         log.info("test_search_before_after_delete: test search after deleting entities")
         # 1. initialize with data
         partition_num = 1
+        nb = 1000
         limit = 1000
-        collection_w = self.init_collection_general(prefix, True, 1000, partition_num)[0]
+        collection_w = self.init_collection_general(prefix, True, nb, partition_num)[0]
         # 2. search all the partitions before partition deletion
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         log.info("test_search_before_after_delete: searching before deleting partitions")
-        res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                                     default_search_params, limit, default_search_exp,
-                                     check_task=CheckTasks.check_search_results,
-                                     check_items={"nq": default_nq,
-                                                  "limit": limit})
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, limit, default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "nb": nb,
+                                         "limit": limit})
         # 3. delete partitions
         log.info("test_search_before_after_delete: deleting a partition")
         par = collection_w.partitions
@@ -479,6 +484,7 @@ class TestCollectionSearch(TestcaseBase):
                             default_search_params, limit, default_search_exp,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
+                                         "nb": nb-deleted_entity_num,
                                          "limit": limit-deleted_entity_num})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -492,30 +498,33 @@ class TestCollectionSearch(TestcaseBase):
         """
         log.info("test_search_partition_after_release_one: test search after releasing entities")
         # 1. initialize with data
-        partition_num = 1
+        nb = 1000
         limit = 1000
-        collection_w = self.init_collection_general(prefix, True, 1000, partition_num)[0]
+        partition_num = 1
+        collection_w = self.init_collection_general(prefix, True, nb, partition_num)[0]
         # 2. search all the partitions before partition deletion
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         log.info("test_search_partition_after_release_one: searching before deleting partitions")
-        res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                                     default_search_params, limit, default_search_exp,
-                                     check_task=CheckTasks.check_search_results,
-                                     check_items={"nq": default_nq,
-                                                  "limit": limit})
-        # 2. release one partition
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, limit, default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "nb": nb,
+                                         "limit": limit})
+        # 3. release one partition
         log.info("test_search_partition_after_release_one: releasing a partition")
         par = collection_w.partitions
         deleted_entity_num = par[partition_num].num_entities
         conn = self.connection_wrap.get_connection()[0]
         conn.release_partitions(collection_w.name, [par[partition_num].name])
         log.info("test_search_partition_after_release_one: released a partition")
-        # 3. search collection after release one partition
+        # 4. search collection after release one partition
         log.info("test_search_partition_after_release_one: searching after deleting partitions")
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, limit, default_search_exp,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
+                                         "nb": nb-deleted_entity_num,
                                          "limit": limit - deleted_entity_num})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -529,23 +538,25 @@ class TestCollectionSearch(TestcaseBase):
         """
         log.info("test_search_before_after_release: test search after releasing entities")
         # 1. initialize with data
+        nb = 1000
         limit = 1000
-        collection_w = self.init_collection_general(prefix, True, 1000, 1)[0]
+        collection_w = self.init_collection_general(prefix, True, nb, 1)[0]
         # 2. search all the partitions before partition deletion
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         log.info("test_search_partition_after_release_all: searching before deleting partitions")
-        res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                                     default_search_params, limit, default_search_exp,
-                                     check_task=CheckTasks.check_search_results,
-                                     check_items={"nq": default_nq,
-                                                  "limit": limit})
-        # 2. release all partitions
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, limit, default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "nb": nb,
+                                         "limit": limit})
+        # 3. release all partitions
         log.info("test_search_partition_after_release_all: releasing a partition")
         par = collection_w.partitions
         conn = self.connection_wrap.get_connection()[0]
         conn.release_partitions(collection_w.name, [par[0].name, par[1].name])
         log.info("test_search_partition_after_release_all: released a partition")
-        # 3. search collection after release all partitions
+        # 4. search collection after release all partitions
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, limit, default_search_exp,
                             check_task=CheckTasks.check_search_results,
@@ -564,7 +575,7 @@ class TestCollectionSearch(TestcaseBase):
         """
         log.info("Test case of search interface: test_search_collection_after_release_load")
         # 1. initialize without data
-        collection_w = self.init_collection_general(prefix, True, 10, 1)[0]
+        collection_w = self.init_collection_general(prefix, True, default_nb, 1)[0]
         # 2. release collection
         collection_w.release()
         # 3. Search the pre-released collection after load
@@ -575,6 +586,7 @@ class TestCollectionSearch(TestcaseBase):
                             default_limit, default_search_exp,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
+                                         "nb": default_nb,
                                          "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -589,7 +601,7 @@ class TestCollectionSearch(TestcaseBase):
         """
         log.info("Test case of search interface: test_search_partition_after_release_load")
         # 1. initialize without data
-        collection_w = self.init_collection_general(prefix, True, 1000, 1)[0]
+        collection_w = self.init_collection_general(prefix, True, default_nb, 1)[0]
         # 2. release collection
         log.info("test_search_partition_after_release_load: releasing a partition")
         par = collection_w.partitions
@@ -605,6 +617,7 @@ class TestCollectionSearch(TestcaseBase):
                             limit, default_search_exp,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
+                                         "nb": default_nb,
                                          "limit": limit})
         # 4. Search the pre-released partition after load
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
@@ -612,6 +625,7 @@ class TestCollectionSearch(TestcaseBase):
                             [par[1].name],
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
+                                         "nb": par[1].num_entities,
                                          "limit": par[1].num_entities})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -627,7 +641,7 @@ class TestCollectionSearch(TestcaseBase):
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix)[0]
         # 2. insert data
-        cf.insert_data(collection_w, 1000)
+        cf.insert_data(collection_w, default_nb)
         # 3. load data
         collection_w.load()
         # 4. flush and load
@@ -639,6 +653,7 @@ class TestCollectionSearch(TestcaseBase):
                             default_search_params, default_limit, default_search_exp,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
+                                         "nb": default_nb,
                                          "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -646,9 +661,9 @@ class TestCollectionSearch(TestcaseBase):
     def test_search_new_data(self):
         """
         target: test search new inserted data without load
-        method: 1 search the collection
-                2 insert new data
-                3 search the collection without load again
+        method: 1. search the collection
+                2. insert new data
+                3. search the collection without load again
         expected: new data should be searched
         """
         log.info("test_search_new_data: search new data without another load")
@@ -663,6 +678,7 @@ class TestCollectionSearch(TestcaseBase):
                             default_search_params, limit, default_search_exp,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
+                                         "nb": nb_old,
                                          "limit": nb_old})
         # 3. insert new data
         nb_new = 300
@@ -672,6 +688,7 @@ class TestCollectionSearch(TestcaseBase):
                             default_search_params, limit, default_search_exp,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
+                                         "nb": nb_old+nb_new,
                                          "limit": nb_old+nb_new})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -695,11 +712,12 @@ class TestCollectionSearch(TestcaseBase):
         log.info("test_search_after_different_index: Created index-%s" % index)
         # 3. search
         log.info("test_search_after_different_index: Searching after creating index-%s" % index)
-        res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                                     default_search_params, default_limit, default_search_exp,
-                                     check_task=CheckTasks.check_search_results,
-                                     check_items={"nq": default_nq,
-                                                  "limit": default_limit})
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit, default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "nb": default_nb,
+                                         "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
@@ -726,6 +744,7 @@ class TestCollectionSearch(TestcaseBase):
                             default_search_params, default_limit, default_search_exp,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
+                                         "nb": default_nb,
                                          "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -737,18 +756,18 @@ class TestCollectionSearch(TestcaseBase):
         """
         log.info("Test case of search interface: test_search_collection_multiple_times")
         # 1. initialize with data
+        search_num = 5
         collection_w = self.init_collection_general(prefix, True)[0]
         # 2. search for multiple times
-        N = 5
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        for i in range(N):
+        for i in range(search_num):
             log.info("test_search_collection_multiple_times: searching round %d" % (i+1))
-            res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                                         default_search_params, default_limit, default_search_exp,
-                                         check_task=CheckTasks.check_search_results,
-                                         check_items={"nq": default_nq,
-                                                      "limit": default_limit})
-        log.info("test_search_collection_multiple_times: test PASS")
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                default_search_params, default_limit, default_search_exp,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": default_nq,
+                                             "nb": default_nb,
+                                             "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_index_one_partition(self):
@@ -759,24 +778,22 @@ class TestCollectionSearch(TestcaseBase):
         """
         log.info("Test case of search interface: test_search_index_one_partition")
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix, True, 1000, 1)[0]
+        collection_w = self.init_collection_general(prefix, True, partition_num=1)[0]
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         # 2. create index
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
         # 3. search in one partition
         log.info("test_search_index_one_partition: searching (1000 entities) through one partition")
-        par = collection_w.partitions
-        log.info("test_search_index_one_partition: partitions: %s" % par)
-        partition_name = par[1].name
-        entity_num = par[1].num_entities
         limit = 1000
-        res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                                     default_search_params, limit, default_search_exp,
-                                     [partition_name],
-                                     check_task=CheckTasks.check_search_results,
-                                     check_items={"nq": default_nq,
-                                                  "limit": entity_num})
+        par = collection_w.partitions
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, limit, default_search_exp,
+                            [par[1].name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "nb": par[1].num_entities,
+                                         "limit": par[1].num_entities})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_index_partitions(self):
@@ -787,7 +804,7 @@ class TestCollectionSearch(TestcaseBase):
         """
         log.info("Test case of search interface: test_search_index_partitions")
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix, True, 1000, 1)[0]
+        collection_w = self.init_collection_general(prefix, True, partition_num=1)[0]
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         # 2. create index
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
@@ -797,15 +814,18 @@ class TestCollectionSearch(TestcaseBase):
         par = collection_w.partitions
         log.info("test_search_index_partitions: partitions: %s" % par)
         limit = 1000
-        res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                                     default_search_params, limit, default_search_exp,
-                                     [par[0].name, par[1].name],
-                                     check_task=CheckTasks.check_search_results,
-                                     check_items={"nq": default_nq,
-                                                  "limit": limit})
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, limit, default_search_exp,
+                            [par[0].name, par[1].name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "nb": default_nb,
+                                         "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_index_partitions_fuzzy(self):
+    @pytest.mark.parametrize("partition_names",
+                             [["(.*)"], ["search(.*)"]])
+    def test_search_index_partitions_fuzzy(self, partition_names):
         """
         target: test search from partitions
         method: search from partitions with fuzzy
@@ -814,28 +834,26 @@ class TestCollectionSearch(TestcaseBase):
         """
         log.info("Test case of search interface: test_search_index_partitions_fuzzy")
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix, True, 1000, 1)[0]
+        collection_w = self.init_collection_general(prefix, True, partition_num=1)[0]
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         # 2. create index
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
         # 3. search through partitions
         log.info("test_search_index_partitions_fuzzy: searching through partitions")
-        par = collection_w.partitions
-        entity_num = par[1].num_entities
         limit = 1000
+        nb = default_nb
+        par = collection_w.partitions
+        if partition_names == ["search(.*)"]:
+            nb = par[1].num_entities
+            limit = par[1].num_entities
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, limit, default_search_exp,
-                            ["(.*)"],
+                            partition_names,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
+                                         "nb": nb,
                                          "limit": limit})
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, limit, default_search_exp,
-                            ["search(.*)"],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "limit": entity_num})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_index_partition_empty(self):
@@ -859,12 +877,12 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.create_index("float_vector", default_index)
         # 4. search the empty partition
         log.info("test_search_index_partition_empty: searching %s entities through empty partition" % default_limit)
-        res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                                     default_search_params, default_limit,
-                                     default_search_exp, [partition_name],
-                                     check_task=CheckTasks.check_search_results,
-                                     check_items={"nq": default_nq,
-                                                  "limit": 0})
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp, [partition_name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": 0})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_binary_jaccard_flat_index(self):
@@ -886,8 +904,8 @@ class TestCollectionSearch(TestcaseBase):
         distance_1 = cf.jaccard(query_raw_vector[0], binary_raw_vector[1])
         # 4. search and compare the distance
         search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
-        res, _ = collection_w.search(binary_vectors[:default_nq], "binary_vector",
-                                     search_params, default_limit, "int64 >= 0")
+        res = collection_w.search(binary_vectors[:default_nq], "binary_vector",
+                                  search_params, default_limit, "int64 >= 0")[0]
         assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -910,8 +928,8 @@ class TestCollectionSearch(TestcaseBase):
         distance_1 = cf.hamming(query_raw_vector[0], binary_raw_vector[1])
         # 4. search and compare the distance
         search_params = {"metric_type": "HAMMING", "params": {"nprobe": 10}}
-        res, _ = collection_w.search(binary_vectors[:default_nq], "binary_vector",
-                                     search_params, default_limit, "int64 >= 0")
+        res = collection_w.search(binary_vectors[:default_nq], "binary_vector",
+                                  search_params, default_limit, "int64 >= 0")[0]
         assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -933,8 +951,8 @@ class TestCollectionSearch(TestcaseBase):
         distance_1 = cf.tanimoto(query_raw_vector[0], binary_raw_vector[1])
         # 4. search and compare the distance
         search_params = {"metric_type": "TANIMOTO", "params": {"nprobe": 10}}
-        res, _ = collection_w.search(binary_vectors[:default_nq], "binary_vector",
-                                     search_params, default_limit, "int64 >= 0")
+        res = collection_w.search(binary_vectors[:default_nq], "binary_vector",
+                                  search_params, default_limit, "int64 >= 0")[0]
         assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -949,18 +967,20 @@ class TestCollectionSearch(TestcaseBase):
         """
         log.info("Test case of search interface: test_search_with_expression")
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix, True, 1000)[0]
+        nb = 1000
+        collection_w = self.init_collection_general(prefix, True, nb)[0]
         # 2. create index
         index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
         # 3. search with different expressions
         log.info("test_search_with_expression: searching with expression: %s" % expression)
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                                     default_search_params, 1000, expression,
-                                     check_task=CheckTasks.check_search_results,
-                                     check_items={"nq": default_nq,
-                                                  "limit": limit})
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, nb, expression,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "nb": nb,
+                                         "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_output_fields_empty(self):
@@ -975,12 +995,13 @@ class TestCollectionSearch(TestcaseBase):
         # 2. search
         log.info("test_search_with_output_fields_empty: Searching collection %s" % collection_w.name)
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                                     default_search_params, default_limit,
-                                     default_search_exp, output_fields=[],
-                                     check_task=CheckTasks.check_search_results,
-                                     check_items={"nq": default_nq,
-                                                  "limit": default_limit})
+        res = collection_w.search(vectors[:default_nq], default_search_field,
+                                  default_search_params, default_limit,
+                                  default_search_exp, output_fields=[],
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": default_nq,
+                                               "nb": default_nb,
+                                               "limit": default_limit})[0]
         assert len(res[0][0].entity._row_data) == 0
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -996,12 +1017,13 @@ class TestCollectionSearch(TestcaseBase):
         # 2. search
         log.info("test_search_with_output_fields_not_exist: Searching collection %s" % collection_w.name)
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                                     default_search_params, default_limit,
-                                     default_search_exp, output_fields=["int63"],
-                                     check_task=CheckTasks.check_search_results,
-                                     check_items={"nq": default_nq,
-                                                  "limit": default_limit})
+        res = collection_w.search(vectors[:default_nq], default_search_field,
+                                  default_search_params, default_limit,
+                                  default_search_exp, output_fields=["int63"],
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": default_nq,
+                                               "nb": default_nb,
+                                               "limit": default_limit})[0]
         assert len(res[0][0].entity._row_data) == 0
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1017,12 +1039,13 @@ class TestCollectionSearch(TestcaseBase):
         # 2. search
         log.info("test_search_with_output_field: Searching collection %s" % collection_w.name)
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                                     default_search_params, default_limit,
-                                     default_search_exp, output_fields=[default_int64_field_name],
-                                     check_task=CheckTasks.check_search_results,
-                                     check_items={"nq": default_nq,
-                                                  "limit": default_limit})
+        res = collection_w.search(vectors[:default_nq], default_search_field,
+                                  default_search_params, default_limit,
+                                  default_search_exp, output_fields=[default_int64_field_name],
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": default_nq,
+                                               "nb": default_nb,
+                                               "limit": default_limit})[0]
         assert len(res[0][0].entity._row_data) != 0
         assert default_int64_field_name in res[0][0].entity._row_data
 
@@ -1039,14 +1062,15 @@ class TestCollectionSearch(TestcaseBase):
         # 2. search
         log.info("test_search_with_output_fields: Searching collection %s" % collection_w.name)
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                                     default_search_params, default_limit,
-                                     default_search_exp,
-                                     output_fields=[default_int64_field_name,
-                                                    default_float_field_name],
-                                     check_task=CheckTasks.check_search_results,
-                                     check_items={"nq": default_nq,
-                                                  "limit": default_limit})
+        res = collection_w.search(vectors[:default_nq], default_search_field,
+                                  default_search_params, default_limit,
+                                  default_search_exp,
+                                  output_fields=[default_int64_field_name,
+                                                 default_float_field_name],
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": default_nq,
+                                               "nb": default_nb,
+                                               "limit": default_limit})[0]
         assert len(res[0][0].entity._row_data) != 0
         assert (default_int64_field_name and default_float_field_name) in res[0][0].entity._row_data
 
@@ -1065,14 +1089,14 @@ class TestCollectionSearch(TestcaseBase):
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         search_exp = "int64 >= 0 && int32 >= 0 && int16 >= 0 " \
                      "&& int8 >= 0 && float >= 0 && double >= 0"
-        res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                                     default_search_params, default_limit,
-                                     search_exp,
-                                     output_fields=[default_int64_field_name,
-                                                    default_float_field_name],
-                                     check_task=CheckTasks.check_search_results,
-                                     check_items={"nq": default_nq,
-                                                  "limit": default_limit})
+        res = collection_w.search(vectors[:default_nq], default_search_field,
+                                  default_search_params, default_limit, search_exp,
+                                  output_fields=[default_int64_field_name,
+                                                 default_float_field_name],
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": default_nq,
+                                               "nb": default_nb,
+                                               "limit": default_limit})[0]
         assert len(res[0][0].entity._row_data) != 0
         assert (default_int64_field_name and default_float_field_name) in res[0][0].entity._row_data
 
@@ -1085,8 +1109,8 @@ class TestCollectionSearch(TestcaseBase):
         """
         log.info("Test case of search interface: test_search_multi_collections")
         self._connect()
-        connection_num = 10
-        for i in range(connection_num):
+        collection_num = 10
+        for i in range(collection_num):
             # 1. initialize with data
             log.info("test_search_multi_collections: search round %d" % (i + 1))
             collection_w = self.init_collection_general(prefix, True)[0]
@@ -1099,8 +1123,8 @@ class TestCollectionSearch(TestcaseBase):
                                 default_search_exp,
                                 check_task=CheckTasks.check_search_results,
                                 check_items={"nq": default_nq,
+                                             "nb": default_nb,
                                              "limit": default_limit})
-        log.info("test_search_multi_collections: searched %s collections" % connection_num)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_concurrent_multi_threads(self):
@@ -1117,12 +1141,12 @@ class TestCollectionSearch(TestcaseBase):
 
         def search(collection_w):
             vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-            res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                                         default_search_params, default_limit, default_search_exp,
-                                         timeout=60,
-                                         check_task=CheckTasks.check_search_results,
-                                         check_items={"nq": default_nq,
-                                                      "limit": default_limit})
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                default_search_params, default_limit, default_search_exp,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": default_nq,
+                                             "nb": default_nb,
+                                             "limit": default_limit})
 
         # 2. search with multi-processes
         log.info("test_search_concurrent_multi_threads: searching with %s processes" % threads_num)

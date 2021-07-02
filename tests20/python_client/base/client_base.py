@@ -161,7 +161,7 @@ class TestcaseBase(Base):
         expected: return collection and raw data
         """
         log.info("Test case of search interface: initialize before test case")
-        conn = self._connect()
+        self._connect()
         collection_name = cf.gen_unique_str(prefix)
         vectors = []
         binary_raw_vectors = []

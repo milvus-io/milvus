@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"google.golang.org/grpc/codes"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -67,19 +68,25 @@ func (c *Client) connect(retryOptions ...retry.Option) error {
 	connectGrpcFunc := func() error {
 		opts := trace.GetInterceptorOpts()
 		log.Debug("DataNode connect ", zap.String("address", c.addr))
-		ctx, cancel := context.WithTimeout(c.ctx, time.Millisecond*200)
-		defer cancel()
-		conn, err := grpc.DialContext(ctx, c.addr,
-			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(200*time.Millisecond),
+		conn, err := grpc.DialContext(c.ctx, c.addr,
+			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(2*time.Second),
 			grpc.WithDisableRetry(),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
-					//grpc_retry.UnaryClientInterceptor(grpc_retry.WithMax(3), grpc_retry.WithPerRetryTimeout(time.Millisecond*50)),
+					grpc_retry.UnaryClientInterceptor(
+						grpc_retry.WithMax(3),
+						grpc_retry.WithPerRetryTimeout(time.Second*5),
+						grpc_retry.WithCodes(codes.Aborted, codes.Unavailable),
+					),
 					grpc_opentracing.UnaryClientInterceptor(opts...),
 				)),
 			grpc.WithStreamInterceptor(
 				grpc_middleware.ChainStreamClient(
-					grpc_retry.StreamClientInterceptor(),
+					grpc_retry.StreamClientInterceptor(
+						grpc_retry.WithMax(3),
+						grpc_retry.WithPerRetryTimeout(time.Second*5),
+						grpc_retry.WithCodes(codes.Aborted, codes.Unavailable),
+					),
 					grpc_opentracing.StreamClientInterceptor(opts...),
 				)),
 		)
