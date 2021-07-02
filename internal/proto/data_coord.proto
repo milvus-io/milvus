@@ -29,6 +29,7 @@ service DataCoord {
 
   rpc SaveBinlogPaths(SaveBinlogPathsRequest) returns (common.Status){}
   rpc GetRecoveryInfo(GetRecoveryInfoRequest) returns (GetRecoveryInfoResponse){}
+  rpc GetFlushedSegments(GetFlushedSegmentsRequest) returns(GetFlushedSegmentsResponse){}
 }
 
 service DataNode {
@@ -289,4 +290,19 @@ message GetRecoveryInfoRequest {
   int64 partitionID = 3;
 }
 
-                                                                                                                   
+message GetFlushedSegmentsRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
+}
+
+message GetFlushedSegmentsResponse {
+  common.Status status = 1;
+  repeated int64 segments = 2;
+}
+
+message SegmentFlushCompletedMsg {
+  common.MsgBase base = 1;
+  SegmentInfo segment = 2;
+}
+

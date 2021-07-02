@@ -249,14 +249,16 @@ func GenFlushedSegMsgPack(segID typeutil.UniqueID) *msgstream.MsgPack {
 	}
 	segMsg := &msgstream.FlushCompletedMsg{
 		BaseMsg: baseMsg,
-		SegmentFlushCompletedMsg: internalpb.SegmentFlushCompletedMsg{
+		SegmentFlushCompletedMsg: datapb.SegmentFlushCompletedMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_SegmentFlushDone,
 				MsgID:     0,
 				Timestamp: 0,
 				SourceID:  0,
 			},
-			SegmentID: segID,
+			Segment: &datapb.SegmentInfo{
+				ID: segID,
+			},
 		},
 	}
 	msgPack.Msgs = append(msgPack.Msgs, segMsg)

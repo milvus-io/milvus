@@ -215,11 +215,6 @@ message SegmentStatistics {
   repeated SegmentStatisticsUpdates SegStats = 2;
 }
 
-message SegmentFlushCompletedMsg {
-  common.MsgBase base = 1;
-  int64 segmentID = 2;
-}
-
 message IndexStats {
   repeated common.KeyValuePair index_params = 1;
   int64 num_related_segments = 2;
