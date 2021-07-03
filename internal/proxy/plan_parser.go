@@ -13,6 +13,7 @@ package proxy
 
 import (
 	"fmt"
+	"math"
 
 	ant_ast "github.com/antonmedv/expr/ast"
 	ant_parser "github.com/antonmedv/expr/parser"
@@ -33,14 +34,139 @@ type ParserContext struct {
 	schema *typeutil.SchemaHelper
 }
 
+type optimizer struct {
+	applied bool
+	err     error
+}
+
+func (*optimizer) Enter(*ant_ast.Node) {}
+
+func (optimizer *optimizer) Exit(node *ant_ast.Node) {
+	patch := func(newNode ant_ast.Node) {
+		optimizer.applied = true
+		ant_ast.Patch(node, newNode)
+	}
+
+	value := func(node *ant_ast.Node) float64 {
+		switch node := (*node).(type) {
+		case *ant_ast.FloatNode:
+			return node.Value
+		case *ant_ast.IntegerNode:
+			return float64(node.Value)
+		}
+		panic("unreachable")
+	}
+
+	switch node := (*node).(type) {
+	case *ant_ast.UnaryNode:
+		switch node.Operator {
+		case "-":
+			if i, ok := node.Node.(*ant_ast.IntegerNode); ok {
+				patch(&ant_ast.IntegerNode{Value: -i.Value})
+			}
+			if i, ok := node.Node.(*ant_ast.FloatNode); ok {
+				patch(&ant_ast.FloatNode{Value: -i.Value})
+			}
+		case "+":
+			if i, ok := node.Node.(*ant_ast.IntegerNode); ok {
+				patch(&ant_ast.IntegerNode{Value: i.Value})
+			}
+			if i, ok := node.Node.(*ant_ast.FloatNode); ok {
+				patch(&ant_ast.FloatNode{Value: i.Value})
+			}
+		}
+
+	case *ant_ast.BinaryNode:
+		switch node.Operator {
+		case "+":
+			_, leftFloat := node.Left.(*ant_ast.FloatNode)
+			_, leftInteger := node.Left.(*ant_ast.IntegerNode)
+			_, rightFloat := node.Right.(*ant_ast.FloatNode)
+			_, rightInteger := node.Right.(*ant_ast.IntegerNode)
+			if (leftFloat || leftInteger) && (rightFloat || rightInteger) {
+				if leftFloat || rightFloat {
+					patch(&ant_ast.FloatNode{Value: value(&node.Left) + value(&node.Right)})
+				} else {
+					patch(&ant_ast.IntegerNode{Value: int(value(&node.Left) + value(&node.Right))})
+				}
+			}
+		case "-":
+			_, leftFloat := node.Left.(*ant_ast.FloatNode)
+			_, leftInteger := node.Left.(*ant_ast.IntegerNode)
+			_, rightFloat := node.Right.(*ant_ast.FloatNode)
+			_, rightInteger := node.Right.(*ant_ast.IntegerNode)
+			if (leftFloat || leftInteger) && (rightFloat || rightInteger) {
+				if leftFloat || rightFloat {
+					patch(&ant_ast.FloatNode{Value: value(&node.Left) - value(&node.Right)})
+				} else {
+					patch(&ant_ast.IntegerNode{Value: int(value(&node.Left) - value(&node.Right))})
+				}
+			}
+		case "*":
+			_, leftFloat := node.Left.(*ant_ast.FloatNode)
+			_, leftInteger := node.Left.(*ant_ast.IntegerNode)
+			_, rightFloat := node.Right.(*ant_ast.FloatNode)
+			_, rightInteger := node.Right.(*ant_ast.IntegerNode)
+			if (leftFloat || leftInteger) && (rightFloat || rightInteger) {
+				if leftFloat || rightFloat {
+					patch(&ant_ast.FloatNode{Value: value(&node.Left) * value(&node.Right)})
+				} else {
+					patch(&ant_ast.IntegerNode{Value: int(value(&node.Left) * value(&node.Right))})
+				}
+			}
+		case "/":
+			_, leftFloat := node.Left.(*ant_ast.FloatNode)
+			_, leftInteger := node.Left.(*ant_ast.IntegerNode)
+			_, rightFloat := node.Right.(*ant_ast.FloatNode)
+			_, rightInteger := node.Right.(*ant_ast.IntegerNode)
+			if (leftFloat || leftInteger) && (rightFloat || rightInteger) {
+				if value(&node.Right) == 0 {
+					optimizer.err = fmt.Errorf("number divide by zero")
+					return
+				}
+				if leftFloat || rightFloat {
+					patch(&ant_ast.FloatNode{Value: value(&node.Left) / value(&node.Right)})
+				} else {
+					patch(&ant_ast.IntegerNode{Value: int(value(&node.Left) / value(&node.Right))})
+				}
+			}
+		case "%":
+			left, leftInteger := node.Left.(*ant_ast.IntegerNode)
+			right, rightInteger := node.Right.(*ant_ast.IntegerNode)
+			if leftInteger && rightInteger {
+				patch(&ant_ast.IntegerNode{Value: left.Value % right.Value})
+			}
+		case "**":
+			_, leftFloat := node.Left.(*ant_ast.FloatNode)
+			_, leftInteger := node.Left.(*ant_ast.IntegerNode)
+			right, rightInteger := node.Right.(*ant_ast.IntegerNode)
+			if (leftFloat || leftInteger) && rightInteger {
+				patch(&ant_ast.FloatNode{Value: math.Pow(value(&node.Left), float64(right.Value))})
+			}
+		}
+	}
+}
+
 func parseQueryExprAdvanced(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, error) {
 	ast, err := ant_parser.Parse(exprStr)
 	if err != nil {
 		return nil, err
 	}
+
+	optimizer := &optimizer{}
+	ant_ast.Walk(&ast.Node, optimizer)
+	if optimizer.err != nil {
+		return nil, optimizer.err
+	}
+
 	context := ParserContext{schema}
 
-	return context.handleExpr(&ast.Node)
+	expr, err := context.handleExpr(&ast.Node)
+	if err != nil {
+		return nil, err
+	}
+
+	return expr, nil
 }
 
 func (context *ParserContext) createColumnInfo(field *schemapb.FieldSchema) *planpb.ColumnInfo {
@@ -49,6 +175,12 @@ func (context *ParserContext) createColumnInfo(field *schemapb.FieldSchema) *pla
 		DataType:     field.DataType,
 		IsPrimaryKey: field.IsPrimaryKey,
 	}
+}
+
+func isSameOrder(a, b string) bool {
+	isLessA := a == "<" || a == "<="
+	isLessB := b == "<" || b == "<="
+	return isLessA == isLessB
 }
 
 func getCompareOpType(opStr string, reverse bool) planpb.RangeExpr_OpType {
@@ -104,18 +236,18 @@ func getLogicalOpType(opStr string) planpb.BinaryExpr_BinaryOp {
 	}
 }
 
-func (context *ParserContext) handleCmpExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
+func (context *ParserContext) createCmpExpr(left, right ant_ast.Node, operator string) (*planpb.Expr, error) {
 	var idNode *ant_ast.IdentifierNode
 	var isReversed bool
 	var valueNode *ant_ast.Node
-	if idNodeLeft, leftOk := node.Left.(*ant_ast.IdentifierNode); leftOk {
+	if idNodeLeft, leftOk := left.(*ant_ast.IdentifierNode); leftOk {
 		idNode = idNodeLeft
 		isReversed = false
-		valueNode = &node.Right
-	} else if idNodeRight, rightOk := node.Right.(*ant_ast.IdentifierNode); rightOk {
+		valueNode = &right
+	} else if idNodeRight, rightOk := right.(*ant_ast.IdentifierNode); rightOk {
 		idNode = idNodeRight
 		isReversed = true
-		valueNode = &node.Left
+		valueNode = &left
 	} else {
 		return nil, fmt.Errorf("compare expr has no identifier")
 	}
@@ -130,9 +262,9 @@ func (context *ParserContext) handleCmpExpr(node *ant_ast.BinaryNode) (*planpb.E
 		return nil, err
 	}
 
-	op := getCompareOpType(node.Operator, isReversed)
+	op := getCompareOpType(operator, isReversed)
 	if op == planpb.RangeExpr_Invalid {
-		return nil, fmt.Errorf("invalid binary operator %s", node.Operator)
+		return nil, fmt.Errorf("invalid binary operator %s", operator)
 	}
 
 	expr := &planpb.Expr{
@@ -145,6 +277,10 @@ func (context *ParserContext) handleCmpExpr(node *ant_ast.BinaryNode) (*planpb.E
 		},
 	}
 	return expr, nil
+}
+
+func (context *ParserContext) handleCmpExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
+	return context.createCmpExpr(node.Left, node.Right, node.Operator)
 }
 
 func (context *ParserContext) handleLogicalExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
@@ -224,9 +360,41 @@ func (context *ParserContext) handleInExpr(node *ant_ast.BinaryNode) (*planpb.Ex
 }
 
 func (context *ParserContext) handleBinaryExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
-	// TODO
 	switch node.Operator {
-	case "<", "<=", ">", ">=", "==", "!=":
+	case "<", "<=", ">", ">=":
+		exprs := []*planpb.Expr{}
+		curNode := node
+		binNodeLeft, LeftOk := curNode.Left.(*ant_ast.BinaryNode)
+		for LeftOk {
+			if isSameOrder(node.Operator, binNodeLeft.Operator) {
+				expr, err := context.createCmpExpr(binNodeLeft.Right, curNode.Right, curNode.Operator)
+				if err != nil {
+					return nil, err
+				}
+				exprs = append(exprs, expr)
+				curNode = binNodeLeft
+			}
+			binNodeLeft, LeftOk = curNode.Left.(*ant_ast.BinaryNode)
+		}
+		combinedExpr, err := context.handleCmpExpr(curNode)
+		if err != nil {
+			return nil, err
+		}
+
+		for i := len(exprs) - 1; i >= 0; i-- {
+			expr := exprs[i]
+			combinedExpr = &planpb.Expr{
+				Expr: &planpb.Expr_BinaryExpr{
+					BinaryExpr: &planpb.BinaryExpr{
+						Op:    planpb.BinaryExpr_LogicalAnd,
+						Left:  combinedExpr,
+						Right: expr,
+					},
+				},
+			}
+		}
+		return combinedExpr, nil
+	case "==", "!=":
 		return context.handleCmpExpr(node)
 	case "and", "or", "&&", "||":
 		return context.handleLogicalExpr(node)
