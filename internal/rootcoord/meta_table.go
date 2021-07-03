@@ -55,7 +55,7 @@ type metaTable struct {
 	collID2Meta     map[typeutil.UniqueID]pb.CollectionInfo                         // collection_id -> meta
 	collName2ID     map[string]typeutil.UniqueID                                    // collection name to collection id
 	partID2SegID    map[typeutil.UniqueID]map[typeutil.UniqueID]bool                // partition_id -> segment_id -> bool
-	segID2IndexMeta map[typeutil.UniqueID]map[typeutil.UniqueID]pb.SegmentIndexInfo // segment_id -> index_id -> meta
+	segID2IndexMeta map[typeutil.UniqueID]map[typeutil.UniqueID]pb.SegmentIndexInfo // collection_id/index_id/partition_id/segment_id -> meta
 	indexID2Meta    map[typeutil.UniqueID]pb.IndexInfo                              // collection_id/index_id -> meta
 
 	tenantLock sync.RWMutex
@@ -141,7 +141,7 @@ func (mt *metaTable) reloadFromKV() error {
 			return fmt.Errorf("RootCoord UnmarshalText pb.SegmentIndexInfo err:%w", err)
 		}
 
-		// update partID2IndexMeta
+		// update partID2SegID
 		segIDMap, ok := mt.partID2SegID[segmentIndexInfo.PartitionID]
 		if ok {
 			segIDMap[segmentIndexInfo.SegmentID] = true
@@ -279,8 +279,7 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ddOpStr func(ts 
 
 	// update segID2IndexMeta
 	for partID := range collMeta.PartitionIDs {
-		segIDMap, ok := mt.partID2SegID[typeutil.UniqueID(partID)]
-		if ok {
+		if segIDMap, ok := mt.partID2SegID[typeutil.UniqueID(partID)]; ok {
 			for segID := range segIDMap {
 				delete(mt.segID2IndexMeta, segID)
 			}
@@ -600,8 +599,7 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	mt.collID2Meta[collID] = collMeta
 
 	// update segID2IndexMeta and partID2SegID
-	segIDMap, ok := mt.partID2SegID[partID]
-	if ok {
+	if segIDMap, ok := mt.partID2SegID[partID]; ok {
 		for segID := range segIDMap {
 			delete(mt.segID2IndexMeta, segID)
 		}
@@ -729,10 +727,13 @@ func (mt *metaTable) DropIndex(collName, fieldName, indexName string) (typeutil.
 	delete(mt.indexID2Meta, dropIdxID)
 
 	// update segID2IndexMeta
-	for _, segIndexInfos := range mt.segID2IndexMeta {
-		_, ok := segIndexInfos[dropIdxID]
-		if ok {
-			delete(segIndexInfos, dropIdxID)
+	for partID := range collMeta.PartitionIDs {
+		if segIDMap, ok := mt.partID2SegID[typeutil.UniqueID(partID)]; ok {
+			for segID := range segIDMap {
+				if segIndexInfos, ok := mt.segID2IndexMeta[segID]; ok {
+					delete(segIndexInfos, dropIdxID)
+				}
+			}
 		}
 	}
 
