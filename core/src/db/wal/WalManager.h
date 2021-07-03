@@ -100,15 +100,6 @@ class WalManager {
     CollectionFlushed(const std::string& collection_id, uint64_t lsn);
 
     /*
-     * Partition is flushed (update flushed_lsn)
-     * @param collection_id: collection id
-     * @param partition_tag: partition_tag
-     * @param lsn: flushed lsn
-     */
-    void
-    PartitionFlushed(const std::string& collection_id, const std::string& partition_tag, uint64_t lsn);
-
-    /*
      * Collection is updated (update wal_lsn)
      * @param collection_id: collection id
      * @param partition_tag: partition_tag
@@ -116,15 +107,6 @@ class WalManager {
      */
     void
     CollectionUpdated(const std::string& collection_id, uint64_t lsn);
-
-    /*
-     * Partition is updated (update wal_lsn)
-     * @param collection_id: collection id
-     * @param partition_tag: partition_tag
-     * @param lsn: flushed lsn
-     */
-    void
-    PartitionUpdated(const std::string& collection_id, const std::string& partition_tag, uint64_t lsn);
 
     /*
      * Insert
@@ -177,12 +159,13 @@ class WalManager {
     MXLogBufferPtr p_buffer_;
     MXLogMetaHandlerPtr p_meta_handler_;
 
-    struct TableLsn {
+    struct CollectionLsn {
         uint64_t flush_lsn;
         uint64_t wal_lsn;
+        std::map<std::string, uint64_t> part_create_lsn;
     };
     std::mutex mutex_;
-    std::map<std::string, std::map<std::string, TableLsn>> collections_;
+    std::map<std::string, CollectionLsn> collections_;
     std::atomic<uint64_t> last_applied_lsn_;
 
     // if multi-thread call Flush(), use list
