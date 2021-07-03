@@ -964,3 +964,29 @@ func (mt *metaTable) GetIndexByID(indexID typeutil.UniqueID) (*pb.IndexInfo, err
 	}
 	return &indexInfo, nil
 }
+
+func (mt *metaTable) dupMeta() (
+	map[typeutil.UniqueID]pb.CollectionInfo,
+	map[typeutil.UniqueID]map[typeutil.UniqueID]pb.SegmentIndexInfo,
+	map[typeutil.UniqueID]pb.IndexInfo,
+) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	collID2Meta := map[typeutil.UniqueID]pb.CollectionInfo{}
+	segID2IndexMeta := map[typeutil.UniqueID]map[typeutil.UniqueID]pb.SegmentIndexInfo{}
+	indexID2Meta := map[typeutil.UniqueID]pb.IndexInfo{}
+	for k, v := range mt.collID2Meta {
+		collID2Meta[k] = v
+	}
+	for k, v := range mt.segID2IndexMeta {
+		segID2IndexMeta[k] = map[typeutil.UniqueID]pb.SegmentIndexInfo{}
+		for k2, v2 := range v {
+			segID2IndexMeta[k][k2] = v2
+		}
+	}
+	for k, v := range mt.indexID2Meta {
+		indexID2Meta[k] = v
+	}
+	return collID2Meta, segID2IndexMeta, indexID2Meta
+}
