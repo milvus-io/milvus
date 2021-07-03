@@ -93,7 +93,9 @@ func DecodeDdOperation(str string, ddOp *DdOperation) error {
 
 // SegmentIndexInfoEqual return true if SegmentIndexInfos are identical
 func SegmentIndexInfoEqual(info1 *etcdpb.SegmentIndexInfo, info2 *etcdpb.SegmentIndexInfo) bool {
-	return info1.SegmentID == info2.SegmentID &&
+	return info1.CollectionID == info2.CollectionID &&
+		info1.PartitionID == info2.PartitionID &&
+		info1.SegmentID == info2.SegmentID &&
 		info1.FieldID == info2.FieldID &&
 		info1.IndexID == info2.IndexID &&
 		info1.EnableIndex == info2.EnableIndex

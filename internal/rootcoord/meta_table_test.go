@@ -390,12 +390,12 @@ func TestMetaTable(t *testing.T) {
 	})
 
 	t.Run("drop index", func(t *testing.T) {
-		_, idx, ok, err := mt.DropIndex("testColl", "field110", "field110", nil)
+		_, idx, ok, err := mt.DropIndex("testColl", "field110", "field110")
 		assert.Nil(t, err)
 		assert.True(t, ok)
 		assert.Equal(t, indexID, idx)
 
-		_, _, ok, err = mt.DropIndex("testColl", "field110", "field110-error", nil)
+		_, _, ok, err = mt.DropIndex("testColl", "field110", "field110-error")
 		assert.Nil(t, err)
 		assert.False(t, ok)
 
@@ -413,7 +413,7 @@ func TestMetaTable(t *testing.T) {
 	})
 
 	t.Run("drop partition", func(t *testing.T) {
-		_, id, err := mt.DeletePartition(collID, partName, nil, nil)
+		_, id, err := mt.DeletePartition(collID, partName, nil)
 		assert.Nil(t, err)
 		assert.Equal(t, partID, id)
 
@@ -424,9 +424,9 @@ func TestMetaTable(t *testing.T) {
 	})
 
 	t.Run("drop collection", func(t *testing.T) {
-		_, err = mt.DeleteCollection(collIDInvalid, nil, nil)
+		_, err = mt.DeleteCollection(collIDInvalid, nil)
 		assert.NotNil(t, err)
-		_, err = mt.DeleteCollection(collID, nil, nil)
+		_, err = mt.DeleteCollection(collID, nil)
 		assert.Nil(t, err)
 
 		// check DD operation flag
@@ -465,7 +465,7 @@ func TestMetaTable(t *testing.T) {
 		_, err := mt.AddCollection(collInfo, partID, partName, idxInfo, nil)
 		assert.Nil(t, err)
 		mt.indexID2Meta = make(map[int64]pb.IndexInfo)
-		_, err = mt.DeleteCollection(collInfo.ID, nil, nil)
+		_, err = mt.DeleteCollection(collInfo.ID, nil)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "milti save and remove with prefix error")
 	})
@@ -575,23 +575,23 @@ func TestMetaTable(t *testing.T) {
 		_, err = mt.AddCollection(collInfo, partID, partName, idxInfo, nil)
 		assert.Nil(t, err)
 
-		_, _, err = mt.DeletePartition(collInfo.ID, Params.DefaultPartitionName, nil, nil)
+		_, _, err = mt.DeletePartition(collInfo.ID, Params.DefaultPartitionName, nil)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "default partition cannot be deleted")
 
-		_, _, err = mt.DeletePartition(collInfo.ID, "abc", nil, nil)
+		_, _, err = mt.DeletePartition(collInfo.ID, "abc", nil)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "partition abc does not exist")
 
 		mockKV.multiSaveAndRemoveWithPrefix = func(saves map[string]string, removals []string, addition func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error) {
 			return 0, fmt.Errorf("multi save and remove with prefix error")
 		}
-		_, _, err = mt.DeletePartition(collInfo.ID, partName, nil, nil)
+		_, _, err = mt.DeletePartition(collInfo.ID, partName, nil)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "multi save and remove with prefix error")
 
 		mt.collID2Meta = make(map[int64]pb.CollectionInfo)
-		_, _, err = mt.DeletePartition(collInfo.ID, "abc", nil, nil)
+		_, _, err = mt.DeletePartition(collInfo.ID, "abc", nil)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("can't find collection id = %d", collInfo.ID))
 	})
@@ -664,16 +664,16 @@ func TestMetaTable(t *testing.T) {
 		_, err = mt.AddCollection(collInfo, partID, partName, idxInfo, nil)
 		assert.Nil(t, err)
 
-		_, _, _, err = mt.DropIndex("abc", "abc", "abc", nil)
+		_, _, _, err = mt.DropIndex("abc", "abc", "abc")
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "collection name = abc not exist")
 
 		mt.collName2ID["abc"] = 2
-		_, _, _, err = mt.DropIndex("abc", "abc", "abc", nil)
+		_, _, _, err = mt.DropIndex("abc", "abc", "abc")
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "collection name  = abc not has meta")
 
-		_, _, _, err = mt.DropIndex(collInfo.Schema.Name, "abc", "abc", nil)
+		_, _, _, err = mt.DropIndex(collInfo.Schema.Name, "abc", "abc")
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("collection %s doesn't have filed abc", collInfo.Schema.Name))
 
@@ -690,7 +690,7 @@ func TestMetaTable(t *testing.T) {
 		}
 		mt.collID2Meta[coll.ID] = coll
 		mt.indexID2Meta = make(map[int64]pb.IndexInfo)
-		_, idxID, isDroped, err := mt.DropIndex(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idxInfo[0].IndexName, nil)
+		_, idxID, isDroped, err := mt.DropIndex(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idxInfo[0].IndexName)
 		assert.Zero(t, idxID)
 		assert.False(t, isDroped)
 		assert.Nil(t, err)
@@ -704,7 +704,7 @@ func TestMetaTable(t *testing.T) {
 		mockKV.multiSaveAndRemoveWithPrefix = func(saves map[string]string, removals []string, addition func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error) {
 			return 0, fmt.Errorf("multi save and remove with prefix error")
 		}
-		_, _, _, err = mt.DropIndex(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idxInfo[0].IndexName, nil)
+		_, _, _, err = mt.DropIndex(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idxInfo[0].IndexName)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "multi save and remove with prefix error")
 	})

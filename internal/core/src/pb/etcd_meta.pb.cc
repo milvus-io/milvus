@@ -211,6 +211,8 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_etcd_5fmeta_2eproto::offsets[]
   ~0u,  // no _extensions_
   ~0u,  // no _oneof_case_
   ~0u,  // no _weak_field_map_
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::SegmentIndexInfo, collectionid_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::SegmentIndexInfo, partitionid_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::SegmentIndexInfo, segmentid_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::SegmentIndexInfo, fieldid_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::SegmentIndexInfo, indexid_),
@@ -235,7 +237,7 @@ static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOB
   { 25, -1, sizeof(::milvus::proto::etcd::FieldIndexInfo)},
   { 32, -1, sizeof(::milvus::proto::etcd::CollectionInfo)},
   { 45, -1, sizeof(::milvus::proto::etcd::SegmentIndexInfo)},
-  { 55, -1, sizeof(::milvus::proto::etcd::CollectionMeta)},
+  { 57, -1, sizeof(::milvus::proto::etcd::CollectionMeta)},
 };
 
 static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] = {
@@ -266,16 +268,17 @@ const char descriptor_table_protodef_etcd_5fmeta_2eproto[] PROTOBUF_SECTION_VARI
   "rtitonNames\030\005 \003(\t\0228\n\rfield_indexes\030\006 \003(\013"
   "2!.milvus.proto.etcd.FieldIndexInfo\022\035\n\025v"
   "irtual_channel_names\030\007 \003(\t\022\036\n\026physical_c"
-  "hannel_names\030\010 \003(\t\"n\n\020SegmentIndexInfo\022\021"
-  "\n\tsegmentID\030\001 \001(\003\022\017\n\007fieldID\030\002 \001(\003\022\017\n\007in"
-  "dexID\030\003 \001(\003\022\017\n\007buildID\030\004 \001(\003\022\024\n\014enable_i"
-  "ndex\030\005 \001(\010\"\252\001\n\016CollectionMeta\022\n\n\002ID\030\001 \001("
-  "\003\0225\n\006schema\030\002 \001(\0132%.milvus.proto.schema."
-  "CollectionSchema\022\023\n\013create_time\030\003 \001(\004\022\022\n"
-  "\nsegmentIDs\030\004 \003(\003\022\026\n\016partition_tags\030\005 \003("
-  "\t\022\024\n\014partitionIDs\030\006 \003(\003B3Z1github.com/mi"
-  "lvus-io/milvus/internal/proto/etcdpbb\006pr"
-  "oto3"
+  "hannel_names\030\010 \003(\t\"\231\001\n\020SegmentIndexInfo\022"
+  "\024\n\014collectionID\030\001 \001(\003\022\023\n\013partitionID\030\002 \001"
+  "(\003\022\021\n\tsegmentID\030\003 \001(\003\022\017\n\007fieldID\030\004 \001(\003\022\017"
+  "\n\007indexID\030\005 \001(\003\022\017\n\007buildID\030\006 \001(\003\022\024\n\014enab"
+  "le_index\030\007 \001(\010\"\252\001\n\016CollectionMeta\022\n\n\002ID\030"
+  "\001 \001(\003\0225\n\006schema\030\002 \001(\0132%.milvus.proto.sch"
+  "ema.CollectionSchema\022\023\n\013create_time\030\003 \001("
+  "\004\022\022\n\nsegmentIDs\030\004 \003(\003\022\026\n\016partition_tags\030"
+  "\005 \003(\t\022\024\n\014partitionIDs\030\006 \003(\003B3Z1github.co"
+  "m/milvus-io/milvus/internal/proto/etcdpb"
+  "b\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_etcd_5fmeta_2eproto_deps[2] = {
   &::descriptor_table_common_2eproto,
@@ -293,7 +296,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_etc
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_etcd_5fmeta_2eproto_once;
 static bool descriptor_table_etcd_5fmeta_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_etcd_5fmeta_2eproto = {
-  &descriptor_table_etcd_5fmeta_2eproto_initialized, descriptor_table_protodef_etcd_5fmeta_2eproto, "etcd_meta.proto", 1044,
+  &descriptor_table_etcd_5fmeta_2eproto_initialized, descriptor_table_protodef_etcd_5fmeta_2eproto, "etcd_meta.proto", 1088,
   &descriptor_table_etcd_5fmeta_2eproto_once, descriptor_table_etcd_5fmeta_2eproto_sccs, descriptor_table_etcd_5fmeta_2eproto_deps, 7, 2,
   schemas, file_default_instances, TableStruct_etcd_5fmeta_2eproto::offsets,
   file_level_metadata_etcd_5fmeta_2eproto, 7, file_level_enum_descriptors_etcd_5fmeta_2eproto, file_level_service_descriptors_etcd_5fmeta_2eproto,
@@ -2452,16 +2455,16 @@ SegmentIndexInfo::SegmentIndexInfo(const SegmentIndexInfo& from)
   : ::PROTOBUF_NAMESPACE_ID::Message(),
       _internal_metadata_(nullptr) {
   _internal_metadata_.MergeFrom(from._internal_metadata_);
-  ::memcpy(&segmentid_, &from.segmentid_,
+  ::memcpy(&collectionid_, &from.collectionid_,
     static_cast<size_t>(reinterpret_cast<char*>(&enable_index_) -
-    reinterpret_cast<char*>(&segmentid_)) + sizeof(enable_index_));
+    reinterpret_cast<char*>(&collectionid_)) + sizeof(enable_index_));
   // @@protoc_insertion_point(copy_constructor:milvus.proto.etcd.SegmentIndexInfo)
 }
 
 void SegmentIndexInfo::SharedCtor() {
-  ::memset(&segmentid_, 0, static_cast<size_t>(
+  ::memset(&collectionid_, 0, static_cast<size_t>(
       reinterpret_cast<char*>(&enable_index_) -
-      reinterpret_cast<char*>(&segmentid_)) + sizeof(enable_index_));
+      reinterpret_cast<char*>(&collectionid_)) + sizeof(enable_index_));
 }
 
 SegmentIndexInfo::~SegmentIndexInfo() {
@@ -2487,9 +2490,9 @@ void SegmentIndexInfo::Clear() {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  ::memset(&segmentid_, 0, static_cast<size_t>(
+  ::memset(&collectionid_, 0, static_cast<size_t>(
       reinterpret_cast<char*>(&enable_index_) -
-      reinterpret_cast<char*>(&segmentid_)) + sizeof(enable_index_));
+      reinterpret_cast<char*>(&collectionid_)) + sizeof(enable_index_));
   _internal_metadata_.Clear();
 }
 
@@ -2501,37 +2504,51 @@ const char* SegmentIndexInfo::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPA
     ptr = ::PROTOBUF_NAMESPACE_ID::internal::ReadTag(ptr, &tag);
     CHK_(ptr);
     switch (tag >> 3) {
-      // int64 segmentID = 1;
+      // int64 collectionID = 1;
       case 1:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 8)) {
+          collectionid_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      // int64 partitionID = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 16)) {
+          partitionid_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      // int64 segmentID = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 24)) {
           segmentid_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // int64 fieldID = 2;
-      case 2:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 16)) {
+      // int64 fieldID = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 32)) {
           fieldid_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // int64 indexID = 3;
-      case 3:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 24)) {
+      // int64 indexID = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 40)) {
           indexid_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // int64 buildID = 4;
-      case 4:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 32)) {
+      // int64 buildID = 6;
+      case 6:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 48)) {
           buildid_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // bool enable_index = 5;
-      case 5:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 40)) {
+      // bool enable_index = 7;
+      case 7:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 56)) {
           enable_index_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
           CHK_(ptr);
         } else goto handle_unusual;
@@ -2566,9 +2583,35 @@ bool SegmentIndexInfo::MergePartialFromCodedStream(
     tag = p.first;
     if (!p.second) goto handle_unusual;
     switch (::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::GetTagFieldNumber(tag)) {
-      // int64 segmentID = 1;
+      // int64 collectionID = 1;
       case 1: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (8 & 0xFF)) {
+
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
+                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
+                 input, &collectionid_)));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      // int64 partitionID = 2;
+      case 2: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (16 & 0xFF)) {
+
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
+                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
+                 input, &partitionid_)));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      // int64 segmentID = 3;
+      case 3: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (24 & 0xFF)) {
 
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
                    ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
@@ -2579,9 +2622,9 @@ bool SegmentIndexInfo::MergePartialFromCodedStream(
         break;
       }
 
-      // int64 fieldID = 2;
-      case 2: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (16 & 0xFF)) {
+      // int64 fieldID = 4;
+      case 4: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (32 & 0xFF)) {
 
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
                    ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
@@ -2592,9 +2635,9 @@ bool SegmentIndexInfo::MergePartialFromCodedStream(
         break;
       }
 
-      // int64 indexID = 3;
-      case 3: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (24 & 0xFF)) {
+      // int64 indexID = 5;
+      case 5: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (40 & 0xFF)) {
 
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
                    ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
@@ -2605,9 +2648,9 @@ bool SegmentIndexInfo::MergePartialFromCodedStream(
         break;
       }
 
-      // int64 buildID = 4;
-      case 4: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (32 & 0xFF)) {
+      // int64 buildID = 6;
+      case 6: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (48 & 0xFF)) {
 
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
                    ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
@@ -2618,9 +2661,9 @@ bool SegmentIndexInfo::MergePartialFromCodedStream(
         break;
       }
 
-      // bool enable_index = 5;
-      case 5: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (40 & 0xFF)) {
+      // bool enable_index = 7;
+      case 7: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (56 & 0xFF)) {
 
           DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
                    bool, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_BOOL>(
@@ -2658,29 +2701,39 @@ void SegmentIndexInfo::SerializeWithCachedSizes(
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // int64 segmentID = 1;
+  // int64 collectionID = 1;
+  if (this->collectionid() != 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(1, this->collectionid(), output);
+  }
+
+  // int64 partitionID = 2;
+  if (this->partitionid() != 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(2, this->partitionid(), output);
+  }
+
+  // int64 segmentID = 3;
   if (this->segmentid() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(1, this->segmentid(), output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(3, this->segmentid(), output);
   }
 
-  // int64 fieldID = 2;
+  // int64 fieldID = 4;
   if (this->fieldid() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(2, this->fieldid(), output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(4, this->fieldid(), output);
   }
 
-  // int64 indexID = 3;
+  // int64 indexID = 5;
   if (this->indexid() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(3, this->indexid(), output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(5, this->indexid(), output);
   }
 
-  // int64 buildID = 4;
+  // int64 buildID = 6;
   if (this->buildid() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(4, this->buildid(), output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(6, this->buildid(), output);
   }
 
-  // bool enable_index = 5;
+  // bool enable_index = 7;
   if (this->enable_index() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBool(5, this->enable_index(), output);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBool(7, this->enable_index(), output);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -2696,29 +2749,39 @@ void SegmentIndexInfo::SerializeWithCachedSizes(
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // int64 segmentID = 1;
+  // int64 collectionID = 1;
+  if (this->collectionid() != 0) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(1, this->collectionid(), target);
+  }
+
+  // int64 partitionID = 2;
+  if (this->partitionid() != 0) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(2, this->partitionid(), target);
+  }
+
+  // int64 segmentID = 3;
   if (this->segmentid() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(1, this->segmentid(), target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(3, this->segmentid(), target);
   }
 
-  // int64 fieldID = 2;
+  // int64 fieldID = 4;
   if (this->fieldid() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(2, this->fieldid(), target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(4, this->fieldid(), target);
   }
 
-  // int64 indexID = 3;
+  // int64 indexID = 5;
   if (this->indexid() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(3, this->indexid(), target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(5, this->indexid(), target);
   }
 
-  // int64 buildID = 4;
+  // int64 buildID = 6;
   if (this->buildid() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(4, this->buildid(), target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(6, this->buildid(), target);
   }
 
-  // bool enable_index = 5;
+  // bool enable_index = 7;
   if (this->enable_index() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBoolToArray(5, this->enable_index(), target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteBoolToArray(7, this->enable_index(), target);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -2742,35 +2805,49 @@ size_t SegmentIndexInfo::ByteSizeLong() const {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  // int64 segmentID = 1;
+  // int64 collectionID = 1;
+  if (this->collectionid() != 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
+        this->collectionid());
+  }
+
+  // int64 partitionID = 2;
+  if (this->partitionid() != 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
+        this->partitionid());
+  }
+
+  // int64 segmentID = 3;
   if (this->segmentid() != 0) {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
         this->segmentid());
   }
 
-  // int64 fieldID = 2;
+  // int64 fieldID = 4;
   if (this->fieldid() != 0) {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
         this->fieldid());
   }
 
-  // int64 indexID = 3;
+  // int64 indexID = 5;
   if (this->indexid() != 0) {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
         this->indexid());
   }
 
-  // int64 buildID = 4;
+  // int64 buildID = 6;
   if (this->buildid() != 0) {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int64Size(
         this->buildid());
   }
 
-  // bool enable_index = 5;
+  // bool enable_index = 7;
   if (this->enable_index() != 0) {
     total_size += 1 + 1;
   }
@@ -2802,6 +2879,12 @@ void SegmentIndexInfo::MergeFrom(const SegmentIndexInfo& from) {
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
+  if (from.collectionid() != 0) {
+    set_collectionid(from.collectionid());
+  }
+  if (from.partitionid() != 0) {
+    set_partitionid(from.partitionid());
+  }
   if (from.segmentid() != 0) {
     set_segmentid(from.segmentid());
   }
@@ -2840,6 +2923,8 @@ bool SegmentIndexInfo::IsInitialized() const {
 void SegmentIndexInfo::InternalSwap(SegmentIndexInfo* other) {
   using std::swap;
   _internal_metadata_.Swap(&other->_internal_metadata_);
+  swap(collectionid_, other->collectionid_);
+  swap(partitionid_, other->partitionid_);
   swap(segmentid_, other->segmentid_);
   swap(fieldid_, other->fieldid_);
   swap(indexid_, other->indexid_);

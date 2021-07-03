@@ -251,7 +251,7 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, partID typeutil.Uniq
 	return ts, nil
 }
 
-func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, segIDs []typeutil.UniqueID, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, error) {
+func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -262,14 +262,21 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, segIDs []typeuti
 
 	delete(mt.collID2Meta, collID)
 	delete(mt.collName2ID, collMeta.Schema.Name)
-	for _, segID := range segIDs {
-		_, ok := mt.segID2IndexMeta[segID]
-		if !ok {
-			log.Warn("segment id not exist", zap.Int64("segment id", segID))
-			continue
+
+	// update segID2IndexMeta
+	delSegIds := make([]typeutil.UniqueID, 0)
+	for segID, segIndexInfos := range mt.segID2IndexMeta {
+		for _, segIndexInfo := range segIndexInfos {
+			if segIndexInfo.CollectionID == collMeta.ID {
+				delSegIds = append(delSegIds, segID)
+				break
+			}
 		}
+	}
+	for _, segID := range delSegIds {
 		delete(mt.segID2IndexMeta, segID)
 	}
+
 	for _, idxInfo := range collMeta.FieldIndexes {
 		_, ok := mt.indexID2Meta[idxInfo.IndexID]
 		if !ok {
@@ -542,7 +549,7 @@ func (mt *metaTable) HasPartition(collID typeutil.UniqueID, partitionName string
 }
 
 //return timestamp, partitionid, error
-func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName string, segIDs []typeutil.UniqueID, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, typeutil.UniqueID, error) {
+func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName string, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, typeutil.UniqueID, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -577,14 +584,21 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	collMeta.PartitonNames = pn
 	mt.collID2Meta[collID] = collMeta
 
-	for _, segID := range segIDs {
-		_, ok := mt.segID2IndexMeta[segID]
-		if !ok {
-			log.Warn("segment has no index meta", zap.Int64("segment id", segID))
-			continue
+	// update segID2IndexMeta
+	delSegIds := make([]typeutil.UniqueID, 0)
+	for segID, segIndexInfos := range mt.segID2IndexMeta {
+		for _, segIndexInfo := range segIndexInfos {
+			if segIndexInfo.CollectionID == collMeta.ID &&
+				segIndexInfo.PartitionID == partID {
+				delSegIds = append(delSegIds, segID)
+				break
+			}
 		}
+	}
+	for _, segID := range delSegIds {
 		delete(mt.segID2IndexMeta, segID)
 	}
+
 	meta := map[string]string{path.Join(CollectionMetaPrefix, strconv.FormatInt(collID, 10)): proto.MarshalTextString(&collMeta)}
 	delMetaKeys := []string{}
 	for _, idxInfo := range collMeta.FieldIndexes {
@@ -653,7 +667,7 @@ func (mt *metaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo, collID, partID ty
 }
 
 //return timestamp, index id, is dropped, error
-func (mt *metaTable) DropIndex(collName, fieldName, indexName string, segIDs []typeutil.UniqueID) (typeutil.Timestamp, typeutil.UniqueID, bool, error) {
+func (mt *metaTable) DropIndex(collName, fieldName, indexName string) (typeutil.Timestamp, typeutil.UniqueID, bool, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -700,15 +714,14 @@ func (mt *metaTable) DropIndex(collName, fieldName, indexName string, segIDs []t
 
 	delete(mt.indexID2Meta, dropIdxID)
 
-	for _, segID := range segIDs {
-		segInfo, ok := mt.segID2IndexMeta[segID]
+	// update segID2IndexMeta
+	for _, segIndexInfos := range mt.segID2IndexMeta {
+		_, ok := segIndexInfos[dropIdxID]
 		if ok {
-			_, ok := segInfo[dropIdxID]
-			if ok {
-				delete(segInfo, dropIdxID)
-			}
+			delete(segIndexInfos, dropIdxID)
 		}
 	}
+
 	delMeta := []string{
 		fmt.Sprintf("%s/%d/%d", SegmentIndexMetaPrefix, collMeta.ID, dropIdxID),
 		fmt.Sprintf("%s/%d/%d", IndexMetaPrefix, collMeta.ID, dropIdxID),
