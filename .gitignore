@@ -23,6 +23,8 @@ cmake_build
 # Docker generated cache file
 .docker/
 
+**/_artifacts/**
+
 # proxy
 proxy/milvus
 proxy/cmake_build
