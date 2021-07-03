@@ -26,12 +26,14 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -66,6 +68,8 @@ func (p *proxyMock) GetCollArray() []string {
 type dataMock struct {
 	types.DataCoord
 	randVal int
+	mu      sync.Mutex
+	segs    []typeutil.UniqueID
 }
 
 func (d *dataMock) Init() error {
@@ -114,13 +118,18 @@ func (d *dataMock) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInf
 	}, nil
 }
 
-func (d *dataMock) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{
+func (d *dataMock) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	rsp := &datapb.GetFlushedSegmentsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
 		},
-		Value: fmt.Sprintf("segment-info-channel-%d", d.randVal),
-	}, nil
+	}
+	rsp.Segments = append(rsp.Segments, d.segs...)
+	return rsp, nil
 }
 
 type queryMock struct {
@@ -308,7 +317,6 @@ func TestRootCoord(t *testing.T) {
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
-	Params.DataCoordSegmentChannel = fmt.Sprintf("data-service-segment-%d", randVal)
 
 	err = core.Register()
 	assert.Nil(t, err)
@@ -369,31 +377,11 @@ func TestRootCoord(t *testing.T) {
 	err = tmpFactory.SetParams(m)
 	assert.Nil(t, err)
 
-	dataCoordSegmentStream, _ := tmpFactory.NewMsgStream(ctx)
-	dataCoordSegmentStream.AsProducer([]string{Params.DataCoordSegmentChannel})
-
 	timeTickStream, _ := tmpFactory.NewMsgStream(ctx)
 	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
 	timeTickStream.Start()
 
 	dmlStream, _ := tmpFactory.NewMsgStream(ctx)
-
-	// test dataCoordSegmentStream seek
-	dataNodeSubName := Params.MsgChannelSubName + "dn"
-	flushedSegStream, _ := tmpFactory.NewMsgStream(ctx)
-	flushedSegStream.AsConsumer([]string{Params.DataCoordSegmentChannel}, dataNodeSubName)
-	flushedSegStream.Start()
-	msgPackTmp := GenFlushedSegMsgPack(9999)
-	err = dataCoordSegmentStream.Produce(msgPackTmp)
-	assert.Nil(t, err)
-
-	flushedSegMsgPack := flushedSegStream.Consume()
-	flushedSegStream.Close()
-
-	flushedSegPosStr, _ := EncodeMsgPositions(flushedSegMsgPack.EndPositions)
-
-	_, err = etcdCli.Put(ctx, path.Join(Params.MetaRootPath, FlushedSegMsgEndPosPrefix), flushedSegPosStr)
-	assert.Nil(t, err)
 
 	err = core.Init()
 	assert.Nil(t, err)
@@ -677,16 +665,16 @@ func TestRootCoord(t *testing.T) {
 		collMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, 2, len(collMeta.PartitionIDs))
-		partMeta, err := core.MetaTable.GetPartitionByID(1, collMeta.PartitionIDs[1], 0)
+		partNameIdx1, err := core.MetaTable.GetPartitionNameByID(collMeta.ID, collMeta.PartitionIDs[1], 0)
 		assert.Nil(t, err)
-		assert.Equal(t, partName, partMeta.PartitionName)
+		assert.Equal(t, partName, partNameIdx1)
 
 		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
 		assert.Equal(t, 1, len(msgs))
 		partMsg, ok := (msgs[0]).(*msgstream.CreatePartitionMsg)
 		assert.True(t, ok)
 		assert.Equal(t, collMeta.ID, partMsg.CollectionID)
-		assert.Equal(t, partMeta.PartitionID, partMsg.PartitionID)
+		assert.Equal(t, collMeta.PartitionIDs[1], partMsg.PartitionID)
 
 		assert.Equal(t, 1, len(pnm.GetCollArray()))
 		assert.Equal(t, collName, pnm.GetCollArray()[0])
@@ -706,7 +694,7 @@ func TestRootCoord(t *testing.T) {
 		err = proto.UnmarshalText(ddOp.Body, &ddReq)
 		assert.Nil(t, err)
 		assert.Equal(t, collMeta.ID, ddReq.CollectionID)
-		assert.Equal(t, partMeta.PartitionID, ddReq.PartitionID)
+		assert.Equal(t, collMeta.PartitionIDs[1], ddReq.PartitionID)
 	})
 
 	t.Run("has partition", func(t *testing.T) {
@@ -752,23 +740,9 @@ func TestRootCoord(t *testing.T) {
 		coll, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		partID := coll.PartitionIDs[1]
-		part, err := core.MetaTable.GetPartitionByID(1, partID, 0)
-		assert.Nil(t, err)
-		assert.Zero(t, len(part.SegmentIDs))
-
-		seg := &datapb.SegmentInfo{
-			ID:           1000,
-			CollectionID: coll.ID,
-			PartitionID:  part.PartitionID,
-		}
-		segInfoMsgPack := GenSegInfoMsgPack(seg)
-		err = dataCoordSegmentStream.Broadcast(segInfoMsgPack)
-		assert.Nil(t, err)
-		time.Sleep(time.Second)
-
-		part, err = core.MetaTable.GetPartitionByID(1, partID, 0)
-		assert.Nil(t, err)
-		assert.Equal(t, 1, len(part.SegmentIDs))
+		dm.mu.Lock()
+		dm.segs = []typeutil.UniqueID{1000}
+		dm.mu.Unlock()
 
 		req := &milvuspb.ShowSegmentsRequest{
 			Base: &commonpb.MsgBase{
@@ -893,28 +867,20 @@ func TestRootCoord(t *testing.T) {
 		coll, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		partID := coll.PartitionIDs[1]
-		part, err := core.MetaTable.GetPartitionByID(1, partID, 0)
-		assert.Nil(t, err)
-		assert.Equal(t, 1, len(part.SegmentIDs))
 
-		seg := &datapb.SegmentInfo{
-			ID:           segID,
-			CollectionID: coll.ID,
-			PartitionID:  part.PartitionID,
+		flushMsg := datapb.SegmentFlushCompletedMsg{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_SegmentFlushDone,
+			},
+			Segment: &datapb.SegmentInfo{
+				ID:           segID,
+				CollectionID: coll.ID,
+				PartitionID:  partID,
+			},
 		}
-		segInfoMsgPack := GenSegInfoMsgPack(seg)
-		err = dataCoordSegmentStream.Broadcast(segInfoMsgPack)
+		st, err := core.SegmentFlushCompleted(ctx, &flushMsg)
 		assert.Nil(t, err)
-		time.Sleep(time.Second)
-
-		part, err = core.MetaTable.GetPartitionByID(1, partID, 0)
-		assert.Nil(t, err)
-		assert.Equal(t, 2, len(part.SegmentIDs))
-
-		flushedSegMsgPack := GenFlushedSegMsgPack(segID)
-		err = dataCoordSegmentStream.Broadcast(flushedSegMsgPack)
-		assert.Nil(t, err)
-		time.Sleep(time.Second)
+		assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_Success)
 
 		req := &milvuspb.DescribeIndexRequest{
 			Base: &commonpb.MsgBase{
@@ -1031,9 +997,9 @@ func TestRootCoord(t *testing.T) {
 		collMeta, err = core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, 1, len(collMeta.PartitionIDs))
-		partMeta, err := core.MetaTable.GetPartitionByID(1, collMeta.PartitionIDs[0], 0)
+		partName, err := core.MetaTable.GetPartitionNameByID(collMeta.ID, collMeta.PartitionIDs[0], 0)
 		assert.Nil(t, err)
-		assert.Equal(t, Params.DefaultPartitionName, partMeta.PartitionName)
+		assert.Equal(t, Params.DefaultPartitionName, partName)
 
 		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
 		assert.Equal(t, 1, len(msgs))
@@ -1834,9 +1800,6 @@ func TestRootCoord2(t *testing.T) {
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
 
-	dataCoordSegmentStream, _ := msFactory.NewMsgStream(ctx)
-	dataCoordSegmentStream.AsProducer([]string{Params.DataCoordSegmentChannel})
-
 	timeTickStream, _ := msFactory.NewMsgStream(ctx)
 	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
 	timeTickStream.Start()
@@ -1972,6 +1935,12 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
+	c.CallGetFlushedSegmentsService = func(ctx context.Context, collID, partID typeutil.UniqueID) ([]typeutil.UniqueID, error) {
+		return nil, nil
+	}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
 	c.CallBuildIndexService = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error) {
 		return 0, nil
 	}
@@ -1999,14 +1968,6 @@ func TestCheckInit(t *testing.T) {
 	c.CallReleasePartitionService = func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID, partitionIDs []typeutil.UniqueID) error {
 		return nil
 	}
-	err = c.checkInit()
-	assert.NotNil(t, err)
-
-	c.DataCoordSegmentChan = make(chan *msgstream.MsgPack)
-	err = c.checkInit()
-	assert.NotNil(t, err)
-
-	c.DataNodeFlushedSegmentChan = make(chan *msgstream.MsgPack)
 	err = c.checkInit()
 	assert.Nil(t, err)
 }

@@ -321,9 +321,3 @@ func (c *GrpcClient) SegmentFlushCompleted(ctx context.Context, in *datapb.Segme
 	})
 	return ret.(*commonpb.Status), err
 }
-func (c *GrpcClient) AddNewSegment(ctx context.Context, in *datapb.SegmentMsg) (*commonpb.Status, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.AddNewSegment(ctx, in)
-	})
-	return ret.(*commonpb.Status), err
-}

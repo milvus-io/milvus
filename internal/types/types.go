@@ -111,7 +111,6 @@ type RootCoord interface {
 	ShowSegments(ctx context.Context, req *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error)
 	ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error)
 	SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error)
-	AddNewSegment(ctx context.Context, in *datapb.SegmentMsg) (*commonpb.Status, error)
 }
 
 // RootCoordComponent is used by grpc server of RootCoord
