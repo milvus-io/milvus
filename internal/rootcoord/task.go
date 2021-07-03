@@ -743,8 +743,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 		if info.BuildID != 0 {
 			info.EnableIndex = true
 		}
-		partID := segID2PartID[segID]
-		if _, err := t.core.MetaTable.AddIndex(&info, collMeta.ID, partID); err != nil {
+		if _, err := t.core.MetaTable.AddIndex(&info); err != nil {
 			log.Debug("Add index into meta table failed", zap.Int64("collection_id", collMeta.ID), zap.Int64("index_id", info.IndexID), zap.Int64("build_id", info.BuildID), zap.Error(err))
 		}
 	}

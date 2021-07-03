@@ -330,10 +330,12 @@ func (c *Core) checkFlushedSegmentsLoop() {
 									continue
 								}
 								info := etcdpb.SegmentIndexInfo{
-									SegmentID:   segID,
-									FieldID:     idxInfo.FiledID,
-									IndexID:     idxInfo.IndexID,
-									EnableIndex: false,
+									CollectionID: collMeta.ID,
+									PartitionID:  partID,
+									SegmentID:    segID,
+									FieldID:      idxInfo.FiledID,
+									IndexID:      idxInfo.IndexID,
+									EnableIndex:  false,
 								}
 								log.Debug("build index by background checker",
 									zap.Int64("segment_id", segID),
@@ -350,7 +352,7 @@ func (c *Core) checkFlushedSegmentsLoop() {
 								if info.BuildID != 0 {
 									info.EnableIndex = true
 								}
-								if _, err := c.MetaTable.AddIndex(&info, collMeta.ID, partID); err != nil {
+								if _, err := c.MetaTable.AddIndex(&info); err != nil {
 									log.Debug("Add index into meta table failed", zap.Int64("collection_id", collMeta.ID), zap.Int64("index_id", info.IndexID), zap.Int64("build_id", info.BuildID), zap.Error(err))
 								}
 							}
@@ -1886,10 +1888,12 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlus
 		}
 
 		info := etcdpb.SegmentIndexInfo{
-			SegmentID:   segID,
-			FieldID:     fieldSch.FieldID,
-			IndexID:     idxInfo.IndexID,
-			EnableIndex: false,
+			CollectionID: in.Segment.CollectionID,
+			PartitionID:  in.Segment.PartitionID,
+			SegmentID:    segID,
+			FieldID:      fieldSch.FieldID,
+			IndexID:      idxInfo.IndexID,
+			EnableIndex:  false,
 		}
 		info.BuildID, err = c.BuildIndex(ctx, segID, fieldSch, idxInfo, true)
 		if err == nil && info.BuildID != 0 {
@@ -1898,7 +1902,7 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlus
 			log.Error("build index fail", zap.Int64("buildid", info.BuildID), zap.Error(err))
 			continue
 		}
-		_, err = c.MetaTable.AddIndex(&info, in.Segment.CollectionID, in.Segment.PartitionID)
+		_, err = c.MetaTable.AddIndex(&info)
 		if err != nil {
 			log.Error("AddIndex fail", zap.String("err", err.Error()))
 		}
