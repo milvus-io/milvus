@@ -1228,16 +1228,12 @@ DBImpl::GetVectorsByID(const engine::meta::CollectionSchema& collection, const s
             return status;
         }
     } else {
-        std::vector<std::string> partition_tags = {partition_tag};
-        std::set<std::string> partition_name_array;
-        std::vector<meta::CollectionSchema> partition_array;
-        auto status =
-            GetPartitionsByTags(collection.collection_id_, partition_tags, partition_name_array, partition_array);
+        std::string target_collection_name;
+        auto status = GetPartitionByTag(collection.collection_id_, partition_tag, target_collection_name);
         if (!status.ok()) {
             return status;  // didn't match any partition.
         }
-
-        status = meta_ptr_->FilesByTypeEx(partition_array, file_types, files_holder);
+        status = meta_ptr_->FilesByType(target_collection_name, file_types, files_holder);
     }
 
     if (files_holder.HoldFiles().empty()) {
@@ -2374,7 +2370,7 @@ DBImpl::ExecWalRecord(const wal::MXLogRecord& record) {
                 std::string target_collection_name;
                 status = GetPartitionByTag(record.collection_id, record.partition_tag, target_collection_name);
                 if (!status.ok()) {
-                    LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "insert", 0) << "Get partition fail: " << status.message();
+                    LOG_WAL_ERROR_ << LogOut("[%s][%ld] ", "delete", 0) << "Get partition fail: " << status.message();
                     return status;
                 }
                 collection_ids.push_back(target_collection_name);
