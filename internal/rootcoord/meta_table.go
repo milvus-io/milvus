@@ -54,7 +54,8 @@ type metaTable struct {
 	proxyID2Meta    map[typeutil.UniqueID]pb.ProxyMeta                              // proxy id to proxy meta
 	collID2Meta     map[typeutil.UniqueID]pb.CollectionInfo                         // collection_id -> meta
 	collName2ID     map[string]typeutil.UniqueID                                    // collection name to collection id
-	segID2IndexMeta map[typeutil.UniqueID]map[typeutil.UniqueID]pb.SegmentIndexInfo // collection_id/index_id/partition_id/segment_id -> meta
+	partID2SegID    map[typeutil.UniqueID]map[typeutil.UniqueID]bool                // partition_id -> segment_id -> bool
+	segID2IndexMeta map[typeutil.UniqueID]map[typeutil.UniqueID]pb.SegmentIndexInfo // segment_id -> index_id -> meta
 	indexID2Meta    map[typeutil.UniqueID]pb.IndexInfo                              // collection_id/index_id -> meta
 
 	tenantLock sync.RWMutex
@@ -82,6 +83,7 @@ func (mt *metaTable) reloadFromKV() error {
 	mt.proxyID2Meta = make(map[typeutil.UniqueID]pb.ProxyMeta)
 	mt.collID2Meta = make(map[typeutil.UniqueID]pb.CollectionInfo)
 	mt.collName2ID = make(map[string]typeutil.UniqueID)
+	mt.partID2SegID = make(map[typeutil.UniqueID]map[typeutil.UniqueID]bool)
 	mt.segID2IndexMeta = make(map[typeutil.UniqueID]map[typeutil.UniqueID]pb.SegmentIndexInfo)
 	mt.indexID2Meta = make(map[typeutil.UniqueID]pb.IndexInfo)
 
@@ -138,6 +140,18 @@ func (mt *metaTable) reloadFromKV() error {
 		if err != nil {
 			return fmt.Errorf("RootCoord UnmarshalText pb.SegmentIndexInfo err:%w", err)
 		}
+
+		// update partID2IndexMeta
+		segIDMap, ok := mt.partID2SegID[segmentIndexInfo.PartitionID]
+		if ok {
+			segIDMap[segmentIndexInfo.SegmentID] = true
+		} else {
+			idMap := make(map[typeutil.UniqueID]bool)
+			idMap[segmentIndexInfo.SegmentID] = true
+			mt.partID2SegID[segmentIndexInfo.PartitionID] = idMap
+		}
+
+		// update segID2IndexMeta
 		idx, ok := mt.segID2IndexMeta[segmentIndexInfo.SegmentID]
 		if ok {
 			idx[segmentIndexInfo.IndexID] = segmentIndexInfo
@@ -264,17 +278,18 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ddOpStr func(ts 
 	delete(mt.collName2ID, collMeta.Schema.Name)
 
 	// update segID2IndexMeta
-	delSegIds := make([]typeutil.UniqueID, 0)
-	for segID, segIndexInfos := range mt.segID2IndexMeta {
-		for _, segIndexInfo := range segIndexInfos {
-			if segIndexInfo.CollectionID == collMeta.ID {
-				delSegIds = append(delSegIds, segID)
-				break
+	for partID := range collMeta.PartitionIDs {
+		segIDMap, ok := mt.partID2SegID[typeutil.UniqueID(partID)]
+		if ok {
+			for segID := range segIDMap {
+				delete(mt.segID2IndexMeta, segID)
 			}
 		}
 	}
-	for _, segID := range delSegIds {
-		delete(mt.segID2IndexMeta, segID)
+
+	// update partID2SegID
+	for partID := range collMeta.PartitionIDs {
+		delete(mt.partID2SegID, typeutil.UniqueID(partID))
 	}
 
 	for _, idxInfo := range collMeta.FieldIndexes {
@@ -584,20 +599,14 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	collMeta.PartitonNames = pn
 	mt.collID2Meta[collID] = collMeta
 
-	// update segID2IndexMeta
-	delSegIds := make([]typeutil.UniqueID, 0)
-	for segID, segIndexInfos := range mt.segID2IndexMeta {
-		for _, segIndexInfo := range segIndexInfos {
-			if segIndexInfo.CollectionID == collMeta.ID &&
-				segIndexInfo.PartitionID == partID {
-				delSegIds = append(delSegIds, segID)
-				break
-			}
+	// update segID2IndexMeta and partID2SegID
+	segIDMap, ok := mt.partID2SegID[partID]
+	if ok {
+		for segID := range segIDMap {
+			delete(mt.segID2IndexMeta, segID)
 		}
 	}
-	for _, segID := range delSegIds {
-		delete(mt.segID2IndexMeta, segID)
-	}
+	delete(mt.partID2SegID, partID)
 
 	meta := map[string]string{path.Join(CollectionMetaPrefix, strconv.FormatInt(collID, 10)): proto.MarshalTextString(&collMeta)}
 	delMetaKeys := []string{}
@@ -640,6 +649,9 @@ func (mt *metaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo, collID, partID ty
 	if !ok {
 		idxMap := map[typeutil.UniqueID]pb.SegmentIndexInfo{segIdxInfo.IndexID: *segIdxInfo}
 		mt.segID2IndexMeta[segIdxInfo.SegmentID] = idxMap
+
+		segIDMap := map[typeutil.UniqueID]bool{segIdxInfo.SegmentID: true}
+		mt.partID2SegID[segIdxInfo.PartitionID] = segIDMap
 	} else {
 		tmpInfo, ok := segIdxMap[segIdxInfo.IndexID]
 		if ok {
@@ -654,6 +666,8 @@ func (mt *metaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo, collID, partID ty
 	}
 
 	mt.segID2IndexMeta[segIdxInfo.SegmentID][segIdxInfo.IndexID] = *segIdxInfo
+	mt.partID2SegID[segIdxInfo.PartitionID][segIdxInfo.SegmentID] = true
+
 	k := fmt.Sprintf("%s/%d/%d/%d/%d", SegmentIndexMetaPrefix, collID, segIdxInfo.IndexID, partID, segIdxInfo.SegmentID)
 	v := proto.MarshalTextString(segIdxInfo)
 
