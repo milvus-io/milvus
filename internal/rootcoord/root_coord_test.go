@@ -226,54 +226,6 @@ func clearMsgChan(timeout time.Duration, targetChan <-chan *msgstream.MsgPack) {
 	}
 }
 
-func GenSegInfoMsgPack(seg *datapb.SegmentInfo) *msgstream.MsgPack {
-	msgPack := msgstream.MsgPack{}
-	baseMsg := msgstream.BaseMsg{
-		BeginTimestamp: 0,
-		EndTimestamp:   0,
-		HashValues:     []uint32{0},
-	}
-	segMsg := &msgstream.SegmentInfoMsg{
-		BaseMsg: baseMsg,
-		SegmentMsg: datapb.SegmentMsg{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_SegmentInfo,
-				MsgID:     0,
-				Timestamp: 0,
-				SourceID:  0,
-			},
-			Segment: seg,
-		},
-	}
-	msgPack.Msgs = append(msgPack.Msgs, segMsg)
-	return &msgPack
-}
-
-func GenFlushedSegMsgPack(segID typeutil.UniqueID) *msgstream.MsgPack {
-	msgPack := msgstream.MsgPack{}
-	baseMsg := msgstream.BaseMsg{
-		BeginTimestamp: 0,
-		EndTimestamp:   0,
-		HashValues:     []uint32{0},
-	}
-	segMsg := &msgstream.FlushCompletedMsg{
-		BaseMsg: baseMsg,
-		SegmentFlushCompletedMsg: datapb.SegmentFlushCompletedMsg{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_SegmentFlushDone,
-				MsgID:     0,
-				Timestamp: 0,
-				SourceID:  0,
-			},
-			Segment: &datapb.SegmentInfo{
-				ID: segID,
-			},
-		},
-	}
-	msgPack.Msgs = append(msgPack.Msgs, segMsg)
-	return &msgPack
-}
-
 func getNotTtMsg(ctx context.Context, n int, ch <-chan *msgstream.MsgPack) []msgstream.TsMsg {
 	ret := make([]msgstream.TsMsg, 0, n)
 	for {

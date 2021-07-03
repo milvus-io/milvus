@@ -260,10 +260,6 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		DbID:           0, //not used
 		CollectionID:   collMeta.ID,
 	}
-	segIDs, err := t.core.CallGetFlushedSegmentsService(ctx, collMeta.ID, -1)
-	if err != nil {
-		log.Debug("Get flushed segment from data coords failed", zap.String("collection_name", t.Req.CollectionName), zap.Error(err))
-	}
 
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
@@ -272,7 +268,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		return EncodeDdOperation(&ddReq, nil, DropCollectionDDType)
 	}
 
-	ts, err := t.core.MetaTable.DeleteCollection(collMeta.ID, segIDs, ddOp)
+	ts, err := t.core.MetaTable.DeleteCollection(collMeta.ID, ddOp)
 	if err != nil {
 		return err
 	}
@@ -492,10 +488,6 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	segIDs, err := t.core.CallGetFlushedSegmentsService(ctx, collInfo.ID, partID)
-	if err != nil {
-		log.Debug("get flushed segments from data coord failed", zap.String("collection_name", t.Req.CollectionName), zap.String("partition_name", t.Req.PartitionName))
-	}
 
 	ddReq := internalpb.DropPartitionRequest{
 		Base:           t.Req.Base,
@@ -514,7 +506,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		return EncodeDdOperation(&ddReq, nil, DropPartitionDDType)
 	}
 
-	ts, _, err := t.core.MetaTable.DeletePartition(collInfo.ID, t.Req.PartitionName, segIDs, ddOp)
+	ts, _, err := t.core.MetaTable.DeletePartition(collInfo.ID, t.Req.PartitionName, ddOp)
 	if err != nil {
 		return err
 	}
@@ -737,10 +729,12 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 
 	for _, segID := range segIDs {
 		info := etcdpb.SegmentIndexInfo{
-			SegmentID:   segID,
-			FieldID:     field.FieldID,
-			IndexID:     idxInfo.IndexID,
-			EnableIndex: false,
+			CollectionID: collMeta.ID,
+			PartitionID:  segID2PartID[segID],
+			SegmentID:    segID,
+			FieldID:      field.FieldID,
+			IndexID:      idxInfo.IndexID,
+			EnableIndex:  false,
 		}
 		info.BuildID, err = t.core.BuildIndex(ctx, segID, &field, idxInfo, false)
 		if err != nil {
@@ -806,7 +800,7 @@ func (t *DropIndexReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DropIndex {
 		return fmt.Errorf("drop index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	collInfo, info, err := t.core.MetaTable.GetIndexByName(t.Req.CollectionName, t.Req.IndexName)
+	_, info, err := t.core.MetaTable.GetIndexByName(t.Req.CollectionName, t.Req.IndexName)
 	if err != nil {
 		log.Warn("GetIndexByName failed,", zap.String("collection name", t.Req.CollectionName), zap.String("field name", t.Req.FieldName), zap.String("index name", t.Req.IndexName), zap.Error(err))
 		return err
@@ -817,15 +811,10 @@ func (t *DropIndexReqTask) Execute(ctx context.Context) error {
 	if len(info) != 1 {
 		return fmt.Errorf("len(index) = %d", len(info))
 	}
-	segIDs, err := t.core.CallGetFlushedSegmentsService(t.ctx, collInfo.ID, -1)
-	if err != nil {
-		log.Debug("call get flushed segments from data coord failed", zap.String("collection_name", collInfo.Schema.Name), zap.Error(err))
-	}
-
 	err = t.core.CallDropIndexService(ctx, info[0].IndexID)
 	if err != nil {
 		return err
 	}
-	_, _, _, err = t.core.MetaTable.DropIndex(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName, segIDs)
+	_, _, _, err = t.core.MetaTable.DropIndex(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName)
 	return err
 }

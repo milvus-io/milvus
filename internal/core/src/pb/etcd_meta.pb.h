@@ -1068,33 +1068,45 @@ class SegmentIndexInfo :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kSegmentIDFieldNumber = 1,
-    kFieldIDFieldNumber = 2,
-    kIndexIDFieldNumber = 3,
-    kBuildIDFieldNumber = 4,
-    kEnableIndexFieldNumber = 5,
+    kCollectionIDFieldNumber = 1,
+    kPartitionIDFieldNumber = 2,
+    kSegmentIDFieldNumber = 3,
+    kFieldIDFieldNumber = 4,
+    kIndexIDFieldNumber = 5,
+    kBuildIDFieldNumber = 6,
+    kEnableIndexFieldNumber = 7,
   };
-  // int64 segmentID = 1;
+  // int64 collectionID = 1;
+  void clear_collectionid();
+  ::PROTOBUF_NAMESPACE_ID::int64 collectionid() const;
+  void set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // int64 partitionID = 2;
+  void clear_partitionid();
+  ::PROTOBUF_NAMESPACE_ID::int64 partitionid() const;
+  void set_partitionid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // int64 segmentID = 3;
   void clear_segmentid();
   ::PROTOBUF_NAMESPACE_ID::int64 segmentid() const;
   void set_segmentid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
-  // int64 fieldID = 2;
+  // int64 fieldID = 4;
   void clear_fieldid();
   ::PROTOBUF_NAMESPACE_ID::int64 fieldid() const;
   void set_fieldid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
-  // int64 indexID = 3;
+  // int64 indexID = 5;
   void clear_indexid();
   ::PROTOBUF_NAMESPACE_ID::int64 indexid() const;
   void set_indexid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
-  // int64 buildID = 4;
+  // int64 buildID = 6;
   void clear_buildid();
   ::PROTOBUF_NAMESPACE_ID::int64 buildid() const;
   void set_buildid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
-  // bool enable_index = 5;
+  // bool enable_index = 7;
   void clear_enable_index();
   bool enable_index() const;
   void set_enable_index(bool value);
@@ -1104,6 +1116,8 @@ class SegmentIndexInfo :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::int64 collectionid_;
+  ::PROTOBUF_NAMESPACE_ID::int64 partitionid_;
   ::PROTOBUF_NAMESPACE_ID::int64 segmentid_;
   ::PROTOBUF_NAMESPACE_ID::int64 fieldid_;
   ::PROTOBUF_NAMESPACE_ID::int64 indexid_;
@@ -2054,7 +2068,35 @@ CollectionInfo::mutable_physical_channel_names() {
 
 // SegmentIndexInfo
 
-// int64 segmentID = 1;
+// int64 collectionID = 1;
+inline void SegmentIndexInfo::clear_collectionid() {
+  collectionid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 SegmentIndexInfo::collectionid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.etcd.SegmentIndexInfo.collectionID)
+  return collectionid_;
+}
+inline void SegmentIndexInfo::set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  collectionid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.SegmentIndexInfo.collectionID)
+}
+
+// int64 partitionID = 2;
+inline void SegmentIndexInfo::clear_partitionid() {
+  partitionid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 SegmentIndexInfo::partitionid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.etcd.SegmentIndexInfo.partitionID)
+  return partitionid_;
+}
+inline void SegmentIndexInfo::set_partitionid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  partitionid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.SegmentIndexInfo.partitionID)
+}
+
+// int64 segmentID = 3;
 inline void SegmentIndexInfo::clear_segmentid() {
   segmentid_ = PROTOBUF_LONGLONG(0);
 }
@@ -2068,7 +2110,7 @@ inline void SegmentIndexInfo::set_segmentid(::PROTOBUF_NAMESPACE_ID::int64 value
   // @@protoc_insertion_point(field_set:milvus.proto.etcd.SegmentIndexInfo.segmentID)
 }
 
-// int64 fieldID = 2;
+// int64 fieldID = 4;
 inline void SegmentIndexInfo::clear_fieldid() {
   fieldid_ = PROTOBUF_LONGLONG(0);
 }
@@ -2082,7 +2124,7 @@ inline void SegmentIndexInfo::set_fieldid(::PROTOBUF_NAMESPACE_ID::int64 value) 
   // @@protoc_insertion_point(field_set:milvus.proto.etcd.SegmentIndexInfo.fieldID)
 }
 
-// int64 indexID = 3;
+// int64 indexID = 5;
 inline void SegmentIndexInfo::clear_indexid() {
   indexid_ = PROTOBUF_LONGLONG(0);
 }
@@ -2096,7 +2138,7 @@ inline void SegmentIndexInfo::set_indexid(::PROTOBUF_NAMESPACE_ID::int64 value) 
   // @@protoc_insertion_point(field_set:milvus.proto.etcd.SegmentIndexInfo.indexID)
 }
 
-// int64 buildID = 4;
+// int64 buildID = 6;
 inline void SegmentIndexInfo::clear_buildid() {
   buildid_ = PROTOBUF_LONGLONG(0);
 }
@@ -2110,7 +2152,7 @@ inline void SegmentIndexInfo::set_buildid(::PROTOBUF_NAMESPACE_ID::int64 value) 
   // @@protoc_insertion_point(field_set:milvus.proto.etcd.SegmentIndexInfo.buildID)
 }
 
-// bool enable_index = 5;
+// bool enable_index = 7;
 inline void SegmentIndexInfo::clear_enable_index() {
   enable_index_ = false;
 }

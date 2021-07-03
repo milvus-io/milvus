@@ -41,11 +41,13 @@ message CollectionInfo {
 }
 
 message SegmentIndexInfo {
-  int64 segmentID = 1;
-  int64 fieldID = 2;
-  int64 indexID = 3;
-  int64 buildID = 4;
-  bool enable_index = 5;
+  int64 collectionID = 1;
+  int64 partitionID = 2;
+  int64 segmentID = 3;
+  int64 fieldID = 4;
+  int64 indexID = 5;
+  int64 buildID = 6;
+  bool enable_index = 7;
 }
 
 message CollectionMeta {
