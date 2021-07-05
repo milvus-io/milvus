@@ -322,7 +322,6 @@ class TestQueryBase(TestcaseBase):
         assert list(res[0].keys()) == [ct.default_int64_field_name]
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #6074")
     @pytest.mark.parametrize("output_fields", [["int"],
                                                [ct.default_int64_field_name, "int"]])
     def test_query_output_not_existed_field(self, output_fields):
@@ -332,7 +331,7 @@ class TestQueryBase(TestcaseBase):
         expected: raise exception
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
-        error = {ct.err_code: 1, ct.err_msg: 'cannot find field'}
+        error = {ct.err_code: 1, ct.err_msg: 'Field int not exist'}
         collection_w.query(default_term_expr, output_fields=output_fields, check_items=CheckTasks.err_res, check_task=error)
 
     @pytest.mark.tags(CaseLabel.L1)
