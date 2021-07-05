@@ -330,10 +330,12 @@ func (c *Core) checkFlushedSegmentsLoop() {
 									continue
 								}
 								info := etcdpb.SegmentIndexInfo{
-									SegmentID:   segID,
-									FieldID:     idxInfo.FiledID,
-									IndexID:     idxInfo.IndexID,
-									EnableIndex: false,
+									CollectionID: collMeta.ID,
+									PartitionID:  partID,
+									SegmentID:    segID,
+									FieldID:      idxInfo.FiledID,
+									IndexID:      idxInfo.IndexID,
+									EnableIndex:  false,
 								}
 								log.Debug("build index by background checker",
 									zap.Int64("segment_id", segID),
