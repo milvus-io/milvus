@@ -111,8 +111,9 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42) {
                     float sum = 0;
 
                     std::default_random_engine er2(seed + n);
+                    std::normal_distribution<> distr2(0, 1);
                     for (auto& x : data) {
-                        x = distr(er2) + offset;
+                        x = distr2(er2) + offset;
                         sum += x * x;
                     }
                     if (is_ip) {
