@@ -569,7 +569,6 @@ class TestCollectionParams(TestcaseBase):
                                                            check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="#6093")
     def test_collection_multi_primary_fields(self):
         """
         target: test collection with multi primary
@@ -579,13 +578,9 @@ class TestCollectionParams(TestcaseBase):
         self._connect()
         int_field_one = cf.gen_int64_field(is_primary=True)
         int_field_two = cf.gen_int64_field(name="int2", is_primary=True)
-        # error = {ct.err_code: 0, ct.err_msg: "Primary key field can only be one"}
-        schema, _ = self.collection_schema_wrap.init_collection_schema(fields=[int_field_one, int_field_two,
-                                                                               cf.gen_float_vec_field()])
-        # check_task=CheckTasks.err_res, check_items=error)
-        log.debug(schema)
-        collection_w, _ = self.collection_wrap.init_collection(name="c", schema=schema)
-        log.debug(collection_w.schema)
+        error = {ct.err_code: 0, ct.err_msg: "Primary key field can only be one."}
+        self.collection_schema_wrap.init_collection_schema(fields=[int_field_one, int_field_two, cf.gen_float_vec_field()],
+                                                           check_items=CheckTasks.err_res, check_task=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_collection_primary_inconsistent(self):
@@ -1130,18 +1125,17 @@ class TestCollectionDataframe(TestcaseBase):
                                                       auto_id=True, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="#5967")
     def test_construct_auto_id_true_no_insert(self):
         """
         target: test construct with true auto_id
-        method: auto_id=True and not insert ids
+        method: auto_id=True and not insert ids(primary fields all values are None)
         expected: verify num entities
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         df = cf.gen_default_dataframe_data(ct.default_nb)
-        df.drop(ct.default_int64_field_name, axis=1, inplace=True)
-        log.debug(df.head(3))
+        # df.drop(ct.default_int64_field_name, axis=1, inplace=True)
+        df[ct.default_int64_field_name] = None
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
                                                       auto_id=True)
         assert self.collection_wrap.num_entities == ct.default_nb

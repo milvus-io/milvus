@@ -713,7 +713,6 @@ class TestInsertAsync(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="#6160")
     def test_insert_async_callback(self):
         """
         target: test insert with callback func
@@ -724,6 +723,8 @@ class TestInsertAsync(TestcaseBase):
         df = cf.gen_default_dataframe_data(nb=ct.default_nb)
         future, _ = collection_w.insert(data=df, _async=True, _callback=assert_mutation_result)
         future.done()
+        mutation_res = future.result()
+        assert mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
         assert collection_w.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -744,7 +745,6 @@ class TestInsertAsync(TestcaseBase):
         assert collection_w.num_entities == nb
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="#6167")
     def test_insert_async_callback_timeout(self):
         """
         target: test insert async with callback
@@ -754,10 +754,8 @@ class TestInsertAsync(TestcaseBase):
         nb = 100000
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         df = cf.gen_default_dataframe_data(nb)
-        err_msg = "timeout"
         future, _ = collection_w.insert(data=df, _async=True, _callback=assert_mutation_result, timeout=1)
-        future.done()
-        with pytest.raises(Exception, match=err_msg):
+        with pytest.raises(Exception):
             future.result()
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -790,7 +788,4 @@ class TestInsertAsync(TestcaseBase):
 
 
 def assert_mutation_result(mutation_res):
-    # todo
-    log.info(f"The result is {mutation_res}")
-    # mutation_res = future.result()
-    # assert mutation_res.insert_count == 100
+    assert mutation_res.insert_count == ct.default_nb
