@@ -52,9 +52,8 @@ import (
 
 // DdOperation used to save ddMsg into ETCD
 type DdOperation struct {
-	Body  string `json:"body"`
-	Body1 string `json:"body1"` // used for CreateCollectionReq only
-	Type  string `json:"type"`
+	Body string `json:"body"`
+	Type string `json:"type"`
 }
 
 const (
@@ -989,23 +988,15 @@ func (c *Core) reSendDdMsg(ctx context.Context) error {
 
 	switch ddOp.Type {
 	case CreateCollectionDDType:
-		var ddCollReq = internalpb.CreateCollectionRequest{}
-		if err = proto.UnmarshalText(ddOp.Body, &ddCollReq); err != nil {
+		var ddReq = internalpb.CreateCollectionRequest{}
+		if err = proto.UnmarshalText(ddOp.Body, &ddReq); err != nil {
 			return err
 		}
-		// TODO: can optimize
-		var ddPartReq = internalpb.CreatePartitionRequest{}
-		if err = proto.UnmarshalText(ddOp.Body1, &ddPartReq); err != nil {
-			return err
-		}
-		collInfo, err := c.MetaTable.GetCollectionByName(ddCollReq.CollectionName, 0)
+		collInfo, err := c.MetaTable.GetCollectionByName(ddReq.CollectionName, 0)
 		if err != nil {
 			return err
 		}
-		if err = c.SendDdCreateCollectionReq(ctx, &ddCollReq, collInfo.PhysicalChannelNames); err != nil {
-			return err
-		}
-		if err = c.SendDdCreatePartitionReq(ctx, &ddPartReq, collInfo.PhysicalChannelNames); err != nil {
+		if err = c.SendDdCreateCollectionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
 			return err
 		}
 	case DropCollectionDDType:

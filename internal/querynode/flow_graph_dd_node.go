@@ -101,6 +101,7 @@ func (ddNode *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 	collectionID := msg.CollectionID
+	partitionID := msg.PartitionID
 
 	hasCollection := ddNode.replica.hasCollection(collectionID)
 	if hasCollection {
@@ -124,7 +125,7 @@ func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 
 	// add default partition
 	// TODO: allocate default partition id in master
-	err = ddNode.replica.addPartition(collectionID, UniqueID(2021))
+	err = ddNode.replica.addPartition(collectionID, partitionID)
 	if err != nil {
 		log.Error(err.Error())
 		return

@@ -202,7 +202,7 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_etcd_5fmeta_2eproto::offsets[]
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::CollectionInfo, schema_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::CollectionInfo, create_time_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::CollectionInfo, partitionids_),
-  PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::CollectionInfo, partitonnames_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::CollectionInfo, partitionnames_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::CollectionInfo, field_indexes_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::CollectionInfo, virtual_channel_names_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::CollectionInfo, physical_channel_names_),
@@ -261,24 +261,24 @@ const char descriptor_table_protodef_etcd_5fmeta_2eproto[] PROTOBUF_SECTION_VARI
   "\022\n\nindex_name\030\001 \001(\t\022\017\n\007indexID\030\002 \001(\003\0227\n\014"
   "index_params\030\003 \003(\0132!.milvus.proto.common"
   ".KeyValuePair\"2\n\016FieldIndexInfo\022\017\n\007filed"
-  "ID\030\001 \001(\003\022\017\n\007indexID\030\002 \001(\003\"\216\002\n\016Collection"
+  "ID\030\001 \001(\003\022\017\n\007indexID\030\002 \001(\003\"\217\002\n\016Collection"
   "Info\022\n\n\002ID\030\001 \001(\003\0225\n\006schema\030\002 \001(\0132%.milvu"
   "s.proto.schema.CollectionSchema\022\023\n\013creat"
-  "e_time\030\003 \001(\004\022\024\n\014partitionIDs\030\004 \003(\003\022\025\n\rpa"
-  "rtitonNames\030\005 \003(\t\0228\n\rfield_indexes\030\006 \003(\013"
-  "2!.milvus.proto.etcd.FieldIndexInfo\022\035\n\025v"
-  "irtual_channel_names\030\007 \003(\t\022\036\n\026physical_c"
-  "hannel_names\030\010 \003(\t\"\231\001\n\020SegmentIndexInfo\022"
-  "\024\n\014collectionID\030\001 \001(\003\022\023\n\013partitionID\030\002 \001"
-  "(\003\022\021\n\tsegmentID\030\003 \001(\003\022\017\n\007fieldID\030\004 \001(\003\022\017"
-  "\n\007indexID\030\005 \001(\003\022\017\n\007buildID\030\006 \001(\003\022\024\n\014enab"
-  "le_index\030\007 \001(\010\"\252\001\n\016CollectionMeta\022\n\n\002ID\030"
-  "\001 \001(\003\0225\n\006schema\030\002 \001(\0132%.milvus.proto.sch"
-  "ema.CollectionSchema\022\023\n\013create_time\030\003 \001("
-  "\004\022\022\n\nsegmentIDs\030\004 \003(\003\022\026\n\016partition_tags\030"
-  "\005 \003(\t\022\024\n\014partitionIDs\030\006 \003(\003B3Z1github.co"
-  "m/milvus-io/milvus/internal/proto/etcdpb"
-  "b\006proto3"
+  "e_time\030\003 \001(\004\022\024\n\014partitionIDs\030\004 \003(\003\022\026\n\016pa"
+  "rtitionNames\030\005 \003(\t\0228\n\rfield_indexes\030\006 \003("
+  "\0132!.milvus.proto.etcd.FieldIndexInfo\022\035\n\025"
+  "virtual_channel_names\030\007 \003(\t\022\036\n\026physical_"
+  "channel_names\030\010 \003(\t\"\231\001\n\020SegmentIndexInfo"
+  "\022\024\n\014collectionID\030\001 \001(\003\022\023\n\013partitionID\030\002 "
+  "\001(\003\022\021\n\tsegmentID\030\003 \001(\003\022\017\n\007fieldID\030\004 \001(\003\022"
+  "\017\n\007indexID\030\005 \001(\003\022\017\n\007buildID\030\006 \001(\003\022\024\n\014ena"
+  "ble_index\030\007 \001(\010\"\252\001\n\016CollectionMeta\022\n\n\002ID"
+  "\030\001 \001(\003\0225\n\006schema\030\002 \001(\0132%.milvus.proto.sc"
+  "hema.CollectionSchema\022\023\n\013create_time\030\003 \001"
+  "(\004\022\022\n\nsegmentIDs\030\004 \003(\003\022\026\n\016partition_tags"
+  "\030\005 \003(\t\022\024\n\014partitionIDs\030\006 \003(\003B3Z1github.c"
+  "om/milvus-io/milvus/internal/proto/etcdp"
+  "bb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_etcd_5fmeta_2eproto_deps[2] = {
   &::descriptor_table_common_2eproto,
@@ -296,7 +296,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_etc
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_etcd_5fmeta_2eproto_once;
 static bool descriptor_table_etcd_5fmeta_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_etcd_5fmeta_2eproto = {
-  &descriptor_table_etcd_5fmeta_2eproto_initialized, descriptor_table_protodef_etcd_5fmeta_2eproto, "etcd_meta.proto", 1088,
+  &descriptor_table_etcd_5fmeta_2eproto_initialized, descriptor_table_protodef_etcd_5fmeta_2eproto, "etcd_meta.proto", 1089,
   &descriptor_table_etcd_5fmeta_2eproto_once, descriptor_table_etcd_5fmeta_2eproto_sccs, descriptor_table_etcd_5fmeta_2eproto_deps, 7, 2,
   schemas, file_default_instances, TableStruct_etcd_5fmeta_2eproto::offsets,
   file_level_metadata_etcd_5fmeta_2eproto, 7, file_level_enum_descriptors_etcd_5fmeta_2eproto, file_level_service_descriptors_etcd_5fmeta_2eproto,
@@ -1802,7 +1802,7 @@ CollectionInfo::CollectionInfo(const CollectionInfo& from)
   : ::PROTOBUF_NAMESPACE_ID::Message(),
       _internal_metadata_(nullptr),
       partitionids_(from.partitionids_),
-      partitonnames_(from.partitonnames_),
+      partitionnames_(from.partitionnames_),
       field_indexes_(from.field_indexes_),
       virtual_channel_names_(from.virtual_channel_names_),
       physical_channel_names_(from.physical_channel_names_) {
@@ -1850,7 +1850,7 @@ void CollectionInfo::Clear() {
   (void) cached_has_bits;
 
   partitionids_.Clear();
-  partitonnames_.Clear();
+  partitionnames_.Clear();
   field_indexes_.Clear();
   virtual_channel_names_.Clear();
   physical_channel_names_.Clear();
@@ -1903,13 +1903,13 @@ const char* CollectionInfo::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // repeated string partitonNames = 5;
+      // repeated string partitionNames = 5;
       case 5:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 42)) {
           ptr -= 1;
           do {
             ptr += 1;
-            ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(add_partitonnames(), ptr, ctx, "milvus.proto.etcd.CollectionInfo.partitonNames");
+            ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(add_partitionnames(), ptr, ctx, "milvus.proto.etcd.CollectionInfo.partitionNames");
             CHK_(ptr);
             if (!ctx->DataAvailable(ptr)) break;
           } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 42);
@@ -2034,16 +2034,16 @@ bool CollectionInfo::MergePartialFromCodedStream(
         break;
       }
 
-      // repeated string partitonNames = 5;
+      // repeated string partitionNames = 5;
       case 5: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (42 & 0xFF)) {
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
-                input, this->add_partitonnames()));
+                input, this->add_partitionnames()));
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-            this->partitonnames(this->partitonnames_size() - 1).data(),
-            static_cast<int>(this->partitonnames(this->partitonnames_size() - 1).length()),
+            this->partitionnames(this->partitionnames_size() - 1).data(),
+            static_cast<int>(this->partitionnames(this->partitionnames_size() - 1).length()),
             ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
-            "milvus.proto.etcd.CollectionInfo.partitonNames"));
+            "milvus.proto.etcd.CollectionInfo.partitionNames"));
         } else {
           goto handle_unusual;
         }
@@ -2147,14 +2147,14 @@ void CollectionInfo::SerializeWithCachedSizes(
       this->partitionids(i), output);
   }
 
-  // repeated string partitonNames = 5;
-  for (int i = 0, n = this->partitonnames_size(); i < n; i++) {
+  // repeated string partitionNames = 5;
+  for (int i = 0, n = this->partitionnames_size(); i < n; i++) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->partitonnames(i).data(), static_cast<int>(this->partitonnames(i).length()),
+      this->partitionnames(i).data(), static_cast<int>(this->partitionnames(i).length()),
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "milvus.proto.etcd.CollectionInfo.partitonNames");
+      "milvus.proto.etcd.CollectionInfo.partitionNames");
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteString(
-      5, this->partitonnames(i), output);
+      5, this->partitionnames(i), output);
   }
 
   // repeated .milvus.proto.etcd.FieldIndexInfo field_indexes = 6;
@@ -2229,14 +2229,14 @@ void CollectionInfo::SerializeWithCachedSizes(
       WriteInt64NoTagToArray(this->partitionids_, target);
   }
 
-  // repeated string partitonNames = 5;
-  for (int i = 0, n = this->partitonnames_size(); i < n; i++) {
+  // repeated string partitionNames = 5;
+  for (int i = 0, n = this->partitionnames_size(); i < n; i++) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->partitonnames(i).data(), static_cast<int>(this->partitonnames(i).length()),
+      this->partitionnames(i).data(), static_cast<int>(this->partitionnames(i).length()),
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "milvus.proto.etcd.CollectionInfo.partitonNames");
+      "milvus.proto.etcd.CollectionInfo.partitionNames");
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      WriteStringToArray(5, this->partitonnames(i), target);
+      WriteStringToArray(5, this->partitionnames(i), target);
   }
 
   // repeated .milvus.proto.etcd.FieldIndexInfo field_indexes = 6;
@@ -2303,12 +2303,12 @@ size_t CollectionInfo::ByteSizeLong() const {
     total_size += data_size;
   }
 
-  // repeated string partitonNames = 5;
+  // repeated string partitionNames = 5;
   total_size += 1 *
-      ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(this->partitonnames_size());
-  for (int i = 0, n = this->partitonnames_size(); i < n; i++) {
+      ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(this->partitionnames_size());
+  for (int i = 0, n = this->partitionnames_size(); i < n; i++) {
     total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-      this->partitonnames(i));
+      this->partitionnames(i));
   }
 
   // repeated .milvus.proto.etcd.FieldIndexInfo field_indexes = 6;
@@ -2387,7 +2387,7 @@ void CollectionInfo::MergeFrom(const CollectionInfo& from) {
   (void) cached_has_bits;
 
   partitionids_.MergeFrom(from.partitionids_);
-  partitonnames_.MergeFrom(from.partitonnames_);
+  partitionnames_.MergeFrom(from.partitionnames_);
   field_indexes_.MergeFrom(from.field_indexes_);
   virtual_channel_names_.MergeFrom(from.virtual_channel_names_);
   physical_channel_names_.MergeFrom(from.physical_channel_names_);
@@ -2424,7 +2424,7 @@ void CollectionInfo::InternalSwap(CollectionInfo* other) {
   using std::swap;
   _internal_metadata_.Swap(&other->_internal_metadata_);
   partitionids_.InternalSwap(&other->partitionids_);
-  partitonnames_.InternalSwap(CastToBase(&other->partitonnames_));
+  partitionnames_.InternalSwap(CastToBase(&other->partitionnames_));
   CastToBase(&field_indexes_)->InternalSwap(CastToBase(&other->field_indexes_));
   virtual_channel_names_.InternalSwap(CastToBase(&other->virtual_channel_names_));
   physical_channel_names_.InternalSwap(CastToBase(&other->physical_channel_names_));

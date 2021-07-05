@@ -126,7 +126,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 
 	log.Debug("collection name -> id",
 		zap.String("collection name", t.Req.CollectionName),
-		zap.Int64("colletion_id", collID),
+		zap.Int64("collection_id", collID),
 		zap.Int64("default partition id", partID))
 
 	vchanNames := make([]string, t.Req.ShardsNum)
@@ -140,35 +140,14 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		ID:                   collID,
 		Schema:               &schema,
 		CreateTime:           collTs,
-		PartitionIDs:         make([]typeutil.UniqueID, 0, 16),
+		PartitionIDs:         []typeutil.UniqueID{partID},
+		PartitionNames:       []string{Params.DefaultPartitionName},
 		FieldIndexes:         make([]*etcdpb.FieldIndexInfo, 0, 16),
 		VirtualChannelNames:  vchanNames,
 		PhysicalChannelNames: chanNames,
 	}
 
 	idxInfo := make([]*etcdpb.IndexInfo, 0, 16)
-	/////////////////////// ignore index param from create_collection /////////////////////////
-	//for _, field := range schema.Fields {
-	//	if field.DataType == schemapb.DataType_VectorFloat || field.DataType == schemapb.DataType_VectorBinary {
-	//		if len(field.IndexParams) > 0 {
-	//			idxID, err := t.core.idAllocator.AllocOne()
-	//			if err != nil {
-	//				return err
-	//			}
-	//			filedIdx := &etcdpb.FieldIndexInfo{
-	//				FiledID: field.FieldID,
-	//				IndexID: idxID,
-	//			}
-	//			idx := &etcdpb.IndexInfo{
-	//				IndexName:   fmt.Sprintf("%s_index_%d", collMeta.Schema.Name, field.FieldID),
-	//				IndexID:     idxID,
-	//				IndexParams: field.IndexParams,
-	//			}
-	//			idxInfo = append(idxInfo, idx)
-	//			collMeta.FieldIndexes = append(collMeta.FieldIndexes, filedIdx)
-	//		}
-	//	}
-	//}
 
 	// schema is modified (add RowIDField and TimestampField),
 	// so need Marshal again
@@ -181,37 +160,23 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		Base:                 t.Req.Base,
 		DbName:               t.Req.DbName,
 		CollectionName:       t.Req.CollectionName,
+		PartitionName:        Params.DefaultPartitionName,
 		DbID:                 0, //TODO,not used
 		CollectionID:         collID,
+		PartitionID:          partID,
 		Schema:               schemaBytes,
 		VirtualChannelNames:  vchanNames,
 		PhysicalChannelNames: chanNames,
-	}
-
-	ddPartReq := internalpb.CreatePartitionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_CreatePartition,
-			MsgID:     t.Req.Base.MsgID, //TODO, msg id
-			Timestamp: t.Req.Base.Timestamp + 1,
-			SourceID:  t.Req.Base.SourceID,
-		},
-		DbName:         t.Req.DbName,
-		CollectionName: t.Req.CollectionName,
-		PartitionName:  Params.DefaultPartitionName,
-		DbID:           0, //TODO, not used
-		CollectionID:   collInfo.ID,
-		PartitionID:    partID,
 	}
 
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
 	ddOp := func(ts typeutil.Timestamp) (string, error) {
 		ddCollReq.Base.Timestamp = ts
-		ddPartReq.Base.Timestamp = ts
-		return EncodeDdOperation(&ddCollReq, &ddPartReq, CreateCollectionDDType)
+		return EncodeDdOperation(&ddCollReq, CreateCollectionDDType)
 	}
 
-	ts, err := t.core.MetaTable.AddCollection(&collInfo, partID, Params.DefaultPartitionName, idxInfo, ddOp)
+	ts, err := t.core.MetaTable.AddCollection(&collInfo, idxInfo, ddOp)
 	if err != nil {
 		return err
 	}
@@ -220,10 +185,6 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	t.core.dmlChannels.AddProducerChannels(chanNames...)
 
 	err = t.core.SendDdCreateCollectionReq(ctx, &ddCollReq, chanNames)
-	if err != nil {
-		return err
-	}
-	err = t.core.SendDdCreatePartitionReq(ctx, &ddPartReq, chanNames)
 	if err != nil {
 		return err
 	}
@@ -265,7 +226,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	// system can restore ddmsg from etcd and re-send
 	ddOp := func(ts typeutil.Timestamp) (string, error) {
 		ddReq.Base.Timestamp = ts
-		return EncodeDdOperation(&ddReq, nil, DropCollectionDDType)
+		return EncodeDdOperation(&ddReq, DropCollectionDDType)
 	}
 
 	ts, err := t.core.MetaTable.DeleteCollection(collMeta.ID, ddOp)
@@ -435,7 +396,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	// system can restore ddmsg from etcd and re-send
 	ddOp := func(ts typeutil.Timestamp) (string, error) {
 		ddReq.Base.Timestamp = ts
-		return EncodeDdOperation(&ddReq, nil, CreatePartitionDDType)
+		return EncodeDdOperation(&ddReq, CreatePartitionDDType)
 	}
 
 	ts, err := t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partID, ddOp)
@@ -503,7 +464,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	// system can restore ddmsg from etcd and re-send
 	ddOp := func(ts typeutil.Timestamp) (string, error) {
 		ddReq.Base.Timestamp = ts
-		return EncodeDdOperation(&ddReq, nil, DropPartitionDDType)
+		return EncodeDdOperation(&ddReq, DropPartitionDDType)
 	}
 
 	ts, _, err := t.core.MetaTable.DeletePartition(collInfo.ID, t.Req.PartitionName, ddOp)
@@ -589,7 +550,7 @@ func (t *ShowPartitionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 	t.Rsp.PartitionIDs = coll.PartitionIDs
-	t.Rsp.PartitionNames = coll.PartitonNames
+	t.Rsp.PartitionNames = coll.PartitionNames
 
 	return nil
 }

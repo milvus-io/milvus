@@ -837,7 +837,7 @@ class CollectionInfo :
 
   enum : int {
     kPartitionIDsFieldNumber = 4,
-    kPartitonNamesFieldNumber = 5,
+    kPartitionNamesFieldNumber = 5,
     kFieldIndexesFieldNumber = 6,
     kVirtualChannelNamesFieldNumber = 7,
     kPhysicalChannelNamesFieldNumber = 8,
@@ -856,22 +856,22 @@ class CollectionInfo :
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
       mutable_partitionids();
 
-  // repeated string partitonNames = 5;
-  int partitonnames_size() const;
-  void clear_partitonnames();
-  const std::string& partitonnames(int index) const;
-  std::string* mutable_partitonnames(int index);
-  void set_partitonnames(int index, const std::string& value);
-  void set_partitonnames(int index, std::string&& value);
-  void set_partitonnames(int index, const char* value);
-  void set_partitonnames(int index, const char* value, size_t size);
-  std::string* add_partitonnames();
-  void add_partitonnames(const std::string& value);
-  void add_partitonnames(std::string&& value);
-  void add_partitonnames(const char* value);
-  void add_partitonnames(const char* value, size_t size);
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& partitonnames() const;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_partitonnames();
+  // repeated string partitionNames = 5;
+  int partitionnames_size() const;
+  void clear_partitionnames();
+  const std::string& partitionnames(int index) const;
+  std::string* mutable_partitionnames(int index);
+  void set_partitionnames(int index, const std::string& value);
+  void set_partitionnames(int index, std::string&& value);
+  void set_partitionnames(int index, const char* value);
+  void set_partitionnames(int index, const char* value, size_t size);
+  std::string* add_partitionnames();
+  void add_partitionnames(const std::string& value);
+  void add_partitionnames(std::string&& value);
+  void add_partitionnames(const char* value);
+  void add_partitionnames(const char* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& partitionnames() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_partitionnames();
 
   // repeated .milvus.proto.etcd.FieldIndexInfo field_indexes = 6;
   int field_indexes_size() const;
@@ -943,7 +943,7 @@ class CollectionInfo :
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > partitionids_;
   mutable std::atomic<int> _partitionids_cached_byte_size_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> partitonnames_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> partitionnames_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::etcd::FieldIndexInfo > field_indexes_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> virtual_channel_names_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> physical_channel_names_;
@@ -1839,69 +1839,69 @@ CollectionInfo::mutable_partitionids() {
   return &partitionids_;
 }
 
-// repeated string partitonNames = 5;
-inline int CollectionInfo::partitonnames_size() const {
-  return partitonnames_.size();
+// repeated string partitionNames = 5;
+inline int CollectionInfo::partitionnames_size() const {
+  return partitionnames_.size();
 }
-inline void CollectionInfo::clear_partitonnames() {
-  partitonnames_.Clear();
+inline void CollectionInfo::clear_partitionnames() {
+  partitionnames_.Clear();
 }
-inline const std::string& CollectionInfo::partitonnames(int index) const {
-  // @@protoc_insertion_point(field_get:milvus.proto.etcd.CollectionInfo.partitonNames)
-  return partitonnames_.Get(index);
+inline const std::string& CollectionInfo::partitionnames(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.etcd.CollectionInfo.partitionNames)
+  return partitionnames_.Get(index);
 }
-inline std::string* CollectionInfo::mutable_partitonnames(int index) {
-  // @@protoc_insertion_point(field_mutable:milvus.proto.etcd.CollectionInfo.partitonNames)
-  return partitonnames_.Mutable(index);
+inline std::string* CollectionInfo::mutable_partitionnames(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.etcd.CollectionInfo.partitionNames)
+  return partitionnames_.Mutable(index);
 }
-inline void CollectionInfo::set_partitonnames(int index, const std::string& value) {
-  // @@protoc_insertion_point(field_set:milvus.proto.etcd.CollectionInfo.partitonNames)
-  partitonnames_.Mutable(index)->assign(value);
+inline void CollectionInfo::set_partitionnames(int index, const std::string& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.CollectionInfo.partitionNames)
+  partitionnames_.Mutable(index)->assign(value);
 }
-inline void CollectionInfo::set_partitonnames(int index, std::string&& value) {
-  // @@protoc_insertion_point(field_set:milvus.proto.etcd.CollectionInfo.partitonNames)
-  partitonnames_.Mutable(index)->assign(std::move(value));
+inline void CollectionInfo::set_partitionnames(int index, std::string&& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.CollectionInfo.partitionNames)
+  partitionnames_.Mutable(index)->assign(std::move(value));
 }
-inline void CollectionInfo::set_partitonnames(int index, const char* value) {
+inline void CollectionInfo::set_partitionnames(int index, const char* value) {
   GOOGLE_DCHECK(value != nullptr);
-  partitonnames_.Mutable(index)->assign(value);
-  // @@protoc_insertion_point(field_set_char:milvus.proto.etcd.CollectionInfo.partitonNames)
+  partitionnames_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:milvus.proto.etcd.CollectionInfo.partitionNames)
 }
-inline void CollectionInfo::set_partitonnames(int index, const char* value, size_t size) {
-  partitonnames_.Mutable(index)->assign(
+inline void CollectionInfo::set_partitionnames(int index, const char* value, size_t size) {
+  partitionnames_.Mutable(index)->assign(
     reinterpret_cast<const char*>(value), size);
-  // @@protoc_insertion_point(field_set_pointer:milvus.proto.etcd.CollectionInfo.partitonNames)
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.etcd.CollectionInfo.partitionNames)
 }
-inline std::string* CollectionInfo::add_partitonnames() {
-  // @@protoc_insertion_point(field_add_mutable:milvus.proto.etcd.CollectionInfo.partitonNames)
-  return partitonnames_.Add();
+inline std::string* CollectionInfo::add_partitionnames() {
+  // @@protoc_insertion_point(field_add_mutable:milvus.proto.etcd.CollectionInfo.partitionNames)
+  return partitionnames_.Add();
 }
-inline void CollectionInfo::add_partitonnames(const std::string& value) {
-  partitonnames_.Add()->assign(value);
-  // @@protoc_insertion_point(field_add:milvus.proto.etcd.CollectionInfo.partitonNames)
+inline void CollectionInfo::add_partitionnames(const std::string& value) {
+  partitionnames_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.etcd.CollectionInfo.partitionNames)
 }
-inline void CollectionInfo::add_partitonnames(std::string&& value) {
-  partitonnames_.Add(std::move(value));
-  // @@protoc_insertion_point(field_add:milvus.proto.etcd.CollectionInfo.partitonNames)
+inline void CollectionInfo::add_partitionnames(std::string&& value) {
+  partitionnames_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:milvus.proto.etcd.CollectionInfo.partitionNames)
 }
-inline void CollectionInfo::add_partitonnames(const char* value) {
+inline void CollectionInfo::add_partitionnames(const char* value) {
   GOOGLE_DCHECK(value != nullptr);
-  partitonnames_.Add()->assign(value);
-  // @@protoc_insertion_point(field_add_char:milvus.proto.etcd.CollectionInfo.partitonNames)
+  partitionnames_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:milvus.proto.etcd.CollectionInfo.partitionNames)
 }
-inline void CollectionInfo::add_partitonnames(const char* value, size_t size) {
-  partitonnames_.Add()->assign(reinterpret_cast<const char*>(value), size);
-  // @@protoc_insertion_point(field_add_pointer:milvus.proto.etcd.CollectionInfo.partitonNames)
+inline void CollectionInfo::add_partitionnames(const char* value, size_t size) {
+  partitionnames_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:milvus.proto.etcd.CollectionInfo.partitionNames)
 }
 inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
-CollectionInfo::partitonnames() const {
-  // @@protoc_insertion_point(field_list:milvus.proto.etcd.CollectionInfo.partitonNames)
-  return partitonnames_;
+CollectionInfo::partitionnames() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.etcd.CollectionInfo.partitionNames)
+  return partitionnames_;
 }
 inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
-CollectionInfo::mutable_partitonnames() {
-  // @@protoc_insertion_point(field_mutable_list:milvus.proto.etcd.CollectionInfo.partitonNames)
-  return &partitonnames_;
+CollectionInfo::mutable_partitionnames() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.etcd.CollectionInfo.partitionNames)
+  return &partitionnames_;
 }
 
 // repeated .milvus.proto.etcd.FieldIndexInfo field_indexes = 6;

@@ -34,7 +34,7 @@ message CollectionInfo {
   schema.CollectionSchema schema = 2;
   uint64 create_time = 3;
   repeated int64 partitionIDs = 4;
-  repeated string partitonNames = 5;
+  repeated string partitionNames = 5;
   repeated FieldIndexInfo field_indexes = 6;
   repeated string virtual_channel_names = 7;
   repeated string physical_channel_names = 8;

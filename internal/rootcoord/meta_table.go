@@ -12,7 +12,6 @@
 package rootcoord
 
 import (
-	"errors"
 	"fmt"
 	"path"
 	"strconv"
@@ -222,12 +221,12 @@ func (mt *metaTable) AddProxy(po *pb.ProxyMeta) (typeutil.Timestamp, error) {
 	return ts, nil
 }
 
-func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, partID typeutil.UniqueID, partName string, idx []*pb.IndexInfo, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, error) {
+func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, idx []*pb.IndexInfo, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	if len(coll.PartitionIDs) != 0 || len(coll.PartitonNames) != 0 {
-		return 0, errors.New("partitions should be empty when creating collection")
+	if len(coll.PartitionIDs) != len(coll.PartitionNames) {
+		return 0, fmt.Errorf("PartitionIDs and PartitionNames' length mis-match when creating collection")
 	}
 	if _, ok := mt.collName2ID[coll.Schema.Name]; ok {
 		return 0, fmt.Errorf("collection %s exist", coll.Schema.Name)
@@ -236,8 +235,6 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, partID typeutil.Uniq
 		return 0, fmt.Errorf("incorrect index id when creating collection")
 	}
 
-	coll.PartitionIDs = append(coll.PartitionIDs, partID)
-	coll.PartitonNames = append(coll.PartitonNames, partName)
 	mt.collID2Meta[coll.ID] = *coll
 	mt.collName2ID[coll.Schema.Name] = coll.ID
 	for _, i := range idx {
@@ -453,21 +450,21 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 		return 0, fmt.Errorf("maximum partition's number should be limit to %d", Params.MaxPartitionNum)
 	}
 
-	if len(coll.PartitionIDs) != len(coll.PartitonNames) {
-		return 0, fmt.Errorf("len(coll.PartitionIDs)=%d, len(coll.PartitonNames)=%d", len(coll.PartitionIDs), len(coll.PartitonNames))
+	if len(coll.PartitionIDs) != len(coll.PartitionNames) {
+		return 0, fmt.Errorf("len(coll.PartitionIDs)=%d, len(coll.PartitionNames)=%d", len(coll.PartitionIDs), len(coll.PartitionNames))
 	}
 
 	for idx := range coll.PartitionIDs {
 		if coll.PartitionIDs[idx] == partitionID {
 			return 0, fmt.Errorf("partition id = %d already exists", partitionID)
 		}
-		if coll.PartitonNames[idx] == partitionName {
+		if coll.PartitionNames[idx] == partitionName {
 			return 0, fmt.Errorf("partition name = %s already exists", partitionName)
 		}
 
 	}
 	coll.PartitionIDs = append(coll.PartitionIDs, partitionID)
-	coll.PartitonNames = append(coll.PartitonNames, partitionName)
+	coll.PartitionNames = append(coll.PartitionNames, partitionName)
 	mt.collID2Meta[collID] = coll
 
 	k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, collID)
@@ -495,7 +492,7 @@ func (mt *metaTable) GetPartitionNameByID(collID, partitionID typeutil.UniqueID,
 		}
 		for idx := range collMeta.PartitionIDs {
 			if collMeta.PartitionIDs[idx] == partitionID {
-				return collMeta.PartitonNames[idx], nil
+				return collMeta.PartitionNames[idx], nil
 			}
 		}
 		return "", fmt.Errorf("partition %d does not exist", partitionID)
@@ -512,7 +509,7 @@ func (mt *metaTable) GetPartitionNameByID(collID, partitionID typeutil.UniqueID,
 	}
 	for idx := range collMeta.PartitionIDs {
 		if collMeta.PartitionIDs[idx] == partitionID {
-			return collMeta.PartitonNames[idx], nil
+			return collMeta.PartitionNames[idx], nil
 		}
 	}
 	return "", fmt.Errorf("partition %d does not exist", partitionID)
@@ -525,7 +522,7 @@ func (mt *metaTable) getPartitionByName(collID typeutil.UniqueID, partitionName 
 			return 0, fmt.Errorf("can't find collection id = %d", collID)
 		}
 		for idx := range collMeta.PartitionIDs {
-			if collMeta.PartitonNames[idx] == partitionName {
+			if collMeta.PartitionNames[idx] == partitionName {
 				return collMeta.PartitionIDs[idx], nil
 			}
 		}
@@ -542,7 +539,7 @@ func (mt *metaTable) getPartitionByName(collID typeutil.UniqueID, partitionName 
 		return 0, err
 	}
 	for idx := range collMeta.PartitionIDs {
-		if collMeta.PartitonNames[idx] == partitionName {
+		if collMeta.PartitionNames[idx] == partitionName {
 			return collMeta.PartitionIDs[idx], nil
 		}
 	}
@@ -580,22 +577,22 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	exist := false
 
 	pd := make([]typeutil.UniqueID, 0, len(collMeta.PartitionIDs))
-	pn := make([]string, 0, len(collMeta.PartitonNames))
+	pn := make([]string, 0, len(collMeta.PartitionNames))
 	var partID typeutil.UniqueID
 	for idx := range collMeta.PartitionIDs {
-		if collMeta.PartitonNames[idx] == partitionName {
+		if collMeta.PartitionNames[idx] == partitionName {
 			partID = collMeta.PartitionIDs[idx]
 			exist = true
 		} else {
 			pd = append(pd, collMeta.PartitionIDs[idx])
-			pn = append(pn, collMeta.PartitonNames[idx])
+			pn = append(pn, collMeta.PartitionNames[idx])
 		}
 	}
 	if !exist {
 		return 0, 0, fmt.Errorf("partition %s does not exist", partitionName)
 	}
 	collMeta.PartitionIDs = pd
-	collMeta.PartitonNames = pn
+	collMeta.PartitionNames = pn
 	mt.collID2Meta[collID] = collMeta
 
 	// update segID2IndexMeta and partID2SegID
