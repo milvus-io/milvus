@@ -1462,18 +1462,17 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
         }
         LoadDeleteDoc();
 
-        // Use uids and deleted-docs to check whether ids
-#pragma omp parallel for
-        for (size_t i = 0; i < temp_ids.size(); ++i) {
+        // Method use uids and deleted-docs to check whether id is in segment
+        auto FindId = [&](int64_t i) {
             if (!temp_ids[i].possible_in) {
-                continue;
+                return;
             }
             temp_ids[i].possible_in = false;
 
             // If the id is in uids and not in deleted-docs, that means this id is found
             auto found = std::find(uids_ptr->begin(), uids_ptr->end(), temp_ids[i].vec_id);
             if (found == uids_ptr->end()) {
-                continue;
+                return;
             }
 
             auto offset = std::distance(uids_ptr->begin(), found);
@@ -1481,11 +1480,23 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
                 auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
                 auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
                 if (deleted != deleted_docs.end()) {
-                    continue;
+                    return;
                 }
             }
 
             temp_ids[i].offset = offset;
+        };
+
+        // For large number id array, use multi-threads to find, otherwise single thread
+        if (temp_ids.size() <= 4) {
+            for (size_t i = 0; i < temp_ids.size(); ++i) {
+                FindId(i);
+            }
+        } else {
+#pragma omp parallel for
+            for (size_t i = 0; i < temp_ids.size(); ++i) {
+                FindId(i);
+            }
         }
 
         // Fetch vector data
