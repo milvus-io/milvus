@@ -17,6 +17,7 @@
 #include <vector>
 
 #include <faiss/utils/ConcurrentBitset.h>
+//#include <scheduler/job/SearchJob.h>
 
 #include "query/GeneralQuery.h"
 #include "utils/Json.h"
@@ -24,6 +25,7 @@
 
 namespace milvus {
 namespace engine {
+
 
 // TODO(linxj): replace with VecIndex::IndexType
 enum class EngineType {
@@ -99,6 +101,9 @@ class ExecutionEngine {
 
     virtual Status
     CopyToCpu() = 0;
+
+    virtual Status
+    CopyToApu(uint32_t i) = 0;
 
     //    virtual std::shared_ptr<ExecutionEngine>
     //    Clone() = 0;

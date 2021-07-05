@@ -24,7 +24,8 @@ set(MILVUS_THIRDPARTY_DEPENDENCIES
         fiu
         AWS
         oatpp
-        armadillo)
+        armadillo
+        apu)
 
 message(STATUS "Using ${MILVUS_DEPENDENCY_SOURCE} approach to find dependencies")
 
@@ -64,6 +65,8 @@ macro(build_dependency DEPENDENCY_NAME)
         build_aws()
     elseif("${DEPENDENCY_NAME}" STREQUAL "armadillo")
         build_armadillo()
+    elseif("${DEPENDENCY_NAME}" STREQUAL "apu")
+        build_apu()
     else ()
         message(FATAL_ERROR "Unknown thirdparty dependency to build: ${DEPENDENCY_NAME}")
     endif ()
@@ -337,6 +340,12 @@ if (DEFINED ENV{MILVUS_ARMADILLO_URL})
     set(ARMADILLO_SOURCE_URL "$ENV{MILVUS_ARMADILLO_URL}")
 else ()
     set(ARMADILLO_SOURCE_URL "https://gitlab.com/conradsnicta/armadillo-code/-/archive/9.900.x/armadillo-code-9.900.x.tar.gz")
+endif ()
+
+if (DEFINED ENV{MILVUS_APU_URL})
+    set(APU_SOURCE_URL "$ENV{MILVUS_APU_URL}")
+else ()
+    set(APU_SOURCE_URL "${PROJECT_SOURCE_DIR}/resources/gsl_sources_milvus/2.8.0/gsi_release_2_8_0.tar.gz")
 endif ()
 
 # ----------------------------------------------------------------------
@@ -1130,8 +1139,8 @@ macro(build_armadillo)
         file(MAKE_DIRECTORY "${ARMADILLO_INCLUDE_DIR}")
         add_library(armadillo SHARED IMPORTED)
         ExTernalProject_Get_Property(armadillo_ep INSTALL_DIR)
-    set_target_properties(armadillo
-        PROPERTIES
+        set_target_properties(armadillo
+            PROPERTIES
             IMPORTED_GLOBAL    TRUE
             IMPORTED_LOCATION "${INSTALL_DIR}/lib/libarmadillo.so"
             INTERFACE_INCLUDE_DIRECTORIES "${INSTALL_DIR}/include")
@@ -1150,3 +1159,51 @@ if(MILVUS_FPGA_VERSION)
             ${INSTALL_DIR}/lib/libarmadillo.so.9.900.4
             DESTINATION lib)
 endif()
+
+# ----------------------------------------------------------------------
+# APU-GSI
+
+macro(build_apu)
+    message(STATUS "Building APU from source")
+    set(APU_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/apu_ep-prefix/src/apu_ep")
+    set(APU_SHARED_LIB "${APU_PREFIX}/lib/libgsl.so")
+    set (APU_LIBS "${APU_PREFIX}/lib")
+    set(APU_INCLUDE_DIR "${APU_PREFIX}/include")
+
+    message( STATUS "APU_PREFIX = "  ${APU_PREFIX})
+    message( STATUS "APU_SHARED_LIB = "  ${APU_SHARED_LIB})
+    message( STATUS "APU_INCLUDE_DIR = "  ${APU_INCLUDE_DIR})
+
+    externalproject_add(apu_ep
+            URL
+            ${APU_SOURCE_URL}
+            ${EP_LOG_OPTIONS}
+            CONFIGURE_COMMAND ""
+            BUILD_COMMAND ""
+            INSTALL_COMMAND "")
+
+    file(MAKE_DIRECTORY ${APU_INCLUDE_DIR})
+    add_library(apu SHARED IMPORTED)
+
+    set_target_properties(apu
+            PROPERTIES
+	    IMPORTED_GLOBAL    TRUE
+            IMPORTED_LOCATION "${APU_SHARED_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${APU_INCLUDE_DIR}")
+
+     add_dependencies(apu apu_ep)
+endmacro()
+
+if (MILVUS_APU_VERSION)
+
+    resolve_dependency(apu)
+
+    get_target_property(APU_INCLUDE_DIR apu INTERFACE_INCLUDE_DIRECTORIES)
+    include_directories(SYSTEM ${APU_INCLUDE_DIR})
+    install(FILES
+            ${APU_PREFIX}/lib/libgsl.so
+            DESTINATION lib)
+
+
+endif ()
+

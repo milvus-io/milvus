@@ -38,6 +38,11 @@
 #include "knowhere/index/vector_index/fpga/IndexFPGAIVFPQ.h"
 #include "knowhere/index/vector_index/fpga/utils.h"
 #endif
+#ifdef  MILVUS_APU_VERSION
+#include <knowhere/index/vector_index/fpga/GsiHammingIndex.h>
+#include <knowhere/index/vector_index/fpga/GsiTanimotoIndex.h>
+#include <knowhere/index/vector_index/fpga/ApuInst.h>
+#endif 
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/gpu/GPUIndex.h"
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
@@ -637,6 +642,38 @@ ExecutionEngineImpl::CopyToFpga() {
     return Status::OK();
 }
 
+Status
+ExecutionEngineImpl::CopyToApu(uint32_t row_count) {
+#ifdef MILVUS_APU_VERSION
+
+    auto cache_index_ =
+    std::static_pointer_cast<knowhere::VecIndex>(cache::FpgaCacheMgr::GetInstance()->GetIndex(location_));
+    bool already_in_cache = (cache_index_ != nullptr);
+    //auto apu = Fpga::ApuInst::getInstance();
+    //bool isLoadNeeded =apu->isLoadNeeded(location_); //(index_ == nullptr);
+    if (!already_in_cache) {
+
+        cache::FpgaCacheMgr::GetInstance()->ClearCache(); // clear cache to support cache switch .
+
+        // factory is needed here
+        if (metric_type_ == MetricType::HAMMING)
+            index_ = std::make_shared<knowhere::GsiHammingIndex>(dim_);//new knowhere::GsiHammingIndex();
+        else
+            index_ = std::make_shared<knowhere::GsiTanimotoIndex>(dim_);
+
+        auto apuIndex = std::static_pointer_cast<knowhere::GsiBaseIndex>(index_);
+        apuIndex->CopyIndexToFpga( row_count, location_ );
+        FpgaCache();
+    }
+    else {
+        index_ = cache_index_;
+    }
+
+
+#endif
+    return Status::OK();
+}
+
 ExecutionEnginePtr
 ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_type) {
     LOG_ENGINE_DEBUG_ << "Build index file: " << location << " from: " << location_;
@@ -772,8 +809,8 @@ ExecutionEngineImpl::Search(int64_t n, const uint8_t* data, int64_t k, const mil
     auto result = index_->Query(dataset, conf, (blacklist_ ? blacklist_->bitset_ : nullptr));
     rc.RecordSection("query done");
 
-    LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] get %ld uids from index %s", "search", 0, index_->GetUids()->size(),
-                                location_.c_str());
+//    LOG_ENGINE_DEBUG_ << LogOut("[%s][%ld] get %ld uids from index %s", "search", 0, index_->GetUids()->size(),   ------ > REMOVED by eitan , need to be uncomment
+//                                location_.c_str());
     CopyResult(result, n * k, distances, labels);
     rc.RecordSection("copy result " + std::to_string(n * k));
 
@@ -840,5 +877,7 @@ ExecutionEngineImpl::Init() {
 #endif
 }
 
-}  // namespace engine
+
+
+    }  // namespace engine
 }  // namespace milvus

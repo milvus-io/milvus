@@ -46,6 +46,9 @@ set_option_category("Milvus Build Option")
 define_option(MILVUS_GPU_VERSION "Build GPU version" OFF)
 
 define_option(MILVUS_FPGA_VERSION "Build FPGA version" OFF)
+
+define_option(MILVUS_APU_VERSION "Build APU version" OFF)
+
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")
 
