@@ -42,113 +42,46 @@ func TestMeta_Basic(t *testing.T) {
 	}
 
 	t.Run("Test Collection", func(t *testing.T) {
-		// check add collection
-		err = meta.AddCollection(collInfo)
-		assert.Nil(t, err)
-
-		// check add existed collection
-		err = meta.AddCollection(collInfo)
-		assert.NotNil(t, err)
-
+		meta.AddCollection(collInfo)
 		// check has collection
-		has := meta.HasCollection(collID)
-		assert.True(t, has)
+		collInfo := meta.GetCollection(collID)
+		assert.NotNil(t, collInfo)
 
 		// check partition info
-		collInfo, err = meta.GetCollection(collID)
-		assert.Nil(t, err)
 		assert.EqualValues(t, collID, collInfo.ID)
 		assert.EqualValues(t, testSchema, collInfo.Schema)
 		assert.EqualValues(t, 2, len(collInfo.Partitions))
 		assert.EqualValues(t, partID0, collInfo.Partitions[0])
 		assert.EqualValues(t, partID1, collInfo.Partitions[1])
-
-		// check drop collection
-		err = meta.DropCollection(collID)
-		assert.Nil(t, err)
-		has = meta.HasCollection(collID)
-		assert.False(t, has)
-		_, err = meta.GetCollection(collID)
-		assert.NotNil(t, err)
-	})
-
-	t.Run("Test Partition", func(t *testing.T) {
-		err = meta.AddCollection(collInfoWoPartition)
-		assert.Nil(t, err)
-
-		// check add partition
-		err = meta.AddPartition(collID, partID0)
-		assert.Nil(t, err)
-		err = meta.AddPartition(collID, partID1)
-		assert.Nil(t, err)
-		exist0 := meta.HasPartition(collID, partID0)
-		assert.True(t, exist0)
-		exist1 := meta.HasPartition(collID, partID1)
-		assert.True(t, exist1)
-
-		// check add existed partition
-		err = meta.AddPartition(collID, partID0)
-		assert.NotNil(t, err)
-
-		// check GetCollection
-		collInfo, err = meta.GetCollection(collID)
-		assert.Nil(t, err)
-		assert.EqualValues(t, 2, len(collInfo.Partitions))
-		assert.Contains(t, collInfo.Partitions, partID0)
-		assert.Contains(t, collInfo.Partitions, partID1)
-
-		// check DropPartition
-		err = meta.DropPartition(collID, partID0)
-		assert.Nil(t, err)
-		exist0 = meta.HasPartition(collID, partID0)
-		assert.False(t, exist0)
-		exist1 = meta.HasPartition(collID, partID1)
-		assert.True(t, exist1)
-
-		// check DropPartition twice
-		err = meta.DropPartition(collID, partID0)
-		assert.NotNil(t, err)
-
-		err = meta.DropCollection(collID)
-		assert.Nil(t, err)
 	})
 
 	t.Run("Test Segment", func(t *testing.T) {
-		err = meta.AddCollection(collInfoWoPartition)
-		assert.Nil(t, err)
-		err = meta.AddPartition(collID, partID0)
-		assert.Nil(t, err)
-
+		meta.AddCollection(collInfoWoPartition)
 		// create seg0 for partition0, seg0/seg1 for partition1
 		segID0_0, err := mockAllocator.allocID()
 		assert.Nil(t, err)
-		segInfo0_0, err := buildSegment(collID, partID0, segID0_0, channelName)
-		assert.Nil(t, err)
+		segInfo0_0 := buildSegment(collID, partID0, segID0_0, channelName)
 		segID1_0, err := mockAllocator.allocID()
 		assert.Nil(t, err)
-		segInfo1_0, err := buildSegment(collID, partID1, segID1_0, channelName)
-		assert.Nil(t, err)
+		segInfo1_0 := buildSegment(collID, partID1, segID1_0, channelName)
 		segID1_1, err := mockAllocator.allocID()
 		assert.Nil(t, err)
-		segInfo1_1, err := buildSegment(collID, partID1, segID1_1, channelName)
-		assert.Nil(t, err)
+		segInfo1_1 := buildSegment(collID, partID1, segID1_1, channelName)
 
 		// check AddSegment
 		err = meta.AddSegment(segInfo0_0)
 		assert.Nil(t, err)
-		err = meta.AddSegment(segInfo0_0)
-		assert.NotNil(t, err)
 		err = meta.AddSegment(segInfo1_0)
 		assert.Nil(t, err)
 		err = meta.AddSegment(segInfo1_1)
 		assert.Nil(t, err)
 
 		// check GetSegment
-		info0_0, err := meta.GetSegment(segID0_0)
-		assert.Nil(t, err)
+		info0_0 := meta.GetSegment(segID0_0)
+		assert.NotNil(t, info0_0)
 		assert.True(t, proto.Equal(info0_0, segInfo0_0))
-		info1_0, err := meta.GetSegment(segID1_0)
-		assert.Nil(t, err)
+		info1_0 := meta.GetSegment(segID1_0)
+		assert.NotNil(t, info1_0)
 		assert.True(t, proto.Equal(info1_0, segInfo1_0))
 
 		// check GetSegmentsOfCollection
@@ -174,19 +107,14 @@ func TestMeta_Basic(t *testing.T) {
 		assert.EqualValues(t, 1, len(segIDs))
 		assert.Contains(t, segIDs, segID1_1)
 
-		err = meta.SealSegment(segID0_0)
+		err = meta.SetState(segID0_0, commonpb.SegmentState_Sealed)
 		assert.Nil(t, err)
-		err = meta.FlushSegment(segID0_0)
+		err = meta.SetState(segID0_0, commonpb.SegmentState_Flushed)
 		assert.Nil(t, err)
 
-		info0_0, err = meta.GetSegment(segID0_0)
-		assert.Nil(t, err)
+		info0_0 = meta.GetSegment(segID0_0)
+		assert.NotNil(t, info0_0)
 		assert.EqualValues(t, commonpb.SegmentState_Flushed, info0_0.State)
-
-		err = meta.DropPartition(collID, partID0)
-		assert.Nil(t, err)
-		err = meta.DropCollection(collID)
-		assert.Nil(t, err)
 	})
 
 	t.Run("Test GetCount", func(t *testing.T) {
@@ -195,15 +123,13 @@ func TestMeta_Basic(t *testing.T) {
 		const dim = 1024
 
 		// no segment
-		nums, err := meta.GetNumRowsOfCollection(collID)
-		assert.Nil(t, err)
+		nums := meta.GetNumRowsOfCollection(collID)
 		assert.EqualValues(t, 0, nums)
 
 		// add seg1 with 100 rows
 		segID0, err := mockAllocator.allocID()
 		assert.Nil(t, err)
-		segInfo0, err := buildSegment(collID, partID0, segID0, channelName)
-		assert.Nil(t, err)
+		segInfo0 := buildSegment(collID, partID0, segID0, channelName)
 		segInfo0.NumOfRows = rowCount0
 		err = meta.AddSegment(segInfo0)
 		assert.Nil(t, err)
@@ -211,61 +137,16 @@ func TestMeta_Basic(t *testing.T) {
 		// add seg2 with 300 rows
 		segID1, err := mockAllocator.allocID()
 		assert.Nil(t, err)
-		segInfo1, err := buildSegment(collID, partID0, segID1, channelName)
-		assert.Nil(t, err)
+		segInfo1 := buildSegment(collID, partID0, segID1, channelName)
 		segInfo1.NumOfRows = rowCount1
 		err = meta.AddSegment(segInfo1)
 		assert.Nil(t, err)
 
 		// check partition/collection statistics
-		nums, err = meta.GetNumRowsOfPartition(collID, partID0)
-		assert.Nil(t, err)
+		nums = meta.GetNumRowsOfPartition(collID, partID0)
 		assert.EqualValues(t, (rowCount0 + rowCount1), nums)
-		nums, err = meta.GetNumRowsOfCollection(collID)
-		assert.Nil(t, err)
+		nums = meta.GetNumRowsOfCollection(collID)
 		assert.EqualValues(t, (rowCount0 + rowCount1), nums)
-	})
-
-	t.Run("Test Invalid", func(t *testing.T) {
-		collIDInvalid := UniqueID(10000)
-		partIDInvalid := UniqueID(10001)
-		segIDInvalid := UniqueID(10002)
-
-		// check drop non-exist collection
-		err = meta.DropCollection(collID)
-		assert.NotNil(t, err)
-
-		// add partition wo collection
-		err = meta.AddPartition(collID, partID0)
-		assert.NotNil(t, err)
-
-		// has partition wo collection
-		exist := meta.HasPartition(collID, partID0)
-		assert.False(t, exist)
-
-		err = meta.AddCollection(collInfo)
-		assert.Nil(t, err)
-
-		// check drop non-exist partition
-		err = meta.DropPartition(collIDInvalid, partID0)
-		assert.NotNil(t, err)
-		err = meta.DropPartition(collID, partIDInvalid)
-		assert.NotNil(t, err)
-
-		// check drop non-exist segment
-		err = meta.DropSegment(segIDInvalid)
-		assert.NotNil(t, err)
-
-		// check seal non-exist segment
-		err = meta.SealSegment(segIDInvalid)
-		assert.NotNil(t, err)
-
-		// check flush non-exist segment
-		err = meta.FlushSegment(segIDInvalid)
-		assert.NotNil(t, err)
-
-		err = meta.DropCollection(collID)
-		assert.Nil(t, err)
 	})
 }
 
