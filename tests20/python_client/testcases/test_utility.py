@@ -368,21 +368,20 @@ class TestUtilityBase(TestcaseBase):
         assert res is None
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason='hang issue #6272')
     def test_wait_index_collection_index(self):
         """
         target: test wait_index
-        method: insert 1200 entities, build and call wait_index
-        expected: 1200 entity indexed
+        method: insert 5000 entities, build and call wait_index
+        expected: 5000 entity indexed
         """
-        nb = 1200
+        nb = 5000
         c_name = cf.gen_unique_str(prefix)
         cw = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(nb)
         cw.insert(data=data)
         cw.create_index(default_field_name, default_index_params)
         res, _ = self.utility_wrap.wait_for_index_building_complete(c_name)
-        assert res is None
+        assert res is True
         res, _ = self.utility_wrap.index_building_progress(c_name)
         assert res["indexed_rows"] == nb
 
