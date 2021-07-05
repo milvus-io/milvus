@@ -278,20 +278,22 @@ func TestMetaTable(t *testing.T) {
 
 	t.Run("add segment index", func(t *testing.T) {
 		segIdxInfo := pb.SegmentIndexInfo{
-			SegmentID: segID,
-			FieldID:   fieldID,
-			IndexID:   indexID,
-			BuildID:   buildID,
+			CollectionID: collID,
+			PartitionID:  partID,
+			SegmentID:    segID,
+			FieldID:      fieldID,
+			IndexID:      indexID,
+			BuildID:      buildID,
 		}
-		_, err := mt.AddIndex(&segIdxInfo, collID, partID)
+		_, err := mt.AddIndex(&segIdxInfo)
 		assert.Nil(t, err)
 
 		// it's legal to add index twice
-		_, err = mt.AddIndex(&segIdxInfo, collID, partID)
+		_, err = mt.AddIndex(&segIdxInfo)
 		assert.Nil(t, err)
 
 		segIdxInfo.BuildID = 202
-		_, err = mt.AddIndex(&segIdxInfo, collID, partID)
+		_, err = mt.AddIndex(&segIdxInfo)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("index id = %d exist", segIdxInfo.IndexID))
 	})
@@ -615,17 +617,19 @@ func TestMetaTable(t *testing.T) {
 		assert.Nil(t, err)
 
 		segIdxInfo := pb.SegmentIndexInfo{
-			SegmentID: segID,
-			FieldID:   fieldID,
-			IndexID:   indexID2,
-			BuildID:   buildID,
+			CollectionID: collID,
+			PartitionID:  partID,
+			SegmentID:    segID,
+			FieldID:      fieldID,
+			IndexID:      indexID2,
+			BuildID:      buildID,
 		}
-		_, err = mt.AddIndex(&segIdxInfo, collID, partID)
+		_, err = mt.AddIndex(&segIdxInfo)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("index id = %d not found", segIdxInfo.IndexID))
 
 		mt.collID2Meta = make(map[int64]pb.CollectionInfo)
-		_, err = mt.AddIndex(&segIdxInfo, collID, partID)
+		_, err = mt.AddIndex(&segIdxInfo)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("collection id = %d not found", collInfo.ID))
 
@@ -641,7 +645,7 @@ func TestMetaTable(t *testing.T) {
 		mockKV.save = func(key, value string) (typeutil.Timestamp, error) {
 			return 0, fmt.Errorf("save error")
 		}
-		_, err = mt.AddIndex(&segIdxInfo, collID, partID)
+		_, err = mt.AddIndex(&segIdxInfo)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "save error")
 	})
@@ -734,12 +738,14 @@ func TestMetaTable(t *testing.T) {
 		assert.Equal(t, false, seg.EnableIndex)
 
 		segIdxInfo := pb.SegmentIndexInfo{
-			SegmentID: segID,
-			FieldID:   fieldID,
-			IndexID:   indexID,
-			BuildID:   buildID,
+			CollectionID: collID,
+			PartitionID:  partID,
+			SegmentID:    segID,
+			FieldID:      fieldID,
+			IndexID:      indexID,
+			BuildID:      buildID,
 		}
-		_, err = mt.AddIndex(&segIdxInfo, collID, partID)
+		_, err = mt.AddIndex(&segIdxInfo)
 		assert.Nil(t, err)
 		idx, err := mt.GetSegmentIndexInfoByID(segIdxInfo.SegmentID, segIdxInfo.FieldID, idxInfo[0].IndexName)
 		assert.Nil(t, err)

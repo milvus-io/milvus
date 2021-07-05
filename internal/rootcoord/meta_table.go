@@ -624,13 +624,13 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	return ts, partID, nil
 }
 
-func (mt *metaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo, collID, partID typeutil.UniqueID) (typeutil.Timestamp, error) {
+func (mt *metaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo) (typeutil.Timestamp, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	collMeta, ok := mt.collID2Meta[collID]
+	collMeta, ok := mt.collID2Meta[segIdxInfo.CollectionID]
 	if !ok {
-		return 0, fmt.Errorf("collection id = %d not found", collID)
+		return 0, fmt.Errorf("collection id = %d not found", segIdxInfo.CollectionID)
 	}
 	exist := false
 	for _, fidx := range collMeta.FieldIndexes {
@@ -666,7 +666,7 @@ func (mt *metaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo, collID, partID ty
 	mt.segID2IndexMeta[segIdxInfo.SegmentID][segIdxInfo.IndexID] = *segIdxInfo
 	mt.partID2SegID[segIdxInfo.PartitionID][segIdxInfo.SegmentID] = true
 
-	k := fmt.Sprintf("%s/%d/%d/%d/%d", SegmentIndexMetaPrefix, collID, segIdxInfo.IndexID, partID, segIdxInfo.SegmentID)
+	k := fmt.Sprintf("%s/%d/%d/%d/%d", SegmentIndexMetaPrefix, segIdxInfo.CollectionID, segIdxInfo.IndexID, segIdxInfo.PartitionID, segIdxInfo.SegmentID)
 	v := proto.MarshalTextString(segIdxInfo)
 
 	ts, err := mt.client.Save(k, v)
