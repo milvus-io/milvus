@@ -111,7 +111,7 @@ structure_metrics = ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
 
 class CheckTasks:
     """ The name of the method used to check the result """
-    false = False
+    check_nothing = "check_nothing"
     err_res = "error_response"
     ccr = "check_connection_result"
     check_collection_property = "check_collection_property"
