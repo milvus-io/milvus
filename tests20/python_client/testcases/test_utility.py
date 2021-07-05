@@ -380,7 +380,6 @@ class TestUtilityBase(TestcaseBase):
                         c_name,
                         check_task=CheckTasks.err_res,
                         check_items={ct.err_code: 1, ct.err_msg: "no index is created"})
-        assert res is None
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_wait_index_collection_index(self):
