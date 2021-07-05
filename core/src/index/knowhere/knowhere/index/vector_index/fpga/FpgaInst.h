@@ -14,6 +14,8 @@
 #include <memory>
 #include <mutex>
 #include "Fpga.h"
+
+
 namespace Fpga {
 class FpgaInst {
  public:
