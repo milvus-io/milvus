@@ -353,6 +353,3 @@ func (s *Server) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.Releas
 func (s *Server) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
 	return s.rootCoord.SegmentFlushCompleted(ctx, in)
 }
-func (s *Server) AddNewSegment(ctx context.Context, in *datapb.SegmentMsg) (*commonpb.Status, error) {
-	return s.rootCoord.AddNewSegment(ctx, in)
-}
