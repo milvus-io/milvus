@@ -580,7 +580,7 @@ class TestCollectionParams(TestcaseBase):
         int_field_two = cf.gen_int64_field(name="int2", is_primary=True)
         error = {ct.err_code: 0, ct.err_msg: "Primary key field can only be one."}
         self.collection_schema_wrap.init_collection_schema(fields=[int_field_one, int_field_two, cf.gen_float_vec_field()],
-                                                           check_items=CheckTasks.err_res, check_task=error)
+                                                           check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_collection_primary_inconsistent(self):
