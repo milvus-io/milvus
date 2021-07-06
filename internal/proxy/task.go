@@ -1292,7 +1292,8 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 
 		plan, err := CreateQueryPlan(schema, st.query.Dsl, annsField, queryInfo)
 		if err != nil {
-			return errors.New("invalid expression: " + st.query.Dsl)
+			//return errors.New("invalid expression: " + st.query.Dsl)
+			return err
 		}
 		for _, name := range st.query.OutputFields {
 			for _, field := range schema.Fields {
