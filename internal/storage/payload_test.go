@@ -280,16 +280,16 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		defer r.ReleasePayloadReader()
 	})
 
-	t.Run("TestAddOneString", func(t *testing.T) {
+	t.Run("TestAddString", func(t *testing.T) {
 		w, err := NewPayloadWriter(schemapb.DataType_String)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
-		err = w.AddOneStringToPayload("hello0")
+		err = w.AddStringToPayload("hello0")
 		assert.Nil(t, err)
-		err = w.AddOneStringToPayload("hello1")
+		err = w.AddStringToPayload("hello1")
 		assert.Nil(t, err)
-		err = w.AddOneStringToPayload("hello2")
+		err = w.AddStringToPayload("hello2")
 		assert.Nil(t, err)
 		err = w.AddDataToPayload("hello3")
 		assert.Nil(t, err)
@@ -306,16 +306,16 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		length, err = r.GetPayloadLengthFromReader()
 		assert.Nil(t, err)
 		assert.Equal(t, length, 4)
-		str0, err := r.GetOneStringFromPayload(0)
+		str0, err := r.GetStringFromPayload(0)
 		assert.Nil(t, err)
 		assert.Equal(t, str0, "hello0")
-		str1, err := r.GetOneStringFromPayload(1)
+		str1, err := r.GetStringFromPayload(1)
 		assert.Nil(t, err)
 		assert.Equal(t, str1, "hello1")
-		str2, err := r.GetOneStringFromPayload(2)
+		str2, err := r.GetStringFromPayload(2)
 		assert.Nil(t, err)
 		assert.Equal(t, str2, "hello2")
-		str3, err := r.GetOneStringFromPayload(3)
+		str3, err := r.GetStringFromPayload(3)
 		assert.Nil(t, err)
 		assert.Equal(t, str3, "hello3")
 
@@ -579,11 +579,11 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		_, err = w.GetPayloadBufferFromWriter()
 		assert.NotNil(t, err)
 
-		err = w.AddOneStringToPayload("")
+		err = w.AddStringToPayload("")
 		assert.NotNil(t, err)
 		err = w.FinishPayloadWriter()
 		assert.Nil(t, err)
-		err = w.AddOneStringToPayload("c")
+		err = w.AddStringToPayload("c")
 		assert.NotNil(t, err)
 	})
 	t.Run("TestAddBinVectorAfterFinish", func(t *testing.T) {
@@ -836,11 +836,11 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		r, err := NewPayloadReader(schemapb.DataType_String, buffer)
 		assert.Nil(t, err)
 
-		_, err = r.GetOneStringFromPayload(0)
+		_, err = r.GetStringFromPayload(0)
 		assert.NotNil(t, err)
 
 		r.colType = 999
-		_, err = r.GetOneStringFromPayload(0)
+		_, err = r.GetStringFromPayload(0)
 		assert.NotNil(t, err)
 	})
 	t.Run("TestGetBinaryVectorError", func(t *testing.T) {
