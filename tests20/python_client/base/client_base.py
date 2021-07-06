@@ -68,13 +68,14 @@ class Base:
             if self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING)[0] is None:
                 self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=param_info.param_host,
                                              port=param_info.param_port)
+
             if self.collection_wrap.collection is not None:
-                self.collection_wrap.drop(check_task='check_nothing')
+                self.collection_wrap.drop(check_task=ct.CheckTasks.check_nothing)
 
             for collection_object in self.collection_object_list:
                 if collection_object.collection is not None \
                         and collection_object.name in self.utility_wrap.list_collections()[0]:
-                    collection_object.drop(check_task='check_nothing')
+                    collection_object.drop(check_task=ct.CheckTasks.check_nothing)
 
         except Exception as e:
             log.debug(str(e))
@@ -115,15 +116,6 @@ class TestcaseBase(Base):
     Additional methods;
     Public methods that can be used to add cases.
     """
-
-    # move to conftest.py
-    # @pytest.fixture(scope="module", params=ct.get_invalid_strs)
-    # def get_invalid_string(self, request):
-    #     yield request.param
-    #
-    # @pytest.fixture(scope="module", params=cf.gen_simple_index())
-    # def get_index_param(self, request):
-    #     yield request.param
 
     def _connect(self):
         """ Add an connection and create the connect """

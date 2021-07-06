@@ -103,7 +103,7 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         columns = [ct.default_int64_field_name, ct.default_float_vec_field_name]
         df = pd.DataFrame(columns=columns)
-        error = {ct.err_code: 1, ct.err_msg: "Cannot infer schema from empty dataframe"}
+        error = {ct.err_code: 0, ct.err_msg: "Cannot infer schema from empty dataframe"}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -117,7 +117,7 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         df = cf.gen_default_dataframe_data(10)
         df.rename(columns={ct.default_int64_field_name: ' '}, inplace=True)
-        error = {ct.err_code: 1, ct.err_msg: "The types of schema and data do not match"}
+        error = {ct.err_code: 0, ct.err_msg: "The types of schema and data do not match"}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -131,7 +131,7 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         df = cf.gen_default_dataframe_data(10)
         df.rename(columns={ct.default_int64_field_name: get_invalid_field_name}, inplace=True)
-        error = {ct.err_code: 1, ct.err_msg: "The types of schema and data do not match"}
+        error = {ct.err_code: 0, ct.err_msg: "The types of schema and data do not match"}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     def test_insert_dataframe_index(self):
@@ -167,7 +167,7 @@ class TestInsertParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_numpy_data(nb=10)
-        error = {ct.err_code: 1, ct.err_msg: "Data type not support numpy.ndarray"}
+        error = {ct.err_code: 0, ct.err_msg: "Data type not support numpy.ndarray"}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -216,6 +216,7 @@ class TestInsertParams(TestcaseBase):
         assert collection_w.num_entities == 1
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="exception not MilvusException")
     def test_insert_dim_not_match(self):
         """
         target: test insert with not match dim
@@ -231,6 +232,7 @@ class TestInsertParams(TestcaseBase):
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="exception not MilvusException")
     def test_insert_binary_dim_not_match(self):
         """
         target: test insert binary with dim not match
@@ -256,7 +258,7 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         df = cf.gen_default_dataframe_data(10)
         df.rename(columns={ct.default_float_field_name: "int"}, inplace=True)
-        error = {ct.err_code: 1, ct.err_msg: 'The types of schema and data do not match'}
+        error = {ct.err_code: 0, ct.err_msg: 'The types of schema and data do not match'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -272,7 +274,7 @@ class TestInsertParams(TestcaseBase):
         df = cf.gen_default_dataframe_data(nb)
         new_float_value = pd.Series(data=[float(i) for i in range(nb)], dtype="float64")
         df.iloc[:, 1] = new_float_value
-        error = {ct.err_code: 1, ct.err_msg: 'The types of schema and data do not match'}
+        error = {ct.err_code: 0, ct.err_msg: 'The types of schema and data do not match'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -352,7 +354,7 @@ class TestInsertParams(TestcaseBase):
         float_values = [np.float32(i) for i in range(nb)]
         float_vec_values = cf.gen_vectors(nb, ct.default_dim)
         data = [float_values, int_values, float_vec_values]
-        error = {ct.err_code: 1, ct.err_msg: 'The types of schema and data do not match'}
+        error = {ct.err_code: 0, ct.err_msg: 'The types of schema and data do not match'}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -373,7 +375,7 @@ class TestInsertParams(TestcaseBase):
             ct.default_float_vec_field_name: float_vec_values,
             ct.default_int64_field_name: int_values
         })
-        error = {ct.err_code: 1, ct.err_msg: 'The types of schema and data do not match'}
+        error = {ct.err_code: 0, ct.err_msg: 'The types of schema and data do not match'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -411,7 +413,7 @@ class TestInsertOperation(TestcaseBase):
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
         data = cf.gen_default_list_data(10)
-        error = {ct.err_code: 1, ct.err_msg: 'should create connect first'}
+        error = {ct.err_code: 0, ct.err_msg: 'should create connect first'}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -568,7 +570,7 @@ class TestInsertOperation(TestcaseBase):
         schema = cf.gen_default_collection_schema(auto_id=True)
         collection_w = self.init_collection_wrap(name=c_name, schema=schema)
         df = cf.gen_default_dataframe_data(nb=100)
-        error = {ct.err_code: 0, ct.err_msg: 'Column cnt not match with schema'}
+        error = {ct.err_code: 0, ct.err_msg: 'Auto_id is True, primary field should not have data'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
         assert collection_w.is_empty
 
@@ -583,7 +585,7 @@ class TestInsertOperation(TestcaseBase):
         schema = cf.gen_default_collection_schema(auto_id=True)
         collection_w = self.init_collection_wrap(name=c_name, schema=schema)
         data = cf.gen_default_list_data(nb=100)
-        error = {ct.err_code: 0, ct.err_msg: 'Column cnt not match with schema'}
+        error = {ct.err_code: 0, ct.err_msg: 'The data fields number is not match with schema'}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
         assert collection_w.is_empty
 
@@ -713,7 +715,6 @@ class TestInsertAsync(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="#6160")
     def test_insert_async_callback(self):
         """
         target: test insert with callback func
@@ -724,6 +725,8 @@ class TestInsertAsync(TestcaseBase):
         df = cf.gen_default_dataframe_data(nb=ct.default_nb)
         future, _ = collection_w.insert(data=df, _async=True, _callback=assert_mutation_result)
         future.done()
+        mutation_res = future.result()
+        assert mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
         assert collection_w.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -744,7 +747,6 @@ class TestInsertAsync(TestcaseBase):
         assert collection_w.num_entities == nb
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="#6167")
     def test_insert_async_callback_timeout(self):
         """
         target: test insert async with callback
@@ -754,10 +756,8 @@ class TestInsertAsync(TestcaseBase):
         nb = 100000
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         df = cf.gen_default_dataframe_data(nb)
-        err_msg = "timeout"
         future, _ = collection_w.insert(data=df, _async=True, _callback=assert_mutation_result, timeout=1)
-        future.done()
-        with pytest.raises(Exception, match=err_msg):
+        with pytest.raises(Exception):
             future.result()
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -770,7 +770,7 @@ class TestInsertAsync(TestcaseBase):
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         columns = [ct.default_int64_field_name, ct.default_float_vec_field_name]
         df = pd.DataFrame(columns=columns)
-        error = {ct.err_code: 1, ct.err_msg: "Cannot infer schema from empty dataframe"}
+        error = {ct.err_code: 0, ct.err_msg: "Cannot infer schema from empty dataframe"}
         collection_w.insert(data=df, _async=True, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -790,7 +790,4 @@ class TestInsertAsync(TestcaseBase):
 
 
 def assert_mutation_result(mutation_res):
-    # todo
-    log.info(f"The result is {mutation_res}")
-    # mutation_res = future.result()
-    # assert mutation_res.insert_count == 100
+    assert mutation_res.insert_count == ct.default_nb

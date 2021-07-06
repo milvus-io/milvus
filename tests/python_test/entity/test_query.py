@@ -458,7 +458,7 @@ class TestQueryBase:
         with pytest.raises(Exception):
             connect.query(collection, default_term_expr, output_fields=["int"])
 
-    @pytest.mark.xfail(reason="#6074")
+    # @pytest.mark.xfail(reason="#6074")
     def test_query_output_part_not_existed_field(self, connect, collection):
         """
         target: test query output part not existed field

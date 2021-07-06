@@ -25,7 +25,7 @@
 #include "indexbuilder/utils.h"
 #include "test_utils/indexbuilder_test_utils.h"
 
-constexpr int64_t NB = 10000;
+constexpr int64_t NB = 1000;
 namespace indexcgo = milvus::proto::indexcgo;
 
 using Param = std::pair<milvus::knowhere::IndexType, milvus::knowhere::MetricType>;

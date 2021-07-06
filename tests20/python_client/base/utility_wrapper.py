@@ -43,7 +43,7 @@ class ApiUtilityWrapper:
     def wait_for_index_building_complete(self, collection_name, index_name="", timeout=None, using="default",
                                          check_task=None, check_items=None):
         func_name = sys._getframe().f_code.co_name
-        res, is_succ = api_request([self.ut.wait_for_loading_complete, collection_name,
+        res, is_succ = api_request([self.ut.wait_for_index_building_complete, collection_name,
                                     index_name, timeout, using])
         check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
                                        collection_name=collection_name, index_name=index_name,
