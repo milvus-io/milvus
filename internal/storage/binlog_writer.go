@@ -14,7 +14,6 @@ package storage
 import (
 	"bytes"
 	"encoding/binary"
-
 	"errors"
 
 	"github.com/milvus-io/milvus/internal/proto/schemapb"

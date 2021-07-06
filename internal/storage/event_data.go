@@ -47,15 +47,18 @@ func (data *descriptorEventData) SetEndTimeStamp(ts typeutil.Timestamp) {
 	data.EndTimestamp = ts
 }
 
+func (data *descriptorEventData) GetEventDataFixPartSize() int32 {
+	return int32(binary.Size(data.DescriptorEventDataFixPart))
+}
+
 func (data *descriptorEventData) GetMemoryUsageInBytes() int32 {
-	return int32(binary.Size(data.DescriptorEventDataFixPart) + binary.Size(data.PostHeaderLengths))
+	return data.GetEventDataFixPartSize() + int32(binary.Size(data.PostHeaderLengths))
 }
 
 func (data *descriptorEventData) Write(buffer io.Writer) error {
 	if err := binary.Write(buffer, binary.LittleEndian, data.DescriptorEventDataFixPart); err != nil {
 		return err
 	}
-
 	if err := binary.Write(buffer, binary.LittleEndian, data.PostHeaderLengths); err != nil {
 		return err
 	}
@@ -64,15 +67,12 @@ func (data *descriptorEventData) Write(buffer io.Writer) error {
 
 func readDescriptorEventData(buffer io.Reader) (*descriptorEventData, error) {
 	event := newDescriptorEventData()
-
 	if err := binary.Read(buffer, binary.LittleEndian, &event.DescriptorEventDataFixPart); err != nil {
 		return nil, err
 	}
-
 	if err := binary.Read(buffer, binary.LittleEndian, &event.PostHeaderLengths); err != nil {
 		return nil, err
 	}
-
 	return event, nil
 }
 
@@ -248,7 +248,7 @@ func (data *dropPartitionEventData) WriteEventData(buffer io.Writer) error {
 func getEventFixPartSize(code EventTypeCode) int32 {
 	switch code {
 	case DescriptorEventType:
-		return int32(binary.Size(descriptorEventData{}.DescriptorEventDataFixPart))
+		return (&descriptorEventData{}).GetEventDataFixPartSize()
 	case InsertEventType:
 		return (&insertEventData{}).GetEventDataFixPartSize()
 	case DeleteEventType:
