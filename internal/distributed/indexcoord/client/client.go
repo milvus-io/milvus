@@ -172,13 +172,6 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 	return ret.(*milvuspb.StringResponse), err
 }
 
-func (c *Client) RegisterNode(ctx context.Context, req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpcClient.RegisterNode(ctx, req)
-	})
-	return ret.(*indexpb.RegisterNodeResponse), err
-}
-
 func (c *Client) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
 	ret, err := c.recall(func() (interface{}, error) {
 		return c.grpcClient.BuildIndex(ctx, req)

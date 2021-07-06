@@ -74,7 +74,6 @@ type IndexCoord interface {
 	Component
 	TimeTickProvider
 
-	RegisterNode(ctx context.Context, req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error)
 	BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error)
 	DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
 	GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error)
