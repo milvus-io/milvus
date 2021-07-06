@@ -1,11 +1,5 @@
-import copy
-import pdb
 import pytest
-from pymilvus_orm import FieldSchema
 from base.client_base import TestcaseBase
-from base.collection_wrapper import ApiCollectionWrapper
-from base.partition_wrapper import ApiPartitionWrapper
-from base.index_wrapper import ApiIndexWrapper
 from base.utility_wrapper import ApiUtilityWrapper
 from utils.util_log import test_log as log
 from common import common_func as cf
@@ -45,9 +39,12 @@ class TestUtilityParams(TestcaseBase):
         self._connect()
         c_name = get_invalid_collection_name
         if isinstance(c_name, str) and c_name:
-            self.utility_wrap.has_collection(c_name, check_task=CheckTasks.err_res, check_items={"err_code": 1, "err_msg": "Invalid collection name"})
+            self.utility_wrap.has_collection(
+                c_name,
+                check_task=CheckTasks.err_res,
+                check_items={ct.err_code: 1, ct.err_msg: "Invalid collection name"})
         # elif not isinstance(c_name, str):
-        #     self.utility_wrap.has_collection(c_name, check_task=CheckTasks.err_res, check_items={"err_code": 1, "err_msg": "illegal"})
+        #     self.utility_wrap.has_collection(c_name, check_task=CheckTasks.err_res, check_items={ct.err_code: 1, ct.err_msg: "illegal"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_has_partition_collection_name_invalid(self, get_invalid_collection_name):
@@ -60,7 +57,10 @@ class TestUtilityParams(TestcaseBase):
         c_name = get_invalid_collection_name
         p_name = cf.gen_unique_str(prefix)
         if isinstance(c_name, str) and c_name:
-            self.utility_wrap.has_partition(c_name, p_name, check_task=CheckTasks.err_res, check_items={"err_code": 1, "err_msg": "Invalid"})
+            self.utility_wrap.has_partition(
+                c_name, p_name,
+                check_task=CheckTasks.err_res,
+                check_items={ct.err_code: 1, ct.err_msg: "Invalid"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_has_partition_name_invalid(self, get_invalid_partition_name):
@@ -74,7 +74,10 @@ class TestUtilityParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         p_name = get_invalid_partition_name
         if isinstance(p_name, str) and p_name:
-            ex, _ = ut.has_partition(c_name, p_name, check_task=CheckTasks.err_res, check_items={"err_code": 1, "err_msg": "Invalid"})
+            ex, _ = ut.has_partition(
+                c_name, p_name,
+                check_task=CheckTasks.err_res,
+                check_items={ct.err_code: 1, ct.err_msg: "Invalid"})
 
     # TODO: enable
     @pytest.mark.tags(CaseLabel.L1)
@@ -87,7 +90,8 @@ class TestUtilityParams(TestcaseBase):
         self._connect()
         using = "empty"
         ut = ApiUtilityWrapper()
-        ex, _ = ut.list_collections(using=using, check_items={"err_code": 0, "err_msg": "should create connect"})
+        ex, _ = ut.list_collections(using=using,
+                                    check_items={ct.err_code: 0, ct.err_msg: "should create connect"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_process_invalid_name(self, get_invalid_collection_name):
@@ -96,11 +100,12 @@ class TestUtilityParams(TestcaseBase):
         method: input invalid name
         expected: raise exception
         """
-        self._connect()
-        c_name = get_invalid_collection_name
-        ut = ApiUtilityWrapper()
+        pass
+        # self._connect()
+        # c_name = get_invalid_collection_name
+        # ut = ApiUtilityWrapper()
         # if isinstance(c_name, str) and c_name:
-        #     ex, _ = ut.index_building_progress(c_name, check_items={"err_code": 1, "err_msg": "Invalid collection name"})
+        #     ex, _ = ut.index_building_progress(c_name, check_items={ct.err_code: 1, ct.err_msg: "Invalid collection name"})
 
     # TODO: not support index name
     @pytest.mark.tags(CaseLabel.L1)
@@ -125,11 +130,12 @@ class TestUtilityParams(TestcaseBase):
         method: input invalid name
         expected: raise exception
         """
-        self._connect()
-        c_name = get_invalid_collection_name
-        ut = ApiUtilityWrapper()
+        pass
+        # self._connect()
+        # c_name = get_invalid_collection_name
+        # ut = ApiUtilityWrapper()
         # if isinstance(c_name, str) and c_name:
-        #     ex, _ = ut.wait_for_index_building_complete(c_name, check_items={"err_code": 1, "err_msg": "Invalid collection name"})
+        #     ex, _ = ut.wait_for_index_building_complete(c_name, check_items={ct.err_code: 1, ct.err_msg: "Invalid collection name"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def _test_wait_index_invalid_index_name(self, get_invalid_index_name):
@@ -266,7 +272,10 @@ class TestUtilityBase(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        self.utility_wrap.index_building_progress(c_name, check_task=CheckTasks.err_res, check_items={"err_code": 1, "err_msg": "can't find collection"})
+        self.utility_wrap.index_building_progress(
+                c_name,
+                check_task=CheckTasks.err_res,
+                check_items={ct.err_code: 1, ct.err_msg: "can't find collection"})
 
     @pytest.mark.xfail(reason="issue #5673")
     @pytest.mark.tags(CaseLabel.L1)
@@ -352,7 +361,10 @@ class TestUtilityBase(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        self.utility_wrap.wait_for_index_building_complete(c_name, check_task=CheckTasks.err_res, check_items={"err_code": 1, "err_msg": "can't find collection"})
+        self.utility_wrap.wait_for_index_building_complete(
+                    c_name,
+                    check_task=CheckTasks.err_res,
+                    check_items={ct.err_code: 1, ct.err_msg: "can't find collection"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_wait_index_collection_empty(self):
@@ -364,25 +376,26 @@ class TestUtilityBase(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         self.init_collection_wrap(name=c_name)
-        res, _ = self.utility_wrap.wait_for_index_building_complete(c_name)
-        assert res is None
+        res, _ = self.utility_wrap.wait_for_index_building_complete(
+                        c_name,
+                        check_task=CheckTasks.err_res,
+                        check_items={ct.err_code: 1, ct.err_msg: "no index is created"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason='hang issue #6272')
     def test_wait_index_collection_index(self):
         """
         target: test wait_index
-        method: insert 1200 entities, build and call wait_index
-        expected: 1200 entity indexed
+        method: insert 5000 entities, build and call wait_index
+        expected: 5000 entity indexed
         """
-        nb = 1200
+        nb = 5000
         c_name = cf.gen_unique_str(prefix)
         cw = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(nb)
         cw.insert(data=data)
         cw.create_index(default_field_name, default_index_params)
         res, _ = self.utility_wrap.wait_for_index_building_complete(c_name)
-        assert res is None
+        assert res is True
         res, _ = self.utility_wrap.index_building_progress(c_name)
         assert res["indexed_rows"] == nb
 

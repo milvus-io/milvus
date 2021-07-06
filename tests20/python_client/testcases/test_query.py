@@ -132,6 +132,7 @@ class TestQueryBase(TestcaseBase):
         collection_w.query(default_term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #6259")
     def test_query_expr_not_existed_field(self):
         """
         target: test query with not existed field
@@ -144,6 +145,7 @@ class TestQueryBase(TestcaseBase):
         collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #6259")
     def test_query_expr_unsupported_field(self):
         """
         target: test query on unsupported field
@@ -156,6 +158,7 @@ class TestQueryBase(TestcaseBase):
         collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #6259")
     def test_query_expr_non_primary_field(self):
         """
         target: test query on non-primary field
@@ -174,6 +177,7 @@ class TestQueryBase(TestcaseBase):
         collection_w.query(default_term_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #6259")
     def test_query_expr_wrong_term_keyword(self):
         """
         target: test query with wrong term expr keyword
@@ -194,6 +198,7 @@ class TestQueryBase(TestcaseBase):
         collection_w.query(expr_3, check_task=CheckTasks.err_res, check_items=error_3)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #6259")
     @pytest.mark.parametrize("expr", [f'{ct.default_int64_field_name} in 1',
                                       f'{ct.default_int64_field_name} in "in"',
                                       f'{ct.default_int64_field_name} in (mn)'])
@@ -220,6 +225,7 @@ class TestQueryBase(TestcaseBase):
         assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #6259")
     def test_query_expr_inconstant_term_array(self):
         """
         target: test query with term expr that field and array are inconsistent
@@ -233,6 +239,7 @@ class TestQueryBase(TestcaseBase):
         collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #6259")
     def test_query_expr_mix_term_array(self):
         """
         target: test query with mix type value expr
@@ -246,6 +253,7 @@ class TestQueryBase(TestcaseBase):
         collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #6259")
     @pytest.mark.parametrize("constant", [[1], (), {}])
     def test_query_expr_non_constant_array_term(self, constant):
         """
@@ -297,18 +305,18 @@ class TestQueryBase(TestcaseBase):
         assert set(res_1[0].keys()) == set(fields)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("output_fields", [[ct.default_float_vec_field_name],
-                                               [ct.default_int64_field_name, ct.default_float_vec_field_name]])
-    def test_query_output_vec_field(self, output_fields):
+    def test_query_output_vec_field(self):
         """
         target: test query with vec output field
         method: specify vec field as output field
         expected: raise exception
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        fields = [[ct.default_float_vec_field_name], [ct.default_int64_field_name, ct.default_float_vec_field_name]]
         error = {ct.err_code: 1, ct.err_msg: "Query does not support vector field currently"}
-        collection_w.query(default_term_expr, output_fields=output_fields,
-                           check_task=CheckTasks.err_res, check_items=error)
+        for output_fields in fields:
+            collection_w.query(default_term_expr, output_fields=output_fields,
+                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_output_primary_field(self):
@@ -322,7 +330,6 @@ class TestQueryBase(TestcaseBase):
         assert list(res[0].keys()) == [ct.default_int64_field_name]
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #6074")
     @pytest.mark.parametrize("output_fields", [["int"],
                                                [ct.default_int64_field_name, "int"]])
     def test_query_output_not_existed_field(self, output_fields):
@@ -332,8 +339,8 @@ class TestQueryBase(TestcaseBase):
         expected: raise exception
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
-        error = {ct.err_code: 1, ct.err_msg: 'cannot find field'}
-        collection_w.query(default_term_expr, output_fields=output_fields, check_items=CheckTasks.err_res, check_task=error)
+        error = {ct.err_code: 1, ct.err_msg: 'Field int not exist'}
+        collection_w.query(default_term_expr, output_fields=output_fields, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_empty_output_fields(self):
@@ -348,16 +355,17 @@ class TestQueryBase(TestcaseBase):
         assert list(query_res[0].keys()) == fields
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("fields", ct.get_invalid_strs)
-    def test_query_invalid_output_fields(self, fields):
+    @pytest.mark.xfail(reason="exception not MilvusException")
+    @pytest.mark.parametrize("output_fields", ["12-s", 1, [1, "2", 3], (1,), {1: 1}])
+    def test_query_invalid_output_fields(self, output_fields):
         """
         target: test query with invalid output fields
         method: query with invalid field fields
         expected: raise exception
         """
         collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
-        error = {ct.err_code: 1, ct.err_msg: 'Invalid query format. must be a list'}
-        collection_w.query(default_term_expr, output_fields=fields, check_items=CheckTasks.err_res, check_task=error)
+        error = {ct.err_code: 0, ct.err_msg: f'Invalid query format. \'output_fields\' must be a list'}
+        collection_w.query(default_term_expr, output_fields=output_fields, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_partition(self):
@@ -390,7 +398,7 @@ class TestQueryBase(TestcaseBase):
         assert partition_w.num_entities == ct.default_nb
         error = {ct.err_code: 1, ct.err_msg: f'collection {collection_w.name} was not loaded into memory'}
         collection_w.query(default_term_expr, partition_names=[partition_w.name],
-                           check_items=CheckTasks.err_res, check_task=error)
+                           check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_default_partition(self):
@@ -430,7 +438,7 @@ class TestQueryBase(TestcaseBase):
         partition_names = cf.gen_unique_str()
         error = {ct.err_code: 1, ct.err_msg: f'PartitonName: {partition_names} not found'}
         collection_w.query(default_term_expr, partition_names=[partition_names],
-                           check_items=CheckTasks.err_res, check_task=error)
+                           check_task=CheckTasks.err_res, check_items=error)
 
 
 class TestQueryOperation(TestcaseBase):

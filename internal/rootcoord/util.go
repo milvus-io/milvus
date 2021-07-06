@@ -71,13 +71,11 @@ func GetFieldSchemaByIndexID(coll *etcdpb.CollectionInfo, idxID typeutil.UniqueI
 }
 
 // EncodeDdOperation serialize DdOperation into string
-func EncodeDdOperation(m proto.Message, m1 proto.Message, ddType string) (string, error) {
+func EncodeDdOperation(m proto.Message, ddType string) (string, error) {
 	mStr := proto.MarshalTextString(m)
-	m1Str := proto.MarshalTextString(m1)
 	ddOp := DdOperation{
-		Body:  mStr,
-		Body1: m1Str, // used for DdCreateCollection only
-		Type:  ddType,
+		Body: mStr,
+		Type: ddType,
 	}
 	ddOpByte, err := json.Marshal(ddOp)
 	if err != nil {
@@ -93,10 +91,11 @@ func DecodeDdOperation(str string, ddOp *DdOperation) error {
 
 // SegmentIndexInfoEqual return true if SegmentIndexInfos are identical
 func SegmentIndexInfoEqual(info1 *etcdpb.SegmentIndexInfo, info2 *etcdpb.SegmentIndexInfo) bool {
-	return info1.SegmentID == info2.SegmentID &&
+	return info1.CollectionID == info2.CollectionID &&
+		info1.PartitionID == info2.PartitionID &&
+		info1.SegmentID == info2.SegmentID &&
 		info1.FieldID == info2.FieldID &&
 		info1.IndexID == info2.IndexID &&
-		info1.BuildID == info2.BuildID &&
 		info1.EnableIndex == info2.EnableIndex
 }
 

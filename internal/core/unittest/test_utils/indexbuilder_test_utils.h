@@ -48,7 +48,7 @@ generate_conf(const milvus::knowhere::IndexType& index_type, const milvus::knowh
         return milvus::knowhere::Config{
             {milvus::knowhere::meta::DIM, DIM},
             {milvus::knowhere::meta::TOPK, K},
-            {milvus::knowhere::IndexParams::nlist, 100},
+            {milvus::knowhere::IndexParams::nlist, 16},
             {milvus::knowhere::IndexParams::nprobe, 4},
             {milvus::knowhere::IndexParams::m, 4},
             {milvus::knowhere::IndexParams::nbits, 8},
@@ -59,7 +59,7 @@ generate_conf(const milvus::knowhere::IndexType& index_type, const milvus::knowh
         return milvus::knowhere::Config{
             {milvus::knowhere::meta::DIM, DIM},
             {milvus::knowhere::meta::TOPK, K},
-            {milvus::knowhere::IndexParams::nlist, 1024},
+            {milvus::knowhere::IndexParams::nlist, 16},
             {milvus::knowhere::IndexParams::nprobe, 4},
             {milvus::knowhere::Metric::TYPE, metric_type},
             {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
@@ -71,7 +71,7 @@ generate_conf(const milvus::knowhere::IndexType& index_type, const milvus::knowh
         return milvus::knowhere::Config{
             {milvus::knowhere::meta::DIM, DIM},
             {milvus::knowhere::meta::TOPK, K},
-            {milvus::knowhere::IndexParams::nlist, 100},
+            {milvus::knowhere::IndexParams::nlist, 16},
             {milvus::knowhere::IndexParams::nprobe, 4},
             {milvus::knowhere::IndexParams::nbits, 8},
             {milvus::knowhere::Metric::TYPE, metric_type},
@@ -84,7 +84,7 @@ generate_conf(const milvus::knowhere::IndexType& index_type, const milvus::knowh
         return milvus::knowhere::Config{
             {milvus::knowhere::meta::DIM, DIM},
             {milvus::knowhere::meta::TOPK, K},
-            {milvus::knowhere::IndexParams::nlist, 100},
+            {milvus::knowhere::IndexParams::nlist, 16},
             {milvus::knowhere::IndexParams::nprobe, 4},
             {milvus::knowhere::IndexParams::m, 4},
             {milvus::knowhere::IndexParams::nbits, 8},
