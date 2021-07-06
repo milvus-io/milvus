@@ -1487,29 +1487,25 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
             temp_ids[i].offset = offset;
         };
 
-        // For large number id array, use multi-threads to find, otherwise single thread
-        if (temp_ids.size() <= 4) {
-            for (size_t i = 0; i < temp_ids.size(); ++i) {
-                FindId(i);
-            }
-        } else {
-#pragma omp parallel for
-            for (size_t i = 0; i < temp_ids.size(); ++i) {
-                FindId(i);
-            }
+        // For large number id array, use multi-threads to find, otherwise single thread.
+        // In our test, when id count is 4, single thread performance is almost equal to multi threads.
+        // So we use a hard code value "4" here as boundary of single thread and multi threads.
+#pragma omp parallel for if (temp_ids.size() > 4)
+        for (size_t i = 0; i < temp_ids.size(); ++i) {
+            FindId(i);
         }
 
         // Fetch vector data
-        auto iter = temp_ids.begin();
-        while (iter != temp_ids.end()) {
-            if ((*iter).offset >= 0) {
+        for (size_t i = 0; i < temp_ids.size();) {
+            auto& iter = temp_ids[i];
+            if (iter.offset >= 0) {
                 // each id must has a VectorsData
                 // if vector not found for an id, its VectorsData's vector_count = 0, else 1
-                VectorsData& vector_ref = vectors[(*iter).sequence];
+                VectorsData& vector_ref = vectors[iter.sequence];
 
                 // Load raw vector
                 std::vector<uint8_t> raw_vector;
-                status = segment_reader.LoadsSingleVector((*iter).offset * single_vector_bytes, single_vector_bytes,
+                status = segment_reader.LoadsSingleVector(iter.offset * single_vector_bytes, single_vector_bytes,
                                                           raw_vector);
                 if (!status.ok()) {
                     LOG_ENGINE_ERROR_ << status.message();
@@ -1526,11 +1522,13 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
                     vector_ref.float_data_.swap(float_vector);
                 }
 
-                iter = temp_ids.erase(iter);
-                continue;
+                // After this retrieving vector data for this id, copy the tail id to this position.
+                // We didn't use std::vector::erase() because erase() could do copy many times.
+                iter = temp_ids.back();
+                temp_ids.resize(temp_ids.size() - 1);
+            } else {
+                i++;
             }
-
-            ++iter;
         }
 
         // unmark file, allow the file to be deleted
