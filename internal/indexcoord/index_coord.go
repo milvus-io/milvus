@@ -70,8 +70,6 @@ type IndexCoord struct {
 
 	metaTable *metaTable
 
-	nodeTasks *nodeTasks
-
 	nodeLock sync.RWMutex
 
 	// Add callback functions at different stages
@@ -86,10 +84,8 @@ func NewIndexCoord(ctx context.Context) (*IndexCoord, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	i := &IndexCoord{
-		loopCtx:     ctx1,
-		loopCancel:  cancel,
-		nodeClients: &PriorityQueue{},
-		nodeTasks:   &nodeTasks{},
+		loopCtx:    ctx1,
+		loopCancel: cancel,
 	}
 	i.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return i, nil
@@ -117,6 +113,7 @@ func (i *IndexCoord) Init() error {
 			return err
 		}
 		i.metaTable = metakv
+		i.nodeClients = NewNodeClients(etcdKV)
 		return err
 	}
 	log.Debug("IndexCoord try to connect etcd")
@@ -126,6 +123,7 @@ func (i *IndexCoord) Init() error {
 		return err
 	}
 	log.Debug("IndexCoord try to connect etcd success")
+	log.Debug("IndexCoord", zap.Any("IndexNode number", len(i.nodeClients.items)))
 
 	//init idAllocator
 	kvRootPath := Params.KvRootPath
@@ -164,8 +162,6 @@ func (i *IndexCoord) Init() error {
 	log.Debug("IndexCoord new task scheduler success")
 	i.UpdateStateCode(internalpb.StateCode_Healthy)
 	log.Debug("IndexCoord", zap.Any("State", i.stateCode.Load()))
-
-	i.nodeTasks = NewNodeTasks()
 
 	log.Debug("IndexCoord assign tasks server success", zap.Error(err))
 	return nil
@@ -225,6 +221,7 @@ func (i *IndexCoord) GetComponentStates(ctx context.Context) (*internalpb.Compon
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}
+	log.Debug("IndexCoord GetComponentStates", zap.Any("IndexCoord component state", stateInfo))
 	return ret, nil
 }
 
@@ -482,17 +479,20 @@ func (i *IndexCoord) watchNodeLoop() {
 		case <-ctx.Done():
 			return
 		case event := <-i.eventChan:
+			log.Debug("IndexCoord watchNodeLoop event updated")
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:
 				serverID := event.Session.ServerID
 				log.Debug("IndexCoord watchNodeLoop SessionAddEvent", zap.Any("serverID", serverID))
+				err := i.nodeClients.addNode(serverID, event.Session.Address)
+				if err != nil {
+					log.Debug("IndexCoord", zap.Any("Add IndexNode err", err))
+				}
+				log.Debug("IndexCoord", zap.Any("IndexNode number", len(i.nodeClients.items)))
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
-				i.removeNode(serverID)
 				log.Debug("IndexCoord watchNodeLoop SessionDelEvent ", zap.Any("serverID", serverID))
-				indexBuildIDs := i.nodeTasks.getTasksByNodeID(serverID)
-				log.Debug("IndexNode crashed", zap.Any("IndexNode ID", serverID), zap.Any("task IDs", indexBuildIDs))
-				i.nodeTasks.delete(serverID)
+				i.nodeClients.removeNode(serverID)
 			}
 		}
 	}
@@ -525,9 +525,6 @@ func (i *IndexCoord) watchMetaLoop() {
 					//TODO: get indexBuildID fast
 					reload := i.metaTable.LoadMetaFromETCD(indexBuildID, eventRevision)
 					log.Debug("IndexCoord watchMetaLoop PUT", zap.Any("IndexBuildID", indexBuildID), zap.Any("reload", reload))
-					if reload {
-						i.nodeTasks.finishTask(indexBuildID)
-					}
 				case mvccpb.DELETE:
 				}
 			}
