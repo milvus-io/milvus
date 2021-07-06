@@ -172,8 +172,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			return nil, nil, err
 		}
 
-		eventWriter.SetStartTimestamp(typeutil.Timestamp(startTs))
-		eventWriter.SetEndTimestamp(typeutil.Timestamp(endTs))
+		eventWriter.SetEventTimestamp(typeutil.Timestamp(startTs), typeutil.Timestamp(endTs))
 		switch field.DataType {
 		case schemapb.DataType_Bool:
 			err = eventWriter.AddBoolToPayload(singleData.(*BoolFieldData).Data)
@@ -206,8 +205,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		if err != nil {
 			return nil, nil, err
 		}
-		writer.SetStartTimeStamp(typeutil.Timestamp(startTs))
-		writer.SetEndTimeStamp(typeutil.Timestamp(endTs))
+		writer.SetEventTimeStamp(typeutil.Timestamp(startTs), typeutil.Timestamp(endTs))
 
 		err = writer.Close()
 		if err != nil {
@@ -507,10 +505,8 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 	if err != nil {
 		return nil, err
 	}
-	eventWriter.SetStartTimestamp(ts[0])
-	eventWriter.SetEndTimestamp(ts[len(ts)-1])
-	writer.SetStartTimeStamp(ts[0])
-	writer.SetEndTimeStamp(ts[len(ts)-1])
+	eventWriter.SetEventTimestamp(ts[0], ts[len(ts)-1])
+	writer.SetEventTimeStamp(ts[0], ts[len(ts)-1])
 	err = writer.Close()
 	if err != nil {
 		return nil, err
@@ -537,45 +533,40 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 			if err != nil {
 				return nil, err
 			}
-			eventWriter.SetStartTimestamp(ts[pos])
-			eventWriter.SetEndTimestamp(ts[pos])
+			eventWriter.SetEventTimestamp(ts[pos], ts[pos])
 		case DropCollectionEventType:
 			eventWriter, err := writer.NextDropCollectionEventWriter()
 			if err != nil {
 				return nil, err
 			}
 			err = eventWriter.AddStringToPayload(req)
-			eventWriter.SetStartTimestamp(ts[pos])
-			eventWriter.SetEndTimestamp(ts[pos])
 			if err != nil {
 				return nil, err
 			}
+			eventWriter.SetEventTimestamp(ts[pos], ts[pos])
 		case CreatePartitionEventType:
 			eventWriter, err := writer.NextCreatePartitionEventWriter()
 			if err != nil {
 				return nil, err
 			}
 			err = eventWriter.AddStringToPayload(req)
-			eventWriter.SetStartTimestamp(ts[pos])
-			eventWriter.SetEndTimestamp(ts[pos])
 			if err != nil {
 				return nil, err
 			}
+			eventWriter.SetEventTimestamp(ts[pos], ts[pos])
 		case DropPartitionEventType:
 			eventWriter, err := writer.NextDropPartitionEventWriter()
 			if err != nil {
 				return nil, err
 			}
 			err = eventWriter.AddStringToPayload(req)
-			eventWriter.SetStartTimestamp(ts[pos])
-			eventWriter.SetEndTimestamp(ts[pos])
 			if err != nil {
 				return nil, err
 			}
+			eventWriter.SetEventTimestamp(ts[pos], ts[pos])
 		}
 	}
-	writer.SetStartTimeStamp(ts[0])
-	writer.SetEndTimeStamp(ts[len(ts)-1])
+	writer.SetEventTimeStamp(ts[0], ts[len(ts)-1])
 	err = writer.Close()
 	if err != nil {
 		return nil, err

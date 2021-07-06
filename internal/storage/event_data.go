@@ -39,12 +39,9 @@ type DescriptorEventDataFixPart struct {
 	PayloadDataType schemapb.DataType
 }
 
-func (data *descriptorEventData) SetStartTimeStamp(ts typeutil.Timestamp) {
-	data.StartTimestamp = ts
-}
-
-func (data *descriptorEventData) SetEndTimeStamp(ts typeutil.Timestamp) {
-	data.EndTimestamp = ts
+func (data *descriptorEventData) SetEventTimeStamp(start typeutil.Timestamp, end typeutil.Timestamp) {
+	data.StartTimestamp = start
+	data.EndTimestamp = end
 }
 
 func (data *descriptorEventData) GetEventDataFixPartSize() int32 {
@@ -88,12 +85,9 @@ type insertEventData struct {
 	EndTimestamp   typeutil.Timestamp
 }
 
-func (data *insertEventData) SetStartTimestamp(timestamp typeutil.Timestamp) {
-	data.StartTimestamp = timestamp
-}
-
-func (data *insertEventData) SetEndTimestamp(timestamp typeutil.Timestamp) {
-	data.EndTimestamp = timestamp
+func (data *insertEventData) SetEventTimestamp(start typeutil.Timestamp, end typeutil.Timestamp) {
+	data.StartTimestamp = start
+	data.EndTimestamp = end
 }
 
 func (data *insertEventData) GetEventDataFixPartSize() int32 {
@@ -115,12 +109,9 @@ type deleteEventData struct {
 	EndTimestamp   typeutil.Timestamp
 }
 
-func (data *deleteEventData) SetStartTimestamp(timestamp typeutil.Timestamp) {
-	data.StartTimestamp = timestamp
-}
-
-func (data *deleteEventData) SetEndTimestamp(timestamp typeutil.Timestamp) {
-	data.EndTimestamp = timestamp
+func (data *deleteEventData) SetEventTimestamp(start typeutil.Timestamp, end typeutil.Timestamp) {
+	data.StartTimestamp = start
+	data.EndTimestamp = end
 }
 
 func (data *deleteEventData) GetEventDataFixPartSize() int32 {
@@ -142,12 +133,9 @@ type createCollectionEventData struct {
 	EndTimestamp   typeutil.Timestamp
 }
 
-func (data *createCollectionEventData) SetStartTimestamp(timestamp typeutil.Timestamp) {
-	data.StartTimestamp = timestamp
-}
-
-func (data *createCollectionEventData) SetEndTimestamp(timestamp typeutil.Timestamp) {
-	data.EndTimestamp = timestamp
+func (data *createCollectionEventData) SetEventTimestamp(start typeutil.Timestamp, end typeutil.Timestamp) {
+	data.StartTimestamp = start
+	data.EndTimestamp = end
 }
 
 func (data *createCollectionEventData) GetEventDataFixPartSize() int32 {
@@ -169,12 +157,9 @@ type dropCollectionEventData struct {
 	EndTimestamp   typeutil.Timestamp
 }
 
-func (data *dropCollectionEventData) SetStartTimestamp(timestamp typeutil.Timestamp) {
-	data.StartTimestamp = timestamp
-}
-
-func (data *dropCollectionEventData) SetEndTimestamp(timestamp typeutil.Timestamp) {
-	data.EndTimestamp = timestamp
+func (data *dropCollectionEventData) SetEventTimestamp(start typeutil.Timestamp, end typeutil.Timestamp) {
+	data.StartTimestamp = start
+	data.EndTimestamp = end
 }
 
 func (data *dropCollectionEventData) GetEventDataFixPartSize() int32 {
@@ -196,12 +181,9 @@ type createPartitionEventData struct {
 	EndTimestamp   typeutil.Timestamp
 }
 
-func (data *createPartitionEventData) SetStartTimestamp(timestamp typeutil.Timestamp) {
-	data.StartTimestamp = timestamp
-}
-
-func (data *createPartitionEventData) SetEndTimestamp(timestamp typeutil.Timestamp) {
-	data.EndTimestamp = timestamp
+func (data *createPartitionEventData) SetEventTimestamp(start typeutil.Timestamp, end typeutil.Timestamp) {
+	data.StartTimestamp = start
+	data.EndTimestamp = end
 }
 
 func (data *createPartitionEventData) GetEventDataFixPartSize() int32 {
@@ -223,12 +205,9 @@ type dropPartitionEventData struct {
 	EndTimestamp   typeutil.Timestamp
 }
 
-func (data *dropPartitionEventData) SetStartTimestamp(timestamp typeutil.Timestamp) {
-	data.StartTimestamp = timestamp
-}
-
-func (data *dropPartitionEventData) SetEndTimestamp(timestamp typeutil.Timestamp) {
-	data.EndTimestamp = timestamp
+func (data *dropPartitionEventData) SetEventTimestamp(start typeutil.Timestamp, end typeutil.Timestamp) {
+	data.StartTimestamp = start
+	data.EndTimestamp = end
 }
 
 func (data *dropPartitionEventData) GetEventDataFixPartSize() int32 {
