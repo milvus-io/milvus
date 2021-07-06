@@ -540,6 +540,9 @@ func (i *IndexCoord) watchMetaLoop() {
 					//TODO: get indexBuildID fast
 					reload := i.metaTable.LoadMetaFromETCD(indexBuildID, eventRevision)
 					log.Debug("IndexCoord watchMetaLoop PUT", zap.Any("IndexBuildID", indexBuildID), zap.Any("reload", reload))
+					if reload {
+						i.nodeClients.IncPriority(indexMeta.NodeID, -1)
+					}
 				case mvccpb.DELETE:
 				}
 			}
