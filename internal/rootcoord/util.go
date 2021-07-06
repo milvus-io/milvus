@@ -71,13 +71,11 @@ func GetFieldSchemaByIndexID(coll *etcdpb.CollectionInfo, idxID typeutil.UniqueI
 }
 
 // EncodeDdOperation serialize DdOperation into string
-func EncodeDdOperation(m proto.Message, m1 proto.Message, ddType string) (string, error) {
+func EncodeDdOperation(m proto.Message, ddType string) (string, error) {
 	mStr := proto.MarshalTextString(m)
-	m1Str := proto.MarshalTextString(m1)
 	ddOp := DdOperation{
-		Body:  mStr,
-		Body1: m1Str, // used for DdCreateCollection only
-		Type:  ddType,
+		Body: mStr,
+		Type: ddType,
 	}
 	ddOpByte, err := json.Marshal(ddOp)
 	if err != nil {

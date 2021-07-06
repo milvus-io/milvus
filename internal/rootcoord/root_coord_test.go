@@ -350,7 +350,7 @@ func TestRootCoord(t *testing.T) {
 	err = core.Start()
 	assert.Nil(t, err)
 
-	time.Sleep(time.Second)
+	time.Sleep(100 * time.Millisecond)
 
 	t.Run("time tick", func(t *testing.T) {
 		ttmsg, ok := <-timeTickStream.Chan()
@@ -424,19 +424,14 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, createMeta.ID, createMsg.CollectionID)
 		assert.Equal(t, 1, len(createMeta.PartitionIDs))
+		assert.Equal(t, createMeta.PartitionIDs[0], createMsg.PartitionID)
+		assert.Equal(t, 1, len(createMeta.PartitionNames))
+		assert.Equal(t, createMeta.PartitionNames[0], createMsg.PartitionName)
 		assert.Equal(t, 2, len(createMeta.VirtualChannelNames))
 		assert.Equal(t, 2, len(createMeta.PhysicalChannelNames))
 
 		vChanName := createMeta.VirtualChannelNames[0]
 		assert.Equal(t, createMeta.PhysicalChannelNames[0], ToPhysicalChannel(vChanName))
-
-		// get CreatePartitionMsg
-		msgPack, ok = <-dmlStream.Chan()
-		assert.True(t, ok)
-		createPart, ok := (msgPack.Msgs[0]).(*msgstream.CreatePartitionMsg)
-		assert.True(t, ok)
-		assert.Equal(t, collName, createPart.CollectionName)
-		assert.Equal(t, createMeta.PartitionIDs[0], createPart.PartitionID)
 
 		// get TimeTickMsg
 		//msgPack, ok = <-dmlStream.Chan()
@@ -457,7 +452,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, pt.in.Timestamps[0], pt.in.DefaultTimestamp)
 		assert.Equal(t, pt.timeTick[pt.in.ChannelNames[0]], pt.in.DefaultTimestamp)
 		assert.Equal(t, pt.timeTick[pt.in.ChannelNames[1]], pt.in.DefaultTimestamp)
-		assert.LessOrEqual(t, createPart.BeginTimestamp, pt.in.Timestamps[0])
+		assert.LessOrEqual(t, createMsg.BeginTimestamp, pt.in.Timestamps[0])
 		core.chanTimeTick.lock.Unlock()
 
 		// check DD operation info
@@ -475,12 +470,7 @@ func TestRootCoord(t *testing.T) {
 		err = proto.UnmarshalText(ddOp.Body, &ddCollReq)
 		assert.Nil(t, err)
 		assert.Equal(t, createMeta.ID, ddCollReq.CollectionID)
-
-		var ddPartReq = internalpb.CreatePartitionRequest{}
-		err = proto.UnmarshalText(ddOp.Body1, &ddPartReq)
-		assert.Nil(t, err)
-		assert.Equal(t, createMeta.ID, ddPartReq.CollectionID)
-		assert.Equal(t, createMeta.PartitionIDs[0], ddPartReq.PartitionID)
+		assert.Equal(t, createMeta.PartitionIDs[0], ddCollReq.PartitionID)
 
 		// check invalid operation
 		req.Base.MsgID = 101
@@ -738,7 +728,7 @@ func TestRootCoord(t *testing.T) {
 		rsp, err := core.CreateIndex(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
-		time.Sleep(time.Second)
+		time.Sleep(100 * time.Millisecond)
 		files := im.getFileArray()
 		assert.Equal(t, 3, len(files))
 		assert.ElementsMatch(t, files, []string{"file0-100", "file1-100", "file2-100"})
@@ -880,7 +870,7 @@ func TestRootCoord(t *testing.T) {
 		rsp, err := core.CreateIndex(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
-		time.Sleep(time.Second)
+		time.Sleep(100 * time.Millisecond)
 
 		collMeta, err = core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
@@ -1010,7 +1000,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, 3, len(collArray))
 		assert.Equal(t, collName, collArray[2])
 
-		time.Sleep(time.Millisecond * 100)
+		time.Sleep(100 * time.Millisecond)
 		qm.mutex.Lock()
 		assert.Equal(t, 1, len(qm.collID))
 		assert.Equal(t, collMeta.ID, qm.collID[0])
@@ -1029,7 +1019,7 @@ func TestRootCoord(t *testing.T) {
 		status, err = core.DropCollection(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
-		time.Sleep(time.Second)
+		time.Sleep(100 * time.Millisecond)
 		collArray = pnm.GetCollArray()
 		assert.Equal(t, 3, len(collArray))
 		assert.Equal(t, collName, collArray[2])
@@ -1054,7 +1044,7 @@ func TestRootCoord(t *testing.T) {
 	t.Run("context_cancel", func(t *testing.T) {
 		ctx2, cancel2 := context.WithTimeout(ctx, time.Millisecond*100)
 		defer cancel2()
-		time.Sleep(time.Millisecond * 150)
+		time.Sleep(100 * time.Millisecond)
 		st, err := core.CreateCollection(ctx2, &milvuspb.CreateCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_CreateCollection,
@@ -1208,8 +1198,7 @@ func TestRootCoord(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp8.Status.ErrorCode)
-		time.Sleep(5 * time.Second)
-
+		time.Sleep(1 * time.Second)
 	})
 
 	t.Run("undefined req type", func(t *testing.T) {
@@ -1439,7 +1428,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		_, err = core.etcdCli.Put(ctx2, path.Join(sessKey, typeutil.ProxyRole)+"-2", string(s2))
 		assert.Nil(t, err)
-		time.Sleep(time.Second)
+		time.Sleep(100 * time.Millisecond)
 
 		core.dmlChannels.AddProducerChannels("c0", "c1", "c2")
 
@@ -1478,7 +1467,7 @@ func TestRootCoord(t *testing.T) {
 		}
 		s, _ = core.UpdateChannelTimeTick(ctx, msgInvalid)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, s.ErrorCode)
-		time.Sleep(1 * time.Second)
+		time.Sleep(100 * time.Millisecond)
 
 		// 2 proxy, 1 rootcoord
 		assert.Equal(t, 3, core.chanTimeTick.GetProxyNum())
@@ -1756,7 +1745,7 @@ func TestRootCoord2(t *testing.T) {
 	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
 	timeTickStream.Start()
 
-	time.Sleep(time.Second)
+	time.Sleep(100 * time.Millisecond)
 
 	t.Run("time tick", func(t *testing.T) {
 		ttmsg, ok := <-timeTickStream.Chan()
@@ -1793,14 +1782,11 @@ func TestRootCoord2(t *testing.T) {
 		dmlStream.AsConsumer([]string{pChan[0]}, Params.MsgChannelSubName)
 		dmlStream.Start()
 
-		msgs := getNotTtMsg(ctx, 2, dmlStream.Chan())
-		assert.Equal(t, 2, len(msgs))
+		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
+		assert.Equal(t, 1, len(msgs))
 
 		m1, ok := (msgs[0]).(*msgstream.CreateCollectionMsg)
 		assert.True(t, ok)
-		m2, ok := (msgs[1]).(*msgstream.CreatePartitionMsg)
-		assert.True(t, ok)
-		assert.Equal(t, m1.Base.Timestamp, m2.Base.Timestamp)
 		t.Log("time tick", m1.Base.Timestamp)
 	})
 }
