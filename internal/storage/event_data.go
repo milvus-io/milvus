@@ -13,9 +13,8 @@ package storage
 
 import (
 	"encoding/binary"
-	"io"
-
 	"errors"
+	"io"
 
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"

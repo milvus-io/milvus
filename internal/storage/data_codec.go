@@ -191,7 +191,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			err = eventWriter.AddDoubleToPayload(singleData.(*DoubleFieldData).Data)
 		case schemapb.DataType_String:
 			for _, singleString := range singleData.(*StringFieldData).Data {
-				err = eventWriter.AddOneStringToPayload(singleString)
+				err = eventWriter.AddStringToPayload(singleString)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -409,7 +409,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				totalLength += length
 				stringFieldData.NumRows += length
 				for i := 0; i < length; i++ {
-					singleString, err := eventReader.GetOneStringFromPayload(i)
+					singleString, err := eventReader.GetStringFromPayload(i)
 					if err != nil {
 						return -1, -1, nil, err
 					}
@@ -533,7 +533,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 			if err != nil {
 				return nil, err
 			}
-			err = eventWriter.AddOneStringToPayload(req)
+			err = eventWriter.AddStringToPayload(req)
 			if err != nil {
 				return nil, err
 			}
@@ -544,7 +544,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 			if err != nil {
 				return nil, err
 			}
-			err = eventWriter.AddOneStringToPayload(req)
+			err = eventWriter.AddStringToPayload(req)
 			eventWriter.SetStartTimestamp(ts[pos])
 			eventWriter.SetEndTimestamp(ts[pos])
 			if err != nil {
@@ -555,7 +555,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 			if err != nil {
 				return nil, err
 			}
-			err = eventWriter.AddOneStringToPayload(req)
+			err = eventWriter.AddStringToPayload(req)
 			eventWriter.SetStartTimestamp(ts[pos])
 			eventWriter.SetEndTimestamp(ts[pos])
 			if err != nil {
@@ -566,7 +566,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 			if err != nil {
 				return nil, err
 			}
-			err = eventWriter.AddOneStringToPayload(req)
+			err = eventWriter.AddStringToPayload(req)
 			eventWriter.SetStartTimestamp(ts[pos])
 			eventWriter.SetEndTimestamp(ts[pos])
 			if err != nil {
@@ -636,7 +636,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Deserialize(blobs []*Blob) (ts [
 					return nil, nil, err
 				}
 				for i := 0; i < length; i++ {
-					singleString, err := eventReader.GetOneStringFromPayload(i)
+					singleString, err := eventReader.GetStringFromPayload(i)
 					if err != nil {
 						return nil, nil, err
 					}
