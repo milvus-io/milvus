@@ -95,7 +95,6 @@ func NewIndexCoord(ctx context.Context) (*IndexCoord, error) {
 func (i *IndexCoord) Register() error {
 	i.session = sessionutil.NewSession(i.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
 	i.session.Init(typeutil.IndexCoordRole, Params.Address, true)
-	i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, 0)
 	return nil
 }
 
@@ -123,6 +122,18 @@ func (i *IndexCoord) Init() error {
 		return err
 	}
 	log.Debug("IndexCoord try to connect etcd success")
+	sessions, revision, err := i.session.GetSessions(typeutil.IndexNodeRole)
+	log.Debug("IndexCoord", zap.Any("session number", len(sessions)), zap.Any("revision", revision))
+	if err != nil {
+		log.Debug("IndexCoord", zap.Any("Get IndexNode Sessions error", err))
+	}
+	for _, session := range sessions {
+		if err = i.nodeClients.addNode(session.ServerID, session.Address); err != nil {
+			log.Debug("IndexCoord", zap.Any("ServerID", session.ServerID),
+				zap.Any("Add IndexNode error", err))
+		}
+	}
+	i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, revision+1)
 	log.Debug("IndexCoord", zap.Any("IndexNode number", len(i.nodeClients.items)))
 
 	//init idAllocator
@@ -491,8 +502,12 @@ func (i *IndexCoord) watchNodeLoop() {
 				log.Debug("IndexCoord", zap.Any("IndexNode number", len(i.nodeClients.items)))
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
-				log.Debug("IndexCoord watchNodeLoop SessionDelEvent ", zap.Any("serverID", serverID))
-				i.nodeClients.removeNode(serverID)
+				log.Debug("IndexCoord watchNodeLoop SessionDelEvent", zap.Any("serverID", serverID))
+				err := i.nodeClients.removeNode(serverID)
+				if err != nil {
+					log.Debug("IndexCoord watchNodeLoop SessionDelEvent", zap.Any("ServerID", serverID),
+						zap.Any("Remove IndexNode error", err))
+				}
 			}
 		}
 	}
