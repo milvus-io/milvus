@@ -246,8 +246,10 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 				BinlogPaths:  segmentBingLog.FieldBinlogs,
 			}
 
+			msgBase := proto.Clone(lct.Base).(*commonpb.MsgBase)
+			msgBase.MsgType = commonpb.MsgType_LoadSegments
 			loadSegmentReq := &querypb.LoadSegmentsRequest{
-				Base:          lct.Base,
+				Base:          msgBase,
 				Infos:         []*querypb.SegmentLoadInfo{segmentLoadInfo},
 				Schema:        lct.Schema,
 				LoadCondition: querypb.TriggerCondition_grpcRequest,
@@ -271,8 +273,10 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 					}
 				}
 				if !merged {
+					msgBase := proto.Clone(lct.Base).(*commonpb.MsgBase)
+					msgBase.MsgType = commonpb.MsgType_WatchDmChannels
 					watchRequest := &querypb.WatchDmChannelsRequest{
-						Base:         lct.Base,
+						Base:         msgBase,
 						CollectionID: collectionID,
 						Infos:        []*datapb.VchannelInfo{info},
 						Schema:       lct.Schema,
@@ -281,8 +285,10 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 					watchDmChannelReqs = append(watchDmChannelReqs, watchRequest)
 				}
 			} else {
+				msgBase := proto.Clone(lct.Base).(*commonpb.MsgBase)
+				msgBase.MsgType = commonpb.MsgType_WatchDmChannels
 				watchRequest := &querypb.WatchDmChannelsRequest{
-					Base:         lct.Base,
+					Base:         msgBase,
 					CollectionID: collectionID,
 					PartitionID:  partitionID,
 					Infos:        []*datapb.VchannelInfo{info},
@@ -515,8 +521,10 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 				BinlogPaths:  segmentBingLog.FieldBinlogs,
 			}
 
+			msgBase := proto.Clone(lpt.Base).(*commonpb.MsgBase)
+			msgBase.MsgType = commonpb.MsgType_LoadSegments
 			loadSegmentReq := &querypb.LoadSegmentsRequest{
-				Base:          lpt.Base,
+				Base:          msgBase,
 				Infos:         []*querypb.SegmentLoadInfo{segmentLoadInfo},
 				Schema:        lpt.Schema,
 				LoadCondition: querypb.TriggerCondition_grpcRequest,
@@ -527,8 +535,10 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 
 		for _, info := range recoveryInfo.Channels {
 			channel := info.ChannelName
+			msgBase := proto.Clone(lpt.Base).(*commonpb.MsgBase)
+			msgBase.MsgType = commonpb.MsgType_WatchDmChannels
 			watchDmRequest := &querypb.WatchDmChannelsRequest{
-				Base:         lpt.Base,
+				Base:         msgBase,
 				CollectionID: collectionID,
 				PartitionID:  partitionID,
 				Infos:        []*datapb.VchannelInfo{info},
@@ -791,14 +801,12 @@ func (lst *LoadSegmentTask) Reschedule() ([]task, error) {
 	collectionID := lst.Infos[0].CollectionID
 	reScheduledTask := make([]task, 0)
 	for _, info := range lst.Infos {
-		segmentID := info.SegmentID
-		segmentIDs = append(segmentIDs, segmentID)
+		segmentIDs = append(segmentIDs, info.SegmentID)
 	}
 	segment2Nodes := shuffleSegmentsToQueryNode(segmentIDs, lst.cluster)
 	node2segmentInfos := make(map[int64][]*querypb.SegmentLoadInfo)
-	for _, info := range lst.Infos {
-		segmentID := info.SegmentID
-		nodeID := segment2Nodes[segmentID]
+	for index, info := range lst.Infos {
+		nodeID := segment2Nodes[index]
 		if _, ok := node2segmentInfos[nodeID]; !ok {
 			node2segmentInfos[nodeID] = make([]*querypb.SegmentLoadInfo, 0)
 		}
@@ -807,7 +815,11 @@ func (lst *LoadSegmentTask) Reschedule() ([]task, error) {
 
 	for nodeID, infos := range node2segmentInfos {
 		loadSegmentTask := &LoadSegmentTask{
-			BaseTask: lst.BaseTask,
+			BaseTask: BaseTask{
+				ctx:              lst.ctx,
+				Condition:        NewTaskCondition(lst.ctx),
+				triggerCondition: lst.LoadCondition,
+			},
 			LoadSegmentsRequest: &querypb.LoadSegmentsRequest{
 				Base:          lst.Base,
 				NodeID:        nodeID,
@@ -825,8 +837,10 @@ func (lst *LoadSegmentTask) Reschedule() ([]task, error) {
 		if !hasWatchQueryChannel {
 			queryChannel, queryResultChannel := lst.meta.GetQueryChannel(collectionID)
 
+			msgBase := proto.Clone(lst.Base).(*commonpb.MsgBase)
+			msgBase.MsgType = commonpb.MsgType_WatchQueryChannels
 			addQueryChannelRequest := &querypb.AddQueryChannelRequest{
-				Base:             lst.Base,
+				Base:             msgBase,
 				NodeID:           nodeID,
 				CollectionID:     collectionID,
 				RequestChannelID: queryChannel,
@@ -836,7 +850,7 @@ func (lst *LoadSegmentTask) Reschedule() ([]task, error) {
 				BaseTask: BaseTask{
 					ctx:              lst.ctx,
 					Condition:        NewTaskCondition(lst.ctx),
-					triggerCondition: querypb.TriggerCondition_grpcRequest,
+					triggerCondition: lst.LoadCondition,
 				},
 
 				AddQueryChannelRequest: addQueryChannelRequest,
@@ -979,8 +993,7 @@ func (wdt *WatchDmChannelTask) Reschedule() ([]task, error) {
 	channelIDs := make([]string, 0)
 	reScheduledTask := make([]task, 0)
 	for _, info := range wdt.Infos {
-		channelID := info.ChannelName
-		channelIDs = append(channelIDs, channelID)
+		channelIDs = append(channelIDs, info.ChannelName)
 	}
 
 	channel2Nodes := shuffleChannelsToQueryNode(channelIDs, wdt.cluster)
@@ -995,7 +1008,11 @@ func (wdt *WatchDmChannelTask) Reschedule() ([]task, error) {
 
 	for nodeID, infos := range node2channelInfos {
 		loadSegmentTask := &WatchDmChannelTask{
-			BaseTask: wdt.BaseTask,
+			BaseTask: BaseTask{
+				ctx:              wdt.ctx,
+				Condition:        NewTaskCondition(wdt.ctx),
+				triggerCondition: wdt.triggerCondition,
+			},
 			WatchDmChannelsRequest: &querypb.WatchDmChannelsRequest{
 				Base:         wdt.Base,
 				NodeID:       nodeID,
@@ -1015,8 +1032,10 @@ func (wdt *WatchDmChannelTask) Reschedule() ([]task, error) {
 		if !hasWatchQueryChannel {
 			queryChannel, queryResultChannel := wdt.meta.GetQueryChannel(collectionID)
 
+			msgBase := proto.Clone(wdt.Base).(*commonpb.MsgBase)
+			msgBase.MsgType = commonpb.MsgType_WatchQueryChannels
 			addQueryChannelRequest := &querypb.AddQueryChannelRequest{
-				Base:             wdt.Base,
+				Base:             msgBase,
 				NodeID:           nodeID,
 				CollectionID:     collectionID,
 				RequestChannelID: queryChannel,
@@ -1026,7 +1045,7 @@ func (wdt *WatchDmChannelTask) Reschedule() ([]task, error) {
 				BaseTask: BaseTask{
 					ctx:              wdt.ctx,
 					Condition:        NewTaskCondition(wdt.ctx),
-					triggerCondition: querypb.TriggerCondition_grpcRequest,
+					triggerCondition: wdt.triggerCondition,
 				},
 
 				AddQueryChannelRequest: addQueryChannelRequest,
@@ -1204,8 +1223,10 @@ func (lbt *LoadBalanceTask) Execute(ctx context.Context) error {
 							BinlogPaths:  segmentBingLog.FieldBinlogs,
 						}
 
+						msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
+						msgBase.MsgType = commonpb.MsgType_LoadSegments
 						loadSegmentReq := &querypb.LoadSegmentsRequest{
-							Base:          lbt.Base,
+							Base:          msgBase,
 							Infos:         []*querypb.SegmentLoadInfo{segmentLoadInfo},
 							Schema:        schema,
 							LoadCondition: querypb.TriggerCondition_nodeDown,
@@ -1230,8 +1251,10 @@ func (lbt *LoadBalanceTask) Execute(ctx context.Context) error {
 										}
 									}
 									if !merged {
+										msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
+										msgBase.MsgType = commonpb.MsgType_WatchDmChannels
 										watchRequest := &querypb.WatchDmChannelsRequest{
-											Base:         lbt.Base,
+											Base:         msgBase,
 											CollectionID: collectionID,
 											Infos:        []*datapb.VchannelInfo{channelInfo},
 											Schema:       schema,
@@ -1240,8 +1263,10 @@ func (lbt *LoadBalanceTask) Execute(ctx context.Context) error {
 										watchDmChannelReqs = append(watchDmChannelReqs, watchRequest)
 									}
 								} else {
+									msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
+									msgBase.MsgType = commonpb.MsgType_WatchDmChannels
 									watchRequest := &querypb.WatchDmChannelsRequest{
-										Base:         lbt.Base,
+										Base:         msgBase,
 										CollectionID: collectionID,
 										PartitionID:  partitionID,
 										Infos:        []*datapb.VchannelInfo{channelInfo},
@@ -1450,7 +1475,7 @@ func assignInternalTask(ctx context.Context,
 	}
 	segment2Nodes := shuffleSegmentsToQueryNode(segmentsToLoad, cluster)
 	watchRequest2Nodes := shuffleChannelsToQueryNode(channelsToWatch, cluster)
-	log.Debug("assignInternalTask: segment to node", zap.Any("segments mao", segment2Nodes), zap.Int64("collectionID", collectionID))
+	log.Debug("assignInternalTask: segment to node", zap.Any("segments map", segment2Nodes), zap.Int64("collectionID", collectionID))
 	log.Debug("assignInternalTask: watch request to node", zap.Any("request map", watchRequest2Nodes), zap.Int64("collectionID", collectionID))
 
 	watchQueryChannelInfo := make(map[int64]bool)
@@ -1490,7 +1515,7 @@ func assignInternalTask(ctx context.Context,
 			cluster:             cluster,
 		}
 		parentTask.AddChildTask(loadSegmentTask)
-		log.Debug("assignInternalTask: add a loadSegmentTask childTask")
+		log.Debug("assignInternalTask: add a loadSegmentTask childTask", zap.Any("task", loadSegmentTask))
 	}
 
 	for index, nodeID := range watchRequest2Nodes {
@@ -1516,8 +1541,10 @@ func assignInternalTask(ctx context.Context,
 			ctx = opentracing.ContextWithSpan(context.Background(), sp)
 			queryChannel, queryResultChannel := meta.GetQueryChannel(collectionID)
 
+			msgBase := proto.Clone(parentTask.MsgBase()).(*commonpb.MsgBase)
+			msgBase.MsgType = commonpb.MsgType_WatchQueryChannels
 			addQueryChannelRequest := &querypb.AddQueryChannelRequest{
-				Base:             parentTask.MsgBase(),
+				Base:             msgBase,
 				NodeID:           nodeID,
 				CollectionID:     collectionID,
 				RequestChannelID: queryChannel,

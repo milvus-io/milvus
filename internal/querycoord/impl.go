@@ -110,7 +110,7 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 
 	loadCollectionTask := &LoadCollectionTask{
 		BaseTask: BaseTask{
-			ctx:              ctx,
+			ctx:              qc.loopCtx,
 			Condition:        NewTaskCondition(ctx),
 			triggerCondition: querypb.TriggerCondition_grpcRequest,
 		},
@@ -156,7 +156,7 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 
 	releaseCollectionTask := &ReleaseCollectionTask{
 		BaseTask: BaseTask{
-			ctx:              ctx,
+			ctx:              qc.loopCtx,
 			Condition:        NewTaskCondition(qc.loopCtx),
 			triggerCondition: querypb.TriggerCondition_grpcRequest,
 		},

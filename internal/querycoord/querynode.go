@@ -29,6 +29,8 @@ import (
 )
 
 type queryNode struct {
+	ctx      context.Context
+	cancel   context.CancelFunc
 	id       int64
 	address  string
 	client   types.QueryNode
@@ -40,28 +42,48 @@ type queryNode struct {
 	onService            bool
 }
 
-func newQueryNode(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) (*queryNode, error) {
-	client, err := nodeclient.NewClient(ctx, address)
-	if err != nil {
-		return nil, err
-	}
-	if err := client.Init(); err != nil {
-		return nil, err
-	}
-	if err := client.Start(); err != nil {
-		return nil, err
-	}
+func newQueryNode(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) *queryNode {
 	collectionInfo := make(map[UniqueID]*querypb.CollectionInfo)
 	watchedChannels := make(map[UniqueID]*querypb.QueryChannelInfo)
-	return &queryNode{
+	childCtx, cancel := context.WithCancel(ctx)
+	node := &queryNode{
+		ctx:                  childCtx,
+		cancel:               cancel,
 		id:                   id,
 		address:              address,
-		client:               client,
 		kvClient:             kv,
 		collectionInfos:      collectionInfo,
 		watchedQueryChannels: watchedChannels,
-		onService:            true,
-	}, nil
+		onService:            false,
+	}
+
+	return node
+}
+
+func (qn *queryNode) start() error {
+	client, err := nodeclient.NewClient(qn.ctx, qn.address)
+	if err != nil {
+		return err
+	}
+	if err = client.Init(); err != nil {
+		return err
+	}
+	if err = client.Start(); err != nil {
+		return err
+	}
+
+	qn.client = client
+	qn.onService = true
+	log.Debug("queryNode client start success", zap.Int64("nodeID", qn.id), zap.String("address", qn.address))
+	return nil
+}
+
+func (qn *queryNode) stop() {
+	qn.onService = false
+	if qn.client != nil {
+		qn.client.Stop()
+	}
+	qn.cancel()
 }
 
 func (qn *queryNode) hasCollection(collectionID UniqueID) bool {

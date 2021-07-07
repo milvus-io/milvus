@@ -68,7 +68,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 	s := &Server{
 		ctx:         ctx1,
 		cancel:      cancel,
-		querynode:   qn.NewQueryNodeWithoutID(ctx, factory),
+		querynode:   qn.NewQueryNode(ctx, factory),
 		grpcErrChan: make(chan error),
 	}
 	return s, nil
@@ -93,10 +93,6 @@ func (s *Server) init() error {
 	// wait for grpc server loop start
 	err := <-s.grpcErrChan
 	if err != nil {
-		return err
-	}
-
-	if err := s.querynode.Register(); err != nil {
 		return err
 	}
 
@@ -194,6 +190,10 @@ func (s *Server) init() error {
 	log.Debug("QueryNode", zap.Any("State", internalpb.StateCode_Initializing))
 	if err := s.querynode.Init(); err != nil {
 		log.Error("QueryNode init error: ", zap.Error(err))
+		return err
+	}
+
+	if err := s.querynode.Register(); err != nil {
 		return err
 	}
 	return nil

@@ -604,6 +604,7 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task)
 
 		redoFunc2 := func() {
 			if t.IsValid() {
+				log.Debug("waitActivateTaskDone: retry the active task", zap.Int64("taskID", t.ID()))
 				scheduler.activateTaskChan <- t
 				wg.Add(1)
 				go scheduler.waitActivateTaskDone(wg, t)

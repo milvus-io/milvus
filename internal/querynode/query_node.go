@@ -27,21 +27,19 @@ import "C"
 import (
 	"context"
 	"errors"
-	"math/rand"
 	"strconv"
 	"sync/atomic"
-	"time"
 
-	"github.com/milvus-io/milvus/internal/kv"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/util/retry"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/kv"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -50,8 +48,7 @@ type QueryNode struct {
 	queryNodeLoopCtx    context.Context
 	queryNodeLoopCancel context.CancelFunc
 
-	QueryNodeID UniqueID
-	stateCode   atomic.Value
+	stateCode atomic.Value
 
 	// internal components
 	historical *historical
@@ -74,24 +71,7 @@ type QueryNode struct {
 	etcdKV  *etcdkv.EtcdKV
 }
 
-func NewQueryNode(ctx context.Context, queryNodeID UniqueID, factory msgstream.Factory) *QueryNode {
-	rand.Seed(time.Now().UnixNano())
-	ctx1, cancel := context.WithCancel(ctx)
-	node := &QueryNode{
-		queryNodeLoopCtx:    ctx1,
-		queryNodeLoopCancel: cancel,
-		QueryNodeID:         queryNodeID,
-		queryService:        nil,
-		msFactory:           factory,
-	}
-
-	node.scheduler = newTaskScheduler(ctx1)
-	node.UpdateStateCode(internalpb.StateCode_Abnormal)
-
-	return node
-}
-
-func NewQueryNodeWithoutID(ctx context.Context, factory msgstream.Factory) *QueryNode {
+func NewQueryNode(ctx context.Context, factory msgstream.Factory) *QueryNode {
 	ctx1, cancel := context.WithCancel(ctx)
 	node := &QueryNode{
 		queryNodeLoopCtx:    ctx1,
