@@ -2,7 +2,7 @@
 
 This document will help to setup your development environment and running tests. If you encounter a problem, please file an issue.
 
-Table of Contents
+Table of contents
 =================
 * [Building Milvus with Docker](#building-milvus-with-docker)
 * [Building Milvus on a local OS/shell environment](#building-milvus-on-a-local-osshell-environment)
