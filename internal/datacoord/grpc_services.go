@@ -95,7 +95,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			zap.String("channelName", r.GetChannelName()),
 			zap.Uint32("count", r.GetCount()))
 
-		if !s.meta.HasCollection(r.CollectionID) {
+		if coll := s.meta.GetCollection(r.CollectionID); coll == nil {
 			if err := s.loadCollectionFromRootCoord(ctx, r.CollectionID); err != nil {
 				errMsg := fmt.Sprintf("Can not load collection %d", r.CollectionID)
 				appendFailedAssignment(errMsg)
@@ -163,10 +163,10 @@ func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 			Status:    &commonpb.Status{},
 			SegmentID: segmentID,
 		}
-		segmentInfo, err := s.meta.GetSegment(segmentID)
-		if err != nil {
+		segmentInfo := s.meta.GetSegment(segmentID)
+		if segmentInfo == nil {
 			state.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			state.Status.Reason = fmt.Sprintf("Failed to get segment %d, %s", segmentID, err.Error())
+			state.Status.Reason = fmt.Sprintf("Failed to get segment %d", segmentID)
 		} else {
 			state.Status.ErrorCode = commonpb.ErrorCode_Success
 			state.State = segmentInfo.GetState()
@@ -227,11 +227,7 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 		resp.Status.Reason = serverNotServingErrMsg
 		return resp, nil
 	}
-	nums, err := s.meta.GetNumRowsOfCollection(req.CollectionID)
-	if err != nil {
-		resp.Status.Reason = err.Error()
-		return resp, nil
-	}
+	nums := s.meta.GetNumRowsOfCollection(req.CollectionID)
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "row_count", Value: strconv.FormatInt(nums, 10)})
 	return resp, nil
@@ -247,11 +243,7 @@ func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 		resp.Status.Reason = serverNotServingErrMsg
 		return resp, nil
 	}
-	nums, err := s.meta.GetNumRowsOfPartition(req.CollectionID, req.PartitionID)
-	if err != nil {
-		resp.Status.Reason = err.Error()
-		return resp, nil
-	}
+	nums := s.meta.GetNumRowsOfPartition(req.CollectionID, req.PartitionID)
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "row_count", Value: strconv.FormatInt(nums, 10)})
 	return resp, nil
@@ -278,9 +270,9 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	}
 	infos := make([]*datapb.SegmentInfo, 0, len(req.SegmentIDs))
 	for _, id := range req.SegmentIDs {
-		info, err := s.meta.GetSegment(id)
-		if err != nil {
-			resp.Status.Reason = err.Error()
+		info := s.meta.GetSegment(id)
+		if info == nil {
+			resp.Status.Reason = fmt.Sprintf("Failed to get segment %d", id)
 			return resp, nil
 		}
 		infos = append(infos, info)
@@ -304,10 +296,10 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		zap.Any("checkpoints", req.GetCheckPoints()))
 
 	// check segment id & collection id matched
-	_, err := s.meta.GetCollection(req.GetCollectionID())
-	if err != nil {
-		log.Error("Failed to get collection info", zap.Int64("collectionID", req.GetCollectionID()), zap.Error(err))
-		resp.Reason = err.Error()
+	if coll := s.meta.GetCollection(req.GetCollectionID()); coll == nil {
+		errMsg := fmt.Sprintf("Failed to get collection info %d", req.GetCollectionID())
+		log.Error(errMsg)
+		resp.Reason = errMsg
 		return resp, nil
 	}
 
@@ -382,10 +374,11 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	segmentIDs := s.meta.GetSegmentsOfPartition(collectionID, partitionID)
 	segment2Binlogs := make(map[UniqueID][]*datapb.FieldBinlog)
 	for _, id := range segmentIDs {
-		segment, err := s.meta.GetSegment(id)
-		if err != nil {
-			log.Error("Get segment failed", zap.Int64("segmentID", id))
-			resp.Status.Reason = err.Error()
+		segment := s.meta.GetSegment(id)
+		if segment == nil {
+			errMsg := fmt.Sprintf("Failed to get segment %d", id)
+			log.Error(errMsg)
+			resp.Status.Reason = errMsg
 			return resp, nil
 		}
 		if segment.State != commonpb.SegmentState_Flushed && segment.State != commonpb.SegmentState_Flushing {
@@ -472,8 +465,8 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 	}
 	ret := make([]UniqueID, 0, len(segmentIDs))
 	for _, id := range segmentIDs {
-		s, err := s.meta.GetSegment(id)
-		if err != nil || s.GetState() != commonpb.SegmentState_Flushed {
+		s := s.meta.GetSegment(id)
+		if s == nil || s.GetState() != commonpb.SegmentState_Flushed {
 			continue
 		}
 		ret = append(ret, id)
