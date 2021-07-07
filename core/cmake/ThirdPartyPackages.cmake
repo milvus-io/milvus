@@ -346,7 +346,7 @@ endif ()
 if (DEFINED ENV{MILVUS_APU_URL})
     set(APU_SOURCE_URL "$ENV{MILVUS_APU_URL}")
 else ()
-    set(APU_SOURCE_URL "${PROJECT_SOURCE_DIR}/resources/gsl_sources_milvus/2.8.0/gsi_release_2_8_0.tar.gz")
+    set(APU_SOURCE_URL "${PROJECT_SOURCE_DIR}/thirdparty/gsi/gsl_sources_milvus/2.8.0/gsi_release_2_8_0.tar.gz")
 endif ()
 
 # ----------------------------------------------------------------------
@@ -1170,10 +1170,6 @@ macro(build_apu)
     set(APU_SHARED_LIB "${APU_PREFIX}/lib/libgsl.so")
     set (APU_LIBS "${APU_PREFIX}/lib")
     set(APU_INCLUDE_DIR "${APU_PREFIX}/include")
-
-    message( STATUS "APU_PREFIX = "  ${APU_PREFIX})
-    message( STATUS "APU_SHARED_LIB = "  ${APU_SHARED_LIB})
-    message( STATUS "APU_INCLUDE_DIR = "  ${APU_INCLUDE_DIR})
 
     externalproject_add(apu_ep
             URL
