@@ -20,4 +20,14 @@ if ! whoami &> /dev/null; then
   fi
 fi
 
+set +e
+if [ -f "/etc/profile.d/devtoolset-7.sh" ]; then
+  source "/etc/profile.d/devtoolset-7.sh"
+fi
+
+if [ -f "/etc/profile.d/llvm-toolset-7.sh" ]; then
+  source "/etc/profile.d/llvm-toolset-7.sh"
+fi
+set -e
+
 exec "$@"
