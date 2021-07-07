@@ -13,7 +13,6 @@ package storage
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -150,7 +149,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 	var writer *InsertBinlogWriter
 	timeFieldData, ok := data.Data[rootcoord.TimeStampField]
 	if !ok {
-		return nil, nil, errors.New("data doesn't contains timestamp field")
+		return nil, nil, fmt.Errorf("data doesn't contains timestamp field")
 	}
 	ts := timeFieldData.(*Int64FieldData).Data
 	startTs := ts[0]
@@ -240,9 +239,10 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 
 	return blobs, statsBlobs, nil
 }
+
 func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID, segmentID UniqueID, data *InsertData, err error) {
 	if len(blobs) == 0 {
-		return -1, -1, nil, errors.New("blobs is empty")
+		return -1, -1, nil, fmt.Errorf("blobs is empty")
 	}
 	readerClose := func(reader *BinlogReader) func() error {
 		return func() error { return reader.Close() }
@@ -581,12 +581,11 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 	})
 
 	return blobs, nil
-
 }
 
 func (dataDefinitionCodec *DataDefinitionCodec) Deserialize(blobs []*Blob) (ts []Timestamp, ddRequests []string, err error) {
 	if len(blobs) == 0 {
-		return nil, nil, errors.New("blobs is empty")
+		return nil, nil, fmt.Errorf("blobs is empty")
 	}
 	readerClose := func(reader *BinlogReader) func() error {
 		return func() error { return reader.Close() }
@@ -698,7 +697,7 @@ func (indexCodec *IndexCodec) Deserialize(blobs []*Blob) ([]*Blob, map[string]st
 		break
 	}
 	if file == nil {
-		return nil, nil, "", -1, errors.New("can not find params blob")
+		return nil, nil, "", -1, fmt.Errorf("can not find params blob")
 	}
 	info := struct {
 		Params    map[string]string

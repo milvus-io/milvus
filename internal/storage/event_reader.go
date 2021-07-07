@@ -75,6 +75,7 @@ func (reader *EventReader) Close() error {
 	}
 	return nil
 }
+
 func newEventReader(datatype schemapb.DataType, buffer *bytes.Buffer) (*EventReader, error) {
 	reader := &EventReader{
 		eventHeader: eventHeader{

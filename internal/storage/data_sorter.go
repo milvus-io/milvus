@@ -13,6 +13,7 @@ package storage
 
 import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/rootcoord"
 )
 
 type DataSorter struct {
@@ -20,17 +21,15 @@ type DataSorter struct {
 	InsertData  *InsertData
 }
 
-func (ds *DataSorter) getIDField() FieldData {
-	for _, field := range ds.InsertCodec.Schema.Schema.Fields {
-		if field.FieldID == 0 {
-			return ds.InsertData.Data[field.FieldID]
-		}
+func (ds *DataSorter) getRowIDFieldData() FieldData {
+	if data, ok := ds.InsertData.Data[rootcoord.RowIDField]; ok {
+		return data
 	}
 	return nil
 }
 
 func (ds *DataSorter) Len() int {
-	return len(ds.getIDField().(*Int64FieldData).Data)
+	return len(ds.getRowIDFieldData().(*Int64FieldData).Data)
 }
 
 func (ds *DataSorter) Swap(i, j int) {
@@ -81,5 +80,6 @@ func (ds *DataSorter) Swap(i, j int) {
 }
 
 func (ds *DataSorter) Less(i, j int) bool {
-	return ds.getIDField().(*Int64FieldData).Data[i] < ds.getIDField().(*Int64FieldData).Data[j]
+	ids := ds.getRowIDFieldData().(*Int64FieldData).Data
+	return ids[i] < ids[j]
 }
