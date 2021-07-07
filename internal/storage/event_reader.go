@@ -13,7 +13,6 @@ package storage
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -27,28 +26,21 @@ type EventReader struct {
 	isClosed bool
 }
 
-func (reader *EventReader) checkClose() error {
+func (reader *EventReader) readHeader() error {
 	if reader.isClosed {
-		return errors.New("event reader is closed")
-	}
-	return nil
-}
-
-func (reader *EventReader) readHeader() (*eventHeader, error) {
-	if err := reader.checkClose(); err != nil {
-		return nil, err
+		return fmt.Errorf("event reader is closed")
 	}
 	header, err := readEventHeader(reader.buffer)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	reader.eventHeader = *header
-	return &reader.eventHeader, nil
+	return nil
 }
 
-func (reader *EventReader) readData() (eventData, error) {
-	if err := reader.checkClose(); err != nil {
-		return nil, err
+func (reader *EventReader) readData() error {
+	if reader.isClosed {
+		return fmt.Errorf("event reader is closed")
 	}
 	var data eventData
 	var err error
@@ -66,15 +58,14 @@ func (reader *EventReader) readData() (eventData, error) {
 	case DropPartitionEventType:
 		data, err = readDropPartitionEventDataFixPart(reader.buffer)
 	default:
-		return nil, fmt.Errorf("unknown header type code: %d", reader.TypeCode)
+		return fmt.Errorf("unknown header type code: %d", reader.TypeCode)
 	}
-
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	reader.eventData = data
-	return reader.eventData, nil
+	return nil
 }
 
 func (reader *EventReader) Close() error {
@@ -84,6 +75,7 @@ func (reader *EventReader) Close() error {
 	}
 	return nil
 }
+
 func newEventReader(datatype schemapb.DataType, buffer *bytes.Buffer) (*EventReader, error) {
 	reader := &EventReader{
 		eventHeader: eventHeader{
@@ -93,15 +85,15 @@ func newEventReader(datatype schemapb.DataType, buffer *bytes.Buffer) (*EventRea
 		isClosed: false,
 	}
 
-	if _, err := reader.readHeader(); err != nil {
+	if err := reader.readHeader(); err != nil {
+		return nil, err
+	}
+	if err := reader.readData(); err != nil {
 		return nil, err
 	}
 
-	if _, err := reader.readData(); err != nil {
-		return nil, err
-	}
-
-	payloadBuffer := buffer.Next(int(reader.EventLength - reader.eventHeader.GetMemoryUsageInBytes() - reader.GetEventDataFixPartSize()))
+	next := int(reader.EventLength - reader.eventHeader.GetMemoryUsageInBytes() - reader.GetEventDataFixPartSize())
+	payloadBuffer := buffer.Next(next)
 	payloadReader, err := NewPayloadReader(datatype, payloadBuffer)
 	if err != nil {
 		return nil, err

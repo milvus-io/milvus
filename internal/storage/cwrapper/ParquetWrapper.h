@@ -18,8 +18,6 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 
-typedef void *CPayloadWriter;
-
 typedef struct CBuffer {
   char *data;
   int length;
@@ -30,6 +28,8 @@ typedef struct CStatus {
   const char *error_msg;
 } CStatus;
 
+//============= payload writer ======================
+typedef void *CPayloadWriter;
 CPayloadWriter NewPayloadWriter(int columnType);
 CStatus AddBooleanToPayload(CPayloadWriter payloadWriter, bool *values, int length);
 CStatus AddInt8ToPayload(CPayloadWriter payloadWriter, int8_t *values, int length);
@@ -48,7 +48,6 @@ int GetPayloadLengthFromWriter(CPayloadWriter payloadWriter);
 CStatus ReleasePayloadWriter(CPayloadWriter handler);
 
 //============= payload reader ======================
-
 typedef void *CPayloadReader;
 CPayloadReader NewPayloadReader(int columnType, uint8_t *buffer, int64_t buf_size);
 CStatus GetBoolFromPayload(CPayloadReader payloadReader, bool **values, int *length);

@@ -13,7 +13,6 @@ package storage
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -150,7 +149,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 	var writer *InsertBinlogWriter
 	timeFieldData, ok := data.Data[rootcoord.TimeStampField]
 	if !ok {
-		return nil, nil, errors.New("data doesn't contains timestamp field")
+		return nil, nil, fmt.Errorf("data doesn't contains timestamp field")
 	}
 	ts := timeFieldData.(*Int64FieldData).Data
 	startTs := ts[0]
@@ -172,8 +171,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			return nil, nil, err
 		}
 
-		eventWriter.SetStartTimestamp(typeutil.Timestamp(startTs))
-		eventWriter.SetEndTimestamp(typeutil.Timestamp(endTs))
+		eventWriter.SetEventTimestamp(typeutil.Timestamp(startTs), typeutil.Timestamp(endTs))
 		switch field.DataType {
 		case schemapb.DataType_Bool:
 			err = eventWriter.AddBoolToPayload(singleData.(*BoolFieldData).Data)
@@ -206,8 +204,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		if err != nil {
 			return nil, nil, err
 		}
-		writer.SetStartTimeStamp(typeutil.Timestamp(startTs))
-		writer.SetEndTimeStamp(typeutil.Timestamp(endTs))
+		writer.SetEventTimeStamp(typeutil.Timestamp(startTs), typeutil.Timestamp(endTs))
 
 		err = writer.Close()
 		if err != nil {
@@ -242,9 +239,10 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 
 	return blobs, statsBlobs, nil
 }
+
 func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID, segmentID UniqueID, data *InsertData, err error) {
 	if len(blobs) == 0 {
-		return -1, -1, nil, errors.New("blobs is empty")
+		return -1, -1, nil, fmt.Errorf("blobs is empty")
 	}
 	readerClose := func(reader *BinlogReader) func() error {
 		return func() error { return reader.Close() }
@@ -507,10 +505,8 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 	if err != nil {
 		return nil, err
 	}
-	eventWriter.SetStartTimestamp(ts[0])
-	eventWriter.SetEndTimestamp(ts[len(ts)-1])
-	writer.SetStartTimeStamp(ts[0])
-	writer.SetEndTimeStamp(ts[len(ts)-1])
+	eventWriter.SetEventTimestamp(ts[0], ts[len(ts)-1])
+	writer.SetEventTimeStamp(ts[0], ts[len(ts)-1])
 	err = writer.Close()
 	if err != nil {
 		return nil, err
@@ -537,45 +533,40 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 			if err != nil {
 				return nil, err
 			}
-			eventWriter.SetStartTimestamp(ts[pos])
-			eventWriter.SetEndTimestamp(ts[pos])
+			eventWriter.SetEventTimestamp(ts[pos], ts[pos])
 		case DropCollectionEventType:
 			eventWriter, err := writer.NextDropCollectionEventWriter()
 			if err != nil {
 				return nil, err
 			}
 			err = eventWriter.AddOneStringToPayload(req)
-			eventWriter.SetStartTimestamp(ts[pos])
-			eventWriter.SetEndTimestamp(ts[pos])
 			if err != nil {
 				return nil, err
 			}
+			eventWriter.SetEventTimestamp(ts[pos], ts[pos])
 		case CreatePartitionEventType:
 			eventWriter, err := writer.NextCreatePartitionEventWriter()
 			if err != nil {
 				return nil, err
 			}
 			err = eventWriter.AddOneStringToPayload(req)
-			eventWriter.SetStartTimestamp(ts[pos])
-			eventWriter.SetEndTimestamp(ts[pos])
 			if err != nil {
 				return nil, err
 			}
+			eventWriter.SetEventTimestamp(ts[pos], ts[pos])
 		case DropPartitionEventType:
 			eventWriter, err := writer.NextDropPartitionEventWriter()
 			if err != nil {
 				return nil, err
 			}
 			err = eventWriter.AddOneStringToPayload(req)
-			eventWriter.SetStartTimestamp(ts[pos])
-			eventWriter.SetEndTimestamp(ts[pos])
 			if err != nil {
 				return nil, err
 			}
+			eventWriter.SetEventTimestamp(ts[pos], ts[pos])
 		}
 	}
-	writer.SetStartTimeStamp(ts[0])
-	writer.SetEndTimeStamp(ts[len(ts)-1])
+	writer.SetEventTimeStamp(ts[0], ts[len(ts)-1])
 	err = writer.Close()
 	if err != nil {
 		return nil, err
@@ -590,12 +581,11 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 	})
 
 	return blobs, nil
-
 }
 
 func (dataDefinitionCodec *DataDefinitionCodec) Deserialize(blobs []*Blob) (ts []Timestamp, ddRequests []string, err error) {
 	if len(blobs) == 0 {
-		return nil, nil, errors.New("blobs is empty")
+		return nil, nil, fmt.Errorf("blobs is empty")
 	}
 	readerClose := func(reader *BinlogReader) func() error {
 		return func() error { return reader.Close() }
@@ -707,7 +697,7 @@ func (indexCodec *IndexCodec) Deserialize(blobs []*Blob) ([]*Blob, map[string]st
 		break
 	}
 	if file == nil {
-		return nil, nil, "", -1, errors.New("can not find params blob")
+		return nil, nil, "", -1, fmt.Errorf("can not find params blob")
 	}
 	info := struct {
 		Params    map[string]string

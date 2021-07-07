@@ -20,9 +20,8 @@ package storage
 */
 import "C"
 import (
-	"unsafe"
-
 	"errors"
+	"unsafe"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -63,6 +62,7 @@ type PayloadReaderInterface interface {
 	ReleasePayloadReader() error
 	Close() error
 }
+
 type PayloadWriter struct {
 	payloadWriterPtr C.CPayloadWriter
 	colType          schemapb.DataType
@@ -91,49 +91,42 @@ func (w *PayloadWriter) AddDataToPayload(msgs interface{}, dim ...int) error {
 				return errors.New("incorrect data type")
 			}
 			return w.AddBoolToPayload(val)
-
 		case schemapb.DataType_Int8:
 			val, ok := msgs.([]int8)
 			if !ok {
 				return errors.New("incorrect data type")
 			}
 			return w.AddInt8ToPayload(val)
-
 		case schemapb.DataType_Int16:
 			val, ok := msgs.([]int16)
 			if !ok {
 				return errors.New("incorrect data type")
 			}
 			return w.AddInt16ToPayload(val)
-
 		case schemapb.DataType_Int32:
 			val, ok := msgs.([]int32)
 			if !ok {
 				return errors.New("incorrect data type")
 			}
 			return w.AddInt32ToPayload(val)
-
 		case schemapb.DataType_Int64:
 			val, ok := msgs.([]int64)
 			if !ok {
 				return errors.New("incorrect data type")
 			}
 			return w.AddInt64ToPayload(val)
-
 		case schemapb.DataType_Float:
 			val, ok := msgs.([]float32)
 			if !ok {
 				return errors.New("incorrect data type")
 			}
 			return w.AddFloatToPayload(val)
-
 		case schemapb.DataType_Double:
 			val, ok := msgs.([]float64)
 			if !ok {
 				return errors.New("incorrect data type")
 			}
 			return w.AddDoubleToPayload(val)
-
 		case schemapb.DataType_String:
 			val, ok := msgs.(string)
 			if !ok {
@@ -151,7 +144,6 @@ func (w *PayloadWriter) AddDataToPayload(msgs interface{}, dim ...int) error {
 				return errors.New("incorrect data type")
 			}
 			return w.AddBinaryVectorToPayload(val, dim[0])
-
 		case schemapb.DataType_FloatVector:
 			val, ok := msgs.([]float32)
 			if !ok {
@@ -161,10 +153,8 @@ func (w *PayloadWriter) AddDataToPayload(msgs interface{}, dim ...int) error {
 		default:
 			return errors.New("incorrect datatype")
 		}
-
 	default:
 		return errors.New("incorrect input numbers")
-
 	}
 }
 
@@ -334,7 +324,6 @@ func (w *PayloadWriter) AddBinaryVectorToPayload(binVec []byte, dim int) error {
 	if length <= 0 {
 		return errors.New("can't add empty binVec into payload")
 	}
-
 	if dim <= 0 {
 		return errors.New("dimension should be greater than 0")
 	}
@@ -359,16 +348,15 @@ func (w *PayloadWriter) AddFloatVectorToPayload(floatVec []float32, dim int) err
 	if length <= 0 {
 		return errors.New("can't add empty floatVec into payload")
 	}
-
 	if dim <= 0 {
 		return errors.New("dimension should be greater than 0")
 	}
 
-	cBinVec := (*C.float)(&floatVec[0])
+	cVec := (*C.float)(&floatVec[0])
 	cDim := C.int(dim)
 	cLength := C.int(length / dim)
 
-	st := C.AddFloatVectorToPayload(w.payloadWriterPtr, cBinVec, cDim, cLength)
+	st := C.AddFloatVectorToPayload(w.payloadWriterPtr, cVec, cDim, cLength)
 	errCode := commonpb.ErrorCode(st.error_code)
 	if errCode != commonpb.ErrorCode_Success {
 		msg := C.GoString(st.error_msg)
@@ -446,45 +434,37 @@ func (r *PayloadReader) GetDataFromPayload(idx ...int) (interface{}, int, error)
 			val, err := r.GetOneStringFromPayload(idx[0])
 			return val, 0, err
 		default:
-			return nil, 0, errors.New("Unknown type")
+			return nil, 0, errors.New("unknown type")
 		}
 	case 0:
 		switch r.colType {
 		case schemapb.DataType_Bool:
 			val, err := r.GetBoolFromPayload()
 			return val, 0, err
-
 		case schemapb.DataType_Int8:
 			val, err := r.GetInt8FromPayload()
 			return val, 0, err
-
 		case schemapb.DataType_Int16:
 			val, err := r.GetInt16FromPayload()
 			return val, 0, err
-
 		case schemapb.DataType_Int32:
 			val, err := r.GetInt32FromPayload()
 			return val, 0, err
-
 		case schemapb.DataType_Int64:
 			val, err := r.GetInt64FromPayload()
 			return val, 0, err
-
 		case schemapb.DataType_Float:
 			val, err := r.GetFloatFromPayload()
 			return val, 0, err
-
 		case schemapb.DataType_Double:
 			val, err := r.GetDoubleFromPayload()
 			return val, 0, err
-
 		case schemapb.DataType_BinaryVector:
 			return r.GetBinaryVectorFromPayload()
-
 		case schemapb.DataType_FloatVector:
 			return r.GetFloatVectorFromPayload()
 		default:
-			return nil, 0, errors.New("Unknown type")
+			return nil, 0, errors.New("unknown type")
 		}
 	default:
 		return nil, 0, errors.New("incorrect number of index")
