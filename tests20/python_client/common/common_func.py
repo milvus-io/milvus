@@ -350,6 +350,7 @@ def insert_data(collection_w, nb=3000, is_binary=False, is_all_data_type=False):
     num = len(par)
     vectors = []
     binary_raw_vectors = []
+    insert_ids = []
     log.info("insert_data: inserting data into collection %s (num_entities: %s)"
              % (collection_w.name, nb))
     for i in range(num):
@@ -359,11 +360,12 @@ def insert_data(collection_w, nb=3000, is_binary=False, is_all_data_type=False):
             binary_raw_vectors.extend(binary_raw_data)
         if is_all_data_type:
             default_data = gen_dataframe_all_data_type(nb // num)
-        collection_w.insert(default_data, par[i].name)
+        insert_res = collection_w.insert(default_data, par[i].name)[0]
+        insert_ids.extend(insert_res.primary_keys)
         vectors.append(default_data)
     log.info("insert_data: inserted data into collection %s (num_entities: %s)"
              % (collection_w.name, nb))
-    return collection_w, vectors, binary_raw_vectors
+    return collection_w, vectors, binary_raw_vectors, insert_ids
 
 
 def _check_primary_keys(primary_keys, nb):
