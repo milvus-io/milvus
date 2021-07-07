@@ -255,7 +255,7 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 			return err
 		}
 		for i := 0; i < rows; i++ {
-			val, err := reader.GetStringFromPayload(i)
+			val, err := reader.GetOneStringFromPayload(i)
 			if err != nil {
 				return err
 			}
@@ -314,7 +314,7 @@ func printDDLPayloadValues(eventType EventTypeCode, colType schemapb.DataType, r
 			return err
 		}
 		for i := 0; i < rows; i++ {
-			val, err := reader.GetStringFromPayload(i)
+			val, err := reader.GetOneStringFromPayload(i)
 			valBytes := []byte(val)
 			if err != nil {
 				return err

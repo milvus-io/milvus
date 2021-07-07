@@ -38,7 +38,7 @@ CStatus AddInt32ToPayload(CPayloadWriter payloadWriter, int32_t *values, int len
 CStatus AddInt64ToPayload(CPayloadWriter payloadWriter, int64_t *values, int length);
 CStatus AddFloatToPayload(CPayloadWriter payloadWriter, float *values, int length);
 CStatus AddDoubleToPayload(CPayloadWriter payloadWriter, double *values, int length);
-CStatus AddStringToPayload(CPayloadWriter payloadWriter, char *cstr, int str_size);
+CStatus AddOneStringToPayload(CPayloadWriter payloadWriter, char *cstr, int str_size);
 CStatus AddBinaryVectorToPayload(CPayloadWriter payloadWriter, uint8_t *values, int dimension, int length);
 CStatus AddFloatVectorToPayload(CPayloadWriter payloadWriter, float *values, int dimension, int length);
 
@@ -57,7 +57,7 @@ CStatus GetInt32FromPayload(CPayloadReader payloadReader, int32_t **values, int 
 CStatus GetInt64FromPayload(CPayloadReader payloadReader, int64_t **values, int *length);
 CStatus GetFloatFromPayload(CPayloadReader payloadReader, float **values, int *length);
 CStatus GetDoubleFromPayload(CPayloadReader payloadReader, double **values, int *length);
-CStatus GetStringFromPayload(CPayloadReader payloadReader, int idx, char **cstr, int *str_size);
+CStatus GetOneStringFromPayload(CPayloadReader payloadReader, int idx, char **cstr, int *str_size);
 CStatus GetBinaryVectorFromPayload(CPayloadReader payloadReader, uint8_t **values, int *dimension, int *length);
 CStatus GetFloatVectorFromPayload(CPayloadReader payloadReader, float **values, int *dimension, int *length);
 

@@ -162,7 +162,7 @@ CStatus AddDoubleToPayload(CPayloadWriter payloadWriter, double *values, int len
 }
 
 extern "C"
-CStatus AddStringToPayload(CPayloadWriter payloadWriter, char *cstr, int str_size) {
+CStatus AddOneStringToPayload(CPayloadWriter payloadWriter, char *cstr, int str_size) {
   CStatus st;
   st.error_code = static_cast<int>(ErrorCode::SUCCESS);
   st.error_msg = nullptr;
@@ -460,7 +460,7 @@ CStatus GetDoubleFromPayload(CPayloadReader payloadReader, double **values, int 
 }
 
 extern "C"
-CStatus GetStringFromPayload(CPayloadReader payloadReader, int idx, char **cstr, int *str_size) {
+CStatus GetOneStringFromPayload(CPayloadReader payloadReader, int idx, char **cstr, int *str_size) {
   CStatus st;
   st.error_code = static_cast<int>(ErrorCode::SUCCESS);
   st.error_msg = nullptr;

@@ -36,7 +36,7 @@ type PayloadWriterInterface interface {
 	AddInt64ToPayload(msgs []int64) error
 	AddFloatToPayload(msgs []float32) error
 	AddDoubleToPayload(msgs []float64) error
-	AddStringToPayload(msgs string) error
+	AddOneStringToPayload(msgs string) error
 	AddBinaryVectorToPayload(binVec []byte, dim int) error
 	AddFloatVectorToPayload(binVec []float32, dim int) error
 	FinishPayloadWriter() error
@@ -55,7 +55,7 @@ type PayloadReaderInterface interface {
 	GetInt64FromPayload() ([]int64, error)
 	GetFloatFromPayload() ([]float32, error)
 	GetDoubleFromPayload() ([]float64, error)
-	GetStringFromPayload(idx int) (string, error)
+	GetOneStringFromPayload(idx int) (string, error)
 	GetBinaryVectorFromPayload() ([]byte, int, error)
 	GetFloatVectorFromPayload() ([]float32, int, error)
 	GetPayloadLengthFromReader() (int, error)
@@ -132,7 +132,7 @@ func (w *PayloadWriter) AddDataToPayload(msgs interface{}, dim ...int) error {
 			if !ok {
 				return errors.New("incorrect data type")
 			}
-			return w.AddStringToPayload(val)
+			return w.AddOneStringToPayload(val)
 		default:
 			return errors.New("incorrect datatype")
 		}
@@ -297,7 +297,7 @@ func (w *PayloadWriter) AddDoubleToPayload(msgs []float64) error {
 	return nil
 }
 
-func (w *PayloadWriter) AddStringToPayload(msg string) error {
+func (w *PayloadWriter) AddOneStringToPayload(msg string) error {
 	length := len(msg)
 	if length == 0 {
 		return errors.New("can't add empty string into payload")
@@ -307,7 +307,7 @@ func (w *PayloadWriter) AddStringToPayload(msg string) error {
 	clength := C.int(length)
 	defer C.free(unsafe.Pointer(cmsg))
 
-	st := C.AddStringToPayload(w.payloadWriterPtr, cmsg, clength)
+	st := C.AddOneStringToPayload(w.payloadWriterPtr, cmsg, clength)
 
 	errCode := commonpb.ErrorCode(st.error_code)
 	if errCode != commonpb.ErrorCode_Success {
@@ -431,7 +431,7 @@ func (r *PayloadReader) GetDataFromPayload(idx ...int) (interface{}, int, error)
 	case 1:
 		switch r.colType {
 		case schemapb.DataType_String:
-			val, err := r.GetStringFromPayload(idx[0])
+			val, err := r.GetOneStringFromPayload(idx[0])
 			return val, 0, err
 		default:
 			return nil, 0, errors.New("unknown type")
@@ -622,7 +622,7 @@ func (r *PayloadReader) GetDoubleFromPayload() ([]float64, error) {
 	return slice, nil
 }
 
-func (r *PayloadReader) GetStringFromPayload(idx int) (string, error) {
+func (r *PayloadReader) GetOneStringFromPayload(idx int) (string, error) {
 	if r.colType != schemapb.DataType_String {
 		return "", errors.New("incorrect data type")
 	}
@@ -630,7 +630,7 @@ func (r *PayloadReader) GetStringFromPayload(idx int) (string, error) {
 	var cStr *C.char
 	var cSize C.int
 
-	st := C.GetStringFromPayload(r.payloadReaderPtr, C.int(idx), &cStr, &cSize)
+	st := C.GetOneStringFromPayload(r.payloadReaderPtr, C.int(idx), &cStr, &cSize)
 
 	errCode := commonpb.ErrorCode(st.error_code)
 	if errCode != commonpb.ErrorCode_Success {

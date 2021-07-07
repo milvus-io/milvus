@@ -189,7 +189,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			err = eventWriter.AddDoubleToPayload(singleData.(*DoubleFieldData).Data)
 		case schemapb.DataType_String:
 			for _, singleString := range singleData.(*StringFieldData).Data {
-				err = eventWriter.AddStringToPayload(singleString)
+				err = eventWriter.AddOneStringToPayload(singleString)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -407,7 +407,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 				totalLength += length
 				stringFieldData.NumRows += length
 				for i := 0; i < length; i++ {
-					singleString, err := eventReader.GetStringFromPayload(i)
+					singleString, err := eventReader.GetOneStringFromPayload(i)
 					if err != nil {
 						return -1, -1, nil, err
 					}
@@ -529,7 +529,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 			if err != nil {
 				return nil, err
 			}
-			err = eventWriter.AddStringToPayload(req)
+			err = eventWriter.AddOneStringToPayload(req)
 			if err != nil {
 				return nil, err
 			}
@@ -539,7 +539,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 			if err != nil {
 				return nil, err
 			}
-			err = eventWriter.AddStringToPayload(req)
+			err = eventWriter.AddOneStringToPayload(req)
 			if err != nil {
 				return nil, err
 			}
@@ -549,7 +549,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 			if err != nil {
 				return nil, err
 			}
-			err = eventWriter.AddStringToPayload(req)
+			err = eventWriter.AddOneStringToPayload(req)
 			if err != nil {
 				return nil, err
 			}
@@ -559,7 +559,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 			if err != nil {
 				return nil, err
 			}
-			err = eventWriter.AddStringToPayload(req)
+			err = eventWriter.AddOneStringToPayload(req)
 			if err != nil {
 				return nil, err
 			}
@@ -626,7 +626,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Deserialize(blobs []*Blob) (ts [
 					return nil, nil, err
 				}
 				for i := 0; i < length; i++ {
-					singleString, err := eventReader.GetStringFromPayload(i)
+					singleString, err := eventReader.GetOneStringFromPayload(i)
 					if err != nil {
 						return nil, nil, err
 					}
