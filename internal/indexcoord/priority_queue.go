@@ -84,6 +84,8 @@ func (pq *PriorityQueue) getItemByKey(key UniqueID) interface{} {
 }
 
 func (pq *PriorityQueue) Len() int {
+	pq.lock.RLock()
+	defer pq.lock.RUnlock()
 	return len(pq.items)
 }
 

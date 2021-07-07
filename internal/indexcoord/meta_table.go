@@ -362,6 +362,9 @@ func (mt *metaTable) GetIndexMeta(indexBuildID UniqueID) Meta {
 }
 
 func (mt *metaTable) GetUnassignedTasks(nodeIDs []int64) []Meta {
+	mt.lock.RLock()
+	defer mt.lock.RUnlock()
+
 	var metas []Meta
 
 	for _, meta := range mt.indexBuildID2Meta {
