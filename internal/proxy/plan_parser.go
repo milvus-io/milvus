@@ -364,8 +364,17 @@ func (context *ParserContext) handleBinaryExpr(node *ant_ast.BinaryNode) (*planp
 	case "<", "<=", ">", ">=":
 		exprs := []*planpb.Expr{}
 		curNode := node
-		binNodeLeft, LeftOk := curNode.Left.(*ant_ast.BinaryNode)
-		for LeftOk {
+
+		for {
+			binNodeLeft, LeftOk := curNode.Left.(*ant_ast.BinaryNode)
+			if !LeftOk {
+				expr, err := context.handleCmpExpr(curNode)
+				if err != nil {
+					return nil, err
+				}
+				exprs = append(exprs, expr)
+				break
+			}
 			if isSameOrder(node.Operator, binNodeLeft.Operator) {
 				expr, err := context.createCmpExpr(binNodeLeft.Right, curNode.Right, curNode.Operator)
 				if err != nil {
@@ -374,14 +383,24 @@ func (context *ParserContext) handleBinaryExpr(node *ant_ast.BinaryNode) (*planp
 				exprs = append(exprs, expr)
 				curNode = binNodeLeft
 			}
-			binNodeLeft, LeftOk = curNode.Left.(*ant_ast.BinaryNode)
-		}
-		combinedExpr, err := context.handleCmpExpr(curNode)
-		if err != nil {
-			return nil, err
 		}
 
+		var lastExpr *planpb.Expr_RangeExpr
 		for i := len(exprs) - 1; i >= 0; i-- {
+			if expr, ok := exprs[i].Expr.(*planpb.Expr_RangeExpr); ok {
+				if lastExpr != nil && expr.RangeExpr.ColumnInfo.FieldId == lastExpr.RangeExpr.ColumnInfo.FieldId {
+					exprs = append(exprs[0:i+1], exprs[i+2:]...)
+					expr.RangeExpr.Ops = append(expr.RangeExpr.Ops, lastExpr.RangeExpr.Ops...)
+					expr.RangeExpr.Values = append(expr.RangeExpr.Values, lastExpr.RangeExpr.Values...)
+				}
+				lastExpr = expr
+			} else {
+				lastExpr = nil
+			}
+		}
+
+		combinedExpr := exprs[len(exprs)-1]
+		for i := len(exprs) - 2; i >= 0; i-- {
 			expr := exprs[i]
 			combinedExpr = &planpb.Expr{
 				Expr: &planpb.Expr_BinaryExpr{
