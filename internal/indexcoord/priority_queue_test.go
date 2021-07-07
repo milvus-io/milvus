@@ -14,6 +14,9 @@ package indexcoord
 import (
 	"testing"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"go.etcd.io/etcd/clientv3"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -21,6 +24,7 @@ const QueueLen = 10
 
 func newPriorityQueue() *PriorityQueue {
 	ret := &PriorityQueue{}
+	ret.items = make(map[UniqueID]*PQItem)
 	for i := 0; i < QueueLen; i++ {
 		item := &PQItem{
 			value:    nil,
@@ -29,6 +33,9 @@ func newPriorityQueue() *PriorityQueue {
 		}
 		ret.items[item.key] = item
 	}
+	etcdClient, _ := clientv3.New(clientv3.Config{Endpoints: []string{"localhost:2379"}})
+	etcdKV := etcdkv.NewEtcdKV(etcdClient, "IndexCoord/unittest")
+	ret.kv = etcdKV
 	return ret
 }
 
