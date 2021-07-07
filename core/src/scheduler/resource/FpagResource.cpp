@@ -13,6 +13,8 @@
 
 #include <utility>
 #include "utils/Log.h"
+
+
 namespace milvus {
 namespace scheduler {
 
@@ -29,7 +31,12 @@ FpgaResource::FpgaResource(std::string name, uint64_t device_id, bool enable_exe
 void
 FpgaResource::LoadFile(TaskPtr task) {
     LOG_ENGINE_DEBUG_ << "jack:  LoadFile loadType cpu2fpga";
+#ifdef MILVUS_APU_VERSION
+    task->Load(LoadType::CPU2APU, 0);
+#else
     task->Load(LoadType::CPU2FPGA, 0);
+#endif
+
 }
 
 void
@@ -37,6 +44,8 @@ FpgaResource::Process(TaskPtr task) {
     LOG_ENGINE_DEBUG_ << "jack:  process loadType cpu2fpga";
     task->Execute();
 }
+
+
 
 }  // namespace scheduler
 }  // namespace milvus

@@ -56,6 +56,8 @@ extern const char* INDEX_SPTAG_KDT_RNT;
 extern const char* INDEX_SPTAG_BKT_RNT;
 extern const char* INDEX_HNSW;
 extern const char* INDEX_ANNOY;
+extern const char* GSI_FLAT_TANIMOTO;
+extern const char* GSI_FLAT_HAMMING;
 }  // namespace IndexEnum
 
 enum class IndexMode { MODE_CPU = 0, MODE_GPU = 1, MODE_FPGA = 2 };
