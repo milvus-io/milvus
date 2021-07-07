@@ -135,8 +135,8 @@ NSG_NM::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
 #endif
 
     for (size_t i = 0; i < knng.size(); i++) {
-        while (knng[i].size() > 0 && knng[i].back() == -1) {
-            knng[i].resize(knng[i].size() - 1);
+        while (!knng[i].empty() && knng[i].back() == -1) {
+            knng[i].erase(knng[i].end() - 1);
         }
     }
 
