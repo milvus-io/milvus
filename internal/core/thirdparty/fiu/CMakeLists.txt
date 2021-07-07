@@ -40,6 +40,7 @@ macro( build_fiu )
     if( NOT IS_DIRECTORY ${INSTALL_DIR}/include )
         file( MAKE_DIRECTORY "${INSTALL_DIR}/include" )
     endif()
+
     add_library( fiu SHARED IMPORTED )
     set_target_properties( fiu
             PROPERTIES

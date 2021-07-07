@@ -83,12 +83,13 @@ macro( build_arrow )
         file( MAKE_DIRECTORY "${UTF8PROC_LOCATION}/include" )
     endif()
 
+    include(GNUInstallDirs)
 
     add_library( thrift STATIC IMPORTED )
     set_target_properties( thrift
             PROPERTIES
                 IMPORTED_GLOBAL                 TRUE
-                IMPORTED_LOCATION               ${THRIFT_LOCATION}/lib/libthrift.a
+                IMPORTED_LOCATION               ${THRIFT_LOCATION}/${CMAKE_INSTALL_LIBDIR}/libthrift.a
                 INTERFACE_INCLUDE_DIRECTORIES   ${THRIFT_LOCATION}/include )
     add_dependencies(thrift arrow-ep)
 
@@ -96,7 +97,7 @@ macro( build_arrow )
     set_target_properties( utf8proc
             PROPERTIES
                 IMPORTED_GLOBAL                 TRUE
-                IMPORTED_LOCATION               ${UTF8PROC_LOCATION}/lib/libutf8proc.a
+                IMPORTED_LOCATION               ${UTF8PROC_LOCATION}/${CMAKE_INSTALL_LIBDIR}/libutf8proc.a
                 INTERFACE_INCLUDE_DIRECTORIES   ${UTF8PROC_LOCATION}/include )
     add_dependencies(utf8proc arrow-ep)
 
@@ -104,7 +105,7 @@ macro( build_arrow )
     set_target_properties( arrow
             PROPERTIES
                 IMPORTED_GLOBAL                 TRUE
-                IMPORTED_LOCATION               ${INSTALL_DIR}/lib/libarrow.a
+                IMPORTED_LOCATION               ${INSTALL_DIR}/${CMAKE_INSTALL_LIBDIR}/libarrow.a
                 INTERFACE_INCLUDE_DIRECTORIES   ${INSTALL_DIR}/include )
     add_dependencies(arrow arrow-ep )
 
@@ -112,7 +113,7 @@ macro( build_arrow )
     set_target_properties( parquet
             PROPERTIES
                 IMPORTED_GLOBAL                 TRUE
-                IMPORTED_LOCATION               ${INSTALL_DIR}/lib/libparquet.a
+                IMPORTED_LOCATION               ${INSTALL_DIR}/${CMAKE_INSTALL_LIBDIR}/libparquet.a
                 INTERFACE_INCLUDE_DIRECTORIES   ${INSTALL_DIR}/include )
     add_dependencies(parquet arrow-ep)
     target_link_libraries(parquet INTERFACE arrow thrift utf8proc)
