@@ -162,6 +162,8 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 		},
 		ReleaseCollectionRequest: req,
 		cluster:                  qc.cluster,
+		meta:                     qc.meta,
+		rootCoord:                qc.rootCoordClient,
 	}
 	qc.scheduler.Enqueue([]task{releaseCollectionTask})
 

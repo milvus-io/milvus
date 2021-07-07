@@ -33,7 +33,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
@@ -72,18 +71,16 @@ type Server struct {
 	serverLoopWg     sync.WaitGroup
 	isServing        ServerState
 
-	kvClient          *etcdkv.EtcdKV
-	meta              *meta
-	segmentInfoStream msgstream.MsgStream
-	segmentManager    Manager
-	allocator         allocator
-	cluster           *cluster
-	rootCoordClient   types.RootCoord
-	ddChannelName     string
+	kvClient        *etcdkv.EtcdKV
+	meta            *meta
+	segmentManager  Manager
+	allocator       allocator
+	cluster         *cluster
+	rootCoordClient types.RootCoord
+	ddChannelName   string
 
-	flushCh        chan UniqueID
-	flushMsgStream msgstream.MsgStream
-	msFactory      msgstream.Factory
+	flushCh   chan UniqueID
+	msFactory msgstream.Factory
 
 	session  *sessionutil.Session
 	activeCh <-chan bool
@@ -157,17 +154,9 @@ func (s *Server) Start() error {
 		return err
 	}
 
-	if err = s.initSegmentInfoChannel(); err != nil {
-		return err
-	}
-
 	s.allocator = newRootCoordAllocator(s.ctx, s.rootCoordClient)
 
 	s.startSegmentManager()
-	if err = s.initFlushMsgStream(); err != nil {
-		return err
-	}
-
 	if err = s.initServiceDiscovery(); err != nil {
 		return err
 	}
@@ -237,20 +226,7 @@ func (s *Server) loadDataNodes() []*datapb.DataNodeInfo {
 }
 
 func (s *Server) startSegmentManager() {
-	helper := createNewSegmentHelper(s.segmentInfoStream)
-	s.segmentManager = newSegmentManager(s.meta, s.allocator, withAllocHelper(helper))
-}
-
-func (s *Server) initSegmentInfoChannel() error {
-	var err error
-	s.segmentInfoStream, err = s.msFactory.NewMsgStream(s.ctx)
-	if err != nil {
-		return err
-	}
-	s.segmentInfoStream.AsProducer([]string{Params.SegmentInfoChannelName})
-	log.Debug("DataCoord AsProducer: " + Params.SegmentInfoChannelName)
-	s.segmentInfoStream.Start()
-	return nil
+	s.segmentManager = newSegmentManager(s.meta, s.allocator)
 }
 
 func (s *Server) initMeta() error {
@@ -267,19 +243,6 @@ func (s *Server) initMeta() error {
 		return nil
 	}
 	return retry.Do(s.ctx, connectEtcdFn, retry.Attempts(connEtcdMaxRetryTime))
-}
-
-func (s *Server) initFlushMsgStream() error {
-	var err error
-	// segment flush stream
-	s.flushMsgStream, err = s.msFactory.NewMsgStream(s.ctx)
-	if err != nil {
-		return err
-	}
-	s.flushMsgStream.AsProducer([]string{Params.SegmentInfoChannelName})
-	log.Debug("DataCoord AsProducer:" + Params.SegmentInfoChannelName)
-	s.flushMsgStream.Start()
-	return nil
 }
 
 func (s *Server) startServerLoop() {
@@ -377,8 +340,8 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 			log.Debug("Flush segments", zap.Int64s("segmentIDs", segments))
 			segmentInfos := make([]*datapb.SegmentInfo, 0, len(segments))
 			for _, id := range segments {
-				sInfo, err := s.meta.GetSegment(id)
-				if err != nil {
+				sInfo := s.meta.GetSegment(id)
+				if sInfo == nil {
 					log.Error("get segment from meta error", zap.Int64("id", id),
 						zap.Error(err))
 					continue
@@ -455,26 +418,30 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 	defer cancel()
 	// send `Flushing` segments
 	go s.handleFlushingSegments(ctx2)
-	var err error
 	for {
 		select {
 		case <-ctx.Done():
 			log.Debug("flush loop shutdown")
 			return
 		case segmentID := <-s.flushCh:
-			// write flush msg into segmentInfo/flush stream
-			msgPack := composeSegmentFlushMsgPack(segmentID)
-			err = s.flushMsgStream.Produce(&msgPack)
-			if err != nil {
-				log.Error("produce flush msg failed",
-					zap.Int64("segmentID", segmentID),
-					zap.Error(err))
+			segment := s.meta.GetSegment(segmentID)
+			if segment == nil {
+				log.Warn("failed to get flused segment", zap.Int64("id", segmentID))
 				continue
 			}
-			log.Debug("send segment flush msg", zap.Int64("id", segmentID))
-
+			req := &datapb.SegmentFlushCompletedMsg{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_SegmentFlushDone,
+				},
+				Segment: segment,
+			}
+			resp, err := s.rootCoordClient.SegmentFlushCompleted(ctx, req)
+			if err = VerifyResponse(resp, err); err != nil {
+				log.Warn("failed to call SegmentFlushComplete", zap.Int64("segmentID", segmentID), zap.Error(err))
+				continue
+			}
 			// set segment to SegmentState_Flushed
-			if err = s.meta.FlushSegment(segmentID); err != nil {
+			if err = s.meta.SetState(segmentID, commonpb.SegmentState_Flushed); err != nil {
 				log.Error("flush segment complete failed", zap.Error(err))
 				continue
 			}
@@ -516,8 +483,6 @@ func (s *Server) Stop() error {
 	log.Debug("DataCoord server shutdown")
 	atomic.StoreInt64(&s.isServing, ServerStateStopped)
 	s.cluster.releaseSessions()
-	s.segmentInfoStream.Close()
-	s.flushMsgStream.Close()
 	s.stopServerLoop()
 	return nil
 }
@@ -581,7 +546,8 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		Schema:     resp.Schema,
 		Partitions: presp.PartitionIDs,
 	}
-	return s.meta.AddCollection(collInfo)
+	s.meta.AddCollection(collInfo)
+	return nil
 }
 
 func (s *Server) prepareBinlog(req *datapb.SaveBinlogPathsRequest) (map[string]string, error) {
@@ -598,28 +564,4 @@ func (s *Server) prepareBinlog(req *datapb.SaveBinlogPathsRequest) (map[string]s
 	}
 
 	return meta, nil
-}
-
-func composeSegmentFlushMsgPack(segmentID UniqueID) msgstream.MsgPack {
-	msgPack := msgstream.MsgPack{
-		Msgs: make([]msgstream.TsMsg, 0, 1),
-	}
-	completeFlushMsg := internalpb.SegmentFlushCompletedMsg{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_SegmentFlushDone,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.NodeID,
-		},
-		SegmentID: segmentID,
-	}
-	var msg msgstream.TsMsg = &msgstream.FlushCompletedMsg{
-		BaseMsg: msgstream.BaseMsg{
-			HashValues: []uint32{0},
-		},
-		SegmentFlushCompletedMsg: completeFlushMsg,
-	}
-
-	msgPack.Msgs = append(msgPack.Msgs, msg)
-	return msgPack
 }

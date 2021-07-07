@@ -75,14 +75,14 @@ func GenFlushedSegMsgPack(segID typeutil.UniqueID) *msgstream.MsgPack {
 	}
 	segMsg := &msgstream.FlushCompletedMsg{
 		BaseMsg: baseMsg,
-		SegmentFlushCompletedMsg: internalpb.SegmentFlushCompletedMsg{
+		SegmentFlushCompletedMsg: datapb.SegmentFlushCompletedMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_SegmentFlushDone,
 				MsgID:     0,
 				Timestamp: 0,
 				SourceID:  0,
 			},
-			SegmentID: segID,
+			Segment: &datapb.SegmentInfo{ID: segID},
 		},
 	}
 	msgPack.Msgs = append(msgPack.Msgs, segMsg)
@@ -130,7 +130,6 @@ func TestGrpcService(t *testing.T) {
 	rootcoord.Params.MsgChannelSubName = fmt.Sprintf("msgChannel%d", randVal)
 	rootcoord.Params.TimeTickChannel = fmt.Sprintf("timeTick%d", randVal)
 	rootcoord.Params.StatisticsChannel = fmt.Sprintf("stateChannel%d", randVal)
-	rootcoord.Params.DataCoordSegmentChannel = fmt.Sprintf("segmentChannel%d", randVal)
 
 	rootcoord.Params.MaxPartitionNum = 64
 	rootcoord.Params.DefaultPartitionName = "_default"
@@ -165,11 +164,6 @@ func TestGrpcService(t *testing.T) {
 
 	err = core.Init()
 	assert.Nil(t, err)
-
-	FlushedSegmentChan := make(chan *msgstream.MsgPack, 8)
-	core.DataNodeFlushedSegmentChan = FlushedSegmentChan
-	SegmentInfoChan := make(chan *msgstream.MsgPack, 8)
-	core.DataCoordSegmentChan = SegmentInfoChan
 
 	timeTickArray := make([]typeutil.Timestamp, 0, 16)
 	timeTickLock := sync.Mutex{}
@@ -213,6 +207,15 @@ func TestGrpcService(t *testing.T) {
 	}
 	core.CallGetNumRowsService = func(ctx context.Context, segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error) {
 		return rootcoord.Params.MinSegmentSizeToEnableIndex, nil
+	}
+	segs := []typeutil.UniqueID{}
+	segLock := sync.Mutex{}
+	core.CallGetFlushedSegmentsService = func(ctx context.Context, collID, partID typeutil.UniqueID) ([]typeutil.UniqueID, error) {
+		segLock.Lock()
+		defer segLock.Unlock()
+		ret := []typeutil.UniqueID{}
+		ret = append(ret, segs...)
+		return ret, nil
 	}
 
 	var binlogLock sync.Mutex
@@ -502,9 +505,9 @@ func TestGrpcService(t *testing.T) {
 		collMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, 2, len(collMeta.PartitionIDs))
-		partMeta, err := core.MetaTable.GetPartitionByID(1, collMeta.PartitionIDs[1], 0)
+		partName2, err := core.MetaTable.GetPartitionNameByID(collMeta.ID, collMeta.PartitionIDs[1], 0)
 		assert.Nil(t, err)
-		assert.Equal(t, partName, partMeta.PartitionName)
+		assert.Equal(t, partName, partName2)
 		assert.Equal(t, 1, len(collectionMetaCache))
 	})
 
@@ -551,28 +554,12 @@ func TestGrpcService(t *testing.T) {
 		coll, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		partID := coll.PartitionIDs[1]
-		part, err := core.MetaTable.GetPartitionByID(1, partID, 0)
+		_, err = core.MetaTable.GetPartitionNameByID(coll.ID, partID, 0)
 		assert.Nil(t, err)
-		assert.Zero(t, len(part.SegmentIDs))
-		seg := &datapb.SegmentInfo{
-			ID:           1000,
-			CollectionID: coll.ID,
-			PartitionID:  part.PartitionID,
-		}
-		segInfoMsgPack := GenSegInfoMsgPack(seg)
-		SegmentInfoChan <- segInfoMsgPack
-		time.Sleep(time.Millisecond * 100)
-		part, err = core.MetaTable.GetPartitionByID(1, partID, 0)
-		assert.Nil(t, err)
-		assert.Equal(t, 1, len(part.SegmentIDs))
 
-		// send msg twice, partition still contains 1 segment
-		segInfoMsgPack1 := GenSegInfoMsgPack(seg)
-		SegmentInfoChan <- segInfoMsgPack1
-		time.Sleep(time.Millisecond * 100)
-		part1, err := core.MetaTable.GetPartitionByID(1, partID, 0)
-		assert.Nil(t, err)
-		assert.Equal(t, 1, len(part1.SegmentIDs))
+		segLock.Lock()
+		segs = []typeutil.UniqueID{1000}
+		segLock.Unlock()
 
 		req := &milvuspb.ShowSegmentsRequest{
 			Base: &commonpb.MsgBase{
@@ -674,33 +661,30 @@ func TestGrpcService(t *testing.T) {
 		coll, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		partID := coll.PartitionIDs[1]
-		part, err := core.MetaTable.GetPartitionByID(1, partID, 0)
-		assert.Nil(t, err)
-		assert.Equal(t, 1, len(part.SegmentIDs))
-		seg := &datapb.SegmentInfo{
-			ID:           segID,
-			CollectionID: coll.ID,
-			PartitionID:  part.PartitionID,
-		}
-		segInfoMsgPack := GenSegInfoMsgPack(seg)
-		SegmentInfoChan <- segInfoMsgPack
-		time.Sleep(time.Millisecond * 100)
-		part, err = core.MetaTable.GetPartitionByID(1, partID, 0)
-		assert.Nil(t, err)
-		assert.Equal(t, 2, len(part.SegmentIDs))
-		flushedSegMsgPack := GenFlushedSegMsgPack(segID)
-		FlushedSegmentChan <- flushedSegMsgPack
-		time.Sleep(time.Millisecond * 100)
-		segIdxInfo, err := core.MetaTable.GetSegmentIndexInfoByID(segID, -1, "")
+		_, err = core.MetaTable.GetPartitionNameByID(coll.ID, partID, 0)
 		assert.Nil(t, err)
 
-		// send msg twice, segIdxInfo should not change
-		flushedSegMsgPack1 := GenFlushedSegMsgPack(segID)
-		FlushedSegmentChan <- flushedSegMsgPack1
-		time.Sleep(time.Millisecond * 100)
-		segIdxInfo1, err := core.MetaTable.GetSegmentIndexInfoByID(segID, -1, "")
+		segLock.Lock()
+		segs = append(segs, segID)
+		segLock.Unlock()
+
+		flushReq := &datapb.SegmentFlushCompletedMsg{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_SegmentFlushDone,
+			},
+			Segment: &datapb.SegmentInfo{
+				ID:           segID,
+				CollectionID: coll.ID,
+				PartitionID:  partID,
+			},
+		}
+		flushRsp, err := cli.SegmentFlushCompleted(ctx, flushReq)
 		assert.Nil(t, err)
-		assert.Equal(t, segIdxInfo, segIdxInfo1)
+		assert.Equal(t, flushRsp.ErrorCode, commonpb.ErrorCode_Success)
+
+		flushRsp, err = cli.SegmentFlushCompleted(ctx, flushReq)
+		assert.Nil(t, err)
+		assert.Equal(t, flushRsp.ErrorCode, commonpb.ErrorCode_Success)
 
 		req := &milvuspb.DescribeIndexRequest{
 			Base: &commonpb.MsgBase{
@@ -766,9 +750,9 @@ func TestGrpcService(t *testing.T) {
 		collMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, 1, len(collMeta.PartitionIDs))
-		partMeta, err := core.MetaTable.GetPartitionByID(1, collMeta.PartitionIDs[0], 0)
+		partName, err := core.MetaTable.GetPartitionNameByID(collMeta.ID, collMeta.PartitionIDs[0], 0)
 		assert.Nil(t, err)
-		assert.Equal(t, rootcoord.Params.DefaultPartitionName, partMeta.PartitionName)
+		assert.Equal(t, rootcoord.Params.DefaultPartitionName, partName)
 		assert.Equal(t, 2, len(collectionMetaCache))
 	})
 

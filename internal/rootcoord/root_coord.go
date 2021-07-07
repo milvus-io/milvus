@@ -52,9 +52,8 @@ import (
 
 // DdOperation used to save ddMsg into ETCD
 type DdOperation struct {
-	Body  string `json:"body"`
-	Body1 string `json:"body1"` // used for CreateCollectionReq only
-	Type  string `json:"type"`
+	Body string `json:"body"`
+	Type string `json:"type"`
 }
 
 const (
@@ -101,15 +100,10 @@ type Core struct {
 	//setMsgStreams, send drop partition into dd channel
 	SendDdDropPartitionReq func(ctx context.Context, req *internalpb.DropPartitionRequest, channelNames []string) error
 
-	// if rootcoord create segment, datacoord will put segment msg into this channel
-	DataCoordSegmentChan <-chan *ms.MsgPack
-
-	// if segment flush completed, data node would put segment msg into this channel
-	DataNodeFlushedSegmentChan <-chan *ms.MsgPack
-
 	//get binlog file path from data service,
 	CallGetBinlogFilePathsService func(ctx context.Context, segID typeutil.UniqueID, fieldID typeutil.UniqueID) ([]string, error)
 	CallGetNumRowsService         func(ctx context.Context, segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error)
+	CallGetFlushedSegmentsService func(ctx context.Context, collID, partID typeutil.UniqueID) ([]typeutil.UniqueID, error)
 
 	//call index builder's client to build index, return build id
 	CallBuildIndexService func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error)
@@ -214,6 +208,9 @@ func (c *Core) checkInit() error {
 	if c.CallDropIndexService == nil {
 		return fmt.Errorf("CallDropIndexService is nil")
 	}
+	if c.CallGetFlushedSegmentsService == nil {
+		return fmt.Errorf("CallGetFlushedSegments is nil")
+	}
 	if c.NewProxyClient == nil {
 		return fmt.Errorf("NewProxyClient is nil")
 	}
@@ -222,12 +219,6 @@ func (c *Core) checkInit() error {
 	}
 	if c.CallReleasePartitionService == nil {
 		return fmt.Errorf("CallReleasePartitionService is nil")
-	}
-	if c.DataCoordSegmentChan == nil {
-		return fmt.Errorf("DataCoordSegmentChan is nil")
-	}
-	if c.DataNodeFlushedSegmentChan == nil {
-		return fmt.Errorf("DataNodeFlushedSegmentChan is nil")
 	}
 
 	return nil
@@ -243,148 +234,6 @@ func (c *Core) startTimeTickLoop() {
 		case <-ticker.C:
 			if ts, err := c.TSOAllocator(1); err == nil {
 				c.SendTimeTick(ts)
-			}
-		}
-	}
-}
-
-// datacoord send segment info msg to rootcoord when create segment
-func (c *Core) startDataCoordSegmentLoop() {
-	for {
-		select {
-		case <-c.ctx.Done():
-			log.Debug("close data service segment loop")
-			return
-		case segMsg, ok := <-c.DataCoordSegmentChan:
-			if !ok {
-				log.Debug("data service segment channel is closed, exit loop")
-				return
-			}
-			var segInfos []*datapb.SegmentInfo
-			for _, msg := range segMsg.Msgs {
-				if msg.Type() != commonpb.MsgType_SegmentInfo {
-					continue
-				}
-				segInfoMsg, ok := msg.(*ms.SegmentInfoMsg)
-				if !ok {
-					log.Debug("input msg is not SegmentInfoMsg")
-					continue
-				}
-				if segInfoMsg.Segment != nil {
-					segInfos = append(segInfos, segInfoMsg.Segment)
-					log.Debug("open segment", zap.Int64("segmentID", segInfoMsg.Segment.ID))
-				}
-			}
-			if len(segInfos) > 0 {
-				startPosStr, err := EncodeMsgPositions(segMsg.StartPositions)
-				if err != nil {
-					log.Error("encode msg start positions fail", zap.String("err", err.Error()))
-					continue
-				}
-				endPosStr, err := EncodeMsgPositions(segMsg.EndPositions)
-				if err != nil {
-					log.Error("encode msg end positions fail", zap.String("err", err.Error()))
-					continue
-				}
-
-				if _, err := c.MetaTable.AddSegment(segInfos, startPosStr, endPosStr); err != nil {
-					//what if rootcoord add segment failed, but datacoord success?
-					log.Debug("add segment info meta table failed ", zap.String("error", err.Error()))
-					continue
-				}
-			}
-		}
-	}
-}
-
-// data node will put msg in this channel when flush segment
-func (c *Core) startDataNodeFlushedSegmentLoop() {
-	for {
-		select {
-		case <-c.ctx.Done():
-			log.Debug("close segment flush completed loop")
-			return
-		case segMsg, ok := <-c.DataNodeFlushedSegmentChan:
-			if !ok {
-				log.Debug("data node segment flush completed chan has closed, exit loop")
-				return
-			}
-
-			startPosStr, err := EncodeMsgPositions(segMsg.StartPositions)
-			if err != nil {
-				log.Error("encode msg start positions fail", zap.String("err", err.Error()))
-				continue
-			}
-			endPosStr, err := EncodeMsgPositions(segMsg.EndPositions)
-			if err != nil {
-				log.Error("encode msg end positions fail", zap.String("err", err.Error()))
-				continue
-			}
-
-			var segIdxInfos []*etcdpb.SegmentIndexInfo
-			for _, msg := range segMsg.Msgs {
-				// check msg type
-				if msg.Type() != commonpb.MsgType_SegmentFlushDone {
-					continue
-				}
-				flushMsg, ok := msg.(*ms.FlushCompletedMsg)
-				if !ok {
-					log.Debug("input msg is not FlushCompletedMsg")
-					continue
-				}
-				segID := flushMsg.SegmentID
-				log.Debug("flush segment", zap.Int64("id", segID))
-
-				coll, err := c.MetaTable.GetCollectionBySegmentID(segID)
-				if err != nil {
-					log.Warn("GetCollectionBySegmentID error", zap.Error(err))
-					continue
-				}
-				err = c.MetaTable.AddFlushedSegment(segID)
-				if err != nil {
-					log.Warn("AddFlushedSegment error", zap.Error(err))
-					continue
-				}
-
-				if len(coll.FieldIndexes) == 0 {
-					log.Debug("no index params on collection", zap.String("collection_name", coll.Schema.Name))
-				}
-
-				for _, f := range coll.FieldIndexes {
-					fieldSch, err := GetFieldSchemaByID(coll, f.FiledID)
-					if err != nil {
-						log.Warn("field schema not found", zap.Int64("field id", f.FiledID))
-						continue
-					}
-
-					idxInfo, err := c.MetaTable.GetIndexByID(f.IndexID)
-					if err != nil {
-						log.Warn("index not found", zap.Int64("index id", f.IndexID))
-						continue
-					}
-
-					info := etcdpb.SegmentIndexInfo{
-						SegmentID:   segID,
-						FieldID:     fieldSch.FieldID,
-						IndexID:     idxInfo.IndexID,
-						EnableIndex: false,
-					}
-					info.BuildID, err = c.BuildIndex(c.ctx, segID, fieldSch, idxInfo, true)
-					if err == nil && info.BuildID != 0 {
-						info.EnableIndex = true
-					} else {
-						log.Error("build index fail", zap.Int64("buildid", info.BuildID), zap.Error(err))
-					}
-
-					segIdxInfos = append(segIdxInfos, &info)
-				}
-			}
-
-			if len(segIdxInfos) > 0 {
-				_, err = c.MetaTable.AddIndex(segIdxInfos, startPosStr, endPosStr)
-				if err != nil {
-					log.Error("AddIndex fail", zap.String("err", err.Error()))
-				}
 			}
 		}
 	}
@@ -431,8 +280,108 @@ func (c *Core) sessionLoop() {
 	}
 }
 
-func (c *Core) watchProxyLoop() {
+func (c *Core) checkFlushedSegmentsLoop() {
+	ticker := time.NewTicker(10 * time.Minute)
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Debug("RootCoord context done,exit checkFlushedSegmentsLoop")
+			return
+		case <-ticker.C:
+			log.Debug("check flushed segments")
+			collID2Meta, segID2IndexMeta, indexID2Meta := c.MetaTable.dupMeta()
+			for _, collMeta := range collID2Meta {
+				if len(collMeta.FieldIndexes) == 0 {
+					continue
+				}
+				for _, partID := range collMeta.PartitionIDs {
+					ctx2, cancel2 := context.WithTimeout(c.ctx, 3*time.Minute)
+					segIDs, err := c.CallGetFlushedSegmentsService(ctx2, collMeta.ID, partID)
+					if err != nil {
+						log.Debug("get flushed segments from data coord failed",
+							zap.Int64("collection id", collMeta.ID),
+							zap.Int64("partition id", partID),
+							zap.Error(err))
+					} else {
+						for _, segID := range segIDs {
+							indexInfos := []*etcdpb.FieldIndexInfo{}
+							indexMeta, ok := segID2IndexMeta[segID]
+							if !ok {
+								indexInfos = append(indexInfos, collMeta.FieldIndexes...)
+							} else {
+								for _, idx := range collMeta.FieldIndexes {
+									if _, ok := indexMeta[idx.IndexID]; !ok {
+										indexInfos = append(indexInfos, idx)
+									}
+								}
+							}
+							for _, idxInfo := range indexInfos {
+								field, err := GetFieldSchemaByID(&collMeta, idxInfo.FiledID)
+								if err != nil {
+									log.Debug("GetFieldSchemaByID",
+										zap.Any("collection_meta", collMeta),
+										zap.Int64("field id", idxInfo.FiledID))
+									continue
+								}
+								indexMeta, ok := indexID2Meta[idxInfo.IndexID]
+								if !ok {
+									log.Debug("index meta not exist", zap.Int64("index_id", idxInfo.IndexID))
+									continue
+								}
+								info := etcdpb.SegmentIndexInfo{
+									CollectionID: collMeta.ID,
+									PartitionID:  partID,
+									SegmentID:    segID,
+									FieldID:      idxInfo.FiledID,
+									IndexID:      idxInfo.IndexID,
+									EnableIndex:  false,
+								}
+								log.Debug("build index by background checker",
+									zap.Int64("segment_id", segID),
+									zap.Int64("index_id", indexMeta.IndexID),
+									zap.Int64("collection_id", collMeta.ID))
+								info.BuildID, err = c.BuildIndex(ctx2, segID, field, &indexMeta, false)
+								if err != nil {
+									log.Debug("build index failed",
+										zap.Int64("segment_id", segID),
+										zap.Int64("field_id", field.FieldID),
+										zap.Int64("index_id", indexMeta.IndexID))
+									continue
+								}
+								if info.BuildID != 0 {
+									info.EnableIndex = true
+								}
+								if _, err := c.MetaTable.AddIndex(&info); err != nil {
+									log.Debug("Add index into meta table failed", zap.Int64("collection_id", collMeta.ID), zap.Int64("index_id", info.IndexID), zap.Int64("build_id", info.BuildID), zap.Error(err))
+								}
+							}
+						}
+					}
+					cancel2()
+				}
+			}
+		}
+	}
+}
 
+func (c *Core) getSegments(ctx context.Context, collID typeutil.UniqueID) (map[typeutil.UniqueID]typeutil.UniqueID, error) {
+	collMeta, err := c.MetaTable.GetCollectionByID(collID, 0)
+	if err != nil {
+		return nil, err
+	}
+	segID2PartID := map[typeutil.UniqueID]typeutil.UniqueID{}
+	for _, partID := range collMeta.PartitionIDs {
+		if seg, err := c.CallGetFlushedSegmentsService(ctx, collID, partID); err == nil {
+			for _, s := range seg {
+				segID2PartID[s] = partID
+			}
+		} else {
+			log.Debug("get flushed segments from data coord failed", zap.Int64("collection_id", collID), zap.Int64("partition_id", partID), zap.Error(err))
+			return nil, err
+		}
+	}
+
+	return segID2PartID, nil
 }
 
 func (c *Core) setDdMsgSendFlag(b bool) error {
@@ -452,33 +401,6 @@ func (c *Core) setDdMsgSendFlag(b bool) error {
 	}
 	_, err = c.MetaTable.client.Save(DDMsgSendPrefix, "false")
 	return err
-}
-
-func (c *Core) startMsgStreamAndSeek(chanName string, subName string, key string) (*ms.MsgStream, error) {
-	stream, err := c.msFactory.NewMsgStream(c.ctx)
-	if err != nil {
-		return nil, err
-	}
-	stream.AsConsumer([]string{chanName}, subName)
-	log.Debug("AsConsumer: " + chanName + ":" + subName)
-
-	msgPosStr, err := c.MetaTable.client.Load(key, 0)
-	if err == nil {
-		msgPositions := make([]*ms.MsgPosition, 0)
-		if err := DecodeMsgPositions(msgPosStr, &msgPositions); err != nil {
-			return nil, fmt.Errorf("decode msg positions fail, err %s", err.Error())
-		}
-		if len(msgPositions) > 0 {
-			log.Debug("msgstream seek to position", zap.String("chanName", chanName), zap.String("SubName", subName))
-			if err := stream.Seek(msgPositions); err != nil {
-				return nil, fmt.Errorf("msg stream seek fail, err %s", err.Error())
-			}
-			log.Debug("msg stream: " + chanName + ":" + subName + " seek to stored position")
-		}
-	}
-	stream.Start()
-	log.Debug("Start Consumer", zap.String("chanName", chanName), zap.String("SubName", subName))
-	return &stream, nil
 }
 
 func (c *Core) setMsgStreams() error {
@@ -606,28 +528,6 @@ func (c *Core) setMsgStreams() error {
 		return c.dmlChannels.BroadcastAll(channelNames, &msgPack)
 	}
 
-	if Params.DataCoordSegmentChannel == "" {
-		return fmt.Errorf("DataCoordSegmentChannel is empty")
-	}
-
-	// data service will put msg into this channel when create segment
-	dsChanName := Params.DataCoordSegmentChannel
-	dsSubName := Params.MsgChannelSubName + "ds"
-	dsStream, err := c.startMsgStreamAndSeek(dsChanName, dsSubName, SegInfoMsgEndPosPrefix)
-	if err != nil {
-		return err
-	}
-	c.DataCoordSegmentChan = (*dsStream).Chan()
-
-	// data node will put msg into this channel when flush segment
-	dnChanName := Params.DataCoordSegmentChannel
-	dnSubName := Params.MsgChannelSubName + "dn"
-	dnStream, err := c.startMsgStreamAndSeek(dnChanName, dnSubName, FlushedSegMsgEndPosPrefix)
-	if err != nil {
-		return err
-	}
-	c.DataNodeFlushedSegmentChan = (*dnStream).Chan()
-
 	return nil
 }
 
@@ -747,6 +647,42 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 		retErr = nil
 		return
 	}
+
+	c.CallGetFlushedSegmentsService = func(ctx context.Context, collID, partID typeutil.UniqueID) (retSegIDs []typeutil.UniqueID, retErr error) {
+		defer func() {
+			if err := recover(); err != nil {
+				retSegIDs = []typeutil.UniqueID{}
+				retErr = fmt.Errorf("get flushed segments from data coord panic, msg = %v", err)
+				return
+			}
+		}()
+		<-initCh
+		req := &datapb.GetFlushedSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   0, //TODO,msg type
+				MsgID:     0,
+				Timestamp: 0,
+				SourceID:  c.session.ServerID,
+			},
+			CollectionID: collID,
+			PartitionID:  partID,
+		}
+		rsp, err := s.GetFlushedSegments(ctx, req)
+		if err != nil {
+			retSegIDs = []typeutil.UniqueID{}
+			retErr = err
+			return
+		}
+		if rsp.Status.ErrorCode != commonpb.ErrorCode_Success {
+			retSegIDs = []typeutil.UniqueID{}
+			retErr = fmt.Errorf("get flushed segments from data coord failed, reason = %s", rsp.Status.Reason)
+			return
+		}
+		retSegIDs = rsp.Segments
+		retErr = nil
+		return
+	}
+
 	return nil
 }
 
@@ -1052,23 +988,15 @@ func (c *Core) reSendDdMsg(ctx context.Context) error {
 
 	switch ddOp.Type {
 	case CreateCollectionDDType:
-		var ddCollReq = internalpb.CreateCollectionRequest{}
-		if err = proto.UnmarshalText(ddOp.Body, &ddCollReq); err != nil {
+		var ddReq = internalpb.CreateCollectionRequest{}
+		if err = proto.UnmarshalText(ddOp.Body, &ddReq); err != nil {
 			return err
 		}
-		// TODO: can optimize
-		var ddPartReq = internalpb.CreatePartitionRequest{}
-		if err = proto.UnmarshalText(ddOp.Body1, &ddPartReq); err != nil {
-			return err
-		}
-		collInfo, err := c.MetaTable.GetCollectionByName(ddCollReq.CollectionName, 0)
+		collInfo, err := c.MetaTable.GetCollectionByName(ddReq.CollectionName, 0)
 		if err != nil {
 			return err
 		}
-		if err = c.SendDdCreateCollectionReq(ctx, &ddCollReq, collInfo.PhysicalChannelNames); err != nil {
-			return err
-		}
-		if err = c.SendDdCreatePartitionReq(ctx, &ddPartReq, collInfo.PhysicalChannelNames); err != nil {
+		if err = c.SendDdCreateCollectionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
 			return err
 		}
 	case DropCollectionDDType:
@@ -1168,11 +1096,10 @@ func (c *Core) Start() error {
 			return
 		}
 		go c.startTimeTickLoop()
-		go c.startDataCoordSegmentLoop()
-		go c.startDataNodeFlushedSegmentLoop()
 		go c.tsLoop()
 		go c.sessionLoop()
 		go c.chanTimeTick.StartWatch()
+		go c.checkFlushedSegmentsLoop()
 		c.stateCode.Store(internalpb.StateCode_Healthy)
 	})
 	log.Debug(typeutil.RootCoordRole, zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Healthy)]))
@@ -1908,7 +1835,7 @@ func (c *Core) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseD
 	return c.proxyClientManager.ReleaseDQLMessageStream(ctx, in)
 }
 
-func (c *Core) SegmentFlushCompleted(ctx context.Context, in *internalpb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
+func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
 	code := c.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
 		return &commonpb.Status{
@@ -1922,23 +1849,15 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *internalpb.Segment
 			Reason:    fmt.Sprintf("SegmentFlushDone with incorrect msgtype = %s", commonpb.MsgType_name[int32(in.Base.MsgType)]),
 		}, nil
 	}
-	segID := in.SegmentID
+	segID := in.Segment.GetID()
 	log.Debug("flush segment", zap.Int64("id", segID))
 
-	coll, err := c.MetaTable.GetCollectionBySegmentID(segID)
+	coll, err := c.MetaTable.GetCollectionByID(in.Segment.CollectionID, 0)
 	if err != nil {
-		log.Warn("GetCollectionBySegmentID error", zap.Error(err))
+		log.Warn("GetCollectionByID error", zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    fmt.Sprintf("GetCollectionBySegmentID error = %v", err),
-		}, nil
-	}
-	err = c.MetaTable.AddFlushedSegment(segID)
-	if err != nil {
-		log.Warn("AddFlushedSegment error", zap.Error(err))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    fmt.Sprintf("AddFlushedSegment error = %v", err),
 		}, nil
 	}
 
@@ -1946,7 +1865,6 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *internalpb.Segment
 		log.Debug("no index params on collection", zap.String("collection_name", coll.Schema.Name))
 	}
 
-	var segIdxInfos []*etcdpb.SegmentIndexInfo
 	for _, f := range coll.FieldIndexes {
 		fieldSch, err := GetFieldSchemaByID(coll, f.FiledID)
 		if err != nil {
@@ -1961,57 +1879,26 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *internalpb.Segment
 		}
 
 		info := etcdpb.SegmentIndexInfo{
-			SegmentID:   segID,
-			FieldID:     fieldSch.FieldID,
-			IndexID:     idxInfo.IndexID,
-			EnableIndex: false,
+			CollectionID: in.Segment.CollectionID,
+			PartitionID:  in.Segment.PartitionID,
+			SegmentID:    segID,
+			FieldID:      fieldSch.FieldID,
+			IndexID:      idxInfo.IndexID,
+			EnableIndex:  false,
 		}
 		info.BuildID, err = c.BuildIndex(ctx, segID, fieldSch, idxInfo, true)
 		if err == nil && info.BuildID != 0 {
 			info.EnableIndex = true
 		} else {
 			log.Error("build index fail", zap.Int64("buildid", info.BuildID), zap.Error(err))
+			continue
 		}
-
-		segIdxInfos = append(segIdxInfos, &info)
-	}
-	if len(segIdxInfos) > 0 {
-		_, err = c.MetaTable.AddIndex(segIdxInfos, "", "")
+		_, err = c.MetaTable.AddIndex(&info)
 		if err != nil {
 			log.Error("AddIndex fail", zap.String("err", err.Error()))
-			return &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    fmt.Sprintf("AddIndex error = %v", err),
-			}, nil
 		}
 	}
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}, nil
-}
 
-func (c *Core) AddNewSegment(ctx context.Context, in *datapb.SegmentMsg) (*commonpb.Status, error) {
-	code := c.stateCode.Load().(internalpb.StateCode)
-	if code != internalpb.StateCode_Healthy {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
-		}, nil
-	}
-	if in.Base.MsgType != commonpb.MsgType_SegmentInfo {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    fmt.Sprintf("AddNewSegment with incorrect msgtype = %s", commonpb.MsgType_name[int32(in.Base.MsgType)]),
-		}, nil
-	}
-	if _, err := c.MetaTable.AddSegment([]*datapb.SegmentInfo{in.Segment}, "", ""); err != nil {
-		log.Debug("add segment info meta table failed ", zap.String("error", err.Error()))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    fmt.Sprintf("add segment info meta table failed, error = %v", err),
-		}, nil
-	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",

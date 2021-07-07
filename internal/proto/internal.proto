@@ -59,12 +59,14 @@ message CreateCollectionRequest {
   common.MsgBase base = 1;
   string db_name = 2;
   string collectionName = 3;
+  string partitionName = 4;
   // `schema` is the serialized `schema.CollectionSchema`
-  int64 dbID = 4;
-  int64 collectionID = 5;
-  bytes schema = 6;
-  repeated string virtualChannelNames = 7;
-  repeated string physicalChannelNames = 8;
+  int64 dbID = 5;
+  int64 collectionID = 6;
+  int64 partitionID = 7;
+  bytes schema = 8;
+  repeated string virtualChannelNames = 9;
+  repeated string physicalChannelNames = 10;
 }
 
 message DropCollectionRequest {
@@ -213,11 +215,6 @@ message SegmentStatisticsUpdates {
 message SegmentStatistics {
   common.MsgBase base = 1;
   repeated SegmentStatisticsUpdates SegStats = 2;
-}
-
-message SegmentFlushCompletedMsg {
-  common.MsgBase base = 1;
-  int64 segmentID = 2;
 }
 
 message IndexStats {

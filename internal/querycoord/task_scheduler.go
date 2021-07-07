@@ -296,6 +296,8 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 			},
 			ReleaseCollectionRequest: &loadReq,
 			cluster:                  scheduler.cluster,
+			meta:                     scheduler.meta,
+			rootCoord:                scheduler.rootCoord,
 		}
 		newTask = releaseCollectionTask
 	case commonpb.MsgType_ReleasePartitions:

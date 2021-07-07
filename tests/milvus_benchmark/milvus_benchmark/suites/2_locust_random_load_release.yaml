@@ -1,0 +1,32 @@
+locust_random_performance:
+  collections:
+    -
+      milvus:
+        cache_config.insert_buffer_size: 2GB
+        engine_config.use_blas_threshold: 1100
+        engine_config.gpu_search_threshold: 1
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 4GB
+        gpu_resource_config.search_resources:
+          gpu0
+        gpu_resource_config.build_index_resources:
+          gpu0
+        wal_enable: true
+      collection_name: sift_10w_128_l2
+      # other_fields: int
+      ni_per: 50000
+      build_index: false
+      index_type: ivf_sq8
+      index_param:
+        nlist: 1024
+      task:
+        types:
+          - type: load
+            weight: 1
+          -
+            type: release
+            weight: 2
+        connection_num: 1
+        clients_num: 100
+        hatch_rate: 2
+        during_time: 1800

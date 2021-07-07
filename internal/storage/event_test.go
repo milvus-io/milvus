@@ -177,8 +177,7 @@ func TestInsertEvent(t *testing.T) {
 	) {
 		w, err := newInsertEventWriter(dt)
 		assert.Nil(t, err)
-		w.SetStartTimestamp(tsoutil.ComposeTS(10, 0))
-		w.SetEndTimestamp(tsoutil.ComposeTS(100, 0))
+		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = ir1(w)
 		assert.Nil(t, err)
 		err = iw(w)
@@ -350,8 +349,7 @@ func TestInsertEvent(t *testing.T) {
 	t.Run("insert_string", func(t *testing.T) {
 		w, err := newInsertEventWriter(schemapb.DataType_String)
 		assert.Nil(t, err)
-		w.SetStartTimestamp(tsoutil.ComposeTS(10, 0))
-		w.SetEndTimestamp(tsoutil.ComposeTS(100, 0))
+		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = w.AddDataToPayload("1234")
 		assert.Nil(t, err)
 		err = w.AddOneStringToPayload("567890")
@@ -426,8 +424,7 @@ func TestDeleteEvent(t *testing.T) {
 	) {
 		w, err := newDeleteEventWriter(dt)
 		assert.Nil(t, err)
-		w.SetStartTimestamp(tsoutil.ComposeTS(10, 0))
-		w.SetEndTimestamp(tsoutil.ComposeTS(100, 0))
+		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = ir1(w)
 		assert.Nil(t, err)
 		err = iw(w)
@@ -599,8 +596,7 @@ func TestDeleteEvent(t *testing.T) {
 	t.Run("delete_string", func(t *testing.T) {
 		w, err := newDeleteEventWriter(schemapb.DataType_String)
 		assert.Nil(t, err)
-		w.SetStartTimestamp(tsoutil.ComposeTS(10, 0))
-		w.SetEndTimestamp(tsoutil.ComposeTS(100, 0))
+		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = w.AddDataToPayload("1234")
 		assert.Nil(t, err)
 		err = w.AddOneStringToPayload("567890")
@@ -675,8 +671,7 @@ func TestCreateCollectionEvent(t *testing.T) {
 	t.Run("create_collection_timestamp", func(t *testing.T) {
 		w, err := newCreateCollectionEventWriter(schemapb.DataType_Int64)
 		assert.Nil(t, err)
-		w.SetStartTimestamp(tsoutil.ComposeTS(10, 0))
-		w.SetEndTimestamp(tsoutil.ComposeTS(100, 0))
+		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = w.AddDataToPayload([]int64{1, 2, 3})
 		assert.Nil(t, err)
 		err = w.AddDataToPayload([]int{4, 5, 6})
@@ -722,8 +717,7 @@ func TestCreateCollectionEvent(t *testing.T) {
 	t.Run("create_collection_string", func(t *testing.T) {
 		w, err := newCreateCollectionEventWriter(schemapb.DataType_String)
 		assert.Nil(t, err)
-		w.SetStartTimestamp(tsoutil.ComposeTS(10, 0))
-		w.SetEndTimestamp(tsoutil.ComposeTS(100, 0))
+		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = w.AddDataToPayload("1234")
 		assert.Nil(t, err)
 		err = w.AddOneStringToPayload("567890")
@@ -798,8 +792,7 @@ func TestDropCollectionEvent(t *testing.T) {
 	t.Run("drop_collection_timestamp", func(t *testing.T) {
 		w, err := newDropCollectionEventWriter(schemapb.DataType_Int64)
 		assert.Nil(t, err)
-		w.SetStartTimestamp(tsoutil.ComposeTS(10, 0))
-		w.SetEndTimestamp(tsoutil.ComposeTS(100, 0))
+		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = w.AddDataToPayload([]int64{1, 2, 3})
 		assert.Nil(t, err)
 		err = w.AddDataToPayload([]int{4, 5, 6})
@@ -845,8 +838,7 @@ func TestDropCollectionEvent(t *testing.T) {
 	t.Run("drop_collection_string", func(t *testing.T) {
 		w, err := newDropCollectionEventWriter(schemapb.DataType_String)
 		assert.Nil(t, err)
-		w.SetStartTimestamp(tsoutil.ComposeTS(10, 0))
-		w.SetEndTimestamp(tsoutil.ComposeTS(100, 0))
+		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = w.AddDataToPayload("1234")
 		assert.Nil(t, err)
 		err = w.AddOneStringToPayload("567890")
@@ -921,8 +913,7 @@ func TestCreatePartitionEvent(t *testing.T) {
 	t.Run("create_partition_timestamp", func(t *testing.T) {
 		w, err := newCreatePartitionEventWriter(schemapb.DataType_Int64)
 		assert.Nil(t, err)
-		w.SetStartTimestamp(tsoutil.ComposeTS(10, 0))
-		w.SetEndTimestamp(tsoutil.ComposeTS(100, 0))
+		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = w.AddDataToPayload([]int64{1, 2, 3})
 		assert.Nil(t, err)
 		err = w.AddDataToPayload([]int{4, 5, 6})
@@ -968,8 +959,7 @@ func TestCreatePartitionEvent(t *testing.T) {
 	t.Run("create_partition_string", func(t *testing.T) {
 		w, err := newCreatePartitionEventWriter(schemapb.DataType_String)
 		assert.Nil(t, err)
-		w.SetStartTimestamp(tsoutil.ComposeTS(10, 0))
-		w.SetEndTimestamp(tsoutil.ComposeTS(100, 0))
+		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = w.AddDataToPayload("1234")
 		assert.Nil(t, err)
 		err = w.AddOneStringToPayload("567890")
@@ -1044,8 +1034,7 @@ func TestDropPartitionEvent(t *testing.T) {
 	t.Run("drop_partition_timestamp", func(t *testing.T) {
 		w, err := newDropPartitionEventWriter(schemapb.DataType_Int64)
 		assert.Nil(t, err)
-		w.SetStartTimestamp(tsoutil.ComposeTS(10, 0))
-		w.SetEndTimestamp(tsoutil.ComposeTS(100, 0))
+		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = w.AddDataToPayload([]int64{1, 2, 3})
 		assert.Nil(t, err)
 		err = w.AddDataToPayload([]int{4, 5, 6})
@@ -1091,8 +1080,7 @@ func TestDropPartitionEvent(t *testing.T) {
 	t.Run("drop_partition_string", func(t *testing.T) {
 		w, err := newDropPartitionEventWriter(schemapb.DataType_String)
 		assert.Nil(t, err)
-		w.SetStartTimestamp(tsoutil.ComposeTS(10, 0))
-		w.SetEndTimestamp(tsoutil.ComposeTS(100, 0))
+		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 		err = w.AddDataToPayload("1234")
 		assert.Nil(t, err)
 		err = w.AddOneStringToPayload("567890")
@@ -1302,8 +1290,7 @@ func TestEventReaderError(t *testing.T) {
 func TestEventClose(t *testing.T) {
 	w, err := newInsertEventWriter(schemapb.DataType_String)
 	assert.Nil(t, err)
-	w.SetStartTimestamp(tsoutil.ComposeTS(10, 0))
-	w.SetEndTimestamp(tsoutil.ComposeTS(100, 0))
+	w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 	err = w.AddDataToPayload("1234")
 	assert.Nil(t, err)
 	err = w.Finish()
@@ -1324,8 +1311,8 @@ func TestEventClose(t *testing.T) {
 	err = r.Close()
 	assert.Nil(t, err)
 
-	_, err = r.readHeader()
+	err = r.readHeader()
 	assert.NotNil(t, err)
-	_, err = r.readData()
+	err = r.readData()
 	assert.NotNil(t, err)
 }

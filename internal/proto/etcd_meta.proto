@@ -18,12 +18,6 @@ message ProxyMeta {
   repeated string result_channelIDs = 3;
 }
 
-message PartitionInfo {
-  string partition_name = 1;
-  int64 partitionID = 2;
-  repeated int64 segmentIDs = 3;
-}
-
 message IndexInfo {
   string index_name = 1;
   int64 indexID = 2;
@@ -40,17 +34,20 @@ message CollectionInfo {
   schema.CollectionSchema schema = 2;
   uint64 create_time = 3;
   repeated int64 partitionIDs = 4;
-  repeated FieldIndexInfo field_indexes = 5;
-  repeated string virtual_channel_names = 6;
-  repeated string physical_channel_names = 7;
+  repeated string partitionNames = 5;
+  repeated FieldIndexInfo field_indexes = 6;
+  repeated string virtual_channel_names = 7;
+  repeated string physical_channel_names = 8;
 }
 
 message SegmentIndexInfo {
-  int64 segmentID = 1;
-  int64 fieldID = 2;
-  int64 indexID = 3;
-  int64 buildID = 4;
-  bool enable_index = 5;
+  int64 collectionID = 1;
+  int64 partitionID = 2;
+  int64 segmentID = 3;
+  int64 fieldID = 4;
+  int64 indexID = 5;
+  int64 buildID = 6;
+  bool enable_index = 7;
 }
 
 message CollectionMeta {
@@ -60,31 +57,4 @@ message CollectionMeta {
   repeated int64 segmentIDs=4;
   repeated string partition_tags=5;
   repeated int64 partitionIDs=6;
-}
-
-message FieldBinlogFiles {
-  int64 fieldID = 1;
-  repeated string binlog_files = 2;
-}
-
-message SegmentMeta {
-  int64 segmentID=1;
-  int64 collectionID =2;
-  string partition_tag=3;
-  int32 channel_start=4;
-  int32 channel_end=5;
-  uint64 open_time=6;
-  uint64 close_time=7;
-  int64 num_rows=8;
-  int64 mem_size=9;
-  repeated FieldBinlogFiles binlog_file_paths = 10;
-}
-
-message FieldIndexMeta {
-  int64 segmentID = 1;
-  int64 fieldID = 2;
-  int64 indexID = 3;
-  repeated common.KeyValuePair index_params = 4;
-  common.IndexState state = 5;
-  repeated string index_file_paths = 6;
 }

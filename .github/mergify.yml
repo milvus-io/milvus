@@ -13,7 +13,7 @@ pull_request_rules:
   - name: Test passed for tests changed
     conditions:
       - base=master
-      - -files~=^(?!tests).+
+      - -files~=^(?!tests\/python_test).+
       - "status-success=continuous-integration/jenkins/pr-merge"
     actions:
       label:
@@ -23,7 +23,8 @@ pull_request_rules:
   - name: Test passed for tests20 changed
     conditions:
       - base=master
-      - -files~=^(?!tests20).+
+      - -files~=^(?!tests20\/python_client).+
+      - "status-success=continuous-integration/jenkins/pr-merge"
     actions:
       label:
         add:
@@ -84,14 +85,3 @@ pull_request_rules:
         remove:
           - ci-passed
 
-# ONLY for recovery2 branch
-  - name: Test passed for code changed
-    conditions:
-      - base=recovery2
-      - "status-success=Code Checker AMD64 Ubuntu 18.04"
-      - "status-success=Build and test AMD64 Ubuntu 18.04"
-      - "status-success=continuous-integration/jenkins/pr-merge"
-    actions:
-      label:
-        add:
-          - ci-passed

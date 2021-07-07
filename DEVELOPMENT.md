@@ -2,6 +2,27 @@
 
 This document will help to setup your development environment and running tests. If you encounter a problem, please file an issue.
 
+Table of contents
+=================
+* [Building Milvus with Docker](#building-milvus-with-docker)
+* [Building Milvus on a local OS/shell environment](#building-milvus-on-a-local-osshell-environment)
+  * [Hardware Requirements](#hardware-requirements)
+  * [Installing Required Software](#installing-required-software)
+     * [Dependencies](#dependencies)
+     * [CMake](#cmake)
+     * [Go](#go)
+     * [Docker &amp; Docker Compose](#docker--docker-compose)
+  * [Building Milvus](#building-milvus)
+* [A Quick Start for Testing Milvus](#a-quick-start-for-testing-milvus)
+  * [Presubmission Verification](#presubmission-verification)
+  * [Unit Tests](#unit-tests)
+  * [E2E Tests](#e2e-tests)
+
+
+## Building Milvus with Docker
+
+Official releases are built using Docker containers. To build Milvus using Docker please follow [these instructions](https://github.com/milvus-io/milvus/blob/master/build/README.md).
+
 ## Building Milvus on a local OS/shell environment
 
 The details below outline the hardware and software requirements for building on Linux.
@@ -89,12 +110,6 @@ make all
 
 If this command succeed, you will now have an executable at `bin/milvus` off of your Milvus project directory.
 
-
-## Building Milvus with Docker
-
-Official releases are built using Docker containers. To build Milvus using Docker please follow [these instructions](https://github.com/milvus-io/milvus/blob/master/build/README.md).
-
-
 ## A Quick Start for Testing Milvus
 
 ### Presubmission Verification
@@ -136,7 +151,7 @@ To run E2E tests, use these command:
 ```shell
 cd tests20/python_client
 pip install -r requirements.txt
-pytest .
+pytest --tags=L0 --workers 4
 ```
 
 ## GitHub Flow

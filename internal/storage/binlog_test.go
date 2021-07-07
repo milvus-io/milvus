@@ -35,8 +35,7 @@ func TestInsertBinlog(t *testing.T) {
 	assert.NotNil(t, err)
 	err = e1.AddDataToPayload([]int64{4, 5, 6})
 	assert.Nil(t, err)
-	e1.SetStartTimestamp(100)
-	e1.SetEndTimestamp(200)
+	e1.SetEventTimestamp(100, 200)
 
 	e2, err := w.NextInsertEventWriter()
 	assert.Nil(t, err)
@@ -46,11 +45,9 @@ func TestInsertBinlog(t *testing.T) {
 	assert.NotNil(t, err)
 	err = e2.AddDataToPayload([]int64{10, 11, 12})
 	assert.Nil(t, err)
-	e2.SetStartTimestamp(300)
-	e2.SetEndTimestamp(400)
+	e2.SetEventTimestamp(300, 400)
 
-	w.SetStartTimeStamp(1000)
-	w.SetEndTimeStamp(2000)
+	w.SetEventTimeStamp(1000, 2000)
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -294,8 +291,7 @@ func TestDeleteBinlog(t *testing.T) {
 	assert.NotNil(t, err)
 	err = e1.AddDataToPayload([]int64{4, 5, 6})
 	assert.Nil(t, err)
-	e1.SetStartTimestamp(100)
-	e1.SetEndTimestamp(200)
+	e1.SetEventTimestamp(100, 200)
 
 	e2, err := w.NextDeleteEventWriter()
 	assert.Nil(t, err)
@@ -305,11 +301,9 @@ func TestDeleteBinlog(t *testing.T) {
 	assert.NotNil(t, err)
 	err = e2.AddDataToPayload([]int64{10, 11, 12})
 	assert.Nil(t, err)
-	e2.SetStartTimestamp(300)
-	e2.SetEndTimestamp(400)
+	e2.SetEventTimestamp(300, 400)
 
-	w.SetStartTimeStamp(1000)
-	w.SetEndTimeStamp(2000)
+	w.SetEventTimeStamp(1000, 2000)
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -553,8 +547,7 @@ func TestDDLBinlog1(t *testing.T) {
 	assert.NotNil(t, err)
 	err = e1.AddDataToPayload([]int64{4, 5, 6})
 	assert.Nil(t, err)
-	e1.SetStartTimestamp(100)
-	e1.SetEndTimestamp(200)
+	e1.SetEventTimestamp(100, 200)
 
 	e2, err := w.NextDropCollectionEventWriter()
 	assert.Nil(t, err)
@@ -564,11 +557,9 @@ func TestDDLBinlog1(t *testing.T) {
 	assert.NotNil(t, err)
 	err = e2.AddDataToPayload([]int64{10, 11, 12})
 	assert.Nil(t, err)
-	e2.SetStartTimestamp(300)
-	e2.SetEndTimestamp(400)
+	e2.SetEventTimestamp(300, 400)
 
-	w.SetStartTimeStamp(1000)
-	w.SetEndTimeStamp(2000)
+	w.SetEventTimeStamp(1000, 2000)
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -812,8 +803,7 @@ func TestDDLBinlog2(t *testing.T) {
 	assert.NotNil(t, err)
 	err = e1.AddDataToPayload([]int64{4, 5, 6})
 	assert.Nil(t, err)
-	e1.SetStartTimestamp(100)
-	e1.SetEndTimestamp(200)
+	e1.SetEventTimestamp(100, 200)
 
 	e2, err := w.NextDropPartitionEventWriter()
 	assert.Nil(t, err)
@@ -823,11 +813,9 @@ func TestDDLBinlog2(t *testing.T) {
 	assert.NotNil(t, err)
 	err = e2.AddDataToPayload([]int64{10, 11, 12})
 	assert.Nil(t, err)
-	e2.SetStartTimestamp(300)
-	e2.SetEndTimestamp(400)
+	e2.SetEventTimestamp(300, 400)
 
-	w.SetStartTimeStamp(1000)
-	w.SetEndTimeStamp(2000)
+	w.SetEventTimeStamp(1000, 2000)
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -1090,8 +1078,7 @@ func TestNewBinlogReaderError(t *testing.T) {
 
 	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
 
-	w.SetStartTimeStamp(1000)
-	w.SetEndTimeStamp(2000)
+	w.SetEventTimeStamp(1000, 2000)
 
 	e1, err := w.NextInsertEventWriter()
 	assert.Nil(t, err)
@@ -1101,8 +1088,7 @@ func TestNewBinlogReaderError(t *testing.T) {
 	assert.NotNil(t, err)
 	err = e1.AddDataToPayload([]int64{4, 5, 6})
 	assert.Nil(t, err)
-	e1.SetStartTimestamp(100)
-	e1.SetEndTimestamp(200)
+	e1.SetEventTimestamp(100, 200)
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
@@ -1132,13 +1118,13 @@ func TestNewBinlogWriterTsError(t *testing.T) {
 	err = w.Close()
 	assert.NotNil(t, err)
 
-	w.SetStartTimeStamp(1000)
+	w.SetEventTimeStamp(1000, 0)
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
 	err = w.Close()
 	assert.NotNil(t, err)
 
-	w.SetEndTimeStamp(2000)
+	w.SetEventTimeStamp(1000, 2000)
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
 	err = w.Close()
@@ -1146,7 +1132,6 @@ func TestNewBinlogWriterTsError(t *testing.T) {
 
 	_, err = w.GetBuffer()
 	assert.Nil(t, err)
-
 }
 
 func TestInsertBinlogWriterCloseError(t *testing.T) {
@@ -1155,17 +1140,14 @@ func TestInsertBinlogWriterCloseError(t *testing.T) {
 	assert.Nil(t, err)
 	err = e1.AddDataToPayload([]int64{1, 2, 3})
 	assert.Nil(t, err)
-	e1.SetStartTimestamp(100)
-	e1.SetEndTimestamp(200)
-	insertWriter.SetStartTimeStamp(1000)
-	insertWriter.SetEndTimeStamp(2000)
+	e1.SetEventTimestamp(100, 200)
+	insertWriter.SetEventTimeStamp(1000, 2000)
 	err = insertWriter.Close()
 	assert.Nil(t, err)
 	assert.NotNil(t, insertWriter.buffer)
 	insertEventWriter, err := insertWriter.NextInsertEventWriter()
 	assert.Nil(t, insertEventWriter)
 	assert.NotNil(t, err)
-
 }
 
 func TestDeleteBinlogWriteCloseError(t *testing.T) {
@@ -1174,10 +1156,8 @@ func TestDeleteBinlogWriteCloseError(t *testing.T) {
 	assert.Nil(t, err)
 	err = e1.AddDataToPayload([]int64{1, 2, 3})
 	assert.Nil(t, err)
-	e1.SetStartTimestamp(100)
-	e1.SetEndTimestamp(200)
-	deleteWriter.SetStartTimeStamp(1000)
-	deleteWriter.SetEndTimeStamp(2000)
+	e1.SetEventTimestamp(100, 200)
+	deleteWriter.SetEventTimeStamp(1000, 2000)
 	err = deleteWriter.Close()
 	assert.Nil(t, err)
 	assert.NotNil(t, deleteWriter.buffer)
@@ -1192,11 +1172,9 @@ func TestDDBinlogWriteCloseError(t *testing.T) {
 	assert.Nil(t, err)
 	err = e1.AddDataToPayload([]int64{1, 2, 3})
 	assert.Nil(t, err)
-	e1.SetStartTimestamp(100)
-	e1.SetEndTimestamp(200)
+	e1.SetEventTimestamp(100, 200)
 
-	ddBinlogWriter.SetStartTimeStamp(1000)
-	ddBinlogWriter.SetEndTimeStamp(2000)
+	ddBinlogWriter.SetEventTimeStamp(1000, 2000)
 	err = ddBinlogWriter.Close()
 	assert.Nil(t, err)
 	assert.NotNil(t, ddBinlogWriter.buffer)
@@ -1216,7 +1194,6 @@ func TestDDBinlogWriteCloseError(t *testing.T) {
 	dropPartitionEventWriter, err := ddBinlogWriter.NextDropPartitionEventWriter()
 	assert.Nil(t, dropPartitionEventWriter)
 	assert.NotNil(t, err)
-
 }
 
 type testEvent struct {
@@ -1276,8 +1253,7 @@ func TestWriterListError(t *testing.T) {
 	insertWriter := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
 	errorEvent := &testEvent{}
 	insertWriter.eventWriters = append(insertWriter.eventWriters, errorEvent)
-	insertWriter.SetStartTimeStamp(1000)
-	insertWriter.SetEndTimeStamp(2000)
+	insertWriter.SetEventTimeStamp(1000, 2000)
 	errorEvent.releasePayloadError = true
 	err := insertWriter.Close()
 	assert.NotNil(t, err)
@@ -1297,5 +1273,4 @@ func TestWriterListError(t *testing.T) {
 	errorEvent.finishError = true
 	err = insertWriter.Close()
 	assert.NotNil(t, err)
-
 }

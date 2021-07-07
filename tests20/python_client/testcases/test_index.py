@@ -345,7 +345,7 @@ class TestIndexAdvanced(TestcaseBase):
         """
         pass
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_index_recovery_after_restart(self):
         """
         target: test index still existed after server restart
@@ -354,7 +354,7 @@ class TestIndexAdvanced(TestcaseBase):
         """
         pass
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_index_building_after_restart(self):
         """
         target: index can still build if not finished before server restart

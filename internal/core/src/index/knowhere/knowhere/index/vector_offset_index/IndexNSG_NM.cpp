@@ -134,6 +134,12 @@ NSG_NM::BuildAll(const DatasetPtr& dataset_ptr, const Config& config) {
     preprocess_index->GenGraph(raw_data, k, knng, config);
 #endif
 
+    for (size_t i = 0; i < knng.size(); i++) {
+        while (!knng[i].empty() && knng[i].back() == -1) {
+            knng[i].erase(knng[i].end() - 1);
+        }
+    }
+
     impl::BuildParams b_params;
     b_params.candidate_pool_size = config[IndexParams::candidate];
     b_params.out_degree = config[IndexParams::out_degree];
