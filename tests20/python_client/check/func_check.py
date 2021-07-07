@@ -151,7 +151,7 @@ class ResponseChecker:
         """
         target: check the search results
         method: 1. check the query number
-                2. check the limit(topK)
+                2. check the limit(topK) and ids
                 3. check the distance
         expected: check the search is ok
         """
@@ -176,11 +176,14 @@ class ResponseChecker:
                 assert len(hits) == check_items["limit"]
                 assert len(hits.ids) == check_items["limit"]
             else:
-                for i in hits.ids:
-                    assert i in range(check_items["nb"])
-                log.info("search_results_check: limit (topK) "
-                         "searched for each query is correct")
-        log.info("search_results_check: search_results_check: checked the searching results")
+                ids_match = pc.list_contain_check(list(hits.ids),
+                                                  list(check_items["ids"]))
+                if ids_match:
+                    log.info("search_results_check: limit (topK) and "
+                             "ids searched for each query are correct")
+                else:
+                    log.error("search_results_check: ids searched not match")
+                    assert ids_match
         return True
 
     @staticmethod
