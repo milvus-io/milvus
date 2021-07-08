@@ -58,7 +58,7 @@ pipeline {
                                         if ("${MILVUS_CLIENT}" == "pymilvus") {
                                             sh """
                                             MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
-                                            timeout ${ci_timeout} \
+                                            timeout -v ${ci_timeout} \
                                             ./e2e-k8s.sh \
                                             --node-image registry.zilliz.com/kindest/node:v1.20.2 \
                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
@@ -67,7 +67,7 @@ pipeline {
                                         } else if ("${MILVUS_CLIENT}" == "pymilvus-orm") {
                                             sh """
                                             MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
-                                            timeout ${ci_timeout} \
+                                            timeout -v ${ci_timeout} \
                                             ./e2e-k8s.sh \
                                             --node-image registry.zilliz.com/kindest/node:v1.20.2 \
                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
