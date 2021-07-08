@@ -24,7 +24,6 @@ import (
 
 func TestHistorical_GlobalSealedSegments(t *testing.T) {
 	n := newQueryNodeMock()
-	assert.Equal(t, 0, len(n.historical.globalSealedSegments))
 
 	// init meta
 	segmentID := UniqueID(0)
@@ -36,7 +35,15 @@ func TestHistorical_GlobalSealedSegments(t *testing.T) {
 		PartitionID:  partitionID,
 	}
 
+	emptySegmentCheck := func() {
+		segmentIDs := n.historical.getGlobalSegmentIDsByCollectionID(collectionID)
+		assert.Equal(t, 0, len(segmentIDs))
+		segmentIDs = n.historical.getGlobalSegmentIDsByPartitionIds([]UniqueID{partitionID})
+		assert.Equal(t, 0, len(segmentIDs))
+	}
+
 	// static test
+	emptySegmentCheck()
 	n.historical.addGlobalSegmentInfo(segmentID, segmentInfo)
 	segmentIDs := n.historical.getGlobalSegmentIDsByCollectionID(collectionID)
 	assert.Equal(t, 1, len(segmentIDs))
@@ -47,15 +54,15 @@ func TestHistorical_GlobalSealedSegments(t *testing.T) {
 	assert.Equal(t, segmentIDs[0], segmentID)
 
 	n.historical.removeGlobalSegmentInfo(segmentID)
-	assert.Equal(t, 0, len(n.historical.globalSealedSegments))
+	emptySegmentCheck()
 
 	n.historical.addGlobalSegmentInfo(segmentID, segmentInfo)
 	n.historical.removeGlobalSegmentIDsByCollectionID(collectionID)
-	assert.Equal(t, 0, len(n.historical.globalSealedSegments))
+	emptySegmentCheck()
 
 	n.historical.addGlobalSegmentInfo(segmentID, segmentInfo)
 	n.historical.removeGlobalSegmentIDsByPartitionIds([]UniqueID{partitionID})
-	assert.Equal(t, 0, len(n.historical.globalSealedSegments))
+	emptySegmentCheck()
 
 	// watch test
 	go n.historical.watchGlobalSegmentMeta()
@@ -77,5 +84,5 @@ func TestHistorical_GlobalSealedSegments(t *testing.T) {
 	err = n.etcdKV.Remove(segmentKey)
 	assert.NoError(t, err)
 	time.Sleep(100 * time.Millisecond) // for etcd latency
-	assert.Equal(t, 0, len(n.historical.globalSealedSegments))
+	emptySegmentCheck()
 }
