@@ -52,3 +52,9 @@ jobs:
           CHECK_BUILDER: "1"
         run: |
           ./build/builder.sh /bin/bash -c "make check-proto-product && make unittest"
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./coverage.txt
+          name: ubuntu-${{ matrix.ubuntu }}-unittests

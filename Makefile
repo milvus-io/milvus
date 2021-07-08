@@ -112,7 +112,8 @@ unittest: test-cpp test-go
 test-go:build-cpp
 	@echo "Running go unittests..."
 	@echo "disable go unittest for now, enable it later"
-	@(env bash $(PWD)/scripts/run_go_unittest.sh)
+	@(env bash $(PWD)/scripts/run_go_codecov.sh)
+# 	@(env bash $(PWD)/scripts/run_go_unittest.sh)
 
 test-cpp: build-cpp-with-unittest
 	@echo "Running cpp unittests..."
