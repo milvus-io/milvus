@@ -27,6 +27,7 @@ for UNITTEST_DIR in "${UNITTEST_DIRS[@]}"; do
     exit 1
   fi
 
+  echo "Running all unittest ..."
   ${UNITTEST_DIR}/all_tests
   if [ $? -ne 0 ]; then
       echo ${UNITTEST_DIR}/all_tests "run failed"
@@ -46,6 +47,7 @@ done
 
 # run cwrapper unittest
 if [ -f ${CWRAPPER_UNITTEST} ];then
+  echo "Running cwrapper unittest ..."
   ${CWRAPPER_UNITTEST}
   if [ $? -ne 0 ]; then
       echo ${CWRAPPER_UNITTEST} " run failed"
