@@ -15,22 +15,36 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strconv"
+	"sync"
 
+	"github.com/coreos/etcd/mvcc/mvccpb"
+	"github.com/golang/protobuf/proto"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 )
 
+const (
+	segmentMetaPrefix = "queryCoord-segmentMeta"
+)
+
 type historical struct {
+	ctx context.Context
+
 	replica      ReplicaInterface
 	loader       *segmentLoader
 	statsService *statsService
 
-	//TODO
-	globalSealedSegments []UniqueID
+	mu                   sync.Mutex // guards globalSealedSegments
+	globalSealedSegments map[UniqueID]*querypb.SegmentInfo
+
+	etcdKV *etcdkv.EtcdKV
 }
 
 func newHistorical(ctx context.Context,
@@ -44,14 +58,18 @@ func newHistorical(ctx context.Context,
 	ss := newStatsService(ctx, replica, loader.indexLoader.fieldStatsChan, factory)
 
 	return &historical{
-		replica:      replica,
-		loader:       loader,
-		statsService: ss,
+		ctx:                  ctx,
+		replica:              replica,
+		loader:               loader,
+		statsService:         ss,
+		globalSealedSegments: make(map[UniqueID]*querypb.SegmentInfo),
+		etcdKV:               etcdKV,
 	}
 }
 
 func (h *historical) start() {
-	h.statsService.start()
+	go h.statsService.start()
+	go h.watchGlobalSegmentMeta()
 }
 
 func (h *historical) close() {
@@ -59,6 +77,105 @@ func (h *historical) close() {
 
 	// free collectionReplica
 	h.replica.freeAll()
+}
+
+func (h *historical) watchGlobalSegmentMeta() {
+	log.Debug("query node watchGlobalSegmentMeta start")
+	watchChan := h.etcdKV.WatchWithPrefix(segmentMetaPrefix)
+
+	for {
+		select {
+		case <-h.ctx.Done():
+			log.Debug("query node watchGlobalSegmentMeta close")
+			return
+		case resp := <-watchChan:
+			for _, event := range resp.Events {
+				segmentID, err := strconv.ParseInt(filepath.Base(string(event.Kv.Key)), 10, 64)
+				if err != nil {
+					log.Error("watchGlobalSegmentMeta failed", zap.Any("error", err.Error()))
+					continue
+				}
+				switch event.Type {
+				case mvccpb.PUT:
+					log.Debug("globalSealedSegments add segment",
+						zap.Any("segmentID", segmentID),
+					)
+					segmentInfo := &querypb.SegmentInfo{}
+					err = proto.UnmarshalText(string(event.Kv.Value), segmentInfo)
+					if err != nil {
+						log.Error("watchGlobalSegmentMeta failed", zap.Any("error", err.Error()))
+						continue
+					}
+					h.addGlobalSegmentInfo(segmentID, segmentInfo)
+				case mvccpb.DELETE:
+					log.Debug("globalSealedSegments delete segment",
+						zap.Any("segmentID", segmentID),
+					)
+					h.removeGlobalSegmentInfo(segmentID)
+				}
+			}
+		}
+	}
+}
+
+func (h *historical) addGlobalSegmentInfo(segmentID UniqueID, segmentInfo *querypb.SegmentInfo) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.globalSealedSegments[segmentID] = segmentInfo
+}
+
+func (h *historical) removeGlobalSegmentInfo(segmentID UniqueID) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.globalSealedSegments, segmentID)
+}
+
+func (h *historical) getGlobalSegmentIDsByCollectionID(collectionID UniqueID) []UniqueID {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	resIDs := make([]UniqueID, 0)
+	for _, v := range h.globalSealedSegments {
+		if v.CollectionID == collectionID {
+			resIDs = append(resIDs, v.SegmentID)
+		}
+	}
+	return resIDs
+}
+
+func (h *historical) getGlobalSegmentIDsByPartitionIds(partitionIDs []UniqueID) []UniqueID {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	resIDs := make([]UniqueID, 0)
+	for _, v := range h.globalSealedSegments {
+		for _, partitionID := range partitionIDs {
+			if v.PartitionID == partitionID {
+				resIDs = append(resIDs, v.SegmentID)
+			}
+		}
+	}
+	return resIDs
+}
+
+func (h *historical) removeGlobalSegmentIDsByCollectionID(collectionID UniqueID) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, v := range h.globalSealedSegments {
+		if v.CollectionID == collectionID {
+			delete(h.globalSealedSegments, v.SegmentID)
+		}
+	}
+}
+
+func (h *historical) removeGlobalSegmentIDsByPartitionIds(partitionIDs []UniqueID) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, v := range h.globalSealedSegments {
+		for _, partitionID := range partitionIDs {
+			if v.PartitionID == partitionID {
+				delete(h.globalSealedSegments, v.SegmentID)
+			}
+		}
+	}
 }
 
 func (h *historical) search(searchReqs []*searchRequest,
