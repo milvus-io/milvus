@@ -23,7 +23,7 @@ jobs:
           # Required
           token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
           repos: 'milvus-io/milvus,bootcamp,community,docs,milvus-helm,milvus-sdk-go,milvus-sdk-java,milvus-sdk-node,milvus.io,pymilvus,pymilvus-orm'
-          target: 'milvus-io/milvus'
+          target: 'milvus-io/milvus/README.md'
           # Optional
           isAscend: True
           width: '30px'
@@ -34,7 +34,7 @@ jobs:
         with:
           token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
           repos: 'milvus-io/milvus,bootcamp,community,docs,milvus-helm,milvus-sdk-go,milvus-sdk-java,milvus-sdk-node,milvus.io,pymilvus,pymilvus-orm'
-          target: 'milvus-io/milvus'
+          target: 'milvus-io/milvus/README_CN.md'
           # Optional
           isAscend: True
           width: '30px'
