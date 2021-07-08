@@ -293,12 +293,6 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 		kv:          i.kv,
 	}
 
-	if i.nodeClients == nil || i.nodeClients.Len() <= 0 {
-		ret.Status.Reason = "IndexBuilding Service not available"
-		return ret, nil
-	}
-	t.nodeClients = i.nodeClients
-
 	var cancel func()
 	t.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
