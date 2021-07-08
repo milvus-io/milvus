@@ -60,7 +60,8 @@ FPGAIVFPQ::CopyIndexToFpga() {
     LOG_ENGINE_DEBUG_ << " copy index to fpga end";
 }
 void
-FPGAIVFPQ::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config) {
+FPGAIVFPQ::QueryImpl(int64_t n, const float* data, int64_t k, float* distances, int64_t* labels, const Config& config,
+                     faiss::ConcurrentBitsetPtr blacklist) {
     try {
         LOG_ENGINE_DEBUG_ << " run fpga search QueryImpl";
         auto params = GenParams(config);
