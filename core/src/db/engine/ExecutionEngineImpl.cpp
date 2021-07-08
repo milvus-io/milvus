@@ -624,7 +624,6 @@ ExecutionEngineImpl::CopyToFpga() {
         std::shared_ptr<knowhere::FPGAIVFPQ> indexFpga = std::make_shared<knowhere::FPGAIVFPQ>(ivfpq->index_);
         indexFpga->SetIndexSize(indexsize);
         indexFpga->CopyIndexToFpga();
-        indexFpga->SetBlacklist(index_->GetBlacklist());
         indexFpga->SetUids(index_->GetUids());
 
         index_ = indexFpga;
