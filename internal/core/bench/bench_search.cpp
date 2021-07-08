@@ -28,7 +28,6 @@ const auto schema = []() {
     return schema;
 }();
 
-
 const auto plan = [] {
     std::string dsl = R"({
         "bool": {
@@ -61,11 +60,11 @@ auto ph_group = [] {
 static void
 Search_SmallIndex(benchmark::State& state) {
     // schema->AddDebugField("age", DataType::FLOAT);
-    
+
     static int64_t N = 1024 * 32;
     const auto dataset_ = [] {
-      auto dataset_ = DataGen(schema, N);
-      return dataset_;
+        auto dataset_ = DataGen(schema, N);
+        return dataset_;
     }();
 
     auto is_small_index = state.range(0);
@@ -96,8 +95,8 @@ Search_Sealed(benchmark::State& state) {
     auto segment = CreateSealedSegment(schema);
     static int64_t N = 1024 * 1024;
     const auto dataset_ = [] {
-      auto dataset_ = DataGen(schema, N);
-      return dataset_;
+        auto dataset_ = DataGen(schema, N);
+        return dataset_;
     }();
     SealedLoader(dataset_, *segment);
     auto choice = state.range(0);

@@ -44,8 +44,8 @@ EasyAssertInfo(bool value,
         if (!extra_info.empty()) {
             info += " => " + std::string(extra_info);
         }
-
-        throw SegcoreError(error_code, info + "\n" + EasyStackTrace());
+        std::cout << info << std::endl;
+        throw SegcoreError(error_code, std::string(extra_info));
     }
 }
 
