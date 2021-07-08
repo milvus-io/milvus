@@ -77,7 +77,6 @@ type IndexAddTask struct {
 	buildQueue        TaskQueue
 	kv                kv.BaseKV
 	builderClient     types.IndexNode
-	nodeClients       *PriorityQueue
 	buildClientNodeID UniqueID
 }
 
