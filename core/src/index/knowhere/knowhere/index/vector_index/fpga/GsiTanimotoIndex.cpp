@@ -28,7 +28,7 @@ GsiTanimotoIndex::CopyIndexToFpga( uint32_t row_count ,const std::string& locati
 }
 
 DatasetPtr
-GsiTanimotoIndex::Query(const DatasetPtr &dataset, const Config &config) {
+GsiTanimotoIndex::Query(const DatasetPtr &dataset, const Config &config , faiss::ConcurrentBitsetPtr blacklist) {
 
     auto apu = Fpga::ApuInst::getInstance();
 

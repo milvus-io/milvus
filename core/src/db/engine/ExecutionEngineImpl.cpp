@@ -646,7 +646,7 @@ ExecutionEngineImpl::CopyToApu(uint32_t row_count) {
 #ifdef MILVUS_APU_VERSION
 
     auto cache_index_ =
-    std::static_pointer_cast<knowhere::VecIndex>(cache::FpgaCacheMgr::GetInstance()->GetIndex(location_));
+    std::static_pointer_cast<knowhere::VecIndex>(cache::FpgaCacheMgr::GetInstance()->GetItem(location_));
     bool already_in_cache = (cache_index_ != nullptr);
     //auto apu = Fpga::ApuInst::getInstance();
     //bool isLoadNeeded =apu->isLoadNeeded(location_); //(index_ == nullptr);

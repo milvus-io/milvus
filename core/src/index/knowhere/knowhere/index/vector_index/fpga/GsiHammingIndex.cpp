@@ -29,7 +29,7 @@ GsiHammingIndex::CopyIndexToFpga( uint32_t row_count ,const std::string& locatio
 }
 
 DatasetPtr
-GsiHammingIndex::Query(const DatasetPtr &dataset, const Config &config) {
+GsiHammingIndex::Query(const DatasetPtr &dataset, const Config &config , faiss::ConcurrentBitsetPtr blacklist) {
 
     auto apu = Fpga::ApuInst::getInstance();
 
