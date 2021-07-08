@@ -340,8 +340,8 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 			log.Debug("Flush segments", zap.Int64s("segmentIDs", segments))
 			segmentInfos := make([]*datapb.SegmentInfo, 0, len(segments))
 			for _, id := range segments {
-				sInfo, err := s.meta.GetSegment(id)
-				if err != nil {
+				sInfo := s.meta.GetSegment(id)
+				if sInfo == nil {
 					log.Error("get segment from meta error", zap.Int64("id", id),
 						zap.Error(err))
 					continue
@@ -424,8 +424,8 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 			log.Debug("flush loop shutdown")
 			return
 		case segmentID := <-s.flushCh:
-			segment, err := s.meta.GetSegment(segmentID)
-			if err != nil {
+			segment := s.meta.GetSegment(segmentID)
+			if segment == nil {
 				log.Warn("failed to get flused segment", zap.Int64("id", segmentID))
 				continue
 			}
@@ -441,7 +441,7 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 				continue
 			}
 			// set segment to SegmentState_Flushed
-			if err = s.meta.FlushSegment(segmentID); err != nil {
+			if err = s.meta.SetState(segmentID, commonpb.SegmentState_Flushed); err != nil {
 				log.Error("flush segment complete failed", zap.Error(err))
 				continue
 			}
@@ -546,7 +546,8 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		Schema:     resp.Schema,
 		Partitions: presp.PartitionIDs,
 	}
-	return s.meta.AddCollection(collInfo)
+	s.meta.AddCollection(collInfo)
+	return nil
 }
 
 func (s *Server) prepareBinlog(req *datapb.SaveBinlogPathsRequest) (map[string]string, error) {

@@ -5,6 +5,10 @@
 String cron_timezone = "TZ=Asia/Shanghai"
 String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
 
+int timeout_minutes = 90
+int delay_minutes = 5
+int ci_timeout = (timeout_minutes - delay_minutes) * 60
+
 pipeline {
     agent none
     triggers {
@@ -13,7 +17,7 @@ pipeline {
     }
     options {
         timestamps()
-        timeout(time: 90, unit: 'MINUTES')
+        timeout(time: timeout_minutes, unit: 'MINUTES')
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         // parallelsAlwaysFailFast()
     }
@@ -62,6 +66,7 @@ pipeline {
                                         if ("${MILVUS_CLIENT}" == "pymilvus") {
                                             sh """
                                             MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
+                                            timeout -v ${ci_timeout} \
                                             ./e2e-k8s.sh \
                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
                                             --node-image registry.zilliz.com/kindest/node:v1.20.2
@@ -69,6 +74,7 @@ pipeline {
                                         } else if ("${MILVUS_CLIENT}" == "pymilvus-orm") {
                                             sh """
                                             MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
+                                            timeout -v ${ci_timeout} \
                                             ./e2e-k8s.sh \
                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
                                             --node-image registry.zilliz.com/kindest/node:v1.20.2 \

@@ -39,8 +39,7 @@ func TestPrintBinlogFilesInt64(t *testing.T) {
 	assert.NotNil(t, err)
 	err = e1.AddDataToPayload([]int64{4, 5, 6})
 	assert.Nil(t, err)
-	e1.SetStartTimestamp(tsoutil.ComposeTS(curTS+10*60*1000, 0))
-	e1.SetEndTimestamp(tsoutil.ComposeTS(curTS+20*60*1000, 0))
+	e1.SetEventTimestamp(tsoutil.ComposeTS(curTS+10*60*1000, 0), tsoutil.ComposeTS(curTS+20*60*1000, 0))
 
 	e2, err := w.NextInsertEventWriter()
 	assert.Nil(t, err)
@@ -50,11 +49,9 @@ func TestPrintBinlogFilesInt64(t *testing.T) {
 	assert.NotNil(t, err)
 	err = e2.AddDataToPayload([]int64{10, 11, 12})
 	assert.Nil(t, err)
-	e2.SetStartTimestamp(tsoutil.ComposeTS(curTS+30*60*1000, 0))
-	e2.SetEndTimestamp(tsoutil.ComposeTS(curTS+40*60*1000, 0))
+	e2.SetEventTimestamp(tsoutil.ComposeTS(curTS+30*60*1000, 0), tsoutil.ComposeTS(curTS+40*60*1000, 0))
 
-	w.SetStartTimeStamp(tsoutil.ComposeTS(curTS, 0))
-	w.SetEndTimeStamp(tsoutil.ComposeTS(curTS+3600*1000, 0))
+	w.SetEventTimeStamp(tsoutil.ComposeTS(curTS, 0), tsoutil.ComposeTS(curTS+3600*1000, 0))
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)

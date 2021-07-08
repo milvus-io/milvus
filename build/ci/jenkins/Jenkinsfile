@@ -1,10 +1,14 @@
 #!/usr/bin/env groovy
 
+int timeout_minutes = 30
+int delay_minutes = 5
+int ci_timeout = (timeout_minutes - delay_minutes) * 60
+
 pipeline {
     agent none
     options {
         timestamps()
-        timeout(time: 30, unit: 'MINUTES')
+        timeout(time: timeout_minutes, unit: 'MINUTES')
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         // parallelsAlwaysFailFast()
 
@@ -54,6 +58,7 @@ pipeline {
                                         if ("${MILVUS_CLIENT}" == "pymilvus") {
                                             sh """
                                             MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
+                                            timeout -v ${ci_timeout} \
                                             ./e2e-k8s.sh \
                                             --node-image registry.zilliz.com/kindest/node:v1.20.2 \
                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
@@ -62,6 +67,7 @@ pipeline {
                                         } else if ("${MILVUS_CLIENT}" == "pymilvus-orm") {
                                             sh """
                                             MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
+                                            timeout -v ${ci_timeout} \
                                             ./e2e-k8s.sh \
                                             --node-image registry.zilliz.com/kindest/node:v1.20.2 \
                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \

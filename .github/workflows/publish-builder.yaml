@@ -16,15 +16,15 @@ on:
 
 jobs:
   publish-builder:
-    name: AMD64 Ubuntu ${{ matrix.ubuntu }}
+    name: AMD64 ${{ matrix.os }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        ubuntu: [18.04]
+        os: [ubuntu18.04, centos7]
     env:
-      UBUNTU: ${{ matrix.ubuntu }}
+      OS_NAME: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -34,12 +34,12 @@ jobs:
       - name: Docker Pull
         shell: bash
         run: |
-          docker-compose pull --ignore-pull-failures ubuntu
+          DATE_VERSION=latest docker-compose pull --ignore-pull-failures builder
       - name: Docker Build
         shell: bash
         run: |
-          DATE_VERSION=${{ steps.extracter.outputs.version }} docker-compose build ubuntu
-          DATE_VERSION=latest docker-compose build ubuntu
+          DATE_VERSION=latest docker-compose build builder
+          DATE_VERSION=${{ steps.extracter.outputs.version }} docker-compose build builder
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true
@@ -47,5 +47,5 @@ jobs:
         run: |
           docker login -u ${{ secrets.DOCKERHUB_USER }} \
                        -p ${{ secrets.DOCKERHUB_TOKEN }}
-          DATE_VERSION=${{ steps.extracter.outputs.version }} docker-compose push ubuntu
-          DATE_VERSION=latest docker-compose push ubuntu
+          DATE_VERSION=latest docker-compose push builder
+          DATE_VERSION=${{ steps.extracter.outputs.version }} docker-compose push builder

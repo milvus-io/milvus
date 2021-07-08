@@ -570,7 +570,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		err = w.AddDoubleToPayload([]float64{0.0})
 		assert.NotNil(t, err)
 	})
-	t.Run("TestAddStringAfterFinish", func(t *testing.T) {
+	t.Run("TestAddOneStringAfterFinish", func(t *testing.T) {
 		w, err := NewPayloadWriter(schemapb.DataType_String)
 		require.Nil(t, err)
 		require.NotNil(t, w)
@@ -819,7 +819,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		_, err = r.GetDoubleFromPayload()
 		assert.NotNil(t, err)
 	})
-	t.Run("TestGetStringError", func(t *testing.T) {
+	t.Run("TestGetOneStringError", func(t *testing.T) {
 		w, err := NewPayloadWriter(schemapb.DataType_Bool)
 		require.Nil(t, err)
 		require.NotNil(t, w)

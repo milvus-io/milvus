@@ -14,8 +14,7 @@ package storage
 import (
 	"bytes"
 	"encoding/binary"
-
-	"errors"
+	"fmt"
 
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
@@ -79,7 +78,7 @@ func (writer *baseBinlogWriter) GetBinlogType() BinlogType {
 // GetBuffer get binlog buffer. Return nil if binlog is not finished yet.
 func (writer *baseBinlogWriter) GetBuffer() ([]byte, error) {
 	if writer.buffer == nil {
-		return nil, errors.New("please close binlog before get buffer")
+		return nil, fmt.Errorf("please close binlog before get buffer")
 	}
 	return writer.buffer.Bytes(), nil
 }
@@ -89,22 +88,21 @@ func (writer *baseBinlogWriter) Close() error {
 	if writer.buffer != nil {
 		return nil
 	}
-	if writer.StartTimestamp == 0 {
-		return errors.New("hasn't set start time stamp")
-	}
-	if writer.EndTimestamp == 0 {
-		return errors.New("hasn't set end time stamp")
+	if writer.StartTimestamp == 0 || writer.EndTimestamp == 0 {
+		return fmt.Errorf("invalid start/end timestamp")
 	}
 
-	var offset int32
+	var offset int32 = 0
 	writer.buffer = new(bytes.Buffer)
 	if err := binary.Write(writer.buffer, binary.LittleEndian, int32(MagicNumber)); err != nil {
 		return err
 	}
+	offset += int32(binary.Size(MagicNumber))
 	if err := writer.descriptorEvent.Write(writer.buffer); err != nil {
 		return err
 	}
-	offset = writer.descriptorEvent.GetMemoryUsageInBytes() + int32(binary.Size(MagicNumber))
+	offset += writer.descriptorEvent.GetMemoryUsageInBytes()
+
 	writer.length = 0
 	for _, w := range writer.eventWriters {
 		w.SetOffset(offset)
@@ -137,7 +135,7 @@ type InsertBinlogWriter struct {
 
 func (writer *InsertBinlogWriter) NextInsertEventWriter() (*insertEventWriter, error) {
 	if writer.isClosed() {
-		return nil, errors.New("binlog has closed")
+		return nil, fmt.Errorf("binlog has closed")
 	}
 	event, err := newInsertEventWriter(writer.PayloadDataType)
 	if err != nil {
@@ -153,7 +151,7 @@ type DeleteBinlogWriter struct {
 
 func (writer *DeleteBinlogWriter) NextDeleteEventWriter() (*deleteEventWriter, error) {
 	if writer.isClosed() {
-		return nil, errors.New("binlog has closed")
+		return nil, fmt.Errorf("binlog has closed")
 	}
 	event, err := newDeleteEventWriter(writer.PayloadDataType)
 	if err != nil {
@@ -169,7 +167,7 @@ type DDLBinlogWriter struct {
 
 func (writer *DDLBinlogWriter) NextCreateCollectionEventWriter() (*createCollectionEventWriter, error) {
 	if writer.isClosed() {
-		return nil, errors.New("binlog has closed")
+		return nil, fmt.Errorf("binlog has closed")
 	}
 	event, err := newCreateCollectionEventWriter(writer.PayloadDataType)
 	if err != nil {
@@ -181,7 +179,7 @@ func (writer *DDLBinlogWriter) NextCreateCollectionEventWriter() (*createCollect
 
 func (writer *DDLBinlogWriter) NextDropCollectionEventWriter() (*dropCollectionEventWriter, error) {
 	if writer.isClosed() {
-		return nil, errors.New("binlog has closed")
+		return nil, fmt.Errorf("binlog has closed")
 	}
 	event, err := newDropCollectionEventWriter(writer.PayloadDataType)
 	if err != nil {
@@ -193,7 +191,7 @@ func (writer *DDLBinlogWriter) NextDropCollectionEventWriter() (*dropCollectionE
 
 func (writer *DDLBinlogWriter) NextCreatePartitionEventWriter() (*createPartitionEventWriter, error) {
 	if writer.isClosed() {
-		return nil, errors.New("binlog has closed")
+		return nil, fmt.Errorf("binlog has closed")
 	}
 	event, err := newCreatePartitionEventWriter(writer.PayloadDataType)
 	if err != nil {
@@ -205,7 +203,7 @@ func (writer *DDLBinlogWriter) NextCreatePartitionEventWriter() (*createPartitio
 
 func (writer *DDLBinlogWriter) NextDropPartitionEventWriter() (*dropPartitionEventWriter, error) {
 	if writer.isClosed() {
-		return nil, errors.New("binlog has closed")
+		return nil, fmt.Errorf("binlog has closed")
 	}
 	event, err := newDropPartitionEventWriter(writer.PayloadDataType)
 	if err != nil {
@@ -232,6 +230,7 @@ func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID
 		},
 	}
 }
+
 func NewDeleteBinlogWriter(dataType schemapb.DataType, collectionID int64) *DeleteBinlogWriter {
 	descriptorEvent := newDescriptorEvent()
 	descriptorEvent.PayloadDataType = dataType
@@ -246,6 +245,7 @@ func NewDeleteBinlogWriter(dataType schemapb.DataType, collectionID int64) *Dele
 		},
 	}
 }
+
 func NewDDLBinlogWriter(dataType schemapb.DataType, collectionID int64) *DDLBinlogWriter {
 	descriptorEvent := newDescriptorEvent()
 	descriptorEvent.PayloadDataType = dataType

@@ -29,7 +29,7 @@ class TestQueryBase(TestcaseBase):
         expected: verify query result
         """
         # create collection, insert default_nb, load collection
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         int_values = vectors[0][ct.default_int64_field_name].values.tolist()
         pos = 5
         term_expr = f'{ct.default_int64_field_name} in {int_values[:pos]}'
@@ -92,7 +92,7 @@ class TestQueryBase(TestcaseBase):
         method: query with expr None
         expected: raise exception
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         error = {ct.err_code: 0, ct.err_msg: "The type of expr must be string"}
         collection_w.query(None, check_task=CheckTasks.err_res, check_items=error)
 
@@ -104,7 +104,7 @@ class TestQueryBase(TestcaseBase):
         method: query with non-string expr, eg 1, [] ..
         expected: raise exception
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         error = {ct.err_code: 0, ct.err_msg: "The type of expr must be string"}
         collection_w.query(expr, check_task=CheckTasks.err_res, check_items=error)
 
@@ -116,7 +116,7 @@ class TestQueryBase(TestcaseBase):
         method: query with invalid string expr
         expected: raise exception
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         error = {ct.err_code: 1, ct.err_msg: "Invalid expression!"}
         collection_w.query(expr, check_task=CheckTasks.err_res, check_items=error)
 
@@ -127,7 +127,7 @@ class TestQueryBase(TestcaseBase):
         method: query with TermExpr
         expected: query result is correct
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         res = vectors[0].iloc[:2, :2].to_dict('records')
         collection_w.query(default_term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
@@ -139,7 +139,7 @@ class TestQueryBase(TestcaseBase):
         method: query by term expr with fake field
         expected: raise exception
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         term_expr = 'field in [1, 2]'
         error = {ct.err_code: 1, ct.err_msg: "fieldName(field) not found"}
         collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
@@ -152,7 +152,7 @@ class TestQueryBase(TestcaseBase):
         method: query on float field
         expected: raise exception
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         term_expr = f'{ct.default_float_field_name} in [1., 2.]'
         error = {ct.err_code: 1, ct.err_msg: "column is not int64"}
         collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
@@ -184,7 +184,7 @@ class TestQueryBase(TestcaseBase):
         method: query with wrong keyword term expr
         expected: raise exception
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         expr_1 = f'{ct.default_int64_field_name} inn [1, 2]'
         error_1 = {ct.err_code: 1, ct.err_msg: f'unexpected token Identifier("inn")'}
         collection_w.query(expr_1, check_task=CheckTasks.err_res, check_items=error_1)
@@ -208,7 +208,7 @@ class TestQueryBase(TestcaseBase):
         method: query with non-array term expr
         expected: raise exception
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         error = {ct.err_code: 1, ct.err_msg: "right operand of the InExpr must be array"}
         collection_w.query(expr, check_task=CheckTasks.err_res, check_items=error)
 
@@ -220,7 +220,7 @@ class TestQueryBase(TestcaseBase):
         expected: empty result
         """
         term_expr = f'{ct.default_int64_field_name} in []'
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         res, _ = collection_w.query(term_expr)
         assert len(res) == 0
 
@@ -232,7 +232,7 @@ class TestQueryBase(TestcaseBase):
         method: query with int field and float values
         expected: raise exception
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         int_values = [1., 2.]
         term_expr = f'{ct.default_int64_field_name} in {int_values}'
         error = {ct.err_code: 1, ct.err_msg: "type mismatch"}
@@ -246,7 +246,7 @@ class TestQueryBase(TestcaseBase):
         method: query with term expr that has int and float type value
         expected: raise exception
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         int_values = [1, 2.]
         term_expr = f'{ct.default_int64_field_name} in {int_values}'
         error = {ct.err_code: 1, ct.err_msg: "type mismatch"}
@@ -261,7 +261,7 @@ class TestQueryBase(TestcaseBase):
         method: query with non-constant array expr
         expected: raise exception
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         term_expr = f'{ct.default_int64_field_name} in [{constant}]'
         log.debug(term_expr)
         error = {ct.err_code: 1, ct.err_msg: "unsupported leaf node"}
@@ -274,7 +274,7 @@ class TestQueryBase(TestcaseBase):
         method: query with output field=None
         expected: return all fields
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         res, _ = collection_w.query(default_term_expr, output_fields=None)
         fields = [ct.default_int64_field_name, ct.default_float_field_name]
         assert set(res[0].keys()) == set(fields)
@@ -286,7 +286,7 @@ class TestQueryBase(TestcaseBase):
         method: query with output one field
         expected: return one field
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         res, _ = collection_w.query(default_term_expr, output_fields=[ct.default_int64_field_name])
         assert set(res[0].keys()) == set([ct.default_int64_field_name])
 
@@ -297,7 +297,7 @@ class TestQueryBase(TestcaseBase):
         method: query with output field=None
         expected: return all fields
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         fields = [ct.default_int64_field_name, ct.default_float_field_name]
         res, _ = collection_w.query(default_term_expr, output_fields=fields)
         assert set(res[0].keys()) == set(fields)
@@ -311,7 +311,7 @@ class TestQueryBase(TestcaseBase):
         method: specify vec field as output field
         expected: raise exception
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         fields = [[ct.default_float_vec_field_name], [ct.default_int64_field_name, ct.default_float_vec_field_name]]
         error = {ct.err_code: 1, ct.err_msg: "Query does not support vector field currently"}
         for output_fields in fields:
@@ -325,7 +325,7 @@ class TestQueryBase(TestcaseBase):
         method: specify int64 primary field as output field
         expected: return int64 field
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         res, _ = collection_w.query(default_term_expr, output_fields=[ct.default_int64_field_name])
         assert list(res[0].keys()) == [ct.default_int64_field_name]
 
@@ -338,7 +338,7 @@ class TestQueryBase(TestcaseBase):
         method: query with not existed output field
         expected: raise exception
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         error = {ct.err_code: 1, ct.err_msg: 'Field int not exist'}
         collection_w.query(default_term_expr, output_fields=output_fields, check_task=CheckTasks.err_res, check_items=error)
 
@@ -349,7 +349,7 @@ class TestQueryBase(TestcaseBase):
         method: query with empty output fields
         expected: return all fields
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         query_res, _ = collection_w.query(default_term_expr, output_fields=[])
         fields = [ct.default_int64_field_name, ct.default_float_field_name]
         assert list(query_res[0].keys()) == fields
@@ -363,7 +363,7 @@ class TestQueryBase(TestcaseBase):
         method: query with invalid field fields
         expected: raise exception
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         error = {ct.err_code: 0, ct.err_msg: f'Invalid query format. \'output_fields\' must be a list'}
         collection_w.query(default_term_expr, output_fields=output_fields, check_task=CheckTasks.err_res, check_items=error)
 
@@ -407,7 +407,7 @@ class TestQueryBase(TestcaseBase):
         method: query on default partition
         expected: verify query result
         """
-        collection_w, vectors, _, = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
         res = vectors[0].iloc[:2, :2].to_dict('records')
         collection_w.query(default_term_expr, partition_names=[ct.default_partition_name],
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
@@ -503,7 +503,7 @@ class TestQueryOperation(TestcaseBase):
         """
 
         # init a collection and insert data
-        collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True)[0:3]
 
         # query the first row of data
         check_vec = vectors[0].iloc[:, [0, 1]][0:1].to_dict('records')
@@ -520,7 +520,7 @@ class TestQueryOperation(TestcaseBase):
 
         # init a collection and insert data
         collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True,
-                                                                                 is_binary=True)
+                                                                                 is_binary=True)[0:3]
 
         # query the first row of data
         check_vec = vectors[0].iloc[:, [0, 1]][0:1].to_dict('records')
@@ -535,7 +535,7 @@ class TestQueryOperation(TestcaseBase):
         """
 
         # init a collection and insert data
-        collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True)[0:3]
 
         # data preparation
         int_values = vectors[0][ct.default_int64_field_name].values.tolist()
@@ -569,7 +569,7 @@ class TestQueryOperation(TestcaseBase):
         method: query with repeated array value
         expected: verify query result
         """
-        collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True)[0:3]
         int_values = [0, 0, 0, 0]
         term_expr = f'{ct.default_int64_field_name} in {int_values}'
         res, _ = collection_w.query(term_expr)
@@ -583,7 +583,7 @@ class TestQueryOperation(TestcaseBase):
         method: query after index
         expected: query result is correct
         """
-        collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True)
+        collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True)[0:3]
 
         default_field_name = ct.default_float_vec_field_name
         default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
@@ -607,14 +607,15 @@ class TestQueryOperation(TestcaseBase):
 
         limit = 1000
         nb_old = 500
-        collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, True, nb_old)
+        collection_w, vectors, binary_raw_vectors, insert_ids = \
+            self.init_collection_general(prefix, True, nb_old)
 
         # 2. search for original data after load
         vectors_s = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
         collection_w.search(vectors_s[:ct.default_nq], ct.default_float_vec_field_name,
                             ct.default_search_params, limit, "int64 >= 0",
                             check_task=CheckTasks.check_search_results,
-                            check_items={"nq": ct.default_nq, "limit": nb_old, "nb": nb_old})
+                            check_items={"nq": ct.default_nq, "limit": nb_old, "ids": insert_ids})
 
         # check number of entities and that method calls the flush interface
         assert collection_w.num_entities == nb_old
