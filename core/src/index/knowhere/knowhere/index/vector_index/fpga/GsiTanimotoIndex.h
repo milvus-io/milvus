@@ -23,7 +23,7 @@ namespace knowhere {
 
         void CopyIndexToFpga(uint32_t row_count , const std::string& location ) override ;
 
-        DatasetPtr Query(const DatasetPtr &dataset, const Config &config) override;
+        DatasetPtr Query(const DatasetPtr &dataset, const Config &config ,faiss::ConcurrentBitsetPtr blacklist ) override;
 
     };
 }//knowhere

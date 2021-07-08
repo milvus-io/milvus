@@ -17,12 +17,12 @@ class GsiHammingIndex : public GsiBaseIndex {
 public :
 
     GsiHammingIndex(uint32_t dim) : GsiBaseIndex(dim) {
-    index_type_ = IndexEnum::INDEX_FAISS_BIN_IDMAP;//GSI_FLAT_HAMMING;
+    index_type_ = IndexEnum::INDEX_FAISS_BIN_IDMAP;
     }
 
 	void CopyIndexToFpga( uint32_t row_count , const std::string& location ) override ;
 
-    DatasetPtr Query(const DatasetPtr &dataset, const Config &config) override;
+    DatasetPtr Query(const DatasetPtr &dataset, const Config &config , faiss::ConcurrentBitsetPtr blacklist) override ;
 
 
 };

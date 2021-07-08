@@ -120,23 +120,20 @@ GsiBaseIndex::Serialize(const Config &config) {
 
 void
 GsiBaseIndex::Load(const BinarySet &set) {
-
 }
 
 void
 GsiBaseIndex::Train(const DatasetPtr &dataset, const Config &config) {
-
 }
 
 void
 GsiBaseIndex::AddWithoutIds(const DatasetPtr &dataset, const Config &config) {
-
 }
 
-DatasetPtr
-GsiBaseIndex::Query(const DatasetPtr &dataset, const Config &config) {
-    return milvus::knowhere::DatasetPtr();
-}
+//DatasetPtr
+//GsiBaseIndex::Query(const DatasetPtr &dataset, const Config &config) {
+//    return milvus::knowhere::DatasetPtr();
+//}
 
 int64_t GsiBaseIndex::Dim() {
     return num_bfeatures_;

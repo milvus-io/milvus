@@ -36,22 +36,19 @@ public :
 
     uint32_t topK_ =INIT_K;
 
-    uint32_t num_queries_ =0;
+    uint32_t num_queries_ ;
 
-    uint32_t num_bfeatures_ = 0;
+    uint32_t num_bfeatures_ ;
 
-    uint32_t num_bytes_in_rec_=0;
+    uint32_t num_bytes_in_rec_;
 
-    int64_t index_size_ = 0;
+    int64_t index_size_;
 
     void *heap_allocations[MAX_HEAP_ALLOCATIONS] = { 0 };
 
-    unsigned int counter_heap_allocations = 0;
-
-
+    unsigned int counter_heap_allocations ;
 
     virtual int64_t Size();
-
 
     BinarySet Serialize(const Config &config) override;
 
@@ -61,17 +58,17 @@ public :
 
     void AddWithoutIds(const DatasetPtr &dataset, const Config &config) override;
 
-    DatasetPtr Query(const DatasetPtr &dataset, const Config &config) override;
-
     int64_t Dim() override;
 
     int64_t Count() override;
 
-   GsiBaseIndex(uint32_t dim );
+    GsiBaseIndex(uint32_t dim );
 
-   ~GsiBaseIndex();
+    ~GsiBaseIndex();
 
-   virtual void CopyIndexToFpga( uint32_t row_count  , const std::string& location) =0;
+    virtual void CopyIndexToFpga( uint32_t row_count  , const std::string& location) =0;
+
+    virtual DatasetPtr Query(const DatasetPtr &dataset, const Config &config , faiss::ConcurrentBitsetPtr blacklist) = 0 ;
 
 
 
