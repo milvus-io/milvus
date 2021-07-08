@@ -12,96 +12,60 @@
 package datacoord
 
 import (
+	"context"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestWatchRestartsPolicy(t *testing.T) {
-	p := newWatchRestartsStartupPolicy()
-	c := make(map[string]*datapb.DataNodeInfo)
-	c["localhost:1111"] = &datapb.DataNodeInfo{
-		Address: "localhost:1111",
-		Version: 0,
-		Channels: []*datapb.ChannelStatus{
-			{
-				Name:         "vch1",
-				State:        datapb.ChannelWatchState_Complete,
-				CollectionID: 0,
-			},
-		},
-	}
-
-	c["localhost:2222"] = &datapb.DataNodeInfo{
-		Address: "localhost:2222",
-		Version: 0,
-		Channels: []*datapb.ChannelStatus{
-			{
-				Name:         "vch2",
-				State:        datapb.ChannelWatchState_Complete,
-				CollectionID: 0,
-			},
-		},
-	}
-
-	dchange := &clusterDeltaChange{
-		newNodes: []string{},
-		offlines: []string{},
-		restarts: []string{"localhost:2222"},
-	}
-
-	nodes, _ := p.apply(c, dchange, []*datapb.ChannelStatus{})
-	assert.EqualValues(t, 1, len(nodes))
-	assert.EqualValues(t, datapb.ChannelWatchState_Uncomplete, nodes[0].Channels[0].State)
-}
-
 func TestRandomReassign(t *testing.T) {
 	p := randomAssignRegisterFunc
 
-	clusters := make(map[string]*datapb.DataNodeInfo)
-	clusters["addr1"] = &datapb.DataNodeInfo{
+	clusters := make([]*NodeInfo, 0)
+	info1 := &datapb.DataNodeInfo{
 		Address:  "addr1",
 		Channels: make([]*datapb.ChannelStatus, 0, 10),
 	}
-	clusters["addr2"] = &datapb.DataNodeInfo{
+	info2 := &datapb.DataNodeInfo{
 		Address:  "addr2",
 		Channels: make([]*datapb.ChannelStatus, 0, 10),
 	}
-	clusters["addr3"] = &datapb.DataNodeInfo{
+	info3 := &datapb.DataNodeInfo{
 		Address:  "addr3",
 		Channels: make([]*datapb.ChannelStatus, 0, 10),
 	}
 
-	cases := []*datapb.DataNodeInfo{
-		{
-			Channels: []*datapb.ChannelStatus{},
+	node1 := NewNodeInfo(context.TODO(), info1)
+	node2 := NewNodeInfo(context.TODO(), info2)
+	node3 := NewNodeInfo(context.TODO(), info3)
+	clusters = append(clusters, node1, node2, node3)
+
+	caseInfo1 := &datapb.DataNodeInfo{
+		Channels: []*datapb.ChannelStatus{},
+	}
+	caseInfo2 := &datapb.DataNodeInfo{
+		Channels: []*datapb.ChannelStatus{
+			{Name: "VChan1", CollectionID: 1},
+			{Name: "VChan2", CollectionID: 2},
 		},
-		{
-			Channels: []*datapb.ChannelStatus{
-				{Name: "VChan1", CollectionID: 1},
-				{Name: "VChan2", CollectionID: 2},
-			},
-		},
-		{
-			Channels: []*datapb.ChannelStatus{
-				{Name: "VChan3", CollectionID: 1},
-				{Name: "VChan4", CollectionID: 2},
-			},
-		},
+	}
+	cases := []*NodeInfo{
+		{info: caseInfo1},
+		{info: caseInfo2},
 		nil,
 	}
 
 	for _, ca := range cases {
-		nodes := p.apply(clusters, ca)
-		if ca == nil || len(ca.Channels) == 0 {
+		nodes := p(clusters, ca)
+		if ca == nil || len(ca.info.GetChannels()) == 0 {
 			assert.Equal(t, 0, len(nodes))
 		} else {
-			for _, ch := range ca.Channels {
+			for _, ch := range ca.info.GetChannels() {
 				found := false
 			loop:
 				for _, node := range nodes {
-					for _, nch := range node.Channels {
+					for _, nch := range node.info.GetChannels() {
 						if nch.Name == ch.Name {
 							found = true
 							assert.EqualValues(t, datapb.ChannelWatchState_Uncomplete, nch.State)

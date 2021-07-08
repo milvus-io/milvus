@@ -30,7 +30,7 @@ type dummyPosProvider struct{}
 
 //GetVChanPositions implements positionProvider
 func (dp dummyPosProvider) GetVChanPositions(vchans []vchannel, isAccurate bool) ([]*datapb.VchannelInfo, error) {
-	pairs := make([]*datapb.VchannelInfo, len(vchans))
+	pairs := make([]*datapb.VchannelInfo, 0, len(vchans))
 	for _, vchan := range vchans {
 		pairs = append(pairs, &datapb.VchannelInfo{
 			CollectionID:      vchan.CollectionID,
