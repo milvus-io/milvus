@@ -3,25 +3,42 @@ name: all-contributors
 on:
     schedule:
     # * is a special character in YAML so you have to quote this string
-    - cron:  '10 9 * * *'
+    #         ┌───────────── minute (0 - 59)
+    #         │ ┌───────────── hour (0 - 23)
+    #         │ │ ┌───────────── day of the month (1 - 31)
+    #         │ │ │ ┌───────────── month (1 - 12 or JAN-DEC)
+    #         │ │ │ │ ┌───────────── day of the week (0 - 6 or SUN-SAT)
+    #         │ │ │ │ │
+    #         │ │ │ │ │
+    #         │ │ │ │ │
+    - cron:  '0 * * * *'
 
 jobs:
   contributor:
     runs-on: ubuntu-latest
     steps:
       # Update README.md
-      - uses: milvus-io/hero-bot@1.4
+      - uses: milvus-io/hero-bot@1.11
         with:
+          # Required
           token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
           repos: 'milvus-io/milvus,bootcamp,community,docs,milvus-helm,milvus-sdk-go,milvus-sdk-java,milvus-sdk-node,milvus.io,pymilvus,pymilvus-orm'
-          targetRepo: 'milvus-io/milvus'
-          filePath: 'README.md'
+          target: 'milvus-io/milvus'
+          # Optional
+          isAscend: True
+          width: '30px'
+          customUserConfig: 'milvus/.contributors'
 
       # Update README_CN.md
-      - uses: milvus-io/hero-bot@1.4
+      - uses: milvus-io/hero-bot@1.11
         with:
           token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
           repos: 'milvus-io/milvus,bootcamp,community,docs,milvus-helm,milvus-sdk-go,milvus-sdk-java,milvus-sdk-node,milvus.io,pymilvus,pymilvus-orm'
-          targetRepo: 'milvus-io/milvus'
-          filePath: 'README_CN.md'
+          target: 'milvus-io/milvus'
+          # Optional
+          isAscend: True
+          width: '30px'
+          customUserConfig: 'milvus/.contributors'
+
+
 
