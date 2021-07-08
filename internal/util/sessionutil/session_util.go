@@ -228,10 +228,12 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 				return
 			case resp, ok := <-ch:
 				if !ok {
+					log.Debug("session keepalive channel closed")
 					close(failCh)
 					return
 				}
 				if resp == nil {
+					log.Debug("session keepalive response failed")
 					close(failCh)
 					return
 				}

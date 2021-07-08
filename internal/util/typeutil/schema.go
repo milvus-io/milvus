@@ -109,9 +109,29 @@ func (helper *SchemaHelper) GetFieldFromName(fieldName string) (*schemapb.FieldS
 func (helper *SchemaHelper) GetFieldFromID(fieldID int64) (*schemapb.FieldSchema, error) {
 	offset, ok := helper.idOffset[fieldID]
 	if !ok {
-		return nil, fmt.Errorf("fieldName(%d) not found", fieldID)
+		return nil, fmt.Errorf("fieldID(%d) not found", fieldID)
 	}
 	return helper.schema.Fields[offset], nil
+}
+
+func (helper *SchemaHelper) GetVectorDimFromID(filedID int64) (int, error) {
+	sch, err := helper.GetFieldFromID(filedID)
+	if err != nil {
+		return 0, err
+	}
+	if !IsVectorType(sch.DataType) {
+		return 0, fmt.Errorf("field type = %s not has dim", schemapb.DataType_name[int32(sch.DataType)])
+	}
+	for _, kv := range sch.TypeParams {
+		if kv.Key == "dim" {
+			dim, err := strconv.Atoi(kv.Value)
+			if err != nil {
+				return 0, err
+			}
+			return dim, nil
+		}
+	}
+	return 0, fmt.Errorf("fieldID(%d) not has dim", filedID)
 }
 
 func IsVectorType(dataType schemapb.DataType) bool {

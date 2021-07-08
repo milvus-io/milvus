@@ -275,6 +275,7 @@ func (c *Core) sessionLoop() {
 					time.Sleep(time.Second)
 					os.Exit(-1)
 				}()
+				return
 			}
 		}
 	}

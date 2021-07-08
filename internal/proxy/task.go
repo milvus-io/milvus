@@ -1722,13 +1722,21 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 					switch vectorType := fieldType.Vectors.Data.(type) {
 					case *schemapb.VectorField_BinaryVector:
 						if ret.Results.FieldsData[k].GetVectors().GetBinaryVector() == nil {
-							ret.Results.FieldsData[k].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector = []byte{vectorType.BinaryVector[curIdx*int((dim/8))]}
+							bvec := &schemapb.VectorField_BinaryVector{
+								BinaryVector: vectorType.BinaryVector[curIdx*int((dim/8)) : (curIdx+1)*int((dim/8))],
+							}
+							ret.Results.FieldsData[k].GetVectors().Data = bvec
 						} else {
 							ret.Results.FieldsData[k].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector = append(ret.Results.FieldsData[k].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector, vectorType.BinaryVector[curIdx*int((dim/8)):(curIdx+1)*int((dim/8))]...)
 						}
 					case *schemapb.VectorField_FloatVector:
 						if ret.Results.FieldsData[k].GetVectors().GetFloatVector() == nil {
-							ret.Results.FieldsData[k].GetVectors().GetFloatVector().Data = []float32{vectorType.FloatVector.Data[curIdx*int(dim)]}
+							fvec := &schemapb.VectorField_FloatVector{
+								FloatVector: &schemapb.FloatArray{
+									Data: vectorType.FloatVector.Data[curIdx*int(dim) : (curIdx+1)*int(dim)],
+								},
+							}
+							ret.Results.FieldsData[k].GetVectors().Data = fvec
 						} else {
 							ret.Results.FieldsData[k].GetVectors().GetFloatVector().Data = append(ret.Results.FieldsData[k].GetVectors().GetFloatVector().Data, vectorType.FloatVector.Data[curIdx*int(dim):(curIdx+1)*int(dim)]...)
 						}
@@ -1902,7 +1910,6 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 					}
 				}
 			}
-
 			log.Debug("Proxy Search PostExecute Done")
 			return nil
 		}
