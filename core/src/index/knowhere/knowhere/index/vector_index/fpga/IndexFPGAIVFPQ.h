@@ -41,7 +41,8 @@ class FPGAIVFPQ : public IVFPQ {
     CopyIndexToFpga();
 
     void
-    QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&) override;
+    QueryImpl(int64_t, const float*, int64_t, float*, int64_t*, const Config&,
+              faiss::ConcurrentBitsetPtr blacklist) override;
 };
 
 using FPGAIVFPQPtr = std::shared_ptr<FPGAIVFPQ>;

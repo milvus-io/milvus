@@ -1356,7 +1356,9 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
                              meta::FilesHolder& files_holder) {
     // attention: this is a copy, not a reference, since the files_holder.UnMarkFile will change the array internal
     milvus::engine::meta::SegmentsSchema files = files_holder.HoldFiles();
-    LOG_ENGINE_DEBUG_ << "Getting vector by id in " << files.size() << " files, id count = " << id_array.size();
+    std::string msg = "Getting vector by id in " + std::to_string(files.size()) +
+                      " files, id count = " + std::to_string(id_array.size());
+    TimeRecorderAuto rc(msg);
 
     bool is_binary = false;
     size_t single_vector_bytes = 0;
@@ -1370,16 +1372,25 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
     // for example:
     // id_array = [1, -1, 2, -1, 3]
     // vectors should return [valid_vector, empty_vector, valid_vector, empty_vector, valid_vector]
-    // the ID2RAW is to ensure returned vector sequence is consist with id_array
+    // the temp_ids is to ensure returned vector sequence is consist with id_array
+    struct IdInfo {
+        int64_t sequence = -1;
+        IDNumber vec_id = 0;
+        bool possible_in = false;
+        int64_t offset = -1;
+    };
 
-    std::vector<std::pair<size_t, IDNumber>> temp_ids;
+    std::vector<IdInfo> temp_ids;
     temp_ids.resize(id_array.size());
     for (size_t i = 0; i < id_array.size(); i++) {
-        temp_ids[i].first = i;
-        temp_ids[i].second = id_array[i];
+        temp_ids[i].sequence = i;
+        temp_ids[i].vec_id = id_array[i];
+        temp_ids[i].possible_in = false;
+        temp_ids[i].offset = -1;
     }
     vectors.resize(id_array.size());
 
+    // Iterate each segment to find vectors
     for (auto& file : files) {
         if (temp_ids.empty()) {
             break;  // all vectors found, no need to continue
@@ -1390,7 +1401,7 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
         engine::utils::GetParentPath(file.location_, segment_dir);
         segment::SegmentReader segment_reader(segment_dir);
 
-        // uids_ptr
+        // Method to read uid file, fetch from cache firstly
         segment::UidsPtr uids_ptr = nullptr;
         auto LoadUid = [&]() {
             auto index = cache::CpuCacheMgr::GetInstance()->GetItem(file.location_);
@@ -1402,11 +1413,11 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
             return segment_reader.LoadUids(uids_ptr);
         };
 
-        // deleted_docs_ptr
+        // Method to read delete-docs file
         segment::DeletedDocsPtr deleted_docs_ptr = nullptr;
         auto LoadDeleteDoc = [&]() { return segment_reader.LoadDeletedDocs(deleted_docs_ptr); };
 
-        // id_bloom_filter_ptr
+        // Read bloom filter file, if the file doesn't exist, regenerate it
         segment::IdBloomFilterPtr id_bloom_filter_ptr;
         auto status = segment_reader.LoadBloomFilter(id_bloom_filter_ptr, false);
         fiu_do_on("DBImpl.GetVectorsByIdHelper.FailedToLoadBloomFilter",
@@ -1430,57 +1441,94 @@ DBImpl::GetVectorsByIdHelper(const IDNumbers& id_array, std::vector<engine::Vect
             segment_writer.WriteBloomFilter(id_bloom_filter_ptr);
         }
 
-        for (size_t i = 0; i < temp_ids.size();) {
-            // each id must has a VectorsData
-            // if vector not found for an id, its VectorsData's vector_count = 0, else 1
-            VectorsData& vector_ref = vectors[temp_ids[i].first];
-            auto vector_id = temp_ids[i].second;
-
+        // Check if the id is present in bloom filter.
+        bool possible_in = false;
+        for (size_t i = 0; i < temp_ids.size(); ++i) {
             // Check if the id is present in bloom filter.
-            if (id_bloom_filter_ptr->Check(vector_id)) {
-                // Load uids and check if the id is indeed present. If yes, find its offset.
-                if (uids_ptr == nullptr && !(status = LoadUid()).ok()) {
-                    return status;
-                }
+            if (id_bloom_filter_ptr->Check(temp_ids[i].vec_id)) {
+                temp_ids[i].possible_in = true;
+                possible_in = true;
+            }
+        }
 
-                auto found = std::find(uids_ptr->begin(), uids_ptr->end(), vector_id);
-                if (found != uids_ptr->end()) {
-                    auto offset = std::distance(uids_ptr->begin(), found);
+        // No any id in this segment, go to next segment
+        if (!possible_in) {
+            continue;
+        }
 
-                    // Check whether the id has been deleted
-                    if (!deleted_docs_ptr && !(status = LoadDeleteDoc()).ok()) {
-                        return status;
-                    }
-                    auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
+        // Since some ids in this segment, we need to read uids file and deleted-docs file
+        if (!(status = LoadUid()).ok()) {
+            return status;
+        }
+        LoadDeleteDoc();
 
-                    auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
-                    if (deleted == deleted_docs.end()) {
-                        // Load raw vector
-                        std::vector<uint8_t> raw_vector;
-                        status = segment_reader.LoadsSingleVector(offset * single_vector_bytes, single_vector_bytes,
-                                                                  raw_vector);
-                        if (!status.ok()) {
-                            LOG_ENGINE_ERROR_ << status.message();
-                            return status;
-                        }
+        // Method use uids and deleted-docs to check whether id is in segment
+        auto FindId = [&](int64_t i) {
+            if (!temp_ids[i].possible_in) {
+                return;
+            }
+            temp_ids[i].possible_in = false;
 
-                        vector_ref.vector_count_ = 1;
-                        if (is_binary) {
-                            vector_ref.binary_data_.swap(raw_vector);
-                        } else {
-                            std::vector<float> float_vector;
-                            float_vector.resize(file.dimension_);
-                            memcpy(float_vector.data(), raw_vector.data(), single_vector_bytes);
-                            vector_ref.float_data_.swap(float_vector);
-                        }
-                        temp_ids[i] = temp_ids.back();
-                        temp_ids.resize(temp_ids.size() - 1);
-                        continue;
-                    }
+            // If the id is in uids and not in deleted-docs, that means this id is found
+            auto found = std::find(uids_ptr->begin(), uids_ptr->end(), temp_ids[i].vec_id);
+            if (found == uids_ptr->end()) {
+                return;
+            }
+
+            auto offset = std::distance(uids_ptr->begin(), found);
+            if (deleted_docs_ptr) {
+                auto& deleted_docs = deleted_docs_ptr->GetDeletedDocs();
+                auto deleted = std::find(deleted_docs.begin(), deleted_docs.end(), offset);
+                if (deleted != deleted_docs.end()) {
+                    return;
                 }
             }
 
-            i++;
+            temp_ids[i].offset = offset;
+        };
+
+        // For large number id array, use multi-threads to find, otherwise single thread.
+        // In our test, when id count is 4, single thread performance is almost equal to multi threads.
+        // So we use a hard code value "4" here as boundary of single thread and multi threads.
+#pragma omp parallel for if (temp_ids.size() > 4)
+        for (size_t i = 0; i < temp_ids.size(); ++i) {
+            FindId(i);
+        }
+
+        // Fetch vector data
+        for (size_t i = 0; i < temp_ids.size();) {
+            auto& iter = temp_ids[i];
+            if (iter.offset >= 0) {
+                // each id must has a VectorsData
+                // if vector not found for an id, its VectorsData's vector_count = 0, else 1
+                VectorsData& vector_ref = vectors[iter.sequence];
+
+                // Load raw vector
+                std::vector<uint8_t> raw_vector;
+                status = segment_reader.LoadsSingleVector(iter.offset * single_vector_bytes, single_vector_bytes,
+                                                          raw_vector);
+                if (!status.ok()) {
+                    LOG_ENGINE_ERROR_ << status.message();
+                    return status;
+                }
+
+                vector_ref.vector_count_ = 1;
+                if (is_binary) {
+                    vector_ref.binary_data_.swap(raw_vector);
+                } else {
+                    std::vector<float> float_vector;
+                    float_vector.resize(file.dimension_);
+                    memcpy(float_vector.data(), raw_vector.data(), single_vector_bytes);
+                    vector_ref.float_data_.swap(float_vector);
+                }
+
+                // After this retrieving vector data for this id, copy the tail id to this position.
+                // We didn't use std::vector::erase() because erase() could do copy many times.
+                iter = temp_ids.back();
+                temp_ids.resize(temp_ids.size() - 1);
+            } else {
+                i++;
+            }
         }
 
         // unmark file, allow the file to be deleted

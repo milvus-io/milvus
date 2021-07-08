@@ -12,6 +12,9 @@
 #include "utils/CommonUtil.h"
 #include "cache/CpuCacheMgr.h"
 #include "cache/GpuCacheMgr.h"
+#ifdef MILVUS_FPGA_VERSION
+#include "cache/FpgaCacheMgr.h"
+#endif
 #include "config/Config.h"
 #include "db/Utils.h"
 #include "utils/Log.h"

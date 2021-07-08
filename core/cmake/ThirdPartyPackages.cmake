@@ -1155,8 +1155,6 @@ if(MILVUS_FPGA_VERSION)
     include_directories(SYSTEM ${ARMADILLO_INCLUDE_DIR})
     install(FILES
             ${INSTALL_DIR}/lib/libarmadillo.so
-            ${INSTALL_DIR}/lib/libarmadillo.so.9
-            ${INSTALL_DIR}/lib/libarmadillo.so.9.900.4
             DESTINATION lib)
 endif()
 
