@@ -31,11 +31,7 @@ func TestAllocSegment(t *testing.T) {
 	schema := newTestSchema()
 	collID, err := mockAllocator.allocID()
 	assert.Nil(t, err)
-	err = meta.AddCollection(&datapb.CollectionInfo{
-		ID:     collID,
-		Schema: schema,
-	})
-	assert.Nil(t, err)
+	meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
 	cases := []struct {
 		collectionID UniqueID
 		partitionID  UniqueID
@@ -68,11 +64,7 @@ func TestLoadSegmentsFromMeta(t *testing.T) {
 	schema := newTestSchema()
 	collID, err := mockAllocator.allocID()
 	assert.Nil(t, err)
-	err = meta.AddCollection(&datapb.CollectionInfo{
-		ID:     collID,
-		Schema: schema,
-	})
-	assert.Nil(t, err)
+	meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
 
 	sealedSegment := &datapb.SegmentInfo{
 		ID:             1,
@@ -124,12 +116,7 @@ func TestSaveSegmentsToMeta(t *testing.T) {
 	schema := newTestSchema()
 	collID, err := mockAllocator.allocID()
 	assert.Nil(t, err)
-	err = meta.AddCollection(&datapb.CollectionInfo{
-		ID:     collID,
-		Schema: schema,
-	})
-	assert.Nil(t, err)
-
+	meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
 	segmentManager := newSegmentManager(meta, mockAllocator)
 	segID, _, expireTs, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000)
 	assert.Nil(t, err)
@@ -137,9 +124,8 @@ func TestSaveSegmentsToMeta(t *testing.T) {
 	assert.NotNil(t, segStatus)
 	_, err = segmentManager.SealAllSegments(context.Background(), collID)
 	assert.Nil(t, err)
-
-	segment, err := meta.GetSegment(segID)
-	assert.Nil(t, err)
+	segment := meta.GetSegment(segID)
+	assert.NotNil(t, segment)
 	assert.EqualValues(t, segment.LastExpireTime, expireTs)
 	assert.EqualValues(t, commonpb.SegmentState_Sealed, segment.State)
 }

@@ -20,7 +20,8 @@ static const char *ErrorMsg(const std::string &msg) {
   return ret;
 }
 
-extern "C" CPayloadWriter NewPayloadWriter(int columnType) {
+extern "C"
+CPayloadWriter NewPayloadWriter(int columnType) {
   auto p = new wrapper::PayloadWriter;
   p->builder = nullptr;
   p->schema = nullptr;
@@ -125,30 +126,43 @@ CStatus AddValuesToPayload(CPayloadWriter payloadWriter, DT *values, int length)
   return st;
 }
 
-extern "C" CStatus AddBooleanToPayload(CPayloadWriter payloadWriter, bool *values, int length) {
+extern "C"
+CStatus AddBooleanToPayload(CPayloadWriter payloadWriter, bool *values, int length) {
   return AddValuesToPayload<bool, arrow::BooleanBuilder>(payloadWriter, values, length);
 }
 
-extern "C" CStatus AddInt8ToPayload(CPayloadWriter payloadWriter, int8_t *values, int length) {
+extern "C"
+CStatus AddInt8ToPayload(CPayloadWriter payloadWriter, int8_t *values, int length) {
   return AddValuesToPayload<int8_t, arrow::Int8Builder>(payloadWriter, values, length);
 }
-extern "C" CStatus AddInt16ToPayload(CPayloadWriter payloadWriter, int16_t *values, int length) {
+
+extern "C"
+CStatus AddInt16ToPayload(CPayloadWriter payloadWriter, int16_t *values, int length) {
   return AddValuesToPayload<int16_t, arrow::Int16Builder>(payloadWriter, values, length);
 }
-extern "C" CStatus AddInt32ToPayload(CPayloadWriter payloadWriter, int32_t *values, int length) {
+
+extern "C"
+CStatus AddInt32ToPayload(CPayloadWriter payloadWriter, int32_t *values, int length) {
   return AddValuesToPayload<int32_t, arrow::Int32Builder>(payloadWriter, values, length);
 }
-extern "C" CStatus AddInt64ToPayload(CPayloadWriter payloadWriter, int64_t *values, int length) {
+
+extern "C"
+CStatus AddInt64ToPayload(CPayloadWriter payloadWriter, int64_t *values, int length) {
   return AddValuesToPayload<int64_t, arrow::Int64Builder>(payloadWriter, values, length);
 }
-extern "C" CStatus AddFloatToPayload(CPayloadWriter payloadWriter, float *values, int length) {
+
+extern "C"
+CStatus AddFloatToPayload(CPayloadWriter payloadWriter, float *values, int length) {
   return AddValuesToPayload<float, arrow::FloatBuilder>(payloadWriter, values, length);
 }
-extern "C" CStatus AddDoubleToPayload(CPayloadWriter payloadWriter, double *values, int length) {
+
+extern "C"
+CStatus AddDoubleToPayload(CPayloadWriter payloadWriter, double *values, int length) {
   return AddValuesToPayload<double, arrow::DoubleBuilder>(payloadWriter, values, length);
 }
 
-extern "C" CStatus AddOneStringToPayload(CPayloadWriter payloadWriter, char *cstr, int str_size) {
+extern "C"
+CStatus AddOneStringToPayload(CPayloadWriter payloadWriter, char *cstr, int str_size) {
   CStatus st;
   st.error_code = static_cast<int>(ErrorCode::SUCCESS);
   st.error_msg = nullptr;
@@ -180,7 +194,8 @@ extern "C" CStatus AddOneStringToPayload(CPayloadWriter payloadWriter, char *cst
   return st;
 }
 
-extern "C" CStatus AddBinaryVectorToPayload(CPayloadWriter payloadWriter, uint8_t *values, int dimension, int length) {
+extern "C"
+CStatus AddBinaryVectorToPayload(CPayloadWriter payloadWriter, uint8_t *values, int dimension, int length) {
   CStatus st;
   st.error_code = static_cast<int>(ErrorCode::SUCCESS);
   st.error_msg = nullptr;
@@ -227,7 +242,8 @@ extern "C" CStatus AddBinaryVectorToPayload(CPayloadWriter payloadWriter, uint8_
   return st;
 }
 
-extern "C" CStatus AddFloatVectorToPayload(CPayloadWriter payloadWriter, float *values, int dimension, int length) {
+extern "C"
+CStatus AddFloatVectorToPayload(CPayloadWriter payloadWriter, float *values, int dimension, int length) {
   CStatus st;
   st.error_code = static_cast<int>(ErrorCode::SUCCESS);
   st.error_msg = nullptr;
@@ -270,7 +286,8 @@ extern "C" CStatus AddFloatVectorToPayload(CPayloadWriter payloadWriter, float *
   return st;
 }
 
-extern "C" CStatus FinishPayloadWriter(CPayloadWriter payloadWriter) {
+extern "C"
+CStatus FinishPayloadWriter(CPayloadWriter payloadWriter) {
   CStatus st;
   st.error_code = static_cast<int>(ErrorCode::SUCCESS);
   st.error_msg = nullptr;
@@ -320,7 +337,8 @@ int GetPayloadLengthFromWriter(CPayloadWriter payloadWriter) {
   return p->rows;
 }
 
-extern "C" CStatus ReleasePayloadWriter(CPayloadWriter handler) {
+extern "C"
+CStatus ReleasePayloadWriter(CPayloadWriter handler) {
   CStatus st;
   st.error_code = static_cast<int>(ErrorCode::SUCCESS);
   st.error_msg = nullptr;
@@ -329,7 +347,8 @@ extern "C" CStatus ReleasePayloadWriter(CPayloadWriter handler) {
   return st;
 }
 
-extern "C" CPayloadReader NewPayloadReader(int columnType, uint8_t *buffer, int64_t buf_size) {
+extern "C"
+CPayloadReader NewPayloadReader(int columnType, uint8_t *buffer, int64_t buf_size) {
   auto p = new wrapper::PayloadReader;
   p->bValues = nullptr;
   p->input = std::make_shared<wrapper::PayloadInputStream>(buffer, buf_size);
@@ -369,7 +388,8 @@ extern "C" CPayloadReader NewPayloadReader(int columnType, uint8_t *buffer, int6
   return reinterpret_cast<CPayloadReader>(p);
 }
 
-extern "C" CStatus GetBoolFromPayload(CPayloadReader payloadReader, bool **values, int *length) {
+extern "C"
+CStatus GetBoolFromPayload(CPayloadReader payloadReader, bool **values, int *length) {
   CStatus st;
   st.error_code = static_cast<int>(ErrorCode::SUCCESS);
   st.error_msg = nullptr;
@@ -409,25 +429,38 @@ CStatus GetValuesFromPayload(CPayloadReader payloadReader, DT **values, int *len
   return st;
 }
 
-extern "C" CStatus GetInt8FromPayload(CPayloadReader payloadReader, int8_t **values, int *length) {
+extern "C"
+CStatus GetInt8FromPayload(CPayloadReader payloadReader, int8_t **values, int *length) {
   return GetValuesFromPayload<int8_t, arrow::Int8Array>(payloadReader, values, length);
 }
-extern "C" CStatus GetInt16FromPayload(CPayloadReader payloadReader, int16_t **values, int *length) {
+
+extern "C"
+CStatus GetInt16FromPayload(CPayloadReader payloadReader, int16_t **values, int *length) {
   return GetValuesFromPayload<int16_t, arrow::Int16Array>(payloadReader, values, length);
 }
-extern "C" CStatus GetInt32FromPayload(CPayloadReader payloadReader, int32_t **values, int *length) {
+
+extern "C"
+CStatus GetInt32FromPayload(CPayloadReader payloadReader, int32_t **values, int *length) {
   return GetValuesFromPayload<int32_t, arrow::Int32Array>(payloadReader, values, length);
 }
-extern "C" CStatus GetInt64FromPayload(CPayloadReader payloadReader, int64_t **values, int *length) {
+
+extern "C"
+CStatus GetInt64FromPayload(CPayloadReader payloadReader, int64_t **values, int *length) {
   return GetValuesFromPayload<int64_t, arrow::Int64Array>(payloadReader, values, length);
 }
-extern "C" CStatus GetFloatFromPayload(CPayloadReader payloadReader, float **values, int *length) {
+
+extern "C"
+CStatus GetFloatFromPayload(CPayloadReader payloadReader, float **values, int *length) {
   return GetValuesFromPayload<float, arrow::FloatArray>(payloadReader, values, length);
 }
-extern "C" CStatus GetDoubleFromPayload(CPayloadReader payloadReader, double **values, int *length) {
+
+extern "C"
+CStatus GetDoubleFromPayload(CPayloadReader payloadReader, double **values, int *length) {
   return GetValuesFromPayload<double, arrow::DoubleArray>(payloadReader, values, length);
 }
-extern "C" CStatus GetOneStringFromPayload(CPayloadReader payloadReader, int idx, char **cstr, int *str_size) {
+
+extern "C"
+CStatus GetOneStringFromPayload(CPayloadReader payloadReader, int idx, char **cstr, int *str_size) {
   CStatus st;
   st.error_code = static_cast<int>(ErrorCode::SUCCESS);
   st.error_msg = nullptr;
@@ -448,10 +481,9 @@ extern "C" CStatus GetOneStringFromPayload(CPayloadReader payloadReader, int idx
   *str_size = length;
   return st;
 }
-extern "C" CStatus GetBinaryVectorFromPayload(CPayloadReader payloadReader,
-                                              uint8_t **values,
-                                              int *dimension,
-                                              int *length) {
+
+extern "C"
+CStatus GetBinaryVectorFromPayload(CPayloadReader payloadReader, uint8_t **values, int *dimension, int *length) {
   CStatus st;
   st.error_code = static_cast<int>(ErrorCode::SUCCESS);
   st.error_msg = nullptr;
@@ -467,10 +499,9 @@ extern "C" CStatus GetBinaryVectorFromPayload(CPayloadReader payloadReader,
   *values = (uint8_t *) array->raw_values();
   return st;
 }
-extern "C" CStatus GetFloatVectorFromPayload(CPayloadReader payloadReader,
-                                             float **values,
-                                             int *dimension,
-                                             int *length) {
+
+extern "C"
+CStatus GetFloatVectorFromPayload(CPayloadReader payloadReader, float **values, int *dimension, int *length) {
   CStatus st;
   st.error_code = static_cast<int>(ErrorCode::SUCCESS);
   st.error_msg = nullptr;
@@ -487,13 +518,15 @@ extern "C" CStatus GetFloatVectorFromPayload(CPayloadReader payloadReader,
   return st;
 }
 
-extern "C" int GetPayloadLengthFromReader(CPayloadReader payloadReader) {
+extern "C"
+int GetPayloadLengthFromReader(CPayloadReader payloadReader) {
   auto p = reinterpret_cast<wrapper::PayloadReader *>(payloadReader);
   if (p->array == nullptr) return 0;
   return p->array->length();
 }
 
-extern "C" CStatus ReleasePayloadReader(CPayloadReader payloadReader) {
+extern "C"
+CStatus ReleasePayloadReader(CPayloadReader payloadReader) {
   CStatus st;
   st.error_code = static_cast<int>(ErrorCode::SUCCESS);
   st.error_msg = nullptr;

@@ -109,12 +109,7 @@ func TestFlush(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)
 	schema := newTestSchema()
-	err := svr.meta.AddCollection(&datapb.CollectionInfo{
-		ID:         0,
-		Schema:     schema,
-		Partitions: []int64{},
-	})
-	assert.Nil(t, err)
+	svr.meta.AddCollection(&datapb.CollectionInfo{ID: 0, Schema: schema, Partitions: []int64{}})
 	segID, _, expireTs, err := svr.segmentManager.AllocSegment(context.TODO(), 0, 1, "channel-1", 1)
 	assert.Nil(t, err)
 	resp, err := svr.Flush(context.TODO(), &datapb.FlushRequest{
@@ -369,12 +364,11 @@ func TestSaveBinlogPaths(t *testing.T) {
 	}
 
 	for _, collection := range collections {
-		err := svr.meta.AddCollection(&datapb.CollectionInfo{
+		svr.meta.AddCollection(&datapb.CollectionInfo{
 			ID:         collection.ID,
 			Schema:     nil,
 			Partitions: collection.Partitions,
 		})
-		assert.Nil(t, err)
 	}
 
 	segments := []struct {
@@ -447,8 +441,8 @@ func TestSaveBinlogPaths(t *testing.T) {
 			assert.EqualValues(t, "/by-dev/test/0/1/2/1/Allo2", metas[1].BinlogPath)
 		}
 
-		segmentInfo, err := svr.meta.GetSegment(0)
-		assert.Nil(t, err)
+		segmentInfo := svr.meta.GetSegment(0)
+		assert.NotNil(t, segmentInfo)
 		assert.EqualValues(t, segmentInfo.DmlPosition.ChannelName, "ch1")
 		assert.EqualValues(t, segmentInfo.DmlPosition.MsgID, []byte{1, 2, 3})
 		assert.EqualValues(t, segmentInfo.NumOfRows, 10)
@@ -565,12 +559,11 @@ func TestGetVChannelPos(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)
 	schema := newTestSchema()
-	err := svr.meta.AddCollection(&datapb.CollectionInfo{
+	svr.meta.AddCollection(&datapb.CollectionInfo{
 		ID:     0,
 		Schema: schema,
 	})
-	assert.Nil(t, err)
-	err = svr.meta.AddSegment(&datapb.SegmentInfo{
+	err := svr.meta.AddSegment(&datapb.SegmentInfo{
 		ID:            1,
 		CollectionID:  0,
 		PartitionID:   0,

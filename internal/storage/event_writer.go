@@ -14,9 +14,8 @@ package storage
 import (
 	"bytes"
 	"encoding/binary"
-	"io"
-
 	"errors"
+	"io"
 
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
@@ -35,12 +34,19 @@ const (
 )
 
 func (code EventTypeCode) String() string {
-	codes := []string{"DescriptorEventType", "InsertEventType", "DeleteEventType", "CreateCollectionEventType", "DropCollectionEventType",
-		"CreatePartitionEventType", "DropPartitionEventType"}
-	if len(codes) < int(code) {
-		return ""
+	codes := map[EventTypeCode]string{
+		DescriptorEventType:       "DescriptorEventType",
+		InsertEventType:           "InsertEventType",
+		DeleteEventType:           "DeleteEventType",
+		CreateCollectionEventType: "CreateCollectionEventType",
+		DropCollectionEventType:   "DropCollectionEventType",
+		CreatePartitionEventType:  "CreatePartitionEventType",
+		DropPartitionEventType:    "DropPartitionEventType",
 	}
-	return codes[code]
+	if eventTypeStr, ok := codes[code]; ok {
+		return eventTypeStr
+	}
+	return "InvalidEventType"
 }
 
 type descriptorEvent struct {
@@ -104,8 +110,8 @@ func (writer *baseEventWriter) GetMemoryUsageInBytes() (int32, error) {
 	if err != nil {
 		return -1, err
 	}
-	return writer.getEventDataSize() + writer.eventHeader.GetMemoryUsageInBytes() +
-		int32(len(data)), nil
+	size := writer.getEventDataSize() + writer.eventHeader.GetMemoryUsageInBytes() + int32(len(data))
+	return size, nil
 }
 
 func (writer *baseEventWriter) Write(buffer *bytes.Buffer) error {
@@ -115,7 +121,6 @@ func (writer *baseEventWriter) Write(buffer *bytes.Buffer) error {
 	if err := writer.writeEventData(buffer); err != nil {
 		return err
 	}
-
 	data, err := writer.GetPayloadBufferFromWriter()
 	if err != nil {
 		return err
@@ -138,7 +143,6 @@ func (writer *baseEventWriter) Finish() error {
 		}
 		writer.EventLength = eventLength
 		writer.NextPosition = eventLength + writer.offset
-
 	}
 	return nil
 }
@@ -229,6 +233,7 @@ func newDeleteEventWriter(dataType schemapb.DataType) (*deleteEventWriter, error
 	}
 	header := newEventHeader(DeleteEventType)
 	data := newDeleteEventData()
+
 	writer := &deleteEventWriter{
 		baseEventWriter: baseEventWriter{
 			eventHeader:            *header,
@@ -242,6 +247,7 @@ func newDeleteEventWriter(dataType schemapb.DataType) (*deleteEventWriter, error
 	writer.baseEventWriter.writeEventData = writer.deleteEventData.WriteEventData
 	return writer, nil
 }
+
 func newCreateCollectionEventWriter(dataType schemapb.DataType) (*createCollectionEventWriter, error) {
 	if dataType != schemapb.DataType_String && dataType != schemapb.DataType_Int64 {
 		return nil, errors.New("incorrect data type")
@@ -267,6 +273,7 @@ func newCreateCollectionEventWriter(dataType schemapb.DataType) (*createCollecti
 	writer.baseEventWriter.writeEventData = writer.createCollectionEventData.WriteEventData
 	return writer, nil
 }
+
 func newDropCollectionEventWriter(dataType schemapb.DataType) (*dropCollectionEventWriter, error) {
 	if dataType != schemapb.DataType_String && dataType != schemapb.DataType_Int64 {
 		return nil, errors.New("incorrect data type")
@@ -278,6 +285,7 @@ func newDropCollectionEventWriter(dataType schemapb.DataType) (*dropCollectionEv
 	}
 	header := newEventHeader(DropCollectionEventType)
 	data := newDropCollectionEventData()
+
 	writer := &dropCollectionEventWriter{
 		baseEventWriter: baseEventWriter{
 			eventHeader:            *header,
@@ -291,6 +299,7 @@ func newDropCollectionEventWriter(dataType schemapb.DataType) (*dropCollectionEv
 	writer.baseEventWriter.writeEventData = writer.dropCollectionEventData.WriteEventData
 	return writer, nil
 }
+
 func newCreatePartitionEventWriter(dataType schemapb.DataType) (*createPartitionEventWriter, error) {
 	if dataType != schemapb.DataType_String && dataType != schemapb.DataType_Int64 {
 		return nil, errors.New("incorrect data type")
@@ -316,6 +325,7 @@ func newCreatePartitionEventWriter(dataType schemapb.DataType) (*createPartition
 	writer.baseEventWriter.writeEventData = writer.createPartitionEventData.WriteEventData
 	return writer, nil
 }
+
 func newDropPartitionEventWriter(dataType schemapb.DataType) (*dropPartitionEventWriter, error) {
 	if dataType != schemapb.DataType_String && dataType != schemapb.DataType_Int64 {
 		return nil, errors.New("incorrect data type")
@@ -327,6 +337,7 @@ func newDropPartitionEventWriter(dataType schemapb.DataType) (*dropPartitionEven
 	}
 	header := newEventHeader(DropPartitionEventType)
 	data := newDropPartitionEventData()
+
 	writer := &dropPartitionEventWriter{
 		baseEventWriter: baseEventWriter{
 			eventHeader:            *header,

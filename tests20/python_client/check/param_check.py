@@ -90,6 +90,24 @@ def list_equal_check(param1, param2):
 
     return check_result
 
+def list_contain_check(sublist, superlist):
+    if not isinstance(sublist, list):
+        raise Exception("%s isn't list type" % sublist)
+    if not isinstance(superlist, list):
+        raise Exception("%s isn't list type" % superlist)
+
+    check_result = True
+    for i in sublist:
+        if i not in superlist:
+            check_result = False
+            break
+        else:
+            superlist.remove(i)
+    if not check_result:
+        log.error("list_contain_check: List(%s) does not contain list(%s)"
+                  % (str(superlist), str(sublist)))
+
+    return check_result
 
 def get_connect_object_name(_list):
     """ get the name of the objects that returned by the connection """

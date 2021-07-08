@@ -236,8 +236,8 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	var status *segmentStatus
 	var info *datapb.SegmentInfo
 	for _, segStatus := range s.stats {
-		info, err = s.meta.GetSegment(segStatus.id)
-		if err != nil {
+		info = s.meta.GetSegment(segStatus.id)
+		if info == nil {
 			log.Warn("Failed to get seginfo from meta", zap.Int64("id", segStatus.id), zap.Error(err))
 			continue
 		}
@@ -260,8 +260,8 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 		if err != nil {
 			return
 		}
-		info, err = s.meta.GetSegment(status.id)
-		if err != nil {
+		info = s.meta.GetSegment(status.id)
+		if info == nil {
 			log.Warn("Failed to get seg into from meta", zap.Int64("id", status.id), zap.Error(err))
 			return
 		}
@@ -368,9 +368,9 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 }
 
 func (s *SegmentManager) estimateMaxNumOfRows(collectionID UniqueID) (int, error) {
-	collMeta, err := s.meta.GetCollection(collectionID)
-	if err != nil {
-		return -1, err
+	collMeta := s.meta.GetCollection(collectionID)
+	if collMeta == nil {
+		return -1, fmt.Errorf("Failed to get collection %d", collectionID)
 	}
 	return s.estimatePolicy.apply(collMeta.Schema)
 }
@@ -396,9 +396,9 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 	defer s.mu.Unlock()
 	ret := make([]UniqueID, 0)
 	for _, status := range s.stats {
-		info, err := s.meta.GetSegment(status.id)
-		if err != nil {
-			log.Warn("Failed to get seg info from meta", zap.Int64("id", status.id), zap.Error(err))
+		info := s.meta.GetSegment(status.id)
+		if info == nil {
+			log.Warn("Failed to get seg info from meta", zap.Int64("id", status.id))
 			continue
 		}
 		if info.CollectionID != collectionID {
@@ -408,7 +408,7 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 			ret = append(ret, status.id)
 			continue
 		}
-		if err := s.meta.SealSegment(status.id); err != nil {
+		if err := s.meta.SetState(status.id, commonpb.SegmentState_Sealed); err != nil {
 			return nil, err
 		}
 		ret = append(ret, status.id)
@@ -486,9 +486,9 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp) error {
 	channelInfo := make(map[string][]*datapb.SegmentInfo)
 	mIDSegment := make(map[UniqueID]*datapb.SegmentInfo)
 	for _, status := range s.stats {
-		info, err := s.meta.GetSegment(status.id)
-		if err != nil {
-			log.Warn("Failed to get seg info from meta", zap.Int64("id", status.id), zap.Error(err))
+		info := s.meta.GetSegment(status.id)
+		if info == nil {
+			log.Warn("Failed to get seg info from meta", zap.Int64("id", status.id))
 			continue
 		}
 		mIDSegment[status.id] = info
@@ -499,7 +499,7 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp) error {
 		// change shouldSeal to segment seal policy logic
 		for _, policy := range s.segmentSealPolicies {
 			if policy(status, info, ts) {
-				if err := s.meta.SealSegment(status.id); err != nil {
+				if err := s.meta.SetState(status.id, commonpb.SegmentState_Sealed); err != nil {
 					return err
 				}
 				break
@@ -513,7 +513,7 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp) error {
 				if info.State == commonpb.SegmentState_Sealed {
 					continue
 				}
-				if err := s.meta.SealSegment(info.ID); err != nil {
+				if err := s.meta.SetState(info.GetID(), commonpb.SegmentState_Sealed); err != nil {
 					return err
 				}
 			}
@@ -528,7 +528,7 @@ func (s *SegmentManager) SealSegment(ctx context.Context, segmentID UniqueID) er
 	defer sp.Finish()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.meta.SealSegment(segmentID); err != nil {
+	if err := s.meta.SetState(segmentID, commonpb.SegmentState_Sealed); err != nil {
 		return err
 	}
 	return nil
