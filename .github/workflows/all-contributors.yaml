@@ -27,7 +27,7 @@ jobs:
           # Optional
           isAscend: True
           width: '30px'
-          customUserConfig: 'milvus/.contributors'
+          customUserConfig: 'milvus-io/milvus/.contributors'
 
       # Update README_CN.md
       - uses: milvus-io/hero-bot@1.11
@@ -38,7 +38,7 @@ jobs:
           # Optional
           isAscend: True
           width: '30px'
-          customUserConfig: 'milvus/.contributors'
+          customUserConfig: 'milvus-io/milvus/.contributors'
 
 
 
