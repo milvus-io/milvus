@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu18.04]
+        os: [ubuntu18.04, centos7]
     env:
       OS_NAME: ${{ matrix.os }}
     steps:
@@ -34,12 +34,12 @@ jobs:
       - name: Docker Pull
         shell: bash
         run: |
-          DATE_VERSION=${{matrix.os}}-latest docker-compose pull --ignore-pull-failures builder
+          DATE_VERSION=latest docker-compose pull --ignore-pull-failures builder
       - name: Docker Build
         shell: bash
         run: |
-          DATE_VERSION=${{matrix.os}}-latest docker-compose build builder
-          DATE_VERSION=${{matrix.os}}-${{ steps.extracter.outputs.version }} docker-compose build builder
+          DATE_VERSION=latest docker-compose build builder
+          DATE_VERSION=${{ steps.extracter.outputs.version }} docker-compose build builder
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true
@@ -47,5 +47,5 @@ jobs:
         run: |
           docker login -u ${{ secrets.DOCKERHUB_USER }} \
                        -p ${{ secrets.DOCKERHUB_TOKEN }}
-          DATE_VERSION=${{matrix.os}}-latest docker-compose push builder
-          DATE_VERSION=${{matrix.os}}-${{ steps.extracter.outputs.version }} docker-compose push builder
+          DATE_VERSION=latest docker-compose push builder
+          DATE_VERSION=${{ steps.extracter.outputs.version }} docker-compose push builder
