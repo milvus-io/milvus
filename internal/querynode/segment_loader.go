@@ -137,10 +137,7 @@ func (loader *segmentLoader) loadSegment(req *queryPb.LoadSegmentsRequest, onSer
 	return loader.indexLoader.sendQueryNodeStats()
 }
 
-func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID,
-	segment *Segment,
-	binlogPaths []*datapb.FieldBinlog) error {
-
+func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment *Segment, fieldBinlogs []*datapb.FieldBinlog) error {
 	vectorFieldIDs, err := loader.historicalReplica.getVecFieldIDsByCollectionID(collectionID)
 	if err != nil {
 		return err
@@ -155,11 +152,12 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID,
 		}
 		loadIndexFieldIDs = append(loadIndexFieldIDs, vecFieldID)
 	}
-	// we don't need load to vector fields
-	binlogPaths = loader.filterOutVectorFields(binlogPaths, loadIndexFieldIDs)
+
+	// we don't need to load vector fields
+	fbs := loader.filterOutVectorFields(fieldBinlogs, loadIndexFieldIDs)
 
 	log.Debug("loading insert...")
-	err = loader.loadSegmentFieldsData(segment, binlogPaths)
+	err = loader.loadSegmentFieldsData(segment, fbs)
 	if err != nil {
 		return err
 	}
@@ -194,9 +192,7 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID,
 //	return statesResponse, nil
 //}
 
-func (loader *segmentLoader) filterOutVectorFields(binlogPaths []*datapb.FieldBinlog,
-	vectorFields []int64) []*datapb.FieldBinlog {
-
+func (loader *segmentLoader) filterOutVectorFields(fieldBinlogs []*datapb.FieldBinlog, vectorFields []int64) []*datapb.FieldBinlog {
 	containsFunc := func(s []int64, e int64) bool {
 		for _, a := range s {
 			if a == e {
@@ -205,16 +201,16 @@ func (loader *segmentLoader) filterOutVectorFields(binlogPaths []*datapb.FieldBi
 		}
 		return false
 	}
-	targetFields := make([]*datapb.FieldBinlog, 0)
-	for _, path := range binlogPaths {
-		if !containsFunc(vectorFields, path.FieldID) {
-			targetFields = append(targetFields, path)
+	targetFbs := make([]*datapb.FieldBinlog, 0)
+	for _, fb := range fieldBinlogs {
+		if !containsFunc(vectorFields, fb.FieldID) {
+			targetFbs = append(targetFbs, fb)
 		}
 	}
-	return targetFields
+	return targetFbs
 }
 
-func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, binlogPaths []*datapb.FieldBinlog) error {
+func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlogs []*datapb.FieldBinlog) error {
 	iCodec := storage.InsertCodec{}
 	defer func() {
 		err := iCodec.Close()
@@ -223,16 +219,13 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, binlogPaths
 		}
 	}()
 	blobs := make([]*storage.Blob, 0)
-	for _, binlogPath := range binlogPaths {
-		fieldID := binlogPath.FieldID
-
-		paths := binlogPath.Binlogs
+	for _, fb := range fieldBinlogs {
 		log.Debug("load segment fields data",
 			zap.Int64("segmentID", segment.segmentID),
-			zap.Any("fieldID", fieldID),
-			zap.String("paths", fmt.Sprintln(paths)),
+			zap.Any("fieldID", fb.FieldID),
+			zap.String("paths", fmt.Sprintln(fb.Binlogs)),
 		)
-		for _, path := range paths {
+		for _, path := range fb.Binlogs {
 			p := path
 			binLog, err := loader.minioKV.Load(path)
 			if err != nil {
