@@ -40,6 +40,7 @@ func TestMain(t *testing.M) {
 func TestDataNode(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	node := newIDLEDataNodeMock(ctx)
+	node.Init()
 	node.Start()
 	node.Register()
 
@@ -226,6 +227,52 @@ func TestDataNode(t *testing.T) {
 		assert.False(t, ok)
 		assert.Nil(t, s)
 
+	})
+
+	t.Run("Test GetChannelName", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		node := newIDLEDataNodeMock(ctx)
+
+		testCollIDs := []UniqueID{0, 1, 2, 1}
+		testSegIDs := []UniqueID{10, 11, 12, 13}
+		testchanNames := []string{"a", "b", "c", "d"}
+
+		node.chanMut.Lock()
+		for i, name := range testchanNames {
+			replica := &SegmentReplica{
+				collectionID: testCollIDs[i],
+				newSegments:  make(map[UniqueID]*Segment),
+			}
+
+			replica.addNewSegment(testSegIDs[i], testCollIDs[i], 0, name, &internalpb.MsgPosition{}, nil)
+			node.vchan2SyncService[name] = &dataSyncService{collectionID: testCollIDs[i], replica: replica}
+		}
+		node.chanMut.Unlock()
+
+		type Test struct {
+			inCollID         UniqueID
+			expectedChannels []string
+
+			inSegID         UniqueID
+			expectedChannel string
+		}
+		tests := []Test{
+			{0, []string{"a"}, 10, "a"},
+			{1, []string{"b", "d"}, 11, "b"},
+			{2, []string{"c"}, 12, "c"},
+			{3, []string{}, 13, "d"},
+			{3, []string{}, 100, ""},
+		}
+
+		for _, test := range tests {
+			actualChannels := node.getChannelNamesbyCollectionID(test.inCollID)
+			assert.ElementsMatch(t, test.expectedChannels, actualChannels)
+
+			actualChannel := node.getChannelNamebySegmentID(test.inSegID)
+			assert.Equal(t, test.expectedChannel, actualChannel)
+		}
+
+		cancel()
 	})
 
 	t.Run("Test BackGroundGC", func(t *testing.T) {

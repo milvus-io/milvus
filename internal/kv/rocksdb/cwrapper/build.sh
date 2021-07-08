@@ -10,7 +10,14 @@ DIR=$( cd -P $( dirname $SOURCE ) && pwd )
 # echo $DIR
 
 CGO_CFLAGS="-I$(pwd)/output/include"
-CGO_LDFLAGS="-L$(pwd)/output/lib -l:librocksdb.a -lstdc++ -lm -lz"
+if [ -f "$(pwd)/output/lib/librocksdb.a" ];then
+    CGO_LDFLAGS="-L$(pwd)/output/lib -l:librocksdb.a -lstdc++ -lm -lz"
+elif [ -f "$(pwd)/output/lib64/librocksdb.a" ];then
+    CGO_LDFLAGS="-L$(pwd)/output/lib64 -l:librocksdb.a -lstdc++ -lm -lz"
+else
+  echo "No found 'librocksdb.a'."
+  exit 1
+fi
 
 OUTPUT_LIB=${DIR}/output
 

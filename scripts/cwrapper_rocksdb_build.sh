@@ -62,3 +62,12 @@ if [[ ! ${jobs+1} ]]; then
     jobs=$(nproc)
 fi
 make -j ${jobs}
+
+go env -w CGO_CFLAGS="-I${OUTPUT_LIB}/include"
+if [ -f "${OUTPUT_LIB}/lib/librocksdb.a" ]; then
+    go env -w CGO_LDFLAGS="-L${OUTPUT_LIB}/lib -l:librocksdb.a -lstdc++ -lm -lz"
+else
+    go env -w CGO_LDFLAGS="-L${OUTPUT_LIB}/lib64 -l:librocksdb.a -lstdc++ -lm -lz"
+fi
+
+go get github.com/tecbot/gorocksdb

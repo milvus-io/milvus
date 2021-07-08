@@ -122,7 +122,6 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 			zap.Int64("SegmentID", fu.segID),
 			zap.Int64("CollectionID", fu.collID),
 			zap.Int("Length of Field2BinlogPaths", len(id2path)),
-			zap.Any("Start Positions", fu.startPositions),
 		)
 
 		req := &datapb.SaveBinlogPathsRequest{
