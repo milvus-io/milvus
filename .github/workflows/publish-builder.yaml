@@ -8,11 +8,13 @@ on:
     paths:
       - 'build/docker/builder/**'
       - '.github/workflows/publish-builder.yaml'
+      - '!**.md'
   pull_request:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
       - 'build/docker/builder/**'
       - '.github/workflows/publish-builder.yaml'
+      - '!**.md'
 
 jobs:
   publish-builder:
