@@ -131,7 +131,7 @@ func (pt *ParamTable) initProxySubName() {
 	if err != nil {
 		panic(err)
 	}
-	pt.ProxySubName = prefix + "-" + pt.Alias
+	pt.ProxySubName = prefix + "-" + strconv.FormatInt(pt.ProxyID, 10)
 }
 
 func (pt *ParamTable) initProxyTimeTickChannelNames() {
