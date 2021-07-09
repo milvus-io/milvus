@@ -27,7 +27,6 @@ using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp
 constexpr auto MAX_TIMESTAMP = std::numeric_limits<Timestamp>::max();
 
 using engine::DataType;
-using engine::FieldElementType;
 using engine::idx_t;
 
 using ScalarArray = proto::schema::ScalarField;
@@ -58,21 +57,20 @@ struct EntityResult {};
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 struct QueryResult {
     QueryResult() = default;
-    QueryResult(uint64_t num_queries, uint64_t topK) : topK_(topK), num_queries_(num_queries) {
+    QueryResult(int64_t num_queries, int64_t topK) : topK_(topK), num_queries_(num_queries) {
         auto count = get_row_count();
         result_distances_.resize(count);
         internal_seg_offsets_.resize(count);
     }
 
-    [[nodiscard]] uint64_t
+    [[nodiscard]] int64_t
     get_row_count() const {
         return topK_ * num_queries_;
     }
 
  public:
-    uint64_t num_queries_;
-    uint64_t topK_;
-    uint64_t seg_id_;
+    int64_t num_queries_;
+    int64_t topK_;
     std::vector<float> result_distances_;
 
  public:

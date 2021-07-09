@@ -22,25 +22,14 @@
 #include <utility>
 #include <vector>
 
-// #include "utils/Json.h"
+namespace milvus::engine {
 
-namespace milvus {
-namespace engine {
-///////////////////////////////////////////////////////////////////////////////////////////////////
 using idx_t = int64_t;
 using offset_t = int32_t;
 using date_t = int32_t;
 using distance_t = float;
 
 using IDNumbers = std::vector<idx_t>;
-
-// using VectorDistance = faiss::Index::distance_t;
-// using VectorDistances = std::vector<VectorDistance>;
-
-using ResultIds = std::vector<idx_t>;
-using ResultDistances = std::vector<distance_t>;
-
-///////////////////////////////////////////////////////////////////////////////////////////////////
 
 enum class DataType {
     NONE = 0,
@@ -59,82 +48,4 @@ enum class DataType {
     VECTOR_FLOAT = 101,
 };
 
-///////////////////////////////////////////////////////////////////////////////////////////////////
-enum class FieldElementType {
-    FET_NONE = 0,
-    FET_RAW = 1,
-    FET_BLOOM_FILTER = 2,
-    FET_DELETED_DOCS = 3,
-    FET_INDEX = 4,
-    FET_COMPRESS_SQ8 = 5,
-};
-
-/////////////////////////////////////////////////////////////////////////////////////////////////////
-// class BinaryData : public cache::DataObj {
-// public:
-//    int64_t
-//    Size() {
-//        return data_.size();
-//    }
-//
-// public:
-//    std::vector<uint8_t> data_;
-//};
-// using BinaryDataPtr = std::shared_ptr<BinaryData>;
-//
-/////////////////////////////////////////////////////////////////////////////////////////////////////
-// class VaribleData : public cache::DataObj {
-// public:
-//    int64_t
-//    Size() {
-//        return data_.size() + offset_.size() * sizeof(int64_t);
-//    }
-//
-// public:
-//    std::vector<uint8_t> data_;
-//    std::vector<int64_t> offset_;
-//};
-// using VaribleDataPtr = std::shared_ptr<VaribleData>;
-//
-/////////////////////////////////////////////////////////////////////////////////////////////////////
-// using FIELD_TYPE_MAP = std::unordered_map<std::string, DataType>;
-// using FIELD_WIDTH_MAP = std::unordered_map<std::string, int64_t>;
-// using FIXEDX_FIELD_MAP = std::unordered_map<std::string, BinaryDataPtr>;
-// using VARIABLE_FIELD_MAP = std::unordered_map<std::string, VaribleDataPtr>;
-// using VECTOR_INDEX_MAP = std::unordered_map<std::string, knowhere::VecIndexPtr>;
-// using STRUCTURED_INDEX_MAP = std::unordered_map<std::string, knowhere::IndexPtr>;
-
-// ///////////////////////////////////////////////////////////////////////////////////////////////////
-// struct DataChunk {
-//     int64_t count_ = 0;
-//     FIXEDX_FIELD_MAP fixed_fields_;
-//     VARIABLE_FIELD_MAP variable_fields_;
-// };
-// using DataChunkPtr = std::shared_ptr<DataChunk>;
-
-// ///////////////////////////////////////////////////////////////////////////////////////////////////
-// struct CollectionIndex {
-//     std::string index_name_;
-//     std::string index_type_;
-//     std::string metric_name_;
-//     milvus::json extra_params_ = {{"nlist", 2048}};
-// };
-
-///////////////////////////////////////////////////////////////////////////////////////////////////
-struct VectorsData {
-    uint64_t vector_count_ = 0;
-    std::vector<float> float_data_;
-    std::vector<uint8_t> binary_data_;
-    IDNumbers id_array_;
-};
-
-///////////////////////////////////////////////////////////////////////////////////////////////////
-struct AttrsData {
-    uint64_t attr_count_ = 0;
-    std::unordered_map<std::string, engine::DataType> attr_type_;
-    std::unordered_map<std::string, std::vector<uint8_t>> attr_data_;
-    IDNumbers id_array_;
-};
-
-}  // namespace engine
-}  // namespace milvus
+}  // namespace milvus::engine
