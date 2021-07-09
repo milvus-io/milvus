@@ -45,7 +45,7 @@ import (
 const (
 	reqTimeoutInterval = time.Second * 10
 	durationInterval   = time.Second * 5
-	recycleIndexLimit  = 20
+	assignTasksLimit   = 20
 )
 
 type IndexCoord struct {
@@ -449,7 +449,7 @@ func (i *IndexCoord) recycleUnusedIndexFiles() {
 		case <-ctx.Done():
 			return
 		case <-timeTicker.C:
-			metas := i.metaTable.GetUnusedIndexFiles(recycleIndexLimit)
+			metas := i.metaTable.GetUnusedIndexFiles(assignTasksLimit)
 			for _, meta := range metas {
 				if meta.indexMeta.MarkDeleted {
 					unusedIndexFilePathPrefix := strconv.Itoa(int(meta.indexMeta.IndexBuildID))
@@ -603,7 +603,7 @@ func (i *IndexCoord) assignTaskLoop() {
 					log.Debug("IndexCoord assignmentTasksLoop metaTable.BuildIndex failed", zap.Error(err))
 				}
 				i.nodeManager.pq.IncPriority(nodeID, 1)
-				if index > 50 {
+				if index > assignTasksLimit {
 					break
 				}
 			}
