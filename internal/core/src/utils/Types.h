@@ -121,20 +121,20 @@ enum class FieldElementType {
 // };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-struct VectorsData {
-    uint64_t vector_count_ = 0;
-    std::vector<float> float_data_;
-    std::vector<uint8_t> binary_data_;
-    IDNumbers id_array_;
-};
+// struct VectorsData {
+//     int64_t vector_count_ = 0;
+//     std::vector<float> float_data_;
+//     std::vector<uint8_t> binary_data_;
+//     IDNumbers id_array_;
+// };
 
-///////////////////////////////////////////////////////////////////////////////////////////////////
-struct AttrsData {
-    uint64_t attr_count_ = 0;
-    std::unordered_map<std::string, engine::DataType> attr_type_;
-    std::unordered_map<std::string, std::vector<uint8_t>> attr_data_;
-    IDNumbers id_array_;
-};
+// ///////////////////////////////////////////////////////////////////////////////////////////////////
+// struct AttrsData {
+//     int64_t attr_count_ = 0;
+//     std::unordered_map<std::string, engine::DataType> attr_type_;
+//     std::unordered_map<std::string, std::vector<uint8_t>> attr_data_;
+//     IDNumbers id_array_;
+// };
 
 }  // namespace engine
 }  // namespace milvus
