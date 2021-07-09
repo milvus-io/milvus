@@ -64,7 +64,14 @@ The following scripts are found in the [`build/`](.) directory. Note that all sc
   * `build/builder.sh make unittest`: Run all unit tests
   * `build/builder.sh make clean`: Clean up all the generated files
 
-You can specify a different OS for builder by setting OS_NAME which defaults to `ubuntu18.04`. Valid OS name are `ubuntu18.04`, `centos7`.
+You can specify a different OS for builder by setting `OS_NAME` which defaults to `ubuntu18.04`. Valid OS name are `ubuntu18.04`, `centos7`.
+
+To specify `centos7` builder, use these command:
+
+```shell
+export OS_NAME=centos7
+build/builder.sh make
+```
 
 ## E2E Tests
 
@@ -85,7 +92,7 @@ $ build/builder.sh /bin/bash -c "./scripts/start_cluster.sh && cat"
 To run E2E tests, use these command:
 
 ```shell
-MILVUS_SERVICE_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $(docker-compose ps -q))
+MILVUS_SERVICE_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $(docker-compose ps -q builder))
 cd tests/docker
 docker-compose run --rm pytest /bin/bash -c "pytest --ip ${MILVUS_SERVICE_IP}"
 ```
