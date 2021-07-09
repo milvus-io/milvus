@@ -12,10 +12,8 @@
 package indexcoord
 
 import (
+	"container/heap"
 	"testing"
-
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"go.etcd.io/etcd/clientv3"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -24,18 +22,15 @@ const QueueLen = 10
 
 func newPriorityQueue() *PriorityQueue {
 	ret := &PriorityQueue{}
-	ret.items = make(map[UniqueID]*PQItem)
 	for i := 0; i < QueueLen; i++ {
 		item := &PQItem{
-			value:    nil,
 			key:      UniqueID(i),
 			priority: i,
+			index:    i,
 		}
-		ret.items[item.key] = item
+		ret.items = append(ret.items, item)
 	}
-	etcdClient, _ := clientv3.New(clientv3.Config{Endpoints: []string{"localhost:2379"}})
-	etcdKV := etcdkv.NewEtcdKV(etcdClient, "IndexCoord/unittest")
-	ret.kv = etcdKV
+	heap.Init(ret)
 	return ret
 }
 
@@ -46,23 +41,44 @@ func TestPriorityQueue_Len(t *testing.T) {
 	pq = nil
 }
 
-func TestPriorityQueue_removeNode(t *testing.T) {
+func TestPriorityQueue_Push(t *testing.T) {
+	pq := newPriorityQueue()
+	for i := 1; i <= QueueLen; i++ {
+		item := &PQItem{
+			key:      UniqueID(i),
+			priority: i,
+			index:    i,
+		}
+		pq.Push(item)
+		assert.Equal(t, i+QueueLen, pq.Len())
+	}
+}
+
+func TestPriorityQueue_Remove(t *testing.T) {
 	pq := newPriorityQueue()
 	cnt := 0
 	for i := 0; i < QueueLen; i++ {
 		if i%2 == 0 {
 			continue
 		}
-		pq.removeNode(UniqueID(i))
+		pq.Remove(UniqueID(i))
 		cnt++
 	}
 	assert.Equal(t, QueueLen-cnt, pq.Len())
+}
+
+func TestPriorityQueue_UpdatePriority(t *testing.T) {
+	pq := newPriorityQueue()
+	key := UniqueID(pq.Len() / 2)
+	pq.UpdatePriority(key, -pq.Len())
+	item := pq.Peek()
+	assert.Equal(t, key, item.(*PQItem).key)
 }
 
 func TestPriorityQueue_IncPriority(t *testing.T) {
 	pq := newPriorityQueue()
 	key := UniqueID(pq.Len() / 2)
 	pq.IncPriority(key, -pq.Len())
-	serverID, _ := pq.PeekClient()
-	assert.Equal(t, key, serverID)
+	item := pq.Peek()
+	assert.Equal(t, key, item.(*PQItem).key)
 }
