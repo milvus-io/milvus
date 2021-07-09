@@ -30,7 +30,7 @@ jobs:
         uses: actions/checkout@v2
       - name: Get version from system time after release step
         id: extracter
-        run: echo "::set-output name=version::$(date +%Y%m%d-%H%M%S)"
+        run: echo "::set-output name=version::$(date +%Y%m%d)"
       - name: Docker Pull
         shell: bash
         run: |
