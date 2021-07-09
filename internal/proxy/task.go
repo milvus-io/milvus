@@ -1634,7 +1634,7 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 			for k, fieldData := range searchResultData[choice].FieldsData {
 				switch fieldType := fieldData.Field.(type) {
 				case *schemapb.FieldData_Scalars:
-					if ret.Results.FieldsData[k].GetScalars() == nil {
+					if ret.Results.FieldsData[k] == nil || ret.Results.FieldsData[k].GetScalars() == nil {
 						ret.Results.FieldsData[k] = &schemapb.FieldData{
 							FieldName: fieldData.FieldName,
 							Field: &schemapb.FieldData_Scalars{
@@ -1709,7 +1709,7 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 					}
 				case *schemapb.FieldData_Vectors:
 					dim := fieldType.Vectors.Dim
-					if ret.Results.FieldsData[k].GetVectors() == nil {
+					if ret.Results.FieldsData[k] == nil || ret.Results.FieldsData[k].GetVectors() == nil {
 						ret.Results.FieldsData[k] = &schemapb.FieldData{
 							FieldName: fieldData.FieldName,
 							Field: &schemapb.FieldData_Vectors{
@@ -1895,7 +1895,8 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 			if len(st.query.OutputFields) != 0 {
 				for k, fieldName := range st.query.OutputFields {
 					for _, field := range schema.Fields {
-						if field.Name == fieldName {
+						// TODO(dragondriver): find why query nodes return empty target entry occasionally
+						if st.result.Results.FieldsData[k] != nil && field.Name == fieldName {
 							st.result.Results.FieldsData[k].FieldName = fieldName
 							st.result.Results.FieldsData[k].Type = field.DataType
 						}
