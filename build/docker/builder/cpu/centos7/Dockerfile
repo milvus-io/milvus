@@ -39,6 +39,8 @@ RUN source /etc/profile.d/devtoolset-7.sh && \
     ./b2 -j2 --prefix=/usr/local --without-python toolset=gcc install && \
     cd ../ && rm -rf ./boost_1_65_1*
 
+ENV LD_LIBRARY_PATH /usr/local/lib:$LD_LIBRARY_PATH
+
 # Install Go
 ENV GOPATH /go
 ENV GOROOT /usr/local/go

@@ -66,6 +66,9 @@ dataCoord:
 dataNode:
   port: 21124
 
+storage:
+  path: /var/lib/milvus/data/
+
 log:
   level: debug # info, warn, error, panic, fatal
   file:

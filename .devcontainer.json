@@ -1,7 +1,7 @@
 {
     "name": "Milvus Distributed Dev Container Definition",
     "dockerComposeFile": ["./docker-compose-devcontainer.yml"],
-    "service": "ubuntu",
+    "service": "builder",
     "initializeCommand": "scripts/devcontainer.sh",
     "workspaceFolder": "/go/src/github.com/milvus-io/milvus",
     "remoteEnv": { "GOPROXY": "https://goproxy.cn" },

@@ -13,6 +13,8 @@ package miniokv_test
 
 import (
 	"context"
+	"io/ioutil"
+	"os"
 	"strconv"
 	"testing"
 
@@ -185,4 +187,95 @@ func TestMinIOKV_Remove(t *testing.T) {
 	val, err = MinIOKV.Load("key_1")
 	assert.Error(t, err)
 	assert.Empty(t, val)
+}
+
+func TestMinIOKV_FGetObject(t *testing.T) {
+	Params.Init()
+	path := "/tmp/milvus/data"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	bucketName := "fantastic-tech-test"
+	MinIOKV, err := newMinIOKVClient(ctx, bucketName)
+	assert.Nil(t, err)
+	defer MinIOKV.RemoveWithPrefix("")
+
+	name1 := "31280791048324/4325023534/53443534/key_1"
+	value1 := "123"
+	err = MinIOKV.Save(name1, value1)
+	assert.Nil(t, err)
+	name2 := "312895849354/31205934503459/18948129301/key_2"
+	value2 := "333"
+	err = MinIOKV.Save(name2, value2)
+	assert.Nil(t, err)
+
+	err = MinIOKV.FGetObject(name1, path)
+	assert.Nil(t, err)
+
+	err = MinIOKV.FGetObject(name2, path)
+	assert.Nil(t, err)
+
+	err = MinIOKV.FGetObject("fail", path)
+	assert.NotNil(t, err)
+
+	file1, err := os.Open(path + name1)
+	assert.Nil(t, err)
+	content1, err := ioutil.ReadAll(file1)
+	assert.Nil(t, err)
+	assert.Equal(t, value1, string(content1))
+	defer file1.Close()
+	defer os.Remove(path + name1)
+
+	file2, err := os.Open(path + name2)
+	assert.Nil(t, err)
+	content2, err := ioutil.ReadAll(file2)
+	assert.Nil(t, err)
+	assert.Equal(t, value2, string(content2))
+	defer file1.Close()
+	defer os.Remove(path + name2)
+}
+
+func TestMinIOKV_FGetObjects(t *testing.T) {
+	Params.Init()
+	path := "/tmp/milvus/data"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	bucketName := "fantastic-tech-test"
+	MinIOKV, err := newMinIOKVClient(ctx, bucketName)
+	assert.Nil(t, err)
+	defer MinIOKV.RemoveWithPrefix("")
+
+	name1 := "31280791048324/4325023534/53443534/key_1"
+	value1 := "123"
+	err = MinIOKV.Save(name1, value1)
+	assert.Nil(t, err)
+	name2 := "312895849354/31205934503459/18948129301/key_2"
+	value2 := "333"
+	err = MinIOKV.Save(name2, value2)
+	assert.Nil(t, err)
+
+	err = MinIOKV.FGetObjects([]string{name1, name2}, path)
+	assert.Nil(t, err)
+
+	err = MinIOKV.FGetObjects([]string{"fail1", "fail2"}, path)
+	assert.NotNil(t, err)
+
+	file1, err := os.Open(path + name1)
+	assert.Nil(t, err)
+	content1, err := ioutil.ReadAll(file1)
+	assert.Nil(t, err)
+	assert.Equal(t, value1, string(content1))
+	defer file1.Close()
+	defer os.Remove(path + name1)
+
+	file2, err := os.Open(path + name2)
+	assert.Nil(t, err)
+	content2, err := ioutil.ReadAll(file2)
+	assert.Nil(t, err)
+	assert.Equal(t, value2, string(content2))
+	defer file1.Close()
+	defer os.Remove(path + name2)
 }

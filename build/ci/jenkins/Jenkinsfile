@@ -1,6 +1,6 @@
 #!/usr/bin/env groovy
 
-int timeout_minutes = 30
+int timeout_minutes = 45
 int delay_minutes = 5
 int ci_timeout = (timeout_minutes - delay_minutes) * 60
 

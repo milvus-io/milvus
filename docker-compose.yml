@@ -28,7 +28,7 @@ services:
       - .:/go/src/github.com/milvus-io/milvus:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-ccache:/ccache:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-go-mod:/go/pkg/mod:delegated
-      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-thirdparty:/tmp/thirdparty:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/thirdparty:/tmp/thirdparty:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-vscode-extensions:/home/milvus/.vscode-server/extensions:delegated
     working_dir: "/go/src/github.com/milvus-io/milvus"
     # Command

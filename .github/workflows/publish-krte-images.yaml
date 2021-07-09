@@ -8,11 +8,13 @@ on:
     paths:
       - 'build/docker/krte/**'
       - '.github/workflows/publish-krte-images.yaml'
+      - '!**.md'
   pull_request:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
       - 'build/docker/krte/**'
       - '.github/workflows/publish-krte-images.yaml'
+      - '!**.md'
 
 jobs:
   publish-krte-images:

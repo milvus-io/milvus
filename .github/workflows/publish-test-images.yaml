@@ -9,12 +9,14 @@ on:
       - 'tests/docker/Dockerfile'
       - 'tests/python_test/requirements.txt'
       - '.github/workflows/publish-test-images.yaml'
+      - '!**.md'
   pull_request:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
       - 'tests/docker/Dockerfile'
       - 'tests/python_test/requirements.txt'
       - '.github/workflows/publish-test-images.yaml'
+      - '!**.md'
 
 jobs:
   publish-pytest-images:

@@ -34,7 +34,7 @@ gid=$(id -g)
 
 mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-${OS_NAME}-ccache"
 mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-${OS_NAME}-go-mod"
-mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-${OS_NAME}-thirdparty"
+mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/thirdparty"
 mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-${OS_NAME}-vscode-extensions"
 chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}"
 
