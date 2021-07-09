@@ -130,20 +130,22 @@ func (kv *MinIOKV) FGetObject(key, localPath string) error {
 // For parallell downloads file, n goroutines will be started to download n keys.
 func (kv *MinIOKV) FGetObjects(keys []string, localPath string) error {
 	var wg sync.WaitGroup
-	el := make(errorList, 0)
+	el := make(errorList, len(keys))
 	for i, key := range keys {
 		wg.Add(1)
 		go func(i int, key string) {
 			err := kv.minioClient.FGetObject(kv.ctx, kv.bucketName, key, localPath+key, minio.GetObjectOptions{})
 			if err != nil {
-				el = append(el, err)
+				el[i] = err
 			}
 			wg.Done()
 		}(i, key)
 	}
 	wg.Wait()
-	if len(el) != 0 {
-		return el
+	for _, err := range el {
+		if err != nil {
+			return el
+		}
 	}
 	return nil
 }
