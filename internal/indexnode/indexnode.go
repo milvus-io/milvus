@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -90,8 +89,6 @@ func (i *IndexNode) Register() error {
 }
 
 func (i *IndexNode) Init() error {
-	ctx := context.Background()
-
 	connectEtcdFn := func() error {
 		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
 		i.etcdKV = etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
@@ -103,15 +100,6 @@ func (i *IndexNode) Init() error {
 		return err
 	}
 	log.Debug("IndexNode try connect etcd success")
-	log.Debug("IndexNode start to wait for IndexCoord ready")
-
-	//TODO: IndexNode does not need to wait IndexCoord healthy.
-	err = funcutil.WaitForComponentHealthy(ctx, i.serviceClient, "IndexCoord", 1000000, time.Millisecond*200)
-	if err != nil {
-		log.Debug("IndexNode wait for IndexCoord ready failed", zap.Error(err))
-		return err
-	}
-	log.Debug("IndexNode report IndexCoord is ready")
 
 	option := &miniokv.Option{
 		Address:           Params.MinIOAddress,

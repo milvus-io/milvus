@@ -19,9 +19,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/types"
 )
 
 const (
@@ -71,14 +69,9 @@ func (bt *BaseTask) Notify(err error) {
 
 type IndexAddTask struct {
 	BaseTask
-	req               *indexpb.BuildIndexRequest
-	indexBuildID      UniqueID
-	idAllocator       *allocator.GlobalIDAllocator
-	buildQueue        TaskQueue
-	kv                kv.BaseKV
-	builderClient     types.IndexNode
-	nodeClients       *PriorityQueue
-	buildClientNodeID UniqueID
+	req          *indexpb.BuildIndexRequest
+	indexBuildID UniqueID
+	idAllocator  *allocator.GlobalIDAllocator
 }
 
 func (it *IndexAddTask) Ctx() context.Context {

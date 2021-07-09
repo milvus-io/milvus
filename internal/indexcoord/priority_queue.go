@@ -12,60 +12,66 @@
 package indexcoord
 
 import (
-	"context"
-	"strconv"
+	"container/heap"
 	"sync"
-
-	"go.uber.org/zap"
-
-	"github.com/golang/protobuf/proto"
-	grpcindexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/types"
 )
 
 // An Item is something we manage in a priority queue.
 type PQItem struct {
-	value types.IndexNode // The value of the item; arbitrary.
-	key   UniqueID
-	addr  string
+	key UniqueID
 
 	priority int // The priority of the item in the queue.
+	// The index is needed by update and is maintained by the heap.Interface methods.
+	index int // The index of the item in the heap.
 }
-
-func (pq *PQItem) Reset() {
-	*pq = PQItem{}
-}
-
-func (pq *PQItem) String() string {
-	return proto.CompactTextString(pq)
-}
-
-func (pq *PQItem) ProtoMessage() {}
 
 // A PriorityQueue implements heap.Interface and holds Items.
 
 type PriorityQueue struct {
-	items map[UniqueID]*PQItem
+	items []*PQItem
 	lock  sync.RWMutex
-
-	kv *etcdkv.EtcdKV
 }
 
-func NewNodeClients(kv *etcdkv.EtcdKV) *PriorityQueue {
-	pq := &PriorityQueue{
-		kv:   kv,
-		lock: sync.RWMutex{},
-	}
-	pq.reloadFromETCD()
-
-	return pq
+func (pq *PriorityQueue) Len() int {
+	return len(pq.items)
 }
 
-func (pq *PriorityQueue) checkAddressExist(addr string) bool {
+func (pq *PriorityQueue) Less(i, j int) bool {
+	// We want Pop to give us the highest, not lowest, priority so we use greater than here.
+	return pq.items[i].priority < pq.items[j].priority
+}
+
+func (pq *PriorityQueue) Swap(i, j int) {
+	pq.items[i], pq.items[j] = pq.items[j], pq.items[i]
+	pq.items[i].index = i
+	pq.items[j].index = j
+}
+
+func (pq *PriorityQueue) Push(x interface{}) {
+	pq.lock.Lock()
+	defer pq.lock.Unlock()
+	n := (*pq).Len()
+	item := x.(*PQItem)
+	item.index = n
+	pq.items = append(pq.items, item)
+}
+
+// Pop do not call this directly.
+func (pq *PriorityQueue) Pop() interface{} {
+	old := pq.items
+	n := len(old)
+	item := old[n-1]
+	item.index = -1 // for safety
+	pq.items = old[0 : n-1]
+	return item
+}
+
+func (pq *PriorityQueue) CheckNodeIDExist(nodeID UniqueID) bool {
+	pq.lock.RLock()
+	defer pq.lock.RUnlock()
+
 	for _, item := range pq.items {
-		if item.addr == addr {
+		if nodeID == item.key {
 			return true
 		}
 	}
@@ -83,12 +89,6 @@ func (pq *PriorityQueue) getItemByKey(key UniqueID) interface{} {
 	return ret
 }
 
-func (pq *PriorityQueue) Len() int {
-	pq.lock.RLock()
-	defer pq.lock.RUnlock()
-	return len(pq.items)
-}
-
 // IncPriority update modifies the priority and value of an Item in the queue.
 func (pq *PriorityQueue) IncPriority(key UniqueID, priority int) {
 	pq.lock.Lock()
@@ -96,109 +96,58 @@ func (pq *PriorityQueue) IncPriority(key UniqueID, priority int) {
 	item := pq.getItemByKey(key)
 	if item != nil {
 		item.(*PQItem).priority += priority
+		heap.Fix(pq, item.(*PQItem).index)
 	}
-	pq.items[key] = item.(*PQItem)
-	pq.saveNodeClients(key, item.(*PQItem))
+}
+
+// UpdatePriority update modifies the priority and value of an Item in the queue.
+func (pq *PriorityQueue) UpdatePriority(key UniqueID, priority int) {
+	pq.lock.Lock()
+	defer pq.lock.Unlock()
+	item := pq.getItemByKey(key)
+	if item != nil {
+		item.(*PQItem).priority = priority
+		heap.Fix(pq, item.(*PQItem).index)
+	}
+}
+
+func (pq *PriorityQueue) Remove(key UniqueID) {
+	pq.lock.Lock()
+	defer pq.lock.Unlock()
+	item := pq.getItemByKey(key)
+	if item != nil {
+		heap.Remove(pq, item.(*PQItem).index)
+	}
+}
+
+func (pq *PriorityQueue) Peek() interface{} {
+	pq.lock.RLock()
+	defer pq.lock.RUnlock()
+	if pq.Len() == 0 {
+		return nil
+	}
+	return pq.items[0]
+	//item := pq.items[0]
+	//return item.value
 }
 
 // PeekClient picks an IndexNode with the lowest load.
-func (pq *PriorityQueue) PeekClient() (UniqueID, types.IndexNode) {
-	pq.lock.RLock()
-	defer pq.lock.RUnlock()
-
-	if len(pq.items) == 0 {
-		return UniqueID(-1), nil
+func (pq *PriorityQueue) PeekClient() UniqueID {
+	item := pq.Peek()
+	if item == nil {
+		return UniqueID(-1)
 	}
-	it := &PQItem{}
-	for k := range pq.items {
-		it = pq.items[k]
-		break
-	}
-	for _, item := range pq.items {
-		if item.priority < it.priority {
-			it = item
-		}
-	}
-	return it.key, it.value
+	return item.(*PQItem).key
 }
 
-func (pq *PriorityQueue) PeekAllClients() []types.IndexNode {
+func (pq *PriorityQueue) PeekAllClients() []UniqueID {
 	pq.lock.RLock()
 	defer pq.lock.RUnlock()
 
-	var ret []types.IndexNode
+	var ret []UniqueID
 	for _, item := range pq.items {
-		ret = append(ret, item.value)
+		ret = append(ret, item.key)
 	}
 
 	return ret
-}
-
-func (pq *PriorityQueue) reloadFromETCD() {
-	pq.lock.RLock()
-	defer pq.lock.RUnlock()
-
-	pq.items = make(map[UniqueID]*PQItem)
-	key := "IndexNodes"
-	_, values, err := pq.kv.LoadWithPrefix(key)
-	if err != nil {
-		log.Debug("IndexCoord PriorityQueue", zap.Any("Load IndexNode err", err))
-	}
-	for _, value := range values {
-		item := PQItem{}
-		err = proto.UnmarshalText(value, &item)
-		if err != nil {
-			log.Debug("IndexCoord PriorityQueue", zap.Any("UnmarshalText err", err))
-		}
-		pq.items[item.key] = &item
-	}
-}
-
-func (pq *PriorityQueue) saveNodeClients(serverID UniqueID, item *PQItem) {
-	log.Debug("IndexCoord saveNodeClients", zap.Any("PriorityQueue", pq.items))
-	value := proto.MarshalTextString(item)
-
-	key := "IndexNodes/" + strconv.FormatInt(serverID, 10)
-	if err := pq.kv.Save(key, value); err != nil {
-		log.Debug("IndexCoord PriorityQueue", zap.Any("IndexNodes save ETCD err", err))
-	}
-}
-
-func (pq *PriorityQueue) removeNode(nodeID UniqueID) error {
-	pq.lock.Lock()
-	defer pq.lock.Unlock()
-
-	log.Debug("IndexCoord", zap.Any("Remove node with ID", nodeID))
-	delete(pq.items, nodeID)
-	key := "IndexNodes/" + strconv.FormatInt(nodeID, 10)
-	return pq.kv.Remove(key)
-}
-
-func (pq *PriorityQueue) addNode(nodeID UniqueID, address string) error {
-	pq.lock.Lock()
-	defer pq.lock.Unlock()
-
-	log.Debug("IndexCoord addNode", zap.Any("nodeID", nodeID), zap.Any("node address", address))
-	if pq.checkAddressExist(address) {
-		log.Debug("IndexCoord", zap.Any("Node client already exist with ID:", nodeID))
-		return nil
-	}
-
-	nodeClient, err := grpcindexnodeclient.NewClient(context.TODO(), address)
-	if err != nil {
-		return err
-	}
-	err = nodeClient.Init()
-	if err != nil {
-		return err
-	}
-	item := &PQItem{
-		value:    nodeClient,
-		key:      nodeID,
-		addr:     address,
-		priority: 0,
-	}
-	pq.items[nodeID] = item
-	pq.saveNodeClients(nodeID, item)
-	return nil
 }

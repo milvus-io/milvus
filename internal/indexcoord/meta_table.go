@@ -480,3 +480,17 @@ func (mt *metaTable) LoadMetaFromETCD(indexBuildID int64, revision int64) bool {
 
 	return true
 }
+
+func (mt *metaTable) GetPriorityForNodeID() map[UniqueID]int {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+
+	log.Debug("IndexCoord MetaTable GetPriorityForNodeID")
+	nodePriority := make(map[UniqueID]int)
+	for _, meta := range mt.indexBuildID2Meta {
+		if meta.indexMeta.State == commonpb.IndexState_InProgress {
+			nodePriority[meta.indexMeta.NodeID]++
+		}
+	}
+	return nodePriority
+}

@@ -49,9 +49,7 @@ const (
 )
 
 type IndexCoord struct {
-	nodeClients *PriorityQueue
-	nodeStates  map[UniqueID]*internalpb.ComponentStates
-	stateCode   atomic.Value
+	stateCode atomic.Value
 
 	ID UniqueID
 
@@ -68,7 +66,8 @@ type IndexCoord struct {
 
 	kv kv.BaseKV
 
-	metaTable *metaTable
+	metaTable   *metaTable
+	nodeManager *NodeManager
 
 	nodeLock sync.RWMutex
 
@@ -112,7 +111,6 @@ func (i *IndexCoord) Init() error {
 			return err
 		}
 		i.metaTable = metakv
-		i.nodeClients = NewNodeClients(etcdKV)
 		return err
 	}
 	log.Debug("IndexCoord try to connect etcd")
@@ -122,19 +120,25 @@ func (i *IndexCoord) Init() error {
 		return err
 	}
 	log.Debug("IndexCoord try to connect etcd success")
+	i.nodeManager = NewNodeManager()
+
 	sessions, revision, err := i.session.GetSessions(typeutil.IndexNodeRole)
 	log.Debug("IndexCoord", zap.Any("session number", len(sessions)), zap.Any("revision", revision))
 	if err != nil {
 		log.Debug("IndexCoord", zap.Any("Get IndexNode Sessions error", err))
 	}
 	for _, session := range sessions {
-		if err = i.nodeClients.addNode(session.ServerID, session.Address); err != nil {
+		if err = i.nodeManager.AddNode(session.ServerID, session.Address); err != nil {
 			log.Debug("IndexCoord", zap.Any("ServerID", session.ServerID),
 				zap.Any("Add IndexNode error", err))
 		}
 	}
+	log.Debug("IndexCoord", zap.Any("IndexNode number", len(i.nodeManager.nodeClients)))
 	i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, revision+1)
-	log.Debug("IndexCoord", zap.Any("IndexNode number", len(i.nodeClients.items)))
+	nodePriority := i.metaTable.GetPriorityForNodeID()
+	for nodeID, priority := range nodePriority {
+		i.nodeManager.pq.UpdatePriority(nodeID, priority)
+	}
 
 	//init idAllocator
 	kvRootPath := Params.KvRootPath
@@ -290,14 +294,7 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 		},
 		req:         req,
 		idAllocator: i.idAllocator,
-		kv:          i.kv,
 	}
-
-	if i.nodeClients == nil || i.nodeClients.Len() <= 0 {
-		ret.Status.Reason = "IndexBuilding Service not available"
-		return ret, nil
-	}
-	t.nodeClients = i.nodeClients
 
 	var cancel func()
 	t.ctx, cancel = context.WithTimeout(ctx, reqTimeoutInterval)
@@ -495,19 +492,15 @@ func (i *IndexCoord) watchNodeLoop() {
 			case sessionutil.SessionAddEvent:
 				serverID := event.Session.ServerID
 				log.Debug("IndexCoord watchNodeLoop SessionAddEvent", zap.Any("serverID", serverID))
-				err := i.nodeClients.addNode(serverID, event.Session.Address)
+				err := i.nodeManager.AddNode(serverID, event.Session.Address)
 				if err != nil {
 					log.Debug("IndexCoord", zap.Any("Add IndexNode err", err))
 				}
-				log.Debug("IndexCoord", zap.Any("IndexNode number", len(i.nodeClients.items)))
+				log.Debug("IndexCoord", zap.Any("IndexNode number", len(i.nodeManager.nodeClients)))
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
 				log.Debug("IndexCoord watchNodeLoop SessionDelEvent", zap.Any("serverID", serverID))
-				err := i.nodeClients.removeNode(serverID)
-				if err != nil {
-					log.Debug("IndexCoord watchNodeLoop SessionDelEvent", zap.Any("ServerID", serverID),
-						zap.Any("Remove IndexNode error", err))
-				}
+				i.nodeManager.RemoveNode(serverID)
 			}
 		}
 	}
@@ -541,7 +534,7 @@ func (i *IndexCoord) watchMetaLoop() {
 					reload := i.metaTable.LoadMetaFromETCD(indexBuildID, eventRevision)
 					log.Debug("IndexCoord watchMetaLoop PUT", zap.Any("IndexBuildID", indexBuildID), zap.Any("reload", reload))
 					if reload {
-						i.nodeClients.IncPriority(indexMeta.NodeID, -1)
+						i.nodeManager.pq.IncPriority(indexMeta.NodeID, -1)
 					}
 				case mvccpb.DELETE:
 				}
@@ -582,7 +575,7 @@ func (i *IndexCoord) assignTaskLoop() {
 				if err = i.metaTable.UpdateVersion(indexBuildID); err != nil {
 					log.Debug("IndexCoord assignmentTasksLoop metaTable.UpdateVersion failed", zap.Error(err))
 				}
-				nodeID, builderClient := i.nodeClients.PeekClient()
+				nodeID, builderClient := i.nodeManager.PeekClient()
 				if builderClient == nil {
 					log.Debug("IndexCoord assignmentTasksLoop can not find available IndexNode")
 					break
@@ -609,7 +602,7 @@ func (i *IndexCoord) assignTaskLoop() {
 				if err = i.metaTable.BuildIndex(indexBuildID, nodeID); err != nil {
 					log.Debug("IndexCoord assignmentTasksLoop metaTable.BuildIndex failed", zap.Error(err))
 				}
-				i.nodeClients.IncPriority(nodeID, 1)
+				i.nodeManager.pq.IncPriority(nodeID, 1)
 				if index > 50 {
 					break
 				}
