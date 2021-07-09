@@ -37,8 +37,8 @@ using IDNumbers = std::vector<idx_t>;
 // using VectorDistance = faiss::Index::distance_t;
 // using VectorDistances = std::vector<VectorDistance>;
 
-using ResultIds = std::vector<idx_t>;
-using ResultDistances = std::vector<distance_t>;
+// using ResultIds = std::vector<idx_t>;
+// using ResultDistances = std::vector<distance_t>;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -59,15 +59,15 @@ enum class DataType {
     VECTOR_FLOAT = 101,
 };
 
-///////////////////////////////////////////////////////////////////////////////////////////////////
-enum class FieldElementType {
-    FET_NONE = 0,
-    FET_RAW = 1,
-    FET_BLOOM_FILTER = 2,
-    FET_DELETED_DOCS = 3,
-    FET_INDEX = 4,
-    FET_COMPRESS_SQ8 = 5,
-};
+// ///////////////////////////////////////////////////////////////////////////////////////////////////
+// enum class FieldElementType {
+//     FET_NONE = 0,
+//     FET_RAW = 1,
+//     FET_BLOOM_FILTER = 2,
+//     FET_DELETED_DOCS = 3,
+//     FET_INDEX = 4,
+//     FET_COMPRESS_SQ8 = 5,
+// };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 // class BinaryData : public cache::DataObj {

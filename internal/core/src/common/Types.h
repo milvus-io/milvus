@@ -27,7 +27,6 @@ using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp
 constexpr auto MAX_TIMESTAMP = std::numeric_limits<Timestamp>::max();
 
 using engine::DataType;
-using engine::FieldElementType;
 using engine::idx_t;
 
 using ScalarArray = proto::schema::ScalarField;
