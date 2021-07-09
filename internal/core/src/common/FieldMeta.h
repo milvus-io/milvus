@@ -28,13 +28,13 @@ datatype_sizeof(DataType data_type, int dim = 1) {
         case DataType::FLOAT:
             return sizeof(float);
         case DataType::INT8:
-            return sizeof(uint8_t);
+            return sizeof(int8_t);
         case DataType::INT16:
-            return sizeof(uint16_t);
+            return sizeof(int16_t);
         case DataType::INT32:
-            return sizeof(uint32_t);
+            return sizeof(int32_t);
         case DataType::INT64:
-            return sizeof(uint64_t);
+            return sizeof(int64_t);
         case DataType::VECTOR_FLOAT:
             return sizeof(float) * dim;
         case DataType::VECTOR_BINARY: {
