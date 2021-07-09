@@ -191,8 +191,7 @@ func TestMinIOKV_Remove(t *testing.T) {
 
 func TestMinIOKV_FGetObject(t *testing.T) {
 	Params.Init()
-	path, err := Params.Load("storage.path")
-	assert.Nil(t, err)
+	path := "/tmp/milvus/data"
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -223,6 +222,7 @@ func TestMinIOKV_FGetObject(t *testing.T) {
 	file1, err := os.Open(path + name1)
 	assert.Nil(t, err)
 	content1, err := ioutil.ReadAll(file1)
+	assert.Nil(t, err)
 	assert.Equal(t, value1, string(content1))
 	defer file1.Close()
 	defer os.Remove(path + name1)
@@ -230,6 +230,7 @@ func TestMinIOKV_FGetObject(t *testing.T) {
 	file2, err := os.Open(path + name2)
 	assert.Nil(t, err)
 	content2, err := ioutil.ReadAll(file2)
+	assert.Nil(t, err)
 	assert.Equal(t, value2, string(content2))
 	defer file1.Close()
 	defer os.Remove(path + name2)
@@ -237,8 +238,7 @@ func TestMinIOKV_FGetObject(t *testing.T) {
 
 func TestMinIOKV_FGetObjects(t *testing.T) {
 	Params.Init()
-	path, err := Params.Load("storage.path")
-	assert.Nil(t, err)
+	path := "/tmp/milvus/data"
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -266,6 +266,7 @@ func TestMinIOKV_FGetObjects(t *testing.T) {
 	file1, err := os.Open(path + name1)
 	assert.Nil(t, err)
 	content1, err := ioutil.ReadAll(file1)
+	assert.Nil(t, err)
 	assert.Equal(t, value1, string(content1))
 	defer file1.Close()
 	defer os.Remove(path + name1)
@@ -273,6 +274,7 @@ func TestMinIOKV_FGetObjects(t *testing.T) {
 	file2, err := os.Open(path + name2)
 	assert.Nil(t, err)
 	content2, err := ioutil.ReadAll(file2)
+	assert.Nil(t, err)
 	assert.Equal(t, value2, string(content2))
 	defer file1.Close()
 	defer os.Remove(path + name2)
