@@ -1,4 +1,4 @@
-# Building Milvus
+# Building Milvus with Docker
 
 Building Milvus is easy if you take advantage of the containerized build environment. This document will help guide you through understanding this build process.
 
@@ -64,6 +64,7 @@ The following scripts are found in the [`build/`](.) directory. Note that all sc
   * `build/builder.sh make unittest`: Run all unit tests
   * `build/builder.sh make clean`: Clean up all the generated files
 
+You can specify a different OS for builder by setting OS_NAME which defaults to `ubuntu18.04`. Valid OS name are `ubuntu18.04`, `centos7`.
 
 ## E2E Tests
 
