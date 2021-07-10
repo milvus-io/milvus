@@ -83,10 +83,15 @@ enum class OpType {
     NotEqual = 6
 };
 
+static const std::map<std::string, OpType> mapping_ = { // op_name -> op
+    {"lt", OpType::LessThan},    {"le", OpType::LessEqual},    {"lte", OpType::LessEqual},
+    {"gt", OpType::GreaterThan}, {"ge", OpType::GreaterEqual}, {"gte", OpType::GreaterEqual},
+    {"eq", OpType::Equal},       {"ne", OpType::NotEqual},
+};
+
 struct RangeExpr : Expr {
     FieldOffset field_offset_;
     DataType data_type_ = DataType::NONE;
-    static const std::map<std::string, OpType> mapping_;  // op_name -> op
 
     // std::vector<std::tuple<OpType, std::any>> conditions_;
  protected:
@@ -101,7 +106,6 @@ struct RangeExpr : Expr {
 struct CompareExpr : Expr {
     std::vector<FieldOffset> fields_offset_;
     std::vector<DataType> datas_type_;
-    static const std::map<std::string, OpType> mapping_;  // op_name -> op
     OpType op;
 
  public:

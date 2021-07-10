@@ -505,38 +505,38 @@ vector_anns: <
 
     ShowPlanNodeVisitor visitor;
     auto json = visitor.call_child(*plan->plan_node_);
-    std::cout << json.dump(2);
+    // std::cout << json.dump(2);
     auto extra_info = plan->extra_info_opt_.value();
 
-    // TODO: support dsl
-//    std::string dsl_text = boost::str(boost::format(R"(
-//{
-//    "bool": {
-//        "must": [
-//            {
-//                "range": {
-//                    "%1%": {
-//                        "GT": 3
-//                    }
-//                }
-//            },
-//            {
-//                "vector": {
-//                    "FloatVectorField": {
-//                        "metric_type": "L2",
-//                        "params": {
-//                            "nprobe": 10
-//                        },
-//                        "query": "$0",
-//                        "topk": 10
-//                    }
-//                }
-//            }
-//        ]
-//    }
-//}
-//)") % field_name);
-//
-//    auto ref_plan = CreatePlan(*schema, dsl_text);
-//    plan->check_identical(*ref_plan);
+    std::string dsl_text = boost::str(boost::format(R"(
+{
+    "bool": {
+        "must": [
+            {
+                "compare": {
+                    "LT": [
+                        "age1",
+                        "age2"
+                    ]
+                }
+            },
+            {
+                "vector": {
+                    "FloatVectorField": {
+                        "metric_type": "L2",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 10
+                    }
+                }
+            }
+        ]
+    }
+}
+)"));
+
+    auto ref_plan = CreatePlan(*schema, dsl_text);
+    plan->check_identical(*ref_plan);
 }

@@ -196,18 +196,18 @@ ShowExprVisitor::visit(CompareExpr& expr) {
     using proto::plan::OpType;
     Assert(!ret_.has_value());
 
-    std::vector<int64_t> offsets;
+    Json offsets;
     for (auto& offset : expr.fields_offset_) {
         offsets.emplace_back(offset.get());
     }
-    std::vector<std::basic_string<char>> datatypes;
+    Json types;
     for (auto& datatype : expr.datas_type_) {
-        datatypes.emplace_back(datatype_name(datatype));
+        types.emplace_back(datatype_name(datatype));
     }
 
     Json res{{"expr_type", "Compare"},
-             {"fields_offset", Json{offsets}},
-             {"datas_type", Json{datatypes}},
+             {"fields_offset", offsets},
+             {"datas_type", types},
              {"op", OpType_Name(static_cast<OpType>(expr.op))}};
     ret_ = res;
 }

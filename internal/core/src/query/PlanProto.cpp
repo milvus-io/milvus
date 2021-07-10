@@ -178,7 +178,6 @@ ProtoParser::ParseRangeExpr(const proto::plan::RangeExpr& expr_pb) {
 ExprPtr
 ProtoParser::ParseCompareExpr(const proto::plan::CompareExpr& expr_pb) {
     auto& columns_info = expr_pb.columns_info();
-    std::vector<FieldId> fields_id;
     std::vector<FieldOffset> fields_offset;
     std::vector<DataType> datas_type;
     for (auto& column_info : columns_info) {
@@ -186,20 +185,18 @@ ProtoParser::ParseCompareExpr(const proto::plan::CompareExpr& expr_pb) {
         auto field_offset = schema.get_offset(field_id);
         auto data_type = schema[field_offset].get_data_type();
         Assert(data_type == (DataType)column_info.data_type());
-        fields_id.emplace_back(field_id);
         fields_offset.emplace_back(field_offset);
         datas_type.emplace_back(data_type);
     }
 
     // auto& field_meta = schema[field_offset];
-    auto result = [&]() -> ExprPtr {
+    return [&]() -> ExprPtr {
       auto result = std::make_unique<CompareExpr>();
       result->fields_offset_ = fields_offset;
       result->datas_type_ = datas_type;
       result->op = static_cast<OpType>(expr_pb.op());
       return result;
     }();
-    return result;
 }
 
 ExprPtr
