@@ -128,7 +128,7 @@ function cleanup_kind_cluster() {
   if [[ -z "${SKIP_CLEANUP:-}" ]]; then
     echo "Cleaning up kind cluster"
     kind delete cluster --name "${NAME}" -v9 || true
-    docker network rm kind 2>&1 > /dev/null || true
+    docker network rm kind > /dev/null 2>&1 || true
   fi
 }
 
@@ -163,7 +163,7 @@ function setup_kind_cluster() {
   if ! (kind delete cluster --name="${NAME}" -v9) > /dev/null; then
     echo "No existing kind cluster with name ${NAME}. Continue..."
   else
-    docker network rm kind 2>&1 > /dev/null || true
+    docker network rm kind > /dev/null 2>&1 || true
   fi
 
   # explicitly disable shellcheck since we actually want $NAME to expand now
