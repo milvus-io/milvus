@@ -105,7 +105,7 @@ pipeline {
                                     }
                                     archiveArtifacts artifacts: "**.tar.gz", allowEmptyArchive: true
                                     sh 'docker rm -f \$(docker network inspect -f \'{{ range \$key, \$value := .Containers }}{{ printf "%s " \$key}}{{ end }}\' kind) || true'
-                                    sh 'docker network rm kind 2>&1 > /dev/null || true'
+                                    sh 'docker network rm kind > /dev/null 2>&1 || true'
                                 }
                             }
                         }
