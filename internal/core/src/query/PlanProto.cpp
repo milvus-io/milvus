@@ -58,7 +58,7 @@ ExtractRangeExprImpl(FieldOffset field_offset, DataType data_type, const planpb:
     auto sz = expr_proto.ops_size();
 
     for (int i = 0; i < sz; ++i) {
-        auto op = static_cast<RangeExpr::OpType>(expr_proto.ops(i));
+        auto op = static_cast<OpType>(expr_proto.ops(i));
         auto& value_proto = expr_proto.values(i);
         if constexpr (std::is_same_v<T, bool>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kBoolVal);
@@ -134,6 +134,7 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
 
     return plan;
 }
+
 ExprPtr
 ProtoParser::ParseRangeExpr(const proto::plan::RangeExpr& expr_pb) {
     auto& columen_info = expr_pb.column_info();
@@ -170,6 +171,33 @@ ProtoParser::ParseRangeExpr(const proto::plan::RangeExpr& expr_pb) {
                 PanicInfo("unsupported data type");
             }
         }
+    }();
+    return result;
+}
+
+ExprPtr
+ProtoParser::ParseCompareExpr(const proto::plan::CompareExpr& expr_pb) {
+    auto& columns_info = expr_pb.columns_info();
+    std::vector<FieldId> fields_id;
+    std::vector<FieldOffset> fields_offset;
+    std::vector<DataType> datas_type;
+    for (auto& column_info : columns_info) {
+        auto field_id = FieldId(column_info.field_id());
+        auto field_offset = schema.get_offset(field_id);
+        auto data_type = schema[field_offset].get_data_type();
+        Assert(data_type == (DataType)column_info.data_type());
+        fields_id.emplace_back(field_id);
+        fields_offset.emplace_back(field_offset);
+        datas_type.emplace_back(data_type);
+    }
+
+    // auto& field_meta = schema[field_offset];
+    auto result = [&]() -> ExprPtr {
+      auto result = std::make_unique<CompareExpr>();
+      result->fields_offset_ = fields_offset;
+      result->datas_type_ = datas_type;
+      result->op = static_cast<OpType>(expr_pb.op());
+      return result;
     }();
     return result;
 }
@@ -252,6 +280,9 @@ ProtoParser::ParseExpr(const proto::plan::Expr& expr_pb) {
         }
         case ppe::kRangeExpr: {
             return ParseRangeExpr(expr_pb.range_expr());
+        }
+        case ppe::kCompareExpr: {
+            return ParseCompareExpr(expr_pb.compare_expr());
         }
         default:
             PanicInfo("unsupported expr proto node");

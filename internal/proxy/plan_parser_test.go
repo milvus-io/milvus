@@ -175,3 +175,38 @@ func TestExprMultiRange_Str(t *testing.T) {
 		println(dbgStr)
 	}
 }
+
+func TestExprFieldCompare_Str(t *testing.T) {
+	exprStrs := []string{
+		"age1 < age2",
+		"3 < age1 <= age2 < 4",
+	}
+
+	fields := []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "fakevec", DataType: schemapb.DataType_FloatVector},
+		{FieldID: 101, Name: "age1", DataType: schemapb.DataType_Int64},
+		{FieldID: 102, Name: "age2", DataType: schemapb.DataType_Int64},
+		{FieldID: 103, Name: "FloatN", DataType: schemapb.DataType_Float},
+	}
+
+	schema := &schemapb.CollectionSchema{
+		Name:        "default-collection",
+		Description: "",
+		AutoID:      true,
+		Fields:      fields,
+	}
+
+	queryInfo := &planpb.QueryInfo{
+		Topk:         10,
+		MetricType:   "L2",
+		SearchParams: "{\"nprobe\": 10}",
+	}
+
+	for offset, exprStr := range exprStrs {
+		fmt.Printf("case %d: %s\n", offset, exprStr)
+		planProto, err := CreateQueryPlan(schema, exprStr, "fakevec", queryInfo)
+		assert.Nil(t, err)
+		dbgStr := proto.MarshalTextString(planProto)
+		println(dbgStr)
+	}
+}

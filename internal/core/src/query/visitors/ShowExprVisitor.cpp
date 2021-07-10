@@ -15,6 +15,7 @@
 #include <utility>
 #include "query/generated/ShowExprVisitor.h"
 #include "query/ExprImpl.h"
+#include "pb/plan.pb.h"
 
 namespace milvus::query {
 using Json = nlohmann::json;
@@ -145,12 +146,13 @@ ShowExprVisitor::visit(TermExpr& expr) {
 template <typename T>
 static Json
 ConditionExtract(const RangeExpr& expr_raw) {
+    using proto::plan::OpType_Name;
+    using proto::plan::OpType;
     auto expr = dynamic_cast<const RangeExprImpl<T>*>(&expr_raw);
     Assert(expr);
     std::map<std::string, T> mapping;
     for (auto [op, v] : expr->conditions_) {
-        // TODO: use name
-        auto op_name = "op(" + std::to_string((int)op) + ")";
+        auto op_name = OpType_Name(static_cast<OpType>(op));
         mapping[op_name] = v;
     }
     return mapping;
@@ -185,6 +187,28 @@ ShowExprVisitor::visit(RangeExpr& expr) {
              {"field_offset", expr.field_offset_.get()},
              {"data_type", datatype_name(expr.data_type_)},
              {"conditions", std::move(conditions)}};
+    ret_ = res;
+}
+
+void
+ShowExprVisitor::visit(CompareExpr& expr) {
+    using proto::plan::OpType_Name;
+    using proto::plan::OpType;
+    Assert(!ret_.has_value());
+
+    std::vector<int64_t> offsets;
+    for (auto& offset : expr.fields_offset_) {
+        offsets.emplace_back(offset.get());
+    }
+    std::vector<std::basic_string<char>> datatypes;
+    for (auto& datatype : expr.datas_type_) {
+        datatypes.emplace_back(datatype_name(datatype));
+    }
+
+    Json res{{"expr_type", "Compare"},
+             {"fields_offset", Json{offsets}},
+             {"datas_type", Json{datatypes}},
+             {"op", OpType_Name(static_cast<OpType>(expr.op))}};
     ret_ = res;
 }
 }  // namespace milvus::query

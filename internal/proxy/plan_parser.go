@@ -183,43 +183,43 @@ func isSameOrder(a, b string) bool {
 	return isLessA == isLessB
 }
 
-func getCompareOpType(opStr string, reverse bool) planpb.RangeExpr_OpType {
-	type OpType = planpb.RangeExpr_OpType
-	var op planpb.RangeExpr_OpType
+func getCompareOpType(opStr string, reverse bool) planpb.OpType {
+	type OpType = planpb.OpType
+	var op planpb.OpType
 
 	if !reverse {
 		switch opStr {
 		case "<":
-			op = planpb.RangeExpr_LessThan
+			op = planpb.OpType_LessThan
 		case ">":
-			op = planpb.RangeExpr_GreaterThan
+			op = planpb.OpType_GreaterThan
 		case "<=":
-			op = planpb.RangeExpr_LessEqual
+			op = planpb.OpType_LessEqual
 		case ">=":
-			op = planpb.RangeExpr_GreaterEqual
+			op = planpb.OpType_GreaterEqual
 		case "==":
-			op = planpb.RangeExpr_Equal
+			op = planpb.OpType_Equal
 		case "!=":
-			op = planpb.RangeExpr_NotEqual
+			op = planpb.OpType_NotEqual
 		default:
-			op = planpb.RangeExpr_Invalid
+			op = planpb.OpType_Invalid
 		}
 	} else {
 		switch opStr {
 		case ">":
-			op = planpb.RangeExpr_LessThan
+			op = planpb.OpType_LessThan
 		case "<":
-			op = planpb.RangeExpr_GreaterThan
+			op = planpb.OpType_GreaterThan
 		case ">=":
-			op = planpb.RangeExpr_LessEqual
+			op = planpb.OpType_LessEqual
 		case "<=":
-			op = planpb.RangeExpr_GreaterEqual
+			op = planpb.OpType_GreaterEqual
 		case "==":
-			op = planpb.RangeExpr_Equal
+			op = planpb.OpType_Equal
 		case "!=":
-			op = planpb.RangeExpr_NotEqual
+			op = planpb.OpType_NotEqual
 		default:
-			op = planpb.RangeExpr_Invalid
+			op = planpb.OpType_Invalid
 		}
 	}
 	return op
@@ -237,46 +237,77 @@ func getLogicalOpType(opStr string) planpb.BinaryExpr_BinaryOp {
 }
 
 func (context *ParserContext) createCmpExpr(left, right ant_ast.Node, operator string) (*planpb.Expr, error) {
-	var idNode *ant_ast.IdentifierNode
-	var isReversed bool
-	var valueNode *ant_ast.Node
-	if idNodeLeft, leftOk := left.(*ant_ast.IdentifierNode); leftOk {
-		idNode = idNodeLeft
-		isReversed = false
-		valueNode = &right
-	} else if idNodeRight, rightOk := right.(*ant_ast.IdentifierNode); rightOk {
-		idNode = idNodeRight
-		isReversed = true
-		valueNode = &left
-	} else {
-		return nil, fmt.Errorf("compare expr has no identifier")
-	}
+	idNodeLeft, leftIdNode := left.(*ant_ast.IdentifierNode)
+	idNodeRight, rightIdNode := right.(*ant_ast.IdentifierNode)
 
-	field, err := context.handleIdentifier(idNode)
-	if err != nil {
-		return nil, err
-	}
-
-	val, err := context.handleLeafValue(valueNode, field.DataType)
-	if err != nil {
-		return nil, err
-	}
-
-	op := getCompareOpType(operator, isReversed)
-	if op == planpb.RangeExpr_Invalid {
-		return nil, fmt.Errorf("invalid binary operator %s", operator)
-	}
-
-	expr := &planpb.Expr{
-		Expr: &planpb.Expr_RangeExpr{
-			RangeExpr: &planpb.RangeExpr{
-				ColumnInfo: context.createColumnInfo(field),
-				Ops:        []planpb.RangeExpr_OpType{op},
-				Values:     []*planpb.GenericValue{val},
+	if leftIdNode && rightIdNode {
+		leftField, err := context.handleIdentifier(idNodeLeft)
+		if err != nil {
+			return nil, err
+		}
+		rightField, err := context.handleIdentifier(idNodeRight)
+		if err != nil {
+			return nil, err
+		}
+		op := getCompareOpType(operator, false)
+		if op == planpb.OpType_Invalid {
+			return nil, fmt.Errorf("invalid binary operator %s", operator)
+		}
+		expr := &planpb.Expr{
+			Expr: &planpb.Expr_CompareExpr{
+				CompareExpr: &planpb.CompareExpr{
+					ColumnsInfo: []*planpb.ColumnInfo{
+						context.createColumnInfo(leftField),
+						context.createColumnInfo(rightField),
+					},
+					Op: op,
+				},
 			},
-		},
+		}
+		return expr, nil
+
+	} else {
+		var idNode *ant_ast.IdentifierNode
+		var isReversed bool
+		var valueNode *ant_ast.Node
+		if leftIdNode {
+			idNode = idNodeLeft
+			isReversed = false
+			valueNode = &right
+		} else if rightIdNode {
+			idNode = idNodeRight
+			isReversed = true
+			valueNode = &left
+		} else {
+			return nil, fmt.Errorf("compare expr has no identifier")
+		}
+
+		field, err := context.handleIdentifier(idNode)
+		if err != nil {
+			return nil, err
+		}
+
+		val, err := context.handleLeafValue(valueNode, field.DataType)
+		if err != nil {
+			return nil, err
+		}
+
+		op := getCompareOpType(operator, isReversed)
+		if op == planpb.OpType_Invalid {
+			return nil, fmt.Errorf("invalid binary operator %s", operator)
+		}
+
+		expr := &planpb.Expr{
+			Expr: &planpb.Expr_RangeExpr{
+				RangeExpr: &planpb.RangeExpr{
+					ColumnInfo: context.createColumnInfo(field),
+					Ops:        []planpb.OpType{op},
+					Values:     []*planpb.GenericValue{val},
+				},
+			},
+		}
+		return expr, nil
 	}
-	return expr, nil
 }
 
 func (context *ParserContext) handleCmpExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {

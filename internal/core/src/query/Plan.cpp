@@ -29,7 +29,7 @@
 namespace milvus::query {
 
 /// initialize RangeExpr::mapping_
-const std::map<std::string, RangeExpr::OpType> RangeExpr::mapping_ = {
+const std::map<std::string, OpType> RangeExpr::mapping_ = {
     {"lt", OpType::LessThan},    {"le", OpType::LessEqual},    {"lte", OpType::LessEqual},
     {"gt", OpType::GreaterThan}, {"ge", OpType::GreaterEqual}, {"gte", OpType::GreaterEqual},
     {"eq", OpType::Equal},       {"ne", OpType::NotEqual},

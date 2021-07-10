@@ -73,24 +73,36 @@ struct TermExpr : Expr {
     accept(ExprVisitor&) override;
 };
 
+enum class OpType {
+    Invalid = 0,
+    GreaterThan = 1,
+    GreaterEqual = 2,
+    LessThan = 3,
+    LessEqual = 4,
+    Equal = 5,
+    NotEqual = 6
+};
+
 struct RangeExpr : Expr {
     FieldOffset field_offset_;
     DataType data_type_ = DataType::NONE;
-    enum class OpType {
-        Invalid = 0,
-        GreaterThan = 1,
-        GreaterEqual = 2,
-        LessThan = 3,
-        LessEqual = 4,
-        Equal = 5,
-        NotEqual = 6
-    };
     static const std::map<std::string, OpType> mapping_;  // op_name -> op
 
     // std::vector<std::tuple<OpType, std::any>> conditions_;
  protected:
     // prevent accidential instantiation
     RangeExpr() = default;
+
+ public:
+    void
+    accept(ExprVisitor&) override;
+};
+
+struct CompareExpr : Expr {
+    std::vector<FieldOffset> fields_offset_;
+    std::vector<DataType> datas_type_;
+    static const std::map<std::string, OpType> mapping_;  // op_name -> op
+    OpType op;
 
  public:
     void
