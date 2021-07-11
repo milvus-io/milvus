@@ -51,7 +51,7 @@ ExtractInfoExprVisitor::visit(RangeExpr& expr) {
 
 void
 ExtractInfoExprVisitor::visit(CompareExpr& expr) {
-    for (auto& field_offset : expr.fields_offset_) {
+    for (auto& field_offset : expr.field_offsets_) {
         plan_info_.add_involved_field(field_offset);
     }
 }

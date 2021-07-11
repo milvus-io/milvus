@@ -104,8 +104,8 @@ struct RangeExpr : Expr {
 };
 
 struct CompareExpr : Expr {
-    std::vector<FieldOffset> fields_offset_;
-    std::vector<DataType> datas_type_;
+    std::vector<FieldOffset> field_offsets_;
+    std::vector<DataType> data_types_;
     OpType op;
 
  public:

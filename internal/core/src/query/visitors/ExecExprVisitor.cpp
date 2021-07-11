@@ -324,8 +324,8 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, CmpFunc cmp_func) 
                     PanicInfo("unsupported datatype");
             }
         };
-        auto left = getChunkData(expr.datas_type_[0], expr.fields_offset_[0]);
-        auto right = getChunkData(expr.datas_type_[1], expr.fields_offset_[1]);
+        auto left = getChunkData(expr.data_types_[0], expr.field_offsets_[0]);
+        auto right = getChunkData(expr.data_types_[1], expr.field_offsets_[1]);
 
         boost::dynamic_bitset<> bitset(size_per_chunk);
         for (int i = 0; i < size; ++i) {
@@ -339,14 +339,14 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, CmpFunc cmp_func) 
 
 void
 ExecExprVisitor::visit(CompareExpr& expr) {
-    Assert(expr.datas_type_.size() == expr.fields_offset_.size());
-    Assert(expr.fields_offset_.size() == 2);
+    Assert(expr.data_types_.size() == expr.field_offsets_.size());
+    Assert(expr.data_types_.size() == 2);
     auto& schema = segment_.get_schema();
 
     // std::vector<FieldMeta&> fields_meta;
-    for (auto i = 0; i < expr.fields_offset_.size(); i++) {
-        auto& field_meta = schema[expr.fields_offset_[i]];
-        Assert(expr.datas_type_[i] == field_meta.get_data_type());
+    for (auto i = 0; i < expr.field_offsets_.size(); i++) {
+        auto& field_meta = schema[expr.field_offsets_[i]];
+        Assert(expr.data_types_[i] == field_meta.get_data_type());
         // fields_meta.emplace_back(field_meta);
     }
 

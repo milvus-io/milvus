@@ -115,8 +115,8 @@ Parser::ParseCompareNode(const Json& out_body) {
         auto field_name = FieldName(item.get<std::string>());
         auto& field_meta = schema[field_name];
         auto data_type = field_meta.get_data_type();
-        expr->datas_type_.emplace_back(data_type);
-        expr->fields_offset_.emplace_back(schema.get_offset(field_name));
+        expr->data_types_.emplace_back(data_type);
+        expr->field_offsets_.emplace_back(schema.get_offset(field_name));
     }
     return expr;
 }

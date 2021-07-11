@@ -197,11 +197,11 @@ ShowExprVisitor::visit(CompareExpr& expr) {
     Assert(!ret_.has_value());
 
     Json offsets;
-    for (auto& offset : expr.fields_offset_) {
+    for (auto& offset : expr.field_offsets_) {
         offsets.emplace_back(offset.get());
     }
     Json types;
-    for (auto& datatype : expr.datas_type_) {
+    for (auto& datatype : expr.data_types_) {
         types.emplace_back(datatype_name(datatype));
     }
 
