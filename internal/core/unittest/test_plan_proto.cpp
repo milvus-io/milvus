@@ -459,18 +459,11 @@ vector_anns: <
 TEST_P(PlanProtoTest, CompareExpr) {
     auto schema = getStandardSchema();
     schema->AddField(FieldName("age1"), FieldId(128), DataType::INT64);
-    schema->AddField(FieldName("age2"), FieldId(129), DataType::FLOAT);
     // xxx.query(predicates = "int64field < int64field", topk = 10, ...)
-    auto data_type = spb::DataType::Int64;
-    auto data_type_str = spb::DataType_Name(data_type);
+    auto data_type = std::get<0>(GetParam());
     auto field_id = 100 + (int)data_type;
+    auto data_type_str = spb::DataType_Name(data_type);
     auto field_name = data_type_str + "Field";
-    string value_tag = "bool_val";
-    if (datatype_is_floating((DataType)data_type)) {
-        value_tag = "float_val";
-    } else if (datatype_is_interger((DataType)data_type)) {
-        value_tag = "int64_val";
-    }
 
     auto fmt1 = boost::format(R"(
 vector_anns: <
@@ -482,8 +475,8 @@ vector_anns: <
         data_type: Int64
       >
       columns_info: <
-        field_id: 129
-        data_type: Float
+        field_id: %1%
+        data_type: %2%
       >
       op: LessThan
     >
@@ -495,7 +488,7 @@ vector_anns: <
   >
   placeholder_tag: "$0"
 >
-)");
+)") % field_id % data_type_str;
 
     auto proto_text = fmt1.str();
     planpb::PlanNode node_proto;
@@ -516,7 +509,7 @@ vector_anns: <
                 "compare": {
                     "LT": [
                         "age1",
-                        "age2"
+                        "%1%"
                     ]
                 }
             },
@@ -535,7 +528,7 @@ vector_anns: <
         ]
     }
 }
-)"));
+)") % field_name);
 
     auto ref_plan = CreatePlan(*schema, dsl_text);
     plan->check_identical(*ref_plan);
