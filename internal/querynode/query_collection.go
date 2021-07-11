@@ -485,6 +485,7 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 }
 
 func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]byte) (*schemapb.SearchResultData, error) {
+	log.Debug("translateHits:", zap.Any("lenOfFieldIDs", len(fieldIDs)), zap.Any("lenOfRawHits", len(rawHits)))
 	if len(rawHits) == 0 {
 		return nil, fmt.Errorf("empty results")
 	}
@@ -501,7 +502,7 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 
 	blobOffset := 0
 	// skip id
-	numQuereis := len(rawHits)
+	numQueries := len(rawHits)
 	pbHits := &milvuspb.Hits{}
 	err := proto.Unmarshal(rawHits[0], pbHits)
 	if err != nil {
@@ -527,7 +528,7 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 		},
 		Scores:     scores,
 		TopK:       int64(topK),
-		NumQueries: int64(numQuereis),
+		NumQueries: int64(numQueries),
 	}
 
 	for _, fieldID := range fieldIDs {
