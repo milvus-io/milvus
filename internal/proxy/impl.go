@@ -1286,7 +1286,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		zap.String("collection", request.CollectionName),
 		zap.Any("partitions", request.PartitionNames),
 		zap.Any("dsl", request.Dsl),
-		zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)))
+		zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)),
+		zap.Any("OutputFields", request.OutputFields))
 	defer func() {
 		log.Debug("Search Done",
 			zap.Error(err),
@@ -1297,7 +1298,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			zap.String("collection", request.CollectionName),
 			zap.Any("partitions", request.PartitionNames),
 			zap.Any("dsl", request.Dsl),
-			zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)))
+			zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)),
+			zap.Any("OutputFields", request.OutputFields))
 	}()
 
 	err = qt.WaitToFinish()

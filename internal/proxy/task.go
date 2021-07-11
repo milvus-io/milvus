@@ -1296,6 +1296,7 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 		for _, name := range st.query.OutputFields {
+			hitField := false
 			for _, field := range schema.Fields {
 				if field.Name == name {
 					if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
@@ -1304,7 +1305,13 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 
 					st.SearchRequest.OutputFieldsId = append(st.SearchRequest.OutputFieldsId, field.FieldID)
 					plan.OutputFieldIds = append(plan.OutputFieldIds, field.FieldID)
+					hitField = true
+					break
 				}
+			}
+			if !hitField {
+				errMsg := "Field " + name + " not exist"
+				return errors.New(errMsg)
 			}
 		}
 
@@ -1313,6 +1320,8 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		log.Debug("Proxy::SearchTask::PreExecute", zap.Any("plan.OutputFieldIds", plan.OutputFieldIds),
+			zap.Any("plan", plan.String()))
 	}
 	travelTimestamp := st.query.TravelTimestamp
 	if travelTimestamp == 0 {
@@ -1418,77 +1427,29 @@ func (st *SearchTask) Execute(ctx context.Context) error {
 	return err
 }
 
-// TODO: add benchmark to compare with serial implementation
-func decodeSearchResultsParallel(searchResults []*internalpb.SearchResults, maxParallel int) ([][]*milvuspb.Hits, error) {
-	log.Debug("decodeSearchResultsParallel", zap.Any("NumOfGoRoutines", maxParallel))
-
-	hits := make([][]*milvuspb.Hits, 0)
-	// necessary to parallel this?
-	for _, partialSearchResult := range searchResults {
-		if partialSearchResult.Hits == nil || len(partialSearchResult.Hits) <= 0 {
-			continue
-		}
-
-		nq := len(partialSearchResult.Hits)
-		partialHits := make([]*milvuspb.Hits, nq)
-
-		f := func(idx int) error {
-			partialHit := &milvuspb.Hits{}
-
-			err := proto.Unmarshal(partialSearchResult.Hits[idx], partialHit)
-			if err != nil {
-				return err
-			}
-
-			partialHits[idx] = partialHit
-
-			return nil
-		}
-
-		err := funcutil.ProcessFuncParallel(nq, maxParallel, f, "decodePartialSearchResult")
-
-		if err != nil {
-			return nil, err
-		}
-
-		hits = append(hits, partialHits)
-	}
-
-	return hits, nil
-}
-
 func decodeSearchResultsSerial(searchResults []*internalpb.SearchResults) ([]*schemapb.SearchResultData, error) {
+	log.Debug("reduceSearchResultDataParallel", zap.Any("lenOfSearchResults", len(searchResults)))
+
 	results := make([]*schemapb.SearchResultData, 0)
 	// necessary to parallel this?
-	for _, partialSearchResult := range searchResults {
+	for i, partialSearchResult := range searchResults {
+		log.Debug("decodeSearchResultsSerial", zap.Any("i", i), zap.Any("SlicedBob", partialSearchResult.SlicedBlob))
 		if partialSearchResult.SlicedBlob == nil {
 			continue
 		}
 
 		var partialResultData schemapb.SearchResultData
 		err := proto.Unmarshal(partialSearchResult.SlicedBlob, &partialResultData)
+		log.Debug("decodeSearchResultsSerial, Unmarshal partitalSearchResult.SliceBlob", zap.Error(err))
 		if err != nil {
 			return nil, err
 		}
 
 		results = append(results, &partialResultData)
 	}
+	log.Debug("reduceSearchResultDataParallel", zap.Any("lenOfResults", len(results)))
 
 	return results, nil
-}
-
-// TODO: add benchmark to compare with serial implementation
-func decodeSearchResultsParallelByNq(searchResults []*internalpb.SearchResults) ([][]*milvuspb.Hits, error) {
-	if len(searchResults) <= 0 {
-		return nil, errors.New("no need to decode empty search results")
-	}
-	nq := len(searchResults[0].Hits)
-	return decodeSearchResultsParallel(searchResults, nq)
-}
-
-// TODO: add benchmark to compare with serial implementation
-func decodeSearchResultsParallelByCPU(searchResults []*internalpb.SearchResults) ([][]*milvuspb.Hits, error) {
-	return decodeSearchResultsParallel(searchResults, runtime.NumCPU())
 }
 
 func decodeSearchResults(searchResults []*internalpb.SearchResults) ([]*schemapb.SearchResultData, error) {
@@ -1500,82 +1461,15 @@ func decodeSearchResults(searchResults []*internalpb.SearchResults) ([]*schemapb
 	// return decodeSearchResultsParallelByCPU(searchResults)
 }
 
-func reduceSearchResultsParallel(hits [][]*milvuspb.Hits, nq, availableQueryNodeNum, topk int, metricType string, maxParallel int) *milvuspb.SearchResults {
-	log.Debug("reduceSearchResultsParallel", zap.Any("NumOfGoRoutines", maxParallel))
-
-	ret := &milvuspb.SearchResults{
-		Status: &commonpb.Status{
-			ErrorCode: 0,
-		},
-	}
-
-	const minFloat32 = -1 * float32(math.MaxFloat32)
-
-	f := func(idx int) error {
-		locs := make([]int, availableQueryNodeNum)
-		reducedHits := &milvuspb.Hits{
-			IDs:     make([]int64, 0),
-			RowData: make([][]byte, 0),
-			Scores:  make([]float32, 0),
-		}
-
-		for j := 0; j < topk; j++ {
-			valid := false
-			choice, maxDistance := 0, minFloat32
-			for q, loc := range locs { // query num, the number of ways to merge
-				if loc >= len(hits[q][idx].IDs) {
-					continue
-				}
-				distance := hits[q][idx].Scores[loc]
-				if distance > maxDistance || (math.Abs(float64(distance-maxDistance)) < math.SmallestNonzeroFloat32 && choice != q) {
-					choice = q
-					maxDistance = distance
-					valid = true
-				}
-			}
-			if !valid {
-				break
-			}
-			choiceOffset := locs[choice]
-			// check if distance is valid, `invalid` here means very very big,
-			// in this process, distance here is the smallest, so the rest of distance are all invalid
-			if hits[choice][idx].Scores[choiceOffset] <= minFloat32 {
-				break
-			}
-			reducedHits.IDs = append(reducedHits.IDs, hits[choice][idx].IDs[choiceOffset])
-			if hits[choice][idx].RowData != nil && len(hits[choice][idx].RowData) > 0 {
-				reducedHits.RowData = append(reducedHits.RowData, hits[choice][idx].RowData[choiceOffset])
-			}
-			reducedHits.Scores = append(reducedHits.Scores, hits[choice][idx].Scores[choiceOffset])
-			locs[choice]++
-		}
-
-		if metricType != "IP" {
-			for k := range reducedHits.Scores {
-				reducedHits.Scores[k] *= -1
-			}
-		}
-
-		// reducedHitsBs, err := proto.Marshal(reducedHits)
-		// if err != nil {
-		// return err
-		// }
-
-		// ret.Hits[idx] = reducedHitsBs
-
-		return nil
-	}
-
-	err := funcutil.ProcessFuncParallel(nq, maxParallel, f, "reduceSearchResults")
-	if err != nil {
-		return nil
-	}
-
-	return ret
-}
-
 func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultData, nq, availableQueryNodeNum, topk int, metricType string, maxParallel int) (*milvuspb.SearchResults, error) {
-	log.Debug("reduceSearchResultDataParallel", zap.Any("NumOfGoRoutines", maxParallel))
+	log.Debug("reduceSearchResultDataParallel", zap.Any("lenOfsearchResultData", len(searchResultData)),
+		zap.Any("nq", nq), zap.Any("availableQueryNodeNum", availableQueryNodeNum),
+		zap.Any("topk", topk), zap.Any("metricType", metricType),
+		zap.Any("maxParallel", maxParallel))
+
+	for i, sData := range searchResultData {
+		log.Debug("reduceSearchResultDataParallel", zap.Any("i", i), zap.Any("len(FieldsData)", len(sData.FieldsData)))
+	}
 
 	ret := &milvuspb.SearchResults{
 		Status: &commonpb.Status{
@@ -1753,34 +1647,8 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 			ret.Results.Scores[k] *= -1
 		}
 	}
-	// err := funcutil.ProcessFuncParallel(nq, maxParallel, f, "reduceSearchResults")
-	// if err != nil {
-	// 	return nil
-	// }
 
 	return ret, nil
-}
-
-func reduceSearchResultsSerial(hits [][]*milvuspb.Hits, nq, availableQueryNodeNum, topk int, metricType string) *milvuspb.SearchResults {
-	return reduceSearchResultsParallel(hits, nq, availableQueryNodeNum, topk, metricType, 1)
-}
-
-// TODO: add benchmark to compare with serial implementation
-func reduceSearchResultsParallelByNq(hits [][]*milvuspb.Hits, nq, availableQueryNodeNum, topk int, metricType string) *milvuspb.SearchResults {
-	return reduceSearchResultsParallel(hits, nq, availableQueryNodeNum, topk, metricType, nq)
-}
-
-// TODO: add benchmark to compare with serial implementation
-func reduceSearchResultsParallelByCPU(hits [][]*milvuspb.Hits, nq, availableQueryNodeNum, topk int, metricType string) *milvuspb.SearchResults {
-	return reduceSearchResultsParallel(hits, nq, availableQueryNodeNum, topk, metricType, runtime.NumCPU())
-}
-
-func reduceSearchResults(hits [][]*milvuspb.Hits, nq, availableQueryNodeNum, topk int, metricType string) *milvuspb.SearchResults {
-	t := time.Now()
-	defer func() {
-		log.Debug("reduceSearchResults", zap.Any("time cost", time.Since(t)))
-	}()
-	return reduceSearchResultsParallelByCPU(hits, nq, availableQueryNodeNum, topk, metricType)
 }
 
 func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq, availableQueryNodeNum, topk int, metricType string) (*milvuspb.SearchResults, error) {
@@ -1892,10 +1760,9 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			if len(st.query.OutputFields) != 0 {
+			if len(st.query.OutputFields) != 0 && len(st.result.Results.FieldsData) != 0 {
 				for k, fieldName := range st.query.OutputFields {
 					for _, field := range schema.Fields {
-						// TODO(dragondriver): find why query nodes return empty target entry occasionally
 						if st.result.Results.FieldsData[k] != nil && field.Name == fieldName {
 							st.result.Results.FieldsData[k].FieldName = fieldName
 							st.result.Results.FieldsData[k].Type = field.DataType
