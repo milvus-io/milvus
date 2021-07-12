@@ -49,3 +49,21 @@ jobs:
           IMAGE_TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} docker-compose push pytest
           IMAGE_TAG=latest docker-compose push pytest
           echo "Push pytest image Succeeded"
+      - name: Update Pytest Image Changes
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        continue-on-error: true
+        shell: bash
+        working-directory: tests/docker
+        run: |
+          sed -i "s#IMAGE_TAG=.*#IMAGE_TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" .env
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add .env
+          git commit -m "Update Pytest Image Changes"
+      - name: Push Pytest Image Changes
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        continue-on-error: true
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.ref }}
