@@ -285,11 +285,13 @@ ExecExprVisitor::visit(RangeExpr& expr) {
 template <typename Op>
 struct relational {
     template <typename T, typename U>
-    bool operator()(T const& a, U const& b) const {
+    bool
+    operator()(T const& a, U const& b) const {
         return Op{}(a, b);
     }
     template <typename... T>
-    bool operator()(T const&...) const {
+    bool
+    operator()(T const&...) const {
         PanicInfo("incompatible operands");
     }
 };
@@ -305,7 +307,7 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op) -> RetType 
     for (int64_t chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
         auto size = chunk_id == num_chunk - 1 ? row_count_ - chunk_id * size_per_chunk : size_per_chunk;
 
-        auto getChunkData = [&, chunk_id] (DataType type, FieldOffset offset) -> std::function<const number(int)> {
+        auto getChunkData = [&, chunk_id](DataType type, FieldOffset offset) -> std::function<const number(int)> {
             switch (type) {
                 case DataType::BOOL: {
                     auto chunk = segment_.chunk_data<bool>(offset, chunk_id);
@@ -374,15 +376,15 @@ ExecExprVisitor::visit(CompareExpr& expr) {
             break;
         }
         case OpType::GreaterEqual: {
-            ret =  ExecCompareExprDispatcher(expr, std::greater_equal<>{});
+            ret = ExecCompareExprDispatcher(expr, std::greater_equal<>{});
             break;
         }
         case OpType::GreaterThan: {
-            ret =  ExecCompareExprDispatcher(expr, std::greater<>{});
+            ret = ExecCompareExprDispatcher(expr, std::greater<>{});
             break;
         }
         case OpType::LessEqual: {
-            ret =  ExecCompareExprDispatcher(expr, std::less_equal<>{});
+            ret = ExecCompareExprDispatcher(expr, std::less_equal<>{});
             break;
         }
         case OpType::LessThan: {

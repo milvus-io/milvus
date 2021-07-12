@@ -83,7 +83,8 @@ enum class OpType {
     NotEqual = 6
 };
 
-static const std::map<std::string, OpType> mapping_ = { // op_name -> op
+static const std::map<std::string, OpType> mapping_ = {
+    // op_name -> op
     {"lt", OpType::LessThan},    {"le", OpType::LessEqual},    {"lte", OpType::LessEqual},
     {"gt", OpType::GreaterThan}, {"ge", OpType::GreaterEqual}, {"gte", OpType::GreaterEqual},
     {"eq", OpType::Equal},       {"ne", OpType::NotEqual},

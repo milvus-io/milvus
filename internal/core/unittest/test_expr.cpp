@@ -518,12 +518,9 @@ TEST(Expr, TestCompare) {
     using namespace milvus::query;
     using namespace milvus::segcore;
     std::vector<std::tuple<std::string, std::function<bool(int, int64_t)>>> testcases = {
-        {R"("LT")", [](int a, int64_t b) { return a < b; }},
-        {R"("LE")", [](int a, int64_t b) { return a <= b; }},
-        {R"("GT")", [](int a, int64_t b) { return a > b; }},
-        {R"("GE")", [](int a, int64_t b) { return a >= b; }},
-        {R"("EQ")", [](int a, int64_t b) { return a == b; }},
-        {R"("NE")", [](int a, int64_t b) { return a != b; }},
+        {R"("LT")", [](int a, int64_t b) { return a < b; }},  {R"("LE")", [](int a, int64_t b) { return a <= b; }},
+        {R"("GT")", [](int a, int64_t b) { return a > b; }},  {R"("GE")", [](int a, int64_t b) { return a >= b; }},
+        {R"("EQ")", [](int a, int64_t b) { return a == b; }}, {R"("NE")", [](int a, int64_t b) { return a != b; }},
     };
 
     std::string dsl_string_tpl = R"(

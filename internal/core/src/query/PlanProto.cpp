@@ -191,11 +191,11 @@ ProtoParser::ParseCompareExpr(const proto::plan::CompareExpr& expr_pb) {
 
     // auto& field_meta = schema[field_offset];
     return [&]() -> ExprPtr {
-      auto result = std::make_unique<CompareExpr>();
-      result->field_offsets_ = field_offsets;
-      result->data_types_ = data_types;
-      result->op = static_cast<OpType>(expr_pb.op());
-      return result;
+        auto result = std::make_unique<CompareExpr>();
+        result->field_offsets_ = field_offsets;
+        result->data_types_ = data_types;
+        result->op = static_cast<OpType>(expr_pb.op());
+        return result;
     }();
 }
 

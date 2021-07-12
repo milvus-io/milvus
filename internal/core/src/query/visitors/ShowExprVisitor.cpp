@@ -146,8 +146,8 @@ ShowExprVisitor::visit(TermExpr& expr) {
 template <typename T>
 static Json
 ConditionExtract(const RangeExpr& expr_raw) {
-    using proto::plan::OpType_Name;
     using proto::plan::OpType;
+    using proto::plan::OpType_Name;
     auto expr = dynamic_cast<const RangeExprImpl<T>*>(&expr_raw);
     Assert(expr);
     std::map<std::string, T> mapping;
@@ -192,8 +192,8 @@ ShowExprVisitor::visit(RangeExpr& expr) {
 
 void
 ShowExprVisitor::visit(CompareExpr& expr) {
-    using proto::plan::OpType_Name;
     using proto::plan::OpType;
+    using proto::plan::OpType_Name;
     Assert(!ret_.has_value());
 
     Json offsets;
