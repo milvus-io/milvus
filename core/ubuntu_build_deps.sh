@@ -12,3 +12,5 @@ libboost-filesystem-dev libboost-serialization-dev libboost-regex-dev liblapack3
 if [ ! -f "/usr/lib/x86_64-linux-gnu/libmysqlclient_r.so" ]; then
     sudo ln -s /usr/lib/x86_64-linux-gnu/libmysqlclient.so /usr/lib/x86_64-linux-gnu/libmysqlclient_r.so
 fi
+
+sudo dpkg -i ./thirdparty/gsi/gdl_sources_milvus/gsi-sys-full-libs-120.11.300.9.deb

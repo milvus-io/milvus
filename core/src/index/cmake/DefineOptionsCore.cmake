@@ -47,6 +47,14 @@ if (MILVUS_FPGA_VERSION)
 else ()
     define_option(KNOWHERE_FPGA_VERSION "Build FPGA version" OFF)
 endif ()
+#-------------------------------------------------
+set_option_category("APU version")
+
+if (MILVUS_APU_VERSION)
+    define_option(KNOWHERE_APU_VERSION "Build APU version" ON)
+else ()
+    define_option(KNOWHERE_APU_VERSION "Build APU version" OFF)
+endif ()
 #----------------------------------------------------------------------
 set_option_category("GPU version")
 

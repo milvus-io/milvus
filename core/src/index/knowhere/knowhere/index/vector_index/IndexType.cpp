@@ -70,6 +70,8 @@ const char* INDEX_SPTAG_KDT_RNT = "SPTAG_KDT_RNT";
 const char* INDEX_SPTAG_BKT_RNT = "SPTAG_BKT_RNT";
 const char* INDEX_HNSW = "HNSW";
 const char* INDEX_ANNOY = "ANNOY";
+const char* GSI_FLAT_TANIMOTO = "GSI_FLAT_TANIMOTO";
+const char* GSI_FLAT_HAMMING = "GSI_FLAT_HAMMING";
 }  // namespace IndexEnum
 
 std::string

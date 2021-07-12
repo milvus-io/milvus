@@ -54,7 +54,7 @@ load_simple_config() {
     server::Config& config = server::Config::GetInstance();
 #endif
 
-#ifdef MILVUS_FPGA_VERSION
+#ifdef  MILVUS_FPGA_VERSION
     bool enable_fpga = false;
     config.GetFpgaResourceConfigEnable(enable_fpga);
     if (enable_fpga) {

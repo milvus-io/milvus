@@ -80,15 +80,34 @@ if (MILVUS_FPGA_VERSION)
               armadillo
              ${depend_libs}             
     )
+    
     set(index_srcs ${index_srcs}
             knowhere/index/vector_index/fpga/Fpga.cpp
             knowhere/index/vector_index/fpga/IndexFPGAIVFPQ.cpp
             knowhere/index/vector_index/fpga/xilinx_c.cpp
             knowhere/index/vector_index/fpga/utils.cpp
             knowhere/index/vector_index/fpga/FpgaInst.cpp
-    )
+        )
 
 endif ()
+
+if (MILVUS_APU_VERSION)
+    
+    set(depend_libs
+            apu
+            ${depend_libs}
+            )
+
+    set(index_srcs ${index_srcs}
+            knowhere/index/vector_index/fpga/GsiBaseIndex.cpp
+            knowhere/index/vector_index/fpga/GsiHammingIndex.cpp
+            knowhere/index/vector_index/fpga/GsiTanimotoIndex.cpp
+            knowhere/index/vector_index/fpga/Apu.cpp
+            knowhere/index/vector_index/fpga/ApuInst.cpp
+        )
+
+endif ()
+
 
 if (KNOWHERE_GPU_VERSION)
     include_directories(${CUDA_INCLUDE_DIRS})
@@ -109,7 +128,7 @@ if (KNOWHERE_GPU_VERSION)
             knowhere/index/vector_index/gpu/IndexIVFSQHybrid.cpp
             knowhere/index/vector_index/helpers/Cloner.cpp
             knowhere/index/vector_index/helpers/FaissGpuResourceMgr.cpp
-            )
+        )
 
 endif ()
 

@@ -12,12 +12,13 @@ RUN_CPPLINT="OFF"
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
 GPU_VERSION="OFF" #defaults to CPU version
 FPGA_VERSION="OFF" 
+APU_VERSION="OFF"
 WITH_MKL="OFF"
 WITH_PROMETHEUS="ON"
 FIU_ENABLE="OFF"
 BUILD_OPENBLAS="ON"
 
-while getopts "p:d:t:f:ulrcgahzmei" arg; do
+while getopts "p:d:t:f:ulrcgahzmeiw" arg; do
   case $arg in
   p)
     INSTALL_PREFIX=$OPTARG
@@ -62,6 +63,9 @@ while getopts "p:d:t:f:ulrcgahzmei" arg; do
   a)
     FPGA_VERSION="ON"
     ;;
+  w)
+    APU_VERSION="ON"
+    ;;
   h) # help
     echo "
 
@@ -79,6 +83,7 @@ parameter:
 -e: build without prometheus(default: OFF)
 -i: build FIU_ENABLE(default: OFF)
 -a: build FPGA(default: OFF)
+-w: build APU(default: OFF )
 -h: help
 
 usage:
@@ -114,6 +119,7 @@ CMAKE_CMD="cmake \
 -DENABLE_CPU_PROFILING=${PROFILING} \
 -DMILVUS_GPU_VERSION=${GPU_VERSION} \
 -DMILVUS_FPGA_VERSION=${FPGA_VERSION} \
+-DMILVUS_APU_VERSION=${APU_VERSION} \
 -DFAISS_WITH_MKL=${WITH_MKL} \
 -DMILVUS_WITH_PROMETHEUS=${WITH_PROMETHEUS} \
 -DMILVUS_WITH_FIU=${FIU_ENABLE} \
