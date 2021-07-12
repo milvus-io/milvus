@@ -197,6 +197,133 @@ func (it *InsertTask) OnEnqueue() error {
 	return nil
 }
 
+func getNumRowsOfScalarField(datas interface{}) uint32 {
+	realTypeDatas := reflect.ValueOf(datas)
+	return uint32(realTypeDatas.Len())
+}
+
+func getNumRowsOfFloatVectorField(fDatas []float32, dim int64) (uint32, error) {
+	if dim <= 0 {
+		return 0, errDimLessThanOrEqualToZero(int(dim))
+	}
+	l := len(fDatas)
+	if int64(l)%dim != 0 {
+		return 0, fmt.Errorf("the length(%d) of float data should divide the dim(%d)", l, dim)
+	}
+	return uint32(int(int64(l) / dim)), nil
+}
+
+func getNumRowsOfBinaryVectorField(bDatas []byte, dim int64) (uint32, error) {
+	if dim <= 0 {
+		return 0, errDimLessThanOrEqualToZero(int(dim))
+	}
+	if dim%8 != 0 {
+		return 0, errDimShouldDivide8(int(dim))
+	}
+	l := len(bDatas)
+	if (8*int64(l))%dim != 0 {
+		return 0, fmt.Errorf("the num(%d) of all bits should divide the dim(%d)", 8*l, dim)
+	}
+	return uint32(int((8 * int64(l)) / dim)), nil
+}
+
+func (it *InsertTask) checkLengthOfFieldsData() error {
+	neededFieldsNum := 0
+	for _, field := range it.schema.Fields {
+		if !field.AutoID {
+			neededFieldsNum++
+		}
+	}
+
+	if len(it.req.FieldsData) < neededFieldsNum {
+		return errFieldsLessThanNeeded(len(it.req.FieldsData), neededFieldsNum)
+	}
+
+	return nil
+}
+
+func (it *InsertTask) checkRowNums() error {
+	if it.req.NumRows <= 0 {
+		return errNumRowsLessThanOrEqualToZero(it.req.NumRows)
+	}
+
+	if err := it.checkLengthOfFieldsData(); err != nil {
+		return err
+	}
+
+	rowNums := it.req.NumRows
+
+	for i, field := range it.req.FieldsData {
+		switch field.Field.(type) {
+		case *schemapb.FieldData_Scalars:
+			scalarField := field.GetScalars()
+			switch scalarField.Data.(type) {
+			case *schemapb.ScalarField_BoolData:
+				fieldNumRows := getNumRowsOfScalarField(scalarField.GetBoolData().Data)
+				if fieldNumRows != rowNums {
+					return errNumRowsOfFieldDataMismatchPassed(i, fieldNumRows, rowNums)
+				}
+			case *schemapb.ScalarField_IntData:
+				fieldNumRows := getNumRowsOfScalarField(scalarField.GetIntData().Data)
+				if fieldNumRows != rowNums {
+					return errNumRowsOfFieldDataMismatchPassed(i, fieldNumRows, rowNums)
+				}
+			case *schemapb.ScalarField_LongData:
+				fieldNumRows := getNumRowsOfScalarField(scalarField.GetLongData().Data)
+				if fieldNumRows != rowNums {
+					return errNumRowsOfFieldDataMismatchPassed(i, fieldNumRows, rowNums)
+				}
+			case *schemapb.ScalarField_FloatData:
+				fieldNumRows := getNumRowsOfScalarField(scalarField.GetFloatData().Data)
+				if fieldNumRows != rowNums {
+					return errNumRowsOfFieldDataMismatchPassed(i, fieldNumRows, rowNums)
+				}
+			case *schemapb.ScalarField_DoubleData:
+				fieldNumRows := getNumRowsOfScalarField(scalarField.GetDoubleData().Data)
+				if fieldNumRows != rowNums {
+					return errNumRowsOfFieldDataMismatchPassed(i, fieldNumRows, rowNums)
+				}
+			case *schemapb.ScalarField_BytesData:
+				return errUnsupportedDType("bytes")
+			case *schemapb.ScalarField_StringData:
+				return errUnsupportedDType("string")
+			case nil:
+				continue
+			default:
+				continue
+			}
+		case *schemapb.FieldData_Vectors:
+			vectorField := field.GetVectors()
+			switch vectorField.Data.(type) {
+			case *schemapb.VectorField_FloatVector:
+				dim := vectorField.GetDim()
+				fieldNumRows, err := getNumRowsOfFloatVectorField(vectorField.GetFloatVector().Data, dim)
+				if err != nil {
+					return err
+				}
+				if fieldNumRows != rowNums {
+					return errNumRowsOfFieldDataMismatchPassed(i, fieldNumRows, rowNums)
+				}
+			case *schemapb.VectorField_BinaryVector:
+				dim := vectorField.GetDim()
+				fieldNumRows, err := getNumRowsOfBinaryVectorField(vectorField.GetBinaryVector(), dim)
+				if err != nil {
+					return err
+				}
+				if fieldNumRows != rowNums {
+					return errNumRowsOfFieldDataMismatchPassed(i, fieldNumRows, rowNums)
+				}
+			case nil:
+				continue
+			default:
+				continue
+			}
+		}
+	}
+
+	return nil
+}
+
 // TODO(dragondriver): ignore the order of fields in request, use the order of CollectionSchema to reorganize data
 func (it *InsertTask) transferColumnBasedRequestToRowBasedData() error {
 	dTypes := make([]schemapb.DataType, 0, len(it.req.FieldsData))
@@ -441,10 +568,15 @@ func (it *InsertTask) transferColumnBasedRequestToRowBasedData() error {
 
 func (it *InsertTask) checkFieldAutoID() error {
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
-	rowNums := it.req.NumRows
-	if len(it.req.FieldsData) == 0 || rowNums == 0 {
-		return fmt.Errorf("do not contain any data")
+	if it.req.NumRows <= 0 {
+		return errNumRowsLessThanOrEqualToZero(it.req.NumRows)
 	}
+
+	if err := it.checkLengthOfFieldsData(); err != nil {
+		return err
+	}
+
+	rowNums := it.req.NumRows
 
 	primaryFieldName := ""
 	autoIDFieldName := ""
@@ -610,6 +742,11 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	it.schema = collSchema
+
+	err = it.checkRowNums()
+	if err != nil {
+		return err
+	}
 
 	err = it.checkFieldAutoID()
 	if err != nil {
