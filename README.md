@@ -390,4 +390,3 @@ Milvus adopts dependencies from the following:
 - Thanks to [RocksDB](https://github.com/facebook/rocksdb) for the powerful storage engines.
 
 
-
