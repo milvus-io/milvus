@@ -13,6 +13,8 @@ package querycoord
 
 import (
 	"context"
+	"math/rand"
+	"strconv"
 	"testing"
 	"time"
 
@@ -25,6 +27,9 @@ import (
 
 func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
 	factory := msgstream.NewPmsFactory()
+	rand.Seed(time.Now().UnixNano())
+	suffix := "-test-query-Coord" + strconv.FormatInt(rand.Int63(), 10)
+	Params.MetaRootPath = metaRootPath + suffix
 	coord, err := NewQueryCoord(ctx, factory)
 	if err != nil {
 		return nil, err
@@ -57,7 +62,7 @@ func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
 	return coord, nil
 }
 
-func TestQueryNode_MultiNode(t *testing.T) {
+func TestQueryNode_MultiNode_stop(t *testing.T) {
 	baseCtx := context.Background()
 
 	queryCoord, err := startQueryCoord(baseCtx)
@@ -101,6 +106,49 @@ func TestQueryNode_MultiNode(t *testing.T) {
 	assert.Nil(t, err)
 	time.Sleep(2 * time.Second)
 	queryNode5.stop()
-	time.Sleep(time.Second)
+	queryCoord.Stop()
+}
+
+func TestQueryNode_MultiNode_reStart(t *testing.T) {
+	baseCtx := context.Background()
+
+	queryCoord, err := startQueryCoord(baseCtx)
+	assert.Nil(t, err)
+
+	queryNode1, err := startQueryNodeServer(baseCtx)
+	assert.Nil(t, err)
+
+	queryNode2, err := startQueryNodeServer(baseCtx)
+	assert.Nil(t, err)
+
+	time.Sleep(2 * time.Second)
+	queryCoord.LoadCollection(baseCtx, &querypb.LoadCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_LoadCollection,
+		},
+		CollectionID: defaultCollectionID,
+		Schema:       genCollectionSchema(defaultCollectionID, false),
+	})
+	queryNode1.stop()
+	queryNode2.stop()
+	queryNode3, err := startQueryNodeServer(baseCtx)
+	assert.Nil(t, err)
+	queryNode4, err := startQueryNodeServer(baseCtx)
+	assert.Nil(t, err)
+	queryNode5, err := startQueryNodeServer(baseCtx)
+	assert.Nil(t, err)
+
+	time.Sleep(2 * time.Second)
+	_, err = queryCoord.ReleaseCollection(baseCtx, &querypb.ReleaseCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_ReleaseCollection,
+		},
+		CollectionID: defaultCollectionID,
+	})
+	assert.Nil(t, err)
+	queryNode3.stop()
+	queryNode4.stop()
+	queryNode5.stop()
+	time.Sleep(2 * time.Second)
 	queryCoord.Stop()
 }

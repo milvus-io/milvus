@@ -17,18 +17,17 @@ import (
 	"os"
 	"strconv"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
+var metaRootPath string
+
 func setup() {
 	Params.Init()
-	rand.Seed(time.Now().UnixNano())
-	suffix := "-test-query-Coord" + strconv.FormatInt(rand.Int63(), 10)
-	Params.MetaRootPath = Params.MetaRootPath + suffix
+	metaRootPath = Params.MetaRootPath
 }
 
 func refreshChannelNames() {
