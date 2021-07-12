@@ -394,7 +394,6 @@ ExecExprVisitor::visit(CompareExpr& expr) {
         }
     }
     ret_ = std::move(ret);
-
 }
 
 template <typename T>
