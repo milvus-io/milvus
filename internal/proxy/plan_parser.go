@@ -35,26 +35,14 @@ type ParserContext struct {
 }
 
 type optimizer struct {
-	applied bool
-	err     error
+	err error
 }
 
 func (*optimizer) Enter(*ant_ast.Node) {}
 
 func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 	patch := func(newNode ant_ast.Node) {
-		optimizer.applied = true
 		ant_ast.Patch(node, newNode)
-	}
-
-	value := func(node *ant_ast.Node) float64 {
-		switch node := (*node).(type) {
-		case *ant_ast.FloatNode:
-			return node.Value
-		case *ant_ast.IntegerNode:
-			return float64(node.Value)
-		}
-		panic("unreachable")
 	}
 
 	switch node := (*node).(type) {
@@ -77,71 +65,81 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 		}
 
 	case *ant_ast.BinaryNode:
+		floatNodeLeft, leftFloat := node.Left.(*ant_ast.FloatNode)
+		integerNodeLeft, leftInteger := node.Left.(*ant_ast.IntegerNode)
+		floatNodeRight, rightFloat := node.Right.(*ant_ast.FloatNode)
+		integerNodeRight, rightInteger := node.Right.(*ant_ast.IntegerNode)
+
 		switch node.Operator {
 		case "+":
-			_, leftFloat := node.Left.(*ant_ast.FloatNode)
-			_, leftInteger := node.Left.(*ant_ast.IntegerNode)
-			_, rightFloat := node.Right.(*ant_ast.FloatNode)
-			_, rightInteger := node.Right.(*ant_ast.IntegerNode)
-			if (leftFloat || leftInteger) && (rightFloat || rightInteger) {
-				if leftFloat || rightFloat {
-					patch(&ant_ast.FloatNode{Value: value(&node.Left) + value(&node.Right)})
-				} else {
-					patch(&ant_ast.IntegerNode{Value: int(value(&node.Left) + value(&node.Right))})
-				}
+			if leftFloat && rightFloat {
+				patch(&ant_ast.FloatNode{Value: floatNodeLeft.Value + floatNodeRight.Value})
+			} else if leftFloat && rightInteger {
+				patch(&ant_ast.FloatNode{Value: floatNodeLeft.Value + float64(integerNodeRight.Value)})
+			} else if leftInteger && rightFloat {
+				patch(&ant_ast.FloatNode{Value: float64(integerNodeLeft.Value) + floatNodeRight.Value})
+			} else if leftInteger && rightInteger {
+				patch(&ant_ast.IntegerNode{Value: integerNodeLeft.Value + integerNodeRight.Value})
 			}
 		case "-":
-			_, leftFloat := node.Left.(*ant_ast.FloatNode)
-			_, leftInteger := node.Left.(*ant_ast.IntegerNode)
-			_, rightFloat := node.Right.(*ant_ast.FloatNode)
-			_, rightInteger := node.Right.(*ant_ast.IntegerNode)
-			if (leftFloat || leftInteger) && (rightFloat || rightInteger) {
-				if leftFloat || rightFloat {
-					patch(&ant_ast.FloatNode{Value: value(&node.Left) - value(&node.Right)})
-				} else {
-					patch(&ant_ast.IntegerNode{Value: int(value(&node.Left) - value(&node.Right))})
-				}
+			if leftFloat && rightFloat {
+				patch(&ant_ast.FloatNode{Value: floatNodeLeft.Value - floatNodeRight.Value})
+			} else if leftFloat && rightInteger {
+				patch(&ant_ast.FloatNode{Value: floatNodeLeft.Value - float64(integerNodeRight.Value)})
+			} else if leftInteger && rightFloat {
+				patch(&ant_ast.FloatNode{Value: float64(integerNodeLeft.Value) - floatNodeRight.Value})
+			} else if leftInteger && rightInteger {
+				patch(&ant_ast.IntegerNode{Value: integerNodeLeft.Value - integerNodeRight.Value})
 			}
 		case "*":
-			_, leftFloat := node.Left.(*ant_ast.FloatNode)
-			_, leftInteger := node.Left.(*ant_ast.IntegerNode)
-			_, rightFloat := node.Right.(*ant_ast.FloatNode)
-			_, rightInteger := node.Right.(*ant_ast.IntegerNode)
-			if (leftFloat || leftInteger) && (rightFloat || rightInteger) {
-				if leftFloat || rightFloat {
-					patch(&ant_ast.FloatNode{Value: value(&node.Left) * value(&node.Right)})
-				} else {
-					patch(&ant_ast.IntegerNode{Value: int(value(&node.Left) * value(&node.Right))})
-				}
+			if leftFloat && rightFloat {
+				patch(&ant_ast.FloatNode{Value: floatNodeLeft.Value * floatNodeRight.Value})
+			} else if leftFloat && rightInteger {
+				patch(&ant_ast.FloatNode{Value: floatNodeLeft.Value * float64(integerNodeRight.Value)})
+			} else if leftInteger && rightFloat {
+				patch(&ant_ast.FloatNode{Value: float64(integerNodeLeft.Value) * floatNodeRight.Value})
+			} else if leftInteger && rightInteger {
+				patch(&ant_ast.IntegerNode{Value: integerNodeLeft.Value * integerNodeRight.Value})
 			}
 		case "/":
-			_, leftFloat := node.Left.(*ant_ast.FloatNode)
-			_, leftInteger := node.Left.(*ant_ast.IntegerNode)
-			_, rightFloat := node.Right.(*ant_ast.FloatNode)
-			_, rightInteger := node.Right.(*ant_ast.IntegerNode)
-			if (leftFloat || leftInteger) && (rightFloat || rightInteger) {
-				if value(&node.Right) == 0 {
+			if leftFloat && rightFloat {
+				if floatNodeRight.Value == 0 {
 					optimizer.err = fmt.Errorf("number divide by zero")
 					return
 				}
-				if leftFloat || rightFloat {
-					patch(&ant_ast.FloatNode{Value: value(&node.Left) / value(&node.Right)})
-				} else {
-					patch(&ant_ast.IntegerNode{Value: int(value(&node.Left) / value(&node.Right))})
+				patch(&ant_ast.FloatNode{Value: floatNodeLeft.Value / floatNodeRight.Value})
+			} else if leftFloat && rightInteger {
+				if integerNodeRight.Value == 0 {
+					optimizer.err = fmt.Errorf("number divide by zero")
+					return
 				}
+				patch(&ant_ast.FloatNode{Value: floatNodeLeft.Value / float64(integerNodeRight.Value)})
+			} else if leftInteger && rightFloat {
+				if floatNodeRight.Value == 0 {
+					optimizer.err = fmt.Errorf("number divide by zero")
+					return
+				}
+				patch(&ant_ast.FloatNode{Value: float64(integerNodeLeft.Value) / floatNodeRight.Value})
+			} else if leftInteger && rightInteger {
+				if integerNodeRight.Value == 0 {
+					optimizer.err = fmt.Errorf("number divide by zero")
+					return
+				}
+				patch(&ant_ast.IntegerNode{Value: integerNodeLeft.Value / integerNodeRight.Value})
 			}
 		case "%":
-			left, leftInteger := node.Left.(*ant_ast.IntegerNode)
-			right, rightInteger := node.Right.(*ant_ast.IntegerNode)
 			if leftInteger && rightInteger {
-				patch(&ant_ast.IntegerNode{Value: left.Value % right.Value})
+				patch(&ant_ast.IntegerNode{Value: integerNodeLeft.Value % integerNodeRight.Value})
 			}
 		case "**":
-			_, leftFloat := node.Left.(*ant_ast.FloatNode)
-			_, leftInteger := node.Left.(*ant_ast.IntegerNode)
-			right, rightInteger := node.Right.(*ant_ast.IntegerNode)
-			if (leftFloat || leftInteger) && rightInteger {
-				patch(&ant_ast.FloatNode{Value: math.Pow(value(&node.Left), float64(right.Value))})
+			if leftFloat && rightFloat {
+				patch(&ant_ast.FloatNode{Value: math.Pow(floatNodeLeft.Value, floatNodeRight.Value)})
+			} else if leftFloat && rightInteger {
+				patch(&ant_ast.FloatNode{Value: math.Pow(floatNodeLeft.Value, float64(integerNodeRight.Value))})
+			} else if leftInteger && rightFloat {
+				patch(&ant_ast.FloatNode{Value: math.Pow(float64(integerNodeLeft.Value), floatNodeRight.Value)})
+			} else if leftInteger && rightInteger {
+				patch(&ant_ast.IntegerNode{Value: int(math.Pow(float64(integerNodeLeft.Value), float64(integerNodeRight.Value)))})
 			}
 		}
 	}
@@ -416,10 +414,14 @@ func (context *ParserContext) handleBinaryExpr(node *ant_ast.BinaryNode) (*planp
 		}
 
 		var lastExpr *planpb.Expr_RangeExpr
-		for i := len(exprs) - 1; i >= 0; i-- {
+		for i := 0; i < len(exprs); i++ {
 			if expr, ok := exprs[i].Expr.(*planpb.Expr_RangeExpr); ok {
 				if lastExpr != nil && expr.RangeExpr.ColumnInfo.FieldId == lastExpr.RangeExpr.ColumnInfo.FieldId {
-					exprs = append(exprs[0:i+1], exprs[i+2:]...)
+					exprs = append(exprs[0:i-1], exprs[i:]...)
+					i--
+					if len(lastExpr.RangeExpr.Ops) > 1 {
+						return nil, fmt.Errorf("invalid compare combination of fieldID: %v", lastExpr.RangeExpr.ColumnInfo.FieldId)
+					}
 					expr.RangeExpr.Ops = append(expr.RangeExpr.Ops, lastExpr.RangeExpr.Ops...)
 					expr.RangeExpr.Values = append(expr.RangeExpr.Values, lastExpr.RangeExpr.Values...)
 				}

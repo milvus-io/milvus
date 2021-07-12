@@ -140,11 +140,14 @@ func TestExprPlan_Str(t *testing.T) {
 func TestExprMultiRange_Str(t *testing.T) {
 	exprStrs := []string{
 		"3 < FloatN < 4.0",
-		"3 < age1 < 5 < age2 < 7 < FloatN < 9.0",
+		"3 < age1 < 5 < age2 < 7 < FloatN < 9.0 < FloatN2",
 		"1 + 1 < age1 < 2 * 2",
 		"1 - 1 < age1 < 3 / 2",
 		"1.0 - 1 < FloatN < 3 / 2",
 		"2 ** 10 < FloatN < 7 % 4",
+		"0.1 ** 2 < FloatN < 2 ** 0.1",
+		"0.1 ** 1.1 < FloatN < 3.1 / 4",
+		"4.1 / 3 < FloatN < 0.0 / 5.0",
 	}
 
 	fields := []*schemapb.FieldSchema{
@@ -152,6 +155,7 @@ func TestExprMultiRange_Str(t *testing.T) {
 		{FieldID: 101, Name: "age1", DataType: schemapb.DataType_Int64},
 		{FieldID: 102, Name: "age2", DataType: schemapb.DataType_Int64},
 		{FieldID: 103, Name: "FloatN", DataType: schemapb.DataType_Float},
+		{FieldID: 104, Name: "FloatN2", DataType: schemapb.DataType_Float},
 	}
 
 	schema := &schemapb.CollectionSchema{
