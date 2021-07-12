@@ -62,9 +62,8 @@ jobs:
           git add .env
           git commit -m "Update Builder Image Changes"
       - name: Push Builder Image Changes
-        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu18.04'
         continue-on-error: true
-        uses: ad-m/github-push-action@master
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          branch: ${{ github.ref }}
+        shell: bash
+        run: |
+          git push "https://${{ secrets.ALL_CONTRIBUTORS_TOKEN }}@github.com/$GITHUB_REPOSITORY.git" HEAD:${{ github.ref }} --follow-tags

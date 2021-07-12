@@ -275,7 +275,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 			resp.Status.Reason = fmt.Sprintf("Failed to get segment %d", id)
 			return resp, nil
 		}
-		infos = append(infos, info)
+		infos = append(infos, info.SegmentInfo)
 	}
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.Infos = infos

@@ -63,7 +63,6 @@ jobs:
       - name: Push Pytest Image Changes
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true
-        uses: ad-m/github-push-action@master
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          branch: ${{ github.ref }}
+        shell: bash
+        run: |
+          git push "https://${{ secrets.ALL_CONTRIBUTORS_TOKEN }}@github.com/$GITHUB_REPOSITORY.git" HEAD:${{ github.ref }} --follow-tags

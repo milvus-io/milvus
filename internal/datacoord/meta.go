@@ -58,7 +58,7 @@ func (m *meta) reloadFromKV() error {
 		if err != nil {
 			return fmt.Errorf("DataCoord reloadFromKV UnMarshalText datapb.SegmentInfo err:%w", err)
 		}
-		m.segments.SetSegment(segmentInfo.GetID(), segmentInfo)
+		m.segments.SetSegment(segmentInfo.GetID(), NewSegmentInfo(segmentInfo))
 	}
 
 	return nil
@@ -93,7 +93,7 @@ func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
 	return ret
 }
 
-func (m *meta) AddSegment(segment *datapb.SegmentInfo) error {
+func (m *meta) AddSegment(segment *SegmentInfo) error {
 	m.Lock()
 	defer m.Unlock()
 	m.segments.SetSegment(segment.GetID(), segment)
@@ -134,7 +134,7 @@ func (m *meta) DropSegment(segmentID UniqueID) error {
 	return nil
 }
 
-func (m *meta) GetSegment(segID UniqueID) *datapb.SegmentInfo {
+func (m *meta) GetSegment(segID UniqueID) *SegmentInfo {
 	m.RLock()
 	defer m.RUnlock()
 	return m.segments.GetSegment(segID)
@@ -200,10 +200,10 @@ func (m *meta) SaveBinlogAndCheckPoints(segID UniqueID, flushed bool,
 	return nil
 }
 
-func (m *meta) GetSegmentsByChannel(dmlCh string) []*datapb.SegmentInfo {
+func (m *meta) GetSegmentsByChannel(dmlCh string) []*SegmentInfo {
 	m.RLock()
 	defer m.RUnlock()
-	infos := make([]*datapb.SegmentInfo, 0)
+	infos := make([]*SegmentInfo, 0)
 	segments := m.segments.GetSegments()
 	for _, segment := range segments {
 		if segment.InsertChannel != dmlCh {
@@ -253,10 +253,10 @@ func (m *meta) GetNumRowsOfPartition(collectionID UniqueID, partitionID UniqueID
 	return ret
 }
 
-func (m *meta) GetUnFlushedSegments() []*datapb.SegmentInfo {
+func (m *meta) GetUnFlushedSegments() []*SegmentInfo {
 	m.RLock()
 	defer m.RUnlock()
-	ret := make([]*datapb.SegmentInfo, 0)
+	ret := make([]*SegmentInfo, 0)
 	segments := m.segments.GetSegments()
 	for _, info := range segments {
 		if info.State != commonpb.SegmentState_Flushing && info.State != commonpb.SegmentState_Flushed {
@@ -266,10 +266,10 @@ func (m *meta) GetUnFlushedSegments() []*datapb.SegmentInfo {
 	return ret
 }
 
-func (m *meta) GetFlushingSegments() []*datapb.SegmentInfo {
+func (m *meta) GetFlushingSegments() []*SegmentInfo {
 	m.RLock()
 	defer m.RUnlock()
-	ret := make([]*datapb.SegmentInfo, 0)
+	ret := make([]*SegmentInfo, 0)
 	segments := m.segments.GetSegments()
 	for _, info := range segments {
 		if info.State == commonpb.SegmentState_Flushing {
@@ -279,14 +279,36 @@ func (m *meta) GetFlushingSegments() []*datapb.SegmentInfo {
 	return ret
 }
 
-func (m *meta) saveSegmentInfo(segment *datapb.SegmentInfo) error {
-	segBytes := proto.MarshalTextString(segment)
+func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
+	m.Lock()
+	defer m.Unlock()
+	m.segments.AddAllocation(segmentID, allocation)
+	if segInfo := m.segments.GetSegment(segmentID); segInfo != nil {
+		return m.saveSegmentInfo(segInfo)
+	}
+	return nil
+}
+
+func (m *meta) SetAllocations(segmentID UniqueID, allocations []*Allocation) {
+	m.Lock()
+	defer m.Unlock()
+	m.segments.SetAllocations(segmentID, allocations)
+}
+
+func (m *meta) SetCurrentRows(segmentID UniqueID, rows int64) {
+	m.Lock()
+	defer m.Unlock()
+	m.segments.SetCurrentRows(segmentID, rows)
+}
+
+func (m *meta) saveSegmentInfo(segment *SegmentInfo) error {
+	segBytes := proto.MarshalTextString(segment.SegmentInfo)
 
 	key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
 	return m.client.Save(key, segBytes)
 }
 
-func (m *meta) removeSegmentInfo(segment *datapb.SegmentInfo) error {
+func (m *meta) removeSegmentInfo(segment *SegmentInfo) error {
 	key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
 	return m.client.Remove(key)
 }
@@ -307,8 +329,8 @@ func buildPartitionPath(collectionID UniqueID, partitionID UniqueID) string {
 	return fmt.Sprintf("%s/%d/%d/", segmentPrefix, collectionID, partitionID)
 }
 
-func buildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, channelName string) *datapb.SegmentInfo {
-	return &datapb.SegmentInfo{
+func buildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, channelName string) *SegmentInfo {
+	info := &datapb.SegmentInfo{
 		ID:            segmentID,
 		CollectionID:  collectionID,
 		PartitionID:   partitionID,
@@ -316,4 +338,5 @@ func buildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueI
 		NumOfRows:     0,
 		State:         commonpb.SegmentState_Growing,
 	}
+	return NewSegmentInfo(info)
 }

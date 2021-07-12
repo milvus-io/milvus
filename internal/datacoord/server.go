@@ -280,7 +280,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 			log.Debug("Receive DataNode segment statistics update")
 			ssMsg := msg.(*msgstream.SegmentStatisticsMsg)
 			for _, stat := range ssMsg.SegStats {
-				s.segmentManager.UpdateSegmentStats(stat)
+				s.meta.SetCurrentRows(stat.GetSegmentID(), stat.GetNumRows())
 			}
 		}
 	}
@@ -341,7 +341,7 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 						zap.Error(err))
 					continue
 				}
-				segmentInfos = append(segmentInfos, sInfo)
+				segmentInfos = append(segmentInfos, sInfo.SegmentInfo)
 			}
 			if len(segmentInfos) > 0 {
 				s.cluster.Flush(segmentInfos)
@@ -427,7 +427,7 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_SegmentFlushDone,
 				},
-				Segment: segment,
+				Segment: segment.SegmentInfo,
 			}
 			resp, err := s.rootCoordClient.SegmentFlushCompleted(ctx, req)
 			if err = VerifyResponse(resp, err); err != nil {
