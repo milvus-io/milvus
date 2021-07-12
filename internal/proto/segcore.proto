@@ -11,7 +11,8 @@ message RetrieveRequest {
 
 message RetrieveResults {
   schema.IDs ids = 1;
-  repeated schema.FieldData fields_data = 2;
+  repeated int64 offset = 2;
+  repeated schema.FieldData fields_data = 3;
 }
 
 message LoadFieldMeta {

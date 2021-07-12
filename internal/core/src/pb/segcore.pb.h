@@ -346,10 +346,22 @@ class RetrieveResults :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kFieldsDataFieldNumber = 2,
+    kOffsetFieldNumber = 2,
+    kFieldsDataFieldNumber = 3,
     kIdsFieldNumber = 1,
   };
-  // repeated .milvus.proto.schema.FieldData fields_data = 2;
+  // repeated int64 offset = 2;
+  int offset_size() const;
+  void clear_offset();
+  ::PROTOBUF_NAMESPACE_ID::int64 offset(int index) const;
+  void set_offset(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_offset(::PROTOBUF_NAMESPACE_ID::int64 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+      offset() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+      mutable_offset();
+
+  // repeated .milvus.proto.schema.FieldData fields_data = 3;
   int fields_data_size() const;
   void clear_fields_data();
   ::milvus::proto::schema::FieldData* mutable_fields_data(int index);
@@ -373,6 +385,8 @@ class RetrieveResults :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > offset_;
+  mutable std::atomic<int> _offset_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::FieldData > fields_data_;
   ::milvus::proto::schema::IDs* ids_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
@@ -802,7 +816,37 @@ inline void RetrieveResults::set_allocated_ids(::milvus::proto::schema::IDs* ids
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.segcore.RetrieveResults.ids)
 }
 
-// repeated .milvus.proto.schema.FieldData fields_data = 2;
+// repeated int64 offset = 2;
+inline int RetrieveResults::offset_size() const {
+  return offset_.size();
+}
+inline void RetrieveResults::clear_offset() {
+  offset_.Clear();
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 RetrieveResults::offset(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.segcore.RetrieveResults.offset)
+  return offset_.Get(index);
+}
+inline void RetrieveResults::set_offset(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
+  offset_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.segcore.RetrieveResults.offset)
+}
+inline void RetrieveResults::add_offset(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  offset_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.segcore.RetrieveResults.offset)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+RetrieveResults::offset() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.segcore.RetrieveResults.offset)
+  return offset_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+RetrieveResults::mutable_offset() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.segcore.RetrieveResults.offset)
+  return &offset_;
+}
+
+// repeated .milvus.proto.schema.FieldData fields_data = 3;
 inline int RetrieveResults::fields_data_size() const {
   return fields_data_.size();
 }
