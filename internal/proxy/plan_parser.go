@@ -54,7 +54,7 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 			} else if i, ok := node.Node.(*ant_ast.FloatNode); ok {
 				patch(&ant_ast.FloatNode{Value: -i.Value})
 			} else {
-				optimizer.err = fmt.Errorf("can only make a number positive")
+				optimizer.err = fmt.Errorf("can only make a number negative")
 				return
 			}
 		case "+":
@@ -63,7 +63,7 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 			} else if i, ok := node.Node.(*ant_ast.FloatNode); ok {
 				patch(&ant_ast.FloatNode{Value: i.Value})
 			} else {
-				optimizer.err = fmt.Errorf("can only make a number negative")
+				optimizer.err = fmt.Errorf("can only make a number positive")
 				return
 			}
 		}
