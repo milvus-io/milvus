@@ -144,7 +144,7 @@ func TestExprMultiRange_Str(t *testing.T) {
 		"1 + 1 < age1 < 2 * 2",
 		"1 - 1 < age1 < 3 / 2",
 		"1.0 - 1 < FloatN < 3 / 2",
-		"2 ** 10 < FloatN < 7 % 4",
+		"2 ** 10 > FloatN >= 7 % 4",
 		"0.1 ** 2 < FloatN < 2 ** 0.1",
 		"0.1 ** 1.1 < FloatN < 3.1 / 4",
 		"4.1 / 3 < FloatN < 0.0 / 5.0",

@@ -98,7 +98,7 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 			} else if leftInteger && rightInteger {
 				patch(&ant_ast.IntegerNode{Value: integerNodeLeft.Value - integerNodeRight.Value})
 			} else {
-				optimizer.err = fmt.Errorf("can only sub two number")
+				optimizer.err = fmt.Errorf("can only subtract two number")
 				return
 			}
 		case "*":
@@ -409,63 +409,67 @@ func (context *ParserContext) handleInExpr(node *ant_ast.BinaryNode) (*planpb.Ex
 	return expr, nil
 }
 
+func (context *ParserContext) handleMultiCmpExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
+	exprs := []*planpb.Expr{}
+	curNode := node
+
+	for {
+		binNodeLeft, LeftOk := curNode.Left.(*ant_ast.BinaryNode)
+		if !LeftOk {
+			expr, err := context.handleCmpExpr(curNode)
+			if err != nil {
+				return nil, err
+			}
+			exprs = append(exprs, expr)
+			break
+		}
+		if isSameOrder(node.Operator, binNodeLeft.Operator) {
+			expr, err := context.createCmpExpr(binNodeLeft.Right, curNode.Right, curNode.Operator)
+			if err != nil {
+				return nil, err
+			}
+			exprs = append(exprs, expr)
+			curNode = binNodeLeft
+		}
+	}
+
+	var lastExpr *planpb.Expr_RangeExpr
+	for i := len(exprs) - 1; i >= 0; i-- {
+		if expr, ok := exprs[i].Expr.(*planpb.Expr_RangeExpr); ok {
+			if lastExpr != nil && expr.RangeExpr.ColumnInfo.FieldId == lastExpr.RangeExpr.ColumnInfo.FieldId {
+				exprs = append(exprs[0:i+1], exprs[i+2:]...)
+				if len(lastExpr.RangeExpr.Ops) > 1 {
+					return nil, fmt.Errorf("invalid compare combination of fieldID: %v", lastExpr.RangeExpr.ColumnInfo.FieldId)
+				}
+				expr.RangeExpr.Ops = append(expr.RangeExpr.Ops, lastExpr.RangeExpr.Ops...)
+				expr.RangeExpr.Values = append(expr.RangeExpr.Values, lastExpr.RangeExpr.Values...)
+			}
+			lastExpr = expr
+		} else {
+			lastExpr = nil
+		}
+	}
+
+	combinedExpr := exprs[len(exprs)-1]
+	for i := len(exprs) - 2; i >= 0; i-- {
+		expr := exprs[i]
+		combinedExpr = &planpb.Expr{
+			Expr: &planpb.Expr_BinaryExpr{
+				BinaryExpr: &planpb.BinaryExpr{
+					Op:    planpb.BinaryExpr_LogicalAnd,
+					Left:  combinedExpr,
+					Right: expr,
+				},
+			},
+		}
+	}
+	return combinedExpr, nil
+}
+
 func (context *ParserContext) handleBinaryExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
 	switch node.Operator {
 	case "<", "<=", ">", ">=":
-		exprs := []*planpb.Expr{}
-		curNode := node
-
-		for {
-			binNodeLeft, LeftOk := curNode.Left.(*ant_ast.BinaryNode)
-			if !LeftOk {
-				expr, err := context.handleCmpExpr(curNode)
-				if err != nil {
-					return nil, err
-				}
-				exprs = append(exprs, expr)
-				break
-			}
-			if isSameOrder(node.Operator, binNodeLeft.Operator) {
-				expr, err := context.createCmpExpr(binNodeLeft.Right, curNode.Right, curNode.Operator)
-				if err != nil {
-					return nil, err
-				}
-				exprs = append(exprs, expr)
-				curNode = binNodeLeft
-			}
-		}
-
-		var lastExpr *planpb.Expr_RangeExpr
-		for i := len(exprs) - 1; i >= 0; i-- {
-			if expr, ok := exprs[i].Expr.(*planpb.Expr_RangeExpr); ok {
-				if lastExpr != nil && expr.RangeExpr.ColumnInfo.FieldId == lastExpr.RangeExpr.ColumnInfo.FieldId {
-					exprs = append(exprs[0:i+1], exprs[i+2:]...)
-					if len(lastExpr.RangeExpr.Ops) > 1 {
-						return nil, fmt.Errorf("invalid compare combination of fieldID: %v", lastExpr.RangeExpr.ColumnInfo.FieldId)
-					}
-					expr.RangeExpr.Ops = append(expr.RangeExpr.Ops, lastExpr.RangeExpr.Ops...)
-					expr.RangeExpr.Values = append(expr.RangeExpr.Values, lastExpr.RangeExpr.Values...)
-				}
-				lastExpr = expr
-			} else {
-				lastExpr = nil
-			}
-		}
-
-		combinedExpr := exprs[len(exprs)-1]
-		for i := len(exprs) - 2; i >= 0; i-- {
-			expr := exprs[i]
-			combinedExpr = &planpb.Expr{
-				Expr: &planpb.Expr_BinaryExpr{
-					BinaryExpr: &planpb.BinaryExpr{
-						Op:    planpb.BinaryExpr_LogicalAnd,
-						Left:  combinedExpr,
-						Right: expr,
-					},
-				},
-			}
-		}
-		return combinedExpr, nil
+		return context.handleMultiCmpExpr(node)
 	case "==", "!=":
 		return context.handleCmpExpr(node)
 	case "and", "or", "&&", "||":
