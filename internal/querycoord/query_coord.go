@@ -70,6 +70,7 @@ type QueryCoord struct {
 
 // Register register query service at etcd
 func (qc *QueryCoord) Register() error {
+	log.Debug("query coord session info", zap.String("metaPath", Params.MetaRootPath), zap.Strings("etcdEndPoints", Params.EtcdEndpoints), zap.String("address", Params.Address))
 	qc.session = sessionutil.NewSession(qc.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
 	qc.session.Init(typeutil.QueryCoordRole, Params.Address, true)
 	Params.NodeID = uint64(qc.session.ServerID)

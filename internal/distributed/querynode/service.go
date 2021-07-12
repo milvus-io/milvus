@@ -159,33 +159,6 @@ func (s *Server) init() error {
 		panic(err)
 	}
 
-	// --- DataCoord ---
-	log.Debug("QueryNode start to new DataCoordClient", zap.Any("DataCoordAddress", Params.DataCoordAddress))
-	dataCoord, err := dsc.NewClient(s.ctx, qn.Params.MetaRootPath, qn.Params.EtcdEndpoints)
-	if err != nil {
-		log.Debug("QueryNode new DataCoordClient failed", zap.Error(err))
-		panic(err)
-	}
-	if err = dataCoord.Init(); err != nil {
-		log.Debug("QueryNode DataCoordClient Init failed", zap.Error(err))
-		panic(err)
-	}
-	if err = dataCoord.Start(); err != nil {
-		log.Debug("QueryNode DataCoordClient Start failed", zap.Error(err))
-		panic(err)
-	}
-	log.Debug("QueryNode start to wait for DataCoord ready")
-	err = funcutil.WaitForComponentInitOrHealthy(s.ctx, dataCoord, "DataCoord", 1000000, time.Millisecond*200)
-	if err != nil {
-		log.Debug("QueryNode wait for DataCoord ready failed", zap.Error(err))
-		panic(err)
-	}
-	log.Debug("QueryNode report DataCoord is ready")
-
-	if err := s.SetDataCoord(dataCoord); err != nil {
-		panic(err)
-	}
-
 	s.querynode.UpdateStateCode(internalpb.StateCode_Initializing)
 	log.Debug("QueryNode", zap.Any("State", internalpb.StateCode_Initializing))
 	if err := s.querynode.Init(); err != nil {
@@ -286,10 +259,6 @@ func (s *Server) SetRootCoord(rootCoord types.RootCoord) error {
 
 func (s *Server) SetIndexCoord(indexCoord types.IndexCoord) error {
 	return s.querynode.SetIndexCoord(indexCoord)
-}
-
-func (s *Server) SetDataCoord(dataCoord types.DataCoord) error {
-	return s.querynode.SetDataCoord(dataCoord)
 }
 
 func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {

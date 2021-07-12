@@ -13,40 +13,56 @@ package querycoord
 
 import (
 	"context"
+	"math/rand"
+	"os"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
+
+func setup() {
+	Params.Init()
+	rand.Seed(time.Now().UnixNano())
+	suffix := "-test-query-Coord" + strconv.FormatInt(rand.Int63(), 10)
+	Params.MetaRootPath = Params.MetaRootPath + suffix
+}
+
+func refreshChannelNames() {
+	suffix := "-test-query-Coord" + strconv.FormatInt(rand.Int63n(1000000), 10)
+	Params.StatsChannelName = Params.StatsChannelName + suffix
+	Params.TimeTickChannelName = Params.TimeTickChannelName + suffix
+}
+
+func TestMain(m *testing.M) {
+	setup()
+	//refreshChannelNames()
+	exitCode := m.Run()
+	os.Exit(exitCode)
+}
 
 func TestQueryCoord_Init(t *testing.T) {
 	ctx := context.Background()
 	msFactory := msgstream.NewPmsFactory()
 	service, err := NewQueryCoord(context.Background(), msFactory)
 	assert.Nil(t, err)
+	service.Register()
 	service.Init()
 	service.Start()
-
-	t.Run("Test create channel", func(t *testing.T) {
-		request := &querypb.CreateQueryChannelRequest{}
-		response, err := service.CreateQueryChannel(ctx, request)
-		assert.Nil(t, err)
-		assert.Equal(t, response.RequestChannel, "query-0")
-		assert.Equal(t, response.ResultChannel, "queryResult-0")
-	})
 
 	t.Run("Test Get statistics channel", func(t *testing.T) {
 		response, err := service.GetStatisticsChannel(ctx)
 		assert.Nil(t, err)
-		assert.Equal(t, response, "query-node-stats")
+		assert.Equal(t, response.Value, "query-node-stats")
 	})
 
 	t.Run("Test Get timeTick channel", func(t *testing.T) {
 		response, err := service.GetTimeTickChannel(ctx)
 		assert.Nil(t, err)
-		assert.Equal(t, response, "queryTimeTick")
+		assert.Equal(t, response.Value, "queryTimeTick")
 	})
 
 	service.Stop()
@@ -59,7 +75,7 @@ func TestQueryCoord_Init(t *testing.T) {
 //	assert.Nil(t, err)
 //	service.Init()
 //	service.Start()
-//	service.SetRootCoord(NewRootCoordMock())
+//	service.SetRootCoord(newRootCoordMock())
 //	service.SetDataCoord(NewDataMock())
 //	registerNodeRequest := &querypb.RegisterNodeRequest{
 //		Address: &commonpb.Address{},

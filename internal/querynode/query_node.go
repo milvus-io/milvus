@@ -60,7 +60,6 @@ type QueryNode struct {
 	// clients
 	rootCoord  types.RootCoord
 	indexCoord types.IndexCoord
-	dataCoord  types.DataCoord
 
 	msFactory msgstream.Factory
 	scheduler *taskScheduler
@@ -88,10 +87,12 @@ func NewQueryNode(ctx context.Context, factory msgstream.Factory) *QueryNode {
 
 // Register register query node at etcd
 func (node *QueryNode) Register() error {
+	log.Debug("query node session info", zap.String("metaPath", Params.MetaRootPath), zap.Strings("etcdEndPoints", Params.EtcdEndpoints))
 	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
 	node.session.Init(typeutil.QueryNodeRole, Params.QueryNodeIP+":"+strconv.FormatInt(Params.QueryNodePort, 10), false)
 	Params.QueryNodeID = node.session.ServerID
 	log.Debug("query nodeID", zap.Int64("nodeID", Params.QueryNodeID))
+	log.Debug("query node address", zap.String("address", node.session.Address))
 
 	// This param needs valid QueryNodeID
 	Params.initMsgChannelSubName()
@@ -119,7 +120,6 @@ func (node *QueryNode) Init() error {
 
 	node.historical = newHistorical(node.queryNodeLoopCtx,
 		node.rootCoord,
-		node.dataCoord,
 		node.indexCoord,
 		node.msFactory,
 		node.etcdKV)
@@ -133,10 +133,6 @@ func (node *QueryNode) Init() error {
 
 	if node.indexCoord == nil {
 		log.Error("null index coordinator detected")
-	}
-
-	if node.dataCoord == nil {
-		log.Error("null data coordinator detected")
 	}
 
 	return nil
@@ -206,13 +202,5 @@ func (node *QueryNode) SetIndexCoord(index types.IndexCoord) error {
 		return errors.New("null index coordinator interface")
 	}
 	node.indexCoord = index
-	return nil
-}
-
-func (node *QueryNode) SetDataCoord(data types.DataCoord) error {
-	if data == nil {
-		return errors.New("null data coordinator interface")
-	}
-	node.dataCoord = data
 	return nil
 }
