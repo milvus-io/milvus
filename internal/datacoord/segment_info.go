@@ -8,14 +8,28 @@ import (
 )
 
 type SegmentsInfo struct {
-	segments map[UniqueID]*datapb.SegmentInfo
+	segments map[UniqueID]*SegmentInfo
+}
+
+type SegmentInfo struct {
+	*datapb.SegmentInfo
+	currRows    int64
+	allocations []*Allocation
+}
+
+func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
+	return &SegmentInfo{
+		SegmentInfo: info,
+		currRows:    0,
+		allocations: make([]*Allocation, 0, 16),
+	}
 }
 
 func NewSegmentsInfo() *SegmentsInfo {
-	return &SegmentsInfo{segments: make(map[UniqueID]*datapb.SegmentInfo)}
+	return &SegmentsInfo{segments: make(map[UniqueID]*SegmentInfo)}
 }
 
-func (s *SegmentsInfo) GetSegment(segmentID UniqueID) *datapb.SegmentInfo {
+func (s *SegmentsInfo) GetSegment(segmentID UniqueID) *SegmentInfo {
 	segment, ok := s.segments[segmentID]
 	if !ok {
 		return nil
@@ -23,8 +37,8 @@ func (s *SegmentsInfo) GetSegment(segmentID UniqueID) *datapb.SegmentInfo {
 	return segment
 }
 
-func (s *SegmentsInfo) GetSegments() []*datapb.SegmentInfo {
-	segments := make([]*datapb.SegmentInfo, 0, len(s.segments))
+func (s *SegmentsInfo) GetSegments() []*SegmentInfo {
+	segments := make([]*SegmentInfo, 0, len(s.segments))
 	for _, segment := range s.segments {
 		segments = append(segments, segment)
 	}
@@ -35,7 +49,7 @@ func (s *SegmentsInfo) DropSegment(segmentID UniqueID) {
 	delete(s.segments, segmentID)
 }
 
-func (s *SegmentsInfo) SetSegment(segmentID UniqueID, segment *datapb.SegmentInfo) {
+func (s *SegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo) {
 	s.segments[segmentID] = segment
 }
 
@@ -69,20 +83,30 @@ func (s *SegmentsInfo) SetStartPosition(segmentID UniqueID, pos *internalpb.MsgP
 	}
 }
 
-func (s *SegmentsInfo) Clone(segment *datapb.SegmentInfo, opts ...SegmentInfoOption) *datapb.SegmentInfo {
-	dmlPos := proto.Clone(segment.DmlPosition).(*internalpb.MsgPosition)
-	startPos := proto.Clone(segment.StartPosition).(*internalpb.MsgPosition)
-	cloned := &datapb.SegmentInfo{
-		ID:             segment.ID,
-		CollectionID:   segment.CollectionID,
-		PartitionID:    segment.PartitionID,
-		InsertChannel:  segment.InsertChannel,
-		NumOfRows:      segment.NumOfRows,
-		State:          segment.State,
-		DmlPosition:    dmlPos,
-		MaxRowNum:      segment.MaxRowNum,
-		LastExpireTime: segment.LastExpireTime,
-		StartPosition:  startPos,
+func (s *SegmentsInfo) SetAllocations(segmentID UniqueID, allocations []*Allocation) {
+	if segment, ok := s.segments[segmentID]; ok {
+		s.segments[segmentID] = s.ShadowClone(segment, SetAllocations(allocations))
+	}
+}
+
+func (s *SegmentsInfo) AddAllocation(segmentID UniqueID, allocation *Allocation) {
+	if segment, ok := s.segments[segmentID]; ok {
+		s.segments[segmentID] = s.Clone(segment, AddAllocation(allocation))
+	}
+}
+
+func (s *SegmentsInfo) SetCurrentRows(segmentID UniqueID, rows int64) {
+	if segment, ok := s.segments[segmentID]; ok {
+		s.segments[segmentID] = s.ShadowClone(segment, SetCurrentRows(rows))
+	}
+}
+
+func (s *SegmentsInfo) Clone(segment *SegmentInfo, opts ...SegmentInfoOption) *SegmentInfo {
+	info := proto.Clone(segment.SegmentInfo).(*datapb.SegmentInfo)
+	cloned := &SegmentInfo{
+		SegmentInfo: info,
+		currRows:    segment.currRows,
+		allocations: segment.allocations,
 	}
 	for _, opt := range opts {
 		opt(cloned)
@@ -90,18 +114,11 @@ func (s *SegmentsInfo) Clone(segment *datapb.SegmentInfo, opts ...SegmentInfoOpt
 	return cloned
 }
 
-func (s *SegmentsInfo) ShadowClone(segment *datapb.SegmentInfo, opts ...SegmentInfoOption) *datapb.SegmentInfo {
-	cloned := &datapb.SegmentInfo{
-		ID:             segment.ID,
-		CollectionID:   segment.CollectionID,
-		PartitionID:    segment.PartitionID,
-		InsertChannel:  segment.InsertChannel,
-		NumOfRows:      segment.NumOfRows,
-		State:          segment.State,
-		DmlPosition:    segment.DmlPosition,
-		MaxRowNum:      segment.MaxRowNum,
-		LastExpireTime: segment.LastExpireTime,
-		StartPosition:  segment.StartPosition,
+func (s *SegmentsInfo) ShadowClone(segment *SegmentInfo, opts ...SegmentInfoOption) *SegmentInfo {
+	cloned := &SegmentInfo{
+		SegmentInfo: segment.SegmentInfo,
+		currRows:    segment.currRows,
+		allocations: segment.allocations,
 	}
 
 	for _, opt := range opts {
@@ -110,34 +127,53 @@ func (s *SegmentsInfo) ShadowClone(segment *datapb.SegmentInfo, opts ...SegmentI
 	return cloned
 }
 
-type SegmentInfoOption func(segment *datapb.SegmentInfo)
+type SegmentInfoOption func(segment *SegmentInfo)
 
 func SetRowCount(rowCount int64) SegmentInfoOption {
-	return func(segment *datapb.SegmentInfo) {
+	return func(segment *SegmentInfo) {
 		segment.NumOfRows = rowCount
 	}
 }
 
 func SetExpireTime(expireTs Timestamp) SegmentInfoOption {
-	return func(segment *datapb.SegmentInfo) {
+	return func(segment *SegmentInfo) {
 		segment.LastExpireTime = expireTs
 	}
 }
 
 func SetState(state commonpb.SegmentState) SegmentInfoOption {
-	return func(segment *datapb.SegmentInfo) {
+	return func(segment *SegmentInfo) {
 		segment.State = state
 	}
 }
 
 func SetDmlPositino(pos *internalpb.MsgPosition) SegmentInfoOption {
-	return func(segment *datapb.SegmentInfo) {
+	return func(segment *SegmentInfo) {
 		segment.DmlPosition = pos
 	}
 }
 
 func SetStartPosition(pos *internalpb.MsgPosition) SegmentInfoOption {
-	return func(segment *datapb.SegmentInfo) {
+	return func(segment *SegmentInfo) {
 		segment.StartPosition = pos
+	}
+}
+
+func SetAllocations(allocations []*Allocation) SegmentInfoOption {
+	return func(segment *SegmentInfo) {
+		segment.allocations = allocations
+	}
+}
+
+func AddAllocation(allocation *Allocation) SegmentInfoOption {
+	return func(segment *SegmentInfo) {
+		segment.allocations = append(segment.allocations, allocation)
+		segment.LastExpireTime = allocation.expireTime
+	}
+}
+
+func SetCurrentRows(rows int64) SegmentInfoOption {
+	return func(segment *SegmentInfo) {
+		segment.currRows = rows
 	}
 }

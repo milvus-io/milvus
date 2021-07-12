@@ -93,18 +93,16 @@ func TestLoadSegmentsFromMeta(t *testing.T) {
 		MaxRowNum:      100,
 		LastExpireTime: 1000,
 	}
-	err = meta.AddSegment(sealedSegment)
+	err = meta.AddSegment(NewSegmentInfo(sealedSegment))
 	assert.Nil(t, err)
-	err = meta.AddSegment(growingSegment)
+	err = meta.AddSegment(NewSegmentInfo(growingSegment))
 	assert.Nil(t, err)
-	err = meta.AddSegment(flushedSegment)
+	err = meta.AddSegment(NewSegmentInfo(flushedSegment))
 	assert.Nil(t, err)
 
 	segmentManager := newSegmentManager(meta, mockAllocator)
-	segments := segmentManager.stats
+	segments := segmentManager.segments
 	assert.EqualValues(t, 2, len(segments))
-	assert.NotNil(t, segments[1])
-	assert.NotNil(t, segments[2])
 }
 
 func TestSaveSegmentsToMeta(t *testing.T) {
@@ -120,12 +118,31 @@ func TestSaveSegmentsToMeta(t *testing.T) {
 	segmentManager := newSegmentManager(meta, mockAllocator)
 	segID, _, expireTs, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000)
 	assert.Nil(t, err)
-	segStatus := segmentManager.stats[segID]
-	assert.NotNil(t, segStatus)
 	_, err = segmentManager.SealAllSegments(context.Background(), collID)
 	assert.Nil(t, err)
 	segment := meta.GetSegment(segID)
 	assert.NotNil(t, segment)
 	assert.EqualValues(t, segment.LastExpireTime, expireTs)
 	assert.EqualValues(t, commonpb.SegmentState_Sealed, segment.State)
+}
+
+func TestDropSegment(t *testing.T) {
+	Params.Init()
+	mockAllocator := newMockAllocator()
+	meta, err := newMemoryMeta(mockAllocator)
+	assert.Nil(t, err)
+
+	schema := newTestSchema()
+	collID, err := mockAllocator.allocID()
+	assert.Nil(t, err)
+	meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
+	segmentManager := newSegmentManager(meta, mockAllocator)
+	segID, _, _, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000)
+	assert.Nil(t, err)
+	segment := meta.GetSegment(segID)
+	assert.NotNil(t, segment)
+
+	segmentManager.DropSegment(context.Background(), segID)
+	segment = meta.GetSegment(segID)
+	assert.NotNil(t, segment)
 }
