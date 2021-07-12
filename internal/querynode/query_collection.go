@@ -18,6 +18,7 @@ import (
 	"math"
 	"reflect"
 	"sync"
+	"unsafe"
 
 	oplog "github.com/opentracing/opentracing-go/log"
 	"go.uber.org/zap"
@@ -484,6 +485,7 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 }
 
 func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]byte) (*schemapb.SearchResultData, error) {
+	log.Debug("translateHits:", zap.Any("lenOfFieldIDs", len(fieldIDs)), zap.Any("lenOfRawHits", len(rawHits)))
 	if len(rawHits) == 0 {
 		return nil, fmt.Errorf("empty results")
 	}
@@ -500,7 +502,7 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 
 	blobOffset := 0
 	// skip id
-	numQuereis := len(rawHits)
+	numQueries := len(rawHits)
 	pbHits := &milvuspb.Hits{}
 	err := proto.Unmarshal(rawHits[0], pbHits)
 	if err != nil {
@@ -526,7 +528,7 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 		},
 		Scores:     scores,
 		TopK:       int64(topK),
-		NumQueries: int64(numQuereis),
+		NumQueries: int64(numQueries),
 	}
 
 	for _, fieldID := range fieldIDs {
@@ -697,11 +699,65 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 			finalResult.FieldsData = append(finalResult.FieldsData, newCol)
 			blobOffset += blobLen
 		case schemapb.DataType_FloatVector:
+			dim, err := schema.GetVectorDimFromID(fieldID)
+			if err != nil {
+				return nil, err
+			}
+			blobLen := dim * 4
+			var colData []float32
+			for _, hit := range hits {
+				for _, row := range hit.RowData {
+					dataBlob := row[blobOffset : blobOffset+blobLen]
+					//ref https://github.com/golang/go/wiki/cgo#turning-c-arrays-into-go-slices
+					ptr := unsafe.Pointer(&dataBlob[0])
+					farray := (*[1 << 28]float32)(ptr)
+					colData = append(colData, farray[:dim:dim]...)
+				}
+			}
+			newCol := &schemapb.FieldData{
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: int64(dim),
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{
+								Data: colData,
+							},
+						},
+					},
+				},
+			}
+			finalResult.FieldsData = append(finalResult.FieldsData, newCol)
+			blobOffset += blobLen
 		case schemapb.DataType_BinaryVector:
-			return nil, fmt.Errorf("unsupported")
+			dim, err := schema.GetVectorDimFromID(fieldID)
+			if err != nil {
+				return nil, err
+			}
+			blobLen := dim / 8
+			var colData []byte
+			for _, hit := range hits {
+				for _, row := range hit.RowData {
+					dataBlob := row[blobOffset : blobOffset+blobLen]
+					colData = append(colData, dataBlob...)
+				}
+			}
+			newCol := &schemapb.FieldData{
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: int64(dim),
+						Data: &schemapb.VectorField_BinaryVector{
+							BinaryVector: colData,
+						},
+					},
+				},
+			}
+			finalResult.FieldsData = append(finalResult.FieldsData, newCol)
+			blobOffset += blobLen
 		default:
+			return nil, fmt.Errorf("unsupport data type %s", schemapb.DataType_name[int32(fieldMeta.DataType)])
 		}
 	}
+
 	return finalResult, nil
 }
 

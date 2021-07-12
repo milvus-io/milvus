@@ -20,7 +20,7 @@ import (
 const (
 	L2       = "L2"
 	IP       = "IP"
-	HAMMING  = "HAMMIN"
+	HAMMING  = "HAMMING"
 	TANIMOTO = "TANIMOTO"
 )
 
@@ -162,14 +162,14 @@ func CountOne(n uint8) int32 {
 	return count
 }
 
-// HAMMIN distance
-func CalcHammin(dim int64, left []byte, lIndex int64, right []byte, rIndex int64) int32 {
+// HAMMING distance
+func CalcHamming(dim int64, left []byte, lIndex int64, right []byte, rIndex int64) int32 {
 	singleBitLen := SingleBitLen(dim)
 	numBytes := singleBitLen / 8
 	lFrom := lIndex * numBytes
 	rFrom := rIndex * numBytes
 
-	var hammin int32 = 0
+	var hamming int32 = 0
 	for i := int64(0); i < numBytes; i++ {
 		var xor uint8 = left[lFrom+i] ^ right[rFrom+i]
 
@@ -182,22 +182,22 @@ func CalcHammin(dim int64, left []byte, lIndex int64, right []byte, rIndex int64
 			xor = xor & (255 << offset)
 		}
 
-		hammin += CountOne(xor)
+		hamming += CountOne(xor)
 	}
 
-	return hammin
+	return hamming
 }
 
-func CalcHamminBatch(dim int64, left []byte, lIndex int64, right []byte, result *[]int32) {
+func CalcHammingBatch(dim int64, left []byte, lIndex int64, right []byte, result *[]int32) {
 	rightNum := VectorCount(dim, len(right))
 
 	for i := int64(0); i < rightNum; i++ {
-		hammin := CalcHammin(dim, left, lIndex, right, i)
-		(*result)[lIndex*rightNum+i] = hammin
+		hamming := CalcHamming(dim, left, lIndex, right, i)
+		(*result)[lIndex*rightNum+i] = hamming
 	}
 }
 
-func CalcHamminDistance(dim int64, left []byte, right []byte) ([]int32, error) {
+func CalcHammingDistance(dim int64, left []byte, right []byte) ([]int32, error) {
 	if dim <= 0 {
 		err := errors.New("Invalid dimension")
 		return nil, err
@@ -219,7 +219,7 @@ func CalcHamminDistance(dim int64, left []byte, right []byte) ([]int32, error) {
 
 	var waitGroup sync.WaitGroup
 	CalcWorker := func(index int64) {
-		CalcHamminBatch(dim, left, index, right, &distArray)
+		CalcHammingBatch(dim, left, index, right, &distArray)
 		waitGroup.Done()
 	}
 	for i := int64(0); i < leftNum; i++ {
@@ -231,19 +231,19 @@ func CalcHamminDistance(dim int64, left []byte, right []byte) ([]int32, error) {
 	return distArray, nil
 }
 
-func CalcTanimotoCoefficient(dim int64, hammin []int32) ([]float32, error) {
-	if dim <= 0 || len(hammin) == 0 {
+func CalcTanimotoCoefficient(dim int64, hamming []int32) ([]float32, error) {
+	if dim <= 0 || len(hamming) == 0 {
 		err := errors.New("Invalid input for tanimoto")
 		return nil, err
 	}
 
-	array := make([]float32, len(hammin))
-	for i := 0; i < len(hammin); i++ {
-		if hammin[i] >= int32(dim)*2 {
-			err := errors.New("Invalid hammin for tanimoto")
+	array := make([]float32, len(hamming))
+	for i := 0; i < len(hamming); i++ {
+		if hamming[i] >= int32(dim)*2 {
+			err := errors.New("Invalid hamming for tanimoto")
 			return nil, err
 		}
-		array[i] = float32(hammin[i] / (int32(dim)*2 - hammin[i]))
+		array[i] = float32(hamming[i]) / (float32(dim)*2 - float32(hamming[i]))
 	}
 
 	return array, nil

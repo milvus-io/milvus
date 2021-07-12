@@ -8,6 +8,8 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 
+export OS_NAME="${OS_NAME:-ubuntu18.04}"
+
 unameOut="$(uname -s)"
 case "${unameOut}" in
     Linux*)     machine=Linux;;
@@ -50,15 +52,15 @@ fi
 
 pushd "$ROOT_DIR"
 
-mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-ccache"
-mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-go-mod"
-mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-thirdparty"
-mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-vscode-extensions"
+mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-${OS_NAME}-ccache"
+mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-${OS_NAME}-go-mod"
+mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/thirdparty"
+mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-${OS_NAME}-vscode-extensions"
 chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}"
 
 if [ "${1-}" = "build" ];then
-   docker-compose -f $ROOT_DIR/docker-compose-devcontainer.yml pull --ignore-pull-failures ubuntu
-   docker-compose -f $ROOT_DIR/docker-compose-devcontainer.yml build ubuntu
+   docker-compose -f $ROOT_DIR/docker-compose-devcontainer.yml pull --ignore-pull-failures builder
+   docker-compose -f $ROOT_DIR/docker-compose-devcontainer.yml build builder
 fi
 
 if [ "${1-}" = "up" ]; then

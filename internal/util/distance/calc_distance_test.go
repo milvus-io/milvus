@@ -29,7 +29,7 @@ func TestValidateMetricType(t *testing.T) {
 		assert.Error(t, err)
 	}
 
-	validMetric := []string{"L2", "ip", "Hammin", "Tanimoto"}
+	validMetric := []string{"L2", "ip", "Hamming", "Tanimoto"}
 	for _, str := range validMetric {
 		metric, err := ValidateMetricType(str)
 		assert.Nil(t, err)
@@ -210,7 +210,7 @@ func TestCountOne(t *testing.T) {
 	assert.Equal(t, n, int32(8))
 }
 
-func TestCalcHammin(t *testing.T) {
+func TestCalcHamming(t *testing.T) {
 	var dim int64 = 22
 	// v1 = 00000010 00000110 00001000
 	v1 := make([]uint8, 3)
@@ -222,14 +222,15 @@ func TestCalcHammin(t *testing.T) {
 	v2[0] = 1
 	v2[1] = 7
 	v2[2] = 27
-	n := CalcHammin(dim, v1, 0, v2, 0)
+	n := CalcHamming(dim, v1, 0, v2, 0)
 	assert.Equal(t, n, int32(4))
 
-	hammin := make([]int32, 1)
-	hammin[0] = n
-	tanimoto, err := CalcTanimotoCoefficient(dim, hammin)
+	hamming := make([]int32, 1)
+	hamming[0] = n
+	tanimoto, err := CalcTanimotoCoefficient(dim, hamming)
+	realTanimoto := float64(n) / (float64(dim)*2.0 - float64(n))
 	assert.Nil(t, err)
-	assert.Less(t, math.Abs(float64(tanimoto[0]-float32(n/(int32(dim)*2-n)))), float64(PRECISION))
+	assert.Less(t, math.Abs(float64(tanimoto[0])-realTanimoto), float64(PRECISION))
 }
 
 func TestCalcHamminDistance(t *testing.T) {
@@ -238,21 +239,21 @@ func TestCalcHamminDistance(t *testing.T) {
 
 	left := CreateBinaryArray(leftNum, dim)
 
-	_, e := CalcHamminDistance(0, left, left)
+	_, e := CalcHammingDistance(0, left, left)
 	assert.Error(t, e)
 
-	distances, err := CalcHamminDistance(dim, left, left)
+	distances, err := CalcHammingDistance(dim, left, left)
 	assert.Nil(t, err)
 
-	n := CalcHammin(dim, left, 0, left, 0)
+	n := CalcHamming(dim, left, 0, left, 0)
 	assert.Equal(t, n, int32(0))
 
-	n = CalcHammin(dim, left, 1, left, 1)
+	n = CalcHamming(dim, left, 1, left, 1)
 	assert.Equal(t, n, int32(0))
 
-	n = CalcHammin(dim, left, 0, left, 1)
+	n = CalcHamming(dim, left, 0, left, 1)
 	assert.Equal(t, n, distances[1])
 
-	n = CalcHammin(dim, left, 1, left, 0)
+	n = CalcHamming(dim, left, 1, left, 0)
 	assert.Equal(t, n, distances[2])
 }

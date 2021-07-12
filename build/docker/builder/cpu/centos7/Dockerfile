@@ -9,14 +9,37 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-FROM milvusdb/openblas:ubuntu18.04-20210428
+FROM milvusdb/openblas:centos7-20210706
 
-RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 && \
+RUN yum install -y epel-release centos-release-scl-rh && yum install -y wget curl which && \
     wget -qO- "https://cmake.org/files/v3.14/cmake-3.14.3-Linux-x86_64.tar.gz" | tar --strip-components=1 -xz -C /usr/local && \
-    apt-get update && apt-get install -y --no-install-recommends \
-    g++ gcc gfortran git make ccache libssl-dev zlib1g-dev libboost-regex-dev libboost-program-options-dev libboost-system-dev libboost-filesystem-dev libboost-serialization-dev python3-dev libboost-python-dev libcurl4-openssl-dev libtbb-dev clang-format-10 clang-tidy-10 lcov && \
-    apt-get remove --purge -y && \
-    rm -rf /var/lib/apt/lists/*
+    yum install -y git make automake openssl-devel zlib-devel \
+      libcurl-devel python3-devel \
+      devtoolset-7-gcc devtoolset-7-gcc-c++ devtoolset-7-gcc-gfortran \
+      llvm-toolset-7.0-clang llvm-toolset-7.0-clang-tools-extra \
+      ccache lcov && \
+      rm -rf /var/cache/yum/* && \
+    echo "source scl_source enable devtoolset-7" >> /etc/profile.d/devtoolset-7.sh && \
+    echo "source scl_source enable llvm-toolset-7.0" >> /etc/profile.d/llvm-toolset-7.sh
+
+ENV CLANG_TOOLS_PATH="/opt/rh/llvm-toolset-7.0/root/usr/bin"
+
+# Install tbb
+RUN source /etc/profile.d/devtoolset-7.sh && \
+    git clone https://github.com/wjakob/tbb.git && \
+    cd tbb/build && \
+    cmake .. && make -j && make install && \
+    cd ../../ && rm -rf tbb/
+
+# Install boost
+RUN source /etc/profile.d/devtoolset-7.sh && \
+    wget -q https://boostorg.jfrog.io/artifactory/main/release/1.65.1/source/boost_1_65_1.tar.gz && \
+    tar zxf boost_1_65_1.tar.gz && cd boost_1_65_1 && \
+    ./bootstrap.sh --prefix=/usr/local --with-toolset=gcc --without-libraries=python && \
+    ./b2 -j2 --prefix=/usr/local --without-python toolset=gcc install && \
+    cd ../ && rm -rf ./boost_1_65_1*
+
+ENV LD_LIBRARY_PATH /usr/local/lib:$LD_LIBRARY_PATH
 
 # Install Go
 ENV GOPATH /go
@@ -34,11 +57,6 @@ RUN mkdir -p /usr/local/go && wget -qO- "https://golang.org/dl/go1.15.2.linux-am
     go get -v honnef.co/go/tools/cmd/staticcheck && \
     go clean --modcache && \
     chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR)
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gdb gdbserver && \
-    apt-get remove --purge -y && \
-    rm -rf /var/lib/apt/lists/*
 
 RUN echo 'root:root' | chpasswd
 

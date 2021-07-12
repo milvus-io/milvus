@@ -50,8 +50,9 @@ class Base:
         log.info("[teardown_class] Start teardown class...")
         pass
 
-    def setup(self):
+    def setup_method(self, method):
         log.info(("*" * 35) + " setup " + ("*" * 35))
+        log.info("[setup_method] Start setup test case %s..." % method.__name__)
         self.connection_wrap = ApiConnectionsWrapper()
         self.utility_wrap = ApiUtilityWrapper()
         self.collection_wrap = ApiCollectionWrapper()
@@ -60,8 +61,9 @@ class Base:
         self.collection_schema_wrap = ApiCollectionSchemaWrapper()
         self.field_schema_wrap = ApiFieldSchemaWrapper()
 
-    def teardown(self):
+    def teardown_method(self, method):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
+        log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
 
         try:
             """ Drop collection before disconnect """

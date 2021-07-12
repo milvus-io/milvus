@@ -5,11 +5,12 @@ set -euo pipefail
 # Absolute path to the toplevel milvus directory.
 toplevel=$(dirname "$(cd "$(dirname "${0}")"; pwd)")
 
+export OS_NAME="${OS_NAME:-ubuntu18.04}"
+
 pushd "${toplevel}"
 
 if [[ "${1-}" == "pull" ]]; then
-    docker-compose pull --ignore-pull-failures ubuntu
-    # docker-compose pull --ignore-pull-failures gdbserver
+    docker-compose pull --ignore-pull-failures builder
     exit 0
 fi
 
@@ -31,20 +32,21 @@ gid=$(id -g)
 [ "$uid" -lt 500 ] && uid=501
 [ "$gid" -lt 500 ] && gid=$uid
 
-mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-ccache"
-mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-go-mod"
-mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-ubuntu18.04-thirdparty"
+mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-${OS_NAME}-ccache"
+mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-${OS_NAME}-go-mod"
+mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/thirdparty"
+mkdir -p "${DOCKER_VOLUME_DIRECTORY:-.docker}/amd64-${OS_NAME}-vscode-extensions"
 chmod -R 777 "${DOCKER_VOLUME_DIRECTORY:-.docker}"
 
-docker-compose pull --ignore-pull-failures ubuntu
+docker-compose pull --ignore-pull-failures builder
 if [[ "${CHECK_BUILDER:-}" == "1" ]]; then
-    docker-compose build ubuntu
+    docker-compose build builder
 fi
 
 if [[ "$(id -u)" != "0" ]]; then
-    docker-compose run --rm -u "$uid:$gid" ubuntu "$@"
+    docker-compose run --rm -u "$uid:$gid" builder "$@"
 else
-    docker-compose run --rm --entrypoint "/tini --" ubuntu "$@"
+    docker-compose run --rm --entrypoint "/tini -- /entrypoint.sh" builder "$@"
 fi
 
 popd

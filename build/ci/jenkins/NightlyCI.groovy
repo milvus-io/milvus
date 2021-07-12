@@ -66,7 +66,7 @@ pipeline {
                                         if ("${MILVUS_CLIENT}" == "pymilvus") {
                                             sh """
                                             MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
-                                            timeout ${ci_timeout} \
+                                            timeout -v ${ci_timeout} \
                                             ./e2e-k8s.sh \
                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
                                             --node-image registry.zilliz.com/kindest/node:v1.20.2
@@ -74,7 +74,7 @@ pipeline {
                                         } else if ("${MILVUS_CLIENT}" == "pymilvus-orm") {
                                             sh """
                                             MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
-                                            timeout ${ci_timeout} \
+                                            timeout -v ${ci_timeout} \
                                             ./e2e-k8s.sh \
                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
                                             --node-image registry.zilliz.com/kindest/node:v1.20.2 \
@@ -111,7 +111,7 @@ pipeline {
                                     }
                                     archiveArtifacts artifacts: "**.tar.gz", allowEmptyArchive: true
                                     sh 'docker rm -f \$(docker network inspect -f \'{{ range \$key, \$value := .Containers }}{{ printf "%s " \$key}}{{ end }}\' kind) || true'
-                                    sh 'docker network rm kind 2>&1 > /dev/null || true'
+                                    sh 'docker network rm kind > /dev/null 2>&1 || true'
                                 }
                             }
                         }

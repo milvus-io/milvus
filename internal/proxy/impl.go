@@ -1286,7 +1286,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		zap.String("collection", request.CollectionName),
 		zap.Any("partitions", request.PartitionNames),
 		zap.Any("dsl", request.Dsl),
-		zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)))
+		zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)),
+		zap.Any("OutputFields", request.OutputFields))
 	defer func() {
 		log.Debug("Search Done",
 			zap.Error(err),
@@ -1297,7 +1298,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			zap.String("collection", request.CollectionName),
 			zap.Any("partitions", request.PartitionNames),
 			zap.Any("dsl", request.Dsl),
-			zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)))
+			zap.Any("len(PlaceholderGroup)", len(request.PlaceholderGroup)),
+			zap.Any("OutputFields", request.OutputFields))
 	}()
 
 	err = qt.WaitToFinish()
@@ -1563,8 +1565,6 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		}, nil
 	}
 
-	errMsg := "Invalid expression!"
-	err = errors.New(errMsg)
 	return &milvuspb.QueryResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1620,6 +1620,15 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 		}
 	}
 
+	if vectorsLeft == nil {
+		return &milvuspb.CalcDistanceResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "Left vectors array is empty",
+			},
+		}, nil
+	}
+
 	vectorsRight := request.GetOpRight().GetDataArray()
 	opRight := request.GetOpRight().GetIdArray()
 	if opRight != nil {
@@ -1639,6 +1648,15 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				break
 			}
 		}
+	}
+
+	if vectorsRight == nil {
+		return &milvuspb.CalcDistanceResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "Right vectors array is empty",
+			},
+		}, nil
 	}
 
 	if vectorsLeft.Dim == vectorsRight.Dim && vectorsLeft.GetFloatVector() != nil && vectorsRight.GetFloatVector() != nil {
@@ -1663,7 +1681,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 	}
 
 	if vectorsLeft.Dim == vectorsRight.Dim && vectorsLeft.GetBinaryVector() != nil && vectorsRight.GetBinaryVector() != nil {
-		hammin, err := distance.CalcHamminDistance(vectorsLeft.Dim, vectorsLeft.GetBinaryVector(), vectorsRight.GetBinaryVector())
+		hamming, err := distance.CalcHammingDistance(vectorsLeft.Dim, vectorsLeft.GetBinaryVector(), vectorsRight.GetBinaryVector())
 		if err != nil {
 			return &milvuspb.CalcDistanceResults{
 				Status: &commonpb.Status{
@@ -1678,14 +1696,14 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success, Reason: ""},
 				Array: &milvuspb.CalcDistanceResults_IntDist{
 					IntDist: &schemapb.IntArray{
-						Data: hammin,
+						Data: hamming,
 					},
 				},
 			}, nil
 		}
 
 		if metric == distance.TANIMOTO {
-			tanimoto, err := distance.CalcTanimotoCoefficient(vectorsLeft.Dim, hammin)
+			tanimoto, err := distance.CalcTanimotoCoefficient(vectorsLeft.Dim, hamming)
 			if err != nil {
 				return &milvuspb.CalcDistanceResults{
 					Status: &commonpb.Status{

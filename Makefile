@@ -33,7 +33,7 @@ tools/bin/revive: tools/check/go.mod
 cppcheck:
 	@(env bash ${PWD}/scripts/core_build.sh -l)
 
-generated-proto-go:export protoc:=${PWD}/cmake_build/thirdparty/protobuf/protobuf-build/protoc
+generated-proto-go: export protoc:=${PWD}/cmake_build/thirdparty/protobuf/protobuf-build/protoc
 generated-proto-go: build-cpp
 	@mkdir -p ${GOPATH}/bin
 	@which protoc-gen-go 1>/dev/null || (echo "Installing protoc-gen-go" && go get github.com/golang/protobuf/protoc-gen-go@v1.3.2)
@@ -53,7 +53,7 @@ else
 	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh tests/go/
 endif
 
-lint:tools/bin/revive
+lint: tools/bin/revive
 	@echo "Running $@ check"
 	@tools/bin/revive -formatter friendly -config tools/check/revive.toml ./...
 
@@ -97,22 +97,21 @@ milvus: build-cpp
 build-go: milvus
 
 build-cpp:
+	@echo "Building Milvus cpp library ..."
 	@(env bash $(PWD)/scripts/core_build.sh -f "$(CUSTOM_THIRDPARTY_PATH)")
 	@(env bash $(PWD)/scripts/cwrapper_build.sh -t Release -f "$(CUSTOM_THIRDPARTY_PATH)")
 	@(env bash $(PWD)/scripts/cwrapper_dablooms_build.sh -t Release -f "$(CUSTOM_THIRDPARTY_PATH)")
-	@go env -w CGO_CFLAGS="-I$(PWD)/internal/kv/rocksdb/cwrapper/output/include"
-	@go env -w CGO_LDFLAGS="-L$(PWD)/internal/kv/rocksdb/cwrapper/output/lib -l:librocksdb.a -lstdc++ -lm -lz"
 	@(env bash $(PWD)/scripts/cwrapper_rocksdb_build.sh -t Release -f "$(CUSTOM_THIRDPARTY_PATH)")
-	@go get github.com/tecbot/gorocksdb
 
 build-cpp-with-unittest:
+	@echo "Building Milvus cpp library with unittest ..."
 	@(env bash $(PWD)/scripts/core_build.sh -u -f "$(CUSTOM_THIRDPARTY_PATH)")
 	@(env bash $(PWD)/scripts/cwrapper_build.sh -t Release -f "$(CUSTOM_THIRDPARTY_PATH)")
 
 # Runs the tests.
 unittest: test-cpp test-go
 
-test-go:build-cpp
+test-go: build-cpp
 	@echo "Running go unittests..."
 	@echo "disable go unittest for now, enable it later"
 	@(env bash $(PWD)/scripts/run_go_unittest.sh)

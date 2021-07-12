@@ -19,7 +19,7 @@ add_library(milvus_indexbuilder SHARED
 
 target_link_libraries(milvus_indexbuilder
         tbb milvus_utils pthread knowhere log milvus_proto
-        dl backtrace
+        dl
         milvus_common
         milvus_query
         )

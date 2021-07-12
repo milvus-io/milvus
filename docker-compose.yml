@@ -8,14 +8,14 @@ x-ccache: &ccache
   CCACHE_DIR: /ccache
 
 services:
-  ubuntu:
-    image: ${IMAGE_REPO}/milvus-env:${IMAGE_ARCH}-ubuntu${UBUNTU}-${DATE_VERSION}
+  builder:
+    image: ${IMAGE_REPO}/milvus-env:${IMAGE_ARCH}-${OS_NAME}-${DATE_VERSION}
     # Build devcontainer
     build:
       context: .
-      dockerfile: build/docker/builder/cpu/ubuntu${UBUNTU}/Dockerfile
+      dockerfile: build/docker/builder/cpu/${OS_NAME}/Dockerfile
       cache_from:
-        - ${IMAGE_REPO}/milvus-env:${IMAGE_ARCH}-ubuntu${UBUNTU}-${LATEST_DATE_VERSION}
+        - ${IMAGE_REPO}/milvus-env:${IMAGE_ARCH}-${OS_NAME}-${LATEST_DATE_VERSION}
     # user: {{ CURRENT_ID }}
     shm_size: 2G
     environment:
@@ -24,15 +24,15 @@ services:
       ETCD_ENDPOINTS: ${ETCD_ENDPOINTS}
       MINIO_ADDRESS: ${MINIO_ADDRESS}
       CUSTOM_THIRDPARTY_PATH: /tmp/thirdparty
-    volumes: &ubuntu-volumes
+    volumes: &builder-volumes
       - .:/go/src/github.com/milvus-io/milvus:delegated
-      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-ubuntu${UBUNTU}-ccache:/ccache:delegated
-      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-ubuntu${UBUNTU}-go-mod:/go/pkg/mod:delegated
-      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-ubuntu${UBUNTU}-thirdparty:/tmp/thirdparty:delegated
-      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-ubuntu${UBUNTU}-vscode-extensions:/home/milvus/.vscode-server/extensions:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-ccache:/ccache:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-go-mod:/go/pkg/mod:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/thirdparty:/tmp/thirdparty:delegated
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-vscode-extensions:/home/milvus/.vscode-server/extensions:delegated
     working_dir: "/go/src/github.com/milvus-io/milvus"
     # Command
-    command: &ubuntu-command >
+    command: &builder-command >
       /bin/bash -c "
         make check-proto-product && make verifiers && make unittest"
 
