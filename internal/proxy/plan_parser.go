@@ -51,16 +51,20 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 		case "-":
 			if i, ok := node.Node.(*ant_ast.IntegerNode); ok {
 				patch(&ant_ast.IntegerNode{Value: -i.Value})
-			}
-			if i, ok := node.Node.(*ant_ast.FloatNode); ok {
+			} else if i, ok := node.Node.(*ant_ast.FloatNode); ok {
 				patch(&ant_ast.FloatNode{Value: -i.Value})
+			} else {
+				optimizer.err = fmt.Errorf("can only make a number positive")
+				return
 			}
 		case "+":
 			if i, ok := node.Node.(*ant_ast.IntegerNode); ok {
 				patch(&ant_ast.IntegerNode{Value: i.Value})
-			}
-			if i, ok := node.Node.(*ant_ast.FloatNode); ok {
+			} else if i, ok := node.Node.(*ant_ast.FloatNode); ok {
 				patch(&ant_ast.FloatNode{Value: i.Value})
+			} else {
+				optimizer.err = fmt.Errorf("can only make a number negative")
+				return
 			}
 		}
 
@@ -80,6 +84,9 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 				patch(&ant_ast.FloatNode{Value: float64(integerNodeLeft.Value) + floatNodeRight.Value})
 			} else if leftInteger && rightInteger {
 				patch(&ant_ast.IntegerNode{Value: integerNodeLeft.Value + integerNodeRight.Value})
+			} else {
+				optimizer.err = fmt.Errorf("can only add two number")
+				return
 			}
 		case "-":
 			if leftFloat && rightFloat {
@@ -90,6 +97,9 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 				patch(&ant_ast.FloatNode{Value: float64(integerNodeLeft.Value) - floatNodeRight.Value})
 			} else if leftInteger && rightInteger {
 				patch(&ant_ast.IntegerNode{Value: integerNodeLeft.Value - integerNodeRight.Value})
+			} else {
+				optimizer.err = fmt.Errorf("can only sub two number")
+				return
 			}
 		case "*":
 			if leftFloat && rightFloat {
@@ -100,6 +110,9 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 				patch(&ant_ast.FloatNode{Value: float64(integerNodeLeft.Value) * floatNodeRight.Value})
 			} else if leftInteger && rightInteger {
 				patch(&ant_ast.IntegerNode{Value: integerNodeLeft.Value * integerNodeRight.Value})
+			} else {
+				optimizer.err = fmt.Errorf("can only multiply two number")
+				return
 			}
 		case "/":
 			if leftFloat && rightFloat {
@@ -126,10 +139,16 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 					return
 				}
 				patch(&ant_ast.IntegerNode{Value: integerNodeLeft.Value / integerNodeRight.Value})
+			} else {
+				optimizer.err = fmt.Errorf("can only divide two number")
+				return
 			}
 		case "%":
 			if leftInteger && rightInteger {
 				patch(&ant_ast.IntegerNode{Value: integerNodeLeft.Value % integerNodeRight.Value})
+			} else {
+				optimizer.err = fmt.Errorf("can only modulus two integer")
+				return
 			}
 		case "**":
 			if leftFloat && rightFloat {
@@ -140,6 +159,9 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 				patch(&ant_ast.FloatNode{Value: math.Pow(float64(integerNodeLeft.Value), floatNodeRight.Value)})
 			} else if leftInteger && rightInteger {
 				patch(&ant_ast.IntegerNode{Value: int(math.Pow(float64(integerNodeLeft.Value), float64(integerNodeRight.Value)))})
+			} else {
+				optimizer.err = fmt.Errorf("can only pow two number")
+				return
 			}
 		}
 	}
@@ -414,11 +436,10 @@ func (context *ParserContext) handleBinaryExpr(node *ant_ast.BinaryNode) (*planp
 		}
 
 		var lastExpr *planpb.Expr_RangeExpr
-		for i := 0; i < len(exprs); i++ {
+		for i := len(exprs) - 1; i >= 0; i-- {
 			if expr, ok := exprs[i].Expr.(*planpb.Expr_RangeExpr); ok {
 				if lastExpr != nil && expr.RangeExpr.ColumnInfo.FieldId == lastExpr.RangeExpr.ColumnInfo.FieldId {
-					exprs = append(exprs[0:i-1], exprs[i:]...)
-					i--
+					exprs = append(exprs[0:i+1], exprs[i+2:]...)
 					if len(lastExpr.RangeExpr.Ops) > 1 {
 						return nil, fmt.Errorf("invalid compare combination of fieldID: %v", lastExpr.RangeExpr.ColumnInfo.FieldId)
 					}
