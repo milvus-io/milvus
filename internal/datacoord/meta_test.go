@@ -154,19 +154,21 @@ func TestGetUnFlushedSegments(t *testing.T) {
 	mockAllocator := newMockAllocator()
 	meta, err := newMemoryMeta(mockAllocator)
 	assert.Nil(t, err)
-	err = meta.AddSegment(&datapb.SegmentInfo{
+	s1 := &datapb.SegmentInfo{
 		ID:           0,
 		CollectionID: 0,
 		PartitionID:  0,
 		State:        commonpb.SegmentState_Growing,
-	})
+	}
+	err = meta.AddSegment(NewSegmentInfo(s1))
 	assert.Nil(t, err)
-	err = meta.AddSegment(&datapb.SegmentInfo{
+	s2 := &datapb.SegmentInfo{
 		ID:           1,
 		CollectionID: 0,
 		PartitionID:  0,
 		State:        commonpb.SegmentState_Flushed,
-	})
+	}
+	err = meta.AddSegment(NewSegmentInfo(s2))
 	assert.Nil(t, err)
 
 	segments := meta.GetUnFlushedSegments()
