@@ -112,6 +112,7 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	if err == nil {
 		return ret, nil
 	}
+	log.Debug("DataNode Client grpc error", zap.Error(err))
 	err = c.connect()
 	if err != nil {
 		return ret, errors.New("Connect to datanode failed with error:\n" + err.Error())

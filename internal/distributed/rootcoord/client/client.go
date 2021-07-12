@@ -155,6 +155,7 @@ func (c *GrpcClient) recall(caller func() (interface{}, error)) (interface{}, er
 	if err == nil {
 		return ret, nil
 	}
+	log.Debug("RootCoord Client grpc error", zap.Error(err))
 	err = c.connect()
 	if err != nil {
 		return ret, errors.New("Connect to rootcoord failed with error:\n" + err.Error())

@@ -1023,14 +1023,12 @@ class TestCollectionSearch(TestcaseBase):
         # 2. search
         log.info("test_search_with_output_fields_not_exist: Searching collection %s" % collection_w.name)
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        res = collection_w.search(vectors[:default_nq], default_search_field,
-                                  default_search_params, default_limit,
-                                  default_search_exp, output_fields=["int63"],
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": default_nq,
-                                               "ids": insert_ids,
-                                               "limit": default_limit})[0]
-        assert len(res[0][0].entity._row_data) == 0
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp, output_fields=["int63"],
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1,
+                                         ct.err_msg: 'Field int63 not exist'})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_output_field(self):
