@@ -204,6 +204,10 @@ SegmentInternalInterface::GetEntityById(const std::vector<FieldOffset>& field_of
 
     results->set_allocated_ids(ids_.release());
 
+    for (auto& seg_offset : seg_offsets) {
+        results->add_offset(seg_offset.get());
+    }
+
     auto fields_data = results->mutable_fields_data();
     for (auto field_offset : field_offsets) {
         auto col = BulkSubScript(field_offset, seg_offsets.data(), seg_offsets.size());

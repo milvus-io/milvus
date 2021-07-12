@@ -24,7 +24,7 @@ import (
 	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 )
@@ -46,23 +46,23 @@ type segmentLoader struct {
 	indexLoader *indexLoader
 }
 
-func (loader *segmentLoader) loadSegmentOfConditionHandOff(req *queryPb.LoadSegmentsRequest) error {
+func (loader *segmentLoader) loadSegmentOfConditionHandOff(req *querypb.LoadSegmentsRequest) error {
 	return errors.New("TODO: implement hand off")
 }
 
-func (loader *segmentLoader) loadSegmentOfConditionLoadBalance(req *queryPb.LoadSegmentsRequest) error {
+func (loader *segmentLoader) loadSegmentOfConditionLoadBalance(req *querypb.LoadSegmentsRequest) error {
 	return loader.loadSegment(req, false)
 }
 
-func (loader *segmentLoader) loadSegmentOfConditionGRPC(req *queryPb.LoadSegmentsRequest) error {
+func (loader *segmentLoader) loadSegmentOfConditionGRPC(req *querypb.LoadSegmentsRequest) error {
 	return loader.loadSegment(req, true)
 }
 
-func (loader *segmentLoader) loadSegmentOfConditionNodeDown(req *queryPb.LoadSegmentsRequest) error {
+func (loader *segmentLoader) loadSegmentOfConditionNodeDown(req *querypb.LoadSegmentsRequest) error {
 	return loader.loadSegment(req, true)
 }
 
-func (loader *segmentLoader) loadSegment(req *queryPb.LoadSegmentsRequest, onService bool) error {
+func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onService bool) error {
 	// no segment needs to load, return
 	if len(req.Infos) == 0 {
 		return nil
@@ -96,7 +96,7 @@ func (loader *segmentLoader) loadSegment(req *queryPb.LoadSegmentsRequest, onSer
 			continue
 		}
 		segment := newSegment(collection, segmentID, partitionID, collectionID, "", segmentTypeSealed, onService)
-		err = loader.loadSegmentInternal(collectionID, segment, info.BinlogPaths)
+		err = loader.loadSegmentInternal(collectionID, segment, info)
 		if err != nil {
 			deleteSegment(segment)
 			log.Error(err.Error())
@@ -116,14 +116,14 @@ func (loader *segmentLoader) loadSegment(req *queryPb.LoadSegmentsRequest, onSer
 				log.Error("error when load segment info from etcd", zap.Any("error", err.Error()))
 				continue
 			}
-			segmentInfo := &queryPb.SegmentInfo{}
+			segmentInfo := &querypb.SegmentInfo{}
 			err = proto.UnmarshalText(value, segmentInfo)
 			if err != nil {
 				deleteSegment(segment)
 				log.Error("error when unmarshal segment info from etcd", zap.Any("error", err.Error()))
 				continue
 			}
-			segmentInfo.SegmentState = queryPb.SegmentState_sealed
+			segmentInfo.SegmentState = querypb.SegmentState_sealed
 			newKey := fmt.Sprintf("%s/%d", queryNodeSegmentMetaPrefix, segmentID)
 			err = loader.etcdKV.Save(newKey, proto.MarshalTextString(segmentInfo))
 			if err != nil {
@@ -137,31 +137,31 @@ func (loader *segmentLoader) loadSegment(req *queryPb.LoadSegmentsRequest, onSer
 	return loader.indexLoader.sendQueryNodeStats()
 }
 
-func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment *Segment, fieldBinlogs []*datapb.FieldBinlog) error {
+func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment *Segment, segmentLoadInfo *querypb.SegmentLoadInfo) error {
 	vectorFieldIDs, err := loader.historicalReplica.getVecFieldIDsByCollectionID(collectionID)
 	if err != nil {
 		return err
 	}
 
-	loadIndexFieldIDs := make([]int64, 0)
+	indexedFieldIDs := make([]int64, 0)
 	for _, vecFieldID := range vectorFieldIDs {
 		err = loader.indexLoader.setIndexInfo(collectionID, segment, vecFieldID)
 		if err != nil {
 			log.Warn(err.Error())
 			continue
 		}
-		loadIndexFieldIDs = append(loadIndexFieldIDs, vecFieldID)
+		indexedFieldIDs = append(indexedFieldIDs, vecFieldID)
 	}
 
-	// we don't need to load vector fields
-	fbs := loader.filterOutVectorFields(fieldBinlogs, loadIndexFieldIDs)
+	// we don't need to load raw data for indexed vector field
+	fieldBinlogs := loader.filterFieldBinlogs(segmentLoadInfo.BinlogPaths, indexedFieldIDs)
 
 	log.Debug("loading insert...")
-	err = loader.loadSegmentFieldsData(segment, fbs)
+	err = loader.loadSegmentFieldsData(segment, fieldBinlogs)
 	if err != nil {
 		return err
 	}
-	for _, id := range loadIndexFieldIDs {
+	for _, id := range indexedFieldIDs {
 		log.Debug("loading index...")
 		err = loader.indexLoader.loadIndex(segment, id)
 		if err != nil {
@@ -192,22 +192,22 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment 
 //	return statesResponse, nil
 //}
 
-func (loader *segmentLoader) filterOutVectorFields(fieldBinlogs []*datapb.FieldBinlog, vectorFields []int64) []*datapb.FieldBinlog {
-	containsFunc := func(s []int64, e int64) bool {
-		for _, a := range s {
-			if a == e {
+func (loader *segmentLoader) filterFieldBinlogs(fieldBinlogs []*datapb.FieldBinlog, skipFieldIDs []int64) []*datapb.FieldBinlog {
+	containsFunc := func(set []int64, target int64) bool {
+		for _, a := range set {
+			if a == target {
 				return true
 			}
 		}
 		return false
 	}
-	targetFbs := make([]*datapb.FieldBinlog, 0)
-	for _, fb := range fieldBinlogs {
-		if !containsFunc(vectorFields, fb.FieldID) {
-			targetFbs = append(targetFbs, fb)
+	result := make([]*datapb.FieldBinlog, 0)
+	for _, fieldBinlog := range fieldBinlogs {
+		if !containsFunc(skipFieldIDs, fieldBinlog.FieldID) {
+			result = append(result, fieldBinlog)
 		}
 	}
-	return targetFbs
+	return result
 }
 
 func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlogs []*datapb.FieldBinlog) error {
@@ -232,6 +232,31 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 				// TODO: return or continue?
 				return err
 			}
+			//sizeBinLog := len(binLog)
+			//log.Debug("CYD - ", zap.Int("len", sizeBinLog), zap.String("path", path))
+
+			//////////////////////////////////////
+			//localFilename, err := loader.minioKV.FGetObject(path, "/tmp/milvus/")
+			//if err != nil {
+			//	// TODO: return or continue?
+			//	return err
+			//}
+			//file, err := os.OpenFile(localFilename, os.O_RDONLY, 0664)
+			//if err != nil {
+			//	return err
+			//}
+			//fileInfo, err := file.Stat()
+			//if err != nil {
+			//	return err
+			//}
+			//fileSize := fileInfo.Size()
+			//log.Debug("CYD - ", zap.Int64("filesize", fileSize), zap.String("path", localFilename))
+			//data, err := syscall.Mmap(int(file.Fd()), 0, int(fileInfo.Size()), syscall.PROT_READ, syscall.MAP_SHARED)
+			//if err != nil {
+			//	return err
+			//}
+			//////////////////////////////////////
+
 			blob := &storage.Blob{
 				Key:   p,
 				Value: []byte(binLog),

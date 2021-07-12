@@ -25,6 +25,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"sync"
 	"unsafe"
@@ -34,6 +35,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 )
 
@@ -46,6 +48,53 @@ const (
 	segmentTypeIndexing
 )
 
+type VectorFieldInfo struct {
+	mu              sync.RWMutex
+	fieldBinlog     *datapb.FieldBinlog
+	rowNum          map[string]int64    // map[binlogPath]int64
+	rawDataInMemory map[string]bool     // map[binlogPath]bool
+	rawDataMmap     map[string]*os.File // map[binlogPath]*os.File
+}
+
+func newVectorFieldInfo(fieldBinlog *datapb.FieldBinlog) *VectorFieldInfo {
+	return &VectorFieldInfo{
+		fieldBinlog:     fieldBinlog,
+		rawDataInMemory: make(map[string]bool),
+		rawDataMmap:     make(map[string]*os.File),
+	}
+}
+
+func (v *VectorFieldInfo) setRowNum(binlogPath string, rowNum int64) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.rowNum[binlogPath] = rowNum
+}
+
+func (v *VectorFieldInfo) getRowNum(binlogPath string) int64 {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if num, ok := v.rowNum[binlogPath]; ok {
+		return num
+	}
+	return 0
+}
+
+func (v *VectorFieldInfo) setRawDataInMemory(binlogPath string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.rawDataInMemory[binlogPath] = true
+}
+
+func (v *VectorFieldInfo) getRawDataInMemory(binlogPath string) bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if _, ok := v.rawDataInMemory[binlogPath]; ok {
+		return true
+	}
+	return false
+}
+
+//--------------------------------------------------------------------------------------
 type Segment struct {
 	segmentPtr C.CSegmentInterface
 
@@ -70,6 +119,9 @@ type Segment struct {
 
 	paramMutex sync.RWMutex // guards index
 	indexInfos map[int64]*indexInfo
+
+	vectorFieldMutex sync.RWMutex // guards vectorFieldInfos
+	vectorFieldInfos map[UniqueID]*VectorFieldInfo
 }
 
 //-------------------------------------------------------------------------------------- common interfaces
@@ -121,12 +173,26 @@ func (s *Segment) setOnService(onService bool) {
 	s.onService = onService
 }
 
+func (s *Segment) setVectorFieldInfo(fieldID UniqueID, info *VectorFieldInfo) {
+	s.vectorFieldMutex.Lock()
+	defer s.vectorFieldMutex.Unlock()
+	s.vectorFieldInfos[fieldID] = info
+}
+
+func (s *Segment) getVectorFieldInfo(fieldID UniqueID) (*VectorFieldInfo, error) {
+	s.vectorFieldMutex.Lock()
+	defer s.vectorFieldMutex.Unlock()
+	if info, ok := s.vectorFieldInfos[fieldID]; ok {
+		return info, nil
+	}
+	return nil, errors.New("Invalid fieldID " + strconv.Itoa(int(fieldID)))
+}
+
 func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, segType segmentType, onService bool) *Segment {
 	/*
 		CSegmentInterface
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
 	*/
-	indexInfos := make(map[int64]*indexInfo)
 	var segmentPtr C.CSegmentInterface
 	switch segType {
 	case segmentTypeInvalid:
@@ -143,18 +209,19 @@ func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, c
 
 	log.Debug("create segment", zap.Int64("segmentID", segmentID))
 
-	var newSegment = &Segment{
-		segmentPtr:   segmentPtr,
-		segmentType:  segType,
-		segmentID:    segmentID,
-		partitionID:  partitionID,
-		collectionID: collectionID,
-		vChannelID:   vChannelID,
-		onService:    onService,
-		indexInfos:   indexInfos,
+	var segment = &Segment{
+		segmentPtr:       segmentPtr,
+		segmentType:      segType,
+		segmentID:        segmentID,
+		partitionID:      partitionID,
+		collectionID:     collectionID,
+		vChannelID:       vChannelID,
+		onService:        onService,
+		indexInfos:       make(map[int64]*indexInfo),
+		vectorFieldInfos: make(map[UniqueID]*VectorFieldInfo),
 	}
 
-	return newSegment
+	return segment
 }
 
 func deleteSegment(segment *Segment) {
