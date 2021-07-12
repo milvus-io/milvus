@@ -65,4 +65,4 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
-          git push "https://sre-ci-robot:${{ secrets.ALL_CONTRIBUTORS_TOKEN }}@github.com/$GITHUB_REPOSITORY.git" HEAD:${{ github.ref }} --follow-tags
+          git push "https://${{ secrets.ALL_CONTRIBUTORS_TOKEN }}@github.com/$GITHUB_REPOSITORY.git" HEAD:${{ github.ref }} --follow-tags
