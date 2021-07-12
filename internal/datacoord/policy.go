@@ -27,108 +27,18 @@ type clusterDeltaChange struct {
 	restarts []string
 }
 
-// clusterStartupPolicy defines the behavior when datacoord starts/restarts
-type clusterStartupPolicy interface {
-	// apply accept all nodes and new/offline/restarts nodes and returns datanodes whose status need to be changed
-	apply(oldCluster map[string]*datapb.DataNodeInfo, delta *clusterDeltaChange, buffer []*datapb.ChannelStatus) ([]*datapb.DataNodeInfo, []*datapb.ChannelStatus)
-}
-
-type watchRestartsStartupPolicy struct {
-}
-
-func newWatchRestartsStartupPolicy() clusterStartupPolicy {
-	return watchRestartStartup
-}
-
-// startup func
-type startupFunc func(cluster map[string]*datapb.DataNodeInfo, delta *clusterDeltaChange,
-	buffer []*datapb.ChannelStatus) ([]*datapb.DataNodeInfo, []*datapb.ChannelStatus)
-
-// implement watchRestartsStartupPolicy for startupFunc
-func (f startupFunc) apply(cluster map[string]*datapb.DataNodeInfo, delta *clusterDeltaChange,
-	buffer []*datapb.ChannelStatus) ([]*datapb.DataNodeInfo, []*datapb.ChannelStatus) {
-	return f(cluster, delta, buffer)
-}
-
-var watchRestartStartup startupFunc = func(cluster map[string]*datapb.DataNodeInfo, delta *clusterDeltaChange,
-	buffer []*datapb.ChannelStatus) ([]*datapb.DataNodeInfo, []*datapb.ChannelStatus) {
-	ret := make([]*datapb.DataNodeInfo, 0)
-	for _, addr := range delta.restarts {
-		node := cluster[addr]
-		for _, ch := range node.Channels {
-			ch.State = datapb.ChannelWatchState_Uncomplete
-		}
-		ret = append(ret, node)
-	}
-	// put all channels from offline into buffer first
-	for _, addr := range delta.offlines {
-		node := cluster[addr]
-		for _, ch := range node.Channels {
-			ch.State = datapb.ChannelWatchState_Uncomplete
-			buffer = append(buffer, ch)
-		}
-	}
-	// try new nodes first
-	if len(delta.newNodes) > 0 && len(buffer) > 0 {
-		idx := 0
-		for len(buffer) > 0 {
-			node := cluster[delta.newNodes[idx%len(delta.newNodes)]]
-			node.Channels = append(node.Channels, buffer[0])
-			buffer = buffer[1:]
-			if idx < len(delta.newNodes) {
-				ret = append(ret, node)
-			}
-			idx++
-		}
-	}
-	// try online nodes if buffer is not empty
-	if len(buffer) > 0 {
-		online := make([]*datapb.DataNodeInfo, 0, len(cluster))
-		for _, node := range cluster {
-			online = append(online, node)
-		}
-		if len(online) > 0 {
-			idx := 0
-			for len(buffer) > 0 {
-				node := online[idx%len(online)]
-				node.Channels = append(node.Channels, buffer[0])
-				buffer = buffer[1:]
-				if idx < len(online) {
-					ret = append(ret, node)
-				}
-				idx++
-			}
-		}
-	}
-	return ret, buffer
-}
-
-// dataNodeRegisterPolicy defines the behavior when a datanode is registered
-type dataNodeRegisterPolicy interface {
-	// apply accept all online nodes and new created node, returns nodes needed to be changed
-	apply(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo, buffer []*datapb.ChannelStatus) ([]*datapb.DataNodeInfo, []*datapb.ChannelStatus)
-}
-
 // data node register func, simple func wrapping policy
-type dataNodeRegisterFunc func(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo, buffer []*datapb.ChannelStatus) ([]*datapb.DataNodeInfo, []*datapb.ChannelStatus)
-
-// implement dataNodeRegisterPolicy for dataNodeRegisterFunc
-func (f dataNodeRegisterFunc) apply(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo,
-	buffer []*datapb.ChannelStatus) ([]*datapb.DataNodeInfo, []*datapb.ChannelStatus) {
-	return f(cluster, session, buffer)
-}
+type dataNodeRegisterPolicy func(cluster []*NodeInfo, session *NodeInfo, buffer []*datapb.ChannelStatus) ([]*NodeInfo, []*datapb.ChannelStatus)
 
 // test logic, register and do nothing
-var emptyRegister dataNodeRegisterFunc = func(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo,
-	buffer []*datapb.ChannelStatus) ([]*datapb.DataNodeInfo, []*datapb.ChannelStatus) {
-	return []*datapb.DataNodeInfo{session}, buffer
+var emptyRegister dataNodeRegisterPolicy = func(cluster []*NodeInfo, session *NodeInfo, buffer []*datapb.ChannelStatus) ([]*NodeInfo, []*datapb.ChannelStatus) {
+	return []*NodeInfo{session}, buffer
 }
 
 // assign existing buffered channels into newly registered data node session
-var registerAssignWithBuffer dataNodeRegisterFunc = func(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo,
-	buffer []*datapb.ChannelStatus) ([]*datapb.DataNodeInfo, []*datapb.ChannelStatus) {
-	session.Channels = append(session.Channels, buffer...)
-	return []*datapb.DataNodeInfo{session}, []*datapb.ChannelStatus{}
+var registerAssignWithBuffer dataNodeRegisterPolicy = func(cluster []*NodeInfo, session *NodeInfo, buffer []*datapb.ChannelStatus) ([]*NodeInfo, []*datapb.ChannelStatus) {
+	node := session.Clone(AddChannels(buffer))
+	return []*NodeInfo{node}, []*datapb.ChannelStatus{}
 }
 
 func newEmptyRegisterPolicy() dataNodeRegisterPolicy {
@@ -139,41 +49,35 @@ func newAssiggBufferRegisterPolicy() dataNodeRegisterPolicy {
 	return registerAssignWithBuffer
 }
 
-// dataNodeUnregisterPolicy defines the behavior when datanode unregisters
-type dataNodeUnregisterPolicy interface {
-	// apply accept all online nodes and unregistered node, returns nodes needed to be changed
-	apply(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo) []*datapb.DataNodeInfo
-}
-
 // unregisterNodeFunc, short cut for functions implement policy
-type unregisterNodeFunc func(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo) []*datapb.DataNodeInfo
-
-// implement dataNodeUnregisterPolicy for unregisterNodeFunc
-func (f unregisterNodeFunc) apply(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo) []*datapb.DataNodeInfo {
-	return f(cluster, session)
-}
+type dataNodeUnregisterPolicy func(cluster []*NodeInfo, session *NodeInfo) []*NodeInfo
 
 // test logic, do nothing when node unregister
-var emptyUnregisterFunc unregisterNodeFunc = func(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo) []*datapb.DataNodeInfo {
+var emptyUnregisterFunc dataNodeUnregisterPolicy = func(cluster []*NodeInfo, session *NodeInfo) []*NodeInfo {
 	return nil
 }
 
 // randomly assign channels from unregistered node into existing nodes
 // if there is no nodes online, this func will not be invoked, buffer will be filled outside this func
-var randomAssignRegisterFunc unregisterNodeFunc = func(cluster map[string]*datapb.DataNodeInfo, session *datapb.DataNodeInfo) []*datapb.DataNodeInfo {
+var randomAssignRegisterFunc dataNodeUnregisterPolicy = func(cluster []*NodeInfo, session *NodeInfo) []*NodeInfo {
 	if len(cluster) == 0 || // no available node
 		session == nil ||
-		len(session.Channels) == 0 { // lost node not watching any channels
-		return []*datapb.DataNodeInfo{}
+		len(session.info.GetChannels()) == 0 { // lost node not watching any channels
+		return []*NodeInfo{}
 	}
 
-	appliedNodes := make([]*datapb.DataNodeInfo, 0, len(session.Channels))
+	appliedNodes := make([]*NodeInfo, 0, len(session.info.GetChannels()))
+	channels := session.info.GetChannels()
+	// clear unregistered node's channels
+	node := session.Clone(SetChannels(nil))
+	appliedNodes = append(appliedNodes, node)
+
 	raResult := make(map[int][]*datapb.ChannelStatus)
-	for _, chanSt := range session.Channels {
+	for _, chanSt := range channels {
 		bIdx, err := rand.Int(rand.Reader, big.NewInt(int64(len(cluster))))
 		if err != nil {
 			log.Error("error generated rand idx", zap.Error(err))
-			return []*datapb.DataNodeInfo{}
+			return []*NodeInfo{}
 		}
 		idx := bIdx.Int64()
 		if int(idx) >= len(cluster) {
@@ -193,11 +97,10 @@ var randomAssignRegisterFunc unregisterNodeFunc = func(cluster map[string]*datap
 		cs, ok := raResult[i]
 		i++
 		if ok {
-			node.Channels = append(node.Channels, cs...)
-			appliedNodes = append(appliedNodes, node)
+			n := node.Clone(AddChannels(cs))
+			appliedNodes = append(appliedNodes, n)
 		}
 	}
-
 	return appliedNodes
 }
 
@@ -205,27 +108,16 @@ func newEmptyUnregisterPolicy() dataNodeUnregisterPolicy {
 	return emptyUnregisterFunc
 }
 
-// channelAssignPolicy defines the behavior when a new channel needs to be assigned
-type channelAssignPolicy interface {
-	// apply accept all online nodes and new created channel with collectionID, returns node needed to be changed
-	apply(cluster map[string]*datapb.DataNodeInfo, channel string, collectionID UniqueID) []*datapb.DataNodeInfo
-}
-
 // channelAssignFunc, function shortcut for policy
-type channelAssignFunc func(cluster map[string]*datapb.DataNodeInfo, channel string, collectionID UniqueID) []*datapb.DataNodeInfo
-
-// implement channelAssignPolicy for channelAssign func
-func (f channelAssignFunc) apply(cluster map[string]*datapb.DataNodeInfo, channel string, collectionID UniqueID) []*datapb.DataNodeInfo {
-	return f(cluster, channel, collectionID)
-}
+type channelAssignPolicy func(cluster []*NodeInfo, channel string, collectionID UniqueID) []*NodeInfo
 
 // deprecated
 // test logic, assign channel to all existing data node, works fine only when there is only one data node!
-var assignAllFunc channelAssignFunc = func(cluster map[string]*datapb.DataNodeInfo, channel string, collectionID UniqueID) []*datapb.DataNodeInfo {
-	ret := make([]*datapb.DataNodeInfo, 0)
+var assignAllFunc channelAssignPolicy = func(cluster []*NodeInfo, channel string, collectionID UniqueID) []*NodeInfo {
+	ret := make([]*NodeInfo, 0)
 	for _, node := range cluster {
 		has := false
-		for _, ch := range node.Channels {
+		for _, ch := range node.info.GetChannels() {
 			if ch.Name == channel {
 				has = true
 				break
@@ -234,45 +126,47 @@ var assignAllFunc channelAssignFunc = func(cluster map[string]*datapb.DataNodeIn
 		if has {
 			continue
 		}
-		node.Channels = append(node.Channels, &datapb.ChannelStatus{
+		c := &datapb.ChannelStatus{
 			Name:         channel,
 			State:        datapb.ChannelWatchState_Uncomplete,
 			CollectionID: collectionID,
-		})
-		ret = append(ret, node)
+		}
+		n := node.Clone(AddChannels([]*datapb.ChannelStatus{c}))
+		ret = append(ret, n)
 	}
 
 	return ret
 }
 
 // balanced assign channel, select the datanode with least amount of channels to assign
-var balancedAssignFunc channelAssignFunc = func(cluster map[string]*datapb.DataNodeInfo, channel string, collectionID UniqueID) []*datapb.DataNodeInfo {
+var balancedAssignFunc channelAssignPolicy = func(cluster []*NodeInfo, channel string, collectionID UniqueID) []*NodeInfo {
 	if len(cluster) == 0 {
-		return []*datapb.DataNodeInfo{}
+		return []*NodeInfo{}
 	}
 	// filter existed channel
 	for _, node := range cluster {
-		for _, c := range node.GetChannels() {
+		for _, c := range node.info.GetChannels() {
 			if c.GetName() == channel && c.GetCollectionID() == collectionID {
 				return nil
 			}
 		}
 	}
-	target, min := "", math.MaxInt32
+	target, min := -1, math.MaxInt32
 	for k, v := range cluster {
-		if len(v.GetChannels()) < min {
+		if len(v.info.GetChannels()) < min {
 			target = k
-			min = len(v.GetChannels())
+			min = len(v.info.GetChannels())
 		}
 	}
 
-	ret := make([]*datapb.DataNodeInfo, 0)
-	cluster[target].Channels = append(cluster[target].Channels, &datapb.ChannelStatus{
+	ret := make([]*NodeInfo, 0)
+	c := &datapb.ChannelStatus{
 		Name:         channel,
 		State:        datapb.ChannelWatchState_Uncomplete,
 		CollectionID: collectionID,
-	})
-	ret = append(ret, cluster[target])
+	}
+	n := cluster[target].Clone(AddChannels([]*datapb.ChannelStatus{c}))
+	ret = append(ret, n)
 	return ret
 }
 
