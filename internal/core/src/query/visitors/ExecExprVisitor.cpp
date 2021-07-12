@@ -11,6 +11,7 @@
 
 #include <optional>
 #include <boost/dynamic_bitset.hpp>
+#include <boost/variant.hpp>
 #include <utility>
 #include <deque>
 #include "segcore/SegmentGrowingImpl.h"
@@ -281,44 +282,58 @@ ExecExprVisitor::visit(RangeExpr& expr) {
     ret_ = std::move(ret);
 }
 
-template <typename CmpFunc>
+template <typename Op>
+struct relational {
+    template <typename T, typename U>
+    bool operator()(T const& a, U const& b) const {
+        return Op{}(a, b);
+    }
+    template <typename... T>
+    bool operator()(T const&...) const {
+        PanicInfo("incompatible operands");
+    }
+};
+
+using number = boost::variant<bool, int8_t, int16_t, int32_t, int64_t, float, double>;
+
+template <typename Op>
 auto
-ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, CmpFunc cmp_func) -> RetType {
+ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op) -> RetType {
     auto size_per_chunk = segment_.size_per_chunk();
     auto num_chunk = upper_div(row_count_, size_per_chunk);
     RetType bitsets;
     for (int64_t chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
         auto size = chunk_id == num_chunk - 1 ? row_count_ - chunk_id * size_per_chunk : size_per_chunk;
 
-        auto getChunkData = [&, chunk_id] (DataType type, FieldOffset offset) -> std::function<double(int)> {
+        auto getChunkData = [&, chunk_id] (DataType type, FieldOffset offset) -> std::function<const number(int)> {
             switch (type) {
                 case DataType::BOOL: {
                     auto chunk = segment_.chunk_data<bool>(offset, chunk_id);
-                    return [chunk](int i) { return double(chunk.data()[i]); };
+                    return [chunk](int i) -> const number { return chunk.data()[i]; };
                 }
                 case DataType::INT8: {
                     auto chunk = segment_.chunk_data<int8_t>(offset, chunk_id);
-                    return [chunk](int i) { return double(chunk.data()[i]); };
+                    return [chunk](int i) -> const number { return chunk.data()[i]; };
                 }
                 case DataType::INT16: {
                     auto chunk = segment_.chunk_data<int16_t>(offset, chunk_id);
-                    return [chunk](int i) { return double(chunk.data()[i]); };
+                    return [chunk](int i) -> const number { return chunk.data()[i]; };
                 }
                 case DataType::INT32: {
                     auto chunk = segment_.chunk_data<int32_t>(offset, chunk_id);
-                    return [chunk](int i) { return double(chunk.data()[i]); };
+                    return [chunk](int i) -> const number { return chunk.data()[i]; };
                 }
                 case DataType::INT64: {
                     auto chunk = segment_.chunk_data<int64_t>(offset, chunk_id);
-                    return [chunk](int i) { return double(chunk.data()[i]); };
+                    return [chunk](int i) -> const number { return chunk.data()[i]; };
                 }
                 case DataType::FLOAT: {
                     auto chunk = segment_.chunk_data<float>(offset, chunk_id);
-                    return [chunk](int i) { return double(chunk.data()[i]); };
+                    return [chunk](int i) -> const number { return chunk.data()[i]; };
                 }
                 case DataType::DOUBLE: {
                     auto chunk = segment_.chunk_data<double>(offset, chunk_id);
-                    return [chunk](int i) { return chunk.data()[i]; };
+                    return [chunk](int i) -> const number { return chunk.data()[i]; };
                 }
                 default:
                     PanicInfo("unsupported datatype");
@@ -329,7 +344,7 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, CmpFunc cmp_func) 
 
         boost::dynamic_bitset<> bitset(size_per_chunk);
         for (int i = 0; i < size; ++i) {
-            bool is_in = cmp_func(left(i), right(i));
+            bool is_in = boost::apply_visitor(relational<decltype(op)>{}, left(i), right(i));
             bitset[i] = is_in;
         }
         bitsets.emplace_back(std::move(bitset));
@@ -343,43 +358,35 @@ ExecExprVisitor::visit(CompareExpr& expr) {
     Assert(expr.data_types_.size() == 2);
     auto& schema = segment_.get_schema();
 
-    // std::vector<FieldMeta&> fields_meta;
     for (auto i = 0; i < expr.field_offsets_.size(); i++) {
         auto& field_meta = schema[expr.field_offsets_[i]];
         Assert(expr.data_types_[i] == field_meta.get_data_type());
-        // fields_meta.emplace_back(field_meta);
     }
 
     RetType ret;
     switch (expr.op) {
         case OpType::Equal: {
-            auto cmp_func = [](auto a, auto b) { return a == b; };
-            ret = ExecCompareExprDispatcher(expr, cmp_func);
+            ret = ExecCompareExprDispatcher(expr, std::equal_to<>{});
             break;
         }
         case OpType::NotEqual: {
-            auto cmp_func = [](auto a, auto b) { return a != b; };
-            ret = ExecCompareExprDispatcher(expr, cmp_func);
+            ret = ExecCompareExprDispatcher(expr, std::not_equal_to<>{});
             break;
         }
         case OpType::GreaterEqual: {
-            auto cmp_func = [](auto a, auto b) { return a >= b; };
-            ret =  ExecCompareExprDispatcher(expr, cmp_func);
+            ret =  ExecCompareExprDispatcher(expr, std::greater_equal<>{});
             break;
         }
         case OpType::GreaterThan: {
-            auto cmp_func = [](auto a, auto b) { return a > b; };
-            ret =  ExecCompareExprDispatcher(expr, cmp_func);
+            ret =  ExecCompareExprDispatcher(expr, std::greater<>{});
             break;
         }
         case OpType::LessEqual: {
-            auto cmp_func = [](auto a, auto b) { return a <= b; };
-            ret =  ExecCompareExprDispatcher(expr, cmp_func);
+            ret =  ExecCompareExprDispatcher(expr, std::less_equal<>{});
             break;
         }
         case OpType::LessThan: {
-            auto cmp_func = [](auto a, auto b) { return a < b; };
-            ret = ExecCompareExprDispatcher(expr, cmp_func);
+            ret = ExecCompareExprDispatcher(expr, std::less<>{});
             break;
         }
         default: {
