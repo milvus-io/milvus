@@ -781,7 +781,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 		return err
 	}
 
-	var plan *Plan
+	var plan *SearchPlan
 	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
 		expr := searchMsg.SerializedExprPlan
 		plan, err = createPlanByExpr(collection, expr)

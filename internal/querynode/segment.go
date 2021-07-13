@@ -211,7 +211,7 @@ func (s *Segment) getMemSize() int64 {
 	return int64(memoryUsageInBytes)
 }
 
-func (s *Segment) search(plan *Plan,
+func (s *Segment) search(plan *SearchPlan,
 	searchRequests []*searchRequest,
 	timestamp []Timestamp) (*SearchResult, error) {
 	/*
@@ -236,7 +236,7 @@ func (s *Segment) search(plan *Plan,
 	cPlaceHolderGroup := cPlaceholderGroups[0]
 
 	log.Debug("do search on segment", zap.Int64("segmentID", s.segmentID), zap.Int32("segmentType", int32(s.segmentType)))
-	var status = C.Search(s.segmentPtr, plan.cPlan, cPlaceHolderGroup, ts, &searchResult.cQueryResult)
+	var status = C.Search(s.segmentPtr, plan.cSearchPlan, cPlaceHolderGroup, ts, &searchResult.cQueryResult)
 	errorCode := status.error_code
 
 	if errorCode != 0 {
@@ -258,14 +258,13 @@ func (s *Segment) segmentGetEntityByIds(plan *RetrievePlan) (*segcorepb.Retrieve
 	return result, nil
 }
 
-func (s *Segment) fillTargetEntry(plan *Plan,
-	result *SearchResult) error {
+func (s *Segment) fillTargetEntry(plan *SearchPlan, result *SearchResult) error {
 	if s.segmentPtr == nil {
 		return errors.New("null seg core pointer")
 	}
 
 	log.Debug("segment fill target entry, ", zap.Int64("segment ID = ", s.segmentID))
-	var status = C.FillTargetEntry(s.segmentPtr, plan.cPlan, result.cQueryResult)
+	var status = C.FillTargetEntry(s.segmentPtr, plan.cSearchPlan, result.cQueryResult)
 	errorCode := status.error_code
 
 	if errorCode != 0 {

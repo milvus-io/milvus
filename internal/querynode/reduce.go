@@ -59,7 +59,7 @@ func reduceSearchResults(searchResults []*SearchResult, numSegments int64, inRed
 	return nil
 }
 
-func fillTargetEntry(plan *Plan, searchResults []*SearchResult, matchedSegments []*Segment, inReduced []bool) error {
+func fillTargetEntry(plan *SearchPlan, searchResults []*SearchResult, matchedSegments []*Segment, inReduced []bool) error {
 	wg := &sync.WaitGroup{}
 	fmt.Println(inReduced)
 	for i := range inReduced {
@@ -78,7 +78,7 @@ func fillTargetEntry(plan *Plan, searchResults []*SearchResult, matchedSegments 
 	return nil
 }
 
-func reorganizeQueryResults(plan *Plan, searchRequests []*searchRequest, searchResults []*SearchResult, numSegments int64, inReduced []bool) (*MarshaledHits, error) {
+func reorganizeQueryResults(plan *SearchPlan, searchRequests []*searchRequest, searchResults []*SearchResult, numSegments int64, inReduced []bool) (*MarshaledHits, error) {
 	cPlaceholderGroups := make([]C.CPlaceholderGroup, 0)
 	for _, pg := range searchRequests {
 		cPlaceholderGroups = append(cPlaceholderGroups, (*pg).cPlaceholderGroup)
@@ -96,7 +96,7 @@ func reorganizeQueryResults(plan *Plan, searchRequests []*searchRequest, searchR
 	var cInReduced = (*C.bool)(&inReduced[0])
 	var cMarshaledHits C.CMarshaledHits
 
-	status := C.ReorganizeQueryResults(&cMarshaledHits, cPlaceHolderGroupPtr, cNumGroup, cSearchResultPtr, cInReduced, cNumSegments, plan.cPlan)
+	status := C.ReorganizeQueryResults(&cMarshaledHits, cPlaceHolderGroupPtr, cNumGroup, cSearchResultPtr, cInReduced, cNumSegments, plan.cSearchPlan)
 	errorCode := status.error_code
 
 	if errorCode != 0 {
@@ -107,7 +107,7 @@ func reorganizeQueryResults(plan *Plan, searchRequests []*searchRequest, searchR
 	return &MarshaledHits{cMarshaledHits: cMarshaledHits}, nil
 }
 
-func reorganizeSingleQueryResult(plan *Plan, placeholderGroups []*searchRequest, searchResult *SearchResult) (*MarshaledHits, error) {
+func reorganizeSingleQueryResult(plan *SearchPlan, placeholderGroups []*searchRequest, searchResult *SearchResult) (*MarshaledHits, error) {
 	cPlaceholderGroups := make([]C.CPlaceholderGroup, 0)
 	for _, pg := range placeholderGroups {
 		cPlaceholderGroups = append(cPlaceholderGroups, (*pg).cPlaceholderGroup)
@@ -118,7 +118,7 @@ func reorganizeSingleQueryResult(plan *Plan, placeholderGroups []*searchRequest,
 	cSearchResult := searchResult.cQueryResult
 	var cMarshaledHits C.CMarshaledHits
 
-	status := C.ReorganizeSingleQueryResult(&cMarshaledHits, cPlaceHolderGroupPtr, cNumGroup, cSearchResult, plan.cPlan)
+	status := C.ReorganizeSingleQueryResult(&cMarshaledHits, cPlaceHolderGroupPtr, cNumGroup, cSearchResult, plan.cSearchPlan)
 	errorCode := status.error_code
 
 	if errorCode != 0 {

@@ -63,7 +63,7 @@ func (h *historical) close() {
 func (h *historical) search(searchReqs []*searchRequest,
 	collID UniqueID,
 	partIDs []UniqueID,
-	plan *Plan,
+	plan *SearchPlan,
 	searchTs Timestamp) ([]*SearchResult, []*Segment, error) {
 
 	searchResults := make([]*SearchResult, 0)

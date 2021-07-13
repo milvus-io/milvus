@@ -65,7 +65,7 @@ func (s *streaming) search(searchReqs []*searchRequest,
 	collID UniqueID,
 	partIDs []UniqueID,
 	vChannel Channel,
-	plan *Plan,
+	plan *SearchPlan,
 	searchTs Timestamp) ([]*SearchResult, []*Segment, error) {
 
 	searchResults := make([]*SearchResult, 0)
