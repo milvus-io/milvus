@@ -92,7 +92,7 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
 
     // skip all calculation
     if (active_count == 0) {
-        ret_ = empty_query_result(num_queries, node.query_info_.topK_, node.query_info_.metric_type_);
+        ret_ = empty_query_result(num_queries, node.search_info_.topK_, node.search_info_.metric_type_);
         return;
     }
 
@@ -104,7 +104,7 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
         view = BitsetView(bitset_holder.data(), bitset_holder.size() * 8);
     }
 
-    segment->vector_search(active_count, node.query_info_, src_data, num_queries, MAX_TIMESTAMP, view, ret);
+    segment->vector_search(active_count, node.search_info_, src_data, num_queries, MAX_TIMESTAMP, view, ret);
 
     ret_ = ret;
 }

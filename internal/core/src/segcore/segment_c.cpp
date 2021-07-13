@@ -76,7 +76,7 @@ Search(CSegmentInterface c_segment,
         auto plan = (milvus::query::Plan*)c_plan;
         auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(c_placeholder_group);
         *search_result = segment->Search(plan, *phg_ptr, timestamp);
-        if (plan->plan_node_->query_info_.metric_type_ != milvus::MetricType::METRIC_INNER_PRODUCT) {
+        if (plan->plan_node_->search_info_.metric_type_ != milvus::MetricType::METRIC_INNER_PRODUCT) {
             for (auto& dis : search_result->result_distances_) {
                 dis *= -1;
             }

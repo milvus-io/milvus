@@ -287,17 +287,17 @@ SegmentGrowingImpl::num_chunk() const {
 }
 void
 SegmentGrowingImpl::vector_search(int64_t vec_count,
-                                  query::QueryInfo query_info,
+                                  query::SearchInfo search_info,
                                   const void* query_data,
                                   int64_t query_count,
                                   Timestamp timestamp,
                                   const BitsetView& bitset,
                                   SearchResult& output) const {
     auto& sealed_indexing = this->get_sealed_indexing_record();
-    if (sealed_indexing.is_ready(query_info.field_offset_)) {
-        query::SearchOnSealed(this->get_schema(), sealed_indexing, query_info, query_data, query_count, bitset, output);
+    if (sealed_indexing.is_ready(search_info.field_offset_)) {
+        query::SearchOnSealed(this->get_schema(), sealed_indexing, search_info, query_data, query_count, bitset, output);
     } else {
-        SearchOnGrowing(*this, vec_count, query_info, query_data, query_count, bitset, output);
+        SearchOnGrowing(*this, vec_count, search_info, query_data, query_count, bitset, output);
     }
 }
 void

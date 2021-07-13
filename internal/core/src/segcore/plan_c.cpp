@@ -111,8 +111,8 @@ GetTopK(CSearchPlan plan) {
 
 const char*
 GetMetricType(CSearchPlan plan) {
-    auto query_plan = static_cast<milvus::query::Plan*>(plan);
-    auto metric_str = milvus::MetricTypeToName(query_plan->plan_node_->query_info_.metric_type_);
+    auto search_plan = static_cast<milvus::query::Plan*>(plan);
+    auto metric_str = milvus::MetricTypeToName(search_plan->plan_node_->search_info_.metric_type_);
     return strdup(metric_str.c_str());
 }
 

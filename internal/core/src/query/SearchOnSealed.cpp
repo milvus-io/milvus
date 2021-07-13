@@ -70,27 +70,27 @@ ReleaseQueryResult(const knowhere::DatasetPtr& result) {
 void
 SearchOnSealed(const Schema& schema,
                const segcore::SealedIndexingRecord& record,
-               const QueryInfo& query_info,
+               const SearchInfo& search_info,
                const void* query_data,
                int64_t num_queries,
                const faiss::BitsetView& bitset,
                SearchResult& result) {
-    auto topK = query_info.topK_;
+    auto topK = search_info.topK_;
 
-    auto field_offset = query_info.field_offset_;
+    auto field_offset = search_info.field_offset_;
     auto& field = schema[field_offset];
     // Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
     auto dim = field.get_dim();
 
     Assert(record.is_ready(field_offset));
     auto field_indexing = record.get_field_indexing(field_offset);
-    Assert(field_indexing->metric_type_ == query_info.metric_type_);
+    Assert(field_indexing->metric_type_ == search_info.metric_type_);
 
     auto final = [&] {
         auto ds = knowhere::GenDataset(num_queries, dim, query_data);
 
-        auto conf = query_info.search_params_;
-        conf[milvus::knowhere::meta::TOPK] = query_info.topK_;
+        auto conf = search_info.search_params_;
+        conf[milvus::knowhere::meta::TOPK] = search_info.topK_;
         conf[milvus::knowhere::Metric::TYPE] = MetricTypeToName(field_indexing->metric_type_);
         return field_indexing->indexing_->Query(ds, conf, bitset);
     }();

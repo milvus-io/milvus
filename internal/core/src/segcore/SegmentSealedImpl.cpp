@@ -213,20 +213,20 @@ SegmentSealedImpl::get_schema() const {
 
 void
 SegmentSealedImpl::vector_search(int64_t vec_count,
-                                 query::QueryInfo query_info,
+                                 query::SearchInfo search_info,
                                  const void* query_data,
                                  int64_t query_count,
                                  Timestamp timestamp,
                                  const BitsetView& bitset,
                                  SearchResult& output) const {
     Assert(is_system_field_ready());
-    auto field_offset = query_info.field_offset_;
+    auto field_offset = search_info.field_offset_;
     auto& field_meta = schema_->operator[](field_offset);
 
     Assert(field_meta.is_vector());
     if (get_bit(vecindex_ready_bitset_, field_offset)) {
         Assert(vecindexs_.is_ready(field_offset));
-        query::SearchOnSealed(*schema_, vecindexs_, query_info, query_data, query_count, bitset, output);
+        query::SearchOnSealed(*schema_, vecindexs_, search_info, query_data, query_count, bitset, output);
         return;
     } else if (!get_bit(field_data_ready_bitset_, field_offset)) {
         PanicInfo("Field Data is not loaded");
@@ -236,8 +236,8 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
     dataset.query_data = query_data;
     dataset.num_queries = query_count;
     // if(field_meta.is)
-    dataset.metric_type = query_info.metric_type_;
-    dataset.topk = query_info.topK_;
+    dataset.metric_type = search_info.metric_type_;
+    dataset.topk = search_info.topK_;
     dataset.dim = field_meta.get_dim();
 
     Assert(get_bit(field_data_ready_bitset_, field_offset));

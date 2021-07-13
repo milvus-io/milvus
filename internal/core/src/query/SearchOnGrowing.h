@@ -23,7 +23,7 @@ using BitsetSimple = std::deque<BitsetChunk>;
 void
 SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 int64_t ins_barrier,
-                const query::QueryInfo& info,
+                const query::SearchInfo& info,
                 const void* query_data,
                 int64_t num_queries,
                 const faiss::BitsetView& bitset,

@@ -22,7 +22,7 @@
 namespace milvus::query {
 Status
 FloatSearch(const segcore::SegmentGrowingImpl& segment,
-            const query::QueryInfo& info,
+            const query::SearchInfo& info,
             const float* query_data,
             int64_t num_queries,
             int64_t ins_barrier,
@@ -119,7 +119,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
 
 Status
 BinarySearch(const segcore::SegmentGrowingImpl& segment,
-             const query::QueryInfo& info,
+             const query::SearchInfo& info,
              const uint8_t* query_data,
              int64_t num_queries,
              int64_t ins_barrier,
@@ -190,7 +190,7 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
 void
 SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 int64_t ins_barrier,
-                const query::QueryInfo& info,
+                const query::SearchInfo& info,
                 const void* query_data,
                 int64_t num_queries,
                 const faiss::BitsetView& bitset,

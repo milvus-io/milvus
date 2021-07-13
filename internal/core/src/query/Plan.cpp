@@ -234,10 +234,10 @@ Parser::ParseVecNode(const Json& out_body) {
             return std::make_unique<BinaryVectorANNS>();
         }
     }();
-    vec_node->query_info_.topK_ = topK;
-    vec_node->query_info_.metric_type_ = GetMetricType(vec_info.at("metric_type"));
-    vec_node->query_info_.search_params_ = vec_info.at("params");
-    vec_node->query_info_.field_offset_ = field_offset;
+    vec_node->search_info_.topK_ = topK;
+    vec_node->search_info_.metric_type_ = GetMetricType(vec_info.at("metric_type"));
+    vec_node->search_info_.search_params_ = vec_info.at("params");
+    vec_node->search_info_.field_offset_ = field_offset;
     vec_node->placeholder_tag_ = vec_info.at("query");
     auto tag = vec_node->placeholder_tag_;
     AssertInfo(!tag2field_.count(tag), "duplicated placeholder tag");
@@ -492,7 +492,7 @@ Parser::ParseMustNotNode(const Json& body) {
 
 int64_t
 GetTopK(const Plan* plan) {
-    return plan->plan_node_->query_info_.topK_;
+    return plan->plan_node_->search_info_.topK_;
 }
 
 int64_t
