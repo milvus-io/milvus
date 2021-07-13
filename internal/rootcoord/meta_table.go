@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	ComponentPrefix        = "master-service"
+	ComponentPrefix        = "root-coord"
 	TenantMetaPrefix       = ComponentPrefix + "/tenant"
 	ProxyMetaPrefix        = ComponentPrefix + "/proxy"
 	CollectionMetaPrefix   = ComponentPrefix + "/collection"
