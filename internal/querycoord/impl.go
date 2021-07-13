@@ -111,7 +111,7 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 	loadCollectionTask := &LoadCollectionTask{
 		BaseTask: BaseTask{
 			ctx:              qc.loopCtx,
-			Condition:        NewTaskCondition(ctx),
+			Condition:        NewTaskCondition(qc.loopCtx),
 			triggerCondition: querypb.TriggerCondition_grpcRequest,
 		},
 		LoadCollectionRequest: req,
