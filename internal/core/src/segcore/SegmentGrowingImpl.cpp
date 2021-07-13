@@ -285,6 +285,7 @@ SegmentGrowingImpl::num_chunk() const {
     auto size = get_insert_record().ack_responder_.GetAck();
     return upper_div(size, segcore_config_.get_size_per_chunk());
 }
+
 void
 SegmentGrowingImpl::vector_search(int64_t vec_count,
                                   query::SearchInfo search_info,
@@ -295,11 +296,13 @@ SegmentGrowingImpl::vector_search(int64_t vec_count,
                                   SearchResult& output) const {
     auto& sealed_indexing = this->get_sealed_indexing_record();
     if (sealed_indexing.is_ready(search_info.field_offset_)) {
-        query::SearchOnSealed(this->get_schema(), sealed_indexing, search_info, query_data, query_count, bitset, output);
+        query::SearchOnSealed(this->get_schema(), sealed_indexing, search_info, query_data, query_count, bitset,
+                              output);
     } else {
         SearchOnGrowing(*this, vec_count, search_info, query_data, query_count, bitset, output);
     }
 }
+
 void
 SegmentGrowingImpl::bulk_subscript(FieldOffset field_offset,
                                    const int64_t* seg_offsets,

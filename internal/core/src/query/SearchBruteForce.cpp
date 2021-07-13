@@ -115,7 +115,7 @@ BinarySearchBruteForce(const dataset::SearchDataset& dataset,
     // TODO: refactor the internal function
     auto query_data = reinterpret_cast<const uint8_t*>(dataset.query_data);
     auto chunk_data = reinterpret_cast<const uint8_t*>(chunk_data_raw);
-    return BinarySearchBruteForceFast(dataset.metric_type, dataset.dim, chunk_data, size_per_chunk,
-                                      dataset.topk, dataset.num_queries, query_data, bitset);
+    return BinarySearchBruteForceFast(dataset.metric_type, dataset.dim, chunk_data, size_per_chunk, dataset.topk,
+                                      dataset.num_queries, query_data, bitset);
 }
 }  // namespace milvus::query
