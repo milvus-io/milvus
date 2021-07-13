@@ -51,7 +51,7 @@ Milvus 基于 [Apache 2.0 License](https://github.com/milvus-io/milvus/blob/mast
 
 <details>
   <summary><b>简化的非结构化数据管理</b></summary>
-  <li>一整套专为数据科学工作流设计的 API。</li><li>消除笔记本、本地集群、云服务器之间的使用差异，提供始终如一的跨平台用户体验。</li><li>可以在任何场景下实现实时搜索与分析。</li>
+  <li>一整套专为数据科学工作流设计的 API。</li><li>无论是笔记本、本地集群还是云服务器，始终如一的跨平台用户体验。</li><li>可以在任何场景下实现实时搜索与分析。</li>
   </details>
 
 
@@ -68,7 +68,7 @@ Milvus 基于 [Apache 2.0 License](https://github.com/milvus-io/milvus/blob/mast
 
 <details>
   <summary><b>混合查询</b></summary>
-  除了向量以外，Milvus还支持布尔值、整型、浮点型等数据类型。在 Milvus 中，一个 collection 可以包含多个字段来代表数据特征或属性。Milvus 还支持在向量相似度检索过程中进行标量字段过滤，为非结构化数据分析提供了灵活多用的现代化平台。
+  除了向量以外，Milvus还支持布尔值、整型、浮点等数据类型。在 Milvus 中，一个 collection 可以包含多个字段来代表数据特征或属性。Milvus 还支持在向量相似度检索过程中进行标量字段过滤。
   </details>
 
 
@@ -178,7 +178,7 @@ Milvus 训练营能够帮助你了解向量数据库的操作及各种应用场�
 ### All contributors
 
 <br><!-- Do not remove start of hero-bot --><br>
-<img src="https://img.shields.io/badge/all--contributors-151-orange"><br>
+<img src="https://img.shields.io/badge/all--contributors-152-orange"><br>
 <a href="https://github.com/ABNER-1"><img src="https://avatars.githubusercontent.com/u/24547351?v=4" width="30px" /></a>
 <a href="https://github.com/Accagain2014"><img src="https://avatars.githubusercontent.com/u/9635216?v=4" width="30px" /></a>
 <a href="https://github.com/AllenYu1987"><img src="https://avatars.githubusercontent.com/u/12489985?v=4" width="30px" /></a>
@@ -314,6 +314,7 @@ Milvus 训练营能够帮助你了解向量数据库的操作及各种应用场�
 <a href="https://github.com/water32"><img src="https://avatars.githubusercontent.com/u/13234561?v=4" width="30px" /></a>
 <a href="https://github.com/weishuo2"><img src="https://avatars.githubusercontent.com/u/27938020?v=4" width="30px" /></a>
 <a href="https://github.com/wscxyey"><img src="https://avatars.githubusercontent.com/u/48882296?v=4" width="30px" /></a>
+<a href="https://github.com/xaxys"><img src="https://avatars.githubusercontent.com/u/28949072?v=4" width="30px" /></a>
 <a href="https://github.com/xiaocai2333"><img src="https://avatars.githubusercontent.com/u/46207236?v=4" width="30px" /></a>
 <a href="https://github.com/xiaofan-luan"><img src="https://avatars.githubusercontent.com/u/83447078?v=4" width="30px" /></a>
 <a href="https://github.com/xige-16"><img src="https://avatars.githubusercontent.com/u/20124155?v=4" width="30px" /></a>

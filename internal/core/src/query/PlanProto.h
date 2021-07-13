@@ -30,6 +30,9 @@ class ProtoParser {
     ParseRangeExpr(const proto::plan::RangeExpr& expr_pb);
 
     ExprPtr
+    ParseCompareExpr(const proto::plan::CompareExpr& expr_pb);
+
+    ExprPtr
     ParseTermExpr(const proto::plan::TermExpr& expr_pb);
 
     ExprPtr

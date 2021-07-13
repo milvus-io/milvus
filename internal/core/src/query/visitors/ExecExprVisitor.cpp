@@ -11,6 +11,7 @@
 
 #include <optional>
 #include <boost/dynamic_bitset.hpp>
+#include <boost/variant.hpp>
 #include <utility>
 #include <deque>
 #include "segcore/SegmentGrowingImpl.h"
@@ -25,8 +26,8 @@ namespace impl {
 class ExecExprVisitor : ExprVisitor {
  public:
     using RetType = std::deque<boost::dynamic_bitset<>>;
-    ExecExprVisitor(const segcore::SegmentInternalInterface& segment, int64_t row_count)
-        : segment_(segment), row_count_(row_count) {
+    ExecExprVisitor(const segcore::SegmentInternalInterface& segment, int64_t row_count, Timestamp timestamp)
+        : segment_(segment), row_count_(row_count), timestamp_(timestamp) {
     }
     RetType
     call_child(Expr& expr) {
@@ -51,10 +52,15 @@ class ExecExprVisitor : ExprVisitor {
     auto
     ExecTermVisitorImpl(TermExpr& expr_raw) -> RetType;
 
+    template <typename CmpFunc>
+    auto
+    ExecCompareExprDispatcher(CompareExpr& expr, CmpFunc cmp_func) -> RetType;
+
  private:
     const segcore::SegmentInternalInterface& segment_;
     int64_t row_count_;
     std::optional<RetType> ret_;
+    Timestamp timestamp_;
 };
 }  // namespace impl
 #endif
@@ -159,7 +165,6 @@ ExecExprVisitor::ExecRangeVisitorDispatcher(RangeExpr& expr_raw) -> RetType {
     auto& expr = static_cast<RangeExprImpl<T>&>(expr_raw);
     auto conditions = expr.conditions_;
     std::sort(conditions.begin(), conditions.end());
-    using OpType = RangeExpr::OpType;
     using Index = knowhere::scalar::StructuredIndex<T>;
     using Operator = knowhere::scalar::OperatorType;
     if (conditions.size() == 1) {
@@ -273,6 +278,122 @@ ExecExprVisitor::visit(RangeExpr& expr) {
         }
         default:
             PanicInfo("unsupported");
+    }
+    ret_ = std::move(ret);
+}
+
+template <typename Op>
+struct relational {
+    template <typename T, typename U>
+    bool
+    operator()(T const& a, U const& b) const {
+        return Op{}(a, b);
+    }
+    template <typename... T>
+    bool
+    operator()(T const&...) const {
+        PanicInfo("incompatible operands");
+    }
+};
+
+using number = boost::variant<bool, int8_t, int16_t, int32_t, int64_t, float, double>;
+
+template <typename Op>
+auto
+ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op) -> RetType {
+    auto size_per_chunk = segment_.size_per_chunk();
+    auto num_chunk = upper_div(row_count_, size_per_chunk);
+    RetType bitsets;
+    for (int64_t chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
+        auto size = chunk_id == num_chunk - 1 ? row_count_ - chunk_id * size_per_chunk : size_per_chunk;
+
+        auto getChunkData = [&, chunk_id](DataType type, FieldOffset offset) -> std::function<const number(int)> {
+            switch (type) {
+                case DataType::BOOL: {
+                    auto chunk = segment_.chunk_data<bool>(offset, chunk_id);
+                    return [chunk](int i) -> const number { return chunk.data()[i]; };
+                }
+                case DataType::INT8: {
+                    auto chunk = segment_.chunk_data<int8_t>(offset, chunk_id);
+                    return [chunk](int i) -> const number { return chunk.data()[i]; };
+                }
+                case DataType::INT16: {
+                    auto chunk = segment_.chunk_data<int16_t>(offset, chunk_id);
+                    return [chunk](int i) -> const number { return chunk.data()[i]; };
+                }
+                case DataType::INT32: {
+                    auto chunk = segment_.chunk_data<int32_t>(offset, chunk_id);
+                    return [chunk](int i) -> const number { return chunk.data()[i]; };
+                }
+                case DataType::INT64: {
+                    auto chunk = segment_.chunk_data<int64_t>(offset, chunk_id);
+                    return [chunk](int i) -> const number { return chunk.data()[i]; };
+                }
+                case DataType::FLOAT: {
+                    auto chunk = segment_.chunk_data<float>(offset, chunk_id);
+                    return [chunk](int i) -> const number { return chunk.data()[i]; };
+                }
+                case DataType::DOUBLE: {
+                    auto chunk = segment_.chunk_data<double>(offset, chunk_id);
+                    return [chunk](int i) -> const number { return chunk.data()[i]; };
+                }
+                default:
+                    PanicInfo("unsupported datatype");
+            }
+        };
+        auto left = getChunkData(expr.data_types_[0], expr.field_offsets_[0]);
+        auto right = getChunkData(expr.data_types_[1], expr.field_offsets_[1]);
+
+        boost::dynamic_bitset<> bitset(size_per_chunk);
+        for (int i = 0; i < size; ++i) {
+            bool is_in = boost::apply_visitor(relational<decltype(op)>{}, left(i), right(i));
+            bitset[i] = is_in;
+        }
+        bitsets.emplace_back(std::move(bitset));
+    }
+    return bitsets;
+}
+
+void
+ExecExprVisitor::visit(CompareExpr& expr) {
+    Assert(expr.data_types_.size() == expr.field_offsets_.size());
+    Assert(expr.data_types_.size() == 2);
+    auto& schema = segment_.get_schema();
+
+    for (auto i = 0; i < expr.field_offsets_.size(); i++) {
+        auto& field_meta = schema[expr.field_offsets_[i]];
+        Assert(expr.data_types_[i] == field_meta.get_data_type());
+    }
+
+    RetType ret;
+    switch (expr.op) {
+        case OpType::Equal: {
+            ret = ExecCompareExprDispatcher(expr, std::equal_to<>{});
+            break;
+        }
+        case OpType::NotEqual: {
+            ret = ExecCompareExprDispatcher(expr, std::not_equal_to<>{});
+            break;
+        }
+        case OpType::GreaterEqual: {
+            ret = ExecCompareExprDispatcher(expr, std::greater_equal<>{});
+            break;
+        }
+        case OpType::GreaterThan: {
+            ret = ExecCompareExprDispatcher(expr, std::greater<>{});
+            break;
+        }
+        case OpType::LessEqual: {
+            ret = ExecCompareExprDispatcher(expr, std::less_equal<>{});
+            break;
+        }
+        case OpType::LessThan: {
+            ret = ExecCompareExprDispatcher(expr, std::less<>{});
+            break;
+        }
+        default: {
+            PanicInfo("unsupported optype");
+        }
     }
     ret_ = std::move(ret);
 }

@@ -19,7 +19,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -50,49 +49,49 @@ type indexLoader struct {
 	kv kv.BaseKV // minio kv
 }
 
-func (loader *indexLoader) doLoadIndex(wg *sync.WaitGroup) {
-	collectionIDs, _, segmentIDs := loader.replica.getSegmentsBySegmentType(segmentTypeSealed)
-	if len(collectionIDs) <= 0 {
-		wg.Done()
-		return
-	}
-	log.Debug("do load index for sealed segments:", zap.String("segmentIDs", fmt.Sprintln(segmentIDs)))
-	for i := range collectionIDs {
-		// we don't need index id yet
-		segment, err := loader.replica.getSegmentByID(segmentIDs[i])
-		if err != nil {
-			log.Warn(err.Error())
-			continue
-		}
-		vecFieldIDs, err := loader.replica.getVecFieldIDsByCollectionID(collectionIDs[i])
-		if err != nil {
-			log.Warn(err.Error())
-			continue
-		}
-		for _, fieldID := range vecFieldIDs {
-			err = loader.setIndexInfo(collectionIDs[i], segment, fieldID)
-			if err != nil {
-				log.Warn(err.Error())
-				continue
-			}
-
-			err = loader.loadIndex(segment, fieldID)
-			if err != nil {
-				log.Warn(err.Error())
-				continue
-			}
-		}
-	}
-	// sendQueryNodeStats
-	err := loader.sendQueryNodeStats()
-	if err != nil {
-		log.Error(err.Error())
-		wg.Done()
-		return
-	}
-
-	wg.Done()
-}
+//func (loader *indexLoader) doLoadIndex(wg *sync.WaitGroup) {
+//	collectionIDs, _, segmentIDs := loader.replica.getSegmentsBySegmentType(segmentTypeSealed)
+//	if len(collectionIDs) <= 0 {
+//		wg.Done()
+//		return
+//	}
+//	log.Debug("do load index for sealed segments:", zap.String("segmentIDs", fmt.Sprintln(segmentIDs)))
+//	for i := range collectionIDs {
+//		// we don't need index id yet
+//		segment, err := loader.replica.getSegmentByID(segmentIDs[i])
+//		if err != nil {
+//			log.Warn(err.Error())
+//			continue
+//		}
+//		vecFieldIDs, err := loader.replica.getVecFieldIDsByCollectionID(collectionIDs[i])
+//		if err != nil {
+//			log.Warn(err.Error())
+//			continue
+//		}
+//		for _, fieldID := range vecFieldIDs {
+//			err = loader.setIndexInfo(collectionIDs[i], segment, fieldID)
+//			if err != nil {
+//				log.Warn(err.Error())
+//				continue
+//			}
+//
+//			err = loader.loadIndex(segment, fieldID)
+//			if err != nil {
+//				log.Warn(err.Error())
+//				continue
+//			}
+//		}
+//	}
+//	// sendQueryNodeStats
+//	err := loader.sendQueryNodeStats()
+//	if err != nil {
+//		log.Error(err.Error())
+//		wg.Done()
+//		return
+//	}
+//
+//	wg.Done()
+//}
 
 func (loader *indexLoader) loadIndex(segment *Segment, fieldID int64) error {
 	// 1. use msg's index paths to get index bytes
@@ -336,26 +335,26 @@ func (loader *indexLoader) setIndexInfo(collectionID UniqueID, segment *Segment,
 	return nil
 }
 
-func (loader *indexLoader) getIndexPaths(indexBuildID UniqueID) ([]string, error) {
-	ctx := context.TODO()
-	if loader.indexCoord == nil {
-		return nil, errors.New("null index coordinator client")
-	}
-
-	indexFilePathRequest := &indexpb.GetIndexFilePathsRequest{
-		IndexBuildIDs: []UniqueID{indexBuildID},
-	}
-	pathResponse, err := loader.indexCoord.GetIndexFilePaths(ctx, indexFilePathRequest)
-	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return nil, err
-	}
-
-	if len(pathResponse.FilePaths) <= 0 {
-		return nil, errors.New("illegal index file paths")
-	}
-
-	return pathResponse.FilePaths[0].IndexFilePaths, nil
-}
+//func (loader *indexLoader) getIndexPaths(indexBuildID UniqueID) ([]string, error) {
+//	ctx := context.TODO()
+//	if loader.indexCoord == nil {
+//		return nil, errors.New("null index coordinator client")
+//	}
+//
+//	indexFilePathRequest := &indexpb.GetIndexFilePathsRequest{
+//		IndexBuildIDs: []UniqueID{indexBuildID},
+//	}
+//	pathResponse, err := loader.indexCoord.GetIndexFilePaths(ctx, indexFilePathRequest)
+//	if err != nil || pathResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
+//		return nil, err
+//	}
+//
+//	if len(pathResponse.FilePaths) <= 0 {
+//		return nil, errors.New("illegal index file paths")
+//	}
+//
+//	return pathResponse.FilePaths[0].IndexFilePaths, nil
+//}
 
 func newIndexLoader(ctx context.Context, rootCoord types.RootCoord, indexCoord types.IndexCoord, replica ReplicaInterface) *indexLoader {
 	option := &minioKV.Option{

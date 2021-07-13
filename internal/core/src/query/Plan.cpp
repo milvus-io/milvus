@@ -28,13 +28,6 @@
 
 namespace milvus::query {
 
-/// initialize RangeExpr::mapping_
-const std::map<std::string, RangeExpr::OpType> RangeExpr::mapping_ = {
-    {"lt", OpType::LessThan},    {"le", OpType::LessEqual},    {"lte", OpType::LessEqual},
-    {"gt", OpType::GreaterThan}, {"ge", OpType::GreaterEqual}, {"gte", OpType::GreaterEqual},
-    {"eq", OpType::Equal},       {"ne", OpType::NotEqual},
-};
-
 // static inline std::string
 // to_lower(const std::string& raw) {
 //    auto data = raw;
@@ -84,6 +77,10 @@ class Parser {
     ExprPtr
     ParseTermNode(const Json& out_body);
 
+    // parse the value of "term" entry
+    ExprPtr
+    ParseCompareNode(const Json& out_body);
+
  private:
     // template implementation of leaf parser
     // used by corresponding parser
@@ -101,6 +98,28 @@ class Parser {
     std::map<std::string, FieldOffset> tag2field_;  // PlaceholderName -> field offset
     std::optional<std::unique_ptr<VectorPlanNode>> vector_node_opt_;
 };
+
+ExprPtr
+Parser::ParseCompareNode(const Json& out_body) {
+    Assert(out_body.is_object());
+    Assert(out_body.size() == 1);
+    auto out_iter = out_body.begin();
+    auto op_name = boost::algorithm::to_lower_copy(std::string(out_iter.key()));
+    AssertInfo(mapping_.count(op_name), "op(" + op_name + ") not found");
+    auto body = out_iter.value();
+    Assert(body.is_array());
+    auto expr = std::make_unique<CompareExpr>();
+    expr->op = mapping_.at(op_name);
+    for (auto& item : body) {
+        Assert(item.is_string());
+        auto field_name = FieldName(item.get<std::string>());
+        auto& field_meta = schema[field_name];
+        auto data_type = field_meta.get_data_type();
+        expr->data_types_.emplace_back(data_type);
+        expr->field_offsets_.emplace_back(schema.get_offset(field_name));
+    }
+    return expr;
+}
 
 ExprPtr
 Parser::ParseRangeNode(const Json& out_body) {
@@ -267,8 +286,8 @@ Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
     for (auto& item : body.items()) {
         auto op_name = boost::algorithm::to_lower_copy(std::string(item.key()));
 
-        AssertInfo(RangeExpr::mapping_.count(op_name), "op(" + op_name + ") not found");
-        auto op = RangeExpr::mapping_.at(op_name);
+        AssertInfo(mapping_.count(op_name), "op(" + op_name + ") not found");
+        auto op = mapping_.at(op_name);
         if constexpr (std::is_same_v<T, bool>) {
             Assert(item.value().is_boolean());
         } else if constexpr (std::is_integral_v<T>) {
@@ -375,6 +394,8 @@ Parser::ParseAnyNode(const Json& out_body) {
         return ParseRangeNode(body);
     } else if (key == "term") {
         return ParseTermNode(body);
+    } else if (key == "compare") {
+        return ParseCompareNode(body);
     } else if (key == "vector") {
         auto vec_node = ParseVecNode(body);
         Assert(!vector_node_opt_.has_value());

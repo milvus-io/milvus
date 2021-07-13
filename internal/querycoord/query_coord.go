@@ -70,6 +70,7 @@ type QueryCoord struct {
 
 // Register register query service at etcd
 func (qc *QueryCoord) Register() error {
+	log.Debug("query coord session info", zap.String("metaPath", Params.MetaRootPath), zap.Strings("etcdEndPoints", Params.EtcdEndpoints), zap.String("address", Params.Address))
 	qc.session = sessionutil.NewSession(qc.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
 	qc.session.Init(typeutil.QueryCoordRole, Params.Address, true)
 	Params.NodeID = uint64(qc.session.ServerID)
@@ -184,19 +185,16 @@ func (qc *QueryCoord) watchNodeLoop() {
 	for nodeID, session := range sessionMap {
 		if _, ok := qc.cluster.nodes[nodeID]; !ok {
 			serverID := session.ServerID
-			go func() {
-				err := qc.cluster.RegisterNode(ctx, session, serverID)
-				if err != nil {
-					log.Error("register queryNode error", zap.Any("error", err.Error()))
-				}
-				log.Debug("query coordinator", zap.Any("Add QueryNode, session serverID", serverID))
-			}()
+			log.Debug("start add a queryNode to cluster", zap.Any("nodeID", serverID))
+			err := qc.cluster.RegisterNode(ctx, session, serverID)
+			if err != nil {
+				log.Error("query node failed to register", zap.Int64("nodeID", serverID), zap.String("error info", err.Error()))
+			}
 		}
 	}
 	for nodeID := range qc.cluster.nodes {
 		if _, ok := sessionMap[nodeID]; !ok {
-			qc.cluster.nodes[nodeID].setNodeState(false)
-			qc.cluster.nodes[nodeID].client.Stop()
+			qc.cluster.stopNode(nodeID)
 			loadBalanceSegment := &querypb.LoadBalanceRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_LoadBalanceSegments,
@@ -230,50 +228,43 @@ func (qc *QueryCoord) watchNodeLoop() {
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:
 				serverID := event.Session.ServerID
-				go func() {
-					err := qc.cluster.RegisterNode(ctx, event.Session, serverID)
-					if err != nil {
-						log.Error(err.Error())
-					}
-					log.Debug("query coordinator", zap.Any("Add QueryNode, session serverID", serverID))
-				}()
+				log.Debug("start add a queryNode to cluster", zap.Any("nodeID", serverID))
+				err := qc.cluster.RegisterNode(ctx, event.Session, serverID)
+				if err != nil {
+					log.Error("query node failed to register", zap.Int64("nodeID", serverID), zap.String("error info", err.Error()))
+				}
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
-				if _, ok := qc.cluster.nodes[serverID]; ok {
-					log.Debug("query coordinator", zap.Any("The QueryNode crashed with ID", serverID))
-					qc.cluster.nodes[serverID].setNodeState(false)
-					qc.cluster.nodes[serverID].client.Stop()
-					loadBalanceSegment := &querypb.LoadBalanceRequest{
-						Base: &commonpb.MsgBase{
-							MsgType:  commonpb.MsgType_LoadBalanceSegments,
-							SourceID: qc.session.ServerID,
-						},
-						SourceNodeIDs: []int64{serverID},
-						BalanceReason: querypb.TriggerCondition_nodeDown,
-					}
-
-					loadBalanceTask := &LoadBalanceTask{
-						BaseTask: BaseTask{
-							ctx:              qc.loopCtx,
-							Condition:        NewTaskCondition(qc.loopCtx),
-							triggerCondition: querypb.TriggerCondition_nodeDown,
-						},
-						LoadBalanceRequest: loadBalanceSegment,
-						rootCoord:          qc.rootCoordClient,
-						dataCoord:          qc.dataCoordClient,
-						cluster:            qc.cluster,
-						meta:               qc.meta,
-					}
-					qc.scheduler.Enqueue([]task{loadBalanceTask})
-					go func() {
-						err := loadBalanceTask.WaitToFinish()
-						if err != nil {
-							log.Error(err.Error())
-						}
-						log.Debug("load balance done after queryNode down", zap.Int64s("nodeIDs", loadBalanceTask.SourceNodeIDs))
-						//TODO::remove nodeInfo and clear etcd
-					}()
+				log.Debug("get a del event after queryNode down", zap.Int64("nodeID", serverID))
+				_, err := qc.cluster.getNodeByID(serverID)
+				if err != nil {
+					log.Error("queryNode not exist", zap.Int64("nodeID", serverID))
+					continue
 				}
+
+				qc.cluster.stopNode(serverID)
+				loadBalanceSegment := &querypb.LoadBalanceRequest{
+					Base: &commonpb.MsgBase{
+						MsgType:  commonpb.MsgType_LoadBalanceSegments,
+						SourceID: qc.session.ServerID,
+					},
+					SourceNodeIDs: []int64{serverID},
+					BalanceReason: querypb.TriggerCondition_nodeDown,
+				}
+
+				loadBalanceTask := &LoadBalanceTask{
+					BaseTask: BaseTask{
+						ctx:              qc.loopCtx,
+						Condition:        NewTaskCondition(qc.loopCtx),
+						triggerCondition: querypb.TriggerCondition_nodeDown,
+					},
+					LoadBalanceRequest: loadBalanceSegment,
+					rootCoord:          qc.rootCoordClient,
+					dataCoord:          qc.dataCoordClient,
+					cluster:            qc.cluster,
+					meta:               qc.meta,
+				}
+				qc.scheduler.Enqueue([]task{loadBalanceTask})
 			}
 		}
 	}
