@@ -436,7 +436,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 	searchResults := make([]*SearchResult, 0)
 	matchedSegments := make([]*Segment, 0)
 
-	searchResult, err := segment.segmentSearch(plan, placeholderGroups, []Timestamp{travelTimestamp})
+	searchResult, err := segment.search(plan, placeholderGroups, []Timestamp{travelTimestamp})
 	assert.Nil(t, err)
 
 	searchResults = append(searchResults, searchResult)

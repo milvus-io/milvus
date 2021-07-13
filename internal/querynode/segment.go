@@ -211,7 +211,7 @@ func (s *Segment) getMemSize() int64 {
 	return int64(memoryUsageInBytes)
 }
 
-func (s *Segment) segmentSearch(plan *Plan,
+func (s *Segment) search(plan *Plan,
 	searchRequests []*searchRequest,
 	timestamp []Timestamp) (*SearchResult, error) {
 	/*
