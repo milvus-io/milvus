@@ -57,7 +57,7 @@ struct EntityResult {};
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 struct SearchResult {
     SearchResult() = default;
-    SearchResult(int64_t num_queries, int64_t topK) : topK_(topK), num_queries_(num_queries) {
+    SearchResult(int64_t num_queries, int64_t topk) : topk_(topk), num_queries_(num_queries) {
         auto count = get_row_count();
         result_distances_.resize(count);
         internal_seg_offsets_.resize(count);
@@ -65,12 +65,12 @@ struct SearchResult {
 
     int64_t
     get_row_count() const {
-        return topK_ * num_queries_;
+        return topk_ * num_queries_;
     }
 
  public:
     int64_t num_queries_;
-    int64_t topK_;
+    int64_t topk_;
     std::vector<float> result_distances_;
 
  public:

@@ -91,7 +91,7 @@ GetResultData(std::vector<std::vector<int64_t>>& search_records,
         result_pairs.push_back(SearchResultPair(distance, search_result, query_offset, j));
     }
     int64_t loc_offset = query_offset;
-    AssertInfo(topk > 0, "topK must greater than 0");
+    AssertInfo(topk > 0, "topk must greater than 0");
     for (int i = 0; i < topk; ++i) {
         result_pairs[0].reset_distance();
         std::sort(result_pairs.begin(), result_pairs.end(), std::greater<>());
@@ -139,7 +139,7 @@ ReduceSearchResults(CSearchResult* c_search_results, int64_t num_segments, bool*
         for (int i = 0; i < num_segments; ++i) {
             search_results.push_back((SearchResult*)c_search_results[i]);
         }
-        auto topk = search_results[0]->topK_;
+        auto topk = search_results[0]->topk_;
         auto num_queries = search_results[0]->num_queries_;
         std::vector<std::vector<int64_t>> search_records(num_segments);
 

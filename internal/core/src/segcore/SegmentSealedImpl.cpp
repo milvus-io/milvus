@@ -237,7 +237,7 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
     dataset.num_queries = query_count;
     // if(field_meta.is)
     dataset.metric_type = search_info.metric_type_;
-    dataset.topk = search_info.topK_;
+    dataset.topk = search_info.topk_;
     dataset.dim = field_meta.get_dim();
 
     Assert(get_bit(field_data_ready_bitset_, field_offset));
@@ -256,7 +256,7 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
     SearchResult results;
     results.result_distances_ = std::move(sub_qr.mutable_values());
     results.internal_seg_offsets_ = std::move(sub_qr.mutable_labels());
-    results.topK_ = dataset.topk;
+    results.topk_ = dataset.topk;
     results.num_queries_ = dataset.num_queries;
 
     output = std::move(results);

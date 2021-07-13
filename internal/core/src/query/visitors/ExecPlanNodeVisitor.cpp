@@ -66,7 +66,7 @@ empty_search_result(int64_t num_queries, int64_t topk, MetricType metric_type) {
     SearchResult final_result;
     SubSearchResult result(num_queries, topk, metric_type);
     final_result.num_queries_ = num_queries;
-    final_result.topK_ = topk;
+    final_result.topk_ = topk;
     final_result.internal_seg_offsets_ = std::move(result.mutable_labels());
     final_result.result_distances_ = std::move(result.mutable_values());
     return final_result;
@@ -92,7 +92,7 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
 
     // skip all calculation
     if (active_count == 0) {
-        ret_ = empty_search_result(num_queries, node.search_info_.topK_, node.search_info_.metric_type_);
+        ret_ = empty_search_result(num_queries, node.search_info_.topk_, node.search_info_.metric_type_);
         return;
     }
 

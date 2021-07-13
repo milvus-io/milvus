@@ -238,7 +238,7 @@ TEST(Expr, ShowExecutor) {
     auto& info = node->search_info_;
 
     info.metric_type_ = MetricType::METRIC_L2;
-    info.topK_ = 20;
+    info.topk_ = 20;
     info.field_offset_ = FieldOffset(0);
     node->predicate_ = std::nullopt;
     ShowPlanNodeVisitor show_visitor;

@@ -97,7 +97,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     search_info.field_offset_ = field_offset;
 
     search_info.metric_type_ = GetMetricType(query_info_proto.metric_type());
-    search_info.topK_ = query_info_proto.topk();
+    search_info.topk_ = query_info_proto.topk();
     search_info.search_params_ = json::parse(query_info_proto.search_params());
 
     auto plan_node = [&]() -> std::unique_ptr<VectorPlanNode> {

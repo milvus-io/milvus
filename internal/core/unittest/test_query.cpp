@@ -38,7 +38,7 @@ TEST(Query, ShowExecutor) {
     auto raw_data = DataGen(schema, num_queries);
     auto& info = node->search_info_;
     info.metric_type_ = MetricType::METRIC_L2;
-    info.topK_ = 20;
+    info.topk_ = 20;
     info.field_offset_ = FieldOffset(1000);
     node->predicate_ = std::nullopt;
     ShowPlanNodeVisitor show_visitor;
@@ -416,7 +416,7 @@ TEST(Query, ExecTerm) {
     int topk = 5;
     auto json = SearchResultToJson(sr);
     ASSERT_EQ(sr.num_queries_, num_queries);
-    ASSERT_EQ(sr.topK_, topk);
+    ASSERT_EQ(sr.topk_, topk);
     // for(auto x: )
 }
 

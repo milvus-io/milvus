@@ -47,15 +47,15 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
 
     Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
     auto dim = field.get_dim();
-    auto topK = info.topK_;
-    auto total_count = topK * num_queries;
+    auto topk = info.topk_;
+    auto total_count = topk * num_queries;
     auto metric_type = info.metric_type_;
 
     // step 3: small indexing search
     // std::vector<int64_t> final_uids(total_count, -1);
     // std::vector<float> final_dis(total_count, std::numeric_limits<float>::max());
-    SubSearchResult final_qr(num_queries, topK, metric_type);
-    dataset::SearchDataset search_dataset{metric_type, num_queries, topK, dim, query_data};
+    SubSearchResult final_qr(num_queries, topk, metric_type);
+    dataset::SearchDataset search_dataset{metric_type, num_queries, topk, dim, query_data};
     auto vec_ptr = record.get_field_data<FloatVector>(vecfield_offset);
 
     int current_chunk_id = 0;
@@ -63,7 +63,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
     if (indexing_record.is_in(vecfield_offset)) {
         auto max_indexed_id = indexing_record.get_finished_ack();
         const auto& field_indexing = indexing_record.get_vec_field_indexing(vecfield_offset);
-        auto search_conf = field_indexing.get_search_params(topK);
+        auto search_conf = field_indexing.get_search_params(topk);
         Assert(vec_ptr->get_size_per_chunk() == field_indexing.get_size_per_chunk());
 
         for (int chunk_id = current_chunk_id; chunk_id < max_indexed_id; ++chunk_id) {
@@ -111,7 +111,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
 
     results.result_distances_ = std::move(final_qr.mutable_values());
     results.internal_seg_offsets_ = std::move(final_qr.mutable_labels());
-    results.topK_ = topK;
+    results.topk_ = topk;
     results.num_queries_ = num_queries;
 
     return Status::OK();
@@ -146,11 +146,11 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
 
     Assert(field.get_data_type() == DataType::VECTOR_BINARY);
     auto dim = field.get_dim();
-    auto topK = info.topK_;
-    auto total_count = topK * num_queries;
+    auto topk = info.topk_;
+    auto total_count = topk * num_queries;
 
     // step 3: small indexing search
-    query::dataset::SearchDataset search_dataset{metric_type, num_queries, topK, dim, query_data};
+    query::dataset::SearchDataset search_dataset{metric_type, num_queries, topk, dim, query_data};
 
     auto vec_ptr = record.get_field_data<BinaryVector>(vecfield_offset);
 
@@ -159,7 +159,7 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
 
     auto vec_size_per_chunk = vec_ptr->get_size_per_chunk();
     auto max_chunk = upper_div(ins_barrier, vec_size_per_chunk);
-    SubSearchResult final_result(num_queries, topK, metric_type);
+    SubSearchResult final_result(num_queries, topk, metric_type);
     for (int chunk_id = max_indexed_id; chunk_id < max_chunk; ++chunk_id) {
         auto& chunk = vec_ptr->get_chunk(chunk_id);
         auto element_begin = chunk_id * vec_size_per_chunk;
@@ -180,7 +180,7 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
 
     results.result_distances_ = std::move(final_result.mutable_values());
     results.internal_seg_offsets_ = std::move(final_result.mutable_labels());
-    results.topK_ = topK;
+    results.topk_ = topk;
     results.num_queries_ = num_queries;
 
     return Status::OK();

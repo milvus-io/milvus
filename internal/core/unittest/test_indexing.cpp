@@ -259,7 +259,7 @@ TEST(Indexing, BinaryBruteForce) {
 
     SearchResult sr;
     sr.num_queries_ = num_queries;
-    sr.topK_ = topk;
+    sr.topk_ = topk;
     sr.internal_seg_offsets_ = std::move(sub_result.mutable_labels());
     sr.result_distances_ = std::move(sub_result.mutable_values());
 

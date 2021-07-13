@@ -75,7 +75,7 @@ SearchOnSealed(const Schema& schema,
                int64_t num_queries,
                const faiss::BitsetView& bitset,
                SearchResult& result) {
-    auto topK = search_info.topK_;
+    auto topk = search_info.topk_;
 
     auto field_offset = search_info.field_offset_;
     auto& field = schema[field_offset];
@@ -90,7 +90,7 @@ SearchOnSealed(const Schema& schema,
         auto ds = knowhere::GenDataset(num_queries, dim, query_data);
 
         auto conf = search_info.search_params_;
-        conf[milvus::knowhere::meta::TOPK] = search_info.topK_;
+        conf[milvus::knowhere::meta::TOPK] = search_info.topk_;
         conf[milvus::knowhere::Metric::TYPE] = MetricTypeToName(field_indexing->metric_type_);
         return field_indexing->indexing_->Query(ds, conf, bitset);
     }();
@@ -98,11 +98,11 @@ SearchOnSealed(const Schema& schema,
     auto ids = final->Get<idx_t*>(knowhere::meta::IDS);
     auto distances = final->Get<float*>(knowhere::meta::DISTANCE);
 
-    auto total_num = num_queries * topK;
+    auto total_num = num_queries * topk;
     result.internal_seg_offsets_.resize(total_num);
     result.result_distances_.resize(total_num);
     result.num_queries_ = num_queries;
-    result.topK_ = topK;
+    result.topk_ = topk;
 
     std::copy_n(ids, total_num, result.internal_seg_offsets_.data());
     std::copy_n(distances, total_num, result.result_distances_.data());
