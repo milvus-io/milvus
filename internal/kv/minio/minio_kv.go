@@ -56,24 +56,24 @@ func NewMinIOKV(ctx context.Context, option *Option) (*MinIOKV, error) {
 	// check valid in first query
 	checkBucketFn := func() error {
 		bucketExists, err = minIOClient.BucketExists(ctx, option.BucketName)
-		return err
+		if err != nil {
+			return err
+		}
+		if option.CreateBucket {
+			if !bucketExists {
+				err = minIOClient.MakeBucket(ctx, option.BucketName, minio.MakeBucketOptions{})
+				return err
+			}
+		} else {
+			if !bucketExists {
+				return fmt.Errorf("bucket %s not Existed", option.BucketName)
+			}
+		}
+		return nil
 	}
 	err = retry.Do(ctx, checkBucketFn, retry.Attempts(300))
 	if err != nil {
 		return nil, err
-	}
-	// connection shall be valid here, no need to retry
-	if option.CreateBucket {
-		if !bucketExists {
-			err = minIOClient.MakeBucket(ctx, option.BucketName, minio.MakeBucketOptions{})
-			if err != nil {
-				return nil, err
-			}
-		}
-	} else {
-		if !bucketExists {
-			return nil, fmt.Errorf("bucket %s not Existed", option.BucketName)
-		}
 	}
 
 	kv := &MinIOKV{
