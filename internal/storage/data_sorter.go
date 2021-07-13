@@ -16,11 +16,13 @@ import (
 	"github.com/milvus-io/milvus/internal/rootcoord"
 )
 
+// DataSorter sorts insert data
 type DataSorter struct {
 	InsertCodec *InsertCodec
 	InsertData  *InsertData
 }
 
+// getRowIDFieldData returns auto generated row id Field
 func (ds *DataSorter) getRowIDFieldData() FieldData {
 	if data, ok := ds.InsertData.Data[rootcoord.RowIDField]; ok {
 		return data
@@ -28,13 +30,26 @@ func (ds *DataSorter) getRowIDFieldData() FieldData {
 	return nil
 }
 
+// Len returns length of the insert data
 func (ds *DataSorter) Len() int {
-	return len(ds.getRowIDFieldData().(*Int64FieldData).Data)
+	idField := ds.getRowIDFieldData()
+	if idField == nil {
+		return 0
+	}
+	fieldData, ok := idField.(*Int64FieldData)
+	if !ok {
+		return 0
+	}
+	return len(fieldData.Data)
 }
 
+// Swap swaps each field's i-th and j-th element
 func (ds *DataSorter) Swap(i, j int) {
 	for _, field := range ds.InsertCodec.Schema.Schema.Fields {
-		singleData := ds.InsertData.Data[field.FieldID]
+		singleData, has := ds.InsertData.Data[field.FieldID]
+		if !has {
+			continue
+		}
 		switch field.DataType {
 		case schemapb.DataType_Bool:
 			data := singleData.(*BoolFieldData).Data
@@ -79,7 +94,21 @@ func (ds *DataSorter) Swap(i, j int) {
 	}
 }
 
+// Less returns whether i-th entry is less than j-th entry, using ID field comparison result
 func (ds *DataSorter) Less(i, j int) bool {
-	ids := ds.getRowIDFieldData().(*Int64FieldData).Data
+	idField := ds.getRowIDFieldData()
+	if idField == nil {
+		return true // to skip swap
+	}
+	data, ok := idField.(*Int64FieldData)
+	if !ok || data.Data == nil {
+		return true // to skip swap
+	}
+	l := len(data.Data)
+	// i,j range check
+	if i < 0 || i >= l || j < 0 || j > l {
+		return true // to skip swap
+	}
+	ids := data.Data
 	return ids[i] < ids[j]
 }

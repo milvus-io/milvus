@@ -35,6 +35,9 @@ class ExecExprVisitor : public ExprVisitor {
     void
     visit(RangeExpr& expr) override;
 
+    void
+    visit(CompareExpr& expr) override;
+
  public:
     using RetType = std::deque<boost::dynamic_bitset<>>;
     ExecExprVisitor(const segcore::SegmentInternalInterface& segment, int64_t row_count, Timestamp timestamp)
@@ -62,6 +65,10 @@ class ExecExprVisitor : public ExprVisitor {
     template <typename T>
     auto
     ExecTermVisitorImpl(TermExpr& expr_raw) -> RetType;
+
+    template <typename CmpFunc>
+    auto
+    ExecCompareExprDispatcher(CompareExpr& expr, CmpFunc cmp_func) -> RetType;
 
  private:
     const segcore::SegmentInternalInterface& segment_;

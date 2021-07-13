@@ -49,4 +49,11 @@ ExtractInfoExprVisitor::visit(RangeExpr& expr) {
     plan_info_.add_involved_field(expr.field_offset_);
 }
 
+void
+ExtractInfoExprVisitor::visit(CompareExpr& expr) {
+    for (auto& field_offset : expr.field_offsets_) {
+        plan_info_.add_involved_field(field_offset);
+    }
+}
+
 }  // namespace milvus::query

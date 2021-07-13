@@ -78,7 +78,7 @@ func (c *queryNodeCluster) reloadFromKV() error {
 		}
 		err = c.RegisterNode(context.Background(), session, nodeID)
 		if err != nil {
-			log.Debug("query node failed to register")
+			log.Debug("reloadFromKV: failed to add queryNode to cluster", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
 			continue
 		}
 		nodeIDs = append(nodeIDs, nodeID)
@@ -195,7 +195,7 @@ func (c *queryNodeCluster) ReleaseSegments(ctx context.Context, nodeID int64, in
 		for _, segmentID := range in.SegmentIDs {
 			err := c.clusterMeta.removeSegmentInfo(segmentID)
 			if err != nil {
-				log.Error("remove segmentInfo Error", zap.Any("error", err.Error()), zap.Int64("segmentID", segmentID))
+				log.Error("ReleaseSegments: remove segmentInfo Error", zap.Any("error", err.Error()), zap.Int64("segmentID", segmentID))
 			}
 		}
 		status, err := node.client.ReleaseSegments(ctx, in)
@@ -222,9 +222,9 @@ func (c *queryNodeCluster) WatchDmChannels(ctx context.Context, nodeID int64, in
 		for _, info := range in.Infos {
 			channels = append(channels, info.ChannelName)
 		}
-		log.Debug("wait queryNode watch dm channel")
+		log.Debug("WatchDmChannels: wait queryNode watch dm channel")
 		status, err := node.client.WatchDmChannels(ctx, in)
-		log.Debug("queryNode watch dm channel done")
+		log.Debug("WatchDmChannels: queryNode watch dm channel done")
 		if err == nil && status.ErrorCode == commonpb.ErrorCode_Success {
 			collectionID := in.CollectionID
 			//c.clusterMeta.addCollection(collectionID, in.Schema)
@@ -251,6 +251,9 @@ func (c *queryNodeCluster) AddQueryChannel(ctx context.Context, nodeID int64, in
 	c.Lock()
 	defer c.Unlock()
 	if node, ok := c.nodes[nodeID]; ok {
+		if !node.isOnService() {
+			return nil, errors.New("node offline")
+		}
 		status, err := node.client.AddQueryChannel(ctx, in)
 		if err == nil && status.ErrorCode == commonpb.ErrorCode_Success {
 			//TODO::should reopen
@@ -260,7 +263,7 @@ func (c *queryNodeCluster) AddQueryChannel(ctx context.Context, nodeID int64, in
 				node.addQueryChannel(collectionID, queryChannelInfo)
 				return status, err
 			}
-			log.Error("queryChannel for collection not assigned", zap.Int64("collectionID", collectionID))
+			log.Error("AddQueryChannel: queryChannel for collection not assigned", zap.Int64("collectionID", collectionID))
 		}
 		return status, err
 	}
@@ -272,6 +275,9 @@ func (c *queryNodeCluster) removeQueryChannel(ctx context.Context, nodeID int64,
 	defer c.Unlock()
 
 	if node, ok := c.nodes[nodeID]; ok {
+		if !node.isOnService() {
+			return nil, errors.New("node offline")
+		}
 		status, err := node.client.RemoveQueryChannel(ctx, in)
 		if err == nil && status.ErrorCode == commonpb.ErrorCode_Success {
 			//TODO::should reopen
@@ -281,7 +287,7 @@ func (c *queryNodeCluster) removeQueryChannel(ctx context.Context, nodeID int64,
 				node.removeQueryChannel(collectionID)
 				return status, err
 			}
-			log.Error("queryChannel for collection not watched", zap.Int64("collectionID", collectionID))
+			log.Error("removeQueryChannel: queryChannel for collection not watched", zap.Int64("collectionID", collectionID))
 		}
 		return status, err
 	}
@@ -294,6 +300,9 @@ func (c *queryNodeCluster) releaseCollection(ctx context.Context, nodeID int64, 
 	defer c.Unlock()
 
 	if node, ok := c.nodes[nodeID]; ok {
+		if !node.isOnService() {
+			return nil, errors.New("node offline")
+		}
 		status, err := node.client.ReleaseCollection(ctx, in)
 		if err == nil && status.ErrorCode == commonpb.ErrorCode_Success {
 			node.releaseCollection(in.CollectionID)
@@ -310,6 +319,9 @@ func (c *queryNodeCluster) releasePartitions(ctx context.Context, nodeID int64, 
 	defer c.Unlock()
 
 	if node, ok := c.nodes[nodeID]; ok {
+		if !node.isOnService() {
+			return nil, errors.New("node offline")
+		}
 		status, err := node.client.ReleasePartitions(ctx, in)
 		if err == nil && status.ErrorCode == commonpb.ErrorCode_Success {
 			for _, partitionID := range in.PartitionIDs {
@@ -324,8 +336,8 @@ func (c *queryNodeCluster) releasePartitions(ctx context.Context, nodeID int64, 
 }
 
 func (c *queryNodeCluster) getSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) ([]*querypb.SegmentInfo, error) {
-	c.Lock()
-	defer c.Unlock()
+	c.RLock()
+	defer c.RUnlock()
 
 	segmentInfos := make([]*querypb.SegmentInfo, 0)
 	nodes, err := c.getOnServiceNodes()
@@ -345,8 +357,8 @@ func (c *queryNodeCluster) getSegmentInfo(ctx context.Context, in *querypb.GetSe
 }
 
 func (c *queryNodeCluster) getNumDmChannels(nodeID int64) (int, error) {
-	c.Lock()
-	defer c.Unlock()
+	c.RLock()
+	defer c.RUnlock()
 
 	if _, ok := c.nodes[nodeID]; !ok {
 		return 0, errors.New("Can't find query node by nodeID ")
@@ -364,8 +376,8 @@ func (c *queryNodeCluster) getNumDmChannels(nodeID int64) (int, error) {
 }
 
 func (c *queryNodeCluster) getNumSegments(nodeID int64) (int, error) {
-	c.Lock()
-	defer c.Unlock()
+	c.RLock()
+	defer c.RUnlock()
 
 	if _, ok := c.nodes[nodeID]; !ok {
 		return 0, errors.New("Can't find query node by nodeID ")
@@ -384,26 +396,31 @@ func (c *queryNodeCluster) RegisterNode(ctx context.Context, session *sessionuti
 	c.Lock()
 	defer c.Unlock()
 
-	sessionJSON, err := json.Marshal(session)
-	if err != nil {
-		return err
-	}
-	key := fmt.Sprintf("%s/%d", queryNodeInfoPrefix, id)
-	err = c.client.Save(key, string(sessionJSON))
-	if err != nil {
-		return err
-	}
-	node, err := newQueryNode(ctx, session.Address, id, c.client)
-	if err != nil {
-		return err
-	}
-	log.Debug("register a new query node", zap.Int64("nodeID", id), zap.String("address", session.Address))
-
 	if _, ok := c.nodes[id]; !ok {
-		c.nodes[id] = node
+		sessionJSON, err := json.Marshal(session)
+		if err != nil {
+			return err
+		}
+		key := fmt.Sprintf("%s/%d", queryNodeInfoPrefix, id)
+		err = c.client.Save(key, string(sessionJSON))
+		if err != nil {
+			return err
+		}
+		c.nodes[id] = newQueryNode(ctx, session.Address, id, c.client)
+		log.Debug("RegisterNode: create a new query node", zap.Int64("nodeID", id), zap.String("address", session.Address))
+
+		go func() {
+			err = c.nodes[id].start()
+			if err != nil {
+				log.Error("RegisterNode: start queryNode client failed", zap.Int64("nodeID", id), zap.String("error", err.Error()))
+				return
+			}
+			log.Debug("RegisterNode: start queryNode success, print cluster meta info", zap.Int64("nodeID", id))
+			c.printMeta()
+		}()
+
 		return nil
 	}
-
 	return fmt.Errorf("node %d alredy exists in cluster", id)
 }
 
@@ -428,14 +445,23 @@ func (c *queryNodeCluster) removeNodeInfo(nodeID int64) error {
 		return err
 	}
 
-	err = c.nodes[nodeID].clearNodeInfo()
-	if err != nil {
-		return err
+	if _, ok := c.nodes[nodeID]; ok {
+		err = c.nodes[nodeID].clearNodeInfo()
+		if err != nil {
+			return err
+		}
+		delete(c.nodes, nodeID)
+		log.Debug("removeNodeInfo: delete nodeInfo in cluster meta and etcd", zap.Int64("nodeID", nodeID))
 	}
-	delete(c.nodes, nodeID)
-	log.Debug("delete nodeInfo in cluster meta and etcd", zap.Int64("nodeID", nodeID))
 
 	return nil
+}
+
+func (c *queryNodeCluster) stopNode(nodeID int64) {
+	if node, ok := c.nodes[nodeID]; ok {
+		node.stop()
+		log.Debug("stopNode: queryNode offline", zap.Int64("nodeID", nodeID))
+	}
 }
 
 func (c *queryNodeCluster) onServiceNodes() (map[int64]*queryNode, error) {

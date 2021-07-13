@@ -28,7 +28,6 @@ type queryService struct {
 	historical *historical
 	streaming  *streaming
 
-	queryNodeID      UniqueID
 	queryCollections map[UniqueID]*queryCollection
 
 	factory msgstream.Factory
@@ -47,7 +46,6 @@ func newQueryService(ctx context.Context,
 		historical: historical,
 		streaming:  streaming,
 
-		queryNodeID:      Params.QueryNodeID,
 		queryCollections: make(map[UniqueID]*queryCollection),
 
 		factory: factory,
