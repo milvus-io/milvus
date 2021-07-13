@@ -184,7 +184,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
                   int64_t query_count,
                   Timestamp timestamp,
                   const BitsetView& bitset,
-                  QueryResult& output) const override;
+                  SearchResult& output) const override;
 
  public:
     std::shared_ptr<DeletedRecord::TmpBitmap>

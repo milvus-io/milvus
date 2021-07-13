@@ -27,6 +27,6 @@ SearchOnSealed(const Schema& schema,
                const void* query_data,
                int64_t num_queries,
                const faiss::BitsetView& view,
-               QueryResult& result);
+               SearchResult& result);
 
 }  // namespace milvus::query

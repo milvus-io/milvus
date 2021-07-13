@@ -27,7 +27,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
             int64_t num_queries,
             int64_t ins_barrier,
             const BitsetView& bitset,
-            QueryResult& results) {
+            SearchResult& results) {
     auto& schema = segment.get_schema();
     auto& indexing_record = segment.get_indexing_record();
     auto& record = segment.get_insert_record();
@@ -124,7 +124,7 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
              int64_t num_queries,
              int64_t ins_barrier,
              const faiss::BitsetView& bitset,
-             QueryResult& results) {
+             SearchResult& results) {
     auto& schema = segment.get_schema();
     auto& indexing_record = segment.get_indexing_record();
     auto& record = segment.get_insert_record();
@@ -194,7 +194,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 const void* query_data,
                 int64_t num_queries,
                 const faiss::BitsetView& bitset,
-                QueryResult& results) {
+                SearchResult& results) {
     // TODO: add data_type to info
     auto data_type = segment.get_schema()[info.field_offset_].get_data_type();
     Assert(datatype_is_vector(data_type));

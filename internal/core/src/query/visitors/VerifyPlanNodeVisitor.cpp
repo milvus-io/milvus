@@ -23,7 +23,7 @@ namespace impl {
 // WILL BE USED BY GENERATOR UNDER suvlim/core_gen/
 class VerifyPlanNodeVisitor : PlanNodeVisitor {
  public:
-    using RetType = QueryResult;
+    using RetType = SearchResult;
     VerifyPlanNodeVisitor() = default;
 
  private:

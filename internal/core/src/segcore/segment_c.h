@@ -34,7 +34,7 @@ void
 DeleteSegment(CSegmentInterface c_segment);
 
 void
-DeleteQueryResult(CSearchResult query_result);
+DeleteSearchResult(CSearchResult search_result);
 
 CStatus
 Search(CSegmentInterface c_segment,

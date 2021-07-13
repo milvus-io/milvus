@@ -69,12 +69,12 @@ TEST(Sealed, without_predicate) {
     auto ph_group_raw = CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    QueryResult qr;
+    SearchResult sr;
     Timestamp time = 1000000;
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
-    qr = segment->Search(plan.get(), *ph_group, time);
-    auto pre_result = QueryResultToJson(qr);
+    sr = segment->Search(plan.get(), *ph_group, time);
+    auto pre_result = SearchResultToJson(sr);
     auto indexing = std::make_shared<knowhere::IVF>();
 
     auto conf = knowhere::Config{{knowhere::meta::DIM, dim},
@@ -100,9 +100,9 @@ TEST(Sealed, without_predicate) {
     std::vector<int64_t> vec_ids(ids, ids + topK * num_queries);
     std::vector<float> vec_dis(dis, dis + topK * num_queries);
 
-    qr.internal_seg_offsets_ = vec_ids;
-    qr.result_distances_ = vec_dis;
-    auto ref_result = QueryResultToJson(qr);
+    sr.internal_seg_offsets_ = vec_ids;
+    sr.result_distances_ = vec_dis;
+    auto ref_result = SearchResultToJson(sr);
 
     LoadIndexInfo load_info;
     load_info.field_id = fake_id.get();
@@ -110,11 +110,11 @@ TEST(Sealed, without_predicate) {
     load_info.index_params["metric_type"] = "L2";
 
     segment->LoadIndexing(load_info);
-    qr = QueryResult();
+    sr = SearchResult();
 
-    qr = segment->Search(plan.get(), *ph_group, time);
+    sr = segment->Search(plan.get(), *ph_group, time);
 
-    auto post_result = QueryResultToJson(qr);
+    auto post_result = SearchResultToJson(sr);
     std::cout << ref_result.dump(1);
     std::cout << post_result.dump(1);
     ASSERT_EQ(ref_result.dump(2), post_result.dump(2));
@@ -170,12 +170,12 @@ TEST(Sealed, with_predicate) {
     auto ph_group_raw = CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    QueryResult qr;
+    SearchResult sr;
     Timestamp time = 10000000;
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
-    qr = segment->Search(plan.get(), *ph_group, time);
-    auto pre_qr = qr;
+    sr = segment->Search(plan.get(), *ph_group, time);
+    auto pre_sr = sr;
     auto indexing = std::make_shared<knowhere::IVF>();
 
     auto conf = knowhere::Config{{knowhere::meta::DIM, dim},
@@ -202,15 +202,15 @@ TEST(Sealed, with_predicate) {
     load_info.index_params["metric_type"] = "L2";
 
     segment->LoadIndexing(load_info);
-    qr = QueryResult();
+    sr = SearchResult();
 
-    qr = segment->Search(plan.get(), *ph_group, time);
+    sr = segment->Search(plan.get(), *ph_group, time);
 
-    auto post_qr = qr;
+    auto post_sr = sr;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * topK;
-        ASSERT_EQ(post_qr.internal_seg_offsets_[offset], 420000 + i);
-        ASSERT_EQ(post_qr.result_distances_[offset], 0.0);
+        ASSERT_EQ(post_sr.internal_seg_offsets_[offset], 420000 + i);
+        ASSERT_EQ(post_sr.result_distances_[offset], 0.0);
     }
 }
 
@@ -290,15 +290,15 @@ TEST(Sealed, LoadFieldData) {
         ASSERT_EQ(chunk_span2[i], ref2[i]);
     }
 
-    auto qr = segment->Search(plan.get(), *ph_group, time);
-    auto json = QueryResultToJson(qr);
+    auto sr = segment->Search(plan.get(), *ph_group, time);
+    auto json = SearchResultToJson(sr);
     std::cout << json.dump(1);
 
     segment->DropIndex(fakevec_id);
     ASSERT_ANY_THROW(segment->Search(plan.get(), *ph_group, time));
     segment->LoadIndex(vec_info);
-    auto qr2 = segment->Search(plan.get(), *ph_group, time);
-    auto json2 = QueryResultToJson(qr);
+    auto sr2 = segment->Search(plan.get(), *ph_group, time);
+    auto json2 = SearchResultToJson(sr);
     ASSERT_EQ(json.dump(-2), json2.dump(-2));
     segment->DropFieldData(double_id);
     ASSERT_ANY_THROW(segment->Search(plan.get(), *ph_group, time));

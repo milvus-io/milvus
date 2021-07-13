@@ -27,5 +27,5 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 const void* query_data,
                 int64_t num_queries,
                 const faiss::BitsetView& bitset,
-                QueryResult& results);
+                SearchResult& results);
 }  // namespace milvus::query

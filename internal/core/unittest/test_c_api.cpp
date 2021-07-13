@@ -232,7 +232,7 @@ TEST(CApiTest, SearchTest) {
 
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(search_result);
+    DeleteSearchResult(search_result);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -315,7 +315,7 @@ TEST(CApiTest, SearchTestWithExpr) {
 
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(search_result);
+    DeleteSearchResult(search_result);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -656,8 +656,8 @@ TEST(CApiTest, Reduce) {
 
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(res1);
-    DeleteQueryResult(res2);
+    DeleteSearchResult(res1);
+    DeleteSearchResult(res2);
     DeleteMarshaledHits(reorganize_search_result);
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -768,8 +768,8 @@ TEST(CApiTest, ReduceSearchWithExpr) {
 
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(res1);
-    DeleteQueryResult(res2);
+    DeleteSearchResult(res1);
+    DeleteSearchResult(res2);
     DeleteMarshaledHits(reorganize_search_result);
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -949,7 +949,7 @@ TEST(CApiTest, UpdateSegmentIndex_Without_Predicate) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (QueryResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
     search_result_on_raw_index->result_distances_ = vec_dis;
 
@@ -977,8 +977,8 @@ TEST(CApiTest, UpdateSegmentIndex_Without_Predicate) {
     auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
-    auto search_result_on_raw_index_json = QueryResultToJson(*search_result_on_raw_index);
-    auto search_result_on_bigIndex_json = QueryResultToJson((*(QueryResult*)c_search_result_on_bigIndex));
+    auto search_result_on_raw_index_json = SearchResultToJson(*search_result_on_raw_index);
+    auto search_result_on_bigIndex_json = SearchResultToJson((*(SearchResult*)c_search_result_on_bigIndex));
     std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
     std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
 
@@ -987,8 +987,8 @@ TEST(CApiTest, UpdateSegmentIndex_Without_Predicate) {
     DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_smallIndex);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_smallIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -1069,7 +1069,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_Without_Predicate) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (QueryResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
     search_result_on_raw_index->result_distances_ = vec_dis;
 
@@ -1097,8 +1097,8 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_Without_Predicate) {
     auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
-    auto search_result_on_raw_index_json = QueryResultToJson(*search_result_on_raw_index);
-    auto search_result_on_bigIndex_json = QueryResultToJson((*(QueryResult*)c_search_result_on_bigIndex));
+    auto search_result_on_raw_index_json = SearchResultToJson(*search_result_on_raw_index);
+    auto search_result_on_bigIndex_json = SearchResultToJson((*(SearchResult*)c_search_result_on_bigIndex));
     std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
     std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
 
@@ -1107,8 +1107,8 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_Without_Predicate) {
     DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_smallIndex);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_smallIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -1206,7 +1206,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Range) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (QueryResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
     search_result_on_raw_index->result_distances_ = vec_dis;
 
@@ -1234,7 +1234,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Range) {
     auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
-    auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
+    auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * K;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
@@ -1245,8 +1245,8 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Range) {
     DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_smallIndex);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_smallIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -1357,7 +1357,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Range) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (QueryResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
     search_result_on_raw_index->result_distances_ = vec_dis;
 
@@ -1385,7 +1385,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Range) {
     auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
-    auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
+    auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * K;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
@@ -1396,8 +1396,8 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Range) {
     DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_smallIndex);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_smallIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -1494,7 +1494,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Term) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (QueryResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
     search_result_on_raw_index->result_distances_ = vec_dis;
 
@@ -1522,7 +1522,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Term) {
     auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
-    auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
+    auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * K;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
@@ -1533,8 +1533,8 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Term) {
     DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_smallIndex);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_smallIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -1696,7 +1696,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Term) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (QueryResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
     search_result_on_raw_index->result_distances_ = vec_dis;
 
@@ -1724,7 +1724,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Term) {
     auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
-    auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
+    auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * K;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
@@ -1735,8 +1735,8 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Term) {
     DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_smallIndex);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_smallIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -1835,7 +1835,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Range) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (QueryResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
     search_result_on_raw_index->result_distances_ = vec_dis;
 
@@ -1863,7 +1863,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Range) {
     auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
-    auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
+    auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * K;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
@@ -1874,8 +1874,8 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Range) {
     DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_smallIndex);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_smallIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -1987,7 +1987,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Range) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (QueryResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
     search_result_on_raw_index->result_distances_ = vec_dis;
 
@@ -2015,7 +2015,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Range) {
     auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
-    auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
+    auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * K;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
@@ -2026,8 +2026,8 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Range) {
     DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_smallIndex);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_smallIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -2125,7 +2125,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Term) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (QueryResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
     search_result_on_raw_index->result_distances_ = vec_dis;
 
@@ -2160,7 +2160,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Term) {
     assert(status.error_code == Success);
     FillTargetEntry(segment, plan, c_search_result_on_bigIndex);
 
-    auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
+    auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * K;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
@@ -2171,8 +2171,8 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Term) {
     DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_smallIndex);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_smallIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -2335,7 +2335,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Term) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (QueryResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
     search_result_on_raw_index->result_distances_ = vec_dis;
 
@@ -2370,7 +2370,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Term) {
     assert(status.error_code == Success);
     FillTargetEntry(segment, plan, c_search_result_on_bigIndex);
 
-    auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
+    auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * K;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
@@ -2381,8 +2381,8 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Term) {
     DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_smallIndex);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_smallIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -2574,7 +2574,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
-    auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
+    auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * K;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
@@ -2583,7 +2583,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -2741,7 +2741,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
-    auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
+    auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * K;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
@@ -2750,7 +2750,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }

@@ -218,7 +218,7 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
                                  int64_t query_count,
                                  Timestamp timestamp,
                                  const BitsetView& bitset,
-                                 QueryResult& output) const {
+                                 SearchResult& output) const {
     Assert(is_system_field_ready());
     auto field_offset = query_info.field_offset_;
     auto& field_meta = schema_->operator[](field_offset);
@@ -253,7 +253,7 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
         }
     }();
 
-    QueryResult results;
+    SearchResult results;
     results.result_distances_ = std::move(sub_qr.mutable_values());
     results.internal_seg_offsets_ = std::move(sub_qr.mutable_labels());
     results.topK_ = dataset.topk;

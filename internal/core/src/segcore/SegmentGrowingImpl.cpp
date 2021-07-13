@@ -292,7 +292,7 @@ SegmentGrowingImpl::vector_search(int64_t vec_count,
                                   int64_t query_count,
                                   Timestamp timestamp,
                                   const BitsetView& bitset,
-                                  QueryResult& output) const {
+                                  SearchResult& output) const {
     auto& sealed_indexing = this->get_sealed_indexing_record();
     if (sealed_indexing.is_ready(query_info.field_offset_)) {
         query::SearchOnSealed(this->get_schema(), sealed_indexing, query_info, query_data, query_count, bitset, output);

@@ -257,13 +257,13 @@ TEST(Indexing, BinaryBruteForce) {
 
     auto sub_result = query::BinarySearchBruteForce(query_dataset, bin_vec.data(), N, nullptr);
 
-    QueryResult qr;
-    qr.num_queries_ = num_queries;
-    qr.topK_ = topk;
-    qr.internal_seg_offsets_ = std::move(sub_result.mutable_labels());
-    qr.result_distances_ = std::move(sub_result.mutable_values());
+    SearchResult sr;
+    sr.num_queries_ = num_queries;
+    sr.topK_ = topk;
+    sr.internal_seg_offsets_ = std::move(sub_result.mutable_labels());
+    sr.result_distances_ = std::move(sub_result.mutable_values());
 
-    auto json = QueryResultToJson(qr);
+    auto json = SearchResultToJson(sr);
     cout << json.dump(2);
     auto ref = json::parse(R"(
 [

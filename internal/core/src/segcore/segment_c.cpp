@@ -59,8 +59,8 @@ DeleteSegment(CSegmentInterface c_segment) {
 }
 
 void
-DeleteQueryResult(CSearchResult query_result) {
-    auto res = (milvus::QueryResult*)query_result;
+DeleteSearchResult(CSearchResult search_result) {
+    auto res = (milvus::SearchResult*)search_result;
     delete res;
 }
 
@@ -70,18 +70,18 @@ Search(CSegmentInterface c_segment,
        CPlaceholderGroup c_placeholder_group,
        uint64_t timestamp,
        CSearchResult* result) {
-    auto query_result = std::make_unique<milvus::QueryResult>();
+    auto search_result = std::make_unique<milvus::SearchResult>();
     try {
         auto segment = (milvus::segcore::SegmentInterface*)c_segment;
         auto plan = (milvus::query::Plan*)c_plan;
         auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(c_placeholder_group);
-        *query_result = segment->Search(plan, *phg_ptr, timestamp);
+        *search_result = segment->Search(plan, *phg_ptr, timestamp);
         if (plan->plan_node_->query_info_.metric_type_ != milvus::MetricType::METRIC_INNER_PRODUCT) {
-            for (auto& dis : query_result->result_distances_) {
+            for (auto& dis : search_result->result_distances_) {
                 dis *= -1;
             }
         }
-        *result = query_result.release();
+        *result = search_result.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
@@ -92,7 +92,7 @@ CStatus
 FillTargetEntry(CSegmentInterface c_segment, CSearchPlan c_plan, CSearchResult c_result) {
     auto segment = (milvus::segcore::SegmentInterface*)c_segment;
     auto plan = (milvus::query::Plan*)c_plan;
-    auto result = (milvus::QueryResult*)c_result;
+    auto result = (milvus::SearchResult*)c_result;
 
     try {
         segment->FillTargetEntry(plan, *result);

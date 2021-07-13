@@ -17,7 +17,7 @@
 #include "common/Types.h"
 #include "pb/milvus.pb.h"
 
-using SearchResult = milvus::QueryResult;
+using SearchResult = milvus::SearchResult;
 
 int
 MergeInto(int64_t num_queries, int64_t topk, float* distances, int64_t* uids, float* new_distances, int64_t* new_uids) {

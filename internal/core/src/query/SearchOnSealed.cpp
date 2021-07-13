@@ -74,7 +74,7 @@ SearchOnSealed(const Schema& schema,
                const void* query_data,
                int64_t num_queries,
                const faiss::BitsetView& bitset,
-               QueryResult& result) {
+               SearchResult& result) {
     auto topK = query_info.topK_;
 
     auto field_offset = query_info.field_offset_;

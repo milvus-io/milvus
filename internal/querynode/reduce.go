@@ -157,6 +157,6 @@ func deleteMarshaledHits(hits *MarshaledHits) {
 
 func deleteSearchResults(results []*SearchResult) {
 	for _, result := range results {
-		C.DeleteQueryResult(result.cSearchResult)
+		C.DeleteSearchResult(result.cSearchResult)
 	}
 }

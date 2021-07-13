@@ -27,7 +27,7 @@ namespace impl {
 // WILL BE USED BY GENERATOR UNDER suvlim/core_gen/
 class ExecPlanNodeVisitor : PlanNodeVisitor {
  public:
-    using RetType = QueryResult;
+    using RetType = SearchResult;
     ExecPlanNodeVisitor(const segcore::SegmentInterface& segment,
                         Timestamp timestamp,
                         const PlaceholderGroup& placeholder_group)
@@ -61,9 +61,9 @@ class ExecPlanNodeVisitor : PlanNodeVisitor {
 }  // namespace impl
 #endif
 
-static QueryResult
+static SearchResult
 empty_query_result(int64_t num_queries, int64_t topk, MetricType metric_type) {
-    QueryResult final_result;
+    SearchResult final_result;
     SubQueryResult result(num_queries, topk, metric_type);
     final_result.num_queries_ = num_queries;
     final_result.topK_ = topk;
