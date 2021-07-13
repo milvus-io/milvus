@@ -555,6 +555,7 @@ func (i *IndexCoord) assignTaskLoop() {
 	for {
 		select {
 		case <-ctx.Done():
+			log.Debug("IndexCoord assignTaskLoop ctx Done")
 			return
 		case <-timeTicker.C:
 			sessions, _, err := i.session.GetSessions(typeutil.IndexNodeRole)
