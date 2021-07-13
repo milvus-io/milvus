@@ -56,7 +56,7 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
-          sed -i "s#DATE_VERSION=.*#DATE_VERSION=${{ steps.extracter.outputs.version }}#g" .env
+          sed -i "s#$DATE_VERSION=.*#DATE_VERSION=${{ steps.extracter.outputs.version }}#g" .env
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add .env
@@ -70,7 +70,7 @@ jobs:
           token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
           author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
           signoff: false
-          branch: update_builder_images
+          branch: update_builder_${{ github.sha }}
           delete-branch: true
           title: '[automated] Update Builder Image Changes'
           body: |
