@@ -44,7 +44,7 @@ import (
 
 const (
 	reqTimeoutInterval = time.Second * 10
-	durationInterval   = time.Second * 5
+	durationInterval   = time.Second * 10
 	assignTasksLimit   = 20
 )
 
