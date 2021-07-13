@@ -325,6 +325,10 @@ func (s *Segment) getEntityByIds(plan *RetrievePlan) (*segcorepb.RetrieveResults
 	return result, nil
 }
 
+func (s *Segment) fillRetrieveResults(plan *RetrievePlan, result *segcorepb.RetrieveResults) error {
+	return nil
+}
+
 func (s *Segment) fillTargetEntry(plan *SearchPlan, result *SearchResult) error {
 	if s.segmentPtr == nil {
 		return errors.New("null seg core pointer")
@@ -803,4 +807,8 @@ func (s *Segment) dropSegmentIndex(fieldID int64) error {
 	log.Debug("dropSegmentIndex done", zap.Int64("fieldID", fieldID), zap.Int64("segmentID", s.ID()))
 
 	return nil
+}
+
+func (s *Segment) segmentVectorFieldDataMmap(fieldID int64, binlog string, rowCount int, data interface{}) ([]byte, error) {
+	return nil, nil
 }

@@ -34,6 +34,15 @@ const (
 	queryNodeSegmentMetaPrefix  = "queryNode-segmentMeta"
 )
 
+func contain(set []int64, target int64) bool {
+	for _, a := range set {
+		if a == target {
+			return true
+		}
+	}
+	return false
+}
+
 // segmentLoader is only responsible for loading the field data from binlog
 type segmentLoader struct {
 	historicalReplica ReplicaInterface
@@ -143,6 +152,14 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment 
 		return err
 	}
 
+	// add VectorFieldInfo for vector fields
+	for _, fieldBinlog := range segmentLoadInfo.BinlogPaths {
+		if contain(vectorFieldIDs, fieldBinlog.FieldID) {
+			vectorFieldInfo := newVectorFieldInfo(fieldBinlog)
+			segment.setVectorFieldInfo(fieldBinlog.FieldID, vectorFieldInfo)
+		}
+	}
+
 	indexedFieldIDs := make([]int64, 0)
 	for _, vecFieldID := range vectorFieldIDs {
 		err = loader.indexLoader.setIndexInfo(collectionID, segment, vecFieldID)
@@ -193,17 +210,9 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment 
 //}
 
 func (loader *segmentLoader) filterFieldBinlogs(fieldBinlogs []*datapb.FieldBinlog, skipFieldIDs []int64) []*datapb.FieldBinlog {
-	containsFunc := func(set []int64, target int64) bool {
-		for _, a := range set {
-			if a == target {
-				return true
-			}
-		}
-		return false
-	}
 	result := make([]*datapb.FieldBinlog, 0)
 	for _, fieldBinlog := range fieldBinlogs {
-		if !containsFunc(skipFieldIDs, fieldBinlog.FieldID) {
+		if !contain(skipFieldIDs, fieldBinlog.FieldID) {
 			result = append(result, fieldBinlog)
 		}
 	}
@@ -312,6 +321,55 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 		if err != nil {
 			// TODO: return or continue?
 			return err
+		}
+	}
+
+	return nil
+}
+
+func (loader *segmentLoader) loadSegmentVectorFieldsData(segment *Segment, binlogs []string) error {
+	for _, path := range binlogs {
+		iCodec := storage.InsertCodec{}
+		defer func() {
+			err := iCodec.Close()
+			if err != nil {
+				log.Error(err.Error())
+			}
+		}()
+
+		binLog, err := loader.minioKV.Load(path)
+		if err != nil {
+			return err
+		}
+
+		blob := &storage.Blob{
+			Key:   path,
+			Value: []byte(binLog),
+		}
+
+		_, _, insertData, err := iCodec.Deserialize([]*storage.Blob{blob})
+		if err != nil {
+			log.Error(err.Error())
+			return err
+		}
+		for fieldID, value := range insertData.Data {
+			var numRows int
+			var data interface{}
+			switch fieldData := value.(type) {
+			case *storage.FloatVectorFieldData:
+				numRows = fieldData.NumRows
+				data = fieldData.Data
+			case *storage.BinaryVectorFieldData:
+				numRows = fieldData.NumRows
+				data = fieldData.Data
+			default:
+				return fmt.Errorf("unexpected field data type")
+			}
+			data, err = segment.segmentVectorFieldDataMmap(fieldID, path, numRows, data)
+			if err != nil {
+				return err
+			}
+			// save dataMmap into segment.vectorFieldInfo
 		}
 	}
 

@@ -2110,10 +2110,6 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 			addPrimaryKey := false
 			for _, field := range schema.Fields {
 				if reqField == field.Name {
-					if field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_BinaryVector {
-						errMsg := "Query does not support vector field currently"
-						return errors.New(errMsg)
-					}
 					if field.IsPrimaryKey {
 						addPrimaryKey = true
 					}

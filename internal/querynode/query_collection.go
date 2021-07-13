@@ -1134,6 +1134,16 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 			if err != nil {
 				return err
 			}
+			// output_fields contain vector field, vector field is not loaded into memory,
+			// and result is not empty
+			if true {
+				if err = q.historical.loader.loadSegmentVectorFieldsData(segment, nil); err != nil {
+					return err
+				}
+				if err = segment.fillRetrieveResults(plan, result); err != nil {
+					return err
+				}
+			}
 			mergeList = append(mergeList, result)
 			sealedSegmentRetrieved = append(sealedSegmentRetrieved, segmentID)
 		}
