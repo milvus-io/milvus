@@ -178,7 +178,7 @@ Milvus 训练营能够帮助你了解向量数据库的操作及各种应用场�
 ### All contributors
 
 <br><!-- Do not remove start of hero-bot --><br>
-<img src="https://img.shields.io/badge/all--contributors-151-orange"><br>
+<img src="https://img.shields.io/badge/all--contributors-152-orange"><br>
 <a href="https://github.com/ABNER-1"><img src="https://avatars.githubusercontent.com/u/24547351?v=4" width="30px" /></a>
 <a href="https://github.com/Accagain2014"><img src="https://avatars.githubusercontent.com/u/9635216?v=4" width="30px" /></a>
 <a href="https://github.com/AllenYu1987"><img src="https://avatars.githubusercontent.com/u/12489985?v=4" width="30px" /></a>
@@ -314,6 +314,7 @@ Milvus 训练营能够帮助你了解向量数据库的操作及各种应用场�
 <a href="https://github.com/water32"><img src="https://avatars.githubusercontent.com/u/13234561?v=4" width="30px" /></a>
 <a href="https://github.com/weishuo2"><img src="https://avatars.githubusercontent.com/u/27938020?v=4" width="30px" /></a>
 <a href="https://github.com/wscxyey"><img src="https://avatars.githubusercontent.com/u/48882296?v=4" width="30px" /></a>
+<a href="https://github.com/xaxys"><img src="https://avatars.githubusercontent.com/u/28949072?v=4" width="30px" /></a>
 <a href="https://github.com/xiaocai2333"><img src="https://avatars.githubusercontent.com/u/46207236?v=4" width="30px" /></a>
 <a href="https://github.com/xiaofan-luan"><img src="https://avatars.githubusercontent.com/u/83447078?v=4" width="30px" /></a>
 <a href="https://github.com/xige-16"><img src="https://avatars.githubusercontent.com/u/20124155?v=4" width="30px" /></a>
