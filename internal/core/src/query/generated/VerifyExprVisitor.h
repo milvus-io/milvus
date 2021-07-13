@@ -35,6 +35,9 @@ class VerifyExprVisitor : public ExprVisitor {
     void
     visit(RangeExpr& expr) override;
 
+    void
+    visit(CompareExpr& expr) override;
+
  public:
 };
 }  // namespace milvus::query
