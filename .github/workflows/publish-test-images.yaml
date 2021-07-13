@@ -23,6 +23,8 @@ jobs:
     name: PyTest
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      GITHUB_TOKEN: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -31,6 +33,11 @@ jobs:
         run: |
           echo "::set-output name=version::$(date +%Y%m%d)"
           echo "::set-output name=sha_short::$(git rev-parse --short HEAD)"
+      - name: Docker Pull
+        shell: bash
+        working-directory: tests/docker
+        run: |
+          IMAGE_TAG=latest docker-compose pull --ignore-pull-failures pytest
       - name: Docker Build
         shell: bash
         working-directory: tests/docker
@@ -65,4 +72,4 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
-          git push "https://sre-ci-robot:${{ secrets.ALL_CONTRIBUTORS_TOKEN }}@github.com/$GITHUB_REPOSITORY.git" HEAD:${{ github.ref }} --follow-tags
+          git push "https://github.com/$GITHUB_REPOSITORY.git" HEAD:${{ github.ref }} --follow-tags
