@@ -14,7 +14,7 @@
 #include <common/Types.h>
 #include <boost/dynamic_bitset.hpp>
 #include <queue>
-#include "SubQueryResult.h"
+#include "SubSearchResult.h"
 
 #include <faiss/utils/distances.h>
 #include <faiss/utils/BinaryDistance.h>

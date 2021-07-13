@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "query/SubQueryResult.h"
+#include "query/SubSearchResult.h"
 #include "query/helper.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>

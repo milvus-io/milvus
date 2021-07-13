@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-#include "query/SubQueryResult.h"
+#include "query/SubSearchResult.h"
 #include <vector>
 #include <queue>
 #include <random>

@@ -14,7 +14,7 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include <deque>
 #include <boost/dynamic_bitset.hpp>
-#include "query/SubQueryResult.h"
+#include "query/SubSearchResult.h"
 
 namespace milvus::query {
 using BitsetChunk = boost::dynamic_bitset<>;

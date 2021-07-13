@@ -13,7 +13,7 @@
 #include <faiss/utils/BinaryDistance.h>
 #include "segcore/ConcurrentVector.h"
 #include "common/Schema.h"
-#include "query/SubQueryResult.h"
+#include "query/SubSearchResult.h"
 #include "query/helper.h"
 
 namespace milvus::query {
