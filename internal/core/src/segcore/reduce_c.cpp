@@ -133,7 +133,7 @@ ResetSearchResult(std::vector<std::vector<int64_t>>& search_records,
 }
 
 CStatus
-ReduceQueryResults(CQueryResult* c_search_results, int64_t num_segments, bool* is_selected) {
+ReduceSearchResults(CSearchResult* c_search_results, int64_t num_segments, bool* is_selected) {
     try {
         std::vector<SearchResult*> search_results;
         for (int i = 0; i < num_segments; ++i) {
@@ -162,13 +162,13 @@ ReduceQueryResults(CQueryResult* c_search_results, int64_t num_segments, bool* i
 }
 
 CStatus
-ReorganizeQueryResults(CMarshaledHits* c_marshaled_hits,
-                       CPlaceholderGroup* c_placeholder_groups,
-                       int64_t num_groups,
-                       CQueryResult* c_search_results,
-                       bool* is_selected,
-                       int64_t num_segments,
-                       CSearchPlan c_plan) {
+ReorganizeSearchResults(CMarshaledHits* c_marshaled_hits,
+                        CPlaceholderGroup* c_placeholder_groups,
+                        int64_t num_groups,
+                        CSearchResult* c_search_results,
+                        bool* is_selected,
+                        int64_t num_segments,
+                        CSearchPlan c_plan) {
     try {
         auto marshaledHits = std::make_unique<MarshaledHits>(num_groups);
         auto topk = GetTopK(c_plan);
@@ -252,11 +252,11 @@ ReorganizeQueryResults(CMarshaledHits* c_marshaled_hits,
 }
 
 CStatus
-ReorganizeSingleQueryResult(CMarshaledHits* c_marshaled_hits,
-                            CPlaceholderGroup* c_placeholder_groups,
-                            int64_t num_groups,
-                            CQueryResult c_search_result,
-                            CSearchPlan c_plan) {
+ReorganizeSingleSearchResult(CMarshaledHits* c_marshaled_hits,
+                             CPlaceholderGroup* c_placeholder_groups,
+                             int64_t num_groups,
+                             CSearchResult c_search_result,
+                             CSearchPlan c_plan) {
     try {
         auto marshaledHits = std::make_unique<MarshaledHits>(num_groups);
         auto search_result = (SearchResult*)c_search_result;

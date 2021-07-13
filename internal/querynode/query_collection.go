@@ -931,8 +931,8 @@ func (q *queryCollection) search(msg queryMsg) error {
 		if err != nil {
 			return err
 		}
-		marshaledHits, err = reorganizeSingleQueryResult(plan, searchRequests, searchResults[0])
-		sp.LogFields(oplog.String("statistical time", "reorganizeSingleQueryResult end"))
+		marshaledHits, err = reorganizeSingleSearchResult(plan, searchRequests, searchResults[0])
+		sp.LogFields(oplog.String("statistical time", "reorganizeSingleSearchResult end"))
 		if err != nil {
 			return err
 		}
@@ -947,8 +947,8 @@ func (q *queryCollection) search(msg queryMsg) error {
 		if err != nil {
 			return err
 		}
-		marshaledHits, err = reorganizeQueryResults(plan, searchRequests, searchResults, numSegment, inReduced)
-		sp.LogFields(oplog.String("statistical time", "reorganizeQueryResults end"))
+		marshaledHits, err = reorganizeSearchResults(plan, searchRequests, searchResults, numSegment, inReduced)
+		sp.LogFields(oplog.String("statistical time", "reorganizeSearchResults end"))
 		if err != nil {
 			return err
 		}

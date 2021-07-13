@@ -31,7 +31,7 @@ import (
 )
 
 type SearchResult struct {
-	cQueryResult C.CQueryResult
+	cSearchResult C.CSearchResult
 }
 
 type MarshaledHits struct {
@@ -39,15 +39,15 @@ type MarshaledHits struct {
 }
 
 func reduceSearchResults(searchResults []*SearchResult, numSegments int64, inReduced []bool) error {
-	cSearchResults := make([]C.CQueryResult, 0)
+	cSearchResults := make([]C.CSearchResult, 0)
 	for _, res := range searchResults {
-		cSearchResults = append(cSearchResults, res.cQueryResult)
+		cSearchResults = append(cSearchResults, res.cSearchResult)
 	}
-	cSearchResultPtr := (*C.CQueryResult)(&cSearchResults[0])
+	cSearchResultPtr := (*C.CSearchResult)(&cSearchResults[0])
 	cNumSegments := C.long(numSegments)
 	cInReduced := (*C.bool)(&inReduced[0])
 
-	status := C.ReduceQueryResults(cSearchResultPtr, cNumSegments, cInReduced)
+	status := C.ReduceSearchResults(cSearchResultPtr, cNumSegments, cInReduced)
 
 	errorCode := status.error_code
 
@@ -78,7 +78,7 @@ func fillTargetEntry(plan *SearchPlan, searchResults []*SearchResult, matchedSeg
 	return nil
 }
 
-func reorganizeQueryResults(plan *SearchPlan, searchRequests []*searchRequest, searchResults []*SearchResult, numSegments int64, inReduced []bool) (*MarshaledHits, error) {
+func reorganizeSearchResults(plan *SearchPlan, searchRequests []*searchRequest, searchResults []*SearchResult, numSegments int64, inReduced []bool) (*MarshaledHits, error) {
 	cPlaceholderGroups := make([]C.CPlaceholderGroup, 0)
 	for _, pg := range searchRequests {
 		cPlaceholderGroups = append(cPlaceholderGroups, (*pg).cPlaceholderGroup)
@@ -86,28 +86,28 @@ func reorganizeQueryResults(plan *SearchPlan, searchRequests []*searchRequest, s
 	var cPlaceHolderGroupPtr = (*C.CPlaceholderGroup)(&cPlaceholderGroups[0])
 	var cNumGroup = (C.long)(len(searchRequests))
 
-	cSearchResults := make([]C.CQueryResult, 0)
+	cSearchResults := make([]C.CSearchResult, 0)
 	for _, res := range searchResults {
-		cSearchResults = append(cSearchResults, res.cQueryResult)
+		cSearchResults = append(cSearchResults, res.cSearchResult)
 	}
-	cSearchResultPtr := (*C.CQueryResult)(&cSearchResults[0])
+	cSearchResultPtr := (*C.CSearchResult)(&cSearchResults[0])
 
 	var cNumSegments = C.long(numSegments)
 	var cInReduced = (*C.bool)(&inReduced[0])
 	var cMarshaledHits C.CMarshaledHits
 
-	status := C.ReorganizeQueryResults(&cMarshaledHits, cPlaceHolderGroupPtr, cNumGroup, cSearchResultPtr, cInReduced, cNumSegments, plan.cSearchPlan)
+	status := C.ReorganizeSearchResults(&cMarshaledHits, cPlaceHolderGroupPtr, cNumGroup, cSearchResultPtr, cInReduced, cNumSegments, plan.cSearchPlan)
 	errorCode := status.error_code
 
 	if errorCode != 0 {
 		errorMsg := C.GoString(status.error_msg)
 		defer C.free(unsafe.Pointer(status.error_msg))
-		return nil, errors.New("reorganizeQueryResults failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+		return nil, errors.New("reorganizeSearchResults failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
 	}
 	return &MarshaledHits{cMarshaledHits: cMarshaledHits}, nil
 }
 
-func reorganizeSingleQueryResult(plan *SearchPlan, placeholderGroups []*searchRequest, searchResult *SearchResult) (*MarshaledHits, error) {
+func reorganizeSingleSearchResult(plan *SearchPlan, placeholderGroups []*searchRequest, searchResult *SearchResult) (*MarshaledHits, error) {
 	cPlaceholderGroups := make([]C.CPlaceholderGroup, 0)
 	for _, pg := range placeholderGroups {
 		cPlaceholderGroups = append(cPlaceholderGroups, (*pg).cPlaceholderGroup)
@@ -115,16 +115,16 @@ func reorganizeSingleQueryResult(plan *SearchPlan, placeholderGroups []*searchRe
 	var cPlaceHolderGroupPtr = (*C.CPlaceholderGroup)(&cPlaceholderGroups[0])
 	var cNumGroup = (C.long)(len(placeholderGroups))
 
-	cSearchResult := searchResult.cQueryResult
+	cSearchResult := searchResult.cSearchResult
 	var cMarshaledHits C.CMarshaledHits
 
-	status := C.ReorganizeSingleQueryResult(&cMarshaledHits, cPlaceHolderGroupPtr, cNumGroup, cSearchResult, plan.cSearchPlan)
+	status := C.ReorganizeSingleSearchResult(&cMarshaledHits, cPlaceHolderGroupPtr, cNumGroup, cSearchResult, plan.cSearchPlan)
 	errorCode := status.error_code
 
 	if errorCode != 0 {
 		errorMsg := C.GoString(status.error_msg)
 		defer C.free(unsafe.Pointer(status.error_msg))
-		return nil, errors.New("reorganizeQueryResults failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+		return nil, errors.New("reorganizeSearchResults failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
 	}
 	return &MarshaledHits{cMarshaledHits: cMarshaledHits}, nil
 }
@@ -157,6 +157,6 @@ func deleteMarshaledHits(hits *MarshaledHits) {
 
 func deleteSearchResults(results []*SearchResult) {
 	for _, result := range results {
-		C.DeleteQueryResult(result.cQueryResult)
+		C.DeleteQueryResult(result.cSearchResult)
 	}
 }

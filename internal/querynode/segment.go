@@ -236,7 +236,7 @@ func (s *Segment) search(plan *SearchPlan,
 	cPlaceHolderGroup := cPlaceholderGroups[0]
 
 	log.Debug("do search on segment", zap.Int64("segmentID", s.segmentID), zap.Int32("segmentType", int32(s.segmentType)))
-	var status = C.Search(s.segmentPtr, plan.cSearchPlan, cPlaceHolderGroup, ts, &searchResult.cQueryResult)
+	var status = C.Search(s.segmentPtr, plan.cSearchPlan, cPlaceHolderGroup, ts, &searchResult.cSearchResult)
 	errorCode := status.error_code
 
 	if errorCode != 0 {
@@ -264,7 +264,7 @@ func (s *Segment) fillTargetEntry(plan *SearchPlan, result *SearchResult) error 
 	}
 
 	log.Debug("segment fill target entry, ", zap.Int64("segment ID = ", s.segmentID))
-	var status = C.FillTargetEntry(s.segmentPtr, plan.cSearchPlan, result.cQueryResult)
+	var status = C.FillTargetEntry(s.segmentPtr, plan.cSearchPlan, result.cSearchResult)
 	errorCode := status.error_code
 
 	if errorCode != 0 {
