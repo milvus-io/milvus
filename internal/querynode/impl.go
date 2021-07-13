@@ -35,14 +35,14 @@ func (node *QueryNode) GetComponentStates(ctx context.Context) (*internalpb.Comp
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}
-	code, ok := node.stateCode.Load().(internalpb.StateCode)
-	if !ok {
-		errMsg := "unexpected error in type assertion"
+	code := node.stateCode.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeID)
 		stats.Status = &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    errMsg,
+			Reason:    err.Error(),
 		}
-		return stats, errors.New(errMsg)
+		return stats, err
 	}
 	info := &internalpb.ComponentInfo{
 		NodeID:    Params.QueryNodeID,
@@ -74,6 +74,15 @@ func (node *QueryNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.Stri
 }
 
 func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQueryChannelRequest) (*commonpb.Status, error) {
+	code := node.stateCode.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeID)
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}
+		return status, err
+	}
 	collectionID := in.CollectionID
 	if node.queryService == nil {
 		errMsg := "null query service, collectionID = " + fmt.Sprintln(collectionID)
@@ -178,6 +187,15 @@ func (node *QueryNode) RemoveQueryChannel(ctx context.Context, in *queryPb.Remov
 }
 
 func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmChannelsRequest) (*commonpb.Status, error) {
+	code := node.stateCode.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeID)
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}
+		return status, err
+	}
 	dct := &watchDmChannelsTask{
 		baseTask: baseTask{
 			ctx:  ctx,
@@ -214,6 +232,15 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 }
 
 func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegmentsRequest) (*commonpb.Status, error) {
+	code := node.stateCode.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeID)
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}
+		return status, err
+	}
 	dct := &loadSegmentsTask{
 		baseTask: baseTask{
 			ctx:  ctx,
@@ -254,6 +281,15 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 }
 
 func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+	code := node.stateCode.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeID)
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}
+		return status, err
+	}
 	dct := &releaseCollectionTask{
 		baseTask: baseTask{
 			ctx:  ctx,
@@ -290,6 +326,15 @@ func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.Releas
 }
 
 func (node *QueryNode) ReleasePartitions(ctx context.Context, in *queryPb.ReleasePartitionsRequest) (*commonpb.Status, error) {
+	code := node.stateCode.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeID)
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}
+		return status, err
+	}
 	dct := &releasePartitionsTask{
 		baseTask: baseTask{
 			ctx:  ctx,
@@ -327,6 +372,15 @@ func (node *QueryNode) ReleasePartitions(ctx context.Context, in *queryPb.Releas
 
 // ReleaseSegments deprecated
 func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
+	code := node.stateCode.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeID)
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}
+		return status, err
+	}
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
@@ -348,6 +402,17 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseS
 }
 
 func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmentInfoRequest) (*queryPb.GetSegmentInfoResponse, error) {
+	code := node.stateCode.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeID)
+		res := &queryPb.GetSegmentInfoResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}
+		return res, err
+	}
 	infos := make([]*queryPb.SegmentInfo, 0)
 	getSegmentInfo := func(segment *Segment) *queryPb.SegmentInfo {
 		var indexName string

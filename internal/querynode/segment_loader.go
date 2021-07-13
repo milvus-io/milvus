@@ -23,7 +23,6 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -175,25 +174,25 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID,
 	return nil
 }
 
-func (loader *segmentLoader) GetSegmentStates(segmentID UniqueID) (*datapb.GetSegmentStatesResponse, error) {
-	ctx := context.TODO()
-	if loader.dataCoord == nil {
-		return nil, errors.New("null data service client")
-	}
-
-	segmentStatesRequest := &datapb.GetSegmentStatesRequest{
-		SegmentIDs: []int64{segmentID},
-	}
-	statesResponse, err := loader.dataCoord.GetSegmentStates(ctx, segmentStatesRequest)
-	if err != nil || statesResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return nil, err
-	}
-	if len(statesResponse.States) != 1 {
-		return nil, errors.New("segment states' len should be 1")
-	}
-
-	return statesResponse, nil
-}
+//func (loader *segmentLoader) GetSegmentStates(segmentID UniqueID) (*datapb.GetSegmentStatesResponse, error) {
+//	ctx := context.TODO()
+//	if loader.dataCoord == nil {
+//		return nil, errors.New("null data service client")
+//	}
+//
+//	segmentStatesRequest := &datapb.GetSegmentStatesRequest{
+//		SegmentIDs: []int64{segmentID},
+//	}
+//	statesResponse, err := loader.dataCoord.GetSegmentStates(ctx, segmentStatesRequest)
+//	if err != nil || statesResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
+//		return nil, err
+//	}
+//	if len(statesResponse.States) != 1 {
+//		return nil, errors.New("segment states' len should be 1")
+//	}
+//
+//	return statesResponse, nil
+//}
 
 func (loader *segmentLoader) filterOutVectorFields(binlogPaths []*datapb.FieldBinlog,
 	vectorFields []int64) []*datapb.FieldBinlog {
@@ -301,7 +300,7 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, binlogPaths
 	return nil
 }
 
-func newSegmentLoader(ctx context.Context, rootCoord types.RootCoord, indexCoord types.IndexCoord, dataCoord types.DataCoord, replica ReplicaInterface, etcdKV *etcdkv.EtcdKV) *segmentLoader {
+func newSegmentLoader(ctx context.Context, rootCoord types.RootCoord, indexCoord types.IndexCoord, replica ReplicaInterface, etcdKV *etcdkv.EtcdKV) *segmentLoader {
 	option := &minioKV.Option{
 		Address:           Params.MinioEndPoint,
 		AccessKeyID:       Params.MinioAccessKeyID,
@@ -319,8 +318,6 @@ func newSegmentLoader(ctx context.Context, rootCoord types.RootCoord, indexCoord
 	iLoader := newIndexLoader(ctx, rootCoord, indexCoord, replica)
 	return &segmentLoader{
 		historicalReplica: replica,
-
-		dataCoord: dataCoord,
 
 		minioKV: client,
 		etcdKV:  etcdKV,
