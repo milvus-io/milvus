@@ -75,7 +75,7 @@ type Server struct {
 	meta            *meta
 	segmentManager  Manager
 	allocator       allocator
-	cluster         *cluster
+	cluster         *Cluster
 	rootCoordClient types.RootCoord
 	ddChannelName   string
 
@@ -169,13 +169,9 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) initCluster() error {
-	dManager, err := newClusterNodeManager(s.kvClient)
-	if err != nil {
-		return err
-	}
-	sManager := newClusterSessionManager(s.ctx, s.dataClientCreator)
-	s.cluster = newCluster(s.ctx, dManager, sManager, s)
-	return nil
+	var err error
+	s.cluster, err = NewCluster(s.ctx, s.kvClient, NewNodesInfo(), s)
+	return err
 }
 
 func (s *Server) initServiceDiscovery() error {
@@ -186,19 +182,18 @@ func (s *Server) initServiceDiscovery() error {
 	}
 	log.Debug("registered sessions", zap.Any("sessions", sessions))
 
-	datanodes := make([]*datapb.DataNodeInfo, 0, len(sessions))
+	datanodes := make([]*NodeInfo, 0, len(sessions))
 	for _, session := range sessions {
-		datanodes = append(datanodes, &datapb.DataNodeInfo{
+		info := &datapb.DataNodeInfo{
 			Address:  session.Address,
 			Version:  session.ServerID,
 			Channels: []*datapb.ChannelStatus{},
-		})
+		}
+		nodeInfo := NewNodeInfo(s.ctx, info)
+		datanodes = append(datanodes, nodeInfo)
 	}
 
-	if err := s.cluster.startup(datanodes); err != nil {
-		log.Debug("DataCoord loadMetaFromRootCoord failed", zap.Error(err))
-		return err
-	}
+	s.cluster.Startup(datanodes)
 
 	s.eventCh = s.session.WatchServices(typeutil.DataNodeRole, rev+1)
 	return nil
@@ -285,7 +280,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 			log.Debug("Receive DataNode segment statistics update")
 			ssMsg := msg.(*msgstream.SegmentStatisticsMsg)
 			for _, stat := range ssMsg.SegStats {
-				s.segmentManager.UpdateSegmentStats(stat)
+				s.meta.SetCurrentRows(stat.GetSegmentID(), stat.GetNumRows())
 			}
 		}
 	}
@@ -346,10 +341,10 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 						zap.Error(err))
 					continue
 				}
-				segmentInfos = append(segmentInfos, sInfo)
+				segmentInfos = append(segmentInfos, sInfo.SegmentInfo)
 			}
 			if len(segmentInfos) > 0 {
-				s.cluster.flush(segmentInfos)
+				s.cluster.Flush(segmentInfos)
 			}
 			s.segmentManager.ExpireAllocations(ch, ts)
 		}
@@ -365,24 +360,23 @@ func (s *Server) startWatchService(ctx context.Context) {
 			log.Debug("watch service shutdown")
 			return
 		case event := <-s.eventCh:
-			datanode := &datapb.DataNodeInfo{
+			info := &datapb.DataNodeInfo{
 				Address:  event.Session.Address,
 				Version:  event.Session.ServerID,
 				Channels: []*datapb.ChannelStatus{},
 			}
+			node := NewNodeInfo(ctx, info)
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:
 				log.Info("Received datanode register",
-					zap.String("address", datanode.Address),
-					zap.Int64("serverID", datanode.Version))
-				//s.cluster.register(datanode)
-				s.cluster.refresh(s.loadDataNodes())
+					zap.String("address", info.Address),
+					zap.Int64("serverID", info.Version))
+				s.cluster.Register(node)
 			case sessionutil.SessionDelEvent:
 				log.Info("Received datanode unregister",
-					zap.String("address", datanode.Address),
-					zap.Int64("serverID", datanode.Version))
-				//s.cluster.unregister(datanode)
-				s.cluster.refresh(s.loadDataNodes())
+					zap.String("address", info.Address),
+					zap.Int64("serverID", info.Version))
+				s.cluster.UnRegister(node)
 			default:
 				log.Warn("receive unknown service event type",
 					zap.Any("type", event.EventType))
@@ -433,7 +427,7 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_SegmentFlushDone,
 				},
-				Segment: segment,
+				Segment: segment.SegmentInfo,
 			}
 			resp, err := s.rootCoordClient.SegmentFlushCompleted(ctx, req)
 			if err = VerifyResponse(resp, err); err != nil {
@@ -482,7 +476,7 @@ func (s *Server) Stop() error {
 	}
 	log.Debug("DataCoord server shutdown")
 	atomic.StoreInt64(&s.isServing, ServerStateStopped)
-	s.cluster.releaseSessions()
+	s.cluster.Close()
 	s.stopServerLoop()
 	return nil
 }

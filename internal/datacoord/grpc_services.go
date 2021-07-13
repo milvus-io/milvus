@@ -60,6 +60,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		resp.Status.Reason = fmt.Sprintf("Failed to flush %d, %s", req.CollectionID, err)
 		return resp, nil
 	}
+	log.Debug("flush response with segments", zap.Any("segments", sealedSegments))
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.DbID = req.GetDbID()
 	resp.CollectionID = req.GetCollectionID()
@@ -110,8 +111,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 		//assigns = append(assigns, result)
 		//continue
 		//}
-
-		s.cluster.watchIfNeeded(r.ChannelName, r.CollectionID)
+		s.cluster.Watch(r.ChannelName, r.CollectionID)
 
 		segmentID, retCount, expireTs, err := s.segmentManager.AllocSegment(ctx,
 			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
@@ -275,7 +275,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 			resp.Status.Reason = fmt.Sprintf("Failed to get segment %d", id)
 			return resp, nil
 		}
-		infos = append(infos, info)
+		infos = append(infos, info.SegmentInfo)
 	}
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.Infos = infos

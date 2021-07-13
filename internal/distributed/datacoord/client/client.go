@@ -131,6 +131,7 @@ func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error)
 	if err == nil {
 		return ret, nil
 	}
+	log.Debug("DataCoord Client grpc error", zap.Error(err))
 	err = c.connect()
 	if err != nil {
 		return ret, errors.New("Connect to datacoord failed with error:\n" + err.Error())

@@ -8,11 +8,13 @@ on:
     paths:
       - 'build/docker/builder/**'
       - '.github/workflows/publish-builder.yaml'
+      - '!**.md'
   pull_request:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
       - 'build/docker/builder/**'
       - '.github/workflows/publish-builder.yaml'
+      - '!**.md'
 
 jobs:
   publish-builder:
@@ -22,24 +24,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu18.04]
+        os: [ubuntu18.04, centos7]
     env:
       OS_NAME: ${{ matrix.os }}
+      GITHUB_TOKEN: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v2
       - name: Get version from system time after release step
         id: extracter
-        run: echo "::set-output name=version::$(date +%Y%m%d-%H%M%S)"
+        run: echo "::set-output name=version::$(date +%Y%m%d)"
       - name: Docker Pull
         shell: bash
         run: |
-          DATE_VERSION=${{matrix.os}}-latest docker-compose pull --ignore-pull-failures builder
+          DATE_VERSION=latest docker-compose pull --ignore-pull-failures builder
       - name: Docker Build
         shell: bash
         run: |
-          DATE_VERSION=${{matrix.os}}-latest docker-compose build builder
-          DATE_VERSION=${{matrix.os}}-${{ steps.extracter.outputs.version }} docker-compose build builder
+          DATE_VERSION=latest docker-compose build builder
+          DATE_VERSION=${{ steps.extracter.outputs.version }} docker-compose build builder
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true
@@ -47,5 +50,21 @@ jobs:
         run: |
           docker login -u ${{ secrets.DOCKERHUB_USER }} \
                        -p ${{ secrets.DOCKERHUB_TOKEN }}
-          DATE_VERSION=${{matrix.os}}-latest docker-compose push builder
-          DATE_VERSION=${{matrix.os}}-${{ steps.extracter.outputs.version }} docker-compose push builder
+          DATE_VERSION=latest docker-compose push builder
+          DATE_VERSION=${{ steps.extracter.outputs.version }} docker-compose push builder
+      - name: Update Builder Image Changes
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        continue-on-error: true
+        shell: bash
+        run: |
+          sed -i "s#DATE_VERSION=.*#DATE_VERSION=${{ steps.extracter.outputs.version }}#g" .env
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add .env
+          git commit -m "Update Builder Image Changes"
+      - name: Push Builder Image Changes
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu18.04'
+        continue-on-error: true
+        shell: bash
+        run: |
+          git push "https://github.com/$GITHUB_REPOSITORY.git" HEAD:${{ github.ref }} --follow-tags

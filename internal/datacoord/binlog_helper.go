@@ -153,7 +153,7 @@ func (s *Server) GetVChanPositions(vchans []vchannel, isAccurate bool) ([]*datap
 				continue
 			}
 
-			unflushed = append(unflushed, s)
+			unflushed = append(unflushed, s.SegmentInfo)
 
 			if seekPosition == nil || !useUnflushedPosition || s.DmlPosition.Timestamp < seekPosition.Timestamp {
 				useUnflushedPosition = true

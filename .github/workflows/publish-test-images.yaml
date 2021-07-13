@@ -9,18 +9,22 @@ on:
       - 'tests/docker/Dockerfile'
       - 'tests/python_test/requirements.txt'
       - '.github/workflows/publish-test-images.yaml'
+      - '!**.md'
   pull_request:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
       - 'tests/docker/Dockerfile'
       - 'tests/python_test/requirements.txt'
       - '.github/workflows/publish-test-images.yaml'
+      - '!**.md'
 
 jobs:
   publish-pytest-images:
     name: PyTest
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      GITHUB_TOKEN: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -29,6 +33,11 @@ jobs:
         run: |
           echo "::set-output name=version::$(date +%Y%m%d)"
           echo "::set-output name=sha_short::$(git rev-parse --short HEAD)"
+      - name: Docker Pull
+        shell: bash
+        working-directory: tests/docker
+        run: |
+          IMAGE_TAG=latest docker-compose pull --ignore-pull-failures pytest
       - name: Docker Build
         shell: bash
         working-directory: tests/docker
@@ -47,3 +56,20 @@ jobs:
           IMAGE_TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} docker-compose push pytest
           IMAGE_TAG=latest docker-compose push pytest
           echo "Push pytest image Succeeded"
+      - name: Update Pytest Image Changes
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        continue-on-error: true
+        shell: bash
+        working-directory: tests/docker
+        run: |
+          sed -i "s#IMAGE_TAG=.*#IMAGE_TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" .env
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add .env
+          git commit -m "Update Pytest Image Changes"
+      - name: Push Pytest Image Changes
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        continue-on-error: true
+        shell: bash
+        run: |
+          git push "https://github.com/$GITHUB_REPOSITORY.git" HEAD:${{ github.ref }} --follow-tags

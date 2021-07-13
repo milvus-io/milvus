@@ -1,6 +1,6 @@
 #!/usr/bin/env groovy
 
-int timeout_minutes = 30
+int timeout_minutes = 45
 int delay_minutes = 5
 int ci_timeout = (timeout_minutes - delay_minutes) * 60
 
@@ -58,7 +58,7 @@ pipeline {
                                         if ("${MILVUS_CLIENT}" == "pymilvus") {
                                             sh """
                                             MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
-                                            timeout ${ci_timeout} \
+                                            timeout -v ${ci_timeout} \
                                             ./e2e-k8s.sh \
                                             --node-image registry.zilliz.com/kindest/node:v1.20.2 \
                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
@@ -67,7 +67,7 @@ pipeline {
                                         } else if ("${MILVUS_CLIENT}" == "pymilvus-orm") {
                                             sh """
                                             MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
-                                            timeout ${ci_timeout} \
+                                            timeout -v ${ci_timeout} \
                                             ./e2e-k8s.sh \
                                             --node-image registry.zilliz.com/kindest/node:v1.20.2 \
                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
@@ -105,7 +105,7 @@ pipeline {
                                     }
                                     archiveArtifacts artifacts: "**.tar.gz", allowEmptyArchive: true
                                     sh 'docker rm -f \$(docker network inspect -f \'{{ range \$key, \$value := .Containers }}{{ printf "%s " \$key}}{{ end }}\' kind) || true'
-                                    sh 'docker network rm kind 2>&1 > /dev/null || true'
+                                    sh 'docker network rm kind > /dev/null 2>&1 || true'
                                 }
                             }
                         }
