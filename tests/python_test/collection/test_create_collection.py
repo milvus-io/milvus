@@ -88,7 +88,7 @@ class TestCreateCollection:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
             message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "Create collection failed: collection %s exist" % collection
+            assert message == "Create collection failed: meta table add collection failed,error = collection %s exist" % collection
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_create_collection_after_insert_flush(self, connect, collection):
@@ -105,7 +105,7 @@ class TestCreateCollection:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
             message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "Create collection failed: collection %s exist" % collection
+            assert message == "Create collection failed: meta table add collection failed,error = collection %s exist" % collection
 
     # TODO: assert exception
     def test_create_collection_without_connection(self, dis_connect):
@@ -133,7 +133,7 @@ class TestCreateCollection:
             code = getattr(e, 'code', "The exception does not contain the field of code.")
             assert code == 1
             message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "Create collection failed: collection %s exist" % collection_name
+            assert message == "Create collection failed: meta table add collection failed,error = collection %s exist" % collection_name
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_create_after_drop_collection(self, connect, collection):
