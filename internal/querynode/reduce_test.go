@@ -63,7 +63,7 @@ func TestReduce_AllFunc(t *testing.T) {
 		log.Print("marshal placeholderGroup failed")
 	}
 
-	plan, err := createPlan(collection, dslString)
+	plan, err := createSearchPlan(collection, dslString)
 	assert.NoError(t, err)
 	holder, err := parseSearchRequest(plan, placeGroupByte)
 	assert.NoError(t, err)

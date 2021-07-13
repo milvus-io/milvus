@@ -426,7 +426,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 	}
 
 	travelTimestamp := Timestamp(1020)
-	plan, err := createPlan(collection, dslString)
+	plan, err := createSearchPlan(collection, dslString)
 	assert.NoError(t, err)
 	holder, err := parseSearchRequest(plan, placeHolderGroupBlob)
 	assert.NoError(t, err)

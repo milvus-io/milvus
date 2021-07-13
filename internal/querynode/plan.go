@@ -28,14 +28,14 @@ import (
 )
 
 type SearchPlan struct {
-	cSearchPlan C.CPlan
+	cSearchPlan C.CSearchPlan
 }
 
-func createPlan(col *Collection, dsl string) (*SearchPlan, error) {
+func createSearchPlan(col *Collection, dsl string) (*SearchPlan, error) {
 	cDsl := C.CString(dsl)
 	defer C.free(unsafe.Pointer(cDsl))
-	var cPlan C.CPlan
-	status := C.CreatePlan(col.collectionPtr, cDsl, &cPlan)
+	var cPlan C.CSearchPlan
+	status := C.CreateSearchPlan(col.collectionPtr, cDsl, &cPlan)
 
 	err1 := HandleCStatus(&status, "Create Plan failed")
 	if err1 != nil {
@@ -46,9 +46,9 @@ func createPlan(col *Collection, dsl string) (*SearchPlan, error) {
 	return newPlan, nil
 }
 
-func createPlanByExpr(col *Collection, expr []byte) (*SearchPlan, error) {
-	var cPlan C.CPlan
-	status := C.CreatePlanByExpr(col.collectionPtr, (*C.char)(unsafe.Pointer(&expr[0])), (C.int64_t)(len(expr)), &cPlan)
+func createSearchPlanByExpr(col *Collection, expr []byte) (*SearchPlan, error) {
+	var cPlan C.CSearchPlan
+	status := C.CreateSearchPlanByExpr(col.collectionPtr, (*C.char)(unsafe.Pointer(&expr[0])), (C.int64_t)(len(expr)), &cPlan)
 
 	err1 := HandleCStatus(&status, "Create Plan by expr failed")
 	if err1 != nil {
@@ -72,7 +72,7 @@ func (plan *SearchPlan) getMetricType() string {
 }
 
 func (plan *SearchPlan) delete() {
-	C.DeletePlan(plan.cSearchPlan)
+	C.DeleteSearchPlan(plan.cSearchPlan)
 }
 
 type searchRequest struct {

@@ -214,7 +214,7 @@ TEST(CApiTest, SearchTest) {
 
     void* plan = nullptr;
 
-    auto status = CreatePlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlan(collection, dsl_string, &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -230,7 +230,7 @@ TEST(CApiTest, SearchTest) {
     auto res = Search(segment, plan, placeholderGroup, timestamps[0], &search_result);
     ASSERT_EQ(res.error_code, Success);
 
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteQueryResult(search_result);
     DeleteCollection(collection);
@@ -297,7 +297,7 @@ TEST(CApiTest, SearchTestWithExpr) {
 
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -313,7 +313,7 @@ TEST(CApiTest, SearchTestWithExpr) {
     auto res = Search(segment, plan, placeholderGroup, timestamps[0], &search_result);
     ASSERT_EQ(res.error_code, Success);
 
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteQueryResult(search_result);
     DeleteCollection(collection);
@@ -611,7 +611,7 @@ TEST(CApiTest, Reduce) {
 
     void* plan = nullptr;
 
-    auto status = CreatePlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlan(collection, dsl_string, &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -654,7 +654,7 @@ TEST(CApiTest, Reduce) {
     GetHitSizePeerQueries(reorganize_search_result, 0, hit_size_peer_query.data());
     assert(hit_size_peer_query[0] > 0);
 
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteQueryResult(res1);
     DeleteQueryResult(res2);
@@ -723,7 +723,7 @@ TEST(CApiTest, ReduceSearchWithExpr) {
 
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -766,7 +766,7 @@ TEST(CApiTest, ReduceSearchWithExpr) {
     GetHitSizePeerQueries(reorganize_search_result, 0, hit_size_peer_query.data());
     assert(hit_size_peer_query[0] > 0);
 
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteQueryResult(res1);
     DeleteQueryResult(res2);
@@ -912,7 +912,7 @@ TEST(CApiTest, UpdateSegmentIndex_Without_Predicate) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreatePlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlan(collection, dsl_string, &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -985,7 +985,7 @@ TEST(CApiTest, UpdateSegmentIndex_Without_Predicate) {
     ASSERT_EQ(search_result_on_raw_index_json.dump(1), search_result_on_bigIndex_json.dump(1));
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteQueryResult(c_search_result_on_smallIndex);
     DeleteQueryResult(c_search_result_on_bigIndex);
@@ -1032,7 +1032,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_Without_Predicate) {
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -1105,7 +1105,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_Without_Predicate) {
     ASSERT_EQ(search_result_on_raw_index_json.dump(1), search_result_on_bigIndex_json.dump(1));
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteQueryResult(c_search_result_on_smallIndex);
     DeleteQueryResult(c_search_result_on_bigIndex);
@@ -1168,7 +1168,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreatePlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlan(collection, dsl_string, &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -1243,7 +1243,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Range) {
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteQueryResult(c_search_result_on_smallIndex);
     DeleteQueryResult(c_search_result_on_bigIndex);
@@ -1319,7 +1319,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Range) {
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -1394,7 +1394,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Range) {
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteQueryResult(c_search_result_on_smallIndex);
     DeleteQueryResult(c_search_result_on_bigIndex);
@@ -1456,7 +1456,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Term) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreatePlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlan(collection, dsl_string, &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -1531,7 +1531,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Term) {
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteQueryResult(c_search_result_on_smallIndex);
     DeleteQueryResult(c_search_result_on_bigIndex);
@@ -1658,7 +1658,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Term) {
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -1733,7 +1733,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Term) {
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteQueryResult(c_search_result_on_smallIndex);
     DeleteQueryResult(c_search_result_on_bigIndex);
@@ -1796,7 +1796,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreatePlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlan(collection, dsl_string, &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -1872,7 +1872,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Range) {
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteQueryResult(c_search_result_on_smallIndex);
     DeleteQueryResult(c_search_result_on_bigIndex);
@@ -1948,7 +1948,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Range) {
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -2024,7 +2024,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Range) {
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteQueryResult(c_search_result_on_smallIndex);
     DeleteQueryResult(c_search_result_on_bigIndex);
@@ -2086,7 +2086,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Term) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreatePlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlan(collection, dsl_string, &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -2169,7 +2169,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Term) {
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteQueryResult(c_search_result_on_smallIndex);
     DeleteQueryResult(c_search_result_on_bigIndex);
@@ -2296,7 +2296,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Term) {
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -2379,7 +2379,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Term) {
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteQueryResult(c_search_result_on_smallIndex);
     DeleteQueryResult(c_search_result_on_bigIndex);
@@ -2483,7 +2483,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreatePlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlan(collection, dsl_string, &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -2581,7 +2581,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteQueryResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
@@ -2650,7 +2650,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -2748,7 +2748,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteQueryResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);

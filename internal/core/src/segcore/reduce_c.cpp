@@ -168,7 +168,7 @@ ReorganizeQueryResults(CMarshaledHits* c_marshaled_hits,
                        CQueryResult* c_search_results,
                        bool* is_selected,
                        int64_t num_segments,
-                       CPlan c_plan) {
+                       CSearchPlan c_plan) {
     try {
         auto marshaledHits = std::make_unique<MarshaledHits>(num_groups);
         auto topk = GetTopK(c_plan);
@@ -256,7 +256,7 @@ ReorganizeSingleQueryResult(CMarshaledHits* c_marshaled_hits,
                             CPlaceholderGroup* c_placeholder_groups,
                             int64_t num_groups,
                             CQueryResult c_search_result,
-                            CPlan c_plan) {
+                            CSearchPlan c_plan) {
     try {
         auto marshaledHits = std::make_unique<MarshaledHits>(num_groups);
         auto search_result = (SearchResult*)c_search_result;
