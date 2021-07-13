@@ -2,43 +2,30 @@
 name: "\U0001F41B Bug report"
 about: Create a bug report to help us improve Milvus
 title: ''
-labels: ''
+labels: needs-triage
 assignees: ''
 
 ---
 
-**Please state your issue using the following template and, most importantly, in English.**
-
-**Describe the bug**
-A clear and concise description of what the bug is.
-
-**Steps/Code to reproduce behavior**
-Follow this [guide](http://matthewrocklin.com/blog/work/2018/02/28/minimal-bug-reports) to craft a minimal bug report. This helps us reproduce the issue you're having and resolve the issue more quickly.
-
-**Expected behavior**
-A clear and concise description of what you expected to happen.
-
-**Method of installation**
-- [ ] Docker/cpu
-- [ ] Docker/gpu
-- [ ] Build from source
-
-**Environment details**
-- Hardware/Software conditions (OS, CPU, GPU, Memory)
+<!-- Please state your issue using the following template and, most importantly, in English. -->
+#### Describe the bug:
 
 
-- Milvus version (master or released version)
+#### Expected behavior:
 
 
-**Configuration file**
-Settings you made in `server_config.yaml` or `milvus.yaml`
+#### Steps/Code to reproduce:
 
-```yaml
-paste-file-content-here
-```
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+#### Environment:
+- Milvus version(e.g. v1.1.0 or 8b23a93): 
+- SDK version(e.g. pymilvus v2.0.0rc2):
+- OS(Ubuntu or CentOS): 
+- CPU/Memory: 
+- GPU: 
+- Others: 
 
-**Additional context**
-Add any other context about the problem here.
+#### Configuration file:
+
+
+#### Additional context:

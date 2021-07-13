@@ -1,5 +1,5 @@
 ---
-name: "Enhancement request"
+name: Enhancement request
 about: Suggest an enhancement idea for Milvus
 title: ''
 labels: ''
@@ -12,4 +12,3 @@ assignees: ''
 **What would you like to be added ?**
 
 **Why is this needed ?**
-
