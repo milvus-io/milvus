@@ -1121,7 +1121,7 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 			if err != nil {
 				return err
 			}
-			result, err := segment.segmentGetEntityByIds(plan)
+			result, err := segment.getEntityByIds(plan)
 			if err != nil {
 				return err
 			}
@@ -1141,7 +1141,7 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 			if err != nil {
 				return err
 			}
-			result, err := segment.segmentGetEntityByIds(plan)
+			result, err := segment.getEntityByIds(plan)
 			if err != nil {
 				return err
 			}
