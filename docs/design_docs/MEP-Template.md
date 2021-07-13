@@ -1,47 +1,46 @@
-# MEP(Milvus Enhancement Proposals) Templates
-Current state: [One of "Under Discussion", "Accepted", "Rejected"]
+# Milvus Enhancement Proposal (MEP) Template
+Current state: [Select one: Under Discussion, Accepted, or Rejected]
 
-ISSUE: link to the github issue
+Issue: [Include Github issue link(s).]
 
-PRs: link to the github PRs
+Pull request (PR): [Include Github PR link(s).]
 
-Keywords: list keywords about this mep
+Keywords: [List keywords relevant to this proposal.]
 
 Released: <Milvus Release Version>
 
-## Summary(required)
+## *Summary
 
-What are we going to do?
+What does this proposal entail? How will it be accomplished?
 
-## Motivation(required)
+## *Motivation
 
-Why are we doing this?
+Why should this proposal be pursued?
+  
+## *Design Details
 
-## Public Interfaces(optional)
+Describe the proposal in appropriate detail. Depending on the specifics of the proposal, this may be fairly extensive and include large subcomponents. Conversely, some proposals may only require a few sentences. Use your best judgement based on the particulars of your proposal. 
 
-Briefly list any new interfaces that will be introduced as part of this proposal or any existing interfaces that will be removed or changed.
-
-## Design Details(required)
-
-Describe the new thing you want to do in appropriate detail. This may be fairly extensive and have large subsections of its own. Or it may be a few sentences. Use judgement based on the scope of the change.
-
-## Compatibility, Deprecation, and Migration Plan(optional)
+## Compatibility, Deprecation, and Migration Plan
 - What impact (if any) will there be on existing users?
-- If we are changing behavior how will we phase out the older behavior?
-- If we need special migration tools, describe them here.
-- When will we remove the existing behavior?
+- If this proposal necessitates behavior change, how and when will we phase out existing behavior?
+- What special migration tools (if any) are needed?
+
+## *Test Plan
+
+Describe in few sentences how the MEP will be tested. We are mostly interested in system tests (since unit-tests are specific to implementation details). How do we know if the implementation works as expected? How do we know nothing else broke?
+
+## Public Interfaces
+
+List any new interfaces that will be introduced as part of this proposal, or any existing interfaces that will be removed or changed.
 
 
-## Test Plan(required)
+## Rejected Alternatives
 
-Describe in few sentences how the MEP will be tested. We are mostly interested in system tests (since unit-tests are specific to implementation details). How will we know that the implementation works as expected? How will we know nothing broke?
+Do alternative methods for implementing your proposal exist? If so, list them here. Expand on the thinking behind the design specifics and benefits over other options. 
 
-## Rejected Alternatives(optional)
+## References
 
-If there are alternative ways of accomplishing the same thing, what were they? The purpose of this section is to motivate why the design is the way it is and not some other way.
+Briefly list all references used in this proposal. 
 
-## References(optional)
-
-Briefly list all references
-
-
+*Note: * Indicates mandatory field. Template items without asterisks are optional.*
