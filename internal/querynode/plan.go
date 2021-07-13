@@ -106,8 +106,8 @@ func (pg *searchRequest) delete() {
 }
 
 type RetrievePlan struct {
-	RetrievePlanPtr C.CRetrievePlan
-	Timestamp       uint64
+	cRetrievePlan C.CRetrievePlan
+	Timestamp     uint64
 }
 
 func createRetrievePlan(col *Collection, msg *segcorepb.RetrieveRequest, timestamp uint64) (*RetrievePlan, error) {
@@ -117,7 +117,7 @@ func createRetrievePlan(col *Collection, msg *segcorepb.RetrieveRequest, timesta
 	}
 	plan := new(RetrievePlan)
 	plan.Timestamp = timestamp
-	status := C.CreateRetrievePlan(col.collectionPtr, protoCGo.CProto, &plan.RetrievePlanPtr)
+	status := C.CreateRetrievePlan(col.collectionPtr, protoCGo.CProto, &plan.cRetrievePlan)
 	err2 := HandleCStatus(&status, "create retrieve plan failed")
 	if err2 != nil {
 		return nil, err2
@@ -126,5 +126,5 @@ func createRetrievePlan(col *Collection, msg *segcorepb.RetrieveRequest, timesta
 }
 
 func (plan *RetrievePlan) delete() {
-	C.DeleteRetrievePlan(plan.RetrievePlanPtr)
+	C.DeleteRetrievePlan(plan.cRetrievePlan)
 }

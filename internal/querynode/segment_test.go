@@ -159,7 +159,7 @@ func TestSegment_retrieve(t *testing.T) {
 	defer plan.delete()
 	assert.NoError(t, err)
 
-	res, err := segment.segmentGetEntityByIds(plan)
+	res, err := segment.getEntityByIds(plan)
 	assert.NoError(t, err)
 
 	assert.Equal(t, res.Ids.GetIntId().Data, []int64{2, 3, 1})

@@ -249,7 +249,7 @@ func (s *Segment) search(plan *SearchPlan,
 }
 
 func (s *Segment) getEntityByIds(plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
-	resProto := C.GetEntityByIds(s.segmentPtr, plan.RetrievePlanPtr, C.uint64_t(plan.Timestamp))
+	resProto := C.GetEntityByIds(s.segmentPtr, plan.cRetrievePlan, C.uint64_t(plan.Timestamp))
 	result := new(segcorepb.RetrieveResults)
 	err := HandleCProtoResult(&resProto, result)
 	if err != nil {
