@@ -1178,7 +1178,7 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Debug("CreateCollection failed", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
+		log.Debug("CreateCollection failed", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "Create collection failed: " + err.Error(),
