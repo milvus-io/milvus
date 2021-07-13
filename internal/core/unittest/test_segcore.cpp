@@ -105,10 +105,10 @@ TEST(SegmentCoreTest, MockTest) {
     RowBasedRawData data_chunk{raw_data.data(), (int)line_sizeof, N};
     auto offset = segment->PreInsert(N);
     segment->Insert(offset, N, uids.data(), timestamps.data(), data_chunk);
-    QueryResult query_result;
-    //    segment->Query(nullptr, 0, query_result);
+    SearchResult search_result;
+    // segment->Query(nullptr, 0, query_result);
     segment->Close();
-    //    segment->BuildIndex();
+    // segment->BuildIndex();
     int i = 0;
     i++;
 }

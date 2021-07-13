@@ -59,29 +59,29 @@ DeleteSegment(CSegmentInterface c_segment) {
 }
 
 void
-DeleteQueryResult(CQueryResult query_result) {
-    auto res = (milvus::QueryResult*)query_result;
+DeleteSearchResult(CSearchResult search_result) {
+    auto res = (milvus::SearchResult*)search_result;
     delete res;
 }
 
 CStatus
 Search(CSegmentInterface c_segment,
-       CPlan c_plan,
+       CSearchPlan c_plan,
        CPlaceholderGroup c_placeholder_group,
        uint64_t timestamp,
-       CQueryResult* result) {
-    auto query_result = std::make_unique<milvus::QueryResult>();
+       CSearchResult* result) {
+    auto search_result = std::make_unique<milvus::SearchResult>();
     try {
         auto segment = (milvus::segcore::SegmentInterface*)c_segment;
         auto plan = (milvus::query::Plan*)c_plan;
         auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(c_placeholder_group);
-        *query_result = segment->Search(plan, *phg_ptr, timestamp);
-        if (plan->plan_node_->query_info_.metric_type_ != milvus::MetricType::METRIC_INNER_PRODUCT) {
-            for (auto& dis : query_result->result_distances_) {
+        *search_result = segment->Search(plan, *phg_ptr, timestamp);
+        if (plan->plan_node_->search_info_.metric_type_ != milvus::MetricType::METRIC_INNER_PRODUCT) {
+            for (auto& dis : search_result->result_distances_) {
                 dis *= -1;
             }
         }
-        *result = query_result.release();
+        *result = search_result.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
@@ -89,10 +89,10 @@ Search(CSegmentInterface c_segment,
 }
 
 CStatus
-FillTargetEntry(CSegmentInterface c_segment, CPlan c_plan, CQueryResult c_result) {
+FillTargetEntry(CSegmentInterface c_segment, CSearchPlan c_plan, CSearchResult c_result) {
     auto segment = (milvus::segcore::SegmentInterface*)c_segment;
     auto plan = (milvus::query::Plan*)c_plan;
-    auto result = (milvus::QueryResult*)c_result;
+    auto result = (milvus::SearchResult*)c_result;
 
     try {
         segment->FillTargetEntry(plan, *result);

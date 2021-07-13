@@ -11,15 +11,15 @@
 
 #pragma once
 
-#include "query/SubQueryResult.h"
+#include "query/SubSearchResult.h"
 #include "query/helper.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include "utils/Json.h"
 
 namespace milvus::query {
-SubQueryResult
-SearchOnIndex(const dataset::QueryDataset& query_dataset,
+SubSearchResult
+SearchOnIndex(const dataset::SearchDataset& search_dataset,
               const knowhere::VecIndex& indexing,
               const knowhere::Config& search_conf,
               const faiss::BitsetView& bitset);

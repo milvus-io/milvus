@@ -23,7 +23,7 @@ namespace impl {
 // WILL BE USED BY GENERATOR UNDER suvlim/core_gen/
 class VerifyPlanNodeVisitor : PlanNodeVisitor {
  public:
-    using RetType = QueryResult;
+    using RetType = SearchResult;
     VerifyPlanNodeVisitor() = default;
 
  private:
@@ -74,7 +74,7 @@ InferBinaryIndexType(const Json& search_params) {
 
 void
 VerifyPlanNodeVisitor::visit(FloatVectorANNS& node) {
-    auto& search_params = node.query_info_.search_params_;
+    auto& search_params = node.search_info_.search_params_;
     auto inferred_type = InferIndexType(search_params);
     auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(inferred_type);
     auto index_mode = knowhere::IndexMode::MODE_CPU;
@@ -92,7 +92,7 @@ VerifyPlanNodeVisitor::visit(FloatVectorANNS& node) {
 
 void
 VerifyPlanNodeVisitor::visit(BinaryVectorANNS& node) {
-    auto& search_params = node.query_info_.search_params_;
+    auto& search_params = node.search_info_.search_params_;
     auto inferred_type = InferBinaryIndexType(search_params);
     auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(inferred_type);
     auto index_mode = knowhere::IndexMode::MODE_CPU;

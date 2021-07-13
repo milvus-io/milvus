@@ -781,16 +781,16 @@ func (q *queryCollection) search(msg queryMsg) error {
 		return err
 	}
 
-	var plan *Plan
+	var plan *SearchPlan
 	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
 		expr := searchMsg.SerializedExprPlan
-		plan, err = createPlanByExpr(collection, expr)
+		plan, err = createSearchPlanByExpr(collection, expr)
 		if err != nil {
 			return err
 		}
 	} else {
 		dsl := searchMsg.Dsl
-		plan, err = createPlan(collection, dsl)
+		plan, err = createSearchPlan(collection, dsl)
 		if err != nil {
 			return err
 		}
@@ -931,8 +931,8 @@ func (q *queryCollection) search(msg queryMsg) error {
 		if err != nil {
 			return err
 		}
-		marshaledHits, err = reorganizeSingleQueryResult(plan, searchRequests, searchResults[0])
-		sp.LogFields(oplog.String("statistical time", "reorganizeSingleQueryResult end"))
+		marshaledHits, err = reorganizeSingleSearchResult(plan, searchRequests, searchResults[0])
+		sp.LogFields(oplog.String("statistical time", "reorganizeSingleSearchResult end"))
 		if err != nil {
 			return err
 		}
@@ -947,8 +947,8 @@ func (q *queryCollection) search(msg queryMsg) error {
 		if err != nil {
 			return err
 		}
-		marshaledHits, err = reorganizeQueryResults(plan, searchRequests, searchResults, numSegment, inReduced)
-		sp.LogFields(oplog.String("statistical time", "reorganizeQueryResults end"))
+		marshaledHits, err = reorganizeSearchResults(plan, searchRequests, searchResults, numSegment, inReduced)
+		sp.LogFields(oplog.String("statistical time", "reorganizeSearchResults end"))
 		if err != nil {
 			return err
 		}
@@ -1121,7 +1121,7 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 			if err != nil {
 				return err
 			}
-			result, err := segment.segmentGetEntityByIds(plan)
+			result, err := segment.getEntityByIds(plan)
 			if err != nil {
 				return err
 			}
@@ -1141,7 +1141,7 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 			if err != nil {
 				return err
 			}
-			result, err := segment.segmentGetEntityByIds(plan)
+			result, err := segment.getEntityByIds(plan)
 			if err != nil {
 				return err
 			}

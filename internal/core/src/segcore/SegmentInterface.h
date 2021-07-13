@@ -34,9 +34,9 @@ class SegmentInterface {
  public:
     // fill results according to target_entries in plan
     virtual void
-    FillTargetEntry(const query::Plan* plan, QueryResult& results) const = 0;
+    FillTargetEntry(const query::Plan* plan, SearchResult& results) const = 0;
 
-    virtual QueryResult
+    virtual SearchResult
     Search(const query::Plan* Plan, const query::PlaceholderGroup& placeholder_group, Timestamp timestamp) const = 0;
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
@@ -79,13 +79,13 @@ class SegmentInternalInterface : public SegmentInterface {
         return *ptr;
     }
 
-    QueryResult
+    SearchResult
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup& placeholder_group,
            Timestamp timestamp) const override;
 
     void
-    FillTargetEntry(const query::Plan* plan, QueryResult& results) const override;
+    FillTargetEntry(const query::Plan* plan, SearchResult& results) const override;
 
     std::unique_ptr<proto::segcore::RetrieveResults>
     GetEntityById(const std::vector<FieldOffset>& field_offsets,
@@ -98,12 +98,12 @@ class SegmentInternalInterface : public SegmentInterface {
  public:
     virtual void
     vector_search(int64_t vec_count,
-                  query::QueryInfo query_info,
+                  query::SearchInfo search_info,
                   const void* query_data,
                   int64_t query_count,
                   Timestamp timestamp,
                   const BitsetView& bitset,
-                  QueryResult& output) const = 0;
+                  SearchResult& output) const = 0;
 
     // count of chunk that has index available
     virtual int64_t
