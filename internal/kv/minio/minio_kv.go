@@ -59,15 +59,11 @@ func NewMinIOKV(ctx context.Context, option *Option) (*MinIOKV, error) {
 		if err != nil {
 			return err
 		}
-		if option.CreateBucket {
-			if !bucketExists {
-				err = minIOClient.MakeBucket(ctx, option.BucketName, minio.MakeBucketOptions{})
-				return err
+		if !bucketExists {
+			if option.CreateBucket {
+				return minIOClient.MakeBucket(ctx, option.BucketName, minio.MakeBucketOptions{})
 			}
-		} else {
-			if !bucketExists {
-				return fmt.Errorf("bucket %s not Existed", option.BucketName)
-			}
+			return fmt.Errorf("bucket %s not Existed", option.BucketName)
 		}
 		return nil
 	}
