@@ -54,7 +54,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
     // step 3: small indexing search
     // std::vector<int64_t> final_uids(total_count, -1);
     // std::vector<float> final_dis(total_count, std::numeric_limits<float>::max());
-    SubQueryResult final_qr(num_queries, topK, metric_type);
+    SubSearchResult final_qr(num_queries, topK, metric_type);
     dataset::QueryDataset query_dataset{metric_type, num_queries, topK, dim, query_data};
     auto vec_ptr = record.get_field_data<FloatVector>(vecfield_offset);
 
@@ -159,7 +159,7 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
 
     auto vec_size_per_chunk = vec_ptr->get_size_per_chunk();
     auto max_chunk = upper_div(ins_barrier, vec_size_per_chunk);
-    SubQueryResult final_result(num_queries, topK, metric_type);
+    SubSearchResult final_result(num_queries, topK, metric_type);
     for (int chunk_id = max_indexed_id; chunk_id < max_chunk; ++chunk_id) {
         auto& chunk = vec_ptr->get_chunk(chunk_id);
         auto element_begin = chunk_id * vec_size_per_chunk;

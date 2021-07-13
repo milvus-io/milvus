@@ -33,7 +33,7 @@ TEST(Reduce, SubQueryResult) {
         }
     }
     std::default_random_engine e(42);
-    SubQueryResult final_result(num_queries, topk, metric_type);
+    SubSearchResult final_result(num_queries, topk, metric_type);
     for (int i = 0; i < iteration; ++i) {
         std::vector<int64_t> labels;
         std::vector<float> values;
@@ -48,7 +48,7 @@ TEST(Reduce, SubQueryResult) {
             std::sort(labels.begin() + n * topk, labels.begin() + n * topk + topk);
             std::sort(values.begin() + n * topk, values.begin() + n * topk + topk);
         }
-        SubQueryResult sub_result(num_queries, topk, metric_type);
+        SubSearchResult sub_result(num_queries, topk, metric_type);
         sub_result.mutable_values() = values;
         sub_result.mutable_labels() = labels;
         final_result.merge(sub_result);
@@ -68,7 +68,7 @@ TEST(Reduce, SubQueryResult) {
     }
 }
 
-TEST(Reduce, SubQueryResultDesc) {
+TEST(Reduce, SubSearchResultDesc) {
     int64_t num_queries = 512;
     int64_t topk = 32;
     int64_t iteration = 50;
@@ -84,7 +84,7 @@ TEST(Reduce, SubQueryResultDesc) {
         }
     }
     std::default_random_engine e(42);
-    SubQueryResult final_result(num_queries, topk, metric_type);
+    SubSearchResult final_result(num_queries, topk, metric_type);
     for (int i = 0; i < iteration; ++i) {
         std::vector<int64_t> labels;
         std::vector<float> values;
@@ -99,7 +99,7 @@ TEST(Reduce, SubQueryResultDesc) {
             std::sort(labels.begin() + n * topk, labels.begin() + n * topk + topk, std::greater<int64_t>());
             std::sort(values.begin() + n * topk, values.begin() + n * topk + topk, std::greater<float>());
         }
-        SubQueryResult sub_result(num_queries, topk, metric_type);
+        SubSearchResult sub_result(num_queries, topk, metric_type);
         sub_result.mutable_values() = values;
         sub_result.mutable_labels() = labels;
         final_result.merge(sub_result);

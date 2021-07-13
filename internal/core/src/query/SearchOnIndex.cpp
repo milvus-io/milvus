@@ -11,7 +11,7 @@
 
 #include "SearchOnIndex.h"
 namespace milvus::query {
-SubQueryResult
+SubSearchResult
 SearchOnIndex(const dataset::QueryDataset& query_dataset,
               const knowhere::VecIndex& indexing,
               const knowhere::Config& search_conf,
@@ -31,7 +31,7 @@ SearchOnIndex(const dataset::QueryDataset& query_dataset,
     auto dis = ans->Get<float*>(milvus::knowhere::meta::DISTANCE);
     auto uids = ans->Get<int64_t*>(milvus::knowhere::meta::IDS);
 
-    SubQueryResult sub_qr(num_queries, topK, metric_type);
+    SubSearchResult sub_qr(num_queries, topK, metric_type);
     std::copy_n(dis, num_queries * topK, sub_qr.get_values());
     std::copy_n(uids, num_queries * topK, sub_qr.get_labels());
     return sub_qr;

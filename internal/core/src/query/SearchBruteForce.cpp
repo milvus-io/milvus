@@ -61,7 +61,7 @@ raw_search(MetricType metric_type,
     }
 }
 
-SubQueryResult
+SubSearchResult
 BinarySearchBruteForceFast(MetricType metric_type,
                            int64_t dim,
                            const uint8_t* binary_chunk,
@@ -70,7 +70,7 @@ BinarySearchBruteForceFast(MetricType metric_type,
                            int64_t num_queries,
                            const uint8_t* query_data,
                            const faiss::BitsetView& bitset) {
-    SubQueryResult sub_result(num_queries, topk, metric_type);
+    SubSearchResult sub_result(num_queries, topk, metric_type);
     float* result_distances = sub_result.get_values();
     idx_t* result_labels = sub_result.get_labels();
 
@@ -83,7 +83,7 @@ BinarySearchBruteForceFast(MetricType metric_type,
     return sub_result;
 }
 
-SubQueryResult
+SubSearchResult
 FloatSearchBruteForce(const dataset::QueryDataset& query_dataset,
                       const void* chunk_data_raw,
                       int64_t size_per_chunk,
@@ -92,7 +92,7 @@ FloatSearchBruteForce(const dataset::QueryDataset& query_dataset,
     auto num_queries = query_dataset.num_queries;
     auto topk = query_dataset.topk;
     auto dim = query_dataset.dim;
-    SubQueryResult sub_qr(num_queries, topk, metric_type);
+    SubSearchResult sub_qr(num_queries, topk, metric_type);
     auto query_data = reinterpret_cast<const float*>(query_dataset.query_data);
     auto chunk_data = reinterpret_cast<const float*>(chunk_data_raw);
 
@@ -107,7 +107,7 @@ FloatSearchBruteForce(const dataset::QueryDataset& query_dataset,
     }
 }
 
-SubQueryResult
+SubSearchResult
 BinarySearchBruteForce(const dataset::QueryDataset& query_dataset,
                        const void* chunk_data_raw,
                        int64_t size_per_chunk,

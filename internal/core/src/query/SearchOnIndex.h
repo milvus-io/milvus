@@ -18,7 +18,7 @@
 #include "utils/Json.h"
 
 namespace milvus::query {
-SubQueryResult
+SubSearchResult
 SearchOnIndex(const dataset::QueryDataset& query_dataset,
               const knowhere::VecIndex& indexing,
               const knowhere::Config& search_conf,
