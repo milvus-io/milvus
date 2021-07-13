@@ -55,7 +55,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
     // std::vector<int64_t> final_uids(total_count, -1);
     // std::vector<float> final_dis(total_count, std::numeric_limits<float>::max());
     SubSearchResult final_qr(num_queries, topK, metric_type);
-    dataset::QueryDataset query_dataset{metric_type, num_queries, topK, dim, query_data};
+    dataset::SearchDataset search_dataset{metric_type, num_queries, topK, dim, query_data};
     auto vec_ptr = record.get_field_data<FloatVector>(vecfield_offset);
 
     int current_chunk_id = 0;
@@ -71,7 +71,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
             auto indexing = field_indexing.get_chunk_indexing(chunk_id);
 
             auto sub_view = BitsetSubView(bitset, chunk_id * size_per_chunk, size_per_chunk);
-            auto sub_qr = SearchOnIndex(query_dataset, *indexing, search_conf, sub_view);
+            auto sub_qr = SearchOnIndex(search_dataset, *indexing, search_conf, sub_view);
 
             // convert chunk uid to segment uid
             for (auto& x : sub_qr.mutable_labels()) {
@@ -97,7 +97,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
         auto size_per_chunk = element_end - element_begin;
 
         auto sub_view = BitsetSubView(bitset, element_begin, size_per_chunk);
-        auto sub_qr = FloatSearchBruteForce(query_dataset, chunk.data(), size_per_chunk, sub_view);
+        auto sub_qr = FloatSearchBruteForce(search_dataset, chunk.data(), size_per_chunk, sub_view);
 
         // convert chunk uid to segment uid
         for (auto& x : sub_qr.mutable_labels()) {
@@ -150,7 +150,7 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
     auto total_count = topK * num_queries;
 
     // step 3: small indexing search
-    query::dataset::QueryDataset query_dataset{metric_type, num_queries, topK, dim, query_data};
+    query::dataset::SearchDataset search_dataset{metric_type, num_queries, topK, dim, query_data};
 
     auto vec_ptr = record.get_field_data<BinaryVector>(vecfield_offset);
 
@@ -167,7 +167,7 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
         auto nsize = element_end - element_begin;
 
         auto sub_view = BitsetSubView(bitset, element_begin, nsize);
-        auto sub_result = BinarySearchBruteForce(query_dataset, chunk.data(), nsize, sub_view);
+        auto sub_result = BinarySearchBruteForce(search_dataset, chunk.data(), nsize, sub_view);
 
         // convert chunk uid to segment uid
         for (auto& x : sub_result.mutable_labels()) {

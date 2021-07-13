@@ -12,16 +12,16 @@
 #include "SearchOnIndex.h"
 namespace milvus::query {
 SubSearchResult
-SearchOnIndex(const dataset::QueryDataset& query_dataset,
+SearchOnIndex(const dataset::SearchDataset& search_dataset,
               const knowhere::VecIndex& indexing,
               const knowhere::Config& search_conf,
               const faiss::BitsetView& bitset) {
-    auto num_queries = query_dataset.num_queries;
-    auto topK = query_dataset.topk;
-    auto dim = query_dataset.dim;
-    auto metric_type = query_dataset.metric_type;
+    auto num_queries = search_dataset.num_queries;
+    auto topK = search_dataset.topk;
+    auto dim = search_dataset.dim;
+    auto metric_type = search_dataset.metric_type;
 
-    auto dataset = knowhere::GenDataset(num_queries, dim, query_dataset.query_data);
+    auto dataset = knowhere::GenDataset(num_queries, dim, search_dataset.query_data);
 
     // NOTE: VecIndex Query API forget to add const qualifier
     // NOTE: use const_cast as a workaround

@@ -232,7 +232,7 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
         PanicInfo("Field Data is not loaded");
     }
 
-    query::dataset::QueryDataset dataset;
+    query::dataset::SearchDataset dataset;
     dataset.query_data = query_data;
     dataset.num_queries = query_count;
     // if(field_meta.is)

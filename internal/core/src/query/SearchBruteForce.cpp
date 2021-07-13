@@ -84,16 +84,16 @@ BinarySearchBruteForceFast(MetricType metric_type,
 }
 
 SubSearchResult
-FloatSearchBruteForce(const dataset::QueryDataset& query_dataset,
+FloatSearchBruteForce(const dataset::SearchDataset& dataset,
                       const void* chunk_data_raw,
                       int64_t size_per_chunk,
                       const faiss::BitsetView& bitset) {
-    auto metric_type = query_dataset.metric_type;
-    auto num_queries = query_dataset.num_queries;
-    auto topk = query_dataset.topk;
-    auto dim = query_dataset.dim;
+    auto metric_type = dataset.metric_type;
+    auto num_queries = dataset.num_queries;
+    auto topk = dataset.topk;
+    auto dim = dataset.dim;
     SubSearchResult sub_qr(num_queries, topk, metric_type);
-    auto query_data = reinterpret_cast<const float*>(query_dataset.query_data);
+    auto query_data = reinterpret_cast<const float*>(dataset.query_data);
     auto chunk_data = reinterpret_cast<const float*>(chunk_data_raw);
 
     if (metric_type == MetricType::METRIC_L2) {
@@ -108,14 +108,14 @@ FloatSearchBruteForce(const dataset::QueryDataset& query_dataset,
 }
 
 SubSearchResult
-BinarySearchBruteForce(const dataset::QueryDataset& query_dataset,
+BinarySearchBruteForce(const dataset::SearchDataset& dataset,
                        const void* chunk_data_raw,
                        int64_t size_per_chunk,
                        const faiss::BitsetView& bitset) {
     // TODO: refactor the internal function
-    auto query_data = reinterpret_cast<const uint8_t*>(query_dataset.query_data);
+    auto query_data = reinterpret_cast<const uint8_t*>(dataset.query_data);
     auto chunk_data = reinterpret_cast<const uint8_t*>(chunk_data_raw);
-    return BinarySearchBruteForceFast(query_dataset.metric_type, query_dataset.dim, chunk_data, size_per_chunk,
-                                      query_dataset.topk, query_dataset.num_queries, query_data, bitset);
+    return BinarySearchBruteForceFast(dataset.metric_type, dataset.dim, chunk_data, size_per_chunk,
+                                      dataset.topk, dataset.num_queries, query_data, bitset);
 }
 }  // namespace milvus::query

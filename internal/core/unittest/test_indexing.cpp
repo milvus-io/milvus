@@ -223,9 +223,9 @@ TEST(Indexing, IVFFlatNM) {
 
     EXPECT_EQ(indexing->Count(), N);
     EXPECT_EQ(indexing->Dim(), DIM);
-    auto query_dataset = knowhere::GenDataset(num_query, DIM, raw_data.data() + DIM * 4200);
+    auto dataset = knowhere::GenDataset(num_query, DIM, raw_data.data() + DIM * 4200);
 
-    auto result = indexing->Query(query_dataset, conf, nullptr);
+    auto result = indexing->Query(dataset, conf, nullptr);
     std::cout << "query ivf " << timer.get_step_seconds() << " seconds" << endl;
 
     auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
@@ -247,7 +247,7 @@ TEST(Indexing, BinaryBruteForce) {
     auto dataset = DataGen(schema, N, 10);
     auto bin_vec = dataset.get_col<uint8_t>(0);
     auto query_data = 1024 * dim / 8 + bin_vec.data();
-    query::dataset::QueryDataset query_dataset{
+    query::dataset::SearchDataset search_dataset{
         faiss::MetricType::METRIC_Jaccard,  //
         num_queries,                        //
         topk,                               //
@@ -255,7 +255,7 @@ TEST(Indexing, BinaryBruteForce) {
         query_data                          //
     };
 
-    auto sub_result = query::BinarySearchBruteForce(query_dataset, bin_vec.data(), N, nullptr);
+    auto sub_result = query::BinarySearchBruteForce(search_dataset, bin_vec.data(), N, nullptr);
 
     SearchResult sr;
     sr.num_queries_ = num_queries;

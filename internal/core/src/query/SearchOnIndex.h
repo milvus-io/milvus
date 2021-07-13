@@ -19,7 +19,7 @@
 
 namespace milvus::query {
 SubSearchResult
-SearchOnIndex(const dataset::QueryDataset& query_dataset,
+SearchOnIndex(const dataset::SearchDataset& search_dataset,
               const knowhere::VecIndex& indexing,
               const knowhere::Config& search_conf,
               const faiss::BitsetView& bitset);
