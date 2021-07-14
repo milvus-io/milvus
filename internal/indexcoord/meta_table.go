@@ -361,7 +361,7 @@ func (mt *metaTable) GetIndexMeta(indexBuildID UniqueID) Meta {
 	return meta
 }
 
-func (mt *metaTable) GetUnassignedTasks(nodeIDs []int64) []Meta {
+func (mt *metaTable) GetUnassignedTasks(onlineNodeIDs []int64) []Meta {
 	mt.lock.RLock()
 	defer mt.lock.RUnlock()
 
@@ -376,9 +376,10 @@ func (mt *metaTable) GetUnassignedTasks(nodeIDs []int64) []Meta {
 			continue
 		}
 		alive := false
-		for _, serverID := range nodeIDs {
+		for _, serverID := range onlineNodeIDs {
 			if meta.indexMeta.NodeID == serverID {
 				alive = true
+				break
 			}
 		}
 		if !alive {
@@ -481,9 +482,9 @@ func (mt *metaTable) LoadMetaFromETCD(indexBuildID int64, revision int64) bool {
 	return true
 }
 
-func (mt *metaTable) GetPriorityForNodeID() map[UniqueID]int {
-	mt.lock.Lock()
-	defer mt.lock.Unlock()
+func (mt *metaTable) GetNodeTaskStats() map[UniqueID]int {
+	mt.lock.RLock()
+	defer mt.lock.RUnlock()
 
 	log.Debug("IndexCoord MetaTable GetPriorityForNodeID")
 	nodePriority := make(map[UniqueID]int)

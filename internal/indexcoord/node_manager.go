@@ -78,7 +78,7 @@ func (nm *NodeManager) PeekClient() (UniqueID, types.IndexNode) {
 
 	log.Debug("IndexCoord NodeManager PeekClient")
 
-	nodeID := nm.pq.PeekClient()
+	nodeID := nm.pq.Peek()
 	client, ok := nm.nodeClients[nodeID]
 	if !ok {
 		log.Error("IndexCoord NodeManager PeekClient", zap.Any("There is no IndexNode client corresponding to NodeID", nodeID))

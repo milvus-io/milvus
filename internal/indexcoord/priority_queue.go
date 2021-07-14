@@ -66,7 +66,7 @@ func (pq *PriorityQueue) Pop() interface{} {
 	return item
 }
 
-func (pq *PriorityQueue) CheckNodeIDExist(nodeID UniqueID) bool {
+func (pq *PriorityQueue) CheckExist(nodeID UniqueID) bool {
 	pq.lock.RLock()
 	defer pq.lock.RUnlock()
 
@@ -120,27 +120,18 @@ func (pq *PriorityQueue) Remove(key UniqueID) {
 	}
 }
 
-func (pq *PriorityQueue) Peek() interface{} {
+// PeekClient picks an key with the lowest load.
+func (pq *PriorityQueue) Peek() UniqueID {
 	pq.lock.RLock()
 	defer pq.lock.RUnlock()
-	if pq.Len() == 0 {
-		return nil
-	}
-	return pq.items[0]
-	//item := pq.items[0]
-	//return item.value
-}
 
-// PeekClient picks an IndexNode with the lowest load.
-func (pq *PriorityQueue) PeekClient() UniqueID {
-	item := pq.Peek()
-	if item == nil {
+	if pq.Len() == 0 {
 		return UniqueID(-1)
 	}
-	return item.(*PQItem).key
+	return pq.items[0].key
 }
 
-func (pq *PriorityQueue) PeekAllClients() []UniqueID {
+func (pq *PriorityQueue) PeekAll() []UniqueID {
 	pq.lock.RLock()
 	defer pq.lock.RUnlock()
 

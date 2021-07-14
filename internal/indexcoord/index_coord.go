@@ -45,7 +45,8 @@ import (
 const (
 	reqTimeoutInterval = time.Second * 10
 	durationInterval   = time.Second * 10
-	assignTasksLimit   = 20
+	assignTaskInterval = time.Second * 3
+	taskLimit          = 20
 )
 
 type IndexCoord struct {
@@ -135,9 +136,9 @@ func (i *IndexCoord) Init() error {
 	}
 	log.Debug("IndexCoord", zap.Any("IndexNode number", len(i.nodeManager.nodeClients)))
 	i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, revision+1)
-	nodePriority := i.metaTable.GetPriorityForNodeID()
-	for nodeID, priority := range nodePriority {
-		i.nodeManager.pq.UpdatePriority(nodeID, priority)
+	nodeTasks := i.metaTable.GetNodeTaskStats()
+	for nodeID, taskNum := range nodeTasks {
+		i.nodeManager.pq.UpdatePriority(nodeID, taskNum)
 	}
 
 	//init idAllocator
@@ -449,7 +450,7 @@ func (i *IndexCoord) recycleUnusedIndexFiles() {
 		case <-ctx.Done():
 			return
 		case <-timeTicker.C:
-			metas := i.metaTable.GetUnusedIndexFiles(assignTasksLimit)
+			metas := i.metaTable.GetUnusedIndexFiles(taskLimit)
 			for _, meta := range metas {
 				if meta.indexMeta.MarkDeleted {
 					unusedIndexFilePathPrefix := strconv.Itoa(int(meta.indexMeta.IndexBuildID))
@@ -491,7 +492,7 @@ func (i *IndexCoord) watchNodeLoop() {
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:
 				serverID := event.Session.ServerID
-				log.Debug("IndexCoord watchNodeLoop SessionAddEvent", zap.Any("serverID", serverID))
+				log.Debug("IndexCoord watchNodeLoop SessionAddEvent", zap.Any("serverID", serverID), zap.Any("address", event.Session.Address))
 				err := i.nodeManager.AddNode(serverID, event.Session.Address)
 				if err != nil {
 					log.Debug("IndexCoord", zap.Any("Add IndexNode err", err))
@@ -549,7 +550,7 @@ func (i *IndexCoord) assignTaskLoop() {
 	defer cancel()
 	defer i.loopWg.Done()
 
-	timeTicker := time.NewTicker(durationInterval)
+	timeTicker := time.NewTicker(assignTaskInterval)
 	log.Debug("IndexCoord start assignTask loop")
 
 	for {
@@ -561,6 +562,9 @@ func (i *IndexCoord) assignTaskLoop() {
 			sessions, _, err := i.session.GetSessions(typeutil.IndexNodeRole)
 			if err != nil {
 				log.Debug("IndexCoord assignTaskLoop", zap.Any("GetSessions error", err))
+			}
+			if len(sessions) <= 0 {
+				continue
 			}
 			var serverIDs []int64
 			for _, session := range sessions {
@@ -604,7 +608,7 @@ func (i *IndexCoord) assignTaskLoop() {
 					log.Debug("IndexCoord assignmentTasksLoop metaTable.BuildIndex failed", zap.Error(err))
 				}
 				i.nodeManager.pq.IncPriority(nodeID, 1)
-				if index > assignTasksLimit {
+				if index > taskLimit {
 					break
 				}
 			}
