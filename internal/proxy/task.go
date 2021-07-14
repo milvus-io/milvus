@@ -2072,7 +2072,7 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 	if len(rt.retrieve.OutputFields) == 0 {
 		for _, field := range schema.Fields {
 			if field.FieldID >= 100 && field.DataType != schemapb.DataType_FloatVector && field.DataType != schemapb.DataType_BinaryVector {
-				rt.OutputFields = append(rt.OutputFields, field.Name)
+				rt.OutputFieldsId = append(rt.OutputFieldsId, field.FieldID)
 			}
 		}
 	} else {
@@ -2089,10 +2089,10 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 						addPrimaryKey = true
 					}
 					findField = true
-					rt.OutputFields = append(rt.OutputFields, reqField)
+					rt.OutputFieldsId = append(rt.OutputFieldsId, field.FieldID)
 				} else {
 					if field.IsPrimaryKey && !addPrimaryKey {
-						rt.OutputFields = append(rt.OutputFields, field.Name)
+						rt.OutputFieldsId = append(rt.OutputFieldsId, field.FieldID)
 						addPrimaryKey = true
 					}
 				}
@@ -2352,7 +2352,7 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 		}
 		for i := 0; i < len(rt.result.FieldsData); i++ {
 			for _, field := range schema.Fields {
-				if field.Name == rt.OutputFields[i] {
+				if field.FieldID == rt.OutputFieldsId[i] {
 					rt.result.FieldsData[i].FieldName = field.Name
 					rt.result.FieldsData[i].Type = field.DataType
 				}

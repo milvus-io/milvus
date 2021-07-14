@@ -1077,8 +1077,8 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 	}
 
 	req := &segcorepb.RetrieveRequest{
-		Ids:          retrieveMsg.Ids,
-		OutputFields: retrieveMsg.OutputFields,
+		Ids:            retrieveMsg.Ids,
+		OutputFieldsId: retrieveMsg.OutputFieldsId,
 	}
 
 	plan, err := createRetrievePlan(collection, req, timestamp)
