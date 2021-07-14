@@ -564,7 +564,7 @@ func (i *IndexCoord) assignTaskLoop() {
 				log.Debug("IndexCoord assignTaskLoop", zap.Any("GetSessions error", err))
 			}
 			if len(sessions) <= 0 {
-				continue
+				break
 			}
 			var serverIDs []int64
 			for _, session := range sessions {
