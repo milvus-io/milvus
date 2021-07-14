@@ -1750,6 +1750,9 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestam
 		}, nil
 	}
 	// log.Printf("AllocTimestamp : %d", ts)
+
+	//return first available  time stamp
+	ts = ts - uint64(in.Count) + 1
 	return &rootcoordpb.AllocTimestampResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
