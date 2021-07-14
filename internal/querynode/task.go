@@ -449,6 +449,9 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 			}
 		}
 
+		// release global segment info
+		r.node.historical.removeGlobalSegmentIDsByCollectionID(r.req.CollectionID)
+
 		log.Debug("ReleaseCollection done", zap.Int64("collectionID", r.req.CollectionID))
 	}()
 
@@ -537,6 +540,9 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 			}
 			sCol.addReleasedPartition(id)
 		}
+
+		// release global segment info
+		r.node.historical.removeGlobalSegmentIDsByPartitionIds(r.req.PartitionIDs)
 
 		log.Debug("release partition task done",
 			zap.Any("collectionID", r.req.CollectionID),
