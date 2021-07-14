@@ -65,6 +65,9 @@ class IndexWrapper {
     knowhere::IndexMode
     get_index_mode();
 
+    int64_t
+    get_index_file_slice_size();
+
     template <typename T>
     std::optional<T>
     get_config_by_name(std::string name);

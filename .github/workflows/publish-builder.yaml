@@ -27,7 +27,6 @@ jobs:
         os: [ubuntu18.04, centos7]
     env:
       OS_NAME: ${{ matrix.os }}
-      GITHUB_TOKEN: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -57,14 +56,29 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
-          sed -i "s#DATE_VERSION=.*#DATE_VERSION=${{ steps.extracter.outputs.version }}#g" .env
+          sed -i "s#^DATE_VERSION=.*#DATE_VERSION=${{ steps.extracter.outputs.version }}#g" .env
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add .env
-          git commit -m "Update Builder Image Changes"
-      - name: Push Builder Image Changes
+          git commit -m "Update Builder image changes"
+      - name: Create Pull Request
+        id: cpr
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu18.04'
         continue-on-error: true
-        shell: bash
+        uses: peter-evans/create-pull-request@v3
+        with:
+          token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
+          author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
+          signoff: false
+          branch: update_builder_${{ github.sha }}
+          delete-branch: true
+          title: '[automated] Update Builder image changes'
+          body: |
+            Update Builder image changes
+
+            Signed-off-by: ${{ github.actor }} ${{ github.actor }}@users.noreply.github.com
+      - name: Check outputs
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu18.04'
         run: |
-          git push "https://github.com/$GITHUB_REPOSITORY.git" HEAD:${{ github.ref }} --follow-tags
+          echo "Pull Request Number - ${{ steps.cpr.outputs.pull-request-number }}"
+          echo "Pull Request URL - ${{ steps.cpr.outputs.pull-request-url }}"

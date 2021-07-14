@@ -27,23 +27,23 @@ int
 MergeInto(int64_t num_queries, int64_t topk, float* distances, int64_t* uids, float* new_distances, int64_t* new_uids);
 
 CStatus
-ReduceQueryResults(CQueryResult* query_results, int64_t num_segments, bool* is_selected);
+ReduceSearchResults(CSearchResult* search_results, int64_t num_segments, bool* is_selected);
 
 CStatus
-ReorganizeQueryResults(CMarshaledHits* c_marshaled_hits,
-                       CPlaceholderGroup* c_placeholder_groups,
-                       int64_t num_groups,
-                       CQueryResult* c_search_results,
-                       bool* is_selected,
-                       int64_t num_segments,
-                       CPlan c_plan);
+ReorganizeSearchResults(CMarshaledHits* c_marshaled_hits,
+                        CPlaceholderGroup* c_placeholder_groups,
+                        int64_t num_groups,
+                        CSearchResult* c_search_results,
+                        bool* is_selected,
+                        int64_t num_segments,
+                        CSearchPlan c_plan);
 
 CStatus
-ReorganizeSingleQueryResult(CMarshaledHits* c_marshaled_hits,
-                            CPlaceholderGroup* c_placeholder_groups,
-                            int64_t num_groups,
-                            CQueryResult c_search_result,
-                            CPlan c_plan);
+ReorganizeSingleSearchResult(CMarshaledHits* c_marshaled_hits,
+                             CPlaceholderGroup* c_placeholder_groups,
+                             int64_t num_groups,
+                             CSearchResult c_search_result,
+                             CSearchPlan c_plan);
 
 int64_t
 GetHitsBlobSize(CMarshaledHits c_marshaled_hits);

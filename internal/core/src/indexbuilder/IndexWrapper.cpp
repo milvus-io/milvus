@@ -21,6 +21,7 @@
 #include "indexbuilder/utils.h"
 #include "index/knowhere/knowhere/index/vector_index/ConfAdapterMgr.h"
 #include "index/knowhere/knowhere/common/Timer.h"
+#include "index/knowhere/knowhere/common/Utils.h"
 
 namespace milvus {
 namespace indexbuilder {
@@ -239,6 +240,10 @@ IndexWrapper::Serialize() {
         std::shared_ptr<uint8_t[]> raw_data(new uint8_t[raw_data_.size()], std::default_delete<uint8_t[]>());
         memcpy(raw_data.get(), raw_data_.data(), raw_data_.size());
         binarySet.Append(RAW_DATA, raw_data, raw_data_.size());
+        auto slice_size = get_index_file_slice_size();
+        // https://github.com/milvus-io/milvus/issues/6421
+        // Disassemble will only divide the raw vectors, other keys was already divided
+        knowhere::Disassemble(slice_size * 1024 * 1024, binarySet);
     }
 
     namespace indexcgo = milvus::proto::indexcgo;
@@ -315,6 +320,14 @@ IndexWrapper::get_index_mode() {
     };
     auto mode = get_config_by_name<std::string>("index_mode");
     return mode.has_value() ? mode_map[mode.value()] : knowhere::IndexMode::MODE_CPU;
+}
+
+int64_t
+IndexWrapper::get_index_file_slice_size() {
+    if (config_.contains(knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE)) {
+        return config_[knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE].get<int64_t>();
+    }
+    return 4;  // by default
 }
 
 std::unique_ptr<IndexWrapper::QueryResult>

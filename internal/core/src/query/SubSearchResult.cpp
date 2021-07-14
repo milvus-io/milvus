@@ -10,14 +10,14 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "exceptions/EasyAssert.h"
-#include "query/SubQueryResult.h"
+#include "query/SubSearchResult.h"
 #include "segcore/Reduce.h"
 
 namespace milvus::query {
 
 template <bool is_desc>
 void
-SubQueryResult::merge_impl(const SubQueryResult& right) {
+SubSearchResult::merge_impl(const SubSearchResult& right) {
     Assert(num_queries_ == right.num_queries_);
     Assert(topk_ == right.topk_);
     Assert(metric_type_ == right.metric_type_);
@@ -58,7 +58,7 @@ SubQueryResult::merge_impl(const SubQueryResult& right) {
 }
 
 void
-SubQueryResult::merge(const SubQueryResult& sub_result) {
+SubSearchResult::merge(const SubSearchResult& sub_result) {
     Assert(metric_type_ == sub_result.metric_type_);
     if (is_descending(metric_type_)) {
         this->merge_impl<true>(sub_result);
@@ -67,8 +67,8 @@ SubQueryResult::merge(const SubQueryResult& sub_result) {
     }
 }
 
-SubQueryResult
-SubQueryResult::merge(const SubQueryResult& left, const SubQueryResult& right) {
+SubSearchResult
+SubSearchResult::merge(const SubSearchResult& left, const SubSearchResult& right) {
     auto left_copy = left;
     left_copy.merge(right);
     return left_copy;

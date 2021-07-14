@@ -36,9 +36,9 @@ TEST(Query, ShowExecutor) {
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     int64_t num_queries = 100L;
     auto raw_data = DataGen(schema, num_queries);
-    auto& info = node->query_info_;
+    auto& info = node->search_info_;
     info.metric_type_ = MetricType::METRIC_L2;
-    info.topK_ = 20;
+    info.topk_ = 20;
     info.field_offset_ = FieldOffset(1000);
     node->predicate_ = std::nullopt;
     ShowPlanNodeVisitor show_visitor;
@@ -176,10 +176,10 @@ TEST(Query, ExecWithPredicateLoader) {
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp time = 1000000;
 
-    auto qr = segment->Search(plan.get(), *ph_group, time);
+    auto sr = segment->Search(plan.get(), *ph_group, time);
     int topk = 5;
 
-    Json json = QueryResultToJson(qr);
+    Json json = SearchResultToJson(sr);
     auto ref = json::parse(R"(
 [
   [
@@ -268,10 +268,10 @@ TEST(Query, ExecWithPredicateSmallN) {
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp time = 1000000;
 
-    auto qr = segment->Search(plan.get(), *ph_group, time);
+    auto sr = segment->Search(plan.get(), *ph_group, time);
     int topk = 5;
 
-    Json json = QueryResultToJson(qr);
+    Json json = SearchResultToJson(sr);
     std::cout << json.dump(2);
 }
 
@@ -319,10 +319,10 @@ TEST(Query, ExecWithPredicate) {
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp time = 1000000;
 
-    auto qr = segment->Search(plan.get(), *ph_group, time);
+    auto sr = segment->Search(plan.get(), *ph_group, time);
     int topk = 5;
 
-    Json json = QueryResultToJson(qr);
+    Json json = SearchResultToJson(sr);
     auto ref = json::parse(R"(
 [
   [
@@ -408,15 +408,15 @@ TEST(Query, ExecTerm) {
     auto num_queries = 3;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    QueryResult qr;
+    SearchResult sr;
     Timestamp time = 1000000;
 
-    qr = segment->Search(plan.get(), *ph_group, time);
+    sr = segment->Search(plan.get(), *ph_group, time);
     std::vector<std::vector<std::string>> results;
     int topk = 5;
-    auto json = QueryResultToJson(qr);
-    ASSERT_EQ(qr.num_queries_, num_queries);
-    ASSERT_EQ(qr.topK_, topk);
+    auto json = SearchResultToJson(sr);
+    ASSERT_EQ(sr.num_queries_, num_queries);
+    ASSERT_EQ(sr.topk_, topk);
     // for(auto x: )
 }
 
@@ -452,14 +452,14 @@ TEST(Query, ExecEmpty) {
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp time = 1000000;
 
-    auto qr = segment->Search(plan.get(), *ph_group, time);
-    std::cout << QueryResultToJson(qr);
+    auto sr = segment->Search(plan.get(), *ph_group, time);
+    std::cout << SearchResultToJson(sr);
 
-    for (auto i : qr.internal_seg_offsets_) {
+    for (auto i : sr.internal_seg_offsets_) {
         ASSERT_EQ(i, -1);
     }
 
-    for (auto v : qr.result_distances_) {
+    for (auto v : sr.result_distances_) {
         ASSERT_EQ(v, std::numeric_limits<float>::max());
     }
 }
@@ -498,13 +498,13 @@ TEST(Query, ExecWithoutPredicateFlat) {
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    QueryResult qr;
+    SearchResult sr;
     Timestamp time = 1000000;
 
-    qr = segment->Search(plan.get(), *ph_group, time);
+    sr = segment->Search(plan.get(), *ph_group, time);
     std::vector<std::vector<std::string>> results;
     int topk = 5;
-    auto json = QueryResultToJson(qr);
+    auto json = SearchResultToJson(sr);
     std::cout << json.dump(2);
 }
 
@@ -542,13 +542,13 @@ TEST(Query, ExecWithoutPredicate) {
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    QueryResult qr;
+    SearchResult sr;
     Timestamp time = 1000000;
 
-    qr = segment->Search(plan.get(), *ph_group, time);
+    sr = segment->Search(plan.get(), *ph_group, time);
     std::vector<std::vector<std::string>> results;
     int topk = 5;
-    auto json = QueryResultToJson(qr);
+    auto json = SearchResultToJson(sr);
     auto ref = json::parse(R"(
 [
   [
@@ -629,9 +629,9 @@ TEST(Indexing, InnerProduct) {
     auto ph_group_raw = CreatePlaceholderGroupFromBlob(num_queries, 16, col.data());
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp ts = N * 2;
-    QueryResult qr;
-    qr = segment->Search(plan.get(), *ph_group, ts);
-    std::cout << QueryResultToJson(qr).dump(2);
+    SearchResult sr;
+    sr = segment->Search(plan.get(), *ph_group, ts);
+    std::cout << SearchResultToJson(sr).dump(2);
 }
 
 TEST(Query, FillSegment) {
@@ -738,8 +738,8 @@ TEST(Query, FillSegment) {
         plan->target_entries_.clear();
         plan->target_entries_.push_back(schema->get_offset(FieldName("fakevec")));
         plan->target_entries_.push_back(schema->get_offset(FieldName("the_value")));
-        QueryResult result = segment->Search(plan.get(), *ph, ts);
-        // std::cout << QueryResultToJson(result).dump(2);
+        SearchResult result = segment->Search(plan.get(), *ph, ts);
+        // std::cout << SearchResultToJson(result).dump(2);
         result.result_offsets_.resize(topk * num_queries);
         segment->FillTargetEntry(plan.get(), result);
 
@@ -815,13 +815,13 @@ TEST(Query, ExecWithPredicateBinary) {
     auto num_queries = 5;
     auto ph_group_raw = CreateBinaryPlaceholderGroupFromBlob(num_queries, 512, vec_ptr.data() + 1024 * 512 / 8);
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    QueryResult qr;
+    SearchResult sr;
     Timestamp time = 1000000;
 
-    qr = segment->Search(plan.get(), *ph_group, time);
+    sr = segment->Search(plan.get(), *ph_group, time);
     int topk = 5;
 
-    Json json = QueryResultToJson(qr);
+    Json json = SearchResultToJson(sr);
     std::cout << json.dump(2);
     // ASSERT_EQ(json.dump(2), ref.dump(2));
 }

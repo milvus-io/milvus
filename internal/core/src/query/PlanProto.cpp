@@ -91,14 +91,14 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
 
     auto& query_info_proto = anns_proto.query_info();
 
-    QueryInfo query_info;
+    SearchInfo search_info;
     auto field_id = FieldId(anns_proto.field_id());
     auto field_offset = schema.get_offset(field_id);
-    query_info.field_offset_ = field_offset;
+    search_info.field_offset_ = field_offset;
 
-    query_info.metric_type_ = GetMetricType(query_info_proto.metric_type());
-    query_info.topK_ = query_info_proto.topk();
-    query_info.search_params_ = json::parse(query_info_proto.search_params());
+    search_info.metric_type_ = GetMetricType(query_info_proto.metric_type());
+    search_info.topk_ = query_info_proto.topk();
+    search_info.search_params_ = json::parse(query_info_proto.search_params());
 
     auto plan_node = [&]() -> std::unique_ptr<VectorPlanNode> {
         if (anns_proto.is_binary()) {
@@ -109,7 +109,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     }();
     plan_node->placeholder_tag_ = anns_proto.placeholder_tag();
     plan_node->predicate_ = std::move(expr_opt);
-    plan_node->query_info_ = std::move(query_info);
+    plan_node->search_info_ = std::move(search_info);
     return plan_node;
 }
 
@@ -122,7 +122,7 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
     ExtractInfoPlanNodeVisitor extractor(plan_info);
     plan_node->accept(extractor);
 
-    plan->tag2field_["$0"] = plan_node->query_info_.field_offset_;
+    plan->tag2field_["$0"] = plan_node->search_info_.field_offset_;
     plan->plan_node_ = std::move(plan_node);
     plan->extra_info_opt_ = std::move(plan_info);
 

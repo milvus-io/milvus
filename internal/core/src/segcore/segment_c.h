@@ -24,7 +24,7 @@ extern "C" {
 #include "segcore/load_index_c.h"
 
 typedef void* CSegmentInterface;
-typedef void* CQueryResult;
+typedef void* CSearchResult;
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CSegmentInterface
@@ -34,20 +34,20 @@ void
 DeleteSegment(CSegmentInterface c_segment);
 
 void
-DeleteQueryResult(CQueryResult query_result);
+DeleteSearchResult(CSearchResult search_result);
 
 CStatus
 Search(CSegmentInterface c_segment,
-       CPlan c_plan,
+       CSearchPlan c_plan,
        CPlaceholderGroup c_placeholder_group,
        uint64_t timestamp,
-       CQueryResult* result);
+       CSearchResult* result);
 
 CProtoResult
-GetEntityByIds(CSegmentInterface c_segment, CRetrievePlan plan, uint64_t timestamp);
+GetEntityByIds(CSegmentInterface c_segment, CRetrievePlan c_plan, uint64_t timestamp);
 
 CStatus
-FillTargetEntry(CSegmentInterface c_segment, CPlan c_plan, CQueryResult result);
+FillTargetEntry(CSegmentInterface c_segment, CSearchPlan c_plan, CSearchResult result);
 
 int64_t
 GetMemoryUsageInBytes(CSegmentInterface c_segment);

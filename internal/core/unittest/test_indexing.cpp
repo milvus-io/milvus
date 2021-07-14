@@ -223,9 +223,9 @@ TEST(Indexing, IVFFlatNM) {
 
     EXPECT_EQ(indexing->Count(), N);
     EXPECT_EQ(indexing->Dim(), DIM);
-    auto query_dataset = knowhere::GenDataset(num_query, DIM, raw_data.data() + DIM * 4200);
+    auto dataset = knowhere::GenDataset(num_query, DIM, raw_data.data() + DIM * 4200);
 
-    auto result = indexing->Query(query_dataset, conf, nullptr);
+    auto result = indexing->Query(dataset, conf, nullptr);
     std::cout << "query ivf " << timer.get_step_seconds() << " seconds" << endl;
 
     auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
@@ -247,7 +247,7 @@ TEST(Indexing, BinaryBruteForce) {
     auto dataset = DataGen(schema, N, 10);
     auto bin_vec = dataset.get_col<uint8_t>(0);
     auto query_data = 1024 * dim / 8 + bin_vec.data();
-    query::dataset::QueryDataset query_dataset{
+    query::dataset::SearchDataset search_dataset{
         faiss::MetricType::METRIC_Jaccard,  //
         num_queries,                        //
         topk,                               //
@@ -255,15 +255,15 @@ TEST(Indexing, BinaryBruteForce) {
         query_data                          //
     };
 
-    auto sub_result = query::BinarySearchBruteForce(query_dataset, bin_vec.data(), N, nullptr);
+    auto sub_result = query::BinarySearchBruteForce(search_dataset, bin_vec.data(), N, nullptr);
 
-    QueryResult qr;
-    qr.num_queries_ = num_queries;
-    qr.topK_ = topk;
-    qr.internal_seg_offsets_ = std::move(sub_result.mutable_labels());
-    qr.result_distances_ = std::move(sub_result.mutable_values());
+    SearchResult sr;
+    sr.num_queries_ = num_queries;
+    sr.topk_ = topk;
+    sr.internal_seg_offsets_ = std::move(sub_result.mutable_labels());
+    sr.result_distances_ = std::move(sub_result.mutable_values());
 
-    auto json = QueryResultToJson(qr);
+    auto json = SearchResultToJson(sr);
     cout << json.dump(2);
     auto ref = json::parse(R"(
 [

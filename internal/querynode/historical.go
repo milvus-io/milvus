@@ -63,7 +63,7 @@ func (h *historical) close() {
 func (h *historical) search(searchReqs []*searchRequest,
 	collID UniqueID,
 	partIDs []UniqueID,
-	plan *Plan,
+	plan *SearchPlan,
 	searchTs Timestamp) ([]*SearchResult, []*Segment, error) {
 
 	searchResults := make([]*SearchResult, 0)
@@ -137,7 +137,7 @@ func (h *historical) search(searchReqs []*searchRequest,
 			if !seg.getOnService() {
 				continue
 			}
-			searchResult, err := seg.segmentSearch(plan, searchReqs, []Timestamp{searchTs})
+			searchResult, err := seg.search(plan, searchReqs, []Timestamp{searchTs})
 			if err != nil {
 				return searchResults, segmentResults, err
 			}

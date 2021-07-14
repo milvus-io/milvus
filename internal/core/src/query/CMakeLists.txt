@@ -26,7 +26,7 @@ set(MILVUS_QUERY_SRCS
         SearchOnSealed.cpp
         SearchOnIndex.cpp
         SearchBruteForce.cpp
-        SubQueryResult.cpp
+        SubSearchResult.cpp
         PlanProto.cpp
         )
 add_library(milvus_query ${MILVUS_QUERY_SRCS})

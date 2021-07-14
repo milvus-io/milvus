@@ -65,7 +65,7 @@ func (s *streaming) search(searchReqs []*searchRequest,
 	collID UniqueID,
 	partIDs []UniqueID,
 	vChannel Channel,
-	plan *Plan,
+	plan *SearchPlan,
 	searchTs Timestamp) ([]*SearchResult, []*Segment, error) {
 
 	searchResults := make([]*SearchResult, 0)
@@ -173,7 +173,7 @@ func (s *streaming) search(searchReqs []*searchRequest,
 				continue
 			}
 
-			searchResult, err := seg.segmentSearch(plan, searchReqs, []Timestamp{searchTs})
+			searchResult, err := seg.search(plan, searchReqs, []Timestamp{searchTs})
 			if err != nil {
 				return searchResults, segmentResults, err
 			}
