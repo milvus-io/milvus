@@ -1,8 +1,3 @@
-
-SERVER_HOST_DEFAULT = "127.0.0.1"
-SERVER_PORT_DEFAULT = 19530
-SERVER_VERSION = "2.0.0-RC2"
-
 # scale object
 IMAGE_REPOSITORY = "milvusdb/milvus-dev"
 IMAGE_TAG = "master-latest"
