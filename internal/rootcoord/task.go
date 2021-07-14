@@ -60,6 +60,9 @@ func executeTask(t reqTask) error {
 	case <-t.Ctx().Done():
 		return fmt.Errorf("context canceled")
 	case err := <-errChan:
+		if t.Core().ctx.Err() != nil || t.Ctx().Err() != nil {
+			return fmt.Errorf("context canceled")
+		}
 		return err
 	}
 }
