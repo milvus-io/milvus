@@ -50,7 +50,7 @@ func (nm *NodeManager) AddNode(nodeID UniqueID, address string) error {
 	defer nm.lock.Unlock()
 
 	log.Debug("IndexCoord addNode", zap.Any("nodeID", nodeID), zap.Any("node address", address))
-	if nm.pq.CheckNodeIDExist(nodeID) {
+	if nm.pq.CheckExist(nodeID) {
 		log.Debug("IndexCoord", zap.Any("Node client already exist with ID:", nodeID))
 		return nil
 	}
