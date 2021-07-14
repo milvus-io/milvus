@@ -185,10 +185,6 @@ func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComp
 	return s.dataCoord.GetComponentStates(ctx)
 }
 
-func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.dataCoord.GetTimeTickChannel(ctx)
-}
-
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.dataCoord.GetStatisticsChannel(ctx)
 }

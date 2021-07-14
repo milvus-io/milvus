@@ -161,16 +161,6 @@ func TestFlush(t *testing.T) {
 //assert.EqualValues(t, 1, len(resp.SubcomponentStates))
 //assert.EqualValues(t, internalpb.StateCode_Healthy, resp.SubcomponentStates[0].StateCode)
 //}
-
-func TestGetTimeTickChannel(t *testing.T) {
-	svr := newTestServer(t, nil)
-	defer closeTestServer(t, svr)
-	resp, err := svr.GetTimeTickChannel(context.TODO())
-	assert.Nil(t, err)
-	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	assert.EqualValues(t, Params.TimeTickChannelName, resp.Value)
-}
-
 func TestGetStatisticsChannel(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)
