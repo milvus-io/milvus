@@ -24,7 +24,6 @@ func newPriorityQueue() *PriorityQueue {
 	ret := &PriorityQueue{}
 	for i := 0; i < QueueLen; i++ {
 		item := &PQItem{
-			value:    nil,
 			key:      UniqueID(i),
 			priority: i,
 			index:    i,
@@ -72,14 +71,14 @@ func TestPriorityQueue_UpdatePriority(t *testing.T) {
 	pq := newPriorityQueue()
 	key := UniqueID(pq.Len() / 2)
 	pq.UpdatePriority(key, -pq.Len())
-	item := pq.Peek()
-	assert.Equal(t, key, item.(*PQItem).key)
+	peekKey := pq.Peek()
+	assert.Equal(t, key, peekKey)
 }
 
 func TestPriorityQueue_IncPriority(t *testing.T) {
 	pq := newPriorityQueue()
 	key := UniqueID(pq.Len() / 2)
 	pq.IncPriority(key, -pq.Len())
-	item := pq.Peek()
-	assert.Equal(t, key, item.(*PQItem).key)
+	peekKey := pq.Peek()
+	assert.Equal(t, key, peekKey)
 }

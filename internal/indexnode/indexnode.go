@@ -13,7 +13,6 @@ package indexnode
 
 import (
 	"context"
-	"errors"
 	"io"
 	"math/rand"
 	"strconv"
@@ -34,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -91,8 +89,6 @@ func (i *IndexNode) Register() error {
 }
 
 func (i *IndexNode) Init() error {
-	ctx := context.Background()
-
 	connectEtcdFn := func() error {
 		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
 		i.etcdKV = etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
@@ -104,40 +100,6 @@ func (i *IndexNode) Init() error {
 		return err
 	}
 	log.Debug("IndexNode try connect etcd success")
-	log.Debug("IndexNode start to wait for IndexCoord ready")
-
-	err = funcutil.WaitForComponentHealthy(ctx, i.serviceClient, "IndexCoord", 1000000, time.Millisecond*200)
-	if err != nil {
-		log.Debug("IndexNode wait for IndexCoord ready failed", zap.Error(err))
-		return err
-	}
-	log.Debug("IndexNode report IndexCoord is ready")
-	request := &indexpb.RegisterNodeRequest{
-		Base: nil,
-		Address: &commonpb.Address{
-			Ip:   Params.IP,
-			Port: int64(Params.Port),
-		},
-		NodeID: i.session.ServerID,
-	}
-
-	resp, err2 := i.serviceClient.RegisterNode(ctx, request)
-	if err2 != nil {
-		log.Debug("IndexNode RegisterNode failed", zap.Error(err2))
-		return err2
-	}
-
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		log.Debug("IndexNode RegisterNode failed", zap.String("Reason", resp.Status.Reason))
-		return errors.New(resp.Status.Reason)
-	}
-
-	err = Params.LoadConfigFromInitParams(resp.InitParams)
-	if err != nil {
-		log.Debug("IndexNode LoadConfigFromInitParams failed", zap.Error(err))
-		return err
-	}
-	log.Debug("IndexNode LoadConfigFromInitParams success")
 
 	option := &miniokv.Option{
 		Address:           Params.MinIOAddress,

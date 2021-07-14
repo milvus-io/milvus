@@ -175,8 +175,8 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 	}
 
 	log.Debug("ReleaseCollectionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID))
-	qc.meta.printMeta()
-	qc.cluster.printMeta()
+	//qc.meta.printMeta()
+	//qc.cluster.printMeta()
 	return status, nil
 }
 
@@ -336,8 +336,8 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 		return status, err
 	}
 	log.Debug("ReleasePartitionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
-	qc.meta.printMeta()
-	qc.cluster.printMeta()
+	//qc.meta.printMeta()
+	//qc.cluster.printMeta()
 	return status, nil
 }
 
