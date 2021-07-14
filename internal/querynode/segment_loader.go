@@ -27,21 +27,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 const (
 	queryCoordSegmentMetaPrefix = "queryCoord-segmentMeta"
 	queryNodeSegmentMetaPrefix  = "queryNode-segmentMeta"
 )
-
-func contain(set []int64, target int64) bool {
-	for _, a := range set {
-		if a == target {
-			return true
-		}
-	}
-	return false
-}
 
 // segmentLoader is only responsible for loading the field data from binlog
 type segmentLoader struct {
@@ -154,7 +146,7 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment 
 
 	// add VectorFieldInfo for vector fields
 	for _, fieldBinlog := range segmentLoadInfo.BinlogPaths {
-		if contain(vectorFieldIDs, fieldBinlog.FieldID) {
+		if funcutil.SliceContain(vectorFieldIDs, fieldBinlog.FieldID) {
 			vectorFieldInfo := newVectorFieldInfo(fieldBinlog)
 			segment.setVectorFieldInfo(fieldBinlog.FieldID, vectorFieldInfo)
 		}
@@ -212,7 +204,7 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment 
 func (loader *segmentLoader) filterFieldBinlogs(fieldBinlogs []*datapb.FieldBinlog, skipFieldIDs []int64) []*datapb.FieldBinlog {
 	result := make([]*datapb.FieldBinlog, 0)
 	for _, fieldBinlog := range fieldBinlogs {
-		if !contain(skipFieldIDs, fieldBinlog.FieldID) {
+		if !funcutil.SliceContain(skipFieldIDs, fieldBinlog.FieldID) {
 			result = append(result, fieldBinlog)
 		}
 	}

@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -389,6 +390,38 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
 	)
 	tr.Elapse("all done")
 	sp.Finish()
+}
+
+func (q *queryCollection) getVectorOutputFields(msg queryMsg) ([]int64, error) {
+	var collID UniqueID
+	var outputFieldsID []int64
+	var resultFieldsID []int64
+
+	msgType := msg.Type()
+	switch msgType {
+	case commonpb.MsgType_Retrieve:
+		retrieveMsg := msg.(*msgstream.RetrieveMsg)
+		collID = retrieveMsg.CollectionID
+		outputFieldsID = retrieveMsg.OutputFieldsId
+	case commonpb.MsgType_Search:
+		searchMsg := msg.(*msgstream.SearchMsg)
+		collID = searchMsg.CollectionID
+		outputFieldsID = searchMsg.OutputFieldsId
+	default:
+		return resultFieldsID, fmt.Errorf("receive invalid msgType = %d", msgType)
+	}
+
+	vectorFieldIDs, err := q.historical.replica.getVecFieldIDsByCollectionID(collID)
+	if err != nil {
+		return resultFieldsID, err
+	}
+
+	for _, fieldID := range vectorFieldIDs {
+		if funcutil.SliceContain(outputFieldsID, fieldID) {
+			resultFieldsID = append(resultFieldsID, fieldID)
+		}
+	}
+	return resultFieldsID, nil
 }
 
 func (q *queryCollection) doUnsolvedQueryMsg() {
@@ -1134,14 +1167,30 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 			if err != nil {
 				return err
 			}
-			// output_fields contain vector field, vector field is not loaded into memory,
-			// and result is not empty
-			if true {
-				if err = q.historical.loader.loadSegmentVectorFieldsData(segment, nil); err != nil {
+
+			// result is not empty
+			if len(result.Offset) > 0 {
+				// get all vector output field ids
+				vectorOutputFieldsID, err := q.getVectorOutputFields(msg)
+				if err != nil {
 					return err
 				}
-				if err = segment.fillRetrieveResults(plan, result); err != nil {
-					return err
+
+				// output_fields contain vector field
+				for _, vectorFieldID := range vectorOutputFieldsID {
+					for _, outputFieldData := range result.FieldsData {
+						if outputFieldData.FieldId == vectorFieldID {
+							vd := outputFieldData.GetVectors()
+							log.Debug("CYD - ", zap.Int64("vd", vd.Dim))
+							// vector field is not loaded into memory,
+							//if err = q.historical.loader.loadSegmentVectorFieldsData(segment, nil); err != nil {
+							//	return err
+							//}
+							//if err = segment.fillRetrieveResults(plan, result); err != nil {
+							//	return err
+							//}
+						}
+					}
 				}
 			}
 			mergeList = append(mergeList, result)
