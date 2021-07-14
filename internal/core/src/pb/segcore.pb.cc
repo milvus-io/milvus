@@ -111,7 +111,7 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_segcore_2eproto::offsets[] PRO
   ~0u,  // no _oneof_case_
   ~0u,  // no _weak_field_map_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::segcore::RetrieveRequest, ids_),
-  PROTOBUF_FIELD_OFFSET(::milvus::proto::segcore::RetrieveRequest, output_fields_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::segcore::RetrieveRequest, output_fields_id_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::segcore::RetrieveResults, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -151,17 +151,18 @@ static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] =
 
 const char descriptor_table_protodef_segcore_2eproto[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) =
   "\n\rsegcore.proto\022\024milvus.proto.segcore\032\014s"
-  "chema.proto\"O\n\017RetrieveRequest\022%\n\003ids\030\001 "
-  "\001(\0132\030.milvus.proto.schema.IDs\022\025\n\routput_"
-  "fields\030\002 \003(\t\"m\n\017RetrieveResults\022%\n\003ids\030\001"
-  " \001(\0132\030.milvus.proto.schema.IDs\0223\n\013fields"
-  "_data\030\002 \003(\0132\036.milvus.proto.schema.FieldD"
-  "ata\"P\n\rLoadFieldMeta\022\025\n\rmin_timestamp\030\001 "
-  "\001(\003\022\025\n\rmax_timestamp\030\002 \001(\003\022\021\n\trow_count\030"
-  "\003 \001(\003\"Y\n\017LoadSegmentMeta\0222\n\005metas\030\001 \003(\0132"
-  "#.milvus.proto.segcore.LoadFieldMeta\022\022\n\n"
-  "total_size\030\002 \001(\003B6Z4github.com/milvus-io"
-  "/milvus/internal/proto/segcorepbb\006proto3"
+  "chema.proto\"R\n\017RetrieveRequest\022%\n\003ids\030\001 "
+  "\001(\0132\030.milvus.proto.schema.IDs\022\030\n\020output_"
+  "fields_id\030\002 \003(\003\"m\n\017RetrieveResults\022%\n\003id"
+  "s\030\001 \001(\0132\030.milvus.proto.schema.IDs\0223\n\013fie"
+  "lds_data\030\002 \003(\0132\036.milvus.proto.schema.Fie"
+  "ldData\"P\n\rLoadFieldMeta\022\025\n\rmin_timestamp"
+  "\030\001 \001(\003\022\025\n\rmax_timestamp\030\002 \001(\003\022\021\n\trow_cou"
+  "nt\030\003 \001(\003\"Y\n\017LoadSegmentMeta\0222\n\005metas\030\001 \003"
+  "(\0132#.milvus.proto.segcore.LoadFieldMeta\022"
+  "\022\n\ntotal_size\030\002 \001(\003B6Z4github.com/milvus"
+  "-io/milvus/internal/proto/segcorepbb\006pro"
+  "to3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_segcore_2eproto_deps[1] = {
   &::descriptor_table_schema_2eproto,
@@ -175,7 +176,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_seg
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_segcore_2eproto_once;
 static bool descriptor_table_segcore_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_segcore_2eproto = {
-  &descriptor_table_segcore_2eproto_initialized, descriptor_table_protodef_segcore_2eproto, "segcore.proto", 480,
+  &descriptor_table_segcore_2eproto_initialized, descriptor_table_protodef_segcore_2eproto, "segcore.proto", 483,
   &descriptor_table_segcore_2eproto_once, descriptor_table_segcore_2eproto_sccs, descriptor_table_segcore_2eproto_deps, 4, 1,
   schemas, file_default_instances, TableStruct_segcore_2eproto::offsets,
   file_level_metadata_segcore_2eproto, 4, file_level_enum_descriptors_segcore_2eproto, file_level_service_descriptors_segcore_2eproto,
@@ -216,7 +217,7 @@ RetrieveRequest::RetrieveRequest()
 RetrieveRequest::RetrieveRequest(const RetrieveRequest& from)
   : ::PROTOBUF_NAMESPACE_ID::Message(),
       _internal_metadata_(nullptr),
-      output_fields_(from.output_fields_) {
+      output_fields_id_(from.output_fields_id_) {
   _internal_metadata_.MergeFrom(from._internal_metadata_);
   if (from.has_ids()) {
     ids_ = new ::milvus::proto::schema::IDs(*from.ids_);
@@ -255,7 +256,7 @@ void RetrieveRequest::Clear() {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  output_fields_.Clear();
+  output_fields_id_.Clear();
   if (GetArenaNoVirtual() == nullptr && ids_ != nullptr) {
     delete ids_;
   }
@@ -278,16 +279,14 @@ const char* RetrieveRequest::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPAC
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // repeated string output_fields = 2;
+      // repeated int64 output_fields_id = 2;
       case 2:
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 18)) {
-          ptr -= 1;
-          do {
-            ptr += 1;
-            ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(add_output_fields(), ptr, ctx, "milvus.proto.segcore.RetrieveRequest.output_fields");
-            CHK_(ptr);
-            if (!ctx->DataAvailable(ptr)) break;
-          } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 18);
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::PackedInt64Parser(mutable_output_fields_id(), ptr, ctx);
+          CHK_(ptr);
+        } else if (static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 16) {
+          add_output_fields_id(::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr));
+          CHK_(ptr);
         } else goto handle_unusual;
         continue;
       default: {
@@ -331,16 +330,16 @@ bool RetrieveRequest::MergePartialFromCodedStream(
         break;
       }
 
-      // repeated string output_fields = 2;
+      // repeated int64 output_fields_id = 2;
       case 2: {
         if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (18 & 0xFF)) {
-          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
-                input, this->add_output_fields()));
-          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-            this->output_fields(this->output_fields_size() - 1).data(),
-            static_cast<int>(this->output_fields(this->output_fields_size() - 1).length()),
-            ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
-            "milvus.proto.segcore.RetrieveRequest.output_fields"));
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPackedPrimitive<
+                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
+                 input, this->mutable_output_fields_id())));
+        } else if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (16 & 0xFF)) {
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadRepeatedPrimitiveNoInline<
+                   ::PROTOBUF_NAMESPACE_ID::int64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT64>(
+                 1, 18u, input, this->mutable_output_fields_id())));
         } else {
           goto handle_unusual;
         }
@@ -380,14 +379,15 @@ void RetrieveRequest::SerializeWithCachedSizes(
       1, _Internal::ids(this), output);
   }
 
-  // repeated string output_fields = 2;
-  for (int i = 0, n = this->output_fields_size(); i < n; i++) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->output_fields(i).data(), static_cast<int>(this->output_fields(i).length()),
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "milvus.proto.segcore.RetrieveRequest.output_fields");
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteString(
-      2, this->output_fields(i), output);
+  // repeated int64 output_fields_id = 2;
+  if (this->output_fields_id_size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTag(2, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WIRETYPE_LENGTH_DELIMITED, output);
+    output->WriteVarint32(_output_fields_id_cached_byte_size_.load(
+        std::memory_order_relaxed));
+  }
+  for (int i = 0, n = this->output_fields_id_size(); i < n; i++) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64NoTag(
+      this->output_fields_id(i), output);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -410,14 +410,17 @@ void RetrieveRequest::SerializeWithCachedSizes(
         1, _Internal::ids(this), target);
   }
 
-  // repeated string output_fields = 2;
-  for (int i = 0, n = this->output_fields_size(); i < n; i++) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->output_fields(i).data(), static_cast<int>(this->output_fields(i).length()),
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "milvus.proto.segcore.RetrieveRequest.output_fields");
+  // repeated int64 output_fields_id = 2;
+  if (this->output_fields_id_size() > 0) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTagToArray(
+      2,
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WIRETYPE_LENGTH_DELIMITED,
+      target);
+    target = ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream::WriteVarint32ToArray(
+        _output_fields_id_cached_byte_size_.load(std::memory_order_relaxed),
+         target);
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      WriteStringToArray(2, this->output_fields(i), target);
+      WriteInt64NoTagToArray(this->output_fields_id_, target);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -441,12 +444,19 @@ size_t RetrieveRequest::ByteSizeLong() const {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  // repeated string output_fields = 2;
-  total_size += 1 *
-      ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(this->output_fields_size());
-  for (int i = 0, n = this->output_fields_size(); i < n; i++) {
-    total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-      this->output_fields(i));
+  // repeated int64 output_fields_id = 2;
+  {
+    size_t data_size = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      Int64Size(this->output_fields_id_);
+    if (data_size > 0) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32Size(
+            static_cast<::PROTOBUF_NAMESPACE_ID::int32>(data_size));
+    }
+    int cached_size = ::PROTOBUF_NAMESPACE_ID::internal::ToCachedSize(data_size);
+    _output_fields_id_cached_byte_size_.store(cached_size,
+                                    std::memory_order_relaxed);
+    total_size += data_size;
   }
 
   // .milvus.proto.schema.IDs ids = 1;
@@ -483,7 +493,7 @@ void RetrieveRequest::MergeFrom(const RetrieveRequest& from) {
   ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
   (void) cached_has_bits;
 
-  output_fields_.MergeFrom(from.output_fields_);
+  output_fields_id_.MergeFrom(from.output_fields_id_);
   if (from.has_ids()) {
     mutable_ids()->::milvus::proto::schema::IDs::MergeFrom(from.ids());
   }
@@ -510,7 +520,7 @@ bool RetrieveRequest::IsInitialized() const {
 void RetrieveRequest::InternalSwap(RetrieveRequest* other) {
   using std::swap;
   _internal_metadata_.Swap(&other->_internal_metadata_);
-  output_fields_.InternalSwap(CastToBase(&other->output_fields_));
+  output_fields_id_.InternalSwap(&other->output_fields_id_);
   swap(ids_, other->ids_);
 }
 

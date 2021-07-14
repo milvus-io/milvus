@@ -153,7 +153,7 @@ func TestSegment_retrieve(t *testing.T) {
 				},
 			},
 		},
-		OutputFields: []string{"vec"},
+		OutputFieldsId: []int64{100},
 	}
 	plan, err := createRetrievePlan(collection, reqIds, 100)
 	defer plan.delete()

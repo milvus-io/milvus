@@ -6,7 +6,7 @@ import "schema.proto";
 
 message RetrieveRequest {
   schema.IDs ids = 1;
-  repeated string output_fields = 2;
+  repeated int64 output_fields_id = 2;
 }
 
 message RetrieveResults {
