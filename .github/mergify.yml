@@ -85,3 +85,21 @@ pull_request_rules:
         remove:
           - ci-passed
 
+  - name: Blocking PR if missing a related issue
+    conditions:
+      - base=master
+      - "-body~=issue: #[0-9]{1,4}"
+    actions:
+      label:
+        add:
+          - do-not-merge/missing-related-issue
+
+  - name: Dismiss block label if related issue be added into PR
+    conditions:
+      - base=master
+      - "body~=issue: #[0-9]{1,4}"
+    actions:
+      label:
+        remove:
+          - do-not-merge/missing-related-issue
+
