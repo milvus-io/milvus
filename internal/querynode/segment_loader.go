@@ -139,9 +139,17 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 }
 
 func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment *Segment, segmentLoadInfo *querypb.SegmentLoadInfo) error {
-	vectorFieldIDs, err := loader.historicalReplica.getVecFieldIDsByCollectionID(collectionID)
+	vectorFields, err := loader.historicalReplica.getVecFieldsByCollectionID(collectionID)
 	if err != nil {
 		return err
+	}
+	if len(vectorFields) <= 0 {
+		return fmt.Errorf("no vector field in collection %d", collectionID)
+	}
+
+	var vectorFieldIDs []int64
+	for _, field := range vectorFields {
+		vectorFieldIDs = append(vectorFieldIDs, field.FieldID)
 	}
 
 	// add VectorFieldInfo for vector fields

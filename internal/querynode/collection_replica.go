@@ -54,7 +54,7 @@ type ReplicaInterface interface {
 	hasCollection(collectionID UniqueID) bool
 	getCollectionNum() int
 	getPartitionIDs(collectionID UniqueID) ([]UniqueID, error)
-	getVecFieldIDsByCollectionID(collectionID UniqueID) ([]int64, error)
+	getVecFieldsByCollectionID(collectionID UniqueID) ([]*schemapb.FieldSchema, error)
 
 	// partition
 	addPartition(collectionID UniqueID, partitionID UniqueID) error
@@ -203,7 +203,7 @@ func (colReplica *collectionReplica) getPartitionIDs(collectionID UniqueID) ([]U
 	return collection.partitionIDs, nil
 }
 
-func (colReplica *collectionReplica) getVecFieldIDsByCollectionID(collectionID UniqueID) ([]int64, error) {
+func (colReplica *collectionReplica) getVecFieldsByCollectionID(collectionID UniqueID) ([]*schemapb.FieldSchema, error) {
 	colReplica.mu.RLock()
 	defer colReplica.mu.RUnlock()
 
@@ -212,17 +212,12 @@ func (colReplica *collectionReplica) getVecFieldIDsByCollectionID(collectionID U
 		return nil, err
 	}
 
-	vecFields := make([]int64, 0)
+	vecFields := make([]*schemapb.FieldSchema, 0)
 	for _, field := range fields {
 		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
-			vecFields = append(vecFields, field.FieldID)
+			vecFields = append(vecFields, field)
 		}
 	}
-
-	if len(vecFields) <= 0 {
-		return nil, errors.New("no vector field in collection %d" + strconv.FormatInt(collectionID, 10))
-	}
-
 	return vecFields, nil
 }
 

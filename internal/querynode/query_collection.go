@@ -392,10 +392,10 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
 	sp.Finish()
 }
 
-func (q *queryCollection) getVectorOutputFields(msg queryMsg) ([]int64, error) {
+func (q *queryCollection) getVectorOutputFieldNames(msg queryMsg) ([]string, error) {
 	var collID UniqueID
 	var outputFieldsID []int64
-	var resultFieldsID []int64
+	var resultFieldNames []string
 
 	msgType := msg.Type()
 	switch msgType {
@@ -408,20 +408,20 @@ func (q *queryCollection) getVectorOutputFields(msg queryMsg) ([]int64, error) {
 		collID = searchMsg.CollectionID
 		outputFieldsID = searchMsg.OutputFieldsId
 	default:
-		return resultFieldsID, fmt.Errorf("receive invalid msgType = %d", msgType)
+		return resultFieldNames, fmt.Errorf("receive invalid msgType = %d", msgType)
 	}
 
-	vectorFieldIDs, err := q.historical.replica.getVecFieldIDsByCollectionID(collID)
+	vecFields, err := q.historical.replica.getVecFieldsByCollectionID(collID)
 	if err != nil {
-		return resultFieldsID, err
+		return resultFieldNames, err
 	}
 
-	for _, fieldID := range vectorFieldIDs {
-		if funcutil.SliceContain(outputFieldsID, fieldID) {
-			resultFieldsID = append(resultFieldsID, fieldID)
+	for _, field := range vecFields {
+		if funcutil.SliceContain(outputFieldsID, field.FieldID) {
+			resultFieldNames = append(resultFieldNames, field.Name)
 		}
 	}
-	return resultFieldsID, nil
+	return resultFieldNames, nil
 }
 
 func (q *queryCollection) doUnsolvedQueryMsg() {
@@ -1170,16 +1170,16 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 
 			// result is not empty
 			if len(result.Offset) > 0 {
-				// get all vector output field ids
-				vectorOutputFieldsID, err := q.getVectorOutputFields(msg)
+				// get all vector output field names
+				vecOutputFieldNames, err := q.getVectorOutputFieldNames(msg)
 				if err != nil {
 					return err
 				}
 
 				// output_fields contain vector field
-				for _, vectorFieldID := range vectorOutputFieldsID {
+				for _, vecFieldName := range vecOutputFieldNames {
 					for _, outputFieldData := range result.FieldsData {
-						if outputFieldData.FieldId == vectorFieldID {
+						if outputFieldData.FieldName == vecFieldName {
 							vd := outputFieldData.GetVectors()
 							log.Debug("CYD - ", zap.Int64("vd", vd.Dim))
 							// vector field is not loaded into memory,
