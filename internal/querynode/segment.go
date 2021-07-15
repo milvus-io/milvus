@@ -339,7 +339,7 @@ func (s *Segment) fillRetrieveResults(result *segcorepb.RetrieveResults, fieldID
 					numRows = int64(fieldData.NumRows)
 					dim = int64(fieldData.Dim)
 					if offset < numRows {
-						copy(resultFieldData.GetVectors().GetFloatVector().Data[int64(i)*dim : int64(i+1)*dim], fieldData.Data[offset*dim : (offset+1)*dim])
+						copy(resultFieldData.GetVectors().GetFloatVector().Data[int64(i)*dim:int64(i+1)*dim], fieldData.Data[offset*dim:(offset+1)*dim])
 						success = true
 					} else {
 						offset -= numRows
@@ -349,7 +349,7 @@ func (s *Segment) fillRetrieveResults(result *segcorepb.RetrieveResults, fieldID
 					dim = int64(fieldData.Dim)
 					if offset < numRows {
 						x := resultFieldData.GetVectors().GetData().(*schemapb.VectorField_BinaryVector)
-						copy(x.BinaryVector[int64(i)*dim/8 : int64(i+1)*dim/8], fieldData.Data[offset*dim/8 : (offset+1)*dim/8])
+						copy(x.BinaryVector[int64(i)*dim/8:int64(i+1)*dim/8], fieldData.Data[offset*dim/8:(offset+1)*dim/8])
 						success = true
 					} else {
 						offset -= numRows

@@ -35,6 +35,7 @@ type (
 	FieldID   = typeutil.UniqueID
 	Timestamp = typeutil.Timestamp
 )
+
 const InvalidUniqueID = UniqueID(-1)
 
 type Blob struct {
@@ -472,7 +473,6 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 
 	return pID, sID, resultData, nil
 }
-
 
 func (insertCodec *InsertCodec) DeserializeOneVectorBinlog(blob *Blob) (data *InsertFieldData, err error) {
 	resultData := &InsertFieldData{

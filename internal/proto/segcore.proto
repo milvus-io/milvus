@@ -16,13 +16,13 @@ message RetrieveResults {
 }
 
 message LoadFieldMeta {
-    int64 min_timestamp = 1;
-    int64 max_timestamp = 2;
-    int64 row_count = 3;
+  int64 min_timestamp = 1;
+  int64 max_timestamp = 2;
+  int64 row_count = 3;
 }
 
 message LoadSegmentMeta {
-    // TODOs
-    repeated LoadFieldMeta metas = 1;
-    int64 total_size = 2;
+  // TODOs
+  repeated LoadFieldMeta metas = 1;
+  int64 total_size = 2;
 }

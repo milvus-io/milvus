@@ -236,31 +236,6 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 				// TODO: return or continue?
 				return err
 			}
-			//sizeBinLog := len(binLog)
-			//log.Debug("CYD - ", zap.Int("len", sizeBinLog), zap.String("path", path))
-
-			//////////////////////////////////////
-			//localFilename, err := loader.minioKV.FGetObject(path, "/tmp/milvus/")
-			//if err != nil {
-			//	// TODO: return or continue?
-			//	return err
-			//}
-			//file, err := os.OpenFile(localFilename, os.O_RDONLY, 0664)
-			//if err != nil {
-			//	return err
-			//}
-			//fileInfo, err := file.Stat()
-			//if err != nil {
-			//	return err
-			//}
-			//fileSize := fileInfo.Size()
-			//log.Debug("CYD - ", zap.Int64("filesize", fileSize), zap.String("path", localFilename))
-			//data, err := syscall.Mmap(int(file.Fd()), 0, int(fileInfo.Size()), syscall.PROT_READ, syscall.MAP_SHARED)
-			//if err != nil {
-			//	return err
-			//}
-			//////////////////////////////////////
-
 			blob := &storage.Blob{
 				Key:   p,
 				Value: []byte(binLog),
