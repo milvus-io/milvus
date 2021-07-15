@@ -98,7 +98,7 @@
 <p>&nbsp;</p>
 <h3 >模块介绍</h3>
 <p><strong>模块调用关系图</strong></p>
-<p><img src="https://zilliverse.feishu.cn/space/api/box/stream/download/asynccode/?code=N2UzZWQxYzRmM2M1MjdlZjdiN2YwMDM2MGUzNDRhM2NfSkNRM3ZxUVRyaDJoQzhQOXh0U2pPZ3RpQ1FUYmdIQW9fVG9rZW46Ym94Y24xZjJBU0ZhTkpMVFNtbm5OQU5uZ09jXzE2MjYyNTkzMzc6MTYyNjI2MjkzN19WNA" referrerpolicy="no-referrer" alt="img"></p>
+<p><img src="https://github.com/milvus-io/milvus/blob/master/tests20/python_client/graphs/module_call_diagram.jpg" referrerpolicy="no-referrer" alt="img"></p>
 <h5 > 工作目录及文件介绍</h5>
 <ul>
 <li><strong>base</strong>：放置已封装好的 <strong>pymilvus-orm 模块文件</strong>，以及 pytest 框架的 setup 和 teardown 处理等</li>
@@ -129,8 +129,7 @@
 <p>&nbsp;</p>
 <h5 >Python 测试代码添加注意事项</h5>
 <ol>
-<li><h6 >测试编码风格</h6>
-</li>
+<h6 >1. 测试编码风格</h6>
 
 </ol>
 <ul>
@@ -198,8 +197,7 @@
 
 </ul>
 <ol>
-<li><h6 >编码注意事项</h6>
-</li>
+<h6 >2. 编码注意事项</h6>
 
 </ol>
 <ul>
@@ -250,8 +248,7 @@ self.partition_wrap.init_partition(collection=None, name=partition_name, check_t
 partition_w = self.init_partition_wrap(collection_w, partition_name, check_task=CheckTasks.check_partition_property, check_items={&quot;name&quot;: partition_name, &quot;description&quot;: description, &quot;is_empty&quot;: True, &quot;num_entities&quot;: 0})
 </code></pre>
 <ol>
-<li><h6 >测试用例添加</h6>
-</li>
+<h6 >3. 测试用例添加</h6>
 
 </ol>
 <ul>
@@ -292,17 +289,11 @@ partition_w = self.init_partition_wrap(collection_w, partition_name, check_task=
 
 </ul>
 <pre><code>self.connection_wrap = ApiConnectionsWrapper()
-
 self.utility_wrap = ApiUtilityWrapper()
-
 self.collection_wrap = ApiCollectionWrapper()
-
 self.partition_wrap = ApiPartitionWrapper()
-
 self.index_wrap = ApiIndexWrapper()
-
 self.collection_schema_wrap = ApiCollectionSchemaWrapper()
-
 self.field_schema_wrap = ApiFieldSchemaWrapper()
 </code></pre>
 <ul>
@@ -318,12 +309,11 @@ self.field_schema_wrap = ApiFieldSchemaWrapper()
 
 </ul>
 <ol>
-<li><h6 >框架功能添加</h6>
-</li>
+<h6 >4. 框架功能添加</h6>
 
 </ol>
 <ul>
 <li>在 utils 目录下添加需要的全局方法或者工具</li>
 <li>可将相应的配置内容加入 config 目录下</li>
-
 </ul>
+
