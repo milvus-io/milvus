@@ -20,9 +20,6 @@
   <a href="https://bestpractices.coreinfrastructure.org/projects/3563">
         <img src="https://bestpractices.coreinfrastructure.org/projects/3563/badge" />
   </a>
-  <a href="https://codecov.io/gh/milvus-io/milvus">
-        <img src="https://codecov.io/gh/milvus-io/milvus/branch/master/graph/badge.svg" />
-  </a>
   <a href="https://app.codacy.com/gh/milvus-io/milvus?utm_source=github.com&utm_medium=referral&utm_content=milvus-io/milvus&utm_campaign=Badge_Grade_Dashboard">
         <img src="https://api.codacy.com/project/badge/Grade/c4bb2ccfb51b47f99e43bfd1705edd95" />
   </a>

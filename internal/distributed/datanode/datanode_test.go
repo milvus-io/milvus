@@ -11,6 +11,7 @@
 
 package grpcdatanode
 
+/*
 import (
 	"context"
 	"fmt"
@@ -159,3 +160,4 @@ func TestRun(t *testing.T) {
 	err = dnServer.Stop()
 	assert.Nil(t, err)
 }
+*/

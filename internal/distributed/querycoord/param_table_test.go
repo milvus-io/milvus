@@ -11,6 +11,7 @@
 
 package grpcquerycoord
 
+/*
 import (
 	"testing"
 
@@ -29,3 +30,4 @@ func TestParamTable(t *testing.T) {
 	assert.NotEqual(t, Params.RootCoordAddress, "")
 	t.Logf("RootCoordAddress:%s", Params.RootCoordAddress)
 }
+*/

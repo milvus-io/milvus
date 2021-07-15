@@ -11,6 +11,7 @@
 
 package proxy
 
+/*
 import (
 	"context"
 	"math/rand"
@@ -222,3 +223,4 @@ func TestChannelsTimeTickerImpl_getMinTsStatistics(t *testing.T) {
 
 	time.Sleep(time.Second)
 }
+*/
