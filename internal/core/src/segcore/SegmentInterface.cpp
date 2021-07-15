@@ -141,6 +141,7 @@ static std::unique_ptr<DataArray>
 CreateDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
     auto data_array = std::make_unique<DataArray>();
+    data_array->set_field_id(field_meta.get_id().get());
 
     if (!datatype_is_vector(data_type)) {
         auto scalar_array = CreateScalarArrayFrom(data_raw, count, data_type);
@@ -166,7 +167,7 @@ CreateDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& field_
                 break;
             }
             default: {
-                PanicInfo("unsupportted datatype");
+                PanicInfo("unsupported datatype");
             }
         }
     }
@@ -203,6 +204,10 @@ SegmentInternalInterface::GetEntityById(const std::vector<FieldOffset>& field_of
     // std::cout << dbg_log << std::endl;
 
     results->set_allocated_ids(ids_.release());
+
+    for (auto& seg_offset : seg_offsets) {
+        results->add_offset(seg_offset.get());
+    }
 
     auto fields_data = results->mutable_fields_data();
     for (auto field_offset : field_offsets) {

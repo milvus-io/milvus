@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -389,6 +390,38 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
 	)
 	tr.Elapse("all done")
 	sp.Finish()
+}
+
+func (q *queryCollection) getVectorOutputFieldIDs(msg queryMsg) ([]int64, error) {
+	var collID UniqueID
+	var outputFieldsID []int64
+	var resultFieldIDs []int64
+
+	msgType := msg.Type()
+	switch msgType {
+	case commonpb.MsgType_Retrieve:
+		retrieveMsg := msg.(*msgstream.RetrieveMsg)
+		collID = retrieveMsg.CollectionID
+		outputFieldsID = retrieveMsg.OutputFieldsId
+	case commonpb.MsgType_Search:
+		searchMsg := msg.(*msgstream.SearchMsg)
+		collID = searchMsg.CollectionID
+		outputFieldsID = searchMsg.OutputFieldsId
+	default:
+		return resultFieldIDs, fmt.Errorf("receive invalid msgType = %d", msgType)
+	}
+
+	vecFields, err := q.historical.replica.getVecFieldIDsByCollectionID(collID)
+	if err != nil {
+		return resultFieldIDs, err
+	}
+
+	for _, fieldID := range vecFields {
+		if funcutil.SliceContain(outputFieldsID, fieldID) {
+			resultFieldIDs = append(resultFieldIDs, fieldID)
+		}
+	}
+	return resultFieldIDs, nil
 }
 
 func (q *queryCollection) doUnsolvedQueryMsg() {
@@ -1057,6 +1090,38 @@ func (q *queryCollection) search(msg queryMsg) error {
 	return nil
 }
 
+func (q *queryCollection) fillVectorOutputFieldsIfNeeded(msg queryMsg, segment *Segment, result *segcorepb.RetrieveResults) error {
+	// result is not empty
+	if len(result.Offset) <= 0 {
+		return nil
+	}
+
+	// get all vector output field ids
+	vecOutputFieldIDs, err := q.getVectorOutputFieldIDs(msg)
+	if err != nil {
+		return err
+	}
+
+	// output_fields contain vector field
+	for _, vecOutputFieldID := range vecOutputFieldIDs {
+		log.Debug("CYD - ", zap.Int64("vecOutputFieldID", vecOutputFieldID))
+		vecFieldInfo, err := segment.getVectorFieldInfo(vecOutputFieldID)
+		if err != nil {
+			return fmt.Errorf("cannot get vector field info, fileID %d", vecOutputFieldID)
+		}
+		// vector field raw data is not loaded into memory
+		if !vecFieldInfo.getRawDataInMemory() {
+			if err = q.historical.loader.loadSegmentVectorFieldsData(vecFieldInfo); err != nil {
+				return err
+			}
+			if err = segment.fillRetrieveResults(result, vecOutputFieldID, vecFieldInfo); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (q *queryCollection) retrieve(msg queryMsg) error {
 	// TODO(yukun)
 	// step 1: get retrieve object and defer destruction
@@ -1132,6 +1197,10 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 			}
 			result, err := segment.getEntityByIds(plan)
 			if err != nil {
+				return err
+			}
+
+			if err = q.fillVectorOutputFieldsIfNeeded(msg, segment, result); err != nil {
 				return err
 			}
 			mergeList = append(mergeList, result)
