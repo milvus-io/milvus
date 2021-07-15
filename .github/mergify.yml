@@ -89,6 +89,7 @@ pull_request_rules:
     conditions:
       - base=master
       - "-body~= #[0-9]{1,6}"
+      - -title~=\[automated\]
     actions:
       label:
         add:
@@ -102,6 +103,7 @@ pull_request_rules:
     conditions:
       - base=master
       - "body~= #[0-9]{1,6}"
+      - title~=\[automated\]
     actions:
       label:
         remove:
