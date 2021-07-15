@@ -1111,12 +1111,12 @@ func (q *queryCollection) fillVectorOutputFieldsIfNeeded(msg queryMsg, segment *
 		}
 		// vector field raw data is not loaded into memory
 		if !vecFieldInfo.getRawDataInMemory() {
-			//if err = q.historical.loader.loadSegmentVectorFieldsData(segment, nil); err != nil {
-			//	return err
-			//}
-			//if err = segment.fillRetrieveResults(plan, result); err != nil {
-			//	return err
-			//}
+			if err = q.historical.loader.loadSegmentVectorFieldsData(vecFieldInfo); err != nil {
+				return err
+			}
+			if err = segment.fillRetrieveResults(result, vecOutputFieldID, vecFieldInfo); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

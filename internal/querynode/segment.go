@@ -25,7 +25,6 @@ import "C"
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"sync"
 	"unsafe"
@@ -36,7 +35,9 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 type segmentType int32
@@ -52,32 +53,30 @@ type VectorFieldInfo struct {
 	mu              sync.RWMutex
 	fieldBinlog     *datapb.FieldBinlog
 	rawDataInMemory bool
-	rowNum          map[string]int64    // map[binlogPath]int64
-	rawDataMmap     map[string]*os.File // map[binlogPath]*os.File
+	rawData         map[string]storage.FieldData // map[binlogPath]FieldData
 }
 
 func newVectorFieldInfo(fieldBinlog *datapb.FieldBinlog) *VectorFieldInfo {
 	return &VectorFieldInfo{
 		fieldBinlog:     fieldBinlog,
 		rawDataInMemory: false,
-		rowNum:          make(map[string]int64),
-		rawDataMmap:     make(map[string]*os.File),
+		rawData:         make(map[string]storage.FieldData),
 	}
 }
 
-func (v *VectorFieldInfo) setRowNum(binlogPath string, rowNum int64) {
+func (v *VectorFieldInfo) setRawData(binlogPath string, data storage.FieldData) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	v.rowNum[binlogPath] = rowNum
+	v.rawData[binlogPath] = data
 }
 
-func (v *VectorFieldInfo) getRowNum(binlogPath string) int64 {
+func (v *VectorFieldInfo) getRawData(binlogPath string) storage.FieldData {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if num, ok := v.rowNum[binlogPath]; ok {
-		return num
+	if data, ok := v.rawData[binlogPath]; ok {
+		return data
 	}
-	return 0
+	return nil
 }
 
 func (v *VectorFieldInfo) setRawDataInMemory(flag bool) {
@@ -323,7 +322,47 @@ func (s *Segment) getEntityByIds(plan *RetrievePlan) (*segcorepb.RetrieveResults
 	return result, nil
 }
 
-func (s *Segment) fillRetrieveResults(plan *RetrievePlan, result *segcorepb.RetrieveResults) error {
+func (s *Segment) fillRetrieveResults(result *segcorepb.RetrieveResults, fieldID int64, fieldInfo *VectorFieldInfo) error {
+	for _, resultFieldData := range result.FieldsData {
+		if resultFieldData.FieldId != fieldID {
+			continue
+		}
+
+		for i, offset := range result.Offset {
+			var success bool
+			for _, path := range fieldInfo.fieldBinlog.Binlogs {
+				rawData := fieldInfo.getRawData(path)
+
+				var numRows, dim int64
+				switch fieldData := rawData.(type) {
+				case *storage.FloatVectorFieldData:
+					numRows = int64(fieldData.NumRows)
+					dim = int64(fieldData.Dim)
+					if offset < numRows {
+						copy(resultFieldData.GetVectors().GetFloatVector().Data[int64(i)*dim : int64(i+1)*dim], fieldData.Data[offset*dim : (offset+1)*dim])
+						success = true
+					} else {
+						offset -= numRows
+					}
+				case *storage.BinaryVectorFieldData:
+					numRows = int64(fieldData.NumRows)
+					dim = int64(fieldData.Dim)
+					if offset < numRows {
+						x := resultFieldData.GetVectors().GetData().(*schemapb.VectorField_BinaryVector)
+						copy(x.BinaryVector[int64(i)*dim/8 : int64(i+1)*dim/8], fieldData.Data[offset*dim/8 : (offset+1)*dim/8])
+						success = true
+					} else {
+						offset -= numRows
+					}
+				default:
+					return errors.New("unexpected field data type")
+				}
+				if success {
+					break
+				}
+			}
+		}
+	}
 	return nil
 }
 
@@ -805,8 +844,4 @@ func (s *Segment) dropSegmentIndex(fieldID int64) error {
 	log.Debug("dropSegmentIndex done", zap.Int64("fieldID", fieldID), zap.Int64("segmentID", s.ID()))
 
 	return nil
-}
-
-func (s *Segment) segmentVectorFieldDataMmap(fieldID int64, binlog string, rowCount int, data interface{}) ([]byte, error) {
-	return nil, nil
 }

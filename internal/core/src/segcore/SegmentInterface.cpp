@@ -141,7 +141,7 @@ static std::unique_ptr<DataArray>
 CreateDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
     auto data_array = std::make_unique<DataArray>();
-    data_array->set_field_name(field_meta.get_name().get());
+    data_array->set_field_id(field_meta.get_id().get());
 
     if (!datatype_is_vector(data_type)) {
         auto scalar_array = CreateScalarArrayFrom(data_raw, count, data_type);

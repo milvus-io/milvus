@@ -326,15 +326,18 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 	return nil
 }
 
-func (loader *segmentLoader) loadSegmentVectorFieldsData(segment *Segment, binlogs []string) error {
-	for _, path := range binlogs {
-		iCodec := storage.InsertCodec{}
-		defer func() {
-			err := iCodec.Close()
-			if err != nil {
-				log.Error(err.Error())
-			}
-		}()
+func (loader *segmentLoader) loadSegmentVectorFieldsData(info *VectorFieldInfo) error {
+	iCodec := storage.InsertCodec{}
+	defer func() {
+		err := iCodec.Close()
+		if err != nil {
+			log.Error(err.Error())
+		}
+	}()
+	for _, path := range info.fieldBinlog.Binlogs {
+		if data := info.getRawData(path); data != nil {
+			continue
+		}
 
 		binLog, err := loader.minioKV.Load(path)
 		if err != nil {
@@ -346,30 +349,14 @@ func (loader *segmentLoader) loadSegmentVectorFieldsData(segment *Segment, binlo
 			Value: []byte(binLog),
 		}
 
-		_, _, insertData, err := iCodec.Deserialize([]*storage.Blob{blob})
+		insertFieldData, err := iCodec.DeserializeOneVectorBinlog(blob)
 		if err != nil {
 			log.Error(err.Error())
 			return err
 		}
-		for fieldID, value := range insertData.Data {
-			var numRows int
-			var data interface{}
-			switch fieldData := value.(type) {
-			case *storage.FloatVectorFieldData:
-				numRows = fieldData.NumRows
-				data = fieldData.Data
-			case *storage.BinaryVectorFieldData:
-				numRows = fieldData.NumRows
-				data = fieldData.Data
-			default:
-				return fmt.Errorf("unexpected field data type")
-			}
-			data, err = segment.segmentVectorFieldDataMmap(fieldID, path, numRows, data)
-			if err != nil {
-				return err
-			}
-			// save dataMmap into segment.vectorFieldInfo
-		}
+
+		// save raw data into segment.vectorFieldInfo
+		info.setRawData(path, insertFieldData.Data)
 	}
 
 	return nil

@@ -474,261 +474,73 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 }
 
 
-func (insertCodec *InsertCodec) DeserializeFieldData(blobs []*Blob) (partitionID UniqueID, segmentID UniqueID, data *InsertFieldData, err error) {
-	if len(blobs) == 0 {
-		return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("blobs are empty")
-	}
-	readerClose := func(reader *BinlogReader) func() error {
-		return func() error { return reader.Close() }
-	}
-
-	var blobList BlobList = blobs
-	sort.Sort(blobList)
-
-	var pID UniqueID
-	var sID UniqueID
+func (insertCodec *InsertCodec) DeserializeOneVectorBinlog(blob *Blob) (data *InsertFieldData, err error) {
 	resultData := &InsertFieldData{
 		ID: InvalidUniqueID,
 	}
-	for _, blob := range blobList {
-		binlogReader, err := NewBinlogReader(blob.Value)
-		if err != nil {
-			return InvalidUniqueID, InvalidUniqueID, nil, err
-		}
-
-		// read partitionID and SegmentID
-		pID, sID = binlogReader.PartitionID, binlogReader.SegmentID
-
-		dataType := binlogReader.PayloadDataType
-		fieldID := binlogReader.FieldID
-		totalLength := 0
-		for {
-			eventReader, err := binlogReader.NextEventReader()
-			if err != nil {
-				return InvalidUniqueID, InvalidUniqueID, nil, err
-			}
-			if eventReader == nil {
-				break
-			}
-			switch dataType {
-			case schemapb.DataType_Bool:
-				if resultData.ID == InvalidUniqueID {
-					resultData.ID = fieldID
-					resultData.Data = &BoolFieldData{}
-				} else if resultData.ID != fieldID {
-					return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("mixed field data")
-				}
-				boolFieldData := resultData.Data.(*BoolFieldData)
-				singleData, err := eventReader.GetBoolFromPayload()
-				if err != nil {
-					return InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				boolFieldData.Data = append(boolFieldData.Data, singleData...)
-				length, err := eventReader.GetPayloadLengthFromReader()
-				if err != nil {
-					return InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				totalLength += length
-				boolFieldData.NumRows += length
-				resultData.Data = boolFieldData
-			case schemapb.DataType_Int8:
-				if resultData.ID == InvalidUniqueID {
-					resultData.ID = fieldID
-					resultData.Data = &Int8FieldData{}
-				} else if resultData.ID != fieldID {
-					return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("mixed field data")
-				}
-				int8FieldData := resultData.Data.(*Int8FieldData)
-				singleData, err := eventReader.GetInt8FromPayload()
-				if err != nil {
-					return InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				int8FieldData.Data = append(int8FieldData.Data, singleData...)
-				length, err := eventReader.GetPayloadLengthFromReader()
-				if err != nil {
-					return InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				totalLength += length
-				int8FieldData.NumRows += length
-				resultData.Data = int8FieldData
-			case schemapb.DataType_Int16:
-				if resultData.ID == InvalidUniqueID {
-					resultData.ID = fieldID
-					resultData.Data = &Int16FieldData{}
-				} else if resultData.ID != fieldID {
-					return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("mixed field data")
-				}
-				int16FieldData := resultData.Data.(*Int16FieldData)
-				singleData, err := eventReader.GetInt16FromPayload()
-				if err != nil {
-					return InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				int16FieldData.Data = append(int16FieldData.Data, singleData...)
-				length, err := eventReader.GetPayloadLengthFromReader()
-				if err != nil {
-					return InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				totalLength += length
-				int16FieldData.NumRows += length
-				resultData.Data = int16FieldData
-			case schemapb.DataType_Int32:
-				if resultData.ID == InvalidUniqueID {
-					resultData.ID = fieldID
-					resultData.Data = &Int32FieldData{}
-				} else if resultData.ID != fieldID {
-					return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("mixed field data")
-				}
-				int32FieldData := resultData.Data.(*Int32FieldData)
-				singleData, err := eventReader.GetInt32FromPayload()
-				if err != nil {
-					return InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				int32FieldData.Data = append(int32FieldData.Data, singleData...)
-				length, err := eventReader.GetPayloadLengthFromReader()
-				if err != nil {
-					return InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				totalLength += length
-				int32FieldData.NumRows += length
-				resultData.Data = int32FieldData
-			case schemapb.DataType_Int64:
-				if resultData.ID == InvalidUniqueID {
-					resultData.ID = fieldID
-					resultData.Data = &Int64FieldData{}
-				} else if resultData.ID != fieldID {
-					return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("mixed field data")
-				}
-				int64FieldData := resultData.Data.(*Int64FieldData)
-				singleData, err := eventReader.GetInt64FromPayload()
-				if err != nil {
-					return InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				int64FieldData.Data = append(int64FieldData.Data, singleData...)
-				length, err := eventReader.GetPayloadLengthFromReader()
-				if err != nil {
-					return InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				totalLength += length
-				int64FieldData.NumRows += length
-				resultData.Data = int64FieldData
-			case schemapb.DataType_Float:
-				if resultData.ID == InvalidUniqueID {
-					resultData.ID = fieldID
-					resultData.Data = &FloatFieldData{}
-				} else if resultData.ID != fieldID {
-					return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("mixed field data")
-				}
-				floatFieldData := resultData.Data.(*FloatFieldData)
-				singleData, err := eventReader.GetFloatFromPayload()
-				if err != nil {
-					return InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				floatFieldData.Data = append(floatFieldData.Data, singleData...)
-				length, err := eventReader.GetPayloadLengthFromReader()
-				if err != nil {
-					return InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				totalLength += length
-				floatFieldData.NumRows += length
-				resultData.Data = floatFieldData
-			case schemapb.DataType_Double:
-				if resultData.ID == InvalidUniqueID {
-					resultData.ID = fieldID
-					resultData.Data = &DoubleFieldData{}
-				} else if resultData.ID != fieldID {
-					return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("mixed field data")
-				}
-				doubleFieldData := resultData.Data.(*DoubleFieldData)
-				singleData, err := eventReader.GetDoubleFromPayload()
-				if err != nil {
-					return InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				doubleFieldData.Data = append(doubleFieldData.Data, singleData...)
-				length, err := eventReader.GetPayloadLengthFromReader()
-				if err != nil {
-					return InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				totalLength += length
-				doubleFieldData.NumRows += length
-				resultData.Data = doubleFieldData
-			case schemapb.DataType_String:
-				if resultData.ID == InvalidUniqueID {
-					resultData.ID = fieldID
-					resultData.Data = &StringFieldData{}
-				} else if resultData.ID != fieldID {
-					return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("mixed field data")
-				}
-				stringFieldData := resultData.Data.(*StringFieldData)
-				length, err := eventReader.GetPayloadLengthFromReader()
-				if err != nil {
-					return InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				totalLength += length
-				stringFieldData.NumRows += length
-				for i := 0; i < length; i++ {
-					singleString, err := eventReader.GetOneStringFromPayload(i)
-					if err != nil {
-						return InvalidUniqueID, InvalidUniqueID, nil, err
-					}
-					stringFieldData.Data = append(stringFieldData.Data, singleString)
-				}
-				resultData.Data = stringFieldData
-			case schemapb.DataType_BinaryVector:
-				if resultData.ID == InvalidUniqueID {
-					resultData.ID = fieldID
-					resultData.Data = &BinaryVectorFieldData{}
-				} else if resultData.ID != fieldID {
-					return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("mixed field data")
-				}
-				binaryVectorFieldData := resultData.Data.(*BinaryVectorFieldData)
-				var singleData []byte
-				singleData, binaryVectorFieldData.Dim, err = eventReader.GetBinaryVectorFromPayload()
-				if err != nil {
-					return InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				binaryVectorFieldData.Data = append(binaryVectorFieldData.Data, singleData...)
-				length, err := eventReader.GetPayloadLengthFromReader()
-				if err != nil {
-					return InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				totalLength += length
-				binaryVectorFieldData.NumRows += length
-				resultData.Data = binaryVectorFieldData
-			case schemapb.DataType_FloatVector:
-				if resultData.ID == InvalidUniqueID {
-					resultData.ID = fieldID
-					resultData.Data = &FloatVectorFieldData{}
-				} else if resultData.ID != fieldID {
-					return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("mixed field data")
-				}
-				floatVectorFieldData := resultData.Data.(*FloatVectorFieldData)
-				var singleData []float32
-				singleData, floatVectorFieldData.Dim, err = eventReader.GetFloatVectorFromPayload()
-				if err != nil {
-					return InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				floatVectorFieldData.Data = append(floatVectorFieldData.Data, singleData...)
-				length, err := eventReader.GetPayloadLengthFromReader()
-				if err != nil {
-					return InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				totalLength += length
-				floatVectorFieldData.NumRows += length
-				resultData.Data = floatVectorFieldData
-			default:
-				return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("undefined data type %d", dataType)
-			}
-		}
-		if fieldID == rootcoord.TimeStampField {
-			blobInfo := BlobInfo{
-				Length: totalLength,
-			}
-			resultData.Infos = append(resultData.Infos, blobInfo)
-		}
-		insertCodec.readerCloseFunc = append(insertCodec.readerCloseFunc, readerClose(binlogReader))
+	binlogReader, err := NewBinlogReader(blob.Value)
+	if err != nil {
+		return nil, err
 	}
 
-	return pID, sID, resultData, nil
+	dataType := binlogReader.PayloadDataType
+	fieldID := binlogReader.FieldID
+	totalLength := 0
+	for {
+		eventReader, err := binlogReader.NextEventReader()
+		if err != nil {
+			return nil, err
+		}
+		if eventReader == nil {
+			break
+		}
+		switch dataType {
+		case schemapb.DataType_BinaryVector:
+			if resultData.ID == InvalidUniqueID {
+				resultData.ID = fieldID
+				resultData.Data = &BinaryVectorFieldData{}
+			}
+			binaryVectorFieldData := resultData.Data.(*BinaryVectorFieldData)
+			var singleData []byte
+			singleData, binaryVectorFieldData.Dim, err = eventReader.GetBinaryVectorFromPayload()
+			if err != nil {
+				return nil, err
+			}
+			binaryVectorFieldData.Data = append(binaryVectorFieldData.Data, singleData...)
+			length, err := eventReader.GetPayloadLengthFromReader()
+			if err != nil {
+				return nil, err
+			}
+			totalLength += length
+			binaryVectorFieldData.NumRows += length
+			resultData.Data = binaryVectorFieldData
+		case schemapb.DataType_FloatVector:
+			if resultData.ID == InvalidUniqueID {
+				resultData.ID = fieldID
+				resultData.Data = &FloatVectorFieldData{}
+			}
+			floatVectorFieldData := resultData.Data.(*FloatVectorFieldData)
+			var singleData []float32
+			singleData, floatVectorFieldData.Dim, err = eventReader.GetFloatVectorFromPayload()
+			if err != nil {
+				return nil, err
+			}
+			floatVectorFieldData.Data = append(floatVectorFieldData.Data, singleData...)
+			length, err := eventReader.GetPayloadLengthFromReader()
+			if err != nil {
+				return nil, err
+			}
+			totalLength += length
+			floatVectorFieldData.NumRows += length
+			resultData.Data = floatVectorFieldData
+		default:
+			return nil, fmt.Errorf("undefined data type %d", dataType)
+		}
+	}
+	if err = binlogReader.Close(); err != nil {
+		return nil, err
+	}
+	return resultData, nil
 }
 
 func (insertCodec *InsertCodec) Close() error {

@@ -154,16 +154,16 @@ const char descriptor_table_protodef_segcore_2eproto[] PROTOBUF_SECTION_VARIABLE
   "\n\rsegcore.proto\022\024milvus.proto.segcore\032\014s"
   "chema.proto\"R\n\017RetrieveRequest\022%\n\003ids\030\001 "
   "\001(\0132\030.milvus.proto.schema.IDs\022\030\n\020output_"
-  "fields_id\030\002 \003(\003\"m\n\017RetrieveResults\022%\n\003id"
-  "s\030\001 \001(\0132\030.milvus.proto.schema.IDs\0223\n\013fie"
-  "lds_data\030\002 \003(\0132\036.milvus.proto.schema.Fie"
-  "ldData\"P\n\rLoadFieldMeta\022\025\n\rmin_timestamp"
-  "\030\001 \001(\003\022\025\n\rmax_timestamp\030\002 \001(\003\022\021\n\trow_cou"
-  "nt\030\003 \001(\003\"Y\n\017LoadSegmentMeta\0222\n\005metas\030\001 \003"
-  "(\0132#.milvus.proto.segcore.LoadFieldMeta\022"
-  "\022\n\ntotal_size\030\002 \001(\003B6Z4github.com/milvus"
-  "-io/milvus/internal/proto/segcorepbb\006pro"
-  "to3"
+  "fields_id\030\002 \003(\003\"}\n\017RetrieveResults\022%\n\003id"
+  "s\030\001 \001(\0132\030.milvus.proto.schema.IDs\022\016\n\006off"
+  "set\030\002 \003(\003\0223\n\013fields_data\030\003 \003(\0132\036.milvus."
+  "proto.schema.FieldData\"P\n\rLoadFieldMeta\022"
+  "\025\n\rmin_timestamp\030\001 \001(\003\022\025\n\rmax_timestamp\030"
+  "\002 \001(\003\022\021\n\trow_count\030\003 \001(\003\"Y\n\017LoadSegmentM"
+  "eta\0222\n\005metas\030\001 \003(\0132#.milvus.proto.segcor"
+  "e.LoadFieldMeta\022\022\n\ntotal_size\030\002 \001(\003B6Z4g"
+  "ithub.com/milvus-io/milvus/internal/prot"
+  "o/segcorepbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_segcore_2eproto_deps[1] = {
   &::descriptor_table_schema_2eproto,
@@ -177,7 +177,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_seg
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_segcore_2eproto_once;
 static bool descriptor_table_segcore_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_segcore_2eproto = {
-  &descriptor_table_segcore_2eproto_initialized, descriptor_table_protodef_segcore_2eproto, "segcore.proto", 483,
+  &descriptor_table_segcore_2eproto_initialized, descriptor_table_protodef_segcore_2eproto, "segcore.proto", 499,
   &descriptor_table_segcore_2eproto_once, descriptor_table_segcore_2eproto_sccs, descriptor_table_segcore_2eproto_deps, 4, 1,
   schemas, file_default_instances, TableStruct_segcore_2eproto::offsets,
   file_level_metadata_segcore_2eproto, 4, file_level_enum_descriptors_segcore_2eproto, file_level_service_descriptors_segcore_2eproto,
