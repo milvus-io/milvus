@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 
@@ -41,21 +40,19 @@ import (
 )
 
 type Server struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	wg        sync.WaitGroup
 	dataCoord *datacoord.Server
-	ctx       context.Context
-	cancel    context.CancelFunc
 
 	grpcErrChan chan error
-	wg          sync.WaitGroup
-
-	grpcServer *grpc.Server
-	rootCoord  types.RootCoord
-
-	closer io.Closer
+	grpcServer  *grpc.Server
+	closer      io.Closer
 }
 
 // NewServer new data service grpc server
-func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
+func NewServer(ctx context.Context, factory msgstream.Factory, opts ...datacoord.Option) (*Server, error) {
 	var err error
 	ctx1, cancel := context.WithCancel(ctx)
 
@@ -64,7 +61,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		cancel:      cancel,
 		grpcErrChan: make(chan error),
 	}
-	s.dataCoord, err = datacoord.CreateServer(s.ctx, factory)
+	s.dataCoord, err = datacoord.CreateServer(s.ctx, factory, opts...)
 	if err != nil {
 		return nil, err
 	}
