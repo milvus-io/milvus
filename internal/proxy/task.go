@@ -652,6 +652,7 @@ func (it *InsertTask) checkFieldAutoID() error {
 	if autoIDLoc >= 0 {
 		fieldData := schemapb.FieldData{
 			FieldName: primaryFieldName,
+			FieldId:   -1,
 			Type:      schemapb.DataType_Int64,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
@@ -1693,6 +1694,7 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 					if ret.Results.FieldsData[k] == nil || ret.Results.FieldsData[k].GetScalars() == nil {
 						ret.Results.FieldsData[k] = &schemapb.FieldData{
 							FieldName: fieldData.FieldName,
+							FieldId:   fieldData.FieldId,
 							Field: &schemapb.FieldData_Scalars{
 								Scalars: &schemapb.ScalarField{},
 							},
@@ -1768,6 +1770,7 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 					if ret.Results.FieldsData[k] == nil || ret.Results.FieldsData[k].GetVectors() == nil {
 						ret.Results.FieldsData[k] = &schemapb.FieldData{
 							FieldName: fieldData.FieldName,
+							FieldId:   fieldData.FieldId,
 							Field: &schemapb.FieldData_Vectors{
 								Vectors: &schemapb.VectorField{
 									Dim: dim,
@@ -1934,7 +1937,8 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 				for k, fieldName := range st.query.OutputFields {
 					for _, field := range schema.Fields {
 						if st.result.Results.FieldsData[k] != nil && field.Name == fieldName {
-							st.result.Results.FieldsData[k].FieldName = fieldName
+							st.result.Results.FieldsData[k].FieldName = field.Name
+							st.result.Results.FieldsData[k].FieldId = field.FieldID
 							st.result.Results.FieldsData[k].Type = field.DataType
 						}
 					}
@@ -2379,6 +2383,7 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 			for _, field := range schema.Fields {
 				if field.FieldID == rt.OutputFieldsId[i] {
 					rt.result.FieldsData[i].FieldName = field.Name
+					rt.result.FieldsData[i].FieldId = field.FieldID
 					rt.result.FieldsData[i].Type = field.DataType
 				}
 			}
