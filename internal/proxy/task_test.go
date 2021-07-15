@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TODO(dragondriver): add more test cases
+
 func TestGetNumRowsOfScalarField(t *testing.T) {
 	cases := []struct {
 		datas interface{}
@@ -385,4 +387,105 @@ func TestInsertTask_checkRowNums(t *testing.T) {
 	case2.req.FieldsData[7] = newBinaryVectorFieldData("BinaryVector", numRows, dim)
 	err = case2.checkRowNums()
 	assert.Equal(t, nil, err)
+}
+
+func TestTranslateOutputFields(t *testing.T) {
+	f1 := "field1"
+	f2 := "field2"
+	fvec := "fvec"
+	bvec := "bvec"
+	all := "*"
+	allWithWhiteSpace := " * "
+	allWithLeftWhiteSpace := " *"
+	allWithRightWhiteSpace := "* "
+	var outputFields []string
+	var err error
+
+	// schema has no vector fields
+	schema1 := &schemapb.CollectionSchema{
+		Name:        "TestTranslateOutputFields",
+		Description: "TestTranslateOutputFields",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			{Name: f1, DataType: schemapb.DataType_Int64},
+			{Name: f2, DataType: schemapb.DataType_Int64},
+		},
+	}
+
+	outputFields, err = translateOutputFields([]string{}, schema1)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, []string{}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{f1}, schema1)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, []string{f1}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{f2}, schema1)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, []string{f2}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{f1, f2}, schema1)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, []string{f1, f2}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{all}, schema1)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, []string{f1, f2}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{allWithWhiteSpace}, schema1)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, []string{f1, f2}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{allWithLeftWhiteSpace}, schema1)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, []string{f1, f2}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{allWithRightWhiteSpace}, schema1)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, []string{f1, f2}, outputFields)
+
+	// schema has vector fields
+	schema2 := &schemapb.CollectionSchema{
+		Name:        "TestTranslateOutputFields",
+		Description: "TestTranslateOutputFields",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			{Name: f1, DataType: schemapb.DataType_Int64},
+			{Name: f2, DataType: schemapb.DataType_Int64},
+			{Name: fvec, DataType: schemapb.DataType_FloatVector},
+			{Name: bvec, DataType: schemapb.DataType_BinaryVector},
+		},
+	}
+
+	outputFields, err = translateOutputFields([]string{}, schema2)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, []string{}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{f1}, schema2)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, []string{f1}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{f2}, schema2)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, []string{f2}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{f1, f2}, schema2)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, []string{f1, f2}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{all}, schema2)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, []string{f1, f2}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{allWithWhiteSpace}, schema2)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, []string{f1, f2}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{allWithLeftWhiteSpace}, schema2)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, []string{f1, f2}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{allWithRightWhiteSpace}, schema2)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, []string{f1, f2}, outputFields)
 }
