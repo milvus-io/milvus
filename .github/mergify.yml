@@ -89,7 +89,6 @@ pull_request_rules:
     conditions:
       - base=master
       - "-body~= #[0-9]{1,6}"
-      - "body~=(?!close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved) #[0-9]{1,6}"
     actions:
       label:
         add:
@@ -97,14 +96,12 @@ pull_request_rules:
       comment:
         message: |
           @{{author}} Please associate the related issue to the body of your Pull Request.  (eg. “issue: #5”)
-          Make sure you don't include linking PR to issue [keywords](https://docs.github.com/en/issues/tracking-your-work-with-issues/linking-a-pull-request-to-an-issue#linking-a-pull-request-to-an-issue-using-a-keyword) in your pull request.
 
 
   - name: Dismiss block label if related issue be added into PR
     conditions:
       - base=master
       - "body~= #[0-9]{1,6}"
-      - "-body~=(?!close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved) #[0-9]{1,6}"
     actions:
       label:
         remove:
