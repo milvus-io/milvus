@@ -497,6 +497,9 @@ func (c *queryNodeCluster) isOnService(nodeID int64) (bool, error) {
 }
 
 func (c *queryNodeCluster) printMeta() {
+	c.Lock()
+	defer c.Unlock()
+
 	for id, node := range c.nodes {
 		if node.isOnService() {
 			for collectionID, info := range node.collectionInfos {

@@ -471,7 +471,7 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 		childTask.SetID(id)
 		kvs := make(map[string]string)
 		taskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, childTask.ID())
-		kvs[taskKey] = t.Marshal()
+		kvs[taskKey] = childTask.Marshal()
 		stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, childTask.ID())
 		kvs[stateKey] = strconv.Itoa(int(taskUndo))
 		err = scheduler.client.MultiSave(kvs)
@@ -610,6 +610,16 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task)
 				scheduler.activateTaskChan <- t
 				wg.Add(1)
 				go scheduler.waitActivateTaskDone(wg, t)
+			} else {
+				removes := make([]string, 0)
+				taskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, t.ID())
+				removes = append(removes, taskKey)
+				stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
+				removes = append(removes, stateKey)
+				err = scheduler.client.MultiRemove(removes)
+				if err != nil {
+					log.Error("waitActivateTaskDone: error when remove task from etcd")
+				}
 			}
 		}
 
