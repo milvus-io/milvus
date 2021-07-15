@@ -121,144 +121,123 @@
 <li><strong>testcases</strong> 目录下的测试文件，继承 <strong>base/client_base.py</strong> 里的 <strong>TestcaseBase</strong> 模块，进行相应的测试用例编写。用例里用到的通用参数和数据处理方法，写入<strong>common</strong>模块供用例调用。</li>
 <li><strong>config</strong> 目录下加入一些全局配置，如日志的路径。</li>
 <li><strong>utils</strong> 目录下负责实现全局的方法，如全局可用的日志模块。</li>
-
 </ul>
+
 <p>&nbsp;</p>
 <h3 >代码添加</h3>
 <p>可参考添加新的测试用例或框架工具。</p>
 <p>&nbsp;</p>
+
 <h5 >Python 测试代码添加注意事项</h5>
+
+
 <ol>
 <h6 >1. 测试编码风格</h6>
-
 </ol>
 <ul>
-<li>test 文件：每一个 SDK 类对应一个 test 文件，Load 和 Search 单独对应一个 test 文件</li>
+    <ul>
+        <li>test 文件：每一个 SDK 类对应一个 test 文件，Load 和 Search 单独对应一个 test 文件</li>
+    </ul>
+    <ul>
+        <li><p>test类：每一个 test 文件中分两个类</p>
+            <ul>
+                <li><p>TestObjectParams ：</p>
+                    <ul>
+                        <li>如 TestPartitionParams 表示 Partition Interface 参数检查测试用例类</li>
+                        <li>检查在不同输入参数条件下，目标类/方法的表现，参数注意覆盖default，empty，none，datatype，maxsize边界值等</li>
+                    </ul>
+                </li>
+            </ul>
+            <ul>
+                <li><p>TestObjectOperations: </p>
+                    <ul>
+                        <li>如 TestPartitionOperations 表示 Partition Interface 针对不同 function 或操作的测试</li>
+                        <li>检查在合法输入参数，与其他接口有一定交互的条件下，目标类/方法的返回和表现</li>
+                    </ul>
+            </ul>
+        </li>
+    </ul>
 
-</ul>
-<ul>
-<li><p>test</p>
-<p> </p>
-<p>类：每一个 test 文件中分两个类</p>
-<ul>
-<li><p>TestObjectParams ：</p>
-<ul>
-<li>如 TestPartitionParams 表示 Partition Interface 参数检查测试用例类</li>
-
-</ul>
-</li>
-
-</ul>
-</li>
-
-</ul>
-<ul>
-<li>检查在不同输入参数条件下，目标类/方法的表现，参数注意覆盖default，empty，none，datatype，maxsize边界值等</li>
-
-</ul>
-<ul>
-<li><p>TestObjectOperations: </p>
-<ul>
-<li>如 TestPartitionOperations 表示 Partition Interface 针对不同 function 或操作的测试</li>
-
-</ul>
-</li>
-
-</ul>
-<ul>
-<li>检查在合法输入参数，与其他接口有一定交互的条件下，目标类/方法的返回和表现</li>
-
-</ul>
 <ul>
 <li><p>testcase 命名</p>
 <ul>
 <li><p>TestObjectParams 类</p>
-<ul>
-<li>以testcase输入参数区分命名，如 test_partition_empty_name() 表示验证空字符串作为 name 参数输入的表现</li>
-
-</ul>
+    <ul>
+    <li>以testcase输入参数区分命名，如 test_partition_empty_name() 表示验证空字符串作为 name 参数输入的表现</li>
+    </ul>
 </li>
 
-</ul>
-</li>
-
-</ul>
-<ul>
 <li><p>TestObjectOperations 类</p>
-<ul>
-<li>以 testcase 操作步骤区分命名，如 test_partition_drop_partition_twice() 表示验证连续 drop 两次 partition 的表现</li>
-
-</ul>
+    <ul>
+    <li>以 testcase 操作步骤区分命名，如 test_partition_drop_partition_twice() 表示验证连续 drop 两次 partition 的表现</li>
+    <li>以 testcase 验证点区分命名，如 test_partition_maximum_partitions() 表示验证创建  partition 的最大数量</li>
+    </ul>
 </li>
 
 </ul>
+</ul>
+</ul>
 <ul>
-<li>以 testcase 验证点区分命名，如 test_partition_maximum_partitions() 表示验证创建  partition 的最大数量</li>
-
 </ul>
 <ol>
-<h6 >2. 编码注意事项</h6>
 
+<h6 >2. 编码注意事项</h6>
 </ol>
 <ul>
-<li>不能在测试用例文件中初始化 ORM 对象</li>
-<li>一般情况下，不在测试用例文件中直接添加日志代码</li>
-<li>在测试用例中，应直接调用封装好的方法或者属性，如下所示：</li>
-
+<ul>
+    <li>不能在测试用例文件中初始化 ORM 对象</li>
+    <li>一般情况下，不在测试用例文件中直接添加日志代码</li>
+    <li>在测试用例中，应直接调用封装好的方法或者属性，如下所示：</li>
 </ul>
+
 <p><em>如当需要创建多个 partition 对象时，可调用方法 self.init_partition_wrap()，该方法返回的结果就是新生成的 partition 对象。当无需创建多个对象时，直接使用 self.partition_wrap 即可</em></p>
+
 <pre><code># create partition  -Call the default initialization method
-
 partition_w = self.init_partition_wrap()
-
 assert partition_w.is_empty
 </code></pre>
+
 <pre><code># create partition    -Directly call the encapsulated object
-
 self.partition_wrap.init_partition(collection=collection_name, name=partition_name)
-
 assert self.partition_wrap.is_empty
 </code></pre>
+
 <ul>
 <li><p>验证接口返回错误或异常</p>
 <ul>
-<li>check_task=CheckTasks.err_res</li>
-<li>输入期望的错误码和错误信息</li>
-
+    <li>check_task=CheckTasks.err_res</li>
+    <li>输入期望的错误码和错误信息</li>
 </ul>
 </li>
-
 </ul>
-<pre><code># create partition with collection is None
 
+<pre><code># create partition with collection is None
 self.partition_wrap.init_partition(collection=None, name=partition_name, check_task=CheckTasks.err_res, check_items={ct.err_code: 1, ct.err_msg: &quot;&#39;NoneType&#39; object has no attribute&quot;})
 </code></pre>
+
 <ul>
 <li><p>验证接口返回正常返回值</p>
 <ul>
-<li>check_task=CheckTasks.check_partition_property，可以在 CheckTasks 中新建校验方法，在用例中调用使用</li>
-<li>输入期望的结果，供校验方法使用</li>
-
+    <li>check_task=CheckTasks.check_partition_property，可以在 CheckTasks 中新建校验方法，在用例中调用使用</li>
+    <li>输入期望的结果，供校验方法使用</li>
 </ul>
 </li>
-
 </ul>
-<pre><code># create partition
 
+<pre><code># create partition
 partition_w = self.init_partition_wrap(collection_w, partition_name, check_task=CheckTasks.check_partition_property, check_items={&quot;name&quot;: partition_name, &quot;description&quot;: description, &quot;is_empty&quot;: True, &quot;num_entities&quot;: 0})
 </code></pre>
+</ul>
 <ol>
 <h6 >3. 测试用例添加</h6>
-
 </ol>
 <ul>
-<li>在 base 文件夹的 wrapper 文件底下找到封装好的同名被测接口，各接口返回2个值的list，第一个是 pymilvus-orm 的接口返回结果，第二个是接口返回结果正常/异常的判断，为True/False。该返回可用于在用例中做额外的结果检查。</li>
-<li>在 testcases 文件夹下找到被测接口相应的测试文件，进行用例添加。如下所示，全部测试用例可直接参考 testcases 目录下的所有 test 文件：</li>
-
+<ul>
+    <li>在 base 文件夹的 wrapper 文件底下找到封装好的同名被测接口，各接口返回2个值的list，第一个是 pymilvus-orm 的接口返回结果，第二个是接口返回结果正常/异常的判断，为True/False。该返回可用于在用例中做额外的结果检查。</li>
+    <li>在 testcases 文件夹下找到被测接口相应的测试文件，进行用例添加。如下所示，全部测试用例可直接参考 testcases 目录下的所有 test 文件：</li>
 </ul>
-<pre><code>
 
-    @pytest.mark.tags(CaseLabel.L1)
+<pre><code>    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_dropped_collection(self, partition_name):
         """
@@ -278,16 +257,15 @@ partition_w = self.init_partition_wrap(collection_w, partition_name, check_task=
         # create partition failed
         self.partition_wrap.init_partition(collection_w.collection, partition_name, check_task=CheckTasks.err_res, check_items={ct.err_code: 1, ct.err_msg: "can't find collection"})
 </code></pre>
+
 <ul>
 <li><p>Tips</p>
-<ul>
-<li>用例注释分为三个部分：目标，测试方法及期望结果，依此说明相应内容</li>
-<li>在 base/client_base.py 文件 Base 类的 setup 方法中对被测试的类进行了初始化，如下图所示：</li>
-
-</ul>
+    <ul>
+        <li>用例注释分为三个部分：目标，测试方法及期望结果，依此说明相应内容</li>
+        <li>在 base/client_base.py 文件 Base 类的 setup 方法中对被测试的类进行了初始化，如下图所示：</li>
+    </ul>
 </li>
 
-</ul>
 <pre><code>self.connection_wrap = ApiConnectionsWrapper()
 self.utility_wrap = ApiUtilityWrapper()
 self.collection_wrap = ApiCollectionWrapper()
@@ -296,24 +274,26 @@ self.index_wrap = ApiIndexWrapper()
 self.collection_schema_wrap = ApiCollectionSchemaWrapper()
 self.field_schema_wrap = ApiFieldSchemaWrapper()
 </code></pre>
-<ul>
-<li>调用需要测试的接口，应按照相应封装好的方法传入参数。如下所示，除了 check_task，check_items 两个参数外，其余参数与 pymilvus-orm 的接口参数一致。</li>
 
+<ul>
+    <li>调用需要测试的接口，应按照相应封装好的方法传入参数。如下所示，除了 check_task，check_items 两个参数外，其余参数与 pymilvus-orm 的接口参数一致。</li>
 </ul>
 <pre><code>def init_partition(self, collection, name, description="", check_task=None, check_items=None, **kwargs)
 </code></pre>
 <ul>
-<li>check_task 用来选择 check/func_check.py 文件中 ResponseChecker 检查类中对应的接口检查方法，可选择的方法在 common/common_type.py 文件的 CheckTasks 类中。</li>
-<li>check_items 传入检查方法所需的特定内容，具体内容由实现的检查方法所决定。</li>
-<li>默认不传这两个参数，则检查接口能正常返回请求结果。</li>
-
+    <li>check_task 用来选择 check/func_check.py 文件中 ResponseChecker 检查类中对应的接口检查方法，可选择的方法在 common/common_type.py 文件的 CheckTasks 类中。</li>
+    <li>check_items 传入检查方法所需的特定内容，具体内容由实现的检查方法所决定。</li>
+    <li>默认不传这两个参数，则检查接口能正常返回请求结果。</li>
+</ul>
+</ul>
 </ul>
 <ol>
 <h6 >4. 框架功能添加</h6>
-
 </ol>
 <ul>
-<li>在 utils 目录下添加需要的全局方法或者工具</li>
-<li>可将相应的配置内容加入 config 目录下</li>
+<ul>
+    <li>在 utils 目录下添加需要的全局方法或者工具</li>
+    <li>可将相应的配置内容加入 config 目录下</li>
+</ul>
 </ul>
 
