@@ -447,7 +447,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, 2, len(pt.in.ChannelNames))
 		assert.Equal(t, 2, len(pt.in.Timestamps))
 		assert.Equal(t, 2, len(pt.timeTick))
-		assert.Equal(t, pt.in.ChannelNames, createMeta.PhysicalChannelNames)
+		assert.ElementsMatch(t, pt.in.ChannelNames, createMeta.PhysicalChannelNames)
 		assert.Equal(t, pt.in.Timestamps[0], pt.in.Timestamps[1])
 		assert.Equal(t, pt.in.Timestamps[0], pt.in.DefaultTimestamp)
 		assert.Equal(t, pt.timeTick[pt.in.ChannelNames[0]], pt.in.DefaultTimestamp)
