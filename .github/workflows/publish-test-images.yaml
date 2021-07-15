@@ -80,8 +80,6 @@ jobs:
           body: |
             Update Pytest image changes
 
-            Related issue: #6548
-
             Signed-off-by: ${{ github.actor }} ${{ github.actor }}@users.noreply.github.com
       - name: Check outputs
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
