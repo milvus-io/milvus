@@ -139,17 +139,12 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 }
 
 func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment *Segment, segmentLoadInfo *querypb.SegmentLoadInfo) error {
-	vectorFields, err := loader.historicalReplica.getVecFieldsByCollectionID(collectionID)
+	vectorFieldIDs, err := loader.historicalReplica.getVecFieldIDsByCollectionID(collectionID)
 	if err != nil {
 		return err
 	}
-	if len(vectorFields) <= 0 {
+	if len(vectorFieldIDs) <= 0 {
 		return fmt.Errorf("no vector field in collection %d", collectionID)
-	}
-
-	var vectorFieldIDs []int64
-	for _, field := range vectorFields {
-		vectorFieldIDs = append(vectorFieldIDs, field.FieldID)
 	}
 
 	// add VectorFieldInfo for vector fields
@@ -272,14 +267,18 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 			}
 			blobs = append(blobs, blob)
 		}
+		// mark the flag that vector raw data will be loaded into memory
+		if vecFieldInfo, err := segment.getVectorFieldInfo(fb.FieldID); err == nil {
+			vecFieldInfo.setRawDataInMemory(true)
+		}
 	}
 
 	_, _, insertData, err := iCodec.Deserialize(blobs)
-
 	if err != nil {
 		log.Error(err.Error())
 		return err
 	}
+
 	for fieldID, value := range insertData.Data {
 		var numRows int
 		var data interface{}

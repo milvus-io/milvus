@@ -51,15 +51,16 @@ const (
 type VectorFieldInfo struct {
 	mu              sync.RWMutex
 	fieldBinlog     *datapb.FieldBinlog
+	rawDataInMemory bool
 	rowNum          map[string]int64    // map[binlogPath]int64
-	rawDataInMemory map[string]bool     // map[binlogPath]bool
 	rawDataMmap     map[string]*os.File // map[binlogPath]*os.File
 }
 
 func newVectorFieldInfo(fieldBinlog *datapb.FieldBinlog) *VectorFieldInfo {
 	return &VectorFieldInfo{
 		fieldBinlog:     fieldBinlog,
-		rawDataInMemory: make(map[string]bool),
+		rawDataInMemory: false,
+		rowNum:          make(map[string]int64),
 		rawDataMmap:     make(map[string]*os.File),
 	}
 }
@@ -79,19 +80,16 @@ func (v *VectorFieldInfo) getRowNum(binlogPath string) int64 {
 	return 0
 }
 
-func (v *VectorFieldInfo) setRawDataInMemory(binlogPath string) {
+func (v *VectorFieldInfo) setRawDataInMemory(flag bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	v.rawDataInMemory[binlogPath] = true
+	v.rawDataInMemory = flag
 }
 
-func (v *VectorFieldInfo) getRawDataInMemory(binlogPath string) bool {
+func (v *VectorFieldInfo) getRawDataInMemory() bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if _, ok := v.rawDataInMemory[binlogPath]; ok {
-		return true
-	}
-	return false
+	return v.rawDataInMemory
 }
 
 //--------------------------------------------------------------------------------------

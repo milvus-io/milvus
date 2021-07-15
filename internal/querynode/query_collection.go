@@ -392,10 +392,10 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
 	sp.Finish()
 }
 
-func (q *queryCollection) getVectorOutputFieldNames(msg queryMsg) ([]string, error) {
+func (q *queryCollection) getVectorOutputFieldIDs(msg queryMsg) ([]int64, error) {
 	var collID UniqueID
 	var outputFieldsID []int64
-	var resultFieldNames []string
+	var resultFieldIDs []int64
 
 	msgType := msg.Type()
 	switch msgType {
@@ -408,20 +408,20 @@ func (q *queryCollection) getVectorOutputFieldNames(msg queryMsg) ([]string, err
 		collID = searchMsg.CollectionID
 		outputFieldsID = searchMsg.OutputFieldsId
 	default:
-		return resultFieldNames, fmt.Errorf("receive invalid msgType = %d", msgType)
+		return resultFieldIDs, fmt.Errorf("receive invalid msgType = %d", msgType)
 	}
 
-	vecFields, err := q.historical.replica.getVecFieldsByCollectionID(collID)
+	vecFields, err := q.historical.replica.getVecFieldIDsByCollectionID(collID)
 	if err != nil {
-		return resultFieldNames, err
+		return resultFieldIDs, err
 	}
 
-	for _, field := range vecFields {
-		if funcutil.SliceContain(outputFieldsID, field.FieldID) {
-			resultFieldNames = append(resultFieldNames, field.Name)
+	for _, fieldID := range vecFields {
+		if funcutil.SliceContain(outputFieldsID, fieldID) {
+			resultFieldIDs = append(resultFieldIDs, fieldID)
 		}
 	}
-	return resultFieldNames, nil
+	return resultFieldIDs, nil
 }
 
 func (q *queryCollection) doUnsolvedQueryMsg() {
@@ -1090,6 +1090,38 @@ func (q *queryCollection) search(msg queryMsg) error {
 	return nil
 }
 
+func (q *queryCollection) fillVectorOutputFieldsIfNeeded(msg queryMsg, segment *Segment, result *segcorepb.RetrieveResults) error {
+	// result is not empty
+	if len(result.Offset) <= 0 {
+		return nil
+	}
+
+	// get all vector output field ids
+	vecOutputFieldIDs, err := q.getVectorOutputFieldIDs(msg)
+	if err != nil {
+		return err
+	}
+
+	// output_fields contain vector field
+	for _, vecOutputFieldID := range vecOutputFieldIDs {
+		log.Debug("CYD - ", zap.Int64("vecOutputFieldID", vecOutputFieldID))
+		vecFieldInfo, err := segment.getVectorFieldInfo(vecOutputFieldID)
+		if err != nil {
+			return fmt.Errorf("cannot get vector field info, fileID %d", vecOutputFieldID)
+		}
+		// vector field raw data is not loaded into memory
+		if !vecFieldInfo.getRawDataInMemory() {
+			//if err = q.historical.loader.loadSegmentVectorFieldsData(segment, nil); err != nil {
+			//	return err
+			//}
+			//if err = segment.fillRetrieveResults(plan, result); err != nil {
+			//	return err
+			//}
+		}
+	}
+	return nil
+}
+
 func (q *queryCollection) retrieve(msg queryMsg) error {
 	// TODO(yukun)
 	// step 1: get retrieve object and defer destruction
@@ -1168,30 +1200,8 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 				return err
 			}
 
-			// result is not empty
-			if len(result.Offset) > 0 {
-				// get all vector output field names
-				vecOutputFieldNames, err := q.getVectorOutputFieldNames(msg)
-				if err != nil {
-					return err
-				}
-
-				// output_fields contain vector field
-				for _, vecFieldName := range vecOutputFieldNames {
-					for _, outputFieldData := range result.FieldsData {
-						if outputFieldData.FieldName == vecFieldName {
-							vd := outputFieldData.GetVectors()
-							log.Debug("CYD - ", zap.Int64("vd", vd.Dim))
-							// vector field is not loaded into memory,
-							//if err = q.historical.loader.loadSegmentVectorFieldsData(segment, nil); err != nil {
-							//	return err
-							//}
-							//if err = segment.fillRetrieveResults(plan, result); err != nil {
-							//	return err
-							//}
-						}
-					}
-				}
+			if err = q.fillVectorOutputFieldsIfNeeded(msg, segment, result); err != nil {
+				return err
 			}
 			mergeList = append(mergeList, result)
 			sealedSegmentRetrieved = append(sealedSegmentRetrieved, segmentID)

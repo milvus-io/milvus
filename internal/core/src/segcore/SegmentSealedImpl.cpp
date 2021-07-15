@@ -374,7 +374,10 @@ SegmentSealedImpl::bulk_subscript(FieldOffset field_offset,
                                   const int64_t* seg_offsets,
                                   int64_t count,
                                   void* output) const {
-    Assert(get_bit(field_data_ready_bitset_, field_offset));
+    // Assert(get_bit(field_data_ready_bitset_, field_offset));
+    if (!get_bit(field_data_ready_bitset_, field_offset)) {
+        return;
+    }
     auto& field_meta = schema_->operator[](field_offset);
     auto src_vec = field_datas_[field_offset.get()].data();
     switch (field_meta.get_data_type()) {
