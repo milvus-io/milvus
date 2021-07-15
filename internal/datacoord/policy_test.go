@@ -51,21 +51,21 @@ func TestRandomReassign(t *testing.T) {
 		},
 	}
 	cases := []*NodeInfo{
-		{info: caseInfo1},
-		{info: caseInfo2},
+		{Info: caseInfo1},
+		{Info: caseInfo2},
 		nil,
 	}
 
 	for _, ca := range cases {
 		nodes := p(clusters, ca)
-		if ca == nil || len(ca.info.GetChannels()) == 0 {
+		if ca == nil || len(ca.Info.GetChannels()) == 0 {
 			assert.Equal(t, 0, len(nodes))
 		} else {
-			for _, ch := range ca.info.GetChannels() {
+			for _, ch := range ca.Info.GetChannels() {
 				found := false
 			loop:
 				for _, node := range nodes {
-					for _, nch := range node.info.GetChannels() {
+					for _, nch := range node.Info.GetChannels() {
 						if nch.Name == ch.Name {
 							found = true
 							assert.EqualValues(t, datapb.ChannelWatchState_Uncomplete, nch.State)
