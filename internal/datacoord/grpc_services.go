@@ -22,15 +22,6 @@ func (s *Server) isClosed() bool {
 	return atomic.LoadInt64(&s.isServing) != ServerStateHealthy
 }
 
-func (s *Server) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Value: Params.TimeTickChannelName,
-	}, nil
-}
-
 func (s *Server) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{

@@ -101,13 +101,6 @@ func TestRun(t *testing.T) {
 		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
 	})
 
-	t.Run("get time tick channel", func(t *testing.T) {
-		req := &internalpb.GetTimeTickChannelRequest{}
-		rsp, err := dsServer.GetTimeTickChannel(ctx, req)
-		assert.Nil(t, err)
-		assert.Equal(t, rsp.Status.ErrorCode, commonpb.ErrorCode_Success)
-	})
-
 	t.Run("get statistics channel", func(t *testing.T) {
 		req := &internalpb.GetStatisticsChannelRequest{}
 		rsp, err := dsServer.GetStatisticsChannel(ctx, req)
