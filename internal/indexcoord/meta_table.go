@@ -351,16 +351,6 @@ func (mt *metaTable) GetUnusedIndexFiles(limit int) []Meta {
 	return metas
 }
 
-func (mt *metaTable) GetIndexMeta(indexBuildID UniqueID) Meta {
-	mt.lock.Lock()
-	defer mt.lock.Unlock()
-
-	meta, ok := mt.indexBuildID2Meta[indexBuildID]
-	log.Debug("IndexCoord metaTable GetIndexMeta", zap.Any("indexBuildID", indexBuildID),
-		zap.Any("exist", ok))
-	return meta
-}
-
 func (mt *metaTable) GetUnassignedTasks(onlineNodeIDs []int64) []Meta {
 	mt.lock.RLock()
 	defer mt.lock.RUnlock()

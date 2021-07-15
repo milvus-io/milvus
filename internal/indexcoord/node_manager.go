@@ -36,6 +36,15 @@ func NewNodeManager() *NodeManager {
 	}
 }
 
+func (nm *NodeManager) setClient(nodeID UniqueID, client types.IndexNode) {
+	item := &PQItem{
+		key:      nodeID,
+		priority: 0,
+	}
+	nm.nodeClients[nodeID] = client
+	nm.pq.Push(item)
+}
+
 func (nm *NodeManager) RemoveNode(nodeID UniqueID) {
 	nm.lock.Lock()
 	defer nm.lock.Unlock()
@@ -63,12 +72,7 @@ func (nm *NodeManager) AddNode(nodeID UniqueID, address string) error {
 	if err != nil {
 		return err
 	}
-	item := &PQItem{
-		key:      nodeID,
-		priority: 0,
-	}
-	nm.nodeClients[nodeID] = nodeClient
-	nm.pq.Push(item)
+	nm.setClient(nodeID, nodeClient)
 	return nil
 }
 

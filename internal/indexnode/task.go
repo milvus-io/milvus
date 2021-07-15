@@ -142,7 +142,9 @@ func (it *IndexBuildTask) checkIndexMeta(ctx context.Context, pre bool) error {
 			if err != nil {
 				return err
 			}
-			return nil
+			errMsg := fmt.Sprintf("the index has been deleted with indexBuildID %d", indexMeta.IndexBuildID)
+			log.Warn(errMsg)
+			return fmt.Errorf(errMsg)
 		}
 		if pre {
 			return nil
@@ -150,8 +152,10 @@ func (it *IndexBuildTask) checkIndexMeta(ctx context.Context, pre bool) error {
 		indexMeta.IndexFilePaths = it.savePaths
 		indexMeta.State = commonpb.IndexState_Finished
 		if it.err != nil {
+			log.Debug("IndexNode CreateIndex Failed", zap.Int64("IndexBuildID", indexMeta.IndexBuildID), zap.Any("err", err))
 			indexMeta.State = commonpb.IndexState_Failed
 		}
+		log.Debug("IndexNode", zap.Int64("indexBuildID", indexMeta.IndexBuildID), zap.Any("IndexState", indexMeta.State))
 		err = it.etcdKV.CompareVersionAndSwap(it.req.MetaPath, versions[0],
 			proto.MarshalTextString(&indexMeta))
 		log.Debug("IndexNode checkIndexMeta CompareVersionAndSwap", zap.Error(err))
@@ -277,6 +281,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	log.Debug("IndexNode load data success")
 	tr.Record("loadKey done")
 
 	storageBlobs := getStorageBlobs(blobs)
@@ -382,6 +387,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 		}
 		tr.Record("save index file done")
 	}
+	log.Debug("IndexNode CreateIndex finished")
 	tr.Elapse("all done")
 	return nil
 }
