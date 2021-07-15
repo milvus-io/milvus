@@ -11,6 +11,7 @@
 
 package proxy
 
+/*
 import (
 	"context"
 	"testing"
@@ -112,3 +113,4 @@ func TestMetaCache_GetPartitionID(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.Equal(t, id, typeutil.UniqueID(0))
 }
+*/

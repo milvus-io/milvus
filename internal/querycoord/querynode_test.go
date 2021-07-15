@@ -11,6 +11,7 @@
 
 package querycoord
 
+/*
 import (
 	"context"
 	"math/rand"
@@ -152,3 +153,4 @@ func TestQueryNode_MultiNode_reStart(t *testing.T) {
 	time.Sleep(2 * time.Second)
 	queryCoord.Stop()
 }
+*/
