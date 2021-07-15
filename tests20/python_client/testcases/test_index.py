@@ -37,13 +37,13 @@ class TestIndexParams(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("field_name", ct.get_invalid_strs)
-    @pytest.mark.parametrize("collection_name", [cf.gen_unique_str(prefix)])
-    def test_index_field_name_invalid(self, field_name, collection_name):
+    def test_index_field_name_invalid(self, field_name):
         """
         target: test index with error field name
         method: input field name
         expected: raise exception
         """
+        collection_name = cf.gen_unique_str(prefix)
 
         collection_w = self.init_collection_wrap(name=collection_name)
 
