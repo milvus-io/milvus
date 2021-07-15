@@ -5,11 +5,12 @@ from pymilvus_orm import FieldSchema
 
 from base.client_base import TestcaseBase
 from base.index_wrapper import ApiIndexWrapper
-from base.collection_wrapper import ApiCollectionWrapper
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from common.code_mapping import CollectionErrorMessage as clem
+from common.code_mapping import IndexErrorMessage as iem
 
 prefix = "index"
 default_schema = cf.gen_default_collection_schema()
@@ -20,39 +21,6 @@ default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": 
 class TestIndexParams(TestcaseBase):
     """ Test case of index interface """
 
-    @pytest.fixture(
-        scope="function",
-        params=ct.get_invalid_strs
-    )
-    def get_invalid_collection_name(self, request):
-        yield request.param
-
-    @pytest.fixture(
-        scope="function",
-        params=ct.get_invalid_strs
-    )
-    def get_invalid_field_name(self, request):
-        yield request.param
-
-    @pytest.fixture(
-        scope="function",
-        params=ct.get_invalid_strs
-    )
-    def get_invalid_index_type(self, request):
-        yield request.param
-
-    # TODO: construct invalid index params for all index types
-    @pytest.fixture(
-        scope="function",
-        params=[
-            {"metric_type": "L3", "index_type": "IVF_FLAT"},
-            {"metric_type": "L2", "index_type": "IVF_FLAT", "err_params": {"nlist": 10}},
-            {"metric_type": "L2", "index_type": "IVF_FLAT", "params": {"nlist": -1}},
-        ]
-    )
-    def get_invalid_index_params(self, request):
-        yield request.param
-
     # @pytest.mark.xfail(reason="issue #5646")
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_collection_None(self):
@@ -61,22 +29,30 @@ class TestIndexParams(TestcaseBase):
         method: input none collection object
         expected: raise exception
         """
+
         self._connect()
+
         self.index_wrap.init_index(None, default_field_name, default_index_params, check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 1, "err_msg": "Collection"})
+                                   check_items={ct.err_code: 0, ct.err_msg: clem.CollectionType})
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_index_field_name_invalid(self, get_invalid_field_name):
+    @pytest.mark.parametrize("field_name", ct.get_invalid_strs)
+    def test_index_field_name_invalid(self, field_name):
         """
         target: test index with error field name
         method: input field name
         expected: raise exception
         """
-        f_name = get_invalid_field_name
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name)
-        self.index_wrap.init_index(collection_w.collection, f_name, default_index_params, check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 1, "err_msg": "but expected one of"})
+        collection_name = cf.gen_unique_str(prefix)
+
+        collection_w = self.init_collection_wrap(name=collection_name)
+
+        log.error(iem.WrongFieldName % (str(field_name), type(field_name)))
+        self.index_wrap.init_index(collection_w.collection, field_name, default_index_params,
+                                   check_task=CheckTasks.err_res,
+                                   check_items={ct.err_code: 1,
+                                                ct.err_msg: iem.WrongFieldName % (str(field_name),
+                                                                                  type(field_name).__name__)})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_field_name_not_existed(self):
@@ -89,7 +65,7 @@ class TestIndexParams(TestcaseBase):
         f_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         self.index_wrap.init_index(collection_w.collection, f_name, default_index_params, check_task=CheckTasks.err_res,
-                                           check_items={"err_code": 1, "err_msg": "CreateIndex failed"})
+                                   check_items={ct.err_code: 1, ct.err_msg: "CreateIndex failed"})
 
     # TODO: update eror msg
     @pytest.mark.tags(CaseLabel.L1)
@@ -108,7 +84,7 @@ class TestIndexParams(TestcaseBase):
         else:
             msg = "Invalid index_type"
         self.index_wrap.init_index(collection_w.collection, default_field_name, index_params, check_task=CheckTasks.err_res,
-                                        check_items={"err_code": 1, "err_msg": msg})
+                                        check_items={ct.err_code: 1, ct.err_msg: msg})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_type_not_supported(self):
@@ -122,7 +98,7 @@ class TestIndexParams(TestcaseBase):
         index_params = copy.deepcopy(default_index_params)
         index_params["index_type"] = "IVFFFFFFF"
         self.index_wrap.init_index(collection_w.collection, default_field_name, index_params, check_task=CheckTasks.err_res,
-                                        check_items={"err_code": 1, "err_msg": ""})
+                                        check_items={ct.err_code: 1, ct.err_msg: ""})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_params_invalid(self, get_invalid_index_params):
@@ -135,7 +111,7 @@ class TestIndexParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         index_params = get_invalid_index_params
         self.index_wrap.init_index(collection_w.collection, default_field_name, index_params, check_task=CheckTasks.err_res,
-                                        check_items={"err_code": 1, "err_msg": ""})
+                                        check_items={ct.err_code: 1, ct.err_msg: ""})
 
     # TODO: not supported
     @pytest.mark.tags(CaseLabel.L1)
@@ -149,21 +125,11 @@ class TestIndexParams(TestcaseBase):
         index_name = get_invalid_index_name
         collection_w = self.init_collection_wrap(name=c_name)
         self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params, check_task=CheckTasks.err_res,
-                                        check_items={"err_code": 1, "err_msg": ""})
+                                        check_items={ct.err_code: 1, ct.err_msg: ""})
 
 
 class TestIndexBase(TestcaseBase):
     """ Test case of index interface """
-    # TODO: construct valid index params for all index types
-    @pytest.fixture(
-        scope="function",
-        params=[
-            default_index_params,
-        ]
-    )
-    def get_valid_index_params(self, request):
-        yield request.param
-
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_collection_empty(self):
@@ -179,7 +145,8 @@ class TestIndexBase(TestcaseBase):
         cf.assert_equal_index(index, collection_w.collection.indexes[0])
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_index_params(self, get_valid_index_params):
+    @pytest.mark.parametrize("index_param", [default_index_params])
+    def test_index_params(self, index_param):
         """
         target: test index with all index type/params
         method: input valid params
@@ -189,7 +156,7 @@ class TestIndexBase(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(ct.default_nb)
         collection_w.insert(data=data)
-        index_params = get_valid_index_params
+        index_params = index_param
         index, _ = self.index_wrap.init_index(collection_w.collection, default_field_name, index_params)
         # TODO: assert index
         cf.assert_equal_index(index, collection_w.collection.indexes[0])
@@ -224,7 +191,7 @@ class TestIndexBase(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         collection_w.collection.create_index(default_field_name, default_index_params, index_name=index_name)
         self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params, check_task=CheckTasks.err_res,
-                                        check_items={"err_code": 1, "err_msg": ""})
+                                        check_items={ct.err_code: 1, ct.err_msg: ""})
 
     # TODO: server not supported
     @pytest.mark.tags(CaseLabel.L1)
@@ -302,7 +269,7 @@ class TestIndexBase(TestcaseBase):
         _, _ = self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params)
         self.index_wrap.drop()
         self.index_wrap.drop(check_task=CheckTasks.err_res,
-                                        check_items={"err_code": 1, "err_msg": "Index doesn't exist"})
+                                        check_items={ct.err_code: 1, ct.err_msg: "Index doesn't exist"})
 
 
 class TestIndexAdvanced(TestcaseBase):

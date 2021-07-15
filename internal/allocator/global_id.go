@@ -48,8 +48,8 @@ func (gia *GlobalIDAllocator) Alloc(count uint32) (typeutil.UniqueID, typeutil.U
 	if err != nil {
 		return 0, 0, err
 	}
-	idStart := typeutil.UniqueID(timestamp)
-	idEnd := idStart + int64(count)
+	idEnd := typeutil.UniqueID(timestamp) + 1
+	idStart := idEnd - int64(count)
 	return idStart, idEnd, nil
 }
 

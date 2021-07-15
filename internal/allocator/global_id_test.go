@@ -49,4 +49,16 @@ func TestGlobalTSOAllocator_All(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, count, uint32(idEnd-idStart))
 	})
+
+	t.Run("Alloc2", func(t *testing.T) {
+		count1 := uint32(2 << 18)
+		id1, err := gTestIDAllocator.allocator.GenerateTSO(count1)
+		assert.Nil(t, err)
+
+		count2 := uint32(2 << 8)
+		id2, err := gTestIDAllocator.allocator.GenerateTSO(count2)
+		assert.Nil(t, err)
+		assert.Equal(t, id2-id1, uint64(count2))
+
+	})
 }

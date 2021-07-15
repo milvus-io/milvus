@@ -321,6 +321,7 @@ func (s *Session) WatchServices(prefix string, revision int64) (eventChannel <-c
 						}
 						eventType = SessionDelEvent
 					}
+					log.Debug("WatchService", zap.Any("event type", eventType))
 					eventCh <- &SessionEvent{
 						EventType: eventType,
 						Session:   session,

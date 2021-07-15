@@ -361,28 +361,33 @@ func (mt *metaTable) GetIndexMeta(indexBuildID UniqueID) Meta {
 	return meta
 }
 
-func (mt *metaTable) GetUnassignedTasks(nodeIDs []int64) [][]UniqueID {
-	var tasks [][]UniqueID
-	var indexBuildIDs []UniqueID
+func (mt *metaTable) GetUnassignedTasks(onlineNodeIDs []int64) []Meta {
+	mt.lock.RLock()
+	defer mt.lock.RUnlock()
 
-	for indexBuildID, meta := range mt.indexBuildID2Meta {
+	var metas []Meta
+
+	for _, meta := range mt.indexBuildID2Meta {
+		if meta.indexMeta.State == commonpb.IndexState_Unissued {
+			metas = append(metas, meta)
+			continue
+		}
+		if meta.indexMeta.State == commonpb.IndexState_Finished || meta.indexMeta.State == commonpb.IndexState_Failed {
+			continue
+		}
 		alive := false
-		for _, serverID := range nodeIDs {
+		for _, serverID := range onlineNodeIDs {
 			if meta.indexMeta.NodeID == serverID {
 				alive = true
+				break
 			}
 		}
 		if !alive {
-			indexBuildIDs = append(indexBuildIDs, indexBuildID)
-		}
-		if len(indexBuildIDs) >= 10 {
-			tasks = append(tasks, indexBuildIDs)
-			indexBuildIDs = []UniqueID{}
+			metas = append(metas, meta)
 		}
 	}
-	tasks = append(tasks, indexBuildIDs)
 
-	return tasks
+	return metas
 }
 
 func (mt *metaTable) HasSameReq(req *indexpb.BuildIndexRequest) (bool, UniqueID) {
@@ -477,67 +482,16 @@ func (mt *metaTable) LoadMetaFromETCD(indexBuildID int64, revision int64) bool {
 	return true
 }
 
-type nodeTasks struct {
-	nodeID2Tasks map[int64][]UniqueID
+func (mt *metaTable) GetNodeTaskStats() map[UniqueID]int {
+	mt.lock.RLock()
+	defer mt.lock.RUnlock()
 
-	lock sync.RWMutex
-}
-
-func NewNodeTasks() *nodeTasks {
-	return &nodeTasks{
-		nodeID2Tasks: map[int64][]UniqueID{},
-	}
-}
-
-func (nt *nodeTasks) getTasksByNodeID(nodeID int64) []UniqueID {
-	nt.lock.Lock()
-	defer nt.lock.Unlock()
-
-	indexBuildIDs, ok := nt.nodeID2Tasks[nodeID]
-	if !ok {
-		return nil
-	}
-	return indexBuildIDs
-}
-
-func (nt *nodeTasks) assignTask(serverID int64, indexBuildID UniqueID) {
-	nt.lock.Lock()
-	defer nt.lock.Unlock()
-
-	indexBuildIDs, ok := nt.nodeID2Tasks[serverID]
-	if !ok {
-		var IDs []UniqueID
-		IDs = append(IDs, indexBuildID)
-		nt.nodeID2Tasks[serverID] = IDs
-		return
-	}
-	indexBuildIDs = append(indexBuildIDs, indexBuildID)
-	nt.nodeID2Tasks[serverID] = indexBuildIDs
-}
-
-func (nt *nodeTasks) finishTask(indexBuildID UniqueID) {
-	nt.lock.Lock()
-	defer nt.lock.Unlock()
-
-	removed := false
-	for serverID, taskIDs := range nt.nodeID2Tasks {
-		for i := 0; i < len(taskIDs); i++ {
-			if indexBuildID == taskIDs[i] {
-				taskIDs = append(taskIDs[:i], taskIDs[i+1:]...)
-				removed = true
-				break
-			}
-		}
-		if removed {
-			nt.nodeID2Tasks[serverID] = taskIDs
-			break
+	log.Debug("IndexCoord MetaTable GetPriorityForNodeID")
+	nodePriority := make(map[UniqueID]int)
+	for _, meta := range mt.indexBuildID2Meta {
+		if meta.indexMeta.State == commonpb.IndexState_InProgress {
+			nodePriority[meta.indexMeta.NodeID]++
 		}
 	}
-}
-
-func (nt *nodeTasks) delete(serverID int64) {
-	nt.lock.Lock()
-	defer nt.lock.Unlock()
-
-	delete(nt.nodeID2Tasks, serverID)
+	return nodePriority
 }

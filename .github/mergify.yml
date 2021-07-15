@@ -85,3 +85,27 @@ pull_request_rules:
         remove:
           - ci-passed
 
+  - name: Blocking PR if missing a related issue
+    conditions:
+      - base=master
+      - "-body~= #[0-9]{1,6}"
+      - -title~=\[automated\]
+    actions:
+      label:
+        add:
+          - do-not-merge/missing-related-issue
+      comment:
+        message: |
+          @{{author}} Please associate the related issue to the body of your Pull Request.  (eg. “issue: #5”)
+
+
+  - name: Dismiss block label if related issue be added into PR
+    conditions:
+      - base=master
+      - "body~= #[0-9]{1,6}"
+      - title~=\[automated\]
+    actions:
+      label:
+        remove:
+          - do-not-merge/missing-related-issue
+

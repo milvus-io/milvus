@@ -24,3 +24,11 @@ class ConnectionErrorMessage(ExceptionsMessage):
 
 class CollectionErrorMessage(ExceptionsMessage):
     CollNotLoaded = "collection %s was not loaded into memory"
+
+
+class PartitionErrorMessage(ExceptionsMessage):
+    pass
+
+
+class IndexErrorMessage(ExceptionsMessage):
+    WrongFieldName = "%s has type %s, but expected one of: bytes, unicode"

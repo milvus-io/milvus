@@ -23,15 +23,38 @@ TermExpr :=
     IDENTIFIER "in" ConstantArray
 
 ConstantArray := 
-    "[" Constant+, "]"
+    "[" ConstantExpr { "," ConstantExpr } "]"
+    
+ConstantExpr := 
+    Constant
+  | ConstantExpr BinaryArithOp ConstantExpr
+  | UnaryArithOp ConstantExpr
 
 Constant := 
     INTERGER
-  | FLOAT_NUMBER 
+  | FLOAT_NUMBER
+  
+UnaryArithOp := 
+    "+"
+  | "-"
+
+BinaryArithOp := 
+    "+"
+  | "-"
+  | "*"
+  | "/"
+  | "%"
+  | "**"
 
 CompareExpr := 
-    IDENTIFIER CmpOp Constant
-  | Constant CmpOp IDENTIFIER
+    IDENTIFIER CmpOp IDENTIFIER
+  | IDENTIFIER CmpOp ConstantExpr
+  | ConstantExpr CmpOp IDENTIFIER
+  | ConstantExpr CmpOpRestricted IDENTIFIER CmpOpRestricted ConstantExpr
+  
+CmpOpRestricted := 
+    "<"
+  | "<="
 
 CmpOp := 
     ">"
@@ -46,23 +69,26 @@ FLOAT_NUM := 浮点数
 IDENTIFIER := 列名
 ```
 
-注意，
+Tips:
 
-1. NIL 态为空字符串, 代表无 Predicate 的情形
-2. ”+,” 代表逗号分隔的，且至少有一个元素的重复元素
+1. NIL represent a empty string, which means there is no Predicate for Expr.
+2. Gramma is described by EBNF syntax，expressions that may be omitted or repeated are represented through curly braces `{...}`.
 
-语法分析后，执行以下静态检查规则
+After syntax analysis, following rules will be applied:
 
-1. 列名必须存在于 Schema 中，且不是向量类型
-2. CompareExpr/TermExpr 要求左右类型匹配
-3. 整型列必须对应整型数据
-    1. 浮点列可以对应浮点数据或整型数据
-    2. BinaryOp 中，“与操作符” 的优先级高于 “或操作符“
+1. non-vector column must exist in Schema.
+2. CompareExpr/TermExpr requires operand type matching.
+3. CompareExpr between non-vector columns of different types is available
+4. The modulo operation requires all operands to be integers.
+5. Integer columns can only match integer operands. But float columns can match both integer and float operands.
+6. In BinaryOp, the `and`/`&&` operator has higher priority than the `or`/`||` operator
 
-简单举例说明：
+example：
 
 ```python
 A > 3 && A < 4 && (C > 5 || D < 6)
+1 < A <= 2.0 + 3 - 4 * 5 / 6 % 7 ** 8
+A == B
 FloatCol in [1.0, 2, 3.0]
 Int64Col in [1, 2, 3] or C != 6
 ```

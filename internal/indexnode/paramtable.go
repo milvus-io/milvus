@@ -12,20 +12,14 @@
 package indexnode
 
 import (
-	"bytes"
 	"fmt"
 	"path"
 	"strconv"
 	"strings"
 	"sync"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/spf13/cast"
-	"github.com/spf13/viper"
 )
 
 const (
@@ -79,55 +73,6 @@ func (pt *ParamTable) initParams() {
 	pt.initMinioBucketName()
 	pt.initEtcdEndpoints()
 	pt.initMetaRootPath()
-}
-
-func (pt *ParamTable) LoadConfigFromInitParams(initParams *internalpb.InitParams) error {
-	pt.NodeID = initParams.NodeID
-
-	config := viper.New()
-	config.SetConfigType("yaml")
-	for _, pair := range initParams.StartParams {
-		if pair.Key == StartParamsKey {
-			err := config.ReadConfig(bytes.NewBuffer([]byte(pair.Value)))
-			if err != nil {
-				return err
-			}
-			break
-		}
-	}
-
-	for _, key := range config.AllKeys() {
-		val := config.Get(key)
-		str, err := cast.ToStringE(val)
-		if err != nil {
-			switch val := val.(type) {
-			case []interface{}:
-				str = str[:0]
-				for _, v := range val {
-					ss, err := cast.ToStringE(v)
-					if err != nil {
-						log.Debug("indexnode", zap.String("error", err.Error()))
-					}
-					if len(str) == 0 {
-						str = ss
-					} else {
-						str = str + "," + ss
-					}
-				}
-
-			default:
-				log.Debug("indexnode", zap.String("undefine config type, key=", key))
-			}
-		}
-		err = pt.Save(key, str)
-		if err != nil {
-			panic(err)
-		}
-
-	}
-
-	pt.initParams()
-	return nil
 }
 
 func (pt *ParamTable) initMinIOAddress() {

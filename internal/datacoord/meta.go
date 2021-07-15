@@ -188,7 +188,7 @@ func (m *meta) SaveBinlogAndCheckPoints(segID UniqueID, flushed bool,
 
 	for _, id := range modSegments {
 		if segment := m.segments.GetSegment(id); segment != nil {
-			segBytes := proto.MarshalTextString(segment)
+			segBytes := proto.MarshalTextString(segment.SegmentInfo)
 			key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
 			kv[key] = segBytes
 		}
