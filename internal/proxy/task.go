@@ -23,6 +23,7 @@ import (
 	"runtime"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -1337,6 +1338,23 @@ func (st *SearchTask) getVChannels() ([]vChan, error) {
 	return st.chMgr.getVChannels(collID)
 }
 
+// https://github.com/milvus-io/milvus/issues/6411
+// Support wildcard match
+func translateOutputFields(outputFields []string, schema *schemapb.CollectionSchema) ([]string, error) {
+	if len(outputFields) == 1 && strings.TrimSpace(outputFields[0]) == "*" {
+		ret := make([]string, 0)
+		// fill all fields except vector fields
+		for _, field := range schema.Fields {
+			if field.DataType != schemapb.DataType_BinaryVector && field.DataType != schemapb.DataType_FloatVector {
+				ret = append(ret, field.Name)
+			}
+		}
+		return ret, nil
+	}
+
+	return outputFields, nil
+}
+
 func (st *SearchTask) PreExecute(ctx context.Context) error {
 	st.Base.MsgType = commonpb.MsgType_Search
 	st.Base.SourceID = Params.ProxyID
@@ -1396,6 +1414,13 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
+
+	outputFields, err := translateOutputFields(st.query.OutputFields, schema)
+	if err != nil {
+		return err
+	}
+	st.query.OutputFields = outputFields
+
 	if st.query.GetDslType() == commonpb.DslType_BoolExprV1 {
 		annsField, err := GetAttrByKeyFromRepeatedKV(AnnsFieldKey, st.query.SearchParams)
 		if err != nil {
@@ -2066,6 +2091,10 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 	}
 	rt.Ids = rt.retrieve.Ids
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
+	if err != nil {
+		return err
+	}
+	rt.retrieve.OutputFields, err = translateOutputFields(rt.retrieve.OutputFields, schema)
 	if err != nil {
 		return err
 	}
