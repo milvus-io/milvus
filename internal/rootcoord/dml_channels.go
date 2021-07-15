@@ -51,6 +51,18 @@ func (d *dmlChannels) GetNumChannles() int {
 	return count
 }
 
+func (d *dmlChannels) ListChannels() []string {
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+
+	ret := make([]string, 0, len(d.dml))
+	for n := range d.dml {
+		ret = append(ret, n)
+	}
+	return ret
+
+}
+
 func (d *dmlChannels) Produce(name string, pack *msgstream.MsgPack) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
