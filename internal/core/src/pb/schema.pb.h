@@ -2028,6 +2028,7 @@ class FieldData :
   enum : int {
     kFieldNameFieldNumber = 2,
     kTypeFieldNumber = 1,
+    kFieldIdFieldNumber = 5,
     kScalarsFieldNumber = 3,
     kVectorsFieldNumber = 4,
   };
@@ -2046,6 +2047,11 @@ class FieldData :
   void clear_type();
   ::milvus::proto::schema::DataType type() const;
   void set_type(::milvus::proto::schema::DataType value);
+
+  // int64 field_id = 5;
+  void clear_field_id();
+  ::PROTOBUF_NAMESPACE_ID::int64 field_id() const;
+  void set_field_id(::PROTOBUF_NAMESPACE_ID::int64 value);
 
   // .milvus.proto.schema.ScalarField scalars = 3;
   bool has_scalars() const;
@@ -2077,6 +2083,7 @@ class FieldData :
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr field_name_;
   int type_;
+  ::PROTOBUF_NAMESPACE_ID::int64 field_id_;
   union FieldUnion {
     FieldUnion() {}
     ::milvus::proto::schema::ScalarField* scalars_;
@@ -3726,6 +3733,20 @@ inline ::milvus::proto::schema::VectorField* FieldData::mutable_vectors() {
   }
   // @@protoc_insertion_point(field_mutable:milvus.proto.schema.FieldData.vectors)
   return field_.vectors_;
+}
+
+// int64 field_id = 5;
+inline void FieldData::clear_field_id() {
+  field_id_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 FieldData::field_id() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.FieldData.field_id)
+  return field_id_;
+}
+inline void FieldData::set_field_id(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  field_id_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.FieldData.field_id)
 }
 
 inline bool FieldData::has_field() const {
