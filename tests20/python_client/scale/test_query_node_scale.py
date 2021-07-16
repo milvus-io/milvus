@@ -17,7 +17,8 @@ default_search_exp = "int64 >= 0"
 default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
 
 
-class TestSearchScale:
+class TestQueryNodeScale:
+
     def test_expand_query_node(self):
         release_name = "scale-query"
         env = HelmEnv(release_name=release_name)
@@ -28,7 +29,7 @@ class TestSearchScale:
         connections.connect(alias='default')
 
         # create
-        c_name = "data_scale_one"
+        c_name = "query_scale_one"
         collection_w = ApiCollectionWrapper()
         collection_w.init_collection(name=c_name, schema=cf.gen_default_collection_schema())
         # insert
@@ -37,7 +38,7 @@ class TestSearchScale:
         assert mutation_res.insert_count == ct.default_nb
         # # create index
         # collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
-        # assert collection_w.has_index()
+        # assert collection_w.has_index()[0]
         # assert collection_w.index()[0] == Index(collection_w.collection, ct.default_float_vec_field_name,
         #                                         default_index_params)
         collection_w.load()
@@ -48,7 +49,7 @@ class TestSearchScale:
         # scale queryNode pod
         env.helm_upgrade_cluster_milvus(queryNode=2)
 
-        c_name_2 = "data_scale_two"
+        c_name_2 = "query_scale_two"
         collection_w2 = ApiCollectionWrapper()
         collection_w2.init_collection(name=c_name_2, schema=cf.gen_default_collection_schema())
         collection_w2.insert(data)
