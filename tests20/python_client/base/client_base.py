@@ -9,12 +9,9 @@ from base.partition_wrapper import ApiPartitionWrapper
 from base.index_wrapper import ApiIndexWrapper
 from base.utility_wrapper import ApiUtilityWrapper
 from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
-
-from config.log_config import log_config
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
-from check.param_check import ip_check, number_check
 
 
 class ParamInfo:
@@ -48,11 +45,10 @@ class Base:
 
     def teardown_class(self):
         log.info("[teardown_class] Start teardown class...")
-        pass
 
     def setup_method(self, method):
         log.info(("*" * 35) + " setup " + ("*" * 35))
-        log.info("[setup_method] Start setup test case %s..." % method.__name__)
+        log.info("[setup_method] Start setup test case %s." % method.__name__)
         self.connection_wrap = ApiConnectionsWrapper()
         self.utility_wrap = ApiUtilityWrapper()
         self.collection_wrap = ApiCollectionWrapper()
@@ -74,9 +70,9 @@ class Base:
             if self.collection_wrap.collection is not None:
                 self.collection_wrap.drop(check_task=ct.CheckTasks.check_nothing)
 
+            collection_list = self.utility_wrap.list_collections()[0]
             for collection_object in self.collection_object_list:
-                if collection_object.collection is not None \
-                        and collection_object.name in self.utility_wrap.list_collections()[0]:
+                if collection_object.collection is not None and collection_object.name in collection_list:
                     collection_object.drop(check_task=ct.CheckTasks.check_nothing)
 
         except Exception as e:
@@ -93,24 +89,6 @@ class Base:
                                                          "port": DefaultConfig.DEFAULT_PORT})
         except Exception as e:
             log.debug(str(e))
-
-    @pytest.fixture(scope="module", autouse=True)
-    def initialize_env(self, request):
-        """ clean log before testing """
-        host = request.config.getoption("--host")
-        port = request.config.getoption("--port")
-        handler = request.config.getoption("--handler")
-        clean_log = request.config.getoption("--clean_log")
-
-        """ params check """
-        assert ip_check(host) and number_check(port)
-
-        """ modify log files """
-        cf.modify_file(file_path_list=[log_config.log_debug, log_config.log_info, log_config.log_err], is_modify=clean_log)
-
-        log.info("#" * 80)
-        log.info("[initialize_milvus] Log cleaned up, start testing...")
-        param_info.prepare_param_info(host, port, handler)
 
 
 class TestcaseBase(Base):
@@ -183,3 +161,22 @@ class TestcaseBase(Base):
             collection_w.load()
 
         return collection_w, vectors, binary_raw_vectors, insert_ids
+
+    def insert_entities_into_two_partitions_in_half(self, half, prefix='query'):
+        """
+        insert default entities into two partitions(partition_w and _default) in half(int64 and float fields values)
+        :param half: half of nb
+        :return: collection wrap and partition wrap
+        """
+        conn = self._connect()
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        partition_w = self.init_partition_wrap(collection_wrap=collection_w)
+        # insert [0, half) into partition_w
+        df_partition = cf.gen_default_dataframe_data(nb=half, start=0)
+        partition_w.insert(df_partition)
+        # insert [half, nb) into _default
+        df_default = cf.gen_default_dataframe_data(nb=half, start=half)
+        collection_w.insert(df_default)
+        conn.flush([collection_w.name])
+        collection_w.load()
+        return collection_w, partition_w, df_partition, df_default

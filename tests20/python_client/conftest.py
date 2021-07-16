@@ -2,6 +2,10 @@ import pytest
 
 import common.common_type as ct
 import common.common_func as cf
+from utils.util_log import test_log as log
+from base.client_base import param_info
+from check.param_check import ip_check, number_check
+from config.log_config import log_config
 
 
 def pytest_addoption(parser):
@@ -25,6 +29,7 @@ def pytest_addoption(parser):
     parser.addoption('--err_msg', action='store', default="err_msg", help="error message of test")
     parser.addoption('--term_expr', action='store', default="term_expr", help="expr of query quest")
     parser.addoption('--check_content', action='store', default="check_content", help="content of check")
+    parser.addoption('--field_name', action='store', default="field_name", help="field_name of index")
 
 
 @pytest.fixture
@@ -124,10 +129,36 @@ def term_expr(request):
 
 @pytest.fixture
 def check_content(request):
+    log.error("^" * 50)
+    log.error("check_content")
     return request.config.getoption("--check_content")
 
 
+@pytest.fixture
+def field_name(request):
+    return request.config.getoption("--field_name")
+
+
 """ fixture func """
+
+
+@pytest.fixture(scope="session", autouse=True)
+def initialize_env(request):
+    """ clean log before testing """
+    host = request.config.getoption("--host")
+    port = request.config.getoption("--port")
+    handler = request.config.getoption("--handler")
+    clean_log = request.config.getoption("--clean_log")
+
+    """ params check """
+    assert ip_check(host) and number_check(port)
+
+    """ modify log files """
+    cf.modify_file(file_path_list=[log_config.log_debug, log_config.log_info, log_config.log_err], is_modify=clean_log)
+
+    log.info("#" * 80)
+    log.info("[initialize_milvus] Log cleaned up, start testing...")
+    param_info.prepare_param_info(host, port, handler)
 
 
 @pytest.fixture(params=ct.get_invalid_strs)
@@ -137,4 +168,32 @@ def get_invalid_string(request):
 
 @pytest.fixture(params=cf.gen_simple_index())
 def get_index_param(request):
+    yield request.param
+
+
+@pytest.fixture(params=ct.get_invalid_strs)
+def get_invalid_collection_name(request):
+    yield request.param
+
+
+@pytest.fixture(params=ct.get_invalid_strs)
+def get_invalid_field_name(request):
+    yield request.param
+
+
+@pytest.fixture(params=ct.get_invalid_strs)
+def get_invalid_index_type(request):
+    yield request.param
+
+
+# TODO: construct invalid index params for all index types
+@pytest.fixture(params=[{"metric_type": "L3", "index_type": "IVF_FLAT"},
+                        {"metric_type": "L2", "index_type": "IVF_FLAT", "err_params": {"nlist": 10}},
+                        {"metric_type": "L2", "index_type": "IVF_FLAT", "params": {"nlist": -1}}])
+def get_invalid_index_params(request):
+    yield request.param
+
+
+@pytest.fixture(params=ct.get_invalid_strs)
+def get_invalid_partition_name(request):
     yield request.param

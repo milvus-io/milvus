@@ -705,22 +705,21 @@ class TestQueryOperation(TestcaseBase):
         assert len(res) == 1
         assert res[0][ct.default_int64_field_name] == half
 
-    @pytest.mark.tags(ct.CaseLabel.L2)
-    def insert_entities_into_two_partitions_in_half(self, half):
-        """
-        insert default entities into two partitions(partition_w and _default) in half(int64 and float fields values)
-        :param half: half of nb
-        :return: collection wrap and partition wrap
-        """
-        conn = self._connect()
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
-        partition_w = self.init_partition_wrap(collection_wrap=collection_w)
-        # insert [0, half) into partition_w
-        df_partition = cf.gen_default_dataframe_data(nb=half, start=0)
-        partition_w.insert(df_partition)
-        # insert [half, nb) into _default
-        df_default = cf.gen_default_dataframe_data(nb=half, start=half)
-        collection_w.insert(df_default)
-        conn.flush([collection_w.name])
-        collection_w.load()
-        return collection_w, partition_w, df_partition, df_default
+    # def insert_entities_into_two_partitions_in_half(self, half):
+    #     """
+    #     insert default entities into two partitions(partition_w and _default) in half(int64 and float fields values)
+    #     :param half: half of nb
+    #     :return: collection wrap and partition wrap
+    #     """
+    #     conn = self._connect()
+    #     collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+    #     partition_w = self.init_partition_wrap(collection_wrap=collection_w)
+    #     # insert [0, half) into partition_w
+    #     df_partition = cf.gen_default_dataframe_data(nb=half, start=0)
+    #     partition_w.insert(df_partition)
+    #     # insert [half, nb) into _default
+    #     df_default = cf.gen_default_dataframe_data(nb=half, start=half)
+    #     collection_w.insert(df_default)
+    #     conn.flush([collection_w.name])
+    #     collection_w.load()
+    #     return collection_w, partition_w, df_partition, df_default

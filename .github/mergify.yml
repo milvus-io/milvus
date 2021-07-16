@@ -88,16 +88,30 @@ pull_request_rules:
   - name: Blocking PR if missing a related issue
     conditions:
       - base=master
-      - "-body~=issue: #[0-9]{1,4}"
+      - -body~=\#[0-9]{1,6}(\s+|$)
+      - -title~=\[automated\]
     actions:
       label:
         add:
           - do-not-merge/missing-related-issue
+      comment:
+        message: |
+          @{{author}} Please associate the related issue to the body of your Pull Request.  (eg. “issue: #6534”)
+
 
   - name: Dismiss block label if related issue be added into PR
     conditions:
       - base=master
-      - "body~=issue: #[0-9]{1,4}"
+      - body~=\#[0-9]{1,6}(\s+|$)
+    actions:
+      label:
+        remove:
+          - do-not-merge/missing-related-issue
+
+  - name: Dismiss block label if automated create PR
+    conditions:
+      - base=master
+      - title~=\[automated\]
     actions:
       label:
         remove:
