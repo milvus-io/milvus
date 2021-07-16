@@ -165,7 +165,7 @@ class TestChaos(TestChaosBase):
         reset_counting(self.health_checkers)
 
         # wait 300s (varies by feature)
-        sleep(constants.WAIT_PER_OP*2.5)
+        sleep(constants.WAIT_PER_OP*5)
 
         # assert statistic: all ops success again
         log.debug("******3rd assert after chaos deleted: ")

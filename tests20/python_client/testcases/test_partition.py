@@ -285,10 +285,10 @@ class TestPartitionParams(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
-    @pytest.mark.parametrize("data, nums", [(cf.gen_default_dataframe_data(10), 10),
-                                            (cf.gen_default_list_data(1), 1),
-                                            (cf.gen_default_tuple_data(10), 10)])
-    def test_partition_insert(self, partition_name, data, nums):
+    @pytest.mark.parametrize("data", [cf.gen_default_dataframe_data(10),
+                                      cf.gen_default_list_data(10),
+                                      cf.gen_default_tuple_data(10)])
+    def test_partition_insert(self, partition_name, data):
         """
         target: verify insert multi entities by dataFrame
         method: 1. create a collection and a partition
@@ -296,6 +296,7 @@ class TestPartitionParams(TestcaseBase):
                 3. insert data again
         expected: 1. insert data successfully
         """
+        nums = 10
         # create collection
         collection_w = self.init_collection_wrap()
 
@@ -381,7 +382,6 @@ class TestPartitionOperations(TestcaseBase):
             assert collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue 6321")
     def test_partition_maximum_partitions(self):
         """
         target: verify create maximum partitions
@@ -397,7 +397,7 @@ class TestPartitionOperations(TestcaseBase):
             for _ in range(ct.max_partition_num // threads_n):
                 name = cf.gen_unique_str(prefix)
                 par_wrap = ApiPartitionWrapper()
-                par_wrap.init_partition(collection, name, check_task="check_nothing")
+                par_wrap.init_partition(collection, name, check_task=CheckTasks.check_nothing)
 
         collection_w = self.init_collection_wrap()
         for _ in range(threads_num):
@@ -414,8 +414,7 @@ class TestPartitionOperations(TestcaseBase):
                          ct.err_msg: "maximum partition's number should be limit to 4096"})
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("partition_name", [ct.default_partition_name])
-    def test_partition_drop_default_partition(self, partition_name):
+    def test_partition_drop_default_partition(self):
         """
         target: verify drop the _default partition
         method: 1. drop the _default partition
@@ -718,7 +717,7 @@ class TestPartitionOperations(TestcaseBase):
                            check_task=CheckTasks.err_res,
                            check_items={ct.err_code: 1, ct.err_msg: "None Type"})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_partition_insert_maximum_size_data(self, data):
         """
         target: verify insert maximum size data(256M?) a time
@@ -734,7 +733,8 @@ class TestPartitionOperations(TestcaseBase):
 
         # insert data to partition
         max_size = 100000  # TODO: clarify the max size of data
-        partition_w.insert(cf.gen_default_dataframe_data(max_size))
+        ins_res, _ = partition_w.insert(cf.gen_default_dataframe_data(max_size))
+        assert len(ins_res.primary_keys) == max_size
         # self._connect().flush([collection_w.name])
         assert partition_w.num_entities == max_size
 
