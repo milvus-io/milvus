@@ -24,7 +24,7 @@ import (
 	"go.uber.org/zap"
 )
 
-type queryRequestHandler struct {
+type requestHandlerStage struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -38,15 +38,15 @@ type queryRequestHandler struct {
 	queryResultStream msgstream.MsgStream
 }
 
-func newQueryRequestHandler(ctx context.Context,
+func newRequestHandlerStage(ctx context.Context,
 	cancel context.CancelFunc,
 	collectionID UniqueID,
 	outputs []chan queryMsg,
 	streaming *streaming,
 	historical *historical,
-	queryResultStream msgstream.MsgStream) *queryRequestHandler {
+	queryResultStream msgstream.MsgStream) *requestHandlerStage {
 
-	return &queryRequestHandler{
+	return &requestHandlerStage{
 		ctx:               ctx,
 		cancel:            cancel,
 		collectionID:      collectionID,
@@ -58,11 +58,11 @@ func newQueryRequestHandler(ctx context.Context,
 	}
 }
 
-func (q *queryRequestHandler) start() {
+func (q *requestHandlerStage) start() {
 	for {
 		select {
 		case <-q.ctx.Done():
-			log.Debug("stop queryRequestHandler", zap.Int64("collectionID", q.collectionID))
+			log.Debug("stop requestHandlerStage", zap.Int64("collectionID", q.collectionID))
 			return
 		case msg := <-q.input:
 			msgType := msg.Type()
@@ -139,7 +139,7 @@ func (q *queryRequestHandler) start() {
 						zap.String("msgType", msgTypeStr),
 					)
 				}
-				retrieveMsg := &retrieveMessage{
+				retrieveMsg := &retrieveMsg{
 					RetrieveMsg: msg.(*msgstream.RetrieveMsg),
 					plan:        plan,
 				}
@@ -155,7 +155,7 @@ func (q *queryRequestHandler) start() {
 						zap.String("msgType", msgTypeStr),
 					)
 				}
-				searchMsg := &searchMessage{
+				searchMsg := &searchMsg{
 					SearchMsg: msg.(*msgstream.SearchMsg),
 					plan:      plan,
 					reqs:      reqs,
@@ -178,7 +178,7 @@ func (q *queryRequestHandler) start() {
 	}
 }
 
-func (q *queryRequestHandler) sendRequests(msg queryMsg) {
+func (q *requestHandlerStage) sendRequests(msg queryMsg) {
 	for i := range q.outputs {
 		q.outputs[i] <- msg
 	}
@@ -188,7 +188,7 @@ func (q *queryRequestHandler) sendRequests(msg queryMsg) {
 	)
 }
 
-func (q *queryRequestHandler) parseSearchPlan(msg queryMsg) (*searchPlan, []*searchRequest, error) {
+func (q *requestHandlerStage) parseSearchPlan(msg queryMsg) (*SearchPlan, []*searchRequest, error) {
 	searchMsg := msg.(*msgstream.SearchMsg)
 	sp, ctx := trace.StartSpanFromContext(searchMsg.TraceCtx())
 	defer sp.Finish()
@@ -200,7 +200,7 @@ func (q *queryRequestHandler) parseSearchPlan(msg queryMsg) (*searchPlan, []*sea
 		return nil, nil, err
 	}
 
-	var plan *searchPlan
+	var plan *SearchPlan
 	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
 		expr := searchMsg.SerializedExprPlan
 		plan, err = createSearchPlanByExpr(collection, expr)
@@ -243,7 +243,7 @@ func (q *queryRequestHandler) parseSearchPlan(msg queryMsg) (*searchPlan, []*sea
 	return plan, searchRequests, nil
 }
 
-func (q *queryRequestHandler) parseRetrievePlan(msg queryMsg) (*RetrievePlan, error) {
+func (q *requestHandlerStage) parseRetrievePlan(msg queryMsg) (*RetrievePlan, error) {
 	// TODO(yukun)
 	// step 1: get retrieve object and defer destruction
 	// step 2: for each segment, call retrieve to get ids proto buffer
@@ -264,7 +264,7 @@ func (q *queryRequestHandler) parseRetrievePlan(msg queryMsg) (*RetrievePlan, er
 
 	req := &segcorepb.RetrieveRequest{
 		Ids:          retrieveMsg.Ids,
-		OutputFields: retrieveMsg.OutputFields,
+		OutputFieldsId: retrieveMsg.OutputFieldsId,
 	}
 
 	plan, err := createRetrievePlan(collection, req, timestamp)

@@ -25,7 +25,7 @@ import (
 	"go.uber.org/zap"
 )
 
-type queryVChannel struct {
+type vChannelStage struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -39,15 +39,15 @@ type queryVChannel struct {
 	streaming *streaming
 }
 
-func newQueryVChannel(ctx context.Context,
+func newVChannelStage(ctx context.Context,
 	cancel context.CancelFunc,
 	collectionID UniqueID,
 	vChannel Channel,
 	unsolvedOutput chan queryMsg,
 	queryOutput chan queryResult,
-	streaming *streaming) *queryVChannel {
+	streaming *streaming) *vChannelStage {
 
-	return &queryVChannel{
+	return &vChannelStage{
 		ctx:            ctx,
 		cancel:         cancel,
 		collectionID:   collectionID,
@@ -59,11 +59,11 @@ func newQueryVChannel(ctx context.Context,
 	}
 }
 
-func (q *queryVChannel) start() {
+func (q *vChannelStage) start() {
 	for {
 		select {
 		case <-q.ctx.Done():
-			log.Debug("stop queryVChannel", zap.Int64("collectionID", q.collectionID))
+			log.Debug("stop vChannelStage", zap.Int64("collectionID", q.collectionID))
 			return
 		case msg := <-q.input:
 			msgType := msg.Type()
@@ -76,7 +76,7 @@ func (q *queryVChannel) start() {
 			if guaranteeTs > serviceTime {
 				gt, _ := tsoutil.ParseTS(guaranteeTs)
 				st, _ := tsoutil.ParseTS(serviceTime)
-				log.Debug("query node::queryVChannel: add to query unsolved",
+				log.Debug("query node::vChannelStage: add to query unsolved",
 					zap.Any("collectionID", q.collectionID),
 					zap.Any("sm.GuaranteeTimestamp", gt),
 					zap.Any("serviceTime", st),
@@ -95,7 +95,7 @@ func (q *queryVChannel) start() {
 				continue
 			}
 
-			log.Debug("doing query in queryVChannel...",
+			log.Debug("doing query in vChannelStage...",
 				zap.Any("collectionID", q.collectionID),
 				zap.Any("msgID", msg.ID()),
 				zap.Any("msgType", msgType),
@@ -103,7 +103,7 @@ func (q *queryVChannel) start() {
 
 			switch msgType {
 			case commonpb.MsgType_Retrieve:
-				retrieveMsg := msg.(*retrieveMessage)
+				retrieveMsg := msg.(*retrieveMsg)
 				segmentRetrieved, res, err := q.retrieve(retrieveMsg)
 				retrieveRes := &retrieveResult{
 					msg:              retrieveMsg.RetrieveMsg,
@@ -113,7 +113,7 @@ func (q *queryVChannel) start() {
 				}
 				q.queryOutput <- retrieveRes
 			case commonpb.MsgType_Search:
-				searchMsg := msg.(*searchMessage)
+				searchMsg := msg.(*searchMsg)
 				searchResults, matchedSegments, sealedSegmentSearched, err := q.search(searchMsg)
 				searchRes := &searchResult{
 					reqs:                  searchMsg.reqs,
@@ -134,7 +134,7 @@ func (q *queryVChannel) start() {
 	}
 }
 
-func (q *queryVChannel) retrieve(retrieveMsg *retrieveMessage) ([]UniqueID, []*segcorepb.RetrieveResults, error) {
+func (q *vChannelStage) retrieve(retrieveMsg *retrieveMsg) ([]UniqueID, []*segcorepb.RetrieveResults, error) {
 	collectionID := retrieveMsg.CollectionID
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("retrieve %d", collectionID))
 
@@ -169,7 +169,7 @@ func (q *queryVChannel) retrieve(retrieveMsg *retrieveMessage) ([]UniqueID, []*s
 			if err != nil {
 				return nil, nil, err
 			}
-			result, err := segment.segmentGetEntityByIds(retrieveMsg.plan)
+			result, err := segment.getEntityByIds(retrieveMsg.plan)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -182,7 +182,7 @@ func (q *queryVChannel) retrieve(retrieveMsg *retrieveMessage) ([]UniqueID, []*s
 	return sealedSegmentRetrieved, mergeList, nil
 }
 
-func (q *queryVChannel) search(searchMsg *searchMessage) ([]*searchResultFromSegCore, []*Segment, []UniqueID, error) {
+func (q *vChannelStage) search(searchMsg *searchMsg) ([]*SearchResult, []*Segment, []UniqueID, error) {
 	sp, ctx := trace.StartSpanFromContext(searchMsg.TraceCtx())
 	defer sp.Finish()
 	searchMsg.SetTraceCtx(ctx)

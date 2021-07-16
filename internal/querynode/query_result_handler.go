@@ -31,7 +31,7 @@ import (
 	"math"
 )
 
-type queryResultHandler struct {
+type resultHandlerStage struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -46,14 +46,14 @@ type queryResultHandler struct {
 	results map[UniqueID][]queryResult // map[msgID]queryResults
 }
 
-func newQueryResultHandler(ctx context.Context,
+func newResultHandlerStage(ctx context.Context,
 	cancel context.CancelFunc,
 	collectionID UniqueID,
 	streaming *streaming,
 	queryResultStream msgstream.MsgStream,
-	channelNum int) *queryResultHandler {
+	channelNum int) *resultHandlerStage {
 
-	return &queryResultHandler{
+	return &resultHandlerStage{
 		ctx:               ctx,
 		cancel:            cancel,
 		collectionID:      collectionID,
@@ -65,11 +65,11 @@ func newQueryResultHandler(ctx context.Context,
 	}
 }
 
-func (q *queryResultHandler) start() {
+func (q *resultHandlerStage) start() {
 	for {
 		select {
 		case <-q.ctx.Done():
-			log.Debug("stop queryResultHandler", zap.Int64("collectionID", q.collectionID))
+			log.Debug("stop resultHandlerStage", zap.Int64("collectionID", q.collectionID))
 			return
 		case msg := <-q.input:
 			if _, ok := q.results[msg.ID()]; !ok {
@@ -87,7 +87,7 @@ func (q *queryResultHandler) start() {
 					case commonpb.MsgType_Search:
 						q.reduceSearch(k, v[0].(*searchResult))
 					default:
-						err := fmt.Errorf("queryResultHandler receive invalid msgType = %d", msgType)
+						err := fmt.Errorf("resultHandlerStage receive invalid msgType = %d", msgType)
 						log.Error(err.Error())
 					}
 				}
@@ -96,7 +96,7 @@ func (q *queryResultHandler) start() {
 	}
 }
 
-func (q *queryResultHandler) reduceRetrieve(msgID UniqueID, msg *msgstream.RetrieveMsg) {
+func (q *resultHandlerStage) reduceRetrieve(msgID UniqueID, msg *msgstream.RetrieveMsg) {
 	collectionID := msg.CollectionID
 	collection, err := q.streaming.replica.getCollectionByID(collectionID)
 	if err != nil {
@@ -156,7 +156,7 @@ func (q *queryResultHandler) reduceRetrieve(msgID UniqueID, msg *msgstream.Retri
 	)
 }
 
-func (q *queryResultHandler) mergeRetrieveResults(dataArr []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error) {
+func (q *resultHandlerStage) mergeRetrieveResults(dataArr []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error) {
 	var final *segcorepb.RetrieveResults
 	for _, data := range dataArr {
 		if data == nil {
@@ -189,7 +189,7 @@ func (q *queryResultHandler) mergeRetrieveResults(dataArr []*segcorepb.RetrieveR
 	return final, nil
 }
 
-func (q *queryResultHandler) reduceSearch(msgID UniqueID, sr *searchResult) {
+func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
 	searchMsg := sr.msg
 	searchRequests := sr.reqs
 
@@ -200,7 +200,7 @@ func (q *queryResultHandler) reduceSearch(msgID UniqueID, sr *searchResult) {
 
 	searchTimestamp := searchMsg.BeginTs()
 
-	searchResults := make([]*searchResultFromSegCore, 0)
+	searchResults := make([]*SearchResult, 0)
 	matchedSegments := make([]*Segment, 0)
 	sealedSegmentSearched := make([]UniqueID, 0)
 
@@ -308,7 +308,7 @@ func (q *queryResultHandler) reduceSearch(msgID UniqueID, sr *searchResult) {
 			log.Error(err.Error())
 			return
 		}
-		marshaledHits, err = reorganizeSingleQueryResult(searchMsg.plan, searchRequests, searchResults[0])
+		marshaledHits, err = reorganizeSingleSearchResult(searchMsg.plan, searchRequests, searchResults[0])
 		sp.LogFields(oplog.String("statistical time", "reorganizeSingleQueryResult end"))
 		if err != nil {
 			log.Error(err.Error())
@@ -327,7 +327,7 @@ func (q *queryResultHandler) reduceSearch(msgID UniqueID, sr *searchResult) {
 			log.Error(err.Error())
 			return
 		}
-		marshaledHits, err = reorganizeQueryResults(searchMsg.plan, searchRequests, searchResults, numSegment, inReduced)
+		marshaledHits, err = reorganizeSearchResults(searchMsg.plan, searchRequests, searchResults, numSegment, inReduced)
 		sp.LogFields(oplog.String("statistical time", "reorganizeQueryResults end"))
 		if err != nil {
 			log.Error(err.Error())
@@ -434,7 +434,7 @@ func (q *queryResultHandler) reduceSearch(msgID UniqueID, sr *searchResult) {
 	tr.Elapse("all done")
 }
 
-func (q *queryResultHandler) translateHits(schema *typeutil.SchemaHelper,
+func (q *resultHandlerStage) translateHits(schema *typeutil.SchemaHelper,
 	fieldIDs []int64,
 	rawHits [][]byte) (*schemapb.SearchResultData, error) {
 

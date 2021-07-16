@@ -24,7 +24,7 @@ import (
 	"go.uber.org/zap"
 )
 
-type queryHistorical struct {
+type historicalStage struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -36,13 +36,13 @@ type queryHistorical struct {
 	historical *historical
 }
 
-func newQueryHistorical(ctx context.Context,
+func newHistoricalStage(ctx context.Context,
 	cancel context.CancelFunc,
 	collectionID UniqueID,
 	output chan queryResult,
-	historical *historical) *queryHistorical {
+	historical *historical) *historicalStage {
 
-	return &queryHistorical{
+	return &historicalStage{
 		ctx:          ctx,
 		cancel:       cancel,
 		collectionID: collectionID,
@@ -52,24 +52,24 @@ func newQueryHistorical(ctx context.Context,
 	}
 }
 
-func (q *queryHistorical) start() {
+func (q *historicalStage) start() {
 	for {
 		select {
 		case <-q.ctx.Done():
-			log.Debug("stop queryHistorical", zap.Int64("collectionID", q.collectionID))
+			log.Debug("stop historicalStage", zap.Int64("collectionID", q.collectionID))
 			return
 		case msg := <-q.input:
 			msgType := msg.Type()
 			sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 			msg.SetTraceCtx(ctx)
-			log.Debug("doing query in queryHistorical...",
+			log.Debug("doing query in historicalStage...",
 				zap.Any("collectionID", q.collectionID),
 				zap.Any("msgID", msg.ID()),
 				zap.Any("msgType", msgType),
 			)
 			switch msgType {
 			case commonpb.MsgType_Retrieve:
-				retrieveMsg := msg.(*retrieveMessage)
+				retrieveMsg := msg.(*retrieveMsg)
 				segmentRetrieved, res, err := q.retrieve(retrieveMsg)
 				retrieveRes := &retrieveResult{
 					msg:              retrieveMsg.RetrieveMsg,
@@ -79,7 +79,7 @@ func (q *queryHistorical) start() {
 				}
 				q.output <- retrieveRes
 			case commonpb.MsgType_Search:
-				searchMsg := msg.(*searchMessage)
+				searchMsg := msg.(*searchMsg)
 				searchResults, matchedSegments, sealedSegmentSearched, err := q.search(searchMsg)
 				searchRes := &searchResult{
 					reqs:                  searchMsg.reqs,
@@ -101,7 +101,7 @@ func (q *queryHistorical) start() {
 	}
 }
 
-func (q *queryHistorical) retrieve(retrieveMsg *retrieveMessage) ([]UniqueID, []*segcorepb.RetrieveResults, error) {
+func (q *historicalStage) retrieve(retrieveMsg *retrieveMsg) ([]UniqueID, []*segcorepb.RetrieveResults, error) {
 	collectionID := retrieveMsg.CollectionID
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("retrieve %d", collectionID))
 
@@ -136,7 +136,7 @@ func (q *queryHistorical) retrieve(retrieveMsg *retrieveMessage) ([]UniqueID, []
 			if err != nil {
 				return nil, nil, err
 			}
-			result, err := segment.segmentGetEntityByIds(retrieveMsg.plan)
+			result, err := segment.getEntityByIds(retrieveMsg.plan)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -149,7 +149,7 @@ func (q *queryHistorical) retrieve(retrieveMsg *retrieveMessage) ([]UniqueID, []
 	return sealedSegmentRetrieved, mergeList, nil
 }
 
-func (q *queryHistorical) search(searchMsg *searchMessage) ([]*searchResultFromSegCore, []*Segment, []UniqueID, error) {
+func (q *historicalStage) search(searchMsg *searchMsg) ([]*SearchResult, []*Segment, []UniqueID, error) {
 	sp, ctx := trace.StartSpanFromContext(searchMsg.TraceCtx())
 	defer sp.Finish()
 	searchMsg.SetTraceCtx(ctx)

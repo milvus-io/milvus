@@ -18,7 +18,7 @@ import (
 	"go.uber.org/zap"
 )
 
-type queryInput struct {
+type inputStage struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -29,14 +29,14 @@ type queryInput struct {
 	queryOutput chan queryMsg
 }
 
-func newQueryInput(ctx context.Context,
+func newInputStage(ctx context.Context,
 	cancel context.CancelFunc,
 	collectionID UniqueID,
 	queryStream msgstream.MsgStream,
 	lbOutput chan *msgstream.LoadBalanceSegmentsMsg,
-	queryOutput chan queryMsg) *queryInput {
+	queryOutput chan queryMsg) *inputStage {
 
-	return &queryInput{
+	return &inputStage{
 		ctx:          ctx,
 		cancel:       cancel,
 		collectionID: collectionID,
@@ -46,11 +46,11 @@ func newQueryInput(ctx context.Context,
 	}
 }
 
-func (q *queryInput) start() {
+func (q *inputStage) start() {
 	for {
 		select {
 		case <-q.ctx.Done():
-			log.Debug("stop queryInput", zap.Int64("collectionID", q.collectionID))
+			log.Debug("stop inputStage", zap.Int64("collectionID", q.collectionID))
 			return
 		default:
 			msgPack := q.queryStream.Consume()

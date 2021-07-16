@@ -18,7 +18,7 @@ import (
 	"go.uber.org/zap"
 )
 
-type queryLoadBalance struct {
+type loadBalanceStage struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -27,11 +27,11 @@ type queryLoadBalance struct {
 	input chan *msgstream.LoadBalanceSegmentsMsg
 }
 
-func newQueryLoadBalance(ctx context.Context,
+func newLoadBalanceStage(ctx context.Context,
 	cancel context.CancelFunc,
-	collectionID UniqueID) *queryLoadBalance {
+	collectionID UniqueID) *loadBalanceStage {
 
-	return &queryLoadBalance{
+	return &loadBalanceStage{
 		ctx:          ctx,
 		cancel:       cancel,
 		collectionID: collectionID,
@@ -39,11 +39,11 @@ func newQueryLoadBalance(ctx context.Context,
 	}
 }
 
-func (q *queryLoadBalance) start() {
+func (q *loadBalanceStage) start() {
 	for {
 		select {
 		case <-q.ctx.Done():
-			log.Debug("stop queryLoadBalance", zap.Int64("collectionID", q.collectionID))
+			log.Debug("stop loadBalanceStage", zap.Int64("collectionID", q.collectionID))
 			return
 		case <-q.input:
 			//TODO:: get loadBalance info from etcd

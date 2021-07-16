@@ -29,7 +29,7 @@ import (
 	"sync"
 )
 
-type queryUnsolved struct {
+type unsolvedStage struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -52,15 +52,15 @@ type queryUnsolved struct {
 	serviceableTime      Timestamp
 }
 
-func newQueryUnsolved(ctx context.Context,
+func newUnsolvedStage(ctx context.Context,
 	cancel context.CancelFunc,
 	collectionID UniqueID,
 	vChannel Channel,
 	output chan queryResult,
 	streaming *streaming,
-	queryResultStream msgstream.MsgStream) *queryUnsolved {
+	queryResultStream msgstream.MsgStream) *unsolvedStage {
 
-	return &queryUnsolved{
+	return &unsolvedStage{
 		ctx:               ctx,
 		cancel:            cancel,
 		collectionID:      collectionID,
@@ -74,11 +74,11 @@ func newQueryUnsolved(ctx context.Context,
 	}
 }
 
-func (q *queryUnsolved) start() {
+func (q *unsolvedStage) start() {
 	for {
 		select {
 		case <-q.ctx.Done():
-			log.Debug("stop queryUnsolved", zap.Int64("collectionID", q.collectionID))
+			log.Debug("stop unsolvedStage", zap.Int64("collectionID", q.collectionID))
 			return
 		case msg := <-q.input:
 			msgType := msg.Type()
@@ -91,7 +91,7 @@ func (q *queryUnsolved) start() {
 			if guaranteeTs > serviceTime {
 				gt, _ := tsoutil.ParseTS(guaranteeTs)
 				st, _ := tsoutil.ParseTS(serviceTime)
-				log.Debug("query node::queryVChannel: add to query unsolved",
+				log.Debug("query node::vChannelStage: add to query unsolved",
 					zap.Any("collectionID", q.collectionID),
 					zap.Any("sm.GuaranteeTimestamp", gt),
 					zap.Any("serviceTime", st),
@@ -110,7 +110,7 @@ func (q *queryUnsolved) start() {
 				continue
 			}
 
-			log.Debug("doing query in queryVChannel...",
+			log.Debug("doing query in vChannelStage...",
 				zap.Any("collectionID", q.collectionID),
 				zap.Any("msgID", msg.ID()),
 				zap.Any("msgType", msgType),
@@ -118,7 +118,7 @@ func (q *queryUnsolved) start() {
 
 			switch msgType {
 			case commonpb.MsgType_Retrieve:
-				retrieveMsg := msg.(*retrieveMessage)
+				retrieveMsg := msg.(*retrieveMsg)
 				segmentRetrieved, res, err := q.retrieve(retrieveMsg)
 				retrieveRes := &retrieveResult{
 					msg:              retrieveMsg.RetrieveMsg,
@@ -128,7 +128,7 @@ func (q *queryUnsolved) start() {
 				}
 				q.output <- retrieveRes
 			case commonpb.MsgType_Search:
-				searchMsg := msg.(*searchMessage)
+				searchMsg := msg.(*searchMsg)
 				searchResults, matchedSegments, sealedSegmentSearched, err := q.search(searchMsg)
 				searchRes := &searchResult{
 					reqs:                  searchMsg.reqs,
@@ -149,7 +149,7 @@ func (q *queryUnsolved) start() {
 	}
 }
 
-func (q *queryUnsolved) doUnsolvedQueryMsg() {
+func (q *unsolvedStage) doUnsolvedQueryMsg() {
 	log.Debug("starting doUnsolvedMsg...",
 		zap.Any("collectionID", q.collectionID),
 		zap.Any("channel", q.vChannel),
@@ -215,7 +215,7 @@ func (q *queryUnsolved) doUnsolvedQueryMsg() {
 
 				switch msgType {
 				case commonpb.MsgType_Retrieve:
-					retrieveMsg := m.(*retrieveMessage)
+					retrieveMsg := m.(*retrieveMsg)
 					segmentRetrieved, res, err := q.retrieve(retrieveMsg)
 					retrieveRes := &retrieveResult{
 						msg:              retrieveMsg.RetrieveMsg,
@@ -225,7 +225,7 @@ func (q *queryUnsolved) doUnsolvedQueryMsg() {
 					}
 					q.output <- retrieveRes
 				case commonpb.MsgType_Search:
-					searchMsg := m.(*searchMessage)
+					searchMsg := m.(*searchMsg)
 					searchResults, matchedSegments, sealedSegmentSearched, err := q.search(searchMsg)
 					searchRes := &searchResult{
 						reqs:                  searchMsg.reqs,
@@ -260,7 +260,7 @@ func (q *queryUnsolved) doUnsolvedQueryMsg() {
 	}
 }
 
-func (q *queryUnsolved) register() {
+func (q *unsolvedStage) register() {
 	collection, err := q.streaming.replica.getCollectionByID(q.collectionID)
 	if err != nil {
 		log.Error(err.Error())
@@ -283,13 +283,13 @@ func (q *queryUnsolved) register() {
 	}
 }
 
-func (q *queryUnsolved) addToUnsolvedMsg(msg queryMsg) {
+func (q *unsolvedStage) addToUnsolvedMsg(msg queryMsg) {
 	q.unsolvedMsgMu.Lock()
 	defer q.unsolvedMsgMu.Unlock()
 	q.unsolvedMsg = append(q.unsolvedMsg, msg)
 }
 
-func (q *queryUnsolved) popAllUnsolvedMsg() []queryMsg {
+func (q *unsolvedStage) popAllUnsolvedMsg() []queryMsg {
 	q.unsolvedMsgMu.Lock()
 	defer q.unsolvedMsgMu.Unlock()
 	tmp := q.unsolvedMsg
@@ -297,7 +297,7 @@ func (q *queryUnsolved) popAllUnsolvedMsg() []queryMsg {
 	return tmp
 }
 
-func (q *queryUnsolved) waitNewTSafe() Timestamp {
+func (q *unsolvedStage) waitNewTSafe() Timestamp {
 	// block until any vChannel updating tSafe
 	_, _, recvOK := reflect.Select(q.watcherSelectCase)
 	if !recvOK {
@@ -315,13 +315,13 @@ func (q *queryUnsolved) waitNewTSafe() Timestamp {
 	return t
 }
 
-func (q *queryUnsolved) getServiceableTime() Timestamp {
+func (q *unsolvedStage) getServiceableTime() Timestamp {
 	q.serviceableTimeMutex.Lock()
 	defer q.serviceableTimeMutex.Unlock()
 	return q.serviceableTime
 }
 
-func (q *queryUnsolved) setServiceableTime(t Timestamp) {
+func (q *unsolvedStage) setServiceableTime(t Timestamp) {
 	q.serviceableTimeMutex.Lock()
 	defer q.serviceableTimeMutex.Unlock()
 
@@ -338,7 +338,7 @@ func (q *queryUnsolved) setServiceableTime(t Timestamp) {
 	}
 }
 
-func (q *queryUnsolved) retrieve(retrieveMsg *retrieveMessage) ([]UniqueID, []*segcorepb.RetrieveResults, error) {
+func (q *unsolvedStage) retrieve(retrieveMsg *retrieveMsg) ([]UniqueID, []*segcorepb.RetrieveResults, error) {
 	collectionID := retrieveMsg.CollectionID
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("retrieve %d", collectionID))
 
@@ -373,7 +373,7 @@ func (q *queryUnsolved) retrieve(retrieveMsg *retrieveMessage) ([]UniqueID, []*s
 			if err != nil {
 				return nil, nil, err
 			}
-			result, err := segment.segmentGetEntityByIds(retrieveMsg.plan)
+			result, err := segment.getEntityByIds(retrieveMsg.plan)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -386,7 +386,7 @@ func (q *queryUnsolved) retrieve(retrieveMsg *retrieveMessage) ([]UniqueID, []*s
 	return sealedSegmentRetrieved, mergeList, nil
 }
 
-func (q *queryUnsolved) search(searchMsg *searchMessage) ([]*searchResultFromSegCore, []*Segment, []UniqueID, error) {
+func (q *unsolvedStage) search(searchMsg *searchMsg) ([]*SearchResult, []*Segment, []UniqueID, error) {
 	sp, ctx := trace.StartSpanFromContext(searchMsg.TraceCtx())
 	defer sp.Finish()
 	searchMsg.SetTraceCtx(ctx)
