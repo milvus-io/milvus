@@ -11,68 +11,10 @@
 
 package storage
 
-import (
-	"encoding/binary"
-	"math"
-)
-
 type FileManager interface {
-	GetFile(path string) (string, error)
-	PutFile(path string, content []byte) error
-	Exist(path string) bool
-	ReadFile(path string) []byte
-}
-
-type VectorFileManager struct {
-	localFileManager  FileManager
-	remoteFileManager FileManager
-
-	insertCodec *InsertCodec
-}
-
-func (vfm *VectorFileManager) GetFile(path string) (string, error) {
-	if vfm.localFileManager.Exist(path) {
-		return vfm.localFileManager.GetFile(path)
-	}
-	content := vfm.remoteFileManager.ReadFile(path)
-	blob := &Blob{
-		Key:   path,
-		Value: content,
-	}
-
-	_, _, data, err := vfm.insertCodec.Deserialize([]*Blob{blob})
-	if err != nil {
-		return "", err
-	}
-
-	for _, singleData := range data.Data {
-		binaryVector, ok := singleData.(*BinaryVectorFieldData)
-		if ok {
-			vfm.localFileManager.PutFile(path, binaryVector.Data)
-		}
-		floatVector, ok := singleData.(*FloatVectorFieldData)
-		if ok {
-			floatData := floatVector.Data
-			result := make([]byte, len(floatData)*8)
-			for _, singleFloat := range floatData {
-				result = append(result, Float32ToByte(singleFloat)...)
-			}
-			vfm.localFileManager.PutFile(result)
-		}
-	}
-	return vfm.localFileManager.GetFile(path)
-}
-
-func Float32ToByte(float float32) []byte {
-	bits := math.Float32bits(float)
-	bytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(bytes, bits)
-
-	return bytes
-}
-
-func ByteToFloat32(bytes []byte) float32 {
-	bits := binary.LittleEndian.Uint32(bytes)
-
-	return math.Float32frombits(bits)
+	GetFile(key string) error
+	PutFile(key string, content []byte) error
+	Exist(key string) bool
+	ReadAll(key string) ([]byte, error)
+	ReadAt(p []byte, off int64) (n int, err error)
 }
