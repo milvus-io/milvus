@@ -13,19 +13,19 @@
 #include <faiss/utils/BinaryDistance.h>
 #include "segcore/ConcurrentVector.h"
 #include "common/Schema.h"
-#include "query/SubQueryResult.h"
+#include "query/SubSearchResult.h"
 #include "query/helper.h"
 
 namespace milvus::query {
 
-SubQueryResult
-BinarySearchBruteForce(const dataset::QueryDataset& query_dataset,
+SubSearchResult
+BinarySearchBruteForce(const dataset::SearchDataset& dataset,
                        const void* chunk_data_raw,
                        int64_t size_per_chunk,
                        const faiss::BitsetView& bitset);
 
-SubQueryResult
-FloatSearchBruteForce(const dataset::QueryDataset& query_dataset,
+SubSearchResult
+FloatSearchBruteForce(const dataset::SearchDataset& dataset,
                       const void* chunk_data_raw,
                       int64_t size_per_chunk,
                       const faiss::BitsetView& bitset);

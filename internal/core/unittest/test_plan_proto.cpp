@@ -64,7 +64,6 @@ INSTANTIATE_TEST_CASE_P(InstName,
 
 TEST_P(PlanProtoTest, Range) {
     // xxx.query(predicates = "int64field > 3", topk = 10, ...)
-    // xxx.query(predicates = "int64field > 3", topk = 10, ...)
     auto data_type = std::get<0>(GetParam());
     auto data_type_str = spb::DataType_Name(data_type);
     auto field_id = 100 + (int)data_type;
@@ -145,8 +144,7 @@ vector_anns: <
 }
 
 TEST_P(PlanProtoTest, TermExpr) {
-    // xxx.query(predicates = "int64field > 3", topk = 10, ...)
-    // xxx.query(predicates = "int64field > 3", topk = 10, ...)
+    // xxx.query(predicates = "int64field in [1, 2, 3]", topk = 10, ...)
     auto data_type = std::get<0>(GetParam());
     auto data_type_str = spb::DataType_Name(data_type);
     auto field_id = 100 + (int)data_type;
@@ -233,8 +231,7 @@ vector_anns: <
 
 TEST(PlanProtoXTest, NotExpr) {
     auto schema = getStandardSchema();
-    // xxx.query(predicates = "int64field > 3", topk = 10, ...)
-    // xxx.query(predicates = "int64field > 3", topk = 10, ...)
+    // xxx.query(predicates = "not (int64field > 3)", topk = 10, ...)
     auto data_type = spb::DataType::Int64;
     auto data_type_str = spb::DataType_Name(data_type);
     auto field_id = 100 + (int)data_type;
@@ -325,8 +322,7 @@ vector_anns: <
 
 TEST(PlanProtoXTest, AndOrExpr) {
     auto schema = getStandardSchema();
-    // xxx.query(predicates = "int64field > 3", topk = 10, ...)
-    // xxx.query(predicates = "int64field > 3", topk = 10, ...)
+    // xxx.query(predicates = "(int64field < 3) && (int64field > 2 || int64field == 1)", topk = 10, ...)
     auto data_type = spb::DataType::Int64;
     auto data_type_str = spb::DataType_Name(data_type);
     auto field_id = 100 + (int)data_type;
@@ -457,5 +453,83 @@ vector_anns: <
     auto ref_plan = CreatePlan(*schema, dsl_text);
     auto ref_json = ShowPlanNodeVisitor().call_child(*ref_plan->plan_node_);
     EXPECT_EQ(json.dump(2), ref_json.dump(2));
+    plan->check_identical(*ref_plan);
+}
+
+TEST_P(PlanProtoTest, CompareExpr) {
+    auto schema = getStandardSchema();
+    schema->AddField(FieldName("age1"), FieldId(128), DataType::INT64);
+    // xxx.query(predicates = "int64field < int64field", topk = 10, ...)
+    auto data_type = std::get<0>(GetParam());
+    auto field_id = 100 + (int)data_type;
+    auto data_type_str = spb::DataType_Name(data_type);
+    auto field_name = data_type_str + "Field";
+
+    auto fmt1 = boost::format(R"(
+vector_anns: <
+  field_id: 201
+  predicates: <
+    compare_expr: <
+      columns_info: <
+        field_id: 128
+        data_type: Int64
+      >
+      columns_info: <
+        field_id: %1%
+        data_type: %2%
+      >
+      op: LessThan
+    >
+  >
+  query_info: <
+    topk: 10
+    metric_type: "L2"
+    search_params: "{\"nprobe\": 10}"
+  >
+  placeholder_tag: "$0"
+>
+)") % field_id % data_type_str;
+
+    auto proto_text = fmt1.str();
+    planpb::PlanNode node_proto;
+    google::protobuf::TextFormat::ParseFromString(proto_text, &node_proto);
+    // std::cout << node_proto.DebugString();
+    auto plan = ProtoParser(*schema).CreatePlan(node_proto);
+
+    ShowPlanNodeVisitor visitor;
+    auto json = visitor.call_child(*plan->plan_node_);
+    // std::cout << json.dump(2);
+    auto extra_info = plan->extra_info_opt_.value();
+
+    std::string dsl_text = boost::str(boost::format(R"(
+{
+    "bool": {
+        "must": [
+            {
+                "compare": {
+                    "LT": [
+                        "age1",
+                        "%1%"
+                    ]
+                }
+            },
+            {
+                "vector": {
+                    "FloatVectorField": {
+                        "metric_type": "L2",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 10
+                    }
+                }
+            }
+        ]
+    }
+}
+)") % field_name);
+
+    auto ref_plan = CreatePlan(*schema, dsl_text);
     plan->check_identical(*ref_plan);
 }

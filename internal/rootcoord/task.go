@@ -60,6 +60,9 @@ func executeTask(t reqTask) error {
 	case <-t.Ctx().Done():
 		return fmt.Errorf("context canceled")
 	case err := <-errChan:
+		if t.Core().ctx.Err() != nil || t.Ctx().Err() != nil {
+			return fmt.Errorf("context canceled")
+		}
 		return err
 	}
 }
@@ -82,7 +85,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	var schema schemapb.CollectionSchema
 	err := proto.Unmarshal(t.Req.Schema, &schema)
 	if err != nil {
-		return err
+		return fmt.Errorf("unmarshal schema error= %w", err)
 	}
 
 	if t.Req.CollectionName != schema.Name {
@@ -116,12 +119,12 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 
 	collID, _, err := t.core.IDAllocator(1)
 	if err != nil {
-		return err
+		return fmt.Errorf("alloc collection id error = %w", err)
 	}
 	collTs := t.Req.Base.Timestamp
 	partID, _, err := t.core.IDAllocator(1)
 	if err != nil {
-		return err
+		return fmt.Errorf("alloc partition id error = %w", err)
 	}
 
 	log.Debug("collection name -> id",
@@ -153,7 +156,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	// so need Marshal again
 	schemaBytes, err := proto.Marshal(&schema)
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal schema error = %w", err)
 	}
 
 	ddCollReq := internalpb.CreateCollectionRequest{
@@ -178,7 +181,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 
 	ts, err := t.core.MetaTable.AddCollection(&collInfo, idxInfo, ddOp)
 	if err != nil {
-		return err
+		return fmt.Errorf("meta table add collection failed,error = %w", err)
 	}
 
 	// add dml channel before send dd msg
@@ -186,13 +189,17 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 
 	err = t.core.SendDdCreateCollectionReq(ctx, &ddCollReq, chanNames)
 	if err != nil {
-		return err
+		return fmt.Errorf("send dd create collection req failed, error = %w", err)
 	}
 
 	t.core.SendTimeTick(ts)
 
 	// Update DDOperation in etcd
-	return t.core.setDdMsgSendFlag(true)
+	err = t.core.setDdMsgSendFlag(true)
+	if err != nil {
+		return fmt.Errorf("send dd msg send flag failed,error = %w", err)
+	}
+	return nil
 }
 
 type DropCollectionReqTask struct {

@@ -113,7 +113,7 @@ class ConcurrentVectorImpl : public VectorBase {
  public:
     explicit ConcurrentVectorImpl(ssize_t dim, int64_t size_per_chunk)
         : VectorBase(size_per_chunk), Dim(is_scalar ? 1 : dim) {
-        Assert(is_scalar ? dim == 1 : dim != 1);
+        // Assert(is_scalar ? dim == 1 : dim != 1);
     }
 
     void

@@ -198,25 +198,19 @@ class RetrieveRequest :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kOutputFieldsFieldNumber = 2,
+    kOutputFieldsIdFieldNumber = 2,
     kIdsFieldNumber = 1,
   };
-  // repeated string output_fields = 2;
-  int output_fields_size() const;
-  void clear_output_fields();
-  const std::string& output_fields(int index) const;
-  std::string* mutable_output_fields(int index);
-  void set_output_fields(int index, const std::string& value);
-  void set_output_fields(int index, std::string&& value);
-  void set_output_fields(int index, const char* value);
-  void set_output_fields(int index, const char* value, size_t size);
-  std::string* add_output_fields();
-  void add_output_fields(const std::string& value);
-  void add_output_fields(std::string&& value);
-  void add_output_fields(const char* value);
-  void add_output_fields(const char* value, size_t size);
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& output_fields() const;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_output_fields();
+  // repeated int64 output_fields_id = 2;
+  int output_fields_id_size() const;
+  void clear_output_fields_id();
+  ::PROTOBUF_NAMESPACE_ID::int64 output_fields_id(int index) const;
+  void set_output_fields_id(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_output_fields_id(::PROTOBUF_NAMESPACE_ID::int64 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+      output_fields_id() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+      mutable_output_fields_id();
 
   // .milvus.proto.schema.IDs ids = 1;
   bool has_ids() const;
@@ -231,7 +225,8 @@ class RetrieveRequest :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> output_fields_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > output_fields_id_;
+  mutable std::atomic<int> _output_fields_id_cached_byte_size_;
   ::milvus::proto::schema::IDs* ids_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_segcore_2eproto;
@@ -728,69 +723,34 @@ inline void RetrieveRequest::set_allocated_ids(::milvus::proto::schema::IDs* ids
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.segcore.RetrieveRequest.ids)
 }
 
-// repeated string output_fields = 2;
-inline int RetrieveRequest::output_fields_size() const {
-  return output_fields_.size();
+// repeated int64 output_fields_id = 2;
+inline int RetrieveRequest::output_fields_id_size() const {
+  return output_fields_id_.size();
 }
-inline void RetrieveRequest::clear_output_fields() {
-  output_fields_.Clear();
+inline void RetrieveRequest::clear_output_fields_id() {
+  output_fields_id_.Clear();
 }
-inline const std::string& RetrieveRequest::output_fields(int index) const {
-  // @@protoc_insertion_point(field_get:milvus.proto.segcore.RetrieveRequest.output_fields)
-  return output_fields_.Get(index);
+inline ::PROTOBUF_NAMESPACE_ID::int64 RetrieveRequest::output_fields_id(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.segcore.RetrieveRequest.output_fields_id)
+  return output_fields_id_.Get(index);
 }
-inline std::string* RetrieveRequest::mutable_output_fields(int index) {
-  // @@protoc_insertion_point(field_mutable:milvus.proto.segcore.RetrieveRequest.output_fields)
-  return output_fields_.Mutable(index);
+inline void RetrieveRequest::set_output_fields_id(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
+  output_fields_id_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.segcore.RetrieveRequest.output_fields_id)
 }
-inline void RetrieveRequest::set_output_fields(int index, const std::string& value) {
-  // @@protoc_insertion_point(field_set:milvus.proto.segcore.RetrieveRequest.output_fields)
-  output_fields_.Mutable(index)->assign(value);
+inline void RetrieveRequest::add_output_fields_id(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  output_fields_id_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.segcore.RetrieveRequest.output_fields_id)
 }
-inline void RetrieveRequest::set_output_fields(int index, std::string&& value) {
-  // @@protoc_insertion_point(field_set:milvus.proto.segcore.RetrieveRequest.output_fields)
-  output_fields_.Mutable(index)->assign(std::move(value));
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+RetrieveRequest::output_fields_id() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.segcore.RetrieveRequest.output_fields_id)
+  return output_fields_id_;
 }
-inline void RetrieveRequest::set_output_fields(int index, const char* value) {
-  GOOGLE_DCHECK(value != nullptr);
-  output_fields_.Mutable(index)->assign(value);
-  // @@protoc_insertion_point(field_set_char:milvus.proto.segcore.RetrieveRequest.output_fields)
-}
-inline void RetrieveRequest::set_output_fields(int index, const char* value, size_t size) {
-  output_fields_.Mutable(index)->assign(
-    reinterpret_cast<const char*>(value), size);
-  // @@protoc_insertion_point(field_set_pointer:milvus.proto.segcore.RetrieveRequest.output_fields)
-}
-inline std::string* RetrieveRequest::add_output_fields() {
-  // @@protoc_insertion_point(field_add_mutable:milvus.proto.segcore.RetrieveRequest.output_fields)
-  return output_fields_.Add();
-}
-inline void RetrieveRequest::add_output_fields(const std::string& value) {
-  output_fields_.Add()->assign(value);
-  // @@protoc_insertion_point(field_add:milvus.proto.segcore.RetrieveRequest.output_fields)
-}
-inline void RetrieveRequest::add_output_fields(std::string&& value) {
-  output_fields_.Add(std::move(value));
-  // @@protoc_insertion_point(field_add:milvus.proto.segcore.RetrieveRequest.output_fields)
-}
-inline void RetrieveRequest::add_output_fields(const char* value) {
-  GOOGLE_DCHECK(value != nullptr);
-  output_fields_.Add()->assign(value);
-  // @@protoc_insertion_point(field_add_char:milvus.proto.segcore.RetrieveRequest.output_fields)
-}
-inline void RetrieveRequest::add_output_fields(const char* value, size_t size) {
-  output_fields_.Add()->assign(reinterpret_cast<const char*>(value), size);
-  // @@protoc_insertion_point(field_add_pointer:milvus.proto.segcore.RetrieveRequest.output_fields)
-}
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
-RetrieveRequest::output_fields() const {
-  // @@protoc_insertion_point(field_list:milvus.proto.segcore.RetrieveRequest.output_fields)
-  return output_fields_;
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
-RetrieveRequest::mutable_output_fields() {
-  // @@protoc_insertion_point(field_mutable_list:milvus.proto.segcore.RetrieveRequest.output_fields)
-  return &output_fields_;
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+RetrieveRequest::mutable_output_fields_id() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.segcore.RetrieveRequest.output_fields_id)
+  return &output_fields_id_;
 }
 
 // -------------------------------------------------------------------

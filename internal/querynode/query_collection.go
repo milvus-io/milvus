@@ -781,16 +781,16 @@ func (q *queryCollection) search(msg queryMsg) error {
 		return err
 	}
 
-	var plan *Plan
+	var plan *SearchPlan
 	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
 		expr := searchMsg.SerializedExprPlan
-		plan, err = createPlanByExpr(collection, expr)
+		plan, err = createSearchPlanByExpr(collection, expr)
 		if err != nil {
 			return err
 		}
 	} else {
 		dsl := searchMsg.Dsl
-		plan, err = createPlan(collection, dsl)
+		plan, err = createSearchPlan(collection, dsl)
 		if err != nil {
 			return err
 		}
@@ -822,6 +822,14 @@ func (q *queryCollection) search(msg queryMsg) error {
 	}
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("search %d(nq=%d, k=%d)", searchMsg.CollectionID, queryNum, topK))
+
+	// get global sealed segments
+	var globalSealedSegments []UniqueID
+	if len(searchMsg.PartitionIDs) > 0 {
+		globalSealedSegments = q.historical.getGlobalSegmentIDsByPartitionIds(searchMsg.PartitionIDs)
+	} else {
+		globalSealedSegments = q.historical.getGlobalSegmentIDsByCollectionID(collectionID)
+	}
 
 	searchResults := make([]*SearchResult, 0)
 	matchedSegments := make([]*Segment, 0)
@@ -901,8 +909,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 					MetricType:               plan.getMetricType(),
 					SealedSegmentIDsSearched: sealedSegmentSearched,
 					ChannelIDsSearched:       collection.getVChannels(),
-					//TODO:: get global sealed segment from etcd
-					GlobalSealedSegmentIDs: sealedSegmentSearched,
+					GlobalSealedSegmentIDs:   globalSealedSegments,
 				},
 			}
 			log.Debug("QueryNode Empty SearchResultMsg",
@@ -931,8 +938,8 @@ func (q *queryCollection) search(msg queryMsg) error {
 		if err != nil {
 			return err
 		}
-		marshaledHits, err = reorganizeSingleQueryResult(plan, searchRequests, searchResults[0])
-		sp.LogFields(oplog.String("statistical time", "reorganizeSingleQueryResult end"))
+		marshaledHits, err = reorganizeSingleSearchResult(plan, searchRequests, searchResults[0])
+		sp.LogFields(oplog.String("statistical time", "reorganizeSingleSearchResult end"))
 		if err != nil {
 			return err
 		}
@@ -947,8 +954,8 @@ func (q *queryCollection) search(msg queryMsg) error {
 		if err != nil {
 			return err
 		}
-		marshaledHits, err = reorganizeQueryResults(plan, searchRequests, searchResults, numSegment, inReduced)
-		sp.LogFields(oplog.String("statistical time", "reorganizeQueryResults end"))
+		marshaledHits, err = reorganizeSearchResults(plan, searchRequests, searchResults, numSegment, inReduced)
+		sp.LogFields(oplog.String("statistical time", "reorganizeSearchResults end"))
 		if err != nil {
 			return err
 		}
@@ -1012,8 +1019,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 				MetricType:               plan.getMetricType(),
 				SealedSegmentIDsSearched: sealedSegmentSearched,
 				ChannelIDsSearched:       collection.getVChannels(),
-				//TODO:: get global sealed segment from etcd
-				GlobalSealedSegmentIDs: sealedSegmentSearched,
+				GlobalSealedSegmentIDs:   globalSealedSegments,
 			},
 		}
 		log.Debug("QueryNode SearchResultMsg",
@@ -1071,8 +1077,8 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 	}
 
 	req := &segcorepb.RetrieveRequest{
-		Ids:          retrieveMsg.Ids,
-		OutputFields: retrieveMsg.OutputFields,
+		Ids:            retrieveMsg.Ids,
+		OutputFieldsId: retrieveMsg.OutputFieldsId,
 	}
 
 	plan, err := createRetrievePlan(collection, req, timestamp)
@@ -1083,10 +1089,12 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("retrieve %d", retrieveMsg.CollectionID))
 
+	var globalSealedSegments []UniqueID
 	var partitionIDsInHistorical []UniqueID
 	var partitionIDsInStreaming []UniqueID
 	partitionIDsInQuery := retrieveMsg.PartitionIDs
 	if len(partitionIDsInQuery) == 0 {
+		globalSealedSegments = q.historical.getGlobalSegmentIDsByCollectionID(collectionID)
 		partitionIDsInHistoricalCol, err1 := q.historical.replica.getPartitionIDs(collectionID)
 		partitionIDsInStreamingCol, err2 := q.streaming.replica.getPartitionIDs(collectionID)
 		if err1 != nil && err2 != nil {
@@ -1095,6 +1103,7 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 		partitionIDsInHistorical = partitionIDsInHistoricalCol
 		partitionIDsInStreaming = partitionIDsInStreamingCol
 	} else {
+		globalSealedSegments = q.historical.getGlobalSegmentIDsByPartitionIds(partitionIDsInQuery)
 		for _, id := range partitionIDsInQuery {
 			_, err1 := q.historical.replica.getPartitionByID(id)
 			if err1 == nil {
@@ -1121,7 +1130,7 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 			if err != nil {
 				return err
 			}
-			result, err := segment.segmentGetEntityByIds(plan)
+			result, err := segment.getEntityByIds(plan)
 			if err != nil {
 				return err
 			}
@@ -1141,7 +1150,7 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 			if err != nil {
 				return err
 			}
-			result, err := segment.segmentGetEntityByIds(plan)
+			result, err := segment.getEntityByIds(plan)
 			if err != nil {
 				return err
 			}
@@ -1171,8 +1180,7 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 			ResultChannelID:           retrieveMsg.ResultChannelID,
 			SealedSegmentIDsRetrieved: sealedSegmentRetrieved,
 			ChannelIDsRetrieved:       collection.getVChannels(),
-			//TODO(yukun):: get global sealed segment from etcd
-			GlobalSealedSegmentIDs: sealedSegmentRetrieved,
+			GlobalSealedSegmentIDs:    globalSealedSegments,
 		},
 	}
 

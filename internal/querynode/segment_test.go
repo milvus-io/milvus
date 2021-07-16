@@ -153,13 +153,13 @@ func TestSegment_retrieve(t *testing.T) {
 				},
 			},
 		},
-		OutputFields: []string{"vec"},
+		OutputFieldsId: []int64{100},
 	}
 	plan, err := createRetrievePlan(collection, reqIds, 100)
 	defer plan.delete()
 	assert.NoError(t, err)
 
-	res, err := segment.segmentGetEntityByIds(plan)
+	res, err := segment.getEntityByIds(plan)
 	assert.NoError(t, err)
 
 	assert.Equal(t, res.Ids.GetIntId().Data, []int64{2, 3, 1})
@@ -426,7 +426,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 	}
 
 	travelTimestamp := Timestamp(1020)
-	plan, err := createPlan(collection, dslString)
+	plan, err := createSearchPlan(collection, dslString)
 	assert.NoError(t, err)
 	holder, err := parseSearchRequest(plan, placeHolderGroupBlob)
 	assert.NoError(t, err)
@@ -436,7 +436,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 	searchResults := make([]*SearchResult, 0)
 	matchedSegments := make([]*Segment, 0)
 
-	searchResult, err := segment.segmentSearch(plan, placeholderGroups, []Timestamp{travelTimestamp})
+	searchResult, err := segment.search(plan, placeholderGroups, []Timestamp{travelTimestamp})
 	assert.Nil(t, err)
 
 	searchResults = append(searchResults, searchResult)
@@ -449,7 +449,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 	assert.NoError(t, err2)
 	err = fillTargetEntry(plan, searchResults, matchedSegments, inReduced)
 	assert.NoError(t, err)
-	marshaledHits, err := reorganizeQueryResults(plan, placeholderGroups, searchResults, numSegment, inReduced)
+	marshaledHits, err := reorganizeSearchResults(plan, placeholderGroups, searchResults, numSegment, inReduced)
 	assert.NoError(t, err)
 	hitsBlob, err := marshaledHits.getHitsBlob()
 	assert.NoError(t, err)

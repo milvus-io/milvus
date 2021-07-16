@@ -88,6 +88,7 @@ func (ddn *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			if msg.(*msgstream.DropCollectionMsg).GetCollectionID() == ddn.collectionID {
 				log.Info("Destroying current flowgraph", zap.Any("collectionID", ddn.collectionID))
 				ddn.clearSignal <- ddn.collectionID
+				return []Msg{}
 			}
 		case commonpb.MsgType_Insert:
 			log.Debug("DDNode with insert messages")

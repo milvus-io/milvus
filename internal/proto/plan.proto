@@ -4,6 +4,16 @@ package milvus.proto.plan;
 option go_package = "github.com/milvus-io/milvus/internal/proto/planpb";
 import "schema.proto";
 
+enum OpType {
+  Invalid = 0;
+  GreaterThan = 1;
+  GreaterEqual = 2;
+  LessThan = 3;
+  LessEqual = 4;
+  Equal = 5;
+  NotEqual = 6;
+};
+
 message GenericValue {
   oneof val {
     bool bool_val = 1;
@@ -11,7 +21,6 @@ message GenericValue {
     double float_val = 3;
   };
 }
-
 
 message QueryInfo {
   int64 topk = 1;
@@ -28,17 +37,13 @@ message ColumnInfo {
 
 message RangeExpr {
   ColumnInfo column_info = 1;
-  enum OpType {
-    Invalid = 0;
-    GreaterThan = 1;
-    GreaterEqual = 2;
-    LessThan = 3;
-    LessEqual = 4;
-    Equal = 5;
-    NotEqual = 6;
-  };
   repeated OpType ops = 2;
   repeated GenericValue values = 3;
+}
+
+message CompareExpr {
+  repeated ColumnInfo columns_info = 1;
+  OpType op = 2;
 }
 
 message TermExpr {
@@ -47,7 +52,7 @@ message TermExpr {
 }
 
 message UnaryExpr {
-  enum UnaryOp{
+  enum UnaryOp {
     Invalid = 0;
     Not = 1;
   };
@@ -72,6 +77,7 @@ message Expr {
     TermExpr term_expr = 2;
     UnaryExpr unary_expr = 3;
     BinaryExpr binary_expr = 4;
+    CompareExpr compare_expr = 5;
   };
 }
 

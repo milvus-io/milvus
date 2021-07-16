@@ -15,19 +15,6 @@ default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": 
 class TestUtilityParams(TestcaseBase):
     """ Test case of index interface """
 
-    @pytest.fixture(
-        scope="function",
-        params=ct.get_invalid_strs
-    )
-    def get_invalid_collection_name(self, request):
-        yield request.param
-
-    @pytest.fixture(
-        scope="function",
-        params=ct.get_invalid_strs
-    )
-    def get_invalid_partition_name(self, request):
-        yield request.param
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_has_collection_name_invalid(self, get_invalid_collection_name):

@@ -70,27 +70,27 @@ ReleaseQueryResult(const knowhere::DatasetPtr& result) {
 void
 SearchOnSealed(const Schema& schema,
                const segcore::SealedIndexingRecord& record,
-               const QueryInfo& query_info,
+               const SearchInfo& search_info,
                const void* query_data,
                int64_t num_queries,
                const faiss::BitsetView& bitset,
-               QueryResult& result) {
-    auto topK = query_info.topK_;
+               SearchResult& result) {
+    auto topk = search_info.topk_;
 
-    auto field_offset = query_info.field_offset_;
+    auto field_offset = search_info.field_offset_;
     auto& field = schema[field_offset];
     // Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
     auto dim = field.get_dim();
 
     Assert(record.is_ready(field_offset));
     auto field_indexing = record.get_field_indexing(field_offset);
-    Assert(field_indexing->metric_type_ == query_info.metric_type_);
+    Assert(field_indexing->metric_type_ == search_info.metric_type_);
 
     auto final = [&] {
         auto ds = knowhere::GenDataset(num_queries, dim, query_data);
 
-        auto conf = query_info.search_params_;
-        conf[milvus::knowhere::meta::TOPK] = query_info.topK_;
+        auto conf = search_info.search_params_;
+        conf[milvus::knowhere::meta::TOPK] = search_info.topk_;
         conf[milvus::knowhere::Metric::TYPE] = MetricTypeToName(field_indexing->metric_type_);
         return field_indexing->indexing_->Query(ds, conf, bitset);
     }();
@@ -98,11 +98,11 @@ SearchOnSealed(const Schema& schema,
     auto ids = final->Get<idx_t*>(knowhere::meta::IDS);
     auto distances = final->Get<float*>(knowhere::meta::DISTANCE);
 
-    auto total_num = num_queries * topK;
+    auto total_num = num_queries * topk;
     result.internal_seg_offsets_.resize(total_num);
     result.result_distances_.resize(total_num);
     result.num_queries_ = num_queries;
-    result.topK_ = topK;
+    result.topk_ = topk;
 
     std::copy_n(ids, total_num, result.internal_seg_offsets_.data());
     std::copy_n(distances, total_num, result.result_distances_.data());

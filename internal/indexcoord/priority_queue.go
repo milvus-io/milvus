@@ -14,16 +14,11 @@ package indexcoord
 import (
 	"container/heap"
 	"sync"
-
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/types"
 )
 
 // An Item is something we manage in a priority queue.
 type PQItem struct {
-	value types.IndexNode // The value of the item; arbitrary.
-	key   UniqueID
-	addr  *commonpb.Address
+	key UniqueID
 
 	priority int // The priority of the item in the queue.
 	// The index is needed by update and is maintained by the heap.Interface methods.
@@ -71,12 +66,12 @@ func (pq *PriorityQueue) Pop() interface{} {
 	return item
 }
 
-func (pq *PriorityQueue) CheckAddressExist(addr *commonpb.Address) bool {
+func (pq *PriorityQueue) CheckExist(nodeID UniqueID) bool {
 	pq.lock.RLock()
 	defer pq.lock.RUnlock()
 
 	for _, item := range pq.items {
-		if CompareAddress(addr, item.addr) {
+		if nodeID == item.key {
 			return true
 		}
 	}
@@ -125,33 +120,24 @@ func (pq *PriorityQueue) Remove(key UniqueID) {
 	}
 }
 
-func (pq *PriorityQueue) Peek() interface{} {
+// PeekClient picks an key with the lowest load.
+func (pq *PriorityQueue) Peek() UniqueID {
 	pq.lock.RLock()
 	defer pq.lock.RUnlock()
+
 	if pq.Len() == 0 {
-		return nil
+		return UniqueID(-1)
 	}
-	return pq.items[0]
-	//item := pq.items[0]
-	//return item.value
+	return pq.items[0].key
 }
 
-// PeekClient picks an IndexNode with the lowest load.
-func (pq *PriorityQueue) PeekClient() (UniqueID, types.IndexNode) {
-	item := pq.Peek()
-	if item == nil {
-		return UniqueID(-1), nil
-	}
-	return item.(*PQItem).key, item.(*PQItem).value
-}
-
-func (pq *PriorityQueue) PeekAllClients() []types.IndexNode {
+func (pq *PriorityQueue) PeekAll() []UniqueID {
 	pq.lock.RLock()
 	defer pq.lock.RUnlock()
 
-	var ret []types.IndexNode
+	var ret []UniqueID
 	for _, item := range pq.items {
-		ret = append(ret, item.value)
+		ret = append(ret, item.key)
 	}
 
 	return ret

@@ -1178,7 +1178,7 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Debug("CreateCollection failed", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
+		log.Debug("CreateCollection failed", zap.String("name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "Create collection failed: " + err.Error(),
@@ -1750,6 +1750,9 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestam
 		}, nil
 	}
 	// log.Printf("AllocTimestamp : %d", ts)
+
+	//return first available  time stamp
+	ts = ts - uint64(in.Count) + 1
 	return &rootcoordpb.AllocTimestampResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,

@@ -23,6 +23,7 @@ import (
 	"runtime"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -194,6 +195,133 @@ func (it *InsertTask) getChannels() ([]pChan, error) {
 
 func (it *InsertTask) OnEnqueue() error {
 	it.BaseInsertTask.InsertRequest.Base = &commonpb.MsgBase{}
+	return nil
+}
+
+func getNumRowsOfScalarField(datas interface{}) uint32 {
+	realTypeDatas := reflect.ValueOf(datas)
+	return uint32(realTypeDatas.Len())
+}
+
+func getNumRowsOfFloatVectorField(fDatas []float32, dim int64) (uint32, error) {
+	if dim <= 0 {
+		return 0, errDimLessThanOrEqualToZero(int(dim))
+	}
+	l := len(fDatas)
+	if int64(l)%dim != 0 {
+		return 0, fmt.Errorf("the length(%d) of float data should divide the dim(%d)", l, dim)
+	}
+	return uint32(int(int64(l) / dim)), nil
+}
+
+func getNumRowsOfBinaryVectorField(bDatas []byte, dim int64) (uint32, error) {
+	if dim <= 0 {
+		return 0, errDimLessThanOrEqualToZero(int(dim))
+	}
+	if dim%8 != 0 {
+		return 0, errDimShouldDivide8(int(dim))
+	}
+	l := len(bDatas)
+	if (8*int64(l))%dim != 0 {
+		return 0, fmt.Errorf("the num(%d) of all bits should divide the dim(%d)", 8*l, dim)
+	}
+	return uint32(int((8 * int64(l)) / dim)), nil
+}
+
+func (it *InsertTask) checkLengthOfFieldsData() error {
+	neededFieldsNum := 0
+	for _, field := range it.schema.Fields {
+		if !field.AutoID {
+			neededFieldsNum++
+		}
+	}
+
+	if len(it.req.FieldsData) < neededFieldsNum {
+		return errFieldsLessThanNeeded(len(it.req.FieldsData), neededFieldsNum)
+	}
+
+	return nil
+}
+
+func (it *InsertTask) checkRowNums() error {
+	if it.req.NumRows <= 0 {
+		return errNumRowsLessThanOrEqualToZero(it.req.NumRows)
+	}
+
+	if err := it.checkLengthOfFieldsData(); err != nil {
+		return err
+	}
+
+	rowNums := it.req.NumRows
+
+	for i, field := range it.req.FieldsData {
+		switch field.Field.(type) {
+		case *schemapb.FieldData_Scalars:
+			scalarField := field.GetScalars()
+			switch scalarField.Data.(type) {
+			case *schemapb.ScalarField_BoolData:
+				fieldNumRows := getNumRowsOfScalarField(scalarField.GetBoolData().Data)
+				if fieldNumRows != rowNums {
+					return errNumRowsOfFieldDataMismatchPassed(i, fieldNumRows, rowNums)
+				}
+			case *schemapb.ScalarField_IntData:
+				fieldNumRows := getNumRowsOfScalarField(scalarField.GetIntData().Data)
+				if fieldNumRows != rowNums {
+					return errNumRowsOfFieldDataMismatchPassed(i, fieldNumRows, rowNums)
+				}
+			case *schemapb.ScalarField_LongData:
+				fieldNumRows := getNumRowsOfScalarField(scalarField.GetLongData().Data)
+				if fieldNumRows != rowNums {
+					return errNumRowsOfFieldDataMismatchPassed(i, fieldNumRows, rowNums)
+				}
+			case *schemapb.ScalarField_FloatData:
+				fieldNumRows := getNumRowsOfScalarField(scalarField.GetFloatData().Data)
+				if fieldNumRows != rowNums {
+					return errNumRowsOfFieldDataMismatchPassed(i, fieldNumRows, rowNums)
+				}
+			case *schemapb.ScalarField_DoubleData:
+				fieldNumRows := getNumRowsOfScalarField(scalarField.GetDoubleData().Data)
+				if fieldNumRows != rowNums {
+					return errNumRowsOfFieldDataMismatchPassed(i, fieldNumRows, rowNums)
+				}
+			case *schemapb.ScalarField_BytesData:
+				return errUnsupportedDType("bytes")
+			case *schemapb.ScalarField_StringData:
+				return errUnsupportedDType("string")
+			case nil:
+				continue
+			default:
+				continue
+			}
+		case *schemapb.FieldData_Vectors:
+			vectorField := field.GetVectors()
+			switch vectorField.Data.(type) {
+			case *schemapb.VectorField_FloatVector:
+				dim := vectorField.GetDim()
+				fieldNumRows, err := getNumRowsOfFloatVectorField(vectorField.GetFloatVector().Data, dim)
+				if err != nil {
+					return err
+				}
+				if fieldNumRows != rowNums {
+					return errNumRowsOfFieldDataMismatchPassed(i, fieldNumRows, rowNums)
+				}
+			case *schemapb.VectorField_BinaryVector:
+				dim := vectorField.GetDim()
+				fieldNumRows, err := getNumRowsOfBinaryVectorField(vectorField.GetBinaryVector(), dim)
+				if err != nil {
+					return err
+				}
+				if fieldNumRows != rowNums {
+					return errNumRowsOfFieldDataMismatchPassed(i, fieldNumRows, rowNums)
+				}
+			case nil:
+				continue
+			default:
+				continue
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -441,10 +569,15 @@ func (it *InsertTask) transferColumnBasedRequestToRowBasedData() error {
 
 func (it *InsertTask) checkFieldAutoID() error {
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
-	rowNums := it.req.NumRows
-	if len(it.req.FieldsData) == 0 || rowNums == 0 {
-		return fmt.Errorf("do not contain any data")
+	if it.req.NumRows <= 0 {
+		return errNumRowsLessThanOrEqualToZero(it.req.NumRows)
 	}
+
+	if err := it.checkLengthOfFieldsData(); err != nil {
+		return err
+	}
+
+	rowNums := it.req.NumRows
 
 	primaryFieldName := ""
 	autoIDFieldName := ""
@@ -610,6 +743,11 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	it.schema = collSchema
+
+	err = it.checkRowNums()
+	if err != nil {
+		return err
+	}
 
 	err = it.checkFieldAutoID()
 	if err != nil {
@@ -1200,6 +1338,23 @@ func (st *SearchTask) getVChannels() ([]vChan, error) {
 	return st.chMgr.getVChannels(collID)
 }
 
+// https://github.com/milvus-io/milvus/issues/6411
+// Support wildcard match
+func translateOutputFields(outputFields []string, schema *schemapb.CollectionSchema) ([]string, error) {
+	if len(outputFields) == 1 && strings.TrimSpace(outputFields[0]) == "*" {
+		ret := make([]string, 0)
+		// fill all fields except vector fields
+		for _, field := range schema.Fields {
+			if field.DataType != schemapb.DataType_BinaryVector && field.DataType != schemapb.DataType_FloatVector {
+				ret = append(ret, field.Name)
+			}
+		}
+		return ret, nil
+	}
+
+	return outputFields, nil
+}
+
 func (st *SearchTask) PreExecute(ctx context.Context) error {
 	st.Base.MsgType = commonpb.MsgType_Search
 	st.Base.SourceID = Params.ProxyID
@@ -1259,6 +1414,13 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
+
+	outputFields, err := translateOutputFields(st.query.OutputFields, schema)
+	if err != nil {
+		return err
+	}
+	st.query.OutputFields = outputFields
+
 	if st.query.GetDslType() == commonpb.DslType_BoolExprV1 {
 		annsField, err := GetAttrByKeyFromRepeatedKV(AnnsFieldKey, st.query.SearchParams)
 		if err != nil {
@@ -1932,10 +2094,14 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	rt.retrieve.OutputFields, err = translateOutputFields(rt.retrieve.OutputFields, schema)
+	if err != nil {
+		return err
+	}
 	if len(rt.retrieve.OutputFields) == 0 {
 		for _, field := range schema.Fields {
 			if field.FieldID >= 100 && field.DataType != schemapb.DataType_FloatVector && field.DataType != schemapb.DataType_BinaryVector {
-				rt.OutputFields = append(rt.OutputFields, field.Name)
+				rt.OutputFieldsId = append(rt.OutputFieldsId, field.FieldID)
 			}
 		}
 	} else {
@@ -1952,10 +2118,10 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 						addPrimaryKey = true
 					}
 					findField = true
-					rt.OutputFields = append(rt.OutputFields, reqField)
+					rt.OutputFieldsId = append(rt.OutputFieldsId, field.FieldID)
 				} else {
 					if field.IsPrimaryKey && !addPrimaryKey {
-						rt.OutputFields = append(rt.OutputFields, field.Name)
+						rt.OutputFieldsId = append(rt.OutputFieldsId, field.FieldID)
 						addPrimaryKey = true
 					}
 				}
@@ -2215,7 +2381,7 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 		}
 		for i := 0; i < len(rt.result.FieldsData); i++ {
 			for _, field := range schema.Fields {
-				if field.Name == rt.OutputFields[i] {
+				if field.FieldID == rt.OutputFieldsId[i] {
 					rt.result.FieldsData[i].FieldName = field.Name
 					rt.result.FieldsData[i].Type = field.DataType
 				}

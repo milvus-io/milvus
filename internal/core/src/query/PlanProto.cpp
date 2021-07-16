@@ -58,7 +58,7 @@ ExtractRangeExprImpl(FieldOffset field_offset, DataType data_type, const planpb:
     auto sz = expr_proto.ops_size();
 
     for (int i = 0; i < sz; ++i) {
-        auto op = static_cast<RangeExpr::OpType>(expr_proto.ops(i));
+        auto op = static_cast<OpType>(expr_proto.ops(i));
         auto& value_proto = expr_proto.values(i);
         if constexpr (std::is_same_v<T, bool>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kBoolVal);
@@ -91,14 +91,14 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
 
     auto& query_info_proto = anns_proto.query_info();
 
-    QueryInfo query_info;
+    SearchInfo search_info;
     auto field_id = FieldId(anns_proto.field_id());
     auto field_offset = schema.get_offset(field_id);
-    query_info.field_offset_ = field_offset;
+    search_info.field_offset_ = field_offset;
 
-    query_info.metric_type_ = GetMetricType(query_info_proto.metric_type());
-    query_info.topK_ = query_info_proto.topk();
-    query_info.search_params_ = json::parse(query_info_proto.search_params());
+    search_info.metric_type_ = GetMetricType(query_info_proto.metric_type());
+    search_info.topk_ = query_info_proto.topk();
+    search_info.search_params_ = json::parse(query_info_proto.search_params());
 
     auto plan_node = [&]() -> std::unique_ptr<VectorPlanNode> {
         if (anns_proto.is_binary()) {
@@ -109,7 +109,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     }();
     plan_node->placeholder_tag_ = anns_proto.placeholder_tag();
     plan_node->predicate_ = std::move(expr_opt);
-    plan_node->query_info_ = std::move(query_info);
+    plan_node->search_info_ = std::move(search_info);
     return plan_node;
 }
 
@@ -122,7 +122,7 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
     ExtractInfoPlanNodeVisitor extractor(plan_info);
     plan_node->accept(extractor);
 
-    plan->tag2field_["$0"] = plan_node->query_info_.field_offset_;
+    plan->tag2field_["$0"] = plan_node->search_info_.field_offset_;
     plan->plan_node_ = std::move(plan_node);
     plan->extra_info_opt_ = std::move(plan_info);
 
@@ -134,6 +134,7 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
 
     return plan;
 }
+
 ExprPtr
 ProtoParser::ParseRangeExpr(const proto::plan::RangeExpr& expr_pb) {
     auto& columen_info = expr_pb.column_info();
@@ -172,6 +173,30 @@ ProtoParser::ParseRangeExpr(const proto::plan::RangeExpr& expr_pb) {
         }
     }();
     return result;
+}
+
+ExprPtr
+ProtoParser::ParseCompareExpr(const proto::plan::CompareExpr& expr_pb) {
+    auto& column_infos = expr_pb.columns_info();
+    std::vector<FieldOffset> field_offsets;
+    std::vector<DataType> data_types;
+    for (auto& column_info : column_infos) {
+        auto field_id = FieldId(column_info.field_id());
+        auto field_offset = schema.get_offset(field_id);
+        auto data_type = schema[field_offset].get_data_type();
+        Assert(data_type == (DataType)column_info.data_type());
+        field_offsets.emplace_back(field_offset);
+        data_types.emplace_back(data_type);
+    }
+
+    // auto& field_meta = schema[field_offset];
+    return [&]() -> ExprPtr {
+        auto result = std::make_unique<CompareExpr>();
+        result->field_offsets_ = field_offsets;
+        result->data_types_ = data_types;
+        result->op = static_cast<OpType>(expr_pb.op());
+        return result;
+    }();
 }
 
 ExprPtr
@@ -252,6 +277,9 @@ ProtoParser::ParseExpr(const proto::plan::Expr& expr_pb) {
         }
         case ppe::kRangeExpr: {
             return ParseRangeExpr(expr_pb.range_expr());
+        }
+        case ppe::kCompareExpr: {
+            return ParseCompareExpr(expr_pb.compare_expr());
         }
         default:
             PanicInfo("unsupported expr proto node");

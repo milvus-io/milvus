@@ -30,17 +30,16 @@ struct PlanNode {
 
 using PlanNodePtr = std::unique_ptr<PlanNode>;
 
-struct QueryInfo {
-    int64_t topK_;
+struct SearchInfo {
+    int64_t topk_;
     FieldOffset field_offset_;
     MetricType metric_type_;
-    std::string deprecated_metric_type_;  // TODO: use enum
     nlohmann::json search_params_;
 };
 
 struct VectorPlanNode : PlanNode {
     std::optional<ExprPtr> predicate_;
-    QueryInfo query_info_;
+    SearchInfo search_info_;
     std::string placeholder_tag_;
 };
 

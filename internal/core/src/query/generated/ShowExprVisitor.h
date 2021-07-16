@@ -33,6 +33,9 @@ class ShowExprVisitor : public ExprVisitor {
     void
     visit(RangeExpr& expr) override;
 
+    void
+    visit(CompareExpr& expr) override;
+
  public:
     using RetType = Json;
 

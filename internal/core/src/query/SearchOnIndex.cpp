@@ -11,17 +11,17 @@
 
 #include "SearchOnIndex.h"
 namespace milvus::query {
-SubQueryResult
-SearchOnIndex(const dataset::QueryDataset& query_dataset,
+SubSearchResult
+SearchOnIndex(const dataset::SearchDataset& search_dataset,
               const knowhere::VecIndex& indexing,
               const knowhere::Config& search_conf,
               const faiss::BitsetView& bitset) {
-    auto num_queries = query_dataset.num_queries;
-    auto topK = query_dataset.topk;
-    auto dim = query_dataset.dim;
-    auto metric_type = query_dataset.metric_type;
+    auto num_queries = search_dataset.num_queries;
+    auto topK = search_dataset.topk;
+    auto dim = search_dataset.dim;
+    auto metric_type = search_dataset.metric_type;
 
-    auto dataset = knowhere::GenDataset(num_queries, dim, query_dataset.query_data);
+    auto dataset = knowhere::GenDataset(num_queries, dim, search_dataset.query_data);
 
     // NOTE: VecIndex Query API forget to add const qualifier
     // NOTE: use const_cast as a workaround
@@ -31,7 +31,7 @@ SearchOnIndex(const dataset::QueryDataset& query_dataset,
     auto dis = ans->Get<float*>(milvus::knowhere::meta::DISTANCE);
     auto uids = ans->Get<int64_t*>(milvus::knowhere::meta::IDS);
 
-    SubQueryResult sub_qr(num_queries, topK, metric_type);
+    SubSearchResult sub_qr(num_queries, topK, metric_type);
     std::copy_n(dis, num_queries * topK, sub_qr.get_values());
     std::copy_n(uids, num_queries * topK, sub_qr.get_labels());
     return sub_qr;

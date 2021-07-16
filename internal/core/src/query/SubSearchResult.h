@@ -15,9 +15,9 @@
 #include <vector>
 namespace milvus::query {
 
-class SubQueryResult {
+class SubSearchResult {
  public:
-    SubQueryResult(int64_t num_queries, int64_t topk, MetricType metric_type)
+    SubSearchResult(int64_t num_queries, int64_t topk, MetricType metric_type)
         : metric_type_(metric_type),
           num_queries_(num_queries),
           topk_(topk),
@@ -76,16 +76,16 @@ class SubQueryResult {
         return values_;
     }
 
-    static SubQueryResult
-    merge(const SubQueryResult& left, const SubQueryResult& right);
+    static SubSearchResult
+    merge(const SubSearchResult& left, const SubSearchResult& right);
 
     void
-    merge(const SubQueryResult& sub_result);
+    merge(const SubSearchResult& sub_result);
 
  private:
     template <bool is_desc>
     void
-    merge_impl(const SubQueryResult& sub_result);
+    merge_impl(const SubSearchResult& sub_result);
 
  private:
     int64_t num_queries_;

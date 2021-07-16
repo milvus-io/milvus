@@ -23,10 +23,10 @@ AssembleNegBitset(const BitsetSimple& bitmap_simple);
 void
 SearchOnSealed(const Schema& schema,
                const segcore::SealedIndexingRecord& record,
-               const QueryInfo& query_info,
+               const SearchInfo& search_info,
                const void* query_data,
                int64_t num_queries,
                const faiss::BitsetView& view,
-               QueryResult& result);
+               SearchResult& result);
 
 }  // namespace milvus::query

@@ -63,7 +63,7 @@ func TestReduce_AllFunc(t *testing.T) {
 		log.Print("marshal placeholderGroup failed")
 	}
 
-	plan, err := createPlan(collection, dslString)
+	plan, err := createSearchPlan(collection, dslString)
 	assert.NoError(t, err)
 	holder, err := parseSearchRequest(plan, placeGroupByte)
 	assert.NoError(t, err)
@@ -72,7 +72,7 @@ func TestReduce_AllFunc(t *testing.T) {
 
 	searchResults := make([]*SearchResult, 0)
 	matchedSegment := make([]*Segment, 0)
-	searchResult, err := segment.segmentSearch(plan, placeholderGroups, []Timestamp{0})
+	searchResult, err := segment.search(plan, placeholderGroups, []Timestamp{0})
 	assert.Nil(t, err)
 	searchResults = append(searchResults, searchResult)
 	matchedSegment = append(matchedSegment, segment)
@@ -83,7 +83,7 @@ func TestReduce_AllFunc(t *testing.T) {
 	err = fillTargetEntry(plan, searchResults, matchedSegment, testReduce)
 	assert.Nil(t, err)
 
-	marshaledHits, err := reorganizeQueryResults(plan, placeholderGroups, searchResults, 1, testReduce)
+	marshaledHits, err := reorganizeSearchResults(plan, placeholderGroups, searchResults, 1, testReduce)
 	assert.NotNil(t, marshaledHits)
 	assert.Nil(t, err)
 

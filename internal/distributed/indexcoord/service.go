@@ -128,10 +128,6 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 	return s.indexcoord.GetStatisticsChannel(ctx)
 }
 
-func (s *Server) RegisterNode(ctx context.Context, req *indexpb.RegisterNodeRequest) (*indexpb.RegisterNodeResponse, error) {
-	return s.indexcoord.RegisterNode(ctx, req)
-}
-
 func (s *Server) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
 	return s.indexcoord.BuildIndex(ctx, req)
 }

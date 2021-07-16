@@ -14,6 +14,7 @@ package querycoord
 import (
 	"fmt"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -50,6 +51,13 @@ type ParamTable struct {
 	EtcdEndpoints []string
 	MetaRootPath  string
 	KvRootPath    string
+
+	//--- Minio ---
+	MinioEndPoint        string
+	MinioAccessKeyID     string
+	MinioSecretAccessKey string
+	MinioUseSSLStr       bool
+	MinioBucketName      string
 }
 
 var Params ParamTable
@@ -81,6 +89,13 @@ func (p *ParamTable) Init() {
 		p.initEtcdEndpoints()
 		p.initMetaRootPath()
 		p.initKvRootPath()
+
+		//--- Minio ----
+		p.initMinioEndPoint()
+		p.initMinioAccessKeyID()
+		p.initMinioSecretAccessKey()
+		p.initMinioUseSSLStr()
+		p.initMinioBucketName()
 	})
 }
 
@@ -187,4 +202,48 @@ func (p *ParamTable) initKvRootPath() {
 		panic(err)
 	}
 	p.KvRootPath = path.Join(rootPath, subPath)
+}
+
+func (p *ParamTable) initMinioEndPoint() {
+	url, err := p.Load("_MinioAddress")
+	if err != nil {
+		panic(err)
+	}
+	p.MinioEndPoint = url
+}
+
+func (p *ParamTable) initMinioAccessKeyID() {
+	id, err := p.Load("minio.accessKeyID")
+	if err != nil {
+		panic(err)
+	}
+	p.MinioAccessKeyID = id
+}
+
+func (p *ParamTable) initMinioSecretAccessKey() {
+	key, err := p.Load("minio.secretAccessKey")
+	if err != nil {
+		panic(err)
+	}
+	p.MinioSecretAccessKey = key
+}
+
+func (p *ParamTable) initMinioUseSSLStr() {
+	ssl, err := p.Load("minio.useSSL")
+	if err != nil {
+		panic(err)
+	}
+	sslBoolean, err := strconv.ParseBool(ssl)
+	if err != nil {
+		panic(err)
+	}
+	p.MinioUseSSLStr = sslBoolean
+}
+
+func (p *ParamTable) initMinioBucketName() {
+	bucketName, err := p.Load("minio.bucketName")
+	if err != nil {
+		panic(err)
+	}
+	p.MinioBucketName = bucketName
 }

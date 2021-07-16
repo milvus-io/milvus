@@ -26,24 +26,31 @@ class ResponseChecker:
         """
         result = True
         if self.check_task is None:
+            # Interface normal return check
             result = self.assert_succ(self.succ, True)
 
         elif self.check_task == CheckTasks.err_res:
+            # Interface return error code and error message check
             result = self.assert_exception(self.response, self.succ, self.check_items)
 
         elif self.check_task == CheckTasks.ccr:
+            # Connection interface response check
             result = self.check_value_equal(self.response, self.func_name, self.check_items)
 
         elif self.check_task == CheckTasks.check_collection_property:
+            # Collection interface response check
             result = self.check_collection_property(self.response, self.func_name, self.check_items)
 
         elif self.check_task == CheckTasks.check_partition_property:
+            # Partition interface response check
             result = self.check_partition_property(self.response, self.func_name, self.check_items)
 
         elif self.check_task == CheckTasks.check_search_results:
+            # Search interface of collection and partition that response check
             result = self.check_search_results(self.response, self.func_name, self.check_items)
 
         elif self.check_task == CheckTasks.check_query_results:
+            # Query interface of collection and partition that response check
             result = self.check_query_results(self.response, self.func_name, self.check_items)
 
         # Add check_items here if something new need verify

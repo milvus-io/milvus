@@ -21,6 +21,7 @@
 #include "query/Plan.h"
 #include "utils/tools.h"
 #include <regex>
+#include <boost/format.hpp>
 #include "segcore/SegmentGrowingImpl.h"
 using namespace milvus;
 
@@ -234,10 +235,10 @@ TEST(Expr, ShowExecutor) {
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     int64_t num_queries = 100L;
     auto raw_data = DataGen(schema, num_queries);
-    auto& info = node->query_info_;
+    auto& info = node->search_info_;
 
     info.metric_type_ = MetricType::METRIC_L2;
-    info.topK_ = 20;
+    info.topk_ = 20;
     info.field_offset_ = FieldOffset(0);
     node->predicate_ = std::nullopt;
     ShowPlanNodeVisitor show_visitor;
@@ -509,6 +510,84 @@ TEST(Expr, TestSimpleDsl) {
             auto val = age_col[i];
             auto ref = ref_func(val);
             ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
+        }
+    }
+}
+
+TEST(Expr, TestCompare) {
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    std::vector<std::tuple<std::string, std::function<bool(int, int64_t)>>> testcases = {
+        {R"("LT")", [](int a, int64_t b) { return a < b; }},  {R"("LE")", [](int a, int64_t b) { return a <= b; }},
+        {R"("GT")", [](int a, int64_t b) { return a > b; }},  {R"("GE")", [](int a, int64_t b) { return a >= b; }},
+        {R"("EQ")", [](int a, int64_t b) { return a == b; }}, {R"("NE")", [](int a, int64_t b) { return a != b; }},
+    };
+
+    std::string dsl_string_tpl = R"(
+{
+    "bool": {
+        "must": [
+            {
+                "compare": {
+                    %1%: [
+                        "age1",
+                        "age2"
+                    ]
+                }
+            },
+            {
+                "vector": {
+                    "fakevec": {
+                        "metric_type": "L2",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 10
+                    }
+                }
+            }
+        ]
+    }
+})";
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddDebugField("age1", DataType::INT32);
+    schema->AddDebugField("age2", DataType::INT64);
+
+    auto seg = CreateGrowingSegment(schema);
+    int N = 10000;
+    std::vector<int> age1_col;
+    std::vector<int64_t> age2_col;
+    int num_iters = 100;
+    for (int iter = 0; iter < num_iters; ++iter) {
+        auto raw_data = DataGen(schema, N, iter);
+        auto new_age1_col = raw_data.get_col<int>(1);
+        auto new_age2_col = raw_data.get_col<int64_t>(2);
+        age1_col.insert(age1_col.end(), new_age1_col.begin(), new_age1_col.end());
+        age2_col.insert(age2_col.end(), new_age2_col.begin(), new_age2_col.end());
+        seg->PreInsert(N);
+        seg->Insert(iter * N, N, raw_data.row_ids_.data(), raw_data.timestamps_.data(), raw_data.raw_);
+    }
+
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+    ExecExprVisitor visitor(*seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
+    for (auto [clause, ref_func] : testcases) {
+        auto dsl_string = boost::str(boost::format(dsl_string_tpl) % clause);
+        auto plan = CreatePlan(*schema, dsl_string);
+        // std::cout << ShowPlanNodeVisitor().call_child(*plan->plan_node_) << std::endl;
+        auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
+        EXPECT_EQ(final.size(), upper_div(N * num_iters, TestChunkSize));
+
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto vec_id = i / TestChunkSize;
+            auto offset = i % TestChunkSize;
+            auto ans = final[vec_id][offset];
+
+            auto val1 = age1_col[i];
+            auto val2 = age2_col[i];
+            auto ref = ref_func(val1, val2);
+            ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << boost::format("[%1%, %2%]") % val1 % val2;
         }
     }
 }

@@ -179,12 +179,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     vector_search(int64_t vec_count,
-                  query::QueryInfo query_info,
+                  query::SearchInfo search_info,
                   const void* query_data,
                   int64_t query_count,
                   Timestamp timestamp,
                   const BitsetView& bitset,
-                  QueryResult& output) const override;
+                  SearchResult& output) const override;
 
  public:
     std::shared_ptr<DeletedRecord::TmpBitmap>

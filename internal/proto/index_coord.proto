@@ -12,7 +12,6 @@ service IndexCoord {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
   rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
-  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse) {}
   rpc BuildIndex(BuildIndexRequest) returns (BuildIndexResponse){}
   rpc GetIndexStates(GetIndexStatesRequest) returns (GetIndexStatesResponse) {}
   rpc GetIndexFilePaths(GetIndexFilePathsRequest) returns (GetIndexFilePathsResponse){}

@@ -38,7 +38,7 @@ services:
 
   rootcoord:
     container_name: milvus-rootcoord
-    image: milvusdb/milvus:v2.0.0-rc1-20210628-b87baa1
+    image: milvusdb/milvus:v2.0.0-rc2-20210712-a8e5fd2
     command: ["milvus", "run", "rootcoord"]
     environment:
       ETCD_ENDPOINTS: etcd:2379

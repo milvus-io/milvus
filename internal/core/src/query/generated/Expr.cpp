@@ -35,4 +35,9 @@ RangeExpr::accept(ExprVisitor& visitor) {
     visitor.visit(*this);
 }
 
+void
+CompareExpr::accept(ExprVisitor& visitor) {
+    visitor.visit(*this);
+}
+
 }  // namespace milvus::query

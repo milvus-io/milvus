@@ -31,6 +31,11 @@ jobs:
         run: |
           echo "::set-output name=version::$(date +%Y%m%d)"
           echo "::set-output name=sha_short::$(git rev-parse --short HEAD)"
+      - name: Docker Pull
+        shell: bash
+        working-directory: tests/docker
+        run: |
+          IMAGE_TAG=latest docker-compose pull --ignore-pull-failures pytest
       - name: Docker Build
         shell: bash
         working-directory: tests/docker
@@ -55,14 +60,29 @@ jobs:
         shell: bash
         working-directory: tests/docker
         run: |
-          sed -i "s#IMAGE_TAG=.*#IMAGE_TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" .env
+          sed -i "s#^IMAGE_TAG=.*#IMAGE_TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" .env
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add .env
-          git commit -m "Update Pytest Image Changes"
-      - name: Push Pytest Image Changes
+          git commit -m "Update Pytest image changes"
+      - name: Create Pull Request
+        id: cpr
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true
-        shell: bash
+        uses: peter-evans/create-pull-request@v3
+        with:
+          token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
+          author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
+          signoff: false
+          branch: update_pytest_${{ github.sha }}
+          delete-branch: true
+          title: '[automated] Update Pytest image changes'
+          body: |
+            Update Pytest image changes
+
+            Signed-off-by: ${{ github.actor }} ${{ github.actor }}@users.noreply.github.com
+      - name: Check outputs
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         run: |
-          git push "https://sre-ci-robot:${{ secrets.ALL_CONTRIBUTORS_TOKEN }}@github.com/$GITHUB_REPOSITORY.git" HEAD:${{ github.ref }} --follow-tags
+          echo "Pull Request Number - ${{ steps.cpr.outputs.pull-request-number }}"
+          echo "Pull Request URL - ${{ steps.cpr.outputs.pull-request-url }}"

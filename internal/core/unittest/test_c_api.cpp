@@ -214,7 +214,7 @@ TEST(CApiTest, SearchTest) {
 
     void* plan = nullptr;
 
-    auto status = CreatePlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlan(collection, dsl_string, &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -226,13 +226,13 @@ TEST(CApiTest, SearchTest) {
     timestamps.clear();
     timestamps.push_back(1);
 
-    CQueryResult search_result;
+    CSearchResult search_result;
     auto res = Search(segment, plan, placeholderGroup, timestamps[0], &search_result);
     ASSERT_EQ(res.error_code, Success);
 
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(search_result);
+    DeleteSearchResult(search_result);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -297,7 +297,7 @@ TEST(CApiTest, SearchTestWithExpr) {
 
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
@@ -309,13 +309,13 @@ TEST(CApiTest, SearchTestWithExpr) {
     timestamps.clear();
     timestamps.push_back(1);
 
-    CQueryResult search_result;
+    CSearchResult search_result;
     auto res = Search(segment, plan, placeholderGroup, timestamps[0], &search_result);
     ASSERT_EQ(res.error_code, Success);
 
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(search_result);
+    DeleteSearchResult(search_result);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -611,7 +611,7 @@ TEST(CApiTest, Reduce) {
 
     void* plan = nullptr;
 
-    auto status = CreatePlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlan(collection, dsl_string, &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -623,9 +623,9 @@ TEST(CApiTest, Reduce) {
     timestamps.clear();
     timestamps.push_back(1);
 
-    std::vector<CQueryResult> results;
-    CQueryResult res1;
-    CQueryResult res2;
+    std::vector<CSearchResult> results;
+    CSearchResult res1;
+    CSearchResult res2;
     auto res = Search(segment, plan, placeholderGroup, timestamps[0], &res1);
     assert(res.error_code == Success);
     res = Search(segment, plan, placeholderGroup, timestamps[0], &res2);
@@ -634,12 +634,12 @@ TEST(CApiTest, Reduce) {
     results.push_back(res2);
 
     bool is_selected[1] = {false};
-    status = ReduceQueryResults(results.data(), 1, is_selected);
+    status = ReduceSearchResults(results.data(), 1, is_selected);
     assert(status.error_code == Success);
     FillTargetEntry(segment, plan, res1);
     void* reorganize_search_result = nullptr;
-    status = ReorganizeQueryResults(&reorganize_search_result, placeholderGroups.data(), 1, results.data(), is_selected,
-                                    1, plan);
+    status = ReorganizeSearchResults(&reorganize_search_result, placeholderGroups.data(), 1, results.data(),
+                                     is_selected, 1, plan);
     assert(status.error_code == Success);
     auto hits_blob_size = GetHitsBlobSize(reorganize_search_result);
     assert(hits_blob_size > 0);
@@ -654,10 +654,10 @@ TEST(CApiTest, Reduce) {
     GetHitSizePeerQueries(reorganize_search_result, 0, hit_size_peer_query.data());
     assert(hit_size_peer_query[0] > 0);
 
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(res1);
-    DeleteQueryResult(res2);
+    DeleteSearchResult(res1);
+    DeleteSearchResult(res2);
     DeleteMarshaledHits(reorganize_search_result);
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -723,7 +723,7 @@ TEST(CApiTest, ReduceSearchWithExpr) {
 
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -735,9 +735,9 @@ TEST(CApiTest, ReduceSearchWithExpr) {
     timestamps.clear();
     timestamps.push_back(1);
 
-    std::vector<CQueryResult> results;
-    CQueryResult res1;
-    CQueryResult res2;
+    std::vector<CSearchResult> results;
+    CSearchResult res1;
+    CSearchResult res2;
     auto res = Search(segment, plan, placeholderGroup, timestamps[0], &res1);
     assert(res.error_code == Success);
     res = Search(segment, plan, placeholderGroup, timestamps[0], &res2);
@@ -746,12 +746,12 @@ TEST(CApiTest, ReduceSearchWithExpr) {
     results.push_back(res2);
 
     bool is_selected[1] = {false};
-    status = ReduceQueryResults(results.data(), 1, is_selected);
+    status = ReduceSearchResults(results.data(), 1, is_selected);
     assert(status.error_code == Success);
     FillTargetEntry(segment, plan, res1);
     void* reorganize_search_result = nullptr;
-    status = ReorganizeQueryResults(&reorganize_search_result, placeholderGroups.data(), 1, results.data(), is_selected,
-                                    1, plan);
+    status = ReorganizeSearchResults(&reorganize_search_result, placeholderGroups.data(), 1, results.data(),
+                                     is_selected, 1, plan);
     assert(status.error_code == Success);
     auto hits_blob_size = GetHitsBlobSize(reorganize_search_result);
     assert(hits_blob_size > 0);
@@ -766,10 +766,10 @@ TEST(CApiTest, ReduceSearchWithExpr) {
     GetHitSizePeerQueries(reorganize_search_result, 0, hit_size_peer_query.data());
     assert(hit_size_peer_query[0] > 0);
 
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(res1);
-    DeleteQueryResult(res2);
+    DeleteSearchResult(res1);
+    DeleteSearchResult(res2);
     DeleteMarshaledHits(reorganize_search_result);
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -912,7 +912,7 @@ TEST(CApiTest, UpdateSegmentIndex_Without_Predicate) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreatePlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlan(collection, dsl_string, &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -923,7 +923,7 @@ TEST(CApiTest, UpdateSegmentIndex_Without_Predicate) {
     placeholderGroups.push_back(placeholderGroup);
     Timestamp time = 10000000;
 
-    CQueryResult c_search_result_on_smallIndex;
+    CSearchResult c_search_result_on_smallIndex;
     auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     assert(res_before_load_index.error_code == Success);
 
@@ -949,7 +949,7 @@ TEST(CApiTest, UpdateSegmentIndex_Without_Predicate) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (QueryResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
     search_result_on_raw_index->result_distances_ = vec_dis;
 
@@ -973,22 +973,22 @@ TEST(CApiTest, UpdateSegmentIndex_Without_Predicate) {
     status = UpdateSegmentIndex(segment, c_load_index_info);
     assert(status.error_code == Success);
 
-    CQueryResult c_search_result_on_bigIndex;
+    CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
-    auto search_result_on_raw_index_json = QueryResultToJson(*search_result_on_raw_index);
-    auto search_result_on_bigIndex_json = QueryResultToJson((*(QueryResult*)c_search_result_on_bigIndex));
+    auto search_result_on_raw_index_json = SearchResultToJson(*search_result_on_raw_index);
+    auto search_result_on_bigIndex_json = SearchResultToJson((*(SearchResult*)c_search_result_on_bigIndex));
     std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
     std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
 
     ASSERT_EQ(search_result_on_raw_index_json.dump(1), search_result_on_bigIndex_json.dump(1));
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_smallIndex);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_smallIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -1032,7 +1032,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_Without_Predicate) {
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -1043,7 +1043,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_Without_Predicate) {
     placeholderGroups.push_back(placeholderGroup);
     Timestamp time = 10000000;
 
-    CQueryResult c_search_result_on_smallIndex;
+    CSearchResult c_search_result_on_smallIndex;
     auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     assert(res_before_load_index.error_code == Success);
 
@@ -1069,7 +1069,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_Without_Predicate) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (QueryResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
     search_result_on_raw_index->result_distances_ = vec_dis;
 
@@ -1093,22 +1093,22 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_Without_Predicate) {
     status = UpdateSegmentIndex(segment, c_load_index_info);
     assert(status.error_code == Success);
 
-    CQueryResult c_search_result_on_bigIndex;
+    CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
-    auto search_result_on_raw_index_json = QueryResultToJson(*search_result_on_raw_index);
-    auto search_result_on_bigIndex_json = QueryResultToJson((*(QueryResult*)c_search_result_on_bigIndex));
+    auto search_result_on_raw_index_json = SearchResultToJson(*search_result_on_raw_index);
+    auto search_result_on_bigIndex_json = SearchResultToJson((*(SearchResult*)c_search_result_on_bigIndex));
     std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
     std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
 
     ASSERT_EQ(search_result_on_raw_index_json.dump(1), search_result_on_bigIndex_json.dump(1));
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_smallIndex);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_smallIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -1168,7 +1168,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreatePlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlan(collection, dsl_string, &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -1179,7 +1179,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Range) {
     placeholderGroups.push_back(placeholderGroup);
     Timestamp time = 10000000;
 
-    CQueryResult c_search_result_on_smallIndex;
+    CSearchResult c_search_result_on_smallIndex;
     auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     assert(res_before_load_index.error_code == Success);
 
@@ -1206,7 +1206,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Range) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (QueryResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
     search_result_on_raw_index->result_distances_ = vec_dis;
 
@@ -1230,11 +1230,11 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Range) {
     status = UpdateSegmentIndex(segment, c_load_index_info);
     assert(status.error_code == Success);
 
-    CQueryResult c_search_result_on_bigIndex;
+    CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
-    auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
+    auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * K;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
@@ -1243,10 +1243,10 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Range) {
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_smallIndex);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_smallIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -1319,7 +1319,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Range) {
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -1330,7 +1330,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Range) {
     placeholderGroups.push_back(placeholderGroup);
     Timestamp time = 10000000;
 
-    CQueryResult c_search_result_on_smallIndex;
+    CSearchResult c_search_result_on_smallIndex;
     auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     assert(res_before_load_index.error_code == Success);
 
@@ -1357,7 +1357,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Range) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (QueryResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
     search_result_on_raw_index->result_distances_ = vec_dis;
 
@@ -1381,11 +1381,11 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Range) {
     status = UpdateSegmentIndex(segment, c_load_index_info);
     assert(status.error_code == Success);
 
-    CQueryResult c_search_result_on_bigIndex;
+    CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
-    auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
+    auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * K;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
@@ -1394,10 +1394,10 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Range) {
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_smallIndex);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_smallIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -1456,7 +1456,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Term) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreatePlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlan(collection, dsl_string, &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -1467,7 +1467,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Term) {
     placeholderGroups.push_back(placeholderGroup);
     Timestamp time = 10000000;
 
-    CQueryResult c_search_result_on_smallIndex;
+    CSearchResult c_search_result_on_smallIndex;
     auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     assert(res_before_load_index.error_code == Success);
 
@@ -1494,7 +1494,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Term) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (QueryResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
     search_result_on_raw_index->result_distances_ = vec_dis;
 
@@ -1518,11 +1518,11 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Term) {
     status = UpdateSegmentIndex(segment, c_load_index_info);
     assert(status.error_code == Success);
 
-    CQueryResult c_search_result_on_bigIndex;
+    CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
-    auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
+    auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * K;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
@@ -1531,10 +1531,10 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Term) {
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_smallIndex);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_smallIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -1658,7 +1658,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Term) {
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -1669,7 +1669,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Term) {
     placeholderGroups.push_back(placeholderGroup);
     Timestamp time = 10000000;
 
-    CQueryResult c_search_result_on_smallIndex;
+    CSearchResult c_search_result_on_smallIndex;
     auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     assert(res_before_load_index.error_code == Success);
 
@@ -1696,7 +1696,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Term) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (QueryResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
     search_result_on_raw_index->result_distances_ = vec_dis;
 
@@ -1720,11 +1720,11 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Term) {
     status = UpdateSegmentIndex(segment, c_load_index_info);
     assert(status.error_code == Success);
 
-    CQueryResult c_search_result_on_bigIndex;
+    CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
-    auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
+    auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * K;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
@@ -1733,10 +1733,10 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Term) {
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_smallIndex);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_smallIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -1796,7 +1796,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreatePlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlan(collection, dsl_string, &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -1807,7 +1807,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Range) {
     placeholderGroups.push_back(placeholderGroup);
     Timestamp time = 10000000;
 
-    CQueryResult c_search_result_on_smallIndex;
+    CSearchResult c_search_result_on_smallIndex;
     auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     assert(res_before_load_index.error_code == Success);
 
@@ -1835,7 +1835,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Range) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (QueryResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
     search_result_on_raw_index->result_distances_ = vec_dis;
 
@@ -1859,11 +1859,11 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Range) {
     status = UpdateSegmentIndex(segment, c_load_index_info);
     assert(status.error_code == Success);
 
-    CQueryResult c_search_result_on_bigIndex;
+    CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
-    auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
+    auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * K;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
@@ -1872,10 +1872,10 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Range) {
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_smallIndex);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_smallIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -1948,7 +1948,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Range) {
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -1959,7 +1959,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Range) {
     placeholderGroups.push_back(placeholderGroup);
     Timestamp time = 10000000;
 
-    CQueryResult c_search_result_on_smallIndex;
+    CSearchResult c_search_result_on_smallIndex;
     auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     ASSERT_TRUE(res_before_load_index.error_code == Success) << res_before_load_index.error_msg;
 
@@ -1987,7 +1987,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Range) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (QueryResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
     search_result_on_raw_index->result_distances_ = vec_dis;
 
@@ -2011,11 +2011,11 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Range) {
     status = UpdateSegmentIndex(segment, c_load_index_info);
     assert(status.error_code == Success);
 
-    CQueryResult c_search_result_on_bigIndex;
+    CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
-    auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
+    auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * K;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
@@ -2024,10 +2024,10 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Range) {
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_smallIndex);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_smallIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -2086,7 +2086,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Term) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreatePlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlan(collection, dsl_string, &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -2097,7 +2097,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Term) {
     placeholderGroups.push_back(placeholderGroup);
     Timestamp time = 10000000;
 
-    CQueryResult c_search_result_on_smallIndex;
+    CSearchResult c_search_result_on_smallIndex;
     auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     assert(res_before_load_index.error_code == Success);
 
@@ -2125,7 +2125,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Term) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (QueryResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
     search_result_on_raw_index->result_distances_ = vec_dis;
 
@@ -2149,18 +2149,18 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Term) {
     status = UpdateSegmentIndex(segment, c_load_index_info);
     assert(status.error_code == Success);
 
-    CQueryResult c_search_result_on_bigIndex;
+    CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
-    std::vector<CQueryResult> results;
+    std::vector<CSearchResult> results;
     results.push_back(c_search_result_on_bigIndex);
     bool is_selected[1] = {false};
-    status = ReduceQueryResults(results.data(), 1, is_selected);
+    status = ReduceSearchResults(results.data(), 1, is_selected);
     assert(status.error_code == Success);
     FillTargetEntry(segment, plan, c_search_result_on_bigIndex);
 
-    auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
+    auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * K;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
@@ -2169,10 +2169,10 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Term) {
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_smallIndex);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_smallIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -2296,7 +2296,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Term) {
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -2307,7 +2307,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Term) {
     placeholderGroups.push_back(placeholderGroup);
     Timestamp time = 10000000;
 
-    CQueryResult c_search_result_on_smallIndex;
+    CSearchResult c_search_result_on_smallIndex;
     auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     assert(res_before_load_index.error_code == Success);
 
@@ -2335,7 +2335,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Term) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (QueryResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->internal_seg_offsets_ = vec_ids;
     search_result_on_raw_index->result_distances_ = vec_dis;
 
@@ -2359,18 +2359,18 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Term) {
     status = UpdateSegmentIndex(segment, c_load_index_info);
     assert(status.error_code == Success);
 
-    CQueryResult c_search_result_on_bigIndex;
+    CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
-    std::vector<CQueryResult> results;
+    std::vector<CSearchResult> results;
     results.push_back(c_search_result_on_bigIndex);
     bool is_selected[1] = {false};
-    status = ReduceQueryResults(results.data(), 1, is_selected);
+    status = ReduceSearchResults(results.data(), 1, is_selected);
     assert(status.error_code == Success);
     FillTargetEntry(segment, plan, c_search_result_on_bigIndex);
 
-    auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
+    auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * K;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
@@ -2379,10 +2379,10 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Term) {
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_smallIndex);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_smallIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -2483,7 +2483,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
 
     // search on segment's small index
     void* plan = nullptr;
-    auto status = CreatePlan(collection, dsl_string, &plan);
+    auto status = CreateSearchPlan(collection, dsl_string, &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -2570,20 +2570,20 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     status = UpdateSealedSegmentIndex(segment, c_load_index_info);
     assert(status.error_code == Success);
 
-    CQueryResult c_search_result_on_bigIndex;
+    CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
-    auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
+    auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * K;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -2650,7 +2650,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreatePlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     assert(status.error_code == Success);
 
     void* placeholderGroup = nullptr;
@@ -2737,20 +2737,20 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     status = UpdateSealedSegmentIndex(segment, c_load_index_info);
     assert(status.error_code == Success);
 
-    CQueryResult c_search_result_on_bigIndex;
+    CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
-    auto search_result_on_bigIndex = (*(QueryResult*)c_search_result_on_bigIndex);
+    auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * K;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
-    DeletePlan(plan);
+    DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
-    DeleteQueryResult(c_search_result_on_bigIndex);
+    DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }

@@ -44,6 +44,7 @@ type Option struct {
 func NewMinIOKV(ctx context.Context, option *Option) (*MinIOKV, error) {
 	var minIOClient *minio.Client
 	var err error
+	log.Debug("MinioKV NewMinioKV", zap.Any("option", option))
 	minIOClient, err = minio.New(option.Address, &minio.Options{
 		Creds:  credentials.NewStaticV4(option.AccessKeyID, option.SecretAccessKeyID, ""),
 		Secure: option.UseSSL,
@@ -56,24 +57,22 @@ func NewMinIOKV(ctx context.Context, option *Option) (*MinIOKV, error) {
 	// check valid in first query
 	checkBucketFn := func() error {
 		bucketExists, err = minIOClient.BucketExists(ctx, option.BucketName)
-		return err
+		if err != nil {
+			return err
+		}
+		if !bucketExists {
+			log.Debug("MinioKV NewMinioKV", zap.Any("Check bucket", "bucket not exist"))
+			if option.CreateBucket {
+				log.Debug("MinioKV NewMinioKV create bucket.")
+				return minIOClient.MakeBucket(ctx, option.BucketName, minio.MakeBucketOptions{})
+			}
+			return fmt.Errorf("bucket %s not Existed", option.BucketName)
+		}
+		return nil
 	}
 	err = retry.Do(ctx, checkBucketFn, retry.Attempts(300))
 	if err != nil {
 		return nil, err
-	}
-	// connection shall be valid here, no need to retry
-	if option.CreateBucket {
-		if !bucketExists {
-			err = minIOClient.MakeBucket(ctx, option.BucketName, minio.MakeBucketOptions{})
-			if err != nil {
-				return nil, err
-			}
-		}
-	} else {
-		if !bucketExists {
-			return nil, fmt.Errorf("bucket %s not Existed", option.BucketName)
-		}
 	}
 
 	kv := &MinIOKV{
@@ -81,6 +80,7 @@ func NewMinIOKV(ctx context.Context, option *Option) (*MinIOKV, error) {
 		minioClient: minIOClient,
 		bucketName:  option.BucketName,
 	}
+	log.Debug("MinioKV new MinioKV success.")
 	//go kv.performanceTest(false, 16<<20)
 
 	return kv, nil
