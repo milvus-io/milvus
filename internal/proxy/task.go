@@ -1419,6 +1419,7 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	log.Debug("translate output fields", zap.Any("OutputFields", outputFields))
 	st.query.OutputFields = outputFields
 
 	if st.query.GetDslType() == commonpb.DslType_BoolExprV1 {
@@ -2098,6 +2099,7 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	log.Debug("translate output fields", zap.Any("OutputFields", rt.retrieve.OutputFields))
 	if len(rt.retrieve.OutputFields) == 0 {
 		for _, field := range schema.Fields {
 			if field.FieldID >= 100 && field.DataType != schemapb.DataType_FloatVector && field.DataType != schemapb.DataType_BinaryVector {
@@ -2105,9 +2107,9 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 			}
 		}
 	} else {
+		addPrimaryKey := false
 		for _, reqField := range rt.retrieve.OutputFields {
 			findField := false
-			addPrimaryKey := false
 			for _, field := range schema.Fields {
 				if reqField == field.Name {
 					if field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_BinaryVector {
@@ -2132,6 +2134,7 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 			}
 		}
 	}
+	log.Debug("translate output fields to field ids", zap.Any("OutputFieldsID", rt.OutputFieldsId))
 
 	travelTimestamp := rt.retrieve.TravelTimestamp
 	if travelTimestamp == 0 {
