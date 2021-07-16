@@ -105,10 +105,10 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 	}
 
 	saveBinlog := func(fu *segmentFlushUnit) error {
-		id2path := []*datapb.ID2PathList{}
+		id2path := []*datapb.FieldBinlog{}
 		checkPoints := []*datapb.CheckPoint{}
 		for k, v := range fu.field2Path {
-			id2path = append(id2path, &datapb.ID2PathList{ID: k, Paths: []string{v}})
+			id2path = append(id2path, &datapb.FieldBinlog{FieldID: k, Binlogs: []string{v}})
 		}
 		for k, v := range fu.checkPoint {
 			v := v

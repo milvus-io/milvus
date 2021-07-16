@@ -13,6 +13,7 @@ package datacoord
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -34,6 +35,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
@@ -55,6 +57,8 @@ type (
 	UniqueID  = typeutil.UniqueID
 	Timestamp = typeutil.Timestamp
 )
+
+var errNilKvClient = errors.New("kv client not initialized")
 
 // ServerState type alias
 type ServerState = int64
@@ -593,18 +597,51 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 	return nil
 }
 
-func (s *Server) prepareBinlog(req *datapb.SaveBinlogPathsRequest) (map[string]string, error) {
-	meta := make(map[string]string)
-
-	for _, fieldBlp := range req.Field2BinlogPaths {
-		fieldMeta, err := s.prepareField2PathMeta(req.SegmentID, fieldBlp)
-		if err != nil {
-			return nil, err
-		}
-		for k, v := range fieldMeta {
-			meta[k] = v
-		}
+// GetVChanPositions get vchannel latest postitions with provided dml channel names
+func (s *Server) GetVChanPositions(vchans []vchannel, seekFromStartPosition bool) ([]*datapb.VchannelInfo, error) {
+	if s.kvClient == nil {
+		return nil, errNilKvClient
 	}
+	pairs := make([]*datapb.VchannelInfo, 0, len(vchans))
 
-	return meta, nil
+	for _, vchan := range vchans {
+		segments := s.meta.GetSegmentsByChannel(vchan.DmlChannel)
+		flushedSegmentIDs := make([]UniqueID, 0)
+		unflushed := make([]*datapb.SegmentInfo, 0)
+		var seekPosition *internalpb.MsgPosition
+		var useUnflushedPosition bool
+		for _, s := range segments {
+			if s.State == commonpb.SegmentState_Flushing || s.State == commonpb.SegmentState_Flushed {
+				flushedSegmentIDs = append(flushedSegmentIDs, s.ID)
+				if seekPosition == nil || (!useUnflushedPosition && s.DmlPosition.Timestamp > seekPosition.Timestamp) {
+					seekPosition = s.DmlPosition
+				}
+				continue
+			}
+
+			if s.DmlPosition == nil {
+				continue
+			}
+
+			unflushed = append(unflushed, s.SegmentInfo)
+
+			if seekPosition == nil || !useUnflushedPosition || s.DmlPosition.Timestamp < seekPosition.Timestamp {
+				useUnflushedPosition = true
+				if !seekFromStartPosition {
+					seekPosition = s.DmlPosition
+				} else {
+					seekPosition = s.StartPosition
+				}
+			}
+		}
+
+		pairs = append(pairs, &datapb.VchannelInfo{
+			CollectionID:      vchan.CollectionID,
+			ChannelName:       vchan.DmlChannel,
+			SeekPosition:      seekPosition,
+			UnflushedSegments: unflushed,
+			FlushedSegments:   flushedSegmentIDs,
+		})
+	}
+	return pairs, nil
 }

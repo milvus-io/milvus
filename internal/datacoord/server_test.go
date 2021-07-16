@@ -235,6 +235,10 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)
 
+	info := &datapb.SegmentInfo{
+		ID: 0,
+	}
+	svr.meta.AddSegment(NewSegmentInfo(info))
 	req := &datapb.GetInsertBinlogPathsRequest{
 		SegmentID: 0,
 	}
@@ -399,10 +403,10 @@ func TestSaveBinlogPaths(t *testing.T) {
 			},
 			SegmentID:    2,
 			CollectionID: 0,
-			Field2BinlogPaths: []*datapb.ID2PathList{
+			Field2BinlogPaths: []*datapb.FieldBinlog{
 				{
-					ID: 1,
-					Paths: []string{
+					FieldID: 1,
+					Binlogs: []string{
 						"/by-dev/test/0/1/2/1/Allo1",
 						"/by-dev/test/0/1/2/1/Allo2",
 					},
@@ -425,23 +429,16 @@ func TestSaveBinlogPaths(t *testing.T) {
 		assert.Nil(t, err)
 		assert.EqualValues(t, resp.ErrorCode, commonpb.ErrorCode_Success)
 
-		metas, err := svr.getFieldBinlogMeta(2, 1)
-		assert.Nil(t, err)
-		if assert.EqualValues(t, 2, len(metas)) {
-			assert.EqualValues(t, 1, metas[0].FieldID)
-			assert.EqualValues(t, "/by-dev/test/0/1/2/1/Allo1", metas[0].BinlogPath)
-			assert.EqualValues(t, 1, metas[1].FieldID)
-			assert.EqualValues(t, "/by-dev/test/0/1/2/1/Allo2", metas[1].BinlogPath)
-		}
-
-		metas, err = svr.getSegmentBinlogMeta(2)
-		assert.Nil(t, err)
-		if assert.EqualValues(t, 2, len(metas)) {
-			assert.EqualValues(t, 1, metas[0].FieldID)
-			assert.EqualValues(t, "/by-dev/test/0/1/2/1/Allo1", metas[0].BinlogPath)
-			assert.EqualValues(t, 1, metas[1].FieldID)
-			assert.EqualValues(t, "/by-dev/test/0/1/2/1/Allo2", metas[1].BinlogPath)
-		}
+		segment := svr.meta.GetSegment(2)
+		assert.NotNil(t, segment)
+		binlogs := segment.GetBinlogs()
+		assert.EqualValues(t, 1, len(binlogs))
+		fieldBinlogs := binlogs[0]
+		assert.NotNil(t, fieldBinlogs)
+		assert.EqualValues(t, 2, len(fieldBinlogs.GetBinlogs()))
+		assert.EqualValues(t, 1, fieldBinlogs.GetFieldID())
+		assert.EqualValues(t, "/by-dev/test/0/1/2/1/Allo1", fieldBinlogs.GetBinlogs()[0])
+		assert.EqualValues(t, "/by-dev/test/0/1/2/1/Allo2", fieldBinlogs.GetBinlogs()[1])
 
 		segmentInfo := svr.meta.GetSegment(0)
 		assert.NotNil(t, segmentInfo)
@@ -853,20 +850,22 @@ func TestGetRecoveryInfo(t *testing.T) {
 		binlogReq := &datapb.SaveBinlogPathsRequest{
 			SegmentID:    0,
 			CollectionID: 0,
-			Field2BinlogPaths: []*datapb.ID2PathList{
+			Field2BinlogPaths: []*datapb.FieldBinlog{
 				{
-					ID: 1,
-					Paths: []string{
+					FieldID: 1,
+					Binlogs: []string{
 						"/binlog/file1",
 						"/binlog/file2",
 					},
 				},
 			},
 		}
-		meta, err := svr.prepareBinlog(binlogReq)
+		segment := createSegment(0, 0, 0, 100, 10, "ch1", commonpb.SegmentState_Flushed)
+		err := svr.meta.AddSegment(NewSegmentInfo(segment))
 		assert.Nil(t, err)
-		err = svr.kvClient.MultiSave(meta)
+		sResp, err := svr.SaveBinlogPaths(context.TODO(), binlogReq)
 		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, sResp.ErrorCode)
 
 		req := &datapb.GetRecoveryInfoRequest{
 			CollectionID: 0,

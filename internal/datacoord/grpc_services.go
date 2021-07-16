@@ -3,11 +3,9 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"path"
 	"strconv"
 	"sync/atomic"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -173,27 +171,17 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 		resp.Status.Reason = serverNotServingErrMsg
 		return resp, nil
 	}
-	p := path.Join(Params.SegmentBinlogSubPath, strconv.FormatInt(req.SegmentID, 10)) + "/" // prefix/id/ instead of prefix/id
-	_, values, err := s.kvClient.LoadWithPrefix(p)
-	if err != nil {
-		resp.Status.Reason = err.Error()
+	segment := s.meta.GetSegment(req.GetSegmentID())
+	if segment == nil {
+		resp.Status.Reason = "segment not found"
 		return resp, nil
 	}
-	m := make(map[int64][]string)
-	tMeta := &datapb.SegmentFieldBinlogMeta{}
-	for _, v := range values {
-		if err := proto.UnmarshalText(v, tMeta); err != nil {
-			resp.Status.Reason = fmt.Errorf("DataCoord GetInsertBinlogPaths UnmarshalText datapb.SegmentFieldBinlogMeta err:%w", err).Error()
-			return resp, nil
-		}
-		m[tMeta.FieldID] = append(m[tMeta.FieldID], tMeta.BinlogPath)
-	}
-
-	fids := make([]UniqueID, len(m))
-	paths := make([]*internalpb.StringList, len(m))
-	for k, v := range m {
-		fids = append(fids, k)
-		paths = append(paths, &internalpb.StringList{Values: v})
+	binlogs := segment.GetBinlogs()
+	fids := make([]UniqueID, 0, len(binlogs))
+	paths := make([]*internalpb.StringList, 0, len(binlogs))
+	for _, field := range binlogs {
+		fids = append(fids, field.GetFieldID())
+		paths = append(paths, &internalpb.StringList{Values: field.GetBinlogs()})
 	}
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.FieldIDs = fids
@@ -279,16 +267,9 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		zap.Int64("segmentID", req.GetSegmentID()),
 		zap.Any("checkpoints", req.GetCheckPoints()))
 
-	binlogs, err := s.prepareBinlog(req)
-	if err != nil {
-		log.Error("prepare binlog meta failed", zap.Error(err))
-		resp.Reason = err.Error()
-		return resp, nil
-	}
-
 	// set segment to SegmentState_Flushing and save binlogs and checkpoints
-	err = s.meta.SaveBinlogAndCheckPoints(req.GetSegmentID(), req.GetFlushed(),
-		binlogs, req.GetCheckPoints(), req.GetStartPositions())
+	err := s.meta.UpdateFlushSegmentsInfo(req.GetSegmentID(), req.GetFlushed(),
+		req.GetField2BinlogPaths(), req.GetCheckPoints(), req.GetStartPositions())
 	if err != nil {
 		log.Error("save binlog and checkpoints failed",
 			zap.Int64("segmentID", req.GetSegmentID()),
@@ -297,7 +278,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		return resp, nil
 	}
 	log.Debug("flush segment with meta", zap.Int64("id", req.SegmentID),
-		zap.Any("meta", binlogs))
+		zap.Any("meta", req.GetField2BinlogPaths()))
 
 	if req.Flushed {
 		s.segmentManager.DropSegment(ctx, req.SegmentID)
@@ -361,15 +342,10 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 			continue
 		}
 
-		meta, err := s.getSegmentBinlogMeta(id)
-		if err != nil {
-			log.Error("get segment binlog meta failed", zap.Int64("segmentID", id))
-			resp.Status.Reason = err.Error()
-			return resp, nil
-		}
+		binlogs := segment.GetBinlogs()
 		field2Binlog := make(map[UniqueID][]string)
-		for _, m := range meta {
-			field2Binlog[m.FieldID] = append(field2Binlog[m.FieldID], m.BinlogPath)
+		for _, field := range binlogs {
+			field2Binlog[field.GetFieldID()] = append(field2Binlog[field.GetFieldID()], field.GetBinlogs()...)
 		}
 
 		for f, paths := range field2Binlog {

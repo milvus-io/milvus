@@ -467,7 +467,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		zap.Int64s("segments", req.SegmentIDs),
 	)
 
-	dmlFlushedCh := make(chan []*datapb.ID2PathList, len(req.SegmentIDs))
+	dmlFlushedCh := make(chan []*datapb.FieldBinlog, len(req.SegmentIDs))
 	for _, id := range req.SegmentIDs {
 		chanName := node.getChannelNamebySegmentID(id)
 		log.Debug("vchannel",
@@ -514,8 +514,8 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		if len(msg) != 1 {
 			panic("flush size expect to 1")
 		}
-		if msg[0].Paths == nil {
-			failedSegments += fmt.Sprintf(" %d", msg[0].ID)
+		if msg[0].Binlogs == nil {
+			failedSegments += fmt.Sprintf(" %d", msg[0].FieldID)
 		}
 	}
 	if len(failedSegments) != 0 {

@@ -55,58 +55,64 @@ func (s *SegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo) {
 
 func (s *SegmentsInfo) SetRowCount(segmentID UniqueID, rowCount int64) {
 	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = s.ShadowClone(segment, SetRowCount(rowCount))
+		s.segments[segmentID] = segment.ShadowClone(SetRowCount(rowCount))
 	}
 }
 
 func (s *SegmentsInfo) SetLasteExpiraTime(segmentID UniqueID, expireTs Timestamp) {
 	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = s.ShadowClone(segment, SetExpireTime(expireTs))
+		s.segments[segmentID] = segment.ShadowClone(SetExpireTime(expireTs))
 	}
 }
 
 func (s *SegmentsInfo) SetState(segmentID UniqueID, state commonpb.SegmentState) {
 	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = s.ShadowClone(segment, SetState(state))
+		s.segments[segmentID] = segment.ShadowClone(SetState(state))
 	}
 }
 
-func (s *SegmentsInfo) SetDmlPositino(segmentID UniqueID, pos *internalpb.MsgPosition) {
+func (s *SegmentsInfo) SetDmlPosition(segmentID UniqueID, pos *internalpb.MsgPosition) {
 	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = s.Clone(segment, SetDmlPositino(pos))
+		s.segments[segmentID] = segment.Clone(SetDmlPosition(pos))
 	}
 }
 
 func (s *SegmentsInfo) SetStartPosition(segmentID UniqueID, pos *internalpb.MsgPosition) {
 	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = s.Clone(segment, SetStartPosition(pos))
+		s.segments[segmentID] = segment.Clone(SetStartPosition(pos))
 	}
 }
 
 func (s *SegmentsInfo) SetAllocations(segmentID UniqueID, allocations []*Allocation) {
 	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = s.ShadowClone(segment, SetAllocations(allocations))
+		s.segments[segmentID] = segment.ShadowClone(SetAllocations(allocations))
 	}
 }
 
 func (s *SegmentsInfo) AddAllocation(segmentID UniqueID, allocation *Allocation) {
 	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = s.Clone(segment, AddAllocation(allocation))
+		s.segments[segmentID] = segment.Clone(AddAllocation(allocation))
 	}
 }
 
 func (s *SegmentsInfo) SetCurrentRows(segmentID UniqueID, rows int64) {
 	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = s.ShadowClone(segment, SetCurrentRows(rows))
+		s.segments[segmentID] = segment.ShadowClone(SetCurrentRows(rows))
 	}
 }
 
-func (s *SegmentsInfo) Clone(segment *SegmentInfo, opts ...SegmentInfoOption) *SegmentInfo {
-	info := proto.Clone(segment.SegmentInfo).(*datapb.SegmentInfo)
+func (s *SegmentsInfo) SetBinlogs(segmentID UniqueID, binlogs []*datapb.FieldBinlog) {
+	if segment, ok := s.segments[segmentID]; ok {
+		s.segments[segmentID] = segment.Clone(SetBinlogs(binlogs))
+	}
+}
+
+func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
+	info := proto.Clone(s.SegmentInfo).(*datapb.SegmentInfo)
 	cloned := &SegmentInfo{
 		SegmentInfo: info,
-		currRows:    segment.currRows,
-		allocations: segment.allocations,
+		currRows:    s.currRows,
+		allocations: s.allocations,
 	}
 	for _, opt := range opts {
 		opt(cloned)
@@ -114,11 +120,11 @@ func (s *SegmentsInfo) Clone(segment *SegmentInfo, opts ...SegmentInfoOption) *S
 	return cloned
 }
 
-func (s *SegmentsInfo) ShadowClone(segment *SegmentInfo, opts ...SegmentInfoOption) *SegmentInfo {
+func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 	cloned := &SegmentInfo{
-		SegmentInfo: segment.SegmentInfo,
-		currRows:    segment.currRows,
-		allocations: segment.allocations,
+		SegmentInfo: s.SegmentInfo,
+		currRows:    s.currRows,
+		allocations: s.allocations,
 	}
 
 	for _, opt := range opts {
@@ -147,7 +153,7 @@ func SetState(state commonpb.SegmentState) SegmentInfoOption {
 	}
 }
 
-func SetDmlPositino(pos *internalpb.MsgPosition) SegmentInfoOption {
+func SetDmlPosition(pos *internalpb.MsgPosition) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.DmlPosition = pos
 	}
@@ -175,5 +181,11 @@ func AddAllocation(allocation *Allocation) SegmentInfoOption {
 func SetCurrentRows(rows int64) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.currRows = rows
+	}
+}
+
+func SetBinlogs(binlogs []*datapb.FieldBinlog) SegmentInfoOption {
+	return func(segment *SegmentInfo) {
+		segment.Binlogs = binlogs
 	}
 }
