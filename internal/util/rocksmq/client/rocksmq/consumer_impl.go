@@ -11,6 +11,11 @@
 
 package rocksmq
 
+import (
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
+)
+
 type consumer struct {
 	topic        string
 	client       *client
@@ -100,4 +105,11 @@ func (c *consumer) Seek(id UniqueID) error { //nolint:govet
 	}
 	c.client.server.Notify(c.topic, c.consumerName)
 	return nil
+}
+
+func (c *consumer) Close() {
+	err := c.client.server.DestroyConsumerGroup(c.topic, c.consumerName)
+	if err != nil {
+		log.Debug("Consumer close failed", zap.Any("topicName", c.topic), zap.Any("groupName", c.consumerName), zap.Any("error", err))
+	}
 }

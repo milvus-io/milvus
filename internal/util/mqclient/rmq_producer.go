@@ -31,4 +31,5 @@ func (rp *rmqProducer) Send(ctx context.Context, message *ProducerMessage) error
 }
 
 func (rp *rmqProducer) Close() {
+
 }

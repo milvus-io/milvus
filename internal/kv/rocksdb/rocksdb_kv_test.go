@@ -12,6 +12,8 @@
 package rocksdbkv_test
 
 import (
+	"strconv"
+	"sync"
 	"testing"
 
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
@@ -102,4 +104,29 @@ func TestRocksdbKV_Prefix(t *testing.T) {
 	val, err = rocksdbKV.Load("abddqqq")
 	assert.Nil(t, err)
 	assert.Equal(t, val, "1234555")
+}
+
+func TestRocksdbKV_Goroutines(t *testing.T) {
+	name := "/tmp/rocksdb"
+	rocksdbkv, err := rocksdbkv.NewRocksdbKV(name)
+	assert.Nil(t, err)
+	defer rocksdbkv.Close()
+	defer rocksdbkv.RemoveWithPrefix("")
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			key := "key_" + strconv.Itoa(i)
+			val := "val_" + strconv.Itoa(i)
+			err := rocksdbkv.Save(key, val)
+			assert.Nil(t, err)
+
+			getVal, err := rocksdbkv.Load(key)
+			assert.Nil(t, err)
+			assert.Equal(t, getVal, val)
+		}(i)
+	}
+	wg.Wait()
 }

@@ -15,7 +15,6 @@ import (
 	"context"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/mqclient"
 	"github.com/milvus-io/milvus/internal/util/rocksmq/client/rocksmq"
 	rocksmqserver "github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
@@ -106,14 +105,13 @@ func (f *RmsFactory) NewQueryMsgStream(ctx context.Context) (MsgStream, error) {
 	return NewMqMsgStream(ctx, f.ReceiveBufSize, f.RmqBufSize, rmqClient, f.dispatcherFactory.NewUnmarshalDispatcher())
 }
 
-func NewRmsFactory(rocksmqPath string) Factory {
+func NewRmsFactory() Factory {
 	f := &RmsFactory{
 		dispatcherFactory: ProtoUDFactory{},
 		ReceiveBufSize:    1024,
 		RmqBufSize:        1024,
 	}
 
-	log.Debug("RocksmqPath=" + rocksmqPath)
-	rocksmqserver.InitRocksMQ(rocksmqPath)
+	rocksmqserver.InitRocksMQ()
 	return f
 }

@@ -25,4 +25,7 @@ type Producer interface {
 
 	// publish a message
 	Send(message *ProducerMessage) error
+
+	// Close a producer
+	Close()
 }

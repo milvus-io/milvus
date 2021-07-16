@@ -38,9 +38,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
-func newMsgFactory(localMsg bool, rocksmqPath string) msgstream.Factory {
+func newMsgFactory(localMsg bool) msgstream.Factory {
 	if localMsg {
-		return msgstream.NewRmsFactory(rocksmqPath)
+		return msgstream.NewRmsFactory()
 	}
 	return msgstream.NewPmsFactory()
 }
@@ -87,7 +87,7 @@ func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *compone
 			defer log.Sync()
 		}
 
-		factory := newMsgFactory(localMsg, rootcoord.Params.RocksmqPath)
+		factory := newMsgFactory(localMsg)
 		var err error
 		rc, err = components.NewRootCoord(ctx, factory)
 		if err != nil {
@@ -116,7 +116,7 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string
 			defer log.Sync()
 		}
 
-		factory := newMsgFactory(localMsg, proxy.Params.RocksmqPath)
+		factory := newMsgFactory(localMsg)
 		var err error
 		pn, err = components.NewProxy(ctx, factory)
 		if err != nil {
@@ -144,9 +144,7 @@ func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *compon
 			defer log.Sync()
 		}
 
-		// FIXME(yukun): newMsgFactory requires parameter rocksmqPath, but won't be used here
-		// so hardcode the path to /tmp/invalid_milvus_rdb
-		factory := newMsgFactory(localMsg, "/tmp/invalid_milvus_rdb")
+		factory := newMsgFactory(localMsg)
 		var err error
 		qs, err = components.NewQueryCoord(ctx, factory)
 		if err != nil {
@@ -175,7 +173,7 @@ func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, alias st
 			defer log.Sync()
 		}
 
-		factory := newMsgFactory(localMsg, querynode.Params.RocksmqPath)
+		factory := newMsgFactory(localMsg)
 		var err error
 		qn, err = components.NewQueryNode(ctx, factory)
 		if err != nil {
@@ -203,7 +201,7 @@ func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *compone
 			defer log.Sync()
 		}
 
-		factory := newMsgFactory(localMsg, datacoord.Params.RocksmqPath)
+		factory := newMsgFactory(localMsg)
 		var err error
 		ds, err = components.NewDataCoord(ctx, factory)
 		if err != nil {
@@ -232,7 +230,7 @@ func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, alias str
 			defer log.Sync()
 		}
 
-		factory := newMsgFactory(localMsg, datanode.Params.RocksmqPath)
+		factory := newMsgFactory(localMsg)
 		var err error
 		dn, err = components.NewDataNode(ctx, factory)
 		if err != nil {
