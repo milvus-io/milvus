@@ -40,6 +40,7 @@ type queryNode struct {
 	collectionInfos      map[UniqueID]*querypb.CollectionInfo
 	watchedQueryChannels map[UniqueID]*querypb.QueryChannelInfo
 	onService            bool
+	serviceLock          sync.Mutex
 }
 
 func newQueryNode(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) *queryNode {
@@ -73,12 +74,16 @@ func (qn *queryNode) start() error {
 	}
 
 	qn.client = client
+	qn.serviceLock.Lock()
 	qn.onService = true
+	qn.serviceLock.Unlock()
 	log.Debug("queryNode client start success", zap.Int64("nodeID", qn.id), zap.String("address", qn.address))
 	return nil
 }
 
 func (qn *queryNode) stop() {
+	qn.serviceLock.Lock()
+	defer qn.serviceLock.Unlock()
 	qn.onService = false
 	if qn.client != nil {
 		qn.client.Stop()
@@ -344,15 +349,15 @@ func (qn *queryNode) clearNodeInfo() error {
 }
 
 func (qn *queryNode) setNodeState(onService bool) {
-	qn.Lock()
-	defer qn.Unlock()
+	qn.serviceLock.Lock()
+	defer qn.serviceLock.Unlock()
 
 	qn.onService = onService
 }
 
 func (qn *queryNode) isOnService() bool {
-	qn.Lock()
-	defer qn.Unlock()
+	qn.serviceLock.Lock()
+	defer qn.serviceLock.Unlock()
 
 	return qn.onService
 }

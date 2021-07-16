@@ -14,13 +14,12 @@ package querycoord
 /*
 import (
 	"context"
-	"math/rand"
-	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -28,9 +27,7 @@ import (
 
 func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
 	factory := msgstream.NewPmsFactory()
-	rand.Seed(time.Now().UnixNano())
-	suffix := "-test-query-Coord" + strconv.FormatInt(rand.Int63(), 10)
-	Params.MetaRootPath = metaRootPath + suffix
+
 	coord, err := NewQueryCoord(ctx, factory)
 	if err != nil {
 		return nil, err
@@ -106,7 +103,25 @@ func TestQueryNode_MultiNode_stop(t *testing.T) {
 	})
 	assert.Nil(t, err)
 	time.Sleep(2 * time.Second)
+	nodes, err := queryCoord.cluster.onServiceNodes()
+	assert.Nil(t, err)
 	queryNode5.stop()
+
+	for {
+		allOffline := true
+		for nodeID := range nodes {
+			_, err = queryCoord.cluster.getNodeByID(nodeID)
+			if err == nil {
+				allOffline = false
+				time.Sleep(time.Second)
+				break
+			}
+		}
+		if allOffline {
+			break
+		}
+		log.Debug("wait all queryNode offline")
+	}
 	queryCoord.Stop()
 }
 
@@ -147,10 +162,27 @@ func TestQueryNode_MultiNode_reStart(t *testing.T) {
 		CollectionID: defaultCollectionID,
 	})
 	assert.Nil(t, err)
+	nodes, err := queryCoord.cluster.onServiceNodes()
+	assert.Nil(t, err)
 	queryNode3.stop()
 	queryNode4.stop()
 	queryNode5.stop()
-	time.Sleep(2 * time.Second)
+
+	for {
+		allOffline := true
+		for nodeID := range nodes {
+			_, err = queryCoord.cluster.getNodeByID(nodeID)
+			if err == nil {
+				allOffline = false
+				time.Sleep(time.Second)
+				break
+			}
+		}
+		if allOffline {
+			break
+		}
+		log.Debug("wait all queryNode offline")
+	}
 	queryCoord.Stop()
 }
 */
