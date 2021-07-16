@@ -212,25 +212,19 @@ func (c *Cluster) handleNodeEvent() {
 }
 
 func (c *Cluster) handleEvent(node *NodeInfo) {
+	log.Debug("start handle event", zap.Any("node", node))
 	ctx := node.ctx
 	ch := node.GetEventChannel()
-	var cli types.DataNode
-	var err error
+	version := node.Info.GetVersion()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case event := <-ch:
-			cli = node.GetClient()
-			if cli == nil {
-				cli, err = createClient(ctx, node.info.GetAddress())
-				if err != nil {
-					log.Warn("failed to create client", zap.Any("node", node), zap.Error(err))
-					continue
-				}
-				c.mu.Lock()
-				c.nodes.SetClient(node.info.GetVersion(), cli)
-				c.mu.Unlock()
+			cli, err := c.getOrCreateClient(ctx, version)
+			if err != nil {
+				log.Warn("failed to get client", zap.Int64("nodeID", version), zap.Error(err))
+				continue
 			}
 			switch event.Type {
 			case Watch:
@@ -239,15 +233,15 @@ func (c *Cluster) handleEvent(node *NodeInfo) {
 					log.Warn("request type is not Watch")
 					continue
 				}
+				log.Debug("receive watch event", zap.Any("event", event), zap.Any("node", node))
 				tCtx, cancel := context.WithTimeout(ctx, eventTimeout)
 				resp, err := cli.WatchDmChannels(tCtx, req)
 				cancel()
 				if err = VerifyResponse(resp, err); err != nil {
-					log.Warn("Failed to watch dm channels", zap.String("addr", node.info.GetAddress()))
+					log.Warn("Failed to watch dm channels", zap.String("addr", node.Info.GetAddress()))
 				}
 				c.mu.Lock()
-				c.nodes.SetWatched(node.info.GetVersion(), parseChannelsFromReq(req))
-				node = c.nodes.GetNode(node.info.GetVersion())
+				c.nodes.SetWatched(node.Info.GetVersion(), parseChannelsFromReq(req))
 				c.mu.Unlock()
 				if err = c.saveNode(node); err != nil {
 					log.Warn("failed to save node info", zap.Any("node", node))
@@ -263,13 +257,35 @@ func (c *Cluster) handleEvent(node *NodeInfo) {
 				resp, err := cli.FlushSegments(tCtx, req)
 				cancel()
 				if err = VerifyResponse(resp, err); err != nil {
-					log.Warn("Failed to flush segments", zap.String("addr", node.info.GetAddress()))
+					log.Warn("failed to flush segments", zap.String("addr", node.Info.GetAddress()))
 				}
 			default:
-				log.Warn("Wrong event type", zap.Any("type", event.Type))
+				log.Warn("unknown event type", zap.Any("type", event.Type))
 			}
 		}
 	}
+}
+
+func (c *Cluster) getOrCreateClient(ctx context.Context, id UniqueID) (types.DataNode, error) {
+	c.mu.Lock()
+	node := c.nodes.GetNode(id)
+	c.mu.Unlock()
+	if node == nil {
+		return nil, fmt.Errorf("node %d is not alive", id)
+	}
+	cli := node.GetClient()
+	if cli != nil {
+		return cli, nil
+	}
+	var err error
+	cli, err = createClient(ctx, node.Info.GetAddress())
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.nodes.SetClient(node.Info.GetVersion(), cli)
+	return cli, nil
 }
 
 func parseChannelsFromReq(req *datapb.WatchDmChannelsRequest) []string {
@@ -314,8 +330,8 @@ func (c *Cluster) updateCluster(nodes []*NodeInfo) (newNodes []*NodeInfo, offlin
 	var onCnt, offCnt float64
 	currentOnline := make(map[int64]struct{})
 	for _, n := range nodes {
-		currentOnline[n.info.GetVersion()] = struct{}{}
-		node := c.nodes.GetNode(n.info.GetVersion())
+		currentOnline[n.Info.GetVersion()] = struct{}{}
+		node := c.nodes.GetNode(n.Info.GetVersion())
 		if node == nil {
 			newNodes = append(newNodes, n)
 		}
@@ -324,7 +340,7 @@ func (c *Cluster) updateCluster(nodes []*NodeInfo) (newNodes []*NodeInfo, offlin
 
 	currNodes := c.nodes.GetNodes()
 	for _, node := range currNodes {
-		_, has := currentOnline[node.info.GetVersion()]
+		_, has := currentOnline[node.Info.GetVersion()]
 		if !has {
 			offlines = append(offlines, node)
 			offCnt++
@@ -339,13 +355,13 @@ func (c *Cluster) handleRegister(n *NodeInfo) {
 	c.mu.Lock()
 	cNodes := c.nodes.GetNodes()
 	var nodes []*NodeInfo
-	log.Debug("before register policy applied", zap.Any("n.Channels", n.info.GetChannels()), zap.Any("buffer", c.chanBuffer))
+	log.Debug("before register policy applied", zap.Any("n.Channels", n.Info.GetChannels()), zap.Any("buffer", c.chanBuffer))
 	nodes, c.chanBuffer = c.registerPolicy(cNodes, n, c.chanBuffer)
 	log.Debug("after register policy applied", zap.Any("ret", nodes), zap.Any("buffer", c.chanBuffer))
 	go c.handleEvent(n)
 	c.txnSaveNodesAndBuffer(nodes, c.chanBuffer)
 	for _, node := range nodes {
-		c.nodes.SetNode(node.info.GetVersion(), node)
+		c.nodes.SetNode(node.Info.GetVersion(), node)
 	}
 	c.mu.Unlock()
 	for _, node := range nodes {
@@ -355,27 +371,32 @@ func (c *Cluster) handleRegister(n *NodeInfo) {
 
 func (c *Cluster) handleUnRegister(n *NodeInfo) {
 	c.mu.Lock()
-	node := c.nodes.GetNode(n.info.GetVersion())
+	node := c.nodes.GetNode(n.Info.GetVersion())
 	if node == nil {
 		c.mu.Unlock()
 		return
 	}
 	node.Dispose()
-	c.nodes.DeleteNode(n.info.GetVersion())
+	// save deleted node to kv
+	deleted := node.Clone(SetChannels(nil))
+	c.saveNode(deleted)
+	c.nodes.DeleteNode(n.Info.GetVersion())
+
 	cNodes := c.nodes.GetNodes()
-	log.Debug("before unregister policy applied", zap.Any("node.Channels", node.info.GetChannels()), zap.Any("buffer", c.chanBuffer))
+	log.Debug("before unregister policy applied", zap.Any("node.Channels", node.Info.GetChannels()), zap.Any("buffer", c.chanBuffer), zap.Any("nodes", cNodes))
 	var rets []*NodeInfo
 	if len(cNodes) == 0 {
-		for _, chStat := range node.info.GetChannels() {
+		for _, chStat := range node.Info.GetChannels() {
 			chStat.State = datapb.ChannelWatchState_Uncomplete
 			c.chanBuffer = append(c.chanBuffer, chStat)
 		}
 	} else {
-		rets = c.unregisterPolicy(cNodes, n)
+		rets = c.unregisterPolicy(cNodes, node)
 	}
+	log.Debug("after unregister policy", zap.Any("rets", rets))
 	c.txnSaveNodesAndBuffer(rets, c.chanBuffer)
 	for _, node := range rets {
-		c.nodes.SetNode(node.info.GetVersion(), node)
+		c.nodes.SetNode(node.Info.GetVersion(), node)
 	}
 	c.mu.Unlock()
 	for _, node := range rets {
@@ -398,7 +419,7 @@ func (c *Cluster) handleWatchChannel(channel string, collectionID UniqueID) {
 	}
 	c.txnSaveNodesAndBuffer(rets, c.chanBuffer)
 	for _, node := range rets {
-		c.nodes.SetNode(node.info.GetVersion(), node)
+		c.nodes.SetNode(node.Info.GetVersion(), node)
 	}
 	c.mu.Unlock()
 	for _, node := range rets {
@@ -422,7 +443,7 @@ func (c *Cluster) handleFlush(segments []*datapb.SegmentInfo) {
 
 	channel2Node := make(map[string]*NodeInfo)
 	for _, node := range dataNodes {
-		for _, chstatus := range node.info.GetChannels() {
+		for _, chstatus := range node.Info.GetChannels() {
 			channel2Node[chstatus.Name] = node
 		}
 	}
@@ -452,15 +473,11 @@ func (c *Cluster) handleFlush(segments []*datapb.SegmentInfo) {
 }
 
 func (c *Cluster) watch(n *NodeInfo) {
-	var logMsg string
-	uncompletes := make([]vchannel, 0, len(n.info.Channels))
-	for _, ch := range n.info.GetChannels() {
+	channelNames := make([]string, 0)
+	uncompletes := make([]vchannel, 0, len(n.Info.Channels))
+	for _, ch := range n.Info.GetChannels() {
 		if ch.State == datapb.ChannelWatchState_Uncomplete {
-			if len(uncompletes) == 0 {
-				logMsg += ch.Name
-			} else {
-				logMsg += "," + ch.Name
-			}
+			channelNames = append(channelNames, ch.GetName())
 			uncompletes = append(uncompletes, vchannel{
 				CollectionID: ch.CollectionID,
 				DmlChannel:   ch.Name,
@@ -471,7 +488,8 @@ func (c *Cluster) watch(n *NodeInfo) {
 	if len(uncompletes) == 0 {
 		return // all set, just return
 	}
-	log.Debug(logMsg)
+	log.Debug("plan to watch channel", zap.String("node", n.Info.GetAddress()),
+		zap.Int64("version", n.Info.GetVersion()), zap.Strings("channels", channelNames))
 
 	vchanInfos, err := c.posProvider.GetVChanPositions(uncompletes, true)
 	if err != nil {
@@ -489,12 +507,13 @@ func (c *Cluster) watch(n *NodeInfo) {
 		Req:  req,
 	}
 	ch := n.GetEventChannel()
+	log.Debug("put watch event to node channel", zap.Any("e", e), zap.Any("n", n.Info))
 	ch <- e
 }
 
 func (c *Cluster) saveNode(n *NodeInfo) error {
-	key := fmt.Sprintf("%s%d", clusterPrefix, n.info.GetVersion())
-	value := proto.MarshalTextString(n.info)
+	key := fmt.Sprintf("%s%d", clusterPrefix, n.Info.GetVersion())
+	value := proto.MarshalTextString(n.Info)
 	return c.kv.Save(key, value)
 }
 
@@ -504,8 +523,8 @@ func (c *Cluster) txnSaveNodesAndBuffer(nodes []*NodeInfo, buffer []*datapb.Chan
 	}
 	data := make(map[string]string)
 	for _, n := range nodes {
-		key := fmt.Sprintf("%s%d", clusterPrefix, n.info.GetVersion())
-		value := proto.MarshalTextString(n.info)
+		key := fmt.Sprintf("%s%d", clusterPrefix, n.Info.GetVersion())
+		value := proto.MarshalTextString(n.Info)
 		data[key] = value
 	}
 

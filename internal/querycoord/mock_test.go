@@ -381,6 +381,13 @@ type queryNodeServerMock struct {
 	queryNode   *qn.QueryNode
 	grpcErrChan chan error
 	grpcServer  *grpc.Server
+
+	addQueryChannels  func() (*commonpb.Status, error)
+	watchDmChannels   func() (*commonpb.Status, error)
+	loadSegment       func() (*commonpb.Status, error)
+	releaseCollection func() (*commonpb.Status, error)
+	releasePartition  func() (*commonpb.Status, error)
+	releaseSegment    func() (*commonpb.Status, error)
 }
 
 func newQueryNodeServerMock(ctx context.Context) *queryNodeServerMock {
@@ -392,6 +399,13 @@ func newQueryNodeServerMock(ctx context.Context) *queryNodeServerMock {
 		cancel:      cancel,
 		queryNode:   qn.NewQueryNode(ctx1, factory),
 		grpcErrChan: make(chan error),
+
+		addQueryChannels:  returnSuccessResult,
+		watchDmChannels:   returnSuccessResult,
+		loadSegment:       returnSuccessResult,
+		releaseCollection: returnSuccessResult,
+		releasePartition:  returnSuccessResult,
+		releaseSegment:    returnSuccessResult,
 	}
 }
 
@@ -475,39 +489,27 @@ func (qs *queryNodeServerMock) run() error {
 }
 
 func (qs *queryNodeServerMock) AddQueryChannel(ctx context.Context, req *querypb.AddQueryChannelRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return qs.addQueryChannels()
 }
 
 func (qs *queryNodeServerMock) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return qs.watchDmChannels()
 }
 
 func (qs *queryNodeServerMock) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return qs.loadSegment()
 }
 
 func (qs *queryNodeServerMock) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return qs.releaseCollection()
 }
 
 func (qs *queryNodeServerMock) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return qs.releasePartition()
 }
 
 func (qs *queryNodeServerMock) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return qs.releaseSegment()
 }
 
 func startQueryNodeServer(ctx context.Context) (*queryNodeServerMock, error) {
@@ -518,4 +520,16 @@ func startQueryNodeServer(ctx context.Context) (*queryNodeServerMock, error) {
 	}
 
 	return node, nil
+}
+
+func returnSuccessResult() (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
+func returnFailedResult() (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}, errors.New("query node do task failed")
 }
