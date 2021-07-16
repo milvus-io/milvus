@@ -11,7 +11,6 @@
 
 package querycoord
 
-/*
 import (
 	"context"
 	"testing"
@@ -185,4 +184,3 @@ func TestQueryNode_MultiNode_reStart(t *testing.T) {
 	}
 	queryCoord.Stop()
 }
-*/
