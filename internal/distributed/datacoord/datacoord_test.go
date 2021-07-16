@@ -11,6 +11,7 @@
 
 package grpcdatacoordclient
 
+/*
 import (
 	"context"
 	"fmt"
@@ -174,3 +175,4 @@ func TestRun(t *testing.T) {
 	err = dsServer.Stop()
 	assert.Nil(t, err)
 }
+*/
