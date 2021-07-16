@@ -6,6 +6,7 @@ from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
+from common.code_mapping import PartitionErrorMessage
 
 prefix = "partition_"
 
@@ -455,7 +456,7 @@ class TestPartitionOperations(TestcaseBase):
 
         # verify that drop the partition again with exception
         partition_w.drop(check_task=CheckTasks.err_res,
-                         check_items={ct.err_code: 1, ct.err_msg: "Partition not exist"})
+                         check_items={ct.err_code: 1, ct.err_msg: PartitionErrorMessage.PartitionNotExist})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
@@ -512,7 +513,7 @@ class TestPartitionOperations(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     # @pytest.mark.parametrize("flush", [True, False])
-    @pytest.mark.parametrize("partition_name, data", [(cf.gen_unique_str(prefix), cf.gen_default_list_data(nb=10))])
+    @pytest.mark.parametrize("partition_name, data", [(cf.gen_unique_str(prefix), cf.gen_default_list_data(nb=3000))])
     @pytest.mark.parametrize("index_param", cf.gen_simple_index())
     def test_partition_drop_indexed_partition(self, partition_name, data, index_param):
         """
@@ -532,7 +533,8 @@ class TestPartitionOperations(TestcaseBase):
         assert collection_w.has_partition(partition_name)[0]
 
         # insert data to partition
-        partition_w.insert(data)
+        ins_res, _ = partition_w.insert(data)
+        assert len(ins_res.primary_keys) == len(data[0])
 
         # create index of collection
         collection_w.create_index(ct.default_float_vec_field_name, index_param)
@@ -578,7 +580,7 @@ class TestPartitionOperations(TestcaseBase):
 
         # release the dropped partition and check err response
         partition_w.release(check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1, ct.err_msg: "Partition not exist"})
+                            check_items={ct.err_code: 1, ct.err_msg: PartitionErrorMessage.PartitionNotExist})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
