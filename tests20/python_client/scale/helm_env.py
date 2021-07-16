@@ -1,4 +1,5 @@
 import os
+from time import sleep
 
 from scale import constants
 from utils.util_log import test_log as log
@@ -88,3 +89,4 @@ if __name__ == '__main__':
     # env.helm_install_cluster_milvus()
     # env.helm_upgrade_cluster_milvus(queryNode=2)
     env.helm_uninstall_cluster_milvus()
+    sleep(5)

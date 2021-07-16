@@ -445,7 +445,7 @@ class TestInsertOperation(TestcaseBase):
         collection_w.insert(data=df)
         assert collection_w.num_entities == ct.default_nb
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
-        assert collection_w.has_index()
+        assert collection_w.has_index()[0]
         index, _ = collection_w.index()
         assert index == Index(collection_w.collection, ct.default_float_vec_field_name, default_index_params)
         assert collection_w.indexes[0] == index
@@ -459,7 +459,7 @@ class TestInsertOperation(TestcaseBase):
         """
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
-        assert collection_w.has_index()
+        assert collection_w.has_index()[0]
         index, _ = collection_w.index()
         assert index == Index(collection_w.collection, ct.default_float_vec_field_name, default_index_params)
         assert collection_w.indexes[0] == index
@@ -477,7 +477,7 @@ class TestInsertOperation(TestcaseBase):
         schema = cf.gen_default_binary_collection_schema()
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
         collection_w.create_index(ct.default_binary_vec_field_name, default_binary_index_params)
-        assert collection_w.has_index()
+        assert collection_w.has_index()[0]
         index, _ = collection_w.index()
         assert index == Index(collection_w.collection, ct.default_binary_vec_field_name, default_binary_index_params)
         assert collection_w.indexes[0] == index
@@ -501,7 +501,7 @@ class TestInsertOperation(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
         # create index
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
-        assert collection_w.has_index()
+        assert collection_w.has_index()[0]
         index, _ = collection_w.index()
         assert index == Index(collection_w.collection, ct.default_float_vec_field_name, default_index_params)
         assert collection_w.indexes[0] == index
