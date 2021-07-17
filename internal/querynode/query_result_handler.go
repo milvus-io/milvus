@@ -37,7 +37,8 @@ type resultHandlerStage struct {
 
 	collectionID UniqueID
 
-	streaming *streaming
+	streaming  *streaming
+	historical *historical
 
 	queryResultStream msgstream.MsgStream
 	input             chan queryResult
@@ -50,6 +51,8 @@ func newResultHandlerStage(ctx context.Context,
 	cancel context.CancelFunc,
 	collectionID UniqueID,
 	streaming *streaming,
+	historical *historical,
+	input chan queryResult,
 	queryResultStream msgstream.MsgStream,
 	channelNum int) *resultHandlerStage {
 
@@ -58,8 +61,9 @@ func newResultHandlerStage(ctx context.Context,
 		cancel:            cancel,
 		collectionID:      collectionID,
 		streaming:         streaming,
+		historical:        historical,
 		queryResultStream: queryResultStream,
-		input:             make(chan queryResult, queryBufferSize*channelNum),
+		input:             input,
 		channelNum:        channelNum,
 		results:           make(map[UniqueID][]queryResult),
 	}
@@ -104,6 +108,15 @@ func (q *resultHandlerStage) reduceRetrieve(msgID UniqueID, msg *msgstream.Retri
 		return
 	}
 
+	// get global sealed segments
+	var globalSealedSegments []UniqueID
+	partitionIDsInQuery := msg.PartitionIDs
+	if len(partitionIDsInQuery) == 0 {
+		globalSealedSegments = q.historical.getGlobalSegmentIDsByCollectionID(collectionID)
+	} else {
+		globalSealedSegments = q.historical.getGlobalSegmentIDsByPartitionIds(partitionIDsInQuery)
+	}
+
 	segmentRetrieved := make([]UniqueID, 0)
 	mergeList := make([]*segcorepb.RetrieveResults, 0)
 	for _, res := range q.results[msgID] {
@@ -143,8 +156,7 @@ func (q *resultHandlerStage) reduceRetrieve(msgID UniqueID, msg *msgstream.Retri
 			ResultChannelID:           msg.ResultChannelID,
 			SealedSegmentIDsRetrieved: segmentRetrieved,
 			ChannelIDsRetrieved:       collection.getVChannels(),
-			//TODO(yukun):: get global sealed segment from etcd
-			GlobalSealedSegmentIDs: segmentRetrieved,
+			GlobalSealedSegmentIDs:    globalSealedSegments,
 		},
 	}
 
@@ -190,15 +202,23 @@ func (q *resultHandlerStage) mergeRetrieveResults(dataArr []*segcorepb.RetrieveR
 }
 
 func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
-	searchMsg := sr.msg
+	msg := sr.msg
 	searchRequests := sr.reqs
 
-	sp, ctx := trace.StartSpanFromContext(searchMsg.TraceCtx())
+	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 	defer sp.Finish()
-	searchMsg.SetTraceCtx(ctx)
-	tr := timerecord.NewTimeRecorder(fmt.Sprintf("search reduce %d", searchMsg.CollectionID))
+	msg.SetTraceCtx(ctx)
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("search reduce %d", msg.CollectionID))
 
-	searchTimestamp := searchMsg.BeginTs()
+	searchTimestamp := msg.BeginTs()
+
+	// get global sealed segments
+	var globalSealedSegments []UniqueID
+	if len(msg.PartitionIDs) > 0 {
+		globalSealedSegments = q.historical.getGlobalSegmentIDsByPartitionIds(msg.PartitionIDs)
+	} else {
+		globalSealedSegments = q.historical.getGlobalSegmentIDsByCollectionID(q.collectionID)
+	}
 
 	searchResults := make([]*SearchResult, 0)
 	matchedSegments := make([]*Segment, 0)
@@ -220,7 +240,7 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
 	}
 
 	// get schema
-	collectionID := searchMsg.CollectionID
+	collectionID := msg.CollectionID
 	collection, err := q.streaming.replica.getCollectionByID(collectionID)
 	if err != nil {
 		log.Error(err.Error())
@@ -250,7 +270,7 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
 			// TODO: Currently add a translate layer from hits to SearchResultData
 			// TODO: hits marshal and unmarshal is likely bottleneck
 
-			transformed, err := q.translateHits(schema, searchMsg.OutputFieldsId, nilHits)
+			transformed, err := q.translateHits(schema, msg.OutputFieldsId, nilHits)
 			if err != nil {
 				log.Error(err.Error())
 				return
@@ -263,30 +283,29 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
 
 			resultChannelInt := 0
 			searchResultMsg := &msgstream.SearchResultMsg{
-				BaseMsg: msgstream.BaseMsg{Ctx: searchMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}},
+				BaseMsg: msgstream.BaseMsg{Ctx: msg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}},
 				SearchResults: internalpb.SearchResults{
 					Base: &commonpb.MsgBase{
 						MsgType:   commonpb.MsgType_SearchResult,
-						MsgID:     searchMsg.Base.MsgID,
+						MsgID:     msg.Base.MsgID,
 						Timestamp: searchTimestamp,
-						SourceID:  searchMsg.Base.SourceID,
+						SourceID:  msg.Base.SourceID,
 					},
 					Status:                   &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-					ResultChannelID:          searchMsg.ResultChannelID,
+					ResultChannelID:          msg.ResultChannelID,
 					Hits:                     nilHits,
 					SlicedBlob:               byteBlobs,
 					SlicedOffset:             1,
 					SlicedNumCount:           1,
-					MetricType:               searchMsg.plan.getMetricType(),
+					MetricType:               msg.plan.getMetricType(),
 					SealedSegmentIDsSearched: sealedSegmentSearched,
 					ChannelIDsSearched:       collection.getVChannels(),
-					//TODO:: get global sealed segment from etcd
-					GlobalSealedSegmentIDs: sealedSegmentSearched,
+					GlobalSealedSegmentIDs:   globalSealedSegments,
 				},
 			}
 			log.Debug("QueryNode Empty SearchResultMsg",
 				zap.Any("collectionID", collection.ID()),
-				zap.Any("msgID", searchMsg.ID()),
+				zap.Any("msgID", msg.ID()),
 				zap.Any("vChannels", collection.getVChannels()),
 				zap.Any("sealedSegmentSearched", sealedSegmentSearched),
 			)
@@ -302,13 +321,13 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
 	var marshaledHits *MarshaledHits = nil
 	if numSegment == 1 {
 		inReduced[0] = true
-		err := fillTargetEntry(searchMsg.plan, searchResults, matchedSegments, inReduced)
+		err := fillTargetEntry(msg.plan, searchResults, matchedSegments, inReduced)
 		sp.LogFields(oplog.String("statistical time", "fillTargetEntry end"))
 		if err != nil {
 			log.Error(err.Error())
 			return
 		}
-		marshaledHits, err = reorganizeSingleSearchResult(searchMsg.plan, searchRequests, searchResults[0])
+		marshaledHits, err = reorganizeSingleSearchResult(msg.plan, searchRequests, searchResults[0])
 		sp.LogFields(oplog.String("statistical time", "reorganizeSingleQueryResult end"))
 		if err != nil {
 			log.Error(err.Error())
@@ -321,13 +340,13 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
 			log.Error(err.Error())
 			return
 		}
-		err = fillTargetEntry(searchMsg.plan, searchResults, matchedSegments, inReduced)
+		err = fillTargetEntry(msg.plan, searchResults, matchedSegments, inReduced)
 		sp.LogFields(oplog.String("statistical time", "fillTargetEntry end"))
 		if err != nil {
 			log.Error(err.Error())
 			return
 		}
-		marshaledHits, err = reorganizeSearchResults(searchMsg.plan, searchRequests, searchResults, numSegment, inReduced)
+		marshaledHits, err = reorganizeSearchResults(msg.plan, searchRequests, searchResults, numSegment, inReduced)
 		sp.LogFields(oplog.String("statistical time", "reorganizeQueryResults end"))
 		if err != nil {
 			log.Error(err.Error())
@@ -350,24 +369,24 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
 			return
 		}
 		hits := make([][]byte, len(hitBlobSizePeerQuery))
-		for i, len := range hitBlobSizePeerQuery {
-			hits[i] = hitsBlob[offset : offset+len]
+		for i, l := range hitBlobSizePeerQuery {
+			hits[i] = hitsBlob[offset : offset+l]
 			//test code to checkout marshaled hits
-			//marshaledHit := hitsBlob[offset:offset+len]
+			//marshaledHit := hitsBlob[offset:offset+l]
 			//unMarshaledHit := milvuspb.Hits{}
 			//err = proto.Unmarshal(marshaledHit, &unMarshaledHit)
 			//if err != nil {
 			//	return err
 			//}
 			//log.Debug("hits msg  = ", unMarshaledHit)
-			offset += len
+			offset += l
 		}
 
 		// TODO: remove inefficient code in cgo and use SearchResultData directly
 		// TODO: Currently add a translate layer from hits to SearchResultData
 		// TODO: hits marshal and unmarshal is likely bottleneck
 
-		transformed, err := translateHits(schema, searchMsg.OutputFieldsId, hits)
+		transformed, err := q.translateHits(schema, msg.OutputFieldsId, hits)
 		if err != nil {
 			log.Error(err.Error())
 			return
@@ -380,37 +399,36 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
 
 		resultChannelInt := 0
 		searchResultMsg := &msgstream.SearchResultMsg{
-			BaseMsg: msgstream.BaseMsg{Ctx: searchMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}},
+			BaseMsg: msgstream.BaseMsg{Ctx: msg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}},
 			SearchResults: internalpb.SearchResults{
 				Base: &commonpb.MsgBase{
 					MsgType:   commonpb.MsgType_SearchResult,
-					MsgID:     searchMsg.Base.MsgID,
+					MsgID:     msg.Base.MsgID,
 					Timestamp: searchTimestamp,
-					SourceID:  searchMsg.Base.SourceID,
+					SourceID:  msg.Base.SourceID,
 				},
 				Status:                   &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-				ResultChannelID:          searchMsg.ResultChannelID,
+				ResultChannelID:          msg.ResultChannelID,
 				Hits:                     hits,
 				SlicedBlob:               byteBlobs,
 				SlicedOffset:             1,
 				SlicedNumCount:           1,
-				MetricType:               searchMsg.plan.getMetricType(),
+				MetricType:               msg.plan.getMetricType(),
 				SealedSegmentIDsSearched: sealedSegmentSearched,
 				ChannelIDsSearched:       collection.getVChannels(),
-				//TODO:: get global sealed segment from etcd
-				GlobalSealedSegmentIDs: sealedSegmentSearched,
+				GlobalSealedSegmentIDs:   globalSealedSegments,
 			},
 		}
 		log.Debug("QueryNode SearchResultMsg",
 			zap.Any("collectionID", collection.ID()),
-			zap.Any("msgID", searchMsg.ID()),
+			zap.Any("msgID", msg.ID()),
 			zap.Any("vChannels", collection.getVChannels()),
 			zap.Any("sealedSegmentSearched", sealedSegmentSearched),
 		)
 
 		// For debugging, please don't delete.
 		//fmt.Println("==================== search result ======================")
-		//for i := 0; i < len(hits); i++ {
+		//for i := 0; i < l(hits); i++ {
 		//	testHits := milvuspb.Hits{}
 		//	err := proto.Unmarshal(hits[i], &testHits)
 		//	if err != nil {
@@ -427,8 +445,8 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
 	deleteSearchResults(searchResults)
 	deleteMarshaledHits(marshaledHits)
 	sp.LogFields(oplog.String("statistical time", "stats done"))
-	searchMsg.plan.delete()
-	for _, r := range searchMsg.reqs {
+	msg.plan.delete()
+	for _, r := range msg.reqs {
 		r.delete()
 	}
 	tr.Elapse("all done")

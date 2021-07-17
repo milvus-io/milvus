@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	oplog "github.com/opentracing/opentracing-go/log"
@@ -39,6 +40,7 @@ type historicalStage struct {
 func newHistoricalStage(ctx context.Context,
 	cancel context.CancelFunc,
 	collectionID UniqueID,
+	input chan queryMsg,
 	output chan queryResult,
 	historical *historical) *historicalStage {
 
@@ -46,7 +48,7 @@ func newHistoricalStage(ctx context.Context,
 		ctx:          ctx,
 		cancel:       cancel,
 		collectionID: collectionID,
-		input:        make(chan queryMsg, queryBufferSize),
+		input:        input,
 		output:       output,
 		historical:   historical,
 	}
@@ -140,6 +142,9 @@ func (q *historicalStage) retrieve(retrieveMsg *retrieveMsg) ([]UniqueID, []*seg
 			if err != nil {
 				return nil, nil, err
 			}
+			if err = q.fillVectorOutputFieldsIfNeeded(retrieveMsg, segment, result); err != nil {
+				return nil, nil, err
+			}
 			mergeList = append(mergeList, result)
 			sealedSegmentRetrieved = append(sealedSegmentRetrieved, segmentID)
 		}
@@ -195,4 +200,57 @@ func (q *historicalStage) search(searchMsg *searchMsg) ([]*SearchResult, []*Segm
 	sp.LogFields(oplog.String("statistical time", "historical search done"))
 	tr.Elapse("all done")
 	return hisSearchResults, hisSegmentResults, sealedSegmentSearched, nil
+}
+
+func (q *historicalStage) getVectorOutputFieldIDs(msg *retrieveMsg) ([]int64, error) {
+	var collID UniqueID
+	var outputFieldsID []int64
+	var resultFieldIDs []int64
+
+	collID = msg.CollectionID
+	outputFieldsID = msg.OutputFieldsId
+
+	vecFields, err := q.historical.replica.getVecFieldIDsByCollectionID(collID)
+	if err != nil {
+		return resultFieldIDs, err
+	}
+
+	for _, fieldID := range vecFields {
+		if funcutil.SliceContain(outputFieldsID, fieldID) {
+			resultFieldIDs = append(resultFieldIDs, fieldID)
+		}
+	}
+	return resultFieldIDs, nil
+}
+
+func (q *historicalStage) fillVectorOutputFieldsIfNeeded(msg *retrieveMsg, segment *Segment, result *segcorepb.RetrieveResults) error {
+	// result is not empty
+	if len(result.Offset) <= 0 {
+		return nil
+	}
+
+	// get all vector output field ids
+	vecOutputFieldIDs, err := q.getVectorOutputFieldIDs(msg)
+	if err != nil {
+		return err
+	}
+
+	// output_fields contain vector field
+	for _, vecOutputFieldID := range vecOutputFieldIDs {
+		log.Debug("CYD - ", zap.Int64("vecOutputFieldID", vecOutputFieldID))
+		vecFieldInfo, err := segment.getVectorFieldInfo(vecOutputFieldID)
+		if err != nil {
+			return fmt.Errorf("cannot get vector field info, fileID %d", vecOutputFieldID)
+		}
+		// vector field raw data is not loaded into memory
+		if !vecFieldInfo.getRawDataInMemory() {
+			if err = q.historical.loader.loadSegmentVectorFieldsData(vecFieldInfo); err != nil {
+				return err
+			}
+			if err = segment.fillRetrieveResults(result, vecOutputFieldID, vecFieldInfo); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

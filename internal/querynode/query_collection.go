@@ -13,16 +13,9 @@ package querynode
 
 import (
 	"context"
-	"fmt"
-	"go.uber.org/zap"
-	"reflect"
-	"sync"
-
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 const queryBufferSize = 1024
@@ -73,15 +66,6 @@ type queryCollection struct {
 	historical   *historical
 	streaming    *streaming
 
-	unsolvedMsgMu sync.Mutex // guards unsolvedMsg
-	unsolvedMsg   []queryMsg
-
-	tSafeWatchers     map[Channel]*tSafeWatcher
-	watcherSelectCase []reflect.SelectCase
-
-	serviceableTimeMutex sync.Mutex // guards serviceableTime
-	serviceableTime      Timestamp
-
 	queryMsgStream       msgstream.MsgStream
 	queryResultMsgStream msgstream.MsgStream
 }
@@ -95,8 +79,6 @@ func newQueryCollection(releaseCtx context.Context,
 	streaming *streaming,
 	factory msgstream.Factory) *queryCollection {
 
-	unsolvedMsg := make([]queryMsg, 0)
-
 	queryStream, _ := factory.NewQueryMsgStream(releaseCtx)
 	queryResultStream, _ := factory.NewQueryMsgStream(releaseCtx)
 
@@ -108,10 +90,6 @@ func newQueryCollection(releaseCtx context.Context,
 		historical:   historical,
 		streaming:    streaming,
 
-		tSafeWatchers: make(map[Channel]*tSafeWatcher),
-
-		unsolvedMsg: unsolvedMsg,
-
 		queryMsgStream:       queryStream,
 		queryResultMsgStream: queryResultStream,
 	}
@@ -119,9 +97,97 @@ func newQueryCollection(releaseCtx context.Context,
 	return qc
 }
 
-func (q *queryCollection) start() {
+func (q *queryCollection) start() error {
+	// create query stages
+	col, err := q.streaming.replica.getCollectionByID(q.collectionID)
+	if err != nil {
+		return err
+	}
+	channels := col.getVChannels()
+
+	lbChan := make(chan *msgstream.LoadBalanceSegmentsMsg, queryBufferSize)
+	reqChan := make(chan queryMsg, queryBufferSize)
+	iStage := newInputStage(q.releaseCtx,
+		q.cancel,
+		q.collectionID,
+		q.queryMsgStream,
+		lbChan,
+		reqChan)
+	lbStage := newLoadBalanceStage(q.releaseCtx,
+		q.cancel,
+		q.collectionID,
+		lbChan)
+
+	hisChan := make(chan queryMsg, queryBufferSize)
+	vChannelChan := make(map[Channel]chan queryMsg)
+	unsolvedChan := make(map[Channel]chan queryMsg)
+	for _, c := range channels {
+		vChannelChan[c] = make(chan queryMsg, queryBufferSize)
+		unsolvedChan[c] = make(chan queryMsg, queryBufferSize)
+	}
+	reqStage := newRequestHandlerStage(q.releaseCtx,
+		q.cancel,
+		q.collectionID,
+		reqChan,
+		hisChan,
+		vChannelChan,
+		q.streaming,
+		q.historical,
+		q.queryResultMsgStream)
+	resChan := make(chan queryResult, queryBufferSize * (len(channels) + 1)) // vChannels + historical
+	hisStage := newHistoricalStage(q.releaseCtx,
+		q.cancel,
+		q.collectionID,
+		hisChan,
+		resChan,
+		q.historical)
+
+	vcStages := make(map[Channel]*vChannelStage)
+	unsolvedStages := make(map[Channel]*unsolvedStage)
+	for _, c := range channels {
+		vcStages[c] = newVChannelStage(q.releaseCtx,
+			q.cancel,
+			q.collectionID,
+			c,
+			vChannelChan[c],
+			unsolvedChan[c],
+			resChan,
+			q.streaming)
+		unsolvedStages[c] = newUnsolvedStage(q.releaseCtx,
+			q.cancel,
+			q.collectionID,
+			c,
+			unsolvedChan[c],
+			resChan,
+			q.streaming,
+			q.queryResultMsgStream)
+	}
+	resStage := newResultHandlerStage(q.releaseCtx,
+		q.cancel,
+		q.collectionID,
+		q.streaming,
+		q.historical,
+		resChan,
+		q.queryResultMsgStream,
+		len(channels))
+
 	go q.queryMsgStream.Start()
 	go q.queryResultMsgStream.Start()
+
+	// start stages
+	go iStage.start()
+	go lbStage.start()
+	go reqStage.start()
+	go hisStage.start()
+	for _, s := range vcStages {
+		go s.start()
+	}
+	for _, s := range unsolvedStages {
+		go s.start()
+	}
+	go resStage.start()
+
+	return nil
 }
 
 func (q *queryCollection) close() {
@@ -131,70 +197,6 @@ func (q *queryCollection) close() {
 	if q.queryResultMsgStream != nil {
 		q.queryResultMsgStream.Close()
 	}
-}
-
-func (q *queryCollection) getVectorOutputFieldIDs(msg queryMsg) ([]int64, error) {
-	var collID UniqueID
-	var outputFieldsID []int64
-	var resultFieldIDs []int64
-
-	msgType := msg.Type()
-	switch msgType {
-	case commonpb.MsgType_Retrieve:
-		retrieveMsg := msg.(*msgstream.RetrieveMsg)
-		collID = retrieveMsg.CollectionID
-		outputFieldsID = retrieveMsg.OutputFieldsId
-	case commonpb.MsgType_Search:
-		searchMsg := msg.(*msgstream.SearchMsg)
-		collID = searchMsg.CollectionID
-		outputFieldsID = searchMsg.OutputFieldsId
-	default:
-		return resultFieldIDs, fmt.Errorf("receive invalid msgType = %d", msgType)
-	}
-
-	vecFields, err := q.historical.replica.getVecFieldIDsByCollectionID(collID)
-	if err != nil {
-		return resultFieldIDs, err
-	}
-
-	for _, fieldID := range vecFields {
-		if funcutil.SliceContain(outputFieldsID, fieldID) {
-			resultFieldIDs = append(resultFieldIDs, fieldID)
-		}
-	}
-	return resultFieldIDs, nil
-}
-
-func (q *queryCollection) fillVectorOutputFieldsIfNeeded(msg queryMsg, segment *Segment, result *segcorepb.RetrieveResults) error {
-	// result is not empty
-	if len(result.Offset) <= 0 {
-		return nil
-	}
-
-	// get all vector output field ids
-	vecOutputFieldIDs, err := q.getVectorOutputFieldIDs(msg)
-	if err != nil {
-		return err
-	}
-
-	// output_fields contain vector field
-	for _, vecOutputFieldID := range vecOutputFieldIDs {
-		log.Debug("CYD - ", zap.Int64("vecOutputFieldID", vecOutputFieldID))
-		vecFieldInfo, err := segment.getVectorFieldInfo(vecOutputFieldID)
-		if err != nil {
-			return fmt.Errorf("cannot get vector field info, fileID %d", vecOutputFieldID)
-		}
-		// vector field raw data is not loaded into memory
-		if !vecFieldInfo.getRawDataInMemory() {
-			if err = q.historical.loader.loadSegmentVectorFieldsData(vecFieldInfo); err != nil {
-				return err
-			}
-			if err = segment.fillRetrieveResults(result, vecOutputFieldID, vecFieldInfo); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 func (r *retrieveResult) Type() msgstream.MsgType {

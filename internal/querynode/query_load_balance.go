@@ -29,13 +29,14 @@ type loadBalanceStage struct {
 
 func newLoadBalanceStage(ctx context.Context,
 	cancel context.CancelFunc,
-	collectionID UniqueID) *loadBalanceStage {
+	collectionID UniqueID,
+	input chan *msgstream.LoadBalanceSegmentsMsg) *loadBalanceStage {
 
 	return &loadBalanceStage{
 		ctx:          ctx,
 		cancel:       cancel,
 		collectionID: collectionID,
-		input:        make(chan *msgstream.LoadBalanceSegmentsMsg, queryBufferSize),
+		input:        input,
 	}
 }
 

@@ -30,8 +30,9 @@ type requestHandlerStage struct {
 
 	collectionID UniqueID
 
-	input   chan queryMsg
-	outputs []chan queryMsg
+	input            chan queryMsg
+	historicalOutput chan queryMsg
+	vChannelOutputs  map[Channel]chan queryMsg
 
 	streaming         *streaming
 	historical        *historical
@@ -41,7 +42,9 @@ type requestHandlerStage struct {
 func newRequestHandlerStage(ctx context.Context,
 	cancel context.CancelFunc,
 	collectionID UniqueID,
-	outputs []chan queryMsg,
+	input chan queryMsg,
+	historicalOutput chan queryMsg,
+	vChannelOutputs map[Channel]chan queryMsg,
 	streaming *streaming,
 	historical *historical,
 	queryResultStream msgstream.MsgStream) *requestHandlerStage {
@@ -50,8 +53,9 @@ func newRequestHandlerStage(ctx context.Context,
 		ctx:               ctx,
 		cancel:            cancel,
 		collectionID:      collectionID,
-		input:             make(chan queryMsg, queryBufferSize),
-		outputs:           outputs,
+		input:             input,
+		historicalOutput:  historicalOutput,
+		vChannelOutputs:   vChannelOutputs,
 		streaming:         streaming,
 		historical:        historical,
 		queryResultStream: queryResultStream,
@@ -139,11 +143,11 @@ func (q *requestHandlerStage) start() {
 						zap.String("msgType", msgTypeStr),
 					)
 				}
-				retrieveMsg := &retrieveMsg{
+				rm := &retrieveMsg{
 					RetrieveMsg: msg.(*msgstream.RetrieveMsg),
 					plan:        plan,
 				}
-				q.sendRequests(retrieveMsg)
+				q.sendRequests(rm)
 			case commonpb.MsgType_Search:
 				plan, reqs, err := q.parseSearchPlan(msg)
 				if err != nil {
@@ -155,12 +159,12 @@ func (q *requestHandlerStage) start() {
 						zap.String("msgType", msgTypeStr),
 					)
 				}
-				searchMsg := &searchMsg{
+				sm := &searchMsg{
 					SearchMsg: msg.(*msgstream.SearchMsg),
 					plan:      plan,
 					reqs:      reqs,
 				}
-				q.sendRequests(searchMsg)
+				q.sendRequests(sm)
 			default:
 				err := fmt.Errorf("receive invalid msgType = %d", msgType)
 				log.Error(err.Error())
@@ -179,9 +183,10 @@ func (q *requestHandlerStage) start() {
 }
 
 func (q *requestHandlerStage) sendRequests(msg queryMsg) {
-	for i := range q.outputs {
-		q.outputs[i] <- msg
+	for i := range q.vChannelOutputs {
+		q.vChannelOutputs[i] <- msg
 	}
+	q.historicalOutput <- msg
 	log.Debug("query request handler send requests done",
 		zap.Any("collectionID", q.collectionID),
 		zap.Any("msgID", msg.ID()),
@@ -263,7 +268,7 @@ func (q *requestHandlerStage) parseRetrievePlan(msg queryMsg) (*RetrievePlan, er
 	}
 
 	req := &segcorepb.RetrieveRequest{
-		Ids:          retrieveMsg.Ids,
+		Ids:            retrieveMsg.Ids,
 		OutputFieldsId: retrieveMsg.OutputFieldsId,
 	}
 
