@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
 )
@@ -320,50 +319,6 @@ func (s *Segment) getEntityByIds(plan *RetrievePlan) (*segcorepb.RetrieveResults
 		return nil, err
 	}
 	return result, nil
-}
-
-func (s *Segment) fillRetrieveResults(result *segcorepb.RetrieveResults, fieldInfo *VectorFieldInfo) error {
-	for _, resultFieldData := range result.FieldsData {
-		if resultFieldData.FieldId != fieldInfo.fieldBinlog.FieldID {
-			continue
-		}
-
-		for i, offset := range result.Offset {
-			var success bool
-			for _, path := range fieldInfo.fieldBinlog.Binlogs {
-				rawData := fieldInfo.getRawData(path)
-
-				var numRows, dim int64
-				switch fieldData := rawData.(type) {
-				case *storage.FloatVectorFieldData:
-					numRows = int64(fieldData.NumRows)
-					dim = int64(fieldData.Dim)
-					if offset < numRows {
-						copy(resultFieldData.GetVectors().GetFloatVector().Data[int64(i)*dim:int64(i+1)*dim], fieldData.Data[offset*dim:(offset+1)*dim])
-						success = true
-					} else {
-						offset -= numRows
-					}
-				case *storage.BinaryVectorFieldData:
-					numRows = int64(fieldData.NumRows)
-					dim = int64(fieldData.Dim)
-					if offset < numRows {
-						x := resultFieldData.GetVectors().GetData().(*schemapb.VectorField_BinaryVector)
-						copy(x.BinaryVector[int64(i)*dim/8:int64(i+1)*dim/8], fieldData.Data[offset*dim/8:(offset+1)*dim/8])
-						success = true
-					} else {
-						offset -= numRows
-					}
-				default:
-					return errors.New("unexpected field data type")
-				}
-				if success {
-					break
-				}
-			}
-		}
-	}
-	return nil
 }
 
 func (s *Segment) fillTargetEntry(plan *SearchPlan, result *SearchResult) error {
