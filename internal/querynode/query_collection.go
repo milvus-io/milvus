@@ -1104,7 +1104,6 @@ func (q *queryCollection) fillVectorOutputFieldsIfNeeded(msg queryMsg, segment *
 
 	// output_fields contain vector field
 	for _, vecOutputFieldID := range vecOutputFieldIDs {
-		log.Debug("CYD - ", zap.Int64("vecOutputFieldID", vecOutputFieldID))
 		vecFieldInfo, err := segment.getVectorFieldInfo(vecOutputFieldID)
 		if err != nil {
 			return fmt.Errorf("cannot get vector field info, fileID %d", vecOutputFieldID)
@@ -1114,7 +1113,7 @@ func (q *queryCollection) fillVectorOutputFieldsIfNeeded(msg queryMsg, segment *
 			if err = q.historical.loader.loadSegmentVectorFieldsData(vecFieldInfo); err != nil {
 				return err
 			}
-			if err = segment.fillRetrieveResults(result, vecOutputFieldID, vecFieldInfo); err != nil {
+			if err = segment.fillRetrieveResults(result, vecFieldInfo); err != nil {
 				return err
 			}
 		}

@@ -322,9 +322,9 @@ func (s *Segment) getEntityByIds(plan *RetrievePlan) (*segcorepb.RetrieveResults
 	return result, nil
 }
 
-func (s *Segment) fillRetrieveResults(result *segcorepb.RetrieveResults, fieldID int64, fieldInfo *VectorFieldInfo) error {
+func (s *Segment) fillRetrieveResults(result *segcorepb.RetrieveResults, fieldInfo *VectorFieldInfo) error {
 	for _, resultFieldData := range result.FieldsData {
-		if resultFieldData.FieldId != fieldID {
+		if resultFieldData.FieldId != fieldInfo.fieldBinlog.FieldID {
 			continue
 		}
 
