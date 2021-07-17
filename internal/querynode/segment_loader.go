@@ -301,7 +301,7 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 	return nil
 }
 
-func (loader *segmentLoader) loadSegmentVectorFieldsData(info *VectorFieldInfo) error {
+func (loader *segmentLoader) loadSegmentVectorFieldData(info *VectorFieldInfo) error {
 	iCodec := storage.InsertCodec{}
 	defer func() {
 		err := iCodec.Close()
@@ -313,6 +313,8 @@ func (loader *segmentLoader) loadSegmentVectorFieldsData(info *VectorFieldInfo) 
 		if data := info.getRawData(path); data != nil {
 			continue
 		}
+
+		log.Debug("load vector raw data", zap.String("path", path))
 
 		binLog, err := loader.minioKV.Load(path)
 		if err != nil {
