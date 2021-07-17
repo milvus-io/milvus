@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -754,7 +755,7 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 			finalResult.FieldsData = append(finalResult.FieldsData, newCol)
 			blobOffset += blobLen
 		default:
-			return nil, fmt.Errorf("unsupport data type %s", schemapb.DataType_name[int32(fieldMeta.DataType)])
+			return nil, fmt.Errorf("unsupported data type %s", schemapb.DataType_name[int32(fieldMeta.DataType)])
 		}
 	}
 
@@ -1057,6 +1058,61 @@ func (q *queryCollection) search(msg queryMsg) error {
 	return nil
 }
 
+func (q *queryCollection) fillVectorFieldsData(segment *Segment, result *segcorepb.RetrieveResults) error {
+	for _, resultFieldData := range result.FieldsData {
+		vecFieldInfo, err := segment.getVectorFieldInfo(resultFieldData.FieldId)
+		if err != nil {
+			continue
+		}
+
+		// if vector raw data is in memory, result should has been filled in valid vector raw data
+		if vecFieldInfo.getRawDataInMemory() {
+			continue
+		}
+
+		// load vector field data
+		if err = q.historical.loader.loadSegmentVectorFieldData(vecFieldInfo); err != nil {
+			return err
+		}
+
+		for i, offset := range result.Offset {
+			var success bool
+			for _, path := range vecFieldInfo.fieldBinlog.Binlogs {
+				rawData := vecFieldInfo.getRawData(path)
+
+				var numRows, dim int64
+				switch fieldData := rawData.(type) {
+				case *storage.FloatVectorFieldData:
+					numRows = int64(fieldData.NumRows)
+					dim = int64(fieldData.Dim)
+					if offset < numRows {
+						copy(resultFieldData.GetVectors().GetFloatVector().Data[int64(i)*dim:int64(i+1)*dim], fieldData.Data[offset*dim:(offset+1)*dim])
+						success = true
+					} else {
+						offset -= numRows
+					}
+				case *storage.BinaryVectorFieldData:
+					numRows = int64(fieldData.NumRows)
+					dim = int64(fieldData.Dim)
+					if offset < numRows {
+						x := resultFieldData.GetVectors().GetData().(*schemapb.VectorField_BinaryVector)
+						copy(x.BinaryVector[int64(i)*dim/8:int64(i+1)*dim/8], fieldData.Data[offset*dim/8:(offset+1)*dim/8])
+						success = true
+					} else {
+						offset -= numRows
+					}
+				default:
+					return fmt.Errorf("unexpected field data type")
+				}
+				if success {
+					break
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func (q *queryCollection) retrieve(msg queryMsg) error {
 	// TODO(yukun)
 	// step 1: get retrieve object and defer destruction
@@ -1132,6 +1188,10 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 			}
 			result, err := segment.getEntityByIds(plan)
 			if err != nil {
+				return err
+			}
+
+			if err = q.fillVectorFieldsData(segment, result); err != nil {
 				return err
 			}
 			mergeList = append(mergeList, result)

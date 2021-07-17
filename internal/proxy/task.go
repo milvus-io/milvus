@@ -652,6 +652,7 @@ func (it *InsertTask) checkFieldAutoID() error {
 	if autoIDLoc >= 0 {
 		fieldData := schemapb.FieldData{
 			FieldName: primaryFieldName,
+			FieldId:   -1,
 			Type:      schemapb.DataType_Int64,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
@@ -1419,6 +1420,7 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	log.Debug("translate output fields", zap.Any("OutputFields", outputFields))
 	st.query.OutputFields = outputFields
 
 	if st.query.GetDslType() == commonpb.DslType_BoolExprV1 {
@@ -1693,6 +1695,7 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 					if ret.Results.FieldsData[k] == nil || ret.Results.FieldsData[k].GetScalars() == nil {
 						ret.Results.FieldsData[k] = &schemapb.FieldData{
 							FieldName: fieldData.FieldName,
+							FieldId:   fieldData.FieldId,
 							Field: &schemapb.FieldData_Scalars{
 								Scalars: &schemapb.ScalarField{},
 							},
@@ -1768,6 +1771,7 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 					if ret.Results.FieldsData[k] == nil || ret.Results.FieldsData[k].GetVectors() == nil {
 						ret.Results.FieldsData[k] = &schemapb.FieldData{
 							FieldName: fieldData.FieldName,
+							FieldId:   fieldData.FieldId,
 							Field: &schemapb.FieldData_Vectors{
 								Vectors: &schemapb.VectorField{
 									Dim: dim,
@@ -1934,7 +1938,8 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 				for k, fieldName := range st.query.OutputFields {
 					for _, field := range schema.Fields {
 						if st.result.Results.FieldsData[k] != nil && field.Name == fieldName {
-							st.result.Results.FieldsData[k].FieldName = fieldName
+							st.result.Results.FieldsData[k].FieldName = field.Name
+							st.result.Results.FieldsData[k].FieldId = field.FieldID
 							st.result.Results.FieldsData[k].Type = field.DataType
 						}
 					}
@@ -2098,6 +2103,7 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	log.Debug("translate output fields", zap.Any("OutputFields", rt.retrieve.OutputFields))
 	if len(rt.retrieve.OutputFields) == 0 {
 		for _, field := range schema.Fields {
 			if field.FieldID >= 100 && field.DataType != schemapb.DataType_FloatVector && field.DataType != schemapb.DataType_BinaryVector {
@@ -2105,15 +2111,11 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 			}
 		}
 	} else {
+		addPrimaryKey := false
 		for _, reqField := range rt.retrieve.OutputFields {
 			findField := false
-			addPrimaryKey := false
 			for _, field := range schema.Fields {
 				if reqField == field.Name {
-					if field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_BinaryVector {
-						errMsg := "Query does not support vector field currently"
-						return errors.New(errMsg)
-					}
 					if field.IsPrimaryKey {
 						addPrimaryKey = true
 					}
@@ -2132,6 +2134,7 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 			}
 		}
 	}
+	log.Debug("translate output fields to field ids", zap.Any("OutputFieldsID", rt.OutputFieldsId))
 
 	travelTimestamp := rt.retrieve.TravelTimestamp
 	if travelTimestamp == 0 {
@@ -2383,6 +2386,7 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 			for _, field := range schema.Fields {
 				if field.FieldID == rt.OutputFieldsId[i] {
 					rt.result.FieldsData[i].FieldName = field.Name
+					rt.result.FieldsData[i].FieldId = field.FieldID
 					rt.result.FieldsData[i].Type = field.DataType
 				}
 			}
