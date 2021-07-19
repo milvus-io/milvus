@@ -25,6 +25,9 @@ type LocalChunkManager struct {
 }
 
 func NewLocalChunkManager(localPath string) *LocalChunkManager {
+	if _, err := os.Stat(localPath); os.IsNotExist(err) {
+		os.MkdirAll(localPath, os.ModePerm)
+	}
 	return &LocalChunkManager{
 		localPath: localPath,
 	}
