@@ -11,6 +11,13 @@
 
 package storage
 
+import (
+	"encoding/binary"
+	"math"
+
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+)
+
 type VectorFileManager struct {
 	localFileManager  FileManager
 	remoteFileManager FileManager
@@ -18,13 +25,22 @@ type VectorFileManager struct {
 	insertCodec *InsertCodec
 }
 
-func (vfm *VectorFileManager) GetFile(key string) error {
+func NewVectorFileManager(localFileManager FileManager, remoteFileManager FileManager, schema *etcdpb.CollectionMeta) *VectorFileManager {
+	insertCodec := NewInsertCodec(schema)
+	return &VectorFileManager{
+		localFileManager:  localFileManager,
+		remoteFileManager: remoteFileManager,
+		insertCodec:       insertCodec,
+	}
+}
+
+func (vfm *VectorFileManager) GetFile(key string) (string, error) {
 	if vfm.localFileManager.Exist(key) {
-		return nil
+		return vfm.localFileManager.GetFile(key)
 	}
 	content, err := vfm.remoteFileManager.ReadAll(key)
 	if err != nil {
-		return err
+		return "", err
 	}
 	blob := &Blob{
 		Key:   key,
@@ -33,7 +49,7 @@ func (vfm *VectorFileManager) GetFile(key string) error {
 
 	_, _, data, err := vfm.insertCodec.Deserialize([]*Blob{blob})
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	for _, singleData := range data.Data {
@@ -44,7 +60,7 @@ func (vfm *VectorFileManager) GetFile(key string) error {
 		floatVector, ok := singleData.(*FloatVectorFieldData)
 		if ok {
 			floatData := floatVector.Data
-			result := make([]byte, len(floatData)*8)
+			result := make([]byte, 0)
 			for _, singleFloat := range floatData {
 				result = append(result, Float32ToByte(singleFloat)...)
 			}
@@ -66,15 +82,15 @@ func (vfm *VectorFileManager) ReadAll(key string) ([]byte, error) {
 	if vfm.localFileManager.Exist(key) {
 		return vfm.localFileManager.ReadAll(key)
 	}
-	err := vfm.GetFile(key)
+	_, err := vfm.GetFile(key)
 	if err != nil {
 		return nil, err
 	}
 	return vfm.localFileManager.ReadAll(key)
 }
 
-func (vfm *VectorFileManager) ReadAt(p []byte, off int64) (n int, err error) {
-	return vfm.localFileManager.ReadAt(p, off)
+func (vfm *VectorFileManager) ReadAt(key string, p []byte, off int64) (n int, err error) {
+	return vfm.localFileManager.ReadAt(key, p, off)
 }
 
 func Float32ToByte(float float32) []byte {

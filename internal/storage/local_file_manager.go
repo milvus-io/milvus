@@ -13,21 +13,29 @@ package storage
 
 import (
 	"errors"
-	"golang.org/x/exp/mmap"
 	"io/ioutil"
 	"os"
 	"path"
+
+	"golang.org/x/exp/mmap"
 )
 
 type LocalFileManager struct {
 	localPath string
 }
 
-func (lfm *LocalFileManager) GetFile(key string) error {
-	if !lfm.Exist(key) {
-		return errors.New("local file cannot be found with key:" + key)
+func NewLocalFileManager(localPath string) *LocalFileManager {
+	return &LocalFileManager{
+		localPath: localPath,
 	}
-	return nil
+}
+
+func (lfm *LocalFileManager) GetFile(key string) (string, error) {
+	if !lfm.Exist(key) {
+		return "", errors.New("local file cannot be found with key:" + key)
+	}
+	path := path.Join(lfm.localPath, key)
+	return path, nil
 }
 
 func (lfm *LocalFileManager) PutFile(key string, content []byte) error {
@@ -41,7 +49,7 @@ func (lfm *LocalFileManager) PutFile(key string, content []byte) error {
 
 func (lfm *LocalFileManager) Exist(key string) bool {
 	path := path.Join(lfm.localPath, key)
-	_, err := os.Stat(path) //os.Stat获取文件信息
+	_, err := os.Stat(path)
 	if err != nil {
 		if os.IsExist(err) {
 			return true
@@ -53,14 +61,19 @@ func (lfm *LocalFileManager) Exist(key string) bool {
 
 func (lfm *LocalFileManager) ReadAll(key string) ([]byte, error) {
 	path := path.Join(lfm.localPath, key)
-	content, err := ioutil.ReadAll(path)
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	content, err := ioutil.ReadAll(file)
 	if err != nil {
 		return nil, err
 	}
 	return content, nil
 }
 
-func (lfm *LocalFileManager) ReadAt(p []byte, off int64) (n int, err error) {
+func (lfm *LocalFileManager) ReadAt(key string, p []byte, off int64) (n int, err error) {
 	path := path.Join(lfm.localPath, key)
 	at, err := mmap.Open(path)
 	defer at.Close()
