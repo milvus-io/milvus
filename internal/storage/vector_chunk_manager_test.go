@@ -52,6 +52,11 @@ func TestVectorChunkManager(t *testing.T) {
 	for _, binlog := range binlogs {
 		rcm.Write(binlog.Key, binlog.Value)
 	}
+	_, err = vcm.Load("108")
+	assert.Nil(t, err)
+
+	_, err = vcm.Load("109")
+	assert.Nil(t, err)
 
 	content, err := vcm.ReadAll("108")
 	assert.Nil(t, err)
