@@ -67,6 +67,7 @@ func (vcm *VectorChunkManager) Load(key string) (string, error) {
 			vcm.localChunkManager.Write(key, result)
 		}
 	}
+	vcm.insertCodec.Close()
 	return vcm.localChunkManager.Load(key)
 }
 
