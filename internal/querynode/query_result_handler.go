@@ -87,9 +87,9 @@ func (q *resultHandlerStage) start() {
 					msgType := v[0].Type()
 					switch msgType {
 					case commonpb.MsgType_Retrieve:
-						q.reduceRetrieve(k, v[0].(*retrieveResult).msg)
+						q.reduceRetrieve(k)
 					case commonpb.MsgType_Search:
-						q.reduceSearch(k, v[0].(*searchResult))
+						q.reduceSearch(k)
 					default:
 						err := fmt.Errorf("resultHandlerStage receive invalid msgType = %d", msgType)
 						log.Error(err.Error())
@@ -100,12 +100,26 @@ func (q *resultHandlerStage) start() {
 	}
 }
 
-func (q *resultHandlerStage) reduceRetrieve(msgID UniqueID, msg *msgstream.RetrieveMsg) {
+func (q *resultHandlerStage) reduceRetrieve(msgID UniqueID) {
+	msg := q.results[msgID][0].(*retrieveResult).msg
 	collectionID := msg.CollectionID
 	collection, err := q.streaming.replica.getCollectionByID(collectionID)
 	if err != nil {
 		log.Error("reduceRetrieve failed, err = " + err.Error())
 		return
+	}
+
+	// error check
+	for _, res := range q.results[msgID] {
+		if err := res.(*retrieveResult).err; err != nil {
+			publishFailedQueryResult(msg, err.Error(), q.queryResultStream)
+			log.Debug("do retrieve failed in resultHandlerStage, publish failed query result",
+				zap.Int64("collectionID", q.collectionID),
+				zap.Int64("msgID", msg.ID()),
+				zap.String("err", err.Error()),
+			)
+			return
+		}
 	}
 
 	// get global sealed segments
@@ -201,14 +215,24 @@ func (q *resultHandlerStage) mergeRetrieveResults(dataArr []*segcorepb.RetrieveR
 	return final, nil
 }
 
-func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
+func (q *resultHandlerStage) reduceSearch(msgID UniqueID) {
 	log.Debug("reducing search result...",
 		zap.Any("collectionID", q.collectionID),
 		zap.Any("msgID", msgID),
 	)
+
+	sr := q.results[msgID][0].(*searchResult)
 	msg := sr.msg
 	plan := msg.plan
 	searchRequests := sr.reqs
+
+	defer func() {
+		plan.delete()
+		for _, r := range msg.reqs {
+			r.delete()
+		}
+		delete(q.results, msgID)
+	}()
 
 	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 	defer sp.Finish()
@@ -216,6 +240,19 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("search reduce %d", msg.CollectionID))
 
 	searchTimestamp := msg.BeginTs()
+
+	// error check
+	for _, res := range q.results[msgID] {
+		if err := res.(*searchResult).err; err != nil {
+			publishFailedQueryResult(msg.SearchMsg, err.Error(), q.queryResultStream)
+			log.Debug("do search failed in resultHandlerStage, publish failed query result",
+				zap.Int64("collectionID", q.collectionID),
+				zap.Int64("msgID", msg.ID()),
+				zap.String("err", err.Error()),
+			)
+			return
+		}
+	}
 
 	// get global sealed segments
 	var globalSealedSegments []UniqueID
@@ -228,6 +265,7 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
 	searchResults := make([]*SearchResult, 0)
 	matchedSegments := make([]*Segment, 0)
 	sealedSegmentSearched := make([]UniqueID, 0)
+	defer deleteSearchResults(searchResults)
 
 	// append all results
 	for _, res := range q.results[msgID] {
@@ -370,6 +408,7 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
 			return
 		}
 	}
+	defer deleteMarshaledHits(marshaledHits)
 	hitsBlob, err := marshaledHits.getHitsBlob()
 	sp.LogFields(oplog.String("statistical time", "getHitsBlob end"))
 	if err != nil {
@@ -463,14 +502,7 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
 	}
 
 	sp.LogFields(oplog.String("statistical time", "before free c++ memory"))
-	deleteSearchResults(searchResults)
-	deleteMarshaledHits(marshaledHits)
 	sp.LogFields(oplog.String("statistical time", "stats done"))
-	plan.delete()
-	for _, r := range msg.reqs {
-		r.delete()
-	}
-	delete(q.results, msgID)
 	tr.Elapse("all done")
 }
 
