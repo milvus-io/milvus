@@ -167,6 +167,10 @@ class ResponseChecker:
             log.warning("The function name is {} rather than {}".format(func_name, "search"))
         if len(check_items) == 0:
             raise Exception("No expect values found in the check task")
+        if check_items.get("_async", None):
+            if check_items["_async"]:
+                search_res.done()
+                search_res = search_res.result()
         if len(search_res) != check_items["nq"]:
             log.error("search_results_check: Numbers of query searched (%d) "
                       "is not equal with expected (%d)"
