@@ -218,11 +218,6 @@ func (colReplica *collectionReplica) getVecFieldIDsByCollectionID(collectionID U
 			vecFields = append(vecFields, field.FieldID)
 		}
 	}
-
-	if len(vecFields) <= 0 {
-		return nil, errors.New("no vector field in collection %d" + strconv.FormatInt(collectionID, 10))
-	}
-
 	return vecFields, nil
 }
 

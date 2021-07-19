@@ -32,6 +32,6 @@ ENTITIES_FOR_SEARCH = 1000
 
 CHAOS_CONFIG_ENV = 'CHAOS_CONFIG_PATH'      # env variables for chao path
 TESTS_CONFIG_LOCATION = 'chaos_objects/'
-ALL_CHAOS_YAMLS = 'chaos_*.yaml'
+ALL_CHAOS_YAMLS = 'chaos_datanode*.yaml'
 WAIT_PER_OP = 10
 DEFAULT_INDEX_PARAM = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}

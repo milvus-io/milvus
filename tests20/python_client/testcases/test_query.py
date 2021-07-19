@@ -305,6 +305,7 @@ class TestQueryBase(TestcaseBase):
         assert set(res_1[0].keys()) == set(fields)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #6299")
     def test_query_output_vec_field(self):
         """
         target: test query with vec output field
