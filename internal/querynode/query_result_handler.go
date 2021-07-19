@@ -226,14 +226,6 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID) {
 	plan := msg.plan
 	searchRequests := sr.reqs
 
-	defer func() {
-		plan.delete()
-		for _, r := range msg.reqs {
-			r.delete()
-		}
-		delete(q.results, msgID)
-	}()
-
 	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 	defer sp.Finish()
 	msg.SetTraceCtx(ctx)
@@ -500,6 +492,12 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID) {
 		publishQueryResult(searchResultMsg, q.queryResultStream)
 		tr.Record("publish search result")
 	}
+
+	plan.delete()
+	for _, r := range msg.reqs {
+		r.delete()
+	}
+	delete(q.results, msgID)
 
 	sp.LogFields(oplog.String("statistical time", "before free c++ memory"))
 	sp.LogFields(oplog.String("statistical time", "stats done"))
