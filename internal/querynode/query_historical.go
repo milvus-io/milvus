@@ -72,21 +72,21 @@ func (q *historicalStage) start() {
 			)
 			switch msgType {
 			case commonpb.MsgType_Retrieve:
-				retrieveMsg := msg.(*retrieveMsg)
-				segmentRetrieved, res, err := q.retrieve(retrieveMsg)
+				rm := msg.(*retrieveMsg)
+				segmentRetrieved, res, err := q.retrieve(rm)
 				retrieveRes := &retrieveResult{
-					msg:              retrieveMsg.RetrieveMsg,
+					msg:              rm.RetrieveMsg,
 					err:              err,
 					segmentRetrieved: segmentRetrieved,
 					res:              res,
 				}
 				q.output <- retrieveRes
 			case commonpb.MsgType_Search:
-				searchMsg := msg.(*searchMsg)
-				searchResults, matchedSegments, sealedSegmentSearched, err := q.search(searchMsg)
+				sm := msg.(*searchMsg)
+				searchResults, matchedSegments, sealedSegmentSearched, err := q.search(sm)
 				searchRes := &searchResult{
-					reqs:                  searchMsg.reqs,
-					msg:                   searchMsg,
+					reqs:                  sm.reqs,
+					msg:                   sm,
 					err:                   err,
 					searchResults:         searchResults,
 					matchedSegments:       matchedSegments,
@@ -96,7 +96,6 @@ func (q *historicalStage) start() {
 			default:
 				err := fmt.Errorf("receive invalid msgType = %d", msgType)
 				log.Error(err.Error())
-				return
 			}
 
 			sp.Finish()

@@ -91,7 +91,7 @@ func (q *requestHandlerStage) start() {
 			default:
 				err := fmt.Errorf("receive invalid msgType = %d", msgType)
 				log.Error(err.Error())
-				return
+				continue
 			}
 			if collectionID != q.collectionID {
 				log.Error("not target collection query request",
@@ -99,7 +99,7 @@ func (q *requestHandlerStage) start() {
 					zap.Int64("target collectionID", collectionID),
 					zap.Int64("msgID", msg.ID()),
 				)
-				return
+				continue
 			}
 
 			sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
@@ -116,7 +116,7 @@ func (q *requestHandlerStage) start() {
 					zap.Int64("msgID", msg.ID()),
 					zap.String("msgType", msgTypeStr),
 				)
-				return
+				continue
 			}
 			guaranteeTs := msg.GuaranteeTs()
 			if guaranteeTs >= collection.getReleaseTime() {
@@ -128,7 +128,7 @@ func (q *requestHandlerStage) start() {
 					zap.Int64("msgID", msg.ID()),
 					zap.String("msgType", msgTypeStr),
 				)
-				return
+				continue
 			}
 
 			switch msgType {
@@ -168,10 +168,11 @@ func (q *requestHandlerStage) start() {
 			default:
 				err := fmt.Errorf("receive invalid msgType = %d", msgType)
 				log.Error(err.Error())
+				continue
 			}
 			tr.Record("operation done")
 
-			log.Debug("do query done in receiveQueryMsg",
+			log.Debug("do query in requestHandlerStage",
 				zap.Int64("collectionID", collectionID),
 				zap.Int64("msgID", msg.ID()),
 				zap.String("msgType", msgTypeStr),
@@ -194,26 +195,26 @@ func (q *requestHandlerStage) sendRequests(msg queryMsg) {
 }
 
 func (q *requestHandlerStage) parseSearchPlan(msg queryMsg) (*SearchPlan, []*searchRequest, error) {
-	searchMsg := msg.(*msgstream.SearchMsg)
-	sp, ctx := trace.StartSpanFromContext(searchMsg.TraceCtx())
+	sm := msg.(*msgstream.SearchMsg)
+	sp, ctx := trace.StartSpanFromContext(sm.TraceCtx())
 	defer sp.Finish()
-	searchMsg.SetTraceCtx(ctx)
+	sm.SetTraceCtx(ctx)
 
-	collectionID := searchMsg.CollectionID
+	collectionID := sm.CollectionID
 	collection, err := q.streaming.replica.getCollectionByID(collectionID)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	var plan *SearchPlan
-	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
-		expr := searchMsg.SerializedExprPlan
+	if sm.GetDslType() == commonpb.DslType_BoolExprV1 {
+		expr := sm.SerializedExprPlan
 		plan, err = createSearchPlanByExpr(collection, expr)
 		if err != nil {
 			return nil, nil, err
 		}
 	} else {
-		dsl := searchMsg.Dsl
+		dsl := sm.Dsl
 		plan, err = createSearchPlan(collection, dsl)
 		if err != nil {
 			return nil, nil, err
@@ -226,7 +227,7 @@ func (q *requestHandlerStage) parseSearchPlan(msg queryMsg) (*SearchPlan, []*sea
 	if topK >= 16385 {
 		return nil, nil, fmt.Errorf("limit %d is too large", topK)
 	}
-	searchRequestBlob := searchMsg.PlaceholderGroup
+	searchRequestBlob := sm.PlaceholderGroup
 	searchReq, err := parseSearchRequest(plan, searchRequestBlob)
 	if err != nil {
 		return nil, nil, err
@@ -235,14 +236,14 @@ func (q *requestHandlerStage) parseSearchPlan(msg queryMsg) (*SearchPlan, []*sea
 	searchRequests := make([]*searchRequest, 0)
 	searchRequests = append(searchRequests, searchReq)
 
-	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
+	if sm.GetDslType() == commonpb.DslType_BoolExprV1 {
 		sp.LogFields(oplog.String("statistical time", "stats start"),
 			oplog.Object("nq", queryNum),
-			oplog.Object("expr", searchMsg.SerializedExprPlan))
+			oplog.Object("expr", sm.SerializedExprPlan))
 	} else {
 		sp.LogFields(oplog.String("statistical time", "stats start"),
 			oplog.Object("nq", queryNum),
-			oplog.Object("dsl", searchMsg.Dsl))
+			oplog.Object("dsl", sm.Dsl))
 	}
 
 	return plan, searchRequests, nil

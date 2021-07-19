@@ -202,7 +202,12 @@ func (q *resultHandlerStage) mergeRetrieveResults(dataArr []*segcorepb.RetrieveR
 }
 
 func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
+	log.Debug("reducing search result...",
+		zap.Any("collectionID", q.collectionID),
+		zap.Any("msgID", msgID),
+	)
 	msg := sr.msg
+	plan := msg.plan
 	searchRequests := sr.reqs
 
 	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
@@ -252,6 +257,11 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
 		return
 	}
 
+	log.Debug("search result length",
+		zap.Any("collectionID", q.collectionID),
+		zap.Any("msgID", msgID),
+		zap.Any("length", len(searchResults)),
+	)
 	if len(searchResults) <= 0 {
 		for _, group := range searchRequests {
 			nq := group.getNumOfQuery()
@@ -297,7 +307,7 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
 					SlicedBlob:               byteBlobs,
 					SlicedOffset:             1,
 					SlicedNumCount:           1,
-					MetricType:               msg.plan.getMetricType(),
+					MetricType:               plan.getMetricType(),
 					SealedSegmentIDsSearched: sealedSegmentSearched,
 					ChannelIDsSearched:       collection.getVChannels(),
 					GlobalSealedSegmentIDs:   globalSealedSegments,
@@ -321,13 +331,13 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
 	var marshaledHits *MarshaledHits = nil
 	if numSegment == 1 {
 		inReduced[0] = true
-		err := fillTargetEntry(msg.plan, searchResults, matchedSegments, inReduced)
+		err := fillTargetEntry(plan, searchResults, matchedSegments, inReduced)
 		sp.LogFields(oplog.String("statistical time", "fillTargetEntry end"))
 		if err != nil {
 			log.Error(err.Error())
 			return
 		}
-		marshaledHits, err = reorganizeSingleSearchResult(msg.plan, searchRequests, searchResults[0])
+		marshaledHits, err = reorganizeSingleSearchResult(plan, searchRequests, searchResults[0])
 		sp.LogFields(oplog.String("statistical time", "reorganizeSingleQueryResult end"))
 		if err != nil {
 			log.Error(err.Error())
@@ -340,13 +350,13 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
 			log.Error(err.Error())
 			return
 		}
-		err = fillTargetEntry(msg.plan, searchResults, matchedSegments, inReduced)
+		err = fillTargetEntry(plan, searchResults, matchedSegments, inReduced)
 		sp.LogFields(oplog.String("statistical time", "fillTargetEntry end"))
 		if err != nil {
 			log.Error(err.Error())
 			return
 		}
-		marshaledHits, err = reorganizeSearchResults(msg.plan, searchRequests, searchResults, numSegment, inReduced)
+		marshaledHits, err = reorganizeSearchResults(plan, searchRequests, searchResults, numSegment, inReduced)
 		sp.LogFields(oplog.String("statistical time", "reorganizeQueryResults end"))
 		if err != nil {
 			log.Error(err.Error())
@@ -360,6 +370,10 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
 		return
 	}
 	tr.Record("reduce result done")
+	log.Debug("reduce search done",
+		zap.Any("collectionID", q.collectionID),
+		zap.Any("msgID", msgID),
+	)
 
 	var offset int64 = 0
 	for index := range searchRequests {
@@ -413,7 +427,7 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
 				SlicedBlob:               byteBlobs,
 				SlicedOffset:             1,
 				SlicedNumCount:           1,
-				MetricType:               msg.plan.getMetricType(),
+				MetricType:               plan.getMetricType(),
 				SealedSegmentIDsSearched: sealedSegmentSearched,
 				ChannelIDsSearched:       collection.getVChannels(),
 				GlobalSealedSegmentIDs:   globalSealedSegments,
@@ -445,10 +459,11 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
 	deleteSearchResults(searchResults)
 	deleteMarshaledHits(marshaledHits)
 	sp.LogFields(oplog.String("statistical time", "stats done"))
-	msg.plan.delete()
+	plan.delete()
 	for _, r := range msg.reqs {
 		r.delete()
 	}
+	delete(q.results, msgID)
 	tr.Elapse("all done")
 }
 

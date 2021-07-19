@@ -98,6 +98,9 @@ func newQueryCollection(releaseCtx context.Context,
 }
 
 func (q *queryCollection) start() error {
+	q.queryMsgStream.Start()
+	q.queryResultMsgStream.Start()
+
 	// create query stages
 	col, err := q.streaming.replica.getCollectionByID(q.collectionID)
 	if err != nil {
@@ -170,9 +173,6 @@ func (q *queryCollection) start() error {
 		resChan,
 		q.queryResultMsgStream,
 		len(channels))
-
-	go q.queryMsgStream.Start()
-	go q.queryResultMsgStream.Start()
 
 	// start stages
 	go iStage.start()

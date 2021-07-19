@@ -36,7 +36,6 @@ func (watcher *tSafeWatcher) notify() {
 	}
 }
 
-// deprecated
 func (watcher *tSafeWatcher) hasUpdate() {
 	<-watcher.notifyChan
 }

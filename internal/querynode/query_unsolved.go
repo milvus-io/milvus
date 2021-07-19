@@ -24,8 +24,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	oplog "github.com/opentracing/opentracing-go/log"
 	"go.uber.org/zap"
-	"math"
-	"reflect"
 	"sync"
 )
 
@@ -45,8 +43,7 @@ type unsolvedStage struct {
 	unsolvedMsgMu sync.Mutex // guards unsolvedMsg
 	unsolvedMsg   []queryMsg
 
-	tSafeWatchers     map[Channel]*tSafeWatcher
-	watcherSelectCase []reflect.SelectCase
+	tSafeWatcher *tSafeWatcher
 
 	serviceableTimeMutex sync.Mutex // guards serviceableTime
 	serviceableTime      Timestamp
@@ -68,7 +65,6 @@ func newUnsolvedStage(ctx context.Context,
 		vChannel:          vChannel,
 		input:             input,
 		output:            output,
-		tSafeWatchers:     make(map[Channel]*tSafeWatcher),
 		unsolvedMsg:       make([]queryMsg, 0),
 		streaming:         streaming,
 		queryResultStream: queryResultStream,
@@ -76,6 +72,8 @@ func newUnsolvedStage(ctx context.Context,
 }
 
 func (q *unsolvedStage) start() {
+	q.register()
+	go q.doUnsolvedQueryMsg()
 	for {
 		select {
 		case <-q.ctx.Done():
@@ -88,11 +86,11 @@ func (q *unsolvedStage) start() {
 
 			// tSafe check
 			guaranteeTs := msg.GuaranteeTs()
-			serviceTime := q.getServiceableTime()
+			serviceTime := q.streaming.tSafeReplica.getTSafe(q.vChannel)
 			if guaranteeTs > serviceTime {
 				gt, _ := tsoutil.ParseTS(guaranteeTs)
 				st, _ := tsoutil.ParseTS(serviceTime)
-				log.Debug("query node::vChannelStage: add to query unsolved",
+				log.Debug("query node::unsolvedStage: add to query unsolved",
 					zap.Any("collectionID", q.collectionID),
 					zap.Any("sm.GuaranteeTimestamp", gt),
 					zap.Any("serviceTime", st),
@@ -119,21 +117,21 @@ func (q *unsolvedStage) start() {
 
 			switch msgType {
 			case commonpb.MsgType_Retrieve:
-				retrieveMsg := msg.(*retrieveMsg)
-				segmentRetrieved, res, err := q.retrieve(retrieveMsg)
+				rm := msg.(*retrieveMsg)
+				segmentRetrieved, res, err := q.retrieve(rm)
 				retrieveRes := &retrieveResult{
-					msg:              retrieveMsg.RetrieveMsg,
+					msg:              rm.RetrieveMsg,
 					err:              err,
 					segmentRetrieved: segmentRetrieved,
 					res:              res,
 				}
 				q.output <- retrieveRes
 			case commonpb.MsgType_Search:
-				searchMsg := msg.(*searchMsg)
-				searchResults, matchedSegments, sealedSegmentSearched, err := q.search(searchMsg)
+				sm := msg.(*searchMsg)
+				searchResults, matchedSegments, sealedSegmentSearched, err := q.search(sm)
 				searchRes := &searchResult{
-					reqs:                  searchMsg.reqs,
-					msg:                   searchMsg,
+					reqs:                  sm.reqs,
+					msg:                   sm,
 					err:                   err,
 					searchResults:         searchResults,
 					matchedSegments:       matchedSegments,
@@ -216,21 +214,21 @@ func (q *unsolvedStage) doUnsolvedQueryMsg() {
 
 				switch msgType {
 				case commonpb.MsgType_Retrieve:
-					retrieveMsg := m.(*retrieveMsg)
-					segmentRetrieved, res, err := q.retrieve(retrieveMsg)
+					rm := m.(*retrieveMsg)
+					segmentRetrieved, res, err := q.retrieve(rm)
 					retrieveRes := &retrieveResult{
-						msg:              retrieveMsg.RetrieveMsg,
+						msg:              rm.RetrieveMsg,
 						err:              err,
 						segmentRetrieved: segmentRetrieved,
 						res:              res,
 					}
 					q.output <- retrieveRes
 				case commonpb.MsgType_Search:
-					searchMsg := m.(*searchMsg)
-					searchResults, matchedSegments, sealedSegmentSearched, err := q.search(searchMsg)
+					sm := m.(*searchMsg)
+					searchResults, matchedSegments, sealedSegmentSearched, err := q.search(sm)
 					searchRes := &searchResult{
-						reqs:                  searchMsg.reqs,
-						msg:                   searchMsg,
+						reqs:                  sm.reqs,
+						msg:                   sm,
 						err:                   err,
 						searchResults:         searchResults,
 						matchedSegments:       matchedSegments,
@@ -240,6 +238,7 @@ func (q *unsolvedStage) doUnsolvedQueryMsg() {
 				default:
 					err := fmt.Errorf("receive invalid msgType = %d", msgType)
 					log.Error(err.Error())
+					continue
 				}
 
 				if err != nil {
@@ -262,26 +261,13 @@ func (q *unsolvedStage) doUnsolvedQueryMsg() {
 }
 
 func (q *unsolvedStage) register() {
-	collection, err := q.streaming.replica.getCollectionByID(q.collectionID)
-	if err != nil {
-		log.Error(err.Error())
-		return
-	}
-
-	//TODO:: can't add new vChannel to selectCase
-	q.watcherSelectCase = make([]reflect.SelectCase, 0)
+	channel := q.vChannel
 	log.Debug("register tSafe watcher and init watcher select case",
-		zap.Any("collectionID", collection.ID()),
-		zap.Any("dml channels", collection.getVChannels()),
+		zap.Any("collectionID", q.collectionID),
+		zap.Any("dml channel", q.vChannel),
 	)
-	for _, channel := range collection.getVChannels() {
-		q.tSafeWatchers[channel] = newTSafeWatcher()
-		q.streaming.tSafeReplica.registerTSafeWatcher(channel, q.tSafeWatchers[channel])
-		q.watcherSelectCase = append(q.watcherSelectCase, reflect.SelectCase{
-			Dir:  reflect.SelectRecv,
-			Chan: reflect.ValueOf(q.tSafeWatchers[channel].watcherChan()),
-		})
-	}
+	q.tSafeWatcher = newTSafeWatcher()
+	q.streaming.tSafeReplica.registerTSafeWatcher(channel, q.tSafeWatcher)
 }
 
 func (q *unsolvedStage) addToUnsolvedMsg(msg queryMsg) {
@@ -299,20 +285,16 @@ func (q *unsolvedStage) popAllUnsolvedMsg() []queryMsg {
 }
 
 func (q *unsolvedStage) waitNewTSafe() Timestamp {
-	// block until any vChannel updating tSafe
-	_, _, recvOK := reflect.Select(q.watcherSelectCase)
-	if !recvOK {
-		log.Error("tSafe has been closed", zap.Any("collectionID", q.collectionID))
-		return Timestamp(math.MaxInt64)
-	}
-	//log.Debug("wait new tSafe", zap.Any("collectionID", s.collectionID))
-	t := Timestamp(math.MaxInt64)
-	for channel := range q.tSafeWatchers {
-		ts := q.streaming.tSafeReplica.getTSafe(channel)
-		if ts <= t {
-			t = ts
-		}
-	}
+	// block until vChannel updating tSafe
+	q.tSafeWatcher.hasUpdate()
+	t := q.streaming.tSafeReplica.getTSafe(q.vChannel)
+	//pt, _ := tsoutil.ParseTS(t)
+	//log.Debug("wait new tSafe",
+	//	zap.Any("collectionID", q.collectionID),
+	//	zap.Any("channel", q.vChannel),
+	//	zap.Any("t", t),
+	//	zap.Any("physicalTime", pt),
+	//)
 	return t
 }
 

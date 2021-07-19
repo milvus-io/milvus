@@ -47,6 +47,9 @@ func newInputStage(ctx context.Context,
 }
 
 func (q *inputStage) start() {
+	log.Debug("start input stage",
+		zap.Any("collectionID", q.collectionID),
+		)
 	for {
 		select {
 		case <-q.ctx.Done():
@@ -67,8 +70,17 @@ func (q *inputStage) start() {
 			for _, msg := range msgPack.Msgs {
 				switch sm := msg.(type) {
 				case *msgstream.SearchMsg:
+					q.queryOutput <- sm
+					log.Debug("inputStage consume Search message",
+						zap.Any("collectionID", q.collectionID),
+						zap.Any("msgID", msg.ID()),
+					)
 				case *msgstream.RetrieveMsg:
 					q.queryOutput <- sm
+					log.Debug("inputStage consume Retrieve message",
+						zap.Any("collectionID", q.collectionID),
+						zap.Any("msgID", msg.ID()),
+					)
 				case *msgstream.LoadBalanceSegmentsMsg:
 					q.lbOutput <- sm
 				default:
