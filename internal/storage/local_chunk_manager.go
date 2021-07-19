@@ -51,10 +51,7 @@ func (lcm *LocalChunkManager) Exist(key string) bool {
 	path := path.Join(lcm.localPath, key)
 	_, err := os.Stat(path)
 	if err != nil {
-		if os.IsExist(err) {
-			return true
-		}
-		return false
+		return os.IsExist(err)
 	}
 	return true
 }

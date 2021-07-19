@@ -19,12 +19,10 @@ import (
 	"testing"
 
 	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 )
 
 var Params paramtable.BaseTable
@@ -52,8 +50,6 @@ func TestVectorChunkManager(t *testing.T) {
 	binlogs := initBinlogFile(schema)
 	assert.NotNil(t, binlogs)
 	for _, binlog := range binlogs {
-		log.Debug("key", zap.Any("key", binlog.Key))
-		log.Debug("key", zap.Any("key", binlog.Value))
 		rcm.Write(binlog.Key, binlog.Value)
 	}
 
