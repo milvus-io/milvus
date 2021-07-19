@@ -127,7 +127,14 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 		node.queryService.addQueryCollection(collectionID)
 		log.Debug("add query collection", zap.Any("collectionID", collectionID))
 	}
-	sc.start()
+	err := sc.start()
+	if err != nil {
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}
+		return status, err
+	}
 	log.Debug("start query collection", zap.Any("collectionID", collectionID))
 
 	status := &commonpb.Status{
