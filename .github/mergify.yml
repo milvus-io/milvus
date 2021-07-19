@@ -34,7 +34,7 @@ pull_request_rules:
     conditions:
       - base=master
       - -files~=^[^\.]+$
-      - -files~=\.(?!md|png)
+      - -files~=\S+\.(?!md$|png$)
     actions:
       label:
         add:
