@@ -21,6 +21,7 @@ assignees: ''
 
 #### Environment:
 - Milvus version(e.g. v2.0.0-RC2 or 8b23a93):
+- Deployment mode(standalone or cluster):
 - SDK version(e.g. pymilvus v2.0.0rc2):
 - OS(Ubuntu or CentOS): 
 - CPU/Memory: 
