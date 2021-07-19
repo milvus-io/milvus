@@ -90,8 +90,16 @@ type Server struct {
 	rootCoordClientCreator rootCoordCreatorFunc
 }
 
+type Option func(svr *Server)
+
+func SetRootCoordCreator(creator rootCoordCreatorFunc) Option {
+	return func(svr *Server) {
+		svr.rootCoordClientCreator = creator
+	}
+}
+
 // CreateServer create `Server` instance
-func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
+func CreateServer(ctx context.Context, factory msgstream.Factory, opts ...Option) (*Server, error) {
 	rand.Seed(time.Now().UnixNano())
 	s := &Server{
 		ctx:                    ctx,
@@ -99,6 +107,10 @@ func CreateServer(ctx context.Context, factory msgstream.Factory) (*Server, erro
 		flushCh:                make(chan UniqueID, 1024),
 		dataClientCreator:      defaultDataNodeCreatorFunc,
 		rootCoordClientCreator: defaultRootCoordCreatorFunc,
+	}
+
+	for _, opt := range opts {
+		opt(s)
 	}
 	return s, nil
 }
