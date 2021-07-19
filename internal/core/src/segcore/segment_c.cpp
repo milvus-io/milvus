@@ -238,49 +238,6 @@ DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id) {
     }
 }
 
-//////////////////////////////    deprecated interfaces    //////////////////////////////
-CStatus
-UpdateSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_index_info) {
-    auto status = CStatus();
-    try {
-        auto segment_interface = reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
-        auto segment = dynamic_cast<milvus::segcore::SegmentGrowing*>(segment_interface);
-        AssertInfo(segment != nullptr, "segment conversion failed");
-        auto load_index_info = (LoadIndexInfo*)c_load_index_info;
-        segment->LoadIndexing(*load_index_info);
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
-    }
-}
-
-CStatus
-LoadSealedSegmentMeta(CSegmentInterface c_segment, CProto LoadSegmentMetaProto) {
-    try {
-        auto segment_raw = (const milvus::segcore::SegmentGrowing*)c_segment;
-        auto segment = dynamic_cast<const milvus::segcore::SegmentSealed*>(segment_raw);
-
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        // TODO
-        return milvus::FailureCStatus(UnexpectedError, e.what());
-    }
-}
-
-int
-Close(CSegmentInterface c_segment) {
-    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
-    auto status = segment->Close();
-    return status.code();
-}
-
-bool
-IsOpened(CSegmentInterface c_segment) {
-    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
-    auto status = segment->get_state();
-    return status == milvus::segcore::SegmentGrowing::SegmentState::Open;
-}
-
 CProtoResult
 GetEntityByIds(CSegmentInterface c_segment, CRetrievePlan c_plan, uint64_t timestamp) {
     try {
