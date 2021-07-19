@@ -48,11 +48,12 @@ Please refer to [Run E2E Tests](https://github.com/milvus-io/milvus/blob/master/
 ## Run
 ### Manually
 Run a single test scenario manually(take query node pod is killed as instance):
-1. update <code>ALL_CHAOS_YAMLS = 'chaos_querynode*.yaml'</code> in constants.py 
+1. update <code>ALL_CHAOS_YAMLS = 'chaos_querynode*.yaml'</code> in <code>constants.py</code>
 
 2. run the commands below:
 ```bash
 cd /milvus/tests20/python_client/chaos
+
 pytest test_chaos.py --host x.x.x.x -v
 ```
 
