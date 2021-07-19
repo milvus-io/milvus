@@ -244,6 +244,13 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID, sr *searchResult) {
 		sealedSegmentSearched = append(sealedSegmentSearched, searchRes.sealedSegmentSearched...)
 	}
 
+	log.Debug("check SealedSegments",
+		zap.Any("collectionID", q.collectionID),
+		zap.Any("msgID", msgID),
+		zap.Any("globalSealedSegments", globalSealedSegments),
+		zap.Any("sealedSegmentSearched", sealedSegmentSearched),
+	)
+
 	// get schema
 	collectionID := msg.CollectionID
 	collection, err := q.streaming.replica.getCollectionByID(collectionID)
