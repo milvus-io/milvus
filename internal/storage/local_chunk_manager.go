@@ -20,26 +20,26 @@ import (
 	"golang.org/x/exp/mmap"
 )
 
-type LocalFileManager struct {
+type LocalChunkManager struct {
 	localPath string
 }
 
-func NewLocalFileManager(localPath string) *LocalFileManager {
-	return &LocalFileManager{
+func NewLocalChunkManager(localPath string) *LocalChunkManager {
+	return &LocalChunkManager{
 		localPath: localPath,
 	}
 }
 
-func (lfm *LocalFileManager) GetFile(key string) (string, error) {
-	if !lfm.Exist(key) {
+func (lcm *LocalChunkManager) Load(key string) (string, error) {
+	if !lcm.Exist(key) {
 		return "", errors.New("local file cannot be found with key:" + key)
 	}
-	path := path.Join(lfm.localPath, key)
+	path := path.Join(lcm.localPath, key)
 	return path, nil
 }
 
-func (lfm *LocalFileManager) PutFile(key string, content []byte) error {
-	path := path.Join(lfm.localPath, key)
+func (lcm *LocalChunkManager) Write(key string, content []byte) error {
+	path := path.Join(lcm.localPath, key)
 	err := ioutil.WriteFile(path, content, 0644)
 	if err != nil {
 		return err
@@ -47,8 +47,8 @@ func (lfm *LocalFileManager) PutFile(key string, content []byte) error {
 	return nil
 }
 
-func (lfm *LocalFileManager) Exist(key string) bool {
-	path := path.Join(lfm.localPath, key)
+func (lcm *LocalChunkManager) Exist(key string) bool {
+	path := path.Join(lcm.localPath, key)
 	_, err := os.Stat(path)
 	if err != nil {
 		if os.IsExist(err) {
@@ -59,8 +59,8 @@ func (lfm *LocalFileManager) Exist(key string) bool {
 	return true
 }
 
-func (lfm *LocalFileManager) ReadAll(key string) ([]byte, error) {
-	path := path.Join(lfm.localPath, key)
+func (lcm *LocalChunkManager) ReadAll(key string) ([]byte, error) {
+	path := path.Join(lcm.localPath, key)
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -73,8 +73,8 @@ func (lfm *LocalFileManager) ReadAll(key string) ([]byte, error) {
 	return content, nil
 }
 
-func (lfm *LocalFileManager) ReadAt(key string, p []byte, off int64) (n int, err error) {
-	path := path.Join(lfm.localPath, key)
+func (lcm *LocalChunkManager) ReadAt(key string, p []byte, off int64) (n int, err error) {
+	path := path.Join(lcm.localPath, key)
 	at, err := mmap.Open(path)
 	defer at.Close()
 	if err != nil {

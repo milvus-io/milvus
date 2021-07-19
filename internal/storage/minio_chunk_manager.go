@@ -17,36 +17,36 @@ import (
 	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 )
 
-type MinioFileManager struct {
+type MinioChunkManager struct {
 	minio *miniokv.MinIOKV
 }
 
-func NewMinioFileManager(minio *miniokv.MinIOKV) *MinioFileManager {
-	return &MinioFileManager{
+func NewMinioChunkManager(minio *miniokv.MinIOKV) *MinioChunkManager {
+	return &MinioChunkManager{
 		minio: minio,
 	}
 }
 
-func (mfm *MinioFileManager) GetFile(key string) (string, error) {
-	if !mfm.Exist(key) {
+func (mcm *MinioChunkManager) Load(key string) (string, error) {
+	if !mcm.Exist(key) {
 		return "", errors.New("minio file manage cannot be found with key:" + key)
 	}
 	return key, nil
 }
 
-func (mfm *MinioFileManager) PutFile(key string, content []byte) error {
-	return mfm.minio.Save(key, string(content))
+func (mcm *MinioChunkManager) Write(key string, content []byte) error {
+	return mcm.minio.Save(key, string(content))
 }
 
-func (mfm *MinioFileManager) Exist(key string) bool {
-	return mfm.minio.Exist(key)
+func (mcm *MinioChunkManager) Exist(key string) bool {
+	return mcm.minio.Exist(key)
 }
 
-func (mfm *MinioFileManager) ReadAll(key string) ([]byte, error) {
-	results, err := mfm.minio.Load(key)
+func (mcm *MinioChunkManager) ReadAll(key string) ([]byte, error) {
+	results, err := mcm.minio.Load(key)
 	return []byte(results), err
 }
 
-func (mfm *MinioFileManager) ReadAt(key string, p []byte, off int64) (n int, err error) {
+func (mcm *MinioChunkManager) ReadAt(key string, p []byte, off int64) (n int, err error) {
 	return 0, errors.New("Minio file manager cannot readat")
 }

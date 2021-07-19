@@ -11,9 +11,9 @@
 
 package storage
 
-type FileManager interface {
-	GetFile(key string) (string, error)
-	PutFile(key string, content []byte) error
+type ChunkManager interface {
+	Load(key string) (string, error)
+	Write(key string, content []byte) error
 	Exist(key string) bool
 	ReadAll(key string) ([]byte, error)
 	ReadAt(key string, p []byte, off int64) (n int, err error)

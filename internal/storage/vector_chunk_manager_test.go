@@ -29,7 +29,7 @@ import (
 
 var Params paramtable.BaseTable
 
-func TestVectorFileManager(t *testing.T) {
+func TestVectorChunkManager(t *testing.T) {
 	Params.Init()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -39,29 +39,29 @@ func TestVectorFileManager(t *testing.T) {
 	assert.Nil(t, err)
 	defer minIOKV.RemoveWithPrefix("")
 
-	rfm := NewMinioFileManager(minIOKV)
+	rcm := NewMinioChunkManager(minIOKV)
 
 	localPath := "/tmp/milvus/data"
 
-	lfm := NewLocalFileManager(localPath)
+	lcm := NewLocalChunkManager(localPath)
 
 	schema := initSchema()
-	vfm := NewVectorFileManager(lfm, rfm, schema)
-	assert.NotNil(t, vfm)
+	vcm := NewVectorChunkManager(lcm, rcm, schema)
+	assert.NotNil(t, vcm)
 
 	binlogs := initBinlogFile(schema)
 	assert.NotNil(t, binlogs)
 	for _, binlog := range binlogs {
 		log.Debug("key", zap.Any("key", binlog.Key))
 		log.Debug("key", zap.Any("key", binlog.Value))
-		rfm.PutFile(binlog.Key, binlog.Value)
+		rcm.Write(binlog.Key, binlog.Value)
 	}
 
-	content, err := vfm.ReadAll("108")
+	content, err := vcm.ReadAll("108")
 	assert.Nil(t, err)
 	assert.Equal(t, []byte{0, 255}, content)
 
-	content, err = vfm.ReadAll("109")
+	content, err = vcm.ReadAll("109")
 	assert.Nil(t, err)
 
 	floatResult := make([]float32, 0)
@@ -72,7 +72,7 @@ func TestVectorFileManager(t *testing.T) {
 	assert.Equal(t, []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 111, 222, 333, 444, 555, 777, 666}, floatResult)
 
 	content = make([]byte, 8*4)
-	byteLen, err := vfm.ReadAt("109", content, 8*4)
+	byteLen, err := vcm.ReadAt("109", content, 8*4)
 	assert.Nil(t, err)
 	assert.Equal(t, 32, byteLen)
 

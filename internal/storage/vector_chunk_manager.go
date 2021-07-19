@@ -18,27 +18,27 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 )
 
-type VectorFileManager struct {
-	localFileManager  FileManager
-	remoteFileManager FileManager
+type VectorChunkManager struct {
+	localChunkManager  ChunkManager
+	remoteChunkManager ChunkManager
 
 	insertCodec *InsertCodec
 }
 
-func NewVectorFileManager(localFileManager FileManager, remoteFileManager FileManager, schema *etcdpb.CollectionMeta) *VectorFileManager {
+func NewVectorChunkManager(localChunkManager ChunkManager, remoteChunkManager ChunkManager, schema *etcdpb.CollectionMeta) *VectorChunkManager {
 	insertCodec := NewInsertCodec(schema)
-	return &VectorFileManager{
-		localFileManager:  localFileManager,
-		remoteFileManager: remoteFileManager,
-		insertCodec:       insertCodec,
+	return &VectorChunkManager{
+		localChunkManager:  localChunkManager,
+		remoteChunkManager: remoteChunkManager,
+		insertCodec:        insertCodec,
 	}
 }
 
-func (vfm *VectorFileManager) GetFile(key string) (string, error) {
-	if vfm.localFileManager.Exist(key) {
-		return vfm.localFileManager.GetFile(key)
+func (vcm *VectorChunkManager) Load(key string) (string, error) {
+	if vcm.localChunkManager.Exist(key) {
+		return vcm.localChunkManager.Load(key)
 	}
-	content, err := vfm.remoteFileManager.ReadAll(key)
+	content, err := vcm.remoteChunkManager.ReadAll(key)
 	if err != nil {
 		return "", err
 	}
@@ -47,7 +47,7 @@ func (vfm *VectorFileManager) GetFile(key string) (string, error) {
 		Value: content,
 	}
 
-	_, _, data, err := vfm.insertCodec.Deserialize([]*Blob{blob})
+	_, _, data, err := vcm.insertCodec.Deserialize([]*Blob{blob})
 	if err != nil {
 		return "", err
 	}
@@ -55,7 +55,7 @@ func (vfm *VectorFileManager) GetFile(key string) (string, error) {
 	for _, singleData := range data.Data {
 		binaryVector, ok := singleData.(*BinaryVectorFieldData)
 		if ok {
-			vfm.localFileManager.PutFile(key, binaryVector.Data)
+			vcm.localChunkManager.Write(key, binaryVector.Data)
 		}
 		floatVector, ok := singleData.(*FloatVectorFieldData)
 		if ok {
@@ -64,33 +64,33 @@ func (vfm *VectorFileManager) GetFile(key string) (string, error) {
 			for _, singleFloat := range floatData {
 				result = append(result, Float32ToByte(singleFloat)...)
 			}
-			vfm.localFileManager.PutFile(key, result)
+			vcm.localChunkManager.Write(key, result)
 		}
 	}
-	return vfm.localFileManager.GetFile(key)
+	return vcm.localChunkManager.Load(key)
 }
 
-func (vfm *VectorFileManager) PutFile(key string, content []byte) error {
-	return vfm.localFileManager.PutFile(key, content)
+func (vcm *VectorChunkManager) Write(key string, content []byte) error {
+	return vcm.localChunkManager.Write(key, content)
 }
 
-func (vfm *VectorFileManager) Exist(key string) bool {
-	return vfm.localFileManager.Exist(key)
+func (vcm *VectorChunkManager) Exist(key string) bool {
+	return vcm.localChunkManager.Exist(key)
 }
 
-func (vfm *VectorFileManager) ReadAll(key string) ([]byte, error) {
-	if vfm.localFileManager.Exist(key) {
-		return vfm.localFileManager.ReadAll(key)
+func (vcm *VectorChunkManager) ReadAll(key string) ([]byte, error) {
+	if vcm.localChunkManager.Exist(key) {
+		return vcm.localChunkManager.ReadAll(key)
 	}
-	_, err := vfm.GetFile(key)
+	_, err := vcm.Load(key)
 	if err != nil {
 		return nil, err
 	}
-	return vfm.localFileManager.ReadAll(key)
+	return vcm.localChunkManager.ReadAll(key)
 }
 
-func (vfm *VectorFileManager) ReadAt(key string, p []byte, off int64) (n int, err error) {
-	return vfm.localFileManager.ReadAt(key, p, off)
+func (vcm *VectorChunkManager) ReadAt(key string, p []byte, off int64) (n int, err error) {
+	return vcm.localChunkManager.ReadAt(key, p, off)
 }
 
 func Float32ToByte(float float32) []byte {
