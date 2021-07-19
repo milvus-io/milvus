@@ -36,6 +36,7 @@ using namespace milvus::segcore;
 // using namespace milvus::proto;
 using namespace milvus::knowhere;
 
+namespace {
 const char*
 get_default_schema_config() {
     static std::string conf = R"(name: "default-collection"
@@ -78,294 +79,6 @@ translate_text_plan_to_binary_plan(const char* text_plan) {
     return ret;
 }
 
-TEST(CApiTest, CollectionTest) {
-    auto collection = NewCollection(get_default_schema_config());
-    DeleteCollection(collection);
-}
-
-TEST(CApiTest, GetCollectionNameTest) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto name = GetCollectionName(collection);
-    assert(strcmp(name, "default-collection") == 0);
-    DeleteCollection(collection);
-}
-
-TEST(CApiTest, SegmentTest) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, 0, Growing);
-    DeleteCollection(collection);
-    DeleteSegment(segment);
-}
-
-TEST(CApiTest, InsertTest) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, 0, Growing);
-
-    std::vector<char> raw_data;
-    std::vector<uint64_t> timestamps;
-    std::vector<int64_t> uids;
-    int N = 10000;
-    std::default_random_engine e(67);
-    for (int i = 0; i < N; ++i) {
-        uids.push_back(100000 + i);
-        timestamps.push_back(0);
-        // append vec
-        float vec[16];
-        for (auto& x : vec) {
-            x = e() % 2000 * 0.001 - 1.0;
-        }
-        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
-        int age = e() % 100;
-        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
-    }
-
-    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
-
-    int64_t offset;
-    PreInsert(segment, N, &offset);
-
-    auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
-
-    assert(res.error_code == Success);
-
-    DeleteCollection(collection);
-    DeleteSegment(segment);
-}
-
-TEST(CApiTest, DeleteTest) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, 0, Growing);
-
-    long delete_row_ids[] = {100000, 100001, 100002};
-    unsigned long delete_timestamps[] = {0, 0, 0};
-
-    auto offset = PreDelete(segment, 3);
-
-    auto del_res = Delete(segment, offset, 3, delete_row_ids, delete_timestamps);
-    assert(del_res.error_code == Success);
-
-    DeleteCollection(collection);
-    DeleteSegment(segment);
-}
-
-TEST(CApiTest, SearchTest) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, 0, Growing);
-
-    std::vector<char> raw_data;
-    std::vector<uint64_t> timestamps;
-    std::vector<int64_t> uids;
-    int N = 10000;
-    std::default_random_engine e(67);
-    for (int i = 0; i < N; ++i) {
-        uids.push_back(100000 + i);
-        timestamps.push_back(0);
-        // append vec
-        float vec[16];
-        for (auto& x : vec) {
-            x = e() % 2000 * 0.001 - 1.0;
-        }
-        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
-        int age = e() % 100;
-        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
-    }
-
-    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
-
-    int64_t offset;
-    PreInsert(segment, N, &offset);
-
-    auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
-    ASSERT_EQ(ins_res.error_code, Success);
-
-    const char* dsl_string = R"(
-    {
-        "bool": {
-            "vector": {
-                "fakevec": {
-                    "metric_type": "L2",
-                    "params": {
-                        "nprobe": 10
-                    },
-                    "query": "$0",
-                    "topk": 10
-                }
-            }
-        }
-    })";
-
-    namespace ser = milvus::proto::milvus;
-    int num_queries = 10;
-    int dim = 16;
-    std::normal_distribution<double> dis(0, 1);
-    ser::PlaceholderGroup raw_group;
-    auto value = raw_group.add_placeholders();
-    value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::FloatVector);
-    for (int i = 0; i < num_queries; ++i) {
-        std::vector<float> vec;
-        for (int d = 0; d < dim; ++d) {
-            vec.push_back(dis(e));
-        }
-        // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
-        value->add_values(vec.data(), vec.size() * sizeof(float));
-    }
-    auto blob = raw_group.SerializeAsString();
-
-    void* plan = nullptr;
-
-    auto status = CreateSearchPlan(collection, dsl_string, &plan);
-    ASSERT_EQ(status.error_code, Success);
-
-    void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
-    ASSERT_EQ(status.error_code, Success);
-
-    std::vector<CPlaceholderGroup> placeholderGroups;
-    placeholderGroups.push_back(placeholderGroup);
-    timestamps.clear();
-    timestamps.push_back(1);
-
-    CSearchResult search_result;
-    auto res = Search(segment, plan, placeholderGroup, timestamps[0], &search_result);
-    ASSERT_EQ(res.error_code, Success);
-
-    DeleteSearchPlan(plan);
-    DeletePlaceholderGroup(placeholderGroup);
-    DeleteSearchResult(search_result);
-    DeleteCollection(collection);
-    DeleteSegment(segment);
-}
-
-TEST(CApiTest, SearchTestWithExpr) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, 0, Growing);
-
-    std::vector<char> raw_data;
-    std::vector<uint64_t> timestamps;
-    std::vector<int64_t> uids;
-    int N = 10000;
-    std::default_random_engine e(67);
-    for (int i = 0; i < N; ++i) {
-        uids.push_back(100000 + i);
-        timestamps.push_back(0);
-        // append vec
-        float vec[16];
-        for (auto& x : vec) {
-            x = e() % 2000 * 0.001 - 1.0;
-        }
-        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
-        int age = e() % 100;
-        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
-    }
-
-    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
-
-    int64_t offset;
-    PreInsert(segment, N, &offset);
-
-    auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
-    ASSERT_EQ(ins_res.error_code, Success);
-
-    const char* serialized_expr_plan = R"(vector_anns: <
-                                            field_id: 100
-                                            query_info: <
-                                                topk: 10
-                                                metric_type: "L2"
-                                                search_params: "{\"nprobe\": 10}"
-                                            >
-                                            placeholder_tag: "$0"
-                                         >)";
-
-    namespace ser = milvus::proto::milvus;
-    int num_queries = 10;
-    int dim = 16;
-    std::normal_distribution<double> dis(0, 1);
-    ser::PlaceholderGroup raw_group;
-    auto value = raw_group.add_placeholders();
-    value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::FloatVector);
-    for (int i = 0; i < num_queries; ++i) {
-        std::vector<float> vec;
-        for (int d = 0; d < dim; ++d) {
-            vec.push_back(dis(e));
-        }
-        // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
-        value->add_values(vec.data(), vec.size() * sizeof(float));
-    }
-    auto blob = raw_group.SerializeAsString();
-
-    void* plan = nullptr;
-    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
-    ASSERT_EQ(status.error_code, Success);
-
-    void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
-    ASSERT_EQ(status.error_code, Success);
-
-    std::vector<CPlaceholderGroup> placeholderGroups;
-    placeholderGroups.push_back(placeholderGroup);
-    timestamps.clear();
-    timestamps.push_back(1);
-
-    CSearchResult search_result;
-    auto res = Search(segment, plan, placeholderGroup, timestamps[0], &search_result);
-    ASSERT_EQ(res.error_code, Success);
-
-    DeleteSearchPlan(plan);
-    DeletePlaceholderGroup(placeholderGroup);
-    DeleteSearchResult(search_result);
-    DeleteCollection(collection);
-    DeleteSegment(segment);
-}
-
-TEST(CApiTest, GetMemoryUsageInBytesTest) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, 0, Growing);
-
-    auto old_memory_usage_size = GetMemoryUsageInBytes(segment);
-    std::cout << "old_memory_usage_size = " << old_memory_usage_size << std::endl;
-
-    std::vector<char> raw_data;
-    std::vector<uint64_t> timestamps;
-    std::vector<int64_t> uids;
-    int N = 10000;
-    std::default_random_engine e(67);
-    for (int i = 0; i < N; ++i) {
-        uids.push_back(100000 + i);
-        timestamps.push_back(0);
-        // append vec
-        float vec[16];
-        for (auto& x : vec) {
-            x = e() % 2000 * 0.001 - 1.0;
-        }
-        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
-        int age = e() % 100;
-        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
-    }
-
-    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
-
-    //    auto offset = PreInsert(segment, N);
-    int64_t offset;
-    PreInsert(segment, N, &offset);
-
-    auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
-
-    assert(res.error_code == Success);
-
-    auto memory_usage_size = GetMemoryUsageInBytes(segment);
-
-    std::cout << "new_memory_usage_size = " << memory_usage_size << std::endl;
-
-    assert(memory_usage_size == 2785280);
-
-    DeleteCollection(collection);
-    DeleteSegment(segment);
-}
-
-namespace {
 auto
 generate_data(int N) {
     std::vector<char> raw_data;
@@ -387,6 +100,27 @@ generate_data(int N) {
         raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
     }
     return std::make_tuple(raw_data, timestamps, uids);
+}
+
+std::string
+generate_query_data(int nq) {
+    namespace ser = milvus::proto::milvus;
+    std::default_random_engine e(67);
+    int dim = 16;
+    std::normal_distribution<double> dis(0, 1);
+    ser::PlaceholderGroup raw_group;
+    auto value = raw_group.add_placeholders();
+    value->set_tag("$0");
+    value->set_type(ser::PlaceholderType::FloatVector);
+    for (int i = 0; i < nq; ++i) {
+        std::vector<float> vec;
+        for (int d = 0; d < dim; ++d) {
+            vec.push_back(dis(e));
+        }
+        value->add_values(vec.data(), vec.size() * sizeof(float));
+    }
+    auto blob = raw_group.SerializeAsString();
+    return blob;
 }
 
 std::string
@@ -438,8 +172,194 @@ generate_index(
     EXPECT_EQ(indexing->Dim(), dim);
     return indexing;
 }
-
 }  // namespace
+
+TEST(CApiTest, CollectionTest) {
+    auto collection = NewCollection(get_default_schema_config());
+    DeleteCollection(collection);
+}
+
+TEST(CApiTest, GetCollectionNameTest) {
+    auto collection = NewCollection(get_default_schema_config());
+    auto name = GetCollectionName(collection);
+    assert(strcmp(name, "default-collection") == 0);
+    DeleteCollection(collection);
+}
+
+TEST(CApiTest, SegmentTest) {
+    auto collection = NewCollection(get_default_schema_config());
+    auto segment = NewSegment(collection, 0, Growing);
+    DeleteCollection(collection);
+    DeleteSegment(segment);
+}
+
+TEST(CApiTest, InsertTest) {
+    auto collection = NewCollection(get_default_schema_config());
+    auto segment = NewSegment(collection, 0, Growing);
+
+    int N = 10000;
+    auto [raw_data, timestamps, uids] = generate_data(N);
+    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
+
+    int64_t offset;
+    PreInsert(segment, N, &offset);
+
+    auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
+    assert(res.error_code == Success);
+
+    DeleteCollection(collection);
+    DeleteSegment(segment);
+}
+
+TEST(CApiTest, DeleteTest) {
+    auto collection = NewCollection(get_default_schema_config());
+    auto segment = NewSegment(collection, 0, Growing);
+
+    long delete_row_ids[] = {100000, 100001, 100002};
+    unsigned long delete_timestamps[] = {0, 0, 0};
+
+    auto offset = PreDelete(segment, 3);
+
+    auto del_res = Delete(segment, offset, 3, delete_row_ids, delete_timestamps);
+    assert(del_res.error_code == Success);
+
+    DeleteCollection(collection);
+    DeleteSegment(segment);
+}
+
+TEST(CApiTest, SearchTest) {
+    auto collection = NewCollection(get_default_schema_config());
+    auto segment = NewSegment(collection, 0, Growing);
+
+    int N = 10000;
+    auto [raw_data, timestamps, uids] = generate_data(N);
+    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
+
+    int64_t offset;
+    PreInsert(segment, N, &offset);
+
+    auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
+    ASSERT_EQ(ins_res.error_code, Success);
+
+    const char* dsl_string = R"(
+    {
+        "bool": {
+            "vector": {
+                "fakevec": {
+                    "metric_type": "L2",
+                    "params": {
+                        "nprobe": 10
+                    },
+                    "query": "$0",
+                    "topk": 10
+                }
+            }
+        }
+    })";
+
+    int num_queries = 10;
+    auto blob = generate_query_data(num_queries);
+
+    void* plan = nullptr;
+    auto status = CreateSearchPlan(collection, dsl_string, &plan);
+    ASSERT_EQ(status.error_code, Success);
+
+    void* placeholderGroup = nullptr;
+    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    ASSERT_EQ(status.error_code, Success);
+
+    std::vector<CPlaceholderGroup> placeholderGroups;
+    placeholderGroups.push_back(placeholderGroup);
+    timestamps.clear();
+    timestamps.push_back(1);
+
+    CSearchResult search_result;
+    auto res = Search(segment, plan, placeholderGroup, timestamps[0], &search_result);
+    ASSERT_EQ(res.error_code, Success);
+
+    DeleteSearchPlan(plan);
+    DeletePlaceholderGroup(placeholderGroup);
+    DeleteSearchResult(search_result);
+    DeleteCollection(collection);
+    DeleteSegment(segment);
+}
+
+TEST(CApiTest, SearchTestWithExpr) {
+    auto collection = NewCollection(get_default_schema_config());
+    auto segment = NewSegment(collection, 0, Growing);
+
+    int N = 10000;
+    auto [raw_data, timestamps, uids] = generate_data(N);
+    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
+
+    int64_t offset;
+    PreInsert(segment, N, &offset);
+
+    auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
+    ASSERT_EQ(ins_res.error_code, Success);
+
+    const char* serialized_expr_plan = R"(vector_anns: <
+                                            field_id: 100
+                                            query_info: <
+                                                topk: 10
+                                                metric_type: "L2"
+                                                search_params: "{\"nprobe\": 10}"
+                                            >
+                                            placeholder_tag: "$0"
+                                         >)";
+
+    int num_queries = 10;
+    auto blob = generate_query_data(num_queries);
+
+    void* plan = nullptr;
+    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
+    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    ASSERT_EQ(status.error_code, Success);
+
+    void* placeholderGroup = nullptr;
+    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    ASSERT_EQ(status.error_code, Success);
+
+    std::vector<CPlaceholderGroup> placeholderGroups;
+    placeholderGroups.push_back(placeholderGroup);
+    timestamps.clear();
+    timestamps.push_back(1);
+
+    CSearchResult search_result;
+    auto res = Search(segment, plan, placeholderGroup, timestamps[0], &search_result);
+    ASSERT_EQ(res.error_code, Success);
+
+    DeleteSearchPlan(plan);
+    DeletePlaceholderGroup(placeholderGroup);
+    DeleteSearchResult(search_result);
+    DeleteCollection(collection);
+    DeleteSegment(segment);
+}
+
+TEST(CApiTest, GetMemoryUsageInBytesTest) {
+    auto collection = NewCollection(get_default_schema_config());
+    auto segment = NewSegment(collection, 0, Growing);
+
+    auto old_memory_usage_size = GetMemoryUsageInBytes(segment);
+    //std::cout << "old_memory_usage_size = " << old_memory_usage_size << std::endl;
+
+    int N = 10000;
+    auto [raw_data, timestamps, uids] = generate_data(N);
+    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
+
+    int64_t offset;
+    PreInsert(segment, N, &offset);
+
+    auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
+    assert(res.error_code == Success);
+
+    auto memory_usage_size = GetMemoryUsageInBytes(segment);
+    //std::cout << "new_memory_usage_size = " << memory_usage_size << std::endl;
+    assert(memory_usage_size == 2785280);
+
+    DeleteCollection(collection);
+    DeleteSegment(segment);
+}
 
 TEST(CApiTest, GetDeletedCountTest) {
     auto collection = NewCollection(get_default_schema_config());
@@ -468,7 +388,7 @@ TEST(CApiTest, GetRowCountTest) {
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_data(N);
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
-    //    auto offset = PreInsert(segment, N);
+
     int64_t offset;
     PreInsert(segment, N, &offset);
     auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
@@ -527,27 +447,10 @@ TEST(CApiTest, Reduce) {
     auto collection = NewCollection(get_default_schema_config());
     auto segment = NewSegment(collection, 0, Growing);
 
-    std::vector<char> raw_data;
-    std::vector<uint64_t> timestamps;
-    std::vector<int64_t> uids;
     int N = 10000;
-    std::default_random_engine e(67);
-    for (int i = 0; i < N; ++i) {
-        uids.push_back(100000 + i);
-        timestamps.push_back(0);
-        // append vec
-        float vec[16];
-        for (auto& x : vec) {
-            x = e() % 2000 * 0.001 - 1.0;
-        }
-        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
-        int age = e() % 100;
-        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
-    }
-
+    auto [raw_data, timestamps, uids] = generate_data(N);
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
-    //    auto offset = PreInsert(segment, N);
     int64_t offset;
     PreInsert(segment, N, &offset);
     auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
@@ -569,26 +472,10 @@ TEST(CApiTest, Reduce) {
         }
     })";
 
-    namespace ser = milvus::proto::milvus;
     int num_queries = 10;
-    int dim = 16;
-    std::normal_distribution<double> dis(0, 1);
-    ser::PlaceholderGroup raw_group;
-    auto value = raw_group.add_placeholders();
-    value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::FloatVector);
-    for (int i = 0; i < num_queries; ++i) {
-        std::vector<float> vec;
-        for (int d = 0; d < dim; ++d) {
-            vec.push_back(dis(e));
-        }
-        // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
-        value->add_values(vec.data(), vec.size() * sizeof(float));
-    }
-    auto blob = raw_group.SerializeAsString();
+    auto blob = generate_query_data(num_queries);
 
     void* plan = nullptr;
-
     auto status = CreateSearchPlan(collection, dsl_string, &plan);
     assert(status.error_code == Success);
 
@@ -645,27 +532,10 @@ TEST(CApiTest, ReduceSearchWithExpr) {
     auto collection = NewCollection(get_default_schema_config());
     auto segment = NewSegment(collection, 0, Growing);
 
-    std::vector<char> raw_data;
-    std::vector<uint64_t> timestamps;
-    std::vector<int64_t> uids;
     int N = 10000;
-    std::default_random_engine e(67);
-    for (int i = 0; i < N; ++i) {
-        uids.push_back(100000 + i);
-        timestamps.push_back(0);
-        // append vec
-        float vec[16];
-        for (auto& x : vec) {
-            x = e() % 2000 * 0.001 - 1.0;
-        }
-        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
-        int age = e() % 100;
-        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
-    }
-
+    auto [raw_data, timestamps, uids] = generate_data(N);
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
-    //    auto offset = PreInsert(segment, N);
     int64_t offset;
     PreInsert(segment, N, &offset);
     auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
@@ -681,23 +551,8 @@ TEST(CApiTest, ReduceSearchWithExpr) {
                                             placeholder_tag: "$0"
                                          >)";
 
-    namespace ser = milvus::proto::milvus;
     int num_queries = 10;
-    int dim = 16;
-    std::normal_distribution<double> dis(0, 1);
-    ser::PlaceholderGroup raw_group;
-    auto value = raw_group.add_placeholders();
-    value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::FloatVector);
-    for (int i = 0; i < num_queries; ++i) {
-        std::vector<float> vec;
-        for (int d = 0; d < dim; ++d) {
-            vec.push_back(dis(e));
-        }
-        // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
-        value->add_values(vec.data(), vec.size() * sizeof(float));
-    }
-    auto blob = raw_group.SerializeAsString();
+    auto blob = generate_query_data(num_queries);
 
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
@@ -841,9 +696,9 @@ TEST(CApiTest, LoadIndex_Search) {
 
     auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
     auto dis = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
-    for (int i = 0; i < std::min(num_query * K, 100); ++i) {
-        std::cout << ids[i] << "->" << dis[i] << std::endl;
-    }
+    //for (int i = 0; i < std::min(num_query * K, 100); ++i) {
+    //    std::cout << ids[i] << "->" << dis[i] << std::endl;
+    //}
 }
 
 TEST(CApiTest, Indexing_Without_Predicate) {
@@ -956,8 +811,8 @@ TEST(CApiTest, Indexing_Without_Predicate) {
 
     auto search_result_on_raw_index_json = SearchResultToJson(*search_result_on_raw_index);
     auto search_result_on_bigIndex_json = SearchResultToJson((*(SearchResult*)c_search_result_on_bigIndex));
-    std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
-    std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
+    //std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
+    //std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
 
     ASSERT_EQ(search_result_on_raw_index_json.dump(1), search_result_on_bigIndex_json.dump(1));
 
@@ -1075,8 +930,8 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
 
     auto search_result_on_raw_index_json = SearchResultToJson(*search_result_on_raw_index);
     auto search_result_on_bigIndex_json = SearchResultToJson((*(SearchResult*)c_search_result_on_bigIndex));
-    std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
-    std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
+    //std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
+    //std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
 
     ASSERT_EQ(search_result_on_raw_index_json.dump(1), search_result_on_bigIndex_json.dump(1));
 
