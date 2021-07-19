@@ -205,7 +205,7 @@ type DdTaskQueue struct {
 
 type pChanStatInfo struct {
 	pChanStatistics
-	refCnt int
+	tsSet map[Timestamp]struct{}
 }
 
 type DmTaskQueue struct {
@@ -258,7 +258,9 @@ func (queue *DmTaskQueue) addPChanStats(t task) error {
 			if !ok {
 				info = &pChanStatInfo{
 					pChanStatistics: stat,
-					refCnt:          1,
+					tsSet: map[Timestamp]struct{}{
+						stat.minTs: {},
+					},
 				}
 				queue.pChanStatisticsInfos[cName] = info
 			} else {
@@ -268,7 +270,7 @@ func (queue *DmTaskQueue) addPChanStats(t task) error {
 				if info.maxTs < stat.maxTs {
 					queue.pChanStatisticsInfos[cName].maxTs = stat.maxTs
 				}
-				queue.pChanStatisticsInfos[cName].refCnt++
+				queue.pChanStatisticsInfos[cName].tsSet[info.minTs] = struct{}{}
 			}
 		}
 		queue.statsLock.Unlock()
@@ -288,9 +290,17 @@ func (queue *DmTaskQueue) popPChanStats(t task) error {
 		for _, cName := range channels {
 			info, ok := queue.pChanStatisticsInfos[cName]
 			if ok {
-				info.refCnt--
-				if info.refCnt <= 0 {
+				delete(queue.pChanStatisticsInfos[cName].tsSet, info.minTs)
+				if len(queue.pChanStatisticsInfos[cName].tsSet) <= 0 {
 					delete(queue.pChanStatisticsInfos, cName)
+				} else if queue.pChanStatisticsInfos[cName].minTs == info.minTs {
+					minTs := info.maxTs
+					for ts := range queue.pChanStatisticsInfos[cName].tsSet {
+						if ts < minTs {
+							minTs = ts
+						}
+					}
+					queue.pChanStatisticsInfos[cName].minTs = minTs
 				}
 			}
 		}
