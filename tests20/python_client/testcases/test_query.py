@@ -53,6 +53,7 @@ class TestQueryBase(TestcaseBase):
         assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(reason="issue #6650")
     def test_query_auto_id_collection(self):
         """
         target: test query with auto_id=True collection
