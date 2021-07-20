@@ -107,7 +107,6 @@ TEST(SegmentCoreTest, MockTest) {
     segment->Insert(offset, N, uids.data(), timestamps.data(), data_chunk);
     SearchResult search_result;
     // segment->Query(nullptr, 0, query_result);
-    segment->Close();
     // segment->BuildIndex();
     int i = 0;
     i++;

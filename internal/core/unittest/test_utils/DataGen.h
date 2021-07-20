@@ -18,6 +18,7 @@
 #include "segcore/SegmentSealed.h"
 #include "Constants.h"
 #include <boost/algorithm/string/predicate.hpp>
+#include "segcore/SegmentSealed.h"
 
 #include <knowhere/index/vector_index/VecIndex.h>
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
@@ -319,6 +320,14 @@ SealedLoader(const GeneratedData& dataset, SegmentSealed& seg) {
         seg.LoadFieldData(info);
         ++field_offset;
     }
+}
+
+inline std::unique_ptr<SegmentSealed>
+SealedCreator(SchemaPtr schema, const GeneratedData& dataset, const LoadIndexInfo& index_info) {
+    auto segment = CreateSealedSegment(schema);
+    SealedLoader(dataset, *segment);
+    segment->LoadIndex(index_info);
+    return segment;
 }
 
 inline knowhere::VecIndexPtr
