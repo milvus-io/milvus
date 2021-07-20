@@ -13,9 +13,11 @@ package querynode
 
 import (
 	"context"
+
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"go.uber.org/zap"
 )
 
 type inputStage struct {
@@ -49,7 +51,7 @@ func newInputStage(ctx context.Context,
 func (q *inputStage) start() {
 	log.Debug("start input stage",
 		zap.Any("collectionID", q.collectionID),
-		)
+	)
 	for {
 		select {
 		case <-q.ctx.Done():

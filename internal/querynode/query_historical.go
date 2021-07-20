@@ -15,6 +15,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	oplog "github.com/opentracing/opentracing-go/log"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -22,8 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	oplog "github.com/opentracing/opentracing-go/log"
-	"go.uber.org/zap"
 )
 
 type historicalStage struct {

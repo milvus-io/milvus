@@ -13,6 +13,7 @@ package querynode
 
 import (
 	"context"
+
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
@@ -137,7 +138,7 @@ func (q *queryCollection) start() error {
 		q.streaming,
 		q.historical,
 		q.queryResultMsgStream)
-	resChan := make(chan queryResult, queryBufferSize * (len(channels) + 1)) // vChannels + historical
+	resChan := make(chan queryResult, queryBufferSize*(len(channels)+1)) // vChannels + historical
 	hisStage := newHistoricalStage(q.releaseCtx,
 		q.cancel,
 		q.collectionID,

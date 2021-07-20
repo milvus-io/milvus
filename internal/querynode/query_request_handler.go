@@ -14,14 +14,16 @@ package querynode
 import (
 	"context"
 	"fmt"
+
+	oplog "github.com/opentracing/opentracing-go/log"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	oplog "github.com/opentracing/opentracing-go/log"
-	"go.uber.org/zap"
 )
 
 type requestHandlerStage struct {

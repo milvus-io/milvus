@@ -15,7 +15,12 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
+
 	"github.com/golang/protobuf/proto"
+	oplog "github.com/opentracing/opentracing-go/log"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -26,9 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	oplog "github.com/opentracing/opentracing-go/log"
-	"go.uber.org/zap"
-	"math"
 )
 
 type resultHandlerStage struct {

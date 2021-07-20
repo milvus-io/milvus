@@ -13,9 +13,11 @@ package querynode
 
 import (
 	"context"
+
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"go.uber.org/zap"
 )
 
 type loadBalanceStage struct {
