@@ -86,19 +86,17 @@ generate_data(int N) {
     std::vector<char> raw_data;
     std::vector<uint64_t> timestamps;
     std::vector<int64_t> uids;
-    std::default_random_engine er(42);
-    std::normal_distribution<> distribution(0.0, 1.0);
-    std::default_random_engine ei(42);
+    std::default_random_engine e(42);
+    std::normal_distribution<> dis(0.0, 1.0);
     for (int i = 0; i < N; ++i) {
         uids.push_back(10 * N + i);
         timestamps.push_back(0);
-        // append vec
         float vec[DIM];
         for (auto& x : vec) {
-            x = distribution(er);
+            x = dis(e);
         }
         raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
-        int age = ei() % 100;
+        int age = e() % 100;
         raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
     }
     return std::make_tuple(raw_data, timestamps, uids);
@@ -109,7 +107,7 @@ generate_query_data(int nq) {
     namespace ser = milvus::proto::milvus;
     std::default_random_engine e(67);
     int dim = DIM;
-    std::normal_distribution<double> dis(0, 1);
+    std::normal_distribution<double> dis(0.0, 1.0);
     ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
@@ -344,6 +342,7 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
 
     auto old_memory_usage_size = GetMemoryUsageInBytes(segment);
     //std::cout << "old_memory_usage_size = " << old_memory_usage_size << std::endl;
+    assert(old_memory_usage_size == 0);
 
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_data(N);
@@ -717,7 +716,7 @@ TEST(CApiTest, Indexing_Without_Predicate) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
@@ -840,7 +839,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
@@ -958,7 +957,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
@@ -1095,7 +1094,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     {
         int64_t offset;
         PreInsert(segment, N, &offset);
-        auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+        auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                               dataset.raw_.sizeof_per_row, dataset.raw_.count);
         assert(ins_res.error_code == Success);
     }
@@ -1245,7 +1244,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
@@ -1380,7 +1379,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
@@ -1580,7 +1579,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
@@ -1717,7 +1716,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
@@ -1867,7 +1866,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
@@ -2010,7 +2009,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
