@@ -95,16 +95,6 @@ DropFieldData(CSegmentInterface c_segment, int64_t field_id);
 CStatus
 DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id);
 
-//////////////////////////////    deprecated interfaces    //////////////////////////////
-CStatus
-UpdateSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_index_info);
-
-int
-Close(CSegmentInterface c_segment);
-
-bool
-IsOpened(CSegmentInterface c_segment);
-
 #ifdef __cplusplus
 }
 #endif

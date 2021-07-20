@@ -320,28 +320,6 @@ TEST(CApiTest, SearchTestWithExpr) {
     DeleteSegment(segment);
 }
 
-TEST(CApiTest, IsOpenedTest) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, 0, Growing);
-
-    auto is_opened = IsOpened(segment);
-    assert(is_opened);
-
-    DeleteCollection(collection);
-    DeleteSegment(segment);
-}
-
-TEST(CApiTest, CloseTest) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, 0, Growing);
-
-    auto status = Close(segment);
-    assert(status == 0);
-
-    DeleteCollection(collection);
-    DeleteSegment(segment);
-}
-
 TEST(CApiTest, GetMemoryUsageInBytesTest) {
     auto collection = NewCollection(get_default_schema_config());
     auto segment = NewSegment(collection, 0, Growing);
@@ -868,7 +846,7 @@ TEST(CApiTest, LoadIndex_Search) {
     }
 }
 
-TEST(CApiTest, UpdateSegmentIndex_Without_Predicate) {
+TEST(CApiTest, Indexing_Without_Predicate) {
     // insert data to segment
     constexpr auto DIM = 16;
     constexpr auto K = 5;
@@ -970,11 +948,10 @@ TEST(CApiTest, UpdateSegmentIndex_Without_Predicate) {
     AppendFieldInfo(c_load_index_info, 100);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
-    status = UpdateSegmentIndex(segment, c_load_index_info);
-    assert(status.error_code == Success);
-
+    auto sealed_segment = SealedCreator(schema, dataset, *(LoadIndexInfo*)c_load_index_info);
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index =
+        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     auto search_result_on_raw_index_json = SearchResultToJson(*search_result_on_raw_index);
@@ -993,7 +970,7 @@ TEST(CApiTest, UpdateSegmentIndex_Without_Predicate) {
     DeleteSegment(segment);
 }
 
-TEST(CApiTest, UpdateSegmentIndex_Expr_Without_Predicate) {
+TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     // insert data to segment
     constexpr auto DIM = 16;
     constexpr auto K = 5;
@@ -1090,11 +1067,10 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_Without_Predicate) {
     AppendFieldInfo(c_load_index_info, 100);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
-    status = UpdateSegmentIndex(segment, c_load_index_info);
-    assert(status.error_code == Success);
-
+    auto sealed_segment = SealedCreator(schema, dataset, *(LoadIndexInfo*)c_load_index_info);
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index =
+        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     auto search_result_on_raw_index_json = SearchResultToJson(*search_result_on_raw_index);
@@ -1113,7 +1089,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_Without_Predicate) {
     DeleteSegment(segment);
 }
 
-TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Range) {
+TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     // insert data to segment
     constexpr auto DIM = 16;
     constexpr auto K = 5;
@@ -1227,11 +1203,10 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Range) {
     AppendFieldInfo(c_load_index_info, 100);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
-    status = UpdateSegmentIndex(segment, c_load_index_info);
-    assert(status.error_code == Success);
-
+    auto sealed_segment = SealedCreator(schema, dataset, *(LoadIndexInfo*)c_load_index_info);
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index =
+        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
@@ -1251,7 +1226,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Range) {
     DeleteSegment(segment);
 }
 
-TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Range) {
+TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     // insert data to segment
     constexpr auto DIM = 16;
     constexpr auto K = 5;
@@ -1266,11 +1241,13 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Range) {
     auto vec_col = dataset.get_col<float>(0);
     auto query_ptr = vec_col.data() + 420000 * DIM;
 
-    int64_t offset;
-    PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
-                          dataset.raw_.sizeof_per_row, dataset.raw_.count);
-    assert(ins_res.error_code == Success);
+    {
+        int64_t offset;
+        PreInsert(segment, N, &offset);
+        auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+                              dataset.raw_.sizeof_per_row, dataset.raw_.count);
+        assert(ins_res.error_code == Success);
+    }
 
     const char* serialized_expr_plan = R"(vector_anns: <
                                             field_id: 100
@@ -1378,11 +1355,10 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Range) {
     AppendFieldInfo(c_load_index_info, 100);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
-    status = UpdateSegmentIndex(segment, c_load_index_info);
-    assert(status.error_code == Success);
-
+    auto sealed_segment = SealedCreator(schema, dataset, *(LoadIndexInfo*)c_load_index_info);
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index =
+        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
@@ -1402,7 +1378,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Range) {
     DeleteSegment(segment);
 }
 
-TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Term) {
+TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     // insert data to segment
     constexpr auto DIM = 16;
     constexpr auto K = 5;
@@ -1515,11 +1491,10 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Term) {
     AppendFieldInfo(c_load_index_info, 100);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
-    status = UpdateSegmentIndex(segment, c_load_index_info);
-    assert(status.error_code == Success);
-
+    auto sealed_segment = SealedCreator(schema, dataset, *(LoadIndexInfo*)c_load_index_info);
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index =
+        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
@@ -1539,7 +1514,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_float_Predicate_Term) {
     DeleteSegment(segment);
 }
 
-TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Term) {
+TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     // insert data to segment
     constexpr auto DIM = 16;
     constexpr auto K = 5;
@@ -1717,11 +1692,10 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Term) {
     AppendFieldInfo(c_load_index_info, 100);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
-    status = UpdateSegmentIndex(segment, c_load_index_info);
-    assert(status.error_code == Success);
-
+    auto sealed_segment = SealedCreator(schema, dataset, *(LoadIndexInfo*)c_load_index_info);
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index =
+        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
@@ -1741,7 +1715,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_float_Predicate_Term) {
     DeleteSegment(segment);
 }
 
-TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Range) {
+TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     // insert data to segment
     constexpr auto DIM = 16;
     constexpr auto K = 5;
@@ -1856,11 +1830,10 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Range) {
     AppendFieldInfo(c_load_index_info, 100);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
-    status = UpdateSegmentIndex(segment, c_load_index_info);
-    assert(status.error_code == Success);
-
+    auto sealed_segment = SealedCreator(schema, dataset, *(LoadIndexInfo*)c_load_index_info);
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index =
+        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
@@ -1880,7 +1853,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Range) {
     DeleteSegment(segment);
 }
 
-TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Range) {
+TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     // insert data to segment
     constexpr auto DIM = 16;
     constexpr auto K = 5;
@@ -2008,11 +1981,10 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Range) {
     AppendFieldInfo(c_load_index_info, 100);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
-    status = UpdateSegmentIndex(segment, c_load_index_info);
-    assert(status.error_code == Success);
-
+    auto sealed_segment = SealedCreator(schema, dataset, *(LoadIndexInfo*)c_load_index_info);
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index =
+        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
@@ -2032,7 +2004,7 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Range) {
     DeleteSegment(segment);
 }
 
-TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Term) {
+TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     // insert data to segment
     constexpr auto DIM = 16;
     constexpr auto K = 5;
@@ -2146,11 +2118,10 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Term) {
     AppendFieldInfo(c_load_index_info, 100);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
-    status = UpdateSegmentIndex(segment, c_load_index_info);
-    assert(status.error_code == Success);
-
+    auto sealed_segment = SealedCreator(schema, dataset, *(LoadIndexInfo*)c_load_index_info);
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index =
+        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     std::vector<CSearchResult> results;
@@ -2177,7 +2148,7 @@ TEST(CApiTest, UpdateSegmentIndex_With_binary_Predicate_Term) {
     DeleteSegment(segment);
 }
 
-TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Term) {
+TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     // insert data to segment
     constexpr auto DIM = 16;
     constexpr auto K = 5;
@@ -2356,11 +2327,10 @@ TEST(CApiTest, UpdateSegmentIndex_Expr_With_binary_Predicate_Term) {
     AppendFieldInfo(c_load_index_info, 100);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
-    status = UpdateSegmentIndex(segment, c_load_index_info);
-    assert(status.error_code == Success);
-
+    auto sealed_segment = SealedCreator(schema, dataset, *(LoadIndexInfo*)c_load_index_info);
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index =
+        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     std::vector<CSearchResult> results;
@@ -2567,11 +2537,10 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     status = LoadFieldData(segment, c_ts_field_data);
     assert(status.error_code == Success);
 
-    status = UpdateSealedSegmentIndex(segment, c_load_index_info);
-    assert(status.error_code == Success);
-
+    auto sealed_segment = SealedCreator(schema, dataset, *(LoadIndexInfo*)c_load_index_info);
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index =
+        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
