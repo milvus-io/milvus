@@ -11,7 +11,6 @@ package datacoord
 
 import (
 	"context"
-	"math"
 	"path"
 	"strconv"
 	"testing"
@@ -26,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 	"go.etcd.io/etcd/clientv3"
 )
@@ -57,52 +55,46 @@ func TestAssignSegmentID(t *testing.T) {
 		Schema:     schema,
 		Partitions: []int64{},
 	})
-	recordSize, err := typeutil.EstimateSizePerRecord(schema)
-	assert.Nil(t, err)
-	maxCount := int(Params.SegmentMaxSize * 1024 * 1024 / float64(recordSize))
 
-	cases := []struct {
-		Description  string
-		CollectionID UniqueID
-		PartitionID  UniqueID
-		ChannelName  string
-		Count        uint32
-		Success      bool
-	}{
-		{"assign segment normally", collID, partID, channel0, 1000, true},
-		{"assign segment with invalid collection", collIDInvalid, partID, channel0, 1000, false},
-		{"assign with max count", collID, partID, channel0, uint32(maxCount), true},
-		{"assign with max uint32 count", collID, partID, channel1, math.MaxUint32, false},
-	}
+	t.Run("assign segment normally", func(t *testing.T) {
+		req := &datapb.SegmentIDRequest{
+			Count:        1000,
+			ChannelName:  channel0,
+			CollectionID: collID,
+			PartitionID:  partID,
+		}
 
-	for _, test := range cases {
-		t.Run(test.Description, func(t *testing.T) {
-			req := &datapb.SegmentIDRequest{
-				Count:        test.Count,
-				ChannelName:  test.ChannelName,
-				CollectionID: test.CollectionID,
-				PartitionID:  test.PartitionID,
-			}
-
-			resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
-				NodeID:            0,
-				PeerRole:          "",
-				SegmentIDRequests: []*datapb.SegmentIDRequest{req},
-			})
-			assert.Nil(t, err)
-			assert.EqualValues(t, 1, len(resp.SegIDAssignments))
-			assign := resp.SegIDAssignments[0]
-			if test.Success {
-				assert.EqualValues(t, commonpb.ErrorCode_Success, assign.Status.ErrorCode)
-				assert.EqualValues(t, test.CollectionID, assign.CollectionID)
-				assert.EqualValues(t, test.PartitionID, assign.PartitionID)
-				assert.EqualValues(t, test.ChannelName, assign.ChannelName)
-				assert.EqualValues(t, test.Count, assign.Count)
-			} else {
-				assert.NotEqualValues(t, commonpb.ErrorCode_Success, assign.Status.ErrorCode)
-			}
+		resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
+			NodeID:            0,
+			PeerRole:          "",
+			SegmentIDRequests: []*datapb.SegmentIDRequest{req},
 		})
-	}
+		assert.Nil(t, err)
+		assert.EqualValues(t, 1, len(resp.SegIDAssignments))
+		assign := resp.SegIDAssignments[0]
+		assert.EqualValues(t, commonpb.ErrorCode_Success, assign.Status.ErrorCode)
+		assert.EqualValues(t, collID, assign.CollectionID)
+		assert.EqualValues(t, partID, assign.PartitionID)
+		assert.EqualValues(t, channel0, assign.ChannelName)
+		assert.EqualValues(t, 1000, assign.Count)
+	})
+
+	t.Run("assign segment with invalid collection", func(t *testing.T) {
+		req := &datapb.SegmentIDRequest{
+			Count:        1000,
+			ChannelName:  channel0,
+			CollectionID: collIDInvalid,
+			PartitionID:  partID,
+		}
+
+		resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
+			NodeID:            0,
+			PeerRole:          "",
+			SegmentIDRequests: []*datapb.SegmentIDRequest{req},
+		})
+		assert.Nil(t, err)
+		assert.EqualValues(t, 0, len(resp.SegIDAssignments))
+	})
 }
 
 func TestFlush(t *testing.T) {
@@ -110,8 +102,12 @@ func TestFlush(t *testing.T) {
 	defer closeTestServer(t, svr)
 	schema := newTestSchema()
 	svr.meta.AddCollection(&datapb.CollectionInfo{ID: 0, Schema: schema, Partitions: []int64{}})
-	segID, _, expireTs, err := svr.segmentManager.AllocSegment(context.TODO(), 0, 1, "channel-1", 1)
+	allocations, err := svr.segmentManager.AllocSegment(context.TODO(), 0, 1, "channel-1", 1)
 	assert.Nil(t, err)
+	assert.EqualValues(t, 1, len(allocations))
+	expireTs := allocations[0].ExpireTime
+	segID := allocations[0].SegmentID
+
 	req := &datapb.FlushRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_Flush,

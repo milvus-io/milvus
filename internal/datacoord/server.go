@@ -407,7 +407,7 @@ func (s *Server) startActiveCheck(ctx context.Context) {
 			if ok {
 				continue
 			}
-			s.Stop()
+			go func() { s.Stop() }()
 			log.Debug("disconnect with etcd and shutdown data coordinator")
 			return
 		case <-ctx.Done():
@@ -487,7 +487,6 @@ func (s *Server) Stop() error {
 		return nil
 	}
 	log.Debug("DataCoord server shutdown")
-	atomic.StoreInt64(&s.isServing, ServerStateStopped)
 	s.cluster.Close()
 	s.stopServerLoop()
 	return nil
