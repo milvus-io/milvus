@@ -474,17 +474,16 @@ SegmentSealedImpl::get_active_count(Timestamp ts) const {
     return this->get_row_count();
 }
 void
-SegmentSealedImpl::mask_with_timestamps(std::deque<boost::dynamic_bitset<>>& bitset_chunks, Timestamp timestamp) const {
+SegmentSealedImpl::mask_with_timestamps(boost::dynamic_bitset<>& bitset_chunk, Timestamp timestamp) const {
     // TODO change the
     Assert(this->timestamps_.size() == get_row_count());
-    Assert(bitset_chunks.size() == 1);
     auto range = timestamp_index_.get_active_range(timestamp);
     if (range.first == range.second && range.first == this->timestamps_.size()) {
         // just skip
         return;
     }
     auto mask = TimestampIndex::GenerateBitset(timestamp, range, this->timestamps_.data(), this->timestamps_.size());
-    bitset_chunks[0] &= mask;
+    bitset_chunk &= mask;
 }
 
 SegmentSealedPtr
