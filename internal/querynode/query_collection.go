@@ -45,7 +45,7 @@ type queryResult interface {
 
 type retrieveResult struct {
 	err              error
-	msg              *msgstream.RetrieveMsg
+	msg              *retrieveMsg
 	segmentRetrieved []UniqueID
 	res              []*segcorepb.RetrieveResults
 }

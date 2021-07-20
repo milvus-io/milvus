@@ -77,7 +77,7 @@ func (q *historicalStage) start() {
 				rm := msg.(*retrieveMsg)
 				segmentRetrieved, res, err := q.retrieve(rm)
 				retrieveRes := &retrieveResult{
-					msg:              rm.RetrieveMsg,
+					msg:              rm,
 					err:              err,
 					segmentRetrieved: segmentRetrieved,
 					res:              res,
@@ -108,8 +108,6 @@ func (q *historicalStage) start() {
 func (q *historicalStage) retrieve(retrieveMsg *retrieveMsg) ([]UniqueID, []*segcorepb.RetrieveResults, error) {
 	collectionID := retrieveMsg.CollectionID
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("retrieve %d", collectionID))
-
-	defer retrieveMsg.plan.delete()
 
 	var partitionIDsInHistorical []UniqueID
 	partitionIDsInQuery := retrieveMsg.PartitionIDs

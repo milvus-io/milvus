@@ -122,7 +122,7 @@ func (q *unsolvedStage) start() {
 				rm := msg.(*retrieveMsg)
 				segmentRetrieved, res, err := q.retrieve(rm)
 				retrieveRes := &retrieveResult{
-					msg:              rm.RetrieveMsg,
+					msg:              rm,
 					err:              err,
 					segmentRetrieved: segmentRetrieved,
 					res:              res,
@@ -219,7 +219,7 @@ func (q *unsolvedStage) doUnsolvedQueryMsg() {
 					rm := m.(*retrieveMsg)
 					segmentRetrieved, res, err := q.retrieve(rm)
 					retrieveRes := &retrieveResult{
-						msg:              rm.RetrieveMsg,
+						msg:              rm,
 						err:              err,
 						segmentRetrieved: segmentRetrieved,
 						res:              res,
@@ -326,8 +326,6 @@ func (q *unsolvedStage) setServiceableTime(t Timestamp) {
 func (q *unsolvedStage) retrieve(retrieveMsg *retrieveMsg) ([]UniqueID, []*segcorepb.RetrieveResults, error) {
 	collectionID := retrieveMsg.CollectionID
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("retrieve %d", collectionID))
-
-	defer retrieveMsg.plan.delete()
 
 	var partitionIDsInStreaming []UniqueID
 	partitionIDsInQuery := retrieveMsg.PartitionIDs

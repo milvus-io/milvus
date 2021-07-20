@@ -176,6 +176,8 @@ func (q *resultHandlerStage) reduceRetrieve(msgID UniqueID) {
 		},
 	}
 
+	msg.plan.delete()
+
 	publishQueryResult(retrieveResultMsg, q.queryResultStream)
 	log.Debug("QueryNode publish RetrieveResultMsg",
 		zap.Any("vChannels", collection.getVChannels()),
