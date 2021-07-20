@@ -158,6 +158,9 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
         } else if (type == LoadType::CPU2FPGA) {
             stat = index_engine_->CopyToFpga();
             type_str = "CPU2FPGA";
+        } else if (type == LoadType::CPU2APU) {
+            stat = index_engine_->CopyToApu(file_->row_count_);
+            type_str = "CPU2APU";
         } else {
             error_msg = "Wrong load type";
             stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);

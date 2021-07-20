@@ -38,6 +38,11 @@
 #include "knowhere/index/vector_index/fpga/IndexFPGAIVFPQ.h"
 #include "knowhere/index/vector_index/fpga/utils.h"
 #endif
+#ifdef MILVUS_APU_VERSION
+#include <knowhere/index/vector_index/fpga/ApuInst.h>
+#include <knowhere/index/vector_index/fpga/GsiHammingIndex.h>
+#include <knowhere/index/vector_index/fpga/GsiTanimotoIndex.h>
+#endif
 #ifdef MILVUS_GPU_VERSION
 #include "knowhere/index/vector_index/gpu/GPUIndex.h"
 #include "knowhere/index/vector_index/gpu/IndexIVFSQHybrid.h"
@@ -59,7 +64,6 @@
 
 namespace milvus {
 namespace engine {
-
 namespace {
 
 Status
@@ -636,6 +640,34 @@ ExecutionEngineImpl::CopyToFpga() {
     return Status::OK();
 }
 
+Status
+ExecutionEngineImpl::CopyToApu(uint32_t row_count) {
+#ifdef MILVUS_APU_VERSION
+
+    auto cache_index_ =
+        std::static_pointer_cast<knowhere::VecIndex>(cache::FpgaCacheMgr::GetInstance()->GetItem(location_));
+    bool already_in_cache = (cache_index_ != nullptr);
+
+    if (!already_in_cache) {
+        cache::FpgaCacheMgr::GetInstance()->ClearCache();  // clear cache to support cache switch .
+        std::shared_ptr<knowhere::GsiBaseIndex> gsi_index;
+        // factory is needed here
+        if (metric_type_ == MetricType::HAMMING)
+            gsi_index = std::make_shared<knowhere::GsiHammingIndex>(dim_);
+        else
+            gsi_index = std::make_shared<knowhere::GsiTanimotoIndex>(dim_);
+
+        gsi_index->SetUids(index_->GetUids());
+        gsi_index->CopyIndexToFpga(row_count, location_);
+        index_ = gsi_index;
+        FpgaCache();
+    } else {
+        index_ = cache_index_;
+    }
+#endif
+    return Status::OK();
+}
+
 ExecutionEnginePtr
 ExecutionEngineImpl::BuildIndex(const std::string& location, EngineType engine_type) {
     LOG_ENGINE_DEBUG_ << "Build index file: " << location << " from: " << location_;
@@ -838,6 +870,5 @@ ExecutionEngineImpl::Init() {
     return Status::OK();
 #endif
 }
-
 }  // namespace engine
 }  // namespace milvus

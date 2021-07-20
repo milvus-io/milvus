@@ -29,7 +29,9 @@
 #include <mutex>
 #include <string>
 #include <vector>
-
+#ifdef MILVUS_APU_VERSION
+#include "selector/ApuPass.h"
+#endif
 namespace milvus {
 namespace scheduler {
 
@@ -95,10 +97,15 @@ class OptimizerInst {
             std::lock_guard<std::mutex> lock(mutex_);
             if (instance == nullptr) {
                 std::vector<PassPtr> pass_list;
+#ifdef MILVUS_APU_VERSION
+                pass_list.push_back(std::make_shared<ApuPass>());
+#endif
+
 #ifdef MILVUS_GPU_VERSION
                 bool enable_gpu = false;
                 server::Config& config = server::Config::GetInstance();
                 config.GetGpuResourceConfigEnable(enable_gpu);
+
                 if (enable_gpu) {
                     std::vector<int64_t> build_gpus;
                     std::vector<int64_t> search_gpus;
