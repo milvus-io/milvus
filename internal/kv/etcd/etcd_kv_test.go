@@ -308,6 +308,21 @@ func TestEtcdKV_WatchPrefix(t *testing.T) {
 	assert.True(t, resp.Created)
 }
 
+func TestEtcdKV_WatchWithVersion(t *testing.T) {
+	cli, err := newEtcdClient()
+	assert.Nil(t, err)
+	rootPath := "/etcd/test/root"
+	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
+
+	defer etcdKV.Close()
+	defer etcdKV.RemoveWithPrefix("")
+
+	ch := etcdKV.WatchWithVersion("v", 0)
+	resp := <-ch
+
+	assert.True(t, resp.Created)
+}
+
 func TestEtcdKV_CompareAndSwap(t *testing.T) {
 	cli, err := newEtcdClient()
 	assert.Nil(t, err)

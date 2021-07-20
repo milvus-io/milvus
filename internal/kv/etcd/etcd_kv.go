@@ -230,6 +230,12 @@ func (kv *EtcdKV) WatchWithPrefix(key string) clientv3.WatchChan {
 	return rch
 }
 
+func (kv *EtcdKV) WatchWithVersion(key string, revision int64) clientv3.WatchChan {
+	key = path.Join(kv.rootPath, key)
+	rch := kv.client.Watch(context.Background(), key, clientv3.WithPrefix(), clientv3.WithCreatedNotify(), clientv3.WithPrevKV(), clientv3.WithRev(revision))
+	return rch
+}
+
 func (kv *EtcdKV) MultiRemoveWithPrefix(keys []string) error {
 	ops := make([]clientv3.Op, 0, len(keys))
 	for _, k := range keys {
