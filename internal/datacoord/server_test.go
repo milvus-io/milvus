@@ -450,21 +450,6 @@ func TestSaveBinlogPaths(t *testing.T) {
 		assert.EqualValues(t, segmentInfo.DmlPosition.MsgID, []byte{1, 2, 3})
 		assert.EqualValues(t, segmentInfo.NumOfRows, 10)
 	})
-	t.Run("Abnormal SaveRequest", func(t *testing.T) {
-		ctx := context.Background()
-		resp, err := svr.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
-			SegmentID:    10,
-			CollectionID: 5,
-			Field2BinlogPaths: []*datapb.ID2PathList{
-				{
-					ID:    1,
-					Paths: []string{"/by-dev/test/0/1/2/1/Allo1", "/by-dev/test/0/1/2/1/Allo2"},
-				},
-			},
-		})
-		assert.Nil(t, err)
-		assert.EqualValues(t, resp.ErrorCode, commonpb.ErrorCode_UnexpectedError)
-	})
 }
 
 func TestDataNodeTtChannel(t *testing.T) {
