@@ -106,8 +106,11 @@ class TestQueryBase:
         for _id, index in enumerate(ids[:default_pos]):
             if res[index][default_int_field_name] == entities[0]["values"][index]:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
-                # not support
-                # ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
+        res = connect.query(collection, term_expr, output_fields=[ut.default_float_vec_field_name])
+        assert len(res) == default_pos
+        for _id, index in enumerate(ids[:default_pos]):
+            if res[index][default_int_field_name] == entities[0]["values"][index]:
+                ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
     def test_query_collection_not_existed(self, connect):
         """
