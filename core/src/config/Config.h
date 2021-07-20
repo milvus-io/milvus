@@ -41,6 +41,9 @@ extern const char* CONFIG_GENERAL_TIMEZONE;
 extern const char* CONFIG_GENERAL_TIMEZONE_DEFAULT;
 extern const char* CONFIG_GENERAL_METAURI;
 extern const char* CONFIG_GENERAL_METAURI_DEFAULT;
+extern const char* CONFIG_GENERAL_META_SSL_CA;
+extern const char* CONFIG_GENERAL_META_SSL_KEY;
+extern const char* CONFIG_GENERAL_META_SSL_CERT;
 
 /* network config */
 extern const char* CONFIG_NETWORK;
@@ -232,6 +235,12 @@ class Config {
     CheckGeneralConfigTimezone(const std::string& value);
     Status
     CheckGeneralConfigMetaURI(const std::string& value);
+    Status
+    CheckGeneralConfigMetaSslCa(const std::string& value);
+    Status
+    CheckGeneralConfigMetaSslKey(const std::string& value);
+    Status
+    CheckGeneralConfigMetaSslCert(const std::string& value);
 
     /* network config */
     Status
@@ -386,6 +395,12 @@ class Config {
     GetGeneralConfigTimezone(std::string& value);
     Status
     GetGeneralConfigMetaURI(std::string& value);
+    Status
+    GetGeneralConfigMetaSslCa(std::string& value);
+    Status
+    GetGeneralConfigMetaSslKey(std::string& value);
+    Status
+    GetGeneralConfigMetaSslCert(std::string& value);
 
     /* network config */
     Status
@@ -538,6 +553,12 @@ class Config {
     SetGeneralConfigTimezone(const std::string& value);
     Status
     SetGeneralConfigMetaURI(const std::string& value);
+    Status
+    SetGeneralConfigMetaSslCa(const std::string& value);
+    Status
+    SetGeneralConfigMetaSslKey(const std::string& value);
+    Status
+    SetGeneralConfigMetaSslCert(const std::string& value);
 
     /* network config */
     Status

@@ -61,6 +61,10 @@ MySQLConnectionPool::create() {
         // creation.
         conn = new mysqlpp::Connection();
         conn->set_option(new mysqlpp::ReconnectOption(true));
+        if (!ssl_ca_.empty()) {
+            conn->set_option(new mysqlpp::SslOption(ssl_key_.c_str(), ssl_cert_.c_str(), ssl_ca_.c_str()));
+        }
+
         conn->connect(db_name_.empty() ? 0 : db_name_.c_str(), server_.empty() ? 0 : server_.c_str(),
                       user_.empty() ? 0 : user_.c_str(), password_.empty() ? 0 : password_.c_str(), port_);
         return conn;
