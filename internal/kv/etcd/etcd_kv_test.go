@@ -12,6 +12,7 @@
 package etcdkv_test
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -317,10 +318,22 @@ func TestEtcdKV_WatchWithVersion(t *testing.T) {
 	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix("")
 
-	ch := etcdKV.WatchWithVersion("v", 0)
-	resp := <-ch
+	key := "test-version"
 
-	assert.True(t, resp.Created)
+	err = etcdKV.Save(key, "v")
+	assert.Nil(t, err)
+
+	resp, _ := cli.Get(context.Background(), rootPath+"/"+key, clientv3.WithPrefix())
+
+	ch := etcdKV.WatchWithVersion(key, resp.Header.Revision+1)
+	err = etcdKV.Save(key, "v2")
+	assert.Nil(t, err)
+
+	resp2 := <-ch
+	assert.Equal(t, 1, len(resp2.Events))
+	assert.Equal(t, "v2", string(resp2.Events[0].Kv.Value))
+	assert.Equal(t, resp.Header.Revision+1, resp2.Header.Revision)
+
 }
 
 func TestEtcdKV_CompareAndSwap(t *testing.T) {
