@@ -17,8 +17,10 @@ import (
 
 	"go.uber.org/zap"
 
+	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 type queryService struct {
@@ -31,6 +33,9 @@ type queryService struct {
 	queryCollections map[UniqueID]*queryCollection
 
 	factory msgstream.Factory
+
+	lcm storage.ChunkManager
+	rcm storage.ChunkManager
 }
 
 func newQueryService(ctx context.Context,
@@ -39,6 +44,28 @@ func newQueryService(ctx context.Context,
 	factory msgstream.Factory) *queryService {
 
 	queryServiceCtx, queryServiceCancel := context.WithCancel(ctx)
+
+	path, err := Params.Load("storage.path")
+	if err != nil {
+		panic(err)
+	}
+	lcm := storage.NewLocalChunkManager(path)
+
+	option := &miniokv.Option{
+		Address:           Params.MinioEndPoint,
+		AccessKeyID:       Params.MinioAccessKeyID,
+		SecretAccessKeyID: Params.MinioSecretAccessKey,
+		UseSSL:            Params.MinioUseSSLStr,
+		CreateBucket:      true,
+		BucketName:        Params.MinioBucketName,
+	}
+
+	client, err := miniokv.NewMinIOKV(ctx, option)
+	if err != nil {
+		panic(err)
+	}
+	rcm := storage.NewMinioChunkManager(client)
+
 	return &queryService{
 		ctx:    queryServiceCtx,
 		cancel: queryServiceCancel,
@@ -49,6 +76,9 @@ func newQueryService(ctx context.Context,
 		queryCollections: make(map[UniqueID]*queryCollection),
 
 		factory: factory,
+
+		lcm: lcm,
+		rcm: rcm,
 	}
 }
 
@@ -73,7 +103,9 @@ func (q *queryService) addQueryCollection(collectionID UniqueID) {
 		collectionID,
 		q.historical,
 		q.streaming,
-		q.factory)
+		q.factory,
+		q.lcm,
+		q.rcm)
 	q.queryCollections[collectionID] = qc
 }
 

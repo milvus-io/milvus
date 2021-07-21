@@ -116,6 +116,8 @@ type Segment struct {
 	paramMutex sync.RWMutex // guards index
 	indexInfos map[int64]*indexInfo
 
+	idBinlogRowSizes []int64
+
 	vectorFieldMutex sync.RWMutex // guards vectorFieldInfos
 	vectorFieldInfos map[UniqueID]*VectorFieldInfo
 }
@@ -135,6 +137,14 @@ func (s *Segment) setEnableIndex(enable bool) {
 
 func (s *Segment) getEnableIndex() bool {
 	return s.enableIndex
+}
+
+func (s *Segment) setIDBinlogRowSizes(sizes []int64) {
+	s.idBinlogRowSizes = sizes
+}
+
+func (s *Segment) getIDBinlogRowSizes() []int64 {
+	return s.idBinlogRowSizes
 }
 
 func (s *Segment) setRecentlyModified(modify bool) {

@@ -25,9 +25,6 @@ type LocalChunkManager struct {
 }
 
 func NewLocalChunkManager(localPath string) *LocalChunkManager {
-	if _, err := os.Stat(localPath); os.IsNotExist(err) {
-		os.MkdirAll(localPath, os.ModePerm)
-	}
 	return &LocalChunkManager{
 		localPath: localPath,
 	}
@@ -42,8 +39,15 @@ func (lcm *LocalChunkManager) Load(key string) (string, error) {
 }
 
 func (lcm *LocalChunkManager) Write(key string, content []byte) error {
-	path := path.Join(lcm.localPath, key)
-	err := ioutil.WriteFile(path, content, 0644)
+	filePath := path.Join(lcm.localPath, key)
+	dir := path.Dir(filePath)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		err := os.MkdirAll(dir, os.ModePerm)
+		if err != nil {
+			return err
+		}
+	}
+	err := ioutil.WriteFile(filePath, content, 0644)
 	if err != nil {
 		return err
 	}

@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -255,7 +256,7 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 	}
 
 	for fieldID, value := range insertData.Data {
-		var numRows int
+		var numRows []int64
 		var data interface{}
 		switch fieldData := value.(type) {
 		case *storage.BoolFieldData:
@@ -291,7 +292,14 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 		default:
 			return errors.New("unexpected field data type")
 		}
-		err = segment.segmentLoadFieldData(fieldID, numRows, data)
+		if fieldID == rootcoord.TimeStampField {
+			segment.setIDBinlogRowSizes(numRows)
+		}
+		totalNumRows := int64(0)
+		for _, numRow := range numRows {
+			totalNumRows += numRow
+		}
+		err = segment.segmentLoadFieldData(fieldID, int(totalNumRows), data)
 		if err != nil {
 			// TODO: return or continue?
 			return err

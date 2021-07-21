@@ -98,13 +98,25 @@ func (ib *insertBuffer) size(segmentID UniqueID) int32 {
 	var maxSize int32 = 0
 	for _, data := range idata.Data {
 		fdata, ok := data.(*storage.FloatVectorFieldData)
-		if ok && int32(fdata.NumRows) > maxSize {
-			maxSize = int32(fdata.NumRows)
+		totalNumRows := int64(0)
+		if fdata != nil && fdata.NumRows != nil {
+			for _, numRow := range fdata.NumRows {
+				totalNumRows += numRow
+			}
+		}
+		if ok && int32(totalNumRows) > maxSize {
+			maxSize = int32(totalNumRows)
 		}
 
 		bdata, ok := data.(*storage.BinaryVectorFieldData)
-		if ok && int32(bdata.NumRows) > maxSize {
-			maxSize = int32(bdata.NumRows)
+		totalNumRows = int64(0)
+		if bdata != nil && bdata.NumRows != nil {
+			for _, numRow := range bdata.NumRows {
+				totalNumRows += numRow
+			}
+		}
+		if ok && int32(totalNumRows) > maxSize {
+			maxSize = int32(totalNumRows)
 		}
 
 	}
@@ -247,7 +259,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.FloatVectorFieldData{
-						NumRows: 0,
+						NumRows: make([]int64, 0),
 						Data:    make([]float32, 0),
 						Dim:     dim,
 					}
@@ -269,7 +281,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 					}
 				}
 				pos += offset
-				fieldData.NumRows += len(msg.RowIDs)
+				fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 
 			case schemapb.DataType_BinaryVector:
 				var dim int
@@ -289,7 +301,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.BinaryVectorFieldData{
-						NumRows: 0,
+						NumRows: make([]int64, 0),
 						Data:    make([]byte, 0),
 						Dim:     dim,
 					}
@@ -303,12 +315,12 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 					offset = len(bv)
 				}
 				pos += offset
-				fieldData.NumRows += len(msg.RowData)
+				fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 
 			case schemapb.DataType_Bool:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.BoolFieldData{
-						NumRows: 0,
+						NumRows: make([]int64, 0),
 						Data:    make([]bool, 0),
 					}
 				}
@@ -324,12 +336,12 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 				}
 				pos += int(unsafe.Sizeof(*(&v)))
-				fieldData.NumRows += len(msg.RowIDs)
+				fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 
 			case schemapb.DataType_Int8:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.Int8FieldData{
-						NumRows: 0,
+						NumRows: make([]int64, 0),
 						Data:    make([]int8, 0),
 					}
 				}
@@ -344,12 +356,12 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 					fieldData.Data = append(fieldData.Data, v)
 				}
 				pos += int(unsafe.Sizeof(*(&v)))
-				fieldData.NumRows += len(msg.RowIDs)
+				fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 
 			case schemapb.DataType_Int16:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.Int16FieldData{
-						NumRows: 0,
+						NumRows: make([]int64, 0),
 						Data:    make([]int16, 0),
 					}
 				}
@@ -364,12 +376,12 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 					fieldData.Data = append(fieldData.Data, v)
 				}
 				pos += int(unsafe.Sizeof(*(&v)))
-				fieldData.NumRows += len(msg.RowIDs)
+				fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 
 			case schemapb.DataType_Int32:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.Int32FieldData{
-						NumRows: 0,
+						NumRows: make([]int64, 0),
 						Data:    make([]int32, 0),
 					}
 				}
@@ -384,12 +396,12 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 					fieldData.Data = append(fieldData.Data, v)
 				}
 				pos += int(unsafe.Sizeof(*(&v)))
-				fieldData.NumRows += len(msg.RowIDs)
+				fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 
 			case schemapb.DataType_Int64:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.Int64FieldData{
-						NumRows: 0,
+						NumRows: make([]int64, 0),
 						Data:    make([]int64, 0),
 					}
 				}
@@ -398,12 +410,12 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				switch field.FieldID {
 				case 0: // rowIDs
 					fieldData.Data = append(fieldData.Data, msg.RowIDs...)
-					fieldData.NumRows += len(msg.RowIDs)
+					fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 				case 1: // Timestamps
 					for _, ts := range msg.Timestamps {
 						fieldData.Data = append(fieldData.Data, int64(ts))
 					}
-					fieldData.NumRows += len(msg.Timestamps)
+					fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 				default:
 					var v int64
 					for _, blob := range msg.RowData {
@@ -414,13 +426,13 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 						fieldData.Data = append(fieldData.Data, v)
 					}
 					pos += int(unsafe.Sizeof(*(&v)))
-					fieldData.NumRows += len(msg.RowIDs)
+					fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 				}
 
 			case schemapb.DataType_Float:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.FloatFieldData{
-						NumRows: 0,
+						NumRows: make([]int64, 0),
 						Data:    make([]float32, 0),
 					}
 				}
@@ -435,12 +447,12 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 					fieldData.Data = append(fieldData.Data, v)
 				}
 				pos += int(unsafe.Sizeof(*(&v)))
-				fieldData.NumRows += len(msg.RowIDs)
+				fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 
 			case schemapb.DataType_Double:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.DoubleFieldData{
-						NumRows: 0,
+						NumRows: make([]int64, 0),
 						Data:    make([]float64, 0),
 					}
 				}
@@ -456,7 +468,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				}
 
 				pos += int(unsafe.Sizeof(*(&v)))
-				fieldData.NumRows += len(msg.RowIDs)
+				fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 			}
 		}
 

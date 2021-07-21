@@ -12,10 +12,8 @@
 package storage
 
 import (
-	"encoding/binary"
-	"math"
-
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type VectorChunkManager struct {
@@ -62,7 +60,7 @@ func (vcm *VectorChunkManager) Load(key string) (string, error) {
 			floatData := floatVector.Data
 			result := make([]byte, 0)
 			for _, singleFloat := range floatData {
-				result = append(result, Float32ToByte(singleFloat)...)
+				result = append(result, typeutil.Float32ToByte(singleFloat)...)
 			}
 			vcm.localChunkManager.Write(key, result)
 		}
@@ -92,18 +90,4 @@ func (vcm *VectorChunkManager) ReadAll(key string) ([]byte, error) {
 
 func (vcm *VectorChunkManager) ReadAt(key string, p []byte, off int64) (n int, err error) {
 	return vcm.localChunkManager.ReadAt(key, p, off)
-}
-
-func Float32ToByte(float float32) []byte {
-	bits := math.Float32bits(float)
-	bytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(bytes, bits)
-
-	return bytes
-}
-
-func ByteToFloat32(bytes []byte) float32 {
-	bits := binary.LittleEndian.Uint32(bytes)
-
-	return math.Float32frombits(bits)
 }
