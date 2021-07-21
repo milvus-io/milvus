@@ -5,9 +5,8 @@
 String cron_timezone = "TZ=Asia/Shanghai"
 String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
 
-int timeout_minutes = 90
-int delay_minutes = 5
-int ci_timeout = (timeout_minutes - delay_minutes) * 60
+int total_timeout_minutes = 90
+int e2e_timeout_seconds = 60 * 60
 
 pipeline {
     agent none
@@ -17,7 +16,7 @@ pipeline {
     }
     options {
         timestamps()
-        timeout(time: timeout_minutes, unit: 'MINUTES')
+        timeout(time: total_timeout_minutes, unit: 'MINUTES')
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         // parallelsAlwaysFailFast()
     }
@@ -66,19 +65,19 @@ pipeline {
                                         if ("${MILVUS_CLIENT}" == "pymilvus") {
                                             sh """
                                             MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
-                                            timeout -v ${ci_timeout} \
                                             ./e2e-k8s.sh \
                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
-                                            --node-image registry.zilliz.com/kindest/node:v1.20.2
+                                            --node-image registry.zilliz.com/kindest/node:v1.20.2 \
+                                            --test-timeout ${e2e_timeout_seconds}
                                             """
                                         } else if ("${MILVUS_CLIENT}" == "pymilvus-orm") {
                                             sh """
                                             MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
-                                            timeout -v ${ci_timeout} \
                                             ./e2e-k8s.sh \
                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
                                             --node-image registry.zilliz.com/kindest/node:v1.20.2 \
-                                            --test-extra-arg "--tags L0 L1 L2"
+                                            --test-extra-arg "--tags L0 L1 L2" \
+                                            --test-timeout ${e2e_timeout_seconds}
                                             """
                                         } else {
                                             error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"

@@ -1504,8 +1504,7 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRe
 		}, nil
 	}
 	log.Debug("ShowPartitions succeed", zap.String("role", Params.RoleName), zap.Int64("msgID", t.Req.Base.MsgID),
-		zap.String("collection name", in.CollectionName), zap.Strings("partition names", t.Rsp.PartitionNames),
-		zap.Int64s("partition ids", t.Rsp.PartitionIDs))
+		zap.String("collection name", in.CollectionName), zap.Int("num of partitions", len(t.Rsp.PartitionNames)))
 	metrics.RootCoordShowPartitionsCounter.WithLabelValues(metricProxy(in.Base.SourceID), MetricRequestsSuccess).Inc()
 	t.Rsp.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,

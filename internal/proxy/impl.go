@@ -1344,6 +1344,7 @@ func (node *Proxy) Retrieve(ctx context.Context, request *milvuspb.RetrieveReque
 		},
 		resultBuf: make(chan []*internalpb.RetrieveResults),
 		retrieve:  request,
+		chMgr:     node.chMgr,
 		qc:        node.queryCoord,
 	}
 
