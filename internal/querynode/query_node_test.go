@@ -31,11 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 )
 
-const ctxTimeInMillisecond = 5000
-const debug = false
-
-const defaultPartitionID = UniqueID(2021)
-
 type queryCoordMock struct {
 	types.QueryCoord
 }
