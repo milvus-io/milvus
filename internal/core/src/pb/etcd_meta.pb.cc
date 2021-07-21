@@ -206,6 +206,7 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_etcd_5fmeta_2eproto::offsets[]
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::CollectionInfo, field_indexes_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::CollectionInfo, virtual_channel_names_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::CollectionInfo, physical_channel_names_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::CollectionInfo, partition_created_timestamps_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::SegmentIndexInfo, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -236,8 +237,8 @@ static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOB
   { 17, -1, sizeof(::milvus::proto::etcd::IndexInfo)},
   { 25, -1, sizeof(::milvus::proto::etcd::FieldIndexInfo)},
   { 32, -1, sizeof(::milvus::proto::etcd::CollectionInfo)},
-  { 45, -1, sizeof(::milvus::proto::etcd::SegmentIndexInfo)},
-  { 57, -1, sizeof(::milvus::proto::etcd::CollectionMeta)},
+  { 46, -1, sizeof(::milvus::proto::etcd::SegmentIndexInfo)},
+  { 58, -1, sizeof(::milvus::proto::etcd::CollectionMeta)},
 };
 
 static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] = {
@@ -261,24 +262,25 @@ const char descriptor_table_protodef_etcd_5fmeta_2eproto[] PROTOBUF_SECTION_VARI
   "\022\n\nindex_name\030\001 \001(\t\022\017\n\007indexID\030\002 \001(\003\0227\n\014"
   "index_params\030\003 \003(\0132!.milvus.proto.common"
   ".KeyValuePair\"2\n\016FieldIndexInfo\022\017\n\007filed"
-  "ID\030\001 \001(\003\022\017\n\007indexID\030\002 \001(\003\"\217\002\n\016Collection"
+  "ID\030\001 \001(\003\022\017\n\007indexID\030\002 \001(\003\"\265\002\n\016Collection"
   "Info\022\n\n\002ID\030\001 \001(\003\0225\n\006schema\030\002 \001(\0132%.milvu"
   "s.proto.schema.CollectionSchema\022\023\n\013creat"
   "e_time\030\003 \001(\004\022\024\n\014partitionIDs\030\004 \003(\003\022\026\n\016pa"
   "rtitionNames\030\005 \003(\t\0228\n\rfield_indexes\030\006 \003("
   "\0132!.milvus.proto.etcd.FieldIndexInfo\022\035\n\025"
   "virtual_channel_names\030\007 \003(\t\022\036\n\026physical_"
-  "channel_names\030\010 \003(\t\"\231\001\n\020SegmentIndexInfo"
-  "\022\024\n\014collectionID\030\001 \001(\003\022\023\n\013partitionID\030\002 "
-  "\001(\003\022\021\n\tsegmentID\030\003 \001(\003\022\017\n\007fieldID\030\004 \001(\003\022"
-  "\017\n\007indexID\030\005 \001(\003\022\017\n\007buildID\030\006 \001(\003\022\024\n\014ena"
-  "ble_index\030\007 \001(\010\"\252\001\n\016CollectionMeta\022\n\n\002ID"
-  "\030\001 \001(\003\0225\n\006schema\030\002 \001(\0132%.milvus.proto.sc"
-  "hema.CollectionSchema\022\023\n\013create_time\030\003 \001"
-  "(\004\022\022\n\nsegmentIDs\030\004 \003(\003\022\026\n\016partition_tags"
-  "\030\005 \003(\t\022\024\n\014partitionIDs\030\006 \003(\003B3Z1github.c"
-  "om/milvus-io/milvus/internal/proto/etcdp"
-  "bb\006proto3"
+  "channel_names\030\010 \003(\t\022$\n\034partition_created"
+  "_timestamps\030\t \003(\004\"\231\001\n\020SegmentIndexInfo\022\024"
+  "\n\014collectionID\030\001 \001(\003\022\023\n\013partitionID\030\002 \001("
+  "\003\022\021\n\tsegmentID\030\003 \001(\003\022\017\n\007fieldID\030\004 \001(\003\022\017\n"
+  "\007indexID\030\005 \001(\003\022\017\n\007buildID\030\006 \001(\003\022\024\n\014enabl"
+  "e_index\030\007 \001(\010\"\252\001\n\016CollectionMeta\022\n\n\002ID\030\001"
+  " \001(\003\0225\n\006schema\030\002 \001(\0132%.milvus.proto.sche"
+  "ma.CollectionSchema\022\023\n\013create_time\030\003 \001(\004"
+  "\022\022\n\nsegmentIDs\030\004 \003(\003\022\026\n\016partition_tags\030\005"
+  " \003(\t\022\024\n\014partitionIDs\030\006 \003(\003B3Z1github.com"
+  "/milvus-io/milvus/internal/proto/etcdpbb"
+  "\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_etcd_5fmeta_2eproto_deps[2] = {
   &::descriptor_table_common_2eproto,
@@ -296,7 +298,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_etc
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_etcd_5fmeta_2eproto_once;
 static bool descriptor_table_etcd_5fmeta_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_etcd_5fmeta_2eproto = {
-  &descriptor_table_etcd_5fmeta_2eproto_initialized, descriptor_table_protodef_etcd_5fmeta_2eproto, "etcd_meta.proto", 1089,
+  &descriptor_table_etcd_5fmeta_2eproto_initialized, descriptor_table_protodef_etcd_5fmeta_2eproto, "etcd_meta.proto", 1127,
   &descriptor_table_etcd_5fmeta_2eproto_once, descriptor_table_etcd_5fmeta_2eproto_sccs, descriptor_table_etcd_5fmeta_2eproto_deps, 7, 2,
   schemas, file_default_instances, TableStruct_etcd_5fmeta_2eproto::offsets,
   file_level_metadata_etcd_5fmeta_2eproto, 7, file_level_enum_descriptors_etcd_5fmeta_2eproto, file_level_service_descriptors_etcd_5fmeta_2eproto,
@@ -1805,7 +1807,8 @@ CollectionInfo::CollectionInfo(const CollectionInfo& from)
       partitionnames_(from.partitionnames_),
       field_indexes_(from.field_indexes_),
       virtual_channel_names_(from.virtual_channel_names_),
-      physical_channel_names_(from.physical_channel_names_) {
+      physical_channel_names_(from.physical_channel_names_),
+      partition_created_timestamps_(from.partition_created_timestamps_) {
   _internal_metadata_.MergeFrom(from._internal_metadata_);
   if (from.has_schema()) {
     schema_ = new ::milvus::proto::schema::CollectionSchema(*from.schema_);
@@ -1854,6 +1857,7 @@ void CollectionInfo::Clear() {
   field_indexes_.Clear();
   virtual_channel_names_.Clear();
   physical_channel_names_.Clear();
+  partition_created_timestamps_.Clear();
   if (GetArenaNoVirtual() == nullptr && schema_ != nullptr) {
     delete schema_;
   }
@@ -1949,6 +1953,16 @@ const char* CollectionInfo::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE
             CHK_(ptr);
             if (!ctx->DataAvailable(ptr)) break;
           } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 66);
+        } else goto handle_unusual;
+        continue;
+      // repeated uint64 partition_created_timestamps = 9;
+      case 9:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 74)) {
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::PackedUInt64Parser(mutable_partition_created_timestamps(), ptr, ctx);
+          CHK_(ptr);
+        } else if (static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 72) {
+          add_partition_created_timestamps(::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr));
+          CHK_(ptr);
         } else goto handle_unusual;
         continue;
       default: {
@@ -2093,6 +2107,22 @@ bool CollectionInfo::MergePartialFromCodedStream(
         break;
       }
 
+      // repeated uint64 partition_created_timestamps = 9;
+      case 9: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (74 & 0xFF)) {
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPackedPrimitive<
+                   ::PROTOBUF_NAMESPACE_ID::uint64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT64>(
+                 input, this->mutable_partition_created_timestamps())));
+        } else if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (72 & 0xFF)) {
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadRepeatedPrimitiveNoInline<
+                   ::PROTOBUF_NAMESPACE_ID::uint64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT64>(
+                 1, 74u, input, this->mutable_partition_created_timestamps())));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
       default: {
       handle_unusual:
         if (tag == 0) {
@@ -2186,6 +2216,17 @@ void CollectionInfo::SerializeWithCachedSizes(
       8, this->physical_channel_names(i), output);
   }
 
+  // repeated uint64 partition_created_timestamps = 9;
+  if (this->partition_created_timestamps_size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTag(9, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WIRETYPE_LENGTH_DELIMITED, output);
+    output->WriteVarint32(_partition_created_timestamps_cached_byte_size_.load(
+        std::memory_order_relaxed));
+  }
+  for (int i = 0, n = this->partition_created_timestamps_size(); i < n; i++) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64NoTag(
+      this->partition_created_timestamps(i), output);
+  }
+
   if (_internal_metadata_.have_unknown_fields()) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFields(
         _internal_metadata_.unknown_fields(), output);
@@ -2267,6 +2308,19 @@ void CollectionInfo::SerializeWithCachedSizes(
       WriteStringToArray(8, this->physical_channel_names(i), target);
   }
 
+  // repeated uint64 partition_created_timestamps = 9;
+  if (this->partition_created_timestamps_size() > 0) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTagToArray(
+      9,
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WIRETYPE_LENGTH_DELIMITED,
+      target);
+    target = ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream::WriteVarint32ToArray(
+        _partition_created_timestamps_cached_byte_size_.load(std::memory_order_relaxed),
+         target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      WriteUInt64NoTagToArray(this->partition_created_timestamps_, target);
+  }
+
   if (_internal_metadata_.have_unknown_fields()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields(), target);
@@ -2338,6 +2392,21 @@ size_t CollectionInfo::ByteSizeLong() const {
       this->physical_channel_names(i));
   }
 
+  // repeated uint64 partition_created_timestamps = 9;
+  {
+    size_t data_size = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      UInt64Size(this->partition_created_timestamps_);
+    if (data_size > 0) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32Size(
+            static_cast<::PROTOBUF_NAMESPACE_ID::int32>(data_size));
+    }
+    int cached_size = ::PROTOBUF_NAMESPACE_ID::internal::ToCachedSize(data_size);
+    _partition_created_timestamps_cached_byte_size_.store(cached_size,
+                                    std::memory_order_relaxed);
+    total_size += data_size;
+  }
+
   // .milvus.proto.schema.CollectionSchema schema = 2;
   if (this->has_schema()) {
     total_size += 1 +
@@ -2391,6 +2460,7 @@ void CollectionInfo::MergeFrom(const CollectionInfo& from) {
   field_indexes_.MergeFrom(from.field_indexes_);
   virtual_channel_names_.MergeFrom(from.virtual_channel_names_);
   physical_channel_names_.MergeFrom(from.physical_channel_names_);
+  partition_created_timestamps_.MergeFrom(from.partition_created_timestamps_);
   if (from.has_schema()) {
     mutable_schema()->::milvus::proto::schema::CollectionSchema::MergeFrom(from.schema());
   }
@@ -2428,6 +2498,7 @@ void CollectionInfo::InternalSwap(CollectionInfo* other) {
   CastToBase(&field_indexes_)->InternalSwap(CastToBase(&other->field_indexes_));
   virtual_channel_names_.InternalSwap(CastToBase(&other->virtual_channel_names_));
   physical_channel_names_.InternalSwap(CastToBase(&other->physical_channel_names_));
+  partition_created_timestamps_.InternalSwap(&other->partition_created_timestamps_);
   swap(schema_, other->schema_);
   swap(id_, other->id_);
   swap(create_time_, other->create_time_);
