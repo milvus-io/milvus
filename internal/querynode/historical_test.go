@@ -72,7 +72,7 @@ func TestHistorical_GlobalSealedSegments(t *testing.T) {
 	err := n.etcdKV.Save(segmentKey, segmentInfoStr)
 	assert.NoError(t, err)
 
-	time.Sleep(100 * time.Millisecond) // for etcd latency
+	time.Sleep(500 * time.Millisecond) // for etcd latency
 	segmentIDs = n.historical.getGlobalSegmentIDsByCollectionID(collectionID)
 	assert.Equal(t, 1, len(segmentIDs))
 	assert.Equal(t, segmentIDs[0], segmentID)

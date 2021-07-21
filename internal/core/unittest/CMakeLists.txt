@@ -37,6 +37,7 @@ set(MILVUS_TEST_FILES
         test_segcore.cpp
         test_span.cpp
         test_timestamp_index.cpp
+        test_reduce_c.cpp
         )
 
 add_executable(all_tests

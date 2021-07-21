@@ -14,6 +14,7 @@
 #include "segcore/reduce_c.h"
 
 #include "segcore/Reduce.h"
+#include "segcore/ReduceStructure.h"
 #include "common/Types.h"
 #include "pb/milvus.pb.h"
 
@@ -48,32 +49,6 @@ DeleteMarshaledHits(CMarshaledHits c_marshaled_hits) {
     auto hits = (MarshaledHits*)c_marshaled_hits;
     delete hits;
 }
-
-struct SearchResultPair {
-    float distance_;
-    SearchResult* search_result_;
-    int64_t offset_;
-    int64_t index_;
-
-    SearchResultPair(float distance, SearchResult* search_result, int64_t offset, int64_t index)
-        : distance_(distance), search_result_(search_result), offset_(offset), index_(index) {
-    }
-
-    bool
-    operator<(const SearchResultPair& pair) const {
-        return (distance_ < pair.distance_);
-    }
-
-    bool
-    operator>(const SearchResultPair& pair) const {
-        return (distance_ > pair.distance_);
-    }
-
-    void
-    reset_distance() {
-        distance_ = search_result_->result_distances_[offset_];
-    }
-};
 
 void
 GetResultData(std::vector<std::vector<int64_t>>& search_records,
