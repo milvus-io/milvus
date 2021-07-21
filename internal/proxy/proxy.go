@@ -20,6 +20,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/metrics"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -300,8 +302,6 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 					}
 				}
 
-				log.Debug("send timestamp statistics of pchan", zap.Any("channels", channels), zap.Any("tss", tss))
-
 				req := &internalpb.ChannelTimeTickMsg{
 					Base: &commonpb.MsgBase{
 						MsgType:   commonpb.MsgType_TimeTick, // todo
@@ -313,6 +313,12 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 					Timestamps:       tss,
 					DefaultTimestamp: maxTs,
 				}
+
+				for idx, channel := range channels {
+					ts := tss[idx]
+					metrics.ProxyDmlChannelTimeTick.WithLabelValues(channel).Set(float64(ts))
+				}
+				metrics.ProxyDmlChannelTimeTick.WithLabelValues("DefaultTimestamp").Set(float64(maxTs))
 
 				status, err := node.rootCoord.UpdateChannelTimeTick(node.ctx, req)
 				if err != nil {
