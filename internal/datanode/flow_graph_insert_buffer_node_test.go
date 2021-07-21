@@ -151,15 +151,15 @@ func TestFlushSegment(t *testing.T) {
 		Data: make(map[storage.FieldID]storage.FieldData),
 	}
 	insertData.Data[0] = &storage.Int64FieldData{
-		NumRows: 10,
+		NumRows: []int64{10},
 		Data:    []int64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
 	}
 	insertData.Data[1] = &storage.Int64FieldData{
-		NumRows: 10,
+		NumRows: []int64{10},
 		Data:    []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
 	}
 	insertData.Data[107] = &storage.FloatFieldData{
-		NumRows: 10,
+		NumRows: []int64{10},
 		Data:    make([]float32, 10),
 	}
 	flushMap.Store(segmentID, insertData)
