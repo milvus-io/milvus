@@ -124,8 +124,9 @@ class TestcaseBase(Base):
                                       **kwargs)
         return partition_wrap
 
-    def init_collection_general(self, prefix, insert_data=False, nb=ct.default_nb, partition_num=0,
-                                is_binary=False, is_all_data_type=False, auto_id=False, dim=ct.default_dim):
+    def init_collection_general(self, prefix, insert_data=False, nb=ct.default_nb,
+                                partition_num=0, is_binary=False, is_all_data_type=False,
+                                auto_id=False, dim=ct.default_dim, is_index=False):
         """
         target: create specified collections
         method: 1. create collections (binary/non-binary)
@@ -159,7 +160,9 @@ class TestcaseBase(Base):
                                auto_id=auto_id, dim=dim)
             assert collection_w.is_empty is False
             assert collection_w.num_entities == nb
-            collection_w.load()
+            # This condition will be removed after auto index feature
+            if not is_index:
+                collection_w.load()
 
         return collection_w, vectors, binary_raw_vectors, insert_ids
 
