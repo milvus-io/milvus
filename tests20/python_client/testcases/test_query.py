@@ -474,8 +474,8 @@ class TestQueryOperation(TestcaseBase):
     """
 
     @pytest.mark.tags(ct.CaseLabel.L2)
-    @pytest.mark.parametrize("collection_name", [cf.gen_unique_str(prefix)])
-    def test_query_without_connection(self, collection_name):
+    # @pytest.mark.parametrize("collection_name", [cf.gen_unique_str(prefix)])
+    def test_query_without_connection(self):
         """
         target: test query without connection
         method: close connect and query
@@ -483,7 +483,7 @@ class TestQueryOperation(TestcaseBase):
         """
 
         # init a collection with default connection
-        collection_w = self.init_collection_wrap(name=collection_name)
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
 
         # remove default connection
         self.connection_wrap.remove_connection(alias=DefaultConfig.DEFAULT_USING)
@@ -496,9 +496,9 @@ class TestQueryOperation(TestcaseBase):
                            check_items={ct.err_code: 0, ct.err_msg: cem.ConnectFirst})
 
     @pytest.mark.tags(ct.CaseLabel.L1)
-    @pytest.mark.parametrize("collection_name, data",
-                             [(cf.gen_unique_str(prefix), cf.gen_default_list_data(ct.default_nb))])
-    def test_query_without_loading(self, collection_name, data):
+    # @pytest.mark.parametrize("collection_name, data",
+                             # [(cf.gen_unique_str(prefix), cf.gen_default_list_data(ct.default_nb))])
+    def test_query_without_loading(self):
         """
         target: test query without loading
         method: no loading before query
@@ -506,10 +506,11 @@ class TestQueryOperation(TestcaseBase):
         """
 
         # init a collection with default connection
+        collection_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=collection_name)
 
         # insert data to collection
-        collection_w.insert(data=data)
+        collection_w.insert(data=cf.gen_default_list_data(ct.default_nb))
 
         # check number of entities and that method calls the flush interface
         assert collection_w.num_entities == ct.default_nb

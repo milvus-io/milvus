@@ -410,7 +410,7 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr,
                                                  check_items={ct.dict_content: {'host': "host", 'port': port}})
 
-    @ pytest.mark.tags(ct.CaseLabel.L0)
+    @pytest.mark.tags(ct.CaseLabel.L0)
     def test_connection_connect_default_alias_effective(self, host, port):
         """
         target: connect passes useful configure that adds by add_connect
@@ -427,7 +427,7 @@ class TestConnectionOperation(TestcaseBase):
         # list all connections and check the response
         self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr,
                                               check_items={ct.list_content: [(DefaultConfig.DEFAULT_USING,
-                                                                             ct.Connect_Object_Name)]})
+                                                                              ct.Connect_Object_Name)]})
 
         # get all addr of alias and check the response
         self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr,
@@ -485,7 +485,7 @@ class TestConnectionOperation(TestcaseBase):
                                             check_items={ct.value_content: ct.Connect_Object_Name})
 
         # list all connections and check the response
-        list_content = [(connect_name, ct.Connect_Object_Name)] if connect_name is DefaultConfig.DEFAULT_USING else\
+        list_content = [(connect_name, ct.Connect_Object_Name)] if connect_name is DefaultConfig.DEFAULT_USING else \
             [(DefaultConfig.DEFAULT_USING, None), (connect_name, ct.Connect_Object_Name)]
         self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr,
                                               check_items={ct.list_content: list_content})
@@ -596,7 +596,8 @@ class TestConnectionOperation(TestcaseBase):
         # list all connections and check the response
         self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr,
                                               check_items={ct.list_content: [(DefaultConfig.DEFAULT_USING, None),
-                                                                             (test_alias_name, ct.Connect_Object_Name)]})
+                                                                             (
+                                                                             test_alias_name, ct.Connect_Object_Name)]})
 
         # get all addr of alias and check the response
         self.connection_wrap.get_connection_addr(alias=test_alias_name, check_task=ct.CheckTasks.ccr,
@@ -692,9 +693,9 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr, check_items={ct.list_content: list_content})
 
     @pytest.mark.tags(ct.CaseLabel.L1)
-    @pytest.mark.parametrize("collection_name, schema", [(cf.gen_unique_str('connection_test_'),
-                                                          cf.gen_default_collection_schema())])
-    def test_connection_init_collection_invalid_connection(self, collection_name, schema):
+    # @pytest.mark.parametrize("collection_name, schema", [(cf.gen_unique_str('connection_test_'),
+    #                                                       cf.gen_default_collection_schema())])
+    def test_connection_init_collection_invalid_connection(self):
         """
         target: create collection with invalid connection
         method: init collection with invalid connection
@@ -702,15 +703,17 @@ class TestConnectionOperation(TestcaseBase):
         """
 
         # init collection failed
+        collection_name = cf.gen_unique_str('connection_test_')
+        schema = cf.gen_default_collection_schema()
         self.collection_wrap.init_collection(name=collection_name, schema=schema, check_task=ct.CheckTasks.err_res,
                                              check_items={ct.err_code: 0,
                                                           ct.err_msg: cem.ConnectFirst},
                                              _using=ct.Not_Exist)
 
     @pytest.mark.tags(ct.CaseLabel.L1)
-    @pytest.mark.parametrize("collection_name, schema", [(cf.gen_unique_str('connection_test_'),
-                                                          cf.gen_default_collection_schema())])
-    def test_connection_init_collection_connection(self, collection_name, schema, host, port):
+    # @pytest.mark.parametrize("collection_name, schema", [(cf.gen_unique_str('connection_test_'),
+    #                                                       cf.gen_default_collection_schema())])
+    def test_connection_init_collection_connection(self, host, port):
         """
         target: create collection then disconnection
         method: connection, init collection, then disconnection
@@ -722,6 +725,8 @@ class TestConnectionOperation(TestcaseBase):
                                      check_task=ct.CheckTasks.ccr)
 
         # init collection successfully
+        collection_name = cf.gen_unique_str('connection_test_')
+        schema = cf.gen_default_collection_schema()
         self.collection_wrap.init_collection(name=collection_name, schema=schema, _using=DefaultConfig.DEFAULT_USING)
 
         # remove connection

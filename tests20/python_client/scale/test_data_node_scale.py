@@ -3,6 +3,7 @@ import random
 import pytest
 
 from base.collection_wrapper import ApiCollectionWrapper
+from common.common_type import CaseLabel
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
@@ -18,6 +19,7 @@ default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": 
 
 class TestDataNodeScale:
 
+    @pytest.mark.tags(CaseLabel.L3)
     def test_expand_data_node(self):
         """
         target: test create and insert api after expand dataNode pod
@@ -63,6 +65,7 @@ class TestDataNodeScale:
         new_collection_w.drop()
         # env.helm_uninstall_cluster_milvus()
 
+    @pytest.mark.tags(CaseLabel.L3)
     def test_shrink_data_node(self):
         """
         target: test shrink dataNode from 2 to 1
