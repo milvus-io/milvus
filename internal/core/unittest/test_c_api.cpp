@@ -36,6 +36,9 @@ using namespace milvus::segcore;
 // using namespace milvus::proto;
 using namespace milvus::knowhere;
 
+namespace {
+const int DIM = 16;
+
 const char*
 get_default_schema_config() {
     static std::string conf = R"(name: "default-collection"
@@ -78,6 +81,99 @@ translate_text_plan_to_binary_plan(const char* text_plan) {
     return ret;
 }
 
+auto
+generate_data(int N) {
+    std::vector<char> raw_data;
+    std::vector<uint64_t> timestamps;
+    std::vector<int64_t> uids;
+    std::default_random_engine e(42);
+    std::normal_distribution<> dis(0.0, 1.0);
+    for (int i = 0; i < N; ++i) {
+        uids.push_back(10 * N + i);
+        timestamps.push_back(0);
+        float vec[DIM];
+        for (auto& x : vec) {
+            x = dis(e);
+        }
+        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
+        int age = e() % 100;
+        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
+    }
+    return std::make_tuple(raw_data, timestamps, uids);
+}
+
+std::string
+generate_query_data(int nq) {
+    namespace ser = milvus::proto::milvus;
+    std::default_random_engine e(67);
+    int dim = DIM;
+    std::normal_distribution<double> dis(0.0, 1.0);
+    ser::PlaceholderGroup raw_group;
+    auto value = raw_group.add_placeholders();
+    value->set_tag("$0");
+    value->set_type(ser::PlaceholderType::FloatVector);
+    for (int i = 0; i < nq; ++i) {
+        std::vector<float> vec;
+        for (int d = 0; d < dim; ++d) {
+            vec.push_back(dis(e));
+        }
+        value->add_values(vec.data(), vec.size() * sizeof(float));
+    }
+    auto blob = raw_group.SerializeAsString();
+    return blob;
+}
+
+std::string
+generate_collection_schema(std::string metric_type, int dim, bool is_binary) {
+    namespace schema = milvus::proto::schema;
+    schema::CollectionSchema collection_schema;
+    collection_schema.set_name("collection_test");
+    collection_schema.set_autoid(true);
+
+    auto vec_field_schema = collection_schema.add_fields();
+    vec_field_schema->set_name("fakevec");
+    vec_field_schema->set_fieldid(100);
+    if (is_binary) {
+        vec_field_schema->set_data_type(schema::DataType::BinaryVector);
+    } else {
+        vec_field_schema->set_data_type(schema::DataType::FloatVector);
+    }
+    auto metric_type_param = vec_field_schema->add_index_params();
+    metric_type_param->set_key("metric_type");
+    metric_type_param->set_value(metric_type);
+    auto dim_param = vec_field_schema->add_type_params();
+    dim_param->set_key("dim");
+    dim_param->set_value(std::to_string(dim));
+
+    auto other_field_schema = collection_schema.add_fields();
+    ;
+    other_field_schema->set_name("counter");
+    other_field_schema->set_fieldid(101);
+    other_field_schema->set_data_type(schema::DataType::Int64);
+
+    std::string schema_string;
+    auto marshal = google::protobuf::TextFormat::PrintToString(collection_schema, &schema_string);
+    assert(marshal == true);
+    return schema_string;
+}
+
+VecIndexPtr
+generate_index(
+    void* raw_data, milvus::knowhere::Config conf, int64_t dim, int64_t topK, int64_t N, std::string index_type) {
+    auto indexing = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type, knowhere::IndexMode::MODE_CPU);
+
+    auto database = milvus::knowhere::GenDataset(N, dim, raw_data);
+    indexing->Train(database, conf);
+    indexing->AddWithoutIds(database, conf);
+    EXPECT_EQ(indexing->Count(), N);
+    EXPECT_EQ(indexing->Dim(), dim);
+
+    EXPECT_EQ(indexing->Count(), N);
+    EXPECT_EQ(indexing->Dim(), dim);
+    return indexing;
+}
+}  // namespace
+
 TEST(CApiTest, CollectionTest) {
     auto collection = NewCollection(get_default_schema_config());
     DeleteCollection(collection);
@@ -101,31 +197,14 @@ TEST(CApiTest, InsertTest) {
     auto collection = NewCollection(get_default_schema_config());
     auto segment = NewSegment(collection, 0, Growing);
 
-    std::vector<char> raw_data;
-    std::vector<uint64_t> timestamps;
-    std::vector<int64_t> uids;
     int N = 10000;
-    std::default_random_engine e(67);
-    for (int i = 0; i < N; ++i) {
-        uids.push_back(100000 + i);
-        timestamps.push_back(0);
-        // append vec
-        float vec[16];
-        for (auto& x : vec) {
-            x = e() % 2000 * 0.001 - 1.0;
-        }
-        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
-        int age = e() % 100;
-        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
-    }
-
+    auto [raw_data, timestamps, uids] = generate_data(N);
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
     int64_t offset;
     PreInsert(segment, N, &offset);
 
     auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
-
     assert(res.error_code == Success);
 
     DeleteCollection(collection);
@@ -152,24 +231,8 @@ TEST(CApiTest, SearchTest) {
     auto collection = NewCollection(get_default_schema_config());
     auto segment = NewSegment(collection, 0, Growing);
 
-    std::vector<char> raw_data;
-    std::vector<uint64_t> timestamps;
-    std::vector<int64_t> uids;
     int N = 10000;
-    std::default_random_engine e(67);
-    for (int i = 0; i < N; ++i) {
-        uids.push_back(100000 + i);
-        timestamps.push_back(0);
-        // append vec
-        float vec[16];
-        for (auto& x : vec) {
-            x = e() % 2000 * 0.001 - 1.0;
-        }
-        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
-        int age = e() % 100;
-        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
-    }
-
+    auto [raw_data, timestamps, uids] = generate_data(N);
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
     int64_t offset;
@@ -194,26 +257,10 @@ TEST(CApiTest, SearchTest) {
         }
     })";
 
-    namespace ser = milvus::proto::milvus;
     int num_queries = 10;
-    int dim = 16;
-    std::normal_distribution<double> dis(0, 1);
-    ser::PlaceholderGroup raw_group;
-    auto value = raw_group.add_placeholders();
-    value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::FloatVector);
-    for (int i = 0; i < num_queries; ++i) {
-        std::vector<float> vec;
-        for (int d = 0; d < dim; ++d) {
-            vec.push_back(dis(e));
-        }
-        // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
-        value->add_values(vec.data(), vec.size() * sizeof(float));
-    }
-    auto blob = raw_group.SerializeAsString();
+    auto blob = generate_query_data(num_queries);
 
     void* plan = nullptr;
-
     auto status = CreateSearchPlan(collection, dsl_string, &plan);
     ASSERT_EQ(status.error_code, Success);
 
@@ -241,24 +288,8 @@ TEST(CApiTest, SearchTestWithExpr) {
     auto collection = NewCollection(get_default_schema_config());
     auto segment = NewSegment(collection, 0, Growing);
 
-    std::vector<char> raw_data;
-    std::vector<uint64_t> timestamps;
-    std::vector<int64_t> uids;
     int N = 10000;
-    std::default_random_engine e(67);
-    for (int i = 0; i < N; ++i) {
-        uids.push_back(100000 + i);
-        timestamps.push_back(0);
-        // append vec
-        float vec[16];
-        for (auto& x : vec) {
-            x = e() % 2000 * 0.001 - 1.0;
-        }
-        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
-        int age = e() % 100;
-        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
-    }
-
+    auto [raw_data, timestamps, uids] = generate_data(N);
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
     int64_t offset;
@@ -277,23 +308,8 @@ TEST(CApiTest, SearchTestWithExpr) {
                                             placeholder_tag: "$0"
                                          >)";
 
-    namespace ser = milvus::proto::milvus;
     int num_queries = 10;
-    int dim = 16;
-    std::normal_distribution<double> dis(0, 1);
-    ser::PlaceholderGroup raw_group;
-    auto value = raw_group.add_placeholders();
-    value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::FloatVector);
-    for (int i = 0; i < num_queries; ++i) {
-        std::vector<float> vec;
-        for (int d = 0; d < dim; ++d) {
-            vec.push_back(dis(e));
-        }
-        // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
-        value->add_values(vec.data(), vec.size() * sizeof(float));
-    }
-    auto blob = raw_group.SerializeAsString();
+    auto blob = generate_query_data(num_queries);
 
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
@@ -325,121 +341,26 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
     auto segment = NewSegment(collection, 0, Growing);
 
     auto old_memory_usage_size = GetMemoryUsageInBytes(segment);
-    std::cout << "old_memory_usage_size = " << old_memory_usage_size << std::endl;
+    //std::cout << "old_memory_usage_size = " << old_memory_usage_size << std::endl;
+    assert(old_memory_usage_size == 0);
 
-    std::vector<char> raw_data;
-    std::vector<uint64_t> timestamps;
-    std::vector<int64_t> uids;
     int N = 10000;
-    std::default_random_engine e(67);
-    for (int i = 0; i < N; ++i) {
-        uids.push_back(100000 + i);
-        timestamps.push_back(0);
-        // append vec
-        float vec[16];
-        for (auto& x : vec) {
-            x = e() % 2000 * 0.001 - 1.0;
-        }
-        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
-        int age = e() % 100;
-        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
-    }
-
+    auto [raw_data, timestamps, uids] = generate_data(N);
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
-    //    auto offset = PreInsert(segment, N);
     int64_t offset;
     PreInsert(segment, N, &offset);
 
     auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
-
     assert(res.error_code == Success);
 
     auto memory_usage_size = GetMemoryUsageInBytes(segment);
-
-    std::cout << "new_memory_usage_size = " << memory_usage_size << std::endl;
-
+    //std::cout << "new_memory_usage_size = " << memory_usage_size << std::endl;
     assert(memory_usage_size == 2785280);
 
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
-
-namespace {
-auto
-generate_data(int N) {
-    std::vector<char> raw_data;
-    std::vector<uint64_t> timestamps;
-    std::vector<int64_t> uids;
-    std::default_random_engine er(42);
-    std::normal_distribution<> distribution(0.0, 1.0);
-    std::default_random_engine ei(42);
-    for (int i = 0; i < N; ++i) {
-        uids.push_back(10 * N + i);
-        timestamps.push_back(0);
-        // append vec
-        float vec[16];
-        for (auto& x : vec) {
-            x = distribution(er);
-        }
-        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
-        int age = ei() % 100;
-        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
-    }
-    return std::make_tuple(raw_data, timestamps, uids);
-}
-
-std::string
-generate_collection_shema(std::string metric_type, std::string dim, bool is_binary) {
-    namespace schema = milvus::proto::schema;
-    schema::CollectionSchema collection_schema;
-    collection_schema.set_name("collection_test");
-    collection_schema.set_autoid(true);
-
-    auto vec_field_schema = collection_schema.add_fields();
-    vec_field_schema->set_name("fakevec");
-    vec_field_schema->set_fieldid(100);
-    if (is_binary) {
-        vec_field_schema->set_data_type(schema::DataType::BinaryVector);
-    } else {
-        vec_field_schema->set_data_type(schema::DataType::FloatVector);
-    }
-    auto metric_type_param = vec_field_schema->add_index_params();
-    metric_type_param->set_key("metric_type");
-    metric_type_param->set_value(metric_type);
-    auto dim_param = vec_field_schema->add_type_params();
-    dim_param->set_key("dim");
-    dim_param->set_value(dim);
-
-    auto other_field_schema = collection_schema.add_fields();
-    ;
-    other_field_schema->set_name("counter");
-    other_field_schema->set_fieldid(101);
-    other_field_schema->set_data_type(schema::DataType::Int64);
-
-    std::string schema_string;
-    auto marshal = google::protobuf::TextFormat::PrintToString(collection_schema, &schema_string);
-    assert(marshal == true);
-    return schema_string;
-}
-
-VecIndexPtr
-generate_index(
-    void* raw_data, milvus::knowhere::Config conf, int64_t dim, int64_t topK, int64_t N, std::string index_type) {
-    auto indexing = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type, knowhere::IndexMode::MODE_CPU);
-
-    auto database = milvus::knowhere::GenDataset(N, dim, raw_data);
-    indexing->Train(database, conf);
-    indexing->AddWithoutIds(database, conf);
-    EXPECT_EQ(indexing->Count(), N);
-    EXPECT_EQ(indexing->Dim(), dim);
-
-    EXPECT_EQ(indexing->Count(), N);
-    EXPECT_EQ(indexing->Dim(), dim);
-    return indexing;
-}
-
-}  // namespace
 
 TEST(CApiTest, GetDeletedCountTest) {
     auto collection = NewCollection(get_default_schema_config());
@@ -468,7 +389,7 @@ TEST(CApiTest, GetRowCountTest) {
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_data(N);
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
-    //    auto offset = PreInsert(segment, N);
+
     int64_t offset;
     PreInsert(segment, N, &offset);
     auto res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
@@ -527,27 +448,10 @@ TEST(CApiTest, Reduce) {
     auto collection = NewCollection(get_default_schema_config());
     auto segment = NewSegment(collection, 0, Growing);
 
-    std::vector<char> raw_data;
-    std::vector<uint64_t> timestamps;
-    std::vector<int64_t> uids;
     int N = 10000;
-    std::default_random_engine e(67);
-    for (int i = 0; i < N; ++i) {
-        uids.push_back(100000 + i);
-        timestamps.push_back(0);
-        // append vec
-        float vec[16];
-        for (auto& x : vec) {
-            x = e() % 2000 * 0.001 - 1.0;
-        }
-        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
-        int age = e() % 100;
-        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
-    }
-
+    auto [raw_data, timestamps, uids] = generate_data(N);
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
-    //    auto offset = PreInsert(segment, N);
     int64_t offset;
     PreInsert(segment, N, &offset);
     auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
@@ -569,26 +473,10 @@ TEST(CApiTest, Reduce) {
         }
     })";
 
-    namespace ser = milvus::proto::milvus;
     int num_queries = 10;
-    int dim = 16;
-    std::normal_distribution<double> dis(0, 1);
-    ser::PlaceholderGroup raw_group;
-    auto value = raw_group.add_placeholders();
-    value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::FloatVector);
-    for (int i = 0; i < num_queries; ++i) {
-        std::vector<float> vec;
-        for (int d = 0; d < dim; ++d) {
-            vec.push_back(dis(e));
-        }
-        // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
-        value->add_values(vec.data(), vec.size() * sizeof(float));
-    }
-    auto blob = raw_group.SerializeAsString();
+    auto blob = generate_query_data(num_queries);
 
     void* plan = nullptr;
-
     auto status = CreateSearchPlan(collection, dsl_string, &plan);
     assert(status.error_code == Success);
 
@@ -611,13 +499,14 @@ TEST(CApiTest, Reduce) {
     results.push_back(res1);
     results.push_back(res2);
 
-    bool is_selected[1] = {false};
-    status = ReduceSearchResults(results.data(), 1, is_selected);
+    bool is_selected[2] = {false, false};
+    status = ReduceSearchResults(results.data(), 2, is_selected);
     assert(status.error_code == Success);
     FillTargetEntry(segment, plan, res1);
+    FillTargetEntry(segment, plan, res2);
     void* reorganize_search_result = nullptr;
     status = ReorganizeSearchResults(&reorganize_search_result, placeholderGroups.data(), 1, results.data(),
-                                     is_selected, 1, plan);
+                                     is_selected, 2, plan);
     assert(status.error_code == Success);
     auto hits_blob_size = GetHitsBlobSize(reorganize_search_result);
     assert(hits_blob_size > 0);
@@ -645,27 +534,10 @@ TEST(CApiTest, ReduceSearchWithExpr) {
     auto collection = NewCollection(get_default_schema_config());
     auto segment = NewSegment(collection, 0, Growing);
 
-    std::vector<char> raw_data;
-    std::vector<uint64_t> timestamps;
-    std::vector<int64_t> uids;
     int N = 10000;
-    std::default_random_engine e(67);
-    for (int i = 0; i < N; ++i) {
-        uids.push_back(100000 + i);
-        timestamps.push_back(0);
-        // append vec
-        float vec[16];
-        for (auto& x : vec) {
-            x = e() % 2000 * 0.001 - 1.0;
-        }
-        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
-        int age = e() % 100;
-        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
-    }
-
+    auto [raw_data, timestamps, uids] = generate_data(N);
     auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
 
-    //    auto offset = PreInsert(segment, N);
     int64_t offset;
     PreInsert(segment, N, &offset);
     auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
@@ -681,23 +553,8 @@ TEST(CApiTest, ReduceSearchWithExpr) {
                                             placeholder_tag: "$0"
                                          >)";
 
-    namespace ser = milvus::proto::milvus;
     int num_queries = 10;
-    int dim = 16;
-    std::normal_distribution<double> dis(0, 1);
-    ser::PlaceholderGroup raw_group;
-    auto value = raw_group.add_placeholders();
-    value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::FloatVector);
-    for (int i = 0; i < num_queries; ++i) {
-        std::vector<float> vec;
-        for (int d = 0; d < dim; ++d) {
-            vec.push_back(dis(e));
-        }
-        // std::string line((char*)vec.data(), (char*)vec.data() + vec.size() * sizeof(float));
-        value->add_values(vec.data(), vec.size() * sizeof(float));
-    }
-    auto blob = raw_group.SerializeAsString();
+    auto blob = generate_query_data(num_queries);
 
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
@@ -723,13 +580,14 @@ TEST(CApiTest, ReduceSearchWithExpr) {
     results.push_back(res1);
     results.push_back(res2);
 
-    bool is_selected[1] = {false};
-    status = ReduceSearchResults(results.data(), 1, is_selected);
+    bool is_selected[2] = {false, false};
+    status = ReduceSearchResults(results.data(), 2, is_selected);
     assert(status.error_code == Success);
     FillTargetEntry(segment, plan, res1);
+    FillTargetEntry(segment, plan, res2);
     void* reorganize_search_result = nullptr;
     status = ReorganizeSearchResults(&reorganize_search_result, placeholderGroups.data(), 1, results.data(),
-                                     is_selected, 1, plan);
+                                     is_selected, 2, plan);
     assert(status.error_code == Success);
     auto hits_blob_size = GetHitsBlobSize(reorganize_search_result);
     assert(hits_blob_size > 0);
@@ -755,14 +613,13 @@ TEST(CApiTest, ReduceSearchWithExpr) {
 
 TEST(CApiTest, LoadIndexInfo) {
     // generator index
-    constexpr auto DIM = 16;
-    constexpr auto K = 10;
+    constexpr auto TOPK = 10;
 
     auto N = 1024 * 10;
     auto [raw_data, timestamps, uids] = generate_data(N);
     auto indexing = std::make_shared<milvus::knowhere::IVFPQ>();
     auto conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
-                                         {milvus::knowhere::meta::TOPK, K},
+                                         {milvus::knowhere::meta::TOPK, TOPK},
                                          {milvus::knowhere::IndexParams::nlist, 100},
                                          {milvus::knowhere::IndexParams::nprobe, 4},
                                          {milvus::knowhere::IndexParams::m, 4},
@@ -798,15 +655,14 @@ TEST(CApiTest, LoadIndexInfo) {
 
 TEST(CApiTest, LoadIndex_Search) {
     // generator index
-    constexpr auto DIM = 16;
-    constexpr auto K = 10;
+    constexpr auto TOPK = 10;
 
     auto N = 1024 * 1024;
     auto num_query = 100;
     auto [raw_data, timestamps, uids] = generate_data(N);
     auto indexing = std::make_shared<milvus::knowhere::IVFPQ>();
     auto conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
-                                         {milvus::knowhere::meta::TOPK, K},
+                                         {milvus::knowhere::meta::TOPK, TOPK},
                                          {milvus::knowhere::IndexParams::nlist, 100},
                                          {milvus::knowhere::IndexParams::nprobe, 4},
                                          {milvus::knowhere::IndexParams::m, 4},
@@ -841,17 +697,16 @@ TEST(CApiTest, LoadIndex_Search) {
 
     auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
     auto dis = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
-    for (int i = 0; i < std::min(num_query * K, 100); ++i) {
-        std::cout << ids[i] << "->" << dis[i] << std::endl;
-    }
+    //for (int i = 0; i < std::min(num_query * K, 100); ++i) {
+    //    std::cout << ids[i] << "->" << dis[i] << std::endl;
+    //}
 }
 
 TEST(CApiTest, Indexing_Without_Predicate) {
     // insert data to segment
-    constexpr auto DIM = 16;
-    constexpr auto K = 5;
+    constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_shema("L2", "16", false);
+    std::string schema_string = generate_collection_schema("L2", DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Growing);
@@ -863,7 +718,7 @@ TEST(CApiTest, Indexing_Without_Predicate) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
@@ -885,7 +740,7 @@ TEST(CApiTest, Indexing_Without_Predicate) {
 
     // create place_holder_group
     int num_queries = 5;
-    auto raw_group = CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
+    auto raw_group = CreatePlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
     auto blob = raw_group.SerializeAsString();
 
     // search on segment's small index
@@ -907,23 +762,23 @@ TEST(CApiTest, Indexing_Without_Predicate) {
 
     // load index to segment
     auto conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
-                                         {milvus::knowhere::meta::TOPK, K},
+                                         {milvus::knowhere::meta::TOPK, TOPK},
                                          {milvus::knowhere::IndexParams::nlist, 100},
                                          {milvus::knowhere::IndexParams::nprobe, 10},
                                          {milvus::knowhere::IndexParams::m, 4},
                                          {milvus::knowhere::IndexParams::nbits, 8},
                                          {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
                                          {milvus::knowhere::meta::DEVICEID, 0}};
-    auto indexing = generate_index(vec_col.data(), conf, DIM, K, N, IndexEnum::INDEX_FAISS_IVFPQ);
+    auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_IVFPQ);
 
     // gen query dataset
     auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
     auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
     auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
-    std::vector<int64_t> vec_ids(ids, ids + K * num_queries);
+    std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
-    for (int j = 0; j < K * num_queries; ++j) {
+    for (int j = 0; j < TOPK * num_queries; ++j) {
         vec_dis.push_back(dis[j] * -1);
     }
 
@@ -956,8 +811,8 @@ TEST(CApiTest, Indexing_Without_Predicate) {
 
     auto search_result_on_raw_index_json = SearchResultToJson(*search_result_on_raw_index);
     auto search_result_on_bigIndex_json = SearchResultToJson((*(SearchResult*)c_search_result_on_bigIndex));
-    std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
-    std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
+    //std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
+    //std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
 
     ASSERT_EQ(search_result_on_raw_index_json.dump(1), search_result_on_bigIndex_json.dump(1));
 
@@ -972,10 +827,9 @@ TEST(CApiTest, Indexing_Without_Predicate) {
 
 TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     // insert data to segment
-    constexpr auto DIM = 16;
-    constexpr auto K = 5;
+    constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_shema("L2", "16", false);
+    std::string schema_string = generate_collection_schema("L2", DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Growing);
@@ -987,7 +841,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
@@ -1003,7 +857,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
 
     // create place_holder_group
     int num_queries = 5;
-    auto raw_group = CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
+    auto raw_group = CreatePlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
     auto blob = raw_group.SerializeAsString();
 
     // search on segment's small index
@@ -1026,23 +880,23 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
 
     // load index to segment
     auto conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
-                                         {milvus::knowhere::meta::TOPK, K},
+                                         {milvus::knowhere::meta::TOPK, TOPK},
                                          {milvus::knowhere::IndexParams::nlist, 100},
                                          {milvus::knowhere::IndexParams::nprobe, 10},
                                          {milvus::knowhere::IndexParams::m, 4},
                                          {milvus::knowhere::IndexParams::nbits, 8},
                                          {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
                                          {milvus::knowhere::meta::DEVICEID, 0}};
-    auto indexing = generate_index(vec_col.data(), conf, DIM, K, N, IndexEnum::INDEX_FAISS_IVFPQ);
+    auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_IVFPQ);
 
     // gen query dataset
     auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
     auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
     auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
-    std::vector<int64_t> vec_ids(ids, ids + K * num_queries);
+    std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
-    for (int j = 0; j < K * num_queries; ++j) {
+    for (int j = 0; j < TOPK * num_queries; ++j) {
         vec_dis.push_back(dis[j] * -1);
     }
 
@@ -1075,8 +929,8 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
 
     auto search_result_on_raw_index_json = SearchResultToJson(*search_result_on_raw_index);
     auto search_result_on_bigIndex_json = SearchResultToJson((*(SearchResult*)c_search_result_on_bigIndex));
-    std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
-    std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
+    //std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
+    //std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
 
     ASSERT_EQ(search_result_on_raw_index_json.dump(1), search_result_on_bigIndex_json.dump(1));
 
@@ -1091,10 +945,9 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
 
 TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     // insert data to segment
-    constexpr auto DIM = 16;
-    constexpr auto K = 5;
+    constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_shema("L2", "16", false);
+    std::string schema_string = generate_collection_schema("L2", DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Growing);
@@ -1106,7 +959,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
@@ -1161,7 +1014,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
 
     // load index to segment
     auto conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
-                                         {milvus::knowhere::meta::TOPK, K},
+                                         {milvus::knowhere::meta::TOPK, TOPK},
                                          {milvus::knowhere::IndexParams::nlist, 100},
                                          {milvus::knowhere::IndexParams::nprobe, 10},
                                          {milvus::knowhere::IndexParams::m, 4},
@@ -1169,16 +1022,16 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
                                          {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
                                          {milvus::knowhere::meta::DEVICEID, 0}};
 
-    auto indexing = generate_index(vec_col.data(), conf, DIM, K, N, IndexEnum::INDEX_FAISS_IVFPQ);
+    auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_IVFPQ);
 
     // gen query dataset
     auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
     auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
     auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
-    std::vector<int64_t> vec_ids(ids, ids + K * num_queries);
+    std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
-    for (int j = 0; j < K * num_queries; ++j) {
+    for (int j = 0; j < TOPK * num_queries; ++j) {
         vec_dis.push_back(dis[j] * -1);
     }
 
@@ -1211,7 +1064,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
 
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
-        auto offset = i * K;
+        auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
         ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
                   search_result_on_raw_index->result_distances_[offset]);
@@ -1228,10 +1081,9 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
 
 TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     // insert data to segment
-    constexpr auto DIM = 16;
-    constexpr auto K = 5;
+    constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_shema("L2", "16", false);
+    std::string schema_string = generate_collection_schema("L2", DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Growing);
@@ -1244,7 +1096,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     {
         int64_t offset;
         PreInsert(segment, N, &offset);
-        auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+        auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                               dataset.raw_.sizeof_per_row, dataset.raw_.count);
         assert(ins_res.error_code == Success);
     }
@@ -1313,7 +1165,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
 
     // load index to segment
     auto conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
-                                         {milvus::knowhere::meta::TOPK, K},
+                                         {milvus::knowhere::meta::TOPK, TOPK},
                                          {milvus::knowhere::IndexParams::nlist, 100},
                                          {milvus::knowhere::IndexParams::nprobe, 10},
                                          {milvus::knowhere::IndexParams::m, 4},
@@ -1321,16 +1173,16 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
                                          {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
                                          {milvus::knowhere::meta::DEVICEID, 0}};
 
-    auto indexing = generate_index(vec_col.data(), conf, DIM, K, N, IndexEnum::INDEX_FAISS_IVFPQ);
+    auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_IVFPQ);
 
     // gen query dataset
     auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
     auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
     auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
-    std::vector<int64_t> vec_ids(ids, ids + K * num_queries);
+    std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
-    for (int j = 0; j < K * num_queries; ++j) {
+    for (int j = 0; j < TOPK * num_queries; ++j) {
         vec_dis.push_back(dis[j] * -1);
     }
 
@@ -1363,7 +1215,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
 
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
-        auto offset = i * K;
+        auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
         ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
                   search_result_on_raw_index->result_distances_[offset]);
@@ -1380,10 +1232,9 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
 
 TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     // insert data to segment
-    constexpr auto DIM = 16;
-    constexpr auto K = 5;
+    constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_shema("L2", "16", false);
+    std::string schema_string = generate_collection_schema("L2", DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Growing);
@@ -1395,7 +1246,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
@@ -1449,7 +1300,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
 
     // load index to segment
     auto conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
-                                         {milvus::knowhere::meta::TOPK, K},
+                                         {milvus::knowhere::meta::TOPK, TOPK},
                                          {milvus::knowhere::IndexParams::nlist, 100},
                                          {milvus::knowhere::IndexParams::nprobe, 10},
                                          {milvus::knowhere::IndexParams::m, 4},
@@ -1457,16 +1308,16 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
                                          {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
                                          {milvus::knowhere::meta::DEVICEID, 0}};
 
-    auto indexing = generate_index(vec_col.data(), conf, DIM, K, N, IndexEnum::INDEX_FAISS_IVFPQ);
+    auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_IVFPQ);
 
     // gen query dataset
     auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
     auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
     auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
-    std::vector<int64_t> vec_ids(ids, ids + K * num_queries);
+    std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
-    for (int j = 0; j < K * num_queries; ++j) {
+    for (int j = 0; j < TOPK * num_queries; ++j) {
         vec_dis.push_back(dis[j] * -1);
     }
 
@@ -1499,7 +1350,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
 
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
-        auto offset = i * K;
+        auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
         ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
                   search_result_on_raw_index->result_distances_[offset]);
@@ -1516,10 +1367,9 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
 
 TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     // insert data to segment
-    constexpr auto DIM = 16;
-    constexpr auto K = 5;
+    constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_shema("L2", "16", false);
+    std::string schema_string = generate_collection_schema("L2", DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Growing);
@@ -1531,7 +1381,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
@@ -1650,7 +1500,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
 
     // load index to segment
     auto conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
-                                         {milvus::knowhere::meta::TOPK, K},
+                                         {milvus::knowhere::meta::TOPK, TOPK},
                                          {milvus::knowhere::IndexParams::nlist, 100},
                                          {milvus::knowhere::IndexParams::nprobe, 10},
                                          {milvus::knowhere::IndexParams::m, 4},
@@ -1658,16 +1508,16 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
                                          {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
                                          {milvus::knowhere::meta::DEVICEID, 0}};
 
-    auto indexing = generate_index(vec_col.data(), conf, DIM, K, N, IndexEnum::INDEX_FAISS_IVFPQ);
+    auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_IVFPQ);
 
     // gen query dataset
     auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
     auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
     auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
-    std::vector<int64_t> vec_ids(ids, ids + K * num_queries);
+    std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
-    for (int j = 0; j < K * num_queries; ++j) {
+    for (int j = 0; j < TOPK * num_queries; ++j) {
         vec_dis.push_back(dis[j] * -1);
     }
 
@@ -1700,7 +1550,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
 
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
-        auto offset = i * K;
+        auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
         ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
                   search_result_on_raw_index->result_distances_[offset]);
@@ -1717,10 +1567,9 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
 
 TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     // insert data to segment
-    constexpr auto DIM = 16;
-    constexpr auto K = 5;
+    constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_shema("JACCARD", "16", true);
+    std::string schema_string = generate_collection_schema("JACCARD", DIM, true);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Growing);
@@ -1732,7 +1581,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
@@ -1788,7 +1637,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     // load index to segment
     auto conf = milvus::knowhere::Config{
         {milvus::knowhere::meta::DIM, DIM},
-        {milvus::knowhere::meta::TOPK, K},
+        {milvus::knowhere::meta::TOPK, TOPK},
         {milvus::knowhere::IndexParams::nprobe, 10},
         {milvus::knowhere::IndexParams::nlist, 100},
         {milvus::knowhere::IndexParams::m, 4},
@@ -1796,16 +1645,16 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
         {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::JACCARD},
     };
 
-    auto indexing = generate_index(vec_col.data(), conf, DIM, K, N, IndexEnum::INDEX_FAISS_BIN_IVFFLAT);
+    auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_BIN_IVFFLAT);
 
     // gen query dataset
     auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
     auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
     auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
-    std::vector<int64_t> vec_ids(ids, ids + K * num_queries);
+    std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
-    for (int j = 0; j < K * num_queries; ++j) {
+    for (int j = 0; j < TOPK * num_queries; ++j) {
         vec_dis.push_back(dis[j] * -1);
     }
 
@@ -1838,7 +1687,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
 
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
-        auto offset = i * K;
+        auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
         ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
                   search_result_on_raw_index->result_distances_[offset]);
@@ -1855,10 +1704,9 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
 
 TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     // insert data to segment
-    constexpr auto DIM = 16;
-    constexpr auto K = 5;
+    constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_shema("JACCARD", "16", true);
+    std::string schema_string = generate_collection_schema("JACCARD", DIM, true);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Growing);
@@ -1870,7 +1718,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
@@ -1939,7 +1787,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     // load index to segment
     auto conf = milvus::knowhere::Config{
         {milvus::knowhere::meta::DIM, DIM},
-        {milvus::knowhere::meta::TOPK, K},
+        {milvus::knowhere::meta::TOPK, TOPK},
         {milvus::knowhere::IndexParams::nprobe, 10},
         {milvus::knowhere::IndexParams::nlist, 100},
         {milvus::knowhere::IndexParams::m, 4},
@@ -1947,16 +1795,16 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
         {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::JACCARD},
     };
 
-    auto indexing = generate_index(vec_col.data(), conf, DIM, K, N, IndexEnum::INDEX_FAISS_BIN_IVFFLAT);
+    auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_BIN_IVFFLAT);
 
     // gen query dataset
     auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
     auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
     auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
-    std::vector<int64_t> vec_ids(ids, ids + K * num_queries);
+    std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
-    for (int j = 0; j < K * num_queries; ++j) {
+    for (int j = 0; j < TOPK * num_queries; ++j) {
         vec_dis.push_back(dis[j] * -1);
     }
 
@@ -1989,7 +1837,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
 
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
-        auto offset = i * K;
+        auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
         ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
                   search_result_on_raw_index->result_distances_[offset]);
@@ -2006,10 +1854,9 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
 
 TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     // insert data to segment
-    constexpr auto DIM = 16;
-    constexpr auto K = 5;
+    constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_shema("JACCARD", "16", true);
+    std::string schema_string = generate_collection_schema("JACCARD", DIM, true);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Growing);
@@ -2021,7 +1868,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
@@ -2076,7 +1923,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     // load index to segment
     auto conf = milvus::knowhere::Config{
         {milvus::knowhere::meta::DIM, DIM},
-        {milvus::knowhere::meta::TOPK, K},
+        {milvus::knowhere::meta::TOPK, TOPK},
         {milvus::knowhere::IndexParams::nprobe, 10},
         {milvus::knowhere::IndexParams::nlist, 100},
         {milvus::knowhere::IndexParams::m, 4},
@@ -2084,16 +1931,16 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
         {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::JACCARD},
     };
 
-    auto indexing = generate_index(vec_col.data(), conf, DIM, K, N, IndexEnum::INDEX_FAISS_BIN_IVFFLAT);
+    auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_BIN_IVFFLAT);
 
     // gen query dataset
     auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
     auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
     auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
-    std::vector<int64_t> vec_ids(ids, ids + K * num_queries);
+    std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
-    for (int j = 0; j < K * num_queries; ++j) {
+    for (int j = 0; j < TOPK * num_queries; ++j) {
         vec_dis.push_back(dis[j] * -1);
     }
 
@@ -2133,7 +1980,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
-        auto offset = i * K;
+        auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
         ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
                   search_result_on_raw_index->result_distances_[offset]);
@@ -2150,10 +1997,9 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
 TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     // insert data to segment
-    constexpr auto DIM = 16;
-    constexpr auto K = 5;
+    constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_shema("JACCARD", "16", true);
+    std::string schema_string = generate_collection_schema("JACCARD", DIM, true);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Growing);
@@ -2165,7 +2011,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, 0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
                           dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
@@ -2285,7 +2131,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     // load index to segment
     auto conf = milvus::knowhere::Config{
         {milvus::knowhere::meta::DIM, DIM},
-        {milvus::knowhere::meta::TOPK, K},
+        {milvus::knowhere::meta::TOPK, TOPK},
         {milvus::knowhere::IndexParams::nprobe, 10},
         {milvus::knowhere::IndexParams::nlist, 100},
         {milvus::knowhere::IndexParams::m, 4},
@@ -2293,16 +2139,16 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
         {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::JACCARD},
     };
 
-    auto indexing = generate_index(vec_col.data(), conf, DIM, K, N, IndexEnum::INDEX_FAISS_BIN_IVFFLAT);
+    auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_BIN_IVFFLAT);
 
     // gen query dataset
     auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
     auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
     auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
-    std::vector<int64_t> vec_ids(ids, ids + K * num_queries);
+    std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
-    for (int j = 0; j < K * num_queries; ++j) {
+    for (int j = 0; j < TOPK * num_queries; ++j) {
         vec_dis.push_back(dis[j] * -1);
     }
 
@@ -2342,7 +2188,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
 
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
-        auto offset = i * K;
+        auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
         ASSERT_EQ(search_result_on_bigIndex.result_distances_[offset],
                   search_result_on_raw_index->result_distances_[offset]);
@@ -2405,10 +2251,9 @@ TEST(CApiTest, SealedSegmentTest) {
 }
 
 TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
-    constexpr auto DIM = 16;
-    constexpr auto K = 5;
+    constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_shema("L2", "16", false);
+    std::string schema_string = generate_collection_schema("L2", DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Sealed);
@@ -2466,7 +2311,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
 
     // load index to segment
     auto conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
-                                         {milvus::knowhere::meta::TOPK, K},
+                                         {milvus::knowhere::meta::TOPK, TOPK},
                                          {milvus::knowhere::IndexParams::nlist, 100},
                                          {milvus::knowhere::IndexParams::nprobe, 10},
                                          {milvus::knowhere::IndexParams::m, 4},
@@ -2474,16 +2319,16 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
                                          {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
                                          {milvus::knowhere::meta::DEVICEID, 0}};
 
-    auto indexing = generate_index(vec_col.data(), conf, DIM, K, N, IndexEnum::INDEX_FAISS_IVFPQ);
+    auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_IVFPQ);
 
     // gen query dataset
     auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
     auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
     auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
-    std::vector<int64_t> vec_ids(ids, ids + K * num_queries);
+    std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
-    for (int j = 0; j < K * num_queries; ++j) {
+    for (int j = 0; j < TOPK * num_queries; ++j) {
         vec_dis.push_back(dis[j] * -1);
     }
 
@@ -2545,7 +2390,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
 
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
-        auto offset = i * K;
+        auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
     }
 
@@ -2558,10 +2403,9 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
 }
 
 TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
-    constexpr auto DIM = 16;
-    constexpr auto K = 5;
+    constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_shema("L2", "16", false);
+    std::string schema_string = generate_collection_schema("L2", DIM, false);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, 0, Sealed);
@@ -2632,7 +2476,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
 
     // load index to segment
     auto conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
-                                         {milvus::knowhere::meta::TOPK, K},
+                                         {milvus::knowhere::meta::TOPK, TOPK},
                                          {milvus::knowhere::IndexParams::nlist, 100},
                                          {milvus::knowhere::IndexParams::nprobe, 10},
                                          {milvus::knowhere::IndexParams::m, 4},
@@ -2640,16 +2484,16 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
                                          {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
                                          {milvus::knowhere::meta::DEVICEID, 0}};
 
-    auto indexing = generate_index(vec_col.data(), conf, DIM, K, N, IndexEnum::INDEX_FAISS_IVFPQ);
+    auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_IVFPQ);
 
     // gen query dataset
     auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
     auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
     auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
-    std::vector<int64_t> vec_ids(ids, ids + K * num_queries);
+    std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
-    for (int j = 0; j < K * num_queries; ++j) {
+    for (int j = 0; j < TOPK * num_queries; ++j) {
         vec_dis.push_back(dis[j] * -1);
     }
 
@@ -2712,7 +2556,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
 
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
-        auto offset = i * K;
+        auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex.internal_seg_offsets_[offset], 420000 + i);
     }
 

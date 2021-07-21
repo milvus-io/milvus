@@ -27,12 +27,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
-
-	"github.com/milvus-io/milvus/internal/proto/planpb"
-
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
@@ -44,9 +38,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -1265,6 +1262,49 @@ func (dct *DropCollectionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+func translateOutputFields(outputFields []string, schema *schemapb.CollectionSchema, addPrimary bool) ([]string, error) {
+	var primaryFieldName string
+	scalarFieldNameMap := make(map[string]bool)
+	vectorFieldNameMap := make(map[string]bool)
+	resultFieldNameMap := make(map[string]bool)
+	resultFieldNames := make([]string, 0)
+
+	for _, field := range schema.Fields {
+		if field.IsPrimaryKey {
+			primaryFieldName = field.Name
+		}
+		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
+			vectorFieldNameMap[field.Name] = true
+		} else {
+			scalarFieldNameMap[field.Name] = true
+		}
+	}
+
+	for _, outputFieldName := range outputFields {
+		outputFieldName = strings.TrimSpace(outputFieldName)
+		if outputFieldName == "*" {
+			for fieldName := range scalarFieldNameMap {
+				resultFieldNameMap[fieldName] = true
+			}
+		} else if outputFieldName == "%" {
+			for fieldName := range vectorFieldNameMap {
+				resultFieldNameMap[fieldName] = true
+			}
+		} else {
+			resultFieldNameMap[outputFieldName] = true
+		}
+	}
+
+	if addPrimary {
+		resultFieldNameMap[primaryFieldName] = true
+	}
+
+	for fieldName := range resultFieldNameMap {
+		resultFieldNames = append(resultFieldNames, fieldName)
+	}
+	return resultFieldNames, nil
+}
+
 type SearchTask struct {
 	Condition
 	*internalpb.SearchRequest
@@ -1339,23 +1379,6 @@ func (st *SearchTask) getVChannels() ([]vChan, error) {
 	return st.chMgr.getVChannels(collID)
 }
 
-// https://github.com/milvus-io/milvus/issues/6411
-// Support wildcard match
-func translateOutputFields(outputFields []string, schema *schemapb.CollectionSchema) ([]string, error) {
-	if len(outputFields) == 1 && strings.TrimSpace(outputFields[0]) == "*" {
-		ret := make([]string, 0)
-		// fill all fields except vector fields
-		for _, field := range schema.Fields {
-			if field.DataType != schemapb.DataType_BinaryVector && field.DataType != schemapb.DataType_FloatVector {
-				ret = append(ret, field.Name)
-			}
-		}
-		return ret, nil
-	}
-
-	return outputFields, nil
-}
-
 func (st *SearchTask) PreExecute(ctx context.Context) error {
 	st.Base.MsgType = commonpb.MsgType_Search
 	st.Base.SourceID = Params.ProxyID
@@ -1416,7 +1439,7 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	outputFields, err := translateOutputFields(st.query.OutputFields, schema)
+	outputFields, err := translateOutputFields(st.query.OutputFields, schema, false)
 	if err != nil {
 		return err
 	}
@@ -2099,7 +2122,7 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	rt.retrieve.OutputFields, err = translateOutputFields(rt.retrieve.OutputFields, schema)
+	rt.retrieve.OutputFields, err = translateOutputFields(rt.retrieve.OutputFields, schema, true)
 	if err != nil {
 		return err
 	}
@@ -2556,6 +2579,8 @@ func (dct *DescribeCollectionTask) Execute(ctx context.Context) error {
 		dct.result.CollectionID = result.CollectionID
 		dct.result.VirtualChannelNames = result.VirtualChannelNames
 		dct.result.PhysicalChannelNames = result.PhysicalChannelNames
+		dct.result.CreatedTimestamp = result.CreatedTimestamp
+		dct.result.CreatedUtcTimestamp = result.CreatedUtcTimestamp
 
 		for _, field := range result.Schema.Fields {
 			if field.FieldID >= 100 { // TODO(dragondriver): use StartOfUserFieldID replacing 100
@@ -2852,19 +2877,24 @@ func (sct *ShowCollectionsTask) Execute(ctx context.Context) error {
 		}
 
 		sct.result = &milvuspb.ShowCollectionsResponse{
-			Status:          resp.Status,
-			CollectionNames: make([]string, 0, len(resp.CollectionIDs)),
-			CollectionIds:   make([]int64, 0, len(resp.CollectionIDs)),
+			Status:               resp.Status,
+			CollectionNames:      make([]string, 0, len(resp.CollectionIDs)),
+			CollectionIds:        make([]int64, 0, len(resp.CollectionIDs)),
+			CreatedTimestamps:    make([]uint64, 0, len(resp.CollectionIDs)),
+			CreatedUtcTimestamps: make([]uint64, 0, len(resp.CollectionIDs)),
 		}
 
-		idMap := make(map[int64]string)
-		for i, name := range respFromRootCoord.CollectionNames {
-			idMap[respFromRootCoord.CollectionIds[i]] = name
+		idMap := make(map[int64]int) // id -> location of respFromRootCoord
+		for i := range respFromRootCoord.CollectionNames {
+			idMap[respFromRootCoord.CollectionIds[i]] = i
 		}
 
 		for _, id := range resp.CollectionIDs {
+			loc := idMap[id]
 			sct.result.CollectionIds = append(sct.result.CollectionIds, id)
-			sct.result.CollectionNames = append(sct.result.CollectionNames, idMap[id])
+			sct.result.CollectionNames = append(sct.result.CollectionNames, respFromRootCoord.CollectionNames[loc])
+			sct.result.CreatedTimestamps = append(sct.result.CreatedTimestamps, respFromRootCoord.CreatedTimestamps[loc])
+			sct.result.CreatedUtcTimestamps = append(sct.result.CreatedUtcTimestamps, respFromRootCoord.CreatedUtcTimestamps[loc])
 		}
 	} else {
 		sct.result = respFromRootCoord
