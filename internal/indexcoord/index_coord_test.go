@@ -55,7 +55,7 @@ func (in *indexNodeMock) CreateIndex(ctx context.Context, req *indexpb.CreateInd
 	}
 	indexMeta.IndexFilePaths = []string{"IndexFilePath-1", "IndexFilePath-2"}
 	indexMeta.State = commonpb.IndexState_Finished
-	err = etcdKV.CompareVersionAndSwap(req.MetaPath, versions[0],
+	_ = etcdKV.CompareVersionAndSwap(req.MetaPath, versions[0],
 		proto.MarshalTextString(&indexMeta))
 
 	time.Sleep(10 * time.Second)
