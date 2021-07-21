@@ -402,7 +402,7 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 		default:
 			//time.Sleep(10 * time.Millisecond)
 			serviceTime := q.waitNewTSafe()
-			st, _ := tsoutil.ParseTS(serviceTime)
+			//st, _ := tsoutil.ParseTS(serviceTime)
 			//log.Debug("get tSafe from flow graph",
 			//	zap.Int64("collectionID", q.collectionID),
 			//	zap.Any("tSafe", st))
@@ -416,7 +416,7 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 			for _, m := range tempMsg {
 				guaranteeTs := m.GuaranteeTs()
 				gt, _ := tsoutil.ParseTS(guaranteeTs)
-				st, _ = tsoutil.ParseTS(serviceTime)
+				st, _ := tsoutil.ParseTS(serviceTime)
 				log.Debug("get query message from unsolvedMsg",
 					zap.Int64("collectionID", q.collectionID),
 					zap.Int64("msgID", m.ID()),
