@@ -24,6 +24,7 @@ class TestQueryBase(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(reason="issue #6650")
     def test_query(self):
         """
         target: test query
@@ -52,6 +53,7 @@ class TestQueryBase(TestcaseBase):
         assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(reason="issue #6650")
     def test_query_auto_id_collection(self):
         """
         target: test query with auto_id=True collection
@@ -135,6 +137,7 @@ class TestQueryBase(TestcaseBase):
             collection_w.query(expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #6650")
     def _test_query_expr_term(self):
         """
         target: test query with TermExpr
@@ -264,6 +267,7 @@ class TestQueryBase(TestcaseBase):
             collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #6650")
     def test_query_output_field_none(self):
         """
         target: test query with none output field
@@ -366,6 +370,7 @@ class TestQueryBase(TestcaseBase):
                                check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #6650")
     def test_query_empty_output_fields(self):
         """
         target: test query with empty output fields
@@ -393,6 +398,7 @@ class TestQueryBase(TestcaseBase):
                                check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(reason="issue #6650")
     def test_query_partition(self):
         """
         target: test query on partition
@@ -426,6 +432,7 @@ class TestQueryBase(TestcaseBase):
                            check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #6650")
     def test_query_default_partition(self):
         """
         target: test query on default partition
@@ -519,6 +526,7 @@ class TestQueryOperation(TestcaseBase):
                            check_items={ct.err_code: 1, ct.err_msg: clem.CollNotLoaded % collection_name})
 
     @pytest.mark.tags(ct.CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #6650")
     @pytest.mark.parametrize("term_expr", [f'{ct.default_int64_field_name} in [0]'])
     def test_query_expr_single_term_array(self, term_expr):
         """
@@ -535,6 +543,7 @@ class TestQueryOperation(TestcaseBase):
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: check_vec})
 
     @pytest.mark.tags(ct.CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #6650")
     @pytest.mark.parametrize("term_expr", [f'{ct.default_int64_field_name} in [0]'])
     def test_query_binary_expr_single_term_array(self, term_expr, check_content):
         """
@@ -552,6 +561,7 @@ class TestQueryOperation(TestcaseBase):
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: check_vec})
 
     @pytest.mark.tags(ct.CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue #6650")
     def test_query_expr_all_term_array(self):
         """
         target: test query with all array term expr
@@ -621,6 +631,7 @@ class TestQueryOperation(TestcaseBase):
         log.debug(res)
 
     @pytest.mark.tags(ct.CaseLabel.L0)
+    @pytest.mark.xfail(reason="issue #6650")
     def test_query_after_index(self):
         """
         target: test query after creating index
@@ -640,6 +651,7 @@ class TestQueryOperation(TestcaseBase):
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: check_vec})
 
     @pytest.mark.tags(ct.CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #6650")
     def test_query_after_search(self):
         """
         target: test query after search

@@ -65,6 +65,10 @@ while (( "$#" )); do
     TEST_EXTRA_ARG=$2
     shift 2
     ;;
+    --test-timeout)
+    TEST_TIMEOUT=$2
+    shift 2
+    ;;
     --skip-setup)
       SKIP_SETUP=true
       shift
@@ -75,10 +79,6 @@ while (( "$#" )); do
     ;;
     --skip-cleanup)
       SKIP_CLEANUP=true
-      shift
-    ;;
-    --install-logger)
-      CRON_LOGGER_INSTALL=true
       shift
     ;;
     --skip-build)
@@ -131,6 +131,8 @@ Usage:
 
     --test-extra-arg            Run e2e test extra configuration
                                 For example, \"--tag=smoke\"
+
+    --test-timeout              To specify timeout period of e2e test. Timeout time is specified in seconds.
 
     --topology                  KinD cluster topology of deployments
                                 Provides three classes: \"SINGLE_CLUSTER\", \"MULTICLUSTER_SINGLE_NETWORK\", \"MULTICLUSTER\"
@@ -283,7 +285,11 @@ if [[ -z "${SKIP_INSTALL:-}" ]]; then
 fi
 
 if [[ -z "${SKIP_TEST:-}" ]]; then
-  trace "test" "${ROOT}/tests/scripts/e2e.sh" "${TEST_EXTRA_ARG}"
+  if [[ -n "${TEST_TIMEOUT:-}" ]]; then
+    trace "test" "timeout" "-v" "${TEST_TIMEOUT}" "${ROOT}/tests/scripts/e2e.sh" "${TEST_EXTRA_ARG}"
+  else
+    trace "test" "${ROOT}/tests/scripts/e2e.sh" "${TEST_EXTRA_ARG}"
+  fi
 fi
 
 # Check if the user is running the clusters in manual mode.
