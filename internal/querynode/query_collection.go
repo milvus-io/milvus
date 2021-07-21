@@ -403,9 +403,9 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 			//time.Sleep(10 * time.Millisecond)
 			serviceTime := q.waitNewTSafe()
 			st, _ := tsoutil.ParseTS(serviceTime)
-			log.Debug("get tSafe from flow graph",
-				zap.Int64("collectionID", q.collectionID),
-				zap.Any("tSafe", st))
+			//log.Debug("get tSafe from flow graph",
+			//	zap.Int64("collectionID", q.collectionID),
+			//	zap.Any("tSafe", st))
 
 			q.setServiceableTime(serviceTime)
 			//log.Debug("query node::doUnsolvedMsg: setServiceableTime", zap.Any("serviceTime", st))
