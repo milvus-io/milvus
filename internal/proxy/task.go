@@ -2579,6 +2579,8 @@ func (dct *DescribeCollectionTask) Execute(ctx context.Context) error {
 		dct.result.CollectionID = result.CollectionID
 		dct.result.VirtualChannelNames = result.VirtualChannelNames
 		dct.result.PhysicalChannelNames = result.PhysicalChannelNames
+		dct.result.CreatedTimestamp = result.CreatedTimestamp
+		dct.result.CreatedUtcTimestamp = result.CreatedUtcTimestamp
 
 		for _, field := range result.Schema.Fields {
 			if field.FieldID >= 100 { // TODO(dragondriver): use StartOfUserFieldID replacing 100
@@ -2875,19 +2877,24 @@ func (sct *ShowCollectionsTask) Execute(ctx context.Context) error {
 		}
 
 		sct.result = &milvuspb.ShowCollectionsResponse{
-			Status:          resp.Status,
-			CollectionNames: make([]string, 0, len(resp.CollectionIDs)),
-			CollectionIds:   make([]int64, 0, len(resp.CollectionIDs)),
+			Status:               resp.Status,
+			CollectionNames:      make([]string, 0, len(resp.CollectionIDs)),
+			CollectionIds:        make([]int64, 0, len(resp.CollectionIDs)),
+			CreatedTimestamps:    make([]uint64, 0, len(resp.CollectionIDs)),
+			CreatedUtcTimestamps: make([]uint64, 0, len(resp.CollectionIDs)),
 		}
 
-		idMap := make(map[int64]string)
-		for i, name := range respFromRootCoord.CollectionNames {
-			idMap[respFromRootCoord.CollectionIds[i]] = name
+		idMap := make(map[int64]int) // id -> location of respFromRootCoord
+		for i := range respFromRootCoord.CollectionNames {
+			idMap[respFromRootCoord.CollectionIds[i]] = i
 		}
 
 		for _, id := range resp.CollectionIDs {
+			loc := idMap[id]
 			sct.result.CollectionIds = append(sct.result.CollectionIds, id)
-			sct.result.CollectionNames = append(sct.result.CollectionNames, idMap[id])
+			sct.result.CollectionNames = append(sct.result.CollectionNames, respFromRootCoord.CollectionNames[loc])
+			sct.result.CreatedTimestamps = append(sct.result.CreatedTimestamps, respFromRootCoord.CreatedTimestamps[loc])
+			sct.result.CreatedUtcTimestamps = append(sct.result.CreatedUtcTimestamps, respFromRootCoord.CreatedUtcTimestamps[loc])
 		}
 	} else {
 		sct.result = respFromRootCoord
