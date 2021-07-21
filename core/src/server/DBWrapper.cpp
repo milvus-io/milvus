@@ -40,6 +40,9 @@ DBWrapper::StartService() {
         std::cerr << s.ToString() << std::endl;
         return s;
     }
+    config.GetGeneralConfigMetaSslCa(opt.meta_.ssl_ca_);
+    config.GetGeneralConfigMetaSslKey(opt.meta_.ssl_key_);
+    config.GetGeneralConfigMetaSslCert(opt.meta_.ssl_cert_);
 
     std::string path;
     s = config.GetStorageConfigPath(path);

@@ -55,6 +55,9 @@ const char* CONFIG_GENERAL_TIMEZONE = "timezone";
 const char* CONFIG_GENERAL_TIMEZONE_DEFAULT = "UTC+8";
 const char* CONFIG_GENERAL_METAURI = "meta_uri";
 const char* CONFIG_GENERAL_METAURI_DEFAULT = "sqlite://:@:/";
+const char* CONFIG_GENERAL_META_SSL_CA = "meta_ssl_ca";
+const char* CONFIG_GENERAL_META_SSL_KEY = "meta_ssl_key";
+const char* CONFIG_GENERAL_META_SSL_CERT = "meta_ssl_cert";
 
 /* network config */
 const char* CONFIG_NETWORK = "network";
@@ -495,6 +498,9 @@ Config::ResetDefaultConfig() {
     /* general config */
     STATUS_CHECK(SetGeneralConfigTimezone(CONFIG_GENERAL_TIMEZONE_DEFAULT));
     STATUS_CHECK(SetGeneralConfigMetaURI(CONFIG_GENERAL_METAURI_DEFAULT));
+    STATUS_CHECK(SetGeneralConfigMetaSslCa(""));
+    STATUS_CHECK(SetGeneralConfigMetaSslKey(""));
+    STATUS_CHECK(SetGeneralConfigMetaSslCert(""));
 
     /* network config */
     STATUS_CHECK(SetNetworkConfigBindAddress(CONFIG_NETWORK_BIND_ADDRESS_DEFAULT));
@@ -612,6 +618,12 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetGeneralConfigTimezone(value);
         } else if (child_key == CONFIG_GENERAL_METAURI) {
             status = SetGeneralConfigMetaURI(value);
+        } else if (child_key == CONFIG_GENERAL_META_SSL_CA) {
+            status = SetGeneralConfigMetaSslCa(value);
+        } else if (child_key == CONFIG_GENERAL_META_SSL_KEY) {
+            status = SetGeneralConfigMetaSslKey(value);
+        } else if (child_key == CONFIG_GENERAL_META_SSL_CERT) {
+            status = SetGeneralConfigMetaSslCert(value);
         } else {
             status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
@@ -1037,6 +1049,21 @@ Config::CheckGeneralConfigMetaURI(const std::string& value) {
             "The correct format should be like sqlite://:@:/ or mysql://root:123456@127.0.0.1:3306/milvus.";
         return Status(SERVER_INVALID_ARGUMENT, msg);
     }
+    return Status::OK();
+}
+
+Status
+Config::CheckGeneralConfigMetaSslCa(const std::string& value) {
+    return Status::OK();
+}
+
+Status
+Config::CheckGeneralConfigMetaSslKey(const std::string& value) {
+    return Status::OK();
+}
+
+Status
+Config::CheckGeneralConfigMetaSslCert(const std::string& value) {
     return Status::OK();
 }
 
@@ -2168,6 +2195,24 @@ Config::GetGeneralConfigMetaURI(std::string& value) {
     return CheckGeneralConfigMetaURI(value);
 }
 
+Status
+Config::GetGeneralConfigMetaSslCa(std::string& value) {
+    value = GetConfigStr(CONFIG_GENERAL, CONFIG_GENERAL_META_SSL_CA, "");
+    return CheckGeneralConfigMetaSslCa(value);
+}
+
+Status
+Config::GetGeneralConfigMetaSslKey(std::string& value) {
+    value = GetConfigStr(CONFIG_GENERAL, CONFIG_GENERAL_META_SSL_KEY, "");
+    return CheckGeneralConfigMetaSslKey(value);
+}
+
+Status
+Config::GetGeneralConfigMetaSslCert(std::string& value) {
+    value = GetConfigStr(CONFIG_GENERAL, CONFIG_GENERAL_META_SSL_CERT, "");
+    return CheckGeneralConfigMetaSslCert(value);
+}
+
 #ifdef MILVUS_FPGA_VERSION
 Status
 Config::GetFpgaResourceConfigEnable(bool& value) {
@@ -2763,6 +2808,24 @@ Status
 Config::SetGeneralConfigMetaURI(const std::string& value) {
     STATUS_CHECK(CheckGeneralConfigMetaURI(value));
     return SetConfigValueInMem(CONFIG_GENERAL, CONFIG_GENERAL_METAURI, value);
+}
+
+Status
+Config::SetGeneralConfigMetaSslCa(const std::string& value) {
+    STATUS_CHECK(CheckGeneralConfigMetaSslCa(value));
+    return SetConfigValueInMem(CONFIG_GENERAL, CONFIG_GENERAL_META_SSL_CA, value);
+}
+
+Status
+Config::SetGeneralConfigMetaSslKey(const std::string& value) {
+    STATUS_CHECK(CheckGeneralConfigMetaSslKey(value));
+    return SetConfigValueInMem(CONFIG_GENERAL, CONFIG_GENERAL_META_SSL_KEY, value);
+}
+
+Status
+Config::SetGeneralConfigMetaSslCert(const std::string& value) {
+    STATUS_CHECK(CheckGeneralConfigMetaSslCert(value));
+    return SetConfigValueInMem(CONFIG_GENERAL, CONFIG_GENERAL_META_SSL_CERT, value);
 }
 
 /* network config */
