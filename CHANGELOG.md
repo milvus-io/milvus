@@ -4,9 +4,12 @@ Please mark all change in change log and use the issue from GitHub
 
 # Milvus 1.1.2 (TBD)
 ## Bug
+-   \#5330 Can't connect to Azure MySQL instance when "enforce SSL connection" is on
 -   \#6085 Search result of restful API contains id -1
 -   \#6228 GetEntityByID will fail if the partition tag is specified as "_default"
 -   \#6266 Insert or delete entities will fail if the partition tag is specified as "_default"
+-   \#6651 Milvus failed to start when the mysql account has no table create permission
+-   \#6684 Use multi-threads to improve getEntityById performance
 
 ## Feature
 
