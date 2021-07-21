@@ -182,7 +182,7 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
 
         if (auto job = job_.lock()) {
             auto search_job = std::static_pointer_cast<scheduler::SearchJob>(job);
-            search_job->GetStatus() = s;
+            search_job->SetStatus(s);
             search_job->SearchDone(file_->id_);
         }
 
@@ -245,7 +245,7 @@ XSearchTask::Execute() {
 
                 auto Illegal_Metric_Type = [&]() {
                     std::string msg = "Illegal metric type" + metric_type;
-                    search_job->GetStatus() = Status(SERVER_INVALID_ARGUMENT, msg);
+                    search_job->SetStatus(Status(SERVER_INVALID_ARGUMENT, msg));
                     search_job->SearchDone(index_id_);
                 };
 
@@ -296,7 +296,7 @@ XSearchTask::Execute() {
                 s = index_engine_->ExecBinaryQuery(general_query, bitset, types, nq, topk, output_distance, output_ids);
 
                 if (!s.ok()) {
-                    search_job->GetStatus() = s;
+                    search_job->SetStatus(s);
                     search_job->SearchDone(index_id_);
                     return;
                 }
@@ -329,7 +329,7 @@ XSearchTask::Execute() {
             fiu_do_on("XSearchTask.Execute.search_fail", s = Status(SERVER_UNEXPECTED_ERROR, ""));
 
             if (!s.ok()) {
-                search_job->GetStatus() = s;
+                search_job->SetStatus(s);
                 search_job->SearchDone(index_id_);
                 return;
             }
@@ -359,7 +359,7 @@ XSearchTask::Execute() {
             // search_job->AccumReduceCost(span);
         } catch (std::exception& ex) {
             LOG_ENGINE_ERROR_ << LogOut("[%s][%ld] SearchTask encounter exception: %s", "search", 0, ex.what());
-            search_job->GetStatus() = Status(SERVER_UNEXPECTED_ERROR, ex.what());
+            search_job->SetStatus(Status(SERVER_UNEXPECTED_ERROR, ex.what()));
         }
 
         // step 4: notify to send result to client
