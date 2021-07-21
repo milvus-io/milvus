@@ -18,6 +18,7 @@ spec:
     args: ["cat"]
     resources:
       limits:
+        cpu: "6"
         memory: 14Gi
         ephemeral-storage: "30Gi"
       requests:
