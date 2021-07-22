@@ -45,3 +45,36 @@ jobs:
           export TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}
           docker push "milvusdb/krte:$TAG"
           echo "Push krte image Succeeded"
+      - name: Update KRTE Image Changes
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        continue-on-error: true
+        shell: bash
+        working-directory: build/ci/jenkins/pod
+        run: |
+          export TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}
+          sed -i "s#image: .*#image: milvusdb/krte:$TAG#g" krte.yaml
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add krte.yaml
+          git commit -m "Update KRTE image changes"
+      - name: Create Pull Request
+        id: cpr
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        continue-on-error: true
+        uses: peter-evans/create-pull-request@v3
+        with:
+          token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
+          author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
+          signoff: false
+          branch: update_krte_${{ github.sha }}
+          delete-branch: true
+          title: '[automated] Update KRTE image changes'
+          body: |
+            Update KRTE image changes
+
+            Signed-off-by: ${{ github.actor }} ${{ github.actor }}@users.noreply.github.com
+      - name: Check outputs
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        run: |
+          echo "Pull Request Number - ${{ steps.cpr.outputs.pull-request-number }}"
+          echo "Pull Request URL - ${{ steps.cpr.outputs.pull-request-url }}"

@@ -213,7 +213,7 @@ fi
 
 if [[ ! -x "$(command -v kind)" ]]; then
   KIND_DIR="${KIND_DIR:-"${HOME}/tool_cache/kind"}"
-  KIND_VERSION="v0.10.0"
+  KIND_VERSION="v0.11.1"
 
   export PATH="${KIND_DIR}:${PATH}"
   if [[ ! -x "$(command -v kind)" ]]; then
