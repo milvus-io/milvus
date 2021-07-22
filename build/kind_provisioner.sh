@@ -124,7 +124,9 @@ function load_cluster_topology() {
 function cleanup_kind_cluster() {
   echo "Test exited with exit code $?."
   NAME="${1}"
-  kind export logs --name "${NAME}" "${ARTIFACTS}/kind" -v9 || true
+  if [[ -z "${SKIP_EXPORT_LOGS:-}" ]]; then
+    kind export logs --name "${NAME}" "${ARTIFACTS}/kind" -v9 || true
+  fi
   if [[ -z "${SKIP_CLEANUP:-}" ]]; then
     echo "Cleaning up kind cluster"
     kind delete cluster --name "${NAME}" -v9 || true
