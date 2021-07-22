@@ -24,6 +24,22 @@ namespace faiss {
  * Optimized distance/norm/inner prod computations
  *********************************************************/
 
+extern float fvec_L2sqr_ref (const float * x,
+                             const float * y,
+                             size_t d);
+
+extern float fvec_L1_ref (const float * x,
+                          const float * y,
+                          size_t d);
+
+extern float fvec_Linf_ref (const float * x,
+                            const float * y,
+                            size_t d);
+
+extern float fvec_inner_product_ref (const float * x,
+                                     const float * y,
+                                     size_t d);
+
 #ifdef __SSE__
 float fvec_L2sqr_sse (
         const float * x,

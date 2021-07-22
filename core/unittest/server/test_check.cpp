@@ -85,7 +85,7 @@ TEST_F(ServerCheckerTest, CPU_TEST) {
 
 TEST_F(ServerCheckerTest, CPU_FAIL_TEST) {
     fiu_enable("CpuChecker.CheckCpuInstructionSet.instruction_sets_empty", 1, NULL, 0);
-    ASSERT_FALSE(ms::CpuChecker::CheckCpuInstructionSet().ok());
+    ASSERT_TRUE(ms::CpuChecker::CheckCpuInstructionSet().ok());
     fiu_disable("CpuChecker.CheckCpuInstructionSet.instruction_sets_empty");
 
     fiu_enable("CpuChecker.CheckCpuInstructionSet.not_support_avx512", 1, NULL, 0);

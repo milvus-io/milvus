@@ -50,11 +50,10 @@ CpuChecker::CheckCpuInstructionSet() {
     fiu_do_on("CpuChecker.CheckCpuInstructionSet.instruction_sets_empty", instruction_sets.clear());
     if (instruction_sets.empty()) {
         std::string msg =
-            "CPU instruction sets are not supported. Ensure the CPU supports at least one of the following instruction "
-            "sets: sse4_2, avx2, avx512";
-        LOG_SERVER_FATAL_ << msg;
+            "CPU instruction sets (sse4_2, avx2, avx512) are all not supported. Execution performance will be poor.";
+        LOG_ENGINE_DEBUG_ << msg;
         std::cerr << msg << std::endl;
-        return Status(SERVER_UNEXPECTED_ERROR, msg);
+        return Status::OK();
     }
 
     std::string instruction_sets_msg;

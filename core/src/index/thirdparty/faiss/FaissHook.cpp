@@ -99,8 +99,18 @@ bool hook_init(std::string& cpu_flag) {
 
         cpu_flag = "SSE42";
     } else {
-        cpu_flag = "UNSUPPORTED";
-        return false;
+        /* for IVFFLAT */
+        fvec_inner_product = fvec_inner_product_ref;
+        fvec_L2sqr = fvec_L2sqr_ref;
+        fvec_L1 = fvec_L1_ref;
+        fvec_Linf = fvec_Linf_ref;
+
+        /* for IVFSQ */
+        sq_get_distance_computer = sq_get_distance_computer_ref;
+        sq_sel_quantizer = sq_select_quantizer_ref;
+        sq_sel_inv_list_scanner = sq_select_inverted_list_scanner_ref;
+
+        cpu_flag = "BASE";
     }
 
     return true;
