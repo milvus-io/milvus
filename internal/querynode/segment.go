@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
-	"github.com/milvus-io/milvus/internal/storage"
 )
 
 type segmentType int32
@@ -49,45 +48,13 @@ const (
 )
 
 type VectorFieldInfo struct {
-	mu              sync.RWMutex
-	fieldBinlog     *datapb.FieldBinlog
-	rawDataInMemory bool
-	rawData         map[string]storage.FieldData // map[binlogPath]FieldData
+	fieldBinlog *datapb.FieldBinlog
 }
 
 func newVectorFieldInfo(fieldBinlog *datapb.FieldBinlog) *VectorFieldInfo {
 	return &VectorFieldInfo{
-		fieldBinlog:     fieldBinlog,
-		rawDataInMemory: false,
-		rawData:         make(map[string]storage.FieldData),
+		fieldBinlog: fieldBinlog,
 	}
-}
-
-func (v *VectorFieldInfo) setRawData(binlogPath string, data storage.FieldData) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	v.rawData[binlogPath] = data
-}
-
-func (v *VectorFieldInfo) getRawData(binlogPath string) storage.FieldData {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	if data, ok := v.rawData[binlogPath]; ok {
-		return data
-	}
-	return nil
-}
-
-func (v *VectorFieldInfo) setRawDataInMemory(flag bool) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	v.rawDataInMemory = flag
-}
-
-func (v *VectorFieldInfo) getRawDataInMemory() bool {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	return v.rawDataInMemory
 }
 
 //--------------------------------------------------------------------------------------

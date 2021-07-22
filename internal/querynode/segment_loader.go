@@ -243,10 +243,6 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 			}
 			blobs = append(blobs, blob)
 		}
-		// mark the flag that vector raw data will be loaded into memory
-		if vecFieldInfo, err := segment.getVectorFieldInfo(fb.FieldID); err == nil {
-			vecFieldInfo.setRawDataInMemory(true)
-		}
 	}
 
 	_, _, insertData, err := iCodec.Deserialize(blobs)
