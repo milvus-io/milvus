@@ -1106,10 +1106,11 @@ func (q *queryCollection) fillVectorFieldsData(segment *Segment, result *segcore
 				return err
 			}
 			dataType := schema.DataType
-			log.Debug("FillVectorFieldData", zap.Any("datatype", resultFieldData.Type))
+			log.Debug("FillVectorFieldData", zap.Any("datatype", dataType))
 
 			switch dataType {
 			case schemapb.DataType_BinaryVector:
+				dim = dim / 8
 				x := resultFieldData.GetVectors().GetData().(*schemapb.VectorField_BinaryVector)
 				content := make([]byte, dim)
 				_, err := q.vcm.ReadAt(vecPath, content, offset*dim)
@@ -1118,9 +1119,6 @@ func (q *queryCollection) fillVectorFieldsData(segment *Segment, result *segcore
 				}
 				log.Debug("FillVectorFieldData", zap.Any("content", content))
 				copy(x.BinaryVector[i*int(dim):(i+1)*int(dim)], content)
-				if err != nil {
-					return err
-				}
 			case schemapb.DataType_FloatVector:
 				x := resultFieldData.GetVectors().GetData().(*schemapb.VectorField_FloatVector)
 				content := make([]byte, dim*4)
