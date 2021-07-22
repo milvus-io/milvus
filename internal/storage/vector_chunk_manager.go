@@ -12,10 +12,11 @@
 package storage
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
 
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type VectorChunkManager struct {
@@ -53,12 +54,12 @@ func (vcm *VectorChunkManager) DownloadVectorFile(key string, schema *etcdpb.Col
 		}
 		floatVector, ok := singleData.(*FloatVectorFieldData)
 		if ok {
-			floatData := floatVector.Data
-			result := make([]byte, 0)
-			for _, singleFloat := range floatData {
-				result = append(result, typeutil.Float32ToByte(singleFloat)...)
+			buf := new(bytes.Buffer)
+			err := binary.Write(buf, binary.LittleEndian, floatVector.Data)
+			if err != nil {
+				return err
 			}
-			vcm.localChunkManager.Write(key, result)
+			vcm.localChunkManager.Write(key, buf.Bytes())
 		}
 	}
 	insertCodec.Close()
