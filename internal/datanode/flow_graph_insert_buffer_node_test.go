@@ -374,9 +374,9 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 
 			if i == 1 {
 				assert.Equal(t, test.expectedSegID, flushUnit[0].segID)
-				assert.Equal(t, int32(0), iBNode.insertBuffer.size(UniqueID(i+1)))
+				assert.Equal(t, int64(0), iBNode.insertBuffer.size(UniqueID(i+1)))
 			} else {
-				assert.Equal(t, int32(1), iBNode.insertBuffer.size(UniqueID(i+1)))
+				assert.Equal(t, int64(1), iBNode.insertBuffer.size(UniqueID(i+1)))
 			}
 		}
 
