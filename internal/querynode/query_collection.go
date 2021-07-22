@@ -1133,7 +1133,7 @@ func (q *queryCollection) fillVectorFieldsData(segment *Segment, result *segcore
 					floatResult = append(floatResult, singleData)
 				}
 				log.Debug("FillVectorFieldData", zap.Any("float32", floatResult))
-				copy(x.FloatVector.Data[i*int(rowBytes):(i+1)*int(rowBytes)], floatResult)
+				copy(x.FloatVector.Data[i*int(dim):(i+1)*int(dim)], floatResult)
 			}
 
 		}
