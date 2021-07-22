@@ -181,10 +181,10 @@ func (mt *metaTable) BuildIndex(indexBuildID UniqueID, nodeID int64) error {
 func (mt *metaTable) UpdateVersion(indexBuildID UniqueID) error {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
-	log.Debug("IndexCoord metaTable update UpdateVersion", zap.Any("IndexBuildId", indexBuildID))
+	log.Debug("IndexCoord metaTable UpdateVersion", zap.Any("IndexBuildId", indexBuildID))
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
 	if !ok {
-		log.Debug("IndexCoord metaTable update UpdateVersion indexBuildID not exists", zap.Any("IndexBuildId", indexBuildID))
+		log.Debug("IndexCoord metaTable UpdateVersion indexBuildID not exists", zap.Any("IndexBuildId", indexBuildID))
 		return fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 
@@ -243,6 +243,23 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 	}
 
 	return nil
+}
+
+func (mt *metaTable) MarkIndexAsFailed(indexBuildID UniqueID, reason string) error {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+
+	log.Debug("IndexCoord metaTable MarkIndexAsFailed", zap.Int64("IndexBuildID", indexBuildID))
+
+	meta, ok := mt.indexBuildID2Meta[indexBuildID]
+	if !ok {
+		log.Debug("IndexCoord metaTable MarkIndexAsFailed indexBuildID not exists", zap.Any("IndexBuildId", indexBuildID))
+		return fmt.Errorf("index not exists with ID = %d", indexBuildID)
+	}
+
+	meta.indexMeta.State = commonpb.IndexState_Failed
+	meta.indexMeta.FailReason = reason
+	return mt.saveIndexMeta(&meta)
 }
 
 func (mt *metaTable) GetIndexStates(indexBuildIDs []UniqueID) []*indexpb.IndexInfo {

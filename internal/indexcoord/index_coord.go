@@ -570,6 +570,20 @@ func (i *IndexCoord) assignTaskLoop() {
 			for _, session := range sessions {
 				serverIDs = append(serverIDs, session.ServerID)
 			}
+			nodeIDs := i.nodeManager.PeekAll()
+			for _, indexNodeID := range nodeIDs {
+				alive := false
+				for _, serverID := range serverIDs {
+					if indexNodeID == serverID {
+						alive = true
+						break
+					}
+				}
+				if !alive {
+					i.nodeManager.RemoveNode(indexNodeID)
+				}
+			}
+			log.Debug("IndexCoord assignTaskLoop", zap.Any("Available IndexNode IDs", serverIDs))
 			metas := i.metaTable.GetUnassignedTasks(serverIDs)
 			sort.Slice(metas, func(i, j int) bool {
 				return metas[i].indexMeta.Version <= metas[j].indexMeta.Version
@@ -577,6 +591,11 @@ func (i *IndexCoord) assignTaskLoop() {
 			log.Debug("IndexCoord assignTaskLoop", zap.Any("Unassign tasks number", len(metas)))
 			for index, meta := range metas {
 				indexBuildID := meta.indexMeta.IndexBuildID
+				if meta.indexMeta.Version > 10 {
+					err = i.metaTable.MarkIndexAsFailed(indexBuildID, "There is no available IndexNode.")
+					log.Debug("IndexCoord assignTaskLoop", zap.Any("MarkIndexAsFailed err", err))
+					continue
+				}
 				if err = i.metaTable.UpdateVersion(indexBuildID); err != nil {
 					log.Debug("IndexCoord assignmentTasksLoop metaTable.UpdateVersion failed", zap.Error(err))
 				}

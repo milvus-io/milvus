@@ -86,3 +86,12 @@ func (nm *NodeManager) PeekClient() (UniqueID, types.IndexNode) {
 	}
 	return nodeID, client
 }
+
+func (nm *NodeManager) PeekAll() []UniqueID {
+	nm.lock.RLock()
+	defer nm.lock.RUnlock()
+
+	log.Debug("IndexCoord NodeManager peek all clients")
+
+	return nm.pq.PeekAll()
+}
