@@ -13,7 +13,9 @@ package querynode
 
 import (
 	"context"
-	"fmt"
+	"encoding/binary"
+	"errors"
+	"github.com/golang/protobuf/proto"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
@@ -21,10 +23,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
+	"math"
 	"math/rand"
 	"path"
 	"strconv"
@@ -36,23 +40,27 @@ const ctxTimeInMillisecond = 5000
 const debug = false
 
 const (
-	dimKey = "dim"
+	dimKey        = "dim"
 	metricTypeKey = "metric_type"
-	topK = 10
-	defaultMetricType = "JACCARD"
-	defaultNProb = 10
 
-	defaultVChannel = "query-node-unittest-channel-0"
+	defaultVecFieldName   = "vec"
+	defaultConstFieldName = "const"
+	defaultTopK           = 10
+	defaultDim            = 128
+	defaultNProb          = 10
+	defaultMetricType     = "JACCARD"
 
-	utKVRootPath = "query-node-unittest"
-	utQueryChannel = "query-node-unittest-query-channel-0"
-	utQueryResultChannel = "query-node-unittest-query-result-channel-0"
+	defaultKVRootPath         = "query-node-unittest"
+	defaultVChannel           = "query-node-unittest-channel-0"
+	defaultQueryChannel       = "query-node-unittest-query-channel-0"
+	defaultQueryResultChannel = "query-node-unittest-query-result-channel-0"
+	defaultSubName            = "query-node-unittest-sub-name-0"
 )
 
 const (
 	defaultCollectionID = UniqueID(0)
-	defaultPartitionID = UniqueID(1)
-	defaultSegmentID = UniqueID(2)
+	defaultPartitionID  = UniqueID(1)
+	defaultSegmentID    = UniqueID(2)
 )
 
 const defaultMsgLength = 1000
@@ -73,7 +81,7 @@ type constFieldParam struct {
 
 var simpleVecField = vecFieldParam{
 	id:         100,
-	dim:        128,
+	dim:        defaultDim,
 	metricType: defaultMetricType,
 	vecType:    schemapb.DataType_FloatVector,
 }
@@ -96,7 +104,7 @@ var timestampField = constFieldParam{
 func genConstantField(param constFieldParam) *schemapb.FieldSchema {
 	field := &schemapb.FieldSchema{
 		FieldID:      param.id,
-		Name:         "field-constant" + fmt.Sprintln(rand.Int()),
+		Name:         defaultConstFieldName,
 		IsPrimaryKey: false,
 		DataType:     param.dataType,
 	}
@@ -106,7 +114,7 @@ func genConstantField(param constFieldParam) *schemapb.FieldSchema {
 func genFloatVectorField(param vecFieldParam) *schemapb.FieldSchema {
 	fieldVec := &schemapb.FieldSchema{
 		FieldID:      param.id,
-		Name:         "field-vector" + fmt.Sprintln(rand.Int()),
+		Name:         defaultVecFieldName,
 		IsPrimaryKey: false,
 		DataType:     param.vecType,
 		TypeParams: []*commonpb.KeyValuePair{
@@ -125,13 +133,13 @@ func genFloatVectorField(param vecFieldParam) *schemapb.FieldSchema {
 	return fieldVec
 }
 
-func genSimpleSchema() *schemapb.CollectionSchema {
+func genSimpleSchema() (*schemapb.CollectionSchema, *schemapb.CollectionSchema) {
 	fieldUID := genConstantField(uidField)
 	fieldTimestamp := genConstantField(timestampField)
 	fieldVec := genFloatVectorField(simpleVecField)
 	fieldInt := genConstantField(simpleConstField)
 
-	schema := schemapb.CollectionSchema{
+	schema1 := schemapb.CollectionSchema{ // schema for insertData
 		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			fieldUID,
@@ -140,7 +148,14 @@ func genSimpleSchema() *schemapb.CollectionSchema {
 			fieldInt,
 		},
 	}
-	return &schema
+	schema2 := schemapb.CollectionSchema{ // schema for segCore
+		AutoID: true,
+		Fields: []*schemapb.FieldSchema{
+			fieldVec,
+			fieldInt,
+		},
+	}
+	return &schema1, &schema2
 }
 
 func genCollectionMeta(collectionID UniqueID, schema *schemapb.CollectionSchema) *etcdpb.CollectionMeta {
@@ -153,7 +168,7 @@ func genCollectionMeta(collectionID UniqueID, schema *schemapb.CollectionSchema)
 }
 
 func genSimpleCollectionMeta() *etcdpb.CollectionMeta {
-	simpleSchema := genSimpleSchema()
+	simpleSchema, _ := genSimpleSchema()
 	return genCollectionMeta(defaultCollectionID, simpleSchema)
 }
 
@@ -201,6 +216,15 @@ func genFactory() msgstream.Factory {
 	return msFactory
 }
 
+func genQueryMsgStream(ctx context.Context) msgstream.MsgStream {
+	fac := genFactory()
+	stream, err := fac.NewQueryMsgStream(ctx)
+	if err != nil {
+		panic(err)
+	}
+	return stream
+}
+
 // ---------- unittest util functions ----------
 // functions of inserting data init
 func genInsertData(msgLength int, schema *schemapb.CollectionSchema) *storage.InsertData {
@@ -217,7 +241,7 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) *storage.In
 			}
 			insertData.Data[f.FieldID] = &storage.BoolFieldData{
 				NumRows: msgLength,
-				Data: data,
+				Data:    data,
 			}
 		case schemapb.DataType_Int8:
 			data := make([]int8, msgLength)
@@ -226,7 +250,7 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) *storage.In
 			}
 			insertData.Data[f.FieldID] = &storage.Int8FieldData{
 				NumRows: msgLength,
-				Data: data,
+				Data:    data,
 			}
 		case schemapb.DataType_Int16:
 			data := make([]int16, msgLength)
@@ -235,7 +259,7 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) *storage.In
 			}
 			insertData.Data[f.FieldID] = &storage.Int16FieldData{
 				NumRows: msgLength,
-				Data: data,
+				Data:    data,
 			}
 		case schemapb.DataType_Int32:
 			data := make([]int32, msgLength)
@@ -244,7 +268,7 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) *storage.In
 			}
 			insertData.Data[f.FieldID] = &storage.Int32FieldData{
 				NumRows: msgLength,
-				Data: data,
+				Data:    data,
 			}
 		case schemapb.DataType_Int64:
 			data := make([]int64, msgLength)
@@ -253,7 +277,7 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) *storage.In
 			}
 			insertData.Data[f.FieldID] = &storage.Int64FieldData{
 				NumRows: msgLength,
-				Data: data,
+				Data:    data,
 			}
 		case schemapb.DataType_Float:
 			data := make([]float32, msgLength)
@@ -262,7 +286,7 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) *storage.In
 			}
 			insertData.Data[f.FieldID] = &storage.FloatFieldData{
 				NumRows: msgLength,
-				Data: data,
+				Data:    data,
 			}
 		case schemapb.DataType_Double:
 			data := make([]float64, msgLength)
@@ -271,7 +295,7 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) *storage.In
 			}
 			insertData.Data[f.FieldID] = &storage.DoubleFieldData{
 				NumRows: msgLength,
-				Data: data,
+				Data:    data,
 			}
 		case schemapb.DataType_FloatVector:
 			dim := simpleVecField.dim // if no dim specified, use simpleVecField's dim
@@ -304,13 +328,13 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) *storage.In
 }
 
 func genSimpleInsertData() *storage.InsertData {
-	schema := genSimpleSchema()
+	schema, _ := genSimpleSchema()
 	return genInsertData(defaultMsgLength, schema)
 }
 
 func genKey(collectionID, partitionID, segmentID UniqueID, fieldID int64) string {
-	ids := []string {
-		utKVRootPath,
+	ids := []string{
+		defaultKVRootPath,
 		strconv.FormatInt(collectionID, 10),
 		strconv.FormatInt(partitionID, 10),
 		strconv.FormatInt(segmentID, 10),
@@ -354,7 +378,7 @@ func saveSimpleBinLog(ctx context.Context) {
 // ---------- unittest util functions ----------
 // functions of replica
 func genSimpleSealedSegment() *Segment {
-	schema := genSimpleSchema()
+	_, schema := genSimpleSchema()
 	col := newCollection(defaultCollectionID, schema)
 	seg := newSegment(col,
 		defaultSegmentID,
@@ -365,7 +389,43 @@ func genSimpleSealedSegment() *Segment {
 		true)
 	insertData := genSimpleInsertData()
 	for k, v := range insertData.Data {
-		err := seg.segmentLoadFieldData(k, defaultMsgLength, v)
+		var numRows int
+		var data interface{}
+		switch fieldData := v.(type) {
+		case *storage.BoolFieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.Int8FieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.Int16FieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.Int32FieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.Int64FieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.FloatFieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.DoubleFieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case storage.StringFieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.FloatVectorFieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		case *storage.BinaryVectorFieldData:
+			numRows = fieldData.NumRows
+			data = fieldData.Data
+		default:
+			panic(errors.New("unexpected field data type"))
+		}
+		err := seg.segmentLoadFieldData(k, numRows, data)
 		if err != nil {
 			panic(err)
 		}
@@ -376,7 +436,7 @@ func genSimpleSealedSegment() *Segment {
 func genSimpleReplica() ReplicaInterface {
 	kv := genEtcdKV()
 	r := newCollectionReplica(kv)
-	schema := genSimpleSchema()
+	_, schema := genSimpleSchema()
 	err := r.addCollection(defaultCollectionID, schema)
 	if err != nil {
 		panic(err)
@@ -422,24 +482,140 @@ func genSimpleStreaming(ctx context.Context) *streaming {
 
 // ---------- unittest util functions ----------
 // functions of messages and requests
-var simpleDSL = "{\"bool\": { " +
-	"\"vector\": {" +
-	" \"vec\": {" +
-	" \"metric_type\": \"" + defaultMetricType + "\", " +
-	" \"params\": {" +
-	" \"nprobe\": " + strconv.Itoa(defaultNProb) + " " +
-	"}, \"query\": \"$0\",\"topk\": " + strconv.Itoa(topK) + " \n } \n } \n } \n }"
+func genDSL(schema *schemapb.CollectionSchema, nProb int, topK int) string {
+	var vecFieldName string
+	var metricType string
+	nProbStr := strconv.Itoa(nProb)
+	topKStr := strconv.Itoa(topK)
+	for _, f := range schema.Fields {
+		if f.DataType == schemapb.DataType_FloatVector {
+			vecFieldName = f.Name
+			for _, p := range f.IndexParams {
+				if p.Key == metricTypeKey {
+					metricType = p.Value
+				}
+			}
+		}
+	}
+	if vecFieldName == "" || metricType == "" {
+		panic("invalid vector field name or metric type")
+	}
+
+	return "{\"bool\": { " +
+		"\"vector\": {" +
+		"\"" + vecFieldName + "\": {" +
+		" \"metric_type\": \"" + metricType + "\", " +
+		" \"params\": {" +
+		" \"nprobe\": " + nProbStr + " " +
+		"}, \"query\": \"$0\",\"topk\": " + topKStr + " \n } \n } \n } \n }"
+}
+
+func genSimpleDSL() string {
+	_, schema := genSimpleSchema()
+	return genDSL(schema, defaultNProb, defaultTopK)
+}
+
+func genSimplePlaceHolderGroup() []byte {
+	placeholderValue := &milvuspb.PlaceholderValue{
+		Tag:    "$0",
+		Type:   milvuspb.PlaceholderType_FloatVector,
+		Values: make([][]byte, 0),
+	}
+	for i := 0; i < defaultTopK; i++ {
+		var vec = make([]float32, defaultDim)
+		for j := 0; j < defaultDim; j++ {
+			vec[j] = rand.Float32()
+		}
+		var rawData []byte
+		for k, ele := range vec {
+			buf := make([]byte, 4)
+			binary.LittleEndian.PutUint32(buf, math.Float32bits(ele+float32(k*2)))
+			rawData = append(rawData, buf...)
+		}
+		placeholderValue.Values = append(placeholderValue.Values, rawData)
+	}
+
+	// generate placeholder
+	placeholderGroup := milvuspb.PlaceholderGroup{
+		Placeholders: []*milvuspb.PlaceholderValue{placeholderValue},
+	}
+	placeGroupByte, err := proto.Marshal(&placeholderGroup)
+	if err != nil {
+		panic(err)
+	}
+	return placeGroupByte
+}
+
+func genSimplePlanAndRequests() (*SearchPlan, []*searchRequest) {
+	_, schema := genSimpleSchema()
+	collection := newCollection(defaultCollectionID, schema)
+
+	var plan *SearchPlan
+	var err error
+	sm := genSimpleSearchMsg()
+	if sm.GetDslType() == commonpb.DslType_BoolExprV1 {
+		expr := sm.SerializedExprPlan
+		plan, err = createSearchPlanByExpr(collection, expr)
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		dsl := sm.Dsl
+		plan, err = createSearchPlan(collection, dsl)
+		if err != nil {
+			panic(err)
+		}
+	}
+	searchRequestBlob := sm.PlaceholderGroup
+	searchReq, err := parseSearchRequest(plan, searchRequestBlob)
+	if err != nil {
+		panic(err)
+	}
+	searchRequests := make([]*searchRequest, 0)
+	searchRequests = append(searchRequests, searchReq)
+
+	return plan, searchRequests
+}
 
 func genSimpleSearchRequest() *internalpb.SearchRequest {
+	placeHolder := genSimplePlaceHolderGroup()
+	simpleDSL := genSimpleDSL()
 	return &internalpb.SearchRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_Search,
-			MsgID: rand.Int63(), // TODO: random msgID?
+			MsgID:   rand.Int63(), // TODO: random msgID?
 		},
-		ResultChannelID: utQueryResultChannel,
-		CollectionID: defaultCollectionID,
-		PartitionIDs: []UniqueID{defaultPartitionID},
-		Dsl: simpleDSL,
+		ResultChannelID:  defaultQueryResultChannel,
+		CollectionID:     defaultCollectionID,
+		PartitionIDs:     []UniqueID{defaultPartitionID},
+		Dsl:              simpleDSL,
+		PlaceholderGroup: placeHolder,
+		DslType:          commonpb.DslType_Dsl,
+	}
+}
 
+func genSimpleSearchMsg() *msgstream.SearchMsg {
+	req := genSimpleSearchRequest()
+	return &msgstream.SearchMsg{
+		BaseMsg: msgstream.BaseMsg{
+			HashValues: []uint32{0},
+		},
+		SearchRequest: *req,
+	}
+}
+
+func produceSimpleSearchMsg(ctx context.Context) {
+	stream := genQueryMsgStream(ctx)
+	stream.AsProducer([]string{defaultQueryChannel})
+	stream.Start()
+	defer stream.Close()
+	msg := genSimpleSearchMsg()
+	msgPack := &msgstream.MsgPack{
+		Msgs: []msgstream.TsMsg{msg},
+	}
+	err := stream.Produce(msgPack)
+	log.Debug("[query node unittest] produce search message done")
+	if err != nil {
+		panic(err)
 	}
 }

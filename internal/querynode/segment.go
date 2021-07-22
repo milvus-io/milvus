@@ -25,6 +25,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 	"sync"
 	"unsafe"
@@ -671,7 +672,7 @@ func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int, data interfa
 		// TODO: support string type
 		return errors.New("we cannot support string type now")
 	default:
-		return errors.New("illegal field data type")
+		return errors.New("illegal field data type, type = " + reflect.TypeOf(d).String())
 	}
 
 	/*
