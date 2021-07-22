@@ -12,6 +12,7 @@
 package querynode
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -1125,14 +1126,15 @@ func (q *queryCollection) fillVectorFieldsData(segment *Segment, result *segcore
 				x := resultFieldData.GetVectors().GetData().(*schemapb.VectorField_FloatVector)
 				rowBytes := dim * 4
 				content := make([]byte, rowBytes)
-				byteLen, err := q.vcm.ReadAt(vecPath, content, offset*rowBytes)
+				_, err := q.vcm.ReadAt(vecPath, content, offset*rowBytes)
 				if err != nil {
 					return err
 				}
-				floatResult := make([]float32, 0)
-				for j := 0; j < byteLen/4; j++ {
-					singleData := typeutil.ByteToFloat32(content[j*4 : j*4+4])
-					floatResult = append(floatResult, singleData)
+				floatResult := make([]float32, dim)
+				buf := bytes.NewReader(content)
+				err = binary.Read(buf, binary.LittleEndian, &floatResult)
+				if err != nil {
+					return err
 				}
 				log.Debug("FillVectorFieldData", zap.Any("floatVectorResult", floatResult))
 
