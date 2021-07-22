@@ -83,7 +83,7 @@ We recommend using Python 3 (3.6 or higher), consistent with the version support
 pip install -r requirements.txt
 ```
 
-1. The default test log path is **/tmp/ci_logs/** under the **config** directory. You can add environment variables to change the path before booting up test cases:
+2. The default test log path is **/tmp/ci_logs/** under the **config** directory. You can add environment variables to change the path before booting up test cases:
 
 ```python
 export CI_LOG_PATH=/tmp/ci_logs/test/
@@ -111,9 +111,9 @@ python3 -W ignore -m pytest <test_file_name>
 
 ## An Introduction to Test Modules
 
-Module Overview
+### Module Overview
 
-![img](https://zilliverse.feishu.cn/space/api/box/stream/download/asynccode/?code=ZTA5MWRkZGQ3YWY1ZmNjNDZkMWQ4MDZjNDJlYWJmN2ZfWHNrVVJTeU5MSzFvZzZSbnJKQlpxZUdwaEs3MGdjYkFfVG9rZW46Ym94Y25xazV4Vk1RMTdSd2ZLaEoyYWw5ZUhjXzE2MjY5MzUxNTc6MTYyNjkzODc1N19WNA)
+![Module Overview](https://github.com/milvus-io/milvus/blob/master/tests20/python_client/graphs/module_call_diagram.jpg)
 
 ### Working directories and files
 
