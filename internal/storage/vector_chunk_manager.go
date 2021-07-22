@@ -12,6 +12,8 @@
 package storage
 
 import (
+	"errors"
+
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -19,35 +21,29 @@ import (
 type VectorChunkManager struct {
 	localChunkManager  ChunkManager
 	remoteChunkManager ChunkManager
-
-	insertCodec *InsertCodec
 }
 
-func NewVectorChunkManager(localChunkManager ChunkManager, remoteChunkManager ChunkManager, schema *etcdpb.CollectionMeta) *VectorChunkManager {
-	insertCodec := NewInsertCodec(schema)
+func NewVectorChunkManager(localChunkManager ChunkManager, remoteChunkManager ChunkManager) *VectorChunkManager {
 	return &VectorChunkManager{
 		localChunkManager:  localChunkManager,
 		remoteChunkManager: remoteChunkManager,
-		insertCodec:        insertCodec,
 	}
 }
 
-func (vcm *VectorChunkManager) Load(key string) (string, error) {
-	if vcm.localChunkManager.Exist(key) {
-		return vcm.localChunkManager.Load(key)
-	}
-	content, err := vcm.remoteChunkManager.ReadAll(key)
+func (vcm *VectorChunkManager) DownloadVectorFile(key string, schema *etcdpb.CollectionMeta) error {
+	insertCodec := NewInsertCodec(schema)
+	content, err := vcm.remoteChunkManager.Read(key)
 	if err != nil {
-		return "", err
+		return err
 	}
 	blob := &Blob{
 		Key:   key,
 		Value: content,
 	}
 
-	_, _, data, err := vcm.insertCodec.Deserialize([]*Blob{blob})
+	_, _, data, err := insertCodec.Deserialize([]*Blob{blob})
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	for _, singleData := range data.Data {
@@ -65,8 +61,15 @@ func (vcm *VectorChunkManager) Load(key string) (string, error) {
 			vcm.localChunkManager.Write(key, result)
 		}
 	}
-	vcm.insertCodec.Close()
-	return vcm.localChunkManager.Load(key)
+	insertCodec.Close()
+	return nil
+}
+
+func (vcm *VectorChunkManager) GetPath(key string) (string, error) {
+	if vcm.localChunkManager.Exist(key) {
+		return vcm.localChunkManager.GetPath(key)
+	}
+	return vcm.localChunkManager.GetPath(key)
 }
 
 func (vcm *VectorChunkManager) Write(key string, content []byte) error {
@@ -77,15 +80,11 @@ func (vcm *VectorChunkManager) Exist(key string) bool {
 	return vcm.localChunkManager.Exist(key)
 }
 
-func (vcm *VectorChunkManager) ReadAll(key string) ([]byte, error) {
+func (vcm *VectorChunkManager) Read(key string) ([]byte, error) {
 	if vcm.localChunkManager.Exist(key) {
-		return vcm.localChunkManager.ReadAll(key)
+		return vcm.localChunkManager.Read(key)
 	}
-	_, err := vcm.Load(key)
-	if err != nil {
-		return nil, err
-	}
-	return vcm.localChunkManager.ReadAll(key)
+	return nil, errors.New("the vector file doesn't exist, please call download first")
 }
 
 func (vcm *VectorChunkManager) ReadAt(key string, p []byte, off int64) (n int, err error) {

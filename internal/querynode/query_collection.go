@@ -65,8 +65,7 @@ type queryCollection struct {
 	queryMsgStream       msgstream.MsgStream
 	queryResultMsgStream msgstream.MsgStream
 
-	schemaHelper *typeutil.SchemaHelper
-	vcm          storage.ChunkManager
+	vcm *storage.VectorChunkManager
 }
 
 type ResultEntityIds []UniqueID
@@ -85,12 +84,7 @@ func newQueryCollection(releaseCtx context.Context,
 	queryStream, _ := factory.NewQueryMsgStream(releaseCtx)
 	queryResultStream, _ := factory.NewQueryMsgStream(releaseCtx)
 
-	collection, _ := streaming.replica.getCollectionByID(collectionID)
-	schemaHelper, _ := typeutil.CreateSchemaHelper(collection.schema)
-	vcm := storage.NewVectorChunkManager(lcm, rcm,
-		&etcdpb.CollectionMeta{
-			ID:     collectionID,
-			Schema: collection.schema})
+	vcm := storage.NewVectorChunkManager(lcm, rcm)
 
 	qc := &queryCollection{
 		releaseCtx: releaseCtx,
@@ -107,8 +101,7 @@ func newQueryCollection(releaseCtx context.Context,
 		queryMsgStream:       queryStream,
 		queryResultMsgStream: queryResultStream,
 
-		schemaHelper: schemaHelper,
-		vcm:          vcm,
+		vcm: vcm,
 	}
 
 	qc.register()
@@ -1075,6 +1068,14 @@ func (q *queryCollection) search(msg queryMsg) error {
 }
 
 func (q *queryCollection) fillVectorFieldsData(segment *Segment, result *segcorepb.RetrieveResults) error {
+	collection, _ := q.streaming.replica.getCollectionByID(q.collectionID)
+	schema := &etcdpb.CollectionMeta{
+		ID:     q.collectionID,
+		Schema: collection.schema}
+	schemaHelper, err := typeutil.CreateSchemaHelper(collection.schema)
+	if err != nil {
+		return err
+	}
 	for _, resultFieldData := range result.FieldsData {
 		vecFieldInfo, err := segment.getVectorFieldInfo(resultFieldData.FieldId)
 		if err != nil {
@@ -1093,14 +1094,14 @@ func (q *queryCollection) fillVectorFieldsData(segment *Segment, result *segcore
 				}
 			}
 			log.Debug("FillVectorFieldData", zap.Any("path", vecPath))
-			_, err := q.vcm.Load(vecPath)
+			err := q.vcm.DownloadVectorFile(vecPath, schema)
 			if err != nil {
 				return err
 			}
 
 			dim := resultFieldData.GetVectors().GetDim()
 			log.Debug("FillVectorFieldData", zap.Any("dim", dim))
-			schema, err := q.schemaHelper.GetFieldFromID(resultFieldData.FieldId)
+			schema, err := schemaHelper.GetFieldFromID(resultFieldData.FieldId)
 			if err != nil {
 				return err
 			}

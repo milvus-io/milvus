@@ -45,7 +45,7 @@ func TestVectorChunkManager(t *testing.T) {
 	lcm := NewLocalChunkManager(localPath)
 
 	schema := initSchema()
-	vcm := NewVectorChunkManager(lcm, rcm, schema)
+	vcm := NewVectorChunkManager(lcm, rcm)
 	assert.NotNil(t, vcm)
 
 	binlogs := initBinlogFile(schema)
@@ -53,17 +53,17 @@ func TestVectorChunkManager(t *testing.T) {
 	for _, binlog := range binlogs {
 		rcm.Write(binlog.Key, binlog.Value)
 	}
-	_, err = vcm.Load("108")
+	err = vcm.DownloadVectorFile("108", schema)
 	assert.Nil(t, err)
 
-	_, err = vcm.Load("109")
+	err = vcm.DownloadVectorFile("109", schema)
 	assert.Nil(t, err)
 
-	content, err := vcm.ReadAll("108")
+	content, err := vcm.Read("108")
 	assert.Nil(t, err)
 	assert.Equal(t, []byte{0, 255}, content)
 
-	content, err = vcm.ReadAll("109")
+	content, err = vcm.Read("109")
 	assert.Nil(t, err)
 
 	floatResult := make([]float32, 0)

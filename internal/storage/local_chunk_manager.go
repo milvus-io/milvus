@@ -30,7 +30,7 @@ func NewLocalChunkManager(localPath string) *LocalChunkManager {
 	}
 }
 
-func (lcm *LocalChunkManager) Load(key string) (string, error) {
+func (lcm *LocalChunkManager) GetPath(key string) (string, error) {
 	if !lcm.Exist(key) {
 		return "", errors.New("local file cannot be found with key:" + key)
 	}
@@ -63,7 +63,7 @@ func (lcm *LocalChunkManager) Exist(key string) bool {
 	return true
 }
 
-func (lcm *LocalChunkManager) ReadAll(key string) ([]byte, error) {
+func (lcm *LocalChunkManager) Read(key string) ([]byte, error) {
 	path := path.Join(lcm.localPath, key)
 	file, err := os.Open(path)
 	if err != nil {

@@ -30,7 +30,7 @@ type ParamTable struct {
 	Port                    int
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
-	FlushInsertBufferSize   int32
+	FlushInsertBufferSize   int64
 	InsertBinlogRootPath    string
 	StatsBinlogRootPath     string
 	Log                     log.Config
@@ -124,7 +124,7 @@ func (p *ParamTable) initFlowGraphMaxParallelism() {
 
 // ---- flush configs ----
 func (p *ParamTable) initFlushInsertBufferSize() {
-	p.FlushInsertBufferSize = p.ParseInt32("datanode.flush.insertBufSize")
+	p.FlushInsertBufferSize = p.ParseInt64("datanode.flush.insertBufSize")
 }
 
 func (p *ParamTable) initInsertBinlogRootPath() {
