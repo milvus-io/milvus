@@ -14,6 +14,8 @@ Please mark all change in change log and use the issue from GitHub
 ## Feature
 
 ## Improvement
+-   \#6139 Allow to compile on cuda 11 locally
+-   \#6722 Allow to run on the CPUs that does not support SIMD
 
 ## Task
 
