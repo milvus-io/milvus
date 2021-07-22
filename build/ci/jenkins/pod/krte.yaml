@@ -6,7 +6,7 @@ metadata:
 spec:
   containers:
   - name: main
-    image: registry.zilliz.com/milvus/krte:v20210414-bd36693
+    image: milvusdb/krte:20210722-806d13f
     env:
     - name: DOCKER_IN_DOCKER_ENABLED
       value: "true"
