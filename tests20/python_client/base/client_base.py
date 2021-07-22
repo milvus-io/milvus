@@ -113,6 +113,15 @@ class TestcaseBase(Base):
         self.collection_object_list.append(collection_w)
         return collection_w
 
+    def init_multi_fields_collection_wrap(self, name=cf.gen_unique_str()):
+        vec_fields = [cf.gen_float_vec_field(ct.another_float_vec_field_name)]
+        schema = cf.gen_schema_multi_vector_fields(vec_fields)
+        collection_w = self.init_collection_wrap(name=name, schema=schema)
+        df = cf.gen_dataframe_multi_vec_fields(vec_fields=vec_fields)
+        collection_w.insert(df)
+        assert collection_w.num_entities == ct.default_nb
+        return collection_w, df
+
     def init_partition_wrap(self, collection_wrap=None, name=None, description=None,
                             check_task=None, check_items=None, **kwargs):
         name = cf.gen_unique_str("partition_") if name is None else name

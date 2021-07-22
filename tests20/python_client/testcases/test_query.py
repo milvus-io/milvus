@@ -309,7 +309,7 @@ class TestQueryBase(TestcaseBase):
         assert set(actual_res[0].keys()) == set(all_fields)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_query_output_vec_field(self):
+    def test_query_output_float_vec_field(self):
         """
         target: test query with vec output field
         method: specify vec field as output field
@@ -326,6 +326,66 @@ class TestQueryBase(TestcaseBase):
             collection_w.query(default_term_expr, output_fields=output_fields,
                                check_task=CheckTasks.check_query_results,
                                check_items={exp_res: res, "with_vec": True})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("vec_fields", [[cf.gen_float_vec_field(name="float_vector1")]])
+    def test_query_output_multi_float_vec_field(self, vec_fields):
+        """
+        target: test query and output multi float vec fields
+        method: a.specify multi vec field as output
+                b.specify output_fields with wildcard %
+        expected: verify query result
+        """
+        # init collection with two float vector fields
+        schema = cf.gen_schema_multi_vector_fields(vec_fields)
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        df = cf.gen_dataframe_multi_vec_fields(vec_fields=vec_fields)
+        collection_w.insert(df)
+        assert collection_w.num_entities == ct.default_nb
+
+        # query with two vec output_fields
+        output_fields = [ct.default_int64_field_name, ct.default_float_vec_field_name]
+        for vec_field in vec_fields:
+            output_fields.append(vec_field.name)
+        res = df.loc[:1, output_fields].to_dict('records')
+        collection_w.load()
+        collection_w.query(default_term_expr, output_fields=output_fields,
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res, "with_vec": True})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #6594 binary unsupported")
+    @pytest.mark.parametrize("vec_fields", [[cf.gen_float_vec_field(name="float_vector1")]])
+    # [cf.gen_binary_vec_field()],
+    # [cf.gen_binary_vec_field(), cf.gen_binary_vec_field("binary_vec")]])
+    def test_query_output_mix_float_binary_field(self, vec_fields):
+        """
+        target:  test query and output mix float and binary vec fields
+        method: a.specify mix vec field as output
+                b.specify output_fields with wildcard %
+        expected: output binary vector and float vec
+        """
+        # init collection with two float vector fields
+        schema = cf.gen_schema_multi_vector_fields(vec_fields)
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        df = cf.gen_dataframe_multi_vec_fields(vec_fields=vec_fields)
+        collection_w.insert(df)
+        assert collection_w.num_entities == ct.default_nb
+
+        # query with two vec output_fields
+        output_fields = [ct.default_int64_field_name, ct.default_float_vec_field_name]
+        for vec_field in vec_fields:
+            output_fields.append(vec_field.name)
+        res = df.loc[:1, output_fields].to_dict('records')
+        collection_w.load()
+        collection_w.query(default_term_expr, output_fields=output_fields,
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res, "with_vec": True})
+
+        # query with wildcard %
+        collection_w.query(default_term_expr, output_fields=["%"],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res, "with_vec": True})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="issue #6594")
@@ -382,6 +442,102 @@ class TestQueryBase(TestcaseBase):
         for fields in output_fields:
             collection_w.query(default_term_expr, output_fields=fields, check_task=CheckTasks.err_res,
                                check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_output_fields_simple_wildcard(self):
+        """
+        target: test query output_fields with simple wildcard (* and %)
+        method: specify output_fields as "*" and "*", "%"
+        expected: output all scale field; output all fields
+        """
+        # init collection with fields: int64, float, float_vec, float_vector1
+        collection_w, df = self.init_multi_fields_collection_wrap(cf.gen_unique_str(prefix))
+        collection_w.load()
+
+        # query with wildcard scale(*)
+        output_fields = [ct.default_int64_field_name, ct.default_float_field_name]
+        res = df.loc[:1, output_fields].to_dict('records')
+        collection_w.query(default_term_expr, output_fields=["*"],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res})
+
+        # query with wildcard %
+        output_fields2 = [ct.default_int64_field_name, ct.default_float_vec_field_name, ct.another_float_vec_field_name]
+        res2 = df.loc[:1, output_fields2].to_dict('records')
+        collection_w.query(default_term_expr, output_fields=["%"],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res2, "with_vec": True})
+
+        # query with wildcard all fields: vector(%) and scale(*)
+        res3 = df.iloc[:2].to_dict('records')
+        collection_w.query(default_term_expr, output_fields=["*", "%"],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res3, "with_vec": True})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_output_fields_part_scale_wildcard(self):
+        """
+        target: test query output_fields with part wildcard
+        method: specify output_fields as wildcard and part field
+        expected: verify query result
+        """
+        # init collection with fields: int64, float, float_vec, float_vector1
+        collection_w, df = self.init_multi_fields_collection_wrap(cf.gen_unique_str(prefix))
+
+        # query with output_fields=["*", float_vector)
+        res = df.iloc[:2, :3].to_dict('records')
+        collection_w.load()
+        collection_w.query(default_term_expr, output_fields=["*", ct.default_float_vec_field_name],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res, "with_vec": True})
+
+        # query with output_fields=["*", float)
+        res2 = df.iloc[:2, :2].to_dict('records')
+        collection_w.load()
+        collection_w.query(default_term_expr, output_fields=["*", ct.default_float_field_name],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res2})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_output_fields_part_vector_wildcard(self):
+        """
+        target: test query output_fields with part wildcard
+        method: specify output_fields as wildcard and part field
+        expected: verify query result
+        """
+        # init collection with fields: int64, float, float_vec, float_vector1
+        collection_w, df = self.init_multi_fields_collection_wrap(cf.gen_unique_str(prefix))
+        collection_w.load()
+
+        # query with output_fields=["%", float), expected: all fields
+        res = df.iloc[:2].to_dict('records')
+        collection_w.query(default_term_expr, output_fields=["%", ct.default_float_field_name],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res, "with_vec": True})
+
+        # query with output_fields=["%", float_vector), expected: int64, float_vector, float_vector1
+        output_fields = [ct.default_int64_field_name, ct.default_float_vec_field_name, ct.another_float_vec_field_name]
+        res2 = df.loc[:1, output_fields].to_dict('records')
+        collection_w.query(default_term_expr, output_fields=["%", ct.default_float_vec_field_name],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res2, "with_vec": True})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("output_fields", [["*%"], ["**"], ["*", "@"]])
+    def test_query_invalid_wildcard(self, output_fields):
+        """
+        target: test query with invalid output wildcard
+        method: output_fields is invalid output wildcard
+        expected: raise exception
+        """
+        # init collection with fields: int64, float, float_vec, float_vector1
+        collection_w, df = self.init_multi_fields_collection_wrap(cf.gen_unique_str(prefix))
+        collection_w.load()
+
+        # query with invalid output_fields
+        error = {ct.err_code: 1, ct.err_msg: f"Field {output_fields[-1]} not exist"}
+        collection_w.query(default_term_expr, output_fields=output_fields,
+                           check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_partition(self):
