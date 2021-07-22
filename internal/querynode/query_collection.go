@@ -1110,19 +1110,20 @@ func (q *queryCollection) fillVectorFieldsData(segment *Segment, result *segcore
 
 			switch dataType {
 			case schemapb.DataType_BinaryVector:
-				dim = dim / 8
+				rowBytes := dim / 8
 				x := resultFieldData.GetVectors().GetData().(*schemapb.VectorField_BinaryVector)
-				content := make([]byte, dim)
-				_, err := q.vcm.ReadAt(vecPath, content, offset*dim)
+				content := make([]byte, rowBytes)
+				_, err := q.vcm.ReadAt(vecPath, content, offset*rowBytes)
 				if err != nil {
 					return err
 				}
 				log.Debug("FillVectorFieldData", zap.Any("content", content))
-				copy(x.BinaryVector[i*int(dim):(i+1)*int(dim)], content)
+				copy(x.BinaryVector[i*int(rowBytes):(i+1)*int(rowBytes)], content)
 			case schemapb.DataType_FloatVector:
 				x := resultFieldData.GetVectors().GetData().(*schemapb.VectorField_FloatVector)
-				content := make([]byte, dim*4)
-				byteLen, err := q.vcm.ReadAt(vecPath, content, offset*dim*4)
+				rowBytes := dim * 4
+				content := make([]byte, rowBytes)
+				byteLen, err := q.vcm.ReadAt(vecPath, content, offset*rowBytes)
 				if err != nil {
 					return err
 				}
@@ -1132,7 +1133,7 @@ func (q *queryCollection) fillVectorFieldsData(segment *Segment, result *segcore
 					floatResult = append(floatResult, singleData)
 				}
 				log.Debug("FillVectorFieldData", zap.Any("float32", floatResult))
-				copy(x.FloatVector.Data[i*int(dim):(i+1)*int(dim)], floatResult)
+				copy(x.FloatVector.Data[i*int(rowBytes):(i+1)*int(rowBytes)], floatResult)
 			}
 
 		}
