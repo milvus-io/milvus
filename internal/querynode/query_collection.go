@@ -1117,8 +1117,10 @@ func (q *queryCollection) fillVectorFieldsData(segment *Segment, result *segcore
 				if err != nil {
 					return err
 				}
-				log.Debug("FillVectorFieldData", zap.Any("content", content))
-				copy(x.BinaryVector[i*int(rowBytes):(i+1)*int(rowBytes)], content)
+				log.Debug("FillVectorFieldData", zap.Any("binaryVectorResult", content))
+
+				resultLen := dim / 8
+				copy(x.BinaryVector[i*int(resultLen):(i+1)*int(resultLen)], content)
 			case schemapb.DataType_FloatVector:
 				x := resultFieldData.GetVectors().GetData().(*schemapb.VectorField_FloatVector)
 				rowBytes := dim * 4
@@ -1132,8 +1134,10 @@ func (q *queryCollection) fillVectorFieldsData(segment *Segment, result *segcore
 					singleData := typeutil.ByteToFloat32(content[j*4 : j*4+4])
 					floatResult = append(floatResult, singleData)
 				}
-				log.Debug("FillVectorFieldData", zap.Any("float32", floatResult))
-				copy(x.FloatVector.Data[i*int(dim):(i+1)*int(dim)], floatResult)
+				log.Debug("FillVectorFieldData", zap.Any("floatVectorResult", floatResult))
+
+				resultLen := dim
+				copy(x.FloatVector.Data[i*int(resultLen):(i+1)*int(resultLen)], floatResult)
 			}
 
 		}
