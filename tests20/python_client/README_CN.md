@@ -76,7 +76,7 @@
 <figure><table>
 <thead>
 <tr><th><strong>Log Level</strong> </th><th><strong>Log File</strong> </th></tr></thead>
-<tbody><tr><td>Debug  </td><td>ci_test_log.debug </td></tr><tr><td>Info  </td><td>ci_test_log .log </td></tr><tr><td>Error  </td><td>ci_test_log.err </td></tr></tbody>
+<tbody><tr><td>Debug  </td><td>ci_test_log.debug </td></tr><tr><td>Info  </td><td>ci_test_log.log </td></tr><tr><td>Error  </td><td>ci_test_log.err </td></tr></tbody>
 </table></figure>
 <li>在主目录 <strong>pytest.ini</strong> 文件内可设置默认传递的参数，如下例中 ip 为所需要设置的 milvus 服务的ip地址，<strong>*.html</strong> 为测试生成的 <strong>report</strong>：</li>
 
