@@ -309,44 +309,6 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 	return nil
 }
 
-func (loader *segmentLoader) loadSegmentVectorFieldData(info *VectorFieldInfo) error {
-	iCodec := storage.InsertCodec{}
-	defer func() {
-		err := iCodec.Close()
-		if err != nil {
-			log.Error(err.Error())
-		}
-	}()
-	for _, path := range info.fieldBinlog.Binlogs {
-		if data := info.getRawData(path); data != nil {
-			continue
-		}
-
-		log.Debug("load vector raw data", zap.String("path", path))
-
-		binLog, err := loader.minioKV.Load(path)
-		if err != nil {
-			return err
-		}
-
-		blob := &storage.Blob{
-			Key:   path,
-			Value: []byte(binLog),
-		}
-
-		insertFieldData, err := iCodec.DeserializeOneVectorBinlog(blob)
-		if err != nil {
-			log.Error(err.Error())
-			return err
-		}
-
-		// save raw data into segment.vectorFieldInfo
-		info.setRawData(path, insertFieldData.Data)
-	}
-
-	return nil
-}
-
 func newSegmentLoader(ctx context.Context, rootCoord types.RootCoord, indexCoord types.IndexCoord, replica ReplicaInterface, etcdKV *etcdkv.EtcdKV) *segmentLoader {
 	option := &minioKV.Option{
 		Address:           Params.MinioEndPoint,
