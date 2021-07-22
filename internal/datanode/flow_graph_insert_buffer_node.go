@@ -113,7 +113,7 @@ func (ib *insertBuffer) size(segmentID UniqueID) int64 {
 		bdata, ok := data.(*storage.BinaryVectorFieldData)
 		if ok {
 			totalNumRows := int64(0)
-			if fdata.NumRows != nil {
+			if bdata.NumRows != nil {
 				for _, numRow := range bdata.NumRows {
 					totalNumRows += numRow
 				}
