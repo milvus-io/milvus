@@ -24,3 +24,5 @@ for node in `kind get nodes --name=kind | tr -s '\n' ' '`
 do
   docker cp $node:/var/log "${ARTIFACTS}/${KIND_NAME}"
 done
+
+echo "Exported logs for cluster \"${KIND_NAME}\" to: \"${ARTIFACTS}/${KIND_NAME}\""
