@@ -98,7 +98,7 @@ TEST_F(ServerCheckerTest, CPU_FAIL_TEST) {
 
     // CPU not support one of sse4_2, avx2, avx512
     fiu_enable("CpuChecker.CheckCpuInstructionSet.not_support_sse4_2", 1, NULL, 0);
-    ASSERT_FALSE(ms::CpuChecker::CheckCpuInstructionSet().ok());
+    ASSERT_TRUE(ms::CpuChecker::CheckCpuInstructionSet().ok());
 
     fiu_disable("CpuChecker.CheckCpuInstructionSet.not_support_sse4_2");
     fiu_disable("CpuChecker.CheckCpuInstructionSet.not_support_avx2");
