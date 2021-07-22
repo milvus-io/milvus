@@ -701,7 +701,7 @@ func (sched *TaskScheduler) collectResultLoop() {
 						continue
 					}
 					t := sched.getTaskByReqID(reqID)
-					log.Debug("Proxy collectResultLoop Got a SearchResultMsg", zap.Any("ReqID", reqID), zap.Any("t", t))
+					log.Debug("Proxy collectResultLoop Got a SearchResultMsg", zap.Any("ReqID", reqID))
 					if t == nil {
 						log.Debug("Proxy collectResultLoop GetTaskByReqID failed", zap.String("reqID", reqIDStr))
 						delete(searchResultBufs, reqID)

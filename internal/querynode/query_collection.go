@@ -156,7 +156,7 @@ func (q *queryCollection) waitNewTSafe() Timestamp {
 	// block until any vChannel updating tSafe
 	_, _, recvOK := reflect.Select(q.watcherSelectCase)
 	if !recvOK {
-		log.Error("tSafe has been closed", zap.Any("collectionID", q.collectionID))
+		// log.Error("tSafe has been closed", zap.Any("collectionID", q.collectionID))
 		return Timestamp(math.MaxInt64)
 	}
 	//log.Debug("wait new tSafe", zap.Any("collectionID", s.collectionID))
