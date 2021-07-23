@@ -30,15 +30,49 @@ func calBySchemaPolicy(schema *schemapb.CollectionSchema) (int, error) {
 	return int(threshold / float64(sizePerRecord)), nil
 }
 
-type allocatePolicy func(segment *SegmentInfo, count int64) bool
+type AllocatePolicy func(segments []*SegmentInfo, count int64,
+	maxCountPerSegment int64) ([]*Allocation, []*Allocation)
 
-func allocatePolicyV1(segment *SegmentInfo, count int64) bool {
-	var allocSize int64
-	for _, allocation := range segment.allocations {
-		allocSize += allocation.numOfRows
+func AllocatePolicyV1(segments []*SegmentInfo, count int64,
+	maxCountPerSegment int64) ([]*Allocation, []*Allocation) {
+	newSegmentAllocations := make([]*Allocation, 0)
+	existedSegmentAllocations := make([]*Allocation, 0)
+	// create new segment if count >= max num
+	for count >= maxCountPerSegment {
+		allocation := &Allocation{
+			NumOfRows: maxCountPerSegment,
+		}
+		newSegmentAllocations = append(newSegmentAllocations, allocation)
+		count -= maxCountPerSegment
 	}
-	free := segment.GetMaxRowNum() - segment.GetNumOfRows() - allocSize
-	return free >= count
+
+	// allocate space for remaining count
+	if count == 0 {
+		return newSegmentAllocations, existedSegmentAllocations
+	}
+	for _, segment := range segments {
+		var allocSize int64
+		for _, allocation := range segment.allocations {
+			allocSize += allocation.NumOfRows
+		}
+		free := segment.GetMaxRowNum() - segment.GetNumOfRows() - allocSize
+		if free < count {
+			continue
+		}
+		allocation := &Allocation{
+			SegmentID: segment.GetID(),
+			NumOfRows: count,
+		}
+		existedSegmentAllocations = append(existedSegmentAllocations, allocation)
+		return newSegmentAllocations, existedSegmentAllocations
+	}
+
+	// allocate new segment for remaining count
+	allocation := &Allocation{
+		NumOfRows: count,
+	}
+	newSegmentAllocations = append(newSegmentAllocations, allocation)
+	return newSegmentAllocations, existedSegmentAllocations
 }
 
 type sealPolicy func(maxCount, writtenCount, allocatedCount int64) bool
@@ -54,7 +88,7 @@ func getSegmentCapacityPolicy(sizeFactor float64) segmentSealPolicy {
 	return func(segment *SegmentInfo, ts Timestamp) bool {
 		var allocSize int64
 		for _, allocation := range segment.allocations {
-			allocSize += allocation.numOfRows
+			allocSize += allocation.NumOfRows
 		}
 		return float64(segment.currRows) >= sizeFactor*float64(segment.GetMaxRowNum())
 	}
