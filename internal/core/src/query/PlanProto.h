@@ -13,6 +13,7 @@
 #include "query/PlanNode.h"
 #include "pb/plan.pb.h"
 #include "query/Plan.h"
+#include "../pb/plan.pb.h"
 #include <boost/dynamic_bitset.hpp>
 #include <memory>
 
@@ -27,7 +28,10 @@ class ProtoParser {
     //    ExprFromProto(const proto::plan::Expr& expr_proto);
 
     ExprPtr
-    ParseRangeExpr(const proto::plan::RangeExpr& expr_pb);
+    ParseUnaryRangeExpr(const proto::plan::UnaryRangeExpr& expr_pb);
+
+    ExprPtr
+    ParseBinaryRangeExpr(const proto::plan::BinaryRangeExpr& expr_pb);
 
     ExprPtr
     ParseCompareExpr(const proto::plan::CompareExpr& expr_pb);

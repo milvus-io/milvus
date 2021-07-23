@@ -31,7 +31,12 @@ TermExpr::accept(ExprVisitor& visitor) {
 }
 
 void
-RangeExpr::accept(ExprVisitor& visitor) {
+UnaryRangeExpr::accept(ExprVisitor& visitor) {
+    visitor.visit(*this);
+}
+
+void
+BinaryRangeExpr::accept(ExprVisitor& visitor) {
     visitor.visit(*this);
 }
 

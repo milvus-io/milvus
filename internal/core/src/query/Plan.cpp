@@ -108,16 +108,22 @@ Parser::ParseCompareNode(const Json& out_body) {
     AssertInfo(mapping_.count(op_name), "op(" + op_name + ") not found");
     auto body = out_iter.value();
     Assert(body.is_array());
+    Assert(body.size() == 2);
     auto expr = std::make_unique<CompareExpr>();
-    expr->op = mapping_.at(op_name);
-    for (auto& item : body) {
-        Assert(item.is_string());
-        auto field_name = FieldName(item.get<std::string>());
-        auto& field_meta = schema[field_name];
-        auto data_type = field_meta.get_data_type();
-        expr->data_types_.emplace_back(data_type);
-        expr->field_offsets_.emplace_back(schema.get_offset(field_name));
-    }
+    expr->op_ = mapping_.at(op_name);
+
+    auto item0 = body[0];
+    Assert(item0.is_string());
+    auto left_field_name = FieldName(item0.get<std::string>());
+    expr->left_data_type_ = schema[left_field_name].get_data_type();
+    expr->left_field_offset_ = schema.get_offset(left_field_name);
+
+    auto item1 = body[1];
+    Assert(item1.is_string());
+    auto right_field_name = FieldName(item1.get<std::string>());
+    expr->right_data_type_ = schema[right_field_name].get_data_type();
+    expr->right_field_offset_ = schema.get_offset(right_field_name);
+
     return expr;
 }
 
@@ -274,35 +280,76 @@ Parser::ParseTermNodeImpl(const FieldName& field_name, const Json& body) {
     return expr;
 }
 
+// Warning: incomplete validation of range node, for dsl parser is deprecated.
 template <typename T>
 ExprPtr
 Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
-    auto expr = std::make_unique<RangeExprImpl<T>>();
-    auto& field_meta = schema[field_name];
-    auto data_type = field_meta.get_data_type();
-    expr->data_type_ = data_type;
-    expr->field_offset_ = schema.get_offset(field_name);
     Assert(body.is_object());
-    for (auto& item : body.items()) {
-        auto op_name = boost::algorithm::to_lower_copy(std::string(item.key()));
-
-        AssertInfo(mapping_.count(op_name), "op(" + op_name + ") not found");
-        auto op = mapping_.at(op_name);
-        if constexpr (std::is_same_v<T, bool>) {
-            Assert(item.value().is_boolean());
-        } else if constexpr (std::is_integral_v<T>) {
-            Assert(item.value().is_number_integer());
-        } else if constexpr (std::is_floating_point_v<T>) {
-            Assert(item.value().is_number());
-        } else {
-            static_assert(always_false<T>, "unsupported type");
-            __builtin_unreachable();
+    std::cout << body.size() << std::endl;
+    if (body.size() == 1) {
+        for (auto& item : body.items()) {
+            auto op_name = boost::algorithm::to_lower_copy(std::string(item.key()));
+            AssertInfo(mapping_.count(op_name), "op(" + op_name + ") not found");
+            if constexpr (std::is_same_v<T, bool>) {
+                Assert(item.value().is_boolean());
+            } else if constexpr (std::is_integral_v<T>) {
+                Assert(item.value().is_number_integer());
+            } else if constexpr (std::is_floating_point_v<T>) {
+                Assert(item.value().is_number());
+            } else {
+                static_assert(always_false<T>, "unsupported type");
+                __builtin_unreachable();
+            }
+            auto expr = std::make_unique<UnaryRangeExprImpl<T>>();
+            expr->data_type_ = schema[field_name].get_data_type();
+            expr->field_offset_ = schema.get_offset(field_name);
+            expr->op_ = mapping_.at(op_name);
+            expr->value_ = item.value();
+            return expr;
         }
-        T value = item.value();
-        expr->conditions_.emplace_back(op, value);
+    } else if (body.size() == 2) {
+        bool lower_inclusive = false;
+        bool upper_inclusive = false;
+        T lower_value;
+        T upper_value;
+        for (auto& item : body.items()) {
+            auto op_name = boost::algorithm::to_lower_copy(std::string(item.key()));
+            AssertInfo(mapping_.count(op_name), "op(" + op_name + ") not found");
+            if constexpr (std::is_same_v<T, bool>) {
+                Assert(item.value().is_boolean());
+            } else if constexpr (std::is_integral_v<T>) {
+                Assert(item.value().is_number_integer());
+            } else if constexpr (std::is_floating_point_v<T>) {
+                Assert(item.value().is_number());
+            } else {
+                static_assert(always_false<T>, "unsupported type");
+                __builtin_unreachable();
+            }
+            auto op = mapping_.at(op_name);
+            switch (op) {
+                case OpType::GreaterEqual: lower_inclusive = true;
+                case OpType::GreaterThan:
+                    lower_value = item.value();
+                    break;
+                case OpType::LessEqual: upper_inclusive = true;
+                case OpType::LessThan:
+                    upper_value = item.value();
+                    break;
+                default:
+                    PanicInfo("illegal range node");
+            };
+        }
+        auto expr = std::make_unique<BinaryRangeExprImpl<T>>();
+        expr->data_type_ = schema[field_name].get_data_type();
+        expr->field_offset_ = schema.get_offset(field_name);
+        expr->lower_inclusive_ = lower_inclusive;
+        expr->upper_inclusive_ = upper_inclusive;
+        expr->lower_value_ = lower_value;
+        expr->upper_value_ = upper_value;
+        return expr;
+    } else {
+        PanicInfo("illegal range node, too more or too few ops");
     }
-    std::sort(expr->conditions_.begin(), expr->conditions_.end());
-    return expr;
 }
 
 std::unique_ptr<PlaceholderGroup>
