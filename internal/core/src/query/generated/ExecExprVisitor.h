@@ -14,6 +14,7 @@
 // DO NOT EDIT
 #include <optional>
 #include <boost/dynamic_bitset.hpp>
+#include <boost/variant.hpp>
 #include <utility>
 #include <deque>
 #include "segcore/SegmentGrowingImpl.h"
@@ -39,7 +40,7 @@ class ExecExprVisitor : public ExprVisitor {
     visit(CompareExpr& expr) override;
 
  public:
-    using RetType = std::deque<boost::dynamic_bitset<>>;
+    using RetType = boost::dynamic_bitset<>;
     ExecExprVisitor(const segcore::SegmentInternalInterface& segment, int64_t row_count, Timestamp timestamp)
         : segment_(segment), row_count_(row_count), timestamp_(timestamp) {
     }

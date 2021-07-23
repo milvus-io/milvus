@@ -416,6 +416,21 @@ class TestInsertOperation(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: 'should create connect first'}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.parametrize("vec_fields", [[cf.gen_float_vec_field(name="float_vector1")],
+                                            [cf.gen_binary_vec_field()],
+                                            [cf.gen_binary_vec_field(), cf.gen_binary_vec_field("binary_vec")]])
+    def test_insert_multi_float_vec_fields(self, vec_fields):
+        """
+        target: test insert into multi float vec fields collection
+        method: create collection and insert
+        expected: verify num entities
+        """
+        schema = cf.gen_schema_multi_vector_fields(vec_fields)
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        df = cf.gen_dataframe_multi_vec_fields(vec_fields=vec_fields)
+        collection_w.insert(df)
+        assert collection_w.num_entities == ct.default_nb
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_drop_collection(self):
         """

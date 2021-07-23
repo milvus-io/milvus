@@ -24,7 +24,6 @@ class TestQueryBase(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(reason="issue #6650")
     def test_query(self):
         """
         target: test query
@@ -36,7 +35,7 @@ class TestQueryBase(TestcaseBase):
         int_values = vectors[0][ct.default_int64_field_name].values.tolist()
         pos = 5
         term_expr = f'{ct.default_int64_field_name} in {int_values[:pos]}'
-        res = vectors[0].iloc[0:pos, :2].to_dict('records')
+        res = vectors[0].iloc[0:pos, :1].to_dict('records')
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -53,7 +52,6 @@ class TestQueryBase(TestcaseBase):
         assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(reason="issue #6650")
     def test_query_auto_id_collection(self):
         """
         target: test query with auto_id=True collection
@@ -63,16 +61,18 @@ class TestQueryBase(TestcaseBase):
         self._connect()
         df = cf.gen_default_dataframe_data(ct.default_nb)
         df[ct.default_int64_field_name] = None
-        res, _, = self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
-                                                                primary_field=ct.default_int64_field_name, auto_id=True)
+        insert_res, _, = self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
+                                                                       primary_field=ct.default_int64_field_name,
+                                                                       auto_id=True)
         assert self.collection_wrap.num_entities == ct.default_nb
-        ids = res[1].primary_keys
-        res = df.iloc[:2, :2].to_dict('records')
+        ids = insert_res[1].primary_keys
+        pos = 5
+        res = df.iloc[:pos, :1].to_dict('records')
         self.collection_wrap.load()
 
         # query with all primary keys
-        term_expr_1 = f'{ct.default_int64_field_name} in {ids[:2]}'
-        for i in range(2):
+        term_expr_1 = f'{ct.default_int64_field_name} in {ids[:pos]}'
+        for i in range(5):
             res[i][ct.default_int64_field_name] = ids[i]
         self.collection_wrap.query(term_expr_1, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
@@ -137,15 +137,15 @@ class TestQueryBase(TestcaseBase):
             collection_w.query(expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #6650")
-    def _test_query_expr_term(self):
+    @pytest.mark.skip(reason="repeat with test_query, waiting for other expr")
+    def test_query_expr_term(self):
         """
         target: test query with TermExpr
         method: query with TermExpr
         expected: query result is correct
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
-        res = vectors[0].iloc[:2, :2].to_dict('records')
+        res = vectors[0].iloc[:2, :1].to_dict('records')
         collection_w.query(default_term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -267,17 +267,16 @@ class TestQueryBase(TestcaseBase):
             collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #6650")
-    def test_query_output_field_none(self):
+    def test_query_output_field_none_or_empty(self):
         """
-        target: test query with none output field
-        method: query with output field=None
-        expected: return all fields
+        target: test query with none and empty output field
+        method: query with output field=None, field=[]
+        expected: return primary field
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
-        res, _ = collection_w.query(default_term_expr, output_fields=None)
-        fields = [ct.default_int64_field_name, ct.default_float_field_name]
-        assert set(res[0].keys()) == set(fields)
+        for fields in [None, []]:
+            res, _ = collection_w.query(default_term_expr, output_fields=fields)
+            assert list(res[0].keys()) == [ct.default_int64_field_name]
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_output_one_field(self):
@@ -310,7 +309,7 @@ class TestQueryBase(TestcaseBase):
         assert set(actual_res[0].keys()) == set(all_fields)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_query_output_vec_field(self):
+    def test_query_output_float_vec_field(self):
         """
         target: test query with vec output field
         method: specify vec field as output field
@@ -327,6 +326,66 @@ class TestQueryBase(TestcaseBase):
             collection_w.query(default_term_expr, output_fields=output_fields,
                                check_task=CheckTasks.check_query_results,
                                check_items={exp_res: res, "with_vec": True})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("vec_fields", [[cf.gen_float_vec_field(name="float_vector1")]])
+    def test_query_output_multi_float_vec_field(self, vec_fields):
+        """
+        target: test query and output multi float vec fields
+        method: a.specify multi vec field as output
+                b.specify output_fields with wildcard %
+        expected: verify query result
+        """
+        # init collection with two float vector fields
+        schema = cf.gen_schema_multi_vector_fields(vec_fields)
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        df = cf.gen_dataframe_multi_vec_fields(vec_fields=vec_fields)
+        collection_w.insert(df)
+        assert collection_w.num_entities == ct.default_nb
+
+        # query with two vec output_fields
+        output_fields = [ct.default_int64_field_name, ct.default_float_vec_field_name]
+        for vec_field in vec_fields:
+            output_fields.append(vec_field.name)
+        res = df.loc[:1, output_fields].to_dict('records')
+        collection_w.load()
+        collection_w.query(default_term_expr, output_fields=output_fields,
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res, "with_vec": True})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #6594 binary unsupported")
+    @pytest.mark.parametrize("vec_fields", [[cf.gen_float_vec_field(name="float_vector1")]])
+    # [cf.gen_binary_vec_field()],
+    # [cf.gen_binary_vec_field(), cf.gen_binary_vec_field("binary_vec")]])
+    def test_query_output_mix_float_binary_field(self, vec_fields):
+        """
+        target:  test query and output mix float and binary vec fields
+        method: a.specify mix vec field as output
+                b.specify output_fields with wildcard %
+        expected: output binary vector and float vec
+        """
+        # init collection with two float vector fields
+        schema = cf.gen_schema_multi_vector_fields(vec_fields)
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        df = cf.gen_dataframe_multi_vec_fields(vec_fields=vec_fields)
+        collection_w.insert(df)
+        assert collection_w.num_entities == ct.default_nb
+
+        # query with two vec output_fields
+        output_fields = [ct.default_int64_field_name, ct.default_float_vec_field_name]
+        for vec_field in vec_fields:
+            output_fields.append(vec_field.name)
+        res = df.loc[:1, output_fields].to_dict('records')
+        collection_w.load()
+        collection_w.query(default_term_expr, output_fields=output_fields,
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res, "with_vec": True})
+
+        # query with wildcard %
+        collection_w.query(default_term_expr, output_fields=["%"],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res, "with_vec": True})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="issue #6594")
@@ -369,19 +428,6 @@ class TestQueryBase(TestcaseBase):
             collection_w.query(default_term_expr, output_fields=fields, check_task=CheckTasks.err_res,
                                check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #6650")
-    def test_query_empty_output_fields(self):
-        """
-        target: test query with empty output fields
-        method: query with empty output fields
-        expected: return all fields
-        """
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
-        query_res, _ = collection_w.query(default_term_expr, output_fields=[])
-        fields = [ct.default_int64_field_name, ct.default_float_field_name]
-        assert list(query_res[0].keys()) == fields
-
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="exception not MilvusException")
     def test_query_invalid_output_fields(self):
@@ -398,7 +444,102 @@ class TestQueryBase(TestcaseBase):
                                check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(reason="issue #6650")
+    def test_query_output_fields_simple_wildcard(self):
+        """
+        target: test query output_fields with simple wildcard (* and %)
+        method: specify output_fields as "*" and "*", "%"
+        expected: output all scale field; output all fields
+        """
+        # init collection with fields: int64, float, float_vec, float_vector1
+        collection_w, df = self.init_multi_fields_collection_wrap(cf.gen_unique_str(prefix))
+        collection_w.load()
+
+        # query with wildcard scale(*)
+        output_fields = [ct.default_int64_field_name, ct.default_float_field_name]
+        res = df.loc[:1, output_fields].to_dict('records')
+        collection_w.query(default_term_expr, output_fields=["*"],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res})
+
+        # query with wildcard %
+        output_fields2 = [ct.default_int64_field_name, ct.default_float_vec_field_name, ct.another_float_vec_field_name]
+        res2 = df.loc[:1, output_fields2].to_dict('records')
+        collection_w.query(default_term_expr, output_fields=["%"],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res2, "with_vec": True})
+
+        # query with wildcard all fields: vector(%) and scale(*)
+        res3 = df.iloc[:2].to_dict('records')
+        collection_w.query(default_term_expr, output_fields=["*", "%"],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res3, "with_vec": True})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_output_fields_part_scale_wildcard(self):
+        """
+        target: test query output_fields with part wildcard
+        method: specify output_fields as wildcard and part field
+        expected: verify query result
+        """
+        # init collection with fields: int64, float, float_vec, float_vector1
+        collection_w, df = self.init_multi_fields_collection_wrap(cf.gen_unique_str(prefix))
+
+        # query with output_fields=["*", float_vector)
+        res = df.iloc[:2, :3].to_dict('records')
+        collection_w.load()
+        collection_w.query(default_term_expr, output_fields=["*", ct.default_float_vec_field_name],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res, "with_vec": True})
+
+        # query with output_fields=["*", float)
+        res2 = df.iloc[:2, :2].to_dict('records')
+        collection_w.load()
+        collection_w.query(default_term_expr, output_fields=["*", ct.default_float_field_name],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res2})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_output_fields_part_vector_wildcard(self):
+        """
+        target: test query output_fields with part wildcard
+        method: specify output_fields as wildcard and part field
+        expected: verify query result
+        """
+        # init collection with fields: int64, float, float_vec, float_vector1
+        collection_w, df = self.init_multi_fields_collection_wrap(cf.gen_unique_str(prefix))
+        collection_w.load()
+
+        # query with output_fields=["%", float), expected: all fields
+        res = df.iloc[:2].to_dict('records')
+        collection_w.query(default_term_expr, output_fields=["%", ct.default_float_field_name],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res, "with_vec": True})
+
+        # query with output_fields=["%", float_vector), expected: int64, float_vector, float_vector1
+        output_fields = [ct.default_int64_field_name, ct.default_float_vec_field_name, ct.another_float_vec_field_name]
+        res2 = df.loc[:1, output_fields].to_dict('records')
+        collection_w.query(default_term_expr, output_fields=["%", ct.default_float_vec_field_name],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res2, "with_vec": True})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("output_fields", [["*%"], ["**"], ["*", "@"]])
+    def test_query_invalid_wildcard(self, output_fields):
+        """
+        target: test query with invalid output wildcard
+        method: output_fields is invalid output wildcard
+        expected: raise exception
+        """
+        # init collection with fields: int64, float, float_vec, float_vector1
+        collection_w, df = self.init_multi_fields_collection_wrap(cf.gen_unique_str(prefix))
+        collection_w.load()
+
+        # query with invalid output_fields
+        error = {ct.err_code: 1, ct.err_msg: f"Field {output_fields[-1]} not exist"}
+        collection_w.query(default_term_expr, output_fields=output_fields,
+                           check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_partition(self):
         """
         target: test query on partition
@@ -411,7 +552,7 @@ class TestQueryBase(TestcaseBase):
         partition_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
         partition_w.load()
-        res = df.iloc[:2, :2].to_dict('records')
+        res = df.iloc[:2, :1].to_dict('records')
         collection_w.query(default_term_expr, partition_names=[partition_w.name],
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
@@ -432,7 +573,6 @@ class TestQueryBase(TestcaseBase):
                            check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #6650")
     def test_query_default_partition(self):
         """
         target: test query on default partition
@@ -440,7 +580,7 @@ class TestQueryBase(TestcaseBase):
         expected: verify query result
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
-        res = vectors[0].iloc[:2, :2].to_dict('records')
+        res = vectors[0].iloc[:2, :1].to_dict('records')
         collection_w.query(default_term_expr, partition_names=[ct.default_partition_name],
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
@@ -526,7 +666,6 @@ class TestQueryOperation(TestcaseBase):
                            check_items={ct.err_code: 1, ct.err_msg: clem.CollNotLoaded % collection_name})
 
     @pytest.mark.tags(ct.CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #6650")
     @pytest.mark.parametrize("term_expr", [f'{ct.default_int64_field_name} in [0]'])
     def test_query_expr_single_term_array(self, term_expr):
         """
@@ -539,11 +678,10 @@ class TestQueryOperation(TestcaseBase):
         collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True)[0:3]
 
         # query the first row of data
-        check_vec = vectors[0].iloc[:, [0, 1]][0:1].to_dict('records')
+        check_vec = vectors[0].iloc[:, [0]][0:1].to_dict('records')
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: check_vec})
 
     @pytest.mark.tags(ct.CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #6650")
     @pytest.mark.parametrize("term_expr", [f'{ct.default_int64_field_name} in [0]'])
     def test_query_binary_expr_single_term_array(self, term_expr, check_content):
         """
@@ -557,11 +695,10 @@ class TestQueryOperation(TestcaseBase):
                                                                                  is_binary=True)[0:3]
 
         # query the first row of data
-        check_vec = vectors[0].iloc[:, [0, 1]][0:1].to_dict('records')
+        check_vec = vectors[0].iloc[:, [0]][0:1].to_dict('records')
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: check_vec})
 
     @pytest.mark.tags(ct.CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue #6650")
     def test_query_expr_all_term_array(self):
         """
         target: test query with all array term expr
@@ -575,7 +712,7 @@ class TestQueryOperation(TestcaseBase):
         # data preparation
         int_values = vectors[0][ct.default_int64_field_name].values.tolist()
         term_expr = f'{ct.default_int64_field_name} in {int_values}'
-        check_vec = vectors[0].iloc[:, [0, 1]][0:len(int_values)].to_dict('records')
+        check_vec = vectors[0].iloc[:, [0]][0:len(int_values)].to_dict('records')
 
         # query all array value
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: check_vec})
@@ -631,7 +768,6 @@ class TestQueryOperation(TestcaseBase):
         log.debug(res)
 
     @pytest.mark.tags(ct.CaseLabel.L0)
-    @pytest.mark.xfail(reason="issue #6650")
     def test_query_after_index(self):
         """
         target: test query after creating index
@@ -647,11 +783,10 @@ class TestQueryOperation(TestcaseBase):
 
         int_values = [0]
         term_expr = f'{ct.default_int64_field_name} in {int_values}'
-        check_vec = vectors[0].iloc[:, [0, 1]][0:len(int_values)].to_dict('records')
+        check_vec = vectors[0].iloc[:, [0]][0:len(int_values)].to_dict('records')
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: check_vec})
 
     @pytest.mark.tags(ct.CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #6650")
     def test_query_after_search(self):
         """
         target: test query after search
@@ -675,7 +810,7 @@ class TestQueryOperation(TestcaseBase):
         assert collection_w.num_entities == nb_old
 
         term_expr = f'{ct.default_int64_field_name} in [0, 1]'
-        check_vec = vectors[0].iloc[:, [0, 1]][0:2].to_dict('records')
+        check_vec = vectors[0].iloc[:, [0]][0:2].to_dict('records')
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: check_vec})
 
     @pytest.mark.tags(ct.CaseLabel.L1)
