@@ -225,8 +225,10 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, idx []*pb.IndexInfo,
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	if len(coll.PartitionIDs) != len(coll.PartitionNames) {
-		return 0, fmt.Errorf("PartitionIDs and PartitionNames' length mis-match when creating collection")
+	if len(coll.PartitionIDs) != len(coll.PartitionNames) ||
+		len(coll.PartitionIDs) != len(coll.PartitionCreatedTimestamps) ||
+		len(coll.PartitionNames) != len(coll.PartitionCreatedTimestamps) {
+		return 0, fmt.Errorf("PartitionIDs, PartitionNames and PartitionCreatedTimestmaps' length mis-match when creating collection")
 	}
 	if _, ok := mt.collName2ID[coll.Schema.Name]; ok {
 		return 0, fmt.Errorf("collection %s exist", coll.Schema.Name)
@@ -386,14 +388,16 @@ func (mt *metaTable) GetCollectionByName(collectionName string, ts typeutil.Time
 	return nil, fmt.Errorf("can't find collection: %s, at timestamp = %d", collectionName, ts)
 }
 
-func (mt *metaTable) ListCollections(ts typeutil.Timestamp) (map[string]typeutil.UniqueID, error) {
+func (mt *metaTable) ListCollections(ts typeutil.Timestamp) (map[string]*pb.CollectionInfo, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
-	colls := make(map[string]typeutil.UniqueID)
+	colls := make(map[string]*pb.CollectionInfo)
 
 	if ts == 0 {
-		for k, v := range mt.collName2ID {
-			colls[k] = v
+		for collName, collID := range mt.collName2ID {
+			coll := mt.collID2Meta[collID]
+			colCopy := proto.Clone(&coll)
+			colls[collName] = colCopy.(*pb.CollectionInfo)
 		}
 		return colls, nil
 	}
@@ -408,7 +412,7 @@ func (mt *metaTable) ListCollections(ts typeutil.Timestamp) (map[string]typeutil
 		if err != nil {
 			log.Debug("unmarshal collection info failed", zap.Error(err))
 		}
-		colls[collMeta.Schema.Name] = collMeta.ID
+		colls[collMeta.Schema.Name] = &collMeta
 	}
 	return colls, nil
 }
@@ -437,7 +441,7 @@ func (mt *metaTable) ListCollectionPhysicalChannels() []string {
 	return plist
 }
 
-func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, error) {
+func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID, createdTimestamp uint64, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 	coll, ok := mt.collID2Meta[collID]
@@ -454,6 +458,14 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 		return 0, fmt.Errorf("len(coll.PartitionIDs)=%d, len(coll.PartitionNames)=%d", len(coll.PartitionIDs), len(coll.PartitionNames))
 	}
 
+	if len(coll.PartitionIDs) != len(coll.PartitionCreatedTimestamps) {
+		return 0, fmt.Errorf("len(coll.PartitionIDs)=%d, len(coll.PartitionCreatedTimestamps)=%d", len(coll.PartitionIDs), len(coll.PartitionCreatedTimestamps))
+	}
+
+	if len(coll.PartitionNames) != len(coll.PartitionCreatedTimestamps) {
+		return 0, fmt.Errorf("len(coll.PartitionNames)=%d, len(coll.PartitionCreatedTimestamps)=%d", len(coll.PartitionNames), len(coll.PartitionCreatedTimestamps))
+	}
+
 	for idx := range coll.PartitionIDs {
 		if coll.PartitionIDs[idx] == partitionID {
 			return 0, fmt.Errorf("partition id = %d already exists", partitionID)
@@ -461,10 +473,11 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 		if coll.PartitionNames[idx] == partitionName {
 			return 0, fmt.Errorf("partition name = %s already exists", partitionName)
 		}
-
+		// no necessary to check created timestamp
 	}
 	coll.PartitionIDs = append(coll.PartitionIDs, partitionID)
 	coll.PartitionNames = append(coll.PartitionNames, partitionName)
+	coll.PartitionCreatedTimestamps = append(coll.PartitionCreatedTimestamps, createdTimestamp)
 	mt.collID2Meta[collID] = coll
 
 	k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, collID)
@@ -578,6 +591,7 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 
 	pd := make([]typeutil.UniqueID, 0, len(collMeta.PartitionIDs))
 	pn := make([]string, 0, len(collMeta.PartitionNames))
+	pts := make([]uint64, 0, len(collMeta.PartitionCreatedTimestamps))
 	var partID typeutil.UniqueID
 	for idx := range collMeta.PartitionIDs {
 		if collMeta.PartitionNames[idx] == partitionName {
@@ -586,6 +600,7 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 		} else {
 			pd = append(pd, collMeta.PartitionIDs[idx])
 			pn = append(pn, collMeta.PartitionNames[idx])
+			pts = append(pts, collMeta.PartitionCreatedTimestamps[idx])
 		}
 	}
 	if !exist {
@@ -593,6 +608,7 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	}
 	collMeta.PartitionIDs = pd
 	collMeta.PartitionNames = pn
+	collMeta.PartitionCreatedTimestamps = pts
 	mt.collID2Meta[collID] = collMeta
 
 	// update segID2IndexMeta and partID2SegID

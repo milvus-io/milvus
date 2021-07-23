@@ -89,6 +89,10 @@ while (( "$#" )); do
       SKIP_TEST=true
       shift
     ;;
+    --skip-export-logs)
+      SKIP_EXPORT_LOGS=true
+      shift
+    ;;
     --manual)
       MANUAL=true
       shift
@@ -149,6 +153,8 @@ Usage:
     --skip-build                Skip build Milvus image
 
     --skip-test                 Skip e2e test
+
+    --skip-export-logs          Skip kind export logs
 
     --manual                    Manual Mode
 
@@ -213,7 +219,7 @@ fi
 
 if [[ ! -x "$(command -v kind)" ]]; then
   KIND_DIR="${KIND_DIR:-"${HOME}/tool_cache/kind"}"
-  KIND_VERSION="v0.10.0"
+  KIND_VERSION="v0.11.1"
 
   export PATH="${KIND_DIR}:${PATH}"
   if [[ ! -x "$(command -v kind)" ]]; then

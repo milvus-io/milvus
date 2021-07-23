@@ -213,9 +213,10 @@ func TestMetaTable(t *testing.T) {
 				IndexID: indexID,
 			},
 		},
-		CreateTime:     0,
-		PartitionIDs:   []typeutil.UniqueID{partIDDefault},
-		PartitionNames: []string{Params.DefaultPartitionName},
+		CreateTime:                 0,
+		PartitionIDs:               []typeutil.UniqueID{partIDDefault},
+		PartitionNames:             []string{Params.DefaultPartitionName},
+		PartitionCreatedTimestamps: []uint64{0},
 	}
 	idxInfo := []*pb.IndexInfo{
 		{
@@ -262,7 +263,7 @@ func TestMetaTable(t *testing.T) {
 	})
 
 	t.Run("add partition", func(t *testing.T) {
-		_, err := mt.AddPartition(collID, partName, partID, ddOp)
+		_, err := mt.AddPartition(collID, partName, partID, ftso(), ddOp)
 		assert.Nil(t, err)
 
 		// check DD operation flag
@@ -445,6 +446,7 @@ func TestMetaTable(t *testing.T) {
 		}
 		collInfo.PartitionIDs = nil
 		collInfo.PartitionNames = nil
+		collInfo.PartitionCreatedTimestamps = nil
 		_, err := mt.AddCollection(collInfo, idxInfo, nil)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "multi save error")
@@ -499,24 +501,25 @@ func TestMetaTable(t *testing.T) {
 		_, err = mt.AddCollection(collInfo, idxInfo, nil)
 		assert.Nil(t, err)
 
-		_, err = mt.AddPartition(2, "no-part", 22, nil)
+		_, err = mt.AddPartition(2, "no-part", 22, ftso(), nil)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "can't find collection. id = 2")
 
 		coll := mt.collID2Meta[collInfo.ID]
 		coll.PartitionIDs = make([]int64, Params.MaxPartitionNum)
 		mt.collID2Meta[coll.ID] = coll
-		_, err = mt.AddPartition(coll.ID, "no-part", 22, nil)
+		_, err = mt.AddPartition(coll.ID, "no-part", 22, ftso(), nil)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("maximum partition's number should be limit to %d", Params.MaxPartitionNum))
 
 		coll.PartitionIDs = []int64{partID}
 		coll.PartitionNames = []string{partName}
+		coll.PartitionCreatedTimestamps = []uint64{ftso()}
 		mt.collID2Meta[coll.ID] = coll
 		mockKV.multiSave = func(kvs map[string]string, addition func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error) {
 			return 0, fmt.Errorf("multi save error")
 		}
-		_, err = mt.AddPartition(coll.ID, "no-part", 22, nil)
+		_, err = mt.AddPartition(coll.ID, "no-part", 22, ftso(), nil)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "multi save error")
 
@@ -527,12 +530,12 @@ func TestMetaTable(t *testing.T) {
 		collInfo.PartitionNames = nil
 		_, err = mt.AddCollection(collInfo, idxInfo, nil)
 		assert.Nil(t, err)
-		_, err = mt.AddPartition(coll.ID, partName, partID, nil)
+		_, err = mt.AddPartition(coll.ID, partName, partID, ftso(), nil)
 		assert.Nil(t, err)
-		_, err = mt.AddPartition(coll.ID, partName, 22, nil)
+		_, err = mt.AddPartition(coll.ID, partName, 22, ftso(), nil)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("partition name = %s already exists", partName))
-		_, err = mt.AddPartition(coll.ID, "no-part", partID, nil)
+		_, err = mt.AddPartition(coll.ID, "no-part", partID, ftso(), nil)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("partition id = %d already exists", partID))
 	})
@@ -570,6 +573,7 @@ func TestMetaTable(t *testing.T) {
 
 		collInfo.PartitionIDs = []int64{partID}
 		collInfo.PartitionNames = []string{partName}
+		collInfo.PartitionCreatedTimestamps = []uint64{ftso()}
 		_, err = mt.AddCollection(collInfo, idxInfo, nil)
 		assert.Nil(t, err)
 
@@ -609,6 +613,7 @@ func TestMetaTable(t *testing.T) {
 
 		collInfo.PartitionIDs = nil
 		collInfo.PartitionNames = nil
+		collInfo.PartitionCreatedTimestamps = nil
 		_, err = mt.AddCollection(collInfo, idxInfo, nil)
 		assert.Nil(t, err)
 
@@ -634,6 +639,7 @@ func TestMetaTable(t *testing.T) {
 
 		collInfo.PartitionIDs = nil
 		collInfo.PartitionNames = nil
+		collInfo.PartitionCreatedTimestamps = nil
 		_, err = mt.AddCollection(collInfo, idxInfo, nil)
 		assert.Nil(t, err)
 
@@ -661,6 +667,7 @@ func TestMetaTable(t *testing.T) {
 
 		collInfo.PartitionIDs = nil
 		collInfo.PartitionNames = nil
+		collInfo.PartitionCreatedTimestamps = nil
 		_, err = mt.AddCollection(collInfo, idxInfo, nil)
 		assert.Nil(t, err)
 
@@ -699,6 +706,7 @@ func TestMetaTable(t *testing.T) {
 		assert.Nil(t, err)
 		collInfo.PartitionIDs = nil
 		collInfo.PartitionNames = nil
+		coll.PartitionCreatedTimestamps = nil
 		_, err = mt.AddCollection(collInfo, idxInfo, nil)
 		assert.Nil(t, err)
 		mockKV.multiSaveAndRemoveWithPrefix = func(saves map[string]string, removals []string, addition func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error) {
@@ -724,6 +732,7 @@ func TestMetaTable(t *testing.T) {
 
 		collInfo.PartitionIDs = nil
 		collInfo.PartitionNames = nil
+		collInfo.PartitionCreatedTimestamps = nil
 		_, err = mt.AddCollection(collInfo, idxInfo, nil)
 		assert.Nil(t, err)
 
@@ -771,6 +780,7 @@ func TestMetaTable(t *testing.T) {
 
 		collInfo.PartitionIDs = nil
 		collInfo.PartitionNames = nil
+		collInfo.PartitionCreatedTimestamps = nil
 		_, err = mt.AddCollection(collInfo, idxInfo, nil)
 		assert.Nil(t, err)
 
@@ -841,6 +851,7 @@ func TestMetaTable(t *testing.T) {
 
 		collInfo.PartitionIDs = nil
 		collInfo.PartitionNames = nil
+		collInfo.PartitionCreatedTimestamps = nil
 		_, err = mt.AddCollection(collInfo, idxInfo, nil)
 		assert.Nil(t, err)
 
@@ -867,6 +878,7 @@ func TestMetaTable(t *testing.T) {
 		}
 		collInfo.PartitionIDs = nil
 		collInfo.PartitionNames = nil
+		collInfo.PartitionCreatedTimestamps = nil
 		_, err = mt.AddCollection(collInfo, idxInfo, nil)
 		assert.Nil(t, err)
 		coll := mt.collID2Meta[collInfo.ID]
@@ -916,6 +928,7 @@ func TestMetaTable(t *testing.T) {
 
 		collInfo.PartitionIDs = nil
 		collInfo.PartitionNames = nil
+		collInfo.PartitionCreatedTimestamps = nil
 		_, err = mt.AddCollection(collInfo, idxInfo, nil)
 		assert.Nil(t, err)
 		mt.indexID2Meta = make(map[int64]pb.IndexInfo)
@@ -971,12 +984,14 @@ func TestMetaWithTimestamp(t *testing.T) {
 
 	collInfo.PartitionIDs = []int64{partID1}
 	collInfo.PartitionNames = []string{partName1}
+	collInfo.PartitionCreatedTimestamps = []uint64{ftso()}
 	t1, err := mt.AddCollection(collInfo, nil, nil)
 	assert.Nil(t, err)
 
 	collInfo.ID = 2
 	collInfo.PartitionIDs = []int64{partID2}
 	collInfo.PartitionNames = []string{partName2}
+	collInfo.PartitionCreatedTimestamps = []uint64{ftso()}
 	collInfo.Schema.Name = collName2
 
 	t2, err := mt.AddCollection(collInfo, nil, nil)
@@ -1044,7 +1059,7 @@ func TestMetaWithTimestamp(t *testing.T) {
 	c2, err = mt.GetCollectionByName(collName2, tsoStart)
 	assert.NotNil(t, err)
 
-	getKeys := func(m map[string]typeutil.UniqueID) []string {
+	getKeys := func(m map[string]*pb.CollectionInfo) []string {
 		keys := make([]string, 0, len(m))
 		for key := range m {
 			keys = append(keys, key)

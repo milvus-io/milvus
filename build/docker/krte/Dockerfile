@@ -14,7 +14,7 @@ ARG GO_VERSION
 ENV KRTE_IMAGE=${IMAGE_ARG} \
     GOPATH=/home/go \
     PATH=/home/go/bin:/usr/local/go/bin:${PATH} \
-    KIND_VERSION=0.10.0 \
+    KIND_VERSION=0.11.1 \
     DOCKER_COMPOSE_VERSION=1.29.1 \
     CONTAINER=docker
 
