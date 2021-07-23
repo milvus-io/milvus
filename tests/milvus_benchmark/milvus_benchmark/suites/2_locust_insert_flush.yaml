@@ -15,12 +15,11 @@ locust_insert_performance:
         step_load: 50
         spawn_rate: 2
         connection_num: 1
-        clients_num: 100
+        clients_num: 100 
         during_time: 600
         types:
           -
-            type: insert
+            type: insert_flush
             weight: 1
             params:
               ni_per: 1
-
