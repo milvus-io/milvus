@@ -20,15 +20,25 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
-func TestHistoricalStage_HistoricalStage(t *testing.T) {
+func TestVChannelStage_VChannelStage(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	his := genSimpleHistorical(ctx)
 	inputChan := make(chan queryMsg, queryBufferSize)
-	outputChan := make(chan queryResult, queryBufferSize)
-	hs := newHistoricalStage(ctx, cancel, defaultCollectionID, inputChan, outputChan, his)
-	go hs.start()
+	unsolvedChan := make(chan queryMsg, queryBufferSize)
+	resChan := make(chan queryResult, queryBufferSize)
+
+	s := genSimpleStreaming(ctx)
+
+	vStage := newVChannelStage(ctx,
+		cancel,
+		defaultCollectionID,
+		defaultVChannel,
+		inputChan,
+		unsolvedChan,
+		resChan,
+		s)
+	go vStage.start()
 
 	// construct searchMsg
 	searchReq := genSimpleSearchRequest()
@@ -44,16 +54,27 @@ func TestHistoricalStage_HistoricalStage(t *testing.T) {
 		reqs: reqs,
 	}
 
+	// 1. output of resultResultHandlerStage
 	go func() {
 		inputChan <- msg
 	}()
-
-	//result check
-	res := <-outputChan
+	res := <-resChan
 	sr, ok := res.(*searchResult)
 	assert.True(t, ok)
 	assert.NoError(t, sr.err)
 	assert.Equal(t, 1, len(sr.matchedSegments))
 	assert.Equal(t, 1, len(sr.sealedSegmentSearched))
 	assert.Equal(t, defaultSegmentID, sr.sealedSegmentSearched[0])
+
+	// 2. output of unsolvedStage
+	msg.GuaranteeTimestamp = Timestamp(1000)
+	go func() {
+		inputChan <- msg
+	}()
+	res2 := <-unsolvedChan
+	sr2, ok := res2.(*searchMsg)
+	assert.True(t, ok)
+	assert.Equal(t, defaultCollectionID, sr2.CollectionID)
+	assert.Equal(t, 1, len(sr2.PartitionIDs))
+	assert.Equal(t, defaultPartitionID, sr2.PartitionIDs[0])
 }

@@ -18,46 +18,36 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestRequestHandlerStage_RequestHandlerStage(t *testing.T) {
+func TestResultHandlerStage_ResultHandlerStage(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	his := genSimpleHistorical(ctx)
 	s := genSimpleStreaming(ctx)
+	h := genSimpleHistorical(ctx)
 
-	inputChan := make(chan queryMsg, queryBufferSize)
-	hisOutput := make(chan queryMsg, queryBufferSize)
-	streamingOutput := make(map[Channel]chan queryMsg)
+	inputChan := make(chan queryResult, queryBufferSize)
+	stream := genQueryMsgStream(ctx)
+	stream.AsProducer([]string{defaultQueryResultChannel})
+	stream.Start()
 
-	resultStream := genQueryMsgStream(ctx)
-	reqStage := newRequestHandlerStage(ctx,
+	resStage := newResultHandlerStage(ctx,
 		cancel,
 		defaultCollectionID,
-		inputChan,
-		hisOutput,
-		streamingOutput,
 		s,
-		his,
-		resultStream)
-	go reqStage.start()
+		h,
+		inputChan,
+		stream,
+		0)
+	go resStage.start()
 
-	// construct searchMsg
-	sm2 := genSimpleSearchMsg()
-
+	resMsg := genSimpleSearchResult()
 	go func() {
-		inputChan <- sm2
+		inputChan <- resMsg
 	}()
 
-	res := <-hisOutput
-	sm, ok := res.(*searchMsg)
-	assert.True(t, ok)
-	assert.Equal(t, defaultCollectionID, sm.CollectionID)
-	assert.Equal(t, 1, len(sm.PartitionIDs))
-	assert.Equal(t, defaultPartitionID, sm.PartitionIDs[0])
-	assert.NotNil(t, sm.plan)
-	assert.NotNil(t, sm.reqs)
-	sm.plan.delete()
-	for _, req := range sm.reqs {
-		req.delete()
-	}
+	res := consumeSimpleSearchResult(ctx)
+	assert.Equal(t, defaultTopK, len(res.Hits))
+	assert.Equal(t, 0, len(res.ChannelIDsSearched))
+	assert.Equal(t, 1, len(res.SealedSegmentIDsSearched))
+	assert.Equal(t, defaultSegmentID, res.SealedSegmentIDsSearched[0])
 }

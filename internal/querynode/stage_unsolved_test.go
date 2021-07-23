@@ -16,48 +16,54 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
-func TestRequestHandlerStage_RequestHandlerStage(t *testing.T) {
+func TestUnsolvedStage_UnsolvedStage(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	his := genSimpleHistorical(ctx)
-	s := genSimpleStreaming(ctx)
-
 	inputChan := make(chan queryMsg, queryBufferSize)
-	hisOutput := make(chan queryMsg, queryBufferSize)
-	streamingOutput := make(map[Channel]chan queryMsg)
+	outputChan := make(chan queryResult, queryBufferSize)
 
-	resultStream := genQueryMsgStream(ctx)
-	reqStage := newRequestHandlerStage(ctx,
+	s := genSimpleStreaming(ctx)
+	stream := genQueryMsgStream(ctx)
+
+	uStage := newUnsolvedStage(ctx,
 		cancel,
 		defaultCollectionID,
+		defaultVChannel,
 		inputChan,
-		hisOutput,
-		streamingOutput,
+		outputChan,
 		s,
-		his,
-		resultStream)
-	go reqStage.start()
+		stream)
+	go uStage.start()
 
 	// construct searchMsg
-	sm2 := genSimpleSearchMsg()
+	searchReq := genSimpleSearchRequest()
+	plan, reqs := genSimplePlanAndRequests()
+	msg := &searchMsg{
+		SearchMsg: &msgstream.SearchMsg{
+			BaseMsg: msgstream.BaseMsg{
+				HashValues: []uint32{0},
+			},
+			SearchRequest: *searchReq,
+		},
+		plan: plan,
+		reqs: reqs,
+	}
 
 	go func() {
-		inputChan <- sm2
+		inputChan <- msg
 	}()
 
-	res := <-hisOutput
-	sm, ok := res.(*searchMsg)
+	//result check
+	res := <-outputChan
+	sr, ok := res.(*searchResult)
 	assert.True(t, ok)
-	assert.Equal(t, defaultCollectionID, sm.CollectionID)
-	assert.Equal(t, 1, len(sm.PartitionIDs))
-	assert.Equal(t, defaultPartitionID, sm.PartitionIDs[0])
-	assert.NotNil(t, sm.plan)
-	assert.NotNil(t, sm.reqs)
-	sm.plan.delete()
-	for _, req := range sm.reqs {
-		req.delete()
-	}
+	assert.NoError(t, sr.err)
+	assert.Equal(t, 1, len(sr.matchedSegments))
+	assert.Equal(t, 1, len(sr.sealedSegmentSearched))
+	assert.Equal(t, defaultSegmentID, sr.sealedSegmentSearched[0])
 }

@@ -13,13 +13,14 @@ package querynode
 
 import (
 	"context"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/stretchr/testify/assert"
-	"testing"
 )
 
-// NOTE: start msgStream before test
 func TestInputStage_InputStage(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

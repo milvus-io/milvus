@@ -15,7 +15,15 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"math"
+	"math/rand"
+	"path"
+	"strconv"
+
 	"github.com/golang/protobuf/proto"
+	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
+
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
@@ -26,12 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"go.etcd.io/etcd/clientv3"
-	"go.uber.org/zap"
-	"math"
-	"math/rand"
-	"path"
-	"strconv"
 )
 
 // ---------- unittest util functions ----------
@@ -604,6 +606,36 @@ func genSimpleSearchMsg() *msgstream.SearchMsg {
 	}
 }
 
+func genSimpleSearchResult() *searchResult {
+	searchReq := genSimpleSearchRequest()
+	plan, reqs := genSimplePlanAndRequests()
+	msg := &searchMsg{
+		SearchMsg: &msgstream.SearchMsg{
+			BaseMsg: msgstream.BaseMsg{
+				HashValues: []uint32{0},
+			},
+			SearchRequest: *searchReq,
+		},
+		plan: plan,
+		reqs: reqs,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	his := genSimpleHistorical(ctx)
+	inputChan := make(chan queryMsg, queryBufferSize)
+	outputChan := make(chan queryResult, queryBufferSize)
+	hs := newHistoricalStage(ctx, cancel, defaultCollectionID, inputChan, outputChan, his)
+	go hs.start()
+	go func() {
+		inputChan <- msg
+	}()
+
+	res := <-outputChan
+	return res.(*searchResult)
+}
+
 func produceSimpleSearchMsg(ctx context.Context) {
 	stream := genQueryMsgStream(ctx)
 	stream.AsProducer([]string{defaultQueryChannel})
@@ -618,4 +650,16 @@ func produceSimpleSearchMsg(ctx context.Context) {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func consumeSimpleSearchResult(ctx context.Context) *msgstream.SearchResultMsg {
+	stream := genQueryMsgStream(ctx)
+	stream.AsConsumer([]string{defaultQueryResultChannel}, defaultSubName)
+	stream.Start()
+	defer stream.Close()
+	res := stream.Consume()
+	if len(res.Msgs) != 1 {
+		panic("unexpected message length")
+	}
+	return res.Msgs[0].(*msgstream.SearchResultMsg)
 }
