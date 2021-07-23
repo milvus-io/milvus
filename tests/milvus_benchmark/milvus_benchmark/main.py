@@ -1,14 +1,9 @@
 import os
 import sys
-import time
-from datetime import datetime
-import pdb
 import argparse
 import logging
 import traceback
-from multiprocessing import Process
-from queue import Queue
-from logging import handlers
+# from queue import Queue
 from yaml import full_load, dump
 from milvus_benchmark.metrics.models.server import Server
 from milvus_benchmark.metrics.models.hardware import Hardware
@@ -17,7 +12,7 @@ from milvus_benchmark.metrics.models.env import Env
 from milvus_benchmark.env import get_env
 from milvus_benchmark.runners import get_runner
 from milvus_benchmark.metrics import api
-from milvus_benchmark import config
+from milvus_benchmark import config, utils
 from milvus_benchmark import parser
 # from scheduler import back_scheduler
 from logs import log
@@ -25,11 +20,7 @@ from logs import log
 log.setup_logging()
 logger = logging.getLogger("milvus_benchmark.main")
 
-DEFAULT_IMAGE = "milvusdb/milvus:latest"
-LOG_FOLDER = "logs"
-NAMESPACE = "milvus"
-SERVER_VERSION = "2.0"
-q = Queue()
+# q = Queue()
 
 
 def positive_int(s):
@@ -58,7 +49,7 @@ def run_suite(run_type, suite, env_mode, env_params):
     try:
         start_status = False
         metric = api.Metric()
-        deploy_mode = env_params["deploy_mode"] if "deploy_mode" in env_params else config.DEFAULT_DEPLOY_MODE
+        deploy_mode = env_params["deploy_mode"]
         env = get_env(env_mode, deploy_mode)
         metric.set_run_id()
         metric.set_mode(env_mode)
@@ -67,6 +58,8 @@ def run_suite(run_type, suite, env_mode, env_params):
         logger.info(env_params)
         if env_mode == "local":
             metric.hardware = Hardware("")
+            if "server_tag" in env_params and env_params["server_tag"]:
+                metric.hardware = Hardware("server_tag")
             start_status = env.start_up(env_params["host"], env_params["port"])
         elif env_mode == "helm":
             helm_params = env_params["helm_params"]
@@ -106,8 +99,8 @@ def run_suite(run_type, suite, env_mode, env_params):
                     case_metric.update_message(err_message)
                     suite_status = False
                 logger.debug(case_metric.metrics)
-                # if env_mode == "helm":
-                api.save(case_metric)
+                if deploy_mode:
+                    api.save(case_metric)
             if suite_status:
                 metric.update_status(status="RUN_SUCC")
             else:
@@ -120,7 +113,8 @@ def run_suite(run_type, suite, env_mode, env_params):
         logger.error(traceback.format_exc())
         metric.update_status(status="RUN_FAILED")
     finally:
-        api.save(metric)
+        if deploy_mode:
+            api.save(metric)
         # time.sleep(10)
         env.tear_down()
         if metric.status != "RUN_SUCC":
@@ -160,6 +154,11 @@ def main():
         '--suite',
         metavar='FILE',
         help='load test suite from FILE',
+        default='')
+    arg_parser.add_argument(
+        '--server-config',
+        metavar='FILE',
+        help='load server config from FILE',
         default='')
 
     args = arg_parser.parse_args()
@@ -216,10 +215,20 @@ def main():
 
     elif args.local:
         # for local mode
+        deploy_params = args.server_config
+        deploy_params_dict = None
+        if deploy_params:
+            with open(deploy_params) as f:
+                deploy_params_dict = full_load(f)
+                f.close()
+            logger.debug(deploy_params_dict)
+        deploy_mode = utils.get_deploy_mode(deploy_params_dict)
+        server_tag = utils.get_server_tag(deploy_params_dict)
         env_params = {
             "host": args.host,
             "port": args.port,
-            "deploy_mode": None
+            "deploy_mode": deploy_mode,
+            "server_tag": server_tag
         }
         suite_file = args.suite
         with open(suite_file) as f:

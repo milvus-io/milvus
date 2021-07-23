@@ -315,12 +315,10 @@ TEST(Expr, TestRange) {
         dsl_string.replace(loc, 4, clause);
         auto plan = CreatePlan(*schema, dsl_string);
         auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
-        EXPECT_EQ(final.size(), upper_div(N * num_iters, TestChunkSize));
+        EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
-            auto vec_id = i / TestChunkSize;
-            auto offset = i % TestChunkSize;
-            auto ans = final[vec_id][offset];
+            auto ans = final[i];
 
             auto val = age_col[i];
             auto ref = ref_func(val);
@@ -399,12 +397,10 @@ TEST(Expr, TestTerm) {
         dsl_string.replace(loc, 4, clause);
         auto plan = CreatePlan(*schema, dsl_string);
         auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
-        EXPECT_EQ(final.size(), upper_div(N * num_iters, TestChunkSize));
+        EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
-            auto vec_id = i / TestChunkSize;
-            auto offset = i % TestChunkSize;
-            auto ans = final[vec_id][offset];
+            auto ans = final[i];
 
             auto val = age_col[i];
             auto ref = ref_func(val);
@@ -501,12 +497,10 @@ TEST(Expr, TestSimpleDsl) {
         // std::cout << dsl.dump(2);
         auto plan = CreatePlan(*schema, dsl.dump());
         auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
-        EXPECT_EQ(final.size(), upper_div(N * num_iters, TestChunkSize));
+        EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
-            auto vec_id = i / TestChunkSize;
-            auto offset = i % TestChunkSize;
-            bool ans = final[vec_id][offset];
+            bool ans = final[i];
             auto val = age_col[i];
             auto ref = ref_func(val);
             ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
@@ -577,12 +571,10 @@ TEST(Expr, TestCompare) {
         auto plan = CreatePlan(*schema, dsl_string);
         // std::cout << ShowPlanNodeVisitor().call_child(*plan->plan_node_) << std::endl;
         auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
-        EXPECT_EQ(final.size(), upper_div(N * num_iters, TestChunkSize));
+        EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
-            auto vec_id = i / TestChunkSize;
-            auto offset = i % TestChunkSize;
-            auto ans = final[vec_id][offset];
+            auto ans = final[i];
 
             auto val1 = age1_col[i];
             auto val2 = age2_col[i];

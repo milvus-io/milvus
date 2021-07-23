@@ -18,6 +18,7 @@
 #include "query/generated/ExecExprVisitor.h"
 #include "query/SearchOnGrowing.h"
 #include "query/SearchOnSealed.h"
+#include "boost_ext/dynamic_bitset_ext.hpp"
 
 namespace milvus::query {
 
@@ -84,7 +85,7 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     auto src_data = ph.get_blob<EmbeddedType<VectorType>>();
     auto num_queries = ph.num_of_queries_;
 
-    aligned_vector<uint8_t> bitset_holder;
+    boost::dynamic_bitset<> bitset_holder;
     BitsetView view;
     // TODO: add API to unify row_count
     // auto row_count = segment->get_row_count();
@@ -99,9 +100,13 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     if (node.predicate_.has_value()) {
         ExecExprVisitor::RetType expr_ret =
             ExecExprVisitor(*segment, active_count, timestamp_).call_child(*node.predicate_.value());
-        segment->mask_with_timestamps(expr_ret, timestamp_);
-        bitset_holder = AssembleNegBitset(expr_ret);
-        view = BitsetView(bitset_holder.data(), bitset_holder.size() * 8);
+        bitset_holder = std::move(expr_ret);
+    }
+    segment->mask_with_timestamps(bitset_holder, timestamp_);
+
+    if (!bitset_holder.empty()) {
+        bitset_holder.flip();
+        view = BitsetView((uint8_t*)boost_ext::get_data(bitset_holder), bitset_holder.size());
     }
 
     segment->vector_search(active_count, node.search_info_, src_data, num_queries, MAX_TIMESTAMP, view, ret);

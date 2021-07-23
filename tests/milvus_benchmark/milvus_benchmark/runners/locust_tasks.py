@@ -2,23 +2,21 @@ import pdb
 import random
 import time
 import logging
-import json
+import math 
 from locust import TaskSet, task
 from . import utils
-
-dim = 128
 
 logger = logging.getLogger("milvus_benchmark.runners.locust_tasks")
 
 
 class Tasks(TaskSet):
-    @task(100)
+    @task
     def query(self):
         op = "query"
-        X = utils.generate_vectors(self.params[op]["nq"], self.op_info["dimension"])
+        # X = utils.generate_vectors(self.params[op]["nq"], self.op_info["dimension"])
         vector_query = {"vector": {self.op_info["vector_field_name"]: {
             "topk": self.params[op]["top_k"], 
-            "query": X, 
+            "query": self.values["X"][:self.params[op]["nq"]], 
             "metric_type": self.params[op]["metric_type"] if "metric_type" in self.params[op] else utils.DEFAULT_METRIC_TYPE, 
             "params": self.params[op]["search_param"]}
         }}
@@ -29,12 +27,11 @@ class Tasks(TaskSet):
                     filter_query.append(eval(filter["range"]))
                 if isinstance(filter, dict) and "term" in filter:
                     filter_query.append(eval(filter["term"]))
-        logger.debug(filter_query)
-        self.client.query(vector_query, filter_query=filter_query, log=False)
+        # logger.debug(filter_query)
+        self.client.query(vector_query, filter_query=filter_query, log=False, timeout=120)
 
     @task
     def flush(self):
-        logger.debug("Flush")
         self.client.flush(log=False)
 
     @task
@@ -57,11 +54,20 @@ class Tasks(TaskSet):
     @task
     def insert(self):
         op = "insert"
-        ids = [random.randint(1, 10000000) for _ in range(self.params[op]["ni_per"])]
-        X = [[random.random() for _ in range(dim)] for _ in range(self.params[op]["ni_per"])]
-        entities = utils.generate_entities(self.op_info["collection_info"], X, ids)
+        # ids = [random.randint(1000000, 10000000) for _ in range(self.params[op]["ni_per"])]
+        # X = [[random.random() for _ in range(self.op_info["dimension"])] for _ in range(self.params[op]["ni_per"])]
+        entities = utils.generate_entities(self.op_info["collection_info"], self.values["X"][:self.params[op]["ni_per"]], self.values["ids"][:self.params[op]["ni_per"]])
         self.client.insert(entities, log=False)
 
+    @task
+    def insert_flush(self):
+        op = "insert_flush"
+        # ids = [random.randint(1000000, 10000000) for _ in range(self.params[op]["ni_per"])]
+        # X = [[random.random() for _ in range(self.op_info["dimension"])] for _ in range(self.params[op]["ni_per"])]
+        entities = utils.generate_entities(self.op_info["collection_info"], self.values["X"][:self.params[op]["ni_per"]], self.values["ids"][:self.params[op]["ni_per"]])
+        self.client.insert(entities, log=False)
+        self.client.flush(log=False)
+        
     @task
     def insert_rand(self):
         self.client.insert_rand(log=False)
@@ -69,5 +75,5 @@ class Tasks(TaskSet):
     @task
     def get(self):
         op = "get"
-        ids = [random.randint(1, 10000000) for _ in range(self.params[op]["ids_length"])]
-        self.client.get(ids)
+        # ids = [random.randint(1, 10000000) for _ in range(self.params[op]["ids_length"])]
+        self.client.get(self.values["get_ids"][:self.params[op]["ids_length"]])
