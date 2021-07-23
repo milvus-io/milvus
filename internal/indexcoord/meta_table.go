@@ -124,7 +124,7 @@ func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequ
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 	_, ok := mt.indexBuildID2Meta[indexBuildID]
-	log.Debug("IndexCoord metaTable AddIndex", zap.Any(" index already exist", ok))
+	log.Debug("IndexCoord metaTable AddIndex", zap.Any("indexBuildID", indexBuildID), zap.Any(" index already exist", ok))
 	if ok {
 		return fmt.Errorf("index already exists with ID = %d", indexBuildID)
 	}

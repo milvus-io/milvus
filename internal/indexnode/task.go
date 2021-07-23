@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
 const (
@@ -170,17 +171,23 @@ func (it *IndexBuildTask) checkIndexMeta(ctx context.Context, pre bool) error {
 
 func (it *IndexBuildTask) PreExecute(ctx context.Context) error {
 	log.Debug("IndexNode IndexBuildTask preExecute...")
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "CreateIndex-PreExecute")
+	defer sp.Finish()
 	return it.checkIndexMeta(ctx, true)
 }
 
 func (it *IndexBuildTask) PostExecute(ctx context.Context) error {
 	log.Debug("IndexNode IndexBuildTask PostExecute...")
+	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "CreateIndex-PostExecute")
+	defer sp.Finish()
 
 	return it.checkIndexMeta(ctx, false)
 }
 
 func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	log.Debug("IndexNode IndexBuildTask Execute ...")
+	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "CreateIndex-Execute")
+	defer sp.Finish()
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildTask %d", it.req.IndexBuildID))
 	var err error
 

@@ -16,26 +16,18 @@
 CCollection
 NewCollection(const char* schema_proto_blob) {
     auto proto = std::string(schema_proto_blob);
-
     auto collection = std::make_unique<milvus::segcore::Collection>(proto);
-
-    // std::cout << "create collection " << collection->get_collection_name() << std::endl;
-
     return (void*)collection.release();
 }
 
 void
 DeleteCollection(CCollection collection) {
     auto col = (milvus::segcore::Collection*)collection;
-
-    // std::cout << "delete collection " << col->get_collection_name() << std::endl;
-
     delete col;
 }
 
 const char*
 GetCollectionName(CCollection collection) {
     auto col = (milvus::segcore::Collection*)collection;
-
     return strdup(col->get_collection_name().data());
 }
