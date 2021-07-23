@@ -156,7 +156,7 @@ func (q *queryCollection) waitNewTSafe() Timestamp {
 	// block until any vChannel updating tSafe
 	_, _, recvOK := reflect.Select(q.watcherSelectCase)
 	if !recvOK {
-		log.Error("tSafe has been closed", zap.Any("collectionID", q.collectionID))
+		//log.Error("tSafe has been closed", zap.Any("collectionID", q.collectionID))
 		return Timestamp(math.MaxInt64)
 	}
 	//log.Debug("wait new tSafe", zap.Any("collectionID", s.collectionID))
@@ -202,13 +202,13 @@ func (q *queryCollection) consumeQuery() {
 		default:
 			msgPack := q.queryMsgStream.Consume()
 			if msgPack == nil || len(msgPack.Msgs) <= 0 {
-				msgPackNil := msgPack == nil
-				msgPackEmpty := true
-				if msgPack != nil {
-					msgPackEmpty = len(msgPack.Msgs) <= 0
-				}
-				log.Debug("consume query message failed", zap.Any("msgPack is Nil", msgPackNil),
-					zap.Any("msgPackEmpty", msgPackEmpty))
+				//msgPackNil := msgPack == nil
+				//msgPackEmpty := true
+				//if msgPack != nil {
+				//	msgPackEmpty = len(msgPack.Msgs) <= 0
+				//}
+				//log.Debug("consume query message failed", zap.Any("msgPack is Nil", msgPackNil),
+				//	zap.Any("msgPackEmpty", msgPackEmpty))
 				continue
 			}
 			for _, msg := range msgPack.Msgs {
@@ -267,28 +267,28 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
 	case commonpb.MsgType_Retrieve:
 		collectionID = msg.(*msgstream.RetrieveMsg).CollectionID
 		msgTypeStr = "retrieve"
-		log.Debug("consume retrieve message",
-			zap.Any("collectionID", collectionID),
-			zap.Int64("msgID", msg.ID()),
-		)
+		//log.Debug("consume retrieve message",
+		//	zap.Any("collectionID", collectionID),
+		//	zap.Int64("msgID", msg.ID()),
+		//)
 	case commonpb.MsgType_Search:
 		collectionID = msg.(*msgstream.SearchMsg).CollectionID
 		msgTypeStr = "search"
-		log.Debug("consume search message",
-			zap.Any("collectionID", collectionID),
-			zap.Int64("msgID", msg.ID()),
-		)
+		//log.Debug("consume search message",
+		//	zap.Any("collectionID", collectionID),
+		//	zap.Int64("msgID", msg.ID()),
+		//)
 	default:
 		err := fmt.Errorf("receive invalid msgType = %d", msgType)
 		log.Error(err.Error())
 		return
 	}
 	if collectionID != q.collectionID {
-		log.Error("not target collection query request",
-			zap.Any("collectionID", q.collectionID),
-			zap.Int64("target collectionID", collectionID),
-			zap.Int64("msgID", msg.ID()),
-		)
+		//log.Error("not target collection query request",
+		//	zap.Any("collectionID", q.collectionID),
+		//	zap.Int64("target collectionID", collectionID),
+		//	zap.Int64("msgID", msg.ID()),
+		//)
 		return
 	}
 

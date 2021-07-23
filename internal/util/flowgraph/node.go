@@ -58,7 +58,7 @@ func (nodeCtx *nodeCtx) Start(ctx context.Context, wg *sync.WaitGroup) {
 		select {
 		case <-ctx.Done():
 			wg.Done()
-			fmt.Println(nodeCtx.node.Name(), "closed")
+			//fmt.Println(nodeCtx.node.Name(), "closed")
 			return
 		default:
 			// inputs from inputsMessages for Operate

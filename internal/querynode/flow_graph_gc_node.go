@@ -37,7 +37,7 @@ func (gcNode *gcNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	_, ok := in[0].(*gcMsg)
 	if !ok {
-		log.Error("type assertion failed for gcMsg")
+		log.Warn("type assertion failed for gcMsg")
 		// TODO: add error handling
 	}
 
