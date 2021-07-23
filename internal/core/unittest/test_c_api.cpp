@@ -341,7 +341,7 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
     auto segment = NewSegment(collection, 0, Growing);
 
     auto old_memory_usage_size = GetMemoryUsageInBytes(segment);
-    //std::cout << "old_memory_usage_size = " << old_memory_usage_size << std::endl;
+    // std::cout << "old_memory_usage_size = " << old_memory_usage_size << std::endl;
     assert(old_memory_usage_size == 0);
 
     int N = 10000;
@@ -355,7 +355,7 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
     assert(res.error_code == Success);
 
     auto memory_usage_size = GetMemoryUsageInBytes(segment);
-    //std::cout << "new_memory_usage_size = " << memory_usage_size << std::endl;
+    // std::cout << "new_memory_usage_size = " << memory_usage_size << std::endl;
     assert(memory_usage_size == 2785280);
 
     DeleteCollection(collection);
@@ -697,7 +697,7 @@ TEST(CApiTest, LoadIndex_Search) {
 
     auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
     auto dis = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
-    //for (int i = 0; i < std::min(num_query * K, 100); ++i) {
+    // for (int i = 0; i < std::min(num_query * K, 100); ++i) {
     //    std::cout << ids[i] << "->" << dis[i] << std::endl;
     //}
 }
@@ -718,8 +718,8 @@ TEST(CApiTest, Indexing_Without_Predicate) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
-                          dataset.raw_.sizeof_per_row, dataset.raw_.count);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
+                          dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
     const char* dsl_string = R"(
@@ -811,8 +811,8 @@ TEST(CApiTest, Indexing_Without_Predicate) {
 
     auto search_result_on_raw_index_json = SearchResultToJson(*search_result_on_raw_index);
     auto search_result_on_bigIndex_json = SearchResultToJson((*(SearchResult*)c_search_result_on_bigIndex));
-    //std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
-    //std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
+    // std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
+    // std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
 
     ASSERT_EQ(search_result_on_raw_index_json.dump(1), search_result_on_bigIndex_json.dump(1));
 
@@ -841,8 +841,8 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
-                          dataset.raw_.sizeof_per_row, dataset.raw_.count);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
+                          dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
     const char* serialized_expr_plan = R"(vector_anns: <
@@ -929,8 +929,8 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
 
     auto search_result_on_raw_index_json = SearchResultToJson(*search_result_on_raw_index);
     auto search_result_on_bigIndex_json = SearchResultToJson((*(SearchResult*)c_search_result_on_bigIndex));
-    //std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
-    //std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
+    // std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
+    // std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
 
     ASSERT_EQ(search_result_on_raw_index_json.dump(1), search_result_on_bigIndex_json.dump(1));
 
@@ -959,8 +959,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
-                          dataset.raw_.sizeof_per_row, dataset.raw_.count);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
+                          dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
     const char* dsl_string = R"({
@@ -1096,8 +1096,8 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     {
         int64_t offset;
         PreInsert(segment, N, &offset);
-        auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
-                              dataset.raw_.sizeof_per_row, dataset.raw_.count);
+        auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
+                              dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
         assert(ins_res.error_code == Success);
     }
 
@@ -1246,8 +1246,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
-                          dataset.raw_.sizeof_per_row, dataset.raw_.count);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
+                          dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
     const char* dsl_string = R"({
@@ -1381,8 +1381,8 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
-                          dataset.raw_.sizeof_per_row, dataset.raw_.count);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
+                          dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
     const char* serialized_expr_plan = R"(vector_anns: <
@@ -1581,8 +1581,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
-                          dataset.raw_.sizeof_per_row, dataset.raw_.count);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
+                          dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
     const char* dsl_string = R"({
@@ -1718,8 +1718,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
-                          dataset.raw_.sizeof_per_row, dataset.raw_.count);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
+                          dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
     const char* serialized_expr_plan = R"(vector_anns: <
@@ -1868,8 +1868,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
-                          dataset.raw_.sizeof_per_row, dataset.raw_.count);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
+                          dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
     const char* dsl_string = R"({
@@ -2011,8 +2011,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
-                          dataset.raw_.sizeof_per_row, dataset.raw_.count);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
+                          dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
     const char* serialized_expr_plan = R"(vector_anns: <
