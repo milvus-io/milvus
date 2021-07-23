@@ -51,7 +51,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	iMsg, ok := in[0].(*insertMsg)
 	if !ok {
-		log.Error("type assertion failed for insertMsg")
+		log.Warn("type assertion failed for insertMsg")
 		// TODO: add error handling
 	}
 
