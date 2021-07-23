@@ -167,6 +167,10 @@ class ResponseChecker:
             log.warning("The function name is {} rather than {}".format(func_name, "search"))
         if len(check_items) == 0:
             raise Exception("No expect values found in the check task")
+        if check_items.get("_async", None):
+            if check_items["_async"]:
+                search_res.done()
+                search_res = search_res.result()
         if len(search_res) != check_items["nq"]:
             log.error("search_results_check: Numbers of query searched (%d) "
                       "is not equal with expected (%d)"
@@ -202,8 +206,9 @@ class ResponseChecker:
         if len(check_items) == 0:
             raise Exception("No expect values found in the check task")
         exp_res = check_items.get("exp_res", None)
+        with_vec = check_items.get("with_vec", False)
         if exp_res and isinstance(query_res, list):
-            assert pc.equal_entities_list(exp=exp_res, actual=query_res)
+            assert pc.equal_entities_list(exp=exp_res, actual=query_res, with_vec=with_vec)
             # assert len(exp_res) == len(query_res)
             # for i in range(len(exp_res)):
             #     assert_entity_equal(exp=exp_res[i], actual=query_res[i])

@@ -109,10 +109,8 @@ TEST(Sealed, without_predicate) {
     load_info.index = indexing;
     load_info.index_params["metric_type"] = "L2";
 
-    segment->LoadIndexing(load_info);
-    sr = SearchResult();
-
-    sr = segment->Search(plan.get(), *ph_group, time);
+    auto sealed_segment = SealedCreator(schema, dataset, load_info);
+    sr = sealed_segment->Search(plan.get(), *ph_group, time);
 
     auto post_result = SearchResultToJson(sr);
     std::cout << ref_result.dump(1);
@@ -201,10 +199,8 @@ TEST(Sealed, with_predicate) {
     load_info.index = indexing;
     load_info.index_params["metric_type"] = "L2";
 
-    segment->LoadIndexing(load_info);
-    sr = SearchResult();
-
-    sr = segment->Search(plan.get(), *ph_group, time);
+    auto sealed_segment = SealedCreator(schema, dataset, load_info);
+    sr = sealed_segment->Search(plan.get(), *ph_group, time);
 
     auto post_sr = sr;
     for (int i = 0; i < num_queries; ++i) {

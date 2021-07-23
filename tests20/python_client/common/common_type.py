@@ -8,6 +8,7 @@ big_flush_interval = 1000
 default_drop_interval = 3
 default_dim = 128
 default_nb = 1200
+default_nb_medium = 5000
 default_top_k = 10
 default_nq = 2
 default_limit = 10
@@ -25,6 +26,7 @@ default_int64_field_name = "int64"
 default_float_field_name = "float"
 default_double_field_name = "double"
 default_float_vec_field_name = "float_vector"
+another_float_vec_field_name = "float_vector1"
 default_binary_vec_field_name = "binary_vector"
 default_partition_name = "_default"
 default_tag = "1970_01_01"
@@ -38,6 +40,8 @@ int_field_desc = "int64 type field"
 float_field_desc = "float type field"
 float_vec_field_desc = "float vector type field"
 binary_vec_field_desc = "binary vector type field"
+max_dim = 32768
+gracefulTime = 1
 
 Not_Exist = "Not_Exist"
 Connect_Object_Name = "Milvus"
@@ -56,6 +60,8 @@ get_invalid_strs = [
     (1,),
     {1: 1},
     None,
+    "",
+    " ",
     "12-s",
     "12 s",
     "(mn)",
@@ -74,6 +80,36 @@ get_not_string = [
     [1, "2", 3]
 ]
 
+get_invalid_vectors = [
+    "1*2",
+    [1],
+    [1, 2],
+    [" "],
+    ['a'],
+    [None],
+    None,
+    (1, 2),
+    {"a": 1},
+    " ",
+    "",
+    "String",
+    " siede ",
+    "中文",
+    "a".join("a" for i in range(256))
+]
+
+get_invalid_ints = [
+    1.0,
+    None,
+    [1, 2, 3],
+    " ",
+    "",
+    -1,
+    "String",
+    "=c",
+    "中文",
+    "a".join("a" for i in range(256))
+]
 
 get_dict_without_host_port = [
     {"host": "host"},
