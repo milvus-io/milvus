@@ -69,6 +69,7 @@ class SearchRunner(BaseRunner):
                             "params": search_param}
                         # TODO: only update search_info
                         case_metric = copy.deepcopy(self.metric)
+                        case_metric.set_case_metric_type()
                         case_metric.search = {
                             "nq": nq,
                             "topk": top_k,
@@ -161,18 +162,20 @@ class InsertSearchRunner(BaseRunner):
         cases = list()
         case_metrics = list()
         self.init_metric(self.name, collection_info, index_info, None)
+        
         for search_param in search_params:
             if not filters:
                 filters.append(None)
             for filter in filters:
-                filter_param = []
+                # filter_param = []
+                filter_query = []
                 if isinstance(filter, dict) and "range" in filter:
                     filter_query.append(eval(filter["range"]))
-                    filter_param.append(filter["range"])
+                    # filter_param.append(filter["range"])
                 if isinstance(filter, dict) and "term" in filter:
                     filter_query.append(eval(filter["term"]))
-                    filter_param.append(filter["term"])
-                logger.info("filter param: %s" % json.dumps(filter_param))
+                    # filter_param.append(filter["term"])
+                # logger.info("filter param: %s" % json.dumps(filter_param))
                 for nq in nqs:
                     query_vectors = base_query_vectors[0:nq]
                     for top_k in top_ks:
@@ -183,11 +186,12 @@ class InsertSearchRunner(BaseRunner):
                             "params": search_param}
                         # TODO: only update search_info
                         case_metric = copy.deepcopy(self.metric)
+                        case_metric.set_case_metric_type()
                         case_metric.search = {
                             "nq": nq,
                             "topk": top_k,
                             "search_param": search_param,
-                            "filter": filter_param
+                            "filter": filter_query
                         }
                         vector_query = {"vector": {index_field_name: search_info}}
                         case = {

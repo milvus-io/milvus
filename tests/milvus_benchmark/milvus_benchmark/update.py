@@ -1,16 +1,11 @@
-import os
 import sys
-import time
 import re
 import logging
 import traceback
 import argparse
 from yaml import full_load, dump
-
-
-DEFUALT_DEPLOY_MODE = "single"
-IDC_NAS_URL = "//172.16.70.249/test"
-MINIO_HOST = "minio-test.qa.svc.cluster.local"
+import config
+import utils
 
 
 def parse_server_tag(server_tag):
@@ -48,21 +43,18 @@ def update_values(src_values_file, deploy_params_file):
     except Exception as e:
         logging.error(str(e))
         raise Exception("File not found")
-    deploy_mode = deploy_params["deploy_mode"] if "deploy_mode" in deploy_params else DEFUALT_DEPLOY_MODE
+    deploy_mode = utils.get_deploy_mode(deploy_params)
+    print(deploy_mode)
     cluster = False
     values_dict["service"]["type"] = "ClusterIP"
-    if deploy_mode != DEFUALT_DEPLOY_MODE:
+    if deploy_mode != config.DEFUALT_DEPLOY_MODE:
         cluster = True
         values_dict["cluster"]["enabled"] = True
-    if "server" in deploy_params:
-        server = deploy_params["server"]
-        server_name = server["server_name"] if "server_name" in server else ""
-        server_tag = server["server_tag"] if "server_tag" in server else ""
-    else:
-        raise Exception("No server specified in {}".format(deploy_params_file))
+    server_tag = utils.get_server_tag(deploy_params)
+    print(server_tag)
     # TODO: update milvus config
     # # update values.yaml with the given host
-    node_config = None
+    # node_config = None
     perf_tolerations = [{
             "key": "node-role.kubernetes.io/benchmark",
             "operator": "Exists",
@@ -92,6 +84,20 @@ def update_values(src_values_file, deploy_params_file):
                     # "cpu": str(int(cpus) - 1) + ".0"
                 }
             }
+    # use external minio/s3
+    
+    # TODO: disable temp
+    # values_dict['minio']['enabled'] = False
+    values_dict['minio']['enabled'] = True
+    # values_dict["externalS3"]["enabled"] = True
+    values_dict["externalS3"]["enabled"] = False
+    values_dict["externalS3"]["host"] = config.MINIO_HOST
+    values_dict["externalS3"]["port"] = config.MINIO_PORT
+    values_dict["externalS3"]["accessKey"] = config.MINIO_ACCESS_KEY
+    values_dict["externalS3"]["secretKey"] = config.MINIO_SECRET_KEY
+    values_dict["externalS3"]["bucketName"] = config.MINIO_BUCKET_NAME
+    logging.debug(values_dict["externalS3"])
+
     if cluster is False:
         # TODO: support pod affinity for standalone mode
         if cpus:
@@ -109,13 +115,6 @@ def update_values(src_values_file, deploy_params_file):
         values_dict['standalone']['tolerations'] = perf_tolerations
         # values_dict['minio']['tolerations'] = perf_tolerations
         values_dict['etcd']['tolerations'] = perf_tolerations
-        values_dict['minio']['enabled'] = False
-        # use external minio/s3
-        values_dict["externalS3"]["enabled"] = True
-        values_dict["externalS3"]["host"] = MINIO_HOST
-        values_dict["externalS3"]["accessKey"] = "minioadmin"
-        values_dict["externalS3"]["secretKey"] = "minioadmin"
-
     else:
         # TODO: mem limits on distributed mode
         # values_dict['pulsar']["broker"]["configData"].update({"maxMessageSize": "52428800", "PULSAR_MEM": BOOKKEEPER_PULSAR_MEM})
@@ -126,9 +125,9 @@ def update_values(src_values_file, deploy_params_file):
             # values_dict['etcd']['nodeSelector'] = node_config
             # # set limit/request cpus in resources
             # values_dict['proxy']['resources'] = resources
-            values_dict['querynode']['resources'] = resources
-            values_dict['indexnode']['resources'] = resources
-            values_dict['datanode']['resources'] = resources
+            values_dict['queryNode']['resources'] = resources
+            values_dict['indexNode']['resources'] = resources
+            values_dict['dataNode']['resources'] = resources
             # values_dict['minio']['resources'] = resources
             # values_dict['pulsarStandalone']['resources'] = resources
         if mems:
@@ -143,9 +142,9 @@ def update_values(src_values_file, deploy_params_file):
         
         logging.debug("Add tolerations into cluster server")
         values_dict['proxy']['tolerations'] = perf_tolerations
-        values_dict['querynode']['tolerations'] = perf_tolerations
-        values_dict['indexnode']['tolerations'] = perf_tolerations
-        values_dict['datanode']['tolerations'] = perf_tolerations
+        values_dict['queryNode']['tolerations'] = perf_tolerations
+        values_dict['indexNode']['tolerations'] = perf_tolerations
+        values_dict['dataNode']['tolerations'] = perf_tolerations
         values_dict['etcd']['tolerations'] = perf_tolerations
         # values_dict['minio']['tolerations'] = perf_tolerations
         values_dict['pulsarStandalone']['tolerations'] = perf_tolerations
@@ -155,12 +154,19 @@ def update_values(src_values_file, deploy_params_file):
         # values_dict['pulsar']['broker']['tolerations'] = perf_tolerations
         # values_dict['pulsar']['bookkeeper']['tolerations'] = perf_tolerations
         # values_dict['pulsar']['zookeeper']['tolerations'] = perf_tolerations
-        values_dict['minio']['enabled'] = False
-        # use external minio/s3
-        values_dict["externalS3"]["enabled"] = True
-        values_dict["externalS3"]["host"] = MINIO_HOST
-        values_dict["externalS3"]["accessKey"] = "minioadmin"
-        values_dict["externalS3"]["secretKey"] = "minioadmin"
+        milvus_params = deploy_params["milvus"]
+        if "datanode" in milvus_params:
+            if "replicas" in milvus_params["datanode"]:
+                values_dict['dataNode']["replicas"] = milvus_params["datanode"]["replicas"]
+        if "querynode"in milvus_params:
+            if "replicas" in milvus_params["querynode"]:
+                values_dict['queryNode']["replicas"] = milvus_params["querynode"]["replicas"]
+        if "indexnode"in milvus_params:
+            if "replicas" in milvus_params["indexnode"]:
+                values_dict['indexNode']["replicas"] = milvus_params["indexnode"]["replicas"]
+        if "proxy"in milvus_params:
+            if "replicas" in milvus_params["proxy"]:
+                values_dict['proxy']["replicas"] = milvus_params["proxy"]["replicas"]
     # add extra volumes
     values_dict['extraVolumes'] = [{
         'name': 'test',
@@ -171,7 +177,7 @@ def update_values(src_values_file, deploy_params_file):
                 'name': "cifs-test-secret"
             },
             'options': {
-                'networkPath': IDC_NAS_URL,
+                'networkPath': config.IDC_NAS_URL,
                 'mountOptions': "vers=1.0"
             }
         }
@@ -184,7 +190,6 @@ def update_values(src_values_file, deploy_params_file):
     with open(src_values_file, 'w') as f:
         dump(values_dict, f, default_flow_style=False)
     f.close()
-
 
 
 if __name__ == "__main__":

@@ -1,50 +1,45 @@
-# Quick start
+`milvus_benchmark` is a non-functional testing tool which allows users to run tests on k8s cluster or at local, the primary use case is performance/load/stability testing, the objective is to expose problems in milvus project.
+
+## Quick start
 
 ### Description：
 
-- Test suites can be organized with `yaml `
-- Test can run with local mode or argo/jenkins mode, that manage the server env in argo/jenkins step or stages
+- Test cases in `milvus_benchmark` can be organized with `yaml`
+- Test can run with local mode or helm mode
+   - local: install and start your local server, and pass the host/port param when start the tests
+   - helm: install the server by helm, which will manage the milvus in k8s cluster, and you can interagte the test stage into argo workflow or jenkins pipeline
 
-### Demos：
+### Usage：
 
-1. Using argo pipeline： 
-   Run test suites(1.x, 2.x version) in argo workflows, innernal argo url: argo-test.zilliz.cc
+1. Using jenkins:
+   Use `ci/main_jenkinsfile` as the jenkins pipeline file
+2. Using argo： 
+   example argo workflow yaml configuration: `ci/argo.yaml`
+3. Local test：
 
-2. Local test：
-   Run test with the local server
-   1. set python path 
+   1). set PYTHONPATH:
    
-      `export PYTHONPATH=/yourmilvusprojectpath/tests/milvus_benchmark`
-   2. (optional, for `sift`/`glove` open dataset) mount NAS or update `*_DATA_DIR` in `runner.py`
+      `export PYTHONPATH=/your/project/path/milvus_benchmark`
    
+   2). prepare data: 
+   
+      if we need to use the sift/deep dataset as the raw data input, we need to mount NAS and update `RAW_DATA_DIR` in `config.py`, the example mount command:
         `sudo mount -t cifs -o username=test,vers=1.0 //172.16.70.249/test /test`
-   3. run test
    
-      `cd milvus-benchmark/`
+   3). install requirements:
 
-      `python3 main.py --local --host=*.* --port=19530 --suite=suites/2_insert_data.yaml`
+      `pip install -r requirements.txt`
+   
+   4). write test yaml and run with the yaml param:
+   
+      `cd milvus-benchmark/ && python main.py --local --host=* --port=19530 --suite=suites/2_insert_data.yaml`
 
-### Definitions of test suites：
+### Definitions of test suite：
 
-Testers need to write test suite config if adding a customized test into the current test framework
+Test suite yaml defines the test process, users need to write test suite yaml if adding a customized test into the current test framework.
 
-The following are the searching performance test suite：
+Take the test file `2_insert_data.yaml` as an example, the top level is the test type: `insert_performance`, there are lots of test types including: `search_performance/build_performance/insert_performance/accuracy/locust_insert/...`, each test type corresponds to this different runner defined in directory `runnners`, the other parts in the test yaml is the params pass to the runner, such as the field `collection_name` means which kind of collection will be created in milvus.
 
-1. insert_search_performance: the test type，also we have:
+### Test result：
 
-    `search_performance`,`build_performance`,`insert_performance`,`accuracy`,`stability`,`search_stability`
-2. collections: list of test cases
-3. The following fields are in the `collection` field：
-   - milvus: milvus config
-   - collection_name: currently support one table
-   - ni_per: per count of insert
-   - index_type: index type
-   - index_param: param of index
-   - run_count: search count
-   - search_params: params of search_vectors
-   - top_ks: top_k of search
-   - nqs: nq of search
-
-## Test result：
-
-Test result will be uploaded, which will be used to tell if the test run pass or failed
+Test result will be uploaded if run with the helm mode, which will be used to judge if the test run pass or failed.
