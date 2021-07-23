@@ -28,7 +28,7 @@ import (
 )
 
 type vChannelStage struct {
-	ctx    context.Context
+	ctx context.Context
 
 	collectionID UniqueID
 	vChannel     Channel

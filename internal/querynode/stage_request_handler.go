@@ -27,7 +27,7 @@ import (
 )
 
 type requestHandlerStage struct {
-	ctx    context.Context
+	ctx context.Context
 
 	collectionID UniqueID
 

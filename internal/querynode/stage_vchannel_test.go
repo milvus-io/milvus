@@ -28,7 +28,8 @@ func TestVChannelStage_VChannelStage(t *testing.T) {
 	unsolvedChan := make(chan queryMsg, queryBufferSize)
 	resChan := make(chan queryResult, queryBufferSize)
 
-	s := genSimpleStreaming(ctx)
+	s, err := genSimpleStreaming(ctx)
+	assert.NoError(t, err)
 
 	vStage := newVChannelStage(ctx,
 		defaultCollectionID,
@@ -40,8 +41,10 @@ func TestVChannelStage_VChannelStage(t *testing.T) {
 	go vStage.start()
 
 	// construct searchMsg
-	searchReq := genSimpleSearchRequest()
-	plan, reqs := genSimplePlanAndRequests()
+	searchReq, err := genSimpleSearchRequest()
+	assert.NoError(t, err)
+	plan, reqs, err := genSimplePlanAndRequests()
+	assert.NoError(t, err)
 	msg := &searchMsg{
 		SearchMsg: &msgstream.SearchMsg{
 			BaseMsg: msgstream.BaseMsg{

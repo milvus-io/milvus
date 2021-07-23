@@ -22,11 +22,14 @@ func TestResultHandlerStage_ResultHandlerStage(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	s := genSimpleStreaming(ctx)
-	h := genSimpleHistorical(ctx)
+	s, err := genSimpleStreaming(ctx)
+	assert.NoError(t, err)
+	h, err := genSimpleHistorical(ctx)
+	assert.NoError(t, err)
 
 	inputChan := make(chan queryResult, queryBufferSize)
-	stream := genQueryMsgStream(ctx)
+	stream, err := genQueryMsgStream(ctx)
+	assert.NoError(t, err)
 	stream.AsProducer([]string{defaultQueryResultChannel})
 	stream.Start()
 
@@ -39,12 +42,14 @@ func TestResultHandlerStage_ResultHandlerStage(t *testing.T) {
 		0)
 	go resStage.start()
 
-	resMsg := genSimpleSearchResult()
+	resMsg, err := genSimpleSearchResult()
+	assert.NoError(t, err)
 	go func() {
 		inputChan <- resMsg
 	}()
 
-	res := consumeSimpleSearchResult(ctx)
+	res, err := consumeSimpleSearchResult(ctx)
+	assert.NoError(t, err)
 	assert.Equal(t, defaultTopK, len(res.Hits))
 	assert.Equal(t, 0, len(res.ChannelIDsSearched))
 	assert.Equal(t, 1, len(res.SealedSegmentIDsSearched))

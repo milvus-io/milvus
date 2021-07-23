@@ -176,7 +176,7 @@ func genSimpleCollectionMeta() *etcdpb.CollectionMeta {
 
 // ---------- unittest util functions ----------
 // functions of third-party
-func genMinioKV(ctx context.Context) *minioKV.MinIOKV {
+func genMinioKV(ctx context.Context) (*minioKV.MinIOKV, error) {
 	bucketName := Params.MinioBucketName
 	option := &minioKV.Option{
 		Address:           Params.MinioEndPoint,
@@ -187,22 +187,19 @@ func genMinioKV(ctx context.Context) *minioKV.MinIOKV {
 		CreateBucket:      true,
 	}
 	kv, err := minioKV.NewMinIOKV(ctx, option)
-	if err != nil {
-		panic(err)
-	}
-	return kv
+	return kv, err
 }
 
-func genEtcdKV() *etcdkv.EtcdKV {
+func genEtcdKV() (*etcdkv.EtcdKV, error) {
 	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
-	return etcdKV
+	return etcdKV, nil
 }
 
-func genFactory() msgstream.Factory {
+func genFactory() (msgstream.Factory, error) {
 	const receiveBufSize = 1024
 
 	pulsarURL := Params.PulsarAddress
@@ -213,23 +210,26 @@ func genFactory() msgstream.Factory {
 		"pulsarBufSize":  1024}
 	err := msFactory.SetParams(m)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return msFactory
+	return msFactory, nil
 }
 
-func genQueryMsgStream(ctx context.Context) msgstream.MsgStream {
-	fac := genFactory()
+func genQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
+	fac, err := genFactory()
+	if err != nil {
+		return nil, err
+	}
 	stream, err := fac.NewQueryMsgStream(ctx)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return stream
+	return stream, nil
 }
 
 // ---------- unittest util functions ----------
 // functions of inserting data init
-func genInsertData(msgLength int, schema *schemapb.CollectionSchema) *storage.InsertData {
+func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.InsertData, error) {
 	insertData := &storage.InsertData{
 		Data: make(map[int64]storage.FieldData),
 	}
@@ -306,7 +306,7 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) *storage.In
 					var err error
 					dim, err = strconv.Atoi(p.Value)
 					if err != nil {
-						panic(err)
+						return nil, err
 					}
 				}
 			}
@@ -322,14 +322,15 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) *storage.In
 				Dim:     dim,
 			}
 		default:
-			panic("data type not supported!")
+			err := errors.New("data type not supported")
+			return nil, err
 		}
 	}
 
-	return insertData
+	return insertData, nil
 }
 
-func genSimpleInsertData() *storage.InsertData {
+func genSimpleInsertData() (*storage.InsertData, error) {
 	schema, _ := genSimpleSchema()
 	return genInsertData(defaultMsgLength, schema)
 }
@@ -345,13 +346,16 @@ func genKey(collectionID, partitionID, segmentID UniqueID, fieldID int64) string
 	return path.Join(ids...)
 }
 
-func saveSimpleBinLog(ctx context.Context) {
+func saveSimpleBinLog(ctx context.Context) error {
 	collMeta := genSimpleCollectionMeta()
 	inCodec := storage.NewInsertCodec(collMeta)
-	insertData := genSimpleInsertData()
+	insertData, err := genSimpleInsertData()
+	if err != nil {
+		return err
+	}
 	binLogs, _, err := inCodec.Serialize(defaultPartitionID, defaultSegmentID, insertData)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	log.Debug(".. [query node unittest] Saving bin logs to MinIO ..", zap.Int("number", len(binLogs)))
@@ -362,7 +366,7 @@ func saveSimpleBinLog(ctx context.Context) {
 		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
 		log.Debug("[query node unittest] save binlog", zap.Int64("fieldID", fieldID))
 		if err != nil {
-			panic(err)
+			return err
 		}
 
 		key := genKey(defaultCollectionID, defaultPartitionID, defaultSegmentID, fieldID)
@@ -370,16 +374,17 @@ func saveSimpleBinLog(ctx context.Context) {
 	}
 	log.Debug("[query node unittest] save binlog file to MinIO/S3")
 
-	kv := genMinioKV(ctx)
-	err = kv.MultiSave(kvs)
+	kv, err := genMinioKV(ctx)
 	if err != nil {
-		panic(err)
+		return err
 	}
+	err = kv.MultiSave(kvs)
+	return err
 }
 
 // ---------- unittest util functions ----------
 // functions of replica
-func genSimpleSealedSegment() *Segment {
+func genSimpleSealedSegment() (*Segment, error) {
 	_, schema := genSimpleSchema()
 	col := newCollection(defaultCollectionID, schema)
 	seg := newSegment(col,
@@ -389,7 +394,10 @@ func genSimpleSealedSegment() *Segment {
 		defaultVChannel,
 		segmentTypeSealed,
 		true)
-	insertData := genSimpleInsertData()
+	insertData, err := genSimpleInsertData()
+	if err != nil {
+		return nil, err
+	}
 	for k, v := range insertData.Data {
 		var numRows int
 		var data interface{}
@@ -425,66 +433,87 @@ func genSimpleSealedSegment() *Segment {
 			numRows = fieldData.NumRows
 			data = fieldData.Data
 		default:
-			panic(errors.New("unexpected field data type"))
+			return nil, errors.New("unexpected field data type")
 		}
 		err := seg.segmentLoadFieldData(k, numRows, data)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 	}
-	return seg
+	return seg, nil
 }
 
-func genSimpleReplica() ReplicaInterface {
-	kv := genEtcdKV()
+func genSimpleReplica() (ReplicaInterface, error) {
+	kv, err := genEtcdKV()
+	if err != nil {
+		return nil, err
+	}
 	r := newCollectionReplica(kv)
 	_, schema := genSimpleSchema()
-	err := r.addCollection(defaultCollectionID, schema)
+	err = r.addCollection(defaultCollectionID, schema)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	err = r.addPartition(defaultCollectionID, defaultPartitionID)
-	if err != nil {
-		panic(err)
-	}
-	return r
+	return r, err
 }
 
-func genSimpleHistorical(ctx context.Context) *historical {
-	fac := genFactory()
-	kv := genEtcdKV()
-	h := newHistorical(ctx, nil, nil, fac, kv)
-	r := genSimpleReplica()
-	seg := genSimpleSealedSegment()
-	err := r.setSegment(seg)
+func genSimpleHistorical(ctx context.Context) (*historical, error) {
+	fac, err := genFactory()
 	if err != nil {
-		panic(err)
+		return nil, err
+	}
+	kv, err := genEtcdKV()
+	if err != nil {
+		return nil, err
+	}
+	h := newHistorical(ctx, nil, nil, fac, kv)
+	r, err := genSimpleReplica()
+	if err != nil {
+		return nil, err
+	}
+	seg, err := genSimpleSealedSegment()
+	if err != nil {
+		return nil, err
+	}
+	err = r.setSegment(seg)
+	if err != nil {
+		return nil, err
 	}
 	h.replica = r
-	return h
+	return h, nil
 }
 
-func genSimpleStreaming(ctx context.Context) *streaming {
-	fac := genFactory()
-	kv := genEtcdKV()
+func genSimpleStreaming(ctx context.Context) (*streaming, error) {
+	fac, err := genFactory()
+	if err != nil {
+		return nil, err
+	}
+	kv, err := genEtcdKV()
+	if err != nil {
+		return nil, err
+	}
 	s := newStreaming(ctx, fac, kv)
-	r := genSimpleReplica()
-	err := r.addSegment(defaultSegmentID,
+	r, err := genSimpleReplica()
+	if err != nil {
+		return nil, err
+	}
+	err = r.addSegment(defaultSegmentID,
 		defaultPartitionID,
 		defaultCollectionID,
 		defaultVChannel,
 		segmentTypeGrowing,
 		true)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	s.replica = r
-	return s
+	return s, nil
 }
 
 // ---------- unittest util functions ----------
 // functions of messages and requests
-func genDSL(schema *schemapb.CollectionSchema, nProb int, topK int) string {
+func genDSL(schema *schemapb.CollectionSchema, nProb int, topK int) (string, error) {
 	var vecFieldName string
 	var metricType string
 	nProbStr := strconv.Itoa(nProb)
@@ -500,7 +529,8 @@ func genDSL(schema *schemapb.CollectionSchema, nProb int, topK int) string {
 		}
 	}
 	if vecFieldName == "" || metricType == "" {
-		panic("invalid vector field name or metric type")
+		err := errors.New("invalid vector field name or metric type")
+		return "", err
 	}
 
 	return "{\"bool\": { " +
@@ -509,15 +539,15 @@ func genDSL(schema *schemapb.CollectionSchema, nProb int, topK int) string {
 		" \"metric_type\": \"" + metricType + "\", " +
 		" \"params\": {" +
 		" \"nprobe\": " + nProbStr + " " +
-		"}, \"query\": \"$0\",\"topk\": " + topKStr + " \n } \n } \n } \n }"
+		"}, \"query\": \"$0\",\"topk\": " + topKStr + " \n } \n } \n } \n }", nil
 }
 
-func genSimpleDSL() string {
+func genSimpleDSL() (string, error) {
 	_, schema := genSimpleSchema()
 	return genDSL(schema, defaultNProb, defaultTopK)
 }
 
-func genSimplePlaceHolderGroup() []byte {
+func genSimplePlaceHolderGroup() ([]byte, error) {
 	placeholderValue := &milvuspb.PlaceholderValue{
 		Tag:    "$0",
 		Type:   milvuspb.PlaceholderType_FloatVector,
@@ -543,45 +573,54 @@ func genSimplePlaceHolderGroup() []byte {
 	}
 	placeGroupByte, err := proto.Marshal(&placeholderGroup)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return placeGroupByte
+	return placeGroupByte, nil
 }
 
-func genSimplePlanAndRequests() (*SearchPlan, []*searchRequest) {
+func genSimplePlanAndRequests() (*SearchPlan, []*searchRequest, error) {
 	_, schema := genSimpleSchema()
 	collection := newCollection(defaultCollectionID, schema)
 
 	var plan *SearchPlan
 	var err error
-	sm := genSimpleSearchMsg()
+	sm, err := genSimpleSearchMsg()
+	if err != nil {
+		return nil, nil, err
+	}
 	if sm.GetDslType() == commonpb.DslType_BoolExprV1 {
 		expr := sm.SerializedExprPlan
 		plan, err = createSearchPlanByExpr(collection, expr)
 		if err != nil {
-			panic(err)
+			return nil, nil, err
 		}
 	} else {
 		dsl := sm.Dsl
 		plan, err = createSearchPlan(collection, dsl)
 		if err != nil {
-			panic(err)
+			return nil, nil, err
 		}
 	}
 	searchRequestBlob := sm.PlaceholderGroup
 	searchReq, err := parseSearchRequest(plan, searchRequestBlob)
 	if err != nil {
-		panic(err)
+		return nil, nil, err
 	}
 	searchRequests := make([]*searchRequest, 0)
 	searchRequests = append(searchRequests, searchReq)
 
-	return plan, searchRequests
+	return plan, searchRequests, nil
 }
 
-func genSimpleSearchRequest() *internalpb.SearchRequest {
-	placeHolder := genSimplePlaceHolderGroup()
-	simpleDSL := genSimpleDSL()
+func genSimpleSearchRequest() (*internalpb.SearchRequest, error) {
+	placeHolder, err := genSimplePlaceHolderGroup()
+	if err != nil {
+		return nil, err
+	}
+	simpleDSL, err := genSimpleDSL()
+	if err != nil {
+		return nil, err
+	}
 	return &internalpb.SearchRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_Search,
@@ -593,22 +632,31 @@ func genSimpleSearchRequest() *internalpb.SearchRequest {
 		Dsl:              simpleDSL,
 		PlaceholderGroup: placeHolder,
 		DslType:          commonpb.DslType_Dsl,
-	}
+	}, nil
 }
 
-func genSimpleSearchMsg() *msgstream.SearchMsg {
-	req := genSimpleSearchRequest()
+func genSimpleSearchMsg() (*msgstream.SearchMsg, error) {
+	req, err := genSimpleSearchRequest()
+	if err != nil {
+		return nil, err
+	}
 	return &msgstream.SearchMsg{
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{0},
 		},
 		SearchRequest: *req,
-	}
+	}, nil
 }
 
-func genSimpleSearchResult() *searchResult {
-	searchReq := genSimpleSearchRequest()
-	plan, reqs := genSimplePlanAndRequests()
+func genSimpleSearchResult() (*searchResult, error) {
+	searchReq, err := genSimpleSearchRequest()
+	if err != nil {
+		return nil, err
+	}
+	plan, reqs, err := genSimplePlanAndRequests()
+	if err != nil {
+		return nil, err
+	}
 	msg := &searchMsg{
 		SearchMsg: &msgstream.SearchMsg{
 			BaseMsg: msgstream.BaseMsg{
@@ -623,7 +671,10 @@ func genSimpleSearchResult() *searchResult {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	his := genSimpleHistorical(ctx)
+	his, err := genSimpleHistorical(ctx)
+	if err != nil {
+		return nil, err
+	}
 	inputChan := make(chan queryMsg, queryBufferSize)
 	outputChan := make(chan queryResult, queryBufferSize)
 	hs := newHistoricalStage(ctx, defaultCollectionID, inputChan, outputChan, his)
@@ -633,33 +684,44 @@ func genSimpleSearchResult() *searchResult {
 	}()
 
 	res := <-outputChan
-	return res.(*searchResult)
+	return res.(*searchResult), nil
 }
 
-func produceSimpleSearchMsg(ctx context.Context) {
-	stream := genQueryMsgStream(ctx)
+func produceSimpleSearchMsg(ctx context.Context) error {
+	stream, err := genQueryMsgStream(ctx)
+	if err != nil {
+		return err
+	}
 	stream.AsProducer([]string{defaultQueryChannel})
 	stream.Start()
 	defer stream.Close()
-	msg := genSimpleSearchMsg()
+	msg, err := genSimpleSearchMsg()
+	if err != nil {
+		return err
+	}
 	msgPack := &msgstream.MsgPack{
 		Msgs: []msgstream.TsMsg{msg},
 	}
-	err := stream.Produce(msgPack)
-	log.Debug("[query node unittest] produce search message done")
+	err = stream.Produce(msgPack)
 	if err != nil {
-		panic(err)
+		return err
 	}
+	log.Debug("[query node unittest] produce search message done")
+	return nil
 }
 
-func consumeSimpleSearchResult(ctx context.Context) *msgstream.SearchResultMsg {
-	stream := genQueryMsgStream(ctx)
+func consumeSimpleSearchResult(ctx context.Context) (*msgstream.SearchResultMsg, error) {
+	stream, err := genQueryMsgStream(ctx)
+	if err != nil {
+		return nil, err
+	}
 	stream.AsConsumer([]string{defaultQueryResultChannel}, defaultSubName)
 	stream.Start()
 	defer stream.Close()
 	res := stream.Consume()
 	if len(res.Msgs) != 1 {
-		panic("unexpected message length")
+		err = errors.New("unexpected message length")
+		return nil, err
 	}
-	return res.Msgs[0].(*msgstream.SearchResultMsg)
+	return res.Msgs[0].(*msgstream.SearchResultMsg), nil
 }

@@ -29,7 +29,7 @@ import (
 )
 
 type historicalStage struct {
-	ctx    context.Context
+	ctx context.Context
 
 	collectionID UniqueID
 

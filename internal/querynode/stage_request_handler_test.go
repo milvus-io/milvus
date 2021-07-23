@@ -22,14 +22,17 @@ func TestRequestHandlerStage_RequestHandlerStage(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	his := genSimpleHistorical(ctx)
-	s := genSimpleStreaming(ctx)
+	his, err := genSimpleHistorical(ctx)
+	assert.NoError(t, err)
+	s, err := genSimpleStreaming(ctx)
+	assert.NoError(t, err)
 
 	inputChan := make(chan queryMsg, queryBufferSize)
 	hisOutput := make(chan queryMsg, queryBufferSize)
 	streamingOutput := make(map[Channel]chan queryMsg)
 
-	resultStream := genQueryMsgStream(ctx)
+	resultStream, err := genQueryMsgStream(ctx)
+	assert.NoError(t, err)
 	reqStage := newRequestHandlerStage(ctx,
 		defaultCollectionID,
 		inputChan,
@@ -41,7 +44,8 @@ func TestRequestHandlerStage_RequestHandlerStage(t *testing.T) {
 	go reqStage.start()
 
 	// construct searchMsg
-	sm2 := genSimpleSearchMsg()
+	sm2, err := genSimpleSearchMsg()
+	assert.NoError(t, err)
 
 	go func() {
 		inputChan <- sm2

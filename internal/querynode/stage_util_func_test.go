@@ -26,7 +26,8 @@ func TestStageUtilFunc_PublishQueryResult(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	stream := genQueryMsgStream(ctx)
+	stream, err := genQueryMsgStream(ctx)
+	assert.NoError(t, err)
 	defer stream.Close()
 	stream.AsProducer([]string{defaultQueryResultChannel})
 	stream.Start()
@@ -46,7 +47,8 @@ func TestStageUtilFunc_PublishQueryResult(t *testing.T) {
 	}
 	publishQueryResult(resMsg, stream)
 
-	res := consumeSimpleSearchResult(ctx)
+	res, err := consumeSimpleSearchResult(ctx)
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, res.Status.ErrorCode)
 	assert.Equal(t, commonpb.MsgType_SearchResult, res.SearchResults.Base.MsgType)
 }
@@ -55,12 +57,14 @@ func TestStageUtilFunc_PublishFailedQueryResult(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	stream := genQueryMsgStream(ctx)
+	stream, err := genQueryMsgStream(ctx)
+	assert.NoError(t, err)
 	defer stream.Close()
 	stream.AsProducer([]string{defaultQueryResultChannel})
 	stream.Start()
 
-	sm := genSimpleSearchMsg()
+	sm, err := genSimpleSearchMsg()
+	assert.NoError(t, err)
 	errStr := "[query node unittest] example search failed error message"
 	publishFailedQueryResult(sm, errStr, stream)
 }

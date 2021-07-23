@@ -28,14 +28,16 @@ func TestInputStage_InputStage(t *testing.T) {
 	lbOutput := make(chan *msgstream.LoadBalanceSegmentsMsg, queryBufferSize)
 	queryOutput := make(chan queryMsg, queryBufferSize)
 
-	stream := genQueryMsgStream(ctx)
+	stream, err := genQueryMsgStream(ctx)
+	assert.NoError(t, err)
 	stream.AsConsumer([]string{defaultQueryChannel}, defaultSubName)
 	stream.Start()
 	defer stream.Close()
 
 	iStage := newInputStage(ctx, defaultCollectionID, stream, lbOutput, queryOutput)
 	go iStage.start()
-	produceSimpleSearchMsg(ctx)
+	err = produceSimpleSearchMsg(ctx)
+	assert.NoError(t, err)
 
 	msg := <-queryOutput
 	assert.Equal(t, commonpb.MsgType_Search, msg.Type())

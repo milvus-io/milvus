@@ -24,15 +24,18 @@ func TestHistoricalStage_HistoricalStage(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	his := genSimpleHistorical(ctx)
+	his, err := genSimpleHistorical(ctx)
+	assert.NoError(t, err)
 	inputChan := make(chan queryMsg, queryBufferSize)
 	outputChan := make(chan queryResult, queryBufferSize)
 	hs := newHistoricalStage(ctx, defaultCollectionID, inputChan, outputChan, his)
 	go hs.start()
 
 	// construct searchMsg
-	searchReq := genSimpleSearchRequest()
-	plan, reqs := genSimplePlanAndRequests()
+	searchReq, err := genSimpleSearchRequest()
+	assert.NoError(t, err)
+	plan, reqs, err := genSimplePlanAndRequests()
+	assert.NoError(t, err)
 	msg := &searchMsg{
 		SearchMsg: &msgstream.SearchMsg{
 			BaseMsg: msgstream.BaseMsg{

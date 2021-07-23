@@ -27,8 +27,10 @@ func TestUnsolvedStage_UnsolvedStage(t *testing.T) {
 	inputChan := make(chan queryMsg, queryBufferSize)
 	outputChan := make(chan queryResult, queryBufferSize)
 
-	s := genSimpleStreaming(ctx)
-	stream := genQueryMsgStream(ctx)
+	s, err := genSimpleStreaming(ctx)
+	assert.NoError(t, err)
+	stream, err := genQueryMsgStream(ctx)
+	assert.NoError(t, err)
 
 	uStage := newUnsolvedStage(ctx,
 		defaultCollectionID,
@@ -40,8 +42,10 @@ func TestUnsolvedStage_UnsolvedStage(t *testing.T) {
 	go uStage.start()
 
 	// construct searchMsg
-	searchReq := genSimpleSearchRequest()
-	plan, reqs := genSimplePlanAndRequests()
+	searchReq, err := genSimpleSearchRequest()
+	assert.NoError(t, err)
+	plan, reqs, err := genSimplePlanAndRequests()
+	assert.NoError(t, err)
 	msg := &searchMsg{
 		SearchMsg: &msgstream.SearchMsg{
 			BaseMsg: msgstream.BaseMsg{
