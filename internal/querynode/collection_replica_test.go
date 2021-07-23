@@ -87,7 +87,7 @@ func TestCollectionReplica_getPartitionNum(t *testing.T) {
 	}
 
 	partitionNum := node.historical.replica.getPartitionNum()
-	assert.Equal(t, partitionNum, len(partitionIDs)+1)
+	assert.Equal(t, partitionNum, len(partitionIDs))
 	err := node.Stop()
 	assert.NoError(t, err)
 }
