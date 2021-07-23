@@ -1620,7 +1620,7 @@ func decodeSearchResultsSerial(searchResults []*internalpb.SearchResults) ([]*sc
 	results := make([]*schemapb.SearchResultData, 0)
 	// necessary to parallel this?
 	for i, partialSearchResult := range searchResults {
-		log.Debug("decodeSearchResultsSerial", zap.Any("i", i), zap.Any("SlicedBob", partialSearchResult.SlicedBlob))
+		log.Debug("decodeSearchResultsSerial", zap.Any("i", i), zap.Any("len(SlicedBob)", len(partialSearchResult.SlicedBlob)))
 		if partialSearchResult.SlicedBlob == nil {
 			continue
 		}
