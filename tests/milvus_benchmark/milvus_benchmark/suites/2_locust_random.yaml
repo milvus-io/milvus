@@ -29,6 +29,19 @@ locust_random_performance:
               #         GT: 1000000
               search_param:
                 nprobe: 16
+          -
+            type: insert
+            weight: 20
+            params:
+              ni_per: 1
+          -
+            type: load
+            weight: 1
+          -
+            type: get
+            weight: 2
+            params:
+              ids_length: 10
         connection_num: 1
         clients_num: 20
         hatch_rate: 2

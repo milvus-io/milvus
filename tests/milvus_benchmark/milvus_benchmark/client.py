@@ -153,6 +153,16 @@ class MilvusClient(object):
         except Exception as e:
             logger.error(str(e))
 
+    @time_wrapper
+    def insert_flush(self, entities, _async=False, collection_name=None):
+        tmp_collection_name = self._collection_name if collection_name is None else collection_name
+        try:
+            insert_res = self._milvus.insert(tmp_collection_name, entities)
+            return insert_res.primary_keys
+        except Exception as e:
+            logger.error(str(e))
+        self._milvus.flush([tmp_collection_name], _async=_async)
+
     def get_dimension(self):
         info = self.get_info()
         for field in info["fields"]:
@@ -424,28 +434,28 @@ class MilvusClient(object):
             self.drop(collection_name=name)
 
     @time_wrapper
-    def load_collection(self, collection_name=None):
+    def load_collection(self, collection_name=None, timeout=3000):
         if collection_name is None:
             collection_name = self._collection_name
-        return self._milvus.load_collection(collection_name, timeout=3000)
+        return self._milvus.load_collection(collection_name, timeout=timeout)
 
     @time_wrapper
-    def release_collection(self, collection_name=None):
+    def release_collection(self, collection_name=None, timeout=3000):
         if collection_name is None:
             collection_name = self._collection_name
-        return self._milvus.release_collection(collection_name, timeout=3000)
+        return self._milvus.release_collection(collection_name, timeout=timeout)
 
     @time_wrapper
-    def load_partitions(self, tag_names, collection_name=None):
+    def load_partitions(self, tag_names, collection_name=None, timeout=3000):
         if collection_name is None:
             collection_name = self._collection_name
-        return self._milvus.load_partitions(collection_name, tag_names, timeout=3000)
+        return self._milvus.load_partitions(collection_name, tag_names, timeout=timeout)
 
     @time_wrapper
-    def release_partitions(self, tag_names, collection_name=None):
+    def release_partitions(self, tag_names, collection_name=None, timeout=3000):
         if collection_name is None:
             collection_name = self._collection_name
-        return self._milvus.release_partitions(collection_name, tag_names, timeout=3000)
+        return self._milvus.release_partitions(collection_name, tag_names, timeout=timeout)
 
     # TODO: remove
     # def get_server_version(self):
