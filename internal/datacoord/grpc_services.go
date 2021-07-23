@@ -295,14 +295,6 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		zap.Int64("segmentID", req.GetSegmentID()),
 		zap.Any("checkpoints", req.GetCheckPoints()))
 
-	// check segment id & collection id matched
-	if coll := s.meta.GetCollection(req.GetCollectionID()); coll == nil {
-		errMsg := fmt.Sprintf("Failed to get collection info %d", req.GetCollectionID())
-		log.Error(errMsg)
-		resp.Reason = errMsg
-		return resp, nil
-	}
-
 	binlogs, err := s.prepareBinlog(req)
 	if err != nil {
 		log.Error("Prepare binlog meta failed", zap.Error(err))
