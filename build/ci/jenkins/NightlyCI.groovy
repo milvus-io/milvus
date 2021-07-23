@@ -123,7 +123,7 @@ pipeline {
                             }
                         }
                     }
-                    cleanup {
+                    always {
                         container('main') {
                             script {
                                 sh "./tests/scripts/export_logs.sh"
@@ -134,6 +134,12 @@ pipeline {
                                     }
                                     archiveArtifacts artifacts: "**.tar.gz", allowEmptyArchive: true
                                 }
+                            }
+                        }
+                    }
+                    cleanup {
+                        container('main') {
+                            script {
                                 sh "kind delete cluster --name kind -v9 || true"
                                 sh 'find . -name . -o -prune -exec rm -rf -- {} +' /* clean up our workspace */
                             }
