@@ -34,6 +34,10 @@ class Metric(object):
     def set_mode(self, mode):
         self.mode = mode
 
+    # including: metric, suite_metric
+    def set_case_metric_type(self):
+        self._type = "case"
+
     def json_md5(self):
         json_str = json.dumps(vars(self), sort_keys=True)
         return hashlib.md5(json_str.encode('utf-8')).hexdigest()

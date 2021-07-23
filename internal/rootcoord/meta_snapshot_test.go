@@ -278,7 +278,7 @@ func TestMultiSave(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		saves := map[string]string{"k1": fmt.Sprintf("v1-%d", i), "k2": fmt.Sprintf("v2-%d", i)}
 		vtso = typeutil.Timestamp(100 + i*5)
-		ts, err := ms.MultiSave(saves, nil)
+		ts, err := ms.MultiSave(saves)
 		assert.Nil(t, err)
 		assert.Equal(t, vtso, ts)
 	}
@@ -348,7 +348,7 @@ func TestMultiSaveAndRemoveWithPrefix(t *testing.T) {
 		sm := map[string]string{"ks": fmt.Sprintf("value-%d", i)}
 		dm := []string{fmt.Sprintf("kd-%04d", i-20)}
 		vtso = typeutil.Timestamp(100 + i*5)
-		ts, err := ms.MultiSaveAndRemoveWithPrefix(sm, dm, nil)
+		ts, err := ms.MultiSaveAndRemoveWithPrefix(sm, dm)
 		assert.Nil(t, err)
 		assert.Equal(t, vtso, ts)
 	}

@@ -123,7 +123,6 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("alloc collection id error = %w", err)
 	}
-	collTs := t.Req.Base.Timestamp
 	partID, _, err := t.core.IDAllocator(1)
 	if err != nil {
 		return fmt.Errorf("alloc partition id error = %w", err)
@@ -132,7 +131,6 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	log.Debug("collection name -> id",
 		zap.String("collection name", t.Req.CollectionName),
 		zap.Int64("collection_id", collID),
-		zap.Uint64("collection created ts", collTs),
 		zap.Int64("default partition id", partID))
 
 	vchanNames := make([]string, t.Req.ShardsNum)
@@ -145,13 +143,12 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	collInfo := etcdpb.CollectionInfo{
 		ID:                         collID,
 		Schema:                     &schema,
-		CreateTime:                 collTs,
 		PartitionIDs:               []typeutil.UniqueID{partID},
 		PartitionNames:             []string{Params.DefaultPartitionName},
 		FieldIndexes:               make([]*etcdpb.FieldIndexInfo, 0, 16),
 		VirtualChannelNames:        vchanNames,
 		PhysicalChannelNames:       chanNames,
-		PartitionCreatedTimestamps: []uint64{collTs},
+		PartitionCreatedTimestamps: []uint64{0},
 	}
 
 	idxInfo := make([]*etcdpb.IndexInfo, 0, 16)
@@ -418,8 +415,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		return EncodeDdOperation(&ddReq, CreatePartitionDDType)
 	}
 
-	createdTimestamp := t.Req.Base.Timestamp
-	ts, err := t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partID, createdTimestamp, ddOp)
+	ts, err := t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partID, ddOp)
 	if err != nil {
 		return err
 	}

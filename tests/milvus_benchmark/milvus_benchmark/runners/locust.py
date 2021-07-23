@@ -21,11 +21,10 @@ class LocustRunner(BaseRunner):
         connection_type = case_param["connection_type"]
 
         # spawn locust requests
-        clients_num = task["clients_num"]
-        hatch_rate = task["hatch_rate"]
-        during_time = utils.timestr_to_int(task["during_time"])
+        task["during_time"] = utils.timestr_to_int(task["during_time"])
         task_types = task["types"]
-        run_params = {"tasks": {}, "clients_num": clients_num, "spawn_rate": hatch_rate, "during_time": during_time}
+        run_params = {"tasks": {}}
+        run_params.update(task)
         info_in_params = {
             "index_field_name": case_param["index_field_name"],
             "vector_field_name": case_param["vector_field_name"],
@@ -95,6 +94,7 @@ class LocustInsertRunner(LocustRunner):
         }
         self.init_metric(self.name, collection_info, index_info, None, run_params)
         case_metric = copy.deepcopy(self.metric)
+        case_metric.set_case_metric_type()
         case_metrics = list()
         case_params = list()
         case_metrics.append(case_metric)
@@ -197,6 +197,7 @@ class LocustSearchRunner(LocustRunner):
         }
         self.init_metric(self.name, collection_info, index_info, None, run_params)
         case_metric = copy.deepcopy(self.metric)
+        case_metric.set_case_metric_type()
         case_metrics = list()
         case_params = list()
         case_metrics.append(case_metric)
@@ -324,6 +325,7 @@ class LocustRandomRunner(LocustRunner):
         }
         self.init_metric(self.name, collection_info, index_info, None, run_params)
         case_metric = copy.deepcopy(self.metric)
+        case_metric.set_case_metric_type()
         case_metrics = list()
         case_params = list()
         case_metrics.append(case_metric)
@@ -356,40 +358,40 @@ class LocustRandomRunner(LocustRunner):
         build_index = case_param["build_index"]
 
         self.milvus.set_collection(collection_name)
-        # if self.milvus.exists_collection():
-        #     logger.debug("Start drop collection")
-        #     self.milvus.drop()
-        #     time.sleep(runner_utils.DELETE_INTERVAL_TIME)
-        # self.milvus.create_collection(dimension, data_type=vector_type,
-        #                                   other_fields=other_fields)
-        # # TODO: update fields in collection_info
-        # # fields = self.get_fields(self.milvus, collection_name)
-        # # collection_info = {
-        # #     "dimension": dimension,
-        # #     "metric_type": metric_type,
-        # #     "dataset_name": collection_name,
-        # #     "fields": fields
-        # # }
-        # if build_index is True:
-        #     if case_param["index_type"]:
-        #         self.milvus.create_index(index_field_name, case_param["index_type"], case_param["metric_type"], index_param=case_param["index_param"])
-        #         logger.debug(self.milvus.describe_index(index_field_name))
-        #     else:
-        #         build_index = False
-        #         logger.warning("Please specify the index_type")
-        # self.insert(self.milvus, collection_name, case_param["data_type"], dimension, case_param["collection_size"], case_param["ni_per"])
-        # build_time = 0.0
-        # start_time = time.time()
-        # self.milvus.flush()
-        # flush_time = round(time.time()-start_time, 2)
-        # logger.debug(self.milvus.count())
-        # if build_index is True:
-        #     logger.debug("Start build index for last file")
-        #     start_time = time.time()
-        #     self.milvus.create_index(index_field_name, case_param["index_type"], case_param["metric_type"], index_param=case_param["index_param"])
-        #     build_time = round(time.time()-start_time, 2)
-        # logger.debug({"flush_time": flush_time, "build_time": build_time})
-        # logger.info(self.milvus.count())
+        if self.milvus.exists_collection():
+            logger.debug("Start drop collection")
+            self.milvus.drop()
+            time.sleep(runner_utils.DELETE_INTERVAL_TIME)
+        self.milvus.create_collection(dimension, data_type=vector_type,
+                                          other_fields=other_fields)
+        # TODO: update fields in collection_info
+        # fields = self.get_fields(self.milvus, collection_name)
+        # collection_info = {
+        #     "dimension": dimension,
+        #     "metric_type": metric_type,
+        #     "dataset_name": collection_name,
+        #     "fields": fields
+        # }
+        if build_index is True:
+            if case_param["index_type"]:
+                self.milvus.create_index(index_field_name, case_param["index_type"], case_param["metric_type"], index_param=case_param["index_param"])
+                logger.debug(self.milvus.describe_index(index_field_name))
+            else:
+                build_index = False
+                logger.warning("Please specify the index_type")
+        self.insert(self.milvus, collection_name, case_param["data_type"], dimension, case_param["collection_size"], case_param["ni_per"])
+        build_time = 0.0
+        start_time = time.time()
+        self.milvus.flush()
+        flush_time = round(time.time()-start_time, 2)
+        logger.debug(self.milvus.count())
+        if build_index is True:
+            logger.debug("Start build index for last file")
+            start_time = time.time()
+            self.milvus.create_index(index_field_name, case_param["index_type"], case_param["metric_type"], index_param=case_param["index_param"])
+            build_time = round(time.time()-start_time, 2)
+        logger.debug({"flush_time": flush_time, "build_time": build_time})
+        logger.info(self.milvus.count())
         logger.info("Start load collection")
         load_start_time = time.time() 
         self.milvus.load_collection()

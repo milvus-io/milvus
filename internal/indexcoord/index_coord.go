@@ -586,7 +586,7 @@ func (i *IndexCoord) assignTaskLoop() {
 			if err != nil {
 				log.Debug("IndexCoord assignTaskLoop", zap.Any("GetSessions error", err))
 			}
-			if len(sessions) <= 0 {
+			if len(i.nodeManager.nodeClients) <= 0 {
 				log.Debug("There is no IndexNode available as this time.")
 				break
 			}
