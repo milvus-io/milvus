@@ -225,8 +225,10 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, idx []*pb.IndexInfo,
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	if len(coll.PartitionIDs) != len(coll.PartitionNames) {
-		return 0, fmt.Errorf("PartitionIDs and PartitionNames' length mis-match when creating collection")
+	if len(coll.PartitionIDs) != len(coll.PartitionNames) ||
+		len(coll.PartitionIDs) != len(coll.PartitionCreatedTimestamps) ||
+		(len(coll.PartitionIDs) != 1 && len(coll.PartitionIDs) != 0) {
+		return 0, fmt.Errorf("PartitionIDs, PartitionNames and PartitionCreatedTimestmaps' length mis-match when creating collection")
 	}
 	if _, ok := mt.collName2ID[coll.Schema.Name]; ok {
 		return 0, fmt.Errorf("collection %s exist", coll.Schema.Name)
@@ -235,15 +237,11 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, idx []*pb.IndexInfo,
 		return 0, fmt.Errorf("incorrect index id when creating collection")
 	}
 
-	mt.collID2Meta[coll.ID] = *coll
-	mt.collName2ID[coll.Schema.Name] = coll.ID
 	for _, i := range idx {
 		mt.indexID2Meta[i.IndexID] = *i
 	}
 
-	k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, coll.ID)
-	v1 := proto.MarshalTextString(coll)
-	meta := map[string]string{k1: v1}
+	meta := make(map[string]string)
 
 	for _, i := range idx {
 		k := fmt.Sprintf("%s/%d/%d", IndexMetaPrefix, coll.ID, i.IndexID)
@@ -253,7 +251,20 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, idx []*pb.IndexInfo,
 
 	// save ddOpStr into etcd
 	addition := mt.getAdditionKV(ddOpStr, meta)
-	ts, err := mt.client.MultiSave(meta, addition)
+	saveColl := func(ts typeutil.Timestamp) (string, string, error) {
+		coll.CreateTime = ts
+		if len(coll.PartitionCreatedTimestamps) == 1 {
+			coll.PartitionCreatedTimestamps[0] = ts
+		}
+		mt.collID2Meta[coll.ID] = *coll
+		mt.collName2ID[coll.Schema.Name] = coll.ID
+		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, coll.ID)
+		v1 := proto.MarshalTextString(coll)
+		meta[k1] = v1
+		return k1, v1, nil
+	}
+
+	ts, err := mt.client.MultiSave(meta, addition, saveColl)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return 0, err
@@ -386,14 +397,16 @@ func (mt *metaTable) GetCollectionByName(collectionName string, ts typeutil.Time
 	return nil, fmt.Errorf("can't find collection: %s, at timestamp = %d", collectionName, ts)
 }
 
-func (mt *metaTable) ListCollections(ts typeutil.Timestamp) (map[string]typeutil.UniqueID, error) {
+func (mt *metaTable) ListCollections(ts typeutil.Timestamp) (map[string]*pb.CollectionInfo, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
-	colls := make(map[string]typeutil.UniqueID)
+	colls := make(map[string]*pb.CollectionInfo)
 
 	if ts == 0 {
-		for k, v := range mt.collName2ID {
-			colls[k] = v
+		for collName, collID := range mt.collName2ID {
+			coll := mt.collID2Meta[collID]
+			colCopy := proto.Clone(&coll)
+			colls[collName] = colCopy.(*pb.CollectionInfo)
 		}
 		return colls, nil
 	}
@@ -408,7 +421,7 @@ func (mt *metaTable) ListCollections(ts typeutil.Timestamp) (map[string]typeutil
 		if err != nil {
 			log.Debug("unmarshal collection info failed", zap.Error(err))
 		}
-		colls[collMeta.Schema.Name] = collMeta.ID
+		colls[collMeta.Schema.Name] = &collMeta
 	}
 	return colls, nil
 }
@@ -454,6 +467,14 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 		return 0, fmt.Errorf("len(coll.PartitionIDs)=%d, len(coll.PartitionNames)=%d", len(coll.PartitionIDs), len(coll.PartitionNames))
 	}
 
+	if len(coll.PartitionIDs) != len(coll.PartitionCreatedTimestamps) {
+		return 0, fmt.Errorf("len(coll.PartitionIDs)=%d, len(coll.PartitionCreatedTimestamps)=%d", len(coll.PartitionIDs), len(coll.PartitionCreatedTimestamps))
+	}
+
+	if len(coll.PartitionNames) != len(coll.PartitionCreatedTimestamps) {
+		return 0, fmt.Errorf("len(coll.PartitionNames)=%d, len(coll.PartitionCreatedTimestamps)=%d", len(coll.PartitionNames), len(coll.PartitionCreatedTimestamps))
+	}
+
 	for idx := range coll.PartitionIDs {
 		if coll.PartitionIDs[idx] == partitionID {
 			return 0, fmt.Errorf("partition id = %d already exists", partitionID)
@@ -461,20 +482,27 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 		if coll.PartitionNames[idx] == partitionName {
 			return 0, fmt.Errorf("partition name = %s already exists", partitionName)
 		}
-
+		// no necessary to check created timestamp
 	}
-	coll.PartitionIDs = append(coll.PartitionIDs, partitionID)
-	coll.PartitionNames = append(coll.PartitionNames, partitionName)
-	mt.collID2Meta[collID] = coll
-
-	k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, collID)
-	v1 := proto.MarshalTextString(&coll)
-	meta := map[string]string{k1: v1}
+	meta := make(map[string]string)
 
 	// save ddOpStr into etcd
 	addition := mt.getAdditionKV(ddOpStr, meta)
 
-	ts, err := mt.client.MultiSave(meta, addition)
+	saveColl := func(ts typeutil.Timestamp) (string, string, error) {
+		coll.PartitionIDs = append(coll.PartitionIDs, partitionID)
+		coll.PartitionNames = append(coll.PartitionNames, partitionName)
+		coll.PartitionCreatedTimestamps = append(coll.PartitionCreatedTimestamps, ts)
+		mt.collID2Meta[collID] = coll
+
+		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, collID)
+		v1 := proto.MarshalTextString(&coll)
+		meta[k1] = v1
+
+		return k1, v1, nil
+	}
+
+	ts, err := mt.client.MultiSave(meta, addition, saveColl)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return 0, err
@@ -578,6 +606,7 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 
 	pd := make([]typeutil.UniqueID, 0, len(collMeta.PartitionIDs))
 	pn := make([]string, 0, len(collMeta.PartitionNames))
+	pts := make([]uint64, 0, len(collMeta.PartitionCreatedTimestamps))
 	var partID typeutil.UniqueID
 	for idx := range collMeta.PartitionIDs {
 		if collMeta.PartitionNames[idx] == partitionName {
@@ -586,6 +615,7 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 		} else {
 			pd = append(pd, collMeta.PartitionIDs[idx])
 			pn = append(pn, collMeta.PartitionNames[idx])
+			pts = append(pts, collMeta.PartitionCreatedTimestamps[idx])
 		}
 	}
 	if !exist {
@@ -593,6 +623,7 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	}
 	collMeta.PartitionIDs = pd
 	collMeta.PartitionNames = pn
+	collMeta.PartitionCreatedTimestamps = pts
 	mt.collID2Meta[collID] = collMeta
 
 	// update segID2IndexMeta and partID2SegID
@@ -739,7 +770,7 @@ func (mt *metaTable) DropIndex(collName, fieldName, indexName string) (typeutil.
 		fmt.Sprintf("%s/%d/%d", IndexMetaPrefix, collMeta.ID, dropIdxID),
 	}
 
-	ts, err := mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMeta, nil)
+	ts, err := mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMeta)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return 0, 0, false, err
@@ -913,7 +944,7 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 			meta[k] = v
 		}
 
-		_, err = mt.client.MultiSave(meta, nil)
+		_, err = mt.client.MultiSave(meta)
 		if err != nil {
 			_ = mt.reloadFromKV()
 			return nil, schemapb.FieldSchema{}, err
@@ -936,7 +967,7 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 				meta[k] = v
 			}
 
-			_, err = mt.client.MultiSave(meta, nil)
+			_, err = mt.client.MultiSave(meta)
 			if err != nil {
 				_ = mt.reloadFromKV()
 				return nil, schemapb.FieldSchema{}, err

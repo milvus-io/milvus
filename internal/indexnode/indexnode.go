@@ -19,8 +19,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/retry"
-
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
@@ -33,7 +31,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -115,6 +115,7 @@ func (i *IndexNode) Init() error {
 		return err
 	}
 	log.Debug("IndexNode NewMinIOKV success")
+	i.closer = trace.InitTracing("index_node")
 
 	i.UpdateStateCode(internalpb.StateCode_Healthy)
 	log.Debug("IndexNode", zap.Any("State", i.stateCode.Load()))
@@ -168,6 +169,9 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 		zap.Strings("DataPaths", request.DataPaths),
 		zap.Any("TypeParams", request.TypeParams),
 		zap.Any("IndexParams", request.IndexParams))
+
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "CreateIndex")
+	defer sp.Finish()
 
 	t := &IndexBuildTask{
 		BaseTask: BaseTask{

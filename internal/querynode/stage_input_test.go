@@ -33,7 +33,7 @@ func TestInputStage_InputStage(t *testing.T) {
 	stream.Start()
 	defer stream.Close()
 
-	iStage := newInputStage(ctx, cancel, defaultCollectionID, stream, lbOutput, queryOutput)
+	iStage := newInputStage(ctx, defaultCollectionID, stream, lbOutput, queryOutput)
 	go iStage.start()
 	produceSimpleSearchMsg(ctx)
 

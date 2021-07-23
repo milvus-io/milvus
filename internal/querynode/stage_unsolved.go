@@ -31,7 +31,6 @@ import (
 
 type unsolvedStage struct {
 	ctx    context.Context
-	cancel context.CancelFunc
 
 	collectionID UniqueID
 	vChannel     Channel
@@ -52,7 +51,6 @@ type unsolvedStage struct {
 }
 
 func newUnsolvedStage(ctx context.Context,
-	cancel context.CancelFunc,
 	collectionID UniqueID,
 	vChannel Channel,
 	input chan queryMsg,
@@ -62,7 +60,6 @@ func newUnsolvedStage(ctx context.Context,
 
 	return &unsolvedStage{
 		ctx:               ctx,
-		cancel:            cancel,
 		collectionID:      collectionID,
 		vChannel:          vChannel,
 		input:             input,
@@ -165,10 +162,10 @@ func (q *unsolvedStage) doUnsolvedQueryMsg() {
 			return
 		default:
 			serviceTime := q.waitNewTSafe()
-			st, _ := tsoutil.ParseTS(serviceTime)
-			log.Debug("get tSafe from flow graph",
-				zap.Int64("collectionID", q.collectionID),
-				zap.Any("tSafe", st))
+			//st, _ := tsoutil.ParseTS(serviceTime)
+			//log.Debug("get tSafe from flow graph",
+			//	zap.Int64("collectionID", q.collectionID),
+			//	zap.Any("tSafe", st))
 
 			q.setServiceableTime(serviceTime)
 
@@ -178,7 +175,7 @@ func (q *unsolvedStage) doUnsolvedQueryMsg() {
 			for _, m := range tempMsg {
 				guaranteeTs := m.GuaranteeTs()
 				gt, _ := tsoutil.ParseTS(guaranteeTs)
-				st, _ = tsoutil.ParseTS(serviceTime)
+				st, _ := tsoutil.ParseTS(serviceTime)
 				log.Debug("get query message from unsolvedMsg",
 					zap.Int64("collectionID", q.collectionID),
 					zap.Int64("msgID", m.ID()),

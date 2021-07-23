@@ -22,7 +22,6 @@ import (
 
 type loadBalanceStage struct {
 	ctx    context.Context
-	cancel context.CancelFunc
 
 	collectionID UniqueID
 
@@ -30,13 +29,11 @@ type loadBalanceStage struct {
 }
 
 func newLoadBalanceStage(ctx context.Context,
-	cancel context.CancelFunc,
 	collectionID UniqueID,
 	input chan *msgstream.LoadBalanceSegmentsMsg) *loadBalanceStage {
 
 	return &loadBalanceStage{
 		ctx:          ctx,
-		cancel:       cancel,
 		collectionID: collectionID,
 		input:        input,
 	}

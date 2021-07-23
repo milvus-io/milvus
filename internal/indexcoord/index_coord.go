@@ -21,6 +21,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/trace"
+
 	"github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/golang/protobuf/proto"
 	"go.etcd.io/etcd/clientv3"
@@ -271,6 +273,8 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 		zap.Strings("DataPath = ", req.DataPaths),
 		zap.Any("TypeParams", req.TypeParams),
 		zap.Any("IndexParams", req.IndexParams))
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "IndexCoord-BuildIndex")
+	defer sp.Finish()
 	hasIndex, indexBuildID := i.metaTable.HasSameReq(req)
 	if hasIndex {
 		log.Debug("IndexCoord", zap.Int64("hasIndex true", indexBuildID), zap.Strings("data paths", req.DataPaths))
@@ -330,6 +334,8 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 }
 
 func (i *IndexCoord) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
+	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "IndexCoord-BuildIndex")
+	defer sp.Finish()
 	var (
 		cntNone       = 0
 		cntUnissued   = 0
@@ -367,6 +373,8 @@ func (i *IndexCoord) GetIndexStates(ctx context.Context, req *indexpb.GetIndexSt
 
 func (i *IndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	log.Debug("IndexCoord DropIndex", zap.Any("IndexID", req.IndexID))
+	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "IndexCoord-BuildIndex")
+	defer sp.Finish()
 
 	ret := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -393,6 +401,8 @@ func (i *IndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexReques
 
 func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
 	log.Debug("IndexCoord GetIndexFilePaths", zap.Int64s("IndexBuildIds", req.IndexBuildIDs))
+	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "IndexCoord-BuildIndex")
+	defer sp.Finish()
 	var indexPaths []*indexpb.IndexFilePathInfo = nil
 
 	for _, indexID := range req.IndexBuildIDs {
@@ -451,15 +461,22 @@ func (i *IndexCoord) recycleUnusedIndexFiles() {
 			return
 		case <-timeTicker.C:
 			metas := i.metaTable.GetUnusedIndexFiles(taskLimit)
+			log.Debug("IndexCoord recycleUnusedIndexFiles", zap.Int("Need recycle tasks num", len(metas)))
 			for _, meta := range metas {
 				if meta.indexMeta.MarkDeleted {
 					unusedIndexFilePathPrefix := strconv.Itoa(int(meta.indexMeta.IndexBuildID))
+					log.Debug("IndexCoord recycleUnusedIndexFiles",
+						zap.Int64("Recycle the index files for deleted index with indexBuildID", meta.indexMeta.IndexBuildID))
 					if err := i.kv.RemoveWithPrefix(unusedIndexFilePathPrefix); err != nil {
 						log.Debug("IndexCoord recycleUnusedIndexFiles Remove index files failed",
 							zap.Any("MarkDeleted", true), zap.Error(err))
 					}
 					i.metaTable.DeleteIndex(meta.indexMeta.IndexBuildID)
+					log.Debug("IndexCoord recycleUnusedIndexFiles",
+						zap.Int64("Recycle the index files successfully for deleted index with indexBuildID", meta.indexMeta.IndexBuildID))
 				} else {
+					log.Debug("IndexCoord recycleUnusedIndexFiles",
+						zap.Int64("Recycle the low version index files of the index with indexBuildID", meta.indexMeta.IndexBuildID))
 					for j := 1; j < int(meta.indexMeta.Version); j++ {
 						unusedIndexFilePathPrefix := strconv.Itoa(int(meta.indexMeta.IndexBuildID)) + "/" + strconv.Itoa(j)
 						if err := i.kv.RemoveWithPrefix(unusedIndexFilePathPrefix); err != nil {
@@ -470,6 +487,8 @@ func (i *IndexCoord) recycleUnusedIndexFiles() {
 					if err := i.metaTable.UpdateRecycleState(meta.indexMeta.IndexBuildID); err != nil {
 						log.Debug("IndexCoord recycleUnusedIndexFiles UpdateRecycleState failed", zap.Error(err))
 					}
+					log.Debug("IndexCoord recycleUnusedIndexFiles",
+						zap.Int64("Recycle the low version index files successfully of the index with indexBuildID", meta.indexMeta.IndexBuildID))
 				}
 			}
 		}
@@ -492,7 +511,8 @@ func (i *IndexCoord) watchNodeLoop() {
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:
 				serverID := event.Session.ServerID
-				log.Debug("IndexCoord watchNodeLoop SessionAddEvent", zap.Any("serverID", serverID), zap.Any("address", event.Session.Address))
+				log.Debug("IndexCoord watchNodeLoop SessionAddEvent", zap.Any("serverID", serverID),
+					zap.Any("address", event.Session.Address))
 				err := i.nodeManager.AddNode(serverID, event.Session.Address)
 				if err != nil {
 					log.Debug("IndexCoord", zap.Any("Add IndexNode err", err))
@@ -531,13 +551,16 @@ func (i *IndexCoord) watchMetaLoop() {
 					zap.Any("event.V", indexMeta), zap.Any("IndexBuildID", indexBuildID), zap.Error(err))
 				switch event.Type {
 				case mvccpb.PUT:
-					//TODO: get indexBuildID fast
 					reload := i.metaTable.LoadMetaFromETCD(indexBuildID, eventRevision)
 					log.Debug("IndexCoord watchMetaLoop PUT", zap.Any("IndexBuildID", indexBuildID), zap.Any("reload", reload))
 					if reload {
+						log.Debug("This task has finished", zap.Int64("indexBuildID", indexBuildID),
+							zap.Int64("Finish by IndexNode", indexMeta.NodeID),
+							zap.Int64("The version of the task", indexMeta.Version))
 						i.nodeManager.pq.IncPriority(indexMeta.NodeID, -1)
 					}
 				case mvccpb.DELETE:
+					log.Debug("IndexCoord watchMetaLoop DELETE", zap.Any("The meta has been deleted of indexBuildID", indexBuildID))
 				}
 			}
 		}
@@ -563,23 +586,26 @@ func (i *IndexCoord) assignTaskLoop() {
 			if err != nil {
 				log.Debug("IndexCoord assignTaskLoop", zap.Any("GetSessions error", err))
 			}
-			if len(sessions) <= 0 {
+			if len(i.nodeManager.nodeClients) <= 0 {
+				log.Debug("There is no IndexNode available as this time.")
 				break
 			}
 			var serverIDs []int64
 			for _, session := range sessions {
 				serverIDs = append(serverIDs, session.ServerID)
 			}
+			log.Debug("IndexCoord assignTaskLoop", zap.Any("Available IndexNode IDs", serverIDs))
 			metas := i.metaTable.GetUnassignedTasks(serverIDs)
 			sort.Slice(metas, func(i, j int) bool {
 				return metas[i].indexMeta.Version <= metas[j].indexMeta.Version
 			})
-			log.Debug("IndexCoord assignTaskLoop", zap.Any("Unassign tasks number", len(metas)))
+			log.Debug("IndexCoord assignTaskLoop", zap.Any("Unassigned tasks number", len(metas)), zap.Any("Unassigned tasks meta", metas))
 			for index, meta := range metas {
 				indexBuildID := meta.indexMeta.IndexBuildID
 				if err = i.metaTable.UpdateVersion(indexBuildID); err != nil {
 					log.Debug("IndexCoord assignmentTasksLoop metaTable.UpdateVersion failed", zap.Error(err))
 				}
+				log.Debug("The version of the task has been updated", zap.Int64("indexBuildID", indexBuildID))
 				nodeID, builderClient := i.nodeManager.PeekClient()
 				if builderClient == nil {
 					log.Debug("IndexCoord assignmentTasksLoop can not find available IndexNode")
@@ -607,6 +633,8 @@ func (i *IndexCoord) assignTaskLoop() {
 				if err = i.metaTable.BuildIndex(indexBuildID, nodeID); err != nil {
 					log.Debug("IndexCoord assignmentTasksLoop metaTable.BuildIndex failed", zap.Error(err))
 				}
+				log.Debug("This task has been assigned", zap.Int64("indexBuildID", indexBuildID),
+					zap.Int64("The IndexNode execute this task", nodeID))
 				i.nodeManager.pq.IncPriority(nodeID, 1)
 				if index > taskLimit {
 					break

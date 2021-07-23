@@ -308,6 +308,52 @@ func TestEtcdKV_WatchPrefix(t *testing.T) {
 	assert.True(t, resp.Created)
 }
 
+func TestEtcdKV_LoadWithVersion(t *testing.T) {
+	cli, err := newEtcdClient()
+	assert.Nil(t, err)
+	rootPath := "/etcd/test/root"
+	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
+
+	defer etcdKV.Close()
+	defer etcdKV.RemoveWithPrefix("")
+
+	key := "test-load-version"
+
+	err = etcdKV.Save(key, "v1")
+	assert.Nil(t, err)
+
+	_, values, _, err := etcdKV.LoadWithVersion(key)
+	assert.Nil(t, err)
+	assert.Equal(t, "v1", values[0])
+}
+
+func TestEtcdKV_WatchWithVersion(t *testing.T) {
+	cli, err := newEtcdClient()
+	assert.Nil(t, err)
+	rootPath := "/etcd/test/root"
+	etcdKV := etcdkv.NewEtcdKV(cli, rootPath)
+
+	defer etcdKV.Close()
+	defer etcdKV.RemoveWithPrefix("")
+
+	key := "test-version"
+
+	err = etcdKV.Save(key, "v")
+	assert.Nil(t, err)
+
+	_, _, revision, _ := etcdKV.LoadWithVersion(key)
+
+	ch := etcdKV.WatchWithVersion(key, revision+1)
+	err = etcdKV.Save(key, "v2")
+	assert.Nil(t, err)
+
+	resp2 := <-ch
+	assert.Equal(t, 1, len(resp2.Events))
+	assert.Equal(t, "v2", string(resp2.Events[0].Kv.Value))
+	assert.Equal(t, revision+1, resp2.Header.Revision)
+
+}
+
 func TestEtcdKV_CompareAndSwap(t *testing.T) {
 	cli, err := newEtcdClient()
 	assert.Nil(t, err)

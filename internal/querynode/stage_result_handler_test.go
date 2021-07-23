@@ -31,7 +31,6 @@ func TestResultHandlerStage_ResultHandlerStage(t *testing.T) {
 	stream.Start()
 
 	resStage := newResultHandlerStage(ctx,
-		cancel,
 		defaultCollectionID,
 		s,
 		h,

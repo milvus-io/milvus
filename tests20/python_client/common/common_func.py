@@ -84,8 +84,8 @@ def gen_binary_vec_field(name=ct.default_binary_vec_field_name, is_primary=False
 
 
 def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
-                                  auto_id=False):
-    fields = [gen_int64_field(), gen_float_field(), gen_float_vec_field()]
+                                  auto_id=False, dim=ct.default_dim):
+    fields = [gen_int64_field(), gen_float_field(), gen_float_vec_field(dim=dim)]
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id)
     return schema
@@ -93,9 +93,9 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
 
 def gen_collection_schema_all_datatype(description=ct.default_desc,
                                        primary_field=ct.default_int64_field_name,
-                                       auto_id=False):
+                                       auto_id=False, dim=ct.default_dim):
     fields = [gen_int64_field(), gen_int32_field(), gen_int16_field(), gen_int8_field(),
-              gen_bool_field(), gen_float_field(), gen_double_field(), gen_float_vec_field()]
+              gen_bool_field(), gen_float_field(), gen_double_field(), gen_float_vec_field(dim=dim)]
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id)
     return schema
@@ -107,11 +107,22 @@ def gen_collection_schema(fields, primary_field=None, description=ct.default_des
     return schema
 
 
-def gen_default_binary_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name):
-    fields = [gen_int64_field(), gen_float_field(), gen_binary_vec_field()]
+def gen_default_binary_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
+                                         auto_id=False, dim=ct.default_dim):
+    fields = [gen_int64_field(), gen_float_field(), gen_binary_vec_field(dim=dim)]
     binary_schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
-                                                                           primary_field=primary_field)
+                                                                           primary_field=primary_field,
+                                                                           auto_id=auto_id)
     return binary_schema
+
+
+def gen_schema_multi_vector_fields(vec_fields):
+    fields = [gen_int64_field(), gen_float_field(), gen_float_vec_field()]
+    fields.extend(vec_fields)
+    primary_field = ct.default_int64_field_name
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=ct.default_desc,
+                                                                    primary_field=primary_field, auto_id=False)
+    return schema
 
 
 def gen_vectors(nb, dim):
@@ -139,6 +150,30 @@ def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0):
         ct.default_float_field_name: float_values,
         ct.default_float_vec_field_name: float_vec_values
     })
+    return df
+
+
+def gen_dataframe_multi_vec_fields(vec_fields, nb=ct.default_nb):
+    """
+    gen dataframe data for fields: int64, float, float_vec and vec_fields
+    :param nb: num of entities, default default_nb
+    :param vec_fields: list of FieldSchema
+    :return: dataframe
+    """
+    int_values = pd.Series(data=[i for i in range(0, nb)])
+    float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
+    df = pd.DataFrame({
+        ct.default_int64_field_name: int_values,
+        ct.default_float_field_name: float_values,
+        ct.default_float_vec_field_name: gen_vectors(nb, ct.default_dim)
+    })
+    for field in vec_fields:
+        dim = field.params['dim']
+        if field.dtype == DataType.FLOAT_VECTOR:
+            vec_values = gen_vectors(nb, dim)
+        elif field.dtype == DataType.BINARY_VECTOR:
+            vec_values = gen_binary_vectors(nb, dim)[1]
+        df[field.name] = vec_values
     return df
 
 
@@ -253,6 +288,18 @@ def gen_normal_expressions():
     return expressions
 
 
+def gen_normal_expressions_field(field):
+    expressions = [
+        "",
+        f"{field} > 0",
+        f"({field} > 0 && {field} < 400) or ({field} > 500 && {field} < 1000)",
+        f"{field} not in [1, 2, 3]",
+        f"{field} in [1, 2, 3] and {field} != 2",
+        f"{field} == 0 || {field} == 1 || {field} == 2",
+    ]
+    return expressions
+
+
 def jaccard(x, y):
     x = np.asarray(x, np.bool)
     y = np.asarray(y, np.bool)
@@ -340,7 +387,8 @@ def gen_partitions(collection_w, partition_num=1):
     log.info("gen_partitions: created partitions %s" % par)
 
 
-def insert_data(collection_w, nb=3000, is_binary=False, is_all_data_type=False):
+def insert_data(collection_w, nb=3000, is_binary=False, is_all_data_type=False,
+                auto_id=False, dim=ct.default_dim):
     """
     target: insert non-binary/binary data
     method: insert non-binary/binary data into partitions if any
@@ -354,12 +402,14 @@ def insert_data(collection_w, nb=3000, is_binary=False, is_all_data_type=False):
     log.info("insert_data: inserting data into collection %s (num_entities: %s)"
              % (collection_w.name, nb))
     for i in range(num):
-        default_data = gen_default_dataframe_data(nb // num)
+        default_data = gen_default_dataframe_data(nb // num, dim=dim)
         if is_binary:
-            default_data, binary_raw_data = gen_default_binary_dataframe_data(nb // num)
+            default_data, binary_raw_data = gen_default_binary_dataframe_data(nb // num, dim=dim)
             binary_raw_vectors.extend(binary_raw_data)
         if is_all_data_type:
-            default_data = gen_dataframe_all_data_type(nb // num)
+            default_data = gen_dataframe_all_data_type(nb // num, dim=dim)
+        if auto_id:
+            default_data.drop(ct.default_int64_field_name, axis=1, inplace=True)
         insert_res = collection_w.insert(default_data, par[i].name)[0]
         insert_ids.extend(insert_res.primary_keys)
         vectors.append(default_data)

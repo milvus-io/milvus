@@ -22,7 +22,6 @@ import (
 
 type inputStage struct {
 	ctx    context.Context
-	cancel context.CancelFunc
 
 	collectionID UniqueID
 
@@ -32,7 +31,6 @@ type inputStage struct {
 }
 
 func newInputStage(ctx context.Context,
-	cancel context.CancelFunc,
 	collectionID UniqueID,
 	queryStream msgstream.MsgStream,
 	lbOutput chan *msgstream.LoadBalanceSegmentsMsg,
@@ -40,7 +38,6 @@ func newInputStage(ctx context.Context,
 
 	return &inputStage{
 		ctx:          ctx,
-		cancel:       cancel,
 		collectionID: collectionID,
 		queryStream:  queryStream,
 		lbOutput:     lbOutput,

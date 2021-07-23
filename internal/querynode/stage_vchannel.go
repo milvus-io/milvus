@@ -29,7 +29,6 @@ import (
 
 type vChannelStage struct {
 	ctx    context.Context
-	cancel context.CancelFunc
 
 	collectionID UniqueID
 	vChannel     Channel
@@ -42,7 +41,6 @@ type vChannelStage struct {
 }
 
 func newVChannelStage(ctx context.Context,
-	cancel context.CancelFunc,
 	collectionID UniqueID,
 	vChannel Channel,
 	input chan queryMsg,
@@ -52,7 +50,6 @@ func newVChannelStage(ctx context.Context,
 
 	return &vChannelStage{
 		ctx:            ctx,
-		cancel:         cancel,
 		collectionID:   collectionID,
 		vChannel:       vChannel,
 		input:          input,

@@ -15,6 +15,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -121,7 +123,6 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("alloc collection id error = %w", err)
 	}
-	collTs := t.Req.Base.Timestamp
 	partID, _, err := t.core.IDAllocator(1)
 	if err != nil {
 		return fmt.Errorf("alloc partition id error = %w", err)
@@ -140,14 +141,14 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	}
 
 	collInfo := etcdpb.CollectionInfo{
-		ID:                   collID,
-		Schema:               &schema,
-		CreateTime:           collTs,
-		PartitionIDs:         []typeutil.UniqueID{partID},
-		PartitionNames:       []string{Params.DefaultPartitionName},
-		FieldIndexes:         make([]*etcdpb.FieldIndexInfo, 0, 16),
-		VirtualChannelNames:  vchanNames,
-		PhysicalChannelNames: chanNames,
+		ID:                         collID,
+		Schema:                     &schema,
+		PartitionIDs:               []typeutil.UniqueID{partID},
+		PartitionNames:             []string{Params.DefaultPartitionName},
+		FieldIndexes:               make([]*etcdpb.FieldIndexInfo, 0, 16),
+		VirtualChannelNames:        vchanNames,
+		PhysicalChannelNames:       chanNames,
+		PartitionCreatedTimestamps: []uint64{0},
 	}
 
 	idxInfo := make([]*etcdpb.IndexInfo, 0, 16)
@@ -339,6 +340,11 @@ func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
 
 	t.Rsp.VirtualChannelNames = collInfo.VirtualChannelNames
 	t.Rsp.PhysicalChannelNames = collInfo.PhysicalChannelNames
+
+	t.Rsp.CreatedTimestamp = collInfo.CreateTime
+	createdPhysicalTime, _ := tsoutil.ParseHybridTs(collInfo.CreateTime)
+	t.Rsp.CreatedUtcTimestamp = createdPhysicalTime
+
 	return nil
 }
 
@@ -360,9 +366,12 @@ func (t *ShowCollectionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for name, id := range coll {
+	for name, meta := range coll {
 		t.Rsp.CollectionNames = append(t.Rsp.CollectionNames, name)
-		t.Rsp.CollectionIds = append(t.Rsp.CollectionIds, id)
+		t.Rsp.CollectionIds = append(t.Rsp.CollectionIds, meta.ID)
+		t.Rsp.CreatedTimestamps = append(t.Rsp.CreatedTimestamps, meta.CreateTime)
+		physical, _ := tsoutil.ParseHybridTs(meta.CreateTime)
+		t.Rsp.CreatedUtcTimestamps = append(t.Rsp.CreatedUtcTimestamps, physical)
 	}
 	return nil
 }
@@ -558,6 +567,12 @@ func (t *ShowPartitionReqTask) Execute(ctx context.Context) error {
 	}
 	t.Rsp.PartitionIDs = coll.PartitionIDs
 	t.Rsp.PartitionNames = coll.PartitionNames
+	t.Rsp.CreatedTimestamps = coll.PartitionCreatedTimestamps
+	t.Rsp.CreatedUtcTimestamps = make([]uint64, 0, len(coll.PartitionCreatedTimestamps))
+	for _, ts := range coll.PartitionCreatedTimestamps {
+		physical, _ := tsoutil.ParseHybridTs(ts)
+		t.Rsp.CreatedUtcTimestamps = append(t.Rsp.CreatedUtcTimestamps, physical)
+	}
 
 	return nil
 }

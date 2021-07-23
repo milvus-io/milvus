@@ -28,7 +28,6 @@ import (
 
 type requestHandlerStage struct {
 	ctx    context.Context
-	cancel context.CancelFunc
 
 	collectionID UniqueID
 
@@ -42,7 +41,6 @@ type requestHandlerStage struct {
 }
 
 func newRequestHandlerStage(ctx context.Context,
-	cancel context.CancelFunc,
 	collectionID UniqueID,
 	input chan queryMsg,
 	historicalOutput chan queryMsg,
@@ -53,7 +51,6 @@ func newRequestHandlerStage(ctx context.Context,
 
 	return &requestHandlerStage{
 		ctx:               ctx,
-		cancel:            cancel,
 		collectionID:      collectionID,
 		input:             input,
 		historicalOutput:  historicalOutput,

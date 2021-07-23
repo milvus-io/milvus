@@ -35,7 +35,6 @@ import (
 
 type resultHandlerStage struct {
 	ctx    context.Context
-	cancel context.CancelFunc
 
 	collectionID UniqueID
 
@@ -50,7 +49,6 @@ type resultHandlerStage struct {
 }
 
 func newResultHandlerStage(ctx context.Context,
-	cancel context.CancelFunc,
 	collectionID UniqueID,
 	streaming *streaming,
 	historical *historical,
@@ -60,7 +58,6 @@ func newResultHandlerStage(ctx context.Context,
 
 	return &resultHandlerStage{
 		ctx:               ctx,
-		cancel:            cancel,
 		collectionID:      collectionID,
 		streaming:         streaming,
 		historical:        historical,

@@ -30,7 +30,6 @@ import (
 
 type historicalStage struct {
 	ctx    context.Context
-	cancel context.CancelFunc
 
 	collectionID UniqueID
 
@@ -41,7 +40,6 @@ type historicalStage struct {
 }
 
 func newHistoricalStage(ctx context.Context,
-	cancel context.CancelFunc,
 	collectionID UniqueID,
 	input chan queryMsg,
 	output chan queryResult,
@@ -49,7 +47,6 @@ func newHistoricalStage(ctx context.Context,
 
 	return &historicalStage{
 		ctx:          ctx,
-		cancel:       cancel,
 		collectionID: collectionID,
 		input:        input,
 		output:       output,

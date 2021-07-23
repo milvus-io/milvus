@@ -17,12 +17,10 @@
 <ol>
 <li>准备环境</li>
 
-</ol>
 <ul>
 <li><a href='https://github.com/milvus-io/milvus/blob/master/tests/README.md'>安装 Docker 、Docker Compose、jq、kubectl、helm、kind</a></li>
 
 </ul>
-<ol>
 <li>脚本安装</li>
 
 </ol>
@@ -69,27 +67,21 @@
 <ol>
 <li>安装测试所需的 python 包，进入代码 <strong>*/milvus/tests20/python_client/</strong> 目录，执行命令：</li>
 
-</ol>
 <pre><code>pip install -r requirements.txt
 </code></pre>
-<ol>
 <li>在<strong>config</strong>目录下，测试的日志目录默认为：<strong>/tmp/ci_logs/</strong>，可在启动测试用例之前添加环境变量来修改log的存放路径：</li>
 
-</ol>
 <pre><code>export CI_LOG_PATH=/tmp/ci_logs/test/
 </code></pre>
 <figure><table>
 <thead>
 <tr><th><strong>Log Level</strong> </th><th><strong>Log File</strong> </th></tr></thead>
-<tbody><tr><td>Debug  </td><td>ci_test_log.debug </td></tr><tr><td>Info  </td><td>ci_test_log .log </td></tr><tr><td>Error  </td><td>ci_test_log.err </td></tr></tbody>
+<tbody><tr><td>Debug  </td><td>ci_test_log.debug </td></tr><tr><td>Info  </td><td>ci_test_log.log </td></tr><tr><td>Error  </td><td>ci_test_log.err </td></tr></tbody>
 </table></figure>
-<ol>
 <li>在主目录 <strong>pytest.ini</strong> 文件内可设置默认传递的参数，如下例中 ip 为所需要设置的 milvus 服务的ip地址，<strong>*.html</strong> 为测试生成的 <strong>report</strong>：</li>
 
-</ol>
 <pre><code>addopts = --host *.*.*.*  --html=/tmp/ci_logs/report.html
 </code></pre>
-<ol>
 <li>进入 <strong>testcases</strong> 目录，命令与 <a href='https://docs.pytest.org/en/6.2.x/'>pytest</a> 框架的执行命令一致，运行如下命令执行测试用例：</li>
 
 </ol>

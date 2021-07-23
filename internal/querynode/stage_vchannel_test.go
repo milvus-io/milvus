@@ -31,7 +31,6 @@ func TestVChannelStage_VChannelStage(t *testing.T) {
 	s := genSimpleStreaming(ctx)
 
 	vStage := newVChannelStage(ctx,
-		cancel,
 		defaultCollectionID,
 		defaultVChannel,
 		inputChan,

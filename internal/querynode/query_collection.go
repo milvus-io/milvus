@@ -112,13 +112,11 @@ func (q *queryCollection) start() error {
 	lbChan := make(chan *msgstream.LoadBalanceSegmentsMsg, queryBufferSize)
 	reqChan := make(chan queryMsg, queryBufferSize)
 	iStage := newInputStage(q.releaseCtx,
-		q.cancel,
 		q.collectionID,
 		q.queryMsgStream,
 		lbChan,
 		reqChan)
 	lbStage := newLoadBalanceStage(q.releaseCtx,
-		q.cancel,
 		q.collectionID,
 		lbChan)
 
@@ -130,7 +128,6 @@ func (q *queryCollection) start() error {
 		unsolvedChan[c] = make(chan queryMsg, queryBufferSize)
 	}
 	reqStage := newRequestHandlerStage(q.releaseCtx,
-		q.cancel,
 		q.collectionID,
 		reqChan,
 		hisChan,
@@ -140,7 +137,6 @@ func (q *queryCollection) start() error {
 		q.queryResultMsgStream)
 	resChan := make(chan queryResult, queryBufferSize*(len(channels)+1)) // vChannels + historical
 	hisStage := newHistoricalStage(q.releaseCtx,
-		q.cancel,
 		q.collectionID,
 		hisChan,
 		resChan,
@@ -150,7 +146,6 @@ func (q *queryCollection) start() error {
 	unsolvedStages := make(map[Channel]*unsolvedStage)
 	for _, c := range channels {
 		vcStages[c] = newVChannelStage(q.releaseCtx,
-			q.cancel,
 			q.collectionID,
 			c,
 			vChannelChan[c],
@@ -158,7 +153,6 @@ func (q *queryCollection) start() error {
 			resChan,
 			q.streaming)
 		unsolvedStages[c] = newUnsolvedStage(q.releaseCtx,
-			q.cancel,
 			q.collectionID,
 			c,
 			unsolvedChan[c],
@@ -167,7 +161,6 @@ func (q *queryCollection) start() error {
 			q.queryResultMsgStream)
 	}
 	resStage := newResultHandlerStage(q.releaseCtx,
-		q.cancel,
 		q.collectionID,
 		q.streaming,
 		q.historical,

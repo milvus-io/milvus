@@ -31,7 +31,6 @@ func TestRequestHandlerStage_RequestHandlerStage(t *testing.T) {
 
 	resultStream := genQueryMsgStream(ctx)
 	reqStage := newRequestHandlerStage(ctx,
-		cancel,
 		defaultCollectionID,
 		inputChan,
 		hisOutput,

@@ -31,7 +31,6 @@ func TestUnsolvedStage_UnsolvedStage(t *testing.T) {
 	stream := genQueryMsgStream(ctx)
 
 	uStage := newUnsolvedStage(ctx,
-		cancel,
 		defaultCollectionID,
 		defaultVChannel,
 		inputChan,

@@ -9,25 +9,22 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package querynode
+package tsoutil
 
 import (
-	"context"
 	"testing"
+	"time"
 
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
 )
 
-func TestLoadBalanceStage_LoadBalanceStage(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	inputChan := make(chan *msgstream.LoadBalanceSegmentsMsg, queryBufferSize)
-	lbStage := newLoadBalanceStage(ctx, defaultCollectionID, inputChan)
-	go lbStage.start()
-
-	msg := &msgstream.LoadBalanceSegmentsMsg{}
-	go func() {
-		inputChan <- msg
-	}()
+func TestParseHybridTs(t *testing.T) {
+	var ts uint64 = 426152581543231492
+	physical, logical := ParseHybridTs(ts)
+	physicalTime := time.Unix(int64(physical/1000), int64(physical)%1000*time.Millisecond.Nanoseconds())
+	log.Debug("TestParseHybridTs",
+		zap.Uint64("physical", physical),
+		zap.Uint64("logical", logical),
+		zap.Any("physical time", physicalTime))
 }

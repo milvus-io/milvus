@@ -626,7 +626,7 @@ func genSimpleSearchResult() *searchResult {
 	his := genSimpleHistorical(ctx)
 	inputChan := make(chan queryMsg, queryBufferSize)
 	outputChan := make(chan queryResult, queryBufferSize)
-	hs := newHistoricalStage(ctx, cancel, defaultCollectionID, inputChan, outputChan, his)
+	hs := newHistoricalStage(ctx, defaultCollectionID, inputChan, outputChan, his)
 	go hs.start()
 	go func() {
 		inputChan <- msg
