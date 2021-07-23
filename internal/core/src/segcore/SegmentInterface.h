@@ -110,7 +110,7 @@ class SegmentInternalInterface : public SegmentInterface {
     num_chunk_index(FieldOffset field_offset) const = 0;
 
     virtual void
-    mask_with_timestamps(std::deque<boost::dynamic_bitset<>>& bitset_chunks, Timestamp timestamp) const = 0;
+    mask_with_timestamps(boost::dynamic_bitset<>& bitset_chunk, Timestamp timestamp) const = 0;
 
     // count of chunks
     virtual int64_t
