@@ -60,6 +60,9 @@ class ExecutionEngineImpl : public ExecutionEngine {
     Status
     CopyToFpga() override;
 
+    Status
+    CopyToApu(uint32_t row_count) override;
+
 #if 0
     Status
     GetVectorByID(const int64_t id, float* vector, bool hybrid) override;
