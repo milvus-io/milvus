@@ -197,10 +197,10 @@ func (context *ParserContext) createColumnInfo(field *schemapb.FieldSchema) *pla
 	}
 }
 
-func isSameOrder(a, b string) bool {
-	isLessA := a == "<" || a == "<="
-	isLessB := b == "<" || b == "<="
-	return isLessA == isLessB
+func isSameOrder(opStr1, opStr2 string) bool {
+	isLess1 := opStr1 == "<" || opStr1 == "<="
+	isLess2 := opStr2 == "<" || opStr2 == "<="
+	return isLess1 == isLess2
 }
 
 func getCompareOpType(opStr string, reverse bool) planpb.OpType {
@@ -276,11 +276,9 @@ func (context *ParserContext) createCmpExpr(left, right ant_ast.Node, operator s
 		expr := &planpb.Expr{
 			Expr: &planpb.Expr_CompareExpr{
 				CompareExpr: &planpb.CompareExpr{
-					ColumnsInfo: []*planpb.ColumnInfo{
-						context.createColumnInfo(leftField),
-						context.createColumnInfo(rightField),
-					},
-					Op: op,
+					LeftColumnInfo:  context.createColumnInfo(leftField),
+					RightColumnInfo: context.createColumnInfo(rightField),
+					Op:              op,
 				},
 			},
 		}
@@ -318,11 +316,11 @@ func (context *ParserContext) createCmpExpr(left, right ant_ast.Node, operator s
 	}
 
 	expr := &planpb.Expr{
-		Expr: &planpb.Expr_RangeExpr{
-			RangeExpr: &planpb.RangeExpr{
+		Expr: &planpb.Expr_UnaryRangeExpr{
+			UnaryRangeExpr: &planpb.UnaryRangeExpr{
 				ColumnInfo: context.createColumnInfo(field),
-				Ops:        []planpb.OpType{op},
-				Values:     []*planpb.GenericValue{val},
+				Op:         op,
+				Value:      val,
 			},
 		},
 	}
@@ -409,10 +407,33 @@ func (context *ParserContext) handleInExpr(node *ant_ast.BinaryNode) (*planpb.Ex
 	return expr, nil
 }
 
+func (context *ParserContext) combineUnaryRangeExpr(a, b *planpb.UnaryRangeExpr) *planpb.Expr {
+	if a.Op == planpb.OpType_LessEqual || a.Op == planpb.OpType_LessThan {
+		a, b = b, a
+	}
+
+	lower_inclusive := (a.Op == planpb.OpType_GreaterEqual)
+	upper_inclusive := (b.Op == planpb.OpType_LessEqual)
+
+	expr := &planpb.Expr{
+		Expr: &planpb.Expr_BinaryRangeExpr{
+			BinaryRangeExpr: &planpb.BinaryRangeExpr{
+				ColumnInfo:     a.ColumnInfo,
+				LowerInclusive: lower_inclusive,
+				UpperInclusive: upper_inclusive,
+				LowerValue:     a.Value,
+				UpperValue:     b.Value,
+			},
+		},
+	}
+	return expr
+}
+
 func (context *ParserContext) handleMultiCmpExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
 	exprs := []*planpb.Expr{}
 	curNode := node
 
+	// handle multiple relational operator
 	for {
 		binNodeLeft, LeftOk := curNode.Left.(*ant_ast.BinaryNode)
 		if !LeftOk {
@@ -433,23 +454,23 @@ func (context *ParserContext) handleMultiCmpExpr(node *ant_ast.BinaryNode) (*pla
 		}
 	}
 
-	var lastExpr *planpb.Expr_RangeExpr
+	// combine UnaryRangeExpr to BinaryRangeExpr
+	var lastExpr *planpb.UnaryRangeExpr
 	for i := len(exprs) - 1; i >= 0; i-- {
-		if expr, ok := exprs[i].Expr.(*planpb.Expr_RangeExpr); ok {
-			if lastExpr != nil && expr.RangeExpr.ColumnInfo.FieldId == lastExpr.RangeExpr.ColumnInfo.FieldId {
-				exprs = append(exprs[0:i+1], exprs[i+2:]...)
-				if len(lastExpr.RangeExpr.Ops) > 1 {
-					return nil, fmt.Errorf("invalid compare combination of fieldID: %v", lastExpr.RangeExpr.ColumnInfo.FieldId)
-				}
-				expr.RangeExpr.Ops = append(expr.RangeExpr.Ops, lastExpr.RangeExpr.Ops...)
-				expr.RangeExpr.Values = append(expr.RangeExpr.Values, lastExpr.RangeExpr.Values...)
+		if expr, ok := exprs[i].Expr.(*planpb.Expr_UnaryRangeExpr); ok {
+			if lastExpr != nil && expr.UnaryRangeExpr.ColumnInfo.FieldId == lastExpr.ColumnInfo.FieldId {
+				binaryRangeExpr := context.combineUnaryRangeExpr(expr.UnaryRangeExpr, lastExpr)
+				exprs = append(exprs[0:i], append([]*planpb.Expr{binaryRangeExpr}, exprs[i+2:]...)...)
+				lastExpr = nil
+			} else {
+				lastExpr = expr.UnaryRangeExpr
 			}
-			lastExpr = expr
 		} else {
 			lastExpr = nil
 		}
 	}
 
+	// use `&&` to connect exprs
 	combinedExpr := exprs[len(exprs)-1]
 	for i := len(exprs) - 2; i >= 0; i-- {
 		expr := exprs[i]
