@@ -12,6 +12,7 @@
 package querynode
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -63,6 +65,8 @@ type queryCollection struct {
 
 	queryMsgStream       msgstream.MsgStream
 	queryResultMsgStream msgstream.MsgStream
+
+	vcm *storage.VectorChunkManager
 }
 
 type ResultEntityIds []UniqueID
@@ -72,12 +76,16 @@ func newQueryCollection(releaseCtx context.Context,
 	collectionID UniqueID,
 	historical *historical,
 	streaming *streaming,
-	factory msgstream.Factory) *queryCollection {
+	factory msgstream.Factory,
+	lcm storage.ChunkManager,
+	rcm storage.ChunkManager) *queryCollection {
 
 	unsolvedMsg := make([]queryMsg, 0)
 
 	queryStream, _ := factory.NewQueryMsgStream(releaseCtx)
 	queryResultStream, _ := factory.NewQueryMsgStream(releaseCtx)
+
+	vcm := storage.NewVectorChunkManager(lcm, rcm)
 
 	qc := &queryCollection{
 		releaseCtx: releaseCtx,
@@ -93,6 +101,8 @@ func newQueryCollection(releaseCtx context.Context,
 
 		queryMsgStream:       queryStream,
 		queryResultMsgStream: queryResultStream,
+
+		vcm: vcm,
 	}
 
 	qc.register()
@@ -1059,55 +1069,79 @@ func (q *queryCollection) search(msg queryMsg) error {
 }
 
 func (q *queryCollection) fillVectorFieldsData(segment *Segment, result *segcorepb.RetrieveResults) error {
+	collection, _ := q.streaming.replica.getCollectionByID(q.collectionID)
+	schema := &etcdpb.CollectionMeta{
+		ID:     q.collectionID,
+		Schema: collection.schema}
+	schemaHelper, err := typeutil.CreateSchemaHelper(collection.schema)
+	if err != nil {
+		return err
+	}
 	for _, resultFieldData := range result.FieldsData {
 		vecFieldInfo, err := segment.getVectorFieldInfo(resultFieldData.FieldId)
 		if err != nil {
 			continue
 		}
-
-		// if vector raw data is in memory, result should has been filled in valid vector raw data
-		if vecFieldInfo.getRawDataInMemory() {
-			continue
-		}
-
-		// load vector field data
-		if err = q.historical.loader.loadSegmentVectorFieldData(vecFieldInfo); err != nil {
-			return err
-		}
+		log.Debug("FillVectorFieldData", zap.Any("fieldID", resultFieldData.FieldId))
 
 		for i, offset := range result.Offset {
-			var success bool
-			for _, path := range vecFieldInfo.fieldBinlog.Binlogs {
-				rawData := vecFieldInfo.getRawData(path)
-
-				var numRows, dim int64
-				switch fieldData := rawData.(type) {
-				case *storage.FloatVectorFieldData:
-					numRows = int64(fieldData.NumRows)
-					dim = int64(fieldData.Dim)
-					if offset < numRows {
-						copy(resultFieldData.GetVectors().GetFloatVector().Data[int64(i)*dim:int64(i+1)*dim], fieldData.Data[offset*dim:(offset+1)*dim])
-						success = true
-					} else {
-						offset -= numRows
-					}
-				case *storage.BinaryVectorFieldData:
-					numRows = int64(fieldData.NumRows)
-					dim = int64(fieldData.Dim)
-					if offset < numRows {
-						x := resultFieldData.GetVectors().GetData().(*schemapb.VectorField_BinaryVector)
-						copy(x.BinaryVector[int64(i)*dim/8:int64(i+1)*dim/8], fieldData.Data[offset*dim/8:(offset+1)*dim/8])
-						success = true
-					} else {
-						offset -= numRows
-					}
-				default:
-					return fmt.Errorf("unexpected field data type")
-				}
-				if success {
+			var vecPath string
+			for index, idBinlogRowSize := range segment.idBinlogRowSizes {
+				if offset < idBinlogRowSize {
+					vecPath = vecFieldInfo.fieldBinlog.Binlogs[index]
 					break
+				} else {
+					offset -= idBinlogRowSize
 				}
 			}
+			log.Debug("FillVectorFieldData", zap.Any("path", vecPath))
+			err := q.vcm.DownloadVectorFile(vecPath, schema)
+			if err != nil {
+				return err
+			}
+
+			dim := resultFieldData.GetVectors().GetDim()
+			log.Debug("FillVectorFieldData", zap.Any("dim", dim))
+			schema, err := schemaHelper.GetFieldFromID(resultFieldData.FieldId)
+			if err != nil {
+				return err
+			}
+			dataType := schema.DataType
+			log.Debug("FillVectorFieldData", zap.Any("datatype", dataType))
+
+			switch dataType {
+			case schemapb.DataType_BinaryVector:
+				rowBytes := dim / 8
+				x := resultFieldData.GetVectors().GetData().(*schemapb.VectorField_BinaryVector)
+				content := make([]byte, rowBytes)
+				_, err := q.vcm.ReadAt(vecPath, content, offset*rowBytes)
+				if err != nil {
+					return err
+				}
+				log.Debug("FillVectorFieldData", zap.Any("binaryVectorResult", content))
+
+				resultLen := dim / 8
+				copy(x.BinaryVector[i*int(resultLen):(i+1)*int(resultLen)], content)
+			case schemapb.DataType_FloatVector:
+				x := resultFieldData.GetVectors().GetData().(*schemapb.VectorField_FloatVector)
+				rowBytes := dim * 4
+				content := make([]byte, rowBytes)
+				_, err := q.vcm.ReadAt(vecPath, content, offset*rowBytes)
+				if err != nil {
+					return err
+				}
+				floatResult := make([]float32, dim)
+				buf := bytes.NewReader(content)
+				err = binary.Read(buf, binary.LittleEndian, &floatResult)
+				if err != nil {
+					return err
+				}
+				log.Debug("FillVectorFieldData", zap.Any("floatVectorResult", floatResult))
+
+				resultLen := dim
+				copy(x.FloatVector.Data[i*int(resultLen):(i+1)*int(resultLen)], floatResult)
+			}
+
 		}
 	}
 	return nil

@@ -27,7 +27,7 @@ func NewMinioChunkManager(minio *miniokv.MinIOKV) *MinioChunkManager {
 	}
 }
 
-func (mcm *MinioChunkManager) Load(key string) (string, error) {
+func (mcm *MinioChunkManager) GetPath(key string) (string, error) {
 	if !mcm.Exist(key) {
 		return "", errors.New("minio file manage cannot be found with key:" + key)
 	}
@@ -42,7 +42,7 @@ func (mcm *MinioChunkManager) Exist(key string) bool {
 	return mcm.minio.Exist(key)
 }
 
-func (mcm *MinioChunkManager) ReadAll(key string) ([]byte, error) {
+func (mcm *MinioChunkManager) Read(key string) ([]byte, error) {
 	results, err := mcm.minio.Load(key)
 	return []byte(results), err
 }
