@@ -412,15 +412,15 @@ func (context *ParserContext) combineUnaryRangeExpr(a, b *planpb.UnaryRangeExpr)
 		a, b = b, a
 	}
 
-	lower_inclusive := (a.Op == planpb.OpType_GreaterEqual)
-	upper_inclusive := (b.Op == planpb.OpType_LessEqual)
+	lowerInclusive := (a.Op == planpb.OpType_GreaterEqual)
+	upperInclusive := (b.Op == planpb.OpType_LessEqual)
 
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_BinaryRangeExpr{
 			BinaryRangeExpr: &planpb.BinaryRangeExpr{
 				ColumnInfo:     a.ColumnInfo,
-				LowerInclusive: lower_inclusive,
-				UpperInclusive: upper_inclusive,
+				LowerInclusive: lowerInclusive,
+				UpperInclusive: upperInclusive,
 				LowerValue:     a.Value,
 				UpperValue:     b.Value,
 			},
