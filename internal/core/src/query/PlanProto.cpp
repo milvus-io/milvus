@@ -47,7 +47,7 @@ ExtractTermExprImpl(FieldOffset field_offset, DataType data_type, const planpb::
     return result;
 }
 
-template<typename T>
+template <typename T>
 std::unique_ptr<UnaryRangeExprImpl<T>>
 ExtractUnaryRangeExprImpl(FieldOffset field_offset, DataType data_type, const planpb::UnaryRangeExpr& expr_proto) {
     static_assert(std::is_fundamental_v<T>);
@@ -56,7 +56,7 @@ ExtractUnaryRangeExprImpl(FieldOffset field_offset, DataType data_type, const pl
     result->data_type_ = data_type;
     result->op_ = static_cast<OpType>(expr_proto.op());
 
-    auto setValue = [&](T &v, const auto &value_proto) {
+    auto setValue = [&](T& v, const auto& value_proto) {
         if constexpr (std::is_same_v<T, bool>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kInt64Val);
             v = static_cast<T>(value_proto.bool_val());

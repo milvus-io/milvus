@@ -229,7 +229,7 @@ vector_anns: <
     plan->check_identical(*ref_plan);
 }
 
-TEST(PlanProtoXTest, NotExpr) {
+TEST(PlanProtoTest, NotExpr) {
     auto schema = getStandardSchema();
     // xxx.query(predicates = "not (int64field > 3)", topk = 10, ...)
     auto data_type = spb::DataType::Int64;
@@ -320,7 +320,7 @@ vector_anns: <
     plan->check_identical(*ref_plan);
 }
 
-TEST(PlanProtoXTest, AndOrExpr) {
+TEST(PlanProtoTest, AndOrExpr) {
     auto schema = getStandardSchema();
     // xxx.query(predicates = "(int64field < 3) && (int64field > 2 || int64field == 1)", topk = 10, ...)
     auto data_type = spb::DataType::Int64;
