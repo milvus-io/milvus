@@ -281,6 +281,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 		}
 		msgPack := statsStream.Consume()
 		if msgPack == nil {
+			log.Debug("receive nil stats msg, shutdown stats channel")
 			return
 		}
 		for _, msg := range msgPack.Msgs {
@@ -321,6 +322,7 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 		}
 		msgPack := ttMsgStream.Consume()
 		if msgPack == nil {
+			log.Debug("receive nil tt msg, shutdown tt channel")
 			return
 		}
 		for _, msg := range msgPack.Msgs {
