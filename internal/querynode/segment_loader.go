@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -242,10 +243,6 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 			}
 			blobs = append(blobs, blob)
 		}
-		// mark the flag that vector raw data will be loaded into memory
-		if vecFieldInfo, err := segment.getVectorFieldInfo(fb.FieldID); err == nil {
-			vecFieldInfo.setRawDataInMemory(true)
-		}
 	}
 
 	_, _, insertData, err := iCodec.Deserialize(blobs)
@@ -255,7 +252,7 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 	}
 
 	for fieldID, value := range insertData.Data {
-		var numRows int
+		var numRows []int64
 		var data interface{}
 		switch fieldData := value.(type) {
 		case *storage.BoolFieldData:
@@ -291,49 +288,18 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 		default:
 			return errors.New("unexpected field data type")
 		}
-		err = segment.segmentLoadFieldData(fieldID, numRows, data)
+		if fieldID == rootcoord.TimeStampField {
+			segment.setIDBinlogRowSizes(numRows)
+		}
+		totalNumRows := int64(0)
+		for _, numRow := range numRows {
+			totalNumRows += numRow
+		}
+		err = segment.segmentLoadFieldData(fieldID, int(totalNumRows), data)
 		if err != nil {
 			// TODO: return or continue?
 			return err
 		}
-	}
-
-	return nil
-}
-
-func (loader *segmentLoader) loadSegmentVectorFieldData(info *VectorFieldInfo) error {
-	iCodec := storage.InsertCodec{}
-	defer func() {
-		err := iCodec.Close()
-		if err != nil {
-			log.Error(err.Error())
-		}
-	}()
-	for _, path := range info.fieldBinlog.Binlogs {
-		if data := info.getRawData(path); data != nil {
-			continue
-		}
-
-		log.Debug("load vector raw data", zap.String("path", path))
-
-		binLog, err := loader.minioKV.Load(path)
-		if err != nil {
-			return err
-		}
-
-		blob := &storage.Blob{
-			Key:   path,
-			Value: []byte(binLog),
-		}
-
-		insertFieldData, err := iCodec.DeserializeOneVectorBinlog(blob)
-		if err != nil {
-			log.Error(err.Error())
-			return err
-		}
-
-		// save raw data into segment.vectorFieldInfo
-		info.setRawData(path, insertFieldData.Data)
 	}
 
 	return nil

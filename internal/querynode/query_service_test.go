@@ -145,7 +145,6 @@ func TestSearch_Search(t *testing.T) {
 		node.historical,
 		node.streaming,
 		msFactory)
-	node.queryService.addQueryCollection(collectionID)
 
 	// load segment
 	err = node.historical.replica.addSegment(segmentID, defaultPartitionID, collectionID, "", segmentTypeSealed, true)
@@ -154,6 +153,8 @@ func TestSearch_Search(t *testing.T) {
 	assert.NoError(t, err)
 	err = loadFields(segment, DIM, N)
 	assert.NoError(t, err)
+
+	node.queryService.addQueryCollection(collectionID)
 
 	err = sendSearchRequest(node.queryNodeLoopCtx, DIM)
 	assert.NoError(t, err)

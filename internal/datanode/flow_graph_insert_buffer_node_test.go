@@ -151,15 +151,15 @@ func TestFlushSegment(t *testing.T) {
 		Data: make(map[storage.FieldID]storage.FieldData),
 	}
 	insertData.Data[0] = &storage.Int64FieldData{
-		NumRows: 10,
+		NumRows: []int64{10},
 		Data:    []int64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
 	}
 	insertData.Data[1] = &storage.Int64FieldData{
-		NumRows: 10,
+		NumRows: []int64{10},
 		Data:    []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
 	}
 	insertData.Data[107] = &storage.FloatFieldData{
-		NumRows: 10,
+		NumRows: []int64{10},
 		Data:    make([]float32, 10),
 	}
 	flushMap.Store(segmentID, insertData)
@@ -374,9 +374,9 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 
 			if i == 1 {
 				assert.Equal(t, test.expectedSegID, flushUnit[0].segID)
-				assert.Equal(t, int32(0), iBNode.insertBuffer.size(UniqueID(i+1)))
+				assert.Equal(t, int64(0), iBNode.insertBuffer.size(UniqueID(i+1)))
 			} else {
-				assert.Equal(t, int32(1), iBNode.insertBuffer.size(UniqueID(i+1)))
+				assert.Equal(t, int64(1), iBNode.insertBuffer.size(UniqueID(i+1)))
 			}
 		}
 
