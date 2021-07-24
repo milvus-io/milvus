@@ -11,7 +11,6 @@
 
 #include <tuple>
 #include <map>
-#include <math.h>
 #include <gtest/gtest.h>
 #include <google/protobuf/text_format.h>
 
@@ -21,7 +20,6 @@
 #include "indexbuilder/IndexWrapper.h"
 #include "indexbuilder/index_c.h"
 #include "test_utils/DataGen.h"
-#include "index/knowhere/knowhere/index/vector_index/VecIndexFactory.h"
 #include "indexbuilder/utils.h"
 #include "test_utils/indexbuilder_test_utils.h"
 
@@ -355,27 +353,26 @@ TEST(BinIdMapWrapper, Build) {
 INSTANTIATE_TEST_CASE_P(
     IndexTypeParameters,
     IndexWrapperTest,
-    ::testing::Values(std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_IDMAP, milvus::knowhere::Metric::L2),
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ, milvus::knowhere::Metric::L2),
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, milvus::knowhere::Metric::L2),
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, milvus::knowhere::Metric::L2),
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
-                                milvus::knowhere::Metric::JACCARD),
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
-                                milvus::knowhere::Metric::TANIMOTO),
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, milvus::knowhere::Metric::JACCARD),
+    ::testing::Values(
+        std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_IDMAP, milvus::knowhere::Metric::L2),
+        std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ, milvus::knowhere::Metric::L2),
+        std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, milvus::knowhere::Metric::L2),
+        std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, milvus::knowhere::Metric::L2),
+        std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, milvus::knowhere::Metric::JACCARD),
+        std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, milvus::knowhere::Metric::TANIMOTO),
+        std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, milvus::knowhere::Metric::JACCARD),
 #ifdef MILVUS_SUPPORT_SPTAG
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT, milvus::knowhere::Metric::L2),
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT, milvus::knowhere::Metric::L2),
+        std::pair(milvus::knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT, milvus::knowhere::Metric::L2),
+        std::pair(milvus::knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT, milvus::knowhere::Metric::L2),
 #endif
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_HNSW, milvus::knowhere::Metric::L2),
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_ANNOY, milvus::knowhere::Metric::L2),
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_RHNSWFlat, milvus::knowhere::Metric::L2),
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_RHNSWPQ, milvus::knowhere::Metric::L2),
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_RHNSWSQ, milvus::knowhere::Metric::L2),
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_NGTPANNG, milvus::knowhere::Metric::L2),
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_NGTONNG, milvus::knowhere::Metric::L2),
-                      std::pair(milvus::knowhere::IndexEnum::INDEX_NSG, milvus::knowhere::Metric::L2)));
+        std::pair(milvus::knowhere::IndexEnum::INDEX_HNSW, milvus::knowhere::Metric::L2),
+        std::pair(milvus::knowhere::IndexEnum::INDEX_ANNOY, milvus::knowhere::Metric::L2),
+        std::pair(milvus::knowhere::IndexEnum::INDEX_RHNSWFlat, milvus::knowhere::Metric::L2),
+        std::pair(milvus::knowhere::IndexEnum::INDEX_RHNSWPQ, milvus::knowhere::Metric::L2),
+        std::pair(milvus::knowhere::IndexEnum::INDEX_RHNSWSQ, milvus::knowhere::Metric::L2),
+        std::pair(milvus::knowhere::IndexEnum::INDEX_NGTPANNG, milvus::knowhere::Metric::L2),
+        std::pair(milvus::knowhere::IndexEnum::INDEX_NGTONNG, milvus::knowhere::Metric::L2),
+        std::pair(milvus::knowhere::IndexEnum::INDEX_NSG, milvus::knowhere::Metric::L2)));
 
 TEST_P(IndexWrapperTest, Constructor) {
     auto index =

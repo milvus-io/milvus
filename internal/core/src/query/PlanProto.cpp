@@ -10,13 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "query/PlanProto.h"
-#include "PlanNode.h"
 #include "ExprImpl.h"
-#include "pb/plan.pb.h"
 #include <google/protobuf/text_format.h>
 #include <query/generated/ExtractInfoPlanNodeVisitor.h>
 #include "query/generated/ExtractInfoExprVisitor.h"
-#include "common/Types.h"
 
 namespace milvus::query {
 namespace planpb = milvus::proto::plan;
@@ -54,11 +51,11 @@ ExtractUnaryRangeExprImpl(FieldOffset field_offset, DataType data_type, const pl
     auto result = std::make_unique<UnaryRangeExprImpl<T>>();
     result->field_offset_ = field_offset;
     result->data_type_ = data_type;
-    result->op_ = static_cast<OpType>(expr_proto.op());
+    result->op_type_ = static_cast<OpType>(expr_proto.op());
 
     auto setValue = [&](T& v, const auto& value_proto) {
         if constexpr (std::is_same_v<T, bool>) {
-            Assert(value_proto.val_case() == planpb::GenericValue::kInt64Val);
+            Assert(value_proto.val_case() == planpb::GenericValue::kBoolVal);
             v = static_cast<T>(value_proto.bool_val());
         } else if constexpr (std::is_integral_v<T>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kInt64Val);
@@ -84,7 +81,7 @@ ExtractBinaryRangeExprImpl(FieldOffset field_offset, DataType data_type, const p
 
     auto setValue = [&](T& v, const auto& value_proto) {
         if constexpr (std::is_same_v<T, bool>) {
-            Assert(value_proto.val_case() == planpb::GenericValue::kInt64Val);
+            Assert(value_proto.val_case() == planpb::GenericValue::kBoolVal);
             v = static_cast<T>(value_proto.bool_val());
         } else if constexpr (std::is_integral_v<T>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kInt64Val);
@@ -258,7 +255,7 @@ ProtoParser::ParseCompareExpr(const proto::plan::CompareExpr& expr_pb) {
         result->left_data_type_ = left_data_type;
         result->right_field_offset_ = right_field_offset;
         result->right_data_type_ = right_data_type;
-        result->op_ = static_cast<OpType>(expr_pb.op());
+        result->op_type_ = static_cast<OpType>(expr_pb.op());
         return result;
     }();
 }

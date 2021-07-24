@@ -271,7 +271,7 @@ func (context *ParserContext) createCmpExpr(left, right ant_ast.Node, operator s
 		}
 		op := getCompareOpType(operator, false)
 		if op == planpb.OpType_Invalid {
-			return nil, fmt.Errorf("invalid binary operator %s", operator)
+			return nil, fmt.Errorf("invalid binary operator(%s)", operator)
 		}
 		expr := &planpb.Expr{
 			Expr: &planpb.Expr_CompareExpr{
@@ -312,7 +312,7 @@ func (context *ParserContext) createCmpExpr(left, right ant_ast.Node, operator s
 
 	op := getCompareOpType(operator, isReversed)
 	if op == planpb.OpType_Invalid {
-		return nil, fmt.Errorf("invalid binary operator %s", operator)
+		return nil, fmt.Errorf("invalid binary operator(%s)", operator)
 	}
 
 	expr := &planpb.Expr{
@@ -334,7 +334,7 @@ func (context *ParserContext) handleCmpExpr(node *ant_ast.BinaryNode) (*planpb.E
 func (context *ParserContext) handleLogicalExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
 	op := getLogicalOpType(node.Operator)
 	if op == planpb.BinaryExpr_Invalid {
-		return nil, fmt.Errorf("invalid logical op(%s)", node.Operator)
+		return nil, fmt.Errorf("invalid logical operator(%s)", node.Operator)
 	}
 
 	leftExpr, err := context.handleExpr(&node.Left)
@@ -377,7 +377,7 @@ func (context *ParserContext) handleArrayExpr(node *ant_ast.Node, dataType schem
 
 func (context *ParserContext) handleInExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
 	if node.Operator != "in" && node.Operator != "not in" {
-		return nil, fmt.Errorf("invalid Operator(%s)", node.Operator)
+		return nil, fmt.Errorf("invalid operator(%s)", node.Operator)
 	}
 	idNode, ok := node.Left.(*ant_ast.IdentifierNode)
 	if !ok {
@@ -451,6 +451,8 @@ func (context *ParserContext) handleMultiCmpExpr(node *ant_ast.BinaryNode) (*pla
 			}
 			exprs = append(exprs, expr)
 			curNode = binNodeLeft
+		} else {
+			return nil, fmt.Errorf("illegal multi-range expr")
 		}
 	}
 

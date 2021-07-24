@@ -92,7 +92,7 @@ static const std::map<std::string, OpType> mapping_ = {
 struct UnaryRangeExpr : Expr {
     FieldOffset field_offset_;
     DataType data_type_ = DataType::NONE;
-    OpType op_;
+    OpType op_type_;
 
  protected:
     // prevent accidential instantiation
@@ -123,7 +123,7 @@ struct CompareExpr : Expr {
     FieldOffset right_field_offset_;
     DataType left_data_type_;
     DataType right_data_type_;
-    OpType op_;
+    OpType op_type_;
 
  public:
     void
