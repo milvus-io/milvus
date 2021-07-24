@@ -179,6 +179,53 @@ TEST(BINFLAT, Build) {
     ASSERT_NO_THROW(index->BuildAll(xb_dataset, conf));
 }
 
+void
+print_query_result(const std::unique_ptr<milvus::indexbuilder::IndexWrapper::QueryResult>& result) {
+    for (auto i = 0; i < result->nq; i++) {
+        printf("result of %dth query:\n", i);
+        for (auto j = 0; j < result->topk; j++) {
+            auto offset = i * result->topk + j;
+            printf("id: %ld, distance: %f\n", result->ids[offset], result->distances[offset]);
+        }
+    }
+}
+
+// test for: https://github.com/milvus-io/milvus/issues/6569
+TEST(BinIVFFlat, Build_and_Query) {
+    auto index_type = milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
+    auto metric_type = milvus::knowhere::Metric::TANIMOTO;
+    auto conf = generate_conf(index_type, metric_type);
+    auto topk = 10;
+    conf[milvus::knowhere::meta::TOPK] = topk;
+    conf[milvus::knowhere::IndexParams::nlist] = 1;
+    auto index = milvus::knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
+    auto nb = 2;
+    auto dim = 128;
+    auto nq = 10;
+    auto dataset = GenDataset(std::max(nq, nb), metric_type, true);
+    auto xb_data = dataset.get_col<uint8_t>(0);
+    std::vector<milvus::knowhere::IDType> ids(nb, 0);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto xb_dataset = milvus::knowhere::GenDataset(nb, dim, xb_data.data());
+    index->BuildAll(xb_dataset, conf);
+    auto xq_data = dataset.get_col<float>(0);
+    auto xq_dataset = milvus::knowhere::GenDataset(nq, dim, xq_data.data());
+    auto result = index->Query(xq_dataset, conf, nullptr);
+
+    auto hit_ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
+    auto distances = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
+
+    auto query_res = std::make_unique<milvus::indexbuilder::IndexWrapper::QueryResult>();
+    query_res->nq = nq;
+    query_res->topk = topk;
+    query_res->ids.resize(nq * topk);
+    query_res->distances.resize(nq * topk);
+    memcpy(query_res->ids.data(), hit_ids, sizeof(int64_t) * nq * topk);
+    memcpy(query_res->distances.data(), distances, sizeof(float) * nq * topk);
+
+    print_query_result(query_res);
+}
+
 TEST(BINIDMAP, Build) {
     auto index_type = milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP;
     auto metric_type = milvus::knowhere::Metric::JACCARD;
@@ -314,6 +361,8 @@ INSTANTIATE_TEST_CASE_P(
                       std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, milvus::knowhere::Metric::L2),
                       std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
                                 milvus::knowhere::Metric::JACCARD),
+                      std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
+                                milvus::knowhere::Metric::TANIMOTO),
                       std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, milvus::knowhere::Metric::JACCARD),
 #ifdef MILVUS_SUPPORT_SPTAG
                       std::pair(milvus::knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT, milvus::knowhere::Metric::L2),

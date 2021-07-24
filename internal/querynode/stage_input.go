@@ -57,13 +57,13 @@ func (q *inputStage) start() {
 		default:
 			msgPack := q.queryStream.Consume()
 			if msgPack == nil || len(msgPack.Msgs) <= 0 {
-				msgPackNil := msgPack == nil
-				msgPackEmpty := true
-				if msgPack != nil {
-					msgPackEmpty = len(msgPack.Msgs) <= 0
-				}
-				log.Debug("consume query message failed", zap.Any("msgPack is Nil", msgPackNil),
-					zap.Any("msgPackEmpty", msgPackEmpty))
+				//msgPackNil := msgPack == nil
+				//msgPackEmpty := true
+				//if msgPack != nil {
+				//	msgPackEmpty = len(msgPack.Msgs) <= 0
+				//}
+				//log.Debug("consume query message failed", zap.Any("msgPack is Nil", msgPackNil),
+				//	zap.Any("msgPackEmpty", msgPackEmpty))
 				continue
 			}
 			for _, msg := range msgPack.Msgs {

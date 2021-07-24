@@ -75,29 +75,29 @@ func (q *requestHandlerStage) start() {
 			switch msgType {
 			case commonpb.MsgType_Retrieve:
 				collectionID = msg.(*msgstream.RetrieveMsg).CollectionID
-				msgTypeStr = "retrieve"
-				log.Debug("consume retrieve message",
-					zap.Any("collectionID", collectionID),
-					zap.Int64("msgID", msg.ID()),
-				)
+				//msgTypeStr = "retrieve"
+				//log.Debug("consume retrieve message",
+				//	zap.Any("collectionID", collectionID),
+				//	zap.Int64("msgID", msg.ID()),
+				//)
 			case commonpb.MsgType_Search:
 				collectionID = msg.(*msgstream.SearchMsg).CollectionID
-				msgTypeStr = "search"
-				log.Debug("consume search message",
-					zap.Any("collectionID", collectionID),
-					zap.Int64("msgID", msg.ID()),
-				)
+				//msgTypeStr = "search"
+				//log.Debug("consume search message",
+				//	zap.Any("collectionID", collectionID),
+				//	zap.Int64("msgID", msg.ID()),
+				//)
 			default:
 				err := fmt.Errorf("receive invalid msgType = %d", msgType)
 				log.Error(err.Error())
 				continue
 			}
 			if collectionID != q.collectionID {
-				log.Error("not target collection query request",
-					zap.Any("collectionID", q.collectionID),
-					zap.Int64("target collectionID", collectionID),
-					zap.Int64("msgID", msg.ID()),
-				)
+				//log.Error("not target collection query request",
+				//	zap.Any("collectionID", q.collectionID),
+				//	zap.Int64("target collectionID", collectionID),
+				//	zap.Int64("msgID", msg.ID()),
+				//)
 				continue
 			}
 

@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 const queryBufferSize = 1024
@@ -69,6 +70,8 @@ type queryCollection struct {
 
 	queryMsgStream       msgstream.MsgStream
 	queryResultMsgStream msgstream.MsgStream
+
+	vcm *storage.VectorChunkManager
 }
 
 type ResultEntityIds []UniqueID
@@ -78,10 +81,14 @@ func newQueryCollection(releaseCtx context.Context,
 	collectionID UniqueID,
 	historical *historical,
 	streaming *streaming,
-	factory msgstream.Factory) *queryCollection {
+	factory msgstream.Factory,
+	lcm storage.ChunkManager,
+	rcm storage.ChunkManager) *queryCollection {
 
 	queryStream, _ := factory.NewQueryMsgStream(releaseCtx)
 	queryResultStream, _ := factory.NewQueryMsgStream(releaseCtx)
+
+	vcm := storage.NewVectorChunkManager(lcm, rcm)
 
 	qc := &queryCollection{
 		releaseCtx: releaseCtx,
@@ -93,6 +100,8 @@ func newQueryCollection(releaseCtx context.Context,
 
 		queryMsgStream:       queryStream,
 		queryResultMsgStream: queryResultStream,
+
+		vcm: vcm,
 	}
 
 	return qc
@@ -140,7 +149,8 @@ func (q *queryCollection) start() error {
 		q.collectionID,
 		hisChan,
 		resChan,
-		q.historical)
+		q.historical,
+		q.vcm)
 
 	vcStages := make(map[Channel]*vChannelStage)
 	unsolvedStages := make(map[Channel]*unsolvedStage)

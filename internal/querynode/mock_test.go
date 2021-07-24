@@ -242,7 +242,7 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.I
 				data[i] = true
 			}
 			insertData.Data[f.FieldID] = &storage.BoolFieldData{
-				NumRows: msgLength,
+				NumRows: []int64{int64(msgLength)},
 				Data:    data,
 			}
 		case schemapb.DataType_Int8:
@@ -251,7 +251,7 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.I
 				data[i] = int8(i)
 			}
 			insertData.Data[f.FieldID] = &storage.Int8FieldData{
-				NumRows: msgLength,
+				NumRows: []int64{int64(msgLength)},
 				Data:    data,
 			}
 		case schemapb.DataType_Int16:
@@ -260,7 +260,7 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.I
 				data[i] = int16(i)
 			}
 			insertData.Data[f.FieldID] = &storage.Int16FieldData{
-				NumRows: msgLength,
+				NumRows: []int64{int64(msgLength)},
 				Data:    data,
 			}
 		case schemapb.DataType_Int32:
@@ -269,7 +269,7 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.I
 				data[i] = int32(i)
 			}
 			insertData.Data[f.FieldID] = &storage.Int32FieldData{
-				NumRows: msgLength,
+				NumRows: []int64{int64(msgLength)},
 				Data:    data,
 			}
 		case schemapb.DataType_Int64:
@@ -278,7 +278,7 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.I
 				data[i] = int64(i)
 			}
 			insertData.Data[f.FieldID] = &storage.Int64FieldData{
-				NumRows: msgLength,
+				NumRows: []int64{int64(msgLength)},
 				Data:    data,
 			}
 		case schemapb.DataType_Float:
@@ -287,7 +287,7 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.I
 				data[i] = float32(i)
 			}
 			insertData.Data[f.FieldID] = &storage.FloatFieldData{
-				NumRows: msgLength,
+				NumRows: []int64{int64(msgLength)},
 				Data:    data,
 			}
 		case schemapb.DataType_Double:
@@ -296,7 +296,7 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.I
 				data[i] = float64(i)
 			}
 			insertData.Data[f.FieldID] = &storage.DoubleFieldData{
-				NumRows: msgLength,
+				NumRows: []int64{int64(msgLength)},
 				Data:    data,
 			}
 		case schemapb.DataType_FloatVector:
@@ -317,7 +317,7 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.I
 				}
 			}
 			insertData.Data[f.FieldID] = &storage.FloatVectorFieldData{
-				NumRows: msgLength,
+				NumRows: []int64{int64(msgLength)},
 				Data:    data,
 				Dim:     dim,
 			}
@@ -399,7 +399,7 @@ func genSimpleSealedSegment() (*Segment, error) {
 		return nil, err
 	}
 	for k, v := range insertData.Data {
-		var numRows int
+		var numRows []int64
 		var data interface{}
 		switch fieldData := v.(type) {
 		case *storage.BoolFieldData:
@@ -435,7 +435,11 @@ func genSimpleSealedSegment() (*Segment, error) {
 		default:
 			return nil, errors.New("unexpected field data type")
 		}
-		err := seg.segmentLoadFieldData(k, numRows, data)
+		totalNumRows := int64(0)
+		for _, numRow := range numRows {
+			totalNumRows += numRow
+		}
+		err := seg.segmentLoadFieldData(k, int(totalNumRows), data)
 		if err != nil {
 			return nil, err
 		}
@@ -677,7 +681,7 @@ func genSimpleSearchResult() (*searchResult, error) {
 	}
 	inputChan := make(chan queryMsg, queryBufferSize)
 	outputChan := make(chan queryResult, queryBufferSize)
-	hs := newHistoricalStage(ctx, defaultCollectionID, inputChan, outputChan, his)
+	hs := newHistoricalStage(ctx, defaultCollectionID, inputChan, outputChan, his, nil)
 	go hs.start()
 	go func() {
 		inputChan <- msg

@@ -28,7 +28,7 @@ func TestHistoricalStage_HistoricalStage(t *testing.T) {
 	assert.NoError(t, err)
 	inputChan := make(chan queryMsg, queryBufferSize)
 	outputChan := make(chan queryResult, queryBufferSize)
-	hs := newHistoricalStage(ctx, defaultCollectionID, inputChan, outputChan, his)
+	hs := newHistoricalStage(ctx, defaultCollectionID, inputChan, outputChan, his, nil)
 	go hs.start()
 
 	// construct searchMsg

@@ -281,6 +281,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 		}
 		msgPack := statsStream.Consume()
 		if msgPack == nil {
+			log.Debug("receive nil stats msg, shutdown stats channel")
 			return
 		}
 		for _, msg := range msgPack.Msgs {
@@ -321,6 +322,7 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 		}
 		msgPack := ttMsgStream.Consume()
 		if msgPack == nil {
+			log.Debug("receive nil tt msg, shutdown tt channel")
 			return
 		}
 		for _, msg := range msgPack.Msgs {
@@ -407,7 +409,7 @@ func (s *Server) startActiveCheck(ctx context.Context) {
 			if ok {
 				continue
 			}
-			s.Stop()
+			go func() { s.Stop() }()
 			log.Debug("disconnect with etcd and shutdown data coordinator")
 			return
 		case <-ctx.Done():
@@ -487,7 +489,6 @@ func (s *Server) Stop() error {
 		return nil
 	}
 	log.Debug("DataCoord server shutdown")
-	atomic.StoreInt64(&s.isServing, ServerStateStopped)
 	s.cluster.Close()
 	s.stopServerLoop()
 	return nil
