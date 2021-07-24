@@ -285,7 +285,6 @@ template <typename T>
 ExprPtr
 Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
     Assert(body.is_object());
-    std::cout << body.size() << std::endl;
     if (body.size() == 1) {
         for (auto& item : body.items()) {
             auto op_name = boost::algorithm::to_lower_copy(std::string(item.key()));
