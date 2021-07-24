@@ -1530,8 +1530,8 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Compare) {
     {
         int64_t offset;
         PreInsert(segment, N, &offset);
-        auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
-                              dataset.raw_.sizeof_per_row, dataset.raw_.count);
+        auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
+                              dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
         assert(ins_res.error_code == Success);
     }
 
@@ -1629,7 +1629,7 @@ vector_anns: <
     auto sealed_segment = SealedCreator(schema, dataset, *(LoadIndexInfo*)c_load_index_info);
     CSearchResult c_search_result_on_bigIndex;
     auto res_after_load_index =
-            Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     assert(res_after_load_index.error_code == Success);
 
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
@@ -2231,7 +2231,7 @@ vector_anns: <
     DeleteSegment(segment);
 }
 
-//TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Compare) {
+// TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Compare) {
 //    // insert data to segment
 //    constexpr auto TOPK = 5;
 //
@@ -2247,12 +2247,13 @@ vector_anns: <
 //
 //    int64_t offset;
 //    PreInsert(segment, N, &offset);
-//    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
+//    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
+//    dataset.raw_.raw_data,
 //                          dataset.raw_.sizeof_per_row, dataset.raw_.count);
 //    assert(ins_res.error_code == Success);
 //
 //    const char* serialized_expr_plan = R"(
-//vector_anns: <
+// vector_anns: <
 //  field_id: 100
 //  predicates: <
 //    compare_expr: <

@@ -62,7 +62,6 @@ struct LogicalBinaryExpr : BinaryExprBase {
 struct TermExpr : Expr {
     FieldOffset field_offset_;
     DataType data_type_ = DataType::NONE;
-    // std::vector<std::any> terms_;
 
  protected:
     // prevent accidential instantiation
@@ -84,7 +83,7 @@ enum class OpType {
 };
 
 static const std::map<std::string, OpType> mapping_ = {
-    // op_name -> op_
+    // op_name -> op
     {"lt", OpType::LessThan},    {"le", OpType::LessEqual},    {"lte", OpType::LessEqual},
     {"gt", OpType::GreaterThan}, {"ge", OpType::GreaterEqual}, {"gte", OpType::GreaterEqual},
     {"eq", OpType::Equal},       {"ne", OpType::NotEqual},
@@ -110,11 +109,11 @@ struct BinaryRangeExpr : Expr {
     bool lower_inclusive_;
     bool upper_inclusive_;
 
-protected:
+ protected:
     // prevent accidential instantiation
     BinaryRangeExpr() = default;
 
-public:
+ public:
     void
     accept(ExprVisitor&) override;
 };

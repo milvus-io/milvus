@@ -327,11 +327,13 @@ Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
             }
             auto op = mapping_.at(op_name);
             switch (op) {
-                case OpType::GreaterEqual: lower_inclusive = true;
+                case OpType::GreaterEqual:
+                    lower_inclusive = true;
                 case OpType::GreaterThan:
                     lower_value = item.value();
                     break;
-                case OpType::LessEqual: upper_inclusive = true;
+                case OpType::LessEqual:
+                    upper_inclusive = true;
                 case OpType::LessThan:
                     upper_value = item.value();
                     break;

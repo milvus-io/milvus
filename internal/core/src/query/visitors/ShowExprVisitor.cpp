@@ -148,13 +148,13 @@ static Json
 UnaryRangeExtract(const UnaryRangeExpr& expr_raw) {
     using proto::plan::OpType;
     using proto::plan::OpType_Name;
-    auto expr = dynamic_cast<const UnaryRangeExprImpl<T> *>(&expr_raw);
+    auto expr = dynamic_cast<const UnaryRangeExprImpl<T>*>(&expr_raw);
     Assert(expr);
-    Json res{{"expr_type",    "UnaryRange"},
+    Json res{{"expr_type", "UnaryRange"},
              {"field_offset", expr->field_offset_.get()},
-             {"data_type",    datatype_name(expr->data_type_)},
-             {"op",           OpType_Name(static_cast<OpType>(expr->op_))},
-             {"value",        expr->value_}};
+             {"data_type", datatype_name(expr->data_type_)},
+             {"op", OpType_Name(static_cast<OpType>(expr->op_))},
+             {"value", expr->value_}};
     return res;
 }
 
@@ -165,18 +165,25 @@ ShowExprVisitor::visit(UnaryRangeExpr& expr) {
     switch (expr.data_type_) {
         case DataType::BOOL:
             ret_ = UnaryRangeExtract<bool>(expr);
+            return;
         case DataType::INT8:
             ret_ = UnaryRangeExtract<int8_t>(expr);
+            return;
         case DataType::INT16:
             ret_ = UnaryRangeExtract<int16_t>(expr);
+            return;
         case DataType::INT32:
             ret_ = UnaryRangeExtract<int32_t>(expr);
+            return;
         case DataType::INT64:
             ret_ = UnaryRangeExtract<int64_t>(expr);
+            return;
         case DataType::DOUBLE:
             ret_ = UnaryRangeExtract<double>(expr);
+            return;
         case DataType::FLOAT:
             ret_ = UnaryRangeExtract<float>(expr);
+            return;
         default:
             PanicInfo("unsupported type");
     };
@@ -187,15 +194,15 @@ static Json
 BinaryRangeExtract(const BinaryRangeExpr& expr_raw) {
     using proto::plan::OpType;
     using proto::plan::OpType_Name;
-    auto expr = dynamic_cast<const BinaryRangeExprImpl<T> *>(&expr_raw);
+    auto expr = dynamic_cast<const BinaryRangeExprImpl<T>*>(&expr_raw);
     Assert(expr);
-    Json res{{"expr_type",    "BinaryRange"},
+    Json res{{"expr_type", "BinaryRange"},
              {"field_offset", expr->field_offset_.get()},
-             {"data_type",    datatype_name(expr->data_type_)},
-             {"lower_inclusive",          expr->lower_inclusive_},
-             {"upper_inclusive",          expr->upper_inclusive_},
-             {"lower_value",        expr->lower_value_},
-             {"upper_value",        expr->upper_value_}};
+             {"data_type", datatype_name(expr->data_type_)},
+             {"lower_inclusive", expr->lower_inclusive_},
+             {"upper_inclusive", expr->upper_inclusive_},
+             {"lower_value", expr->lower_value_},
+             {"upper_value", expr->upper_value_}};
     return res;
 }
 
@@ -206,18 +213,25 @@ ShowExprVisitor::visit(BinaryRangeExpr& expr) {
     switch (expr.data_type_) {
         case DataType::BOOL:
             ret_ = BinaryRangeExtract<bool>(expr);
+            return;
         case DataType::INT8:
             ret_ = BinaryRangeExtract<int8_t>(expr);
+            return;
         case DataType::INT16:
             ret_ = BinaryRangeExtract<int16_t>(expr);
+            return;
         case DataType::INT32:
             ret_ = BinaryRangeExtract<int32_t>(expr);
+            return;
         case DataType::INT64:
             ret_ = BinaryRangeExtract<int64_t>(expr);
+            return;
         case DataType::DOUBLE:
             ret_ = BinaryRangeExtract<double>(expr);
+            return;
         case DataType::FLOAT:
             ret_ = BinaryRangeExtract<float>(expr);
+            return;
         default:
             PanicInfo("unsupported type");
     };
@@ -229,12 +243,12 @@ ShowExprVisitor::visit(CompareExpr& expr) {
     using proto::plan::OpType_Name;
     Assert(!ret_.has_value());
 
-    Json res{{"expr_type",          "Compare"},
-             {"left_field_offset",  expr.left_field_offset_.get()},
-             {"left_data_type",     datatype_name(expr.left_data_type_)},
+    Json res{{"expr_type", "Compare"},
+             {"left_field_offset", expr.left_field_offset_.get()},
+             {"left_data_type", datatype_name(expr.left_data_type_)},
              {"right_field_offset", expr.right_field_offset_.get()},
-             {"right_data_type",    datatype_name(expr.right_data_type_)},
-             {"op",                 OpType_Name(static_cast<OpType>(expr.op_))}};
+             {"right_data_type", datatype_name(expr.right_data_type_)},
+             {"op", OpType_Name(static_cast<OpType>(expr.op_))}};
     ret_ = res;
 }
 }  // namespace milvus::query
