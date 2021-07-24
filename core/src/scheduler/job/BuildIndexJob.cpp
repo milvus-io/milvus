@@ -68,5 +68,17 @@ BuildIndexJob::OnCacheInsertDataChanged(bool value) {
     options_.insert_cache_immediately_ = value;
 }
 
+void
+BuildIndexJob::SetStatus(const Status& status) {
+    std::lock_guard<std::mutex> lock(status_mutex_);
+    status_ = status;
+}
+
+void
+BuildIndexJob::GetStatus(Status& status) {
+    std::lock_guard<std::mutex> lock(status_mutex_);
+    status = status_;
+}
+
 }  // namespace scheduler
 }  // namespace milvus

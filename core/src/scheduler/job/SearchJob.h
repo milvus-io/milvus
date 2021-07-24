@@ -65,8 +65,11 @@ class SearchJob : public Job {
     ResultDistances&
     GetResultDistances();
 
-    Status&
-    GetStatus();
+    void
+    SetStatus(const Status& status);
+
+    void
+    GetStatus(Status& status);
 
     json
     Dump() const override;
@@ -133,6 +136,7 @@ class SearchJob : public Job {
     ResultIds result_ids_;
     ResultDistances result_distances_;
     Status status_;
+    std::mutex status_mutex_;
 
     query::GeneralQueryPtr general_query_;
     std::unordered_map<std::string, engine::meta::hybrid::DataType> attr_type_;

@@ -1866,8 +1866,11 @@ DBImpl::QueryAsync(const std::shared_ptr<server::Context>& context, meta::FilesH
     ResumeIfLast();
 
     files_holder.ReleaseFiles();
-    if (!job->GetStatus().ok()) {
-        return job->GetStatus();
+
+    Status job_status;
+    job->GetStatus(job_status);
+    if (!job_status.ok()) {
+        return job_status;
     }
 
     // step 3: construct results
@@ -2063,11 +2066,12 @@ DBImpl::BackgroundBuildIndex() {
             meta::SegmentSchema& file_schema = *(iter->second.get());
             job->WaitBuildIndexFinish();
             LOG_ENGINE_INFO_ << "Build Index Progress: " << ++completed << " of " << job2file_map.size();
-            if (!job->GetStatus().ok()) {
-                Status status = job->GetStatus();
-                LOG_ENGINE_ERROR_ << "Building index job " << job->id() << " failed: " << status.ToString();
+            Status job_status;
+            job->GetStatus(job_status);
+            if (!job_status.ok()) {
+                LOG_ENGINE_ERROR_ << "Building index job " << job->id() << " failed: " << job_status.ToString();
 
-                index_failed_checker_.MarkFailedIndexFile(file_schema, status.message());
+                index_failed_checker_.MarkFailedIndexFile(file_schema, job_status.message());
             } else {
                 LOG_ENGINE_DEBUG_ << "Building index job " << job->id() << " succeed.";
 

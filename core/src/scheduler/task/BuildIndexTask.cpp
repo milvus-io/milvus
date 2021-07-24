@@ -93,7 +93,7 @@ XBuildIndexTask::Load(milvus::scheduler::LoadType type, uint8_t device_id) {
 
             if (auto job = job_.lock()) {
                 auto build_index_job = std::static_pointer_cast<scheduler::BuildIndexJob>(job);
-                build_index_job->GetStatus() = s;
+                build_index_job->SetStatus(s);
                 build_index_job->BuildIndexDone(file_->id_);
             }
 
@@ -120,7 +120,7 @@ XBuildIndexTask::Execute() {
         auto build_index_job = std::static_pointer_cast<scheduler::BuildIndexJob>(job);
         if (to_index_engine_ == nullptr) {
             build_index_job->BuildIndexDone(to_index_id_);
-            build_index_job->GetStatus() = Status(DB_ERROR, "source index is null");
+            build_index_job->SetStatus(Status(DB_ERROR, "source index is null"));
             return;
         }
 
@@ -141,7 +141,7 @@ XBuildIndexTask::Execute() {
         if (!status.ok()) {
             LOG_ENGINE_ERROR_ << "Failed to create collection file: " << status.ToString();
             build_index_job->BuildIndexDone(to_index_id_);
-            build_index_job->GetStatus() = status;
+            build_index_job->SetStatus(status);
             to_index_engine_ = nullptr;
             return;
         }
@@ -152,7 +152,7 @@ XBuildIndexTask::Execute() {
             LOG_ENGINE_ERROR_ << log_msg;
 
             build_index_job->BuildIndexDone(to_index_id_);
-            build_index_job->GetStatus() = Status(DB_ERROR, err_msg);
+            build_index_job->SetStatus(Status(DB_ERROR, err_msg));
             to_index_engine_ = nullptr;
         };
 
