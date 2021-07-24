@@ -107,13 +107,13 @@ Parser::ParseCompareNode(const Json& out_body) {
     auto expr = std::make_unique<CompareExpr>();
     expr->op_type_ = mapping_.at(op_name);
 
-    auto item0 = body[0];
+    auto& item0 = body[0];
     Assert(item0.is_string());
     auto left_field_name = FieldName(item0.get<std::string>());
     expr->left_data_type_ = schema[left_field_name].get_data_type();
     expr->left_field_offset_ = schema.get_offset(left_field_name);
 
-    auto item1 = body[1];
+    auto& item1 = body[1];
     Assert(item1.is_string());
     auto right_field_name = FieldName(item1.get<std::string>());
     expr->right_data_type_ = schema[right_field_name].get_data_type();
@@ -275,33 +275,33 @@ Parser::ParseTermNodeImpl(const FieldName& field_name, const Json& body) {
     return expr;
 }
 
-// Warning: incomplete validation of range node, for dsl parser is deprecated.
 template <typename T>
 ExprPtr
 Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
     Assert(body.is_object());
     if (body.size() == 1) {
-        for (auto& item : body.items()) {
-            auto op_name = boost::algorithm::to_lower_copy(std::string(item.key()));
-            AssertInfo(mapping_.count(op_name), "op(" + op_name + ") not found");
-            if constexpr (std::is_same_v<T, bool>) {
-                Assert(item.value().is_boolean());
-            } else if constexpr (std::is_integral_v<T>) {
-                Assert(item.value().is_number_integer());
-            } else if constexpr (std::is_floating_point_v<T>) {
-                Assert(item.value().is_number());
-            } else {
-                static_assert(always_false<T>, "unsupported type");
-                __builtin_unreachable();
-            }
-            auto expr = std::make_unique<UnaryRangeExprImpl<T>>();
-            expr->data_type_ = schema[field_name].get_data_type();
-            expr->field_offset_ = schema.get_offset(field_name);
-            expr->op_type_ = mapping_.at(op_name);
-            expr->value_ = item.value();
-            return expr;
+        auto item = body.begin();
+        auto op_name = boost::algorithm::to_lower_copy(std::string(item.key()));
+        AssertInfo(mapping_.count(op_name), "op(" + op_name + ") not found");
+        if constexpr (std::is_same_v<T, bool>) {
+            Assert(item.value().is_boolean());
+        } else if constexpr (std::is_integral_v<T>) {
+            Assert(item.value().is_number_integer());
+        } else if constexpr (std::is_floating_point_v<T>) {
+            Assert(item.value().is_number());
+        } else {
+            static_assert(always_false<T>, "unsupported type");
+            __builtin_unreachable();
         }
+        auto expr = std::make_unique<UnaryRangeExprImpl<T>>();
+        expr->data_type_ = schema[field_name].get_data_type();
+        expr->field_offset_ = schema.get_offset(field_name);
+        expr->op_type_ = mapping_.at(op_name);
+        expr->value_ = item.value();
+        return expr;
     } else if (body.size() == 2) {
+        bool has_lower_value = false;
+        bool has_upper_value = false;
         bool lower_inclusive = false;
         bool upper_inclusive = false;
         T lower_value;
@@ -325,16 +325,19 @@ Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
                     lower_inclusive = true;
                 case OpType::GreaterThan:
                     lower_value = item.value();
+                    has_lower_value = true;
                     break;
                 case OpType::LessEqual:
                     upper_inclusive = true;
                 case OpType::LessThan:
                     upper_value = item.value();
+                    has_upper_value = true;
                     break;
                 default:
-                    PanicInfo("illegal range node");
+                    PanicInfo("unsupported operator in binary-range node");
             }
         }
+        AssertInfo(has_lower_value && has_upper_value, "illegal binary-range node");
         auto expr = std::make_unique<BinaryRangeExprImpl<T>>();
         expr->data_type_ = schema[field_name].get_data_type();
         expr->field_offset_ = schema.get_offset(field_name);
