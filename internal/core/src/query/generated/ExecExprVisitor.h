@@ -52,9 +52,9 @@ class ExecExprVisitor : public ExprVisitor {
         Assert(!ret_.has_value());
         expr.accept(*this);
         Assert(ret_.has_value());
-        auto ret = std::move(ret_);
+        auto res = std::move(ret_);
         ret_ = std::nullopt;
-        return std::move(ret.value());
+        return std::move(res.value());
     }
 
  public:

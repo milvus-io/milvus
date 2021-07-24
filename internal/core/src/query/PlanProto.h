@@ -13,7 +13,6 @@
 #include "query/PlanNode.h"
 #include "pb/plan.pb.h"
 #include "query/Plan.h"
-#include "../pb/plan.pb.h"
 #include <boost/dynamic_bitset.hpp>
 #include <memory>
 

@@ -180,39 +180,39 @@ ExecExprVisitor::ExecRangeVisitorImpl(FieldOffset field_offset, IndexFunc index_
 template <typename T>
 auto
 ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> RetType {
-    auto &expr = static_cast<UnaryRangeExprImpl<T> &>(expr_raw);
+    auto& expr = static_cast<UnaryRangeExprImpl<T>&>(expr_raw);
     using Index = knowhere::scalar::StructuredIndex<T>;
     using Operator = knowhere::scalar::OperatorType;
     auto op = expr.op_type_;
     auto val = expr.value_;
     switch (op) {
         case OpType::Equal: {
-            auto index_func = [val](Index *index) { return index->In(1, &val); };
+            auto index_func = [val](Index* index) { return index->In(1, &val); };
             auto elem_func = [val](T x) { return (x == val); };
             return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
         }
         case OpType::NotEqual: {
-            auto index_func = [val](Index *index) { return index->NotIn(1, &val); };
+            auto index_func = [val](Index* index) { return index->NotIn(1, &val); };
             auto elem_func = [val](T x) { return (x != val); };
             return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
         }
         case OpType::GreaterEqual: {
-            auto index_func = [val](Index *index) { return index->Range(val, Operator::GE); };
+            auto index_func = [val](Index* index) { return index->Range(val, Operator::GE); };
             auto elem_func = [val](T x) { return (x >= val); };
             return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
         }
         case OpType::GreaterThan: {
-            auto index_func = [val](Index *index) { return index->Range(val, Operator::GT); };
+            auto index_func = [val](Index* index) { return index->Range(val, Operator::GT); };
             auto elem_func = [val](T x) { return (x > val); };
             return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
         }
         case OpType::LessEqual: {
-            auto index_func = [val](Index *index) { return index->Range(val, Operator::LE); };
+            auto index_func = [val](Index* index) { return index->Range(val, Operator::LE); };
             auto elem_func = [val](T x) { return (x <= val); };
             return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
         }
         case OpType::LessThan: {
-            auto index_func = [val](Index *index) { return index->Range(val, Operator::LT); };
+            auto index_func = [val](Index* index) { return index->Range(val, Operator::LT); };
             auto elem_func = [val](T x) { return (x < val); };
             return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
         }
@@ -228,7 +228,7 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> Re
 template <typename T>
 auto
 ExecExprVisitor::ExecBinaryRangeVisitorDispatcher(BinaryRangeExpr& expr_raw) -> RetType {
-    auto &expr = static_cast<BinaryRangeExprImpl<T> &>(expr_raw);
+    auto& expr = static_cast<BinaryRangeExprImpl<T>&>(expr_raw);
     using Index = knowhere::scalar::StructuredIndex<T>;
     using Operator = knowhere::scalar::OperatorType;
     bool lower_inclusive = expr.lower_inclusive_;
@@ -240,19 +240,19 @@ ExecExprVisitor::ExecBinaryRangeVisitorDispatcher(BinaryRangeExpr& expr_raw) -> 
         RetType res(row_count_, false);
         return res;
     }
-    auto index_func = [=](Index *index) { return index->Range(val1, lower_inclusive, val2, upper_inclusive); };
+    auto index_func = [=](Index* index) { return index->Range(val1, lower_inclusive, val2, upper_inclusive); };
     if (lower_inclusive && upper_inclusive) {
-        auto elem_func =  [val1, val2](T x) { return (val1 <= x && x <= val2); };
-        return ExecRangeVisitorImpl<T, decltype(index_func), decltype(elem_func)>(expr.field_offset_, index_func, elem_func);
+        auto elem_func = [val1, val2](T x) { return (val1 <= x && x <= val2); };
+        return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
     } else if (lower_inclusive && !upper_inclusive) {
         auto elem_func = [val1, val2](T x) { return (val1 <= x && x < val2); };
-        return ExecRangeVisitorImpl<T, decltype(index_func), decltype(elem_func)>(expr.field_offset_, index_func, elem_func);
+        return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
     } else if (!lower_inclusive && upper_inclusive) {
         auto elem_func = [val1, val2](T x) { return (val1 < x && x <= val2); };
-        return ExecRangeVisitorImpl<T, decltype(index_func), decltype(elem_func)>(expr.field_offset_, index_func, elem_func);
+        return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
     } else {
         auto elem_func = [val1, val2](T x) { return (val1 < x && x < val2); };
-        return ExecRangeVisitorImpl<T, decltype(index_func), decltype(elem_func)>(expr.field_offset_, index_func, elem_func);
+        return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
     }
 }
 #pragma clang diagnostic pop
@@ -300,36 +300,36 @@ ExecExprVisitor::visit(UnaryRangeExpr& expr) {
 
 void
 ExecExprVisitor::visit(BinaryRangeExpr& expr) {
-    auto &field_meta = segment_.get_schema()[expr.field_offset_];
+    auto& field_meta = segment_.get_schema()[expr.field_offset_];
     Assert(expr.data_type_ == field_meta.get_data_type());
     RetType res;
     switch (expr.data_type_) {
         case DataType::BOOL: {
-            res = ExecRangeVisitorDispatcher<bool>(expr);
+            res = ExecBinaryRangeVisitorDispatcher<bool>(expr);
             break;
         }
         case DataType::INT8: {
-            res = ExecRangeVisitorDispatcher<int8_t>(expr);
+            res = ExecBinaryRangeVisitorDispatcher<int8_t>(expr);
             break;
         }
         case DataType::INT16: {
-            res = ExecRangeVisitorDispatcher<int16_t>(expr);
+            res = ExecBinaryRangeVisitorDispatcher<int16_t>(expr);
             break;
         }
         case DataType::INT32: {
-            res = ExecRangeVisitorDispatcher<int32_t>(expr);
+            res = ExecBinaryRangeVisitorDispatcher<int32_t>(expr);
             break;
         }
         case DataType::INT64: {
-            res = ExecRangeVisitorDispatcher<int64_t>(expr);
+            res = ExecBinaryRangeVisitorDispatcher<int64_t>(expr);
             break;
         }
         case DataType::FLOAT: {
-            res = ExecRangeVisitorDispatcher<float>(expr);
+            res = ExecBinaryRangeVisitorDispatcher<float>(expr);
             break;
         }
         case DataType::DOUBLE: {
-            res = ExecRangeVisitorDispatcher<double>(expr);
+            res = ExecBinaryRangeVisitorDispatcher<double>(expr);
             break;
         }
         default:
@@ -466,9 +466,7 @@ ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> RetType {
     std::deque<RetType> bitsets;
     for (int64_t chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
         Span<T> chunk = segment_.chunk_data<T>(field_offset, chunk_id);
-
         auto size = chunk_id == num_chunk - 1 ? row_count_ - chunk_id * size_per_chunk : size_per_chunk;
-
         boost::dynamic_bitset<> bitset(size);
         for (int i = 0; i < size; ++i) {
             auto value = chunk.data()[i];

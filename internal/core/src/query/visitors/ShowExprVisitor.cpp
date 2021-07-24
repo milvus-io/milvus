@@ -10,12 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "query/Plan.h"
-#include "exceptions/EasyAssert.h"
-#include "utils/Json.h"
 #include <utility>
 #include "query/generated/ShowExprVisitor.h"
 #include "query/ExprImpl.h"
-#include "pb/plan.pb.h"
 
 namespace milvus::query {
 using Json = nlohmann::json;
@@ -153,7 +150,7 @@ UnaryRangeExtract(const UnaryRangeExpr& expr_raw) {
     Json res{{"expr_type", "UnaryRange"},
              {"field_offset", expr->field_offset_.get()},
              {"data_type", datatype_name(expr->data_type_)},
-             {"op", OpType_Name(static_cast<OpType>(expr->op_))},
+             {"op", OpType_Name(static_cast<OpType>(expr->op_type_))},
              {"value", expr->value_}};
     return res;
 }
@@ -186,7 +183,7 @@ ShowExprVisitor::visit(UnaryRangeExpr& expr) {
             return;
         default:
             PanicInfo("unsupported type");
-    };
+    }
 }
 
 template <typename T>
@@ -234,7 +231,7 @@ ShowExprVisitor::visit(BinaryRangeExpr& expr) {
             return;
         default:
             PanicInfo("unsupported type");
-    };
+    }
 }
 
 void
@@ -248,7 +245,7 @@ ShowExprVisitor::visit(CompareExpr& expr) {
              {"left_data_type", datatype_name(expr.left_data_type_)},
              {"right_field_offset", expr.right_field_offset_.get()},
              {"right_data_type", datatype_name(expr.right_data_type_)},
-             {"op", OpType_Name(static_cast<OpType>(expr.op_))}};
+             {"op", OpType_Name(static_cast<OpType>(expr.op_type_))}};
     ret_ = res;
 }
 }  // namespace milvus::query

@@ -10,12 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "query/Plan.h"
-#include "query/PlanImpl.h"
-#include "query/PlanNode.h"
 #include "query/ExprImpl.h"
-#include "utils/Json.h"
-#include "exceptions/EasyAssert.h"
-#include "pb/milvus.pb.h"
 #include <vector>
 #include <memory>
 #include <boost/algorithm/string.hpp>
@@ -110,7 +105,7 @@ Parser::ParseCompareNode(const Json& out_body) {
     Assert(body.is_array());
     Assert(body.size() == 2);
     auto expr = std::make_unique<CompareExpr>();
-    expr->op_ = mapping_.at(op_name);
+    expr->op_type_ = mapping_.at(op_name);
 
     auto item0 = body[0];
     Assert(item0.is_string());
@@ -302,7 +297,7 @@ Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
             auto expr = std::make_unique<UnaryRangeExprImpl<T>>();
             expr->data_type_ = schema[field_name].get_data_type();
             expr->field_offset_ = schema.get_offset(field_name);
-            expr->op_ = mapping_.at(op_name);
+            expr->op_type_ = mapping_.at(op_name);
             expr->value_ = item.value();
             return expr;
         }
@@ -338,7 +333,7 @@ Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
                     break;
                 default:
                     PanicInfo("illegal range node");
-            };
+            }
         }
         auto expr = std::make_unique<BinaryRangeExprImpl<T>>();
         expr->data_type_ = schema[field_name].get_data_type();
