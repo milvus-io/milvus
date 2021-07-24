@@ -55,9 +55,7 @@ type assignInfo struct {
 	collID         UniqueID
 	partitionID    UniqueID
 	channelName    string
-	segID          UniqueID
 	segInfos       *list.List
-	segCapacity    uint32
 	lastInsertTime time.Time
 }
 
@@ -74,6 +72,8 @@ func (info *segInfo) Capacity(ts Timestamp) uint32 {
 
 func (info *segInfo) Assign(ts Timestamp, count uint32) uint32 {
 	if info.IsExpired(ts) {
+		log.Debug("segInfo Assign IsExpired", zap.Any("ts", ts),
+			zap.Any("count", count))
 		return 0
 	}
 	ret := uint32(0)
@@ -81,8 +81,8 @@ func (info *segInfo) Assign(ts Timestamp, count uint32) uint32 {
 		info.count -= count
 		ret = count
 	} else {
-		info.count = 0
 		ret = info.count
+		info.count = 0
 	}
 	return ret
 }
@@ -313,7 +313,7 @@ func (sa *SegIDAssigner) syncSegments() (bool, error) {
 			continue
 		}
 		assign, err := sa.getAssign(info.CollectionID, info.PartitionID, info.ChannelName)
-		segInfo := &segInfo{
+		segInfo2 := &segInfo{
 			segID:      info.SegID,
 			count:      info.Count,
 			expireTime: info.ExpireTime,
@@ -325,7 +325,7 @@ func (sa *SegIDAssigner) syncSegments() (bool, error) {
 			}
 			segInfos := list.New()
 
-			segInfos.PushBack(segInfo)
+			segInfos.PushBack(segInfo2)
 			assign = &assignInfo{
 				collID:      info.CollectionID,
 				partitionID: info.PartitionID,
@@ -335,7 +335,7 @@ func (sa *SegIDAssigner) syncSegments() (bool, error) {
 			colInfos.PushBack(assign)
 			sa.assignInfos[info.CollectionID] = colInfos
 		} else {
-			assign.segInfos.PushBack(segInfo)
+			assign.segInfos.PushBack(segInfo2)
 		}
 		assign.lastInsertTime = now
 		success = true
@@ -349,9 +349,9 @@ func (sa *SegIDAssigner) processFunc(req allocator.Request) error {
 	if err != nil {
 		return err
 	}
-	result, err := assign.Assign(segRequest.timestamp, segRequest.count)
+	result, err2 := assign.Assign(segRequest.timestamp, segRequest.count)
 	segRequest.segInfo = result
-	return err
+	return err2
 }
 
 func (sa *SegIDAssigner) GetSegmentID(collID UniqueID, partitionID UniqueID, channelName string, count uint32, ts Timestamp) (map[UniqueID]uint32, error) {
