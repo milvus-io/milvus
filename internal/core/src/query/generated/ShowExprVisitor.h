@@ -13,8 +13,6 @@
 // Generated File
 // DO NOT EDIT
 #include "query/Plan.h"
-#include "exceptions/EasyAssert.h"
-#include "utils/Json.h"
 #include <utility>
 #include "ExprVisitor.h"
 
@@ -31,7 +29,10 @@ class ShowExprVisitor : public ExprVisitor {
     visit(TermExpr& expr) override;
 
     void
-    visit(RangeExpr& expr) override;
+    visit(UnaryRangeExpr& expr) override;
+
+    void
+    visit(BinaryRangeExpr& expr) override;
 
     void
     visit(CompareExpr& expr) override;
