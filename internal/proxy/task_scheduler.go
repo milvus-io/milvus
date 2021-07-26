@@ -701,7 +701,7 @@ func (sched *TaskScheduler) collectResultLoop() {
 						continue
 					}
 					t := sched.getTaskByReqID(reqID)
-					log.Debug("Proxy collectResultLoop Got a SearchResultMsg", zap.Any("ReqID", reqID), zap.Any("t", t))
+					log.Debug("Proxy collectResultLoop Got a SearchResultMsg", zap.Any("ReqID", reqID))
 					if t == nil {
 						log.Debug("Proxy collectResultLoop GetTaskByReqID failed", zap.String("reqID", reqIDStr))
 						delete(searchResultBufs, reqID)
@@ -711,7 +711,7 @@ func (sched *TaskScheduler) collectResultLoop() {
 
 					st, ok := t.(*SearchTask)
 					if !ok {
-						log.Debug("Proxy collectResultLoop type assert t as SearchTask failed", zap.Any("t", t))
+						log.Debug("Proxy collectResultLoop type assert t as SearchTask failed", zap.Any("ReqID", reqID))
 						delete(searchResultBufs, reqID)
 						searchResultBufFlags[reqID] = true
 						continue
@@ -800,7 +800,7 @@ func (sched *TaskScheduler) collectResultLoop() {
 						continue
 					}
 					t := sched.getTaskByReqID(reqID)
-					log.Debug("Proxy collectResultLoop Got a queryResultMsg", zap.Any("ReqID", reqID), zap.Any("t", t))
+					log.Debug("Proxy collectResultLoop Got a queryResultMsg", zap.Any("ReqID", reqID))
 					if t == nil {
 						log.Debug("Proxy collectResultLoop GetTaskByReqID failed", zap.String("reqID", reqIDStr))
 						delete(queryResultBufs, reqID)
@@ -810,7 +810,7 @@ func (sched *TaskScheduler) collectResultLoop() {
 
 					st, ok := t.(*RetrieveTask)
 					if !ok {
-						log.Debug("Proxy collectResultLoop type assert t as RetrieveTask failed", zap.Any("t", t))
+						log.Debug("Proxy collectResultLoop type assert t as RetrieveTask failed")
 						delete(queryResultBufs, reqID)
 						queryResultBufFlags[reqID] = true
 						continue

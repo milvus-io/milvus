@@ -86,11 +86,11 @@ func TestIndexNode(t *testing.T) {
 			tsData[i] = int64(i + 100)
 		}
 		data[tsFieldID] = &storage.Int64FieldData{
-			NumRows: nb,
+			NumRows: []int64{nb},
 			Data:    tsData,
 		}
 		data[floatVectorFieldID] = &storage.FloatVectorFieldData{
-			NumRows: nb,
+			NumRows: []int64{nb},
 			Data:    generateFloatVectors(),
 			Dim:     dim,
 		}
@@ -201,11 +201,11 @@ func TestIndexNode(t *testing.T) {
 			tsData[i] = int64(i + 100)
 		}
 		data[tsFieldID] = &storage.Int64FieldData{
-			NumRows: nb,
+			NumRows: []int64{nb},
 			Data:    tsData,
 		}
 		data[binaryVectorFieldID] = &storage.BinaryVectorFieldData{
-			NumRows: nb,
+			NumRows: []int64{nb},
 			Data:    generateBinaryVectors(),
 			Dim:     dim,
 		}
@@ -313,11 +313,11 @@ func TestIndexNode(t *testing.T) {
 			tsData[i] = int64(i + 100)
 		}
 		data[tsFieldID] = &storage.Int64FieldData{
-			NumRows: nb,
+			NumRows: []int64{nb},
 			Data:    tsData,
 		}
 		data[floatVectorFieldID] = &storage.FloatVectorFieldData{
-			NumRows: nb,
+			NumRows: []int64{nb},
 			Data:    generateFloatVectors(),
 			Dim:     dim,
 		}

@@ -817,7 +817,6 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 	}
 
 	reqSegCountMap := make(map[int32]map[UniqueID]uint32)
-
 	for channelID, count := range channelCountMap {
 		ts, ok := channelMaxTSMap[channelID]
 		if !ok {
@@ -830,6 +829,8 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 		}
 		mapInfo, err := it.segIDAssigner.GetSegmentID(it.CollectionID, it.PartitionID, channelName, count, ts)
 		if err != nil {
+			log.Debug("InsertTask.go", zap.Any("MapInfo", mapInfo),
+				zap.Error(err))
 			return nil, err
 		}
 		reqSegCountMap[channelID] = make(map[UniqueID]uint32)
@@ -880,7 +881,7 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 				return segIDSlice[index]
 			}
 		}
-		log.Warn("Can't Found SegmentID")
+		log.Warn("Can't Found SegmentID", zap.Any("reqSegAllocateCounter", reqSegAllocateCounter))
 		return 0
 	}
 
@@ -921,6 +922,9 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 			rowID := insertRequest.RowIDs[index]
 			row := insertRequest.RowData[index]
 			segmentID := getSegmentID(key)
+			if segmentID == 0 {
+				return nil, fmt.Errorf("get SegmentID failed, segmentID is zero")
+			}
 			_, ok := result[key]
 			if !ok {
 				sliceRequest := internalpb.InsertRequest{
@@ -1620,7 +1624,7 @@ func decodeSearchResultsSerial(searchResults []*internalpb.SearchResults) ([]*sc
 	results := make([]*schemapb.SearchResultData, 0)
 	// necessary to parallel this?
 	for i, partialSearchResult := range searchResults {
-		log.Debug("decodeSearchResultsSerial", zap.Any("i", i), zap.Any("SlicedBob", partialSearchResult.SlicedBlob))
+		log.Debug("decodeSearchResultsSerial", zap.Any("i", i), zap.Any("len(SlicedBob)", len(partialSearchResult.SlicedBlob)))
 		if partialSearchResult.SlicedBlob == nil {
 			continue
 		}

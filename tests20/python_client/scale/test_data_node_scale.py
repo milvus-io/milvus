@@ -1,5 +1,3 @@
-import random
-
 import pytest
 
 from base.collection_wrapper import ApiCollectionWrapper

@@ -34,7 +34,10 @@ class ExecExprVisitor : public ExprVisitor {
     visit(TermExpr& expr) override;
 
     void
-    visit(RangeExpr& expr) override;
+    visit(UnaryRangeExpr& expr) override;
+
+    void
+    visit(BinaryRangeExpr& expr) override;
 
     void
     visit(CompareExpr& expr) override;
@@ -49,19 +52,23 @@ class ExecExprVisitor : public ExprVisitor {
         Assert(!ret_.has_value());
         expr.accept(*this);
         Assert(ret_.has_value());
-        auto ret = std::move(ret_);
+        auto res = std::move(ret_);
         ret_ = std::nullopt;
-        return std::move(ret.value());
+        return std::move(res.value());
     }
 
  public:
     template <typename T, typename IndexFunc, typename ElementFunc>
     auto
-    ExecRangeVisitorImpl(RangeExprImpl<T>& expr, IndexFunc func, ElementFunc element_func) -> RetType;
+    ExecRangeVisitorImpl(FieldOffset field_offset, IndexFunc func, ElementFunc element_func) -> RetType;
 
     template <typename T>
     auto
-    ExecRangeVisitorDispatcher(RangeExpr& expr_raw) -> RetType;
+    ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> RetType;
+
+    template <typename T>
+    auto
+    ExecBinaryRangeVisitorDispatcher(BinaryRangeExpr& expr_raw) -> RetType;
 
     template <typename T>
     auto

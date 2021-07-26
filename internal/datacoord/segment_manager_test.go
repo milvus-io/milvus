@@ -11,11 +11,11 @@ package datacoord
 
 import (
 	"context"
-	"math"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -32,27 +32,15 @@ func TestAllocSegment(t *testing.T) {
 	collID, err := mockAllocator.allocID()
 	assert.Nil(t, err)
 	meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
-	cases := []struct {
-		collectionID UniqueID
-		partitionID  UniqueID
-		channelName  string
-		requestRows  int64
-		expectResult bool
-	}{
-		{collID, 100, "c1", 100, true},
-		{collID, 100, "c1", math.MaxInt64, false},
-	}
-	for _, c := range cases {
-		id, count, expireTime, err := segmentManager.AllocSegment(ctx, c.collectionID, c.partitionID, c.channelName, c.requestRows)
-		if c.expectResult {
-			assert.Nil(t, err)
-			assert.EqualValues(t, c.requestRows, count)
-			assert.NotEqualValues(t, 0, id)
-			assert.NotEqualValues(t, 0, expireTime)
-		} else {
-			assert.NotNil(t, err)
-		}
-	}
+
+	t.Run("normal allocation", func(t *testing.T) {
+		allocations, err := segmentManager.AllocSegment(ctx, collID, 100, "c1", 100)
+		assert.Nil(t, err)
+		assert.EqualValues(t, 1, len(allocations))
+		assert.EqualValues(t, 100, allocations[0].NumOfRows)
+		assert.NotEqualValues(t, 0, allocations[0].SegmentID)
+		assert.NotEqualValues(t, 0, allocations[0].ExpireTime)
+	})
 }
 
 func TestLoadSegmentsFromMeta(t *testing.T) {
@@ -116,13 +104,14 @@ func TestSaveSegmentsToMeta(t *testing.T) {
 	assert.Nil(t, err)
 	meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
 	segmentManager := newSegmentManager(meta, mockAllocator)
-	segID, _, expireTs, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000)
+	allocations, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000)
 	assert.Nil(t, err)
+	assert.EqualValues(t, 1, len(allocations))
 	_, err = segmentManager.SealAllSegments(context.Background(), collID)
 	assert.Nil(t, err)
-	segment := meta.GetSegment(segID)
+	segment := meta.GetSegment(allocations[0].SegmentID)
 	assert.NotNil(t, segment)
-	assert.EqualValues(t, segment.LastExpireTime, expireTs)
+	assert.EqualValues(t, segment.LastExpireTime, allocations[0].ExpireTime)
 	assert.EqualValues(t, commonpb.SegmentState_Sealed, segment.State)
 }
 
@@ -137,12 +126,36 @@ func TestDropSegment(t *testing.T) {
 	assert.Nil(t, err)
 	meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
 	segmentManager := newSegmentManager(meta, mockAllocator)
-	segID, _, _, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000)
+	allocations, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000)
 	assert.Nil(t, err)
+	assert.EqualValues(t, 1, len(allocations))
+	segID := allocations[0].SegmentID
 	segment := meta.GetSegment(segID)
 	assert.NotNil(t, segment)
 
 	segmentManager.DropSegment(context.Background(), segID)
 	segment = meta.GetSegment(segID)
 	assert.NotNil(t, segment)
+}
+
+func TestAllocRowsLargerThanOneSegment(t *testing.T) {
+	Params.Init()
+	mockAllocator := newMockAllocator()
+	meta, err := newMemoryMeta(mockAllocator)
+	assert.Nil(t, err)
+
+	schema := newTestSchema()
+	collID, err := mockAllocator.allocID()
+	assert.Nil(t, err)
+	meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
+
+	var mockPolicy = func(schema *schemapb.CollectionSchema) (int, error) {
+		return 1, nil
+	}
+	segmentManager := newSegmentManager(meta, mockAllocator, withCalUpperLimitPolicy(mockPolicy))
+	allocations, err := segmentManager.AllocSegment(context.TODO(), collID, 0, "c1", 2)
+	assert.Nil(t, err)
+	assert.EqualValues(t, 2, len(allocations))
+	assert.EqualValues(t, 1, allocations[0].NumOfRows)
+	assert.EqualValues(t, 1, allocations[1].NumOfRows)
 }

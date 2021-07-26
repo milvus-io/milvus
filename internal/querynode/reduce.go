@@ -22,7 +22,6 @@ package querynode
 import "C"
 import (
 	"errors"
-	"fmt"
 	"strconv"
 	"sync"
 	"unsafe"
@@ -61,7 +60,7 @@ func reduceSearchResults(searchResults []*SearchResult, numSegments int64, inRed
 
 func fillTargetEntry(plan *SearchPlan, searchResults []*SearchResult, matchedSegments []*Segment, inReduced []bool) error {
 	wg := &sync.WaitGroup{}
-	fmt.Println(inReduced)
+	//fmt.Println(inReduced)
 	for i := range inReduced {
 		if inReduced[i] {
 			wg.Add(1)

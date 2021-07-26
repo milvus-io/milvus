@@ -142,52 +142,52 @@ func TestInsertCodec(t *testing.T) {
 	insertData1 := &InsertData{
 		Data: map[int64]FieldData{
 			RowIDField: &Int64FieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []int64{3, 4},
 			},
 			TimestampField: &Int64FieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []int64{3, 4},
 			},
 			BoolField: &BoolFieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []bool{true, false},
 			},
 			Int8Field: &Int8FieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []int8{3, 4},
 			},
 			Int16Field: &Int16FieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []int16{3, 4},
 			},
 			Int32Field: &Int32FieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []int32{3, 4},
 			},
 			Int64Field: &Int64FieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []int64{3, 4},
 			},
 			FloatField: &FloatFieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []float32{3, 4},
 			},
 			DoubleField: &DoubleFieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []float64{3, 4},
 			},
 			StringField: &StringFieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []string{"3", "4"},
 			},
 			BinaryVectorField: &BinaryVectorFieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []byte{0, 255},
 				Dim:     8,
 			},
 			FloatVectorField: &FloatVectorFieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []float32{4, 5, 6, 7, 4, 5, 6, 7},
 				Dim:     4,
 			},
@@ -197,52 +197,52 @@ func TestInsertCodec(t *testing.T) {
 	insertData2 := &InsertData{
 		Data: map[int64]FieldData{
 			RowIDField: &Int64FieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []int64{1, 2},
 			},
 			TimestampField: &Int64FieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []int64{1, 2},
 			},
 			BoolField: &BoolFieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []bool{true, false},
 			},
 			Int8Field: &Int8FieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []int8{1, 2},
 			},
 			Int16Field: &Int16FieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []int16{1, 2},
 			},
 			Int32Field: &Int32FieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []int32{1, 2},
 			},
 			Int64Field: &Int64FieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []int64{1, 2},
 			},
 			FloatField: &FloatFieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []float32{1, 2},
 			},
 			DoubleField: &DoubleFieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []float64{1, 2},
 			},
 			StringField: &StringFieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []string{"1", "2"},
 			},
 			BinaryVectorField: &BinaryVectorFieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []byte{0, 255},
 				Dim:     8,
 			},
 			FloatVectorField: &FloatVectorFieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []float32{0, 1, 2, 3, 0, 1, 2, 3},
 				Dim:     4,
 			},
@@ -265,18 +265,18 @@ func TestInsertCodec(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, UniqueID(PartitionID), partID)
 	assert.Equal(t, UniqueID(SegmentID), segID)
-	assert.Equal(t, 4, resultData.Data[RowIDField].(*Int64FieldData).NumRows)
-	assert.Equal(t, 4, resultData.Data[TimestampField].(*Int64FieldData).NumRows)
-	assert.Equal(t, 4, resultData.Data[BoolField].(*BoolFieldData).NumRows)
-	assert.Equal(t, 4, resultData.Data[Int8Field].(*Int8FieldData).NumRows)
-	assert.Equal(t, 4, resultData.Data[Int16Field].(*Int16FieldData).NumRows)
-	assert.Equal(t, 4, resultData.Data[Int32Field].(*Int32FieldData).NumRows)
-	assert.Equal(t, 4, resultData.Data[Int64Field].(*Int64FieldData).NumRows)
-	assert.Equal(t, 4, resultData.Data[FloatField].(*FloatFieldData).NumRows)
-	assert.Equal(t, 4, resultData.Data[DoubleField].(*DoubleFieldData).NumRows)
-	assert.Equal(t, 4, resultData.Data[StringField].(*StringFieldData).NumRows)
-	assert.Equal(t, 4, resultData.Data[BinaryVectorField].(*BinaryVectorFieldData).NumRows)
-	assert.Equal(t, 4, resultData.Data[FloatVectorField].(*FloatVectorFieldData).NumRows)
+	assert.Equal(t, []int64{2, 2}, resultData.Data[RowIDField].(*Int64FieldData).NumRows)
+	assert.Equal(t, []int64{2, 2}, resultData.Data[TimestampField].(*Int64FieldData).NumRows)
+	assert.Equal(t, []int64{2, 2}, resultData.Data[BoolField].(*BoolFieldData).NumRows)
+	assert.Equal(t, []int64{2, 2}, resultData.Data[Int8Field].(*Int8FieldData).NumRows)
+	assert.Equal(t, []int64{2, 2}, resultData.Data[Int16Field].(*Int16FieldData).NumRows)
+	assert.Equal(t, []int64{2, 2}, resultData.Data[Int32Field].(*Int32FieldData).NumRows)
+	assert.Equal(t, []int64{2, 2}, resultData.Data[Int64Field].(*Int64FieldData).NumRows)
+	assert.Equal(t, []int64{2, 2}, resultData.Data[FloatField].(*FloatFieldData).NumRows)
+	assert.Equal(t, []int64{2, 2}, resultData.Data[DoubleField].(*DoubleFieldData).NumRows)
+	assert.Equal(t, []int64{2, 2}, resultData.Data[StringField].(*StringFieldData).NumRows)
+	assert.Equal(t, []int64{2, 2}, resultData.Data[BinaryVectorField].(*BinaryVectorFieldData).NumRows)
+	assert.Equal(t, []int64{2, 2}, resultData.Data[FloatVectorField].(*FloatVectorFieldData).NumRows)
 	assert.Equal(t, []int64{1, 2, 3, 4}, resultData.Data[RowIDField].(*Int64FieldData).Data)
 	assert.Equal(t, []int64{1, 2, 3, 4}, resultData.Data[TimestampField].(*Int64FieldData).Data)
 	assert.Equal(t, []bool{true, false, true, false}, resultData.Data[BoolField].(*BoolFieldData).Data)
@@ -412,15 +412,15 @@ func TestSchemaError(t *testing.T) {
 	insertData := &InsertData{
 		Data: map[int64]FieldData{
 			RowIDField: &Int64FieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []int64{3, 4},
 			},
 			TimestampField: &Int64FieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []int64{3, 4},
 			},
 			BoolField: &BoolFieldData{
-				NumRows: 2,
+				NumRows: []int64{2},
 				Data:    []bool{true, false},
 			},
 		},
