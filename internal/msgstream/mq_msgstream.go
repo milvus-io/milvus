@@ -243,6 +243,7 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 
 			trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
 
+			t1 := time.Now()
 			if err := ms.producers[channel].Send(
 				spanCtx,
 				msg,
@@ -250,6 +251,10 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 				trace.LogError(sp, err)
 				sp.Finish()
 				return err
+			}
+			d := time.Since(t1)
+			if d > 5*time.Second {
+				log.Warn("pulsar producer send took too long", zap.Any("duration", d), zap.Any("channel", channel))
 			}
 			sp.Finish()
 		}
