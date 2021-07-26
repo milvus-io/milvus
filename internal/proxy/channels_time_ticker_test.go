@@ -37,8 +37,8 @@ func newMockTsoAllocator() *mockTsoAllocator {
 }
 
 func newGetStatisticsFunc(pchans []pChan) getPChanStatisticsFuncType {
-	total_pchan := len(pchans)
-	pchanNum := rand.Uint64()%(uint64(total_pchan)) + 1
+	totalPchan := len(pchans)
+	pchanNum := rand.Uint64()%(uint64(totalPchan)) + 1
 	pchans2 := make([]pChan, 0, pchanNum)
 	for i := 0; uint64(i) < pchanNum; i++ {
 		pchans2 = append(pchans2, pchans[i])
