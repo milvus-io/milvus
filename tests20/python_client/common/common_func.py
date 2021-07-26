@@ -137,6 +137,7 @@ def gen_binary_vectors(num, dim):
     for _ in range(num):
         raw_vector = [random.randint(0, 1) for _ in range(dim)]
         raw_vectors.append(raw_vector)
+        # packs a binary-valued array into bits in a unit8 array, and bytes array_of_ints
         binary_vectors.append(bytes(np.packbits(raw_vector, axis=-1).tolist()))
     return raw_vectors, binary_vectors
 
