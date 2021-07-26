@@ -62,7 +62,6 @@ struct LogicalBinaryExpr : BinaryExprBase {
 struct TermExpr : Expr {
     FieldOffset field_offset_;
     DataType data_type_ = DataType::NONE;
-    // std::vector<std::any> terms_;
 
  protected:
     // prevent accidential instantiation
@@ -80,7 +79,7 @@ enum class OpType {
     LessThan = 3,
     LessEqual = 4,
     Equal = 5,
-    NotEqual = 6
+    NotEqual = 6,
 };
 
 static const std::map<std::string, OpType> mapping_ = {
@@ -90,14 +89,29 @@ static const std::map<std::string, OpType> mapping_ = {
     {"eq", OpType::Equal},       {"ne", OpType::NotEqual},
 };
 
-struct RangeExpr : Expr {
+struct UnaryRangeExpr : Expr {
     FieldOffset field_offset_;
     DataType data_type_ = DataType::NONE;
+    OpType op_type_;
 
-    // std::vector<std::tuple<OpType, std::any>> conditions_;
  protected:
     // prevent accidential instantiation
-    RangeExpr() = default;
+    UnaryRangeExpr() = default;
+
+ public:
+    void
+    accept(ExprVisitor&) override;
+};
+
+struct BinaryRangeExpr : Expr {
+    FieldOffset field_offset_;
+    DataType data_type_ = DataType::NONE;
+    bool lower_inclusive_;
+    bool upper_inclusive_;
+
+ protected:
+    // prevent accidential instantiation
+    BinaryRangeExpr() = default;
 
  public:
     void
@@ -105,9 +119,11 @@ struct RangeExpr : Expr {
 };
 
 struct CompareExpr : Expr {
-    std::vector<FieldOffset> field_offsets_;
-    std::vector<DataType> data_types_;
-    OpType op;
+    FieldOffset left_field_offset_;
+    FieldOffset right_field_offset_;
+    DataType left_data_type_;
+    DataType right_data_type_;
+    OpType op_type_;
 
  public:
     void

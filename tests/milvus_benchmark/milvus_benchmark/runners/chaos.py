@@ -71,6 +71,7 @@ class SimpleChaosRunner(BaseRunner):
         }]
         self.init_metric(self.name, {}, {}, None)
         case_metric = copy.deepcopy(self.metric)
+        case_metric.set_case_metric_type()
         case_metrics.append(case_metric)
         return case_params, case_metrics
 

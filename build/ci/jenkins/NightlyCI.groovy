@@ -5,9 +5,8 @@
 String cron_timezone = "TZ=Asia/Shanghai"
 String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
 
-int timeout_minutes = 90
-int delay_minutes = 5
-int ci_timeout = (timeout_minutes - delay_minutes) * 60
+int total_timeout_minutes = 90
+int e2e_timeout_seconds = 60 * 60
 
 pipeline {
     agent none
@@ -17,7 +16,7 @@ pipeline {
     }
     options {
         timestamps()
-        timeout(time: timeout_minutes, unit: 'MINUTES')
+        timeout(time: total_timeout_minutes, unit: 'MINUTES')
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         // parallelsAlwaysFailFast()
     }
@@ -66,19 +65,23 @@ pipeline {
                                         if ("${MILVUS_CLIENT}" == "pymilvus") {
                                             sh """
                                             MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
-                                            timeout -v ${ci_timeout} \
                                             ./e2e-k8s.sh \
                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
-                                            --node-image registry.zilliz.com/kindest/node:v1.20.2
+                                            --node-image registry.zilliz.com/kindest/node:v1.20.2 \
+                                            --skip-export-logs \
+                                            --skip-cleanup \
+                                            --test-timeout ${e2e_timeout_seconds}
                                             """
                                         } else if ("${MILVUS_CLIENT}" == "pymilvus-orm") {
                                             sh """
                                             MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
-                                            timeout -v ${ci_timeout} \
                                             ./e2e-k8s.sh \
                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
                                             --node-image registry.zilliz.com/kindest/node:v1.20.2 \
-                                            --test-extra-arg "--tags L0 L1 L2"
+                                            --skip-export-logs \
+                                            --skip-cleanup \
+                                            --test-extra-arg "--tags L0 L1 L2" \
+                                            --test-timeout ${e2e_timeout_seconds}
                                             """
                                         } else {
                                             error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"
@@ -101,21 +104,6 @@ pipeline {
                             }
                         }
                     }
-                    always {
-                        container('main') {
-                            script {
-                                dir("${env.ARTIFACTS}") {
-                                    sh "find ./kind -path '*/history/*' -type f | xargs tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-e2e-nightly-logs.tar.gz --transform='s:^[^/]*/[^/]*/[^/]*/[^/]*/::g' || true"
-                                    if ("${MILVUS_CLIENT}" == "pymilvus-orm") {
-                                        sh "tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${MILVUS_CLIENT}-pytest-logs.tar.gz ./tests/pytest_logs --remove-files || true"
-                                    }
-                                    archiveArtifacts artifacts: "**.tar.gz", allowEmptyArchive: true
-                                    sh 'docker rm -f \$(docker network inspect -f \'{{ range \$key, \$value := .Containers }}{{ printf "%s " \$key}}{{ end }}\' kind) || true'
-                                    sh 'docker network rm kind > /dev/null 2>&1 || true'
-                                }
-                            }
-                        }
-                    }
                     success {
                         container('main') {
                             script {
@@ -135,9 +123,24 @@ pipeline {
                             }
                         }
                     }
+                    always {
+                        container('main') {
+                            script {
+                                sh "./tests/scripts/export_logs.sh"
+                                dir("${env.ARTIFACTS}") {
+                                    sh "find ./kind -path '*/history/*' -type f | xargs tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-e2e-nightly-logs.tar.gz --transform='s:^[^/]*/[^/]*/[^/]*/[^/]*/::g' || true"
+                                    if ("${MILVUS_CLIENT}" == "pymilvus-orm") {
+                                        sh "tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${MILVUS_CLIENT}-pytest-logs.tar.gz ./tests/pytest_logs --remove-files || true"
+                                    }
+                                    archiveArtifacts artifacts: "**.tar.gz", allowEmptyArchive: true
+                                }
+                            }
+                        }
+                    }
                     cleanup {
                         container('main') {
                             script {
+                                sh "kind delete cluster --name kind -v9 || true"
                                 sh 'find . -name . -o -prune -exec rm -rf -- {} +' /* clean up our workspace */
                             }
                         }

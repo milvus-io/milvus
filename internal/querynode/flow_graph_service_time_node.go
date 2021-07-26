@@ -49,7 +49,7 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	serviceTimeMsg, ok := in[0].(*serviceTimeMsg)
 	if !ok {
-		log.Error("type assertion failed for serviceTimeMsg")
+		log.Warn("type assertion failed for serviceTimeMsg")
 		// TODO: add error handling
 	}
 

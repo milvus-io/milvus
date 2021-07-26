@@ -772,20 +772,20 @@ func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID
 	insertData := &storage.InsertData{
 		Data: map[int64]storage.FieldData{
 			0: &storage.Int64FieldData{
-				NumRows: msgLength,
+				NumRows: []int64{msgLength},
 				Data:    idData,
 			},
 			1: &storage.Int64FieldData{
-				NumRows: msgLength,
+				NumRows: []int64{msgLength},
 				Data:    timestamps,
 			},
 			100: &storage.FloatVectorFieldData{
-				NumRows: msgLength,
+				NumRows: []int64{msgLength},
 				Data:    fieldVecData,
 				Dim:     DIM,
 			},
 			101: &storage.Int32FieldData{
-				NumRows: msgLength,
+				NumRows: []int64{msgLength},
 				Data:    fieldAgeData,
 			},
 		},

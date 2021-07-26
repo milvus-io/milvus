@@ -116,6 +116,15 @@ def gen_default_binary_collection_schema(description=ct.default_desc, primary_fi
     return binary_schema
 
 
+def gen_schema_multi_vector_fields(vec_fields):
+    fields = [gen_int64_field(), gen_float_field(), gen_float_vec_field()]
+    fields.extend(vec_fields)
+    primary_field = ct.default_int64_field_name
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=ct.default_desc,
+                                                                    primary_field=primary_field, auto_id=False)
+    return schema
+
+
 def gen_vectors(nb, dim):
     vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
     vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
@@ -141,6 +150,30 @@ def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0):
         ct.default_float_field_name: float_values,
         ct.default_float_vec_field_name: float_vec_values
     })
+    return df
+
+
+def gen_dataframe_multi_vec_fields(vec_fields, nb=ct.default_nb):
+    """
+    gen dataframe data for fields: int64, float, float_vec and vec_fields
+    :param nb: num of entities, default default_nb
+    :param vec_fields: list of FieldSchema
+    :return: dataframe
+    """
+    int_values = pd.Series(data=[i for i in range(0, nb)])
+    float_values = pd.Series(data=[float(i) for i in range(nb)], dtype="float32")
+    df = pd.DataFrame({
+        ct.default_int64_field_name: int_values,
+        ct.default_float_field_name: float_values,
+        ct.default_float_vec_field_name: gen_vectors(nb, ct.default_dim)
+    })
+    for field in vec_fields:
+        dim = field.params['dim']
+        if field.dtype == DataType.FLOAT_VECTOR:
+            vec_values = gen_vectors(nb, dim)
+        elif field.dtype == DataType.BINARY_VECTOR:
+            vec_values = gen_binary_vectors(nb, dim)[1]
+        df[field.name] = vec_values
     return df
 
 

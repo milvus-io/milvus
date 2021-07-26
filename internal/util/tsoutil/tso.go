@@ -36,6 +36,13 @@ func ParseTS(ts uint64) (time.Time, uint64) {
 	return physicalTime, logical
 }
 
+// ParseHybridTs parses the ts to (physical, logical), physical part is of utc-timestamp format.
+func ParseHybridTs(ts uint64) (uint64, uint64) {
+	logical := ts & logicalBitsMask
+	physical := ts >> logicalBits
+	return physical, logical
+}
+
 // Mod24H parses the ts to millisecond in one day
 func Mod24H(ts uint64) uint64 {
 	logical := ts & logicalBitsMask

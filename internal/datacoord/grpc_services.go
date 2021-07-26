@@ -80,15 +80,6 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 
 	assigns := make([]*datapb.SegmentIDAssignment, 0, len(req.SegmentIDRequests))
 
-	var appendFailedAssignment = func(err string) {
-		assigns = append(assigns, &datapb.SegmentIDAssignment{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err,
-			},
-		})
-	}
-
 	for _, r := range req.SegmentIDRequests {
 		log.Debug("Handle assign segment request",
 			zap.Int64("collectionID", r.GetCollectionID()),
@@ -98,46 +89,39 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 
 		if coll := s.meta.GetCollection(r.CollectionID); coll == nil {
 			if err := s.loadCollectionFromRootCoord(ctx, r.CollectionID); err != nil {
-				errMsg := fmt.Sprintf("Can not load collection %d", r.CollectionID)
-				appendFailedAssignment(errMsg)
 				log.Error("load collection from rootcoord error",
 					zap.Int64("collectionID", r.CollectionID),
 					zap.Error(err))
 				continue
 			}
 		}
-		//if err := s.validateAllocRequest(r.CollectionID, r.PartitionID, r.ChannelName); err != nil {
-		//result.Status.Reason = err.Error()
-		//assigns = append(assigns, result)
-		//continue
-		//}
+
 		s.cluster.Watch(r.ChannelName, r.CollectionID)
 
-		segmentID, retCount, expireTs, err := s.segmentManager.AllocSegment(ctx,
+		allocations, err := s.segmentManager.AllocSegment(ctx,
 			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
 		if err != nil {
-			errMsg := fmt.Sprintf("Allocation of collection %d, partition %d, channel %s, count %d error:  %s",
-				r.CollectionID, r.PartitionID, r.ChannelName, r.Count, err.Error())
-			appendFailedAssignment(errMsg)
+			log.Warn("failed to alloc segment", zap.Any("request", r), zap.Error(err))
 			continue
 		}
 
-		log.Debug("Assign segment success", zap.Int64("segmentID", segmentID),
-			zap.Uint64("expireTs", expireTs))
+		log.Debug("Assign segment success", zap.Any("assignments", allocations))
 
-		result := &datapb.SegmentIDAssignment{
-			SegID:        segmentID,
-			ChannelName:  r.ChannelName,
-			Count:        uint32(retCount),
-			CollectionID: r.CollectionID,
-			PartitionID:  r.PartitionID,
-			ExpireTime:   expireTs,
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    "",
-			},
+		for _, allocation := range allocations {
+			result := &datapb.SegmentIDAssignment{
+				SegID:        allocation.SegmentID,
+				ChannelName:  r.ChannelName,
+				Count:        uint32(allocation.NumOfRows),
+				CollectionID: r.CollectionID,
+				PartitionID:  r.PartitionID,
+				ExpireTime:   allocation.ExpireTime,
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+					Reason:    "",
+				},
+			}
+			assigns = append(assigns, result)
 		}
-		assigns = append(assigns, result)
 	}
 	return &datapb.AssignSegmentIDResponse{
 		Status: &commonpb.Status{
@@ -294,14 +278,6 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("segmentID", req.GetSegmentID()),
 		zap.Any("checkpoints", req.GetCheckPoints()))
-
-	// check segment id & collection id matched
-	if coll := s.meta.GetCollection(req.GetCollectionID()); coll == nil {
-		errMsg := fmt.Sprintf("Failed to get collection info %d", req.GetCollectionID())
-		log.Error(errMsg)
-		resp.Reason = errMsg
-		return resp, nil
-	}
 
 	binlogs, err := s.prepareBinlog(req)
 	if err != nil {

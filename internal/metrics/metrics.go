@@ -523,6 +523,15 @@ var (
 			Name:      "release_dql_message_stream_total",
 			Help:      "Counter of release dql message stream",
 		}, []string{"status"})
+
+	// ProxyDmlChannelTimeTick used to count the time tick value of dml channels
+	ProxyDmlChannelTimeTick = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: subSystemProxy,
+			Name:      "dml_channels_time_tick",
+			Help:      "Time tick of dml channels",
+		}, []string{"pchan"})
 )
 
 //RegisterProxy register Proxy metrics
@@ -570,6 +579,8 @@ func RegisterProxy() {
 	prometheus.MustRegister(ProxyGetDdChannelCounter)
 
 	prometheus.MustRegister(ProxyReleaseDQLMessageStreamCounter)
+
+	prometheus.MustRegister(ProxyDmlChannelTimeTick)
 }
 
 //RegisterQueryCoord register QueryCoord metrics

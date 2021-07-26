@@ -92,6 +92,8 @@ message DescribeCollectionResponse {
   int64 collectionID = 3;
   repeated string virtual_channel_names = 4;
   repeated string physical_channel_names = 5;
+  uint64 created_timestamp = 6; // hybrid timestamp
+  uint64 created_utc_timestamp = 7; // physical timestamp
 }
 
 message LoadCollectionRequest {
@@ -133,6 +135,8 @@ message ShowCollectionsResponse {
   common.Status status = 1;
   repeated string collection_names = 2;
   repeated int64 collection_ids = 3;
+  repeated uint64 created_timestamps = 4; // hybrid timestamps
+  repeated uint64 created_utc_timestamps = 5; // physical timestamps
 }
 
 message CreatePartitionRequest {
@@ -193,6 +197,8 @@ message ShowPartitionsResponse {
   common.Status status = 1;
   repeated string partition_names = 2;
   repeated int64 partitionIDs = 3;
+  repeated uint64 created_timestamps = 4; // hybrid timestamps
+  repeated uint64 created_utc_timestamps = 5; // physical timestamps
 }
 
 message DescribeSegmentRequest {

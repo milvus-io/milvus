@@ -65,6 +65,10 @@ while (( "$#" )); do
     TEST_EXTRA_ARG=$2
     shift 2
     ;;
+    --test-timeout)
+    TEST_TIMEOUT=$2
+    shift 2
+    ;;
     --skip-setup)
       SKIP_SETUP=true
       shift
@@ -77,16 +81,16 @@ while (( "$#" )); do
       SKIP_CLEANUP=true
       shift
     ;;
-    --install-logger)
-      CRON_LOGGER_INSTALL=true
-      shift
-    ;;
     --skip-build)
       SKIP_BUILD=true
       shift
     ;;
     --skip-test)
       SKIP_TEST=true
+      shift
+    ;;
+    --skip-export-logs)
+      SKIP_EXPORT_LOGS=true
       shift
     ;;
     --manual)
@@ -132,6 +136,8 @@ Usage:
     --test-extra-arg            Run e2e test extra configuration
                                 For example, \"--tag=smoke\"
 
+    --test-timeout              To specify timeout period of e2e test. Timeout time is specified in seconds.
+
     --topology                  KinD cluster topology of deployments
                                 Provides three classes: \"SINGLE_CLUSTER\", \"MULTICLUSTER_SINGLE_NETWORK\", \"MULTICLUSTER\"
                                 Default: \"SINGLE_CLUSTER\"
@@ -147,6 +153,8 @@ Usage:
     --skip-build                Skip build Milvus image
 
     --skip-test                 Skip e2e test
+
+    --skip-export-logs          Skip kind export logs
 
     --manual                    Manual Mode
 
@@ -211,7 +219,7 @@ fi
 
 if [[ ! -x "$(command -v kind)" ]]; then
   KIND_DIR="${KIND_DIR:-"${HOME}/tool_cache/kind"}"
-  KIND_VERSION="v0.10.0"
+  KIND_VERSION="v0.11.1"
 
   export PATH="${KIND_DIR}:${PATH}"
   if [[ ! -x "$(command -v kind)" ]]; then
@@ -283,7 +291,11 @@ if [[ -z "${SKIP_INSTALL:-}" ]]; then
 fi
 
 if [[ -z "${SKIP_TEST:-}" ]]; then
-  trace "test" "${ROOT}/tests/scripts/e2e.sh" "${TEST_EXTRA_ARG}"
+  if [[ -n "${TEST_TIMEOUT:-}" ]]; then
+    trace "test" "timeout" "-v" "${TEST_TIMEOUT}" "${ROOT}/tests/scripts/e2e.sh" "${TEST_EXTRA_ARG}"
+  else
+    trace "test" "${ROOT}/tests/scripts/e2e.sh" "${TEST_EXTRA_ARG}"
+  fi
 fi
 
 # Check if the user is running the clusters in manual mode.

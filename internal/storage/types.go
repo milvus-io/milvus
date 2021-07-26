@@ -12,9 +12,9 @@
 package storage
 
 type ChunkManager interface {
-	Load(key string) (string, error)
+	GetPath(key string) (string, error)
 	Write(key string, content []byte) error
 	Exist(key string) bool
-	ReadAll(key string) ([]byte, error)
+	Read(key string) ([]byte, error)
 	ReadAt(key string, p []byte, off int64) (n int, err error)
 }

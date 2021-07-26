@@ -12,8 +12,9 @@
 package storage
 
 import (
+	"bytes"
 	"encoding/binary"
-	"math"
+	"errors"
 
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 )
@@ -21,35 +22,29 @@ import (
 type VectorChunkManager struct {
 	localChunkManager  ChunkManager
 	remoteChunkManager ChunkManager
-
-	insertCodec *InsertCodec
 }
 
-func NewVectorChunkManager(localChunkManager ChunkManager, remoteChunkManager ChunkManager, schema *etcdpb.CollectionMeta) *VectorChunkManager {
-	insertCodec := NewInsertCodec(schema)
+func NewVectorChunkManager(localChunkManager ChunkManager, remoteChunkManager ChunkManager) *VectorChunkManager {
 	return &VectorChunkManager{
 		localChunkManager:  localChunkManager,
 		remoteChunkManager: remoteChunkManager,
-		insertCodec:        insertCodec,
 	}
 }
 
-func (vcm *VectorChunkManager) Load(key string) (string, error) {
-	if vcm.localChunkManager.Exist(key) {
-		return vcm.localChunkManager.Load(key)
-	}
-	content, err := vcm.remoteChunkManager.ReadAll(key)
+func (vcm *VectorChunkManager) DownloadVectorFile(key string, schema *etcdpb.CollectionMeta) error {
+	insertCodec := NewInsertCodec(schema)
+	content, err := vcm.remoteChunkManager.Read(key)
 	if err != nil {
-		return "", err
+		return err
 	}
 	blob := &Blob{
 		Key:   key,
 		Value: content,
 	}
 
-	_, _, data, err := vcm.insertCodec.Deserialize([]*Blob{blob})
+	_, _, data, err := insertCodec.Deserialize([]*Blob{blob})
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	for _, singleData := range data.Data {
@@ -59,16 +54,23 @@ func (vcm *VectorChunkManager) Load(key string) (string, error) {
 		}
 		floatVector, ok := singleData.(*FloatVectorFieldData)
 		if ok {
-			floatData := floatVector.Data
-			result := make([]byte, 0)
-			for _, singleFloat := range floatData {
-				result = append(result, Float32ToByte(singleFloat)...)
+			buf := new(bytes.Buffer)
+			err := binary.Write(buf, binary.LittleEndian, floatVector.Data)
+			if err != nil {
+				return err
 			}
-			vcm.localChunkManager.Write(key, result)
+			vcm.localChunkManager.Write(key, buf.Bytes())
 		}
 	}
-	vcm.insertCodec.Close()
-	return vcm.localChunkManager.Load(key)
+	insertCodec.Close()
+	return nil
+}
+
+func (vcm *VectorChunkManager) GetPath(key string) (string, error) {
+	if vcm.localChunkManager.Exist(key) {
+		return vcm.localChunkManager.GetPath(key)
+	}
+	return vcm.localChunkManager.GetPath(key)
 }
 
 func (vcm *VectorChunkManager) Write(key string, content []byte) error {
@@ -79,31 +81,13 @@ func (vcm *VectorChunkManager) Exist(key string) bool {
 	return vcm.localChunkManager.Exist(key)
 }
 
-func (vcm *VectorChunkManager) ReadAll(key string) ([]byte, error) {
+func (vcm *VectorChunkManager) Read(key string) ([]byte, error) {
 	if vcm.localChunkManager.Exist(key) {
-		return vcm.localChunkManager.ReadAll(key)
+		return vcm.localChunkManager.Read(key)
 	}
-	_, err := vcm.Load(key)
-	if err != nil {
-		return nil, err
-	}
-	return vcm.localChunkManager.ReadAll(key)
+	return nil, errors.New("the vector file doesn't exist, please call download first")
 }
 
 func (vcm *VectorChunkManager) ReadAt(key string, p []byte, off int64) (n int, err error) {
 	return vcm.localChunkManager.ReadAt(key, p, off)
-}
-
-func Float32ToByte(float float32) []byte {
-	bits := math.Float32bits(float)
-	bytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(bytes, bits)
-
-	return bytes
-}
-
-func ByteToFloat32(bytes []byte) float32 {
-	bits := binary.LittleEndian.Uint32(bytes)
-
-	return math.Float32frombits(bits)
 }

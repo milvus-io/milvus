@@ -62,6 +62,7 @@ class AccuracyRunner(BaseRunner):
                             "params": search_param}
                         # TODO: only update search_info
                         case_metric = copy.deepcopy(self.metric)
+                        case_metric.set_case_metric_type()
                         case_metric.search = {
                             "nq": nq,
                             "topk": top_k,
@@ -168,6 +169,7 @@ class AccAccuracyRunner(AccuracyRunner):
                                     "params": search_param}
                                 # TODO: only update search_info
                                 case_metric = copy.deepcopy(self.metric)
+                                case_metric.set_case_metric_type()
                                 case_metric.index = index_info
                                 case_metric.search = {
                                     "nq": nq,
@@ -245,7 +247,7 @@ class AccAccuracyRunner(AccuracyRunner):
         logger.info(self.milvus.describe_index(index_field_name))
         logger.info("Start load collection: %s" % collection_name)
         # self.milvus.release_collection()
-        self.milvus.load_collection()
+        self.milvus.load_collection(timeout=600)
         logger.info("End load collection: %s" % collection_name)
 
     def run_case(self, case_metric, **case_param):
