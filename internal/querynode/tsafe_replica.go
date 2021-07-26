@@ -14,7 +14,6 @@ package querynode
 import (
 	"context"
 	"errors"
-	"math"
 	"sync"
 
 	"go.uber.org/zap"
@@ -42,7 +41,7 @@ func (t *tSafeReplica) getTSafe(vChannel Channel) Timestamp {
 	safer, err := t.getTSaferPrivate(vChannel)
 	if err != nil {
 		log.Error("get tSafe failed", zap.Error(err))
-		return math.MaxUint64
+		return 0
 	}
 	return safer.get()
 }
