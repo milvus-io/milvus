@@ -21,24 +21,15 @@ For instance, if the dataNode pod expands from one to two:
 - expand / shrink proxy pod
 
 ## How it works
-The flow chart of an scale test scenarios:
 
-```ow
-st=>start: start
-e=>end: end
-
-op1=>operation: Deploy Milvus
-op2=>operation: Milvus Operation
-op3=>operation: Scale Milvus
-op4=>operation: Milvus Operation
-st->op1->op2->op3->op4->e
-
-```
-- Test scenarios are designed by different chaos objects
-- Every chaos object is defined in one yaml file locates in  folder <code>chaos_objects</code>
-- Every chaos yaml file specified by <code>ALL_CHAOS_YAMLS</code> in <code>constants.py</code> would be parsed as a parameter and be passed into <code>test_chaos.py</code>
-- All expectations of every scenario are defined in <code>testcases.yaml</code> locates in folder <code>chaos_objects</code>
-- [Chaos Mesh](https://chaos-mesh.org/) is used to inject chaos into Milvus in <code>test_chaos.py</code>
+- Milvus scales the number of pods in a deployment based on the helm upgrade
+  
+- Scale test decouple the milvus deployment from the test code
+  
+- Each test scenario is carried out along the process:
+  <br> deploy milvus -> operate milvus -> scale milvus -> verify milvus 
+  
+- Milvus deployment and milvus scaling are designed in `helm_env.py`
 
 ## Run
 ### Manually
@@ -58,11 +49,3 @@ Run a single test scenario manually(take scale dataNode as instance):
 
 ### Nightly 
 still in planning 
-
-```mermaid
-graph LR
-A[Square Rect] -- Link text --> B((Circle))
-A --> C(Round Rect)
-B --> D{Rhombus}
-C --> D
-```
