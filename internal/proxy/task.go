@@ -99,6 +99,7 @@ type dmlTask interface {
 	task
 	getChannels() ([]vChan, error)
 	getPChanStats() (map[pChan]pChanStatistics, error)
+	getChannelsTimerTicker() channelsTimeTicker
 }
 
 type BaseInsertTask = msgstream.InsertMsg
@@ -151,6 +152,10 @@ func (it *InsertTask) SetTs(ts Timestamp) {
 
 func (it *InsertTask) EndTs() Timestamp {
 	return it.EndTimestamp
+}
+
+func (it *InsertTask) getChannelsTimerTicker() channelsTimeTicker {
+	return it.chTicker
 }
 
 func (it *InsertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
@@ -1023,15 +1028,6 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 			it.result.Status.Reason = err.Error()
 			return err
 		}
-	}
-
-	pchans, err := it.chMgr.getChannels(collID)
-	if err != nil {
-		return err
-	}
-	for _, pchan := range pchans {
-		log.Debug("Proxy InsertTask add pchan", zap.Any("pchan", pchan))
-		_ = it.chTicker.addPChan(pchan)
 	}
 
 	// Assign SegmentID

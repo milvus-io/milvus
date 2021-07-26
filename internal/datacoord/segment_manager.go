@@ -376,7 +376,7 @@ func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel strin
 	defer s.mu.Unlock()
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
-	if err := s.tryToSealSegment(t); err != nil {
+	if err := s.tryToSealSegment(t, channel); err != nil {
 		return nil, err
 	}
 
@@ -384,6 +384,9 @@ func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel strin
 	for _, id := range s.segments {
 		info := s.meta.GetSegment(id)
 		if info == nil {
+			continue
+		}
+		if info.InsertChannel != channel {
 			continue
 		}
 		if s.flushPolicy(info, t) {
@@ -403,6 +406,9 @@ func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) error {
 		if segment == nil {
 			continue
 		}
+		if segment.InsertChannel != channel {
+			continue
+		}
 		for i := 0; i < len(segment.allocations); i++ {
 			if segment.allocations[i].ExpireTime <= ts {
 				a := segment.allocations[i]
@@ -416,12 +422,15 @@ func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) error {
 }
 
 // tryToSealSegment applies segment & channel seal policies
-func (s *SegmentManager) tryToSealSegment(ts Timestamp) error {
+func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 	channelInfo := make(map[string][]*SegmentInfo)
 	for _, id := range s.segments {
 		info := s.meta.GetSegment(id)
 		if info == nil {
 			log.Warn("Failed to get seg info from meta", zap.Int64("id", id))
+			continue
+		}
+		if info.InsertChannel != channel {
 			continue
 		}
 		channelInfo[info.InsertChannel] = append(channelInfo[info.InsertChannel], info)
