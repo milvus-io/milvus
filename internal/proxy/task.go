@@ -1698,6 +1698,10 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 					continue
 				}
 				distance := searchResultData[q].Scores[idx*topk+loc]
+				// https://github.com/milvus-io/milvus/issues/6781
+				if math.IsNaN(float64(distance)) {
+					continue
+				}
 				if distance > maxDistance || (math.Abs(float64(distance-maxDistance)) < math.SmallestNonzeroFloat32 && choice != q) {
 					choice = q
 					maxDistance = distance
@@ -1710,7 +1714,12 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 			choiceOffset := locs[choice]
 			// check if distance is valid, `invalid` here means very very big,
 			// in this process, distance here is the smallest, so the rest of distance are all invalid
-			if searchResultData[choice].Scores[idx*topk+choiceOffset] <= minFloat32 {
+			// https://github.com/milvus-io/milvus/issues/6781
+			// tanimoto distance between two binary vectors maybe -inf, so -inf distance shouldn't be filtered,
+			// otherwise it will cause that the number of hit records is less than needed (topk).
+			// in the above process, we have already filtered NaN distance.
+			distance := searchResultData[choice].Scores[idx*topk+choiceOffset]
+			if distance < minFloat32 {
 				break
 			}
 			curIdx := idx*topk + choiceOffset
