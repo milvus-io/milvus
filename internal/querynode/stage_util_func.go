@@ -13,6 +13,7 @@ package querynode
 
 import (
 	"fmt"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -52,28 +53,40 @@ func publishFailedQueryResult(msg msgstream.TsMsg, errMsg string, stream msgstre
 
 	switch msgType {
 	case commonpb.MsgType_Retrieve:
-		retrieveMsg := msg.(*msgstream.RetrieveMsg)
+		rm, ok := msg.(*msgstream.RetrieveMsg)
+		if !ok {
+			log.Error("type assertion failed",
+				zap.Any("msgID", msg.ID()),
+			)
+			return
+		}
 		baseResult.MsgType = commonpb.MsgType_RetrieveResult
 		retrieveResultMsg := &msgstream.RetrieveResultMsg{
 			BaseMsg: baseMsg,
 			RetrieveResults: internalpb.RetrieveResults{
 				Base:            baseResult,
 				Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: errMsg},
-				ResultChannelID: retrieveMsg.ResultChannelID,
+				ResultChannelID: rm.ResultChannelID,
 				Ids:             nil,
 				FieldsData:      nil,
 			},
 		}
 		msgPack.Msgs = append(msgPack.Msgs, retrieveResultMsg)
 	case commonpb.MsgType_Search:
-		searchMsg := msg.(*msgstream.SearchMsg)
+		sm, ok := msg.(*msgstream.SearchMsg)
+		if !ok {
+			log.Error("type assertion failed",
+				zap.Any("msgID", msg.ID()),
+			)
+			return
+		}
 		baseResult.MsgType = commonpb.MsgType_SearchResult
 		searchResultMsg := &msgstream.SearchResultMsg{
 			BaseMsg: baseMsg,
 			SearchResults: internalpb.SearchResults{
 				Base:            baseResult,
 				Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: errMsg},
-				ResultChannelID: searchMsg.ResultChannelID,
+				ResultChannelID: sm.ResultChannelID,
 			},
 		}
 		msgPack.Msgs = append(msgPack.Msgs, searchResultMsg)
