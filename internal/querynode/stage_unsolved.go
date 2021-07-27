@@ -206,7 +206,7 @@ func (q *unsolvedStage) doUnsolvedQueryMsg() {
 				var err error
 				sp, ctx := trace.StartSpanFromContext(m.TraceCtx())
 				m.SetTraceCtx(ctx)
-				log.Debug("doing search in doUnsolvedMsg...",
+				log.Debug("doing query in doUnsolvedMsg...",
 					zap.Int64("collectionID", q.collectionID),
 					zap.Int64("msgID", m.ID()),
 				)

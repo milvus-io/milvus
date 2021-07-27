@@ -69,12 +69,20 @@ func newResultHandlerStage(ctx context.Context,
 }
 
 func (q *resultHandlerStage) start() {
+	log.Debug("starting resultHandlerStage...",
+		zap.Any("collectionID", q.collectionID),
+		zap.Any("channelNum", q.channelNum),
+	)
 	for {
 		select {
 		case <-q.ctx.Done():
 			log.Debug("stop resultHandlerStage", zap.Int64("collectionID", q.collectionID))
 			return
 		case msg := <-q.input:
+			log.Debug("receive result",
+				zap.Any("collectionID", q.collectionID),
+				zap.Any("msgID", msg.ID()),
+			)
 			if _, ok := q.results[msg.ID()]; !ok {
 				q.results[msg.ID()] = make([]queryResult, 0)
 			}
@@ -93,6 +101,7 @@ func (q *resultHandlerStage) start() {
 						err := fmt.Errorf("resultHandlerStage receive invalid msgType = %d", msgType)
 						log.Error(err.Error())
 					}
+					delete(q.results, msg.ID())
 				}
 			}
 		}
@@ -107,6 +116,11 @@ func (q *resultHandlerStage) reduceRetrieve(msgID UniqueID) {
 		log.Error("reduceRetrieve failed, err = " + err.Error())
 		return
 	}
+
+	log.Debug("reducing Retrieve result...",
+		zap.Any("collectionID", msg.CollectionID),
+		zap.Any("msgID", msg.ID()),
+	)
 
 	// error check
 	for _, res := range q.results[msgID] {
@@ -173,12 +187,18 @@ func (q *resultHandlerStage) reduceRetrieve(msgID UniqueID) {
 		},
 	}
 
+	log.Debug("delete plan",
+		zap.Any("collectionID", msg.CollectionID),
+		zap.Any("msgID", msg.ID()),
+		zap.Any("vChannels", collection.getVChannels()),
+	)
 	msg.plan.delete()
 
 	publishQueryResult(retrieveResultMsg, q.queryResultStream)
 	log.Debug("QueryNode publish RetrieveResultMsg",
-		zap.Any("vChannels", collection.getVChannels()),
 		zap.Any("collectionID", msg.CollectionID),
+		zap.Any("msgID", msg.ID()),
+		zap.Any("vChannels", collection.getVChannels()),
 		zap.Any("sealedSegmentRetrieved", segmentRetrieved),
 	)
 }
@@ -498,7 +518,6 @@ func (q *resultHandlerStage) reduceSearch(msgID UniqueID) {
 	for _, r := range msg.reqs {
 		r.delete()
 	}
-	delete(q.results, msgID)
 
 	sp.LogFields(oplog.String("statistical time", "before free c++ memory"))
 	sp.LogFields(oplog.String("statistical time", "stats done"))
