@@ -10,13 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "query/PlanProto.h"
-#include "PlanNode.h"
 #include "ExprImpl.h"
-#include "pb/plan.pb.h"
 #include <google/protobuf/text_format.h>
 #include <query/generated/ExtractInfoPlanNodeVisitor.h>
 #include "query/generated/ExtractInfoExprVisitor.h"
-#include "common/Types.h"
 
 namespace milvus::query {
 namespace planpb = milvus::proto::plan;
@@ -48,31 +45,56 @@ ExtractTermExprImpl(FieldOffset field_offset, DataType data_type, const planpb::
 }
 
 template <typename T>
-std::unique_ptr<RangeExprImpl<T>>
-ExtractRangeExprImpl(FieldOffset field_offset, DataType data_type, const planpb::RangeExpr& expr_proto) {
+std::unique_ptr<UnaryRangeExprImpl<T>>
+ExtractUnaryRangeExprImpl(FieldOffset field_offset, DataType data_type, const planpb::UnaryRangeExpr& expr_proto) {
     static_assert(std::is_fundamental_v<T>);
-    auto result = std::make_unique<RangeExprImpl<T>>();
+    auto result = std::make_unique<UnaryRangeExprImpl<T>>();
     result->field_offset_ = field_offset;
     result->data_type_ = data_type;
-    Assert(expr_proto.ops_size() == expr_proto.values_size());
-    auto sz = expr_proto.ops_size();
+    result->op_type_ = static_cast<OpType>(expr_proto.op());
 
-    for (int i = 0; i < sz; ++i) {
-        auto op = static_cast<OpType>(expr_proto.ops(i));
-        auto& value_proto = expr_proto.values(i);
+    auto setValue = [&](T& v, const auto& value_proto) {
         if constexpr (std::is_same_v<T, bool>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kBoolVal);
-            result->conditions_.emplace_back(op, static_cast<T>(value_proto.bool_val()));
+            v = static_cast<T>(value_proto.bool_val());
         } else if constexpr (std::is_integral_v<T>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kInt64Val);
-            result->conditions_.emplace_back(op, static_cast<T>(value_proto.int64_val()));
+            v = static_cast<T>(value_proto.int64_val());
         } else if constexpr (std::is_floating_point_v<T>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kFloatVal);
-            result->conditions_.emplace_back(op, static_cast<T>(value_proto.float_val()));
+            v = static_cast<T>(value_proto.float_val());
         } else {
             static_assert(always_false<T>);
         }
-    }
+    };
+    setValue(result->value_, expr_proto.value());
+    return result;
+}
+
+template <typename T>
+std::unique_ptr<BinaryRangeExprImpl<T>>
+ExtractBinaryRangeExprImpl(FieldOffset field_offset, DataType data_type, const planpb::BinaryRangeExpr& expr_proto) {
+    static_assert(std::is_fundamental_v<T>);
+    auto result = std::make_unique<BinaryRangeExprImpl<T>>();
+    result->field_offset_ = field_offset;
+    result->data_type_ = data_type;
+
+    auto setValue = [&](T& v, const auto& value_proto) {
+        if constexpr (std::is_same_v<T, bool>) {
+            Assert(value_proto.val_case() == planpb::GenericValue::kBoolVal);
+            v = static_cast<T>(value_proto.bool_val());
+        } else if constexpr (std::is_integral_v<T>) {
+            Assert(value_proto.val_case() == planpb::GenericValue::kInt64Val);
+            v = static_cast<T>(value_proto.int64_val());
+        } else if constexpr (std::is_floating_point_v<T>) {
+            Assert(value_proto.val_case() == planpb::GenericValue::kFloatVal);
+            v = static_cast<T>(value_proto.float_val());
+        } else {
+            static_assert(always_false<T>);
+        }
+    };
+    setValue(result->lower_value_, expr_proto.lower_value());
+    setValue(result->upper_value_, expr_proto.upper_value());
     return result;
 }
 
@@ -136,36 +158,74 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
 }
 
 ExprPtr
-ProtoParser::ParseRangeExpr(const proto::plan::RangeExpr& expr_pb) {
-    auto& columen_info = expr_pb.column_info();
-    auto field_id = FieldId(columen_info.field_id());
+ProtoParser::ParseUnaryRangeExpr(const proto::plan::UnaryRangeExpr& expr_pb) {
+    auto& column_info = expr_pb.column_info();
+    auto field_id = FieldId(column_info.field_id());
     auto field_offset = schema.get_offset(field_id);
     auto data_type = schema[field_offset].get_data_type();
-    Assert(data_type == (DataType)columen_info.data_type());
+    Assert(data_type == static_cast<DataType>(column_info.data_type()));
 
-    // auto& field_meta = schema[field_offset];
     auto result = [&]() -> ExprPtr {
         switch (data_type) {
             case DataType::BOOL: {
-                return ExtractRangeExprImpl<bool>(field_offset, data_type, expr_pb);
+                return ExtractUnaryRangeExprImpl<bool>(field_offset, data_type, expr_pb);
             }
             case DataType::INT8: {
-                return ExtractRangeExprImpl<int8_t>(field_offset, data_type, expr_pb);
+                return ExtractUnaryRangeExprImpl<int8_t>(field_offset, data_type, expr_pb);
             }
             case DataType::INT16: {
-                return ExtractRangeExprImpl<int16_t>(field_offset, data_type, expr_pb);
+                return ExtractUnaryRangeExprImpl<int16_t>(field_offset, data_type, expr_pb);
             }
             case DataType::INT32: {
-                return ExtractRangeExprImpl<int32_t>(field_offset, data_type, expr_pb);
+                return ExtractUnaryRangeExprImpl<int32_t>(field_offset, data_type, expr_pb);
             }
             case DataType::INT64: {
-                return ExtractRangeExprImpl<int64_t>(field_offset, data_type, expr_pb);
+                return ExtractUnaryRangeExprImpl<int64_t>(field_offset, data_type, expr_pb);
             }
             case DataType::FLOAT: {
-                return ExtractRangeExprImpl<float>(field_offset, data_type, expr_pb);
+                return ExtractUnaryRangeExprImpl<float>(field_offset, data_type, expr_pb);
             }
             case DataType::DOUBLE: {
-                return ExtractRangeExprImpl<double>(field_offset, data_type, expr_pb);
+                return ExtractUnaryRangeExprImpl<double>(field_offset, data_type, expr_pb);
+            }
+            default: {
+                PanicInfo("unsupported data type");
+            }
+        }
+    }();
+    return result;
+}
+
+ExprPtr
+ProtoParser::ParseBinaryRangeExpr(const proto::plan::BinaryRangeExpr& expr_pb) {
+    auto& columnInfo = expr_pb.column_info();
+    auto field_id = FieldId(columnInfo.field_id());
+    auto field_offset = schema.get_offset(field_id);
+    auto data_type = schema[field_offset].get_data_type();
+    Assert(data_type == (DataType)columnInfo.data_type());
+
+    auto result = [&]() -> ExprPtr {
+        switch (data_type) {
+            case DataType::BOOL: {
+                return ExtractBinaryRangeExprImpl<bool>(field_offset, data_type, expr_pb);
+            }
+            case DataType::INT8: {
+                return ExtractBinaryRangeExprImpl<int8_t>(field_offset, data_type, expr_pb);
+            }
+            case DataType::INT16: {
+                return ExtractBinaryRangeExprImpl<int16_t>(field_offset, data_type, expr_pb);
+            }
+            case DataType::INT32: {
+                return ExtractBinaryRangeExprImpl<int32_t>(field_offset, data_type, expr_pb);
+            }
+            case DataType::INT64: {
+                return ExtractBinaryRangeExprImpl<int64_t>(field_offset, data_type, expr_pb);
+            }
+            case DataType::FLOAT: {
+                return ExtractBinaryRangeExprImpl<float>(field_offset, data_type, expr_pb);
+            }
+            case DataType::DOUBLE: {
+                return ExtractBinaryRangeExprImpl<double>(field_offset, data_type, expr_pb);
             }
             default: {
                 PanicInfo("unsupported data type");
@@ -177,35 +237,36 @@ ProtoParser::ParseRangeExpr(const proto::plan::RangeExpr& expr_pb) {
 
 ExprPtr
 ProtoParser::ParseCompareExpr(const proto::plan::CompareExpr& expr_pb) {
-    auto& column_infos = expr_pb.columns_info();
-    std::vector<FieldOffset> field_offsets;
-    std::vector<DataType> data_types;
-    for (auto& column_info : column_infos) {
-        auto field_id = FieldId(column_info.field_id());
-        auto field_offset = schema.get_offset(field_id);
-        auto data_type = schema[field_offset].get_data_type();
-        Assert(data_type == (DataType)column_info.data_type());
-        field_offsets.emplace_back(field_offset);
-        data_types.emplace_back(data_type);
-    }
+    auto& left_column_info = expr_pb.left_column_info();
+    auto left_field_id = FieldId(left_column_info.field_id());
+    auto left_field_offset = schema.get_offset(left_field_id);
+    auto left_data_type = schema[left_field_offset].get_data_type();
+    Assert(left_data_type == static_cast<DataType>(left_column_info.data_type()));
 
-    // auto& field_meta = schema[field_offset];
+    auto& right_column_info = expr_pb.right_column_info();
+    auto right_field_id = FieldId(right_column_info.field_id());
+    auto right_field_offset = schema.get_offset(right_field_id);
+    auto right_data_type = schema[right_field_offset].get_data_type();
+    Assert(right_data_type == static_cast<DataType>(right_column_info.data_type()));
+
     return [&]() -> ExprPtr {
         auto result = std::make_unique<CompareExpr>();
-        result->field_offsets_ = field_offsets;
-        result->data_types_ = data_types;
-        result->op = static_cast<OpType>(expr_pb.op());
+        result->left_field_offset_ = left_field_offset;
+        result->left_data_type_ = left_data_type;
+        result->right_field_offset_ = right_field_offset;
+        result->right_data_type_ = right_data_type;
+        result->op_type_ = static_cast<OpType>(expr_pb.op());
         return result;
     }();
 }
 
 ExprPtr
 ProtoParser::ParseTermExpr(const proto::plan::TermExpr& expr_pb) {
-    auto& columen_info = expr_pb.column_info();
-    auto field_id = FieldId(columen_info.field_id());
+    auto& columnInfo = expr_pb.column_info();
+    auto field_id = FieldId(columnInfo.field_id());
     auto field_offset = schema.get_offset(field_id);
     auto data_type = schema[field_offset].get_data_type();
-    Assert(data_type == (DataType)columen_info.data_type());
+    Assert(data_type == (DataType)columnInfo.data_type());
 
     // auto& field_meta = schema[field_offset];
     auto result = [&]() -> ExprPtr {
@@ -275,8 +336,11 @@ ProtoParser::ParseExpr(const proto::plan::Expr& expr_pb) {
         case ppe::kTermExpr: {
             return ParseTermExpr(expr_pb.term_expr());
         }
-        case ppe::kRangeExpr: {
-            return ParseRangeExpr(expr_pb.range_expr());
+        case ppe::kUnaryRangeExpr: {
+            return ParseUnaryRangeExpr(expr_pb.unary_range_expr());
+        }
+        case ppe::kBinaryRangeExpr: {
+            return ParseBinaryRangeExpr(expr_pb.binary_range_expr());
         }
         case ppe::kCompareExpr: {
             return ParseCompareExpr(expr_pb.compare_expr());

@@ -72,44 +72,44 @@ func (b Blob) GetValue() []byte {
 type FieldData interface{}
 
 type BoolFieldData struct {
-	NumRows int
+	NumRows []int64
 	Data    []bool
 }
 type Int8FieldData struct {
-	NumRows int
+	NumRows []int64
 	Data    []int8
 }
 type Int16FieldData struct {
-	NumRows int
+	NumRows []int64
 	Data    []int16
 }
 type Int32FieldData struct {
-	NumRows int
+	NumRows []int64
 	Data    []int32
 }
 type Int64FieldData struct {
-	NumRows int
+	NumRows []int64
 	Data    []int64
 }
 type FloatFieldData struct {
-	NumRows int
+	NumRows []int64
 	Data    []float32
 }
 type DoubleFieldData struct {
-	NumRows int
+	NumRows []int64
 	Data    []float64
 }
 type StringFieldData struct {
-	NumRows int
+	NumRows []int64
 	Data    []string
 }
 type BinaryVectorFieldData struct {
-	NumRows int
+	NumRows []int64
 	Data    []byte
 	Dim     int
 }
 type FloatVectorFieldData struct {
-	NumRows int
+	NumRows []int64
 	Data    []float32
 	Dim     int
 }
@@ -131,12 +131,6 @@ type BlobInfo struct {
 // Data {<0, row_id>, <1, timestamp>, <100, float_field>, <101, int_field>, <102, float_vector_field>, <103, string_field>}
 type InsertData struct {
 	Data  map[FieldID]FieldData // field id to field data
-	Infos []BlobInfo
-}
-
-type InsertFieldData struct {
-	ID    FieldID
-	Data  FieldData
 	Infos []BlobInfo
 }
 
@@ -299,7 +293,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 					return InvalidUniqueID, InvalidUniqueID, nil, err
 				}
 				totalLength += length
-				boolFieldData.NumRows += length
+				boolFieldData.NumRows = append(boolFieldData.NumRows, int64(length))
 				resultData.Data[fieldID] = boolFieldData
 			case schemapb.DataType_Int8:
 				if resultData.Data[fieldID] == nil {
@@ -316,7 +310,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 					return InvalidUniqueID, InvalidUniqueID, nil, err
 				}
 				totalLength += length
-				int8FieldData.NumRows += length
+				int8FieldData.NumRows = append(int8FieldData.NumRows, int64(length))
 				resultData.Data[fieldID] = int8FieldData
 			case schemapb.DataType_Int16:
 				if resultData.Data[fieldID] == nil {
@@ -333,7 +327,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 					return InvalidUniqueID, InvalidUniqueID, nil, err
 				}
 				totalLength += length
-				int16FieldData.NumRows += length
+				int16FieldData.NumRows = append(int16FieldData.NumRows, int64(length))
 				resultData.Data[fieldID] = int16FieldData
 			case schemapb.DataType_Int32:
 				if resultData.Data[fieldID] == nil {
@@ -350,7 +344,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 					return InvalidUniqueID, InvalidUniqueID, nil, err
 				}
 				totalLength += length
-				int32FieldData.NumRows += length
+				int32FieldData.NumRows = append(int32FieldData.NumRows, int64(length))
 				resultData.Data[fieldID] = int32FieldData
 			case schemapb.DataType_Int64:
 				if resultData.Data[fieldID] == nil {
@@ -367,7 +361,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 					return InvalidUniqueID, InvalidUniqueID, nil, err
 				}
 				totalLength += length
-				int64FieldData.NumRows += length
+				int64FieldData.NumRows = append(int64FieldData.NumRows, int64(length))
 				resultData.Data[fieldID] = int64FieldData
 			case schemapb.DataType_Float:
 				if resultData.Data[fieldID] == nil {
@@ -384,7 +378,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 					return InvalidUniqueID, InvalidUniqueID, nil, err
 				}
 				totalLength += length
-				floatFieldData.NumRows += length
+				floatFieldData.NumRows = append(floatFieldData.NumRows, int64(length))
 				resultData.Data[fieldID] = floatFieldData
 			case schemapb.DataType_Double:
 				if resultData.Data[fieldID] == nil {
@@ -401,7 +395,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 					return InvalidUniqueID, InvalidUniqueID, nil, err
 				}
 				totalLength += length
-				doubleFieldData.NumRows += length
+				doubleFieldData.NumRows = append(doubleFieldData.NumRows, int64(length))
 				resultData.Data[fieldID] = doubleFieldData
 			case schemapb.DataType_String:
 				if resultData.Data[fieldID] == nil {
@@ -413,7 +407,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 					return InvalidUniqueID, InvalidUniqueID, nil, err
 				}
 				totalLength += length
-				stringFieldData.NumRows += length
+				stringFieldData.NumRows = append(stringFieldData.NumRows, int64(length))
 				for i := 0; i < length; i++ {
 					singleString, err := eventReader.GetOneStringFromPayload(i)
 					if err != nil {
@@ -438,7 +432,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 					return InvalidUniqueID, InvalidUniqueID, nil, err
 				}
 				totalLength += length
-				binaryVectorFieldData.NumRows += length
+				binaryVectorFieldData.NumRows = append(binaryVectorFieldData.NumRows, int64(length))
 				resultData.Data[fieldID] = binaryVectorFieldData
 			case schemapb.DataType_FloatVector:
 				if resultData.Data[fieldID] == nil {
@@ -456,7 +450,7 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 					return InvalidUniqueID, InvalidUniqueID, nil, err
 				}
 				totalLength += length
-				floatVectorFieldData.NumRows += length
+				floatVectorFieldData.NumRows = append(floatVectorFieldData.NumRows, int64(length))
 				resultData.Data[fieldID] = floatVectorFieldData
 			default:
 				return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("undefined data type %d", dataType)
@@ -472,75 +466,6 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 	}
 
 	return pID, sID, resultData, nil
-}
-
-func (insertCodec *InsertCodec) DeserializeOneVectorBinlog(blob *Blob) (data *InsertFieldData, err error) {
-	resultData := &InsertFieldData{
-		ID: InvalidUniqueID,
-	}
-	binlogReader, err := NewBinlogReader(blob.Value)
-	if err != nil {
-		return nil, err
-	}
-
-	dataType := binlogReader.PayloadDataType
-	fieldID := binlogReader.FieldID
-	totalLength := 0
-	for {
-		eventReader, err := binlogReader.NextEventReader()
-		if err != nil {
-			return nil, err
-		}
-		if eventReader == nil {
-			break
-		}
-		switch dataType {
-		case schemapb.DataType_BinaryVector:
-			if resultData.ID == InvalidUniqueID {
-				resultData.ID = fieldID
-				resultData.Data = &BinaryVectorFieldData{}
-			}
-			binaryVectorFieldData := resultData.Data.(*BinaryVectorFieldData)
-			var singleData []byte
-			singleData, binaryVectorFieldData.Dim, err = eventReader.GetBinaryVectorFromPayload()
-			if err != nil {
-				return nil, err
-			}
-			binaryVectorFieldData.Data = append(binaryVectorFieldData.Data, singleData...)
-			length, err := eventReader.GetPayloadLengthFromReader()
-			if err != nil {
-				return nil, err
-			}
-			totalLength += length
-			binaryVectorFieldData.NumRows += length
-			resultData.Data = binaryVectorFieldData
-		case schemapb.DataType_FloatVector:
-			if resultData.ID == InvalidUniqueID {
-				resultData.ID = fieldID
-				resultData.Data = &FloatVectorFieldData{}
-			}
-			floatVectorFieldData := resultData.Data.(*FloatVectorFieldData)
-			var singleData []float32
-			singleData, floatVectorFieldData.Dim, err = eventReader.GetFloatVectorFromPayload()
-			if err != nil {
-				return nil, err
-			}
-			floatVectorFieldData.Data = append(floatVectorFieldData.Data, singleData...)
-			length, err := eventReader.GetPayloadLengthFromReader()
-			if err != nil {
-				return nil, err
-			}
-			totalLength += length
-			floatVectorFieldData.NumRows += length
-			resultData.Data = floatVectorFieldData
-		default:
-			return nil, fmt.Errorf("undefined data type %d", dataType)
-		}
-	}
-	if err = binlogReader.Close(); err != nil {
-		return nil, err
-	}
-	return resultData, nil
 }
 
 func (insertCodec *InsertCodec) Close() error {

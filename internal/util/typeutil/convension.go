@@ -14,8 +14,25 @@ package typeutil
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"reflect"
 )
+
+// Float32ToByte converts a float to byte slice.
+func Float32ToByte(float float32) []byte {
+	bits := math.Float32bits(float)
+	bytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(bytes, bits)
+
+	return bytes
+}
+
+// BytesToFloat32 converts a byte slice to float32.
+func ByteToFloat32(bytes []byte) float32 {
+	bits := binary.LittleEndian.Uint32(bytes)
+
+	return math.Float32frombits(bits)
+}
 
 // BytesToUint64 converts a byte slice to uint64.
 func BytesToInt64(b []byte) (int64, error) {

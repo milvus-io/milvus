@@ -27,12 +27,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
-
-	"github.com/milvus-io/milvus/internal/proto/planpb"
-
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
@@ -44,9 +38,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -820,7 +817,6 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 	}
 
 	reqSegCountMap := make(map[int32]map[UniqueID]uint32)
-
 	for channelID, count := range channelCountMap {
 		ts, ok := channelMaxTSMap[channelID]
 		if !ok {
@@ -833,6 +829,8 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 		}
 		mapInfo, err := it.segIDAssigner.GetSegmentID(it.CollectionID, it.PartitionID, channelName, count, ts)
 		if err != nil {
+			log.Debug("InsertTask.go", zap.Any("MapInfo", mapInfo),
+				zap.Error(err))
 			return nil, err
 		}
 		reqSegCountMap[channelID] = make(map[UniqueID]uint32)
@@ -883,7 +881,7 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 				return segIDSlice[index]
 			}
 		}
-		log.Warn("Can't Found SegmentID")
+		log.Warn("Can't Found SegmentID", zap.Any("reqSegAllocateCounter", reqSegAllocateCounter))
 		return 0
 	}
 
@@ -924,6 +922,9 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 			rowID := insertRequest.RowIDs[index]
 			row := insertRequest.RowData[index]
 			segmentID := getSegmentID(key)
+			if segmentID == 0 {
+				return nil, fmt.Errorf("get SegmentID failed, segmentID is zero")
+			}
 			_, ok := result[key]
 			if !ok {
 				sliceRequest := internalpb.InsertRequest{
@@ -1265,6 +1266,49 @@ func (dct *DropCollectionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+func translateOutputFields(outputFields []string, schema *schemapb.CollectionSchema, addPrimary bool) ([]string, error) {
+	var primaryFieldName string
+	scalarFieldNameMap := make(map[string]bool)
+	vectorFieldNameMap := make(map[string]bool)
+	resultFieldNameMap := make(map[string]bool)
+	resultFieldNames := make([]string, 0)
+
+	for _, field := range schema.Fields {
+		if field.IsPrimaryKey {
+			primaryFieldName = field.Name
+		}
+		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
+			vectorFieldNameMap[field.Name] = true
+		} else {
+			scalarFieldNameMap[field.Name] = true
+		}
+	}
+
+	for _, outputFieldName := range outputFields {
+		outputFieldName = strings.TrimSpace(outputFieldName)
+		if outputFieldName == "*" {
+			for fieldName := range scalarFieldNameMap {
+				resultFieldNameMap[fieldName] = true
+			}
+		} else if outputFieldName == "%" {
+			for fieldName := range vectorFieldNameMap {
+				resultFieldNameMap[fieldName] = true
+			}
+		} else {
+			resultFieldNameMap[outputFieldName] = true
+		}
+	}
+
+	if addPrimary {
+		resultFieldNameMap[primaryFieldName] = true
+	}
+
+	for fieldName := range resultFieldNameMap {
+		resultFieldNames = append(resultFieldNames, fieldName)
+	}
+	return resultFieldNames, nil
+}
+
 type SearchTask struct {
 	Condition
 	*internalpb.SearchRequest
@@ -1339,23 +1383,6 @@ func (st *SearchTask) getVChannels() ([]vChan, error) {
 	return st.chMgr.getVChannels(collID)
 }
 
-// https://github.com/milvus-io/milvus/issues/6411
-// Support wildcard match
-func translateOutputFields(outputFields []string, schema *schemapb.CollectionSchema) ([]string, error) {
-	if len(outputFields) == 1 && strings.TrimSpace(outputFields[0]) == "*" {
-		ret := make([]string, 0)
-		// fill all fields except vector fields
-		for _, field := range schema.Fields {
-			if field.DataType != schemapb.DataType_BinaryVector && field.DataType != schemapb.DataType_FloatVector {
-				ret = append(ret, field.Name)
-			}
-		}
-		return ret, nil
-	}
-
-	return outputFields, nil
-}
-
 func (st *SearchTask) PreExecute(ctx context.Context) error {
 	st.Base.MsgType = commonpb.MsgType_Search
 	st.Base.SourceID = Params.ProxyID
@@ -1416,7 +1443,7 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	outputFields, err := translateOutputFields(st.query.OutputFields, schema)
+	outputFields, err := translateOutputFields(st.query.OutputFields, schema, false)
 	if err != nil {
 		return err
 	}
@@ -1597,7 +1624,7 @@ func decodeSearchResultsSerial(searchResults []*internalpb.SearchResults) ([]*sc
 	results := make([]*schemapb.SearchResultData, 0)
 	// necessary to parallel this?
 	for i, partialSearchResult := range searchResults {
-		log.Debug("decodeSearchResultsSerial", zap.Any("i", i), zap.Any("SlicedBob", partialSearchResult.SlicedBlob))
+		log.Debug("decodeSearchResultsSerial", zap.Any("i", i), zap.Any("len(SlicedBob)", len(partialSearchResult.SlicedBlob)))
 		if partialSearchResult.SlicedBlob == nil {
 			continue
 		}
@@ -1671,6 +1698,10 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 					continue
 				}
 				distance := searchResultData[q].Scores[idx*topk+loc]
+				// https://github.com/milvus-io/milvus/issues/6781
+				if math.IsNaN(float64(distance)) {
+					continue
+				}
 				if distance > maxDistance || (math.Abs(float64(distance-maxDistance)) < math.SmallestNonzeroFloat32 && choice != q) {
 					choice = q
 					maxDistance = distance
@@ -1683,7 +1714,12 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 			choiceOffset := locs[choice]
 			// check if distance is valid, `invalid` here means very very big,
 			// in this process, distance here is the smallest, so the rest of distance are all invalid
-			if searchResultData[choice].Scores[idx*topk+choiceOffset] <= minFloat32 {
+			// https://github.com/milvus-io/milvus/issues/6781
+			// tanimoto distance between two binary vectors maybe -inf, so -inf distance shouldn't be filtered,
+			// otherwise it will cause that the number of hit records is less than needed (topk).
+			// in the above process, we have already filtered NaN distance.
+			distance := searchResultData[choice].Scores[idx*topk+choiceOffset]
+			if distance < minFloat32 {
 				break
 			}
 			curIdx := idx*topk + choiceOffset
@@ -2099,7 +2135,7 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	rt.retrieve.OutputFields, err = translateOutputFields(rt.retrieve.OutputFields, schema)
+	rt.retrieve.OutputFields, err = translateOutputFields(rt.retrieve.OutputFields, schema, true)
 	if err != nil {
 		return err
 	}
@@ -2556,6 +2592,8 @@ func (dct *DescribeCollectionTask) Execute(ctx context.Context) error {
 		dct.result.CollectionID = result.CollectionID
 		dct.result.VirtualChannelNames = result.VirtualChannelNames
 		dct.result.PhysicalChannelNames = result.PhysicalChannelNames
+		dct.result.CreatedTimestamp = result.CreatedTimestamp
+		dct.result.CreatedUtcTimestamp = result.CreatedUtcTimestamp
 
 		for _, field := range result.Schema.Fields {
 			if field.FieldID >= 100 { // TODO(dragondriver): use StartOfUserFieldID replacing 100
@@ -2852,19 +2890,24 @@ func (sct *ShowCollectionsTask) Execute(ctx context.Context) error {
 		}
 
 		sct.result = &milvuspb.ShowCollectionsResponse{
-			Status:          resp.Status,
-			CollectionNames: make([]string, 0, len(resp.CollectionIDs)),
-			CollectionIds:   make([]int64, 0, len(resp.CollectionIDs)),
+			Status:               resp.Status,
+			CollectionNames:      make([]string, 0, len(resp.CollectionIDs)),
+			CollectionIds:        make([]int64, 0, len(resp.CollectionIDs)),
+			CreatedTimestamps:    make([]uint64, 0, len(resp.CollectionIDs)),
+			CreatedUtcTimestamps: make([]uint64, 0, len(resp.CollectionIDs)),
 		}
 
-		idMap := make(map[int64]string)
-		for i, name := range respFromRootCoord.CollectionNames {
-			idMap[respFromRootCoord.CollectionIds[i]] = name
+		idMap := make(map[int64]int) // id -> location of respFromRootCoord
+		for i := range respFromRootCoord.CollectionNames {
+			idMap[respFromRootCoord.CollectionIds[i]] = i
 		}
 
 		for _, id := range resp.CollectionIDs {
+			loc := idMap[id]
 			sct.result.CollectionIds = append(sct.result.CollectionIds, id)
-			sct.result.CollectionNames = append(sct.result.CollectionNames, idMap[id])
+			sct.result.CollectionNames = append(sct.result.CollectionNames, respFromRootCoord.CollectionNames[loc])
+			sct.result.CreatedTimestamps = append(sct.result.CreatedTimestamps, respFromRootCoord.CreatedTimestamps[loc])
+			sct.result.CreatedUtcTimestamps = append(sct.result.CreatedUtcTimestamps, respFromRootCoord.CreatedUtcTimestamps[loc])
 		}
 	} else {
 		sct.result = respFromRootCoord

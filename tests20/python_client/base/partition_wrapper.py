@@ -6,6 +6,9 @@ from check.func_check import *
 from utils.api_request import api_request
 
 
+TIMEOUT = 5
+
+
 class ApiPartitionWrapper:
     partition = None
 
@@ -36,6 +39,9 @@ class ApiPartitionWrapper:
         return self.partition.num_entities if self.partition else None
 
     def drop(self, check_task=None, check_items=None, **kwargs):
+        timeout = kwargs.get("timeout", TIMEOUT)
+        kwargs.update({"timeout": timeout})
+
         func_name = sys._getframe().f_code.co_name
         res, succ = api_request([self.partition.drop], **kwargs)
         check_result = ResponseChecker(res, func_name,
@@ -43,6 +49,9 @@ class ApiPartitionWrapper:
         return res, check_result
 
     def load(self, check_task=None, check_items=None, **kwargs):
+        timeout = kwargs.get("timeout", TIMEOUT)
+        kwargs.update({"timeout": timeout})
+
         func_name = sys._getframe().f_code.co_name
         res, succ = api_request([self.partition.load], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task,
@@ -51,6 +60,9 @@ class ApiPartitionWrapper:
         return res, check_result
 
     def release(self, check_task=None, check_items=None, **kwargs):
+        timeout = kwargs.get("timeout", TIMEOUT)
+        kwargs.update({"timeout": timeout})
+
         func_name = sys._getframe().f_code.co_name
         res, succ = api_request([self.partition.release], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task,
@@ -59,6 +71,9 @@ class ApiPartitionWrapper:
         return res, check_result
 
     def insert(self, data, check_task=None, check_items=None, **kwargs):
+        timeout = kwargs.get("timeout", TIMEOUT)
+        kwargs.update({"timeout": timeout})
+
         func_name = sys._getframe().f_code.co_name
         res, succ = api_request([self.partition.insert, data], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task,
@@ -68,6 +83,9 @@ class ApiPartitionWrapper:
 
     def search(self, data, anns_field, params, limit, expr=None, output_fields=None,
                check_task=None, check_items=None, **kwargs):
+        timeout = kwargs.get("timeout", TIMEOUT)
+        kwargs.update({"timeout": timeout})
+
         func_name = sys._getframe().f_code.co_name
         res, succ = api_request([self.partition.search, data, anns_field, params,
                                  limit, expr, output_fields], **kwargs)

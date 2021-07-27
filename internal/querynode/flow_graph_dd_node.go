@@ -43,7 +43,7 @@ func (ddNode *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	msMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
-		log.Error("type assertion failed for MsgStreamMsg")
+		log.Warn("type assertion failed for MsgStreamMsg")
 		// TODO: add error handling
 	}
 

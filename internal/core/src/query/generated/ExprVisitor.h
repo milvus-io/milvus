@@ -29,7 +29,10 @@ class ExprVisitor {
     visit(TermExpr&) = 0;
 
     virtual void
-    visit(RangeExpr&) = 0;
+    visit(UnaryRangeExpr&) = 0;
+
+    virtual void
+    visit(BinaryRangeExpr&) = 0;
 
     virtual void
     visit(CompareExpr&) = 0;

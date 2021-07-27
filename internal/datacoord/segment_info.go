@@ -168,7 +168,7 @@ func SetAllocations(allocations []*Allocation) SegmentInfoOption {
 func AddAllocation(allocation *Allocation) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.allocations = append(segment.allocations, allocation)
-		segment.LastExpireTime = allocation.expireTime
+		segment.LastExpireTime = allocation.ExpireTime
 	}
 }
 

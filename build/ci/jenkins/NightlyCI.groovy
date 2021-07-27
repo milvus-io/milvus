@@ -68,6 +68,8 @@ pipeline {
                                             ./e2e-k8s.sh \
                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
                                             --node-image registry.zilliz.com/kindest/node:v1.20.2 \
+                                            --skip-export-logs \
+                                            --skip-cleanup \
                                             --test-timeout ${e2e_timeout_seconds}
                                             """
                                         } else if ("${MILVUS_CLIENT}" == "pymilvus-orm") {
@@ -76,6 +78,8 @@ pipeline {
                                             ./e2e-k8s.sh \
                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
                                             --node-image registry.zilliz.com/kindest/node:v1.20.2 \
+                                            --skip-export-logs \
+                                            --skip-cleanup \
                                             --test-extra-arg "--tags L0 L1 L2" \
                                             --test-timeout ${e2e_timeout_seconds}
                                             """
@@ -100,21 +104,6 @@ pipeline {
                             }
                         }
                     }
-                    always {
-                        container('main') {
-                            script {
-                                dir("${env.ARTIFACTS}") {
-                                    sh "find ./kind -path '*/history/*' -type f | xargs tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-e2e-nightly-logs.tar.gz --transform='s:^[^/]*/[^/]*/[^/]*/[^/]*/::g' || true"
-                                    if ("${MILVUS_CLIENT}" == "pymilvus-orm") {
-                                        sh "tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${MILVUS_CLIENT}-pytest-logs.tar.gz ./tests/pytest_logs --remove-files || true"
-                                    }
-                                    archiveArtifacts artifacts: "**.tar.gz", allowEmptyArchive: true
-                                    sh 'docker rm -f \$(docker network inspect -f \'{{ range \$key, \$value := .Containers }}{{ printf "%s " \$key}}{{ end }}\' kind) || true'
-                                    sh 'docker network rm kind > /dev/null 2>&1 || true'
-                                }
-                            }
-                        }
-                    }
                     success {
                         container('main') {
                             script {
@@ -134,9 +123,24 @@ pipeline {
                             }
                         }
                     }
+                    always {
+                        container('main') {
+                            script {
+                                sh "./tests/scripts/export_logs.sh"
+                                dir("${env.ARTIFACTS}") {
+                                    sh "find ./kind -path '*/history/*' -type f | xargs tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-e2e-nightly-logs.tar.gz --transform='s:^[^/]*/[^/]*/[^/]*/[^/]*/::g' || true"
+                                    if ("${MILVUS_CLIENT}" == "pymilvus-orm") {
+                                        sh "tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${MILVUS_CLIENT}-pytest-logs.tar.gz ./tests/pytest_logs --remove-files || true"
+                                    }
+                                    archiveArtifacts artifacts: "**.tar.gz", allowEmptyArchive: true
+                                }
+                            }
+                        }
+                    }
                     cleanup {
                         container('main') {
                             script {
+                                sh "kind delete cluster --name kind -v9 || true"
                                 sh 'find . -name . -o -prune -exec rm -rf -- {} +' /* clean up our workspace */
                             }
                         }

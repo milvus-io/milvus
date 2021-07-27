@@ -113,6 +113,15 @@ class TestcaseBase(Base):
         self.collection_object_list.append(collection_w)
         return collection_w
 
+    def init_multi_fields_collection_wrap(self, name=cf.gen_unique_str()):
+        vec_fields = [cf.gen_float_vec_field(ct.another_float_vec_field_name)]
+        schema = cf.gen_schema_multi_vector_fields(vec_fields)
+        collection_w = self.init_collection_wrap(name=name, schema=schema)
+        df = cf.gen_dataframe_multi_vec_fields(vec_fields=vec_fields)
+        collection_w.insert(df)
+        assert collection_w.num_entities == ct.default_nb
+        return collection_w, df
+
     def init_partition_wrap(self, collection_wrap=None, name=None, description=None,
                             check_task=None, check_items=None, **kwargs):
         name = cf.gen_unique_str("partition_") if name is None else name
@@ -124,8 +133,9 @@ class TestcaseBase(Base):
                                       **kwargs)
         return partition_wrap
 
-    def init_collection_general(self, prefix, insert_data=False, nb=ct.default_nb, partition_num=0,
-                                is_binary=False, is_all_data_type=False, auto_id=False, dim=ct.default_dim):
+    def init_collection_general(self, prefix, insert_data=False, nb=ct.default_nb,
+                                partition_num=0, is_binary=False, is_all_data_type=False,
+                                auto_id=False, dim=ct.default_dim, is_index=False):
         """
         target: create specified collections
         method: 1. create collections (binary/non-binary)
@@ -159,7 +169,9 @@ class TestcaseBase(Base):
                                auto_id=auto_id, dim=dim)
             assert collection_w.is_empty is False
             assert collection_w.num_entities == nb
-            collection_w.load()
+            # This condition will be removed after auto index feature
+            if not is_index:
+                collection_w.load()
 
         return collection_w, vectors, binary_raw_vectors, insert_ids
 
