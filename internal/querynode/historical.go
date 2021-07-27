@@ -21,12 +21,14 @@ import (
 
 	"github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/golang/protobuf/proto"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"go.uber.org/zap"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 )
 
@@ -177,10 +179,7 @@ func (h *historical) removeGlobalSegmentIDsByPartitionIds(partitionIDs []UniqueI
 	}
 }
 
-func (h *historical) search(searchReqs []*searchRequest,
-	collID UniqueID,
-	partIDs []UniqueID,
-	plan *SearchPlan,
+func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, plan *SearchPlan,
 	searchTs Timestamp) ([]*SearchResult, []*Segment, error) {
 
 	searchResults := make([]*SearchResult, 0)
@@ -190,10 +189,6 @@ func (h *historical) search(searchReqs []*searchRequest,
 	var searchPartIDs []UniqueID
 	if len(partIDs) == 0 {
 		hisPartIDs, err := h.replica.getPartitionIDs(collID)
-		if len(hisPartIDs) == 0 {
-			// no partitions in collection, do empty search
-			return nil, nil, nil
-		}
 		if err != nil {
 			return searchResults, segmentResults, err
 		}
@@ -264,4 +259,55 @@ func (h *historical) search(searchReqs []*searchRequest,
 	}
 
 	return searchResults, segmentResults, nil
+}
+
+func (h *historical) fetch(collID UniqueID, partIDs []UniqueID, vcm *storage.VectorChunkManager, plan *RetrievePlan) ([]*segcorepb.RetrieveResults, []UniqueID, error) {
+	fetchResults := make([]*segcorepb.RetrieveResults, 0)
+	segmentResultIDs := make([]UniqueID, 0)
+
+	// get historical partition ids
+	var fetchPartIDs []UniqueID
+	if len(partIDs) == 0 {
+		hisPartIDs, err := h.replica.getPartitionIDs(collID)
+		if err != nil {
+			return fetchResults, segmentResultIDs, err
+		}
+		fetchPartIDs = hisPartIDs
+	} else {
+		for _, id := range partIDs {
+			_, err := h.replica.getPartitionByID(id)
+			if err == nil {
+				fetchPartIDs = append(fetchPartIDs, id)
+			}
+		}
+	}
+
+	col, err := h.replica.getCollectionByID(collID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for _, partID := range fetchPartIDs {
+		segIDs, err := h.replica.getSegmentIDs(partID)
+		if err != nil {
+			return fetchResults, segmentResultIDs, err
+		}
+		for _, segID := range segIDs {
+			seg, err := h.replica.getSegmentByID(segID)
+			if err != nil {
+				return fetchResults, segmentResultIDs, err
+			}
+			result, err := seg.getEntityByIds(plan)
+			if err != nil {
+				return fetchResults, segmentResultIDs, err
+			}
+
+			if err = seg.fillVectorFieldsData(collID, col.schema, vcm, result); err != nil {
+				return fetchResults, segmentResultIDs, err
+			}
+			fetchResults = append(fetchResults, result)
+			segmentResultIDs = append(segmentResultIDs, segID)
+		}
+	}
+	return fetchResults, segmentResultIDs, nil
 }

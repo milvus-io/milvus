@@ -53,10 +53,10 @@ func TestVectorChunkManager(t *testing.T) {
 	for _, binlog := range binlogs {
 		rcm.Write(binlog.Key, binlog.Value)
 	}
-	err = vcm.DownloadVectorFile("108", schema)
+	err = vcm.DownloadVectorFile("108", schema.ID, schema.Schema)
 	assert.Nil(t, err)
 
-	err = vcm.DownloadVectorFile("109", schema)
+	err = vcm.DownloadVectorFile("109", schema.ID, schema.Schema)
 	assert.Nil(t, err)
 
 	content, err := vcm.Read("108")

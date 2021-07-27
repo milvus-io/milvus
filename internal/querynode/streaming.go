@@ -21,6 +21,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
@@ -61,12 +62,8 @@ func (s *streaming) close() {
 	s.replica.freeAll()
 }
 
-func (s *streaming) search(searchReqs []*searchRequest,
-	collID UniqueID,
-	partIDs []UniqueID,
-	vChannel Channel,
-	plan *SearchPlan,
-	searchTs Timestamp) ([]*SearchResult, []*Segment, error) {
+func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, vChannel Channel,
+	plan *SearchPlan, searchTs Timestamp) ([]*SearchResult, []*Segment, error) {
 
 	searchResults := make([]*SearchResult, 0)
 	segmentResults := make([]*Segment, 0)
@@ -183,4 +180,46 @@ func (s *streaming) search(searchReqs []*searchRequest,
 	}
 
 	return searchResults, segmentResults, nil
+}
+
+func (s *streaming) fetch(collID UniqueID, partIDs []UniqueID, plan *RetrievePlan) ([]*segcorepb.RetrieveResults, []UniqueID, error) {
+	fetchResults := make([]*segcorepb.RetrieveResults, 0)
+	segmentResultIDs := make([]UniqueID, 0)
+
+	var fetchPartIDs []UniqueID
+	if len(partIDs) == 0 {
+		strPartIDs, err := s.replica.getPartitionIDs(collID)
+		if err != nil {
+			return fetchResults, segmentResultIDs, err
+		}
+		fetchPartIDs = strPartIDs
+	} else {
+		for _, id := range partIDs {
+			_, err := s.replica.getPartitionByID(id)
+			if err == nil {
+				fetchPartIDs = append(fetchPartIDs, id)
+			}
+		}
+	}
+
+	for _, partID := range fetchPartIDs {
+		segIDs, err := s.replica.getSegmentIDs(partID)
+		if err != nil {
+			return fetchResults, segmentResultIDs, err
+		}
+		for _, segID := range segIDs {
+			seg, err := s.replica.getSegmentByID(segID)
+			if err != nil {
+				return fetchResults, segmentResultIDs, err
+			}
+			result, err := seg.getEntityByIds(plan)
+			if err != nil {
+				return fetchResults, segmentResultIDs, err
+			}
+
+			fetchResults = append(fetchResults, result)
+			segmentResultIDs = append(segmentResultIDs, segID)
+		}
+	}
+	return fetchResults, segmentResultIDs, nil
 }

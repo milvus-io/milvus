@@ -12,9 +12,7 @@
 package querynode
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 
@@ -23,13 +21,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type historicalStage struct {
@@ -61,35 +56,35 @@ func newHistoricalStage(ctx context.Context,
 	}
 }
 
-func (q *historicalStage) start() {
+func (hs *historicalStage) start() {
 	for {
 		select {
-		case <-q.ctx.Done():
-			log.Debug("stop historicalStage", zap.Int64("collectionID", q.collectionID))
+		case <-hs.ctx.Done():
+			log.Debug("stop historicalStage", zap.Int64("collectionID", hs.collectionID))
 			return
-		case msg := <-q.input:
+		case msg := <-hs.input:
 			msgType := msg.Type()
 			sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 			msg.SetTraceCtx(ctx)
 			log.Debug("doing query in historicalStage...",
-				zap.Any("collectionID", q.collectionID),
+				zap.Any("collectionID", hs.collectionID),
 				zap.Any("msgID", msg.ID()),
 				zap.Any("msgType", msgType),
 			)
 			switch msgType {
 			case commonpb.MsgType_Retrieve:
 				rm := msg.(*retrieveMsg)
-				segmentRetrieved, res, err := q.retrieve(rm)
+				retrieveResults, segmentRetrievedIDs, err := hs.retrieve(rm)
 				retrieveRes := &retrieveResult{
 					msg:              rm,
 					err:              err,
-					segmentRetrieved: segmentRetrieved,
-					res:              res,
+					segmentRetrieved: segmentRetrievedIDs,
+					res:              retrieveResults,
 				}
-				q.output <- retrieveRes
+				hs.output <- retrieveRes
 			case commonpb.MsgType_Search:
 				sm := msg.(*searchMsg)
-				searchResults, matchedSegments, sealedSegmentSearched, err := q.search(sm)
+				searchResults, matchedSegments, sealedSegmentSearched, err := hs.search(sm)
 				searchRes := &searchResult{
 					reqs:                  sm.reqs,
 					msg:                   sm,
@@ -98,7 +93,7 @@ func (q *historicalStage) start() {
 					matchedSegments:       matchedSegments,
 					sealedSegmentSearched: sealedSegmentSearched,
 				}
-				q.output <- searchRes
+				hs.output <- searchRes
 			default:
 				err := fmt.Errorf("receive invalid msgType = %d", msgType)
 				log.Error(err.Error())
@@ -109,56 +104,22 @@ func (q *historicalStage) start() {
 	}
 }
 
-func (q *historicalStage) retrieve(retrieveMsg *retrieveMsg) ([]UniqueID, []*segcorepb.RetrieveResults, error) {
+func (hs *historicalStage) retrieve(retrieveMsg *retrieveMsg) ([]*segcorepb.RetrieveResults, []UniqueID, error) {
 	collectionID := retrieveMsg.CollectionID
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("retrieve %d", collectionID))
 
-	var partitionIDsInHistorical []UniqueID
-	partitionIDsInQuery := retrieveMsg.PartitionIDs
-	if len(partitionIDsInQuery) == 0 {
-		partitionIDsInHistoricalCol, err := q.historical.replica.getPartitionIDs(collectionID)
-		if err != nil {
-			return nil, nil, err
-		}
-		partitionIDsInHistorical = partitionIDsInHistoricalCol
-	} else {
-		for _, id := range partitionIDsInQuery {
-			_, err := q.historical.replica.getPartitionByID(id)
-			if err != nil {
-				return nil, nil, err
-			}
-			partitionIDsInHistorical = append(partitionIDsInHistorical, id)
-		}
-	}
-	sealedSegmentRetrieved := make([]UniqueID, 0)
-	var mergeList []*segcorepb.RetrieveResults
-	for _, partitionID := range partitionIDsInHistorical {
-		segmentIDs, err := q.historical.replica.getSegmentIDs(partitionID)
-		if err != nil {
-			return nil, nil, err
-		}
-		for _, segmentID := range segmentIDs {
-			segment, err := q.historical.replica.getSegmentByID(segmentID)
-			if err != nil {
-				return nil, nil, err
-			}
-			result, err := segment.getEntityByIds(retrieveMsg.plan)
-			if err != nil {
-				return nil, nil, err
-			}
-			if err = q.fillVectorFieldsData(segment, result); err != nil {
-				return nil, nil, err
-			}
-			mergeList = append(mergeList, result)
-			sealedSegmentRetrieved = append(sealedSegmentRetrieved, segmentID)
-		}
+	fetchResults, segmentResultIDs, err :=
+		hs.historical.fetch(collectionID, retrieveMsg.PartitionIDs, hs.vcm, retrieveMsg.plan)
+	if err != nil {
+		log.Error(err.Error())
+		return nil, nil, err
 	}
 	tr.Record("historical retrieve done")
 	tr.Elapse("all done")
-	return sealedSegmentRetrieved, mergeList, nil
+	return fetchResults, segmentResultIDs, nil
 }
 
-func (q *historicalStage) search(searchMsg *searchMsg) ([]*SearchResult, []*Segment, []UniqueID, error) {
+func (hs *historicalStage) search(searchMsg *searchMsg) ([]*SearchResult, []*Segment, []UniqueID, error) {
 	sp, ctx := trace.StartSpanFromContext(searchMsg.TraceCtx())
 	defer sp.Finish()
 	searchMsg.SetTraceCtx(ctx)
@@ -187,11 +148,8 @@ func (q *historicalStage) search(searchMsg *searchMsg) ([]*SearchResult, []*Segm
 	sealedSegmentSearched := make([]UniqueID, 0)
 
 	// historical search
-	hisSearchResults, hisSegmentResults, err := q.historical.search(searchMsg.reqs,
-		collectionID,
-		searchMsg.PartitionIDs,
-		searchMsg.plan,
-		travelTimestamp)
+	hisSearchResults, hisSegmentResults, err :=
+		hs.historical.search(searchMsg.reqs, collectionID, searchMsg.PartitionIDs, searchMsg.plan, travelTimestamp)
 	if err != nil {
 		log.Error(err.Error())
 		return nil, nil, nil, err
@@ -204,83 +162,4 @@ func (q *historicalStage) search(searchMsg *searchMsg) ([]*SearchResult, []*Segm
 	sp.LogFields(oplog.String("statistical time", "historical search done"))
 	tr.Elapse("all done")
 	return hisSearchResults, hisSegmentResults, sealedSegmentSearched, nil
-}
-
-func (q *historicalStage) fillVectorFieldsData(segment *Segment, result *segcorepb.RetrieveResults) error {
-	collection, _ := q.historical.replica.getCollectionByID(q.collectionID)
-	schema := &etcdpb.CollectionMeta{
-		ID:     q.collectionID,
-		Schema: collection.schema}
-	schemaHelper, err := typeutil.CreateSchemaHelper(collection.schema)
-	if err != nil {
-		return err
-	}
-	for _, resultFieldData := range result.FieldsData {
-		vecFieldInfo, err := segment.getVectorFieldInfo(resultFieldData.FieldId)
-		if err != nil {
-			continue
-		}
-		log.Debug("FillVectorFieldData", zap.Any("fieldID", resultFieldData.FieldId))
-
-		for i, offset := range result.Offset {
-			var vecPath string
-			for index, idBinlogRowSize := range segment.idBinlogRowSizes {
-				if offset < idBinlogRowSize {
-					vecPath = vecFieldInfo.fieldBinlog.Binlogs[index]
-					break
-				} else {
-					offset -= idBinlogRowSize
-				}
-			}
-			log.Debug("FillVectorFieldData", zap.Any("path", vecPath))
-			err := q.vcm.DownloadVectorFile(vecPath, schema)
-			if err != nil {
-				return err
-			}
-
-			dim := resultFieldData.GetVectors().GetDim()
-			log.Debug("FillVectorFieldData", zap.Any("dim", dim))
-			schema, err := schemaHelper.GetFieldFromID(resultFieldData.FieldId)
-			if err != nil {
-				return err
-			}
-			dataType := schema.DataType
-			log.Debug("FillVectorFieldData", zap.Any("datatype", dataType))
-
-			switch dataType {
-			case schemapb.DataType_BinaryVector:
-				rowBytes := dim / 8
-				x := resultFieldData.GetVectors().GetData().(*schemapb.VectorField_BinaryVector)
-				content := make([]byte, rowBytes)
-				_, err := q.vcm.ReadAt(vecPath, content, offset*rowBytes)
-				if err != nil {
-					return err
-				}
-				log.Debug("FillVectorFieldData", zap.Any("binaryVectorResult", content))
-
-				resultLen := dim / 8
-				copy(x.BinaryVector[i*int(resultLen):(i+1)*int(resultLen)], content)
-			case schemapb.DataType_FloatVector:
-				x := resultFieldData.GetVectors().GetData().(*schemapb.VectorField_FloatVector)
-				rowBytes := dim * 4
-				content := make([]byte, rowBytes)
-				_, err := q.vcm.ReadAt(vecPath, content, offset*rowBytes)
-				if err != nil {
-					return err
-				}
-				floatResult := make([]float32, dim)
-				buf := bytes.NewReader(content)
-				err = binary.Read(buf, binary.LittleEndian, &floatResult)
-				if err != nil {
-					return err
-				}
-				log.Debug("FillVectorFieldData", zap.Any("floatVectorResult", floatResult))
-
-				resultLen := dim
-				copy(x.FloatVector.Data[i*int(resultLen):(i+1)*int(resultLen)], floatResult)
-			}
-
-		}
-	}
-	return nil
 }

@@ -23,6 +23,8 @@ package querynode
 */
 import "C"
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"reflect"
@@ -36,7 +38,9 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 type segmentType int32
@@ -314,6 +318,70 @@ func (s *Segment) fillTargetEntry(plan *SearchPlan, result *SearchResult) error 
 		return errors.New("FillTargetEntry failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
 	}
 
+	return nil
+}
+
+func (s *Segment) fillVectorFieldsData(collectionID UniqueID, schema *schemapb.CollectionSchema, vcm *storage.VectorChunkManager, result *segcorepb.RetrieveResults) error {
+	for _, fieldData := range result.FieldsData {
+		vecFieldInfo, err := s.getVectorFieldInfo(fieldData.FieldId)
+		if err != nil {
+			continue
+		}
+		log.Debug("FillVectorFieldData", zap.Any("fieldID", fieldData.FieldId))
+
+		for i, offset := range result.Offset {
+			var vecPath string
+			for index, idBinlogRowSize := range s.idBinlogRowSizes {
+				if offset < idBinlogRowSize {
+					vecPath = vecFieldInfo.fieldBinlog.Binlogs[index]
+					break
+				} else {
+					offset -= idBinlogRowSize
+				}
+			}
+			log.Debug("FillVectorFieldData", zap.Any("path", vecPath))
+			err := vcm.DownloadVectorFile(vecPath, collectionID, schema)
+			if err != nil {
+				return err
+			}
+
+			dim := fieldData.GetVectors().GetDim()
+			log.Debug("FillVectorFieldData", zap.Int64("dim", dim), zap.Any("datatype", fieldData.Type))
+
+			switch fieldData.Type {
+			case schemapb.DataType_BinaryVector:
+				rowBytes := dim / 8
+				x := fieldData.GetVectors().GetData().(*schemapb.VectorField_BinaryVector)
+				content := make([]byte, rowBytes)
+				_, err := vcm.ReadAt(vecPath, content, offset*rowBytes)
+				if err != nil {
+					return err
+				}
+				log.Debug("FillVectorFieldData", zap.Any("binaryVectorResult", content))
+
+				resultLen := dim / 8
+				copy(x.BinaryVector[i*int(resultLen):(i+1)*int(resultLen)], content)
+			case schemapb.DataType_FloatVector:
+				x := fieldData.GetVectors().GetData().(*schemapb.VectorField_FloatVector)
+				rowBytes := dim * 4
+				content := make([]byte, rowBytes)
+				_, err := vcm.ReadAt(vecPath, content, offset*rowBytes)
+				if err != nil {
+					return err
+				}
+				floatResult := make([]float32, dim)
+				buf := bytes.NewReader(content)
+				err = binary.Read(buf, binary.LittleEndian, &floatResult)
+				if err != nil {
+					return err
+				}
+				log.Debug("FillVectorFieldData", zap.Any("floatVectorResult", floatResult))
+
+				resultLen := dim
+				copy(x.FloatVector.Data[i*int(resultLen):(i+1)*int(resultLen)], floatResult)
+			}
+		}
+	}
 	return nil
 }
 
