@@ -1,7 +1,5 @@
 import pytest
-from pymilvus_orm import connections, Index
 
-from base.collection_wrapper import ApiCollectionWrapper
 from scale.helm_env import HelmEnv
 from common import common_func as cf
 from common import common_type as ct
@@ -49,3 +47,18 @@ class TestProxyScale:
                 4.e2e test
         expected:
         """
+        # deploy all nodes one pod cluster milvus with helm
+        release_name = "scale-proxy"
+        env = HelmEnv(release_name=release_name, proxy=2)
+        env.helm_install_cluster_milvus()
+        host = env.get_svc_external_ip()
+        # host = "10.98.0.8"
+
+        c_name = cf.gen_unique_str(prefix)
+        sc.e2e_milvus(host, c_name)
+
+        # scale proxy
+        env.helm_upgrade_cluster_milvus(proxy=1)
+
+        c_name_2 = cf.gen_unique_str(prefix)
+        sc.e2e_milvus(host, c_name_2)
