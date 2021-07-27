@@ -32,6 +32,9 @@ func NewVectorChunkManager(localChunkManager ChunkManager, remoteChunkManager Ch
 }
 
 func (vcm *VectorChunkManager) DownloadVectorFile(key string, schema *etcdpb.CollectionMeta) error {
+	if vcm.localChunkManager.Exist(key) {
+		return nil
+	}
 	insertCodec := NewInsertCodec(schema)
 	content, err := vcm.remoteChunkManager.Read(key)
 	if err != nil {
