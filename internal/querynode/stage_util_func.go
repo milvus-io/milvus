@@ -13,6 +13,7 @@ package querynode
 
 import (
 	"fmt"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
