@@ -79,13 +79,13 @@ TEST_P(PlanProtoTest, Range) {
 vector_anns: <
   field_id: 201
   predicates: <
-    range_expr: <
+    unary_range_expr: <
       column_info: <
         field_id: %1%
         data_type: %2%
       >
-      ops: GreaterThan
-      values: <
+      op: GreaterThan
+      value: <
         %3%: 3
       >
     >
@@ -229,7 +229,7 @@ vector_anns: <
     plan->check_identical(*ref_plan);
 }
 
-TEST(PlanProtoXTest, NotExpr) {
+TEST(PlanProtoTest, NotExpr) {
     auto schema = getStandardSchema();
     // xxx.query(predicates = "not (int64field > 3)", topk = 10, ...)
     auto data_type = spb::DataType::Int64;
@@ -250,13 +250,13 @@ vector_anns: <
     unary_expr: <
       op: Not
       child: <
-        range_expr: <
+        unary_range_expr: <
           column_info: <
             field_id: %1%
             data_type: %2%
           >
-          ops: GreaterThan
-          values: <
+          op: GreaterThan
+          value: <
             %3%: 3
           >
         >
@@ -320,7 +320,7 @@ vector_anns: <
     plan->check_identical(*ref_plan);
 }
 
-TEST(PlanProtoXTest, AndOrExpr) {
+TEST(PlanProtoTest, AndOrExpr) {
     auto schema = getStandardSchema();
     // xxx.query(predicates = "(int64field < 3) && (int64field > 2 || int64field == 1)", topk = 10, ...)
     auto data_type = spb::DataType::Int64;
@@ -341,13 +341,13 @@ vector_anns: <
     binary_expr: <
       op: LogicalAnd
       left: <
-        range_expr: <
+        unary_range_expr: <
           column_info: <
             field_id: 105
             data_type: Int64
           >
-          ops: LessThan
-          values: <
+          op: LessThan
+          value: <
             int64_val: 3
           >
         >
@@ -356,25 +356,25 @@ vector_anns: <
         binary_expr: <
           op: LogicalOr
           left: <
-            range_expr: <
+            unary_range_expr: <
               column_info: <
                 field_id: 105
                 data_type: Int64
               >
-              ops: GreaterThan
-              values: <
+              op: GreaterThan
+              value: <
                 int64_val: 2
               >
             >
           >
           right: <
-            range_expr: <
+            unary_range_expr: <
               column_info: <
                 field_id: 105
                 data_type: Int64
               >
-              ops: Equal
-              values: <
+              op: Equal
+              value: <
                 int64_val: 1
               >
             >
@@ -470,11 +470,11 @@ vector_anns: <
   field_id: 201
   predicates: <
     compare_expr: <
-      columns_info: <
+      left_column_info: <
         field_id: 128
         data_type: Int64
       >
-      columns_info: <
+      right_column_info: <
         field_id: %1%
         data_type: %2%
       >

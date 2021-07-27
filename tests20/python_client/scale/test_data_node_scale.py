@@ -1,8 +1,7 @@
-import random
-
 import pytest
 
 from base.collection_wrapper import ApiCollectionWrapper
+from common.common_type import CaseLabel
 from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
@@ -18,6 +17,7 @@ default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": 
 
 class TestDataNodeScale:
 
+    @pytest.mark.tags(CaseLabel.L3)
     def test_expand_data_node(self):
         """
         target: test create and insert api after expand dataNode pod
@@ -30,9 +30,10 @@ class TestDataNodeScale:
         release_name = "scale-test"
         env = HelmEnv(release_name=release_name)
         env.helm_install_cluster_milvus()
+        host = env.get_svc_external_ip()
 
         # connect
-        connections.add_connection(default={"host": '10.98.0.8', "port": 19530})
+        connections.add_connection(default={"host": host, "port": 19530})
         connections.connect(alias='default')
         # create
         c_name = cf.gen_unique_str(prefix)
@@ -63,6 +64,7 @@ class TestDataNodeScale:
         new_collection_w.drop()
         # env.helm_uninstall_cluster_milvus()
 
+    @pytest.mark.tags(CaseLabel.L3)
     def test_shrink_data_node(self):
         """
         target: test shrink dataNode from 2 to 1
@@ -101,5 +103,3 @@ class TestDataNodeScale:
         collection_w2.drop()
 
         # env.helm_uninstall_cluster_milvus()
-
-

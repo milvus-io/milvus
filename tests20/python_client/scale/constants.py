@@ -1,6 +1,7 @@
 # scale object
 IMAGE_REPOSITORY = "milvusdb/milvus-dev"
 IMAGE_TAG = "master-latest"
+NAMESPACE = "chaos-testing"
 IF_NOT_PRESENT = "IfNotPresent"
 ALWAYS = "Always"
 PROXY = "proxy"
@@ -9,4 +10,5 @@ INDEX_NODE = "indexNode"
 QUERY_NODE = "queryNode"
 
 # my values.yaml path
-HELM_VALUES_PATH = '/home/zong/milvus-helm/charts/milvus'
+MILVUS_CHART_ENV = 'MILVUS_CHART_ENV'
+MILVUS_CHART = '/home/zong/milvus-helm/charts/milvus'

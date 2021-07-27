@@ -99,6 +99,7 @@ type dmlTask interface {
 	task
 	getChannels() ([]vChan, error)
 	getPChanStats() (map[pChan]pChanStatistics, error)
+	getChannelsTimerTicker() channelsTimeTicker
 }
 
 type BaseInsertTask = msgstream.InsertMsg
@@ -151,6 +152,10 @@ func (it *InsertTask) SetTs(ts Timestamp) {
 
 func (it *InsertTask) EndTs() Timestamp {
 	return it.EndTimestamp
+}
+
+func (it *InsertTask) getChannelsTimerTicker() channelsTimeTicker {
+	return it.chTicker
 }
 
 func (it *InsertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
@@ -817,7 +822,6 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 	}
 
 	reqSegCountMap := make(map[int32]map[UniqueID]uint32)
-
 	for channelID, count := range channelCountMap {
 		ts, ok := channelMaxTSMap[channelID]
 		if !ok {
@@ -830,6 +834,8 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 		}
 		mapInfo, err := it.segIDAssigner.GetSegmentID(it.CollectionID, it.PartitionID, channelName, count, ts)
 		if err != nil {
+			log.Debug("InsertTask.go", zap.Any("MapInfo", mapInfo),
+				zap.Error(err))
 			return nil, err
 		}
 		reqSegCountMap[channelID] = make(map[UniqueID]uint32)
@@ -880,7 +886,7 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 				return segIDSlice[index]
 			}
 		}
-		log.Warn("Can't Found SegmentID")
+		log.Warn("Can't Found SegmentID", zap.Any("reqSegAllocateCounter", reqSegAllocateCounter))
 		return 0
 	}
 
@@ -921,6 +927,9 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 			rowID := insertRequest.RowIDs[index]
 			row := insertRequest.RowData[index]
 			segmentID := getSegmentID(key)
+			if segmentID == 0 {
+				return nil, fmt.Errorf("get SegmentID failed, segmentID is zero")
+			}
 			_, ok := result[key]
 			if !ok {
 				sliceRequest := internalpb.InsertRequest{
@@ -1019,15 +1028,6 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 			it.result.Status.Reason = err.Error()
 			return err
 		}
-	}
-
-	pchans, err := it.chMgr.getChannels(collID)
-	if err != nil {
-		return err
-	}
-	for _, pchan := range pchans {
-		log.Debug("Proxy InsertTask add pchan", zap.Any("pchan", pchan))
-		_ = it.chTicker.addPChan(pchan)
 	}
 
 	// Assign SegmentID
@@ -1694,6 +1694,10 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 					continue
 				}
 				distance := searchResultData[q].Scores[idx*topk+loc]
+				// https://github.com/milvus-io/milvus/issues/6781
+				if math.IsNaN(float64(distance)) {
+					continue
+				}
 				if distance > maxDistance || (math.Abs(float64(distance-maxDistance)) < math.SmallestNonzeroFloat32 && choice != q) {
 					choice = q
 					maxDistance = distance
@@ -1706,7 +1710,12 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 			choiceOffset := locs[choice]
 			// check if distance is valid, `invalid` here means very very big,
 			// in this process, distance here is the smallest, so the rest of distance are all invalid
-			if searchResultData[choice].Scores[idx*topk+choiceOffset] <= minFloat32 {
+			// https://github.com/milvus-io/milvus/issues/6781
+			// tanimoto distance between two binary vectors maybe -inf, so -inf distance shouldn't be filtered,
+			// otherwise it will cause that the number of hit records is less than needed (topk).
+			// in the above process, we have already filtered NaN distance.
+			distance := searchResultData[choice].Scores[idx*topk+choiceOffset]
+			if distance < minFloat32 {
 				break
 			}
 			curIdx := idx*topk + choiceOffset

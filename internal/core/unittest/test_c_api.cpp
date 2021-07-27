@@ -146,10 +146,14 @@ generate_collection_schema(std::string metric_type, int dim, bool is_binary) {
     dim_param->set_value(std::to_string(dim));
 
     auto other_field_schema = collection_schema.add_fields();
-    ;
     other_field_schema->set_name("counter");
     other_field_schema->set_fieldid(101);
     other_field_schema->set_data_type(schema::DataType::Int64);
+
+    auto other_field_schema2 = collection_schema.add_fields();
+    other_field_schema2->set_name("doubleField");
+    other_field_schema2->set_fieldid(102);
+    other_field_schema2->set_data_type(schema::DataType::Double);
 
     std::string schema_string;
     auto marshal = google::protobuf::TextFormat::PrintToString(collection_schema, &schema_string);
@@ -1107,25 +1111,25 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
                                               binary_expr: <
                                                 op: LogicalAnd
                                                 left: <
-                                                  range_expr: <
+                                                  unary_range_expr: <
                                                     column_info: <
                                                       field_id: 101
                                                       data_type: Int64
                                                     >
-                                                    ops: GreaterEqual
-                                                    values: <
+                                                    op: GreaterEqual
+                                                    value: <
                                                       int64_val: 420000
                                                     >
                                                   >
                                                 >
                                                 right: <
-                                                  range_expr: <
+                                                  unary_range_expr: <
                                                     column_info: <
                                                       field_id: 101
                                                       data_type: Int64
                                                     >
-                                                    ops: LessThan
-                                                    values: <
+                                                    op: LessThan
+                                                    value: <
                                                       int64_val: 420010
                                                     >
                                                   >
@@ -1385,95 +1389,39 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
                           dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
-    const char* serialized_expr_plan = R"(vector_anns: <
-                                            field_id: 100
-                                            predicates: <
-                                              binary_expr: <
-                                                op: LogicalOr
-                                                left: <
-                                                  binary_expr: <
-                                                    op: LogicalOr
-                                                    left: <
-                                                      binary_expr: <
-                                                        op: LogicalOr
-                                                        left: <
-                                                          binary_expr: <
-                                                            op: LogicalOr
-                                                            left: <
-                                                              range_expr: <
-                                                                column_info: <
-                                                                  field_id: 101
-                                                                  data_type: Int64
-                                                                >
-                                                                ops: Equal
-                                                                values: <
-                                                                  int64_val: 420000
-                                                                >
-                                                              >
-                                                            >
-                                                            right: <
-                                                              range_expr: <
-                                                                column_info: <
-                                                                  field_id: 101
-                                                                  data_type: Int64
-                                                                >
-                                                                ops: Equal
-                                                                values: <
-                                                                  int64_val: 420001
-                                                                >
-                                                              >
-                                                            >
-                                                          >
-                                                        >
-                                                        right: <
-                                                          range_expr: <
-                                                            column_info: <
-                                                              field_id: 101
-                                                              data_type: Int64
-                                                            >
-                                                            ops: Equal
-                                                            values: <
-                                                              int64_val: 420002
-                                                            >
-                                                          >
-                                                        >
-                                                      >
-                                                    >
-                                                    right: <
-                                                      range_expr: <
-                                                        column_info: <
-                                                          field_id: 101
-                                                          data_type: Int64
-                                                        >
-                                                        ops: Equal
-                                                        values: <
-                                                          int64_val: 420003
-                                                        >
-                                                      >
-                                                    >
-                                                  >
-                                                >
-                                                right: <
-                                                  range_expr: <
-                                                    column_info: <
-                                                      field_id: 101
-                                                      data_type: Int64
-                                                    >
-                                                    ops: Equal
-                                                    values: <
-                                                      int64_val: 420004
-                                                    >
-                                                  >
-                                                >
-                                              >
-                                            >
-                                            query_info: <
-                                              topk: 5
-                                              metric_type: "L2"
-                                              search_params: "{\"nprobe\": 10}"
-                                            >
-                                            placeholder_tag: "$0"
-    >)";
+    const char* serialized_expr_plan = R"(
+vector_anns: <
+  field_id: 100
+  predicates: <
+    term_expr: <
+      column_info: <
+        field_id: 101
+        data_type: Int64
+      >
+      values: <
+        int64_val: 420000
+      >
+      values: <
+        int64_val: 420001
+      >
+      values: <
+        int64_val: 420002
+      >
+      values: <
+        int64_val: 420003
+      >
+      values: <
+        int64_val: 420004
+      >
+    >
+  >
+  query_info: <
+    topk: 5
+    metric_type: "L2"
+    search_params: "{\"nprobe\": 10}"
+  >
+  placeholder_tag: "$0"
+>)";
 
     // create place_holder_group
     int num_queries = 5;
@@ -1728,25 +1676,25 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
                                               binary_expr: <
                                                 op: LogicalAnd
                                                 left: <
-                                                  range_expr: <
+                                                  unary_range_expr: <
                                                     column_info: <
                                                       field_id: 101
                                                       data_type: Int64
                                                     >
-                                                    ops: GreaterEqual
-                                                    values: <
+                                                    op: GreaterEqual
+                                                    value: <
                                                       int64_val: 420000
                                                     >
                                                   >
                                                 >
                                                 right: <
-                                                  range_expr: <
+                                                  unary_range_expr: <
                                                     column_info: <
                                                       field_id: 101
                                                       data_type: Int64
                                                     >
-                                                    ops: LessThan
-                                                    values: <
+                                                    op: LessThan
+                                                    value: <
                                                       int64_val: 420010
                                                     >
                                                   >
@@ -2015,95 +1963,39 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
                           dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
-    const char* serialized_expr_plan = R"(vector_anns: <
-                                            field_id: 100
-                                            predicates: <
-                                              binary_expr: <
-                                                op: LogicalOr
-                                                left: <
-                                                  binary_expr: <
-                                                    op: LogicalOr
-                                                    left: <
-                                                      binary_expr: <
-                                                        op: LogicalOr
-                                                        left: <
-                                                          binary_expr: <
-                                                            op: LogicalOr
-                                                            left: <
-                                                              range_expr: <
-                                                                column_info: <
-                                                                  field_id: 101
-                                                                  data_type: Int64
-                                                                >
-                                                                ops: Equal
-                                                                values: <
-                                                                  int64_val: 420000
-                                                                >
-                                                              >
-                                                            >
-                                                            right: <
-                                                              range_expr: <
-                                                                column_info: <
-                                                                  field_id: 101
-                                                                  data_type: Int64
-                                                                >
-                                                                ops: Equal
-                                                                values: <
-                                                                  int64_val: 420001
-                                                                >
-                                                              >
-                                                            >
-                                                          >
-                                                        >
-                                                        right: <
-                                                          range_expr: <
-                                                            column_info: <
-                                                              field_id: 101
-                                                              data_type: Int64
-                                                            >
-                                                            ops: Equal
-                                                            values: <
-                                                              int64_val: 420002
-                                                            >
-                                                          >
-                                                        >
-                                                      >
-                                                    >
-                                                    right: <
-                                                      range_expr: <
-                                                        column_info: <
-                                                          field_id: 101
-                                                          data_type: Int64
-                                                        >
-                                                        ops: Equal
-                                                        values: <
-                                                          int64_val: 420003
-                                                        >
-                                                      >
-                                                    >
-                                                  >
-                                                >
-                                                right: <
-                                                  range_expr: <
-                                                    column_info: <
-                                                      field_id: 101
-                                                      data_type: Int64
-                                                    >
-                                                    ops: Equal
-                                                    values: <
-                                                      int64_val: 420004
-                                                    >
-                                                  >
-                                                >
-                                              >
-                                            >
-                                            query_info: <
-                                              topk: 5
-                                              metric_type: "JACCARD"
-                                              search_params: "{\"nprobe\": 10}"
-                                            >
-                                            placeholder_tag: "$0"
-    >)";
+    const char* serialized_expr_plan = R"(
+vector_anns: <
+  field_id: 100
+  predicates: <
+    term_expr: <
+      column_info: <
+        field_id: 101
+        data_type: Int64
+      >
+      values: <
+        int64_val: 420000
+      >
+      values: <
+        int64_val: 420001
+      >
+      values: <
+        int64_val: 420002
+      >
+      values: <
+        int64_val: 420003
+      >
+      values: <
+        int64_val: 420004
+      >
+    >
+  >
+  query_info: <
+    topk: 5
+    metric_type: "JACCARD"
+    search_params: "{\"nprobe\": 10}"
+  >
+  placeholder_tag: "$0"
+>)";
 
     // create place_holder_group
     int num_queries = 5;
@@ -2422,25 +2314,25 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
                                               binary_expr: <
                                                 op: LogicalAnd
                                                 left: <
-                                                  range_expr: <
+                                                  unary_range_expr: <
                                                     column_info: <
                                                       field_id: 101
                                                       data_type: Int64
                                                     >
-                                                    ops: GreaterEqual
-                                                    values: <
+                                                    op: GreaterEqual
+                                                    value: <
                                                       int64_val: 420000
                                                     >
                                                   >
                                                 >
                                                 right: <
-                                                  range_expr: <
+                                                  unary_range_expr: <
                                                     column_info: <
                                                       field_id: 101
                                                       data_type: Int64
                                                     >
-                                                    ops: LessThan
-                                                    values: <
+                                                    op: LessThan
+                                                    value: <
                                                       int64_val: 420010
                                                     >
                                                   >
