@@ -4,6 +4,7 @@ from time import sleep
 from scale import constants
 from utils.util_log import test_log as log
 from common import common_func as cf
+from scale import scale_common as sc
 
 
 class HelmEnv:
@@ -35,8 +36,9 @@ class HelmEnv:
                       f'--set indexNode.replicas={self.index_node} ' \
                       f'--set queryNode.replicas={self.query_node} ' \
                       f'{self.release_name} . '
-        log.info(install_cmd)
-        os.system(f'cd {constants.HELM_VALUES_PATH} && {install_cmd}')
+        log.debug(f'install_cmd: {install_cmd}')
+        log.debug(f'MILVUS CHART: {sc.get_milvus_chart_env_var()}')
+        os.system(f'cd {sc.get_milvus_chart_env_var()} && {install_cmd}')
         # raise Exception("Failed to deploy cluster milvus")
         #     todo
         #   return svc ip
@@ -62,8 +64,9 @@ class HelmEnv:
                       f'--set indexNode.replicas={index_node} ' \
                       f'--set queryNode.replicas={query_node} ' \
                       f'{self.release_name} . '
-        log.info(upgrade_cmd)
-        if os.system(f'cd {constants.HELM_VALUES_PATH} && {upgrade_cmd}'):
+        log.debug(f'upgrade_cmd: {upgrade_cmd}')
+        log.debug(f'MILVUS CHART: {sc.get_milvus_chart_env_var()}')
+        if os.system(f'cd {sc.get_milvus_chart_env_var()} && {upgrade_cmd}'):
             raise Exception(f'Failed to upgrade cluster milvus with {kwargs}')
 
     def helm_uninstall_cluster_milvus(self):
@@ -81,11 +84,21 @@ class HelmEnv:
         # delete plusar
         # delete_pvc_plusar_cmd = "kubectl delete pvc scale-test-milvus-pulsar"
 
+    def get_svc_external_ip(self):
+        from kubernetes import client, config
+        # from kubernetes.client.rest import ApiException
+        config.load_kube_config()
+        v1 = client.CoreV1Api()
+        service = v1.read_namespaced_service(f'{self.release_name}-milvus', constants.NAMESPACE)
+        return service.status.load_balancer.ingress[0].ip
+
 
 if __name__ == '__main__':
     # default deploy q replicas
     release_name = "scale-test"
     env = HelmEnv(release_name=release_name)
+    # host = env.get_svc_external_ip()
+    # log.debug(host)
     # env.helm_install_cluster_milvus()
     # env.helm_upgrade_cluster_milvus(queryNode=2)
     env.helm_uninstall_cluster_milvus()

@@ -7,6 +7,9 @@ from check.func_check import *
 from utils.api_request import api_request
 
 
+TIMEOUT = 5
+
+
 class ApiIndexWrapper:
     index = None
 
@@ -21,6 +24,9 @@ class ApiIndexWrapper:
         return res, check_result
 
     def drop(self, check_task=None, check_items=None, **kwargs):
+        timeout = kwargs.get("timeout", TIMEOUT)
+        kwargs.update({"timeout": timeout})
+
         func_name = sys._getframe().f_code.co_name
         res, is_succ = api_request([self.index.drop], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ, **kwargs).run()
