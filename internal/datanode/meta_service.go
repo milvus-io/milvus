@@ -55,8 +55,8 @@ func (mService *metaService) getCollectionSchema(ctx context.Context, collID Uni
 	}
 
 	response, err := mService.rootCoord.DescribeCollection(ctx, req)
-	if response.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return nil, fmt.Errorf("Describe collection %v from rootcoord wrong: %s", collID, err.Error())
+	if response != nil && response.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return nil, fmt.Errorf("Describe collection %v from rootcoord wrong: %s", collID, response.Status.Reason)
 	}
 
 	if err != nil {
