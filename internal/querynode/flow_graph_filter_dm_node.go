@@ -113,6 +113,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 		log.Debug("filter invalid insert message, collection is not the target collection",
 			zap.Any("collectionID", msg.CollectionID),
 			zap.Any("partitionID", msg.PartitionID))
+
 		return nil
 	}
 
