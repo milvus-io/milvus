@@ -37,7 +37,7 @@ type Replica interface {
 	listSegmentsCheckPoints() map[UniqueID]segmentCheckPoint
 	updateSegmentEndPosition(segID UniqueID, endPos *internalpb.MsgPosition)
 	updateSegmentCheckPoint(segID UniqueID)
-	hasSegment(segID UniqueID) bool
+	hasSegment(segID UniqueID, countFlushed bool) bool
 
 	updateStatistics(segID UniqueID, numRows int64) error
 	getSegmentStatisticsUpdates(segID UniqueID) (*internalpb.SegmentStatisticsUpdates, error)
@@ -283,13 +283,17 @@ func (replica *SegmentReplica) removeSegment(segID UniqueID) error {
 }
 
 // hasSegment checks whether this replica has a segment according to segment ID.
-func (replica *SegmentReplica) hasSegment(segID UniqueID) bool {
+func (replica *SegmentReplica) hasSegment(segID UniqueID, countFlushed bool) bool {
 	replica.segMu.RLock()
 	defer replica.segMu.RUnlock()
 
 	_, inNew := replica.newSegments[segID]
 	_, inNormal := replica.normalSegments[segID]
-	_, inFlush := replica.flushedSegments[segID]
+
+	inFlush := false
+	if countFlushed {
+		_, inFlush = replica.flushedSegments[segID]
+	}
 
 	return inNew || inNormal || inFlush
 }
