@@ -458,9 +458,12 @@ func (mt *metaTable) LoadMetaFromETCD(indexBuildID int64, revision int64) bool {
 		if meta.revision >= revision {
 			return false
 		}
+	} else {
+		log.Debug("Index not exist", zap.Int64("IndexBuildID", indexBuildID))
+		return false
 	}
 
-	m, err := mt.reloadMeta(meta.indexMeta.IndexBuildID)
+	m, err := mt.reloadMeta(indexBuildID)
 	if m == nil {
 		log.Debug("IndexCoord metaTable reloadMeta failed", zap.Error(err))
 		return false
