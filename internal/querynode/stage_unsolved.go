@@ -198,6 +198,24 @@ func (q *unsolvedStage) doUnsolvedQueryMsg() {
 					zap.Any("guaranteeTime_l", guaranteeTs),
 					zap.Any("serviceTime_l", serviceTime),
 				)
+				collection, err := q.streaming.replica.getCollectionByID(q.collectionID)
+				if err != nil {
+					// TODO: handle error
+					log.Error("do query failed in doUnsolvedQueryMsg, err = " + err.Error())
+					continue
+				}
+				if guaranteeTs >= collection.getReleaseTime() {
+					err = fmt.Errorf("collection has been released, msgID = %d, collectionID = %d", m.ID(), q.collectionID)
+					log.Error(err.Error())
+					publishFailedQueryResult(m, err.Error(), q.queryResultStream)
+					log.Debug("do query failed in doUnsolvedQueryMsg, publish failed query result",
+						zap.Int64("collectionID", q.collectionID),
+						zap.Int64("msgID", m.ID()),
+						zap.Any("msgType", m.Type()),
+						zap.Error(err),
+					)
+					continue
+				}
 				if guaranteeTs <= serviceTime {
 					unSolvedMsg = append(unSolvedMsg, m)
 					continue
