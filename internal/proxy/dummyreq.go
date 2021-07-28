@@ -27,17 +27,17 @@ func parseDummyRequestType(str string) (*dummyRequestType, error) {
 	return drt, nil
 }
 
-type dummyRetrieveRequest struct {
+type dummyQueryRequest struct {
 	RequestType    string   `json:"request_type"`
 	DbName         string   `json:"dbname"`
 	CollectionName string   `json:"collection_name"`
 	PartitionNames []string `json:"partition_names"`
-	Ids            []int64  `json:"ids"`
+	Expr           string   `json:"expr"`
 	OutputFields   []string `json:"output_fields"`
 }
 
-func parseDummyRetrieveRequest(str string) (*dummyRetrieveRequest, error) {
-	dr := &dummyRetrieveRequest{}
+func parseDummyQueryRequest(str string) (*dummyQueryRequest, error) {
+	dr := &dummyQueryRequest{}
 
 	if err := json.Unmarshal([]byte(str), &dr); err != nil {
 		return nil, err

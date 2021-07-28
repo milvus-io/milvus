@@ -32,7 +32,6 @@ service MilvusService {
 
   rpc Insert(InsertRequest) returns (MutationResult) {}
   rpc Search(SearchRequest) returns (SearchResults) {}
-  rpc Retrieve(RetrieveRequest) returns (RetrieveResults) {}
   rpc Flush(FlushRequest) returns (FlushResponse) {}
   rpc Query(QueryRequest) returns (QueryResults) {}
   rpc CalcDistance(CalcDistanceRequest) returns (CalcDistanceResults) {}
@@ -348,23 +347,6 @@ message SearchRequest {
   uint64 guarantee_timestamp = 11; // guarantee_timestamp
 }
 
-message RetrieveRequest {
-  common.MsgBase base = 1; // must
-  string db_name = 2;
-  string collection_name = 3; // must
-  repeated string partition_names = 4; // must
-  schema.IDs ids = 5; // must
-  repeated string output_fields = 6; // must
-  uint64 travel_timestamp = 7;
-  uint64 guarantee_timestamp = 8; // guarantee_timestamp
-}
-
-message RetrieveResults {
-  common.Status status = 1;
-  schema.IDs ids = 2;
-  repeated schema.FieldData fields_data = 3;
-}
-
 message Hits {
   repeated int64 IDs = 1;
   repeated bytes row_data = 2;
@@ -395,6 +377,8 @@ message QueryRequest {
   string expr = 4;
   repeated string output_fields = 5;
   repeated string partition_names = 6;
+  uint64 travel_timestamp = 7;
+  uint64 guarantee_timestamp = 8; // guarantee_timestamp
 }
 
 message QueryResults {
