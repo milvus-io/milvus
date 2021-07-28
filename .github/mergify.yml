@@ -52,7 +52,7 @@ pull_request_rules:
   - name: Test passed for title skip ci
     conditions:
       - base=master
-      - title~=[skip-ci]
+      - title~=[skip ci]
     actions:
       label:
         add:
