@@ -13,6 +13,7 @@ package querynode
 
 import (
 	"fmt"
+	"reflect"
 
 	"go.uber.org/zap"
 
@@ -58,6 +59,8 @@ func publishFailedQueryResult(msg msgstream.TsMsg, errMsg string, stream msgstre
 		if !ok {
 			log.Error("type assertion failed",
 				zap.Any("msgID", msg.ID()),
+				zap.Any("expect type", "MsgType_Retrieve"),
+				zap.Any("actual type", reflect.TypeOf(msg)),
 			)
 			return
 		}
@@ -78,6 +81,8 @@ func publishFailedQueryResult(msg msgstream.TsMsg, errMsg string, stream msgstre
 		if !ok {
 			log.Error("type assertion failed",
 				zap.Any("msgID", msg.ID()),
+				zap.Any("expect type", "MsgType_Search"),
+				zap.Any("actual type", reflect.TypeOf(msg)),
 			)
 			return
 		}

@@ -111,6 +111,13 @@ func (q *vChannelStage) start() {
 					segmentRetrieved: segmentRetrieved,
 					res:              res,
 				}
+				if err != nil {
+					log.Error("retrieve error in vChannelStage",
+						zap.Any("collectionID", q.collectionID),
+						zap.Any("msgID", msg.ID()),
+						zap.Error(err),
+					)
+				}
 				q.queryOutput <- retrieveRes
 			case commonpb.MsgType_Search:
 				sm := msg.(*searchMsg)
@@ -122,6 +129,13 @@ func (q *vChannelStage) start() {
 					searchResults:         searchResults,
 					matchedSegments:       matchedSegments,
 					sealedSegmentSearched: sealedSegmentSearched,
+				}
+				if err != nil {
+					log.Error("search error in vChannelStage",
+						zap.Any("collectionID", q.collectionID),
+						zap.Any("msgID", msg.ID()),
+						zap.Error(err),
+					)
 				}
 				q.queryOutput <- searchRes
 			default:

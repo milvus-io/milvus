@@ -86,6 +86,13 @@ func (q *historicalStage) start() {
 					segmentRetrieved: segmentRetrieved,
 					res:              res,
 				}
+				if err != nil {
+					log.Error("retrieve error in historicalStage",
+						zap.Any("collectionID", q.collectionID),
+						zap.Any("msgID", msg.ID()),
+						zap.Error(err),
+					)
+				}
 				q.output <- retrieveRes
 			case commonpb.MsgType_Search:
 				sm := msg.(*searchMsg)
@@ -97,6 +104,13 @@ func (q *historicalStage) start() {
 					searchResults:         searchResults,
 					matchedSegments:       matchedSegments,
 					sealedSegmentSearched: sealedSegmentSearched,
+				}
+				if err != nil {
+					log.Error("search error in historicalStage",
+						zap.Any("collectionID", q.collectionID),
+						zap.Any("msgID", msg.ID()),
+						zap.Error(err),
+					)
 				}
 				q.output <- searchRes
 			default:

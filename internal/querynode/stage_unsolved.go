@@ -124,6 +124,13 @@ func (q *unsolvedStage) start() {
 					segmentRetrieved: segmentRetrieved,
 					res:              res,
 				}
+				if err != nil {
+					log.Error("retrieve error in unsolvedStage 's start",
+						zap.Any("collectionID", q.collectionID),
+						zap.Any("msgID", msg.ID()),
+						zap.Error(err),
+					)
+				}
 				q.output <- retrieveRes
 			case commonpb.MsgType_Search:
 				sm := msg.(*searchMsg)
@@ -135,6 +142,13 @@ func (q *unsolvedStage) start() {
 					searchResults:         searchResults,
 					matchedSegments:       matchedSegments,
 					sealedSegmentSearched: sealedSegmentSearched,
+				}
+				if err != nil {
+					log.Error("search error in unsolvedStage 's start",
+						zap.Any("collectionID", q.collectionID),
+						zap.Any("msgID", msg.ID()),
+						zap.Error(err),
+					)
 				}
 				q.output <- searchRes
 			default:
@@ -221,6 +235,13 @@ func (q *unsolvedStage) doUnsolvedQueryMsg() {
 						segmentRetrieved: segmentRetrieved,
 						res:              res,
 					}
+					if err != nil {
+						log.Error("retrieve error in unsolvedStage's unsolved",
+							zap.Any("collectionID", q.collectionID),
+							zap.Any("msgID", m.ID()),
+							zap.Error(err),
+						)
+					}
 					q.output <- retrieveRes
 				case commonpb.MsgType_Search:
 					sm := m.(*searchMsg)
@@ -233,21 +254,20 @@ func (q *unsolvedStage) doUnsolvedQueryMsg() {
 						matchedSegments:       matchedSegments,
 						sealedSegmentSearched: sealedSegmentSearched,
 					}
+					if err != nil {
+						log.Error("search error in unsolvedStage 's unsolved",
+							zap.Any("collectionID", q.collectionID),
+							zap.Any("msgID", m.ID()),
+							zap.Error(err),
+						)
+					}
 					q.output <- searchRes
 				default:
-					err := fmt.Errorf("receive invalid msgType = %d", msgType)
+					err = fmt.Errorf("receive invalid msgType = %d", msgType)
 					log.Error(err.Error())
 					continue
 				}
 
-				if err != nil {
-					log.Error(err.Error())
-					publishFailedQueryResult(m, err.Error(), q.queryResultStream)
-					log.Debug("do query failed in doUnsolvedMsg, publish failed query result",
-						zap.Int64("collectionID", q.collectionID),
-						zap.Int64("msgID", m.ID()),
-					)
-				}
 				sp.Finish()
 				log.Debug("do query done in doUnsolvedMsg",
 					zap.Int64("collectionID", q.collectionID),

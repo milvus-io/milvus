@@ -125,7 +125,7 @@ func (q *resultHandlerStage) reduceRetrieve(msgID UniqueID) {
 	// error check
 	for _, res := range q.results[msgID] {
 		if err := res.(*retrieveResult).err; err != nil {
-			publishFailedQueryResult(msg, err.Error(), q.queryResultStream)
+			publishFailedQueryResult(msg.RetrieveMsg, err.Error(), q.queryResultStream)
 			log.Debug("do retrieve failed in resultHandlerStage, publish failed query result",
 				zap.Int64("collectionID", q.collectionID),
 				zap.Int64("msgID", msg.ID()),
