@@ -436,6 +436,7 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_schema_2eproto::offsets[] PROT
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::SearchResultData, scores_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::SearchResultData, ids_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::SearchResultData, topks_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::schema::SearchResultData, distances_),
 };
 static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
   { 0, -1, sizeof(::milvus::proto::schema::FieldSchema)},
@@ -509,16 +510,17 @@ const char descriptor_table_protodef_schema_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "\003B\007\n\005field\"w\n\003IDs\0220\n\006int_id\030\001 \001(\0132\036.milv"
   "us.proto.schema.LongArrayH\000\0222\n\006str_id\030\002 "
   "\001(\0132 .milvus.proto.schema.StringArrayH\000B"
-  "\n\n\010id_field\"\261\001\n\020SearchResultData\022\023\n\013num_"
+  "\n\n\010id_field\"\304\001\n\020SearchResultData\022\023\n\013num_"
   "queries\030\001 \001(\003\022\r\n\005top_k\030\002 \001(\003\0223\n\013fields_d"
   "ata\030\003 \003(\0132\036.milvus.proto.schema.FieldDat"
   "a\022\016\n\006scores\030\004 \003(\002\022%\n\003ids\030\005 \001(\0132\030.milvus."
-  "proto.schema.IDs\022\r\n\005topks\030\006 \003(\003*\217\001\n\010Data"
-  "Type\022\010\n\004None\020\000\022\010\n\004Bool\020\001\022\010\n\004Int8\020\002\022\t\n\005In"
-  "t16\020\003\022\t\n\005Int32\020\004\022\t\n\005Int64\020\005\022\t\n\005Float\020\n\022\n"
-  "\n\006Double\020\013\022\n\n\006String\020\024\022\020\n\014BinaryVector\020d"
-  "\022\017\n\013FloatVector\020eB5Z3github.com/milvus-i"
-  "o/milvus/internal/proto/schemapbb\006proto3"
+  "proto.schema.IDs\022\r\n\005topks\030\006 \003(\003\022\021\n\tdista"
+  "nces\030\007 \003(\002*\217\001\n\010DataType\022\010\n\004None\020\000\022\010\n\004Boo"
+  "l\020\001\022\010\n\004Int8\020\002\022\t\n\005Int16\020\003\022\t\n\005Int32\020\004\022\t\n\005I"
+  "nt64\020\005\022\t\n\005Float\020\n\022\n\n\006Double\020\013\022\n\n\006String\020"
+  "\024\022\020\n\014BinaryVector\020d\022\017\n\013FloatVector\020eB5Z3"
+  "github.com/milvus-io/milvus/internal/pro"
+  "to/schemapbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_schema_2eproto_deps[1] = {
   &::descriptor_table_common_2eproto,
@@ -542,7 +544,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_sch
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_schema_2eproto_once;
 static bool descriptor_table_schema_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_schema_2eproto = {
-  &descriptor_table_schema_2eproto_initialized, descriptor_table_protodef_schema_2eproto, "schema.proto", 1880,
+  &descriptor_table_schema_2eproto_initialized, descriptor_table_protodef_schema_2eproto, "schema.proto", 1899,
   &descriptor_table_schema_2eproto_once, descriptor_table_schema_2eproto_sccs, descriptor_table_schema_2eproto_deps, 14, 1,
   schemas, file_default_instances, TableStruct_schema_2eproto::offsets,
   file_level_metadata_schema_2eproto, 14, file_level_enum_descriptors_schema_2eproto, file_level_service_descriptors_schema_2eproto,
@@ -5599,7 +5601,8 @@ SearchResultData::SearchResultData(const SearchResultData& from)
       _internal_metadata_(nullptr),
       fields_data_(from.fields_data_),
       scores_(from.scores_),
-      topks_(from.topks_) {
+      topks_(from.topks_),
+      distances_(from.distances_) {
   _internal_metadata_.MergeFrom(from._internal_metadata_);
   if (from.has_ids()) {
     ids_ = new ::milvus::proto::schema::IDs(*from.ids_);
@@ -5646,6 +5649,7 @@ void SearchResultData::Clear() {
   fields_data_.Clear();
   scores_.Clear();
   topks_.Clear();
+  distances_.Clear();
   if (GetArenaNoVirtual() == nullptr && ids_ != nullptr) {
     delete ids_;
   }
@@ -5715,6 +5719,16 @@ const char* SearchResultData::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPA
         } else if (static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 48) {
           add_topks(::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr));
           CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      // repeated float distances = 7;
+      case 7:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 58)) {
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::PackedFloatParser(mutable_distances(), ptr, ctx);
+          CHK_(ptr);
+        } else if (static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 61) {
+          add_distances(::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<float>(ptr));
+          ptr += sizeof(float);
         } else goto handle_unusual;
         continue;
       default: {
@@ -5827,6 +5841,22 @@ bool SearchResultData::MergePartialFromCodedStream(
         break;
       }
 
+      // repeated float distances = 7;
+      case 7: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (58 & 0xFF)) {
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPackedPrimitive<
+                   float, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_FLOAT>(
+                 input, this->mutable_distances())));
+        } else if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (61 & 0xFF)) {
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadRepeatedPrimitiveNoInline<
+                   float, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_FLOAT>(
+                 1, 58u, input, this->mutable_distances())));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
       default: {
       handle_unusual:
         if (tag == 0) {
@@ -5899,6 +5929,15 @@ void SearchResultData::SerializeWithCachedSizes(
       this->topks(i), output);
   }
 
+  // repeated float distances = 7;
+  if (this->distances_size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTag(7, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WIRETYPE_LENGTH_DELIMITED, output);
+    output->WriteVarint32(_distances_cached_byte_size_.load(
+        std::memory_order_relaxed));
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteFloatArray(
+      this->distances().data(), this->distances_size(), output);
+  }
+
   if (_internal_metadata_.have_unknown_fields()) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFields(
         _internal_metadata_.unknown_fields(), output);
@@ -5963,6 +6002,19 @@ void SearchResultData::SerializeWithCachedSizes(
       WriteInt64NoTagToArray(this->topks_, target);
   }
 
+  // repeated float distances = 7;
+  if (this->distances_size() > 0) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteTagToArray(
+      7,
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WIRETYPE_LENGTH_DELIMITED,
+      target);
+    target = ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream::WriteVarint32ToArray(
+        _distances_cached_byte_size_.load(std::memory_order_relaxed),
+         target);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      WriteFloatNoTagToArray(this->distances_, target);
+  }
+
   if (_internal_metadata_.have_unknown_fields()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields(), target);
@@ -6025,6 +6077,21 @@ size_t SearchResultData::ByteSizeLong() const {
     total_size += data_size;
   }
 
+  // repeated float distances = 7;
+  {
+    unsigned int count = static_cast<unsigned int>(this->distances_size());
+    size_t data_size = 4UL * count;
+    if (data_size > 0) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32Size(
+            static_cast<::PROTOBUF_NAMESPACE_ID::int32>(data_size));
+    }
+    int cached_size = ::PROTOBUF_NAMESPACE_ID::internal::ToCachedSize(data_size);
+    _distances_cached_byte_size_.store(cached_size,
+                                    std::memory_order_relaxed);
+    total_size += data_size;
+  }
+
   // .milvus.proto.schema.IDs ids = 5;
   if (this->has_ids()) {
     total_size += 1 +
@@ -6076,6 +6143,7 @@ void SearchResultData::MergeFrom(const SearchResultData& from) {
   fields_data_.MergeFrom(from.fields_data_);
   scores_.MergeFrom(from.scores_);
   topks_.MergeFrom(from.topks_);
+  distances_.MergeFrom(from.distances_);
   if (from.has_ids()) {
     mutable_ids()->::milvus::proto::schema::IDs::MergeFrom(from.ids());
   }
@@ -6111,6 +6179,7 @@ void SearchResultData::InternalSwap(SearchResultData* other) {
   CastToBase(&fields_data_)->InternalSwap(CastToBase(&other->fields_data_));
   scores_.InternalSwap(&other->scores_);
   topks_.InternalSwap(&other->topks_);
+  distances_.InternalSwap(&other->distances_);
   swap(ids_, other->ids_);
   swap(num_queries_, other->num_queries_);
   swap(top_k_, other->top_k_);

@@ -2374,6 +2374,7 @@ class SearchResultData :
     kFieldsDataFieldNumber = 3,
     kScoresFieldNumber = 4,
     kTopksFieldNumber = 6,
+    kDistancesFieldNumber = 7,
     kIdsFieldNumber = 5,
     kNumQueriesFieldNumber = 1,
     kTopKFieldNumber = 2,
@@ -2411,6 +2412,17 @@ class SearchResultData :
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
       mutable_topks();
 
+  // repeated float distances = 7;
+  int distances_size() const;
+  void clear_distances();
+  float distances(int index) const;
+  void set_distances(int index, float value);
+  void add_distances(float value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >&
+      distances() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >*
+      mutable_distances();
+
   // .milvus.proto.schema.IDs ids = 5;
   bool has_ids() const;
   void clear_ids();
@@ -2439,6 +2451,8 @@ class SearchResultData :
   mutable std::atomic<int> _scores_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > topks_;
   mutable std::atomic<int> _topks_cached_byte_size_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< float > distances_;
+  mutable std::atomic<int> _distances_cached_byte_size_;
   ::milvus::proto::schema::IDs* ids_;
   ::PROTOBUF_NAMESPACE_ID::int64 num_queries_;
   ::PROTOBUF_NAMESPACE_ID::int64 top_k_;
@@ -4024,6 +4038,36 @@ inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
 SearchResultData::mutable_topks() {
   // @@protoc_insertion_point(field_mutable_list:milvus.proto.schema.SearchResultData.topks)
   return &topks_;
+}
+
+// repeated float distances = 7;
+inline int SearchResultData::distances_size() const {
+  return distances_.size();
+}
+inline void SearchResultData::clear_distances() {
+  distances_.Clear();
+}
+inline float SearchResultData::distances(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.SearchResultData.distances)
+  return distances_.Get(index);
+}
+inline void SearchResultData::set_distances(int index, float value) {
+  distances_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.SearchResultData.distances)
+}
+inline void SearchResultData::add_distances(float value) {
+  distances_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.schema.SearchResultData.distances)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >&
+SearchResultData::distances() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.schema.SearchResultData.distances)
+  return distances_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< float >*
+SearchResultData::mutable_distances() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.schema.SearchResultData.distances)
+  return &distances_;
 }
 
 #ifdef __GNUC__

@@ -122,4 +122,5 @@ message SearchResultData {
   repeated float scores = 4;
   IDs ids = 5;
   repeated int64 topks = 6;
+  repeated float distances = 7;
 }

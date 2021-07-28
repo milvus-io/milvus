@@ -14,6 +14,8 @@ package indexparamcheck
 import (
 	"errors"
 	"sync"
+
+	"github.com/milvus-io/milvus/internal/util/typedef"
 )
 
 type ConfAdapterMgr interface {
@@ -22,7 +24,7 @@ type ConfAdapterMgr interface {
 
 type ConfAdapterMgrImpl struct {
 	init     bool
-	adapters map[IndexType]ConfAdapter
+	adapters map[typedef.IndexType]ConfAdapter
 }
 
 func (mgr *ConfAdapterMgrImpl) GetAdapter(indexType string) (ConfAdapter, error) {
@@ -40,27 +42,27 @@ func (mgr *ConfAdapterMgrImpl) GetAdapter(indexType string) (ConfAdapter, error)
 func (mgr *ConfAdapterMgrImpl) registerConfAdapter() {
 	mgr.init = true
 
-	mgr.adapters[IndexFaissIDMap] = newBaseConfAdapter()
-	mgr.adapters[IndexFaissIvfFlat] = newIVFConfAdapter()
-	mgr.adapters[IndexFaissIvfPQ] = newIVFPQConfAdapter()
-	mgr.adapters[IndexFaissIvfSQ8] = newIVFSQConfAdapter()
-	mgr.adapters[IndexFaissIvfSQ8H] = newIVFSQConfAdapter()
-	mgr.adapters[IndexFaissBinIDMap] = newBinIDMAPConfAdapter()
-	mgr.adapters[IndexFaissBinIvfFlat] = newBinIVFConfAdapter()
-	mgr.adapters[IndexNSG] = newNSGConfAdapter()
-	mgr.adapters[IndexHNSW] = newHNSWConfAdapter()
-	mgr.adapters[IndexANNOY] = newANNOYConfAdapter()
-	mgr.adapters[IndexRHNSWFlat] = newRHNSWFlatConfAdapter()
-	mgr.adapters[IndexRHNSWPQ] = newRHNSWPQConfAdapter()
-	mgr.adapters[IndexRHNSWSQ] = newRHNSWSQConfAdapter()
-	mgr.adapters[IndexNGTPANNG] = newNGTPANNGConfAdapter()
-	mgr.adapters[IndexNGTONNG] = newNGTONNGConfAdapter()
+	mgr.adapters[typedef.IndexFaissIDMap] = newBaseConfAdapter()
+	mgr.adapters[typedef.IndexFaissIvfFlat] = newIVFConfAdapter()
+	mgr.adapters[typedef.IndexFaissIvfPQ] = newIVFPQConfAdapter()
+	mgr.adapters[typedef.IndexFaissIvfSQ8] = newIVFSQConfAdapter()
+	mgr.adapters[typedef.IndexFaissIvfSQ8H] = newIVFSQConfAdapter()
+	mgr.adapters[typedef.IndexFaissBinIDMap] = newBinIDMAPConfAdapter()
+	mgr.adapters[typedef.IndexFaissBinIvfFlat] = newBinIVFConfAdapter()
+	mgr.adapters[typedef.IndexNSG] = newNSGConfAdapter()
+	mgr.adapters[typedef.IndexHNSW] = newHNSWConfAdapter()
+	mgr.adapters[typedef.IndexANNOY] = newANNOYConfAdapter()
+	mgr.adapters[typedef.IndexRHNSWFlat] = newRHNSWFlatConfAdapter()
+	mgr.adapters[typedef.IndexRHNSWPQ] = newRHNSWPQConfAdapter()
+	mgr.adapters[typedef.IndexRHNSWSQ] = newRHNSWSQConfAdapter()
+	mgr.adapters[typedef.IndexNGTPANNG] = newNGTPANNGConfAdapter()
+	mgr.adapters[typedef.IndexNGTONNG] = newNGTONNGConfAdapter()
 }
 
 func newConfAdapterMgrImpl() *ConfAdapterMgrImpl {
 	return &ConfAdapterMgrImpl{
 		init:     false,
-		adapters: make(map[IndexType]ConfAdapter),
+		adapters: make(map[typedef.IndexType]ConfAdapter),
 	}
 }
 

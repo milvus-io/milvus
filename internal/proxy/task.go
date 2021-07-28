@@ -27,6 +27,8 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/util/typedef"
+
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
@@ -1848,9 +1850,15 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 
 	ret.Results.TopK = int64(realTopK)
 
-	if metricType != "IP" {
+	// TODO(dragondriver): a more reasonable way to calculate score
+	ret.Results.Distances = make([]float32, len(ret.Results.Scores))
+	if inScorePositivelyRelatedToDistanceMetrics(metricType) {
 		for k := range ret.Results.Scores {
-			ret.Results.Scores[k] *= -1
+			ret.Results.Distances[k] = ret.Results.Scores[k] * -1
+		}
+	} else if inScoreNegativelyRelatedToDistanceMetrics(metricType) {
+		for k := range ret.Results.Scores {
+			ret.Results.Distances[k] = ret.Results.Scores[k] * 1
 		}
 	}
 
@@ -3297,7 +3305,7 @@ func (cit *CreateIndexTask) PreExecute(ctx context.Context) error {
 
 	indexType, exist := indexParams["index_type"] // TODO(dragondriver): change `index_type` to const variable
 	if !exist {
-		indexType = indexparamcheck.IndexFaissIvfPQ // IVF_PQ is the default index type
+		indexType = typedef.IndexFaissIvfPQ // IVF_PQ is the default index type
 	}
 
 	adapter, err := indexparamcheck.GetConfAdapterMgrInstance().GetAdapter(indexType)
