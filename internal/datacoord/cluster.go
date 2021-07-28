@@ -238,7 +238,7 @@ func (c *Cluster) handleEvent(node *NodeInfo) {
 				resp, err := cli.WatchDmChannels(tCtx, req)
 				cancel()
 				if err = VerifyResponse(resp, err); err != nil {
-					log.Warn("Failed to watch dm channels", zap.String("addr", node.Info.GetAddress()))
+					log.Warn("failed to watch dm channels", zap.String("addr", node.Info.GetAddress()))
 				}
 				c.mu.Lock()
 				c.nodes.SetWatched(node.Info.GetVersion(), parseChannelsFromReq(req))
@@ -355,9 +355,13 @@ func (c *Cluster) handleRegister(n *NodeInfo) {
 	c.mu.Lock()
 	cNodes := c.nodes.GetNodes()
 	var nodes []*NodeInfo
-	log.Debug("before register policy applied", zap.Any("n.Channels", n.Info.GetChannels()), zap.Any("buffer", c.chanBuffer))
+	log.Debug("channels info before register policy applied",
+		zap.Any("n.Channels", n.Info.GetChannels()),
+		zap.Any("buffer", c.chanBuffer))
 	nodes, c.chanBuffer = c.registerPolicy(cNodes, n, c.chanBuffer)
-	log.Debug("after register policy applied", zap.Any("ret", nodes), zap.Any("buffer", c.chanBuffer))
+	log.Debug("delta changes after register policy applied",
+		zap.Any("nodes", nodes),
+		zap.Any("buffer", c.chanBuffer))
 	go c.handleEvent(n)
 	c.txnSaveNodesAndBuffer(nodes, c.chanBuffer)
 	for _, node := range nodes {
@@ -383,7 +387,7 @@ func (c *Cluster) handleUnRegister(n *NodeInfo) {
 	c.nodes.DeleteNode(n.Info.GetVersion())
 
 	cNodes := c.nodes.GetNodes()
-	log.Debug("before unregister policy applied", zap.Any("node.Channels", node.Info.GetChannels()), zap.Any("buffer", c.chanBuffer), zap.Any("nodes", cNodes))
+	log.Debug("channels info before unregister policy applied", zap.Any("node.Channels", node.Info.GetChannels()), zap.Any("buffer", c.chanBuffer), zap.Any("nodes", cNodes))
 	var rets []*NodeInfo
 	if len(cNodes) == 0 {
 		for _, chStat := range node.Info.GetChannels() {
@@ -393,7 +397,7 @@ func (c *Cluster) handleUnRegister(n *NodeInfo) {
 	} else {
 		rets = c.unregisterPolicy(cNodes, node)
 	}
-	log.Debug("after unregister policy", zap.Any("rets", rets))
+	log.Debug("delta changes after unregister policy", zap.Any("nodes", rets), zap.Any("buffer", c.chanBuffer))
 	c.txnSaveNodesAndBuffer(rets, c.chanBuffer)
 	for _, node := range rets {
 		c.nodes.SetNode(node.Info.GetVersion(), node)
@@ -488,8 +492,10 @@ func (c *Cluster) watch(n *NodeInfo) {
 	if len(uncompletes) == 0 {
 		return // all set, just return
 	}
-	log.Debug("plan to watch channel", zap.String("node", n.Info.GetAddress()),
-		zap.Int64("version", n.Info.GetVersion()), zap.Strings("channels", channelNames))
+	log.Debug("plan to watch channel",
+		zap.String("node", n.Info.GetAddress()),
+		zap.Int64("version", n.Info.GetVersion()),
+		zap.Strings("channels", channelNames))
 
 	vchanInfos, err := c.posProvider.GetVChanPositions(uncompletes, true)
 	if err != nil {
@@ -507,7 +513,10 @@ func (c *Cluster) watch(n *NodeInfo) {
 		Req:  req,
 	}
 	ch := n.GetEventChannel()
-	log.Debug("put watch event to node channel", zap.Any("e", e), zap.Any("n", n.Info))
+	log.Debug("put watch event to node channel",
+		zap.Any("event", e),
+		zap.Any("node.version", n.Info.GetVersion()),
+		zap.String("node.address", n.Info.GetAddress()))
 	ch <- e
 }
 
