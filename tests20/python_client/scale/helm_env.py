@@ -38,7 +38,10 @@ class HelmEnv:
                       f'{self.release_name} . '
         log.debug(f'install_cmd: {install_cmd}')
         log.debug(f'MILVUS CHART: {sc.get_milvus_chart_env_var()}')
-        os.system(f'cd {sc.get_milvus_chart_env_var()} && {install_cmd}')
+        try:
+            os.system(f'cd {sc.get_milvus_chart_env_var()} && {install_cmd}')
+        except Exception as e:
+            raise
         # raise Exception("Failed to deploy cluster milvus")
         #     todo
         #   return svc ip

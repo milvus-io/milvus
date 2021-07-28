@@ -13,6 +13,7 @@ default_top_k = 10
 default_nq = 2
 default_limit = 10
 default_search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
+default_index = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
 max_top_k = 16384
 max_partition_num = 4096  # 256
 default_segment_row_limit = 1000
