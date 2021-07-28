@@ -111,3 +111,20 @@ func TestGlobalParamsTable_LoadYaml(t *testing.T) {
 	_, err = baseParams.Load("pulsar.port")
 	assert.Nil(t, err)
 }
+
+func TestBaseTable_ParseIntWithErr(t *testing.T) {
+	var err error
+
+	key1 := "ParseIntWithErrInt"
+	err = baseParams.Save(key1, "10")
+	assert.Nil(t, err)
+	ten, err := baseParams.ParseIntWithErr(key1)
+	assert.Nil(t, err)
+	assert.Equal(t, 10, ten)
+
+	key2 := "ParseIntWithErrInvalidInt"
+	err = baseParams.Save(key2, "invalid")
+	assert.Nil(t, err)
+	_, err = baseParams.ParseIntWithErr(key2)
+	assert.NotNil(t, err)
+}
