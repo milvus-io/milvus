@@ -49,6 +49,15 @@ pull_request_rules:
         add:
           - ci-passed
 
+  - name: Test passed for title skip ci
+    conditions:
+      - base=master
+      - title~=[skip-ci]
+    actions:
+      label:
+        add:
+          - ci-passed
+
   - name: Remove ci-passed when code check failed
     conditions:
       - base=master
