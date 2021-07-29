@@ -449,7 +449,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 	assert.NoError(t, err2)
 	err = fillTargetEntry(plan, searchResults, matchedSegments)
 	assert.NoError(t, err)
-	marshaledHits, err := reorganizeSearchResults(plan, placeholderGroups, searchResults, numSegment)
+	marshaledHits, err := reorganizeSearchResults(searchResults, numSegment)
 	assert.NoError(t, err)
 	hitsBlob, err := marshaledHits.getHitsBlob()
 	assert.NoError(t, err)

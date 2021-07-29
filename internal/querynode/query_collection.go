@@ -951,7 +951,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 	if err != nil {
 		return err
 	}
-	marshaledHits, err = reorganizeSearchResults(plan, searchRequests, searchResults, numSegment)
+	marshaledHits, err = reorganizeSearchResults(searchResults, numSegment)
 	sp.LogFields(oplog.String("statistical time", "reorganizeSearchResults end"))
 	if err != nil {
 		return err

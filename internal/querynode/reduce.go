@@ -73,14 +73,7 @@ func fillTargetEntry(plan *SearchPlan, searchResults []*SearchResult, matchedSeg
 	return nil
 }
 
-func reorganizeSearchResults(plan *SearchPlan, searchRequests []*searchRequest, searchResults []*SearchResult, numSegments int64) (*MarshaledHits, error) {
-	cPlaceholderGroups := make([]C.CPlaceholderGroup, 0)
-	for _, pg := range searchRequests {
-		cPlaceholderGroups = append(cPlaceholderGroups, (*pg).cPlaceholderGroup)
-	}
-	var cPlaceHolderGroupPtr = (*C.CPlaceholderGroup)(&cPlaceholderGroups[0])
-	var cNumGroup = (C.long)(len(searchRequests))
-
+func reorganizeSearchResults(searchResults []*SearchResult, numSegments int64) (*MarshaledHits, error) {
 	cSearchResults := make([]C.CSearchResult, 0)
 	for _, res := range searchResults {
 		cSearchResults = append(cSearchResults, res.cSearchResult)
@@ -90,7 +83,7 @@ func reorganizeSearchResults(plan *SearchPlan, searchRequests []*searchRequest, 
 	var cNumSegments = C.long(numSegments)
 	var cMarshaledHits C.CMarshaledHits
 
-	status := C.ReorganizeSearchResults(&cMarshaledHits, cPlaceHolderGroupPtr, cNumGroup, cSearchResultPtr, cNumSegments, plan.cSearchPlan)
+	status := C.ReorganizeSearchResults(&cMarshaledHits, cSearchResultPtr, cNumSegments)
 	errorCode := status.error_code
 
 	if errorCode != 0 {

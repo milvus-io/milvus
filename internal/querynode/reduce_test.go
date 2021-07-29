@@ -82,7 +82,7 @@ func TestReduce_AllFunc(t *testing.T) {
 	err = fillTargetEntry(plan, searchResults, matchedSegment)
 	assert.Nil(t, err)
 
-	marshaledHits, err := reorganizeSearchResults(plan, placeholderGroups, searchResults, 1)
+	marshaledHits, err := reorganizeSearchResults(searchResults, 1)
 	assert.NotNil(t, marshaledHits)
 	assert.Nil(t, err)
 

@@ -507,8 +507,7 @@ TEST(CApiTest, Reduce) {
     FillTargetEntry(segment, plan, res1);
     FillTargetEntry(segment, plan, res2);
     void* reorganize_search_result = nullptr;
-    status = ReorganizeSearchResults(&reorganize_search_result, placeholderGroups.data(), placeholderGroups.size(),
-                                     results.data(), results.size(), plan);
+    status = ReorganizeSearchResults(&reorganize_search_result, results.data(), results.size());
     assert(status.error_code == Success);
     auto hits_blob_size = GetHitsBlobSize(reorganize_search_result);
     assert(hits_blob_size > 0);
@@ -587,8 +586,7 @@ TEST(CApiTest, ReduceSearchWithExpr) {
     FillTargetEntry(segment, plan, res1);
     FillTargetEntry(segment, plan, res2);
     void* reorganize_search_result = nullptr;
-    status = ReorganizeSearchResults(&reorganize_search_result, placeholderGroups.data(), placeholderGroups.size(),
-                                     results.data(), results.size(), plan);
+    status = ReorganizeSearchResults(&reorganize_search_result, results.data(), results.size());
     assert(status.error_code == Success);
     auto hits_blob_size = GetHitsBlobSize(reorganize_search_result);
     assert(hits_blob_size > 0);

@@ -133,27 +133,15 @@ ReduceSearchResults(CSearchResult* c_search_results, int64_t num_segments) {
 }
 
 CStatus
-ReorganizeSearchResults(CMarshaledHits* c_marshaled_hits,
-                        CPlaceholderGroup* c_placeholder_groups,
-                        int64_t num_groups,
-                        CSearchResult* c_search_results,
-                        int64_t num_segments,
-                        CSearchPlan c_plan) {
+ReorganizeSearchResults(CMarshaledHits* c_marshaled_hits, CSearchResult* c_search_results, int64_t num_segments) {
     try {
-        auto marshaledHits = std::make_unique<MarshaledHits>(num_groups);
-        auto topk = GetTopK(c_plan);
-        std::vector<int64_t> num_queries_per_group(num_groups);
-        int64_t total_num_queries = 0;
-        for (int i = 0; i < num_groups; i++) {
-            auto num_queries = GetNumOfQueries(c_placeholder_groups[i]);
-            num_queries_per_group[i] = num_queries;
-            total_num_queries += num_queries;
-        }
+        auto marshaledHits = std::make_unique<MarshaledHits>(1);
+        auto sr = (SearchResult*)c_search_results[0];
+        auto topk = sr->topk_;
+        auto num_queries = sr->num_queries_;
 
-        std::vector<float> result_distances(total_num_queries * topk);
-        std::vector<int64_t> result_ids(total_num_queries * topk);
-        std::vector<std::vector<char>> row_datas(total_num_queries * topk);
-        std::vector<char> temp_ids;
+        std::vector<float> result_distances(num_queries * topk);
+        std::vector<std::vector<char>> row_datas(num_queries * topk);
 
         std::vector<int64_t> counts(num_segments);
         for (int i = 0; i < num_segments; i++) {
@@ -168,7 +156,6 @@ ReorganizeSearchResults(CMarshaledHits* c_marshaled_hits,
                 auto loc = search_result->result_offsets_[j];
                 result_distances[loc] = search_result->result_distances_[j];
                 row_datas[loc] = search_result->row_data_[j];
-                memcpy(&result_ids[loc], search_result->row_data_[j].data(), sizeof(int64_t));
             }
             counts[i] = size;
         }
@@ -177,33 +164,28 @@ ReorganizeSearchResults(CMarshaledHits* c_marshaled_hits,
         for (int i = 0; i < num_segments; i++) {
             total_count += counts[i];
         }
-        AssertInfo(total_count == total_num_queries * topk,
-                   "the reduces result's size less than total_num_queries*topk");
+        AssertInfo(total_count == num_queries * topk, "the reduces result's size less than total_num_queries*topk");
 
-        int64_t last_offset = 0;
-        for (int i = 0; i < num_groups; i++) {
-            MarshaledHitsPerGroup& hits_per_group = (*marshaledHits).marshaled_hits_[i];
-            hits_per_group.hits_.resize(num_queries_per_group[i]);
-            hits_per_group.blob_length_.resize(num_queries_per_group[i]);
-            std::vector<milvus::proto::milvus::Hits> hits(num_queries_per_group[i]);
+        MarshaledHitsPerGroup& hits_per_group = (*marshaledHits).marshaled_hits_[0];
+        hits_per_group.hits_.resize(num_queries);
+        hits_per_group.blob_length_.resize(num_queries);
+        std::vector<milvus::proto::milvus::Hits> hits(num_queries);
 #pragma omp parallel for
-            for (int m = 0; m < num_queries_per_group[i]; m++) {
-                for (int n = 0; n < topk; n++) {
-                    int64_t result_offset = last_offset + m * topk + n;
-                    hits[m].add_ids(result_ids[result_offset]);
-                    hits[m].add_scores(result_distances[result_offset]);
-                    auto& row_data = row_datas[result_offset];
-                    hits[m].add_row_data(row_data.data(), row_data.size());
-                }
+        for (int m = 0; m < num_queries; m++) {
+            for (int n = 0; n < topk; n++) {
+                int64_t result_offset = m * topk + n;
+                hits[m].add_scores(result_distances[result_offset]);
+                auto& row_data = row_datas[result_offset];
+                hits[m].add_row_data(row_data.data(), row_data.size());
+                hits[m].add_ids(*(int64_t*)row_data.data());
             }
-            last_offset = last_offset + num_queries_per_group[i] * topk;
+        }
 
 #pragma omp parallel for
-            for (int j = 0; j < num_queries_per_group[i]; j++) {
-                auto blob = hits[j].SerializeAsString();
-                hits_per_group.hits_[j] = blob;
-                hits_per_group.blob_length_[j] = blob.size();
-            }
+        for (int j = 0; j < num_queries; j++) {
+            auto blob = hits[j].SerializeAsString();
+            hits_per_group.hits_[j] = blob;
+            hits_per_group.blob_length_[j] = blob.size();
         }
 
         auto status = CStatus();
