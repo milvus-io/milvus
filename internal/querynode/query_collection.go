@@ -941,34 +941,22 @@ func (q *queryCollection) search(msg queryMsg) error {
 
 	numSegment := int64(len(searchResults))
 	var marshaledHits *MarshaledHits = nil
-	if numSegment == 1 {
-		err = fillTargetEntry(plan, searchResults, matchedSegments)
-		sp.LogFields(oplog.String("statistical time", "fillTargetEntry end"))
-		if err != nil {
-			return err
-		}
-		marshaledHits, err = reorganizeSingleSearchResult(plan, searchRequests, searchResults[0])
-		sp.LogFields(oplog.String("statistical time", "reorganizeSingleSearchResult end"))
-		if err != nil {
-			return err
-		}
-	} else {
-		err = reduceSearchResults(searchResults, numSegment)
-		sp.LogFields(oplog.String("statistical time", "reduceSearchResults end"))
-		if err != nil {
-			return err
-		}
-		err = fillTargetEntry(plan, searchResults, matchedSegments)
-		sp.LogFields(oplog.String("statistical time", "fillTargetEntry end"))
-		if err != nil {
-			return err
-		}
-		marshaledHits, err = reorganizeSearchResults(plan, searchRequests, searchResults, numSegment)
-		sp.LogFields(oplog.String("statistical time", "reorganizeSearchResults end"))
-		if err != nil {
-			return err
-		}
+	err = reduceSearchResults(searchResults, numSegment)
+	sp.LogFields(oplog.String("statistical time", "reduceSearchResults end"))
+	if err != nil {
+		return err
 	}
+	err = fillTargetEntry(plan, searchResults, matchedSegments)
+	sp.LogFields(oplog.String("statistical time", "fillTargetEntry end"))
+	if err != nil {
+		return err
+	}
+	marshaledHits, err = reorganizeSearchResults(plan, searchRequests, searchResults, numSegment)
+	sp.LogFields(oplog.String("statistical time", "reorganizeSearchResults end"))
+	if err != nil {
+		return err
+	}
+
 	hitsBlob, err := marshaledHits.getHitsBlob()
 	sp.LogFields(oplog.String("statistical time", "getHitsBlob end"))
 	if err != nil {

@@ -101,28 +101,6 @@ func reorganizeSearchResults(plan *SearchPlan, searchRequests []*searchRequest, 
 	return &MarshaledHits{cMarshaledHits: cMarshaledHits}, nil
 }
 
-func reorganizeSingleSearchResult(plan *SearchPlan, placeholderGroups []*searchRequest, searchResult *SearchResult) (*MarshaledHits, error) {
-	cPlaceholderGroups := make([]C.CPlaceholderGroup, 0)
-	for _, pg := range placeholderGroups {
-		cPlaceholderGroups = append(cPlaceholderGroups, (*pg).cPlaceholderGroup)
-	}
-	var cPlaceHolderGroupPtr = (*C.CPlaceholderGroup)(&cPlaceholderGroups[0])
-	var cNumGroup = (C.long)(len(placeholderGroups))
-
-	cSearchResult := searchResult.cSearchResult
-	var cMarshaledHits C.CMarshaledHits
-
-	status := C.ReorganizeSingleSearchResult(&cMarshaledHits, cPlaceHolderGroupPtr, cNumGroup, cSearchResult, plan.cSearchPlan)
-	errorCode := status.error_code
-
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return nil, errors.New("reorganizeSearchResults failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
-	}
-	return &MarshaledHits{cMarshaledHits: cMarshaledHits}, nil
-}
-
 func (mh *MarshaledHits) getHitsBlobSize() int64 {
 	res := C.GetHitsBlobSize(mh.cMarshaledHits)
 	return int64(res)

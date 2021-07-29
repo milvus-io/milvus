@@ -37,13 +37,6 @@ ReorganizeSearchResults(CMarshaledHits* c_marshaled_hits,
                         int64_t num_segments,
                         CSearchPlan c_plan);
 
-CStatus
-ReorganizeSingleSearchResult(CMarshaledHits* c_marshaled_hits,
-                             CPlaceholderGroup* c_placeholder_groups,
-                             int64_t num_groups,
-                             CSearchResult c_search_result,
-                             CSearchPlan c_plan);
-
 int64_t
 GetHitsBlobSize(CMarshaledHits c_marshaled_hits);
 
