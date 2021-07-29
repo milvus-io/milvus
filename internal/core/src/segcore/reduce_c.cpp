@@ -26,7 +26,7 @@ MergeInto(int64_t num_queries, int64_t topk, float* distances, int64_t* uids, fl
     return status.code();
 }
 
-struct MarshaledHitsPeerGroup {
+struct MarshaledHitsPerGroup {
     std::vector<std::string> hits_;
     std::vector<int64_t> blob_length_;
 };
@@ -41,7 +41,7 @@ struct MarshaledHits {
         return marshaled_hits_.size();
     }
 
-    std::vector<MarshaledHitsPeerGroup> marshaled_hits_;
+    std::vector<MarshaledHitsPerGroup> marshaled_hits_;
 };
 
 void
@@ -142,11 +142,11 @@ ReorganizeSearchResults(CMarshaledHits* c_marshaled_hits,
     try {
         auto marshaledHits = std::make_unique<MarshaledHits>(num_groups);
         auto topk = GetTopK(c_plan);
-        std::vector<int64_t> num_queries_peer_group(num_groups);
+        std::vector<int64_t> num_queries_per_group(num_groups);
         int64_t total_num_queries = 0;
         for (int i = 0; i < num_groups; i++) {
             auto num_queries = GetNumOfQueries(c_placeholder_groups[i]);
-            num_queries_peer_group[i] = num_queries;
+            num_queries_per_group[i] = num_queries;
             total_num_queries += num_queries;
         }
 
@@ -182,12 +182,12 @@ ReorganizeSearchResults(CMarshaledHits* c_marshaled_hits,
 
         int64_t last_offset = 0;
         for (int i = 0; i < num_groups; i++) {
-            MarshaledHitsPeerGroup& hits_peer_group = (*marshaledHits).marshaled_hits_[i];
-            hits_peer_group.hits_.resize(num_queries_peer_group[i]);
-            hits_peer_group.blob_length_.resize(num_queries_peer_group[i]);
-            std::vector<milvus::proto::milvus::Hits> hits(num_queries_peer_group[i]);
+            MarshaledHitsPerGroup& hits_per_group = (*marshaledHits).marshaled_hits_[i];
+            hits_per_group.hits_.resize(num_queries_per_group[i]);
+            hits_per_group.blob_length_.resize(num_queries_per_group[i]);
+            std::vector<milvus::proto::milvus::Hits> hits(num_queries_per_group[i]);
 #pragma omp parallel for
-            for (int m = 0; m < num_queries_peer_group[i]; m++) {
+            for (int m = 0; m < num_queries_per_group[i]; m++) {
                 for (int n = 0; n < topk; n++) {
                     int64_t result_offset = last_offset + m * topk + n;
                     hits[m].add_ids(result_ids[result_offset]);
@@ -196,21 +196,21 @@ ReorganizeSearchResults(CMarshaledHits* c_marshaled_hits,
                     hits[m].add_row_data(row_data.data(), row_data.size());
                 }
             }
-            last_offset = last_offset + num_queries_peer_group[i] * topk;
+            last_offset = last_offset + num_queries_per_group[i] * topk;
 
 #pragma omp parallel for
-            for (int j = 0; j < num_queries_peer_group[i]; j++) {
+            for (int j = 0; j < num_queries_per_group[i]; j++) {
                 auto blob = hits[j].SerializeAsString();
-                hits_peer_group.hits_[j] = blob;
-                hits_peer_group.blob_length_[j] = blob.size();
+                hits_per_group.hits_[j] = blob;
+                hits_per_group.blob_length_[j] = blob.size();
             }
         }
 
         auto status = CStatus();
         status.error_code = Success;
         status.error_msg = "";
-        auto marshled_res = (CMarshaledHits)marshaledHits.release();
-        *c_marshaled_hits = marshled_res;
+        auto marshaled_res = (CMarshaledHits)marshaledHits.release();
+        *c_marshaled_hits = marshaled_res;
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
