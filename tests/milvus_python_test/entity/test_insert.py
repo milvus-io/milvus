@@ -492,6 +492,19 @@ class TestAddBase:
         assert len(ids) == nq
 
     @pytest.mark.timeout(ADD_TIMEOUT)
+    def test_insert_default_tag(self, connect, collection):
+        '''
+        target: test add vectors in default partition created before
+        method: create collection and add vectors in it, with the default paritition name
+        expected: the collection row count equals to nq
+        '''
+        nq = 5
+        vectors = gen_vectors(nq, dim)
+        status, ids = connect.insert(collection, vectors, partition_tag="_default")
+        assert status.OK()
+        assert len(ids) == nq
+
+    @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_tag_A(self, connect, collection):
         '''
         target: test add vectors in collection created before
