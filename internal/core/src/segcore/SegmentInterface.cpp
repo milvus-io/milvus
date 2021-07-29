@@ -79,6 +79,7 @@ SegmentInternalInterface::Search(const query::Plan* plan,
     check_search(plan);
     query::ExecPlanNodeVisitor visitor(*this, timestamp, placeholder_group);
     auto results = visitor.get_moved_result(*plan->plan_node_);
+    results.segment_ = (void*)this;
     return results;
 }
 
