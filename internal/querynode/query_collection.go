@@ -939,12 +939,10 @@ func (q *queryCollection) search(msg queryMsg) error {
 		}
 	}
 
-	inReduced := make([]bool, len(searchResults))
 	numSegment := int64(len(searchResults))
 	var marshaledHits *MarshaledHits = nil
 	if numSegment == 1 {
-		inReduced[0] = true
-		err = fillTargetEntry(plan, searchResults, matchedSegments, inReduced)
+		err = fillTargetEntry(plan, searchResults, matchedSegments)
 		sp.LogFields(oplog.String("statistical time", "fillTargetEntry end"))
 		if err != nil {
 			return err
@@ -955,17 +953,17 @@ func (q *queryCollection) search(msg queryMsg) error {
 			return err
 		}
 	} else {
-		err = reduceSearchResults(searchResults, numSegment, inReduced)
+		err = reduceSearchResults(searchResults, numSegment)
 		sp.LogFields(oplog.String("statistical time", "reduceSearchResults end"))
 		if err != nil {
 			return err
 		}
-		err = fillTargetEntry(plan, searchResults, matchedSegments, inReduced)
+		err = fillTargetEntry(plan, searchResults, matchedSegments)
 		sp.LogFields(oplog.String("statistical time", "fillTargetEntry end"))
 		if err != nil {
 			return err
 		}
-		marshaledHits, err = reorganizeSearchResults(plan, searchRequests, searchResults, numSegment, inReduced)
+		marshaledHits, err = reorganizeSearchResults(plan, searchRequests, searchResults, numSegment)
 		sp.LogFields(oplog.String("statistical time", "reorganizeSearchResults end"))
 		if err != nil {
 			return err

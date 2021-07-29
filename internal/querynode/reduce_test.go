@@ -77,13 +77,12 @@ func TestReduce_AllFunc(t *testing.T) {
 	searchResults = append(searchResults, searchResult)
 	matchedSegment = append(matchedSegment, segment)
 
-	testReduce := make([]bool, len(searchResults))
-	err = reduceSearchResults(searchResults, 1, testReduce)
+	err = reduceSearchResults(searchResults, 1)
 	assert.Nil(t, err)
-	err = fillTargetEntry(plan, searchResults, matchedSegment, testReduce)
+	err = fillTargetEntry(plan, searchResults, matchedSegment)
 	assert.Nil(t, err)
 
-	marshaledHits, err := reorganizeSearchResults(plan, placeholderGroups, searchResults, 1, testReduce)
+	marshaledHits, err := reorganizeSearchResults(plan, placeholderGroups, searchResults, 1)
 	assert.NotNil(t, marshaledHits)
 	assert.Nil(t, err)
 

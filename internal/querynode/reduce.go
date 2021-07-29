@@ -37,17 +37,15 @@ type MarshaledHits struct {
 	cMarshaledHits C.CMarshaledHits
 }
 
-func reduceSearchResults(searchResults []*SearchResult, numSegments int64, inReduced []bool) error {
+func reduceSearchResults(searchResults []*SearchResult, numSegments int64) error {
 	cSearchResults := make([]C.CSearchResult, 0)
 	for _, res := range searchResults {
 		cSearchResults = append(cSearchResults, res.cSearchResult)
 	}
 	cSearchResultPtr := (*C.CSearchResult)(&cSearchResults[0])
 	cNumSegments := C.long(numSegments)
-	cInReduced := (*C.bool)(&inReduced[0])
 
-	status := C.ReduceSearchResults(cSearchResultPtr, cNumSegments, cInReduced)
-
+	status := C.ReduceSearchResults(cSearchResultPtr, cNumSegments)
 	errorCode := status.error_code
 
 	if errorCode != 0 {
@@ -58,26 +56,24 @@ func reduceSearchResults(searchResults []*SearchResult, numSegments int64, inRed
 	return nil
 }
 
-func fillTargetEntry(plan *SearchPlan, searchResults []*SearchResult, matchedSegments []*Segment, inReduced []bool) error {
+func fillTargetEntry(plan *SearchPlan, searchResults []*SearchResult, matchedSegments []*Segment) error {
 	wg := &sync.WaitGroup{}
 	//fmt.Println(inReduced)
-	for i := range inReduced {
-		if inReduced[i] {
-			wg.Add(1)
-			go func(i int) {
-				err := matchedSegments[i].fillTargetEntry(plan, searchResults[i])
-				if err != nil {
-					log.Warn(err.Error())
-				}
-				wg.Done()
-			}(i)
-		}
+	for i := range matchedSegments {
+		wg.Add(1)
+		go func(i int) {
+			err := matchedSegments[i].fillTargetEntry(plan, searchResults[i])
+			if err != nil {
+				log.Warn(err.Error())
+			}
+			wg.Done()
+		}(i)
 	}
 	wg.Wait()
 	return nil
 }
 
-func reorganizeSearchResults(plan *SearchPlan, searchRequests []*searchRequest, searchResults []*SearchResult, numSegments int64, inReduced []bool) (*MarshaledHits, error) {
+func reorganizeSearchResults(plan *SearchPlan, searchRequests []*searchRequest, searchResults []*SearchResult, numSegments int64) (*MarshaledHits, error) {
 	cPlaceholderGroups := make([]C.CPlaceholderGroup, 0)
 	for _, pg := range searchRequests {
 		cPlaceholderGroups = append(cPlaceholderGroups, (*pg).cPlaceholderGroup)
@@ -92,10 +88,9 @@ func reorganizeSearchResults(plan *SearchPlan, searchRequests []*searchRequest, 
 	cSearchResultPtr := (*C.CSearchResult)(&cSearchResults[0])
 
 	var cNumSegments = C.long(numSegments)
-	var cInReduced = (*C.bool)(&inReduced[0])
 	var cMarshaledHits C.CMarshaledHits
 
-	status := C.ReorganizeSearchResults(&cMarshaledHits, cPlaceHolderGroupPtr, cNumGroup, cSearchResultPtr, cInReduced, cNumSegments, plan.cSearchPlan)
+	status := C.ReorganizeSearchResults(&cMarshaledHits, cPlaceHolderGroupPtr, cNumGroup, cSearchResultPtr, cNumSegments, plan.cSearchPlan)
 	errorCode := status.error_code
 
 	if errorCode != 0 {

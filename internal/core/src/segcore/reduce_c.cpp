@@ -54,7 +54,6 @@ void
 GetResultData(std::vector<std::vector<int64_t>>& search_records,
               std::vector<SearchResult*>& search_results,
               int64_t query_offset,
-              bool* is_selected,
               int64_t topk) {
     auto num_segments = search_results.size();
     AssertInfo(num_segments > 0, "num segment must greater than 0");
@@ -72,24 +71,21 @@ GetResultData(std::vector<std::vector<int64_t>>& search_records,
         std::sort(result_pairs.begin(), result_pairs.end(), std::greater<>());
         auto& result_pair = result_pairs[0];
         auto index = result_pair.index_;
-        is_selected[index] = true;
         result_pair.search_result_->result_offsets_.push_back(loc_offset++);
         search_records[index].push_back(result_pair.offset_++);
     }
 }
 
 void
-ResetSearchResult(std::vector<std::vector<int64_t>>& search_records,
-                  std::vector<SearchResult*>& search_results,
-                  bool* is_selected) {
+ResetSearchResult(std::vector<std::vector<int64_t>>& search_records, std::vector<SearchResult*>& search_results) {
     auto num_segments = search_results.size();
     AssertInfo(num_segments > 0, "num segment must greater than 0");
     for (int i = 0; i < num_segments; i++) {
-        if (is_selected[i] == false) {
-            continue;
-        }
         auto search_result = search_results[i];
         AssertInfo(search_result != nullptr, "search result must not equal to nullptr");
+        if (search_result->result_offsets_.size() == 0) {
+            continue;
+        }
 
         std::vector<float> result_distances;
         std::vector<int64_t> internal_seg_offsets;
@@ -108,7 +104,7 @@ ResetSearchResult(std::vector<std::vector<int64_t>>& search_records,
 }
 
 CStatus
-ReduceSearchResults(CSearchResult* c_search_results, int64_t num_segments, bool* is_selected) {
+ReduceSearchResults(CSearchResult* c_search_results, int64_t num_segments) {
     try {
         std::vector<SearchResult*> search_results;
         for (int i = 0; i < num_segments; ++i) {
@@ -120,10 +116,10 @@ ReduceSearchResults(CSearchResult* c_search_results, int64_t num_segments, bool*
 
         int64_t query_offset = 0;
         for (int j = 0; j < num_queries; ++j) {
-            GetResultData(search_records, search_results, query_offset, is_selected, topk);
+            GetResultData(search_records, search_results, query_offset, topk);
             query_offset += topk;
         }
-        ResetSearchResult(search_records, search_results, is_selected);
+        ResetSearchResult(search_records, search_results);
         auto status = CStatus();
         status.error_code = Success;
         status.error_msg = "";
@@ -141,7 +137,6 @@ ReorganizeSearchResults(CMarshaledHits* c_marshaled_hits,
                         CPlaceholderGroup* c_placeholder_groups,
                         int64_t num_groups,
                         CSearchResult* c_search_results,
-                        bool* is_selected,
                         int64_t num_segments,
                         CSearchPlan c_plan) {
     try {
@@ -162,12 +157,12 @@ ReorganizeSearchResults(CMarshaledHits* c_marshaled_hits,
 
         std::vector<int64_t> counts(num_segments);
         for (int i = 0; i < num_segments; i++) {
-            if (is_selected[i] == false) {
-                continue;
-            }
             auto search_result = (SearchResult*)c_search_results[i];
             AssertInfo(search_result != nullptr, "search result must not equal to nullptr");
             auto size = search_result->result_offsets_.size();
+            if (size == 0) {
+                continue;
+            }
 #pragma omp parallel for
             for (int j = 0; j < size; j++) {
                 auto loc = search_result->result_offsets_[j];

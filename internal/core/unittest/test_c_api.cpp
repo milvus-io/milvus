@@ -502,14 +502,13 @@ TEST(CApiTest, Reduce) {
     results.push_back(res1);
     results.push_back(res2);
 
-    bool is_selected[2] = {false, false};
-    status = ReduceSearchResults(results.data(), results.size(), is_selected);
+    status = ReduceSearchResults(results.data(), results.size());
     assert(status.error_code == Success);
     FillTargetEntry(segment, plan, res1);
     FillTargetEntry(segment, plan, res2);
     void* reorganize_search_result = nullptr;
     status = ReorganizeSearchResults(&reorganize_search_result, placeholderGroups.data(), placeholderGroups.size(),
-                                     results.data(), is_selected, results.size(), plan);
+                                     results.data(), results.size(), plan);
     assert(status.error_code == Success);
     auto hits_blob_size = GetHitsBlobSize(reorganize_search_result);
     assert(hits_blob_size > 0);
@@ -583,14 +582,13 @@ TEST(CApiTest, ReduceSearchWithExpr) {
     results.push_back(res1);
     results.push_back(res2);
 
-    bool is_selected[2] = {false, false};
-    status = ReduceSearchResults(results.data(), results.size(), is_selected);
+    status = ReduceSearchResults(results.data(), results.size());
     assert(status.error_code == Success);
     FillTargetEntry(segment, plan, res1);
     FillTargetEntry(segment, plan, res2);
     void* reorganize_search_result = nullptr;
     status = ReorganizeSearchResults(&reorganize_search_result, placeholderGroups.data(), placeholderGroups.size(),
-                                     results.data(), is_selected, results.size(), plan);
+                                     results.data(), results.size(), plan);
     assert(status.error_code == Success);
     auto hits_blob_size = GetHitsBlobSize(reorganize_search_result);
     assert(hits_blob_size > 0);
@@ -1920,8 +1918,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
     std::vector<CSearchResult> results;
     results.push_back(c_search_result_on_bigIndex);
-    bool is_selected[1] = {false};
-    status = ReduceSearchResults(results.data(), 1, is_selected);
+    status = ReduceSearchResults(results.data(), results.size());
     assert(status.error_code == Success);
     FillTargetEntry(segment, plan, c_search_result_on_bigIndex);
 
@@ -2072,8 +2069,7 @@ vector_anns: <
 
     std::vector<CSearchResult> results;
     results.push_back(c_search_result_on_bigIndex);
-    bool is_selected[1] = {false};
-    status = ReduceSearchResults(results.data(), 1, is_selected);
+    status = ReduceSearchResults(results.data(), results.size());
     assert(status.error_code == Success);
     FillTargetEntry(segment, plan, c_search_result_on_bigIndex);
 

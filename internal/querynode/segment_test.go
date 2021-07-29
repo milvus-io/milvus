@@ -444,13 +444,12 @@ func TestSegment_segmentSearch(t *testing.T) {
 	matchedSegments = append(matchedSegments, segment)
 
 	///////////////////////////////////
-	inReduced := make([]bool, len(searchResults))
 	numSegment := int64(len(searchResults))
-	err2 := reduceSearchResults(searchResults, numSegment, inReduced)
+	err2 := reduceSearchResults(searchResults, numSegment)
 	assert.NoError(t, err2)
-	err = fillTargetEntry(plan, searchResults, matchedSegments, inReduced)
+	err = fillTargetEntry(plan, searchResults, matchedSegments)
 	assert.NoError(t, err)
-	marshaledHits, err := reorganizeSearchResults(plan, placeholderGroups, searchResults, numSegment, inReduced)
+	marshaledHits, err := reorganizeSearchResults(plan, placeholderGroups, searchResults, numSegment)
 	assert.NoError(t, err)
 	hitsBlob, err := marshaledHits.getHitsBlob()
 	assert.NoError(t, err)

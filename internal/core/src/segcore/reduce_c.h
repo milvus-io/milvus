@@ -27,14 +27,13 @@ int
 MergeInto(int64_t num_queries, int64_t topk, float* distances, int64_t* uids, float* new_distances, int64_t* new_uids);
 
 CStatus
-ReduceSearchResults(CSearchResult* search_results, int64_t num_segments, bool* is_selected);
+ReduceSearchResults(CSearchResult* search_results, int64_t num_segments);
 
 CStatus
 ReorganizeSearchResults(CMarshaledHits* c_marshaled_hits,
                         CPlaceholderGroup* c_placeholder_groups,
                         int64_t num_groups,
                         CSearchResult* c_search_results,
-                        bool* is_selected,
                         int64_t num_segments,
                         CSearchPlan c_plan);
 
