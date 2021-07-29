@@ -26,3 +26,13 @@ do
 done
 
 echo "Exported logs for cluster \"${KIND_NAME}\" to: \"${ARTIFACTS}/${KIND_NAME}\""
+
+MILVUS_HELM_NAMESPACE="${MILVUS_HELM_NAMESPACE:-default}"
+MILVUS_HELM_RELEASE_NAME="${MILVUS_HELM_RELEASE_NAME:-milvus-testing}"
+
+ETCD_SERVICE_IP=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "app.kubernetes.io/instance=${MILVUS_HELM_RELEASE_NAME},app.kubernetes.io/name=etcd" -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}')
+ETCD_SERVICE_PORT=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "app.kubernetes.io/instance=${MILVUS_HELM_RELEASE_NAME},app.kubernetes.io/name=etcd" -o jsonpath='{.items[0].spec.ports[0].port}')
+METRICS_DIRS="${ARTIFACTS:-$(mktemp -d)}/metrics"
+
+mkdir -p "${METRICS_DIRS}"
+curl -L -s "http://${ETCD_SERVICE_IP}:${ETCD_SERVICE_PORT}/metrics" > "${METRICS_DIRS}/etcd.log"

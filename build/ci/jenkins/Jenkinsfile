@@ -95,6 +95,7 @@ pipeline {
                                     if ("${MILVUS_CLIENT}" == "pymilvus-orm") {
                                         sh "tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${MILVUS_CLIENT}-pytest-logs.tar.gz ./tests/pytest_logs --remove-files || true"
                                     }
+                                    sh "tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-${MILVUS_CLIENT}-metrics-logs.tar.gz ./metrics --remove-files || true"
                                     archiveArtifacts artifacts: "**.tar.gz", allowEmptyArchive: true
                                 }
                             }
