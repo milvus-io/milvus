@@ -165,6 +165,23 @@ class TestDeleteBase:
         assert status.OK()
         assert res == nb-length
 
+    def test_delete_vector_from_default_partition(self, connect, collection):
+        '''
+        target: test.get_entity_by_id with default partition
+        method: add vector, and delete 
+        expected: status ok
+        '''
+        vectors = gen_vectors(nb, dim)
+        status, ids = connect.insert(collection, vectors)
+        status = connect.flush([collection])
+        length = 2
+        status = connect.delete_entity_by_id(collection, ids[:length], partition_tag="_default")
+        assert status.OK()
+        status = connect.flush([collection])
+        status, res = connect.count_entities(collection)
+        assert status.OK()
+        assert res == nb-length
+
     def test_delete_vector_from_partition_empty(self, connect, collection):
         '''
         target: test.get_entity_by_id with partition params
