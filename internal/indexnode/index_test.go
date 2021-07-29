@@ -40,10 +40,11 @@ const (
 	IndexNGTONNG   = "NGT_ONNG"
 
 	// metric type
-	L2      = "L2"
-	IP      = "IP"
-	hamming = "HAMMING"
-	Jaccard = "JACCARD"
+	L2       = "L2"
+	IP       = "IP"
+	hamming  = "HAMMING"
+	Jaccard  = "JACCARD"
+	tanimoto = "TANIMOTO"
 
 	dim            = 8
 	nlist          = 100
@@ -100,6 +101,7 @@ func generateBinaryVectorTestCases() []testCase {
 	return []testCase{
 		{IndexFaissBinIVFFlat, Jaccard, true},
 		{IndexFaissBinIVFFlat, hamming, true},
+		{IndexFaissBinIVFFlat, tanimoto, true},
 		{IndexFaissBinIDMap, Jaccard, true},
 		{IndexFaissBinIDMap, hamming, true},
 	}

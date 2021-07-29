@@ -14,6 +14,7 @@
 // DO NOT EDIT
 #include <optional>
 #include <boost/dynamic_bitset.hpp>
+#include <boost/variant.hpp>
 #include <utility>
 #include <deque>
 #include "segcore/SegmentGrowingImpl.h"
@@ -33,7 +34,10 @@ class VerifyExprVisitor : public ExprVisitor {
     visit(TermExpr& expr) override;
 
     void
-    visit(RangeExpr& expr) override;
+    visit(UnaryRangeExpr& expr) override;
+
+    void
+    visit(BinaryRangeExpr& expr) override;
 
     void
     visit(CompareExpr& expr) override;

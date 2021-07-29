@@ -7,6 +7,9 @@ from check.func_check import *
 from utils.api_request import api_request
 
 
+TIMEOUT = 5
+
+
 class ApiUtilityWrapper:
     """ Method of encapsulating utility files """
 
@@ -23,6 +26,8 @@ class ApiUtilityWrapper:
 
     def wait_for_loading_complete(self, collection_name, partition_names=[], timeout=None, using="default",
                                   check_task=None, check_items=None):
+        timeout = TIMEOUT if timeout is None else timeout
+
         func_name = sys._getframe().f_code.co_name
         res, is_succ = api_request([self.ut.wait_for_loading_complete, collection_name,
                                     partition_names, timeout, using])
@@ -42,6 +47,8 @@ class ApiUtilityWrapper:
 
     def wait_for_index_building_complete(self, collection_name, index_name="", timeout=None, using="default",
                                          check_task=None, check_items=None):
+        timeout = TIMEOUT if timeout is None else timeout
+
         func_name = sys._getframe().f_code.co_name
         res, is_succ = api_request([self.ut.wait_for_index_building_complete, collection_name,
                                     index_name, timeout, using])
@@ -67,6 +74,8 @@ class ApiUtilityWrapper:
         return res, check_result
 
     def list_collections(self, timeout=None, using="default", check_task=None, check_items=None):
+        timeout = TIMEOUT if timeout is None else timeout
+
         func_name = sys._getframe().f_code.co_name
         res, is_succ = api_request([self.ut.list_collections, timeout, using])
         check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,

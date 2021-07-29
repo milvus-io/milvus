@@ -1,9 +1,10 @@
 import datetime
 # import pdb
-
+import pytest
 from pymilvus_orm import connections
 
 from base.collection_wrapper import ApiCollectionWrapper
+from common.common_type import CaseLabel
 from scale.helm_env import HelmEnv
 from common import common_func as cf
 from common import common_type as ct
@@ -15,6 +16,7 @@ default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": 
 
 class TestIndexNodeScale:
 
+    @pytest.mark.tags(CaseLabel.L3)
     def test_expand_index_node(self):
         """
         target: test expand indexNode from 1 to 2
@@ -27,9 +29,10 @@ class TestIndexNodeScale:
         release_name = "scale-index"
         env = HelmEnv(release_name=release_name)
         env.helm_install_cluster_milvus()
+        host = env.get_svc_external_ip()
 
         # connect
-        connections.add_connection(default={"host": '10.98.0.8', "port": 19530})
+        connections.add_connection(default={"host": host, "port": 19530})
         connections.connect(alias='default')
 
         data = cf.gen_default_dataframe_data(nb)
@@ -67,6 +70,7 @@ class TestIndexNodeScale:
         log.debug(f't1: {t1}')
         assert round(t0 / t1) == 2
 
+    @pytest.mark.tags(CaseLabel.L3)
     def test_shrink_index_node(self):
         """
         target: test shrink indexNode from 2 to 1

@@ -96,7 +96,6 @@ func (ticker *channelsTimeTickerImpl) tick() error {
 		log.Warn("Proxy channelsTimeTickerImpl failed to get ts from tso", zap.Error(err))
 		return err
 	}
-	//nowPTime, _ := tsoutil.ParseTS(now)
 
 	ticker.statisticsMtx.Lock()
 	defer ticker.statisticsMtx.Unlock()
@@ -111,36 +110,19 @@ func (ticker *channelsTimeTickerImpl) tick() error {
 
 	for pchan := range ticker.currents {
 		current := ticker.currents[pchan]
-		//currentPTime, _ := tsoutil.ParseTS(current)
 		stat, ok := stats[pchan]
-		//log.Debug("Proxy channelsTimeTickerImpl", zap.Any("pchan", pchan),
-		//	zap.Any("TaskInQueue", ok),
-		//	zap.Any("current", currentPTime),
-		//	zap.Any("now", nowPTime))
+
 		if !ok {
 			ticker.minTsStatistics[pchan] = current
 			ticker.currents[pchan] = now
 		} else {
-			//minPTime, _ := tsoutil.ParseTS(stat.minTs)
-			//maxPTime, _ := tsoutil.ParseTS(stat.maxTs)
-
 			if stat.minTs > current {
-				cur := current
-				if stat.minTs > now {
-					cur = now
-				}
-				ticker.minTsStatistics[pchan] = cur
+				ticker.minTsStatistics[pchan] = stat.minTs - 1
 				next := now + Timestamp(sendTimeTickMsgInterval)
 				if next > stat.maxTs {
 					next = stat.maxTs
 				}
 				ticker.currents[pchan] = next
-				//nextPTime, _ := tsoutil.ParseTS(next)
-				//log.Debug("Proxy channelsTimeTickerImpl",
-				//	zap.Any("pchan", pchan),
-				//	zap.Any("minPTime", minPTime),
-				//	zap.Any("maxPTime", maxPTime),
-				//	zap.Any("nextPTime", nextPTime))
 			}
 		}
 	}
@@ -190,7 +172,6 @@ func (ticker *channelsTimeTickerImpl) close() error {
 
 func (ticker *channelsTimeTickerImpl) addPChan(pchan pChan) error {
 	ticker.statisticsMtx.Lock()
-
 	if _, ok := ticker.minTsStatistics[pchan]; ok {
 		ticker.statisticsMtx.Unlock()
 		return fmt.Errorf("pChan %v already exist in minTsStatistics", pchan)

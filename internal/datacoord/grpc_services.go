@@ -41,7 +41,7 @@ func (s *Server) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 }
 
 func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
-	log.Debug("Receive flush request", zap.Int64("dbID", req.GetDbID()), zap.Int64("collectionID", req.GetCollectionID()))
+	log.Debug("receive flush request", zap.Int64("dbID", req.GetDbID()), zap.Int64("collectionID", req.GetCollectionID()))
 	resp := &datapb.FlushResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -57,7 +57,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	}
 	sealedSegments, err := s.segmentManager.SealAllSegments(ctx, req.CollectionID)
 	if err != nil {
-		resp.Status.Reason = fmt.Sprintf("Failed to flush %d, %s", req.CollectionID, err)
+		resp.Status.Reason = fmt.Sprintf("failed to flush %d, %s", req.CollectionID, err)
 		return resp, nil
 	}
 	log.Debug("flush response with segments", zap.Any("segments", sealedSegments))
@@ -80,17 +80,8 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 
 	assigns := make([]*datapb.SegmentIDAssignment, 0, len(req.SegmentIDRequests))
 
-	var appendFailedAssignment = func(err string) {
-		assigns = append(assigns, &datapb.SegmentIDAssignment{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err,
-			},
-		})
-	}
-
 	for _, r := range req.SegmentIDRequests {
-		log.Debug("Handle assign segment request",
+		log.Debug("handle assign segment request",
 			zap.Int64("collectionID", r.GetCollectionID()),
 			zap.Int64("partitionID", r.GetPartitionID()),
 			zap.String("channelName", r.GetChannelName()),
@@ -98,46 +89,39 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 
 		if coll := s.meta.GetCollection(r.CollectionID); coll == nil {
 			if err := s.loadCollectionFromRootCoord(ctx, r.CollectionID); err != nil {
-				errMsg := fmt.Sprintf("Can not load collection %d", r.CollectionID)
-				appendFailedAssignment(errMsg)
 				log.Error("load collection from rootcoord error",
 					zap.Int64("collectionID", r.CollectionID),
 					zap.Error(err))
 				continue
 			}
 		}
-		//if err := s.validateAllocRequest(r.CollectionID, r.PartitionID, r.ChannelName); err != nil {
-		//result.Status.Reason = err.Error()
-		//assigns = append(assigns, result)
-		//continue
-		//}
+
 		s.cluster.Watch(r.ChannelName, r.CollectionID)
 
-		segmentID, retCount, expireTs, err := s.segmentManager.AllocSegment(ctx,
+		allocations, err := s.segmentManager.AllocSegment(ctx,
 			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
 		if err != nil {
-			errMsg := fmt.Sprintf("Allocation of collection %d, partition %d, channel %s, count %d error:  %s",
-				r.CollectionID, r.PartitionID, r.ChannelName, r.Count, err.Error())
-			appendFailedAssignment(errMsg)
+			log.Warn("failed to alloc segment", zap.Any("request", r), zap.Error(err))
 			continue
 		}
 
-		log.Debug("Assign segment success", zap.Int64("segmentID", segmentID),
-			zap.Uint64("expireTs", expireTs))
+		log.Debug("Assign segment success", zap.Any("assignments", allocations))
 
-		result := &datapb.SegmentIDAssignment{
-			SegID:        segmentID,
-			ChannelName:  r.ChannelName,
-			Count:        uint32(retCount),
-			CollectionID: r.CollectionID,
-			PartitionID:  r.PartitionID,
-			ExpireTime:   expireTs,
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    "",
-			},
+		for _, allocation := range allocations {
+			result := &datapb.SegmentIDAssignment{
+				SegID:        allocation.SegmentID,
+				ChannelName:  r.ChannelName,
+				Count:        uint32(allocation.NumOfRows),
+				CollectionID: r.CollectionID,
+				PartitionID:  r.PartitionID,
+				ExpireTime:   allocation.ExpireTime,
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+					Reason:    "",
+				},
+			}
+			assigns = append(assigns, result)
 		}
-		assigns = append(assigns, result)
 	}
 	return &datapb.AssignSegmentIDResponse{
 		Status: &commonpb.Status{
@@ -166,7 +150,7 @@ func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 		segmentInfo := s.meta.GetSegment(segmentID)
 		if segmentInfo == nil {
 			state.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			state.Status.Reason = fmt.Sprintf("Failed to get segment %d", segmentID)
+			state.Status.Reason = fmt.Sprintf("failed to get segment %d", segmentID)
 		} else {
 			state.Status.ErrorCode = commonpb.ErrorCode_Success
 			state.State = segmentInfo.GetState()
@@ -272,7 +256,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	for _, id := range req.SegmentIDs {
 		info := s.meta.GetSegment(id)
 		if info == nil {
-			resp.Status.Reason = fmt.Sprintf("Failed to get segment %d", id)
+			resp.Status.Reason = fmt.Sprintf("failed to get segment %d", id)
 			return resp, nil
 		}
 		infos = append(infos, info.SegmentInfo)
@@ -290,22 +274,14 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		resp.Reason = serverNotServingErrMsg
 		return resp, nil
 	}
-	log.Debug("Receive SaveBinlogPaths request",
+	log.Debug("receive SaveBinlogPaths request",
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("segmentID", req.GetSegmentID()),
 		zap.Any("checkpoints", req.GetCheckPoints()))
 
-	// check segment id & collection id matched
-	if coll := s.meta.GetCollection(req.GetCollectionID()); coll == nil {
-		errMsg := fmt.Sprintf("Failed to get collection info %d", req.GetCollectionID())
-		log.Error(errMsg)
-		resp.Reason = errMsg
-		return resp, nil
-	}
-
 	binlogs, err := s.prepareBinlog(req)
 	if err != nil {
-		log.Error("Prepare binlog meta failed", zap.Error(err))
+		log.Error("prepare binlog meta failed", zap.Error(err))
 		resp.Reason = err.Error()
 		return resp, nil
 	}
@@ -314,13 +290,13 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	err = s.meta.SaveBinlogAndCheckPoints(req.GetSegmentID(), req.GetFlushed(),
 		binlogs, req.GetCheckPoints(), req.GetStartPositions())
 	if err != nil {
-		log.Error("Save binlog and checkpoints failed",
+		log.Error("save binlog and checkpoints failed",
 			zap.Int64("segmentID", req.GetSegmentID()),
 			zap.Error(err))
 		resp.Reason = err.Error()
 		return resp, nil
 	}
-	log.Debug("Flush segment with meta", zap.Int64("id", req.SegmentID),
+	log.Debug("flush segment with meta", zap.Int64("id", req.SegmentID),
 		zap.Any("meta", binlogs))
 
 	if req.Flushed {
@@ -359,7 +335,7 @@ func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
 	collectionID := req.GetCollectionID()
 	partitionID := req.GetPartitionID()
-	log.Info("Receive get recovery info request",
+	log.Info("receive get recovery info request",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("partitionID", partitionID))
 	resp := &datapb.GetRecoveryInfoResponse{
@@ -376,7 +352,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	for _, id := range segmentIDs {
 		segment := s.meta.GetSegment(id)
 		if segment == nil {
-			errMsg := fmt.Sprintf("Failed to get segment %d", id)
+			errMsg := fmt.Sprintf("failed to get segment %d", id)
 			log.Error(errMsg)
 			resp.Status.Reason = errMsg
 			return resp, nil
@@ -387,7 +363,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 
 		meta, err := s.getSegmentBinlogMeta(id)
 		if err != nil {
-			log.Error("Get segment binlog meta failed", zap.Int64("segmentID", id))
+			log.Error("get segment binlog meta failed", zap.Int64("segmentID", id))
 			resp.Status.Reason = err.Error()
 			return resp, nil
 		}
@@ -422,7 +398,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		CollectionID: collectionID,
 	})
 	if err = VerifyResponse(dresp, err); err != nil {
-		log.Error("Get collection info from master failed",
+		log.Error("get collection info from master failed",
 			zap.Int64("collectionID", collectionID),
 			zap.Error(err))
 
@@ -441,7 +417,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 
 	channelInfos, err := s.GetVChanPositions(vchans, false)
 	if err != nil {
-		log.Error("Get channel positions failed",
+		log.Error("get channel positions failed",
 			zap.Strings("channels", channels),
 			zap.Error(err))
 		resp.Status.Reason = err.Error()

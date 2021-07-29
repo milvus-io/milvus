@@ -4,6 +4,12 @@ sys.path.append("..")
 from check.param_check import *
 from check.func_check import *
 from utils.api_request import api_request
+from utils.util_log import test_log as log
+
+TIMEOUT = 20
+#keep small timeout for stability tests
+#TIMEOUT = 5
+
 
 
 class ApiCollectionWrapper:
@@ -51,12 +57,18 @@ class ApiCollectionWrapper:
         return res, check_result
 
     def drop(self, check_task=None, check_items=None, **kwargs):
+        timeout = kwargs.get("timeout", TIMEOUT)
+        kwargs.update({"timeout": timeout})
+
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.drop], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
     def load(self, partition_names=None, check_task=None, check_items=None, **kwargs):
+        timeout = kwargs.get("timeout", TIMEOUT)
+        kwargs.update({"timeout": timeout})
+
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.load, partition_names], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
@@ -64,6 +76,9 @@ class ApiCollectionWrapper:
         return res, check_result
 
     def release(self, check_task=None, check_items=None, **kwargs):
+        timeout = kwargs.get("timeout", TIMEOUT)
+        kwargs.update({"timeout": timeout})
+
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.release], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task,
@@ -71,6 +86,9 @@ class ApiCollectionWrapper:
         return res, check_result
 
     def insert(self, data, partition_name=None, check_task=None, check_items=None, **kwargs):
+        timeout = kwargs.get("timeout", TIMEOUT)
+        kwargs.update({"timeout": timeout})
+
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.insert, data, partition_name], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
@@ -81,6 +99,8 @@ class ApiCollectionWrapper:
     def search(self, data, anns_field, param, limit, expr=None,
                partition_names=None, output_fields=None, timeout=None,
                check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.search, data, anns_field, param, limit,
                                   expr, partition_names, output_fields, timeout], **kwargs)
@@ -93,6 +113,8 @@ class ApiCollectionWrapper:
 
     def query(self, expr, output_fields=None, partition_names=None, timeout=None, check_task=None, check_items=None,
               **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.query, expr, output_fields, partition_names, timeout])
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
@@ -120,16 +142,19 @@ class ApiCollectionWrapper:
         return res, check_result
 
     def drop_partition(self, partition_name, check_task=None, check_items=None, **kwargs):
+        timeout = kwargs.get("timeout", TIMEOUT)
+        kwargs.update({"timeout": timeout})
+
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.drop_partition, partition_name], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, partition_name=partition_name, **kwargs).run()
         return res, check_result
 
-    def create_partition(self, partition_name, check_task=None, check_items=None, **kwargs):
+    def create_partition(self, partition_name, check_task=None, check_items=None, description=""):
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.collection.create_partition, partition_name], **kwargs)
+        res, check = api_request([self.collection.create_partition, partition_name, description])
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
-                                       partition_name=partition_name, **kwargs).run()
+                                       partition_name=partition_name).run()
         return res, check_result
 
     @property
@@ -143,6 +168,9 @@ class ApiCollectionWrapper:
         return res, check_result
 
     def create_index(self, field_name, index_params, check_task=None, check_items=None, **kwargs):
+        timeout = kwargs.get("timeout", TIMEOUT)
+        kwargs.update({"timeout": timeout})
+
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.create_index, field_name, index_params], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
@@ -156,6 +184,9 @@ class ApiCollectionWrapper:
         return res, check_result
 
     def drop_index(self, check_task=None, check_items=None, **kwargs):
+        timeout = kwargs.get("timeout", TIMEOUT)
+        kwargs.update({"timeout": timeout})
+
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.drop_index], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()

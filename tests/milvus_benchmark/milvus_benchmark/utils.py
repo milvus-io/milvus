@@ -1,25 +1,13 @@
 # -*- coding: utf-8 -*-
-import os
-import sys
-import pdb
 import time
-import json
-import datetime
-import argparse
-import threading
 import logging
 import string
 import random
-# import multiprocessing
-import numpy as np
-# import psutil
-import sklearn.preprocessing
-# import docker
 from yaml import full_load, dump
 import yaml
 import tableprint as tp
 from pprint import pprint
-from pymilvus import DataType
+import config
 
 logger = logging.getLogger("milvus_benchmark.utils")
 
@@ -122,63 +110,25 @@ def print_table(headers, columns, data):
     tp.table(bodys, headers)
 
 
-def modify_config(k, v, type=None, file_path="conf/server_config.yaml", db_slave=None):
-    if not os.path.isfile(file_path):
-        raise Exception('File: %s not found' % file_path)
-    with open(file_path) as f:
-        config_dict = full_load(f)
-        f.close()
-    if config_dict:
-        if k.find("use_blas_threshold") != -1:
-            config_dict['engine_config']['use_blas_threshold'] = int(v)
-        elif k.find("use_gpu_threshold") != -1:
-            config_dict['engine_config']['gpu_search_threshold'] = int(v)
-        elif k.find("cpu_cache_capacity") != -1:
-            config_dict['cache_config']['cpu_cache_capacity'] = int(v)
-        elif k.find("enable_gpu") != -1:
-            config_dict['gpu_resource_config']['enable'] = v
-        elif k.find("gpu_cache_capacity") != -1:
-            config_dict['gpu_resource_config']['cache_capacity'] = int(v)
-        elif k.find("index_build_device") != -1:
-            config_dict['gpu_resource_config']['build_index_resources'] = v
-        elif k.find("search_resources") != -1:
-            config_dict['resource_config']['resources'] = v
-
-        # if db_slave:
-        #     config_dict['db_config']['db_slave_path'] = MULTI_DB_SLAVE_PATH
-        with open(file_path, 'w') as f:
-            dump(config_dict, f, default_flow_style=False)
-        f.close()
-    else:
-        raise Exception('Load file:%s error' % file_path)
+def get_deploy_mode(deploy_params):
+    deploy_mode = None
+    if deploy_params:
+        milvus_params = None
+        if "milvus" in deploy_params:
+            milvus_params = deploy_params["milvus"]
+        if not milvus_params:
+            deploy_mode = config.DEFUALT_DEPLOY_MODE
+        elif "deploy_mode" in milvus_params:
+            deploy_mode = milvus_params["deploy_mode"]
+            if deploy_mode not in [config.SINGLE_DEPLOY_MODE, config.CLUSTER_DEPLOY_MODE]:
+                raise Exception("Invalid deploy mode: %s" % deploy_mode)
+    return deploy_mode
 
 
-# update server_config.yaml
-def update_server_config(file_path, server_config):
-    if not os.path.isfile(file_path):
-        raise Exception('File: %s not found' % file_path)
-    with open(file_path) as f:
-        values_dict = full_load(f)
-        f.close()
-        for k, v in server_config.items():
-            if k.find("primary_path") != -1:
-                values_dict["db_config"]["primary_path"] = v
-            elif k.find("use_blas_threshold") != -1:
-                values_dict['engine_config']['use_blas_threshold'] = int(v)
-            elif k.find("gpu_search_threshold") != -1:
-                values_dict['engine_config']['gpu_search_threshold'] = int(v)
-            elif k.find("cpu_cache_capacity") != -1:
-                values_dict['cache_config']['cpu_cache_capacity'] = int(v)
-            elif k.find("cache_insert_data") != -1:
-                values_dict['cache_config']['cache_insert_data'] = v
-            elif k.find("enable") != -1:
-                values_dict['gpu_resource_config']['enable'] = v
-            elif k.find("gpu_cache_capacity") != -1:
-                values_dict['gpu_resource_config']['cache_capacity'] = int(v)
-            elif k.find("build_index_resources") != -1:
-                values_dict['gpu_resource_config']['build_index_resources'] = v
-            elif k.find("search_resources") != -1:
-                values_dict['gpu_resource_config']['search_resources'] = v
-            with open(file_path, 'w') as f:
-                dump(values_dict, f, default_flow_style=False)
-            f.close()
+def get_server_tag(deploy_params):
+    server_tag = ""
+    if deploy_params and "server" in deploy_params:
+        server = deploy_params["server"]
+        # server_name = server["server_name"] if "server_name" in server else ""
+        server_tag = server["server_tag"] if "server_tag" in server else ""
+    return server_tag

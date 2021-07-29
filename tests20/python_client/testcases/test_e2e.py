@@ -12,10 +12,11 @@ prefix = "e2e_"
 class TestE2e(TestcaseBase):
     """ Test case of end to end"""
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("name", [(cf.gen_unique_str(prefix))])
-    def test_milvus_default(self, name):
+    # @pytest.mark.parametrize("name", [(cf.gen_unique_str(prefix))])
+    def test_milvus_default(self):
         from utils.util_log import test_log as log
         # create
+        name = cf.gen_unique_str(prefix)
         t0 = datetime.datetime.now()
         collection_w = self.init_collection_wrap(name=name)
         tt = datetime.datetime.now() - t0

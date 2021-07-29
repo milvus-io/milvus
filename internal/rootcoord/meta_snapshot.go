@@ -313,7 +313,7 @@ func (ms *metaSnapshot) Load(key string, ts typeutil.Timestamp) (string, error) 
 	return string(resp.Kvs[0].Value), nil
 }
 
-func (ms *metaSnapshot) MultiSave(kvs map[string]string, addition func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error) {
+func (ms *metaSnapshot) MultiSave(kvs map[string]string, additions ...func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error) {
 	ms.lock.Lock()
 	defer ms.lock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
@@ -325,7 +325,10 @@ func (ms *metaSnapshot) MultiSave(kvs map[string]string, addition func(ts typeut
 	for key, value := range kvs {
 		ops = append(ops, clientv3.OpPut(path.Join(ms.root, key), value))
 	}
-	if addition != nil {
+	for _, addition := range additions {
+		if addition == nil {
+			continue
+		}
 		if k, v, e := addition(ts); e == nil {
 			ops = append(ops, clientv3.OpPut(path.Join(ms.root, k), v))
 		}
@@ -375,7 +378,7 @@ func (ms *metaSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]str
 	return keys, values, nil
 }
 
-func (ms *metaSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, addition func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error) {
+func (ms *metaSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, additions ...func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error) {
 	ms.lock.Lock()
 	defer ms.lock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
@@ -387,7 +390,10 @@ func (ms *metaSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, re
 	for key, value := range saves {
 		ops = append(ops, clientv3.OpPut(path.Join(ms.root, key), value))
 	}
-	if addition != nil {
+	for _, addition := range additions {
+		if addition == nil {
+			continue
+		}
 		if k, v, e := addition(ts); e == nil {
 			ops = append(ops, clientv3.OpPut(path.Join(ms.root, k), v))
 		}

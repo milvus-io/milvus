@@ -146,10 +146,14 @@ generate_collection_schema(std::string metric_type, int dim, bool is_binary) {
     dim_param->set_value(std::to_string(dim));
 
     auto other_field_schema = collection_schema.add_fields();
-    ;
     other_field_schema->set_name("counter");
     other_field_schema->set_fieldid(101);
     other_field_schema->set_data_type(schema::DataType::Int64);
+
+    auto other_field_schema2 = collection_schema.add_fields();
+    other_field_schema2->set_name("doubleField");
+    other_field_schema2->set_fieldid(102);
+    other_field_schema2->set_data_type(schema::DataType::Double);
 
     std::string schema_string;
     auto marshal = google::protobuf::TextFormat::PrintToString(collection_schema, &schema_string);
@@ -341,7 +345,7 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
     auto segment = NewSegment(collection, 0, Growing);
 
     auto old_memory_usage_size = GetMemoryUsageInBytes(segment);
-    //std::cout << "old_memory_usage_size = " << old_memory_usage_size << std::endl;
+    // std::cout << "old_memory_usage_size = " << old_memory_usage_size << std::endl;
     assert(old_memory_usage_size == 0);
 
     int N = 10000;
@@ -355,7 +359,7 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
     assert(res.error_code == Success);
 
     auto memory_usage_size = GetMemoryUsageInBytes(segment);
-    //std::cout << "new_memory_usage_size = " << memory_usage_size << std::endl;
+    // std::cout << "new_memory_usage_size = " << memory_usage_size << std::endl;
     assert(memory_usage_size == 2785280);
 
     DeleteCollection(collection);
@@ -697,7 +701,7 @@ TEST(CApiTest, LoadIndex_Search) {
 
     auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
     auto dis = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
-    //for (int i = 0; i < std::min(num_query * K, 100); ++i) {
+    // for (int i = 0; i < std::min(num_query * K, 100); ++i) {
     //    std::cout << ids[i] << "->" << dis[i] << std::endl;
     //}
 }
@@ -718,8 +722,8 @@ TEST(CApiTest, Indexing_Without_Predicate) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
-                          dataset.raw_.sizeof_per_row, dataset.raw_.count);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
+                          dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
     const char* dsl_string = R"(
@@ -811,8 +815,8 @@ TEST(CApiTest, Indexing_Without_Predicate) {
 
     auto search_result_on_raw_index_json = SearchResultToJson(*search_result_on_raw_index);
     auto search_result_on_bigIndex_json = SearchResultToJson((*(SearchResult*)c_search_result_on_bigIndex));
-    //std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
-    //std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
+    // std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
+    // std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
 
     ASSERT_EQ(search_result_on_raw_index_json.dump(1), search_result_on_bigIndex_json.dump(1));
 
@@ -841,8 +845,8 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
-                          dataset.raw_.sizeof_per_row, dataset.raw_.count);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
+                          dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
     const char* serialized_expr_plan = R"(vector_anns: <
@@ -929,8 +933,8 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
 
     auto search_result_on_raw_index_json = SearchResultToJson(*search_result_on_raw_index);
     auto search_result_on_bigIndex_json = SearchResultToJson((*(SearchResult*)c_search_result_on_bigIndex));
-    //std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
-    //std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
+    // std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
+    // std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
 
     ASSERT_EQ(search_result_on_raw_index_json.dump(1), search_result_on_bigIndex_json.dump(1));
 
@@ -959,8 +963,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
-                          dataset.raw_.sizeof_per_row, dataset.raw_.count);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
+                          dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
     const char* dsl_string = R"({
@@ -1096,8 +1100,8 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     {
         int64_t offset;
         PreInsert(segment, N, &offset);
-        auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
-                              dataset.raw_.sizeof_per_row, dataset.raw_.count);
+        auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
+                              dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
         assert(ins_res.error_code == Success);
     }
 
@@ -1107,25 +1111,25 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
                                               binary_expr: <
                                                 op: LogicalAnd
                                                 left: <
-                                                  range_expr: <
+                                                  unary_range_expr: <
                                                     column_info: <
                                                       field_id: 101
                                                       data_type: Int64
                                                     >
-                                                    ops: GreaterEqual
-                                                    values: <
+                                                    op: GreaterEqual
+                                                    value: <
                                                       int64_val: 420000
                                                     >
                                                   >
                                                 >
                                                 right: <
-                                                  range_expr: <
+                                                  unary_range_expr: <
                                                     column_info: <
                                                       field_id: 101
                                                       data_type: Int64
                                                     >
-                                                    ops: LessThan
-                                                    values: <
+                                                    op: LessThan
+                                                    value: <
                                                       int64_val: 420010
                                                     >
                                                   >
@@ -1246,8 +1250,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
-                          dataset.raw_.sizeof_per_row, dataset.raw_.count);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
+                          dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
     const char* dsl_string = R"({
@@ -1381,99 +1385,43 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
-                          dataset.raw_.sizeof_per_row, dataset.raw_.count);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
+                          dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
-    const char* serialized_expr_plan = R"(vector_anns: <
-                                            field_id: 100
-                                            predicates: <
-                                              binary_expr: <
-                                                op: LogicalOr
-                                                left: <
-                                                  binary_expr: <
-                                                    op: LogicalOr
-                                                    left: <
-                                                      binary_expr: <
-                                                        op: LogicalOr
-                                                        left: <
-                                                          binary_expr: <
-                                                            op: LogicalOr
-                                                            left: <
-                                                              range_expr: <
-                                                                column_info: <
-                                                                  field_id: 101
-                                                                  data_type: Int64
-                                                                >
-                                                                ops: Equal
-                                                                values: <
-                                                                  int64_val: 420000
-                                                                >
-                                                              >
-                                                            >
-                                                            right: <
-                                                              range_expr: <
-                                                                column_info: <
-                                                                  field_id: 101
-                                                                  data_type: Int64
-                                                                >
-                                                                ops: Equal
-                                                                values: <
-                                                                  int64_val: 420001
-                                                                >
-                                                              >
-                                                            >
-                                                          >
-                                                        >
-                                                        right: <
-                                                          range_expr: <
-                                                            column_info: <
-                                                              field_id: 101
-                                                              data_type: Int64
-                                                            >
-                                                            ops: Equal
-                                                            values: <
-                                                              int64_val: 420002
-                                                            >
-                                                          >
-                                                        >
-                                                      >
-                                                    >
-                                                    right: <
-                                                      range_expr: <
-                                                        column_info: <
-                                                          field_id: 101
-                                                          data_type: Int64
-                                                        >
-                                                        ops: Equal
-                                                        values: <
-                                                          int64_val: 420003
-                                                        >
-                                                      >
-                                                    >
-                                                  >
-                                                >
-                                                right: <
-                                                  range_expr: <
-                                                    column_info: <
-                                                      field_id: 101
-                                                      data_type: Int64
-                                                    >
-                                                    ops: Equal
-                                                    values: <
-                                                      int64_val: 420004
-                                                    >
-                                                  >
-                                                >
-                                              >
-                                            >
-                                            query_info: <
-                                              topk: 5
-                                              metric_type: "L2"
-                                              search_params: "{\"nprobe\": 10}"
-                                            >
-                                            placeholder_tag: "$0"
-    >)";
+    const char* serialized_expr_plan = R"(
+vector_anns: <
+  field_id: 100
+  predicates: <
+    term_expr: <
+      column_info: <
+        field_id: 101
+        data_type: Int64
+      >
+      values: <
+        int64_val: 420000
+      >
+      values: <
+        int64_val: 420001
+      >
+      values: <
+        int64_val: 420002
+      >
+      values: <
+        int64_val: 420003
+      >
+      values: <
+        int64_val: 420004
+      >
+    >
+  >
+  query_info: <
+    topk: 5
+    metric_type: "L2"
+    search_params: "{\"nprobe\": 10}"
+  >
+  placeholder_tag: "$0"
+>)";
 
     // create place_holder_group
     int num_queries = 5;
@@ -1581,8 +1529,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
-                          dataset.raw_.sizeof_per_row, dataset.raw_.count);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
+                          dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
     const char* dsl_string = R"({
@@ -1718,8 +1666,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
-                          dataset.raw_.sizeof_per_row, dataset.raw_.count);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
+                          dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
     const char* serialized_expr_plan = R"(vector_anns: <
@@ -1728,25 +1676,25 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
                                               binary_expr: <
                                                 op: LogicalAnd
                                                 left: <
-                                                  range_expr: <
+                                                  unary_range_expr: <
                                                     column_info: <
                                                       field_id: 101
                                                       data_type: Int64
                                                     >
-                                                    ops: GreaterEqual
-                                                    values: <
+                                                    op: GreaterEqual
+                                                    value: <
                                                       int64_val: 420000
                                                     >
                                                   >
                                                 >
                                                 right: <
-                                                  range_expr: <
+                                                  unary_range_expr: <
                                                     column_info: <
                                                       field_id: 101
                                                       data_type: Int64
                                                     >
-                                                    ops: LessThan
-                                                    values: <
+                                                    op: LessThan
+                                                    value: <
                                                       int64_val: 420010
                                                     >
                                                   >
@@ -1868,8 +1816,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
-                          dataset.raw_.sizeof_per_row, dataset.raw_.count);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
+                          dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
     const char* dsl_string = R"({
@@ -2011,99 +1959,43 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
 
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_.raw_data,
-                          dataset.raw_.sizeof_per_row, dataset.raw_.count);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
+                          dataset.raw_.raw_data, dataset.raw_.sizeof_per_row, dataset.raw_.count);
     assert(ins_res.error_code == Success);
 
-    const char* serialized_expr_plan = R"(vector_anns: <
-                                            field_id: 100
-                                            predicates: <
-                                              binary_expr: <
-                                                op: LogicalOr
-                                                left: <
-                                                  binary_expr: <
-                                                    op: LogicalOr
-                                                    left: <
-                                                      binary_expr: <
-                                                        op: LogicalOr
-                                                        left: <
-                                                          binary_expr: <
-                                                            op: LogicalOr
-                                                            left: <
-                                                              range_expr: <
-                                                                column_info: <
-                                                                  field_id: 101
-                                                                  data_type: Int64
-                                                                >
-                                                                ops: Equal
-                                                                values: <
-                                                                  int64_val: 420000
-                                                                >
-                                                              >
-                                                            >
-                                                            right: <
-                                                              range_expr: <
-                                                                column_info: <
-                                                                  field_id: 101
-                                                                  data_type: Int64
-                                                                >
-                                                                ops: Equal
-                                                                values: <
-                                                                  int64_val: 420001
-                                                                >
-                                                              >
-                                                            >
-                                                          >
-                                                        >
-                                                        right: <
-                                                          range_expr: <
-                                                            column_info: <
-                                                              field_id: 101
-                                                              data_type: Int64
-                                                            >
-                                                            ops: Equal
-                                                            values: <
-                                                              int64_val: 420002
-                                                            >
-                                                          >
-                                                        >
-                                                      >
-                                                    >
-                                                    right: <
-                                                      range_expr: <
-                                                        column_info: <
-                                                          field_id: 101
-                                                          data_type: Int64
-                                                        >
-                                                        ops: Equal
-                                                        values: <
-                                                          int64_val: 420003
-                                                        >
-                                                      >
-                                                    >
-                                                  >
-                                                >
-                                                right: <
-                                                  range_expr: <
-                                                    column_info: <
-                                                      field_id: 101
-                                                      data_type: Int64
-                                                    >
-                                                    ops: Equal
-                                                    values: <
-                                                      int64_val: 420004
-                                                    >
-                                                  >
-                                                >
-                                              >
-                                            >
-                                            query_info: <
-                                              topk: 5
-                                              metric_type: "JACCARD"
-                                              search_params: "{\"nprobe\": 10}"
-                                            >
-                                            placeholder_tag: "$0"
-    >)";
+    const char* serialized_expr_plan = R"(
+vector_anns: <
+  field_id: 100
+  predicates: <
+    term_expr: <
+      column_info: <
+        field_id: 101
+        data_type: Int64
+      >
+      values: <
+        int64_val: 420000
+      >
+      values: <
+        int64_val: 420001
+      >
+      values: <
+        int64_val: 420002
+      >
+      values: <
+        int64_val: 420003
+      >
+      values: <
+        int64_val: 420004
+      >
+    >
+  >
+  query_info: <
+    topk: 5
+    metric_type: "JACCARD"
+    search_params: "{\"nprobe\": 10}"
+  >
+  placeholder_tag: "$0"
+>)";
 
     // create place_holder_group
     int num_queries = 5;
@@ -2422,25 +2314,25 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
                                               binary_expr: <
                                                 op: LogicalAnd
                                                 left: <
-                                                  range_expr: <
+                                                  unary_range_expr: <
                                                     column_info: <
                                                       field_id: 101
                                                       data_type: Int64
                                                     >
-                                                    ops: GreaterEqual
-                                                    values: <
+                                                    op: GreaterEqual
+                                                    value: <
                                                       int64_val: 420000
                                                     >
                                                   >
                                                 >
                                                 right: <
-                                                  range_expr: <
+                                                  unary_range_expr: <
                                                     column_info: <
                                                       field_id: 101
                                                       data_type: Int64
                                                     >
-                                                    ops: LessThan
-                                                    values: <
+                                                    op: LessThan
+                                                    value: <
                                                       int64_val: 420010
                                                     >
                                                   >

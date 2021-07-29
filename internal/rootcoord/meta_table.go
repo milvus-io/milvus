@@ -227,7 +227,7 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, idx []*pb.IndexInfo,
 
 	if len(coll.PartitionIDs) != len(coll.PartitionNames) ||
 		len(coll.PartitionIDs) != len(coll.PartitionCreatedTimestamps) ||
-		len(coll.PartitionNames) != len(coll.PartitionCreatedTimestamps) {
+		(len(coll.PartitionIDs) != 1 && len(coll.PartitionIDs) != 0) {
 		return 0, fmt.Errorf("PartitionIDs, PartitionNames and PartitionCreatedTimestmaps' length mis-match when creating collection")
 	}
 	if _, ok := mt.collName2ID[coll.Schema.Name]; ok {
@@ -237,15 +237,11 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, idx []*pb.IndexInfo,
 		return 0, fmt.Errorf("incorrect index id when creating collection")
 	}
 
-	mt.collID2Meta[coll.ID] = *coll
-	mt.collName2ID[coll.Schema.Name] = coll.ID
 	for _, i := range idx {
 		mt.indexID2Meta[i.IndexID] = *i
 	}
 
-	k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, coll.ID)
-	v1 := proto.MarshalTextString(coll)
-	meta := map[string]string{k1: v1}
+	meta := make(map[string]string)
 
 	for _, i := range idx {
 		k := fmt.Sprintf("%s/%d/%d", IndexMetaPrefix, coll.ID, i.IndexID)
@@ -255,7 +251,20 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, idx []*pb.IndexInfo,
 
 	// save ddOpStr into etcd
 	addition := mt.getAdditionKV(ddOpStr, meta)
-	ts, err := mt.client.MultiSave(meta, addition)
+	saveColl := func(ts typeutil.Timestamp) (string, string, error) {
+		coll.CreateTime = ts
+		if len(coll.PartitionCreatedTimestamps) == 1 {
+			coll.PartitionCreatedTimestamps[0] = ts
+		}
+		mt.collID2Meta[coll.ID] = *coll
+		mt.collName2ID[coll.Schema.Name] = coll.ID
+		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, coll.ID)
+		v1 := proto.MarshalTextString(coll)
+		meta[k1] = v1
+		return k1, v1, nil
+	}
+
+	ts, err := mt.client.MultiSave(meta, addition, saveColl)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return 0, err
@@ -441,7 +450,7 @@ func (mt *metaTable) ListCollectionPhysicalChannels() []string {
 	return plist
 }
 
-func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID, createdTimestamp uint64, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, error) {
+func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 	coll, ok := mt.collID2Meta[collID]
@@ -475,19 +484,25 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 		}
 		// no necessary to check created timestamp
 	}
-	coll.PartitionIDs = append(coll.PartitionIDs, partitionID)
-	coll.PartitionNames = append(coll.PartitionNames, partitionName)
-	coll.PartitionCreatedTimestamps = append(coll.PartitionCreatedTimestamps, createdTimestamp)
-	mt.collID2Meta[collID] = coll
-
-	k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, collID)
-	v1 := proto.MarshalTextString(&coll)
-	meta := map[string]string{k1: v1}
+	meta := make(map[string]string)
 
 	// save ddOpStr into etcd
 	addition := mt.getAdditionKV(ddOpStr, meta)
 
-	ts, err := mt.client.MultiSave(meta, addition)
+	saveColl := func(ts typeutil.Timestamp) (string, string, error) {
+		coll.PartitionIDs = append(coll.PartitionIDs, partitionID)
+		coll.PartitionNames = append(coll.PartitionNames, partitionName)
+		coll.PartitionCreatedTimestamps = append(coll.PartitionCreatedTimestamps, ts)
+		mt.collID2Meta[collID] = coll
+
+		k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, collID)
+		v1 := proto.MarshalTextString(&coll)
+		meta[k1] = v1
+
+		return k1, v1, nil
+	}
+
+	ts, err := mt.client.MultiSave(meta, addition, saveColl)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return 0, err
@@ -755,7 +770,7 @@ func (mt *metaTable) DropIndex(collName, fieldName, indexName string) (typeutil.
 		fmt.Sprintf("%s/%d/%d", IndexMetaPrefix, collMeta.ID, dropIdxID),
 	}
 
-	ts, err := mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMeta, nil)
+	ts, err := mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMeta)
 	if err != nil {
 		_ = mt.reloadFromKV()
 		return 0, 0, false, err
@@ -929,7 +944,7 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 			meta[k] = v
 		}
 
-		_, err = mt.client.MultiSave(meta, nil)
+		_, err = mt.client.MultiSave(meta)
 		if err != nil {
 			_ = mt.reloadFromKV()
 			return nil, schemapb.FieldSchema{}, err
@@ -952,7 +967,7 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 				meta[k] = v
 			}
 
-			_, err = mt.client.MultiSave(meta, nil)
+			_, err = mt.client.MultiSave(meta)
 			if err != nil {
 				_ = mt.reloadFromKV()
 				return nil, schemapb.FieldSchema{}, err

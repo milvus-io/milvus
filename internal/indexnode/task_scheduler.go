@@ -31,12 +31,12 @@ type TaskQueue interface {
 	utEmpty() bool
 	utFull() bool
 	addUnissuedTask(t task) error
-	FrontUnissuedTask() task
+	//FrontUnissuedTask() task
 	PopUnissuedTask() task
 	AddActiveTask(t task)
 	PopActiveTask(tID UniqueID) task
 	Enqueue(t task) error
-	tryToRemoveUselessIndexBuildTask(indexID UniqueID) []UniqueID
+	//tryToRemoveUselessIndexBuildTask(indexID UniqueID) []UniqueID
 }
 
 type BaseTaskQueue struct {
@@ -77,17 +77,17 @@ func (queue *BaseTaskQueue) addUnissuedTask(t task) error {
 	return nil
 }
 
-func (queue *BaseTaskQueue) FrontUnissuedTask() task {
-	queue.utLock.Lock()
-	defer queue.utLock.Unlock()
-
-	if queue.unissuedTasks.Len() <= 0 {
-		log.Debug("IndexNode FrontUnissuedTask sorry, but the unissued task list is empty!")
-		return nil
-	}
-
-	return queue.unissuedTasks.Front().Value.(task)
-}
+//func (queue *BaseTaskQueue) FrontUnissuedTask() task {
+//	queue.utLock.Lock()
+//	defer queue.utLock.Unlock()
+//
+//	if queue.unissuedTasks.Len() <= 0 {
+//		log.Debug("IndexNode FrontUnissuedTask sorry, but the unissued task list is empty!")
+//		return nil
+//	}
+//
+//	return queue.unissuedTasks.Front().Value.(task)
+//}
 
 func (queue *BaseTaskQueue) PopUnissuedTask() task {
 	queue.utLock.Lock()
@@ -130,26 +130,26 @@ func (queue *BaseTaskQueue) PopActiveTask(tID UniqueID) task {
 	return nil
 }
 
-func (queue *BaseTaskQueue) tryToRemoveUselessIndexBuildTask(indexID UniqueID) []UniqueID {
-	queue.utLock.Lock()
-	defer queue.utLock.Unlock()
-
-	var next *list.Element
-	var indexBuildIDs []UniqueID
-	for e := queue.unissuedTasks.Front(); e != nil; e = next {
-		next = e.Next()
-		indexBuildTask, ok := e.Value.(*IndexBuildTask)
-		if !ok {
-			continue
-		}
-		if indexBuildTask.req.IndexID == indexID {
-			indexBuildIDs = append(indexBuildIDs, indexBuildTask.req.IndexBuildID)
-			queue.unissuedTasks.Remove(e)
-			indexBuildTask.Notify(nil)
-		}
-	}
-	return indexBuildIDs
-}
+//func (queue *BaseTaskQueue) tryToRemoveUselessIndexBuildTask(indexID UniqueID) []UniqueID {
+//	queue.utLock.Lock()
+//	defer queue.utLock.Unlock()
+//
+//	var next *list.Element
+//	var indexBuildIDs []UniqueID
+//	for e := queue.unissuedTasks.Front(); e != nil; e = next {
+//		next = e.Next()
+//		indexBuildTask, ok := e.Value.(*IndexBuildTask)
+//		if !ok {
+//			continue
+//		}
+//		if indexBuildTask.req.IndexID == indexID {
+//			indexBuildIDs = append(indexBuildIDs, indexBuildTask.req.IndexBuildID)
+//			queue.unissuedTasks.Remove(e)
+//			indexBuildTask.Notify(nil)
+//		}
+//	}
+//	return indexBuildIDs
+//}
 
 func (queue *BaseTaskQueue) Enqueue(t task) error {
 	err := t.OnEnqueue()

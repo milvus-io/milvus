@@ -11,7 +11,6 @@
 
 package proxy
 
-/*
 import (
 	"context"
 	"math/rand"
@@ -38,7 +37,8 @@ func newMockTsoAllocator() *mockTsoAllocator {
 }
 
 func newGetStatisticsFunc(pchans []pChan) getPChanStatisticsFuncType {
-	pchanNum := rand.Uint64()%5 + 1
+	totalPchan := len(pchans)
+	pchanNum := rand.Uint64()%(uint64(totalPchan)) + 1
 	pchans2 := make([]pChan, 0, pchanNum)
 	for i := 0; uint64(i) < pchanNum; i++ {
 		pchans2 = append(pchans2, pchans[i])
@@ -223,4 +223,3 @@ func TestChannelsTimeTickerImpl_getMinTsStatistics(t *testing.T) {
 
 	time.Sleep(time.Second)
 }
-*/

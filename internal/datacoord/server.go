@@ -11,7 +11,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -176,7 +175,7 @@ func (s *Server) Start() error {
 	s.startServerLoop()
 
 	atomic.StoreInt64(&s.isServing, ServerStateHealthy)
-	log.Debug("DataCoordinator startup success")
+	log.Debug("dataCoordinator startup success")
 	return nil
 }
 
@@ -189,7 +188,7 @@ func (s *Server) initCluster() error {
 func (s *Server) initServiceDiscovery() error {
 	sessions, rev, err := s.session.GetSessions(typeutil.DataNodeRole)
 	if err != nil {
-		log.Debug("DataCoord initMeta failed", zap.Error(err))
+		log.Debug("dataCoord initMeta failed", zap.Error(err))
 		return err
 	}
 	log.Debug("registered sessions", zap.Any("sessions", sessions))
@@ -267,7 +266,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 	defer s.serverLoopWg.Done()
 	statsStream, _ := s.msFactory.NewMsgStream(ctx)
 	statsStream.AsConsumer([]string{Params.StatisticsChannelName}, Params.DataCoordSubscriptionName)
-	log.Debug("DataCoord stats stream",
+	log.Debug("dataCoord create stats channel consumer",
 		zap.String("channelName", Params.StatisticsChannelName),
 		zap.String("descriptionName", Params.DataCoordSubscriptionName))
 	statsStream.Start()
@@ -281,6 +280,7 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 		}
 		msgPack := statsStream.Consume()
 		if msgPack == nil {
+			log.Debug("receive nil stats msg, shutdown stats channel")
 			return
 		}
 		for _, msg := range msgPack.Msgs {
@@ -289,7 +289,6 @@ func (s *Server) startStatsChannel(ctx context.Context) {
 					zap.Stringer("msgType", msg.Type()))
 				continue
 			}
-			log.Debug("Receive DataNode segment statistics update")
 			ssMsg := msg.(*msgstream.SegmentStatisticsMsg)
 			for _, stat := range ssMsg.SegStats {
 				s.meta.SetCurrentRows(stat.GetSegmentID(), stat.GetNumRows())
@@ -308,8 +307,9 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 	}
 	ttMsgStream.AsConsumer([]string{Params.TimeTickChannelName},
 		Params.DataCoordSubscriptionName)
-	log.Debug(fmt.Sprintf("DataCoord AsConsumer:%s:%s",
-		Params.TimeTickChannelName, Params.DataCoordSubscriptionName))
+	log.Debug("dataCoord create time tick channel consumer",
+		zap.String("timeTickChannelName", Params.TimeTickChannelName),
+		zap.String("subscriptionName", Params.DataCoordSubscriptionName))
 	ttMsgStream.Start()
 	defer ttMsgStream.Close()
 	for {
@@ -321,11 +321,12 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 		}
 		msgPack := ttMsgStream.Consume()
 		if msgPack == nil {
+			log.Debug("receive nil tt msg, shutdown tt channel")
 			return
 		}
 		for _, msg := range msgPack.Msgs {
 			if msg.Type() != commonpb.MsgType_DataNodeTt {
-				log.Warn("Receive unexpected msg type from tt channel",
+				log.Warn("receive unexpected msg type from tt channel",
 					zap.Stringer("msgType", msg.Type()))
 				continue
 			}
@@ -333,8 +334,6 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 
 			ch := ttMsg.ChannelName
 			ts := ttMsg.Timestamp
-			// log.Debug("Receive datanode timetick msg", zap.String("channel", ch),
-			// zap.Any("ts", ts))
 			segments, err := s.segmentManager.GetFlushableSegments(ctx, ch, ts)
 			if err != nil {
 				log.Warn("get flushable segments failed", zap.Error(err))
@@ -344,7 +343,7 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 			if len(segments) == 0 {
 				continue
 			}
-			log.Debug("Flush segments", zap.Int64s("segmentIDs", segments))
+			log.Debug("flush segments", zap.Int64s("segmentIDs", segments))
 			segmentInfos := make([]*datapb.SegmentInfo, 0, len(segments))
 			for _, id := range segments {
 				sInfo := s.meta.GetSegment(id)
@@ -380,12 +379,12 @@ func (s *Server) startWatchService(ctx context.Context) {
 			node := NewNodeInfo(ctx, info)
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:
-				log.Info("Received datanode register",
+				log.Info("received datanode register",
 					zap.String("address", info.Address),
 					zap.Int64("serverID", info.Version))
 				s.cluster.Register(node)
 			case sessionutil.SessionDelEvent:
-				log.Info("Received datanode unregister",
+				log.Info("received datanode unregister",
 					zap.String("address", info.Address),
 					zap.Int64("serverID", info.Version))
 				s.cluster.UnRegister(node)
@@ -407,7 +406,7 @@ func (s *Server) startActiveCheck(ctx context.Context) {
 			if ok {
 				continue
 			}
-			s.Stop()
+			go func() { s.Stop() }()
 			log.Debug("disconnect with etcd and shutdown data coordinator")
 			return
 		case <-ctx.Done():
@@ -486,8 +485,7 @@ func (s *Server) Stop() error {
 	if !atomic.CompareAndSwapInt64(&s.isServing, ServerStateHealthy, ServerStateStopped) {
 		return nil
 	}
-	log.Debug("DataCoord server shutdown")
-	atomic.StoreInt64(&s.isServing, ServerStateStopped)
+	log.Debug("dataCoord server shutdown")
 	s.cluster.Close()
 	s.stopServerLoop()
 	return nil

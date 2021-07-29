@@ -1,7 +1,10 @@
 import pdb
 import random
 
+import pytest
+
 from base.collection_wrapper import ApiCollectionWrapper
+from common.common_type import CaseLabel
 from scale.helm_env import HelmEnv
 from utils.util_log import test_log as log
 from common import common_func as cf
@@ -19,13 +22,15 @@ default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": 
 
 class TestQueryNodeScale:
 
+    @pytest.mark.tags(CaseLabel.L3)
     def test_expand_query_node(self):
         release_name = "scale-query"
         env = HelmEnv(release_name=release_name)
         env.helm_install_cluster_milvus()
+        host = env.get_svc_external_ip()
 
         # connect
-        connections.add_connection(default={"host": '10.98.0.8', "port": 19530})
+        connections.add_connection(default={"host": host, "port": 19530})
         connections.connect(alias='default')
 
         # create
@@ -60,6 +65,7 @@ class TestQueryNodeScale:
 
         assert res1[0].ids == res2[0].ids
 
+    @pytest.mark.tags(CaseLabel.L3)
     def test_shrink_query_node(self):
         """
         target: test shrink queryNode from 2 to 1
