@@ -143,10 +143,10 @@ func (mh *MarshaledHits) getHitsBlob() ([]byte, error) {
 
 func (mh *MarshaledHits) hitBlobSizeInGroup(groupOffset int64) ([]int64, error) {
 	cGroupOffset := (C.long)(groupOffset)
-	numQueries := C.GetNumQueriesPeerGroup(mh.cMarshaledHits, cGroupOffset)
+	numQueries := C.GetNumQueriesPerGroup(mh.cMarshaledHits, cGroupOffset)
 	result := make([]int64, int64(numQueries))
 	cResult := (*C.long)(&result[0])
-	C.GetHitSizePeerQueries(mh.cMarshaledHits, cGroupOffset, cResult)
+	C.GetHitSizePerQueries(mh.cMarshaledHits, cGroupOffset, cResult)
 	return result, nil
 }
 

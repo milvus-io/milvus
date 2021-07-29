@@ -318,14 +318,14 @@ GetHitsBlob(CMarshaledHits c_marshaled_hits, const void* hits) {
 }
 
 int64_t
-GetNumQueriesPeerGroup(CMarshaledHits c_marshaled_hits, int64_t group_index) {
+GetNumQueriesPerGroup(CMarshaledHits c_marshaled_hits, int64_t group_index) {
     auto marshaled_hits = (MarshaledHits*)c_marshaled_hits;
     auto& hits = marshaled_hits->marshaled_hits_[group_index].hits_;
     return hits.size();
 }
 
 void
-GetHitSizePeerQueries(CMarshaledHits c_marshaled_hits, int64_t group_index, int64_t* hit_size_peer_query) {
+GetHitSizePerQueries(CMarshaledHits c_marshaled_hits, int64_t group_index, int64_t* hit_size_peer_query) {
     auto marshaled_hits = (MarshaledHits*)c_marshaled_hits;
     auto& blob_lens = marshaled_hits->marshaled_hits_[group_index].blob_length_;
     for (int i = 0; i < blob_lens.size(); i++) {

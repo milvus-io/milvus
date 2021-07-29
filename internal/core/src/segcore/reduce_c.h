@@ -52,10 +52,10 @@ void
 GetHitsBlob(CMarshaledHits c_marshaled_hits, const void* hits);
 
 int64_t
-GetNumQueriesPeerGroup(CMarshaledHits c_marshaled_hits, int64_t group_index);
+GetNumQueriesPerGroup(CMarshaledHits c_marshaled_hits, int64_t group_index);
 
 void
-GetHitSizePeerQueries(CMarshaledHits c_marshaled_hits, int64_t group_index, int64_t* hit_size_peer_query);
+GetHitSizePerQueries(CMarshaledHits c_marshaled_hits, int64_t group_index, int64_t* hit_size_peer_query);
 
 #ifdef __cplusplus
 }
