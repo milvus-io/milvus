@@ -198,24 +198,18 @@ func (q *unsolvedStage) doUnsolvedQueryMsg() {
 					zap.Any("guaranteeTime_l", guaranteeTs),
 					zap.Any("serviceTime_l", serviceTime),
 				)
+				// release check
 				collection, err := q.streaming.replica.getCollectionByID(q.collectionID)
 				if err != nil {
-					// TODO: handle error
-					log.Error("do query failed in doUnsolvedQueryMsg, err = " + err.Error())
+					q.queryError(m, err)
 					continue
 				}
 				if guaranteeTs >= collection.getReleaseTime() {
 					err = fmt.Errorf("collection has been released, msgID = %d, collectionID = %d", m.ID(), q.collectionID)
-					log.Error(err.Error())
-					publishFailedQueryResult(m, err.Error(), q.queryResultStream)
-					log.Debug("do query failed in doUnsolvedQueryMsg, publish failed query result",
-						zap.Int64("collectionID", q.collectionID),
-						zap.Int64("msgID", m.ID()),
-						zap.Any("msgType", m.Type()),
-						zap.Error(err),
-					)
+					q.queryError(m, err)
 					continue
 				}
+				// service time check
 				if guaranteeTs <= serviceTime {
 					unSolvedMsg = append(unSolvedMsg, m)
 					continue
@@ -355,6 +349,33 @@ func (q *unsolvedStage) setServiceableTime(t Timestamp) {
 		q.serviceableTime = t + gracefulTime
 	} else {
 		q.serviceableTime = t
+	}
+}
+
+func (q *unsolvedStage) queryError(msg queryMsg, err error) {
+	msgType := msg.Type()
+	log.Debug("queryError in unsolvedStage",
+		zap.Int64("collectionID", q.collectionID),
+		zap.Int64("msgID", msg.ID()),
+		zap.Error(err),
+	)
+
+	switch msgType {
+	case commonpb.MsgType_Retrieve:
+		rm := msg.(*retrieveMsg)
+		retrieveRes := &retrieveResult{
+			msg: rm,
+			err: err,
+		}
+		q.output <- retrieveRes
+	case commonpb.MsgType_Search:
+		sm := msg.(*searchMsg)
+		searchRes := &searchResult{
+			reqs: sm.reqs,
+			msg:  sm,
+			err:  err,
+		}
+		q.output <- searchRes
 	}
 }
 
