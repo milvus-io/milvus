@@ -6,8 +6,10 @@ from check.func_check import *
 from utils.api_request import api_request
 from utils.util_log import test_log as log
 
+TIMEOUT = 20
+#keep small timeout for stability tests
+#TIMEOUT = 5
 
-TIMEOUT = 5
 
 
 class ApiCollectionWrapper:
