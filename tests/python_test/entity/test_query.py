@@ -103,7 +103,7 @@ class TestQueryBase:
         assert len(ids) == ut.default_nb
         connect.load_collection(collection)
         term_expr = f'{default_int_field_name} in {ids[:default_pos]}'
-        res = connect.query(collection, term_expr, output_fields=["*"])
+        res = connect.query(collection, term_expr, output_fields=["*", "%"])
         assert len(res) == default_pos
         for _id, index in enumerate(ids[:default_pos]):
             if res[index][default_int_field_name] == entities[0]["values"][index]:
@@ -121,9 +121,8 @@ class TestQueryBase:
         method: query not existed collection
         expected: raise exception
         """
-        ex_msg = 'find collection'
         collection = "not_exist"
-        with pytest.raises(Exception, match=ex_msg):
+        with pytest.raises(Exception):
             connect.query(collection, default_term_expr)
 
     @pytest.mark.tags(ut.CaseLabel.tags_smoke)
@@ -133,8 +132,7 @@ class TestQueryBase:
         method: close connect and query
         expected: raise exception
         """
-        ex_msg = 'NoneType'
-        with pytest.raises(Exception, match=ex_msg):
+        with pytest.raises(Exception):
             dis_connect.query(collection, default_term_expr)
 
     @pytest.mark.tags(ut.CaseLabel.tags_smoke)
@@ -160,13 +158,13 @@ class TestQueryBase:
         connect.create_index(collection, ut.default_float_vec_field_name, get_simple_index)
         connect.load_collection(collection)
         term_expr = f'{default_int_field_name} in {ids[:default_pos]}'
-        res = connect.query(collection, term_expr, output_fields=["*"])
+        res = connect.query(collection, term_expr, output_fields=["*", "%"])
         logging.getLogger().info(res)
         assert len(res) == default_pos
         for _id, index in enumerate(ids[:default_pos]):
             if res[index][default_int_field_name] == entities[0]["values"][index]:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
-                ut.assert_equal_vector(res[i][ut.default_float_vec_field_name], entities[-1]["values"][i])
+                ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[-1]["values"][index])
 
     def test_query_after_search(self, connect, collection):
         """
@@ -184,13 +182,12 @@ class TestQueryBase:
         assert len(search_res) == nq
         assert len(search_res[0]) == top_k
         term_expr = f'{default_int_field_name} in {ids[:default_pos]}'
-        res = connect.query(collection, term_expr, output_fields=["*"])
+        res = connect.query(collection, term_expr, output_fields=["*", "%"])
         logging.getLogger().info(res)
         assert len(res) == default_pos
         for _id, index in enumerate(ids[:default_pos]):
             if res[index][default_int_field_name] == entities[0]["values"][index]:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
-                # not support
                 ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
     @pytest.mark.tags(ut.CaseLabel.tags_smoke)
@@ -325,7 +322,7 @@ class TestQueryBase:
         assert len(ids) == ut.default_nb
         connect.load_collection(collection)
         term_expr = f'{default_int_field_name} in [0]'
-        res = connect.query(collection, term_expr, output_fields=["*"])
+        res = connect.query(collection, term_expr, output_fields=["*", "%"])
         assert len(res) == 1
         assert res[0][default_int_field_name] == entities[0]["values"][0]
         assert res[0][default_float_field_name] == entities[1]["values"][0]
@@ -343,7 +340,7 @@ class TestQueryBase:
         assert len(ids) == ut.default_nb
         connect.load_collection(binary_collection)
         term_expr = f'{default_int_field_name} in [0]'
-        res = connect.query(binary_collection, term_expr, output_fields=["*"])
+        res = connect.query(binary_collection, term_expr, output_fields=["*", "%"])
         assert len(res) == 1
         assert res[0][default_int_field_name] == binary_entities[0]["values"][0]
         assert res[1][default_float_field_name] == binary_entities[1]["values"][0]
@@ -361,7 +358,7 @@ class TestQueryBase:
         assert len(ids) == ut.default_nb
         connect.load_collection(collection)
         term_expr = f'{default_int_field_name} in {ids}'
-        res = connect.query(collection, term_expr, output_fields=["*"])
+        res = connect.query(collection, term_expr, output_fields=["*", "%"])
         assert len(res) == ut.default_nb
         for _id, index in enumerate(ids):
             if res[index][default_int_field_name] == entities[0]["values"][index]:
@@ -437,10 +434,9 @@ class TestQueryBase:
         assert len(ids) == ut.default_nb
         connect.load_collection(collection)
         res = connect.query(collection, default_term_expr, output_fields=[])
-        # not support float_vector
-        fields = [default_int_field_name, default_float_field_name]
-        for field in fields:
-            assert field in res[0].keys()
+        assert default_int_field_name in res[0].keys()
+        assert default_float_field_name not in res[0].keys()
+        assert ut.default_float_vec_field_name not in res[0].keys()
 
     @pytest.mark.tags(ut.CaseLabel.tags_smoke)
     def test_query_output_one_field(self, connect, collection):
@@ -527,7 +523,7 @@ class TestQueryPartition:
         entities, ids = init_data(connect, collection, partition_names=ut.default_tag)
         assert len(ids) == ut.default_nb
         connect.load_partitions(collection, [ut.default_tag])
-        res = connect.query(collection, default_term_expr, partition_names=[ut.default_tag], output_fields=["*"])
+        res = connect.query(collection, default_term_expr, partition_names=[ut.default_tag], output_fields=["*", "%"])
         for _id, index in enumerate(ids[:default_pos]):
             if res[index][default_int_field_name] == entities[0]["values"][index]:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
@@ -556,12 +552,11 @@ class TestQueryPartition:
         entities, ids = init_data(connect, collection)
         assert len(ids) == ut.default_nb
         connect.load_collection(collection)
-        res = connect.query(collection, default_term_expr, partition_names=[ut.default_partition_name])
+        res = connect.query(collection, default_term_expr, partition_names=[ut.default_partition_name], output_fields=["*", "%"])
         for _id, index in enumerate(ids[:default_pos]):
             if res[index][default_int_field_name] == entities[0]["values"][index]:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
-                # not support
-                # ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
+                ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
     @pytest.mark.xfail(reason="#6075")
     def test_query_empty_partition(self, connect, collection):
