@@ -33,7 +33,6 @@ namespace chrono = std::chrono;
 
 using namespace milvus;
 using namespace milvus::segcore;
-// using namespace milvus::proto;
 using namespace milvus::knowhere;
 
 namespace {
@@ -203,7 +202,7 @@ TEST(CApiTest, InsertTest) {
 
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_data(N);
-    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
+    auto line_sizeof = (sizeof(int) + sizeof(float) * DIM);
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -237,7 +236,7 @@ TEST(CApiTest, SearchTest) {
 
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_data(N);
-    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
+    auto line_sizeof = (sizeof(int) + sizeof(float) * DIM);
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -294,7 +293,7 @@ TEST(CApiTest, SearchTestWithExpr) {
 
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_data(N);
-    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
+    auto line_sizeof = (sizeof(int) + sizeof(float) * DIM);
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -350,7 +349,7 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
 
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_data(N);
-    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
+    auto line_sizeof = (sizeof(int) + sizeof(float) * DIM);
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -392,7 +391,7 @@ TEST(CApiTest, GetRowCountTest) {
 
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_data(N);
-    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
+    auto line_sizeof = (sizeof(int) + sizeof(float) * DIM);
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -454,7 +453,7 @@ TEST(CApiTest, Reduce) {
 
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_data(N);
-    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
+    auto line_sizeof = (sizeof(int) + sizeof(float) * DIM);
 
     int64_t offset;
     PreInsert(segment, N, &offset);
@@ -519,7 +518,7 @@ TEST(CApiTest, Reduce) {
     GetHitsBlob(reorganize_search_result, hits_blob.data());
     assert(hits_blob.data() != nullptr);
     auto num_queries_group = GetNumQueriesPeerGroup(reorganize_search_result, 0);
-    assert(num_queries_group == 10);
+    assert(num_queries_group == num_queries);
     std::vector<int64_t> hit_size_peer_query;
     hit_size_peer_query.resize(num_queries_group);
     GetHitSizePeerQueries(reorganize_search_result, 0, hit_size_peer_query.data());
@@ -540,7 +539,7 @@ TEST(CApiTest, ReduceSearchWithExpr) {
 
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_data(N);
-    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
+    auto line_sizeof = (sizeof(int) + sizeof(float) * DIM);
 
     int64_t offset;
     PreInsert(segment, N, &offset);
