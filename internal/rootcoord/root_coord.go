@@ -1736,6 +1736,7 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestam
 			Count:     0,
 		}, nil
 	}
+	log.Debug("AllocTimestamp", zap.Uint32("count", in.Count))
 	ts, err := c.TSOAllocator(in.Count)
 	if err != nil {
 		log.Debug("AllocTimestamp failed", zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
@@ -1752,6 +1753,7 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestam
 
 	//return first available  time stamp
 	ts = ts - uint64(in.Count) + 1
+	log.Debug("AllocTimestamp success", zap.Uint32("count", in.Count))
 	return &rootcoordpb.AllocTimestampResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
