@@ -221,7 +221,7 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 	log.Debug("IndexCoord metaTable MarkIndexAsDeleted ", zap.Int64("indexID", indexID))
 
 	for _, meta := range mt.indexBuildID2Meta {
-		if meta.indexMeta.Req.IndexID == indexID {
+		if meta.indexMeta.Req.IndexID == indexID && !meta.indexMeta.MarkDeleted {
 			meta.indexMeta.MarkDeleted = true
 			if err := mt.saveIndexMeta(&meta); err != nil {
 				log.Debug("IndexCoord metaTable MarkIndexAsDeleted saveIndexMeta failed", zap.Error(err))
@@ -458,9 +458,12 @@ func (mt *metaTable) LoadMetaFromETCD(indexBuildID int64, revision int64) bool {
 		if meta.revision >= revision {
 			return false
 		}
+	} else {
+		log.Debug("Index not exist", zap.Int64("IndexBuildID", indexBuildID))
+		return false
 	}
 
-	m, err := mt.reloadMeta(meta.indexMeta.IndexBuildID)
+	m, err := mt.reloadMeta(indexBuildID)
 	if m == nil {
 		log.Debug("IndexCoord metaTable reloadMeta failed", zap.Error(err))
 		return false
