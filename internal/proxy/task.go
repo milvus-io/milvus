@@ -1687,21 +1687,22 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 
 		j := 0
 		for ; j < topk; j++ {
-			valid := false
+			valid := true
 			choice, maxDistance := 0, minFloat32
 			for q, loc := range locs { // query num, the number of ways to merge
 				if loc >= topk {
 					continue
 				}
-				id := searchResultData[q].Ids.GetIntId().Data[idx*topk+loc]
+				curIdx := idx*topk + loc
+				id := searchResultData[q].Ids.GetIntId().Data[curIdx]
 				if id == -1 {
-					continue
-				}
-				distance := searchResultData[q].Scores[idx*topk+loc]
-				if distance > maxDistance || (math.Abs(float64(distance-maxDistance)) < math.SmallestNonzeroFloat32 && choice != q) {
-					choice = q
-					maxDistance = distance
-					valid = true
+					valid = false
+				} else {
+					distance := searchResultData[q].Scores[curIdx]
+					if distance > maxDistance {
+						choice = q
+						maxDistance = distance
+					}
 				}
 			}
 			if !valid {
@@ -1710,7 +1711,7 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 			choiceOffset := locs[choice]
 			curIdx := idx*topk + choiceOffset
 
-			// ignore invalid result
+			// ignore invalid search result
 			id := searchResultData[choice].Ids.GetIntId().Data[curIdx]
 			if id == -1 {
 				continue
