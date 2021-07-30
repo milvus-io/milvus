@@ -225,6 +225,15 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 		log.Debug("watchDmChannelsTask WaitToFinish done", zap.Any("collectionID", in.CollectionID))
 	}()
 
+	if err != nil {
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}
+		log.Error(err.Error())
+		return status, err
+	}
+
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
@@ -273,6 +282,15 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 		}
 		log.Debug("loadSegmentsTask WaitToFinish done", zap.Int64s("segmentIDs", segmentIDs))
 	}()
+
+	if err != nil {
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}
+		log.Error(err.Error())
+		return status, err
+	}
 
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
