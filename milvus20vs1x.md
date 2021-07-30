@@ -57,7 +57,7 @@
 	<tr>
 		<th>SDKs</th>
 		<td><li>Python</li><li>Java</li><li>Go</li><li>RESTful</li><li>C++</li></td>
-		<td><li>Python</li><li>Go (in planning)</li><li>JAVA (in planning)</li><li>RESTful (in planning)</li><li>C++ (in planning)</li></td>
+		<td><li>Python</li><li>Go (in planning)</li><li>Java (in planning)</li><li>RESTful (in planning)</li><li>C++ (in planning)</li></td>
 	</tr>
 	<tr>
 		<th>Release status</th>
