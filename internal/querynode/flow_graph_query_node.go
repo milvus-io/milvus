@@ -105,7 +105,7 @@ func newQueryNodeFlowGraph(ctx context.Context,
 func (q *queryNodeFlowGraph) newDmInputNode(ctx context.Context, factory msgstream.Factory) *flowgraph.InputNode {
 	insertStream, err := factory.NewTtMsgStream(ctx)
 	if err != nil {
-		log.Error(err.Error())
+		log.Warn(err.Error())
 	} else {
 		q.dmlStream = insertStream
 	}

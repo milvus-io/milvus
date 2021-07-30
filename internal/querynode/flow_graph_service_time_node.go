@@ -73,7 +73,7 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	//)
 
 	//if err := stNode.sendTimeTick(serviceTimeMsg.timeRange.timestampMax); err != nil {
-	//	log.Error("Error: send time tick into pulsar channel failed", zap.Error(err))
+	//	log.Warn("Error: send time tick into pulsar channel failed", zap.Error(err))
 	//}
 
 	var res Msg = &gcMsg{
@@ -121,7 +121,7 @@ func newServiceTimeNode(ctx context.Context,
 
 	timeTimeMsgStream, err := factory.NewMsgStream(ctx)
 	if err != nil {
-		log.Error(err.Error())
+		log.Warn(err.Error())
 	} else {
 		// TODO: use param table
 		timeTickChannel := "query-node-time-tick-0"

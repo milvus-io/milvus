@@ -67,7 +67,7 @@ func fillTargetEntry(plan *SearchPlan, searchResults []*SearchResult, matchedSeg
 			go func(i int) {
 				err := matchedSegments[i].fillTargetEntry(plan, searchResults[i])
 				if err != nil {
-					log.Error(err.Error())
+					log.Warn(err.Error())
 				}
 				wg.Done()
 			}(i)
