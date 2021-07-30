@@ -340,6 +340,40 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 	log.Debug("query node load segment", zap.String("loadSegmentRequest", fmt.Sprintln(l.req)))
 	var err error
 
+	// init meta
+	for _, info := range l.req.Infos {
+		collectionID := info.CollectionID
+		partitionID := info.PartitionID
+		hasCollectionInHistorical := l.node.historical.replica.hasCollection(collectionID)
+		hasPartitionInHistorical := l.node.historical.replica.hasPartition(partitionID)
+		if !hasCollectionInHistorical {
+			err = l.node.historical.replica.addCollection(collectionID, l.req.Schema)
+			if err != nil {
+				return err
+			}
+		}
+		if !hasPartitionInHistorical {
+			err = l.node.historical.replica.addPartition(collectionID, partitionID)
+			if err != nil {
+				return err
+			}
+		}
+		hasCollectionInStreaming := l.node.streaming.replica.hasCollection(collectionID)
+		hasPartitionInStreaming := l.node.streaming.replica.hasPartition(partitionID)
+		if !hasCollectionInStreaming {
+			err = l.node.streaming.replica.addCollection(collectionID, l.req.Schema)
+			if err != nil {
+				return err
+			}
+		}
+		if !hasPartitionInStreaming {
+			err = l.node.streaming.replica.addPartition(collectionID, partitionID)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	switch l.req.LoadCondition {
 	case queryPb.TriggerCondition_handoff:
 		err = l.node.historical.loader.loadSegmentOfConditionHandOff(l.req)
