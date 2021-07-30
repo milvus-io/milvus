@@ -204,6 +204,7 @@ func (q *queryCollection) setServiceableTime(t Timestamp) {
 }
 
 func (q *queryCollection) consumeQuery() {
+	var loopCount int64
 	for {
 		select {
 		case <-q.releaseCtx.Done():
@@ -211,6 +212,8 @@ func (q *queryCollection) consumeQuery() {
 			return
 		default:
 			msgPack := q.queryMsgStream.Consume()
+			log.Debug("receieve query message", zap.Int64("collectionID", q.collectionID), zap.Int64("count", loopCount))
+			loopCount++
 			if msgPack == nil || len(msgPack.Msgs) <= 0 {
 				//msgPackNil := msgPack == nil
 				//msgPackEmpty := true
