@@ -771,7 +771,7 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 			return nil, fmt.Errorf("unsupported data type %s", schemapb.DataType_name[int32(fieldMeta.DataType)])
 		}
 	}
-
+	log.Debug("translateHits done:", zap.Any("lenOfFieldIDs", len(fieldIDs)), zap.Any("lenOfRawHits", len(rawHits)))
 	return finalResult, nil
 }
 
@@ -899,10 +899,12 @@ func (q *queryCollection) search(msg queryMsg) error {
 			if err != nil {
 				return err
 			}
+			log.Debug("search: start marshal transformed result")
 			byteBlobs, err := proto.Marshal(transformed)
 			if err != nil {
 				return err
 			}
+			log.Debug("search: marshal transformed result done")
 
 			resultChannelInt := 0
 			searchResultMsg := &msgstream.SearchResultMsg{
