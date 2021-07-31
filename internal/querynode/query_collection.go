@@ -771,6 +771,7 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 			return nil, fmt.Errorf("unsupported data type %s", schemapb.DataType_name[int32(fieldMeta.DataType)])
 		}
 	}
+	log.Debug("translateHits: finalResult", zap.Any("result", finalResult))
 	log.Debug("translateHits done:", zap.Any("lenOfFieldIDs", len(fieldIDs)), zap.Any("lenOfRawHits", len(rawHits)))
 	return finalResult, nil
 }
