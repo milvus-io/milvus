@@ -128,7 +128,7 @@ func (q *queryCollection) close() {
 func (q *queryCollection) register() {
 	collection, err := q.streaming.replica.getCollectionByID(q.collectionID)
 	if err != nil {
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		return
 	}
 
@@ -166,7 +166,7 @@ func (q *queryCollection) waitNewTSafe() Timestamp {
 	// block until any vChannel updating tSafe
 	_, _, recvOK := reflect.Select(q.watcherSelectCase)
 	if !recvOK {
-		//log.Error("tSafe has been closed", zap.Any("collectionID", q.collectionID))
+		//log.Warn("tSafe has been closed", zap.Any("collectionID", q.collectionID))
 		return Timestamp(math.MaxInt64)
 	}
 	//log.Debug("wait new tSafe", zap.Any("collectionID", s.collectionID))
@@ -250,7 +250,7 @@ func (q *queryCollection) loadBalance(msg *msgstream.LoadBalanceSegmentsMsg) {
 	//	if nodeID == info.SourceNodeID {
 	//		err := s.historical.replica.removeSegment(segmentID)
 	//		if err != nil {
-	//			log.Error("loadBalance failed when remove segment",
+	//			log.Warn("loadBalance failed when remove segment",
 	//				zap.Error(err),
 	//				zap.Any("segmentID", segmentID))
 	//		}
@@ -258,7 +258,7 @@ func (q *queryCollection) loadBalance(msg *msgstream.LoadBalanceSegmentsMsg) {
 	//	if nodeID == info.DstNodeID {
 	//		segment, err := s.historical.replica.getSegmentByID(segmentID)
 	//		if err != nil {
-	//			log.Error("loadBalance failed when making segment on service",
+	//			log.Warn("loadBalance failed when making segment on service",
 	//				zap.Error(err),
 	//				zap.Any("segmentID", segmentID))
 	//			continue // not return, try to load balance all segment
@@ -293,11 +293,11 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
 		//)
 	default:
 		err := fmt.Errorf("receive invalid msgType = %d", msgType)
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		return
 	}
 	if collectionID != q.collectionID {
-		//log.Error("not target collection query request",
+		//log.Warn("not target collection query request",
 		//	zap.Any("collectionID", q.collectionID),
 		//	zap.Int64("target collectionID", collectionID),
 		//	zap.Int64("msgID", msg.ID()),
@@ -312,10 +312,10 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
 	// check if collection has been released
 	collection, err := q.historical.replica.getCollectionByID(collectionID)
 	if err != nil {
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		err = q.publishFailedQueryResult(msg, err.Error())
 		if err != nil {
-			log.Error(err.Error())
+			log.Warn(err.Error())
 		} else {
 			log.Debug("do query failed in receiveQueryMsg, publish failed query result",
 				zap.Int64("collectionID", collectionID),
@@ -328,10 +328,10 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
 	guaranteeTs := msg.GuaranteeTs()
 	if guaranteeTs >= collection.getReleaseTime() {
 		err = fmt.Errorf("retrieve failed, collection has been released, msgID = %d, collectionID = %d", msg.ID(), collectionID)
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		err = q.publishFailedQueryResult(msg, err.Error())
 		if err != nil {
-			log.Error(err.Error())
+			log.Warn(err.Error())
 		} else {
 			log.Debug("do query failed in receiveQueryMsg, publish failed query result",
 				zap.Int64("collectionID", collectionID),
@@ -378,16 +378,16 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
 		err = q.search(msg)
 	default:
 		err := fmt.Errorf("receive invalid msgType = %d", msgType)
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		return
 	}
 	tr.Record("operation done")
 
 	if err != nil {
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		err = q.publishFailedQueryResult(msg, err.Error())
 		if err != nil {
-			log.Error(err.Error())
+			log.Warn(err.Error())
 		} else {
 			log.Debug("do query failed in receiveQueryMsg, publish failed query result",
 				zap.Int64("collectionID", collectionID),
@@ -471,15 +471,15 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 					err = q.search(m)
 				default:
 					err := fmt.Errorf("receive invalid msgType = %d", msgType)
-					log.Error(err.Error())
+					log.Warn(err.Error())
 					return
 				}
 
 				if err != nil {
-					log.Error(err.Error())
+					log.Warn(err.Error())
 					err = q.publishFailedQueryResult(m, err.Error())
 					if err != nil {
-						log.Error(err.Error())
+						log.Warn(err.Error())
 					} else {
 						log.Debug("do query failed in doUnsolvedMsg, publish failed query result",
 							zap.Int64("collectionID", q.collectionID),
@@ -853,7 +853,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 	// historical search
 	hisSearchResults, hisSegmentResults, err1 := q.historical.search(searchRequests, collectionID, searchMsg.PartitionIDs, plan, travelTimestamp)
 	if err1 != nil {
-		log.Error(err1.Error())
+		log.Warn(err1.Error())
 		return err1
 	}
 	searchResults = append(searchResults, hisSearchResults...)
@@ -870,7 +870,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 		var strSegmentResults []*Segment
 		strSearchResults, strSegmentResults, err2 = q.streaming.search(searchRequests, collectionID, searchMsg.PartitionIDs, channel, plan, travelTimestamp)
 		if err2 != nil {
-			log.Error(err2.Error())
+			log.Warn(err2.Error())
 			return err2
 		}
 		searchResults = append(searchResults, strSearchResults...)
