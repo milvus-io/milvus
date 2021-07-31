@@ -230,7 +230,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		return status, err
 	}
 

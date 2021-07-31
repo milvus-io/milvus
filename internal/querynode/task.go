@@ -144,8 +144,8 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		w.node.streaming.replica.initExcludedSegments(collectionID)
 	}
+	w.node.streaming.replica.initExcludedSegments(collectionID)
 	if hasCollectionInHistorical := w.node.historical.replica.hasCollection(collectionID); !hasCollectionInHistorical {
 		err := w.node.historical.replica.addCollection(collectionID, w.req.Schema)
 		if err != nil {
