@@ -53,15 +53,16 @@ DeleteMarshaledHits(CMarshaledHits c_marshaled_hits) {
 void
 GetResultData(std::vector<std::vector<int64_t>>& search_records,
               std::vector<SearchResult*>& search_results,
-              int64_t query_offset,
+              int64_t query_idx,
               int64_t topk) {
     auto num_segments = search_results.size();
     AssertInfo(num_segments > 0, "num segment must greater than 0");
     std::vector<SearchResultPair> result_pairs;
+    int64_t query_offset = query_idx * topk;
     for (int j = 0; j < num_segments; ++j) {
-        auto distance = search_results[j]->result_distances_[query_offset];
         auto search_result = search_results[j];
         AssertInfo(search_result != nullptr, "search result must not equal to nullptr");
+        auto distance = search_result->result_distances_[query_offset];
         result_pairs.push_back(SearchResultPair(distance, search_result, query_offset, j));
     }
     int64_t loc_offset = query_offset;
@@ -114,10 +115,8 @@ ReduceSearchResults(CSearchResult* c_search_results, int64_t num_segments) {
         auto num_queries = search_results[0]->num_queries_;
         std::vector<std::vector<int64_t>> search_records(num_segments);
 
-        int64_t query_offset = 0;
-        for (int j = 0; j < num_queries; ++j) {
-            GetResultData(search_records, search_results, query_offset, topk);
-            query_offset += topk;
+        for (int i = 0; i < num_queries; ++i) {
+            GetResultData(search_records, search_results, i, topk);
         }
         ResetSearchResult(search_records, search_results);
         auto status = CStatus();
