@@ -143,13 +143,13 @@ func (s *streaming) search(searchReqs []*searchRequest,
 			zap.Any("segmentIDs", segIDs),
 		)
 		if err != nil {
-			log.Error(err.Error())
+			log.Warn(err.Error())
 			return searchResults, segmentResults, err
 		}
 		for _, segID := range segIDs {
 			seg, err := s.replica.getSegmentByID(segID)
 			if err != nil {
-				log.Error(err.Error())
+				log.Warn(err.Error())
 				return searchResults, segmentResults, err
 			}
 

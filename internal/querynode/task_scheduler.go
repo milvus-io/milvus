@@ -44,7 +44,7 @@ func (s *taskScheduler) processTask(t task, q taskQueue) {
 		t.Notify(err)
 	}()
 	if err != nil {
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		return
 	}
 
@@ -55,7 +55,7 @@ func (s *taskScheduler) processTask(t task, q taskQueue) {
 
 	err = t.Execute(s.ctx)
 	if err != nil {
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		return
 	}
 	err = t.PostExecute(s.ctx)
