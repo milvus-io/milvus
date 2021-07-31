@@ -6012,9 +6012,21 @@ class GetIndexStateResponse :
   // accessors -------------------------------------------------------
 
   enum : int {
+    kFailReasonFieldNumber = 3,
     kStatusFieldNumber = 1,
     kStateFieldNumber = 2,
   };
+  // string fail_reason = 3;
+  void clear_fail_reason();
+  const std::string& fail_reason() const;
+  void set_fail_reason(const std::string& value);
+  void set_fail_reason(std::string&& value);
+  void set_fail_reason(const char* value);
+  void set_fail_reason(const char* value, size_t size);
+  std::string* mutable_fail_reason();
+  std::string* release_fail_reason();
+  void set_allocated_fail_reason(std::string* fail_reason);
+
   // .milvus.proto.common.Status status = 1;
   bool has_status() const;
   void clear_status();
@@ -6033,6 +6045,7 @@ class GetIndexStateResponse :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr fail_reason_;
   ::milvus::proto::common::Status* status_;
   int state_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
@@ -16150,6 +16163,57 @@ inline void GetIndexStateResponse::set_state(::milvus::proto::common::IndexState
   
   state_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.GetIndexStateResponse.state)
+}
+
+// string fail_reason = 3;
+inline void GetIndexStateResponse::clear_fail_reason() {
+  fail_reason_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& GetIndexStateResponse::fail_reason() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetIndexStateResponse.fail_reason)
+  return fail_reason_.GetNoArena();
+}
+inline void GetIndexStateResponse::set_fail_reason(const std::string& value) {
+  
+  fail_reason_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.GetIndexStateResponse.fail_reason)
+}
+inline void GetIndexStateResponse::set_fail_reason(std::string&& value) {
+  
+  fail_reason_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.milvus.GetIndexStateResponse.fail_reason)
+}
+inline void GetIndexStateResponse::set_fail_reason(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  fail_reason_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.milvus.GetIndexStateResponse.fail_reason)
+}
+inline void GetIndexStateResponse::set_fail_reason(const char* value, size_t size) {
+  
+  fail_reason_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.milvus.GetIndexStateResponse.fail_reason)
+}
+inline std::string* GetIndexStateResponse::mutable_fail_reason() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.GetIndexStateResponse.fail_reason)
+  return fail_reason_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* GetIndexStateResponse::release_fail_reason() {
+  // @@protoc_insertion_point(field_release:milvus.proto.milvus.GetIndexStateResponse.fail_reason)
+  
+  return fail_reason_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void GetIndexStateResponse::set_allocated_fail_reason(std::string* fail_reason) {
+  if (fail_reason != nullptr) {
+    
+  } else {
+    
+  }
+  fail_reason_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), fail_reason);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.GetIndexStateResponse.fail_reason)
 }
 
 // -------------------------------------------------------------------
