@@ -170,14 +170,14 @@ func newSegment(collection *Collection, segmentID int64, partitionID UniqueID, c
 	var segmentPtr C.CSegmentInterface
 	switch segType {
 	case segmentTypeInvalid:
-		log.Error("illegal segment type when create segment")
+		log.Warn("illegal segment type when create segment")
 		return nil
 	case segmentTypeSealed:
 		segmentPtr = C.NewSegment(collection.collectionPtr, C.ulong(segmentID), C.Sealed)
 	case segmentTypeGrowing:
 		segmentPtr = C.NewSegment(collection.collectionPtr, C.ulong(segmentID), C.Growing)
 	default:
-		log.Error("illegal segment type when create segment")
+		log.Warn("illegal segment type when create segment")
 		return nil
 	}
 
