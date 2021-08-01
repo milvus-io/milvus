@@ -76,10 +76,10 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*G
 		log.Debug("RootCoordClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
-	ctx, cancel := context.WithCancel(ctx)
+	ctx2, cancel := context.WithCancel(ctx)
 
 	return &GrpcClient{
-		ctx:    ctx,
+		ctx:    ctx2,
 		cancel: cancel,
 		sess:   sess,
 	}, nil

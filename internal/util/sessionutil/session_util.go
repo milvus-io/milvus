@@ -218,6 +218,19 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 	return ch, nil
 }
 
+func (s *Session) Clear() error {
+	ctx, cancel := context.WithTimeout(s.ctx, DefaultTTL)
+	defer cancel()
+	if s.etcdCli != nil && s.leaseID > 0 {
+		_, err := s.etcdCli.Revoke(ctx, s.leaseID)
+		if err != nil {
+			log.Debug("Session Remove Failed", zap.Error(err))
+			return err
+		}
+	}
+	return nil
+}
+
 // processKeepAliveResponse processes the response of etcd keepAlive interface
 // If keepAlive fails for unexpected error, it will send a signal to the channel.
 func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveResponse) (failChannel <-chan bool) {
@@ -231,15 +244,16 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 			case resp, ok := <-ch:
 				if !ok {
 					log.Debug("session keepalive channel closed")
+					s.Clear()
 					close(failCh)
 					return
 				}
 				if resp == nil {
 					log.Debug("session keepalive response failed")
+					s.Clear()
 					close(failCh)
 					return
 				}
-				//failCh <- true
 			}
 		}
 	}()
