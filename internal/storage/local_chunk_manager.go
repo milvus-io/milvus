@@ -18,6 +18,8 @@ import (
 	"path"
 
 	"golang.org/x/exp/mmap"
+
+	"github.com/milvus-io/milvus/internal/log"
 )
 
 type LocalChunkManager struct {
@@ -80,7 +82,14 @@ func (lcm *LocalChunkManager) Read(key string) ([]byte, error) {
 func (lcm *LocalChunkManager) ReadAt(key string, p []byte, off int64) (n int, err error) {
 	path := path.Join(lcm.localPath, key)
 	at, err := mmap.Open(path)
-	defer at.Close()
+	defer func() {
+		if at != nil {
+			err = at.Close()
+			if err != nil {
+				log.Error(err.Error())
+			}
+		}
+	}()
 	if err != nil {
 		return 0, err
 	}

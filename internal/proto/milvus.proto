@@ -284,6 +284,7 @@ message GetIndexStateRequest {
 message GetIndexStateResponse {
   common.Status status = 1;
   common.IndexState state = 2;
+  string fail_reason = 3;
 }
 
 message DropIndexRequest {

@@ -117,7 +117,7 @@ func (q *queryService) hasQueryCollection(collectionID UniqueID) bool {
 func (q *queryService) stopQueryCollection(collectionID UniqueID) {
 	sc, ok := q.queryCollections[collectionID]
 	if !ok {
-		log.Error("stopQueryCollection failed, collection doesn't exist", zap.Int64("collectionID", collectionID))
+		log.Warn("stopQueryCollection failed, collection doesn't exist", zap.Int64("collectionID", collectionID))
 		return
 	}
 	sc.close()

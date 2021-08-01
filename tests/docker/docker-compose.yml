@@ -7,7 +7,7 @@ services:
       context: ../..
       dockerfile: tests/docker/Dockerfile
       cache_from:
-        - ${IMAGE_REPO}/pytest:latest
+        - ${IMAGE_REPO}/pytest:${LATEST_IMAGE_TAG}
     shm_size: 2G
     environment:
       MILVUS_SERVICE_IP: ${MILVUS_SERVICE_IP}

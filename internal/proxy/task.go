@@ -3993,7 +3993,8 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		State: commonpb.IndexState_Finished,
+		State:      commonpb.IndexState_Finished,
+		FailReason: "",
 	}
 
 	log.Debug("Proxy GetIndexState", zap.Int("IndexBuildIDs", len(getIndexStatesRequest.IndexBuildIDs)), zap.Error(err))
@@ -4017,8 +4018,9 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 	for _, state := range states.States {
 		if state.State != commonpb.IndexState_Finished {
 			gist.result = &milvuspb.GetIndexStateResponse{
-				Status: states.Status,
-				State:  state.State,
+				Status:     states.Status,
+				State:      state.State,
+				FailReason: state.Reason,
 			}
 			return nil
 		}
