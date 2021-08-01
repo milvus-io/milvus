@@ -36,12 +36,13 @@ jobs:
       - name: Docker Pull
         shell: bash
         run: |
-          DATE_VERSION=latest docker-compose pull --ignore-pull-failures builder
+          docker-compose pull --ignore-pull-failures builder
       - name: Docker Build
         shell: bash
         run: |
-          DATE_VERSION=latest docker-compose build builder
           DATE_VERSION=${{ steps.extracter.outputs.version }} docker-compose build builder
+          export LATEST_DATE_VERSION=${{ steps.extracter.outputs.version }}
+          DATE_VERSION=latest docker-compose build builder
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true
@@ -49,14 +50,15 @@ jobs:
         run: |
           docker login -u ${{ secrets.DOCKERHUB_USER }} \
                        -p ${{ secrets.DOCKERHUB_TOKEN }}
-          DATE_VERSION=latest docker-compose push builder
           DATE_VERSION=${{ steps.extracter.outputs.version }} docker-compose push builder
+          DATE_VERSION=latest docker-compose push builder
       - name: Update Builder Image Changes
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true
         shell: bash
         run: |
           sed -i "s#^DATE_VERSION=.*#DATE_VERSION=${{ steps.extracter.outputs.version }}#g" .env
+          sed -i "s#^LATEST_DATE_VERSION=.*#LATEST_DATE_VERSION=${{ steps.extracter.outputs.version }}#g" .env
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add .env
