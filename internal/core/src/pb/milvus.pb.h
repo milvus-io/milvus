@@ -324,30 +324,30 @@ namespace milvus {
 namespace proto {
 namespace milvus {
 
-enum ShowCollectionsType : int {
+enum ShowType : int {
   All = 0,
   InMemory = 1,
-  ShowCollectionsType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
-  ShowCollectionsType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
+  ShowType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
+  ShowType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
-bool ShowCollectionsType_IsValid(int value);
-constexpr ShowCollectionsType ShowCollectionsType_MIN = All;
-constexpr ShowCollectionsType ShowCollectionsType_MAX = InMemory;
-constexpr int ShowCollectionsType_ARRAYSIZE = ShowCollectionsType_MAX + 1;
+bool ShowType_IsValid(int value);
+constexpr ShowType ShowType_MIN = All;
+constexpr ShowType ShowType_MAX = InMemory;
+constexpr int ShowType_ARRAYSIZE = ShowType_MAX + 1;
 
-const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ShowCollectionsType_descriptor();
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ShowType_descriptor();
 template<typename T>
-inline const std::string& ShowCollectionsType_Name(T enum_t_value) {
-  static_assert(::std::is_same<T, ShowCollectionsType>::value ||
+inline const std::string& ShowType_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, ShowType>::value ||
     ::std::is_integral<T>::value,
-    "Incorrect type passed to function ShowCollectionsType_Name.");
+    "Incorrect type passed to function ShowType_Name.");
   return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
-    ShowCollectionsType_descriptor(), enum_t_value);
+    ShowType_descriptor(), enum_t_value);
 }
-inline bool ShowCollectionsType_Parse(
-    const std::string& name, ShowCollectionsType* value) {
-  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<ShowCollectionsType>(
-    ShowCollectionsType_descriptor(), name, value);
+inline bool ShowType_Parse(
+    const std::string& name, ShowType* value) {
+  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<ShowType>(
+    ShowType_descriptor(), name, value);
 }
 enum PlaceholderType : int {
   None = 0,
@@ -2289,11 +2289,29 @@ class ShowCollectionsRequest :
   // accessors -------------------------------------------------------
 
   enum : int {
+    kCollectionNamesFieldNumber = 5,
     kDbNameFieldNumber = 2,
     kBaseFieldNumber = 1,
     kTimeStampFieldNumber = 3,
     kTypeFieldNumber = 4,
   };
+  // repeated string collection_names = 5;
+  int collection_names_size() const;
+  void clear_collection_names();
+  const std::string& collection_names(int index) const;
+  std::string* mutable_collection_names(int index);
+  void set_collection_names(int index, const std::string& value);
+  void set_collection_names(int index, std::string&& value);
+  void set_collection_names(int index, const char* value);
+  void set_collection_names(int index, const char* value, size_t size);
+  std::string* add_collection_names();
+  void add_collection_names(const std::string& value);
+  void add_collection_names(std::string&& value);
+  void add_collection_names(const char* value);
+  void add_collection_names(const char* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& collection_names() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_collection_names();
+
   // string db_name = 2;
   void clear_db_name();
   const std::string& db_name() const;
@@ -2318,16 +2336,17 @@ class ShowCollectionsRequest :
   ::PROTOBUF_NAMESPACE_ID::uint64 time_stamp() const;
   void set_time_stamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
 
-  // .milvus.proto.milvus.ShowCollectionsType type = 4;
+  // .milvus.proto.milvus.ShowType type = 4;
   void clear_type();
-  ::milvus::proto::milvus::ShowCollectionsType type() const;
-  void set_type(::milvus::proto::milvus::ShowCollectionsType value);
+  ::milvus::proto::milvus::ShowType type() const;
+  void set_type(::milvus::proto::milvus::ShowType value);
 
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.ShowCollectionsRequest)
  private:
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> collection_names_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr db_name_;
   ::milvus::proto::common::MsgBase* base_;
   ::PROTOBUF_NAMESPACE_ID::uint64 time_stamp_;
@@ -2454,6 +2473,7 @@ class ShowCollectionsResponse :
     kCollectionIdsFieldNumber = 3,
     kCreatedTimestampsFieldNumber = 4,
     kCreatedUtcTimestampsFieldNumber = 5,
+    kInMemoryPercentagesFieldNumber = 6,
     kStatusFieldNumber = 1,
   };
   // repeated string collection_names = 2;
@@ -2506,6 +2526,17 @@ class ShowCollectionsResponse :
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint64 >*
       mutable_created_utc_timestamps();
 
+  // repeated int64 inMemory_percentages = 6;
+  int inmemory_percentages_size() const;
+  void clear_inmemory_percentages();
+  ::PROTOBUF_NAMESPACE_ID::int64 inmemory_percentages(int index) const;
+  void set_inmemory_percentages(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_inmemory_percentages(::PROTOBUF_NAMESPACE_ID::int64 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+      inmemory_percentages() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+      mutable_inmemory_percentages();
+
   // .milvus.proto.common.Status status = 1;
   bool has_status() const;
   void clear_status();
@@ -2526,6 +2557,8 @@ class ShowCollectionsResponse :
   mutable std::atomic<int> _created_timestamps_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint64 > created_utc_timestamps_;
   mutable std::atomic<int> _created_utc_timestamps_cached_byte_size_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > inmemory_percentages_;
+  mutable std::atomic<int> _inmemory_percentages_cached_byte_size_;
   ::milvus::proto::common::Status* status_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
@@ -3842,11 +3875,30 @@ class ShowPartitionsRequest :
   // accessors -------------------------------------------------------
 
   enum : int {
+    kPartitionNamesFieldNumber = 6,
     kDbNameFieldNumber = 2,
     kCollectionNameFieldNumber = 3,
     kBaseFieldNumber = 1,
     kCollectionIDFieldNumber = 4,
+    kTypeFieldNumber = 5,
   };
+  // repeated string partition_names = 6;
+  int partition_names_size() const;
+  void clear_partition_names();
+  const std::string& partition_names(int index) const;
+  std::string* mutable_partition_names(int index);
+  void set_partition_names(int index, const std::string& value);
+  void set_partition_names(int index, std::string&& value);
+  void set_partition_names(int index, const char* value);
+  void set_partition_names(int index, const char* value, size_t size);
+  std::string* add_partition_names();
+  void add_partition_names(const std::string& value);
+  void add_partition_names(std::string&& value);
+  void add_partition_names(const char* value);
+  void add_partition_names(const char* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& partition_names() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_partition_names();
+
   // string db_name = 2;
   void clear_db_name();
   const std::string& db_name() const;
@@ -3882,15 +3934,22 @@ class ShowPartitionsRequest :
   ::PROTOBUF_NAMESPACE_ID::int64 collectionid() const;
   void set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
+  // .milvus.proto.milvus.ShowType type = 5;
+  void clear_type();
+  ::milvus::proto::milvus::ShowType type() const;
+  void set_type(::milvus::proto::milvus::ShowType value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.ShowPartitionsRequest)
  private:
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> partition_names_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr db_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::milvus::proto::common::MsgBase* base_;
   ::PROTOBUF_NAMESPACE_ID::int64 collectionid_;
+  int type_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -4013,6 +4072,7 @@ class ShowPartitionsResponse :
     kPartitionIDsFieldNumber = 3,
     kCreatedTimestampsFieldNumber = 4,
     kCreatedUtcTimestampsFieldNumber = 5,
+    kInMemoryPercentagesFieldNumber = 6,
     kStatusFieldNumber = 1,
   };
   // repeated string partition_names = 2;
@@ -4065,6 +4125,17 @@ class ShowPartitionsResponse :
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint64 >*
       mutable_created_utc_timestamps();
 
+  // repeated int64 inMemory_percentages = 6;
+  int inmemory_percentages_size() const;
+  void clear_inmemory_percentages();
+  ::PROTOBUF_NAMESPACE_ID::int64 inmemory_percentages(int index) const;
+  void set_inmemory_percentages(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_inmemory_percentages(::PROTOBUF_NAMESPACE_ID::int64 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+      inmemory_percentages() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+      mutable_inmemory_percentages();
+
   // .milvus.proto.common.Status status = 1;
   bool has_status() const;
   void clear_status();
@@ -4085,6 +4156,8 @@ class ShowPartitionsResponse :
   mutable std::atomic<int> _created_timestamps_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint64 > created_utc_timestamps_;
   mutable std::atomic<int> _created_utc_timestamps_cached_byte_size_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > inmemory_percentages_;
+  mutable std::atomic<int> _inmemory_percentages_cached_byte_size_;
   ::milvus::proto::common::Status* status_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
@@ -12571,18 +12644,83 @@ inline void ShowCollectionsRequest::set_time_stamp(::PROTOBUF_NAMESPACE_ID::uint
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.ShowCollectionsRequest.time_stamp)
 }
 
-// .milvus.proto.milvus.ShowCollectionsType type = 4;
+// .milvus.proto.milvus.ShowType type = 4;
 inline void ShowCollectionsRequest::clear_type() {
   type_ = 0;
 }
-inline ::milvus::proto::milvus::ShowCollectionsType ShowCollectionsRequest::type() const {
+inline ::milvus::proto::milvus::ShowType ShowCollectionsRequest::type() const {
   // @@protoc_insertion_point(field_get:milvus.proto.milvus.ShowCollectionsRequest.type)
-  return static_cast< ::milvus::proto::milvus::ShowCollectionsType >(type_);
+  return static_cast< ::milvus::proto::milvus::ShowType >(type_);
 }
-inline void ShowCollectionsRequest::set_type(::milvus::proto::milvus::ShowCollectionsType value) {
+inline void ShowCollectionsRequest::set_type(::milvus::proto::milvus::ShowType value) {
   
   type_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.ShowCollectionsRequest.type)
+}
+
+// repeated string collection_names = 5;
+inline int ShowCollectionsRequest::collection_names_size() const {
+  return collection_names_.size();
+}
+inline void ShowCollectionsRequest::clear_collection_names() {
+  collection_names_.Clear();
+}
+inline const std::string& ShowCollectionsRequest::collection_names(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ShowCollectionsRequest.collection_names)
+  return collection_names_.Get(index);
+}
+inline std::string* ShowCollectionsRequest::mutable_collection_names(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.ShowCollectionsRequest.collection_names)
+  return collection_names_.Mutable(index);
+}
+inline void ShowCollectionsRequest::set_collection_names(int index, const std::string& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ShowCollectionsRequest.collection_names)
+  collection_names_.Mutable(index)->assign(value);
+}
+inline void ShowCollectionsRequest::set_collection_names(int index, std::string&& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ShowCollectionsRequest.collection_names)
+  collection_names_.Mutable(index)->assign(std::move(value));
+}
+inline void ShowCollectionsRequest::set_collection_names(int index, const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  collection_names_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:milvus.proto.milvus.ShowCollectionsRequest.collection_names)
+}
+inline void ShowCollectionsRequest::set_collection_names(int index, const char* value, size_t size) {
+  collection_names_.Mutable(index)->assign(
+    reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.milvus.ShowCollectionsRequest.collection_names)
+}
+inline std::string* ShowCollectionsRequest::add_collection_names() {
+  // @@protoc_insertion_point(field_add_mutable:milvus.proto.milvus.ShowCollectionsRequest.collection_names)
+  return collection_names_.Add();
+}
+inline void ShowCollectionsRequest::add_collection_names(const std::string& value) {
+  collection_names_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.ShowCollectionsRequest.collection_names)
+}
+inline void ShowCollectionsRequest::add_collection_names(std::string&& value) {
+  collection_names_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.ShowCollectionsRequest.collection_names)
+}
+inline void ShowCollectionsRequest::add_collection_names(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  collection_names_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:milvus.proto.milvus.ShowCollectionsRequest.collection_names)
+}
+inline void ShowCollectionsRequest::add_collection_names(const char* value, size_t size) {
+  collection_names_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:milvus.proto.milvus.ShowCollectionsRequest.collection_names)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
+ShowCollectionsRequest::collection_names() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.ShowCollectionsRequest.collection_names)
+  return collection_names_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
+ShowCollectionsRequest::mutable_collection_names() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.ShowCollectionsRequest.collection_names)
+  return &collection_names_;
 }
 
 // -------------------------------------------------------------------
@@ -12787,6 +12925,36 @@ inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint64 >
 ShowCollectionsResponse::mutable_created_utc_timestamps() {
   // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.ShowCollectionsResponse.created_utc_timestamps)
   return &created_utc_timestamps_;
+}
+
+// repeated int64 inMemory_percentages = 6;
+inline int ShowCollectionsResponse::inmemory_percentages_size() const {
+  return inmemory_percentages_.size();
+}
+inline void ShowCollectionsResponse::clear_inmemory_percentages() {
+  inmemory_percentages_.Clear();
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 ShowCollectionsResponse::inmemory_percentages(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ShowCollectionsResponse.inMemory_percentages)
+  return inmemory_percentages_.Get(index);
+}
+inline void ShowCollectionsResponse::set_inmemory_percentages(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
+  inmemory_percentages_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ShowCollectionsResponse.inMemory_percentages)
+}
+inline void ShowCollectionsResponse::add_inmemory_percentages(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  inmemory_percentages_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.ShowCollectionsResponse.inMemory_percentages)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+ShowCollectionsResponse::inmemory_percentages() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.ShowCollectionsResponse.inMemory_percentages)
+  return inmemory_percentages_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+ShowCollectionsResponse::mutable_inmemory_percentages() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.ShowCollectionsResponse.inMemory_percentages)
+  return &inmemory_percentages_;
 }
 
 // -------------------------------------------------------------------
@@ -14270,6 +14438,85 @@ inline void ShowPartitionsRequest::set_collectionid(::PROTOBUF_NAMESPACE_ID::int
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.ShowPartitionsRequest.collectionID)
 }
 
+// .milvus.proto.milvus.ShowType type = 5;
+inline void ShowPartitionsRequest::clear_type() {
+  type_ = 0;
+}
+inline ::milvus::proto::milvus::ShowType ShowPartitionsRequest::type() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ShowPartitionsRequest.type)
+  return static_cast< ::milvus::proto::milvus::ShowType >(type_);
+}
+inline void ShowPartitionsRequest::set_type(::milvus::proto::milvus::ShowType value) {
+  
+  type_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ShowPartitionsRequest.type)
+}
+
+// repeated string partition_names = 6;
+inline int ShowPartitionsRequest::partition_names_size() const {
+  return partition_names_.size();
+}
+inline void ShowPartitionsRequest::clear_partition_names() {
+  partition_names_.Clear();
+}
+inline const std::string& ShowPartitionsRequest::partition_names(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ShowPartitionsRequest.partition_names)
+  return partition_names_.Get(index);
+}
+inline std::string* ShowPartitionsRequest::mutable_partition_names(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.ShowPartitionsRequest.partition_names)
+  return partition_names_.Mutable(index);
+}
+inline void ShowPartitionsRequest::set_partition_names(int index, const std::string& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ShowPartitionsRequest.partition_names)
+  partition_names_.Mutable(index)->assign(value);
+}
+inline void ShowPartitionsRequest::set_partition_names(int index, std::string&& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ShowPartitionsRequest.partition_names)
+  partition_names_.Mutable(index)->assign(std::move(value));
+}
+inline void ShowPartitionsRequest::set_partition_names(int index, const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  partition_names_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:milvus.proto.milvus.ShowPartitionsRequest.partition_names)
+}
+inline void ShowPartitionsRequest::set_partition_names(int index, const char* value, size_t size) {
+  partition_names_.Mutable(index)->assign(
+    reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.milvus.ShowPartitionsRequest.partition_names)
+}
+inline std::string* ShowPartitionsRequest::add_partition_names() {
+  // @@protoc_insertion_point(field_add_mutable:milvus.proto.milvus.ShowPartitionsRequest.partition_names)
+  return partition_names_.Add();
+}
+inline void ShowPartitionsRequest::add_partition_names(const std::string& value) {
+  partition_names_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.ShowPartitionsRequest.partition_names)
+}
+inline void ShowPartitionsRequest::add_partition_names(std::string&& value) {
+  partition_names_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.ShowPartitionsRequest.partition_names)
+}
+inline void ShowPartitionsRequest::add_partition_names(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  partition_names_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:milvus.proto.milvus.ShowPartitionsRequest.partition_names)
+}
+inline void ShowPartitionsRequest::add_partition_names(const char* value, size_t size) {
+  partition_names_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:milvus.proto.milvus.ShowPartitionsRequest.partition_names)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
+ShowPartitionsRequest::partition_names() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.ShowPartitionsRequest.partition_names)
+  return partition_names_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
+ShowPartitionsRequest::mutable_partition_names() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.ShowPartitionsRequest.partition_names)
+  return &partition_names_;
+}
+
 // -------------------------------------------------------------------
 
 // ShowPartitionsResponse
@@ -14472,6 +14719,36 @@ inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint64 >
 ShowPartitionsResponse::mutable_created_utc_timestamps() {
   // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.ShowPartitionsResponse.created_utc_timestamps)
   return &created_utc_timestamps_;
+}
+
+// repeated int64 inMemory_percentages = 6;
+inline int ShowPartitionsResponse::inmemory_percentages_size() const {
+  return inmemory_percentages_.size();
+}
+inline void ShowPartitionsResponse::clear_inmemory_percentages() {
+  inmemory_percentages_.Clear();
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 ShowPartitionsResponse::inmemory_percentages(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ShowPartitionsResponse.inMemory_percentages)
+  return inmemory_percentages_.Get(index);
+}
+inline void ShowPartitionsResponse::set_inmemory_percentages(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
+  inmemory_percentages_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ShowPartitionsResponse.inMemory_percentages)
+}
+inline void ShowPartitionsResponse::add_inmemory_percentages(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  inmemory_percentages_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.ShowPartitionsResponse.inMemory_percentages)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+ShowPartitionsResponse::inmemory_percentages() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.ShowPartitionsResponse.inMemory_percentages)
+  return inmemory_percentages_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+ShowPartitionsResponse::mutable_inmemory_percentages() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.ShowPartitionsResponse.inMemory_percentages)
+  return &inmemory_percentages_;
 }
 
 // -------------------------------------------------------------------
@@ -20538,10 +20815,10 @@ inline void RegisterLinkResponse::set_allocated_status(::milvus::proto::common::
 
 PROTOBUF_NAMESPACE_OPEN
 
-template <> struct is_proto_enum< ::milvus::proto::milvus::ShowCollectionsType> : ::std::true_type {};
+template <> struct is_proto_enum< ::milvus::proto::milvus::ShowType> : ::std::true_type {};
 template <>
-inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::milvus::ShowCollectionsType>() {
-  return ::milvus::proto::milvus::ShowCollectionsType_descriptor();
+inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::milvus::ShowType>() {
+  return ::milvus::proto::milvus::ShowType_descriptor();
 }
 template <> struct is_proto_enum< ::milvus::proto::milvus::PlaceholderType> : ::std::true_type {};
 template <>

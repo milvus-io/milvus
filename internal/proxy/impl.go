@@ -828,6 +828,7 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 		Condition:             NewTaskCondition(ctx),
 		ShowPartitionsRequest: request,
 		rootCoord:             node.rootCoord,
+		queryCoord:            node.queryCoord,
 		result:                nil,
 	}
 

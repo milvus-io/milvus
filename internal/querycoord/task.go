@@ -135,7 +135,7 @@ type LoadCollectionTask struct {
 	rootCoord types.RootCoord
 	dataCoord types.DataCoord
 	cluster   *queryNodeCluster
-	meta      *meta
+	meta      Meta
 }
 
 func (lct *LoadCollectionTask) MsgBase() *commonpb.MsgBase {
@@ -194,8 +194,8 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 	watchPartition := false
 	if hasCollection {
 		watchPartition = true
-		loadCollection, _ := lct.meta.getLoadCollection(collectionID)
-		if loadCollection {
+		loadType, _ := lct.meta.getLoadType(collectionID)
+		if loadType == querypb.LoadType_loadCollection {
 			for _, partitionID := range partitionIDs {
 				hasReleasePartition := lct.meta.hasReleasePartition(collectionID, partitionID)
 				if hasReleasePartition {
@@ -216,7 +216,7 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 
 	log.Debug("loadCollectionTask: toLoadPartitionIDs", zap.Int64s("partitionIDs", toLoadPartitionIDs))
 	lct.meta.addCollection(collectionID, lct.Schema)
-	lct.meta.setLoadCollection(collectionID, true)
+	lct.meta.setLoadType(collectionID, querypb.LoadType_loadCollection)
 	for _, id := range toLoadPartitionIDs {
 		lct.meta.addPartition(collectionID, id)
 	}
@@ -312,7 +312,14 @@ func (lct *LoadCollectionTask) Execute(ctx context.Context) error {
 
 func (lct *LoadCollectionTask) PostExecute(ctx context.Context) error {
 	collectionID := lct.CollectionID
-	lct.meta.addCollection(collectionID, lct.Schema)
+	if lct.State() == taskDone {
+		err := lct.meta.setLoadPercentage(collectionID, 0, 100, querypb.LoadType_loadCollection)
+		if err != nil {
+			log.Debug("loadCollectionTask: set load percentage to meta's collectionInfo", zap.Int64("collectionID", collectionID))
+			return err
+		}
+		return nil
+	}
 	if lct.result.ErrorCode != commonpb.ErrorCode_Success {
 		lct.childTasks = make([]task, 0)
 		nodes, err := lct.cluster.onServiceNodes()
@@ -344,6 +351,7 @@ func (lct *LoadCollectionTask) PostExecute(ctx context.Context) error {
 			log.Debug("loadCollectionTask: add a releaseCollectionTask to loadCollectionTask's childTask", zap.Any("task", releaseCollectionTask))
 		}
 	}
+	lct.meta.addCollection(collectionID, lct.Schema)
 	log.Debug("LoadCollectionTask postExecute done",
 		zap.Int64("msgID", lct.ID()),
 		zap.Int64("collectionID", collectionID))
@@ -354,7 +362,7 @@ type ReleaseCollectionTask struct {
 	BaseTask
 	*querypb.ReleaseCollectionRequest
 	cluster   *queryNodeCluster
-	meta      *meta
+	meta      Meta
 	rootCoord types.RootCoord
 }
 
@@ -438,16 +446,9 @@ func (rct *ReleaseCollectionTask) Execute(ctx context.Context) error {
 			log.Debug("ReleaseCollectionTask: add a releaseCollectionTask to releaseCollectionTask's childTask", zap.Any("task", releaseCollectionTask))
 		}
 	} else {
-		res, err := rct.cluster.releaseCollection(ctx, rct.NodeID, rct.ReleaseCollectionRequest)
+		err := rct.cluster.releaseCollection(ctx, rct.NodeID, rct.ReleaseCollectionRequest)
 		if err != nil {
 			log.Error("ReleaseCollectionTask: release collection end, node occur error", zap.Int64("nodeID", rct.NodeID))
-			status.Reason = err.Error()
-			rct.result = status
-			return err
-		}
-		if res.ErrorCode != commonpb.ErrorCode_Success {
-			log.Error("ReleaseCollectionTask: release collection end, node occur error", zap.Int64("nodeID", rct.NodeID))
-			err = errors.New("queryNode releaseCollection failed")
 			status.Reason = err.Error()
 			rct.result = status
 			return err
@@ -476,7 +477,7 @@ type LoadPartitionTask struct {
 	*querypb.LoadPartitionsRequest
 	dataCoord types.DataCoord
 	cluster   *queryNodeCluster
-	meta      *meta
+	meta      Meta
 	addCol    bool
 }
 
@@ -590,6 +591,16 @@ func (lpt *LoadPartitionTask) Execute(ctx context.Context) error {
 func (lpt *LoadPartitionTask) PostExecute(ctx context.Context) error {
 	collectionID := lpt.CollectionID
 	partitionIDs := lpt.PartitionIDs
+	if lpt.State() == taskDone {
+		for _, id := range partitionIDs {
+			err := lpt.meta.setLoadPercentage(collectionID, id, 100, querypb.LoadType_LoadPartition)
+			if err != nil {
+				log.Debug("loadPartitionTask: set load percentage to meta's collectionInfo", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", id))
+				return err
+			}
+		}
+		return nil
+	}
 	if lpt.result.ErrorCode != commonpb.ErrorCode_Success {
 		lpt.childTasks = make([]task, 0)
 		if lpt.addCol {
@@ -725,16 +736,9 @@ func (rpt *ReleasePartitionTask) Execute(ctx context.Context) error {
 			log.Debug("ReleasePartitionTask: add a releasePartitionTask to releasePartitionTask's childTask", zap.Any("task", releasePartitionTask))
 		}
 	} else {
-		res, err := rpt.cluster.releasePartitions(ctx, rpt.NodeID, rpt.ReleasePartitionsRequest)
+		err := rpt.cluster.releasePartitions(ctx, rpt.NodeID, rpt.ReleasePartitionsRequest)
 		if err != nil {
 			log.Error("ReleasePartitionsTask: release partition end, node occur error", zap.String("nodeID", fmt.Sprintln(rpt.NodeID)))
-			status.Reason = err.Error()
-			rpt.result = status
-			return err
-		}
-		if res.ErrorCode != commonpb.ErrorCode_Success {
-			log.Error("ReleasePartitionsTask: release partition end, node occur error", zap.String("nodeID", fmt.Sprintln(rpt.NodeID)))
-			err = errors.New("queryNode releasePartition failed")
 			status.Reason = err.Error()
 			rpt.result = status
 			return err
@@ -765,7 +769,7 @@ func (rpt *ReleasePartitionTask) PostExecute(context.Context) error {
 type LoadSegmentTask struct {
 	BaseTask
 	*querypb.LoadSegmentsRequest
-	meta    *meta
+	meta    Meta
 	cluster *queryNodeCluster
 }
 
@@ -799,6 +803,10 @@ func (lst *LoadSegmentTask) PreExecute(context.Context) error {
 	for _, info := range lst.Infos {
 		segmentIDs = append(segmentIDs, info.SegmentID)
 	}
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}
+	lst.result = status
 	log.Debug("start do loadSegmentTask",
 		zap.Int64s("segmentIDs", segmentIDs),
 		zap.Int64("loaded nodeID", lst.NodeID),
@@ -807,13 +815,17 @@ func (lst *LoadSegmentTask) PreExecute(context.Context) error {
 }
 
 func (lst *LoadSegmentTask) Execute(ctx context.Context) error {
-	status, err := lst.cluster.LoadSegments(ctx, lst.NodeID, lst.LoadSegmentsRequest)
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}
+	err := lst.cluster.loadSegments(ctx, lst.NodeID, lst.LoadSegmentsRequest)
 	if err != nil {
+		log.Error("LoadSegmentTask: loadSegment occur error", zap.Int64("taskID", lst.ID()))
+		status.Reason = err.Error()
 		lst.result = status
 		return err
 	}
 
-	lst.result = status
 	log.Debug("loadSegmentTask Execute done",
 		zap.Int64("taskID", lst.ID()))
 	return nil
@@ -924,6 +936,10 @@ func (rst *ReleaseSegmentTask) Timestamp() Timestamp {
 
 func (rst *ReleaseSegmentTask) PreExecute(context.Context) error {
 	segmentIDs := rst.SegmentIDs
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}
+	rst.result = status
 	log.Debug("start do releaseSegmentTask",
 		zap.Int64s("segmentIDs", segmentIDs),
 		zap.Int64("loaded nodeID", rst.NodeID),
@@ -932,13 +948,17 @@ func (rst *ReleaseSegmentTask) PreExecute(context.Context) error {
 }
 
 func (rst *ReleaseSegmentTask) Execute(ctx context.Context) error {
-	status, err := rst.cluster.ReleaseSegments(rst.ctx, rst.NodeID, rst.ReleaseSegmentsRequest)
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}
+	err := rst.cluster.releaseSegments(rst.ctx, rst.NodeID, rst.ReleaseSegmentsRequest)
 	if err != nil {
+		log.Error("ReleaseSegmentTask: releaseSegment occur error", zap.Int64("taskID", rst.ID()))
+		status.Reason = err.Error()
 		rst.result = status
 		return err
 	}
 
-	rst.result = status
 	log.Debug("releaseSegmentTask Execute done",
 		zap.Int64s("segmentIDs", rst.SegmentIDs),
 		zap.Int64("taskID", rst.ID()))
@@ -956,7 +976,7 @@ func (rst *ReleaseSegmentTask) PostExecute(context.Context) error {
 type WatchDmChannelTask struct {
 	BaseTask
 	*querypb.WatchDmChannelsRequest
-	meta    *meta
+	meta    Meta
 	cluster *queryNodeCluster
 }
 
@@ -990,6 +1010,10 @@ func (wdt *WatchDmChannelTask) PreExecute(context.Context) error {
 	for _, info := range channelInfos {
 		channels = append(channels, info.ChannelName)
 	}
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}
+	wdt.result = status
 	log.Debug("start do watchDmChannelTask",
 		zap.Strings("dmChannels", channels),
 		zap.Int64("loaded nodeID", wdt.NodeID),
@@ -998,13 +1022,17 @@ func (wdt *WatchDmChannelTask) PreExecute(context.Context) error {
 }
 
 func (wdt *WatchDmChannelTask) Execute(ctx context.Context) error {
-	status, err := wdt.cluster.WatchDmChannels(wdt.ctx, wdt.NodeID, wdt.WatchDmChannelsRequest)
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}
+	err := wdt.cluster.watchDmChannels(wdt.ctx, wdt.NodeID, wdt.WatchDmChannelsRequest)
 	if err != nil {
+		log.Error("WatchDmChannelTask: watchDmChannel occur error", zap.Int64("taskID", wdt.ID()))
+		status.Reason = err.Error()
 		wdt.result = status
 		return err
 	}
 
-	wdt.result = status
 	log.Debug("watchDmChannelsTask Execute done",
 		zap.Int64("taskID", wdt.ID()))
 	return nil
@@ -1119,6 +1147,10 @@ func (wqt *WatchQueryChannelTask) Timestamp() Timestamp {
 }
 
 func (wqt *WatchQueryChannelTask) PreExecute(context.Context) error {
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}
+	wqt.result = status
 	log.Debug("start do WatchQueryChannelTask",
 		zap.Int64("collectionID", wqt.CollectionID),
 		zap.String("queryChannel", wqt.RequestChannelID),
@@ -1129,13 +1161,17 @@ func (wqt *WatchQueryChannelTask) PreExecute(context.Context) error {
 }
 
 func (wqt *WatchQueryChannelTask) Execute(ctx context.Context) error {
-	status, err := wqt.cluster.AddQueryChannel(wqt.ctx, wqt.NodeID, wqt.AddQueryChannelRequest)
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}
+	err := wqt.cluster.addQueryChannel(wqt.ctx, wqt.NodeID, wqt.AddQueryChannelRequest)
 	if err != nil {
+		log.Error("WatchQueryChannelTask: watchQueryChannel occur error", zap.Int64("taskID", wqt.ID()))
+		status.Reason = err.Error()
 		wqt.result = status
 		return err
 	}
 
-	wqt.result = status
 	log.Debug("watchQueryChannelTask Execute done",
 		zap.Int64("collectionID", wqt.CollectionID),
 		zap.String("queryChannel", wqt.RequestChannelID),
@@ -1164,7 +1200,7 @@ type LoadBalanceTask struct {
 	rootCoord types.RootCoord
 	dataCoord types.DataCoord
 	cluster   *queryNodeCluster
-	meta      *meta
+	meta      Meta
 }
 
 func (lbt *LoadBalanceTask) MsgBase() *commonpb.MsgBase {
@@ -1184,6 +1220,10 @@ func (lbt *LoadBalanceTask) Timestamp() Timestamp {
 }
 
 func (lbt *LoadBalanceTask) PreExecute(context.Context) error {
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}
+	lbt.result = status
 	log.Debug("start do LoadBalanceTask",
 		zap.Int64s("sourceNodeIDs", lbt.SourceNodeIDs),
 		zap.Any("balanceReason", lbt.BalanceReason),
@@ -1198,20 +1238,16 @@ func (lbt *LoadBalanceTask) Execute(ctx context.Context) error {
 
 	if lbt.triggerCondition == querypb.TriggerCondition_nodeDown {
 		for _, nodeID := range lbt.SourceNodeIDs {
-			node, err := lbt.cluster.getNodeByID(nodeID)
-			if err != nil {
-				log.Error(err.Error())
-				continue
-			}
 			lbt.meta.deleteSegmentInfoByNodeID(nodeID)
-			collectionInfos := node.collectionInfos
-			for collectionID, info := range collectionInfos {
+			collectionInfos := lbt.cluster.getCollectionInfosByID(lbt.ctx, nodeID)
+			for _, info := range collectionInfos {
+				collectionID := info.CollectionID
 				metaInfo, err := lbt.meta.getCollectionInfoByID(collectionID)
 				if err != nil {
-					log.Error(err.Error())
+					log.Error("LoadBalanceTask: getCollectionInfoByID occur error", zap.String("error", err.Error()))
 					continue
 				}
-				loadCollection := metaInfo.LoadCollection
+				loadType := metaInfo.LoadType
 				schema := metaInfo.Schema
 				partitionIDs := info.PartitionIDs
 
@@ -1267,7 +1303,7 @@ func (lbt *LoadBalanceTask) Execute(ctx context.Context) error {
 					for _, channelInfo := range recoveryInfo.Channels {
 						for _, channel := range dmChannels {
 							if channelInfo.ChannelName == channel {
-								if loadCollection {
+								if loadType == querypb.LoadType_loadCollection {
 									merged := false
 									for index, channelName := range channelsToWatch {
 										if channel == channelName {
@@ -1342,7 +1378,7 @@ func (lbt *LoadBalanceTask) PostExecute(context.Context) error {
 
 func shuffleChannelsToQueryNode(dmChannels []string, cluster *queryNodeCluster) []int64 {
 	maxNumChannels := 0
-	nodes := make(map[int64]*queryNode)
+	nodes := make(map[int64]Node)
 	var err error
 	for {
 		nodes, err = cluster.onServiceNodes()
@@ -1398,7 +1434,7 @@ func shuffleChannelsToQueryNode(dmChannels []string, cluster *queryNodeCluster) 
 
 func shuffleSegmentsToQueryNode(segmentIDs []UniqueID, cluster *queryNodeCluster) []int64 {
 	maxNumSegments := 0
-	nodes := make(map[int64]*queryNode)
+	nodes := make(map[int64]Node)
 	var err error
 	for {
 		nodes, err = cluster.onServiceNodes()
@@ -1486,7 +1522,7 @@ func mergeVChannelInfo(info1 *datapb.VchannelInfo, info2 *datapb.VchannelInfo) *
 func assignInternalTask(ctx context.Context,
 	collectionID UniqueID,
 	parentTask task,
-	meta *meta,
+	meta Meta,
 	cluster *queryNodeCluster,
 	loadSegmentRequests []*querypb.LoadSegmentsRequest,
 	watchDmChannelRequests []*querypb.WatchDmChannelsRequest) {

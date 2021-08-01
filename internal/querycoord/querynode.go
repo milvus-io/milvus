@@ -23,10 +23,47 @@ import (
 	nodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 )
+
+type Node interface {
+	start() error
+	stop()
+	clearNodeInfo() error
+
+	hasCollection(collectionID UniqueID) bool
+	addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error
+	setCollectionInfo(info *querypb.CollectionInfo) error
+	getCollectionInfoByID(collectionID UniqueID) (*querypb.CollectionInfo, error)
+	showCollections() []*querypb.CollectionInfo
+	releaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest) error
+
+	hasPartition(collectionID UniqueID, partitionID UniqueID) bool
+	addPartition(collectionID UniqueID, partitionID UniqueID) error
+	releasePartitions(ctx context.Context, in *querypb.ReleasePartitionsRequest) error
+
+	hasWatchedDmChannel(collectionID UniqueID, channelID string) (bool, error)
+	getDmChannelsByCollectionID(collectionID UniqueID) ([]string, error)
+	watchDmChannels(ctx context.Context, in *querypb.WatchDmChannelsRequest) error
+	removeDmChannel(collectionID UniqueID, channels []string) error
+
+	hasWatchedQueryChannel(collectionID UniqueID) bool
+	showWatchedQueryChannels() []*querypb.QueryChannelInfo
+	addQueryChannel(ctx context.Context, in *querypb.AddQueryChannelRequest) error
+	removeQueryChannel(ctx context.Context, in *querypb.RemoveQueryChannelRequest) error
+
+	setNodeState(onService bool)
+	isOnService() bool
+
+	getSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error)
+	loadSegments(ctx context.Context, in *querypb.LoadSegmentsRequest) error
+	releaseSegments(ctx context.Context, in *querypb.ReleaseSegmentsRequest) error
+	getComponentInfo(ctx context.Context) *internalpb.ComponentInfo
+}
 
 type queryNode struct {
 	ctx      context.Context
@@ -40,10 +77,10 @@ type queryNode struct {
 	collectionInfos      map[UniqueID]*querypb.CollectionInfo
 	watchedQueryChannels map[UniqueID]*querypb.QueryChannelInfo
 	onService            bool
-	serviceLock          sync.Mutex
+	serviceLock          sync.RWMutex
 }
 
-func newQueryNode(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) *queryNode {
+func newQueryNode(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) Node {
 	collectionInfo := make(map[UniqueID]*querypb.CollectionInfo)
 	watchedChannels := make(map[UniqueID]*querypb.QueryChannelInfo)
 	childCtx, cancel := context.WithCancel(ctx)
@@ -77,7 +114,7 @@ func (qn *queryNode) start() error {
 	qn.serviceLock.Lock()
 	qn.onService = true
 	qn.serviceLock.Unlock()
-	log.Debug("queryNode client start success", zap.Int64("nodeID", qn.id), zap.String("address", qn.address))
+	log.Debug("Start: queryNode client start success", zap.Int64("nodeID", qn.id), zap.String("address", qn.address))
 	return nil
 }
 
@@ -131,14 +168,28 @@ func (qn *queryNode) addCollection(collectionID UniqueID, schema *schemapb.Colle
 			Schema:       schema,
 		}
 		qn.collectionInfos[collectionID] = newCollection
-		err := qn.saveCollectionInfo(collectionID, newCollection)
+		err := saveNodeCollectionInfo(collectionID, newCollection, qn.id, qn.kvClient)
 		if err != nil {
-			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+			log.Error("AddCollection: save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+			return err
 		}
 		return nil
 	}
 
-	return errors.New("addCollection: collection already exists")
+	return errors.New("AddCollection: collection already exists")
+}
+
+func (qn *queryNode) setCollectionInfo(info *querypb.CollectionInfo) error {
+	qn.Lock()
+	defer qn.Unlock()
+
+	qn.collectionInfos[info.CollectionID] = info
+	err := saveNodeCollectionInfo(info.CollectionID, info, qn.id, qn.kvClient)
+	if err != nil {
+		log.Error("SetCollectionInfo: save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", info.CollectionID))
+		return err
+	}
+	return nil
 }
 
 func (qn *queryNode) getCollectionInfoByID(collectionID UniqueID) (*querypb.CollectionInfo, error) {
@@ -148,7 +199,19 @@ func (qn *queryNode) getCollectionInfoByID(collectionID UniqueID) (*querypb.Coll
 	if _, ok := qn.collectionInfos[collectionID]; ok {
 		return proto.Clone(qn.collectionInfos[collectionID]).(*querypb.CollectionInfo), nil
 	}
-	return nil, errors.New("addPartition: can't find collection")
+	return nil, errors.New("GetCollectionInfoByID: can't find collection")
+}
+
+func (qn *queryNode) showCollections() []*querypb.CollectionInfo {
+	qn.RLock()
+	defer qn.RUnlock()
+
+	results := make([]*querypb.CollectionInfo, 0)
+	for _, info := range qn.collectionInfos {
+		results = append(results, proto.Clone(info).(*querypb.CollectionInfo))
+	}
+
+	return results
 }
 
 func (qn *queryNode) addPartition(collectionID UniqueID, partitionID UniqueID) error {
@@ -161,46 +224,58 @@ func (qn *queryNode) addPartition(collectionID UniqueID, partitionID UniqueID) e
 			}
 		}
 		col.PartitionIDs = append(col.PartitionIDs, partitionID)
-		err := qn.saveCollectionInfo(collectionID, col)
+		err := saveNodeCollectionInfo(collectionID, col, qn.id, qn.kvClient)
 		if err != nil {
-			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+			log.Error("AddPartition: save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
 		}
 		return nil
 	}
-	return errors.New("addPartition: can't find collection when add partition")
+	return errors.New("AddPartition: can't find collection when add partition")
 }
 
-func (qn *queryNode) releaseCollection(collectionID UniqueID) {
+func (qn *queryNode) releaseCollectionInfo(collectionID UniqueID) error {
 	qn.Lock()
 	defer qn.Unlock()
 	if _, ok := qn.collectionInfos[collectionID]; ok {
-		err := qn.removeCollectionInfo(collectionID)
+		err := removeNodeCollectionInfo(collectionID, qn.id, qn.kvClient)
 		if err != nil {
-			log.Error("remove collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+			log.Error("ReleaseCollectionInfo: remove collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+			return err
 		}
 		delete(qn.collectionInfos, collectionID)
 	}
 
 	delete(qn.watchedQueryChannels, collectionID)
+	return nil
 }
 
-func (qn *queryNode) releasePartition(collectionID UniqueID, partitionID UniqueID) {
+func (qn *queryNode) releasePartitionsInfo(collectionID UniqueID, partitionIDs []UniqueID) error {
 	qn.Lock()
 	defer qn.Unlock()
 
 	if info, ok := qn.collectionInfos[collectionID]; ok {
 		newPartitionIDs := make([]UniqueID, 0)
 		for _, id := range info.PartitionIDs {
-			if id != partitionID {
+			match := false
+			for _, partitionID := range partitionIDs {
+				if id == partitionID {
+					match = true
+					break
+				}
+			}
+			if !match {
 				newPartitionIDs = append(newPartitionIDs, id)
 			}
 		}
 		info.PartitionIDs = newPartitionIDs
-		err := qn.removeCollectionInfo(collectionID)
+		err := removeNodeCollectionInfo(collectionID, qn.id, qn.kvClient)
 		if err != nil {
-			log.Error("remove collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+			log.Error("ReleasePartitionsInfo: remove collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+			return err
 		}
 	}
+
+	return nil
 }
 
 func (qn *queryNode) hasWatchedDmChannel(collectionID UniqueID, channelID string) (bool, error) {
@@ -219,7 +294,7 @@ func (qn *queryNode) hasWatchedDmChannel(collectionID UniqueID, channelID string
 		return false, nil
 	}
 
-	return false, errors.New("hasWatchedDmChannel: can't find collection in collectionInfos")
+	return false, errors.New("HasWatchedDmChannel: can't find collection in collectionInfos")
 }
 
 func (qn *queryNode) getDmChannelsByCollectionID(collectionID UniqueID) ([]string, error) {
@@ -234,14 +309,14 @@ func (qn *queryNode) getDmChannelsByCollectionID(collectionID UniqueID) ([]strin
 		return channels, nil
 	}
 
-	return nil, errors.New("getDmChannelsByCollectionID: can't find collection in collectionInfos")
+	return nil, errors.New("GetDmChannelsByCollectionID: can't find collection in collectionInfos")
 }
 
 func (qn *queryNode) addDmChannel(collectionID UniqueID, channels []string) error {
 	qn.Lock()
 	defer qn.Unlock()
 
-	//before add channel, should ensure toAddedChannels not in meta
+	//before add channel, should ensure toAddedChannels not in MetaReplica
 	if info, ok := qn.collectionInfos[collectionID]; ok {
 		findNodeID := false
 		for _, channelInfo := range info.ChannelInfos {
@@ -257,13 +332,15 @@ func (qn *queryNode) addDmChannel(collectionID UniqueID, channels []string) erro
 			}
 			info.ChannelInfos = append(info.ChannelInfos, newChannelInfo)
 		}
-		err := qn.saveCollectionInfo(collectionID, info)
+		err := saveNodeCollectionInfo(collectionID, info, qn.id, qn.kvClient)
 		if err != nil {
-			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+			log.Error("AddDmChannel: save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+			return err
 		}
+		return nil
 	}
 
-	return errors.New("addDmChannels: can't find collection in watchedQueryChannel")
+	return errors.New("AddDmChannels: can't find collection in watchedQueryChannel")
 }
 
 func (qn *queryNode) removeDmChannel(collectionID UniqueID, channels []string) error {
@@ -289,13 +366,13 @@ func (qn *queryNode) removeDmChannel(collectionID UniqueID, channels []string) e
 			}
 		}
 
-		err := qn.saveCollectionInfo(collectionID, info)
+		err := saveNodeCollectionInfo(collectionID, info, qn.id, qn.kvClient)
 		if err != nil {
-			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+			log.Error("RemoveDmChannel: save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
 		}
 	}
 
-	return errors.New("addDmChannels: can't find collection in watchedQueryChannel")
+	return errors.New("RemoveDmChannel: can't find collection in watchedQueryChannel")
 }
 
 func (qn *queryNode) hasWatchedQueryChannel(collectionID UniqueID) bool {
@@ -309,37 +386,37 @@ func (qn *queryNode) hasWatchedQueryChannel(collectionID UniqueID) bool {
 	return false
 }
 
-func (qn *queryNode) addQueryChannel(collectionID UniqueID, queryChannel *querypb.QueryChannelInfo) {
+func (qn *queryNode) showWatchedQueryChannels() []*querypb.QueryChannelInfo {
+	qn.RLock()
+	defer qn.Unlock()
+
+	results := make([]*querypb.QueryChannelInfo, 0)
+	for _, info := range qn.watchedQueryChannels {
+		results = append(results, proto.Clone(info).(*querypb.QueryChannelInfo))
+	}
+
+	return results
+}
+
+func (qn *queryNode) setQueryChannelInfo(info *querypb.QueryChannelInfo) {
 	qn.Lock()
 	defer qn.Unlock()
 
-	qn.watchedQueryChannels[collectionID] = queryChannel
+	qn.watchedQueryChannels[info.CollectionID] = info
 }
 
-func (qn *queryNode) removeQueryChannel(collectionID UniqueID) error {
+func (qn *queryNode) removeQueryChannelInfo(collectionID UniqueID) {
 	qn.Lock()
 	defer qn.Unlock()
 
 	delete(qn.watchedQueryChannels, collectionID)
-
-	return errors.New("removeQueryChannel: can't find collection in watchedQueryChannel")
-}
-
-func (qn *queryNode) saveCollectionInfo(collectionID UniqueID, info *querypb.CollectionInfo) error {
-	infoBytes := proto.MarshalTextString(info)
-
-	key := fmt.Sprintf("%s/%d/%d", queryNodeMetaPrefix, qn.id, collectionID)
-	return qn.kvClient.Save(key, infoBytes)
-}
-
-func (qn *queryNode) removeCollectionInfo(collectionID UniqueID) error {
-	key := fmt.Sprintf("%s/%d/%d", queryNodeMetaPrefix, qn.id, collectionID)
-	return qn.kvClient.Remove(key)
 }
 
 func (qn *queryNode) clearNodeInfo() error {
+	qn.RLock()
+	defer qn.RUnlock()
 	for collectionID := range qn.collectionInfos {
-		err := qn.removeCollectionInfo(collectionID)
+		err := removeNodeCollectionInfo(collectionID, qn.id, qn.kvClient)
 		if err != nil {
 			return err
 		}
@@ -356,8 +433,226 @@ func (qn *queryNode) setNodeState(onService bool) {
 }
 
 func (qn *queryNode) isOnService() bool {
-	qn.serviceLock.Lock()
-	defer qn.serviceLock.Unlock()
+	qn.serviceLock.RLock()
+	defer qn.serviceLock.RUnlock()
 
 	return qn.onService
+}
+
+//***********************grpc req*************************//
+func (qn *queryNode) watchDmChannels(ctx context.Context, in *querypb.WatchDmChannelsRequest) error {
+	qn.serviceLock.RLock()
+	onService := qn.onService
+	qn.serviceLock.RUnlock()
+	if !onService {
+		return errors.New("WatchDmChannels: queryNode is offline")
+	}
+
+	status, err := qn.client.WatchDmChannels(ctx, in)
+	if err != nil {
+		return err
+	}
+	if status.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(status.Reason)
+	}
+	channels := make([]string, 0)
+	for _, info := range in.Infos {
+		channels = append(channels, info.ChannelName)
+	}
+	err = qn.addCollection(in.CollectionID, in.Schema)
+	if err != nil {
+		return err
+	}
+	err = qn.addDmChannel(in.CollectionID, channels)
+	return err
+}
+
+func (qn *queryNode) addQueryChannel(ctx context.Context, in *querypb.AddQueryChannelRequest) error {
+	qn.serviceLock.RLock()
+	onService := qn.onService
+	qn.serviceLock.RUnlock()
+	if !onService {
+		return errors.New("AddQueryChannel: queryNode is offline")
+	}
+
+	status, err := qn.client.AddQueryChannel(ctx, in)
+	if err != nil {
+		return err
+	}
+	if status.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(status.Reason)
+	}
+
+	queryChannelInfo := &querypb.QueryChannelInfo{
+		CollectionID:         in.CollectionID,
+		QueryChannelID:       in.RequestChannelID,
+		QueryResultChannelID: in.ResultChannelID,
+	}
+	qn.setQueryChannelInfo(queryChannelInfo)
+	return nil
+}
+
+func (qn *queryNode) removeQueryChannel(ctx context.Context, in *querypb.RemoveQueryChannelRequest) error {
+	qn.serviceLock.RLock()
+	onService := qn.onService
+	qn.serviceLock.RUnlock()
+	if !onService {
+		return nil
+	}
+
+	status, err := qn.client.RemoveQueryChannel(ctx, in)
+	if err != nil {
+		return err
+	}
+	if status.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(status.Reason)
+	}
+
+	qn.removeQueryChannelInfo(in.CollectionID)
+	return nil
+}
+
+func (qn *queryNode) releaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest) error {
+	qn.serviceLock.RLock()
+	onService := qn.onService
+	qn.serviceLock.RUnlock()
+	if !onService {
+		return nil
+	}
+
+	status, err := qn.client.ReleaseCollection(ctx, in)
+	if err != nil {
+		return err
+	}
+	if status.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(status.Reason)
+	}
+
+	err = qn.releaseCollectionInfo(in.CollectionID)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (qn *queryNode) releasePartitions(ctx context.Context, in *querypb.ReleasePartitionsRequest) error {
+	qn.serviceLock.RLock()
+	onService := qn.onService
+	qn.serviceLock.RUnlock()
+	if !onService {
+		return nil
+	}
+
+	status, err := qn.client.ReleasePartitions(ctx, in)
+	if err != nil {
+		return err
+	}
+	if status.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(status.Reason)
+	}
+	err = qn.releasePartitionsInfo(in.CollectionID, in.PartitionIDs)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (qn *queryNode) getSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
+	qn.serviceLock.RLock()
+	if !qn.onService {
+		return nil, nil
+	}
+	qn.serviceLock.RUnlock()
+
+	res, err := qn.client.GetSegmentInfo(ctx, in)
+	if err == nil && res.Status.ErrorCode == commonpb.ErrorCode_Success {
+		return res, nil
+	}
+
+	return nil, nil
+}
+
+func (qn *queryNode) getComponentInfo(ctx context.Context) *internalpb.ComponentInfo {
+	qn.serviceLock.RLock()
+	if !qn.onService {
+		return &internalpb.ComponentInfo{
+			NodeID:    qn.id,
+			StateCode: internalpb.StateCode_Abnormal,
+		}
+	}
+	qn.serviceLock.RUnlock()
+
+	res, err := qn.client.GetComponentStates(ctx)
+	if err != nil || res.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return &internalpb.ComponentInfo{
+			NodeID:    qn.id,
+			StateCode: internalpb.StateCode_Abnormal,
+		}
+	}
+
+	return res.State
+}
+
+func (qn *queryNode) loadSegments(ctx context.Context, in *querypb.LoadSegmentsRequest) error {
+	qn.serviceLock.RLock()
+	onService := qn.onService
+	qn.serviceLock.RUnlock()
+	if !onService {
+		return errors.New("LoadSegments: queryNode is offline")
+	}
+
+	status, err := qn.client.LoadSegments(ctx, in)
+	if err != nil {
+		return err
+	}
+	if status.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(status.Reason)
+	}
+
+	for _, info := range in.Infos {
+		err = qn.addCollection(info.CollectionID, in.Schema)
+		if err != nil {
+			return err
+		}
+		err = qn.addPartition(info.CollectionID, info.PartitionID)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (qn *queryNode) releaseSegments(ctx context.Context, in *querypb.ReleaseSegmentsRequest) error {
+	qn.serviceLock.RLock()
+	onService := qn.onService
+	qn.serviceLock.RUnlock()
+	if !onService {
+		return errors.New("ReleaseSegments: queryNode is offline")
+	}
+
+	status, err := qn.client.ReleaseSegments(ctx, in)
+	if err != nil {
+		return err
+	}
+	if status.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(status.Reason)
+	}
+
+	return nil
+}
+
+//****************************************************//
+
+func saveNodeCollectionInfo(collectionID UniqueID, info *querypb.CollectionInfo, nodeID int64, kv *etcdkv.EtcdKV) error {
+	infoBytes := proto.MarshalTextString(info)
+
+	key := fmt.Sprintf("%s/%d/%d", queryNodeMetaPrefix, nodeID, collectionID)
+	return kv.Save(key, infoBytes)
+}
+
+func removeNodeCollectionInfo(collectionID UniqueID, nodeID int64, kv *etcdkv.EtcdKV) error {
+	key := fmt.Sprintf("%s/%d/%d", queryNodeMetaPrefix, nodeID, collectionID)
+	return kv.Remove(key)
 }

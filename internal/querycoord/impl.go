@@ -84,11 +84,41 @@ func (qc *QueryCoord) ShowCollections(ctx context.Context, req *querypb.ShowColl
 			Status: status,
 		}, err
 	}
-	collectionIDs := qc.meta.showCollections()
-	log.Debug("show collection end", zap.Int64s("collections", collectionIDs))
+	collectionInfos := qc.meta.showCollections()
+	ID2collectionInfo := make(map[UniqueID]*querypb.CollectionInfo)
+	inMemoryCollectionIDs := make([]UniqueID, 0)
+	for _, info := range collectionInfos {
+		ID2collectionInfo[info.CollectionID] = info
+		inMemoryCollectionIDs = append(inMemoryCollectionIDs, info.CollectionID)
+	}
+	inMemoryPercentages := make([]int64, 0)
+	if len(req.CollectionIDs) == 0 {
+		for _, id := range inMemoryCollectionIDs {
+			inMemoryPercentages = append(inMemoryPercentages, ID2collectionInfo[id].InMemoryPercentage)
+		}
+		log.Debug("show collection end", zap.Int64s("collections", inMemoryCollectionIDs))
+		return &querypb.ShowCollectionsResponse{
+			Status:              status,
+			CollectionIDs:       inMemoryCollectionIDs,
+			InMemoryPercentages: inMemoryPercentages,
+		}, nil
+	}
+	for _, id := range req.CollectionIDs {
+		if _, ok := ID2collectionInfo[id]; !ok {
+			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			err := errors.New("collection not exist or has not been loaded to memory")
+			status.Reason = err.Error()
+			return &querypb.ShowCollectionsResponse{
+				Status: status,
+			}, err
+		}
+		inMemoryPercentages = append(inMemoryPercentages, ID2collectionInfo[id].InMemoryPercentage)
+	}
+	log.Debug("show collection end", zap.Int64s("collections", req.CollectionIDs))
 	return &querypb.ShowCollectionsResponse{
-		Status:        status,
-		CollectionIDs: collectionIDs,
+		Status:              status,
+		CollectionIDs:       req.CollectionIDs,
+		InMemoryPercentages: inMemoryPercentages,
 	}, nil
 }
 
@@ -175,7 +205,7 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 	}
 
 	log.Debug("ReleaseCollectionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID))
-	//qc.meta.printMeta()
+	//qc.MetaReplica.printMeta()
 	//qc.cluster.printMeta()
 	return status, nil
 }
@@ -196,7 +226,7 @@ func (qc *QueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowParti
 		}, err
 	}
 
-	partitionIDs, err := qc.meta.showPartitions(collectionID)
+	partitionStates, err := qc.meta.showPartitions(collectionID)
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
@@ -204,12 +234,42 @@ func (qc *QueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowParti
 			Status: status,
 		}, err
 	}
+	ID2PartitionState := make(map[UniqueID]*querypb.PartitionStates)
+	inMemoryPartitionIDs := make([]UniqueID, 0)
+	for _, state := range partitionStates {
+		ID2PartitionState[state.PartitionID] = state
+		inMemoryPartitionIDs = append(inMemoryPartitionIDs, state.PartitionID)
+	}
+	inMemoryPercentages := make([]int64, 0)
+	if len(req.PartitionIDs) == 0 {
+		for _, id := range inMemoryPartitionIDs {
+			inMemoryPercentages = append(inMemoryPercentages, ID2PartitionState[id].InMemoryPercentage)
+		}
+		log.Debug("show partitions end", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", inMemoryPartitionIDs))
+		return &querypb.ShowPartitionsResponse{
+			Status:              status,
+			PartitionIDs:        inMemoryPartitionIDs,
+			InMemoryPercentages: inMemoryPercentages,
+		}, nil
+	}
+	for _, id := range req.PartitionIDs {
+		if _, ok := ID2PartitionState[id]; !ok {
+			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			err := errors.New("partition not exist or has not been loaded to memory")
+			status.Reason = err.Error()
+			return &querypb.ShowPartitionsResponse{
+				Status: status,
+			}, err
+		}
+		inMemoryPercentages = append(inMemoryPercentages, ID2PartitionState[id].InMemoryPercentage)
+	}
 
-	log.Debug("show partitions end", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
+	log.Debug("show partitions end", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", req.PartitionIDs))
 
 	return &querypb.ShowPartitionsResponse{
-		Status:       status,
-		PartitionIDs: partitionIDs,
+		Status:              status,
+		PartitionIDs:        req.PartitionIDs,
+		InMemoryPercentages: inMemoryPercentages,
 	}, nil
 }
 
@@ -239,8 +299,8 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 	hasCollection := qc.meta.hasCollection(collectionID)
 	if hasCollection {
 		partitionIDsToLoad := make([]UniqueID, 0)
-		loadCollection, _ := qc.meta.getLoadCollection(collectionID)
-		if loadCollection {
+		loadType, _ := qc.meta.getLoadType(collectionID)
+		if loadType == querypb.LoadType_loadCollection {
 			for _, partitionID := range partitionIDs {
 				hasReleasePartition := qc.meta.hasReleasePartition(collectionID, partitionID)
 				if hasReleasePartition {
@@ -336,7 +396,7 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 		return status, err
 	}
 	log.Debug("ReleasePartitionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
-	//qc.meta.printMeta()
+	//qc.MetaReplica.printMeta()
 	//qc.cluster.printMeta()
 	return status, nil
 }
@@ -382,7 +442,7 @@ func (qc *QueryCoord) GetPartitionStates(ctx context.Context, req *querypb.GetPa
 	partitionIDs := req.PartitionIDs
 	partitionStates := make([]*querypb.PartitionStates, 0)
 	for _, partitionID := range partitionIDs {
-		state, err := qc.meta.getPartitionStateByID(partitionID)
+		res, err := qc.meta.getPartitionStatesByID(req.CollectionID, partitionID)
 		if err != nil {
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			status.Reason = err.Error()
@@ -392,7 +452,7 @@ func (qc *QueryCoord) GetPartitionStates(ctx context.Context, req *querypb.GetPa
 		}
 		partitionState := &querypb.PartitionStates{
 			PartitionID: partitionID,
-			State:       state,
+			State:       res.State,
 		}
 		partitionStates = append(partitionStates, partitionState)
 	}
@@ -419,9 +479,9 @@ func (qc *QueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmen
 
 	totalMemSize := int64(0)
 	totalNumRows := int64(0)
-	//TODO::get segment infos from meta
+	//TODO::get segment infos from MetaReplica
 	//segmentIDs := req.SegmentIDs
-	//segmentInfos, err := qs.meta.getSegmentInfos(segmentIDs)
+	//segmentInfos, err := qs.MetaReplica.getSegmentInfos(segmentIDs)
 	segmentInfos, err := qc.cluster.getSegmentInfo(ctx, req)
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError

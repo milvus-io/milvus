@@ -119,7 +119,7 @@ message GetCollectionStatisticsResponse {
   repeated common.KeyValuePair stats = 2;
 }
 
-enum ShowCollectionsType {
+enum ShowType {
   All = 0;
   InMemory = 1;
 }
@@ -128,7 +128,8 @@ message ShowCollectionsRequest {
   common.MsgBase base = 1; // must
   string db_name = 2;
   uint64 time_stamp = 3;
-  ShowCollectionsType type = 4;
+  ShowType type = 4;
+  repeated string collection_names = 5; // show collection in querynode, showType = InMemory
 }
 
 message ShowCollectionsResponse {
@@ -137,6 +138,7 @@ message ShowCollectionsResponse {
   repeated int64 collection_ids = 3;
   repeated uint64 created_timestamps = 4; // hybrid timestamps
   repeated uint64 created_utc_timestamps = 5; // physical timestamps
+  repeated int64 inMemory_percentages = 6; // load percentage on querynode
 }
 
 message CreatePartitionRequest {
@@ -191,6 +193,9 @@ message ShowPartitionsRequest {
   string db_name = 2;
   string collection_name = 3; // must
   int64 collectionID = 4;
+  ShowType type = 5;
+  repeated string partition_names = 6; // show partition in querynode, showType = InMemory
+
 }
 
 message ShowPartitionsResponse {
@@ -199,6 +204,7 @@ message ShowPartitionsResponse {
   repeated int64 partitionIDs = 3;
   repeated uint64 created_timestamps = 4; // hybrid timestamps
   repeated uint64 created_utc_timestamps = 5; // physical timestamps
+  repeated int64 inMemory_percentages = 6; // load percentage on querynode
 }
 
 message DescribeSegmentRequest {
