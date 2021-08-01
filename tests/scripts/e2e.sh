@@ -17,7 +17,7 @@ set -x
 MILVUS_HELM_RELEASE_NAME="${MILVUS_HELM_RELEASE_NAME:-milvus-testing}"
 MILVUS_CLUSTER_ENABLED="${MILVUS_CLUSTER_ENABLED:-false}"
 MILVUS_HELM_NAMESPACE="${MILVUS_HELM_NAMESPACE:-default}"
-PARALLEL_NUM="${PARALLEL_NUM:-4}"
+PARALLEL_NUM="${PARALLEL_NUM:-3}"
 MILVUS_CLIENT="${MILVUS_CLIENT:-pymilvus}"
 
 SOURCE="${BASH_SOURCE[0]}"
@@ -68,10 +68,10 @@ pushd "${ROOT}/tests/docker"
   else
     if [[ "${MILVUS_CLIENT}" == "pymilvus" ]]; then
       export MILVUS_PYTEST_WORKSPACE="/milvus/tests/python_test"
-      docker-compose run --rm pytest /bin/bash -c "pytest -n auto --ip ${MILVUS_SERVICE_IP} --port ${MILVUS_SERVICE_PORT} ${@:-}"
+      docker-compose run --rm pytest /bin/bash -c "pytest -n ${PARALLEL_NUM} --ip ${MILVUS_SERVICE_IP} --port ${MILVUS_SERVICE_PORT} ${@:-}"
     elif [[ "${MILVUS_CLIENT}" == "pymilvus-orm" ]]; then
       export MILVUS_PYTEST_WORKSPACE="/milvus/tests20/python_client"
-      docker-compose run --rm pytest /bin/bash -c "pytest -n auto --host ${MILVUS_SERVICE_IP} --port ${MILVUS_SERVICE_PORT} \
+      docker-compose run --rm pytest /bin/bash -c "pytest -n ${PARALLEL_NUM} --host ${MILVUS_SERVICE_IP} --port ${MILVUS_SERVICE_PORT} \
                                                --html=\${CI_LOG_PATH}/report.html --self-contained-html ${@:-}"
     fi
   fi

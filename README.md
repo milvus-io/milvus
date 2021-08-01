@@ -1,4 +1,4 @@
-<img src="https://zillizstorage.blob.core.windows.net/zilliz-assets/zilliz-assets/assets/readme_en_6c5b3a1466.png" alt="milvus banner">
+<img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/readme_en_6c5b3a1466.png" alt="milvus banner">
 
 
 
