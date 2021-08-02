@@ -3875,14 +3875,14 @@ class ShowPartitionsRequest :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kPartitionNamesFieldNumber = 6,
+    kPartitionNamesFieldNumber = 5,
     kDbNameFieldNumber = 2,
     kCollectionNameFieldNumber = 3,
     kBaseFieldNumber = 1,
     kCollectionIDFieldNumber = 4,
-    kTypeFieldNumber = 5,
+    kTypeFieldNumber = 6,
   };
-  // repeated string partition_names = 6;
+  // repeated string partition_names = 5;
   int partition_names_size() const;
   void clear_partition_names();
   const std::string& partition_names(int index) const;
@@ -3934,7 +3934,7 @@ class ShowPartitionsRequest :
   ::PROTOBUF_NAMESPACE_ID::int64 collectionid() const;
   void set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
-  // .milvus.proto.milvus.ShowType type = 5;
+  // .milvus.proto.milvus.ShowType type = 6;
   void clear_type();
   ::milvus::proto::milvus::ShowType type() const;
   void set_type(::milvus::proto::milvus::ShowType value);
@@ -14451,21 +14451,7 @@ inline void ShowPartitionsRequest::set_collectionid(::PROTOBUF_NAMESPACE_ID::int
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.ShowPartitionsRequest.collectionID)
 }
 
-// .milvus.proto.milvus.ShowType type = 5;
-inline void ShowPartitionsRequest::clear_type() {
-  type_ = 0;
-}
-inline ::milvus::proto::milvus::ShowType ShowPartitionsRequest::type() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ShowPartitionsRequest.type)
-  return static_cast< ::milvus::proto::milvus::ShowType >(type_);
-}
-inline void ShowPartitionsRequest::set_type(::milvus::proto::milvus::ShowType value) {
-  
-  type_ = value;
-  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ShowPartitionsRequest.type)
-}
-
-// repeated string partition_names = 6;
+// repeated string partition_names = 5;
 inline int ShowPartitionsRequest::partition_names_size() const {
   return partition_names_.size();
 }
@@ -14528,6 +14514,20 @@ inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
 ShowPartitionsRequest::mutable_partition_names() {
   // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.ShowPartitionsRequest.partition_names)
   return &partition_names_;
+}
+
+// .milvus.proto.milvus.ShowType type = 6;
+inline void ShowPartitionsRequest::clear_type() {
+  type_ = 0;
+}
+inline ::milvus::proto::milvus::ShowType ShowPartitionsRequest::type() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ShowPartitionsRequest.type)
+  return static_cast< ::milvus::proto::milvus::ShowType >(type_);
+}
+inline void ShowPartitionsRequest::set_type(::milvus::proto::milvus::ShowType value) {
+  
+  type_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ShowPartitionsRequest.type)
 }
 
 // -------------------------------------------------------------------

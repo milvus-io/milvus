@@ -193,9 +193,8 @@ message ShowPartitionsRequest {
   string db_name = 2;
   string collection_name = 3; // must
   int64 collectionID = 4;
-  ShowType type = 5;
-  repeated string partition_names = 6; // show partition in querynode, showType = InMemory
-
+  repeated string partition_names = 5; // show partition in querynode, showType = InMemory
+  ShowType type = 6;
 }
 
 message ShowPartitionsResponse {

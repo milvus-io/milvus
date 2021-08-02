@@ -1445,8 +1445,8 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_milvus_2eproto::offsets[] PROT
   PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::ShowPartitionsRequest, db_name_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::ShowPartitionsRequest, collection_name_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::ShowPartitionsRequest, collectionid_),
-  PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::ShowPartitionsRequest, type_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::ShowPartitionsRequest, partition_names_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::ShowPartitionsRequest, type_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::ShowPartitionsResponse, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -2027,8 +2027,8 @@ const char descriptor_table_protodef_milvus_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "ionsRequest\022*\n\004base\030\001 \001(\0132\034.milvus.proto"
   ".common.MsgBase\022\017\n\007db_name\030\002 \001(\t\022\027\n\017coll"
   "ection_name\030\003 \001(\t\022\024\n\014collectionID\030\004 \001(\003\022"
-  "+\n\004type\030\005 \001(\0162\035.milvus.proto.milvus.Show"
-  "Type\022\027\n\017partition_names\030\006 \003(\t\"\316\001\n\026ShowPa"
+  "\027\n\017partition_names\030\005 \003(\t\022+\n\004type\030\006 \001(\0162\035"
+  ".milvus.proto.milvus.ShowType\"\316\001\n\026ShowPa"
   "rtitionsResponse\022+\n\006status\030\001 \001(\0132\033.milvu"
   "s.proto.common.Status\022\027\n\017partition_names"
   "\030\002 \003(\t\022\024\n\014partitionIDs\030\003 \003(\003\022\032\n\022created_"
@@ -11278,24 +11278,24 @@ const char* ShowPartitionsRequest::_InternalParse(const char* ptr, ::PROTOBUF_NA
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
-      // .milvus.proto.milvus.ShowType type = 5;
+      // repeated string partition_names = 5;
       case 5:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 40)) {
-          ::PROTOBUF_NAMESPACE_ID::uint64 val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
-          CHK_(ptr);
-          set_type(static_cast<::milvus::proto::milvus::ShowType>(val));
-        } else goto handle_unusual;
-        continue;
-      // repeated string partition_names = 6;
-      case 6:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 50)) {
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 42)) {
           ptr -= 1;
           do {
             ptr += 1;
             ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(add_partition_names(), ptr, ctx, "milvus.proto.milvus.ShowPartitionsRequest.partition_names");
             CHK_(ptr);
             if (!ctx->DataAvailable(ptr)) break;
-          } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 50);
+          } while (::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<::PROTOBUF_NAMESPACE_ID::uint8>(ptr) == 42);
+        } else goto handle_unusual;
+        continue;
+      // .milvus.proto.milvus.ShowType type = 6;
+      case 6:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 48)) {
+          ::PROTOBUF_NAMESPACE_ID::uint64 val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
+          CHK_(ptr);
+          set_type(static_cast<::milvus::proto::milvus::ShowType>(val));
         } else goto handle_unusual;
         continue;
       default: {
@@ -11382,23 +11382,9 @@ bool ShowPartitionsRequest::MergePartialFromCodedStream(
         break;
       }
 
-      // .milvus.proto.milvus.ShowType type = 5;
+      // repeated string partition_names = 5;
       case 5: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (40 & 0xFF)) {
-          int value = 0;
-          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
-                   int, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_ENUM>(
-                 input, &value)));
-          set_type(static_cast< ::milvus::proto::milvus::ShowType >(value));
-        } else {
-          goto handle_unusual;
-        }
-        break;
-      }
-
-      // repeated string partition_names = 6;
-      case 6: {
-        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (50 & 0xFF)) {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (42 & 0xFF)) {
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
                 input, this->add_partition_names()));
           DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
@@ -11406,6 +11392,20 @@ bool ShowPartitionsRequest::MergePartialFromCodedStream(
             static_cast<int>(this->partition_names(this->partition_names_size() - 1).length()),
             ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
             "milvus.proto.milvus.ShowPartitionsRequest.partition_names"));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      // .milvus.proto.milvus.ShowType type = 6;
+      case 6: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (48 & 0xFF)) {
+          int value = 0;
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
+                   int, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_ENUM>(
+                 input, &value)));
+          set_type(static_cast< ::milvus::proto::milvus::ShowType >(value));
         } else {
           goto handle_unusual;
         }
@@ -11470,20 +11470,20 @@ void ShowPartitionsRequest::SerializeWithCachedSizes(
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64(4, this->collectionid(), output);
   }
 
-  // .milvus.proto.milvus.ShowType type = 5;
-  if (this->type() != 0) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnum(
-      5, this->type(), output);
-  }
-
-  // repeated string partition_names = 6;
+  // repeated string partition_names = 5;
   for (int i = 0, n = this->partition_names_size(); i < n; i++) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
       this->partition_names(i).data(), static_cast<int>(this->partition_names(i).length()),
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
       "milvus.proto.milvus.ShowPartitionsRequest.partition_names");
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteString(
-      6, this->partition_names(i), output);
+      5, this->partition_names(i), output);
+  }
+
+  // .milvus.proto.milvus.ShowType type = 6;
+  if (this->type() != 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnum(
+      6, this->type(), output);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -11533,20 +11533,20 @@ void ShowPartitionsRequest::SerializeWithCachedSizes(
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt64ToArray(4, this->collectionid(), target);
   }
 
-  // .milvus.proto.milvus.ShowType type = 5;
-  if (this->type() != 0) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnumToArray(
-      5, this->type(), target);
-  }
-
-  // repeated string partition_names = 6;
+  // repeated string partition_names = 5;
   for (int i = 0, n = this->partition_names_size(); i < n; i++) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
       this->partition_names(i).data(), static_cast<int>(this->partition_names(i).length()),
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
       "milvus.proto.milvus.ShowPartitionsRequest.partition_names");
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      WriteStringToArray(6, this->partition_names(i), target);
+      WriteStringToArray(5, this->partition_names(i), target);
+  }
+
+  // .milvus.proto.milvus.ShowType type = 6;
+  if (this->type() != 0) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnumToArray(
+      6, this->type(), target);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -11570,7 +11570,7 @@ size_t ShowPartitionsRequest::ByteSizeLong() const {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  // repeated string partition_names = 6;
+  // repeated string partition_names = 5;
   total_size += 1 *
       ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(this->partition_names_size());
   for (int i = 0, n = this->partition_names_size(); i < n; i++) {
@@ -11606,7 +11606,7 @@ size_t ShowPartitionsRequest::ByteSizeLong() const {
         this->collectionid());
   }
 
-  // .milvus.proto.milvus.ShowType type = 5;
+  // .milvus.proto.milvus.ShowType type = 6;
   if (this->type() != 0) {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->type());
