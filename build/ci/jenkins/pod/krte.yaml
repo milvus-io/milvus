@@ -18,11 +18,11 @@ spec:
     args: ["cat"]
     resources:
       limits:
-        cpu: "8"
+        cpu: "11"
         memory: 14Gi
         ephemeral-storage: "30Gi"
       requests:
-        cpu: "4"
+        cpu: "11"
         memory: 12Gi
         ephemeral-storage: "30Gi"
     volumeMounts:
