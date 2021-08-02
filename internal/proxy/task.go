@@ -3252,7 +3252,7 @@ func (spt *ShowPartitionsTask) Execute(ctx context.Context) error {
 	}
 
 	if respFromRootCoord.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return errors.New(spt.result.Status.Reason)
+		return errors.New(respFromRootCoord.Status.Reason)
 	}
 
 	if spt.GetType() == milvuspb.ShowType_InMemory {
