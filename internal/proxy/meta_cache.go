@@ -159,7 +159,7 @@ func (m *MetaCache) updateCollection(coll *milvuspb.DescribeCollectionResponse, 
 func (m *MetaCache) GetPartitionID(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error) {
 	partInfo, err := m.GetPartitionInfo(ctx, collectionName, partitionName)
 	if err != nil {
-		return 0, nil
+		return 0, err
 	}
 	return partInfo.partitionID, nil
 }

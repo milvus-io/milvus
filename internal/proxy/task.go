@@ -1421,8 +1421,8 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 	)
 	collectionLoaded := false
 
-	for offset, collectionID := range showResp.CollectionIDs {
-		if collectionID == collID && showResp.InMemoryPercentages[offset] == 100 {
+	for _, collectionID := range showResp.CollectionIDs {
+		if collectionID == collID {
 			collectionLoaded = true
 			break
 		}
@@ -2111,8 +2111,8 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 		zap.Any("collID", collectionID))
 
 	collectionLoaded := false
-	for offset, collID := range showResp.CollectionIDs {
-		if collectionID == collID && showResp.InMemoryPercentages[offset] == 100 {
+	for _, collID := range showResp.CollectionIDs {
+		if collectionID == collID {
 			collectionLoaded = true
 			break
 		}
