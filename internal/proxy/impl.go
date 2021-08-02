@@ -488,16 +488,13 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 
 	log.Debug("ShowCollections",
 		zap.String("role", Params.RoleName),
-		zap.Int64("msgID", request.Base.MsgID),
-		zap.Uint64("timestamp", request.Base.Timestamp),
-		zap.String("db", request.DbName))
+		zap.Any("request", request))
 	defer func() {
 		log.Debug("ShowCollections Done",
 			zap.Error(err),
 			zap.String("role", Params.RoleName),
-			zap.Int64("msgID", request.Base.MsgID),
-			zap.Uint64("timestamp", request.Base.Timestamp),
-			zap.String("db", request.DbName))
+			zap.Any("request", request),
+			zap.Any("result", sct.result))
 	}()
 
 	err = sct.WaitToFinish()
@@ -828,6 +825,7 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 		Condition:             NewTaskCondition(ctx),
 		ShowPartitionsRequest: request,
 		rootCoord:             node.rootCoord,
+		queryCoord:            node.queryCoord,
 		result:                nil,
 	}
 
@@ -844,18 +842,13 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 
 	log.Debug("ShowPartitions",
 		zap.String("role", Params.RoleName),
-		zap.Int64("msgID", request.Base.MsgID),
-		zap.Uint64("timestamp", request.Base.Timestamp),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName))
+		zap.Any("request", request))
 	defer func() {
 		log.Debug("ShowPartitions Done",
 			zap.Error(err),
 			zap.String("role", Params.RoleName),
-			zap.Int64("msgID", request.Base.MsgID),
-			zap.Uint64("timestamp", request.Base.Timestamp),
-			zap.String("db", request.DbName),
-			zap.String("collection", request.CollectionName))
+			zap.Any("request", request),
+			zap.Any("result", spt.result))
 	}()
 
 	err = spt.WaitToFinish()
