@@ -426,9 +426,7 @@ func (m *MetaReplica) releaseCollection(collectionID UniqueID) error {
 	m.Lock()
 	defer m.Unlock()
 
-	if _, ok := m.collectionInfos[collectionID]; ok {
-		delete(m.collectionInfos, collectionID)
-	}
+	delete(m.collectionInfos, collectionID)
 	for id, info := range m.segmentInfos {
 		if info.CollectionID == collectionID {
 			err := removeSegmentInfo(id, m.client)

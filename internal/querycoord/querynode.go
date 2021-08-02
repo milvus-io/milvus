@@ -388,7 +388,7 @@ func (qn *queryNode) hasWatchedQueryChannel(collectionID UniqueID) bool {
 
 func (qn *queryNode) showWatchedQueryChannels() []*querypb.QueryChannelInfo {
 	qn.RLock()
-	defer qn.Unlock()
+	defer qn.RUnlock()
 
 	results := make([]*querypb.QueryChannelInfo, 0)
 	for _, info := range qn.watchedQueryChannels {

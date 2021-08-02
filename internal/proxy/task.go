@@ -99,6 +99,7 @@ type dmlTask interface {
 	task
 	getChannels() ([]vChan, error)
 	getPChanStats() (map[pChan]pChanStatistics, error)
+	getChannelsTimerTicker() channelsTimeTicker
 }
 
 type BaseInsertTask = msgstream.InsertMsg
@@ -151,6 +152,10 @@ func (it *InsertTask) SetTs(ts Timestamp) {
 
 func (it *InsertTask) EndTs() Timestamp {
 	return it.EndTimestamp
+}
+
+func (it *InsertTask) getChannelsTimerTicker() channelsTimeTicker {
+	return it.chTicker
 }
 
 func (it *InsertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
@@ -1025,15 +1030,6 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	pchans, err := it.chMgr.getChannels(collID)
-	if err != nil {
-		return err
-	}
-	for _, pchan := range pchans {
-		log.Debug("Proxy InsertTask add pchan", zap.Any("pchan", pchan))
-		_ = it.chTicker.addPChan(pchan)
-	}
-
 	// Assign SegmentID
 	var pack *msgstream.MsgPack
 	pack, err = it._assignSegmentID(stream, &msgPack)
@@ -1413,14 +1409,18 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 		},
 		DbID: 0, // TODO(dragondriver)
 	})
+	if err != nil {
+		return err
+	}
+	if showResp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(showResp.Status.Reason)
+	}
 	log.Debug("query coordinator show collections",
 		zap.Any("collID", collID),
 		zap.Any("collections", showResp.CollectionIDs),
 	)
 	collectionLoaded := false
-	if err != nil || showResp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		log.Debug("collection hasn't been load to queryNode", zap.String("collection name", collectionName), zap.Int64("collectionID", collID), zap.Any("error = ", err.Error()))
-	}
+
 	for offset, collectionID := range showResp.CollectionIDs {
 		if collectionID == collID && showResp.InMemoryPercentages[offset] == 100 {
 			collectionLoaded = true
@@ -1695,6 +1695,10 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 					continue
 				}
 				distance := searchResultData[q].Scores[idx*topk+loc]
+				// https://github.com/milvus-io/milvus/issues/6781
+				if math.IsNaN(float64(distance)) {
+					continue
+				}
 				if distance > maxDistance || (math.Abs(float64(distance-maxDistance)) < math.SmallestNonzeroFloat32 && choice != q) {
 					choice = q
 					maxDistance = distance
@@ -1707,7 +1711,12 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 			choiceOffset := locs[choice]
 			// check if distance is valid, `invalid` here means very very big,
 			// in this process, distance here is the smallest, so the rest of distance are all invalid
-			if searchResultData[choice].Scores[idx*topk+choiceOffset] <= minFloat32 {
+			// https://github.com/milvus-io/milvus/issues/6781
+			// tanimoto distance between two binary vectors maybe -inf, so -inf distance shouldn't be filtered,
+			// otherwise it will cause that the number of hit records is less than needed (topk).
+			// in the above process, we have already filtered NaN distance.
+			distance := searchResultData[choice].Scores[idx*topk+choiceOffset]
+			if distance < minFloat32 {
 				break
 			}
 			curIdx := idx*topk + choiceOffset
@@ -2091,12 +2100,16 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 		},
 		DbID: 0, // TODO(dragondriver)
 	})
+	if err != nil {
+		return err
+	}
+	if showResp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(showResp.Status.Reason)
+	}
 	log.Debug("query coordinator show collections",
 		zap.Any("collections", showResp.CollectionIDs),
 		zap.Any("collID", collectionID))
-	if err != nil || showResp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		log.Debug("collection hasn't been load to queryNode", zap.String("collection name", collectionName), zap.Int64("collectionID", collectionID), zap.Any("error = ", err.Error()))
-	}
+
 	collectionLoaded := false
 	for offset, collID := range showResp.CollectionIDs {
 		if collectionID == collID && showResp.InMemoryPercentages[offset] == 100 {
