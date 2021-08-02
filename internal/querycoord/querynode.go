@@ -173,10 +173,9 @@ func (qn *queryNode) addCollection(collectionID UniqueID, schema *schemapb.Colle
 			log.Error("AddCollection: save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
 			return err
 		}
-		return nil
 	}
 
-	return errors.New("AddCollection: collection already exists")
+	return nil
 }
 
 func (qn *queryNode) setCollectionInfo(info *querypb.CollectionInfo) error {
@@ -220,7 +219,7 @@ func (qn *queryNode) addPartition(collectionID UniqueID, partitionID UniqueID) e
 	if col, ok := qn.collectionInfos[collectionID]; ok {
 		for _, id := range col.PartitionIDs {
 			if id == partitionID {
-				return errors.New("addPartition: partition already exists in collectionInfos")
+				return nil
 			}
 		}
 		col.PartitionIDs = append(col.PartitionIDs, partitionID)

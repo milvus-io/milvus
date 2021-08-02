@@ -248,13 +248,9 @@ func (m *MetaReplica) addCollection(collectionID UniqueID, schema *schemapb.Coll
 			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
 			return err
 		}
-		log.Debug("add collection",
-			zap.Any("collectionID", collectionID),
-		)
-		return nil
 	}
 
-	return errors.New("addCollection: collection already exists")
+	return nil
 }
 
 func (m *MetaReplica) addPartition(collectionID UniqueID, partitionID UniqueID) error {
@@ -264,7 +260,7 @@ func (m *MetaReplica) addPartition(collectionID UniqueID, partitionID UniqueID) 
 		log.Debug("add a  partition to MetaReplica...", zap.Int64s("partitionIDs", col.PartitionIDs))
 		for _, id := range col.PartitionIDs {
 			if id == partitionID {
-				return errors.New("addPartition: partition already exists in collectionInfos")
+				return nil
 			}
 		}
 		col.PartitionIDs = append(col.PartitionIDs, partitionID)

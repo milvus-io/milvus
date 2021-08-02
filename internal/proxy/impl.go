@@ -497,7 +497,8 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 			zap.String("role", Params.RoleName),
 			zap.Int64("msgID", request.Base.MsgID),
 			zap.Uint64("timestamp", request.Base.Timestamp),
-			zap.String("db", request.DbName))
+			zap.String("db", request.DbName),
+			zap.Any("result", sct.result))
 	}()
 
 	err = sct.WaitToFinish()
@@ -856,7 +857,8 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 			zap.Int64("msgID", request.Base.MsgID),
 			zap.Uint64("timestamp", request.Base.Timestamp),
 			zap.String("db", request.DbName),
-			zap.String("collection", request.CollectionName))
+			zap.String("collection", request.CollectionName),
+			zap.Any("result", spt.result))
 	}()
 
 	err = spt.WaitToFinish()

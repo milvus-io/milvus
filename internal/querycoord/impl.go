@@ -96,7 +96,7 @@ func (qc *QueryCoord) ShowCollections(ctx context.Context, req *querypb.ShowColl
 		for _, id := range inMemoryCollectionIDs {
 			inMemoryPercentages = append(inMemoryPercentages, ID2collectionInfo[id].InMemoryPercentage)
 		}
-		log.Debug("show collection end", zap.Int64s("collections", inMemoryCollectionIDs))
+		log.Debug("show collection end", zap.Int64s("collections", inMemoryCollectionIDs), zap.Int64s("inMemoryPercentage", inMemoryPercentages))
 		return &querypb.ShowCollectionsResponse{
 			Status:              status,
 			CollectionIDs:       inMemoryCollectionIDs,
@@ -114,7 +114,7 @@ func (qc *QueryCoord) ShowCollections(ctx context.Context, req *querypb.ShowColl
 		}
 		inMemoryPercentages = append(inMemoryPercentages, ID2collectionInfo[id].InMemoryPercentage)
 	}
-	log.Debug("show collection end", zap.Int64s("collections", req.CollectionIDs))
+	log.Debug("show collection end", zap.Int64s("collections", req.CollectionIDs), zap.Int64s("inMemoryPercentage", inMemoryPercentages))
 	return &querypb.ShowCollectionsResponse{
 		Status:              status,
 		CollectionIDs:       req.CollectionIDs,
@@ -245,7 +245,7 @@ func (qc *QueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowParti
 		for _, id := range inMemoryPartitionIDs {
 			inMemoryPercentages = append(inMemoryPercentages, ID2PartitionState[id].InMemoryPercentage)
 		}
-		log.Debug("show partitions end", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", inMemoryPartitionIDs))
+		log.Debug("show partitions end", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", inMemoryPartitionIDs), zap.Int64s("inMemoryPercentage", inMemoryPercentages))
 		return &querypb.ShowPartitionsResponse{
 			Status:              status,
 			PartitionIDs:        inMemoryPartitionIDs,
@@ -264,7 +264,7 @@ func (qc *QueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowParti
 		inMemoryPercentages = append(inMemoryPercentages, ID2PartitionState[id].InMemoryPercentage)
 	}
 
-	log.Debug("show partitions end", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", req.PartitionIDs))
+	log.Debug("show partitions end", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", req.PartitionIDs), zap.Int64s("inMemoryPercentage", inMemoryPercentages))
 
 	return &querypb.ShowPartitionsResponse{
 		Status:              status,
