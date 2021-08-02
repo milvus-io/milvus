@@ -1,11 +1,13 @@
 apiVersion: chaos-mesh.org/v1alpha1
 kind: PodChaos
 metadata:
-  name: test-querynode-podkill
+  name: test-querynode-pod-failure
   namespace: chaos-testing
 spec:
-  action: pod-kill
+  action: pod-failure
   mode: one
+  value: ''
+  duration: '20s'
   selector:
     namespaces:
       - chaos-testing         # target namespace of milvus deployment
@@ -14,4 +16,4 @@ spec:
       app.kubernetes.io/name: milvus
       component: querynode
   scheduler:
-    cron: '@every 2s'
+    cron: '@every 30s'
