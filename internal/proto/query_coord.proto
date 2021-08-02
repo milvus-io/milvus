@@ -247,8 +247,8 @@ enum SegmentState {
 }
 
 enum LoadType {
-  loadCollection = 0;
-  LoadPartition = 1;
+  LoadPartition = 0;
+  loadCollection = 1;
 }
 
 message DmChannelInfo {
