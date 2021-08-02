@@ -311,7 +311,9 @@ RHNSWPQConfAdapter::CheckTrain(Config& oricfg, const IndexMode mode) {
 
     auto dimension = oricfg[knowhere::meta::DIM].get<int64_t>();
 
-    IVFPQConfAdapter::CheckCPUPQParams(dimension, oricfg[knowhere::IndexParams::PQM].get<int64_t>());
+    if (!IVFPQConfAdapter::CheckCPUPQParams(dimension, oricfg[knowhere::IndexParams::PQM].get<int64_t>())) {
+        return false;
+    }
 
     return ConfAdapter::CheckTrain(oricfg, mode);
 }
