@@ -85,7 +85,7 @@ type indexLoader struct {
 //	// sendQueryNodeStats
 //	err := loader.sendQueryNodeStats()
 //	if err != nil {
-//		log.Error(err.Error())
+//		log.Warn(err.Error())
 //		wg.Done()
 //		return
 //	}

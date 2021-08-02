@@ -197,3 +197,14 @@ def get_invalid_index_params(request):
 @pytest.fixture(params=ct.get_invalid_strs)
 def get_invalid_partition_name(request):
     yield request.param
+
+
+# for test exit in the future
+# @pytest.hookimpl(hookwrapper=True, tryfirst=True)
+# def pytest_runtest_makereport():
+#     result = yield
+#     report = result.get_result()
+#     if report.outcome == "failed":
+#         msg = "The execution of the test case fails and the test exits..."
+#         log.error(msg)
+#         pytest.exit(msg)

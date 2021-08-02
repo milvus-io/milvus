@@ -48,8 +48,14 @@ class TestCollectionSearchInvalid(TestcaseBase):
             pytest.skip("empty field is valid")
         yield request.param
 
+    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
+    def get_invalid_metric_type(self, request):
+        yield request.param
+
     @pytest.fixture(scope="function", params=ct.get_invalid_ints)
     def get_invalid_limit(self, request):
+        if isinstance(request.param, int) and request.param >= 0:
+            pytest.skip("positive int is valid type for limit")
         yield request.param
 
     @pytest.fixture(scope="function", params=ct.get_invalid_strs)
@@ -83,6 +89,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         if request.param == None:
             pytest.skip("None is valid for output_fields")
         yield request.param
+
 
     """
     ******************************************************************
@@ -156,7 +163,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
     def test_search_param_invalid_vectors(self, get_invalid_vectors):
         """
         target: test search with invalid parameter values
-        method: search with invalid field
+        method: search with invalid data
         expected: raise exception and report the error
         """
         # 1. initialize with data
@@ -192,23 +199,99 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                                     "is different from schema"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_search_param_invalid_metric_type(self):
+    def test_search_param_invalid_field_type(self, get_invalid_fields_type):
+        """
+        target: test search with invalid parameter type
+        method: search with invalid field
+        expected: raise exception and report the error
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix)[0]
+        # 2. search with invalid field
+        invalid_search_field = get_invalid_fields_type
+        log.info("test_search_param_invalid_field_type: searching with "
+                 "invalid field: %s" % invalid_search_field)
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        collection_w.search(vectors[:default_nq], invalid_search_field, default_search_params,
+                            default_limit, default_search_exp,
+                            check_task=CheckTasks.err_res,
+                            check_items=
+                            {"err_code": 1,
+                             "err_msg": "`anns_field` value {} is illegal".format(invalid_search_field)})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_param_invalid_field_value(self, get_invalid_fields_value):
+        """
+        target: test search with invalid parameter values
+        method: search with invalid field
+        expected: raise exception and report the error
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix)[0]
+        # 2. search with invalid field
+        invalid_search_field = get_invalid_fields_value
+        log.info("test_search_param_invalid_field_value: searching with "
+                 "invalid field: %s" % invalid_search_field)
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        collection_w.search(vectors[:default_nq], invalid_search_field, default_search_params,
+                            default_limit, default_search_exp,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": "Field %s doesn't exist in schema"
+                                                    % invalid_search_field})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_param_invalid_metric_type(self, get_invalid_metric_type):
         """
         target: test search with invalid parameter values
         method: search with invalid metric type
         expected: raise exception and report the error
         """
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, True, 10)[0]
         # 2. search with invalid metric_type
         log.info("test_search_param_invalid_metric_type: searching with invalid metric_type")
+        invalid_metric = get_invalid_metric_type
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        search_params = {"metric_type": "L10", "params": {"nprobe": 10}}
+        search_params = {"metric_type": invalid_metric, "params": {"nprobe": 10}}
         collection_w.search(vectors[:default_nq], default_search_field, search_params,
                             default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
                                          "err_msg": "metric type not found"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue 6727")
+    @pytest.mark.parametrize("index, params",
+                             zip(ct.all_index_types[:9],
+                                 ct.default_index_params[:9]))
+    def test_search_invalid_params_type(self, index, params):
+        """
+        target: test search with invalid search params
+        method: test search with invalid params type
+        expected: raise exception and report the error
+        """
+        if index == "FLAT":
+            pytest.skip("skip in FLAT index")
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 5000,
+                                                                      is_index=True)
+        # 2. create index and load
+        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
+        collection_w.create_index("float_vector", default_index)
+        collection_w.load()
+        # 3. search
+        invalid_search_params = cf.gen_invaild_search_params_type()
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        for invalid_search_param in invalid_search_params:
+            if index == invalid_search_param["index_type"]:
+                search_params = {"metric_type": "L2", "params": invalid_search_param["search_params"]}
+                collection_w.search(vectors[:default_nq], default_search_field,
+                                    search_params, default_limit,
+                                    default_search_exp,
+                                    check_task=CheckTasks.err_res,
+                                    check_items={"err_code": 0,
+                                                 "err_msg": "metric type not found"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_param_invalid_limit_type(self, get_invalid_limit):
@@ -254,51 +337,9 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_search_param_invalid_field_type(self, get_invalid_fields_type):
-        """
-        target: test search with invalid parameter values
-        method: search with invalid field
-        expected: raise exception and report the error
-        """
-        # 1. initialize with data
-        collection_w = self.init_collection_general(prefix)[0]
-        # 2. search with invalid field
-        invalid_search_field = get_invalid_fields_type
-        log.info("test_search_param_invalid_field_type: searching with "
-                 "invalid field: %s" % invalid_search_field)
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        collection_w.search(vectors[:default_nq], invalid_search_field, default_search_params,
-                            default_limit, default_search_exp,
-                            check_task=CheckTasks.err_res,
-                            check_items=
-                            {"err_code": 1,
-                             "err_msg": "`anns_field` value {} is illegal".format(invalid_search_field)})
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_search_param_invalid_field_value(self, get_invalid_fields_value):
-        """
-        target: test search with invalid parameter values
-        method: search with invalid field
-        expected: raise exception and report the error
-        """
-        # 1. initialize with data
-        collection_w = self.init_collection_general(prefix)[0]
-        # 2. search with invalid field
-        invalid_search_field = get_invalid_fields_value
-        log.info("test_search_param_invalid_field_value: searching with "
-                 "invalid field: %s" % invalid_search_field)
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        collection_w.search(vectors[:default_nq], invalid_search_field, default_search_params,
-                            default_limit, default_search_exp,
-                            check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "Field %s doesn't exist in schema"
-                                                    % invalid_search_field})
-
-    @pytest.mark.tags(CaseLabel.L1)
     def test_search_param_invalid_expr_type(self, get_invalid_expr_type):
         """
-        target: test search with invalid parameter values
+        target: test search with invalid parameter type
         method: search with invalid search expressions
         expected: raise exception and report the error
         """
@@ -337,7 +378,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                                     % invalid_search_expr})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_index_partition_invalid_type(self, get_invalid_partition):
+    def test_search_partition_invalid_type(self, get_invalid_partition):
         """
         target: test search invalid partition
         method: search with invalid partition type
@@ -346,10 +387,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix)[0]
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-        # 2. create index
-        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
-        collection_w.create_index("float_vector", default_index)
-        # 3. search the non exist partition
+        # 2. search the invalid partition
         partition_name = get_invalid_partition
         err_msg = "`partition_name_array` value {} is illegal".format(partition_name)
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
@@ -362,8 +400,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
     def test_search_with_output_fields_invalid_type(self, get_invalid_output_fields):
         """
         target: test search with output fields
-        method: search with non-exist output_field
-        expected: search success
+        method: search with invalid output_field
+        expected: raise exception and report the error
         """
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix)[0]
@@ -567,10 +605,12 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          ct.err_msg: 'Field int63 not exist'})
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_search_output_field_vector(self):
+    @pytest.mark.parametrize("output_fields", [[default_search_field], ["%"]])
+    def test_search_output_field_vector(self, output_fields):
         """
         target: test search with vector as output field
-        method: search with one vector output_field
+        method: search with one vector output_field or
+                wildcard for vector
         expected: raise exception and report the error
         """
         # 1. initialize with data
@@ -580,11 +620,30 @@ class TestCollectionSearchInvalid(TestcaseBase):
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
-                            default_search_exp, output_fields=[default_search_field],
+                            default_search_exp, output_fields=output_fields,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
                                          "err_msg": "Search doesn't support "
                                                     "vector field as output_fields"})
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("output_fields", [["*%"], ["**"], ["*", "@"]])
+    def test_search_output_field_invalid_wildcard(self, output_fields):
+        """
+        target: test search with invalid output wildcard
+        method: search with invalid output_field wildcard
+        expected: raise exception and report the error
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True)[0]
+        # 2. search
+        log.info("test_search_output_field_vector: Searching collection %s" % collection_w.name)
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp, output_fields=output_fields,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": f"Field {output_fields[-1]} not exist"})
 
 class TestCollectionSearch(TestcaseBase):
     """ Test case of search interface """
@@ -637,14 +696,14 @@ class TestCollectionSearch(TestcaseBase):
                                          "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_search_with_empty_vectors(self, nb, dim, auto_id, _async):
+    def test_search_with_empty_vectors(self, dim, auto_id, _async):
         """
         target: test search with empty query vector
         method: search using empty query vector
         expected: search successfully with 0 results
         """
         # 1. initialize without data
-        collection_w = self.init_collection_general(prefix, True, nb,
+        collection_w = self.init_collection_general(prefix, True,
                                                     auto_id=auto_id, dim=dim)[0]
         # 2. search collection without data
         log.info("test_search_with_empty_vectors: Searching collection %s "
@@ -653,6 +712,29 @@ class TestCollectionSearch(TestcaseBase):
                             default_limit, default_search_exp, _async=_async,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": 0,
+                                         "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("search_params", [{}, {"params": {}}, {"params": {"nprobe": 10}}])
+    def test_search_normal_default_params(self, dim, auto_id, search_params, _async):
+        """
+        target: test search normal case
+        method: create connection, collection, insert and search
+        expected: search successfully with limit(topK)
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = \
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim)
+        # 2. search
+        log.info("test_search_normal: searching collection %s" % collection_w.name)
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            search_params, default_limit,
+                            default_search_exp, _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -962,22 +1044,26 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue 6731")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:9],
                                  ct.default_index_params[:9]))
-    def test_search_after_different_index(self, nb, nq, dim, index, params, auto_id, _async):
+    def test_search_after_different_index(self, nq, dim, index, params, auto_id, _async):
         """
         target: test search with different index
         method: test search with different index
         expected: searched successfully
         """
         # 1. initialize with data
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 5000,
                                                                       partition_num=1,
                                                                       auto_id=auto_id,
                                                                       dim=dim, is_index=True)
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create different index
+        if params.get("m"):
+            if (dim % params["m"]) != 0:
+                params["m"] = dim//4
         log.info("test_search_after_different_index: Creating index-%s" % index)
         default_index = {"index_type": index, "params": params, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
@@ -995,37 +1081,80 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue 6731")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:9],
                                  ct.default_index_params[:9]))
-    def test_search_after_index_different_metric_type(self, nb, nq, dim, index, params, auto_id, _async):
+    def test_search_after_different_index_with_params(self, dim, index, params, auto_id, _async):
+        """
+        target: test search with invalid search params
+        method: test search with invalid params type
+        expected: raise exception and report the error
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 5000,
+                                                                      partition_num=1,
+                                                                      auto_id=auto_id,
+                                                                      dim=dim, is_index=True)
+        # 2. create index and load
+        if params.get("m"):
+            if (dim % params["m"]) != 0:
+                params["m"] = dim//4
+        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
+        collection_w.create_index("float_vector", default_index)
+        collection_w.load()
+        # 3. search
+        search_params = cf.gen_search_param(index)
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        for search_param in search_params:
+            log.info("Searching with search params: {}".format(search_param))
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                search_param, default_limit,
+                                default_search_exp, _async=_async,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": default_nq,
+                                             "ids": insert_ids,
+                                             "limit": default_limit,
+                                             "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue 6731")
+    @pytest.mark.parametrize("index, params",
+                             zip(ct.all_index_types[:9],
+                                 ct.default_index_params[:9]))
+    def test_search_after_index_different_metric_type(self, nq, dim, index, params, auto_id, _async):
         """
         target: test search with different metric type
         method: test search with different metric type
         expected: searched successfully
         """
         # 1. initialize with data
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 5000,
                                                                       partition_num=1,
                                                                       auto_id=auto_id,
                                                                       dim=dim, is_index=True)
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create different index
+        if params.get("m"):
+            if (dim % params["m"]) != 0:
+                params["m"] = dim//4
         log.info("test_search_after_index_different_metric_type: Creating index-%s" % index)
         default_index = {"index_type": index, "params": params, "metric_type": "IP"}
         collection_w.create_index("float_vector", default_index)
         log.info("test_search_after_index_different_metric_type: Created index-%s" % index)
         collection_w.load()
         # 3. search
-        log.info("test_search_after_index_different_metric_type: Searching after creating index-%s" % index)
-        collection_w.search(vectors[:nq], default_search_field,
-                            default_search_params, default_limit,
-                            default_search_exp, _async=_async,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": nq,
-                                         "ids": insert_ids,
-                                         "limit": default_limit,
-                                         "_async": _async})
+        search_params = cf.gen_search_param(index, "IP")
+        for search_param in search_params:
+            log.info("Searching with search params: {}".format(search_param))
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                search_param, default_limit,
+                                default_search_exp, _async=_async,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": default_nq,
+                                             "ids": insert_ids,
+                                             "limit": default_limit,
+                                             "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_collection_multiple_times(self, nb, nq, dim, auto_id, _async):
@@ -1091,8 +1220,8 @@ class TestCollectionSearch(TestcaseBase):
         # 2. create collection with multiple vectors
         c_name = cf.gen_unique_str(prefix)
         fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(),
-                  cf.gen_float_vec_field(), cf.gen_float_vec_field(name="tmp")]
-        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, dim=dim)
+                  cf.gen_float_vec_field(dim=dim), cf.gen_float_vec_field(name="tmp", dim=dim)]
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         collection_w = self.collection_wrap.init_collection(c_name, schema=schema,
                                                             check_task=CheckTasks.check_collection_property,
                                                             check_items={"name": c_name, "schema": schema})[0]
@@ -1127,7 +1256,6 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue 6713")
     def test_search_index_one_partition(self, nb, auto_id, _async):
         """
         target: test search from partition
@@ -1152,8 +1280,9 @@ class TestCollectionSearch(TestcaseBase):
             limit_check = par[1].num_entities
         else:
             limit_check = limit
+        search_params = {"metric_type": "L2", "params": {"nprobe": 128}}
         collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, limit, default_search_exp,
+                            search_params, limit, default_search_exp,
                             [par[1].name], _async=_async,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
@@ -1300,7 +1429,6 @@ class TestCollectionSearch(TestcaseBase):
         assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue 6469")
     def test_search_binary_hamming_flat_index(self, nq, dim, auto_id, _async):
         """
         target: search binary_collection, and check the result: distance
@@ -1438,6 +1566,39 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
+    def test_search_expression_all_data_type(self, nb, nq, dim, auto_id, _async):
+        """
+        target: test search using different supported data type
+        method: search using different supported data type
+        expected: search success
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
+                                                                      is_all_data_type=True,
+                                                                      auto_id=auto_id,
+                                                                      dim=dim)
+        # 2. search
+        log.info("test_search_expression_all_data_type: Searching collection %s" % collection_w.name)
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+        search_exp = "int64 >= 0 && int32 >= 0 && int16 >= 0 " \
+                     "&& int8 >= 0 && float >= 0 && double >= 0"
+        res = collection_w.search(vectors[:nq], default_search_field,
+                                  default_search_params, default_limit,
+                                  search_exp, _async=_async,
+                                  output_fields=[default_int64_field_name,
+                                                 default_float_field_name],
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": nq,
+                                               "ids": insert_ids,
+                                               "limit": default_limit,
+                                               "_async": _async})[0]
+        if _async:
+            res.done()
+            res = res.result()
+        assert len(res[0][0].entity._row_data) != 0
+        assert (default_int64_field_name and default_float_field_name) in res[0][0].entity._row_data
+
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_output_fields_empty(self, nb, nq, dim, auto_id, _async):
         """
         target: test search with output fields
@@ -1525,29 +1686,25 @@ class TestCollectionSearch(TestcaseBase):
         assert (default_int64_field_name and default_float_field_name) in res[0][0].entity._row_data
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_expression_all_data_type(self, nb, nq, dim, auto_id, _async):
+    @pytest.mark.parametrize("output_fields", [["*"], ["*", default_float_field_name]])
+    def test_search_with_output_field_wildcard(self, output_fields, auto_id, _async):
         """
-        target: test search using different supported data type
-        method: search using different supported data type
+        target: test search with output fields using wildcard
+        method: search with one output_field (wildcard)
         expected: search success
         """
         # 1. initialize with data
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
-                                                                      is_all_data_type=True,
-                                                                      auto_id=auto_id,
-                                                                      dim=dim)
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
+                                                                      auto_id=auto_id)
         # 2. search
-        log.info("test_search_expression_all_data_type: Searching collection %s" % collection_w.name)
-        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        search_exp = "int64 >= 0 && int32 >= 0 && int16 >= 0 " \
-                     "&& int8 >= 0 && float >= 0 && double >= 0"
-        res = collection_w.search(vectors[:nq], default_search_field,
+        log.info("test_search_with_output_field_wildcard: Searching collection %s" % collection_w.name)
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        res = collection_w.search(vectors[:default_nq], default_search_field,
                                   default_search_params, default_limit,
-                                  search_exp, _async=_async,
-                                  output_fields=[default_int64_field_name,
-                                                 default_float_field_name],
+                                  default_search_exp, _async=_async,
+                                  output_fields=output_fields,
                                   check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": nq,
+                                  check_items={"nq": default_nq,
                                                "ids": insert_ids,
                                                "limit": default_limit,
                                                "_async": _async})[0]

@@ -189,12 +189,11 @@ class ResponseChecker:
             else:
                 ids_match = pc.list_contain_check(list(hits.ids),
                                                   list(check_items["ids"]))
-                if ids_match:
-                    log.info("search_results_check: limit (topK) and "
-                             "ids searched for each query are correct")
-                else:
+                if not ids_match:
                     log.error("search_results_check: ids searched not match")
                     assert ids_match
+        log.info("search_results_check: limit (topK) and "
+                 "ids searched for %d queries are correct" % len(search_res))
         return True
 
     @staticmethod
