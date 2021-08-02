@@ -251,6 +251,7 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, idx []*pb.IndexInfo,
 		meta[k] = v
 	}
 
+	// okokok
 	// save ddOpStr into etcd
 	addition := mt.getAdditionKV(ddOpStr, meta)
 	ts, err := mt.client.MultiSave(meta, addition)
