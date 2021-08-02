@@ -91,7 +91,7 @@ func (h *historical) watchGlobalSegmentMeta() {
 			for _, event := range resp.Events {
 				segmentID, err := strconv.ParseInt(filepath.Base(string(event.Kv.Key)), 10, 64)
 				if err != nil {
-					log.Error("watchGlobalSegmentMeta failed", zap.Any("error", err.Error()))
+					log.Warn("watchGlobalSegmentMeta failed", zap.Any("error", err.Error()))
 					continue
 				}
 				switch event.Type {
@@ -102,7 +102,7 @@ func (h *historical) watchGlobalSegmentMeta() {
 					segmentInfo := &querypb.SegmentInfo{}
 					err = proto.UnmarshalText(string(event.Kv.Value), segmentInfo)
 					if err != nil {
-						log.Error("watchGlobalSegmentMeta failed", zap.Any("error", err.Error()))
+						log.Warn("watchGlobalSegmentMeta failed", zap.Any("error", err.Error()))
 						continue
 					}
 					h.addGlobalSegmentInfo(segmentID, segmentInfo)

@@ -410,7 +410,7 @@ func (colReplica *collectionReplica) removeSegmentPrivate(segmentID UniqueID) er
 	key := fmt.Sprintf("%s/%d", queryNodeSegmentMetaPrefix, segmentID)
 	err = colReplica.etcdKV.Remove(key)
 	if err != nil {
-		log.Error("error when remove segment info from etcd")
+		log.Warn("error when remove segment info from etcd")
 	}
 
 	return nil

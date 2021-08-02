@@ -24,7 +24,7 @@ MILVUS_INSTALL_TIMEOUT="${MILVUS_INSTALL_TIMEOUT:-300s}"
 
 # Delete any previous Milvus cluster
 echo "Deleting previous Milvus cluster with name=${MILVUS_HELM_RELEASE_NAME}"
-if ! (helm uninstall -n "${MILVUS_HELM_NAMESPACE}" "${MILVUS_HELM_RELEASE_NAME}") > /dev/null; then
+if ! (helm uninstall -n "${MILVUS_HELM_NAMESPACE}" "${MILVUS_HELM_RELEASE_NAME}" > /dev/null 2>&1); then
   echo "No existing Milvus cluster with name ${MILVUS_HELM_RELEASE_NAME}. Continue..."
 else
   MILVUS_LABELS="app.kubernetes.io/instance=${MILVUS_HELM_RELEASE_NAME}"
@@ -44,7 +44,7 @@ if [[ ! -d "${MILVUS_HELM_CHART_PATH:-}" ]]; then
   MILVUS_HELM_CHART_PATH="${TMP_DIR}/charts/milvus"
 fi
 
-kubectl create namespace "${MILVUS_HELM_NAMESPACE}" || true
+kubectl create namespace "${MILVUS_HELM_NAMESPACE}" > /dev/null 2>&1 || true
 
 helm install --wait --timeout "${MILVUS_INSTALL_TIMEOUT}" \
                                --set image.all.repository="${MILVUS_IMAGE_REPO}" \

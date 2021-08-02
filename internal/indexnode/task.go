@@ -155,6 +155,7 @@ func (it *IndexBuildTask) checkIndexMeta(ctx context.Context, pre bool) error {
 		if it.err != nil {
 			log.Debug("IndexNode CreateIndex Failed", zap.Int64("IndexBuildID", indexMeta.IndexBuildID), zap.Any("err", err))
 			indexMeta.State = commonpb.IndexState_Failed
+			indexMeta.FailReason = it.err.Error()
 		}
 		log.Debug("IndexNode", zap.Int64("indexBuildID", indexMeta.IndexBuildID), zap.Any("IndexState", indexMeta.State))
 		err = it.etcdKV.CompareVersionAndSwap(it.req.MetaPath, versions[0],
