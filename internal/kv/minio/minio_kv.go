@@ -110,6 +110,9 @@ func (kv *MinIOKV) LoadWithPrefix(key string) ([]string, []string, error) {
 
 func (kv *MinIOKV) Load(key string) (string, error) {
 	object, err := kv.minioClient.GetObject(kv.ctx, kv.bucketName, key, minio.GetObjectOptions{})
+	if object != nil {
+		defer object.Close()
+	}
 	if err != nil {
 		return "", err
 	}
