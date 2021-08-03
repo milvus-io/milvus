@@ -14,9 +14,6 @@
 
 
 <div class="column" align="middle">
-  <a href="https://ci.milvus.io:18080/jenkins/job/milvus-ha-ci/job/master/badge/">
-        <img src="https://ci.milvus.io:18080/jenkins/job/milvus-ha-ci/job/master/badge/icon" />
-  </a>
   <a href="https://bestpractices.coreinfrastructure.org/projects/3563">
         <img src="https://bestpractices.coreinfrastructure.org/projects/3563/badge" />
   </a>
