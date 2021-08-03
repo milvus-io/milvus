@@ -15,7 +15,7 @@ type testTask struct {
 	BaseTask
 	baseMsg *commonpb.MsgBase
 	cluster *queryNodeCluster
-	meta    *meta
+	meta    Meta
 	nodeID  int64
 }
 

@@ -380,7 +380,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		log.Info("vchannel", zap.String("name", chanName))
 		if len(chanName) == 0 {
 			status.Reason = fmt.Sprintf("DataNode not find segment %d!", id)
-			return status, errors.New(status.GetReason())
+			return status, nil
 		}
 
 		if node.segmentCache.checkIfCached(id) {

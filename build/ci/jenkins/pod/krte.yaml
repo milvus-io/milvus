@@ -12,6 +12,10 @@ spec:
       value: "true"
     - name: DOCKER_VOLUME_DIRECTORY
       value: "/mnt/disk/.docker"
+    - name: KRTE_POD_IP
+      valueFrom:
+        fieldRef:
+          fieldPath: status.podIP
     securityContext:
       privileged: true
     tty: true
@@ -38,6 +42,20 @@ spec:
     - mountPath: /mnt/disk/.docker
       name: build-cache
       subPath: docker-volume
+  - name: etcd
+    image: quay.io/coreos/etcd:v3.4.13
+    command:
+    - etcd
+    - -advertise-client-urls=http://127.0.0.1:2379
+    - -listen-client-urls=http://0.0.0.0:2379
+    resources:
+      limits:
+        cpu: "1"
+        memory: "1Gi"
+    ports:
+    - containerPort: 2379
+      name: client
+      protocol: TCP
   volumes:
   - emptyDir: {}
     name: docker-graph

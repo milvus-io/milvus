@@ -1147,7 +1147,6 @@ func (q *queryCollection) fillVectorFieldsData(segment *Segment, result *segcore
 				resultLen := dim
 				copy(x.FloatVector.Data[i*int(resultLen):(i+1)*int(resultLen)], floatResult)
 			}
-
 		}
 	}
 	return nil
@@ -1300,7 +1299,8 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 func mergeRetrieveResults(dataArr []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error) {
 	var final *segcorepb.RetrieveResults
 	for _, data := range dataArr {
-		if data == nil {
+		// skip empty result, it will break merge result
+		if data == nil || len(data.Offset) == 0 {
 			continue
 		}
 
