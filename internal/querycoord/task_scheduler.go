@@ -121,7 +121,7 @@ func NewTaskQueue() *TaskQueue {
 type TaskScheduler struct {
 	triggerTaskQueue *TaskQueue
 	activateTaskChan chan task
-	meta             *meta
+	meta             Meta
 	cluster          *queryNodeCluster
 	taskIDAllocator  func() (UniqueID, error)
 	client           *etcdkv.EtcdKV
@@ -134,7 +134,7 @@ type TaskScheduler struct {
 	cancel context.CancelFunc
 }
 
-func NewTaskScheduler(ctx context.Context, meta *meta, cluster *queryNodeCluster, kv *etcdkv.EtcdKV, rootCoord types.RootCoord, dataCoord types.DataCoord) (*TaskScheduler, error) {
+func NewTaskScheduler(ctx context.Context, meta Meta, cluster *queryNodeCluster, kv *etcdkv.EtcdKV, rootCoord types.RootCoord, dataCoord types.DataCoord) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	taskChan := make(chan task, 1024)
 	s := &TaskScheduler{
@@ -216,6 +216,10 @@ func (scheduler *TaskScheduler) reloadFromKV() error {
 		}
 		state := taskState(value)
 		taskInfos[taskID] = state
+		if _, ok := triggerTasks[taskID]; !ok {
+			return errors.New("taskStateInfo and triggerTaskInfo are inconsistent")
+		}
+		triggerTasks[taskID].SetState(state)
 	}
 
 	var doneTriggerTask task = nil
@@ -431,6 +435,7 @@ func (scheduler *TaskScheduler) Enqueue(tasks []task) {
 			log.Error("error when save trigger task to etcd", zap.Int64("taskID", t.ID()))
 		}
 		log.Debug("EnQueue a triggerTask and save to etcd", zap.Int64("taskID", t.ID()), zap.Any("error", err.Error()))
+		t.SetState(taskUndo)
 	}
 
 	scheduler.triggerTaskQueue.addTask(tasks)
@@ -449,15 +454,16 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 	key := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
 	err := scheduler.client.Save(key, strconv.Itoa(int(taskDoing)))
 	if err != nil {
-		log.Error("processTask: update task state err", zap.String("reason", err.Error()))
+		log.Error("processTask: update task state err", zap.String("reason", err.Error()), zap.Int64("taskID", t.ID()))
 		trace.LogError(span, err)
 		return err
 	}
+	t.SetState(taskDoing)
 
 	span.LogFields(oplog.Int64("processTask: scheduler process Execute", t.ID()))
 	err = t.Execute(ctx)
 	if err != nil {
-		log.Debug("processTask: execute err", zap.String("reason", err.Error()))
+		log.Debug("processTask: execute err", zap.String("reason", err.Error()), zap.Int64("taskID", t.ID()))
 		trace.LogError(span, err)
 		return err
 	}
@@ -495,13 +501,14 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 
 	err = scheduler.client.Save(key, strconv.Itoa(int(taskDone)))
 	if err != nil {
-		log.Error("processTask: update task state err", zap.String("reason", err.Error()))
+		log.Error("processTask: update task state err", zap.String("reason", err.Error()), zap.Int64("taskID", t.ID()))
 		trace.LogError(span, err)
 		return err
 	}
 
 	span.LogFields(oplog.Int64("processTask: scheduler process PostExecute", t.ID()))
 	t.PostExecute(ctx)
+	t.SetState(taskDone)
 
 	return nil
 }
@@ -539,6 +546,10 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 				}
 			}
 			activeTaskWg.Wait()
+			if t.Type() == commonpb.MsgType_LoadCollection || t.Type() == commonpb.MsgType_LoadPartitions {
+				t.PostExecute(scheduler.ctx)
+			}
+
 			keys := make([]string, 0)
 			taskKey := fmt.Sprintf("%s/%d", triggerTaskPrefix, t.ID())
 			stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
@@ -635,7 +646,7 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task)
 				removes = append(removes, stateKey)
 				err = scheduler.client.MultiRemove(removes)
 				if err != nil {
-					log.Error("waitActivateTaskDone: error when remove task from etcd")
+					log.Error("waitActivateTaskDone: error when remove task from etcd", zap.Int64("taskID", t.ID()))
 				}
 			}
 		}
