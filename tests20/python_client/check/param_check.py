@@ -151,7 +151,7 @@ def equal_entity(exp, actual):
     for field, value in exp.items():
         if isinstance(value, list):
             assert len(actual[field]) == len(exp[field])
-            for i in range(0, len(exp[field]), 2):
+            for i in range(0, len(exp[field]), 4):
                 assert abs(actual[field][i] - exp[field][i]) < ct.epsilon
         else:
             assert actual[field] == exp[field]

@@ -23,7 +23,7 @@ func NewDefaultConfig() *Config {
 	return &Config{
 		attempts:     uint(10),
 		sleep:        200 * time.Millisecond,
-		maxSleepTime: 1 * time.Second,
+		maxSleepTime: 3 * time.Second,
 	}
 }
 
@@ -38,11 +38,20 @@ func Attempts(attempts uint) Option {
 func Sleep(sleep time.Duration) Option {
 	return func(c *Config) {
 		c.sleep = sleep
+		// ensure max retry interval is always larger than retry interval
+		if c.sleep*2 > c.maxSleepTime {
+			c.maxSleepTime = 2 * c.sleep
+		}
 	}
 }
 
 func MaxSleepTime(maxSleepTime time.Duration) Option {
 	return func(c *Config) {
-		c.maxSleepTime = maxSleepTime
+		// ensure max retry interval is always larger than retry interval
+		if c.sleep*2 > maxSleepTime {
+			c.maxSleepTime = 2 * c.sleep
+		} else {
+			c.maxSleepTime = maxSleepTime
+		}
 	}
 }
