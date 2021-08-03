@@ -502,11 +502,10 @@ TEST(CApiTest, Reduce) {
     results.push_back(res1);
     results.push_back(res2);
 
-    status = ReduceSearchResults(plan, results.data(), results.size());
-    assert(status.error_code == Success);
     void* reorganize_search_result = nullptr;
-    status = ReorganizeSearchResults(&reorganize_search_result, results.data(), results.size());
+    status = ReduceSearchResults(&reorganize_search_result, plan, results.data(), results.size());
     assert(status.error_code == Success);
+
     auto hits_blob_size = GetHitsBlobSize(reorganize_search_result);
     assert(hits_blob_size > 0);
     std::vector<char> hits_blob;
@@ -579,11 +578,10 @@ TEST(CApiTest, ReduceSearchWithExpr) {
     results.push_back(res1);
     results.push_back(res2);
 
-    status = ReduceSearchResults(plan, results.data(), results.size());
-    assert(status.error_code == Success);
     void* reorganize_search_result = nullptr;
-    status = ReorganizeSearchResults(&reorganize_search_result, results.data(), results.size());
+    status = ReduceSearchResults(&reorganize_search_result, plan, results.data(), results.size());
     assert(status.error_code == Success);
+
     auto hits_blob_size = GetHitsBlobSize(reorganize_search_result);
     assert(hits_blob_size > 0);
     std::vector<char> hits_blob;
@@ -1912,7 +1910,9 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
     std::vector<CSearchResult> results;
     results.push_back(c_search_result_on_bigIndex);
-    status = ReduceSearchResults(plan, results.data(), results.size());
+
+    void* reorganize_search_result = nullptr;
+    status = ReduceSearchResults(&reorganize_search_result, plan, results.data(), results.size());
     assert(status.error_code == Success);
 
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
@@ -2062,7 +2062,9 @@ vector_anns: <
 
     std::vector<CSearchResult> results;
     results.push_back(c_search_result_on_bigIndex);
-    status = ReduceSearchResults(plan, results.data(), results.size());
+
+    void* reorganize_search_result = nullptr;
+    status = ReduceSearchResults(&reorganize_search_result, plan, results.data(), results.size());
     assert(status.error_code == Success);
 
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);

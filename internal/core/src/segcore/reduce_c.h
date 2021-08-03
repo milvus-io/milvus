@@ -28,10 +28,10 @@ int
 MergeInto(int64_t num_queries, int64_t topk, float* distances, int64_t* uids, float* new_distances, int64_t* new_uids);
 
 CStatus
-ReduceSearchResults(CSearchPlan c_plan, CSearchResult* search_results, int64_t num_segments);
-
-CStatus
-ReorganizeSearchResults(CMarshaledHits* c_marshaled_hits, CSearchResult* c_search_results, int64_t num_segments);
+ReduceSearchResults(CMarshaledHits* c_marshaled_hits,
+                    CSearchPlan c_plan,
+                    CSearchResult* c_search_results,
+                    int64_t num_segments);
 
 int64_t
 GetHitsBlobSize(CMarshaledHits c_marshaled_hits);

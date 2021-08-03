@@ -441,9 +441,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 
 	///////////////////////////////////
 	numSegment := int64(len(searchResults))
-	err = reduceSearchResults(plan, searchResults, numSegment)
-	assert.NoError(t, err)
-	marshaledHits, err := reorganizeSearchResults(searchResults, numSegment)
+	marshaledHits, err := reduceSearchResults(plan, searchResults, numSegment)
 	assert.NoError(t, err)
 	hitsBlob, err := marshaledHits.getHitsBlob()
 	assert.NoError(t, err)

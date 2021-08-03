@@ -34,42 +34,22 @@ type MarshaledHits struct {
 	cMarshaledHits C.CMarshaledHits
 }
 
-func reduceSearchResults(plan *SearchPlan, searchResults []*SearchResult, numSegments int64) error {
+func reduceSearchResults(plan *SearchPlan, searchResults []*SearchResult, numSegments int64) (*MarshaledHits, error) {
 	cSearchResults := make([]C.CSearchResult, 0)
 	for _, res := range searchResults {
 		cSearchResults = append(cSearchResults, res.cSearchResult)
 	}
 	cSearchResultPtr := (*C.CSearchResult)(&cSearchResults[0])
 	cNumSegments := C.long(numSegments)
-
-	status := C.ReduceSearchResults(plan.cSearchPlan, cSearchResultPtr, cNumSegments)
-	errorCode := status.error_code
-
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return errors.New("reduceSearchResults failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
-	}
-	return nil
-}
-
-func reorganizeSearchResults(searchResults []*SearchResult, numSegments int64) (*MarshaledHits, error) {
-	cSearchResults := make([]C.CSearchResult, 0)
-	for _, res := range searchResults {
-		cSearchResults = append(cSearchResults, res.cSearchResult)
-	}
-	cSearchResultPtr := (*C.CSearchResult)(&cSearchResults[0])
-
-	var cNumSegments = C.long(numSegments)
 	var cMarshaledHits C.CMarshaledHits
 
-	status := C.ReorganizeSearchResults(&cMarshaledHits, cSearchResultPtr, cNumSegments)
+	status := C.ReduceSearchResults(&cMarshaledHits, plan.cSearchPlan, cSearchResultPtr, cNumSegments)
 	errorCode := status.error_code
 
 	if errorCode != 0 {
 		errorMsg := C.GoString(status.error_msg)
 		defer C.free(unsafe.Pointer(status.error_msg))
-		return nil, errors.New("reorganizeSearchResults failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
+		return nil, errors.New("reduceSearchResults failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
 	}
 	return &MarshaledHits{cMarshaledHits: cMarshaledHits}, nil
 }

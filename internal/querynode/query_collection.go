@@ -936,14 +936,8 @@ func (q *queryCollection) search(msg queryMsg) error {
 	}
 
 	numSegment := int64(len(searchResults))
-	var marshaledHits *MarshaledHits = nil
-	err = reduceSearchResults(plan, searchResults, numSegment)
+	marshaledHits, err := reduceSearchResults(plan, searchResults, numSegment)
 	sp.LogFields(oplog.String("statistical time", "reduceSearchResults end"))
-	if err != nil {
-		return err
-	}
-	marshaledHits, err = reorganizeSearchResults(searchResults, numSegment)
-	sp.LogFields(oplog.String("statistical time", "reorganizeSearchResults end"))
 	if err != nil {
 		return err
 	}

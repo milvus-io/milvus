@@ -75,10 +75,7 @@ func TestReduce_AllFunc(t *testing.T) {
 	assert.Nil(t, err)
 	searchResults = append(searchResults, searchResult)
 
-	err = reduceSearchResults(plan, searchResults, 1)
-	assert.Nil(t, err)
-
-	marshaledHits, err := reorganizeSearchResults(searchResults, 1)
+	marshaledHits, err := reduceSearchResults(plan, searchResults, 1)
 	assert.NotNil(t, marshaledHits)
 	assert.Nil(t, err)
 

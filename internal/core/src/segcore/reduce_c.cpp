@@ -107,7 +107,10 @@ ResetSearchResult(std::vector<std::vector<int64_t>>& search_records, std::vector
 }
 
 CStatus
-ReduceSearchResults(CSearchPlan c_plan, CSearchResult* c_search_results, int64_t num_segments) {
+ReduceSearchResults(CMarshaledHits* c_marshaled_hits,
+                    CSearchPlan c_plan,
+                    CSearchResult* c_search_results,
+                    int64_t num_segments) {
     try {
         auto plan = (milvus::query::Plan*)c_plan;
         std::vector<SearchResult*> search_results;
@@ -123,32 +126,14 @@ ReduceSearchResults(CSearchPlan c_plan, CSearchResult* c_search_results, int64_t
         }
         ResetSearchResult(search_records, search_results);
 
+        // fill target entry
         for (int i = 0; i < num_segments; ++i) {
             auto search_result = search_results[i];
             auto segment = (milvus::segcore::SegmentInterface*)(search_result->segment_);
             segment->FillTargetEntry(plan, *search_result);
         }
 
-        auto status = CStatus();
-        status.error_code = Success;
-        status.error_msg = "";
-        return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
-    }
-}
-
-CStatus
-ReorganizeSearchResults(CMarshaledHits* c_marshaled_hits, CSearchResult* c_search_results, int64_t num_segments) {
-    try {
-        auto marshaledHits = std::make_unique<MarshaledHits>(1);
-        auto sr = (SearchResult*)c_search_results[0];
-        auto topk = sr->topk_;
-        auto num_queries = sr->num_queries_;
-
+        // reorganize search results
         std::vector<float> result_distances(num_queries * topk);
         std::vector<std::vector<char>> row_datas(num_queries * topk);
 
@@ -175,6 +160,7 @@ ReorganizeSearchResults(CMarshaledHits* c_marshaled_hits, CSearchResult* c_searc
         }
         AssertInfo(total_count == num_queries * topk, "the reduces result's size less than total_num_queries*topk");
 
+        auto marshaledHits = std::make_unique<MarshaledHits>(1);
         MarshaledHitsPerGroup& hits_per_group = (*marshaledHits).marshaled_hits_[0];
         hits_per_group.hits_.resize(num_queries);
         hits_per_group.blob_length_.resize(num_queries);
