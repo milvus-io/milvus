@@ -760,7 +760,7 @@ class TestPartitionOperations(TestcaseBase):
 
         # insert data to partition
         max_size = 100000  # TODO: clarify the max size of data
-        ins_res, _ = partition_w.insert(cf.gen_default_dataframe_data(max_size))
+        ins_res, _ = partition_w.insert(cf.gen_default_dataframe_data(max_size), timeout=40)
         assert len(ins_res.primary_keys) == max_size
         # self._connect().flush([collection_w.name])
         assert partition_w.num_entities == max_size

@@ -6,6 +6,8 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel
 from utils.util_log import test_log as log
+from pymilvus_orm import utility
+
 
 rounds = 100
 per_nb = 100000
@@ -20,36 +22,41 @@ class TestLoad(TestcaseBase):
         name = 'load_test_collection_1'
         name2 = 'load_test_collection_2'
         # create
-        collection_w = self.init_collection_wrap(name=name)
-        collection_w2 = self.init_collection_wrap(name=name2)
-        assert collection_w.name == name
+        # collection_w = self.init_collection_wrap(name=name)
+        # collection_w2 = self.init_collection_wrap(name=name2)
+        # assert collection_w.name == name
 
-        # insert
-        data = cf.gen_default_list_data(per_nb)
-        log.debug(f"data len: {len(data[0])}")
-        for i in range(rounds):
-            t0 = datetime.datetime.now()
-            ins_res, res = collection_w.insert(data, timeout=180)
-            tt = datetime.datetime.now() - t0
-            log.debug(f"round{i} insert: {len(ins_res.primary_keys)} entities in {tt}s")
-            assert res    # and per_nb == len(ins_res.primary_keys)
+        for i in range(50):
+            name = f"load_collection2_{i}"
+            self.init_collection_wrap(name=name)
+        log.debug(f"total collections: {len(utility.list_collections())}")
 
-            t0 = datetime.datetime.now()
-            ins_res2, res = collection_w2.insert(data, timeout=180)
-            tt = datetime.datetime.now() - t0
-            log.debug(f"round{i} insert2: {len(ins_res2.primary_keys)} entities in {tt}s")
-            assert res
-
-            # flush
-            t0 = datetime.datetime.now()
-            log.debug(f"current collection num_entities: {collection_w.num_entities}")
-            tt = datetime.datetime.now() - t0
-            log.debug(f"round{i} flush in {tt}")
-
-            t0 = datetime.datetime.now()
-            log.debug(f"current collection2 num_entities: {collection_w2.num_entities}")
-            tt = datetime.datetime.now() - t0
-            log.debug(f"round{i} flush2 in {tt}")
+        # # insert
+        # data = cf.gen_default_list_data(per_nb)
+        # log.debug(f"data len: {len(data[0])}")
+        # for i in range(rounds):
+        #     t0 = datetime.datetime.now()
+        #     ins_res, res = collection_w.insert(data, timeout=180)
+        #     tt = datetime.datetime.now() - t0
+        #     log.debug(f"round{i} insert: {len(ins_res.primary_keys)} entities in {tt}s")
+        #     assert res    # and per_nb == len(ins_res.primary_keys)
+        #
+        #     t0 = datetime.datetime.now()
+        #     ins_res2, res = collection_w2.insert(data, timeout=180)
+        #     tt = datetime.datetime.now() - t0
+        #     log.debug(f"round{i} insert2: {len(ins_res2.primary_keys)} entities in {tt}s")
+        #     assert res
+        #
+        #     # flush
+        #     t0 = datetime.datetime.now()
+        #     log.debug(f"current collection num_entities: {collection_w.num_entities}")
+        #     tt = datetime.datetime.now() - t0
+        #     log.debug(f"round{i} flush in {tt}")
+        #
+        #     t0 = datetime.datetime.now()
+        #     log.debug(f"current collection2 num_entities: {collection_w2.num_entities}")
+        #     tt = datetime.datetime.now() - t0
+        #     log.debug(f"round{i} flush2 in {tt}")
 
         # index, res = collection_w.create_index(default_field_name, default_index_params, timeout=60)
         # assert res
