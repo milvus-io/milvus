@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/mqclient"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
@@ -100,7 +101,7 @@ func (ms *mqMsgStream) AsProducer(channels []string) {
 			ms.producerLock.Unlock()
 			return nil
 		}
-		err := Retry(20, time.Millisecond*200, fn)
+		err := retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200))
 		if err != nil {
 			errMsg := "Failed to create producer " + channel + ", error = " + err.Error()
 			panic(errMsg)
@@ -135,7 +136,7 @@ func (ms *mqMsgStream) AsConsumer(channels []string, subName string) {
 			ms.consumerLock.Unlock()
 			return nil
 		}
-		err := Retry(20, time.Millisecond*200, fn)
+		err := retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200))
 		if err != nil {
 			errMsg := "Failed to create consumer " + channel + ", error = " + err.Error()
 			panic(errMsg)
@@ -497,7 +498,7 @@ func (ms *MqTtMsgStream) AsConsumer(channels []string, subName string) {
 			ms.consumerLock.Unlock()
 			return nil
 		}
-		err := Retry(10, time.Millisecond*200, fn)
+		err := retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200))
 		if err != nil {
 			errMsg := "Failed to create consumer " + channel + ", error = " + err.Error()
 			panic(errMsg)
@@ -733,7 +734,7 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 		if len(mp.MsgID) == 0 {
 			return fmt.Errorf("when msgID's length equal to 0, please use AsConsumer interface")
 		}
-		if err = Retry(20, time.Millisecond*200, fn); err != nil {
+		if err = retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200)); err != nil {
 			return fmt.Errorf("Failed to seek, error %s", err.Error())
 		}
 		ms.addConsumer(consumer, mp.ChannelName)

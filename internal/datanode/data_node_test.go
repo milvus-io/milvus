@@ -204,12 +204,13 @@ func TestDataNode(t *testing.T) {
 	})
 
 	t.Run("Test BackGroundGC", func(te *testing.T) {
+		te.Skipf("issue #6574")
 		ctx, cancel := context.WithCancel(context.Background())
 		node := newIDLEDataNodeMock(ctx)
 
 		collIDCh := make(chan UniqueID)
-		go node.BackGroundGC(collIDCh)
 		node.clearSignal = collIDCh
+		go node.BackGroundGC(collIDCh)
 
 		testDataSyncs := []struct {
 			collID        UniqueID
@@ -225,11 +226,6 @@ func TestDataNode(t *testing.T) {
 		for i, t := range testDataSyncs {
 			if i <= 2 {
 				node.NewDataSyncService(&datapb.VchannelInfo{CollectionID: t.collID, ChannelName: t.dmChannelName})
-
-				msFactory := msgstream.NewPmsFactory()
-				insertStream, _ := msFactory.NewMsgStream(ctx)
-				var insertMsgStream msgstream.MsgStream = insertStream
-				insertMsgStream.Start()
 			}
 
 			collIDCh <- t.collID
