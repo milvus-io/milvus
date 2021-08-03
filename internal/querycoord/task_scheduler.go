@@ -148,7 +148,7 @@ func NewTaskScheduler(ctx context.Context, meta Meta, cluster *queryNodeCluster,
 		dataCoord:        dataCoord,
 	}
 	s.triggerTaskQueue = NewTaskQueue()
-	idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "query coordinator task id"))
+	idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "queryCoordTaskID"))
 	if err := idAllocator.Initialize(); err != nil {
 		log.Debug("query coordinator idAllocator initialize failed", zap.Error(err))
 		return nil, err
@@ -217,7 +217,8 @@ func (scheduler *TaskScheduler) reloadFromKV() error {
 		state := taskState(value)
 		taskInfos[taskID] = state
 		if _, ok := triggerTasks[taskID]; !ok {
-			return errors.New("taskStateInfo and triggerTaskInfo are inconsistent")
+			log.Error("reloadFromKV: taskStateInfo and triggerTaskInfo are inconsistent")
+			continue
 		}
 		triggerTasks[taskID].SetState(state)
 	}
@@ -243,7 +244,7 @@ func (scheduler *TaskScheduler) reloadFromKV() error {
 
 func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 	header := commonpb.MsgHeader{}
-	err := proto.UnmarshalText(t, &header)
+	err := proto.Unmarshal([]byte(t), &header)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to unmarshal message header, err %s ", err.Error())
 	}
@@ -251,7 +252,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 	switch header.Base.MsgType {
 	case commonpb.MsgType_LoadCollection:
 		loadReq := querypb.LoadCollectionRequest{}
-		err = proto.UnmarshalText(t, &loadReq)
+		err = proto.Unmarshal([]byte(t), &loadReq)
 		if err != nil {
 			log.Error(err.Error())
 		}
@@ -270,7 +271,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 		newTask = loadCollectionTask
 	case commonpb.MsgType_LoadPartitions:
 		loadReq := querypb.LoadPartitionsRequest{}
-		err = proto.UnmarshalText(t, &loadReq)
+		err = proto.Unmarshal([]byte(t), &loadReq)
 		if err != nil {
 			log.Error(err.Error())
 		}
@@ -288,7 +289,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 		newTask = loadPartitionTask
 	case commonpb.MsgType_ReleaseCollection:
 		loadReq := querypb.ReleaseCollectionRequest{}
-		err = proto.UnmarshalText(t, &loadReq)
+		err = proto.Unmarshal([]byte(t), &loadReq)
 		if err != nil {
 			log.Error(err.Error())
 		}
@@ -306,7 +307,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 		newTask = releaseCollectionTask
 	case commonpb.MsgType_ReleasePartitions:
 		loadReq := querypb.ReleasePartitionsRequest{}
-		err = proto.UnmarshalText(t, &loadReq)
+		err = proto.Unmarshal([]byte(t), &loadReq)
 		if err != nil {
 			log.Error(err.Error())
 		}
@@ -322,7 +323,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 		newTask = releasePartitionTask
 	case commonpb.MsgType_LoadSegments:
 		loadReq := querypb.LoadSegmentsRequest{}
-		err = proto.UnmarshalText(t, &loadReq)
+		err = proto.Unmarshal([]byte(t), &loadReq)
 		if err != nil {
 			log.Error(err.Error())
 		}
@@ -339,7 +340,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 		newTask = loadSegmentTask
 	case commonpb.MsgType_ReleaseSegments:
 		loadReq := querypb.ReleaseSegmentsRequest{}
-		err = proto.UnmarshalText(t, &loadReq)
+		err = proto.Unmarshal([]byte(t), &loadReq)
 		if err != nil {
 			log.Error(err.Error())
 		}
@@ -355,7 +356,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 		newTask = releaseSegmentTask
 	case commonpb.MsgType_WatchDmChannels:
 		loadReq := querypb.WatchDmChannelsRequest{}
-		err = proto.UnmarshalText(t, &loadReq)
+		err = proto.Unmarshal([]byte(t), &loadReq)
 		if err != nil {
 			log.Error(err.Error())
 		}
@@ -372,7 +373,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 		newTask = watchDmChannelTask
 	case commonpb.MsgType_WatchQueryChannels:
 		loadReq := querypb.AddQueryChannelRequest{}
-		err = proto.UnmarshalText(t, &loadReq)
+		err = proto.Unmarshal([]byte(t), &loadReq)
 		if err != nil {
 			log.Error(err.Error())
 		}
@@ -388,7 +389,7 @@ func (scheduler *TaskScheduler) unmarshalTask(t string) (task, error) {
 		newTask = watchQueryChannelTask
 	case commonpb.MsgType_LoadBalanceSegments:
 		loadReq := querypb.LoadBalanceRequest{}
-		err = proto.UnmarshalText(t, &loadReq)
+		err = proto.Unmarshal([]byte(t), &loadReq)
 		if err != nil {
 			log.Error(err.Error())
 		}
@@ -423,12 +424,16 @@ func (scheduler *TaskScheduler) Enqueue(tasks []task) {
 		t.SetID(id)
 		kvs := make(map[string]string)
 		taskKey := fmt.Sprintf("%s/%d", triggerTaskPrefix, t.ID())
-		kvs[taskKey] = t.Marshal()
+		blobs, err := t.Marshal()
+		if err != nil {
+			log.Error("error when save marshal task", zap.Int64("taskID", t.ID()), zap.String("error", err.Error()))
+		}
+		kvs[taskKey] = string(blobs)
 		stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
 		kvs[stateKey] = strconv.Itoa(int(taskUndo))
 		err = scheduler.client.MultiSave(kvs)
 		if err != nil {
-			log.Error("error when save trigger task to etcd", zap.Int64("taskID", t.ID()))
+			log.Error("error when save trigger task to etcd", zap.Int64("taskID", t.ID()), zap.String("error", err.Error()))
 		}
 		log.Debug("EnQueue a triggerTask and save to etcd", zap.Int64("taskID", t.ID()))
 		t.SetState(taskUndo)
@@ -450,7 +455,7 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 	key := fmt.Sprintf("%s/%d", taskInfoPrefix, t.ID())
 	err := scheduler.client.Save(key, strconv.Itoa(int(taskDoing)))
 	if err != nil {
-		log.Debug("processTask: update task state err", zap.String("reason", err.Error()), zap.Int64("taskID", t.ID()))
+		log.Error("processTask: update task state err", zap.String("reason", err.Error()), zap.Int64("taskID", t.ID()))
 		trace.LogError(span, err)
 		return err
 	}
@@ -477,12 +482,18 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 		childTask.SetID(id)
 		kvs := make(map[string]string)
 		taskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, childTask.ID())
-		kvs[taskKey] = childTask.Marshal()
+		blobs, err := childTask.Marshal()
+		if err != nil {
+			log.Error("processTask: marshal task err", zap.String("reason", err.Error()))
+			trace.LogError(span, err)
+			return err
+		}
+		kvs[taskKey] = string(blobs)
 		stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, childTask.ID())
 		kvs[stateKey] = strconv.Itoa(int(taskUndo))
 		err = scheduler.client.MultiSave(kvs)
 		if err != nil {
-			log.Debug("processTask: save active task info err", zap.String("reason", err.Error()))
+			log.Error("processTask: save active task info err", zap.String("reason", err.Error()))
 			trace.LogError(span, err)
 			return err
 		}
@@ -491,7 +502,7 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 
 	err = scheduler.client.Save(key, strconv.Itoa(int(taskDone)))
 	if err != nil {
-		log.Debug("processTask: update task state err", zap.String("reason", err.Error()), zap.Int64("taskID", t.ID()))
+		log.Error("processTask: update task state err", zap.String("reason", err.Error()), zap.Int64("taskID", t.ID()))
 		trace.LogError(span, err)
 		return err
 	}
@@ -586,7 +597,13 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task)
 						}
 						rt.SetID(id)
 						taskKey := fmt.Sprintf("%s/%d", activeTaskPrefix, rt.ID())
-						saves[taskKey] = rt.Marshal()
+						blobs, err := rt.Marshal()
+						if err != nil {
+							log.Error("waitActivateTaskDone: error when marshal active task")
+							continue
+							//TODO::xige-16 deal error when marshal task failed
+						}
+						saves[taskKey] = string(blobs)
 						stateKey := fmt.Sprintf("%s/%d", taskInfoPrefix, rt.ID())
 						saves[stateKey] = strconv.Itoa(int(taskUndo))
 						reSchedID = append(reSchedID, rt.ID())
@@ -595,6 +612,7 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task)
 				err = scheduler.client.MultiSaveAndRemove(saves, removes)
 				if err != nil {
 					log.Error("waitActivateTaskDone: error when save and remove task from etcd")
+					//TODO::xige-16 deal error when save meta failed
 				}
 				log.Debug("waitActivateTaskDone: delete failed active task and save reScheduled task to etcd", zap.Int64("failed taskID", t.ID()), zap.Int64s("reScheduled taskIDs", reSchedID))
 

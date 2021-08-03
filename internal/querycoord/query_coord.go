@@ -85,18 +85,7 @@ func (qc *QueryCoord) Init() error {
 		}
 		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
 		qc.kvClient = etcdKV
-		metaKV, err := newMeta(etcdKV)
-		if err != nil {
-			return err
-		}
-		qc.meta = metaKV
-		qc.cluster, err = newQueryNodeCluster(metaKV, etcdKV)
-		if err != nil {
-			return err
-		}
-
-		qc.scheduler, err = NewTaskScheduler(qc.loopCtx, metaKV, qc.cluster, etcdKV, qc.rootCoordClient, qc.dataCoordClient)
-		return err
+		return nil
 	}
 	log.Debug("query coordinator try to connect etcd")
 	err := retry.Do(qc.loopCtx, connectEtcdFn, retry.Attempts(300))
@@ -105,6 +94,24 @@ func (qc *QueryCoord) Init() error {
 		return err
 	}
 	log.Debug("query coordinator try to connect etcd success")
+	qc.meta, err = newMeta(qc.kvClient)
+	if err != nil {
+		log.Error("query coordinator init meta failed", zap.Error(err))
+		return err
+	}
+
+	qc.cluster, err = newQueryNodeCluster(qc.meta, qc.kvClient)
+	if err != nil {
+		log.Error("query coordinator init cluster failed", zap.Error(err))
+		return err
+	}
+
+	qc.scheduler, err = NewTaskScheduler(qc.loopCtx, qc.meta, qc.cluster, qc.kvClient, qc.rootCoordClient, qc.dataCoordClient)
+	if err != nil {
+		log.Error("query coordinator init task scheduler failed", zap.Error(err))
+		return err
+	}
+
 	return nil
 }
 
