@@ -19,7 +19,6 @@ import (
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/logutil"
-	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -237,11 +236,12 @@ func (s *Server) startSegmentManager() {
 
 func (s *Server) initMeta() error {
 	connectEtcdFn := func() error {
-		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 		if err != nil {
 			return err
 		}
-		s.kvClient = etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+
+		s.kvClient = etcdKV
 		s.meta, err = newMeta(s.kvClient)
 		if err != nil {
 			return err

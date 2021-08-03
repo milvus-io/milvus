@@ -18,14 +18,14 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
+
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"go.etcd.io/etcd/clientv3"
+	"github.com/milvus-io/milvus/internal/types"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/types"
-	"github.com/stretchr/testify/assert"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
 type indexNodeMock struct {
@@ -33,14 +33,13 @@ type indexNodeMock struct {
 }
 
 func (in *indexNodeMock) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
-	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	indexMeta := indexpb.IndexMeta{}
+	etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 	if err != nil {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		}, err
 	}
-	indexMeta := indexpb.IndexMeta{}
-	etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
 	_, values, versions, err := etcdKV.LoadWithPrefix2(req.MetaPath)
 	if err != nil {
 		return &commonpb.Status{

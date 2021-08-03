@@ -25,7 +25,6 @@ import (
 
 	"github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/golang/protobuf/proto"
-	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -104,11 +103,10 @@ func (i *IndexCoord) Init() error {
 	log.Debug("IndexCoord", zap.Any("etcd endpoints", Params.EtcdEndpoints))
 
 	connectEtcdFn := func() error {
-		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 		if err != nil {
 			return err
 		}
-		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
 		metakv, err := NewMetaTable(etcdKV)
 		if err != nil {
 			return err
@@ -145,7 +143,12 @@ func (i *IndexCoord) Init() error {
 
 	//init idAllocator
 	kvRootPath := Params.KvRootPath
-	i.idAllocator = allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(Params.EtcdEndpoints, kvRootPath, "index_gid"))
+	etcdKV, err := tsoutil.NewTSOKVBase(Params.EtcdEndpoints, kvRootPath, "index_gid")
+	if err != nil {
+		log.Debug("IndexCoord TSOKVBase initialize failed", zap.Error(err))
+	}
+
+	i.idAllocator = allocator.NewGlobalIDAllocator("idTimestamp", etcdKV)
 	if err := i.idAllocator.Initialize(); err != nil {
 		log.Debug("IndexCoord idAllocator initialize failed", zap.Error(err))
 		return err

@@ -22,7 +22,6 @@ import (
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/stretchr/testify/assert"
-	"go.etcd.io/etcd/clientv3"
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -1028,11 +1027,10 @@ func initRmq(name string) *etcdkv.EtcdKV {
 		endpoints = "localhost:2379"
 	}
 	etcdEndpoints := strings.Split(endpoints, ",")
-	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
+	etcdKV, err := etcdkv.NewEtcdKV(etcdEndpoints, "/etcd/test/root")
 	if err != nil {
 		log.Fatalf("New clientv3 error = %v", err)
 	}
-	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
