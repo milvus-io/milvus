@@ -85,6 +85,7 @@ func (qc *QueryCoord) Init() error {
 		}
 		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
 		qc.kvClient = etcdKV
+		return nil
 	}
 	log.Debug("query coordinator try to connect etcd")
 	err := retry.Do(qc.loopCtx, connectEtcdFn, retry.Attempts(300))
