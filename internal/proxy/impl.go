@@ -1593,6 +1593,81 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 		return node.Retrieve(ctx, retrieveRequest)
 	}
 
+	// the vectors retrieved are random order, we need re-arrange the vectors by the order of input ids
+	arrangeFunc := func(ids *milvuspb.VectorIDs, retrievedFields []*schemapb.FieldData) *schemapb.VectorField {
+		var retrievedIds *schemapb.ScalarField
+		var retrievedVectors *schemapb.VectorField
+		for _, fieldData := range retrievedFields {
+			if fieldData.FieldName == ids.FieldName {
+				retrievedVectors = fieldData.GetVectors()
+				break
+			}
+			if fieldData.Type == schemapb.DataType_Int64 {
+				retrievedIds = fieldData.GetScalars()
+			}
+		}
+
+		if retrievedIds == nil || retrievedVectors == nil {
+			return nil
+		}
+
+		dict := make(map[int64]int)
+		for index, id := range retrievedIds.GetLongData().Data {
+			dict[id] = index
+		}
+
+		inputIds := ids.IdArray.GetIntId().Data
+		if retrievedVectors.GetFloatVector() != nil {
+			floatArr := retrievedVectors.GetFloatVector().Data
+			element := retrievedVectors.GetDim()
+			result := make([]float32, 0)
+			for _, id := range inputIds {
+				index, ok := dict[id]
+				if !ok {
+					log.Error("id not found in CalcDistance", zap.Int64("id", id))
+					return nil
+				}
+				result = append(result, floatArr[int64(index)*element:int64(index+1)*element]...)
+			}
+
+			return &schemapb.VectorField{
+				Dim: int64(element),
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{
+						Data: result,
+					},
+				},
+			}
+		}
+
+		if retrievedVectors.GetBinaryVector() != nil {
+			binaryArr := retrievedVectors.GetBinaryVector()
+			element := retrievedVectors.GetDim()
+			if element%8 != 0 {
+				element = element + 8 - element%8
+			}
+
+			result := make([]byte, 0)
+			for _, id := range inputIds {
+				index, ok := dict[id]
+				if !ok {
+					log.Error("id not found in CalcDistance", zap.Int64("id", id))
+					return nil
+				}
+				result = append(result, binaryArr[int64(index)*element:int64(index+1)*element]...)
+			}
+
+			return &schemapb.VectorField{
+				Dim: int64(element) * 8,
+				Data: &schemapb.VectorField_BinaryVector{
+					BinaryVector: result,
+				},
+			}
+		}
+
+		return nil
+	}
+
 	vectorsLeft := request.GetOpLeft().GetDataArray()
 	opLeft := request.GetOpLeft().GetIdArray()
 	if opLeft != nil {
@@ -1606,12 +1681,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			}, nil
 		}
 
-		for _, fieldData := range result.FieldsData {
-			if fieldData.FieldName == opLeft.FieldName {
-				vectorsLeft = fieldData.GetVectors()
-				break
-			}
-		}
+		vectorsLeft = arrangeFunc(opLeft, result.FieldsData)
 	}
 
 	if vectorsLeft == nil {
@@ -1636,12 +1706,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			}, nil
 		}
 
-		for _, fieldData := range result.FieldsData {
-			if fieldData.FieldName == opRight.FieldName {
-				vectorsRight = fieldData.GetVectors()
-				break
-			}
-		}
+		vectorsRight = arrangeFunc(opRight, result.FieldsData)
 	}
 
 	if vectorsRight == nil {
@@ -1653,7 +1718,16 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 		}, nil
 	}
 
-	if vectorsLeft.Dim == vectorsRight.Dim && vectorsLeft.GetFloatVector() != nil && vectorsRight.GetFloatVector() != nil {
+	if vectorsLeft.Dim != vectorsRight.Dim {
+		return &milvuspb.CalcDistanceResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "Vectors dimension is not equal",
+			},
+		}, nil
+	}
+
+	if vectorsLeft.GetFloatVector() != nil && vectorsRight.GetFloatVector() != nil {
 		distances, err := distance.CalcFloatDistance(vectorsLeft.Dim, vectorsLeft.GetFloatVector().Data, vectorsRight.GetFloatVector().Data, metric)
 		if err != nil {
 			return &milvuspb.CalcDistanceResults{
@@ -1674,7 +1748,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 		}, nil
 	}
 
-	if vectorsLeft.Dim == vectorsRight.Dim && vectorsLeft.GetBinaryVector() != nil && vectorsRight.GetBinaryVector() != nil {
+	if vectorsLeft.GetBinaryVector() != nil && vectorsRight.GetBinaryVector() != nil {
 		hamming, err := distance.CalcHammingDistance(vectorsLeft.Dim, vectorsLeft.GetBinaryVector(), vectorsRight.GetBinaryVector())
 		if err != nil {
 			return &milvuspb.CalcDistanceResults{
