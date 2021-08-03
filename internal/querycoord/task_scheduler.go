@@ -432,9 +432,9 @@ func (scheduler *TaskScheduler) Enqueue(tasks []task) {
 		kvs[stateKey] = strconv.Itoa(int(taskUndo))
 		err = scheduler.client.MultiSave(kvs)
 		if err != nil {
-			log.Error("error when save trigger task to etcd", zap.Int64("taskID", t.ID()))
+			log.Error("error when save trigger task to etcd", zap.Int64("taskID", t.ID()), zap.String("error", err.Error()))
 		}
-		log.Debug("EnQueue a triggerTask and save to etcd", zap.Int64("taskID", t.ID()), zap.Any("error", err.Error()))
+		log.Debug("EnQueue a triggerTask and save to etcd", zap.Int64("taskID", t.ID()))
 		t.SetState(taskUndo)
 	}
 
