@@ -88,20 +88,6 @@ Search(CSegmentInterface c_segment,
     }
 }
 
-CStatus
-FillTargetEntry(CSegmentInterface c_segment, CSearchPlan c_plan, CSearchResult c_result) {
-    auto segment = (milvus::segcore::SegmentInterface*)c_segment;
-    auto plan = (milvus::query::Plan*)c_plan;
-    auto result = (milvus::SearchResult*)c_result;
-
-    try {
-        segment->FillTargetEntry(plan, *result);
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
-    }
-}
-
 int64_t
 GetMemoryUsageInBytes(CSegmentInterface c_segment) {
     auto segment = (milvus::segcore::SegmentInterface*)c_segment;

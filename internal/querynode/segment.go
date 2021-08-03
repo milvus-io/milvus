@@ -312,26 +312,6 @@ func (s *Segment) getEntityByIds(plan *RetrievePlan) (*segcorepb.RetrieveResults
 	return result, nil
 }
 
-func (s *Segment) fillTargetEntry(plan *SearchPlan, result *SearchResult) error {
-	s.segPtrMu.RLock()
-	defer s.segPtrMu.RUnlock()
-	if s.segmentPtr == nil {
-		return errors.New("null seg core pointer")
-	}
-
-	log.Debug("segment fill target entry, ", zap.Int64("segment ID = ", s.segmentID))
-	var status = C.FillTargetEntry(s.segmentPtr, plan.cSearchPlan, result.cSearchResult)
-	errorCode := status.error_code
-
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return errors.New("FillTargetEntry failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
-	}
-
-	return nil
-}
-
 //-------------------------------------------------------------------------------------- index info interface
 func (s *Segment) setIndexName(fieldID int64, name string) error {
 	s.paramMutex.Lock()

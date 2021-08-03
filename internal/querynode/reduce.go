@@ -23,10 +23,7 @@ import "C"
 import (
 	"errors"
 	"strconv"
-	"sync"
 	"unsafe"
-
-	"github.com/milvus-io/milvus/internal/log"
 )
 
 type SearchResult struct {
@@ -37,7 +34,7 @@ type MarshaledHits struct {
 	cMarshaledHits C.CMarshaledHits
 }
 
-func reduceSearchResults(searchResults []*SearchResult, numSegments int64) error {
+func reduceSearchResults(plan *SearchPlan, searchResults []*SearchResult, numSegments int64) error {
 	cSearchResults := make([]C.CSearchResult, 0)
 	for _, res := range searchResults {
 		cSearchResults = append(cSearchResults, res.cSearchResult)
@@ -45,7 +42,7 @@ func reduceSearchResults(searchResults []*SearchResult, numSegments int64) error
 	cSearchResultPtr := (*C.CSearchResult)(&cSearchResults[0])
 	cNumSegments := C.long(numSegments)
 
-	status := C.ReduceSearchResults(cSearchResultPtr, cNumSegments)
+	status := C.ReduceSearchResults(plan.cSearchPlan, cSearchResultPtr, cNumSegments)
 	errorCode := status.error_code
 
 	if errorCode != 0 {
@@ -53,23 +50,6 @@ func reduceSearchResults(searchResults []*SearchResult, numSegments int64) error
 		defer C.free(unsafe.Pointer(status.error_msg))
 		return errors.New("reduceSearchResults failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
 	}
-	return nil
-}
-
-func fillTargetEntry(plan *SearchPlan, searchResults []*SearchResult, matchedSegments []*Segment) error {
-	wg := &sync.WaitGroup{}
-	//fmt.Println(inReduced)
-	for i := range matchedSegments {
-		wg.Add(1)
-		go func(i int) {
-			err := matchedSegments[i].fillTargetEntry(plan, searchResults[i])
-			if err != nil {
-				log.Warn(err.Error())
-			}
-			wg.Done()
-		}(i)
-	}
-	wg.Wait()
 	return nil
 }
 

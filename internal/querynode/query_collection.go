@@ -843,7 +843,6 @@ func (q *queryCollection) search(msg queryMsg) error {
 	}
 
 	searchResults := make([]*SearchResult, 0)
-	matchedSegments := make([]*Segment, 0)
 	sealedSegmentSearched := make([]UniqueID, 0)
 
 	// historical search
@@ -853,7 +852,6 @@ func (q *queryCollection) search(msg queryMsg) error {
 		return err1
 	}
 	searchResults = append(searchResults, hisSearchResults...)
-	matchedSegments = append(matchedSegments, hisSegmentResults...)
 	for _, seg := range hisSegmentResults {
 		sealedSegmentSearched = append(sealedSegmentSearched, seg.segmentID)
 	}
@@ -863,14 +861,12 @@ func (q *queryCollection) search(msg queryMsg) error {
 	var err2 error
 	for _, channel := range collection.getVChannels() {
 		var strSearchResults []*SearchResult
-		var strSegmentResults []*Segment
-		strSearchResults, strSegmentResults, err2 = q.streaming.search(searchRequests, collectionID, searchMsg.PartitionIDs, channel, plan, travelTimestamp)
+		strSearchResults, err2 = q.streaming.search(searchRequests, collectionID, searchMsg.PartitionIDs, channel, plan, travelTimestamp)
 		if err2 != nil {
 			log.Warn(err2.Error())
 			return err2
 		}
 		searchResults = append(searchResults, strSearchResults...)
-		matchedSegments = append(matchedSegments, strSegmentResults...)
 	}
 	tr.Record("streaming search done")
 
@@ -941,13 +937,8 @@ func (q *queryCollection) search(msg queryMsg) error {
 
 	numSegment := int64(len(searchResults))
 	var marshaledHits *MarshaledHits = nil
-	err = reduceSearchResults(searchResults, numSegment)
+	err = reduceSearchResults(plan, searchResults, numSegment)
 	sp.LogFields(oplog.String("statistical time", "reduceSearchResults end"))
-	if err != nil {
-		return err
-	}
-	err = fillTargetEntry(plan, searchResults, matchedSegments)
-	sp.LogFields(oplog.String("statistical time", "fillTargetEntry end"))
 	if err != nil {
 		return err
 	}

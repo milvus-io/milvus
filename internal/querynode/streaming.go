@@ -61,15 +61,10 @@ func (s *streaming) close() {
 	s.replica.freeAll()
 }
 
-func (s *streaming) search(searchReqs []*searchRequest,
-	collID UniqueID,
-	partIDs []UniqueID,
-	vChannel Channel,
-	plan *SearchPlan,
-	searchTs Timestamp) ([]*SearchResult, []*Segment, error) {
+func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, vChannel Channel,
+	plan *SearchPlan, searchTs Timestamp) ([]*SearchResult, error) {
 
 	searchResults := make([]*SearchResult, 0)
-	segmentResults := make([]*Segment, 0)
 
 	// get streaming partition ids
 	var searchPartIDs []UniqueID
@@ -77,10 +72,10 @@ func (s *streaming) search(searchReqs []*searchRequest,
 		strPartIDs, err := s.replica.getPartitionIDs(collID)
 		if len(strPartIDs) == 0 {
 			// no partitions in collection, do empty search
-			return nil, nil, nil
+			return nil, nil
 		}
 		if err != nil {
-			return searchResults, segmentResults, err
+			return searchResults, err
 		}
 		log.Debug("no partition specified, search all partitions",
 			zap.Any("collectionID", collID),
@@ -104,22 +99,20 @@ func (s *streaming) search(searchReqs []*searchRequest,
 
 	col, err := s.replica.getCollectionByID(collID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// all partitions have been released
 	if len(searchPartIDs) == 0 && col.getLoadType() == loadTypePartition {
-		return nil, nil, errors.New("partitions have been released , collectionID = " +
-			fmt.Sprintln(collID) +
-			"target partitionIDs = " +
-			fmt.Sprintln(partIDs))
+		err = errors.New("partitions have been released , collectionID = " + fmt.Sprintln(collID) + "target partitionIDs = " + fmt.Sprintln(partIDs))
+		return nil, err
 	}
 
 	if len(searchPartIDs) == 0 && col.getLoadType() == loadTypeCollection {
 		if err = col.checkReleasedPartitions(partIDs); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		return nil, nil, nil
+		return nil, nil
 	}
 
 	log.Debug("doing search in streaming",
@@ -144,13 +137,13 @@ func (s *streaming) search(searchReqs []*searchRequest,
 		)
 		if err != nil {
 			log.Warn(err.Error())
-			return searchResults, segmentResults, err
+			return searchResults, err
 		}
 		for _, segID := range segIDs {
 			seg, err := s.replica.getSegmentByID(segID)
 			if err != nil {
 				log.Warn(err.Error())
-				return searchResults, segmentResults, err
+				return searchResults, err
 			}
 
 			// TSafe less than searchTs means this vChannel is not available
@@ -175,12 +168,11 @@ func (s *streaming) search(searchReqs []*searchRequest,
 
 			searchResult, err := seg.search(plan, searchReqs, []Timestamp{searchTs})
 			if err != nil {
-				return searchResults, segmentResults, err
+				return searchResults, err
 			}
 			searchResults = append(searchResults, searchResult)
-			segmentResults = append(segmentResults, seg)
 		}
 	}
 
-	return searchResults, segmentResults, nil
+	return searchResults, nil
 }

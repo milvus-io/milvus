@@ -15,6 +15,7 @@ extern "C" {
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "segcore/plan_c.h"
 #include "segcore/segment_c.h"
 #include "common/type_c.h"
 
@@ -27,7 +28,7 @@ int
 MergeInto(int64_t num_queries, int64_t topk, float* distances, int64_t* uids, float* new_distances, int64_t* new_uids);
 
 CStatus
-ReduceSearchResults(CSearchResult* search_results, int64_t num_segments);
+ReduceSearchResults(CSearchPlan c_plan, CSearchResult* search_results, int64_t num_segments);
 
 CStatus
 ReorganizeSearchResults(CMarshaledHits* c_marshaled_hits, CSearchResult* c_search_results, int64_t num_segments);

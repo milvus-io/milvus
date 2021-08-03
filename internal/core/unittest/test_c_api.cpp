@@ -502,10 +502,8 @@ TEST(CApiTest, Reduce) {
     results.push_back(res1);
     results.push_back(res2);
 
-    status = ReduceSearchResults(results.data(), results.size());
+    status = ReduceSearchResults(plan, results.data(), results.size());
     assert(status.error_code == Success);
-    FillTargetEntry(segment, plan, res1);
-    FillTargetEntry(segment, plan, res2);
     void* reorganize_search_result = nullptr;
     status = ReorganizeSearchResults(&reorganize_search_result, results.data(), results.size());
     assert(status.error_code == Success);
@@ -581,10 +579,8 @@ TEST(CApiTest, ReduceSearchWithExpr) {
     results.push_back(res1);
     results.push_back(res2);
 
-    status = ReduceSearchResults(results.data(), results.size());
+    status = ReduceSearchResults(plan, results.data(), results.size());
     assert(status.error_code == Success);
-    FillTargetEntry(segment, plan, res1);
-    FillTargetEntry(segment, plan, res2);
     void* reorganize_search_result = nullptr;
     status = ReorganizeSearchResults(&reorganize_search_result, results.data(), results.size());
     assert(status.error_code == Success);
@@ -1916,9 +1912,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
     std::vector<CSearchResult> results;
     results.push_back(c_search_result_on_bigIndex);
-    status = ReduceSearchResults(results.data(), results.size());
+    status = ReduceSearchResults(plan, results.data(), results.size());
     assert(status.error_code == Success);
-    FillTargetEntry(segment, plan, c_search_result_on_bigIndex);
 
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {
@@ -2067,9 +2062,8 @@ vector_anns: <
 
     std::vector<CSearchResult> results;
     results.push_back(c_search_result_on_bigIndex);
-    status = ReduceSearchResults(results.data(), results.size());
+    status = ReduceSearchResults(plan, results.data(), results.size());
     assert(status.error_code == Success);
-    FillTargetEntry(segment, plan, c_search_result_on_bigIndex);
 
     auto search_result_on_bigIndex = (*(SearchResult*)c_search_result_on_bigIndex);
     for (int i = 0; i < num_queries; ++i) {

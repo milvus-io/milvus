@@ -11,10 +11,12 @@
 
 #include <vector>
 #include <exceptions/EasyAssert.h>
-#include "segcore/reduce_c.h"
 
+#include "query/Plan.h"
+#include "segcore/reduce_c.h"
 #include "segcore/Reduce.h"
 #include "segcore/ReduceStructure.h"
+#include "segcore/SegmentInterface.h"
 #include "common/Types.h"
 #include "pb/milvus.pb.h"
 
@@ -105,8 +107,9 @@ ResetSearchResult(std::vector<std::vector<int64_t>>& search_records, std::vector
 }
 
 CStatus
-ReduceSearchResults(CSearchResult* c_search_results, int64_t num_segments) {
+ReduceSearchResults(CSearchPlan c_plan, CSearchResult* c_search_results, int64_t num_segments) {
     try {
+        auto plan = (milvus::query::Plan*)c_plan;
         std::vector<SearchResult*> search_results;
         for (int i = 0; i < num_segments; ++i) {
             search_results.push_back((SearchResult*)c_search_results[i]);
@@ -119,6 +122,13 @@ ReduceSearchResults(CSearchResult* c_search_results, int64_t num_segments) {
             GetResultData(search_records, search_results, i, topk);
         }
         ResetSearchResult(search_records, search_results);
+
+        for (int i = 0; i < num_segments; ++i) {
+            auto search_result = search_results[i];
+            auto segment = (milvus::segcore::SegmentInterface*)(search_result->segment_);
+            segment->FillTargetEntry(plan, *search_result);
+        }
+
         auto status = CStatus();
         status.error_code = Success;
         status.error_msg = "";
