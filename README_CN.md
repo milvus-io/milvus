@@ -118,17 +118,17 @@ $ make milvus
   <tr>
     <td width="30%">
       <a href="https://zilliz.com/milvus-demos">
-        <img src="https://zillizstorage.blob.core.windows.net/zilliz-assets/zilliz-assets/assets/image_search_59a64e4f22.gif" />
+        <img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/image_search_59a64e4f22.gif" />
       </a>
     </td>
     <td width="30%">
 <a href="https://zilliz.com/milvus-demos">
-<img src="https://zillizstorage.blob.core.windows.net/zilliz-assets/zilliz-assets/assets/qa_df5ee7bd83.gif" />
+<img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/qa_df5ee7bd83.gif" />
 </a>
     </td>
     <td width="30%">
 <a href="https://zilliz.com/milvus-demos">
-<img src="https://zillizstorage.blob.core.windows.net/zilliz-assets/zilliz-assets/assets/mole_search_76f8340572.gif" />
+<img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/mole_search_76f8340572.gif" />
 </a>
     </td>
   </tr>
@@ -354,7 +354,7 @@ Milvus 训练营能够帮助你了解向量数据库的操作及各种应用场�
 - [Bilibili](http://space.bilibili.com/478166626)
 - Zilliz 技术交流微信群
 
-<img src="https://zillizstorage.blob.core.windows.net/zilliz-assets/zilliz-assets/assets/wechat_2abac21f5a.png" alt="Wechat QR Code">
+<img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/wechat_2abac21f5a.png" alt="Wechat QR Code">
 
 ## 加入我们
 
