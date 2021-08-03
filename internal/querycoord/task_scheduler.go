@@ -217,7 +217,8 @@ func (scheduler *TaskScheduler) reloadFromKV() error {
 		state := taskState(value)
 		taskInfos[taskID] = state
 		if _, ok := triggerTasks[taskID]; !ok {
-			return errors.New("taskStateInfo and triggerTaskInfo are inconsistent")
+			log.Error("reloadFromKV: taskStateInfo and triggerTaskInfo are inconsistent")
+			continue
 		}
 		triggerTasks[taskID].SetState(state)
 	}
