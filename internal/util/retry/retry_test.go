@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lingdor/stackerror"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -76,7 +77,7 @@ func TestAllError(t *testing.T) {
 	ctx := context.Background()
 
 	testFn := func() error {
-		return fmt.Errorf("some error")
+		return stackerror.New("some error")
 	}
 
 	err := Do(ctx, testFn, Attempts(3))
