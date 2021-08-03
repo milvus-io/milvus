@@ -33,7 +33,46 @@ const (
 	queryChannelMetaPrefix = "queryCoord-queryChannel"
 )
 
-type meta struct {
+type Meta interface {
+	reloadFromKV() error
+
+	showCollections() []*querypb.CollectionInfo
+	hasCollection(collectionID UniqueID) bool
+	getCollectionInfoByID(collectionID UniqueID) (*querypb.CollectionInfo, error)
+	addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error
+	releaseCollection(collectionID UniqueID) error
+
+	addPartition(collectionID UniqueID, partitionID UniqueID) error
+	showPartitions(collectionID UniqueID) ([]*querypb.PartitionStates, error)
+	hasPartition(collectionID UniqueID, partitionID UniqueID) bool
+	hasReleasePartition(collectionID UniqueID, partitionID UniqueID) bool
+	releasePartition(collectionID UniqueID, partitionID UniqueID) error
+
+	deleteSegmentInfoByID(segmentID UniqueID) error
+	deleteSegmentInfoByNodeID(nodeID UniqueID) error
+	setSegmentInfo(segmentID UniqueID, info *querypb.SegmentInfo) error
+	hasSegmentInfo(segmentID UniqueID) bool
+	showSegmentInfos(collectionID UniqueID, partitionIDs []UniqueID) []*querypb.SegmentInfo
+	getSegmentInfoByID(segmentID UniqueID) (*querypb.SegmentInfo, error)
+
+	getPartitionStatesByID(collectionID UniqueID, partitionID UniqueID) (*querypb.PartitionStates, error)
+
+	hasWatchedDmChannel(collectionID UniqueID, channelID string) (bool, error)
+	getDmChannelsByCollectionID(collectionID UniqueID) ([]string, error)
+	getDmChannelsByNodeID(collectionID UniqueID, nodeID int64) ([]string, error)
+	addDmChannel(collectionID UniqueID, nodeID int64, channels []string) error
+	removeDmChannel(collectionID UniqueID, nodeID int64, channels []string) error
+
+	getQueryChannelInfoByID(collectionID UniqueID) (*querypb.QueryChannelInfo, error)
+	GetQueryChannel(collectionID UniqueID) (string, string)
+
+	setLoadType(collectionID UniqueID, loadType querypb.LoadType) error
+	getLoadType(collectionID UniqueID) (querypb.LoadType, error)
+	setLoadPercentage(collectionID UniqueID, partitionID UniqueID, percentage int64, loadType querypb.LoadType) error
+	printMeta()
+}
+
+type MetaReplica struct {
 	client *etcdkv.EtcdKV // client of a reliable kv service, i.e. etcd client
 
 	sync.RWMutex
@@ -41,21 +80,19 @@ type meta struct {
 	segmentInfos      map[UniqueID]*querypb.SegmentInfo
 	queryChannelInfos map[UniqueID]*querypb.QueryChannelInfo
 
-	partitionStates map[UniqueID]querypb.PartitionState
+	//partitionStates map[UniqueID]*querypb.PartitionStates
 }
 
-func newMeta(kv *etcdkv.EtcdKV) (*meta, error) {
+func newMeta(kv *etcdkv.EtcdKV) (Meta, error) {
 	collectionInfos := make(map[UniqueID]*querypb.CollectionInfo)
 	segmentInfos := make(map[UniqueID]*querypb.SegmentInfo)
 	queryChannelInfos := make(map[UniqueID]*querypb.QueryChannelInfo)
-	partitionStates := make(map[UniqueID]querypb.PartitionState)
 
-	m := &meta{
+	m := &MetaReplica{
 		client:            kv,
 		collectionInfos:   collectionInfos,
 		segmentInfos:      segmentInfos,
 		queryChannelInfos: queryChannelInfos,
-		partitionStates:   partitionStates,
 	}
 
 	err := m.reloadFromKV()
@@ -66,7 +103,7 @@ func newMeta(kv *etcdkv.EtcdKV) (*meta, error) {
 	return m, nil
 }
 
-func (m *meta) reloadFromKV() error {
+func (m *MetaReplica) reloadFromKV() error {
 	collectionKeys, collectionValues, err := m.client.LoadWithPrefix(collectionMetaPrefix)
 	if err != nil {
 		return err
@@ -122,30 +159,34 @@ func (m *meta) reloadFromKV() error {
 	return nil
 }
 
-func (m *meta) showCollections() []UniqueID {
+func (m *MetaReplica) showCollections() []*querypb.CollectionInfo {
 	m.RLock()
 	defer m.RUnlock()
 
-	collections := make([]UniqueID, 0)
-	for id := range m.collectionInfos {
-		collections = append(collections, id)
+	collections := make([]*querypb.CollectionInfo, 0)
+	for _, info := range m.collectionInfos {
+		collections = append(collections, proto.Clone(info).(*querypb.CollectionInfo))
 	}
 	return collections
 }
 
-func (m *meta) showPartitions(collectionID UniqueID) ([]UniqueID, error) {
+func (m *MetaReplica) showPartitions(collectionID UniqueID) ([]*querypb.PartitionStates, error) {
 	m.RLock()
 	defer m.RUnlock()
 
 	//TODO::should update after load collection
+	results := make([]*querypb.PartitionStates, 0)
 	if info, ok := m.collectionInfos[collectionID]; ok {
-		return info.PartitionIDs, nil
+		for _, state := range info.PartitionStates {
+			results = append(results, proto.Clone(state).(*querypb.PartitionStates))
+		}
+		return results, nil
 	}
 
 	return nil, errors.New("showPartitions: can't find collection in collectionInfos")
 }
 
-func (m *meta) hasCollection(collectionID UniqueID) bool {
+func (m *MetaReplica) hasCollection(collectionID UniqueID) bool {
 	m.RLock()
 	defer m.RUnlock()
 
@@ -156,7 +197,7 @@ func (m *meta) hasCollection(collectionID UniqueID) bool {
 	return false
 }
 
-func (m *meta) hasPartition(collectionID UniqueID, partitionID UniqueID) bool {
+func (m *MetaReplica) hasPartition(collectionID UniqueID, partitionID UniqueID) bool {
 	m.RLock()
 	defer m.RUnlock()
 
@@ -171,7 +212,7 @@ func (m *meta) hasPartition(collectionID UniqueID, partitionID UniqueID) bool {
 	return false
 }
 
-func (m *meta) hasReleasePartition(collectionID UniqueID, partitionID UniqueID) bool {
+func (m *MetaReplica) hasReleasePartition(collectionID UniqueID, partitionID UniqueID) bool {
 	m.RLock()
 	defer m.RUnlock()
 
@@ -186,41 +227,40 @@ func (m *meta) hasReleasePartition(collectionID UniqueID, partitionID UniqueID) 
 	return false
 }
 
-func (m *meta) addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error {
+func (m *MetaReplica) addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error {
 	m.Lock()
 	defer m.Unlock()
 
 	if _, ok := m.collectionInfos[collectionID]; !ok {
 		partitions := make([]UniqueID, 0)
+		partitionStates := make([]*querypb.PartitionStates, 0)
 		channels := make([]*querypb.DmChannelInfo, 0)
 		newCollection := &querypb.CollectionInfo{
-			CollectionID: collectionID,
-			PartitionIDs: partitions,
-			ChannelInfos: channels,
-			Schema:       schema,
+			CollectionID:    collectionID,
+			PartitionIDs:    partitions,
+			PartitionStates: partitionStates,
+			ChannelInfos:    channels,
+			Schema:          schema,
 		}
 		m.collectionInfos[collectionID] = newCollection
-		err := m.saveCollectionInfo(collectionID, newCollection)
+		err := saveGlobalCollectionInfo(collectionID, newCollection, m.client)
 		if err != nil {
 			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+			return err
 		}
-		log.Debug("add collection",
-			zap.Any("collectionID", collectionID),
-		)
-		return nil
 	}
 
-	return errors.New("addCollection: collection already exists")
+	return nil
 }
 
-func (m *meta) addPartition(collectionID UniqueID, partitionID UniqueID) error {
+func (m *MetaReplica) addPartition(collectionID UniqueID, partitionID UniqueID) error {
 	m.Lock()
 	defer m.Unlock()
 	if col, ok := m.collectionInfos[collectionID]; ok {
-		log.Debug("add a  partition to meta...", zap.Int64s("partitionIDs", col.PartitionIDs))
+		log.Debug("add a  partition to MetaReplica...", zap.Int64s("partitionIDs", col.PartitionIDs))
 		for _, id := range col.PartitionIDs {
 			if id == partitionID {
-				return errors.New("addPartition: partition already exists in collectionInfos")
+				return nil
 			}
 		}
 		col.PartitionIDs = append(col.PartitionIDs, partitionID)
@@ -231,72 +271,94 @@ func (m *meta) addPartition(collectionID UniqueID, partitionID UniqueID) error {
 			}
 		}
 		col.ReleasedPartitionIDs = releasedPartitionIDs
-		m.partitionStates[partitionID] = querypb.PartitionState_NotPresent
-		log.Debug("add a  partition to meta", zap.Int64s("partitionIDs", col.PartitionIDs))
-		err := m.saveCollectionInfo(collectionID, col)
+		col.PartitionStates = append(col.PartitionStates, &querypb.PartitionStates{
+			PartitionID: partitionID,
+			State:       querypb.PartitionState_NotPresent,
+		})
+
+		log.Debug("add a  partition to MetaReplica", zap.Int64s("partitionIDs", col.PartitionIDs))
+		err := saveGlobalCollectionInfo(collectionID, col, m.client)
 		if err != nil {
 			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+			return err
 		}
 		return nil
 	}
 	return errors.New("addPartition: can't find collection when add partition")
 }
 
-func (m *meta) deleteSegmentInfoByID(segmentID UniqueID) {
+func (m *MetaReplica) deleteSegmentInfoByID(segmentID UniqueID) error {
 	m.Lock()
 	defer m.Unlock()
 
 	if _, ok := m.segmentInfos[segmentID]; ok {
-		err := m.removeSegmentInfo(segmentID)
+		err := removeSegmentInfo(segmentID, m.client)
 		if err != nil {
 			log.Error("remove segmentInfo error", zap.Any("error", err.Error()), zap.Int64("segmentID", segmentID))
+			return err
 		}
 		delete(m.segmentInfos, segmentID)
 	}
+
+	return nil
 }
 
-func (m *meta) deleteSegmentInfoByNodeID(nodeID UniqueID) {
+func (m *MetaReplica) deleteSegmentInfoByNodeID(nodeID UniqueID) error {
 	m.Lock()
 	defer m.Unlock()
 
 	for segmentID, info := range m.segmentInfos {
 		if info.NodeID == nodeID {
-			err := m.removeSegmentInfo(segmentID)
+			err := removeSegmentInfo(segmentID, m.client)
 			if err != nil {
 				log.Error("remove segmentInfo error", zap.Any("error", err.Error()), zap.Int64("segmentID", segmentID))
+				return err
 			}
 			delete(m.segmentInfos, segmentID)
 		}
 	}
+
+	return nil
 }
 
-func (m *meta) setSegmentInfo(segmentID UniqueID, info *querypb.SegmentInfo) {
+func (m *MetaReplica) setSegmentInfo(segmentID UniqueID, info *querypb.SegmentInfo) error {
 	m.Lock()
 	defer m.Unlock()
 
-	err := m.saveSegmentInfo(segmentID, info)
+	err := saveSegmentInfo(segmentID, info, m.client)
 	if err != nil {
 		log.Error("save segmentInfo error", zap.Any("error", err.Error()), zap.Int64("segmentID", segmentID))
+		return err
 	}
 	m.segmentInfos[segmentID] = info
+	return nil
 }
 
-func (m *meta) getSegmentInfos(segmentIDs []UniqueID) ([]*querypb.SegmentInfo, error) {
-	m.Lock()
-	defer m.Unlock()
+func (m *MetaReplica) showSegmentInfos(collectionID UniqueID, partitionIDs []UniqueID) []*querypb.SegmentInfo {
+	m.RLock()
+	defer m.RUnlock()
 
+	results := make([]*querypb.SegmentInfo, 0)
 	segmentInfos := make([]*querypb.SegmentInfo, 0)
-	for _, segmentID := range segmentIDs {
-		if info, ok := m.segmentInfos[segmentID]; ok {
+	for _, info := range m.segmentInfos {
+		if info.CollectionID == collectionID {
 			segmentInfos = append(segmentInfos, proto.Clone(info).(*querypb.SegmentInfo))
-			continue
 		}
-		return nil, errors.New("segment not exist")
 	}
-	return segmentInfos, nil
+	if len(partitionIDs) == 0 {
+		return segmentInfos
+	}
+	for _, info := range segmentInfos {
+		for _, partitionID := range partitionIDs {
+			if info.PartitionID == partitionID {
+				results = append(results, info)
+			}
+		}
+	}
+	return results
 }
 
-func (m *meta) hasSegmentInfo(segmentID UniqueID) bool {
+func (m *MetaReplica) hasSegmentInfo(segmentID UniqueID) bool {
 	m.RLock()
 	defer m.RUnlock()
 
@@ -307,19 +369,18 @@ func (m *meta) hasSegmentInfo(segmentID UniqueID) bool {
 	return false
 }
 
-func (m *meta) getSegmentInfoByID(segmentID UniqueID) (*querypb.SegmentInfo, error) {
+func (m *MetaReplica) getSegmentInfoByID(segmentID UniqueID) (*querypb.SegmentInfo, error) {
 	m.Lock()
 	defer m.Unlock()
 
 	if info, ok := m.segmentInfos[segmentID]; ok {
-
 		return proto.Clone(info).(*querypb.SegmentInfo), nil
 	}
 
 	return nil, errors.New("getSegmentInfoByID: can't find segmentID in segmentInfos")
 }
 
-func (m *meta) getCollectionInfoByID(collectionID UniqueID) (*querypb.CollectionInfo, error) {
+func (m *MetaReplica) getCollectionInfoByID(collectionID UniqueID) (*querypb.CollectionInfo, error) {
 	m.Lock()
 	defer m.Unlock()
 
@@ -330,7 +391,7 @@ func (m *meta) getCollectionInfoByID(collectionID UniqueID) (*querypb.Collection
 	return nil, errors.New("getCollectionInfoByID: can't find collectionID in collectionInfo")
 }
 
-func (m *meta) getQueryChannelInfoByID(collectionID UniqueID) (*querypb.QueryChannelInfo, error) {
+func (m *MetaReplica) getQueryChannelInfoByID(collectionID UniqueID) (*querypb.QueryChannelInfo, error) {
 	m.Lock()
 	defer m.Unlock()
 
@@ -341,69 +402,63 @@ func (m *meta) getQueryChannelInfoByID(collectionID UniqueID) (*querypb.QueryCha
 	return nil, errors.New("getQueryChannelInfoByID: can't find collectionID in queryChannelInfo")
 }
 
-func (m *meta) updatePartitionState(partitionID UniqueID, state querypb.PartitionState) error {
-	m.Lock()
-	defer m.Unlock()
-
-	if _, ok := m.partitionStates[partitionID]; ok {
-		m.partitionStates[partitionID] = state
-	}
-
-	return errors.New("updatePartitionState: can't find partition in partitionStates")
-}
-
-func (m *meta) getPartitionStateByID(partitionID UniqueID) (querypb.PartitionState, error) {
+func (m *MetaReplica) getPartitionStatesByID(collectionID UniqueID, partitionID UniqueID) (*querypb.PartitionStates, error) {
 	m.RLock()
 	defer m.RUnlock()
 
-	if state, ok := m.partitionStates[partitionID]; ok {
-		return state, nil
+	if info, ok := m.collectionInfos[collectionID]; ok {
+		for offset, id := range info.PartitionIDs {
+			if id == partitionID {
+				return proto.Clone(info.PartitionStates[offset]).(*querypb.PartitionStates), nil
+			}
+		}
+		return nil, errors.New("getPartitionStateByID: can't find partitionID in partitionStates")
 	}
 
-	return 0, errors.New("getPartitionStateByID: can't find partition in partitionStates")
+	return nil, errors.New("getPartitionStateByID: can't find collectionID in collectionInfo")
 }
 
-func (m *meta) releaseCollection(collectionID UniqueID) {
+func (m *MetaReplica) releaseCollection(collectionID UniqueID) error {
 	m.Lock()
 	defer m.Unlock()
 
-	if info, ok := m.collectionInfos[collectionID]; ok {
-		for _, partitionID := range info.PartitionIDs {
-			delete(m.partitionStates, partitionID)
-		}
-		delete(m.collectionInfos, collectionID)
-	}
+	delete(m.collectionInfos, collectionID)
 	for id, info := range m.segmentInfos {
 		if info.CollectionID == collectionID {
-			err := m.removeSegmentInfo(id)
+			err := removeSegmentInfo(id, m.client)
 			if err != nil {
 				log.Error("remove segmentInfo error", zap.Any("error", err.Error()), zap.Int64("segmentID", id))
+				return err
 			}
 			delete(m.segmentInfos, id)
 		}
 	}
 
 	delete(m.queryChannelInfos, collectionID)
-	err := m.removeCollectionInfo(collectionID)
+	err := removeGlobalCollectionInfo(collectionID, m.client)
 	if err != nil {
 		log.Error("remove collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+		return err
 	}
+
+	return nil
 }
 
-func (m *meta) releasePartition(collectionID UniqueID, partitionID UniqueID) {
+func (m *MetaReplica) releasePartition(collectionID UniqueID, partitionID UniqueID) error {
 	m.Lock()
 	defer m.Unlock()
 
 	if info, ok := m.collectionInfos[collectionID]; ok {
 		newPartitionIDs := make([]UniqueID, 0)
-		for _, id := range info.PartitionIDs {
-			if id == partitionID {
-				delete(m.partitionStates, partitionID)
-			} else {
+		newPartitionStates := make([]*querypb.PartitionStates, 0)
+		for offset, id := range info.PartitionIDs {
+			if id != partitionID {
 				newPartitionIDs = append(newPartitionIDs, id)
+				newPartitionStates = append(newPartitionStates, info.PartitionStates[offset])
 			}
 		}
 		info.PartitionIDs = newPartitionIDs
+		info.PartitionStates = newPartitionStates
 
 		releasedPartitionIDs := make([]UniqueID, 0)
 		for _, id := range info.ReleasedPartitionIDs {
@@ -413,23 +468,27 @@ func (m *meta) releasePartition(collectionID UniqueID, partitionID UniqueID) {
 		}
 		releasedPartitionIDs = append(releasedPartitionIDs, partitionID)
 		info.ReleasedPartitionIDs = releasedPartitionIDs
-		err := m.saveCollectionInfo(collectionID, info)
+		err := saveGlobalCollectionInfo(collectionID, info, m.client)
 		if err != nil {
 			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+			return err
 		}
 	}
 	for id, info := range m.segmentInfos {
 		if info.PartitionID == partitionID {
-			err := m.removeSegmentInfo(id)
+			err := removeSegmentInfo(id, m.client)
 			if err != nil {
 				log.Error("delete segmentInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID), zap.Int64("segmentID", id))
+				return err
 			}
 			delete(m.segmentInfos, id)
 		}
 	}
+
+	return nil
 }
 
-func (m *meta) hasWatchedDmChannel(collectionID UniqueID, channelID string) (bool, error) {
+func (m *MetaReplica) hasWatchedDmChannel(collectionID UniqueID, channelID string) (bool, error) {
 	m.RLock()
 	defer m.RUnlock()
 
@@ -448,7 +507,7 @@ func (m *meta) hasWatchedDmChannel(collectionID UniqueID, channelID string) (boo
 	return false, errors.New("hasWatchedDmChannel: can't find collection in collectionInfos")
 }
 
-func (m *meta) getDmChannelsByCollectionID(collectionID UniqueID) ([]string, error) {
+func (m *MetaReplica) getDmChannelsByCollectionID(collectionID UniqueID) ([]string, error) {
 	m.RLock()
 	defer m.RUnlock()
 
@@ -463,7 +522,7 @@ func (m *meta) getDmChannelsByCollectionID(collectionID UniqueID) ([]string, err
 	return nil, errors.New("getDmChannelsByCollectionID: can't find collection in collectionInfos")
 }
 
-func (m *meta) getDmChannelsByNodeID(collectionID UniqueID, nodeID int64) ([]string, error) {
+func (m *MetaReplica) getDmChannelsByNodeID(collectionID UniqueID, nodeID int64) ([]string, error) {
 	m.RLock()
 	defer m.RUnlock()
 
@@ -480,11 +539,11 @@ func (m *meta) getDmChannelsByNodeID(collectionID UniqueID, nodeID int64) ([]str
 	return nil, errors.New("getDmChannelsByNodeID: can't find collection in collectionInfos")
 }
 
-func (m *meta) addDmChannel(collectionID UniqueID, nodeID int64, channels []string) error {
+func (m *MetaReplica) addDmChannel(collectionID UniqueID, nodeID int64, channels []string) error {
 	m.Lock()
 	defer m.Unlock()
 
-	//before add channel, should ensure toAddedChannels not in meta
+	//before add channel, should ensure toAddedChannels not in MetaReplica
 	if info, ok := m.collectionInfos[collectionID]; ok {
 		findNodeID := false
 		for _, channelInfo := range info.ChannelInfos {
@@ -501,16 +560,18 @@ func (m *meta) addDmChannel(collectionID UniqueID, nodeID int64, channels []stri
 			info.ChannelInfos = append(info.ChannelInfos, newChannelInfo)
 		}
 
-		err := m.saveCollectionInfo(collectionID, info)
+		err := saveGlobalCollectionInfo(collectionID, info, m.client)
 		if err != nil {
 			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+			return err
 		}
+		return nil
 	}
 
 	return errors.New("addDmChannels: can't find collection in collectionInfos")
 }
 
-func (m *meta) removeDmChannel(collectionID UniqueID, nodeID int64, channels []string) error {
+func (m *MetaReplica) removeDmChannel(collectionID UniqueID, nodeID int64, channels []string) error {
 	m.Lock()
 	defer m.Unlock()
 
@@ -533,16 +594,19 @@ func (m *meta) removeDmChannel(collectionID UniqueID, nodeID int64, channels []s
 			}
 		}
 
-		err := m.saveCollectionInfo(collectionID, info)
+		err := saveGlobalCollectionInfo(collectionID, info, m.client)
 		if err != nil {
 			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+			return err
 		}
+
+		return nil
 	}
 
 	return errors.New("addDmChannels: can't find collection in collectionInfos")
 }
 
-func (m *meta) GetQueryChannel(collectionID UniqueID) (string, string) {
+func (m *MetaReplica) GetQueryChannel(collectionID UniqueID) (string, string) {
 	m.Lock()
 	defer m.Unlock()
 
@@ -568,78 +632,129 @@ func (m *meta) GetQueryChannel(collectionID UniqueID) (string, string) {
 	return allocatedQueryChannel, allocatedQueryResultChannel
 }
 
-func (m *meta) saveCollectionInfo(collectionID UniqueID, info *querypb.CollectionInfo) error {
-	infoBytes := proto.MarshalTextString(info)
-
-	key := fmt.Sprintf("%s/%d", collectionMetaPrefix, collectionID)
-	return m.client.Save(key, infoBytes)
-}
-
-func (m *meta) removeCollectionInfo(collectionID UniqueID) error {
-	key := fmt.Sprintf("%s/%d", collectionMetaPrefix, collectionID)
-	return m.client.Remove(key)
-}
-
-func (m *meta) saveSegmentInfo(segmentID UniqueID, info *querypb.SegmentInfo) error {
-	infoBytes := proto.MarshalTextString(info)
-
-	key := fmt.Sprintf("%s/%d", segmentMetaPrefix, segmentID)
-	return m.client.Save(key, infoBytes)
-}
-
-func (m *meta) removeSegmentInfo(segmentID UniqueID) error {
-	key := fmt.Sprintf("%s/%d", segmentMetaPrefix, segmentID)
-	return m.client.Remove(key)
-}
-
-func (m *meta) saveQueryChannelInfo(collectionID UniqueID, info *querypb.QueryChannelInfo) error {
-	infoBytes := proto.MarshalTextString(info)
-
-	key := fmt.Sprintf("%s/%d", queryChannelMetaPrefix, collectionID)
-	return m.client.Save(key, infoBytes)
-}
-
-func (m *meta) removeQueryChannelInfo(collectionID UniqueID) error {
-	key := fmt.Sprintf("%s/%d", queryChannelMetaPrefix, collectionID)
-	return m.client.Remove(key)
-}
-
-func (m *meta) setLoadCollection(collectionID UniqueID, state bool) error {
+func (m *MetaReplica) setLoadType(collectionID UniqueID, loadType querypb.LoadType) error {
 	m.Lock()
 	defer m.Unlock()
 
 	if info, ok := m.collectionInfos[collectionID]; ok {
-		info.LoadCollection = state
-		err := m.saveCollectionInfo(collectionID, info)
+		info.LoadType = loadType
+		err := saveGlobalCollectionInfo(collectionID, info, m.client)
 		if err != nil {
 			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+			return err
 		}
+		return nil
 	}
 
-	return errors.New("setLoadCollection: can't find collection in collectionInfos")
+	return errors.New("setLoadType: can't find collection in collectionInfos")
 }
 
-func (m *meta) getLoadCollection(collectionID UniqueID) (bool, error) {
+func (m *MetaReplica) getLoadType(collectionID UniqueID) (querypb.LoadType, error) {
 	m.RLock()
 	defer m.RUnlock()
 
 	if info, ok := m.collectionInfos[collectionID]; ok {
-		return info.LoadCollection, nil
+		return info.LoadType, nil
 	}
 
-	return false, errors.New("getLoadCollection: can't find collection in collectionInfos")
+	return 0, errors.New("getLoadType: can't find collection in collectionInfos")
 }
 
-func (m *meta) printMeta() {
+func (m *MetaReplica) setLoadPercentage(collectionID UniqueID, partitionID UniqueID, percentage int64, loadType querypb.LoadType) error {
+	m.Lock()
+	defer m.Unlock()
+
+	info, ok := m.collectionInfos[collectionID]
+	if !ok {
+		return errors.New("setLoadPercentage: can't find collection in collectionInfos")
+	}
+
+	if loadType == querypb.LoadType_loadCollection {
+		info.InMemoryPercentage = percentage
+		for _, partitionState := range info.PartitionStates {
+			if percentage >= 100 {
+				partitionState.State = querypb.PartitionState_InMemory
+			} else {
+				partitionState.State = querypb.PartitionState_PartialInMemory
+			}
+			partitionState.InMemoryPercentage = percentage
+		}
+		err := saveGlobalCollectionInfo(collectionID, info, m.client)
+		if err != nil {
+			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+			return err
+		}
+	} else {
+		for _, partitionState := range info.PartitionStates {
+			if partitionState.PartitionID == partitionID {
+				if percentage >= 100 {
+					partitionState.State = querypb.PartitionState_InMemory
+				} else {
+					partitionState.State = querypb.PartitionState_PartialInMemory
+				}
+				partitionState.InMemoryPercentage = percentage
+				err := saveGlobalCollectionInfo(collectionID, info, m.client)
+				if err != nil {
+					log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+					return err
+				}
+				return nil
+			}
+		}
+		return errors.New("setLoadPercentage: can't find partitionID in collectionInfos")
+	}
+
+	return nil
+}
+
+func (m *MetaReplica) printMeta() {
+	m.RLock()
+	defer m.RUnlock()
 	for id, info := range m.collectionInfos {
-		log.Debug("query coordinator meta: collectionInfo", zap.Int64("collectionID", id), zap.Any("info", info))
+		log.Debug("query coordinator MetaReplica: collectionInfo", zap.Int64("collectionID", id), zap.Any("info", info))
 	}
 
 	for id, info := range m.segmentInfos {
-		log.Debug("query coordinator meta: segmentInfo", zap.Int64("segmentID", id), zap.Any("info", info))
+		log.Debug("query coordinator MetaReplica: segmentInfo", zap.Int64("segmentID", id), zap.Any("info", info))
 	}
 
 	for id, info := range m.queryChannelInfos {
-		log.Debug("query coordinator meta: queryChannelInfo", zap.Int64("collectionID", id), zap.Any("info", info))
+		log.Debug("query coordinator MetaReplica: queryChannelInfo", zap.Int64("collectionID", id), zap.Any("info", info))
 	}
+}
+
+func saveGlobalCollectionInfo(collectionID UniqueID, info *querypb.CollectionInfo, kv *etcdkv.EtcdKV) error {
+	infoBytes := proto.MarshalTextString(info)
+
+	key := fmt.Sprintf("%s/%d", collectionMetaPrefix, collectionID)
+	return kv.Save(key, infoBytes)
+}
+
+func removeGlobalCollectionInfo(collectionID UniqueID, kv *etcdkv.EtcdKV) error {
+	key := fmt.Sprintf("%s/%d", collectionMetaPrefix, collectionID)
+	return kv.Remove(key)
+}
+
+func saveSegmentInfo(segmentID UniqueID, info *querypb.SegmentInfo, kv *etcdkv.EtcdKV) error {
+	infoBytes := proto.MarshalTextString(info)
+
+	key := fmt.Sprintf("%s/%d", segmentMetaPrefix, segmentID)
+	return kv.Save(key, infoBytes)
+}
+
+func removeSegmentInfo(segmentID UniqueID, kv *etcdkv.EtcdKV) error {
+	key := fmt.Sprintf("%s/%d", segmentMetaPrefix, segmentID)
+	return kv.Remove(key)
+}
+
+func saveQueryChannelInfo(collectionID UniqueID, info *querypb.QueryChannelInfo, kv *etcdkv.EtcdKV) error {
+	infoBytes := proto.MarshalTextString(info)
+
+	key := fmt.Sprintf("%s/%d", queryChannelMetaPrefix, collectionID)
+	return kv.Save(key, infoBytes)
+}
+
+func removeQueryChannelInfo(collectionID UniqueID, kv *etcdkv.EtcdKV) error {
+	key := fmt.Sprintf("%s/%d", queryChannelMetaPrefix, collectionID)
+	return kv.Remove(key)
 }

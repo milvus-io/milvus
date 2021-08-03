@@ -51,7 +51,7 @@ type QueryCoord struct {
 	kvClient   *etcdkv.EtcdKV
 
 	queryCoordID uint64
-	meta         *meta
+	meta         Meta
 	cluster      *queryNodeCluster
 	scheduler    *TaskScheduler
 
@@ -186,7 +186,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 		if _, ok := qc.cluster.nodes[nodeID]; !ok {
 			serverID := session.ServerID
 			log.Debug("start add a queryNode to cluster", zap.Any("nodeID", serverID))
-			err := qc.cluster.RegisterNode(ctx, session, serverID)
+			err := qc.cluster.registerNode(ctx, session, serverID)
 			if err != nil {
 				log.Error("query node failed to register", zap.Int64("nodeID", serverID), zap.String("error info", err.Error()))
 			}
@@ -229,7 +229,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 			case sessionutil.SessionAddEvent:
 				serverID := event.Session.ServerID
 				log.Debug("start add a queryNode to cluster", zap.Any("nodeID", serverID))
-				err := qc.cluster.RegisterNode(ctx, event.Session, serverID)
+				err := qc.cluster.registerNode(ctx, event.Session, serverID)
 				if err != nil {
 					log.Error("query node failed to register", zap.Int64("nodeID", serverID), zap.String("error info", err.Error()))
 				}
@@ -275,25 +275,25 @@ func (qc *QueryCoord) watchMetaLoop() {
 
 	defer cancel()
 	defer qc.loopWg.Done()
-	log.Debug("query coordinator start watch meta loop")
+	log.Debug("query coordinator start watch MetaReplica loop")
 
-	watchChan := qc.meta.client.WatchWithPrefix("queryNode-segmentMeta")
+	watchChan := qc.kvClient.WatchWithPrefix("queryNode-segmentMeta")
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case resp := <-watchChan:
-			log.Debug("segment meta updated.")
+			log.Debug("segment MetaReplica updated.")
 			for _, event := range resp.Events {
 				segmentID, err := strconv.ParseInt(filepath.Base(string(event.Kv.Key)), 10, 64)
 				if err != nil {
-					log.Error("watch meta loop error when get segmentID", zap.Any("error", err.Error()))
+					log.Error("watch MetaReplica loop error when get segmentID", zap.Any("error", err.Error()))
 				}
 				segmentInfo := &querypb.SegmentInfo{}
 				err = proto.UnmarshalText(string(event.Kv.Value), segmentInfo)
 				if err != nil {
-					log.Error("watch meta loop error when unmarshal", zap.Any("error", err.Error()))
+					log.Error("watch MetaReplica loop error when unmarshal", zap.Any("error", err.Error()))
 				}
 				switch event.Type {
 				case mvccpb.PUT:
