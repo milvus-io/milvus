@@ -963,7 +963,7 @@ class TestCollectionSearch(TestcaseBase):
         # 3. load data
         collection_w.load()
         # 4. flush and load
-        collection_w.partitions
+        collection_w.num_entities
         collection_w.load()
         # 5. search for new data without load
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
