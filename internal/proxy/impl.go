@@ -1812,6 +1812,10 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 	}
 
 	err = errors.New("Unexpected error")
+	if (vectorsLeft.GetBinaryVector() != nil && vectorsRight.GetFloatVector() != nil) || (vectorsLeft.GetFloatVector() != nil && vectorsRight.GetBinaryVector() != nil) {
+		err = errors.New("Cannot calculate distance between binary vectors and float vectors")
+	}
+
 	return &milvuspb.CalcDistanceResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
