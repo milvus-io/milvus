@@ -216,19 +216,23 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 	}
 	log.Debug("watchDmChannelsTask Enqueue done", zap.Any("collectionID", in.CollectionID))
 
-	func() {
+	waitFunc := func() (*commonpb.Status, error) {
 		err = dct.WaitToFinish()
 		if err != nil {
+			status := &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			}
 			log.Warn(err.Error())
-			return
+			return status, err
 		}
 		log.Debug("watchDmChannelsTask WaitToFinish done", zap.Any("collectionID", in.CollectionID))
-	}()
-
-	status := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}, nil
 	}
-	return status, nil
+
+	return waitFunc()
 }
 
 func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegmentsRequest) (*commonpb.Status, error) {
@@ -265,19 +269,23 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 	}
 	log.Debug("loadSegmentsTask Enqueue done", zap.Int64s("segmentIDs", segmentIDs))
 
-	func() {
+	waitFunc := func() (*commonpb.Status, error) {
 		err = dct.WaitToFinish()
 		if err != nil {
+			status := &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			}
 			log.Warn(err.Error())
-			return
+			return status, err
 		}
 		log.Debug("loadSegmentsTask WaitToFinish done", zap.Int64s("segmentIDs", segmentIDs))
-	}()
-
-	status := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}, nil
 	}
-	return status, nil
+
+	return waitFunc()
 }
 
 func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.ReleaseCollectionRequest) (*commonpb.Status, error) {

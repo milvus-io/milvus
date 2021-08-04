@@ -32,6 +32,7 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 			if s, ok := err.(InterruptError); ok {
 				return s.error
 			}
+			// TODO early termination if this is unretriable error?
 			el[i] = err
 
 			select {
@@ -53,10 +54,15 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 
 type ErrorList []error
 
+// TODO shouldn't print all retries, might be too much
 func (el ErrorList) Error() string {
 	var builder strings.Builder
 	builder.WriteString("All attempts results:\n")
 	for index, err := range el {
+		// if early termination happens
+		if err == nil {
+			break
+		}
 		builder.WriteString(fmt.Sprintf("attempt #%d:%s\n", index+1, err.Error()))
 	}
 	return builder.String()

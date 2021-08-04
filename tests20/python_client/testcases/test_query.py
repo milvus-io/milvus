@@ -354,10 +354,8 @@ class TestQueryBase(TestcaseBase):
                            check_items={exp_res: res, "with_vec": True})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #6594 binary unsupported")
-    @pytest.mark.parametrize("vec_fields", [[cf.gen_float_vec_field(name="float_vector1")]])
-    # [cf.gen_binary_vec_field()],
-    # [cf.gen_binary_vec_field(), cf.gen_binary_vec_field("binary_vec")]])
+    @pytest.mark.parametrize("vec_fields", [[cf.gen_binary_vec_field()],
+                                            [cf.gen_binary_vec_field(), cf.gen_binary_vec_field("binary_vec1")]])
     def test_query_output_mix_float_binary_field(self, vec_fields):
         """
         target:  test query and output mix float and binary vec fields
@@ -388,8 +386,6 @@ class TestQueryBase(TestcaseBase):
                            check_items={exp_res: res, "with_vec": True})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #6594")
-    # todo
     def test_query_output_binary_vec_field(self):
         """
         target: test query with binary vec output field
@@ -397,7 +393,6 @@ class TestQueryBase(TestcaseBase):
         expected: return primary field and binary vec field
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_binary=True)[0:2]
-        log.debug(collection_w.schema)
         fields = [[ct.default_binary_vec_field_name], [ct.default_int64_field_name, ct.default_binary_vec_field_name]]
         for output_fields in fields:
             res, _ = collection_w.query(default_term_expr, output_fields=output_fields)
@@ -620,7 +615,7 @@ class TestQueryOperation(TestcaseBase):
     ******************************************************************
     """
 
-    @pytest.mark.tags(ct.CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L2)
     # @pytest.mark.parametrize("collection_name", [cf.gen_unique_str(prefix)])
     def test_query_without_connection(self):
         """
@@ -642,7 +637,7 @@ class TestQueryOperation(TestcaseBase):
         collection_w.query(default_term_expr, check_task=CheckTasks.err_res,
                            check_items={ct.err_code: 0, ct.err_msg: cem.ConnectFirst})
 
-    @pytest.mark.tags(ct.CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L1)
     # @pytest.mark.parametrize("collection_name, data",
                              # [(cf.gen_unique_str(prefix), cf.gen_default_list_data(ct.default_nb))])
     def test_query_without_loading(self):
@@ -666,7 +661,7 @@ class TestQueryOperation(TestcaseBase):
         collection_w.query(default_term_expr, check_task=CheckTasks.err_res,
                            check_items={ct.err_code: 1, ct.err_msg: clem.CollNotLoaded % collection_name})
 
-    @pytest.mark.tags(ct.CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("term_expr", [f'{ct.default_int64_field_name} in [0]'])
     def test_query_expr_single_term_array(self, term_expr):
         """
@@ -682,7 +677,7 @@ class TestQueryOperation(TestcaseBase):
         check_vec = vectors[0].iloc[:, [0]][0:1].to_dict('records')
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: check_vec})
 
-    @pytest.mark.tags(ct.CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("term_expr", [f'{ct.default_int64_field_name} in [0]'])
     def test_query_binary_expr_single_term_array(self, term_expr, check_content):
         """
@@ -699,7 +694,7 @@ class TestQueryOperation(TestcaseBase):
         check_vec = vectors[0].iloc[:, [0]][0:1].to_dict('records')
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: check_vec})
 
-    @pytest.mark.tags(ct.CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_expr_all_term_array(self):
         """
         target: test query with all array term expr
@@ -718,7 +713,7 @@ class TestQueryOperation(TestcaseBase):
         # query all array value
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: check_vec})
 
-    @pytest.mark.tags(ct.CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_query_expr_half_term_array(self):
         """
         target: test query with half array term expr
@@ -735,7 +730,7 @@ class TestQueryOperation(TestcaseBase):
         assert len(res) == len(int_values)
 
     @pytest.mark.xfail(reason="fail")
-    @pytest.mark.tags(ct.CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_expr_repeated_term_array(self):
         """
         target: test query with repeated term array on primary field with unique value
@@ -749,7 +744,7 @@ class TestQueryOperation(TestcaseBase):
         assert len(res) == 1
         assert res[0][ct.default_int64_field_name] == int_values[0]
 
-    @pytest.mark.tags(ct.CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="issue #6624")
     def test_query_dup_ids_dup_term_array(self):
         """
@@ -768,7 +763,7 @@ class TestQueryOperation(TestcaseBase):
         res, _ = collection_w.query(term_expr)
         log.debug(res)
 
-    @pytest.mark.tags(ct.CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_after_index(self):
         """
         target: test query after creating index
@@ -787,7 +782,7 @@ class TestQueryOperation(TestcaseBase):
         check_vec = vectors[0].iloc[:, [0]][0:len(int_values)].to_dict('records')
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: check_vec})
 
-    @pytest.mark.tags(ct.CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_query_after_search(self):
         """
         target: test query after search
@@ -814,7 +809,7 @@ class TestQueryOperation(TestcaseBase):
         check_vec = vectors[0].iloc[:, [0]][0:2].to_dict('records')
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: check_vec})
 
-    @pytest.mark.tags(ct.CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_query_output_vec_field_after_index(self):
         """
         target: test query output vec field after index
@@ -834,9 +829,7 @@ class TestQueryOperation(TestcaseBase):
                            check_task=CheckTasks.check_query_results,
                            check_items={exp_res: res, "with_vec": True})
 
-    @pytest.mark.tags(ct.CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue #6594")
-    # todo
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_output_binary_vec_field_after_index(self):
         """
         target: test query output vec field after index
@@ -850,7 +843,7 @@ class TestQueryOperation(TestcaseBase):
         res, _ = collection_w.query(default_term_expr, output_fields=[ct.default_binary_vec_field_name])
         assert list(res[0].keys()) == fields
 
-    @pytest.mark.tags(ct.CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_partition_repeatedly(self):
         """
         target: test query repeatedly on partition
@@ -882,7 +875,7 @@ class TestQueryOperation(TestcaseBase):
         res_two, _ = collection_w.query(default_term_expr, partition_names=[partition_w.name])
         assert res_one == res_two
 
-    @pytest.mark.tags(ct.CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_another_partition(self):
         """
         target: test query another partition
@@ -898,7 +891,7 @@ class TestQueryOperation(TestcaseBase):
         collection_w.query(term_expr, partition_names=[partition_w.name], check_task=CheckTasks.check_query_results,
                            check_items={exp_res: []})
 
-    @pytest.mark.tags(ct.CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_multi_partitions_multi_results(self):
         """
         target: test query on multi partitions and get multi results
@@ -914,7 +907,7 @@ class TestQueryOperation(TestcaseBase):
         res, _ = collection_w.query(term_expr, partition_names=[ct.default_partition_name, partition_w.name])
         assert len(res) == 2
 
-    @pytest.mark.tags(ct.CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_multi_partitions_single_result(self):
         """
         target: test query on multi partitions and get single result

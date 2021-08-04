@@ -46,6 +46,11 @@ pipeline {
                 stages {
                     stage('Test') {
                         steps {
+                            container('etcd') {
+                                script {
+                                    sh 'ETCDCTL_API=3 etcdctl del "" --from-key=true'
+                                }
+                            }
                             container('main') {
                                 dir ('tests/scripts') {
                                     script {
