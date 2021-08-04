@@ -1360,6 +1360,10 @@ func (node *Proxy) Retrieve(ctx context.Context, request *milvuspb.RetrieveReque
 		zap.Any("partitions", request.PartitionNames),
 		zap.Any("len(Ids)", len(request.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data)))
 	defer func() {
+		idsCount := 0
+		if rt.result != nil {
+			idsCount = len(rt.result.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data)
+		}
 		log.Debug("Retrieve Done",
 			zap.Error(err),
 			zap.String("role", Params.RoleName),
@@ -1368,7 +1372,7 @@ func (node *Proxy) Retrieve(ctx context.Context, request *milvuspb.RetrieveReque
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
 			zap.Any("partitions", request.PartitionNames),
-			zap.Any("len(Ids)", len(rt.result.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data)))
+			zap.Any("len(Ids)", idsCount))
 	}()
 
 	err = rt.WaitToFinish()
@@ -1594,7 +1598,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 	}
 
 	// the vectors retrieved are random order, we need re-arrange the vectors by the order of input ids
-	arrangeFunc := func(ids *milvuspb.VectorIDs, retrievedFields []*schemapb.FieldData) *schemapb.VectorField {
+	arrangeFunc := func(ids *milvuspb.VectorIDs, retrievedFields []*schemapb.FieldData) (*schemapb.VectorField, error) {
 		var retrievedIds *schemapb.ScalarField
 		var retrievedVectors *schemapb.VectorField
 		for _, fieldData := range retrievedFields {
@@ -1608,7 +1612,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 		}
 
 		if retrievedIds == nil || retrievedVectors == nil {
-			return nil
+			return nil, errors.New("Failed to fetch vectors")
 		}
 
 		dict := make(map[int64]int)
@@ -1625,7 +1629,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				index, ok := dict[id]
 				if !ok {
 					log.Error("id not found in CalcDistance", zap.Int64("id", id))
-					return nil
+					return nil, errors.New("Failed to fetch vectors by id: " + fmt.Sprintln(id))
 				}
 				result = append(result, floatArr[int64(index)*element:int64(index+1)*element]...)
 			}
@@ -1637,7 +1641,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 						Data: result,
 					},
 				},
-			}
+			}, nil
 		}
 
 		if retrievedVectors.GetBinaryVector() != nil {
@@ -1652,7 +1656,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				index, ok := dict[id]
 				if !ok {
 					log.Error("id not found in CalcDistance", zap.Int64("id", id))
-					return nil
+					return nil, errors.New("Failed to fetch vectors by id: " + fmt.Sprintln(id))
 				}
 				result = append(result, binaryArr[int64(index)*element:int64(index+1)*element]...)
 			}
@@ -1662,10 +1666,10 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				Data: &schemapb.VectorField_BinaryVector{
 					BinaryVector: result,
 				},
-			}
+			}, nil
 		}
 
-		return nil
+		return nil, errors.New("Failed to fetch vectors")
 	}
 
 	vectorsLeft := request.GetOpLeft().GetDataArray()
@@ -1681,7 +1685,15 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			}, nil
 		}
 
-		vectorsLeft = arrangeFunc(opLeft, result.FieldsData)
+		vectorsLeft, err = arrangeFunc(opLeft, result.FieldsData)
+		if err != nil {
+			return &milvuspb.CalcDistanceResults{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+			}, nil
+		}
 	}
 
 	if vectorsLeft == nil {
@@ -1706,7 +1718,15 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			}, nil
 		}
 
-		vectorsRight = arrangeFunc(opRight, result.FieldsData)
+		vectorsRight, err = arrangeFunc(opRight, result.FieldsData)
+		if err != nil {
+			return &milvuspb.CalcDistanceResults{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+			}, nil
+		}
 	}
 
 	if vectorsRight == nil {
