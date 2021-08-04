@@ -14,6 +14,9 @@ package grpcdatanode
 import (
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -35,4 +38,7 @@ func TestParamTable(t *testing.T) {
 
 	assert.NotEqual(t, Params.RootCoordAddress, "")
 	t.Logf("RootCoordAddress:%s", Params.RootCoordAddress)
+
+	log.Info("TestParamTable", zap.Int("ServerMaxSendSize", Params.ServerMaxSendSize))
+	log.Info("TestParamTable", zap.Int("ServerMaxRecvSize", Params.ServerMaxRecvSize))
 }
