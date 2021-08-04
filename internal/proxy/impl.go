@@ -1604,7 +1604,6 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 		for _, fieldData := range retrievedFields {
 			if fieldData.FieldName == ids.FieldName {
 				retrievedVectors = fieldData.GetVectors()
-				break
 			}
 			if fieldData.Type == schemapb.DataType_Int64 {
 				retrievedIds = fieldData.GetScalars()
