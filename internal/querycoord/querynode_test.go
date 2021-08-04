@@ -68,23 +68,23 @@ func TestQueryNode_MultiNode_stop(t *testing.T) {
 	queryNode1, err := startQueryNodeServer(baseCtx)
 	assert.Nil(t, err)
 
-	queryNode2, err := startQueryNodeServer(baseCtx)
-	assert.Nil(t, err)
-
-	queryNode3, err := startQueryNodeServer(baseCtx)
-	assert.Nil(t, err)
-
-	queryNode4, err := startQueryNodeServer(baseCtx)
-	assert.Nil(t, err)
+	//queryNode2, err := startQueryNodeServer(baseCtx)
+	//assert.Nil(t, err)
+	//
+	//queryNode3, err := startQueryNodeServer(baseCtx)
+	//assert.Nil(t, err)
+	//
+	//queryNode4, err := startQueryNodeServer(baseCtx)
+	//assert.Nil(t, err)
 
 	queryNode5, err := startQueryNodeServer(baseCtx)
 	assert.Nil(t, err)
 
 	time.Sleep(2 * time.Second)
 	queryNode1.stop()
-	queryNode2.stop()
-	queryNode3.stop()
-	queryNode4.stop()
+	//queryNode2.stop()
+	//queryNode3.stop()
+	//queryNode4.stop()
 
 	queryCoord.LoadCollection(baseCtx, &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{
@@ -133,8 +133,8 @@ func TestQueryNode_MultiNode_reStart(t *testing.T) {
 	queryNode1, err := startQueryNodeServer(baseCtx)
 	assert.Nil(t, err)
 
-	queryNode2, err := startQueryNodeServer(baseCtx)
-	assert.Nil(t, err)
+	//queryNode2, err := startQueryNodeServer(baseCtx)
+	//assert.Nil(t, err)
 
 	time.Sleep(2 * time.Second)
 	queryCoord.LoadCollection(baseCtx, &querypb.LoadCollectionRequest{
@@ -145,13 +145,13 @@ func TestQueryNode_MultiNode_reStart(t *testing.T) {
 		Schema:       genCollectionSchema(defaultCollectionID, false),
 	})
 	queryNode1.stop()
-	queryNode2.stop()
+	//queryNode2.stop()
 	queryNode3, err := startQueryNodeServer(baseCtx)
 	assert.Nil(t, err)
-	queryNode4, err := startQueryNodeServer(baseCtx)
-	assert.Nil(t, err)
-	queryNode5, err := startQueryNodeServer(baseCtx)
-	assert.Nil(t, err)
+	//queryNode4, err := startQueryNodeServer(baseCtx)
+	//assert.Nil(t, err)
+	//queryNode5, err := startQueryNodeServer(baseCtx)
+	//assert.Nil(t, err)
 
 	time.Sleep(2 * time.Second)
 	_, err = queryCoord.ReleaseCollection(baseCtx, &querypb.ReleaseCollectionRequest{
@@ -164,8 +164,8 @@ func TestQueryNode_MultiNode_reStart(t *testing.T) {
 	nodes, err := queryCoord.cluster.onServiceNodes()
 	assert.Nil(t, err)
 	queryNode3.stop()
-	queryNode4.stop()
-	queryNode5.stop()
+	//queryNode4.stop()
+	//queryNode5.stop()
 
 	for {
 		allOffline := true
