@@ -521,7 +521,9 @@ func (colReplica *collectionReplica) initExcludedSegments(collectionID UniqueID)
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
-	colReplica.excludedSegments[collectionID] = make([]*datapb.SegmentInfo, 0)
+	if _, ok := colReplica.excludedSegments[collectionID]; !ok {
+		colReplica.excludedSegments[collectionID] = make([]*datapb.SegmentInfo, 0)
+	}
 }
 
 func (colReplica *collectionReplica) removeExcludedSegments(collectionID UniqueID) {

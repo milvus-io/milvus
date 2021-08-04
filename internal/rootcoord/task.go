@@ -253,11 +253,10 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	t.core.dmlChannels.RemoveProducerChannels(collMeta.PhysicalChannelNames...)
 
 	//notify query service to release collection
-	go func() {
-		if err = t.core.CallReleaseCollectionService(t.core.ctx, ts, 0, collMeta.ID); err != nil {
-			log.Warn("CallReleaseCollectionService failed", zap.String("error", err.Error()))
-		}
-	}()
+	if err = t.core.CallReleaseCollectionService(t.core.ctx, ts, 0, collMeta.ID); err != nil {
+		log.Error("CallReleaseCollectionService failed", zap.String("error", err.Error()))
+		return err
+	}
 
 	req := proxypb.InvalidateCollMetaCacheRequest{
 		Base: &commonpb.MsgBase{
@@ -509,11 +508,10 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	t.core.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
 
 	//notify query service to release partition
-	go func() {
-		if err = t.core.CallReleasePartitionService(t.core.ctx, ts, 0, collInfo.ID, []typeutil.UniqueID{partID}); err != nil {
-			log.Warn("CallReleaseCollectionService failed", zap.String("error", err.Error()))
-		}
-	}()
+	if err = t.core.CallReleasePartitionService(t.core.ctx, ts, 0, collInfo.ID, []typeutil.UniqueID{partID}); err != nil {
+		log.Error("CallReleaseCollectionService failed", zap.String("error", err.Error()))
+		return err
+	}
 
 	// Update DDOperation in etcd
 	return t.core.setDdMsgSendFlag(true)

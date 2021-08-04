@@ -66,7 +66,7 @@ type task interface {
 	AddChildTask(t task)
 	IsValid() bool
 	Reschedule() ([]task, error)
-	Marshal() string
+	Marshal() ([]byte, error)
 	State() taskState
 	SetState(state taskState)
 }
@@ -142,8 +142,8 @@ func (lct *LoadCollectionTask) MsgBase() *commonpb.MsgBase {
 	return lct.Base
 }
 
-func (lct *LoadCollectionTask) Marshal() string {
-	return proto.MarshalTextString(lct.LoadCollectionRequest)
+func (lct *LoadCollectionTask) Marshal() ([]byte, error) {
+	return proto.Marshal(lct.LoadCollectionRequest)
 }
 
 func (lct *LoadCollectionTask) Type() commonpb.MsgType {
@@ -370,8 +370,8 @@ func (rct *ReleaseCollectionTask) MsgBase() *commonpb.MsgBase {
 	return rct.Base
 }
 
-func (rct *ReleaseCollectionTask) Marshal() string {
-	return proto.MarshalTextString(rct.ReleaseCollectionRequest)
+func (rct *ReleaseCollectionTask) Marshal() ([]byte, error) {
+	return proto.Marshal(rct.ReleaseCollectionRequest)
 }
 
 func (rct *ReleaseCollectionTask) Type() commonpb.MsgType {
@@ -485,8 +485,8 @@ func (lpt *LoadPartitionTask) MsgBase() *commonpb.MsgBase {
 	return lpt.Base
 }
 
-func (lpt *LoadPartitionTask) Marshal() string {
-	return proto.MarshalTextString(lpt.LoadPartitionsRequest)
+func (lpt *LoadPartitionTask) Marshal() ([]byte, error) {
+	return proto.Marshal(lpt.LoadPartitionsRequest)
 }
 
 func (lpt *LoadPartitionTask) Type() commonpb.MsgType {
@@ -683,8 +683,8 @@ func (rpt *ReleasePartitionTask) MsgBase() *commonpb.MsgBase {
 	return rpt.Base
 }
 
-func (rpt *ReleasePartitionTask) Marshal() string {
-	return proto.MarshalTextString(rpt.ReleasePartitionsRequest)
+func (rpt *ReleasePartitionTask) Marshal() ([]byte, error) {
+	return proto.Marshal(rpt.ReleasePartitionsRequest)
 }
 
 func (rpt *ReleasePartitionTask) Type() commonpb.MsgType {
@@ -777,8 +777,8 @@ func (lst *LoadSegmentTask) MsgBase() *commonpb.MsgBase {
 	return lst.Base
 }
 
-func (lst *LoadSegmentTask) Marshal() string {
-	return proto.MarshalTextString(lst.LoadSegmentsRequest)
+func (lst *LoadSegmentTask) Marshal() ([]byte, error) {
+	return proto.Marshal(lst.LoadSegmentsRequest)
 }
 
 func (lst *LoadSegmentTask) IsValid() bool {
@@ -914,8 +914,8 @@ func (rst *ReleaseSegmentTask) MsgBase() *commonpb.MsgBase {
 	return rst.Base
 }
 
-func (rst *ReleaseSegmentTask) Marshal() string {
-	return proto.MarshalTextString(rst.ReleaseSegmentsRequest)
+func (rst *ReleaseSegmentTask) Marshal() ([]byte, error) {
+	return proto.Marshal(rst.ReleaseSegmentsRequest)
 }
 
 func (rst *ReleaseSegmentTask) IsValid() bool {
@@ -984,8 +984,8 @@ func (wdt *WatchDmChannelTask) MsgBase() *commonpb.MsgBase {
 	return wdt.Base
 }
 
-func (wdt *WatchDmChannelTask) Marshal() string {
-	return proto.MarshalTextString(wdt.WatchDmChannelsRequest)
+func (wdt *WatchDmChannelTask) Marshal() ([]byte, error) {
+	return proto.Marshal(wdt.WatchDmChannelsRequest)
 }
 
 func (wdt *WatchDmChannelTask) IsValid() bool {
@@ -1125,8 +1125,8 @@ func (wqt *WatchQueryChannelTask) MsgBase() *commonpb.MsgBase {
 	return wqt.Base
 }
 
-func (wqt *WatchQueryChannelTask) Marshal() string {
-	return proto.MarshalTextString(wqt.AddQueryChannelRequest)
+func (wqt *WatchQueryChannelTask) Marshal() ([]byte, error) {
+	return proto.Marshal(wqt.AddQueryChannelRequest)
 }
 
 func (wqt *WatchQueryChannelTask) IsValid() bool {
@@ -1207,8 +1207,8 @@ func (lbt *LoadBalanceTask) MsgBase() *commonpb.MsgBase {
 	return lbt.Base
 }
 
-func (lbt *LoadBalanceTask) Marshal() string {
-	return proto.MarshalTextString(lbt.LoadBalanceRequest)
+func (lbt *LoadBalanceTask) Marshal() ([]byte, error) {
+	return proto.Marshal(lbt.LoadBalanceRequest)
 }
 
 func (lbt *LoadBalanceTask) Type() commonpb.MsgType {

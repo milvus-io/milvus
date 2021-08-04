@@ -106,7 +106,7 @@ func (qc *QueryCoord) ShowCollections(ctx context.Context, req *querypb.ShowColl
 	for _, id := range req.CollectionIDs {
 		if _, ok := ID2collectionInfo[id]; !ok {
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			err := errors.New("collection not exist or has not been loaded to memory")
+			err := errors.New("collection has not been loaded to memory or load failed")
 			status.Reason = err.Error()
 			return &querypb.ShowCollectionsResponse{
 				Status: status,
@@ -255,7 +255,7 @@ func (qc *QueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowParti
 	for _, id := range req.PartitionIDs {
 		if _, ok := ID2PartitionState[id]; !ok {
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			err := errors.New("partition not exist or has not been loaded to memory")
+			err := errors.New("partition has not been loaded to memory or load failed")
 			status.Reason = err.Error()
 			return &querypb.ShowPartitionsResponse{
 				Status: status,

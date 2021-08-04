@@ -20,6 +20,7 @@ import (
 
 type TimeTickedFlowGraph struct {
 	ctx     context.Context
+	cancel  context.CancelFunc
 	nodeCtx map[NodeName]*nodeCtx
 }
 
@@ -89,11 +90,14 @@ func (fg *TimeTickedFlowGraph) Close() {
 		// }
 		v.Close()
 	}
+	fg.cancel()
 }
 
 func NewTimeTickedFlowGraph(ctx context.Context) *TimeTickedFlowGraph {
+	ctx1, cancel := context.WithCancel(ctx)
 	flowGraph := TimeTickedFlowGraph{
-		ctx:     ctx,
+		ctx:     ctx1,
+		cancel:  cancel,
 		nodeCtx: make(map[string]*nodeCtx),
 	}
 

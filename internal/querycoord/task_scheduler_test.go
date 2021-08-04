@@ -5,6 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"go.etcd.io/etcd/clientv3"
+
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -23,8 +26,8 @@ func (tt *testTask) MsgBase() *commonpb.MsgBase {
 	return tt.baseMsg
 }
 
-func (tt *testTask) Marshal() string {
-	return ""
+func (tt *testTask) Marshal() ([]byte, error) {
+	return []byte{}, nil
 }
 
 func (tt *testTask) Type() commonpb.MsgType {
@@ -154,4 +157,30 @@ func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, len(newActiveTaskIDKeys), len(activeTaskIDKeys))
 	queryCoord.Stop()
+}
+
+func TestUnMarshalTask_LoadCollection(t *testing.T) {
+	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	assert.Nil(t, err)
+	kv := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+
+	loadTask := &LoadCollectionTask{
+		LoadCollectionRequest: &querypb.LoadCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_LoadCollection,
+			},
+		},
+	}
+	blobs, err := loadTask.Marshal()
+	assert.Nil(t, err)
+	err = kv.Save("testMarshalLoadCollection", string(blobs))
+	assert.Nil(t, err)
+	defer kv.RemoveWithPrefix("testMarshalLoadCollection")
+	value, err := kv.Load("testMarshalLoadCollection")
+	assert.Nil(t, err)
+
+	taskScheduler := &TaskScheduler{}
+	task, err := taskScheduler.unmarshalTask(value)
+	assert.Nil(t, err)
+	assert.Equal(t, task.Type(), commonpb.MsgType_LoadCollection)
 }
