@@ -62,6 +62,7 @@ pipeline {
                             container('main') {
                                 dir ('tests/scripts') {
                                     script {
+                                        sh 'printenv'
                                         def clusterEnabled = "false"
                                         if ("${MILVUS_SERVER_TYPE}" == "distributed") {
                                             clusterEnabled = "true"
