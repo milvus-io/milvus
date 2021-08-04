@@ -1634,7 +1634,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			}
 
 			return &schemapb.VectorField{
-				Dim: int64(element),
+				Dim: element,
 				Data: &schemapb.VectorField_FloatVector{
 					FloatVector: &schemapb.FloatArray{
 						Data: result,
@@ -1661,7 +1661,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			}
 
 			return &schemapb.VectorField{
-				Dim: int64(element) * 8,
+				Dim: element * 8,
 				Data: &schemapb.VectorField_BinaryVector{
 					BinaryVector: result,
 				},
