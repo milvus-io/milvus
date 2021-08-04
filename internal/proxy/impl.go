@@ -1624,7 +1624,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 		if retrievedVectors.GetFloatVector() != nil {
 			floatArr := retrievedVectors.GetFloatVector().Data
 			element := retrievedVectors.GetDim()
-			result := make([]float32, 0)
+			result := make([]float32, 0, int64(len(inputIds))*element)
 			for _, id := range inputIds {
 				index, ok := dict[id]
 				if !ok {
@@ -1651,7 +1651,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 				element = element + 8 - element%8
 			}
 
-			result := make([]byte, 0)
+			result := make([]byte, 0, int64(len(inputIds))*element)
 			for _, id := range inputIds {
 				index, ok := dict[id]
 				if !ok {
