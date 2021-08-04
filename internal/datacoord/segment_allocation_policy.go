@@ -13,6 +13,7 @@ package datacoord
 
 import (
 	"sort"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -126,6 +127,10 @@ func sealPolicyV1(maxCount, writtenCount, allocatedCount int64) bool {
 
 type flushPolicy func(segment *SegmentInfo, t Timestamp) bool
 
+const flushInterval = 2 * time.Second
+
 func flushPolicyV1(segment *SegmentInfo, t Timestamp) bool {
-	return segment.GetState() == commonpb.SegmentState_Sealed && segment.GetLastExpireTime() <= t
+	return segment.GetState() == commonpb.SegmentState_Sealed &&
+		segment.GetLastExpireTime() <= t &&
+		time.Since(segment.lastFlushTime) >= flushInterval
 }

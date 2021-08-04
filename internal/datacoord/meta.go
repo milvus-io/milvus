@@ -13,6 +13,7 @@ package datacoord
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -320,6 +321,12 @@ func (m *meta) SetCurrentRows(segmentID UniqueID, rows int64) {
 	m.Lock()
 	defer m.Unlock()
 	m.segments.SetCurrentRows(segmentID, rows)
+}
+
+func (m *meta) SetLastFlushTime(segmentID UniqueID, t time.Time) {
+	m.Lock()
+	defer m.Unlock()
+	m.segments.SetFlushTime(segmentID, t)
 }
 
 func (m *meta) saveSegmentInfo(segment *SegmentInfo) error {

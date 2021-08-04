@@ -1,6 +1,8 @@
 package datacoord
 
 import (
+	"time"
+
 	"github.com/gogo/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -13,8 +15,9 @@ type SegmentsInfo struct {
 
 type SegmentInfo struct {
 	*datapb.SegmentInfo
-	currRows    int64
-	allocations []*Allocation
+	currRows      int64
+	allocations   []*Allocation
+	lastFlushTime time.Time
 }
 
 func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
@@ -107,12 +110,19 @@ func (s *SegmentsInfo) SetBinlogs(segmentID UniqueID, binlogs []*datapb.FieldBin
 	}
 }
 
+func (s *SegmentsInfo) SetFlushTime(segmentID UniqueID, t time.Time) {
+	if segment, ok := s.segments[segmentID]; ok {
+		s.segments[segmentID] = segment.ShadowClone(SetFlushTime(t))
+	}
+}
+
 func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 	info := proto.Clone(s.SegmentInfo).(*datapb.SegmentInfo)
 	cloned := &SegmentInfo{
-		SegmentInfo: info,
-		currRows:    s.currRows,
-		allocations: s.allocations,
+		SegmentInfo:   info,
+		currRows:      s.currRows,
+		allocations:   s.allocations,
+		lastFlushTime: s.lastFlushTime,
 	}
 	for _, opt := range opts {
 		opt(cloned)
@@ -122,9 +132,10 @@ func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 
 func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 	cloned := &SegmentInfo{
-		SegmentInfo: s.SegmentInfo,
-		currRows:    s.currRows,
-		allocations: s.allocations,
+		SegmentInfo:   s.SegmentInfo,
+		currRows:      s.currRows,
+		allocations:   s.allocations,
+		lastFlushTime: s.lastFlushTime,
 	}
 
 	for _, opt := range opts {
@@ -187,5 +198,11 @@ func SetCurrentRows(rows int64) SegmentInfoOption {
 func SetBinlogs(binlogs []*datapb.FieldBinlog) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.Binlogs = binlogs
+	}
+}
+
+func SetFlushTime(t time.Time) SegmentInfoOption {
+	return func(segment *SegmentInfo) {
+		segment.lastFlushTime = t
 	}
 }
