@@ -9,37 +9,18 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package msgstream
+package grpcdatanodeclient
 
 import (
-	"time"
+	"testing"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 )
 
-// Reference: https://blog.cyeam.com/golang/2018/08/27/retry
+func TestParamTable(t *testing.T) {
+	Params.Init()
 
-func Retry(attempts int, sleep time.Duration, fn func() error) error {
-	if err := fn(); err != nil {
-		if s, ok := err.(InterruptError); ok {
-			return s.error
-		}
-
-		if attempts--; attempts > 0 {
-			log.Debug("retry func error", zap.Int("attempts", attempts), zap.Duration("sleep", sleep), zap.Error(err))
-			time.Sleep(sleep)
-			return Retry(attempts, 2*sleep, fn)
-		}
-		return err
-	}
-	return nil
-}
-
-type InterruptError struct {
-	error
-}
-
-func NoRetryError(err error) InterruptError {
-	return InterruptError{err}
+	log.Info("TestParamTable", zap.Int("ClientMaxSendSize", Params.ClientMaxSendSize))
+	log.Info("TestParamTable", zap.Int("ClientMaxRecvSize", Params.ClientMaxRecvSize))
 }

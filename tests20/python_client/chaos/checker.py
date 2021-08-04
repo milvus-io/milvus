@@ -76,7 +76,7 @@ class InsertFlushChecker(Checker):
     def __init__(self, flush=False):
         super().__init__()
         self._flush = flush
-        self.init_entities = self.c_wrap.num_entities
+        self.initial_entities = self.c_wrap.num_entities
 
     def keep_running(self):
         while self._running:
@@ -90,9 +90,9 @@ class InsertFlushChecker(Checker):
                     self._fail += 1
                 sleep(constants.WAIT_PER_OP / 10)
             else:
-                if self.c_wrap.num_entities == (self.init_entities + constants.DELTA_PER_INS):
+                if self.c_wrap.num_entities == (self.initial_entities + constants.DELTA_PER_INS):
                     self._succ += 1
-                    self.init_entities += constants.DELTA_PER_INS
+                    self.initial_entities += constants.DELTA_PER_INS
                 else:
                     self._fail += 1
 

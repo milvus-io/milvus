@@ -76,22 +76,6 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 		partitionID := info.PartitionID
 		collectionID := info.CollectionID
 
-		// init replica
-		hasCollectionInHistorical := loader.historicalReplica.hasCollection(collectionID)
-		hasPartitionInHistorical := loader.historicalReplica.hasPartition(partitionID)
-		if !hasCollectionInHistorical {
-			err := loader.historicalReplica.addCollection(collectionID, req.Schema)
-			if err != nil {
-				return err
-			}
-		}
-		if !hasPartitionInHistorical {
-			err := loader.historicalReplica.addPartition(collectionID, partitionID)
-			if err != nil {
-				return err
-			}
-		}
-
 		collection, err := loader.historicalReplica.getCollectionByID(collectionID)
 		if err != nil {
 			log.Warn(err.Error())

@@ -152,6 +152,8 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 
 	if iMsg == nil {
+		ibNode.timeTickStream.Close()
+		ibNode.segmentStatisticsStream.Close()
 		return []Msg{}
 	}
 
