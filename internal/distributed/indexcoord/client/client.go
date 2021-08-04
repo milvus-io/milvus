@@ -77,6 +77,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*C
 }
 
 func (c *Client) Init() error {
+	Params.Init()
 	return c.connect(retry.Attempts(20))
 }
 
@@ -92,6 +93,9 @@ func (c *Client) connect(retryOptions ...retry.Option) error {
 		log.Debug("IndexCoordClient try connect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(c.ctx, c.addr,
 			grpc.WithInsecure(), grpc.WithBlock(),
+			grpc.WithDefaultCallOptions(
+				grpc.MaxCallRecvMsgSize(Params.ClientMaxRecvSize),
+				grpc.MaxCallSendMsgSize(Params.ClientMaxSendSize)),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
 					grpc_retry.UnaryClientInterceptor(grpc_retry.WithMax(3)),

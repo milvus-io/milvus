@@ -14,6 +14,10 @@ package grpcquerycoord
 import (
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/distributed/grpcconfigs"
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
@@ -24,9 +28,11 @@ type ParamTable struct {
 	paramtable.BaseTable
 	Port int
 
-	IndexCoordAddress string
-	RootCoordAddress  string
-	DataCoordAddress  string
+	RootCoordAddress string
+	DataCoordAddress string
+
+	ServerMaxSendSize int
+	ServerMaxRecvSize int
 }
 
 func (pt *ParamTable) Init() {
@@ -34,8 +40,10 @@ func (pt *ParamTable) Init() {
 		pt.BaseTable.Init()
 		pt.initPort()
 		pt.initRootCoordAddress()
-		pt.initIndexCoordAddress()
 		pt.initDataCoordAddress()
+
+		pt.initServerMaxSendSize()
+		pt.initServerMaxRecvSize()
 	})
 }
 
@@ -45,14 +53,6 @@ func (pt *ParamTable) initRootCoordAddress() {
 		panic(err)
 	}
 	pt.RootCoordAddress = ret
-}
-
-func (pt *ParamTable) initIndexCoordAddress() {
-	ret, err := pt.Load("IndexCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	pt.IndexCoordAddress = ret
 }
 
 func (pt *ParamTable) initDataCoordAddress() {
@@ -65,4 +65,26 @@ func (pt *ParamTable) initDataCoordAddress() {
 
 func (pt *ParamTable) initPort() {
 	pt.Port = pt.ParseInt("queryCoord.port")
+}
+
+func (pt *ParamTable) initServerMaxSendSize() {
+	var err error
+	pt.ServerMaxSendSize, err = pt.ParseIntWithErr("queryCoord.grpc.serverMaxSendSize")
+	if err != nil {
+		pt.ServerMaxSendSize = grpcconfigs.DefaultServerMaxSendSize
+		log.Debug("queryCoord.grpc.serverMaxSendSize not set, set to default")
+	}
+	log.Debug("initServerMaxSendSize",
+		zap.Int("queryCoord.grpc.serverMaxSendSize", pt.ServerMaxSendSize))
+}
+
+func (pt *ParamTable) initServerMaxRecvSize() {
+	var err error
+	pt.ServerMaxRecvSize, err = pt.ParseIntWithErr("queryCoord.grpc.serverMaxRecvSize")
+	if err != nil {
+		pt.ServerMaxRecvSize = grpcconfigs.DefaultServerMaxRecvSize
+		log.Debug("queryCoord.grpc.serverMaxRecvSize not set, set to default")
+	}
+	log.Debug("initServerMaxRecvSize",
+		zap.Int("queryCoord.grpc.serverMaxRecvSize", pt.ServerMaxRecvSize))
 }

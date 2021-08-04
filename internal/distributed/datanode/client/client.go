@@ -60,6 +60,7 @@ func NewClient(ctx context.Context, addr string, retryOptions ...retry.Option) (
 }
 
 func (c *Client) Init() error {
+	Params.Init()
 	return c.connect(retry.Attempts(20))
 }
 
@@ -69,6 +70,9 @@ func (c *Client) connect(retryOptions ...retry.Option) error {
 		log.Debug("DataNode connect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(c.ctx, c.addr,
 			grpc.WithInsecure(), grpc.WithBlock(),
+			grpc.WithDefaultCallOptions(
+				grpc.MaxCallRecvMsgSize(Params.ClientMaxRecvSize),
+				grpc.MaxCallSendMsgSize(Params.ClientMaxSendSize)),
 			grpc.WithDisableRetry(),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(

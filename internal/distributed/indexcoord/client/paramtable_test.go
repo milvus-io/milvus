@@ -9,26 +9,18 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package grpcquerycoord
+package grpcindexcoordclient
 
 import (
 	"testing"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
 
 func TestParamTable(t *testing.T) {
 	Params.Init()
 
-	assert.NotEqual(t, Params.DataCoordAddress, "")
-	t.Logf("DataCoordAddress:%s", Params.DataCoordAddress)
-
-	assert.NotEqual(t, Params.RootCoordAddress, "")
-	t.Logf("RootCoordAddress:%s", Params.RootCoordAddress)
-
-	log.Info("TestParamTable", zap.Int("ServerMaxSendSize", Params.ServerMaxSendSize))
-	log.Info("TestParamTable", zap.Int("ServerMaxRecvSize", Params.ServerMaxRecvSize))
+	log.Info("TestParamTable", zap.Int("ClientMaxSendSize", Params.ClientMaxSendSize))
+	log.Info("TestParamTable", zap.Int("ClientMaxRecvSize", Params.ClientMaxRecvSize))
 }
