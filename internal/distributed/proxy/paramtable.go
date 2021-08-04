@@ -12,6 +12,7 @@
 package grpcproxy
 
 import (
+	"strconv"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/distributed/grpcconfigs"
@@ -110,22 +111,46 @@ func (pt *ParamTable) initPort() {
 
 func (pt *ParamTable) initServerMaxSendSize() {
 	var err error
-	pt.ServerMaxSendSize, err = pt.ParseIntWithErr("proxy.grpc.serverMaxSendSize")
-	if err != nil {
+
+	valueStr, err := pt.Load("proxy.grpc.serverMaxSendSize")
+	if err != nil { // not set
 		pt.ServerMaxSendSize = grpcconfigs.DefaultServerMaxSendSize
-		log.Debug("proxy.grpc.serverMaxSendSize not set, set to default")
 	}
+
+	value, err := strconv.Atoi(valueStr)
+	if err != nil { // not in valid format
+		log.Warn("Failed to parse proxy.grpc.serverMaxSendSize, set to default",
+			zap.String("proxy.grpc.serverMaxSendSize", valueStr),
+			zap.Error(err))
+
+		pt.ServerMaxSendSize = grpcconfigs.DefaultServerMaxSendSize
+	} else {
+		pt.ServerMaxSendSize = value
+	}
+
 	log.Debug("initServerMaxSendSize",
 		zap.Int("proxy.grpc.serverMaxSendSize", pt.ServerMaxSendSize))
 }
 
 func (pt *ParamTable) initServerMaxRecvSize() {
 	var err error
-	pt.ServerMaxRecvSize, err = pt.ParseIntWithErr("proxy.grpc.serverMaxRecvSize")
-	if err != nil {
+
+	valueStr, err := pt.Load("proxy.grpc.serverMaxRecvSize")
+	if err != nil { // not set
 		pt.ServerMaxRecvSize = grpcconfigs.DefaultServerMaxRecvSize
-		log.Debug("proxy.grpc.serverMaxRecvSize not set, set to default")
 	}
+
+	value, err := strconv.Atoi(valueStr)
+	if err != nil { // not in valid format
+		log.Warn("Failed to parse proxy.grpc.serverMaxRecvSize, set to default",
+			zap.String("proxy.grpc.serverMaxRecvSize", valueStr),
+			zap.Error(err))
+
+		pt.ServerMaxRecvSize = grpcconfigs.DefaultServerMaxRecvSize
+	} else {
+		pt.ServerMaxRecvSize = value
+	}
+
 	log.Debug("initServerMaxRecvSize",
 		zap.Int("proxy.grpc.serverMaxRecvSize", pt.ServerMaxRecvSize))
 }

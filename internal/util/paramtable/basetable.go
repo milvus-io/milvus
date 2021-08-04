@@ -316,18 +316,6 @@ func (gp *BaseTable) ParseInt(key string) int {
 	return value
 }
 
-func (gp *BaseTable) ParseIntWithErr(key string) (int, error) {
-	valueStr, err := gp.Load(key)
-	if err != nil {
-		return 0, err
-	}
-	value, err := strconv.Atoi(valueStr)
-	if err != nil {
-		return 0, err
-	}
-	return value, nil
-}
-
 // package methods
 
 func ConvertRangeToIntRange(rangeStr, sep string) []int {
