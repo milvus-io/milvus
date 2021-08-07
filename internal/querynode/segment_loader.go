@@ -76,22 +76,6 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 		partitionID := info.PartitionID
 		collectionID := info.CollectionID
 
-		// init replica
-		hasCollectionInHistorical := loader.historicalReplica.hasCollection(collectionID)
-		hasPartitionInHistorical := loader.historicalReplica.hasPartition(partitionID)
-		if !hasCollectionInHistorical {
-			err := loader.historicalReplica.addCollection(collectionID, req.Schema)
-			if err != nil {
-				return err
-			}
-		}
-		if !hasPartitionInHistorical {
-			err := loader.historicalReplica.addPartition(collectionID, partitionID)
-			if err != nil {
-				return err
-			}
-		}
-
 		collection, err := loader.historicalReplica.getCollectionByID(collectionID)
 		if err != nil {
 			log.Warn(err.Error())
@@ -101,13 +85,13 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 		err = loader.loadSegmentInternal(collectionID, segment, info)
 		if err != nil {
 			deleteSegment(segment)
-			log.Error(err.Error())
+			log.Warn(err.Error())
 			continue
 		}
 		err = loader.historicalReplica.setSegment(segment)
 		if err != nil {
 			deleteSegment(segment)
-			log.Error(err.Error())
+			log.Warn(err.Error())
 			continue
 		}
 		if onService {
@@ -115,14 +99,14 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 			value, err := loader.etcdKV.Load(key)
 			if err != nil {
 				deleteSegment(segment)
-				log.Error("error when load segment info from etcd", zap.Any("error", err.Error()))
+				log.Warn("error when load segment info from etcd", zap.Any("error", err.Error()))
 				continue
 			}
 			segmentInfo := &querypb.SegmentInfo{}
 			err = proto.UnmarshalText(value, segmentInfo)
 			if err != nil {
 				deleteSegment(segment)
-				log.Error("error when unmarshal segment info from etcd", zap.Any("error", err.Error()))
+				log.Warn("error when unmarshal segment info from etcd", zap.Any("error", err.Error()))
 				continue
 			}
 			segmentInfo.SegmentState = querypb.SegmentState_sealed
@@ -130,7 +114,7 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 			err = loader.etcdKV.Save(newKey, proto.MarshalTextString(segmentInfo))
 			if err != nil {
 				deleteSegment(segment)
-				log.Error("error when update segment info to etcd", zap.Any("error", err.Error()))
+				log.Warn("error when update segment info to etcd", zap.Any("error", err.Error()))
 			}
 		}
 	}
@@ -220,7 +204,7 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 	defer func() {
 		err := iCodec.Close()
 		if err != nil {
-			log.Error(err.Error())
+			log.Warn(err.Error())
 		}
 	}()
 	blobs := make([]*storage.Blob, 0)
@@ -247,7 +231,7 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 
 	_, _, insertData, err := iCodec.Deserialize(blobs)
 	if err != nil {
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		return err
 	}
 

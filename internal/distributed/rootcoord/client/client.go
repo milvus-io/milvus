@@ -15,7 +15,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
@@ -86,6 +85,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*G
 }
 
 func (c *GrpcClient) Init() error {
+	Params.Init()
 	return c.connect(retry.Attempts(20))
 }
 
@@ -100,7 +100,10 @@ func (c *GrpcClient) connect(retryOptions ...retry.Option) error {
 		opts := trace.GetInterceptorOpts()
 		log.Debug("RootCoordClient try reconnect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(c.ctx, c.addr,
-			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(2*time.Second),
+			grpc.WithInsecure(), grpc.WithBlock(),
+			grpc.WithDefaultCallOptions(
+				grpc.MaxCallRecvMsgSize(Params.ClientMaxRecvSize),
+				grpc.MaxCallSendMsgSize(Params.ClientMaxSendSize)),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
 					grpc_retry.UnaryClientInterceptor(

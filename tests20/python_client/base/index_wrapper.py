@@ -7,7 +7,7 @@ from check.func_check import *
 from utils.api_request import api_request
 
 
-TIMEOUT = 5
+TIMEOUT = 20
 
 
 class ApiIndexWrapper:

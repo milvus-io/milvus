@@ -15,7 +15,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
@@ -78,6 +77,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*C
 }
 
 func (c *Client) Init() error {
+	Params.Init()
 	return c.connect(retry.Attempts(20))
 }
 
@@ -92,12 +92,14 @@ func (c *Client) connect(retryOptions ...retry.Option) error {
 		opts := trace.GetInterceptorOpts()
 		log.Debug("QueryCoordClient try reconnect ", zap.String("address", c.addr))
 		conn, err := grpc.DialContext(c.ctx, c.addr,
-			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(2*time.Second),
+			grpc.WithInsecure(), grpc.WithBlock(),
+			grpc.WithDefaultCallOptions(
+				grpc.MaxCallRecvMsgSize(Params.ClientMaxRecvSize),
+				grpc.MaxCallSendMsgSize(Params.ClientMaxSendSize)),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
 					grpc_retry.UnaryClientInterceptor(
 						grpc_retry.WithMax(3),
-						grpc_retry.WithPerRetryTimeout(time.Second*10),
 						grpc_retry.WithCodes(codes.Aborted, codes.Unavailable),
 					),
 					grpc_opentracing.UnaryClientInterceptor(opts...),
@@ -106,7 +108,6 @@ func (c *Client) connect(retryOptions ...retry.Option) error {
 				grpc_middleware.ChainStreamClient(
 					grpc_retry.StreamClientInterceptor(
 						grpc_retry.WithMax(3),
-						grpc_retry.WithPerRetryTimeout(time.Second*10),
 						grpc_retry.WithCodes(codes.Aborted, codes.Unavailable),
 					),
 					grpc_opentracing.StreamClientInterceptor(opts...),

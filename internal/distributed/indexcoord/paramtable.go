@@ -14,6 +14,10 @@ package grpcindexcoord
 import (
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/distributed/grpcconfigs"
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
@@ -22,6 +26,9 @@ type ParamTable struct {
 
 	ServiceAddress string
 	ServicePort    int
+
+	ServerMaxSendSize int
+	ServerMaxRecvSize int
 }
 
 var Params ParamTable
@@ -37,6 +44,9 @@ func (pt *ParamTable) Init() {
 func (pt *ParamTable) initParams() {
 	pt.initServicePort()
 	pt.initServiceAddress()
+
+	pt.initServerMaxSendSize()
+	pt.initServerMaxRecvSize()
 }
 
 func (pt *ParamTable) initServicePort() {
@@ -49,4 +59,26 @@ func (pt *ParamTable) initServiceAddress() {
 		panic(err)
 	}
 	pt.ServiceAddress = ret
+}
+
+func (pt *ParamTable) initServerMaxSendSize() {
+	var err error
+	pt.ServerMaxSendSize, err = pt.ParseIntWithErr("indexCoord.grpc.serverMaxSendSize")
+	if err != nil {
+		pt.ServerMaxSendSize = grpcconfigs.DefaultServerMaxSendSize
+		log.Debug("indexCoord.grpc.serverMaxSendSize not set, set to default")
+	}
+	log.Debug("initServerMaxSendSize",
+		zap.Int("indexCoord.grpc.serverMaxSendSize", pt.ServerMaxSendSize))
+}
+
+func (pt *ParamTable) initServerMaxRecvSize() {
+	var err error
+	pt.ServerMaxRecvSize, err = pt.ParseIntWithErr("indexCoord.grpc.serverMaxRecvSize")
+	if err != nil {
+		pt.ServerMaxRecvSize = grpcconfigs.DefaultServerMaxRecvSize
+		log.Debug("indexCoord.grpc.serverMaxRecvSize not set, set to default")
+	}
+	log.Debug("initServerMaxRecvSize",
+		zap.Int("indexCoord.grpc.serverMaxRecvSize", pt.ServerMaxRecvSize))
 }

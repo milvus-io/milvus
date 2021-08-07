@@ -74,7 +74,7 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 
 	finalMsg := fmt.Sprintf("[%s] %s", errorName, errorMsg)
 	logMsg := fmt.Sprintf("%s, C Runtime Exception: %s\n", extraInfo, finalMsg)
-	log.Error(logMsg)
+	log.Warn(logMsg)
 	return errors.New(finalMsg)
 }
 

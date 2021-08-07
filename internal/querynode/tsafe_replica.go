@@ -40,7 +40,7 @@ func (t *tSafeReplica) getTSafe(vChannel Channel) Timestamp {
 	defer t.mu.Unlock()
 	safer, err := t.getTSaferPrivate(vChannel)
 	if err != nil {
-		log.Error("get tSafe failed", zap.Error(err))
+		log.Warn("get tSafe failed", zap.Error(err))
 		return 0
 	}
 	return safer.get()
@@ -51,7 +51,7 @@ func (t *tSafeReplica) setTSafe(vChannel Channel, id UniqueID, timestamp Timesta
 	defer t.mu.Unlock()
 	safer, err := t.getTSaferPrivate(vChannel)
 	if err != nil {
-		log.Error("set tSafe failed", zap.Error(err))
+		log.Warn("set tSafe failed", zap.Error(err))
 		return
 	}
 	safer.set(id, timestamp)
@@ -60,7 +60,7 @@ func (t *tSafeReplica) setTSafe(vChannel Channel, id UniqueID, timestamp Timesta
 func (t *tSafeReplica) getTSaferPrivate(vChannel Channel) (tSafer, error) {
 	if _, ok := t.tSafes[vChannel]; !ok {
 		err := errors.New("cannot found tSafer, vChannel = " + vChannel)
-		//log.Error(err.Error())
+		//log.Warn(err.Error())
 		return nil, err
 	}
 	return t.tSafes[vChannel], nil
@@ -75,7 +75,7 @@ func (t *tSafeReplica) addTSafe(vChannel Channel) {
 		t.tSafes[vChannel].start()
 		log.Debug("add tSafe done", zap.Any("channel", vChannel))
 	} else {
-		log.Error("tSafe has been existed", zap.Any("channel", vChannel))
+		log.Warn("tSafe has been existed", zap.Any("channel", vChannel))
 	}
 }
 
@@ -98,7 +98,7 @@ func (t *tSafeReplica) registerTSafeWatcher(vChannel Channel, watcher *tSafeWatc
 	defer t.mu.Unlock()
 	safer, err := t.getTSaferPrivate(vChannel)
 	if err != nil {
-		log.Error("register tSafe watcher failed", zap.Error(err))
+		log.Warn("register tSafe watcher failed", zap.Error(err))
 		return
 	}
 	safer.registerTSafeWatcher(watcher)

@@ -13,6 +13,7 @@ default_top_k = 10
 default_nq = 2
 default_limit = 10
 default_search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
+default_index = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
 max_top_k = 16384
 max_partition_num = 4096  # 256
 default_segment_row_limit = 1000
@@ -42,6 +43,7 @@ float_vec_field_desc = "float vector type field"
 binary_vec_field_desc = "binary vector type field"
 max_dim = 32768
 gracefulTime = 1
+default_nlist = 128
 
 Not_Exist = "Not_Exist"
 Connect_Object_Name = "Milvus"
@@ -99,6 +101,7 @@ get_invalid_vectors = [
 ]
 
 get_invalid_ints = [
+    9999999999,
     1.0,
     None,
     [1, 2, 3],
@@ -125,6 +128,7 @@ get_wrong_format_dict = [
     {"host": "string_host", "port": {}},
     {"host": 0, "port": 19520}
 ]
+
 
 """ Specially defined list """
 all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "ANNOY", "RHNSW_FLAT", "RHNSW_PQ", "RHNSW_SQ",

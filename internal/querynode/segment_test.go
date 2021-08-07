@@ -15,6 +15,7 @@ import (
 	"encoding/binary"
 	"log"
 	"math"
+	"sync"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
@@ -582,5 +583,37 @@ func TestSegment_segmentLoadFieldData(t *testing.T) {
 	assert.NoError(t, err)
 
 	deleteSegment(segment)
+	deleteCollection(collection)
+}
+
+func TestSegment_ConcurrentOperation(t *testing.T) {
+	const N = 16
+	var ages = []int32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+
+	collectionID := UniqueID(0)
+	partitionID := UniqueID(0)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
+	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
+	assert.Equal(t, collection.ID(), collectionID)
+
+	wg := sync.WaitGroup{}
+	for i := 0; i < 1000; i++ {
+		segmentID := UniqueID(i)
+		segment := newSegment(collection, segmentID, partitionID, collectionID, "", segmentTypeSealed, true)
+		assert.Equal(t, segmentID, segment.segmentID)
+		assert.Equal(t, partitionID, segment.partitionID)
+
+		wg.Add(2)
+		go func() {
+			deleteSegment(segment)
+			wg.Done()
+		}()
+		go func() {
+			// segmentLoadFieldData result error may be nil or not, we just expected this test would not crash.
+			_ = segment.segmentLoadFieldData(101, N, ages)
+			wg.Done()
+		}()
+	}
+	wg.Wait()
 	deleteCollection(collection)
 }
