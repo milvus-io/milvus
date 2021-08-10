@@ -36,7 +36,7 @@ class TestRestartBase:
             logging.getLogger().info(reason)
             pytest.skip(reason)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_insert_flush(self, connect, collection, args):
         '''
         target: return the same row count after server restart
@@ -54,12 +54,12 @@ class TestRestartBase:
         logging.getLogger().info("Start restart server")
         assert restart_server(args["service_name"])
         # assert row count again
-        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"]) 
+        new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
         res_count = new_connect.count_entities(collection)
         logging.getLogger().info(res_count)
         assert res_count == 2 * nb
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_insert_during_flushing(self, connect, collection, args):
         '''
         target: flushing will recover
@@ -75,7 +75,7 @@ class TestRestartBase:
             # restart server
             assert restart_server(args["service_name"])
             # assert row count again
-            new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"]) 
+            new_connect = get_milvus(args["ip"], args["port"], handler=args["handler"])
             res_count_2 = new_connect.count_entities(collection)
             logging.getLogger().info(res_count_2)
             timeout = 300
@@ -87,7 +87,7 @@ class TestRestartBase:
             logging.getLogger().info(res_count_3)
             assert res_count_3 == big_nb
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_delete_during_flushing(self, connect, collection, args):
         '''
         target: flushing will recover
@@ -120,7 +120,7 @@ class TestRestartBase:
             logging.getLogger().info(res_count_3)
             assert res_count_3 == big_nb - delete_length
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_during_indexed(self, connect, collection, args):
         '''
         target: flushing will recover
@@ -150,7 +150,7 @@ class TestRestartBase:
                 else:
                     assert True
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_during_indexing(self, connect, collection, args):
         '''
         target: flushing will recover
@@ -197,7 +197,7 @@ class TestRestartBase:
         #         else:
         #             assert True
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_delete_flush_during_compacting(self, connect, collection, args):
         '''
         target: verify server work after restart during compaction
@@ -237,7 +237,7 @@ class TestRestartBase:
         assert size_before > size_after
 
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_insert_during_flushing_multi_collections(self, connect, args):
         '''
         target: flushing will recover
@@ -280,7 +280,7 @@ class TestRestartBase:
             for name in collection_list:
                 assert new_connect.count_entities(name) == big_nb
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_insert_during_flushing_multi_partitions(self, connect, collection, args):
         '''
         target: flushing will recover

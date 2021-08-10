@@ -74,7 +74,7 @@ class TestIndexBase:
         with pytest.raises(Exception) as e:
             connect.create_index(collection, tmp_field_name, get_simple_index)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_index_on_field(self, connect, collection, get_simple_index):
         '''
         target: test create index interface
@@ -86,6 +86,7 @@ class TestIndexBase:
         with pytest.raises(Exception) as e:
             connect.create_index(collection, tmp_field_name, get_simple_index)
 
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_no_vectors(self, connect, collection, get_simple_index):
         '''
@@ -99,6 +100,7 @@ class TestIndexBase:
             create_target_index(get_simple_index, field_name)
             assert index == get_simple_index
 
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition(self, connect, collection, get_simple_index):
         '''
@@ -131,6 +133,7 @@ class TestIndexBase:
             create_target_index(get_simple_index, field_name)
             assert index == get_simple_index
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_index_without_connect(self, dis_connect, collection):
         '''
         target: test create index without connection
@@ -161,7 +164,7 @@ class TestIndexBase:
         assert len(res) == nq
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_index_multithread(self, connect, collection, args):
         '''
         target: test create index interface with multiprocess
@@ -200,7 +203,7 @@ class TestIndexBase:
         with pytest.raises(Exception) as e:
             connect.create_index(collection_name, field_name, default_index)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_insert_flush(self, connect, collection, get_simple_index):
         '''
@@ -218,7 +221,7 @@ class TestIndexBase:
             create_target_index(get_simple_index, field_name)
             assert index == get_simple_index
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_same_index_repeatedly(self, connect, collection, get_simple_index):
         '''
@@ -233,7 +236,7 @@ class TestIndexBase:
             create_target_index(get_simple_index, field_name)
             assert index == get_simple_index
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_different_index_repeatedly(self, connect, collection):
         '''
@@ -252,7 +255,7 @@ class TestIndexBase:
         # assert index == indexs[-1]
         assert not index    # FLAT is the last index_type, drop all indexes in server
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_different_index_repeatedly_B(self, connect, collection):
         '''
@@ -303,6 +306,7 @@ class TestIndexBase:
             create_target_index(get_simple_index, field_name)
             assert index == get_simple_index
 
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition_ip(self, connect, collection, get_simple_index):
         '''
@@ -360,7 +364,7 @@ class TestIndexBase:
         assert len(res) == nq
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_index_multithread_ip(self, connect, collection, args):
         '''
         target: test create index interface with multiprocess
@@ -388,6 +392,7 @@ class TestIndexBase:
         for t in threads:
             t.join()
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_index_collection_not_existed_ip(self, connect, collection):
         '''
         target: test create index interface when collection name not existed
@@ -419,7 +424,7 @@ class TestIndexBase:
             create_target_index(default_index, field_name)
             assert index == default_index
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_same_index_repeatedly_ip(self, connect, collection):
         '''
@@ -435,7 +440,7 @@ class TestIndexBase:
             create_target_index(default_index, field_name)
             assert index == default_index
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_different_index_repeatedly_ip(self, connect, collection):
         '''
@@ -476,7 +481,7 @@ class TestIndexBase:
         index = connect.describe_index(collection, "")
         assert not index
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_drop_index_repeatedly(self, connect, collection, get_simple_index):
         '''
         target: test drop index repeatedly
@@ -489,7 +494,7 @@ class TestIndexBase:
         index = connect.describe_index(collection, "")
         assert not index
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_drop_index_without_connect(self, dis_connect, collection):
         '''
         target: test drop index without connection
@@ -521,7 +526,7 @@ class TestIndexBase:
         # no create index
         connect.drop_index(collection, field_name)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_drop_index_repeatedly(self, connect, collection, get_simple_index):
         '''
         target: test create / drop index repeatedly, use the same index params
@@ -532,6 +537,7 @@ class TestIndexBase:
             connect.create_index(collection, field_name, get_simple_index)
             connect.drop_index(collection, field_name)
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_drop_index_ip(self, connect, collection, get_simple_index):
         '''
         target: test drop index interface
@@ -545,7 +551,7 @@ class TestIndexBase:
         index = connect.describe_index(collection, "")
         assert not index
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_drop_index_repeatedly_ip(self, connect, collection, get_simple_index):
         '''
         target: test drop index repeatedly
@@ -559,7 +565,7 @@ class TestIndexBase:
         index = connect.describe_index(collection, "")
         assert not index
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_drop_index_without_connect_ip(self, dis_connect, collection):
         '''
         target: test drop index without connection
@@ -569,6 +575,7 @@ class TestIndexBase:
         with pytest.raises(Exception) as e:
             dis_connect.drop_index(collection, field_name)
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_drop_index_collection_not_create_ip(self, connect, collection):
         '''
         target: test drop index interface when index not created
@@ -579,7 +586,7 @@ class TestIndexBase:
         # no create index
         connect.drop_index(collection, field_name)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_drop_index_repeatedly_ip(self, connect, collection, get_simple_index):
         '''
         target: test create / drop index repeatedly, use the same index params
@@ -647,6 +654,7 @@ class TestIndexBinary:
       The following cases are used to test `create_index` function
     ******************************************************************
     """
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index(self, connect, binary_collection, get_jaccard_index):
         '''
@@ -695,6 +703,7 @@ class TestIndexBinary:
         assert len(res) == nq
 
     @pytest.mark.timeout(BUILD_TIMEOUT)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_index_invalid_metric_type_binary(self, connect, binary_collection, get_l2_index):
         '''
         target: test create index interface with invalid metric type
@@ -760,6 +769,7 @@ class TestIndexBinary:
       The following cases are used to test `drop_index` function
     ******************************************************************
     """
+    @pytest.mark.tags(CaseLabel.L2)
     def test_drop_index(self, connect, binary_collection, get_jaccard_index):
         '''
         target: test drop index interface
@@ -802,13 +812,12 @@ class TestIndexInvalid(object):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.tags_smoke)
-    @pytest.mark.level(1)
     def test_create_index_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.create_index(collection_name, field_name, default_index)
 
-    @pytest.mark.level(1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_drop_index_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
@@ -821,7 +830,7 @@ class TestIndexInvalid(object):
     def get_index(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_index_with_invalid_index_params(self, connect, collection, get_index):
         logging.getLogger().info(get_index)
         with pytest.raises(Exception) as e:
@@ -888,7 +897,7 @@ class TestIndexAsync:
         logging.getLogger().info("DROP")
         connect.drop_collection(collection)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_index_with_invalid_collection_name(self, connect):
         collection_name = " "
         with pytest.raises(Exception) as e:

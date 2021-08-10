@@ -73,7 +73,7 @@ class TestDescribeCollection:
             assert index["metric_type"] == get_simple_index["metric_type"]
             assert index["params"] == get_simple_index["params"]
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_describe_collection_without_connection(self, collection, dis_connect):
         '''
         target: test get collection info, without connection
@@ -103,7 +103,7 @@ class TestDescribeCollection:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "describe collection failed: can't find collection: %s" % collection_name
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_describe_collection_multithread(self, connect):
         '''
         target: test create collection with multithread
@@ -171,13 +171,13 @@ class TestDescribeCollectionInvalid(object):
     def get_collection_name(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_describe_collection_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.describe_collection(collection_name)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("collection_name", ('', None))
     def test_describe_collection_with_empty_or_None_collection_name(self, connect, collection_name):
         with pytest.raises(Exception) as e:

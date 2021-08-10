@@ -166,6 +166,7 @@ class TestQueryBase:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
                 ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[-1]["values"][index])
 
+    @pytest.mark.tags(ut.CaseLabel.L2)
     def test_query_after_search(self, connect, collection):
         """
         target: test query after search
@@ -346,7 +347,6 @@ class TestQueryBase:
         assert res[1][default_float_field_name] == binary_entities[1]["values"][0]
         assert res[2][ut.default_float_vec_field_name] == binary_entities[2]["values"][0]
 
-    @pytest.mark.level(2)
     @pytest.mark.tags(ut.CaseLabel.tags_smoke)
     def test_query_expr_all_term_array(self, connect, collection):
         """
@@ -558,7 +558,7 @@ class TestQueryPartition:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
                 ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
-    @pytest.mark.xfail(reason="#6075")
+    @pytest.mark.tags(ut.CaseLabel.L2)
     def test_query_empty_partition(self, connect, collection):
         """
         target: test query on empty partition

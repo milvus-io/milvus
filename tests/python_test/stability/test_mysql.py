@@ -20,6 +20,7 @@ class TestMysql:
             logging.getLogger().info(reason)
             pytest.skip(reason)
 
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_kill_mysql_during_index(self, connect, collection, args):
         big_nb = 20000
         index_param = {"nlist": 1024, "m": 16}

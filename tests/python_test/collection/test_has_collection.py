@@ -26,7 +26,7 @@ class TestHasCollection:
         '''
         assert connect.has_collection(collection)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_has_collection_without_connection(self, collection, dis_connect):
         '''
         target: test has collection, without connection
@@ -50,7 +50,7 @@ class TestHasCollection:
         connect.drop_collection(collection_name)
         assert not connect.has_collection(collection_name)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_has_collection_multithread(self, connect):
         '''
         target: test create collection with multithread
@@ -85,19 +85,19 @@ class TestHasCollectionInvalid(object):
     def get_collection_name(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_has_collection_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.has_collection(collection_name)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_has_collection_with_empty_collection_name(self, connect):
         collection_name = ''
         with pytest.raises(Exception) as e:
             connect.has_collection(collection_name)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_has_collection_with_none_collection_name(self, connect):
         collection_name = None
         with pytest.raises(Exception) as e:

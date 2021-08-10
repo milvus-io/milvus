@@ -29,6 +29,7 @@ class TestDropCollection:
         time.sleep(2)
         assert not connect.has_collection(collection)
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_drop_collection_without_connection(self, collection, dis_connect):
         '''
         target: test describe collection, without connection
@@ -55,8 +56,7 @@ class TestDropCollection:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "describe collection failed: can't find collection: %s" % collection_name
 
-    @pytest.mark.level(2)
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_drop_collection_multithread(self, connect):
         '''
         target: test create and drop collection with multithread
@@ -95,12 +95,13 @@ class TestDropCollectionInvalid(object):
     def get_collection_name(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_drop_collection_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.has_collection(collection_name)
 
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("collection_name", ('', None))
     def test_drop_collection_with_empty_or_None_collection_name(self, connect, collection_name):
         with pytest.raises(Exception) as e:

@@ -26,7 +26,7 @@ class TestCreateBase:
         '''
         connect.create_partition(collection, default_tag)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(600)
     def test_create_partition_limit(self, connect, collection, args):
         '''
@@ -72,6 +72,7 @@ class TestCreateBase:
             assert message == "create partition failed: partition name = %s already exists" % default_tag
         assert compare_list_elements(connect.list_partitions(collection), [default_tag, '_default'])
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_partition_collection_not_existed(self, connect):
         '''
         target: test create partition, its owner collection name not existed in db, check status returned
@@ -172,7 +173,7 @@ class TestCreateBase:
         res = connect.get_collection_stats(id_collection)
         assert res["row_count"] == default_nb * 2
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_partition_insert_same_tags_two_collections(self, connect, collection):
         '''
         target: test create two partitions, and insert vectors with the same tag to each collection, check status returned
@@ -301,7 +302,7 @@ class TestHasBase:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "HasPartition failed: can't find collection: %s" % collection_name
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_has_partition_with_invalid_tag_name(self, connect, collection, get_tag_name):
         '''
         target: test has partition, with invalid tag name, check status returned
@@ -369,8 +370,7 @@ class TestDropBase:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "DropPartition failed: can't find collection: %s" % new_collection
 
-    @pytest.mark.tags(CaseLabel.tags_smoke)
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_drop_partition_repeatedly(self, connect, collection):
         '''
         target: test drop partition twice, check status and partition if existed
@@ -421,7 +421,7 @@ class TestNameInvalid(object):
     def get_collection_name(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_drop_partition_with_invalid_collection_name(self, connect, collection, get_collection_name):
         '''
         target: test drop partition, with invalid collection name, check status returned
@@ -433,7 +433,7 @@ class TestNameInvalid(object):
         with pytest.raises(Exception) as e:
             connect.drop_partition(collection_name, default_tag)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_drop_partition_with_invalid_tag_name(self, connect, collection, get_tag_name):
         '''
         target: test drop partition, with invalid tag name, check status returned
@@ -445,7 +445,7 @@ class TestNameInvalid(object):
         with pytest.raises(Exception) as e:
             connect.drop_partition(collection, tag_name)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_list_partitions_with_invalid_collection_name(self, connect, collection, get_collection_name):
         '''
         target: test show partitions, with invalid collection name, check status returned
