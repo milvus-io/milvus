@@ -59,7 +59,8 @@ The Docker images will be stored under **images** directory.
 2. Enter the following command to load the Docker images:
 
 ```shell
-for image in $(find images/ -type f -name "*.tar.gz") ; do gunzip -c $image | docker load; done 
+cd images/
+for image in $(find . -type f -name "*.tar.gz") ; do gunzip -c $image | docker load; done
 ```
 
 ## Install Milvus
@@ -74,4 +75,18 @@ docker-compose -f docker-compose.yaml up -d
 
 ```shell
 kubectl apply -f milvus_manifest.yaml
+```
+
+## Uninstall Milvus
+
+- Uninstall Milvus with Docker Compose
+
+```shell
+docker-compose -f docker-compose.yaml down
+```
+
+- Uninstall Milvus on Kubernetes
+
+```shell
+kubectl delete -f milvus_manifest.yaml
 ```
