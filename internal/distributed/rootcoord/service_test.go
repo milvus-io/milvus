@@ -167,7 +167,7 @@ func TestGrpcService(t *testing.T) {
 
 	timeTickArray := make([]typeutil.Timestamp, 0, 16)
 	timeTickLock := sync.Mutex{}
-	core.SendTimeTick = func(ts typeutil.Timestamp) error {
+	core.SendTimeTick = func(ts typeutil.Timestamp, reason string) error {
 		timeTickLock.Lock()
 		defer timeTickLock.Unlock()
 		t.Logf("send time tick %d", ts)
