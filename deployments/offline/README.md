@@ -8,16 +8,16 @@ Your Milvus installation may fail when images are not properly loaded from publi
 
 If you install your Milvus with the **docker-compose.yml** file, use these command:
 
-- Download Milvus docker-compose.yaml
+- Download Milvus docker-compose.yml
 ```shell
-# Download Milvus standalone docker-compose.yaml
+# Download Milvus standalone docker-compose.yml
 wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/standalone/docker-compose.yml -O docker-compose.yml
 ```
 
 or
 
 ```shell
-# Download Milvus cluster docker-compose.yaml
+# Download Milvus cluster docker-compose.yml
 wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/cluster/docker-compose.yml -O docker-compose.yml
 ```
 
@@ -68,7 +68,7 @@ for image in $(find . -type f -name "*.tar.gz") ; do gunzip -c $image | docker l
 - Install Milvus with Docker Compose
 
 ```shell
-docker-compose -f docker-compose.yaml up -d
+docker-compose -f docker-compose.yml up -d
 ```
 
 - Install Milvus on Kubernetes
@@ -82,7 +82,7 @@ kubectl apply -f milvus_manifest.yaml
 - Uninstall Milvus with Docker Compose
 
 ```shell
-docker-compose -f docker-compose.yaml down
+docker-compose -f docker-compose.yml down
 ```
 
 - Uninstall Milvus on Kubernetes
