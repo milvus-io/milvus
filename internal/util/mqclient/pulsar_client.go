@@ -67,7 +67,7 @@ func (pc *pulsarClient) Subscribe(options ConsumerOptions) (Consumer, error) {
 	}
 	//consumer.Seek(pulsar.EarliestMessageID())
 	//consumer.SeekByTime(time.Unix(0, 0))
-	pConsumer := &pulsarConsumer{c: consumer}
+	pConsumer := &pulsarConsumer{c: consumer, closeCh: make(chan struct{})}
 
 	return pConsumer, nil
 }
