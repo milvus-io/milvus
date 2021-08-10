@@ -83,6 +83,7 @@ class TestFlushBase:
         # with pytest.raises(Exception) as e:
         #     connect.flush([collection])
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_add_partition_flush(self, connect, id_collection):
         '''
         method: add entities into partition in collection, flush serveral times
@@ -140,6 +141,7 @@ class TestFlushBase:
         res = connect.get_collection_stats(collection_new)
         assert res["row_count"] == default_nb
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_add_collections_fields_flush(self, connect, id_collection, get_filter_field, get_vector_field):
         '''
         method: create collection with different fields, and add entities into collections, flush one
@@ -187,6 +189,7 @@ class TestFlushBase:
         assert len(res[0].ids) == 10
         assert len(res[0].distances) == 10
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_add_flush_auto(self, connect, id_collection):
         '''
         method: add entities
@@ -252,7 +255,7 @@ class TestFlushBase:
         # assert res
 
     # TODO: unable to set config 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_collection_count_during_flush(self, connect, collection, args):
         '''
         method: flush collection at background, call `get_collection_stats`
@@ -281,7 +284,7 @@ class TestFlushBase:
         res = connect.get_collection_stats(collection)
         assert res["row_count"] == 0
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_delete_flush_during_search(self, connect, collection, args):
         '''
         method: search at background, call `delete and flush`
@@ -321,6 +324,7 @@ class TestFlushAsync:
     def check_status(self):
         logging.getLogger().info("In callback check status")
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_flush_empty_collection(self, connect, collection):
         '''
         method: flush collection with no vectors
@@ -330,6 +334,7 @@ class TestFlushAsync:
         status = future.result()
         assert status is None
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_flush_async_long(self, connect, collection):
         ids = connect.insert(collection, default_entities)
         assert len(ids) == default_nb
@@ -372,7 +377,7 @@ class TestCollectionNameInvalid(object):
     def get_invalid_collection_name(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_flush_with_invalid_collection_name(self, connect, get_invalid_collection_name):
         collection_name = get_invalid_collection_name
         if collection_name is None or not collection_name:

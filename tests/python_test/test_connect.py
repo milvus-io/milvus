@@ -19,6 +19,7 @@ class TestConnect:
         else:
             return False
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_close(self, connect):
         '''
         target: test disconnect
@@ -29,6 +30,7 @@ class TestConnect:
         with pytest.raises(Exception) as e:
             connect.list_collections()
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_close_repeatedly(self, dis_connect, args):
         '''
         target: test disconnect repeatedly
@@ -38,6 +40,7 @@ class TestConnect:
         with pytest.raises(Exception) as e:
             dis_connect.close()
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_connect_correct_ip_port(self, args):
         '''
         target: test connect with correct ip and port value
@@ -47,6 +50,7 @@ class TestConnect:
         milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
 
     # TODO: Currently we test with remote IP, localhost testing need to add
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_connect_ip_localhost(self, args):
         '''
         target: test connect with ip value: localhost
@@ -58,6 +62,7 @@ class TestConnect:
         # assert milvus.connected()
 
     @pytest.mark.timeout(CONNECT_TIMEOUT)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_connect_wrong_ip_null(self, args):
         '''
         target: test connect with wrong ip value
@@ -68,6 +73,7 @@ class TestConnect:
         with pytest.raises(Exception) as e:
             get_milvus(ip, args["port"], args["handler"])
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_connect_uri(self, args):
         '''
         target: test connect with correct uri
@@ -77,6 +83,7 @@ class TestConnect:
         uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
         milvus = get_milvus(args["ip"], args["port"], uri=uri_value, handler=args["handler"])
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_connect_uri_null(self, args):
         '''
         target: test connect with null uri
@@ -90,6 +97,7 @@ class TestConnect:
             with pytest.raises(Exception) as e:
                 milvus = get_milvus(None, None, uri=uri_value, handler=args["handler"])
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_connect_with_multiprocess(self, args):
         '''
         target: test uri connect with multiprocess
@@ -106,6 +114,7 @@ class TestConnect:
             for future in concurrent.futures.as_completed(future_results):
                 future.result()
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_connect_repeatedly(self, args):
         '''
         target: test connect repeatedly
@@ -116,6 +125,7 @@ class TestConnect:
         milvus = Milvus(uri=uri_value, handler=args["handler"])
         milvus = Milvus(uri=uri_value, handler=args["handler"])
 
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_add_vector_and_disconnect_concurrently(self):
         '''
         Target: test disconnect in the middle of add vectors
@@ -129,6 +139,7 @@ class TestConnect:
         '''
         pass
 
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_search_vector_and_disconnect_concurrently(self):
         '''
         Target: Test disconnect in the middle of search vectors(with large nq and topk)multiple times, and search/add vectors still work
@@ -141,6 +152,7 @@ class TestConnect:
         '''
         pass
 
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_thread_safe_with_one_connection_shared_in_multi_threads(self):
         '''
         Target: test 1 connection thread safe
@@ -163,7 +175,7 @@ class TestConnectIPInvalid(object):
     def get_invalid_ip(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(CONNECT_TIMEOUT)
     def test_connect_with_invalid_ip(self, args, get_invalid_ip):
         ip = get_invalid_ip
@@ -183,7 +195,7 @@ class TestConnectPortInvalid(object):
     def get_invalid_port(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(CONNECT_TIMEOUT)
     def test_connect_with_invalid_port(self, args, get_invalid_port):
         '''
@@ -208,7 +220,7 @@ class TestConnectURIInvalid(object):
     def get_invalid_uri(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.timeout(CONNECT_TIMEOUT)
     def test_connect_with_invalid_uri(self, get_invalid_uri, args):
         '''

@@ -294,7 +294,7 @@ default_single_query = {
 #         assert res_get[0] is None
 #
 #     # TODO: disable
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def _test_index_insert_single_delete_get(self, connect, id_collection):
 #         '''
 #         method: insert entities, and delete
@@ -455,7 +455,7 @@ default_single_query = {
 #     def get_collection_name(self, request):
 #         yield request.param
 #
-#     @pytest.mark.level(1)
+#     @pytest.mark.tags(CaseLabel.L1)
 #     def test_delete_entity_id_invalid(self, connect, collection, gen_entity_id):
 #         invalid_id = gen_entity_id
 #         with pytest.raises(Exception) as e:
@@ -466,7 +466,7 @@ default_single_query = {
 #         with pytest.raises(Exception) as e:
 #             status = connect.delete_entity_by_id(collection, [1, invalid_id])
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_delete_entity_with_invalid_collection_name(self, connect, get_collection_name):
 #         collection_name = get_collection_name
 #         with pytest.raises(Exception) as e:

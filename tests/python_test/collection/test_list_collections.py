@@ -38,7 +38,7 @@ class TestListCollections:
         for i in range(collection_num):
             connect.drop_collection(collection_names[i])
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_list_collections_without_connection(self, dis_connect):
         '''
         target: test list collections, without connection
@@ -48,6 +48,7 @@ class TestListCollections:
         with pytest.raises(Exception) as e:
             dis_connect.list_collections()
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_list_collections_not_existed(self, connect):
         '''
         target: test if collection not created
@@ -63,7 +64,7 @@ class TestListCollections:
 
     # TODO: make sure to run this case in the end
     @pytest.mark.skip("r0.3-test")
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_list_collections_no_collection(self, connect):
         '''
         target: test show collections is correct or not, if no collection in db
@@ -76,7 +77,7 @@ class TestListCollections:
             for collection_name in result:
                 assert connect.has_collection(collection_name)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_list_collections_multithread(self, connect):
         '''
         target: test list collection with multithread
