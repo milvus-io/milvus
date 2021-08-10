@@ -22,6 +22,7 @@ type pulsarConsumer struct {
 	c          pulsar.Consumer
 	msgChannel chan ConsumerMessage
 	hasSeek    bool
+	closeCh    chan struct{}
 }
 
 func (pc *pulsarConsumer) Subscription() string {
@@ -39,11 +40,13 @@ func (pc *pulsarConsumer) Chan() <-chan ConsumerMessage {
 				select {
 				case msg, ok := <-pc.c.Chan():
 					if !ok {
-						close(pc.msgChannel)
 						log.Debug("pulsar consumer channel closed")
 						return
 					}
 					pc.msgChannel <- &pulsarMessage{msg: msg}
+				case <-pc.closeCh: // workaround for pulsar consumer.receiveCh not closed
+					close(pc.msgChannel)
+					return
 				}
 			}
 		}()
@@ -67,4 +70,5 @@ func (pc *pulsarConsumer) Ack(message ConsumerMessage) {
 
 func (pc *pulsarConsumer) Close() {
 	pc.c.Close()
+	close(pc.closeCh)
 }
