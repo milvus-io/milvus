@@ -43,7 +43,7 @@ spec:
       name: build-cache
       subPath: docker-volume
   - name: etcd
-    image: quay.io/coreos/etcd:v3.4.13
+    image: quay.io/coreos/etcd:v3.5.0
     env:
     - name: ETCD_LOG_LEVEL
       value: debug

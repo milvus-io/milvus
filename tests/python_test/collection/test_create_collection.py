@@ -60,6 +60,7 @@ class TestCreateCollection:
         connect.create_collection(collection_name, fields)
         assert connect.has_collection(collection_name)
 
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_create_collection_segment_row_limit(self, connect, get_segment_row_limit):
         '''
         target: test create normal collection with different fields
@@ -108,6 +109,7 @@ class TestCreateCollection:
             assert message == "Create collection failed: meta table add collection failed,error = collection %s exist" % collection
 
     # TODO: assert exception
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_collection_without_connection(self, dis_connect):
         '''
         target: test create collection, without connection
@@ -146,7 +148,7 @@ class TestCreateCollection:
         time.sleep(2)
         connect.create_collection(collection, default_fields)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_collection_multithread(self, connect):
         '''
         target: test create collection with multithread
@@ -215,7 +217,7 @@ class TestCreateCollectionInvalid(object):
     def get_field_type(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_create_collection_with_invalid_segment_row_limit(self, connect, get_segment_row_limit):
         collection_name = gen_unique_str()
         fields = copy.deepcopy(default_fields)
@@ -223,7 +225,7 @@ class TestCreateCollectionInvalid(object):
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, fields)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_collection_with_invalid_dimension(self, connect, get_dim):
         dimension = get_dim
         collection_name = gen_unique_str()
@@ -232,14 +234,13 @@ class TestCreateCollectionInvalid(object):
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, fields)
 
-    @pytest.mark.level(2)
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_collection_with_invalid_collection_name(self, connect, get_invalid_string):
         collection_name = get_invalid_string
         with pytest.raises(Exception) as e:
             connect.create_collection(collection_name, default_fields)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("collection_name", ('', None))
     def test_create_collection_with_empty_or_None_collection_name(self, connect, collection_name):
         # collection_name = ''
@@ -251,6 +252,7 @@ class TestCreateCollectionInvalid(object):
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "Collection name should not be empty"
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_collection_no_dimension(self, connect):
         '''
         target: test create collection with no dimension params
@@ -268,6 +270,7 @@ class TestCreateCollectionInvalid(object):
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "dimension is not defined in field type params"
 
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_create_collection_no_segment_row_limit(self, connect):
         '''
         target: test create collection with no segment_row_limit params
@@ -283,6 +286,7 @@ class TestCreateCollectionInvalid(object):
         assert res["segment_row_limit"] == default_server_segment_row_limit
 
     # TODO: assert exception
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_collection_limit_fields(self, connect):
         collection_name = gen_unique_str(uid)
         limit_num = 64
@@ -301,7 +305,7 @@ class TestCreateCollectionInvalid(object):
             assert message == "maximum field's number should be limited to 64"
 
     # TODO: assert exception
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_collection_invalid_field_name(self, connect, get_invalid_string):
         collection_name = gen_unique_str(uid)
         fields = copy.deepcopy(default_fields)
@@ -312,6 +316,7 @@ class TestCreateCollectionInvalid(object):
             connect.create_collection(collection_name, fields)
 
     # TODO: assert exception
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_collection_invalid_field_type(self, connect, get_field_type):
         collection_name = gen_unique_str(uid)
         fields = copy.deepcopy(default_fields)

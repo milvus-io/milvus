@@ -68,7 +68,7 @@ CONFIG_TIMEOUT = 80
 #         config_value = connect.get_config("cache.cache_size")
 #         assert config_value
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_get_insert_buffer_size_invalid_parent_key(self, connect, collection):
 #         '''
 #         target: get invalid parent key
@@ -80,7 +80,7 @@ CONFIG_TIMEOUT = 80
 #             with pytest.raises(Exception) as e:
 #                 config_value = connect.get_config(config+".insert_buffer_size")
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_get_insert_buffer_size_invalid_child_key(self, connect, collection):
 #         '''
 #         target: get invalid child key
@@ -102,7 +102,7 @@ CONFIG_TIMEOUT = 80
 #         config_value = connect.get_config("cache.insert_buffer_size")
 #         assert config_value
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_get_preload_collection_invalid_child_key(self, connect, collection):
 #         '''
 #         target: get invalid child key
@@ -187,7 +187,7 @@ CONFIG_TIMEOUT = 80
 #         assert config_value == '2GB'
 #
 #     @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_set_cache_size_valid_multiple_times(self, connect, collection):
 #         '''
 #         target: set cache_size
@@ -205,7 +205,7 @@ CONFIG_TIMEOUT = 80
 #             assert config_value == '2147483648'
 #
 #     @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_set_insert_buffer_size_invalid_parent_key(self, connect, collection):
 #         '''
 #         target: set invalid parent key
@@ -230,7 +230,7 @@ CONFIG_TIMEOUT = 80
 #         relpy = connect.set_config("cache.insert_buffer_size", '2GB')
 #
 #     @pytest.mark.skip(reason="overwrite config file is not supported in ci yet.")
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_set_insert_buffer_size_valid_multiple_times(self, connect, collection):
 #         '''
 #         target: set insert_buffer_size
@@ -272,7 +272,7 @@ CONFIG_TIMEOUT = 80
 #         if args["handler"] == "HTTP":
 #             pytest.skip("skip in http mode")
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_get_gpu_search_threshold_invalid_parent_key(self, connect, collection):
 #         '''
 #         target: get invalid parent key
@@ -286,7 +286,7 @@ CONFIG_TIMEOUT = 80
 #             with pytest.raises(Exception) as e:
 #                 config_value = connect.get_config(config+".gpu_search_threshold")
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_get_gpu_search_threshold_invalid_child_key(self, connect, collection):
 #         '''
 #         target: get invalid child key
@@ -436,7 +436,7 @@ CONFIG_TIMEOUT = 80
 #         config_value = connect.get_config("gpu.enable")
 #         assert config_value == "true" or config_value == "false"
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_get_cache_size_invalid_parent_key(self, connect, collection):
 #         '''
 #         target: get invalid parent key
@@ -451,7 +451,7 @@ CONFIG_TIMEOUT = 80
 #             with pytest.raises(Exception) as e:
 #                 config_value = connect.get_config(config+".cache_size")
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_get_cache_size_invalid_child_key(self, connect, collection):
 #         '''
 #         target: get invalid child key
@@ -517,7 +517,7 @@ CONFIG_TIMEOUT = 80
 #         config_value = connect.get_config("gpu.search_devices")
 #         logging.getLogger().info(config_value)
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_get_build_index_devices_invalid_parent_key(self, connect, collection):
 #         '''
 #         target: get invalid parent key
@@ -532,7 +532,7 @@ CONFIG_TIMEOUT = 80
 #             with pytest.raises(Exception) as e:
 #                 config_value = connect.get_config(config+".build_index_devices")
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_get_build_index_devices_invalid_child_key(self, connect, collection):
 #         '''
 #         target: get invalid child key
@@ -789,7 +789,7 @@ CONFIG_TIMEOUT = 80
 #         '''
 #         config_value = connect.get_config("network.bind.address")
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_get_port_invalid_child_key(self, connect, collection):
 #         '''
 #         target: get invalid child key
@@ -811,7 +811,7 @@ CONFIG_TIMEOUT = 80
 #         config_value = connect.get_config("network.http.port")
 #         assert config_value
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_get_http_port_invalid_child_key(self, connect, collection):
 #         '''
 #         target: get invalid child key
@@ -944,7 +944,7 @@ CONFIG_TIMEOUT = 80
 #         config_value = connect.get_config("general.meta_uri")
 #         assert config_value
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_get_timezone_invalid_child_key(self, connect, collection):
 #         '''
 #         target: get invalid child key
@@ -1038,7 +1038,7 @@ CONFIG_TIMEOUT = 80
 #         config_value = connect.get_config("storage.path")
 #         assert config_value
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_get_auto_flush_interval_invalid_child_key(self, connect, collection):
 #         '''
 #         target: get invalid child key
@@ -1165,7 +1165,7 @@ CONFIG_TIMEOUT = 80
 #         config_value = connect.get_config("metric.address")
 #         assert config_value
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_get_port_invalid_child_key(self, connect, collection):
 #         '''
 #         target: get invalid child key
@@ -1300,7 +1300,7 @@ CONFIG_TIMEOUT = 80
 #         config_value = connect.get_config("wal.recovery_error_ignore")
 #         assert config_value
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_get_buffer_size_invalid_child_key(self, connect, collection):
 #         '''
 #         target: get invalid child key
@@ -1322,7 +1322,7 @@ CONFIG_TIMEOUT = 80
 #         config_value = connect.get_config("wal.buffer_size")
 #         assert config_value
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_get_wal_path_invalid_child_key(self, connect, collection):
 #         '''
 #         target: get invalid child key

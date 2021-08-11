@@ -19,11 +19,8 @@ func (c *Cache) checkIfCached(key UniqueID) bool {
 	c.cacheMu.Lock()
 	defer c.cacheMu.Unlock()
 
-	if _, ok := c.cacheMap[key]; !ok {
-		return false
-	}
-
-	return true
+	_, ok := c.cacheMap[key]
+	return ok
 }
 
 func (c *Cache) Cache(segID UniqueID) {
@@ -31,4 +28,13 @@ func (c *Cache) Cache(segID UniqueID) {
 	defer c.cacheMu.Unlock()
 
 	c.cacheMap[segID] = true
+}
+
+func (c *Cache) Remove(segIDs ...UniqueID) {
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+
+	for _, id := range segIDs {
+		delete(c.cacheMap, id)
+	}
 }

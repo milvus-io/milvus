@@ -77,7 +77,7 @@ from constants import *
 #     def get_threshold(self, request):
 #         yield request.param
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     @pytest.mark.timeout(COMPACT_TIMEOUT)
 #     def test_compact_collection_name_invalid(self, connect, get_collection_name):
 #         '''
@@ -90,7 +90,7 @@ from constants import *
 #             status = connect.compact(collection_name)
 #             # assert not status.OK()
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     @pytest.mark.timeout(COMPACT_TIMEOUT)
 #     def test_compact_threshold_invalid(self, connect, collection, get_threshold):
 #         '''
@@ -103,7 +103,7 @@ from constants import *
 #             with pytest.raises(Exception) as e:
 #                 status = connect.compact(collection, threshold)
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     @pytest.mark.timeout(COMPACT_TIMEOUT)
 #     def test_add_entity_and_compact(self, connect, collection):
 #         '''
@@ -203,7 +203,7 @@ from constants import *
 #         logging.getLogger().info(size_after)
 #         assert(size_before >= size_after)
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     @pytest.mark.timeout(COMPACT_TIMEOUT)
 #     def test_insert_delete_all_and_compact(self, connect, collection):
 #         '''
@@ -227,7 +227,7 @@ from constants import *
 #         assert not info["partitions"][0]["segments"]
 #
 #     # TODO: enable
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     @pytest.mark.timeout(COMPACT_TIMEOUT)
 #     def test_insert_partition_delete_half_and_compact(self, connect, collection):
 #         '''
@@ -268,7 +268,7 @@ from constants import *
 #                 pytest.skip("CPU not support index_type: ivf_sq8h")
 #         return request.param
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_compact_after_index_created(self, connect, collection, get_simple_index):
 #         '''
 #         target: test compact collection after index created
@@ -529,7 +529,7 @@ from constants import *
 #         logging.getLogger().info(size_after)
 #         assert(size_before >= size_after)
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     @pytest.mark.timeout(COMPACT_TIMEOUT)
 #     def test_insert_delete_all_and_compact(self, connect, binary_collection):
 #         '''
@@ -635,7 +635,7 @@ from constants import *
 #             status = connect.drop_collection(collection_list[i])
 #             assert status.OK()
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     @pytest.mark.timeout(COMPACT_TIMEOUT)
 #     def test_add_entity_after_compact(self, connect, binary_collection):
 #         '''
@@ -677,7 +677,7 @@ from constants import *
 #         res = connect.count_entities(binary_collection)
 #         assert res == 0
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     @pytest.mark.timeout(COMPACT_TIMEOUT)
 #     def test_search_after_compact(self, connect, binary_collection):
 #         '''
