@@ -13,4 +13,7 @@ func TestSegmentCache(t *testing.T) {
 
 	segCache.Cache(UniqueID(0))
 	assert.True(t, segCache.checkIfCached(0))
+
+	segCache.Remove(UniqueID(0))
+	assert.False(t, segCache.checkIfCached(0))
 }

@@ -109,13 +109,14 @@ func TestSegmentReplica(t *testing.T) {
 
 	t.Run("Test inner function segment", func(t *testing.T) {
 		replica := newSegmentReplica(rc, collID)
-		assert.False(t, replica.hasSegment(0))
+		assert.False(t, replica.hasSegment(0, true))
+		assert.False(t, replica.hasSegment(0, false))
 
 		startPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(100)}
 		endPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(200)}
 		err := replica.addNewSegment(0, 1, 2, "insert-01", startPos, endPos)
 		assert.NoError(t, err)
-		assert.True(t, replica.hasSegment(0))
+		assert.True(t, replica.hasSegment(0, true))
 		assert.Equal(t, 1, len(replica.newSegments))
 
 		seg, ok := replica.newSegments[UniqueID(0)]
@@ -141,7 +142,7 @@ func TestSegmentReplica(t *testing.T) {
 		cp := &segmentCheckPoint{int64(10), *cpPos}
 		err = replica.addNormalSegment(1, 1, 2, "insert-01", int64(10), cp)
 		assert.NoError(t, err)
-		assert.True(t, replica.hasSegment(1))
+		assert.True(t, replica.hasSegment(1, true))
 		assert.Equal(t, 1, len(replica.normalSegments))
 		seg, ok = replica.normalSegments[UniqueID(1)]
 		assert.True(t, ok)
