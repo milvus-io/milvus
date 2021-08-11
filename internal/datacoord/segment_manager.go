@@ -403,14 +403,16 @@ func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) error {
 		if segment == nil || segment.InsertChannel != channel {
 			continue
 		}
+		allocations := make([]*Allocation, 0, len(segment.allocations))
 		for i := 0; i < len(segment.allocations); i++ {
 			if segment.allocations[i].ExpireTime <= ts {
 				a := segment.allocations[i]
-				segment.allocations = append(segment.allocations[:i], segment.allocations[i+1:]...)
 				s.putAllocation(a)
+			} else {
+				allocations = append(allocations, segment.allocations[i])
 			}
 		}
-		s.meta.SetAllocations(segment.GetID(), segment.allocations)
+		s.meta.SetAllocations(segment.GetID(), allocations)
 	}
 	return nil
 }
