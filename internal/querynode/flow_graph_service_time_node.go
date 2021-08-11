@@ -36,7 +36,8 @@ func (stNode *serviceTimeNode) Name() string {
 }
 
 func (stNode *serviceTimeNode) Close() {
-	//stNode.timeTickMsgStream.Close()
+	// `Close` needs to be invoked to close producers
+	stNode.timeTickMsgStream.Close()
 }
 
 func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
