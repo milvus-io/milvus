@@ -1069,6 +1069,12 @@ func (q *queryCollection) search(msg queryMsg) error {
 }
 
 func (q *queryCollection) fillVectorFieldsData(segment *Segment, result *segcorepb.RetrieveResults) error {
+	// If segment is growing, vector data is in memory
+	if segment.segmentType == segmentTypeGrowing {
+		log.Debug("Segment is growing, all vector data is in memory")
+		log.Debug("FillVectorFieldData", zap.Any("segmentType", segment.segmentType))
+		return nil
+	}
 	collection, _ := q.streaming.replica.getCollectionByID(q.collectionID)
 	schema := &etcdpb.CollectionMeta{
 		ID:     q.collectionID,
@@ -1078,11 +1084,30 @@ func (q *queryCollection) fillVectorFieldsData(segment *Segment, result *segcore
 		return err
 	}
 	for _, resultFieldData := range result.FieldsData {
+		log.Debug("FillVectorFieldData for fieldID", zap.Any("fieldID", resultFieldData.FieldId))
+		// If the vector field doesn't have index. Vector data is in memory for
+		// brute force search. No need to download data from remote.
+		_, ok := segment.indexInfos[resultFieldData.FieldId]
+		if !ok {
+			log.Debug("FillVectorFieldData fielD doesn't have index",
+				zap.Any("fielD", resultFieldData.FieldId))
+			continue
+		}
+
 		vecFieldInfo, err := segment.getVectorFieldInfo(resultFieldData.FieldId)
 		if err != nil {
 			continue
 		}
-		log.Debug("FillVectorFieldData", zap.Any("fieldID", resultFieldData.FieldId))
+		dim := resultFieldData.GetVectors().GetDim()
+		log.Debug("FillVectorFieldData", zap.Any("dim", dim))
+		fieldSchema, err := schemaHelper.GetFieldFromID(resultFieldData.FieldId)
+		if err != nil {
+			return err
+		}
+		dataType := fieldSchema.DataType
+		log.Debug("FillVectorFieldData", zap.Any("datatype", dataType))
+
+		data := resultFieldData.GetVectors().GetData()
 
 		for i, offset := range result.Offset {
 			var vecPath string
@@ -1100,19 +1125,9 @@ func (q *queryCollection) fillVectorFieldsData(segment *Segment, result *segcore
 				return err
 			}
 
-			dim := resultFieldData.GetVectors().GetDim()
-			log.Debug("FillVectorFieldData", zap.Any("dim", dim))
-			schema, err := schemaHelper.GetFieldFromID(resultFieldData.FieldId)
-			if err != nil {
-				return err
-			}
-			dataType := schema.DataType
-			log.Debug("FillVectorFieldData", zap.Any("datatype", dataType))
-
 			switch dataType {
 			case schemapb.DataType_BinaryVector:
 				rowBytes := dim / 8
-				x := resultFieldData.GetVectors().GetData().(*schemapb.VectorField_BinaryVector)
 				content := make([]byte, rowBytes)
 				_, err := q.vcm.ReadAt(vecPath, content, offset*rowBytes)
 				if err != nil {
@@ -1121,9 +1136,8 @@ func (q *queryCollection) fillVectorFieldsData(segment *Segment, result *segcore
 				log.Debug("FillVectorFieldData", zap.Any("binaryVectorResult", content))
 
 				resultLen := dim / 8
-				copy(x.BinaryVector[i*int(resultLen):(i+1)*int(resultLen)], content)
+				copy(data.(*schemapb.VectorField_BinaryVector).BinaryVector[i*int(resultLen):(i+1)*int(resultLen)], content)
 			case schemapb.DataType_FloatVector:
-				x := resultFieldData.GetVectors().GetData().(*schemapb.VectorField_FloatVector)
 				rowBytes := dim * 4
 				content := make([]byte, rowBytes)
 				_, err := q.vcm.ReadAt(vecPath, content, offset*rowBytes)
@@ -1139,7 +1153,7 @@ func (q *queryCollection) fillVectorFieldsData(segment *Segment, result *segcore
 				log.Debug("FillVectorFieldData", zap.Any("floatVectorResult", floatResult))
 
 				resultLen := dim
-				copy(x.FloatVector.Data[i*int(resultLen):(i+1)*int(resultLen)], floatResult)
+				copy(data.(*schemapb.VectorField_FloatVector).FloatVector.Data[i*int(resultLen):(i+1)*int(resultLen)], floatResult)
 			}
 		}
 	}
