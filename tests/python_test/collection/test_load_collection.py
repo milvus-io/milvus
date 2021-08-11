@@ -49,7 +49,7 @@ class TestLoadCollection:
         connect.load_collection(collection)
         connect.release_collection(collection)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_after_index_binary(self, connect, binary_collection, get_binary_index):
         '''
         target: test load binary_collection, after index created
@@ -83,7 +83,7 @@ class TestLoadCollection:
         connect.load_collection(collection)
         connect.release_collection(collection)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_dis_connect(self, dis_connect, collection):
         '''
         target: test load collection, without connection
@@ -93,7 +93,7 @@ class TestLoadCollection:
         with pytest.raises(Exception) as e:
             dis_connect.load_collection(collection)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_release_collection_dis_connect(self, dis_connect, collection):
         '''
         target: test release collection, without connection
@@ -103,7 +103,7 @@ class TestLoadCollection:
         with pytest.raises(Exception) as e:
             dis_connect.release_collection(collection)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_not_existed(self, connect, collection):
         collection_name = gen_unique_str(uid)
         try:
@@ -114,7 +114,7 @@ class TestLoadCollection:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "describe collection failed: can't find collection: %s" % collection_name
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_release_collection_not_existed(self, connect, collection):
         collection_name = gen_unique_str(uid)
         try:
@@ -146,6 +146,7 @@ class TestLoadCollection:
         connect.release_collection(collection)
         connect.load_collection(collection)
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_repeatedly(self, connect, collection):
         ids = connect.insert(collection, default_entities)
         assert len(ids) == default_nb
@@ -153,7 +154,7 @@ class TestLoadCollection:
         connect.load_collection(collection)
         connect.load_collection(collection)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_release_collection(self, connect, collection):
         collection_name = gen_unique_str(uid)
         connect.create_collection(collection_name, default_fields)
@@ -210,6 +211,7 @@ class TestLoadCollection:
         connect.load_collection(collection)
 
     # TODO
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_load_collection_larger_than_memory(self):
         """
         target: test load collection when memory less than collection size
@@ -237,6 +239,7 @@ class TestLoadCollection:
         res = connect.search(collection, default_single_query, partition_names=[default_partition_name])
         assert len(res[0]) == default_top_k
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_release_all_partitions(self, connect, collection):
         """
         target: test release all partitions after load collection
@@ -292,6 +295,7 @@ class TestReleaseAdvanced:
         with pytest.raises(Exception):
             connect.search(collection, default_single_query)
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_release_partition_during_searching(self, connect, collection):
         """
         target: test release partition during searching
@@ -415,13 +419,13 @@ class TestLoadCollectionInvalid(object):
     def get_collection_name(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.load_collection(collection_name)
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_release_collection_with_invalid_collection_name(self, connect, get_collection_name):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
@@ -474,7 +478,6 @@ class TestLoadPartition:
         res = connect.search(collection, query, partition_names=[default_tag])
         assert len(res[0]) == default_top_k
 
-    @pytest.mark.level(2)
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_load_partition_after_index_binary(self, connect, binary_collection, get_binary_index):
         '''
@@ -508,7 +511,7 @@ class TestLoadPartition:
         res = connect.search(collection, default_single_query)
         assert len(res[0]) == 0
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_dis_connect(self, connect, dis_connect, collection):
         '''
         target: test load collection, without connection
@@ -519,7 +522,7 @@ class TestLoadPartition:
         with pytest.raises(Exception) as e:
             dis_connect.load_partitions(collection, [default_tag])
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_release_partition_dis_connect(self, connect, dis_connect, collection):
         '''
         target: test release collection, without connection
@@ -531,7 +534,6 @@ class TestLoadPartition:
         with pytest.raises(Exception) as e:
             dis_connect.release_partitions(collection, [default_tag])
 
-    @pytest.mark.level(2)
     @pytest.mark.tags(CaseLabel.tags_smoke)
     def test_load_partition_not_existed(self, connect, collection):
         partition_name = gen_unique_str(uid)
@@ -543,8 +545,7 @@ class TestLoadPartition:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "partitionID of partitionName:%s can not be find" % partition_name
 
-    @pytest.mark.level(2)
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_release_partition_not_existed(self, connect, collection):
         partition_name = gen_unique_str(uid)
         try:
@@ -568,7 +569,7 @@ class TestLoadPartition:
         connect.flush([collection])
         connect.release_partitions(collection, [default_tag])
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_release_after_drop(self, connect, collection):
         connect.create_partition(collection, default_tag)
         ids = connect.insert(collection, default_entities, partition_name=default_tag)
@@ -657,13 +658,13 @@ class TestLoadPartitionInvalid(object):
     def get_partition_name(self, request):
         yield request.param
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_partition_with_invalid_partition_name(self, connect, collection, get_partition_name):
         partition_name = get_partition_name
         with pytest.raises(Exception) as e:
             connect.load_partitions(collection, [partition_name])
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_release_partition_with_invalid_partition_name(self, connect, collection, get_partition_name):
         partition_name = get_partition_name
         with pytest.raises(Exception) as e:

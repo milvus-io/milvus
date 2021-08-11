@@ -11,4 +11,4 @@ QUERY_NODE = "queryNode"
 
 # my values.yaml path
 MILVUS_CHART_ENV = 'MILVUS_CHART_ENV'
-MILVUS_CHART = '/home/zong/milvus-helm/charts/milvus'
+MILVUS_CHART_PATH = '/home/zong/milvus-helm/charts/milvus'

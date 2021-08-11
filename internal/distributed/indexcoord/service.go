@@ -14,7 +14,6 @@ package grpcindexcoord
 import (
 	"context"
 	"io"
-	"math"
 	"net"
 	"strconv"
 	"sync"
@@ -161,8 +160,8 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	opts := trace.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
-		grpc.MaxRecvMsgSize(math.MaxInt32),
-		grpc.MaxSendMsgSize(math.MaxInt32),
+		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
+		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
 		grpc.UnaryInterceptor(ot.UnaryServerInterceptor(opts...)),
 		grpc.StreamInterceptor(ot.StreamServerInterceptor(opts...)))
 	indexpb.RegisterIndexCoordServer(s.grpcServer, s)

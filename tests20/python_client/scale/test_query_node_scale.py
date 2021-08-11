@@ -27,9 +27,10 @@ class TestQueryNodeScale:
         release_name = "scale-query"
         env = HelmEnv(release_name=release_name)
         env.helm_install_cluster_milvus()
+        host = env.get_svc_external_ip()
 
         # connect
-        connections.add_connection(default={"host": '10.98.0.8', "port": 19530})
+        connections.add_connection(default={"host": host, "port": 19530})
         connections.connect(alias='default')
 
         # create

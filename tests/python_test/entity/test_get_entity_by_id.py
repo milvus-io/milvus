@@ -252,7 +252,7 @@ default_single_query = {
 #         for i in range(get_pos, get_pos * 2):
 #             assert_equal_vector(res[i].get(default_float_vec_field_name), new_entities[-1]["values"][i - get_pos])
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_get_entities_indexed_tag(self, connect, collection, get_simple_index, get_pos):
 #         '''
 #         target: test.get_entity_by_id
@@ -432,7 +432,7 @@ default_single_query = {
 #         for i in range(get_pos):
 #             assert_equal_vector(res[i].get(default_float_vec_field_name), default_entities[-1]["values"][i])
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_get_entities_indexed_single(self, connect, collection, get_simple_index, get_pos):
 #         '''
 #         target: test.get_entity_by_id
@@ -533,7 +533,7 @@ default_single_query = {
 #             for future in concurrent.futures.as_completed(future_results):
 #                 future.result()
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_get_entity_by_id_insert_multi_threads(self, connect, collection):
 #         '''
 #         target: test.get_entity_by_id
@@ -565,7 +565,7 @@ default_single_query = {
 #                 future = executor.submit(fun)
 #                 future.result()
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_get_entity_by_id_insert_multi_threads_2(self, connect, collection):
 #         '''
 #         target: test.get_entity_by_id
@@ -625,7 +625,7 @@ default_single_query = {
 #     def get_entity_id(self, request):
 #         yield request.param
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_insert_ids_invalid(self, connect, collection, get_entity_id):
 #         '''
 #         target: test insert, with using customize ids, which are not int64
@@ -637,7 +637,7 @@ default_single_query = {
 #         with pytest.raises(Exception):
 #             connect.get_entity_by_id(collection, ids)
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_insert_parts_ids_invalid(self, connect, collection, get_entity_id):
 #         '''
 #         target: test insert, with using customize ids, which are not int64
@@ -650,14 +650,14 @@ default_single_query = {
 #         with pytest.raises(Exception):
 #             connect.get_entity_by_id(collection, ids)
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_get_entities_with_invalid_collection_name(self, connect, get_collection_name):
 #         collection_name = get_collection_name
 #         ids = [1]
 #         with pytest.raises(Exception):
 #             res = connect.get_entity_by_id(collection_name, ids)
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_get_entities_with_invalid_field_name(self, connect, collection, get_field_name):
 #         field_name = get_field_name
 #         ids = [1]

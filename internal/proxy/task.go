@@ -99,6 +99,7 @@ type dmlTask interface {
 	task
 	getChannels() ([]vChan, error)
 	getPChanStats() (map[pChan]pChanStatistics, error)
+	getChannelsTimerTicker() channelsTimeTicker
 }
 
 type BaseInsertTask = msgstream.InsertMsg
@@ -151,6 +152,10 @@ func (it *InsertTask) SetTs(ts Timestamp) {
 
 func (it *InsertTask) EndTs() Timestamp {
 	return it.EndTimestamp
+}
+
+func (it *InsertTask) getChannelsTimerTicker() channelsTimeTicker {
+	return it.chTicker
 }
 
 func (it *InsertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
@@ -1025,15 +1030,6 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	pchans, err := it.chMgr.getChannels(collID)
-	if err != nil {
-		return err
-	}
-	for _, pchan := range pchans {
-		log.Debug("Proxy InsertTask add pchan", zap.Any("pchan", pchan))
-		_ = it.chTicker.addPChan(pchan)
-	}
-
 	// Assign SegmentID
 	var pack *msgstream.MsgPack
 	pack, err = it._assignSegmentID(stream, &msgPack)
@@ -1424,6 +1420,7 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 		zap.Any("collections", showResp.CollectionIDs),
 	)
 	collectionLoaded := false
+
 	for _, collectionID := range showResp.CollectionIDs {
 		if collectionID == collID {
 			collectionLoaded = true
@@ -1691,39 +1688,36 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 
 		j := 0
 		for ; j < topk; j++ {
-			valid := false
+			valid := true
 			choice, maxDistance := 0, minFloat32
 			for q, loc := range locs { // query num, the number of ways to merge
 				if loc >= topk {
 					continue
 				}
-				distance := searchResultData[q].Scores[idx*topk+loc]
-				// https://github.com/milvus-io/milvus/issues/6781
-				if math.IsNaN(float64(distance)) {
-					continue
-				}
-				if distance > maxDistance || (math.Abs(float64(distance-maxDistance)) < math.SmallestNonzeroFloat32 && choice != q) {
-					choice = q
-					maxDistance = distance
-					valid = true
+				curIdx := idx*topk + loc
+				id := searchResultData[q].Ids.GetIntId().Data[curIdx]
+				if id == -1 {
+					valid = false
+				} else {
+					distance := searchResultData[q].Scores[curIdx]
+					if distance > maxDistance {
+						choice = q
+						maxDistance = distance
+					}
 				}
 			}
 			if !valid {
 				break
 			}
 			choiceOffset := locs[choice]
-			// check if distance is valid, `invalid` here means very very big,
-			// in this process, distance here is the smallest, so the rest of distance are all invalid
-			// https://github.com/milvus-io/milvus/issues/6781
-			// tanimoto distance between two binary vectors maybe -inf, so -inf distance shouldn't be filtered,
-			// otherwise it will cause that the number of hit records is less than needed (topk).
-			// in the above process, we have already filtered NaN distance.
-			distance := searchResultData[choice].Scores[idx*topk+choiceOffset]
-			if distance < minFloat32 {
-				break
-			}
 			curIdx := idx*topk + choiceOffset
-			ret.Results.Ids.GetIntId().Data = append(ret.Results.Ids.GetIntId().Data, searchResultData[choice].Ids.GetIntId().Data[curIdx])
+
+			// ignore invalid search result
+			id := searchResultData[choice].Ids.GetIntId().Data[curIdx]
+			if id == -1 {
+				continue
+			}
+			ret.Results.Ids.GetIntId().Data = append(ret.Results.Ids.GetIntId().Data, id)
 			// TODO(yukun): Process searchResultData.FieldsData
 			for k, fieldData := range searchResultData[choice].FieldsData {
 				switch fieldType := fieldData.Field.(type) {
@@ -2112,6 +2106,7 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 	log.Debug("query coordinator show collections",
 		zap.Any("collections", showResp.CollectionIDs),
 		zap.Any("collID", collectionID))
+
 	collectionLoaded := false
 	for _, collID := range showResp.CollectionIDs {
 		if collectionID == collID {
@@ -2845,13 +2840,18 @@ func (sct *ShowCollectionsTask) OnEnqueue() error {
 func (sct *ShowCollectionsTask) PreExecute(ctx context.Context) error {
 	sct.Base.MsgType = commonpb.MsgType_ShowCollections
 	sct.Base.SourceID = Params.ProxyID
+	if sct.GetType() == milvuspb.ShowType_InMemory {
+		for _, collectionName := range sct.CollectionNames {
+			if err := ValidateCollectionName(collectionName); err != nil {
+				return err
+			}
+		}
+	}
 
 	return nil
 }
 
 func (sct *ShowCollectionsTask) Execute(ctx context.Context) error {
-	var err error
-
 	respFromRootCoord, err := sct.rootCoord.ShowCollections(ctx, sct.ShowCollectionsRequest)
 
 	if err != nil {
@@ -2866,15 +2866,33 @@ func (sct *ShowCollectionsTask) Execute(ctx context.Context) error {
 		return errors.New(respFromRootCoord.Status.Reason)
 	}
 
-	if sct.ShowCollectionsRequest.Type == milvuspb.ShowCollectionsType_InMemory {
+	if sct.GetType() == milvuspb.ShowType_InMemory {
+		IDs2Names := make(map[UniqueID]string)
+		for offset, collectionName := range respFromRootCoord.CollectionNames {
+			collectionID := respFromRootCoord.CollectionIds[offset]
+			IDs2Names[collectionID] = collectionName
+		}
+		collectionIDs := make([]UniqueID, 0)
+		for _, collectionName := range sct.CollectionNames {
+			collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+			if err != nil {
+				log.Debug("Failed to get collection id.", zap.Any("collectionName", collectionName),
+					zap.Any("requestID", sct.Base.MsgID), zap.Any("requestType", "showCollections"))
+				return err
+			}
+			collectionIDs = append(collectionIDs, collectionID)
+			IDs2Names[collectionID] = collectionName
+		}
+
 		resp, err := sct.queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_ShowCollections,
-				MsgID:     sct.ShowCollectionsRequest.Base.MsgID,
-				Timestamp: sct.ShowCollectionsRequest.Base.Timestamp,
-				SourceID:  sct.ShowCollectionsRequest.Base.SourceID,
+				MsgID:     sct.Base.MsgID,
+				Timestamp: sct.Base.Timestamp,
+				SourceID:  sct.Base.SourceID,
 			},
 			//DbID: sct.ShowCollectionsRequest.DbName,
+			CollectionIDs: collectionIDs,
 		})
 
 		if err != nil {
@@ -2895,19 +2913,27 @@ func (sct *ShowCollectionsTask) Execute(ctx context.Context) error {
 			CollectionIds:        make([]int64, 0, len(resp.CollectionIDs)),
 			CreatedTimestamps:    make([]uint64, 0, len(resp.CollectionIDs)),
 			CreatedUtcTimestamps: make([]uint64, 0, len(resp.CollectionIDs)),
+			InMemoryPercentages:  make([]int64, 0, len(resp.CollectionIDs)),
 		}
 
-		idMap := make(map[int64]int) // id -> location of respFromRootCoord
-		for i := range respFromRootCoord.CollectionNames {
-			idMap[respFromRootCoord.CollectionIds[i]] = i
-		}
-
-		for _, id := range resp.CollectionIDs {
-			loc := idMap[id]
+		for offset, id := range resp.CollectionIDs {
+			collectionName, ok := IDs2Names[id]
+			if !ok {
+				log.Debug("Failed to get collection info.", zap.Any("collectionName", collectionName),
+					zap.Any("requestID", sct.Base.MsgID), zap.Any("requestType", "showCollections"))
+				return errors.New("failed to show collections")
+			}
+			collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, collectionName)
+			if err != nil {
+				log.Debug("Failed to get collection info.", zap.Any("collectionName", collectionName),
+					zap.Any("requestID", sct.Base.MsgID), zap.Any("requestType", "showCollections"))
+				return err
+			}
 			sct.result.CollectionIds = append(sct.result.CollectionIds, id)
-			sct.result.CollectionNames = append(sct.result.CollectionNames, respFromRootCoord.CollectionNames[loc])
-			sct.result.CreatedTimestamps = append(sct.result.CreatedTimestamps, respFromRootCoord.CreatedTimestamps[loc])
-			sct.result.CreatedUtcTimestamps = append(sct.result.CreatedUtcTimestamps, respFromRootCoord.CreatedUtcTimestamps[loc])
+			sct.result.CollectionNames = append(sct.result.CollectionNames, collectionName)
+			sct.result.CreatedTimestamps = append(sct.result.CreatedTimestamps, collectionInfo.createdTimestamp)
+			sct.result.CreatedUtcTimestamps = append(sct.result.CreatedUtcTimestamps, collectionInfo.createdUtcTimestamp)
+			sct.result.InMemoryPercentages = append(sct.result.InMemoryPercentages, resp.InMemoryPercentages[offset])
 		}
 	} else {
 		sct.result = respFromRootCoord
@@ -3153,9 +3179,10 @@ func (hpt *HasPartitionTask) PostExecute(ctx context.Context) error {
 type ShowPartitionsTask struct {
 	Condition
 	*milvuspb.ShowPartitionsRequest
-	ctx       context.Context
-	rootCoord types.RootCoord
-	result    *milvuspb.ShowPartitionsResponse
+	ctx        context.Context
+	rootCoord  types.RootCoord
+	queryCoord types.QueryCoord
+	result     *milvuspb.ShowPartitionsResponse
 }
 
 func (spt *ShowPartitionsTask) TraceCtx() context.Context {
@@ -3202,19 +3229,112 @@ func (spt *ShowPartitionsTask) PreExecute(ctx context.Context) error {
 	if err := ValidateCollectionName(spt.CollectionName); err != nil {
 		return err
 	}
+
+	if spt.GetType() == milvuspb.ShowType_InMemory {
+		for _, partitionName := range spt.PartitionNames {
+			if err := ValidatePartitionTag(partitionName, true); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 
 func (spt *ShowPartitionsTask) Execute(ctx context.Context) error {
-	var err error
-	spt.result, err = spt.rootCoord.ShowPartitions(ctx, spt.ShowPartitionsRequest)
-	if spt.result == nil {
-		return errors.New("get collection statistics resp is nil")
+	respFromRootCoord, err := spt.rootCoord.ShowPartitions(ctx, spt.ShowPartitionsRequest)
+	if err != nil {
+		return err
 	}
-	if spt.result.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return errors.New(spt.result.Status.Reason)
+
+	if respFromRootCoord == nil {
+		return errors.New("failed to show partitions")
 	}
-	return err
+
+	if respFromRootCoord.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(respFromRootCoord.Status.Reason)
+	}
+
+	if spt.GetType() == milvuspb.ShowType_InMemory {
+		collectionName := spt.CollectionName
+		collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+		if err != nil {
+			log.Debug("Failed to get collection id.", zap.Any("collectionName", collectionName),
+				zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"))
+			return err
+		}
+		IDs2Names := make(map[UniqueID]string)
+		for offset, partitionName := range respFromRootCoord.PartitionNames {
+			partitionID := respFromRootCoord.PartitionIDs[offset]
+			IDs2Names[partitionID] = partitionName
+		}
+		partitionIDs := make([]UniqueID, 0)
+		for _, partitionName := range spt.PartitionNames {
+			partitionID, err := globalMetaCache.GetPartitionID(ctx, collectionName, partitionName)
+			if err != nil {
+				log.Debug("Failed to get partition id.", zap.Any("partitionName", partitionName),
+					zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"))
+				return err
+			}
+			partitionIDs = append(partitionIDs, partitionID)
+			IDs2Names[partitionID] = partitionName
+		}
+		resp, err := spt.queryCoord.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_ShowCollections,
+				MsgID:     spt.Base.MsgID,
+				Timestamp: spt.Base.Timestamp,
+				SourceID:  spt.Base.SourceID,
+			},
+			CollectionID: collectionID,
+			PartitionIDs: partitionIDs,
+		})
+
+		if err != nil {
+			return err
+		}
+
+		if resp == nil {
+			return errors.New("failed to show partitions")
+		}
+
+		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+			return errors.New(resp.Status.Reason)
+		}
+
+		spt.result = &milvuspb.ShowPartitionsResponse{
+			Status:               resp.Status,
+			PartitionNames:       make([]string, 0, len(resp.PartitionIDs)),
+			PartitionIDs:         make([]int64, 0, len(resp.PartitionIDs)),
+			CreatedTimestamps:    make([]uint64, 0, len(resp.PartitionIDs)),
+			CreatedUtcTimestamps: make([]uint64, 0, len(resp.PartitionIDs)),
+			InMemoryPercentages:  make([]int64, 0, len(resp.PartitionIDs)),
+		}
+
+		for offset, id := range resp.PartitionIDs {
+			partitionName, ok := IDs2Names[id]
+			if !ok {
+				log.Debug("Failed to get partition id.", zap.Any("partitionName", partitionName),
+					zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"))
+				return errors.New("failed to show partitions")
+			}
+			partitionInfo, err := globalMetaCache.GetPartitionInfo(ctx, collectionName, partitionName)
+			if err != nil {
+				log.Debug("Failed to get partition id.", zap.Any("partitionName", partitionName),
+					zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"))
+				return err
+			}
+			spt.result.PartitionIDs = append(spt.result.PartitionIDs, id)
+			spt.result.PartitionNames = append(spt.result.PartitionNames, partitionName)
+			spt.result.CreatedTimestamps = append(spt.result.CreatedTimestamps, partitionInfo.createdTimestamp)
+			spt.result.CreatedUtcTimestamps = append(spt.result.CreatedUtcTimestamps, partitionInfo.createdUtcTimestamp)
+			spt.result.InMemoryPercentages = append(spt.result.InMemoryPercentages, resp.InMemoryPercentages[offset])
+		}
+	} else {
+		spt.result = respFromRootCoord
+	}
+
+	return nil
 }
 
 func (spt *ShowPartitionsTask) PostExecute(ctx context.Context) error {
@@ -3883,7 +4003,8 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		State: commonpb.IndexState_Finished,
+		State:      commonpb.IndexState_Finished,
+		FailReason: "",
 	}
 
 	log.Debug("Proxy GetIndexState", zap.Int("IndexBuildIDs", len(getIndexStatesRequest.IndexBuildIDs)), zap.Error(err))
@@ -3907,8 +4028,9 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 	for _, state := range states.States {
 		if state.State != commonpb.IndexState_Finished {
 			gist.result = &milvuspb.GetIndexStateResponse{
-				Status: states.Status,
-				State:  state.State,
+				Status:     states.Status,
+				State:      state.State,
+				FailReason: state.Reason,
 			}
 			return nil
 		}

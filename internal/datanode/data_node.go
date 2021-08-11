@@ -308,7 +308,7 @@ func (node *DataNode) getChannelNamebySegmentID(segID UniqueID) string {
 	node.chanMut.RLock()
 	defer node.chanMut.RUnlock()
 	for name, dataSync := range node.vchan2SyncService {
-		if dataSync.replica.hasSegment(segID) {
+		if dataSync.replica.hasSegment(segID, false) {
 			return name
 		}
 	}
@@ -377,10 +377,13 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 	dmlFlushedCh := make(chan []*datapb.ID2PathList, len(req.SegmentIDs))
 	for _, id := range req.SegmentIDs {
 		chanName := node.getChannelNamebySegmentID(id)
-		log.Info("vchannel", zap.String("name", chanName))
+		log.Debug("vchannel",
+			zap.String("name", chanName),
+			zap.Int64("SegmentID", id))
+
 		if len(chanName) == 0 {
 			status.Reason = fmt.Sprintf("DataNode not find segment %d!", id)
-			return status, errors.New(status.GetReason())
+			return status, nil
 		}
 
 		if node.segmentCache.checkIfCached(id) {
@@ -426,7 +429,10 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		status.Reason = fmt.Sprintf("flush failed segment list = %s", failedSegments)
 		return status, nil
 	}
-	log.Debug("FlushSegments Done")
+
+	node.segmentCache.Remove(req.SegmentIDs...)
+	log.Debug("FlushSegments Done",
+		zap.Int64s("segments", req.SegmentIDs))
 
 	status.ErrorCode = commonpb.ErrorCode_Success
 	metrics.DataNodeFlushSegmentsCounter.WithLabelValues(MetricRequestsSuccess).Inc()

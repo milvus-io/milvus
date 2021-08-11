@@ -152,6 +152,8 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 
 	if iMsg == nil {
+		ibNode.timeTickStream.Close()
+		ibNode.segmentStatisticsStream.Close()
 		return []Msg{}
 	}
 
@@ -178,7 +180,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		collID := msg.GetCollectionID()
 		partitionID := msg.GetPartitionID()
 
-		if !ibNode.replica.hasSegment(currentSegID) {
+		if !ibNode.replica.hasSegment(currentSegID, true) {
 			err := ibNode.replica.addNewSegment(currentSegID, collID, partitionID, msg.GetChannelID(),
 				iMsg.startPositions[0], iMsg.endPositions[0])
 			if err != nil {
@@ -789,7 +791,7 @@ func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID) error {
 }
 
 func (ibNode *insertBufferNode) getCollMetabySegID(segmentID UniqueID, ts Timestamp) (meta *etcdpb.CollectionMeta, err error) {
-	if !ibNode.replica.hasSegment(segmentID) {
+	if !ibNode.replica.hasSegment(segmentID, true) {
 		return nil, fmt.Errorf("No such segment %d in the replica", segmentID)
 	}
 

@@ -14,6 +14,9 @@ package grpcrootcoord
 import (
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -34,4 +37,7 @@ func TestParamTable(t *testing.T) {
 
 	assert.NotEqual(t, Params.QueryCoordAddress, "")
 	t.Logf("QueryCoordAddress:%s", Params.QueryCoordAddress)
+
+	log.Info("TestParamTable", zap.Int("ServerMaxSendSize", Params.ServerMaxSendSize))
+	log.Info("TestParamTable", zap.Int("ServerMaxRecvSize", Params.ServerMaxRecvSize))
 }

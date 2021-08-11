@@ -54,9 +54,15 @@ pipeline {
                 stages {
                     stage('Test') {
                         steps {
+                            container('etcd') {
+                                script {
+                                    sh 'ETCDCTL_API=3 etcdctl del "" --from-key=true'
+                                }
+                            }
                             container('main') {
                                 dir ('tests/scripts') {
                                     script {
+                                        sh 'printenv'
                                         def clusterEnabled = "false"
                                         if ("${MILVUS_SERVER_TYPE}" == "distributed") {
                                             clusterEnabled = "true"
@@ -68,6 +74,7 @@ pipeline {
                                             ./e2e-k8s.sh \
                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
                                             --node-image registry.zilliz.com/kindest/node:v1.20.2 \
+                                            --install-extra-arg "--set etcd.enabled=false --set externalEtcd.enabled=true --set externalEtcd.endpoints={\$KRTE_POD_IP:2379}" \
                                             --skip-export-logs \
                                             --skip-cleanup \
                                             --test-timeout ${e2e_timeout_seconds}
@@ -78,6 +85,7 @@ pipeline {
                                             ./e2e-k8s.sh \
                                             --kind-config "${env.WORKSPACE}/build/config/topology/trustworthy-jwt-ci.yaml" \
                                             --node-image registry.zilliz.com/kindest/node:v1.20.2 \
+                                            --install-extra-arg "--set etcd.enabled=false --set externalEtcd.enabled=true --set externalEtcd.endpoints={\$KRTE_POD_IP:2379}" \
                                             --skip-export-logs \
                                             --skip-cleanup \
                                             --test-extra-arg "--tags L0 L1 L2" \

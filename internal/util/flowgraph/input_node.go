@@ -29,7 +29,7 @@ func (inNode *InputNode) IsInputNode() bool {
 }
 
 func (inNode *InputNode) Close() {
-	(*inNode.inStream).Close()
+	// do nothing
 }
 
 func (inNode *InputNode) Name() string {

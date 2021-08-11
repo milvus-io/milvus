@@ -112,14 +112,14 @@ func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 	var schema schemapb.CollectionSchema
 	err := proto.Unmarshal(msg.Schema, &schema)
 	if err != nil {
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		return
 	}
 
 	// add collection
 	err = ddNode.replica.addCollection(collectionID, &schema)
 	if err != nil {
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		return
 	}
 
@@ -127,7 +127,7 @@ func (ddNode *ddNode) createCollection(msg *msgstream.CreateCollectionMsg) {
 	// TODO: allocate default partition id in master
 	err = ddNode.replica.addPartition(collectionID, partitionID)
 	if err != nil {
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		return
 	}
 
@@ -156,7 +156,7 @@ func (ddNode *ddNode) createPartition(msg *msgstream.CreatePartitionMsg) {
 
 	err := ddNode.replica.addPartition(collectionID, partitionID)
 	if err != nil {
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		return
 	}
 

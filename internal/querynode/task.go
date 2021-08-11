@@ -90,7 +90,7 @@ func (b *baseTask) Notify(err error) {
 // watchDmChannelsTask
 func (w *watchDmChannelsTask) Timestamp() Timestamp {
 	if w.req.Base == nil {
-		log.Error("nil base req in watchDmChannelsTask", zap.Any("collectionID", w.req.CollectionID))
+		log.Warn("nil base req in watchDmChannelsTask", zap.Any("collectionID", w.req.CollectionID))
 		return 0
 	}
 	return w.req.Base.Timestamp
@@ -144,8 +144,8 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		w.node.streaming.replica.initExcludedSegments(collectionID)
 	}
+	w.node.streaming.replica.initExcludedSegments(collectionID)
 	if hasCollectionInHistorical := w.node.historical.replica.hasCollection(collectionID); !hasCollectionInHistorical {
 		err := w.node.historical.replica.addCollection(collectionID, w.req.Schema)
 		if err != nil {
@@ -217,7 +217,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	}
 	err = w.node.streaming.replica.addExcludedSegments(collectionID, checkPointInfos)
 	if err != nil {
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		return err
 	}
 	log.Debug("watchDMChannel, add check points info done", zap.Any("collectionID", collectionID))
@@ -262,7 +262,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 				err := fg.consumerFlowGraph(VPChannels[channel], consumeSubName)
 				if err != nil {
 					errMsg := "msgStream consume error :" + err.Error()
-					log.Error(errMsg)
+					log.Warn(errMsg)
 					return errors.New(errMsg)
 				}
 			}
@@ -282,7 +282,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 				err := fg.seekQueryNodeFlowGraph(pos)
 				if err != nil {
 					errMsg := "msgStream seek error :" + err.Error()
-					log.Error(errMsg)
+					log.Warn(errMsg)
 					return errors.New(errMsg)
 				}
 			}
@@ -316,7 +316,7 @@ func (w *watchDmChannelsTask) PostExecute(ctx context.Context) error {
 // loadSegmentsTask
 func (l *loadSegmentsTask) Timestamp() Timestamp {
 	if l.req.Base == nil {
-		log.Error("nil base req in loadSegmentsTask")
+		log.Warn("nil base req in loadSegmentsTask")
 		return 0
 	}
 	return l.req.Base.Timestamp
@@ -340,6 +340,40 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 	log.Debug("query node load segment", zap.String("loadSegmentRequest", fmt.Sprintln(l.req)))
 	var err error
 
+	// init meta
+	for _, info := range l.req.Infos {
+		collectionID := info.CollectionID
+		partitionID := info.PartitionID
+		hasCollectionInHistorical := l.node.historical.replica.hasCollection(collectionID)
+		hasPartitionInHistorical := l.node.historical.replica.hasPartition(partitionID)
+		if !hasCollectionInHistorical {
+			err = l.node.historical.replica.addCollection(collectionID, l.req.Schema)
+			if err != nil {
+				return err
+			}
+		}
+		if !hasPartitionInHistorical {
+			err = l.node.historical.replica.addPartition(collectionID, partitionID)
+			if err != nil {
+				return err
+			}
+		}
+		hasCollectionInStreaming := l.node.streaming.replica.hasCollection(collectionID)
+		hasPartitionInStreaming := l.node.streaming.replica.hasPartition(partitionID)
+		if !hasCollectionInStreaming {
+			err = l.node.streaming.replica.addCollection(collectionID, l.req.Schema)
+			if err != nil {
+				return err
+			}
+		}
+		if !hasPartitionInStreaming {
+			err = l.node.streaming.replica.addPartition(collectionID, partitionID)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	switch l.req.LoadCondition {
 	case queryPb.TriggerCondition_handoff:
 		err = l.node.historical.loader.loadSegmentOfConditionHandOff(l.req)
@@ -352,7 +386,7 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 	}
 
 	if err != nil {
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		return err
 	}
 
@@ -382,7 +416,7 @@ func (l *loadSegmentsTask) PostExecute(ctx context.Context) error {
 // releaseCollectionTask
 func (r *releaseCollectionTask) Timestamp() Timestamp {
 	if r.req.Base == nil {
-		log.Error("nil base req in releaseCollectionTask", zap.Any("collectionID", r.req.CollectionID))
+		log.Warn("nil base req in releaseCollectionTask", zap.Any("collectionID", r.req.CollectionID))
 		return 0
 	}
 	return r.req.Base.Timestamp
@@ -405,7 +439,7 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 	log.Debug("receive release collection task", zap.Any("collectionID", r.req.CollectionID))
 	collection, err := r.node.streaming.replica.getCollectionByID(r.req.CollectionID)
 	if err != nil {
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		return err
 	}
 	collection.setReleaseTime(r.req.Base.Timestamp)
@@ -435,7 +469,7 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 		if hasCollectionInHistorical {
 			err := r.node.historical.replica.removeCollection(r.req.CollectionID)
 			if err != nil {
-				log.Error(errMsg + err.Error())
+				log.Warn(errMsg + err.Error())
 				return
 			}
 		}
@@ -444,7 +478,7 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 		if hasCollectionInStreaming {
 			err := r.node.streaming.replica.removeCollection(r.req.CollectionID)
 			if err != nil {
-				log.Error(errMsg + err.Error())
+				log.Warn(errMsg + err.Error())
 				return
 			}
 		}
@@ -465,7 +499,7 @@ func (r *releaseCollectionTask) PostExecute(ctx context.Context) error {
 // releasePartitionsTask
 func (r *releasePartitionsTask) Timestamp() Timestamp {
 	if r.req.Base == nil {
-		log.Error("nil base req in releasePartitionsTask", zap.Any("collectionID", r.req.CollectionID))
+		log.Warn("nil base req in releasePartitionsTask", zap.Any("collectionID", r.req.CollectionID))
 		return 0
 	}
 	return r.req.Base.Timestamp
@@ -496,13 +530,13 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 
 		hCol, err := r.node.historical.replica.getCollectionByID(r.req.CollectionID)
 		if err != nil {
-			log.Error(errMsg + err.Error())
+			log.Warn(errMsg + err.Error())
 			return
 		}
 
 		sCol, err := r.node.streaming.replica.getCollectionByID(r.req.CollectionID)
 		if err != nil {
-			log.Error(errMsg + err.Error())
+			log.Warn(errMsg + err.Error())
 			return
 		}
 
@@ -526,7 +560,7 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 				err = r.node.historical.replica.removePartition(id)
 				if err != nil {
 					// not return, try to release all partitions
-					log.Error(errMsg + err.Error())
+					log.Warn(errMsg + err.Error())
 				}
 			}
 			hCol.addReleasedPartition(id)
@@ -535,7 +569,7 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 			if hasPartitionInStreaming {
 				err = r.node.streaming.replica.removePartition(id)
 				if err != nil {
-					log.Error(errMsg + err.Error())
+					log.Warn(errMsg + err.Error())
 				}
 			}
 			sCol.addReleasedPartition(id)

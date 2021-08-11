@@ -167,7 +167,7 @@ To run E2E tests, use these command:
 ```shell
 cd tests20/python_client
 pip install -r requirements.txt
-pytest --tags=L0 --workers 4
+pytest --tags=L0 -n auto
 ```
 
 ## GitHub Flow

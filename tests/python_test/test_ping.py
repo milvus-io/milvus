@@ -117,7 +117,7 @@ __version__ = '0.11.1'
 #         with pytest.raises(Exception) as e:
 #             res = dis_connect.server_status()
 #
-#     @pytest.mark.level(2)
+#     @pytest.mark.tags(CaseLabel.L2)
 #     def test_server_version_with_timeout(self, dis_connect):
 #         '''
 #         target: test get the server status with timeout settings after disconnect

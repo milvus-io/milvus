@@ -410,7 +410,7 @@ func (colReplica *collectionReplica) removeSegmentPrivate(segmentID UniqueID) er
 	key := fmt.Sprintf("%s/%d", queryNodeSegmentMetaPrefix, segmentID)
 	err = colReplica.etcdKV.Remove(key)
 	if err != nil {
-		log.Error("error when remove segment info from etcd")
+		log.Warn("error when remove segment info from etcd")
 	}
 
 	return nil
@@ -521,7 +521,9 @@ func (colReplica *collectionReplica) initExcludedSegments(collectionID UniqueID)
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
-	colReplica.excludedSegments[collectionID] = make([]*datapb.SegmentInfo, 0)
+	if _, ok := colReplica.excludedSegments[collectionID]; !ok {
+		colReplica.excludedSegments[collectionID] = make([]*datapb.SegmentInfo, 0)
+	}
 }
 
 func (colReplica *collectionReplica) removeExcludedSegments(collectionID UniqueID) {

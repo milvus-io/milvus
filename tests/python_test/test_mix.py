@@ -23,6 +23,7 @@ default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 16384}, "metric_t
 
 class TestMixBase:
     # TODO
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_mix_base(self, connect, collection):
         nb = 200000
         nq = 5
@@ -43,6 +44,7 @@ class TestMixBase:
         assert check_id_result(res[0], ids[0])
 
     # disable
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_search_during_createIndex(self, args):
         loops = 10000
         collection = gen_unique_str()
@@ -92,7 +94,7 @@ class TestMixBase:
         p_create.start()
         p_create.join()
 
-    @pytest.mark.level(2)
+    @pytest.mark.tags(CaseLabel.L2)
     def _test_mix_multi_collections(self, connect):
         '''
         target: test functions with multiple collections of different metric_types and index_types
