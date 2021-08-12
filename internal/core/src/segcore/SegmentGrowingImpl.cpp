@@ -306,35 +306,29 @@ SegmentGrowingImpl::bulk_subscript(FieldOffset field_offset,
             break;
         }
         case DataType::INT8: {
-            bulk_subscript_impl<int8_t>(*vec_ptr, seg_offsets, count, 0, output);
+            bulk_subscript_impl<int8_t>(*vec_ptr, seg_offsets, count, -1, output);
             break;
         }
-
         case DataType::INT16: {
-            bulk_subscript_impl<int16_t>(*vec_ptr, seg_offsets, count, 0, output);
+            bulk_subscript_impl<int16_t>(*vec_ptr, seg_offsets, count, -1, output);
             break;
         }
-
         case DataType::INT32: {
-            bulk_subscript_impl<int32_t>(*vec_ptr, seg_offsets, count, 0, output);
+            bulk_subscript_impl<int32_t>(*vec_ptr, seg_offsets, count, -1, output);
             break;
         }
-
         case DataType::INT64: {
-            bulk_subscript_impl<int64_t>(*vec_ptr, seg_offsets, count, 0, output);
+            bulk_subscript_impl<int64_t>(*vec_ptr, seg_offsets, count, -1, output);
             break;
         }
-
         case DataType::FLOAT: {
-            bulk_subscript_impl<float>(*vec_ptr, seg_offsets, count, 0, output);
+            bulk_subscript_impl<float>(*vec_ptr, seg_offsets, count, -1.0, output);
             break;
         }
-
         case DataType::DOUBLE: {
-            bulk_subscript_impl<double>(*vec_ptr, seg_offsets, count, 0, output);
+            bulk_subscript_impl<double>(*vec_ptr, seg_offsets, count, -1.0, output);
             break;
         }
-
         default: {
             PanicInfo("unsupported type");
         }
