@@ -129,7 +129,7 @@ class TestChaos(TestChaosBase):
         chaos_opt = ChaosOpt(chaos_config['kind'])
         chaos_opt.create_chaos_object(chaos_config)
         log.debug("chaos injected")
-
+        sleep(constants.WAIT_PER_OP * 2.1)
         # reset counting
         reset_counting(self.health_checkers)
 

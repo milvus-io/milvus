@@ -95,14 +95,37 @@ class HelmEnv:
         service = v1.read_namespaced_service(f'{self.release_name}-milvus', constants.NAMESPACE)
         return service.status.load_balancer.ingress[0].ip
 
+    def export_all_logs(self):
+        """
+        export all cluster logs to /tmp/milvus, and temporarily missing minio pod logs
+        :return: export all pods' log to constants.MILVUS_LOGS_PATH
+        """
+        pods = self.list_all_pods()
+        for pod in pods:
+            os.system(f'kubectl logs {pod} > {constants.MILVUS_LOGS_PATH}/{pod}.log 2>&1')
+
+    def list_all_pods(self):
+        from kubernetes import client, config
+        config.load_kube_config()
+        v1 = client.CoreV1Api()
+        label_selector = f'app.kubernetes.io/instance={self.release_name}'
+        ret = v1.list_namespaced_pod(namespace=constants.NAMESPACE, label_selector=label_selector)
+        pods = []
+        # # label_selector = 'release=zong-single'
+        for i in ret.items:
+            pods.append(i.metadata.name)
+        #     # print("%s\t%s\t%s" % (i.status.pod_ip, i.metadata.namespace, i.metadata.name))
+        return pods
+
 
 if __name__ == '__main__':
     # default deploy q replicas
-    release_name = "scale-test"
+    release_name = "milvus-chaos"
     env = HelmEnv(release_name=release_name)
     # host = env.get_svc_external_ip()
     # log.debug(host)
     # env.helm_install_cluster_milvus()
     # env.helm_upgrade_cluster_milvus(queryNode=2)
     env.helm_uninstall_cluster_milvus()
-    sleep(5)
+    # sleep(5)
+    # env.export_all_logs()

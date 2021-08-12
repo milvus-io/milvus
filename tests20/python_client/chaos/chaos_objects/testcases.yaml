@@ -141,3 +141,25 @@ Collections:
       name: test_querynode_network_isolation
       chaos: chaos_querynode_network_isolation.yaml
     # and 10 more for the other pods
+
+  -
+    testcase:
+      name: test_datanode_container_kill
+      chaos: chaos_datanode_container_kill.yaml
+      expectation:
+        cluster_1_node:
+          insert: succ
+          flush: fail
+        cluster_n_nodes:
+          insert: degrade
+
+  -
+    testcase:
+      name: test_datanode_pod_failure
+      chaos: chaos_datanode_pod_failure.yaml
+      expectation:
+        cluster_1_node:
+          insert: succ
+          flush: fail
+        cluster_n_nodes:
+          insert: degrade
