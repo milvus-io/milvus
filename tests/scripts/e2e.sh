@@ -72,11 +72,12 @@ pushd "${ROOT}/tests/docker"
   else
     if [[ "${MILVUS_CLIENT}" == "pymilvus" ]]; then
       export MILVUS_PYTEST_WORKSPACE="/milvus/tests/python_test"
-      docker-compose run --rm pytest /bin/bash -c "pytest -n ${PARALLEL_NUM} --ip ${MILVUS_SERVICE_IP} --port ${MILVUS_SERVICE_PORT} ${@:-}"
+      docker-compose run --rm pytest /bin/bash -c "pytest -n ${PARALLEL_NUM} --ip ${MILVUS_SERVICE_IP} \
+                                          --port ${MILVUS_SERVICE_PORT} ${@:-} -x"
     elif [[ "${MILVUS_CLIENT}" == "pymilvus-orm" ]]; then
       export MILVUS_PYTEST_WORKSPACE="/milvus/tests20/python_client"
       docker-compose run --rm pytest /bin/bash -c "pytest -n ${PARALLEL_NUM} --host ${MILVUS_SERVICE_IP} --port ${MILVUS_SERVICE_PORT} \
-                                               --html=\${CI_LOG_PATH}/report.html --self-contained-html ${@:-}"
+                                               --html=\${CI_LOG_PATH}/report.html --self-contained-html ${@:-} -x"
     fi
   fi
 popd

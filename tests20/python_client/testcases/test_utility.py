@@ -8,13 +8,15 @@ from common.common_type import CaseLabel, CheckTasks
 
 prefix = "utility"
 default_schema = cf.gen_default_collection_schema()
+default_int64_field_name = ct.default_int64_field_name
 default_field_name = ct.default_float_vec_field_name
 default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+default_dim = ct.default_dim
+default_nb = ct.default_nb
 
 
 class TestUtilityParams(TestcaseBase):
     """ Test case of index interface """
-
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_has_collection_name_invalid(self, get_invalid_collection_name):
@@ -139,9 +141,125 @@ class TestUtilityParams(TestcaseBase):
         log.error(str(ex))
         assert "invalid" or "illegal" in str(ex)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_calc_distance_left_vector_invalid_type(self, get_invalid_vector_dict):
+        """
+        target: test calculated distance with invalid vectors
+        method: input invalid vectors type
+        expected: raise exception
+        """
+        self._connect()
+        invalid_vector = get_invalid_vector_dict
+        if not isinstance(invalid_vector, dict):
+            self.utility_wrap.calc_distance(invalid_vector, invalid_vector,
+                                            check_task=CheckTasks.err_res,
+                                            check_items={"err_code": 1,
+                                                         "err_msg": "Left vectors array is invalid"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue 7038")
+    def test_calc_distance_left_vector_invalid_value(self, get_invalid_vector_dict):
+        """
+        target: test calculated distance with invalid vectors
+        method: input invalid vectors value
+        expected: raise exception
+        """
+        self._connect()
+        invalid_vector = get_invalid_vector_dict
+        if isinstance(invalid_vector, dict):
+            self.utility_wrap.calc_distance(invalid_vector, invalid_vector,
+                                            check_task=CheckTasks.err_res,
+                                            check_items={"err_code": 1,
+                                                         "err_msg": "Left vectors array is empty"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_calc_distance_right_vector_invalid_type(self, get_invalid_vector_dict):
+        """
+        target: test calculated distance with invalid vectors
+        method: input invalid vectors type
+        expected: raise exception
+        """
+        self._connect()
+        invalid_vector = get_invalid_vector_dict
+        vector = cf.gen_vectors(default_nb, default_dim)
+        op_l = {"float_vectors": vector}
+        if not isinstance(invalid_vector, dict):
+            self.utility_wrap.calc_distance(op_l, invalid_vector,
+                                            check_task=CheckTasks.err_res,
+                                            check_items={"err_code": 1,
+                                                         "err_msg": "Right vectors array is invalid"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_calc_distance_right_vector_invalid_value(self, get_invalid_vector_dict):
+        """
+        target: test calculated distance with invalid vectors
+        method: input invalid vectors value
+        expected: raise exception
+        """
+        self._connect()
+        invalid_vector = get_invalid_vector_dict
+        vector = cf.gen_vectors(default_nb, default_dim)
+        op_l = {"float_vectors": vector}
+        if isinstance(invalid_vector, dict):
+            self.utility_wrap.calc_distance(op_l, invalid_vector,
+                                            check_task=CheckTasks.err_res,
+                                            check_items={"err_code": 1,
+                                                         "err_msg": "Cannot calculate distance between "
+                                                                    "vectors with different dimension"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_calc_distance_invalid_using(self):
+        """
+        target: test calculated distance with invalid using
+        method: input invalid using
+        expected: raise exception
+        """
+        self._connect()
+        vectors_l = cf.gen_vectors(5, 64)
+        vectors_r = cf.gen_vectors(10, 64)
+        op_l = {"float_vectors": vectors_l}
+        op_r = {"float_vectors": vectors_r}
+        params = {"metric": "L2", "sqrt": True}
+        using = "empty"
+        self.utility_wrap.calc_distance(op_l, op_r, params, using=using,
+                                        check_task=CheckTasks.err_res,
+                                        check_items={"err_code": 1,
+                                                     "err_msg": "should create connect"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_calc_distance_not_match_dim(self):
+        """
+        target: test calculated distance with invalid vectors
+        method: input invalid vectors type and value
+        expected: raise exception
+        """
+        self._connect()
+        dim = 129
+        vector_l = cf.gen_vectors(default_nb, default_dim)
+        vector_r = cf.gen_vectors(default_nb, dim)
+        op_l = {"float_vectors": vector_l}
+        op_r = {"float_vectors": vector_r}
+        ut = ApiUtilityWrapper()
+        ut.calc_distance(op_l, op_r,
+                         check_task=CheckTasks.err_res,
+                         check_items={"err_code": 1,
+                                      "err_msg": "Cannot calculate distance between "
+                                                 "vectors with different dimension"})
 
 class TestUtilityBase(TestcaseBase):
     """ Test case of index interface """
+
+    @pytest.fixture(scope="function", params=[True, False])
+    def sqrt(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["L2", "IP"])
+    def metric(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["HAMMING", "TANIMOTO", "JACCARD"])
+    def metric_binary(self, request):
+        yield request.param
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_has_collection(self):
@@ -386,6 +504,299 @@ class TestUtilityBase(TestcaseBase):
         res, _ = self.utility_wrap.index_building_progress(c_name)
         assert res["indexed_rows"] == nb
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_calc_distance_default(self):
+        """
+        target: test calculated distance with default params
+        method: calculated distance between two random vectors
+        expected: distance calculated successfully
+        """
+        self._connect()
+        vectors_l = cf.gen_vectors(default_nb, default_dim)
+        vectors_r = cf.gen_vectors(default_nb, default_dim)
+        op_l = {"float_vectors": vectors_l}
+        op_r = {"float_vectors": vectors_r}
+        self.utility_wrap.calc_distance(op_l, op_r,
+                                        check_task=CheckTasks.check_distance,
+                                        check_items={"vectors_l": vectors_l,
+                                                     "vectors_r": vectors_r})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_calc_distance_default_sqrt(self, metric):
+        """
+        target: test calculated distance with default param
+        method: calculated distance with default sqrt
+        expected: distance calculated successfully
+        """
+        self._connect()
+        vectors_l = cf.gen_vectors(default_nb, default_dim)
+        vectors_r = cf.gen_vectors(default_nb, default_dim)
+        op_l = {"float_vectors": vectors_l}
+        op_r = {"float_vectors": vectors_r}
+        params = {"metric": metric}
+        self.utility_wrap.calc_distance(op_l, op_r, params,
+                                        check_task=CheckTasks.check_distance,
+                                        check_items={"vectors_l": vectors_l,
+                                                     "vectors_r": vectors_r,
+                                                     "metric": metric})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_calc_distance_default_metric(self, sqrt):
+        """
+        target: test calculated distance with default param
+        method: calculated distance with default metric
+        expected: distance calculated successfully
+        """
+        self._connect()
+        vectors_l = cf.gen_vectors(default_nb, default_dim)
+        vectors_r = cf.gen_vectors(default_nb, default_dim)
+        op_l = {"float_vectors": vectors_l}
+        op_r = {"float_vectors": vectors_r}
+        params = {"sqrt": sqrt}
+        self.utility_wrap.calc_distance(op_l, op_r, params,
+                                        check_task=CheckTasks.check_distance,
+                                        check_items={"vectors_l": vectors_l,
+                                                     "vectors_r": vectors_r,
+                                                     "sqrt": sqrt})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue 7064")
+    def test_calc_distance_binary_metric(self, metric_binary):
+        """
+        target: test calculate distance with binary vectors
+        method: calculate distance between binary vectors
+        expected: distance calculated successfully
+        """
+        self._connect()
+        nb = 10
+        raw_vectors_l, vectors_l = cf.gen_binary_vectors(nb, default_dim)
+        raw_vectors_r, vectors_r = cf.gen_binary_vectors(nb, default_dim)
+        op_l = {"bin_vectors": vectors_l}
+        op_r = {"bin_vectors": vectors_r}
+        params = {"metric": metric_binary}
+        if metric_binary == "HAMMING":
+            vectors_l = raw_vectors_l
+            vectors_r = raw_vectors_r
+        self.utility_wrap.calc_distance(op_l, op_r, params,
+                                        check_task=CheckTasks.check_distance,
+                                        check_items={"vectors_l": vectors_l,
+                                                     "vectors_r": vectors_r,
+                                                     "metric": metric_binary})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_calc_distance_from_collection_ids(self, metric, sqrt):
+        """
+        target: test calculated distance from collection entities
+        method: both left and right vectors are from collection
+        expected: distance calculated successfully
+        """
+        self._connect()
+        nb = 10
+        collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb)
+        middle = len(insert_ids) // 2
+        vectors = vectors[0].loc[:, default_field_name]
+        vectors_l = vectors[:middle]
+        vectors_r = []
+        for i in range(middle):
+            vectors_r.append(vectors[middle+i])
+        op_l = {"ids": insert_ids[:middle], "collection": collection_w.name,
+                "field": default_field_name}
+        op_r = {"ids": insert_ids[middle:], "collection": collection_w.name,
+                "field": default_field_name}
+        params = {"metric": metric, "sqrt": sqrt}
+        self.utility_wrap.calc_distance(op_l, op_r, params,
+                                        check_task=CheckTasks.check_distance,
+                                        check_items={"vectors_l": vectors_l,
+                                                     "vectors_r": vectors_r,
+                                                     "metric": metric,
+                                                     "sqrt": sqrt})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_calc_distance_from_collections(self, metric, sqrt):
+        """
+        target: test calculated distance between entities from collections
+        method: calculated distance between entities from two collections
+        expected: distance calculated successfully
+        """
+        self._connect()
+        nb = 10
+        prefix_1 = "utility_distance"
+        collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb)
+        collection_w_1, vectors_1, _, insert_ids_1 = self.init_collection_general(prefix_1, True, nb)
+        vectors_l = vectors[0].loc[:, default_field_name]
+        vectors_r = vectors_1[0].loc[:, default_field_name]
+        op_l = {"ids": insert_ids, "collection": collection_w.name,
+                "field": default_field_name}
+        op_r = {"ids": insert_ids_1, "collection": collection_w_1.name,
+                "field": default_field_name}
+        params = {"metric": metric, "sqrt": sqrt}
+        self.utility_wrap.calc_distance(op_l, op_r, params,
+                                        check_task=CheckTasks.check_distance,
+                                        check_items={"vectors_l": vectors_l,
+                                                     "vectors_r": vectors_r,
+                                                     "metric": metric,
+                                                     "sqrt": sqrt})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_calc_distance_left_vector_and_collection_ids(self, metric, sqrt):
+        """
+        target: test calculated distance from collection entities
+        method: set left vectors as random vectors, right vectors from collection
+        expected: distance calculated successfully
+        """
+        self._connect()
+        nb = 10
+        collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb)
+        middle = len(insert_ids) // 2
+        vectors = vectors[0].loc[:, default_field_name]
+        vectors_l = cf.gen_vectors(nb, default_dim)
+        vectors_r = []
+        for i in range(middle):
+            vectors_r.append(vectors[middle + i])
+        op_l = {"float_vectors": vectors_l}
+        op_r = {"ids": insert_ids[middle:], "collection": collection_w.name,
+                "field": default_field_name}
+        params = {"metric": metric, "sqrt": sqrt}
+        self.utility_wrap.calc_distance(op_l, op_r, params,
+                                        check_task=CheckTasks.check_distance,
+                                        check_items={"vectors_l": vectors_l,
+                                                     "vectors_r": vectors_r,
+                                                     "metric": metric,
+                                                     "sqrt": sqrt})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_calc_distance_right_vector_and_collection_ids(self, metric, sqrt):
+        """
+        target: test calculated distance from collection entities
+        method: set right vectors as random vectors, left vectors from collection
+        expected: distance calculated successfully
+        """
+        self._connect()
+        nb = 10
+        collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb)
+        middle = len(insert_ids) // 2
+        vectors = vectors[0].loc[:, default_field_name]
+        vectors_l = vectors[:middle]
+        vectors_r = cf.gen_vectors(nb, default_dim)
+        op_l = {"ids": insert_ids[:middle], "collection": collection_w.name,
+                "field": default_field_name}
+        op_r = {"float_vectors": vectors_r}
+        params = {"metric": metric, "sqrt": sqrt}
+        self.utility_wrap.calc_distance(op_l, op_r, params,
+                                        check_task=CheckTasks.check_distance,
+                                        check_items={"vectors_l": vectors_l,
+                                                     "vectors_r": vectors_r,
+                                                     "metric": metric,
+                                                     "sqrt": sqrt})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue 7046")
+    def test_calc_distance_from_partition_ids(self, metric, sqrt):
+        """
+        target: test calculated distance from one partition entities
+        method: both left and right vectors are from partition
+        expected: distance calculated successfully
+        """
+        self._connect()
+        nb = 10
+        collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb, partition_num=1)
+        partitions = collection_w.partitions
+        middle = len(insert_ids) // 2
+        params = {"metric": metric, "sqrt": sqrt}
+        for i in range(len(partitions)):
+            vectors_l = vectors[i].loc[:, default_field_name]
+            vectors_r = vectors[i].loc[:, default_field_name]
+            op_l = {"ids": insert_ids[:middle], "collection": collection_w.name,
+                    "partition": partitions[i].name, "field": default_field_name}
+            op_r = {"ids": insert_ids[middle:], "collection": collection_w.name,
+                    "partition": partitions[i].name, "field": default_field_name}
+            self.utility_wrap.calc_distance(op_l, op_r, params,
+                                            check_task=CheckTasks.check_distance,
+                                            check_items={"vectors_l": vectors_l,
+                                                         "vectors_r": vectors_r,
+                                                         "metric": metric,
+                                                         "sqrt": sqrt})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue 7046")
+    def test_calc_distance_from_partitions(self, metric, sqrt):
+        """
+        target: test calculated distance between entities from partitions
+        method: calculate distance between entities from two partitions
+        expected: distance calculated successfully
+        """
+        self._connect()
+        nb = 10
+        collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb, partition_num=1)
+        partitions = collection_w.partitions
+        middle = len(insert_ids) // 2
+        params = {"metric": metric, "sqrt": sqrt}
+        vectors_l = vectors[0].loc[:, default_field_name]
+        vectors_r = vectors[1].loc[:, default_field_name]
+        op_l = {"ids": insert_ids[:middle], "collection": collection_w.name,
+                "partition": partitions[0].name, "field": default_field_name}
+        op_r = {"ids": insert_ids[middle:], "collection": collection_w.name,
+                "partition": partitions[1].name, "field": default_field_name}
+        self.utility_wrap.calc_distance(op_l, op_r, params,
+                                        check_task=CheckTasks.check_distance,
+                                        check_items={"vectors_l": vectors_l,
+                                                     "vectors_r": vectors_r,
+                                                     "metric": metric,
+                                                     "sqrt": sqrt})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue 7046")
+    def test_calc_distance_left_vectors_and_partition_ids(self, metric, sqrt):
+        """
+        target: test calculated distance between vectors and partition entities
+        method: set left vectors as random vectors, right vectors are entities
+        expected: distance calculated successfully
+        """
+        self._connect()
+        nb = 10
+        collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb, partition_num=1)
+        middle = len(insert_ids) // 2
+        partitions = collection_w.partitions
+        vectors_l = cf.gen_vectors(nb // 2, default_dim)
+        op_l = {"float_vectors": vectors_l}
+        params = {"metric": metric, "sqrt": sqrt}
+        for i in range(len(partitions)):
+            vectors_r = vectors[i].loc[:, default_field_name]
+            op_r = {"ids": insert_ids[middle:], "collection": collection_w.name,
+                    "partition": partitions[i].name, "field": default_field_name}
+            self.utility_wrap.calc_distance(op_l, op_r, params,
+                                            check_task=CheckTasks.check_distance,
+                                            check_items={"vectors_l": vectors_l,
+                                                         "vectors_r": vectors_r,
+                                                         "metric": metric,
+                                                         "sqrt": sqrt})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue 7046")
+    def test_calc_distance_right_vectors_and_partition_ids(self, metric, sqrt):
+        """
+        target: test calculated distance between vectors and partition entities
+        method: set right vectors as random vectors, left vectors are entities
+        expected: distance calculated successfully
+        """
+        self._connect()
+        nb = 10
+        collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb, partition_num=1)
+        middle = len(insert_ids) // 2
+        partitions = collection_w.partitions
+        vectors_r = cf.gen_vectors(nb // 2, default_dim)
+        op_r = {"float_vectors": vectors_r}
+        params = {"metric": metric, "sqrt": sqrt}
+        for i in range(len(partitions)):
+            vectors_l = vectors[i].loc[:, default_field_name]
+            op_l = {"ids": insert_ids[middle:], "collection": collection_w.name,
+                    "partition": partitions[i].name, "field": default_field_name}
+            self.utility_wrap.calc_distance(op_l, op_r, params,
+                                            check_task=CheckTasks.check_distance,
+                                            check_items={"vectors_l": vectors_l,
+                                                         "vectors_r": vectors_r,
+                                                         "metric": metric,
+                                                         "sqrt": sqrt})
 
 class TestUtilityAdvanced(TestcaseBase):
     """ Test case of index interface """

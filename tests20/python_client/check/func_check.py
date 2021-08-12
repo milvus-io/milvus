@@ -1,5 +1,6 @@
 from utils.util_log import test_log as log
 from common import common_type as ct
+from common import common_func as cf
 from common.common_type import CheckTasks, Connect_Object_Name
 # from common.code_mapping import ErrorCode, ErrorMessage
 from pymilvus_orm import Collection, Partition
@@ -52,6 +53,10 @@ class ResponseChecker:
         elif self.check_task == CheckTasks.check_query_results:
             # Query interface of collection and partition that response check
             result = self.check_query_results(self.response, self.func_name, self.check_items)
+
+        elif self.check_task == CheckTasks.check_distance:
+            # Calculate distance interface that response check
+            result = self.check_distance(self.response, self.func_name, self.check_items)
 
         # Add check_items here if something new need verify
 
@@ -212,3 +217,20 @@ class ResponseChecker:
             # for i in range(len(exp_res)):
             #     assert_entity_equal(exp=exp_res[i], actual=query_res[i])
 
+    @staticmethod
+    def check_distance(distance_res, func_name, check_items):
+        if func_name != 'calc_distance':
+            log.warning("The function name is {} rather than {}".format(func_name, "calc_distance"))
+        if not isinstance(distance_res, list):
+            raise Exception("The distance result to check isn't list type object")
+        if len(check_items) == 0:
+            raise Exception("No expect values found in the check task")
+        vectors_l = check_items["vectors_l"]
+        vectors_r = check_items["vectors_r"]
+        metric = check_items.get("metric", "L2")
+        sqrt = check_items.get("sqrt", False)
+        cf.compare_distance_2d_vector(vectors_l, vectors_r,
+                                      distance_res,
+                                      metric, sqrt)
+
+        return True

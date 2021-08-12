@@ -114,6 +114,21 @@ get_invalid_ints = [
     "a".join("a" for i in range(256))
 ]
 
+get_invalid_dict = [
+    [],
+    1,
+    [1, "2", 3],
+    (1,),
+    None,
+    "",
+    " ",
+    "12-s",
+    {1: 1},
+    {"中文": 1},
+    {"%$#": ["a"]},
+    {"a".join("a" for i in range(256)): "a"}
+]
+
 get_dict_without_host_port = [
     {"host": "host"},
     {"port": "port"},
@@ -158,6 +173,7 @@ class CheckTasks:
     check_partition_property = "check_partition_property"
     check_search_results = "check_search_results"
     check_query_results = "check_query_results"
+    check_distance = "check_distance"
 
 
 class CaseLabel:
