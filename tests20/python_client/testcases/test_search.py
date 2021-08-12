@@ -525,6 +525,43 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": "PartitonName: %s not found" % deleted_par_name})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue 6731")
+    @pytest.mark.parametrize("index, params",
+                             zip(ct.all_index_types[:9],
+                                 ct.default_index_params[:9]))
+    def test_search_different_index_invalid_params(self, nq, dim, index, params, auto_id, _async):
+        """
+        target: test search with different index
+        method: test search with different index
+        expected: searched successfully
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 5000,
+                                                                      partition_num=1,
+                                                                      auto_id=auto_id,
+                                                                      dim=dim, is_index=True)
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+        # 2. create different index
+        if params.get("m"):
+            if (dim % params["m"]) != 0:
+                params["m"] = dim//4
+        log.info("test_search_different_index_invalid_params: Creating index-%s" % index)
+        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
+        collection_w.create_index("float_vector", default_index)
+        log.info("test_search_different_index_invalid_params: Created index-%s" % index)
+        collection_w.load()
+        # 3. search
+        log.info("test_search_different_index_invalid_params: Searching after creating index-%s" % index)
+        collection_w.search(vectors[:nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp, _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async})
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_index_partition_not_existed(self):
         """
@@ -902,6 +939,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue 6997")
     def test_search_partition_after_release_load(self, nb, nq, dim, auto_id, _async):
         """
         target: search the pre-released collection after load
@@ -1044,44 +1082,6 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue 6731")
-    @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:9],
-                                 ct.default_index_params[:9]))
-    def test_search_after_different_index(self, nq, dim, index, params, auto_id, _async):
-        """
-        target: test search with different index
-        method: test search with different index
-        expected: searched successfully
-        """
-        # 1. initialize with data
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 5000,
-                                                                      partition_num=1,
-                                                                      auto_id=auto_id,
-                                                                      dim=dim, is_index=True)
-        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        # 2. create different index
-        if params.get("m"):
-            if (dim % params["m"]) != 0:
-                params["m"] = dim//4
-        log.info("test_search_after_different_index: Creating index-%s" % index)
-        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
-        collection_w.create_index("float_vector", default_index)
-        log.info("test_search_after_different_index: Created index-%s" % index)
-        collection_w.load()
-        # 3. search
-        log.info("test_search_after_different_index: Searching after creating index-%s" % index)
-        collection_w.search(vectors[:nq], default_search_field,
-                            default_search_params, default_limit,
-                            default_search_exp, _async=_async,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": nq,
-                                         "ids": insert_ids,
-                                         "limit": default_limit,
-                                         "_async": _async})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue 6731")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:9],
                                  ct.default_index_params[:9]))
@@ -1100,6 +1100,9 @@ class TestCollectionSearch(TestcaseBase):
         if params.get("m"):
             if (dim % params["m"]) != 0:
                 params["m"] = dim//4
+        if params.get("PQM"):
+            if (dim % params["PQM"]) != 0:
+                params["PQM"] = dim//4
         default_index = {"index_type": index, "params": params, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
@@ -1118,11 +1121,10 @@ class TestCollectionSearch(TestcaseBase):
                                              "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue 6731")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:9],
                                  ct.default_index_params[:9]))
-    def test_search_after_index_different_metric_type(self, nq, dim, index, params, auto_id, _async):
+    def test_search_after_index_different_metric_type(self, dim, index, params, auto_id, _async):
         """
         target: test search with different metric type
         method: test search with different metric type
@@ -1133,11 +1135,13 @@ class TestCollectionSearch(TestcaseBase):
                                                                       partition_num=1,
                                                                       auto_id=auto_id,
                                                                       dim=dim, is_index=True)
-        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create different index
         if params.get("m"):
             if (dim % params["m"]) != 0:
                 params["m"] = dim//4
+        if params.get("PQM"):
+            if (dim % params["PQM"]) != 0:
+                params["PQM"] = dim//4
         log.info("test_search_after_index_different_metric_type: Creating index-%s" % index)
         default_index = {"index_type": index, "params": params, "metric_type": "IP"}
         collection_w.create_index("float_vector", default_index)
@@ -1145,6 +1149,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.load()
         # 3. search
         search_params = cf.gen_search_param(index, "IP")
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         for search_param in search_params:
             log.info("Searching with search params: {}".format(search_param))
             collection_w.search(vectors[:default_nq], default_search_field,
@@ -1465,7 +1470,6 @@ class TestCollectionSearch(TestcaseBase):
         assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue 6569")
     def test_search_binary_tanimoto_flat_index(self, nq, dim, auto_id, _async):
         """
         target: search binary_collection, and check the result: distance

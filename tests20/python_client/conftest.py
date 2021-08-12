@@ -199,6 +199,11 @@ def get_invalid_partition_name(request):
     yield request.param
 
 
+@pytest.fixture(params=ct.get_invalid_dict)
+def get_invalid_vector_dict(request):
+    yield request.param
+
+
 # for test exit in the future
 # @pytest.hookimpl(hookwrapper=True, tryfirst=True)
 # def pytest_runtest_makereport():

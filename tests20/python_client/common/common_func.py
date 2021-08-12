@@ -1,5 +1,6 @@
 import os
 import random
+import math
 import string
 import numpy as np
 import pandas as pd
@@ -13,7 +14,7 @@ import threading
 import traceback
 
 """" Methods of processing data """
-l2 = lambda x, y: np.linalg.norm(np.array(x) - np.array(y))
+#l2 = lambda x, y: np.linalg.norm(np.array(x) - np.array(y))
 
 
 def gen_unique_str(str_value=None):
@@ -313,7 +314,7 @@ def gen_search_param(index_type, metric_type="L2"):
             search_params.append(nsg_search_param)
     elif index_type == "ANNOY":
         for search_k in [1000, 5000]:
-            annoy_search_param = {"metric_type": metric_type, "params": {"search_length": search_k}}
+            annoy_search_param = {"metric_type": metric_type, "params": {"search_k": search_k}}
             search_params.append(annoy_search_param)
     else:
         log.error("Invalid index_type.")
@@ -353,6 +354,14 @@ def gen_normal_expressions_field(field):
     return expressions
 
 
+def l2(x, y):
+    return np.linalg.norm(np.array(x) - np.array(y))
+
+
+def ip(x, y):
+    return np.inner(np.array(x), np.array(y))
+
+
 def jaccard(x, y):
     x = np.asarray(x, np.bool)
     y = np.asarray(y, np.bool)
@@ -381,6 +390,27 @@ def superstructure(x, y):
     x = np.asarray(x, np.bool)
     y = np.asarray(y, np.bool)
     return 1 - np.double(np.bitwise_and(x, y).sum()) / np.count_nonzero(x)
+
+def compare_distance_2d_vector(x, y, distance, metric, sqrt):
+    for i in range(len(x)):
+        for j in range(len(y)):
+            if metric == "L2":
+                distance_i = l2(x[i], y[j])
+                if not sqrt:
+                    distance_i = math.pow(distance_i, 2)
+            elif metric == "IP":
+                distance_i = ip(x[i], y[j])
+            elif metric == "HAMMING":
+                distance_i = hamming(x[i], y[j])
+            elif metric == "TANIMOTO":
+                distance_i = tanimoto(x[i], y[j])
+            elif metric == "JACCARD":
+                distance_i = jaccard(x[i], y[j])
+            else:
+                raise Exception("metric type is invalid")
+            assert abs(distance_i - distance[i][j]) < ct.epsilon
+
+    return True
 
 
 def modify_file(file_path_list, is_modify=False, input_content=""):

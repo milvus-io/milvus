@@ -81,3 +81,14 @@ class ApiUtilityWrapper:
         check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
                                        timeout=timeout, using=using).run()
         return res, check_result
+
+    def calc_distance(self, vectors_left, vectors_right, params=None, timeout=None,
+                      using="default", check_task=None, check_items=None):
+        timeout = TIMEOUT if timeout is None else timeout
+
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([self.ut.calc_distance, vectors_left, vectors_right,
+                                    params, timeout, using])
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
+                                       timeout=timeout, using=using).run()
+        return res, check_result
