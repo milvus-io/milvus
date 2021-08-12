@@ -13,10 +13,4 @@ filters:
       - yanliang567
       - zwd1208
     approvers:
-      - czs007
-      - neza2017
-      - scsven
-      - shengjun1985
-      - xiaofan-luan
-      - yanliang567
-      - zwd1208
+      - pr-inspection
