@@ -46,9 +46,6 @@ Search(CSegmentInterface c_segment,
 CProtoResult
 GetEntityByIds(CSegmentInterface c_segment, CRetrievePlan c_plan, uint64_t timestamp);
 
-CStatus
-FillTargetEntry(CSegmentInterface c_segment, CSearchPlan c_plan, CSearchResult result);
-
 int64_t
 GetMemoryUsageInBytes(CSegmentInterface c_segment);
 

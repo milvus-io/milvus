@@ -435,22 +435,15 @@ func TestSegment_segmentSearch(t *testing.T) {
 	placeholderGroups = append(placeholderGroups, holder)
 
 	searchResults := make([]*SearchResult, 0)
-	matchedSegments := make([]*Segment, 0)
-
 	searchResult, err := segment.search(plan, placeholderGroups, []Timestamp{travelTimestamp})
 	assert.Nil(t, err)
-
 	searchResults = append(searchResults, searchResult)
-	matchedSegments = append(matchedSegments, segment)
 
 	///////////////////////////////////
-	inReduced := make([]bool, len(searchResults))
 	numSegment := int64(len(searchResults))
-	err2 := reduceSearchResults(searchResults, numSegment, inReduced)
-	assert.NoError(t, err2)
-	err = fillTargetEntry(plan, searchResults, matchedSegments, inReduced)
+	err = reduceSearchResultsAndFillData(plan, searchResults, numSegment)
 	assert.NoError(t, err)
-	marshaledHits, err := reorganizeSearchResults(plan, placeholderGroups, searchResults, numSegment, inReduced)
+	marshaledHits, err := reorganizeSearchResults(searchResults, numSegment)
 	assert.NoError(t, err)
 	hitsBlob, err := marshaledHits.getHitsBlob()
 	assert.NoError(t, err)
