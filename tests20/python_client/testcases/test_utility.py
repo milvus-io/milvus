@@ -611,7 +611,7 @@ class TestUtilityBase(TestcaseBase):
                                                      "metric": metric,
                                                      "sqrt": sqrt})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_calc_distance_from_collections(self, metric, sqrt):
         """
         target: test calculated distance between entities from collections
