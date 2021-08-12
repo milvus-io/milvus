@@ -12,6 +12,7 @@
 package grpcdatacoordclient
 
 import (
+	"strconv"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/distributed/grpcconfigs"
@@ -78,22 +79,46 @@ func (pt *ParamTable) initDataCoordAddress() {
 
 func (pt *ParamTable) initServerMaxSendSize() {
 	var err error
-	pt.ServerMaxSendSize, err = pt.ParseIntWithErr("dataCoord.grpc.serverMaxSendSize")
-	if err != nil {
+
+	valueStr, err := pt.Load("dataCoord.grpc.serverMaxSendSize")
+	if err != nil { // not set
 		pt.ServerMaxSendSize = grpcconfigs.DefaultServerMaxSendSize
-		log.Debug("dataCoord.grpc.serverMaxSendSize not set, set to default")
 	}
+
+	value, err := strconv.Atoi(valueStr)
+	if err != nil { // not in valid format
+		log.Warn("Failed to parse dataCoord.grpc.serverMaxSendSize, set to default",
+			zap.String("dataCoord.grpc.serverMaxSendSize", valueStr),
+			zap.Error(err))
+
+		pt.ServerMaxSendSize = grpcconfigs.DefaultServerMaxSendSize
+	} else {
+		pt.ServerMaxSendSize = value
+	}
+
 	log.Debug("initServerMaxSendSize",
 		zap.Int("dataCoord.grpc.serverMaxSendSize", pt.ServerMaxSendSize))
 }
 
 func (pt *ParamTable) initServerMaxRecvSize() {
 	var err error
-	pt.ServerMaxRecvSize, err = pt.ParseIntWithErr("dataCoord.grpc.serverMaxRecvSize")
-	if err != nil {
+
+	valueStr, err := pt.Load("dataCoord.grpc.serverMaxRecvSize")
+	if err != nil { // not set
 		pt.ServerMaxRecvSize = grpcconfigs.DefaultServerMaxRecvSize
-		log.Debug("dataCoord.grpc.serverMaxRecvSize not set, set to default")
 	}
+
+	value, err := strconv.Atoi(valueStr)
+	if err != nil { // not in valid format
+		log.Warn("Failed to parse dataCoord.grpc.serverMaxRecvSize, set to default",
+			zap.String("dataCoord.grpc.serverMaxRecvSize", valueStr),
+			zap.Error(err))
+
+		pt.ServerMaxRecvSize = grpcconfigs.DefaultServerMaxRecvSize
+	} else {
+		pt.ServerMaxRecvSize = value
+	}
+
 	log.Debug("initServerMaxRecvSize",
 		zap.Int("dataCoord.grpc.serverMaxRecvSize", pt.ServerMaxRecvSize))
 }
