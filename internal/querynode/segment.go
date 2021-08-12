@@ -203,6 +203,10 @@ func deleteSegment(segment *Segment) {
 		void
 		deleteSegment(CSegmentInterface segment);
 	*/
+	if segment.segmentPtr == nil {
+		return
+	}
+
 	segment.segPtrMu.Lock()
 	defer segment.segPtrMu.Unlock()
 	cPtr := segment.segmentPtr
