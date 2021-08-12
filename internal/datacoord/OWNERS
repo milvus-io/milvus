@@ -6,9 +6,7 @@ reviewers:
   - neza2017
 
 approvers:
-  - czs007
-  - neza2017
-  - scsven
+  - pr-inspection
 
 labels:
 - component/datacoord

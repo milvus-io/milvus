@@ -6,8 +6,7 @@ reviewers:
   - yanliang567
 
 approvers:
-  - del-zhenwu
-  - yanliang567
+  - pr-inspection
 
 labels:
 - area/test

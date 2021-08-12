@@ -8,9 +8,7 @@ reviewers:
   - yhmo
 
 approvers:
-  - czs007
-  - neza2017
-  - scsven
+  - pr-inspection
 
 labels:
 - component/rootcoord
