@@ -11,6 +11,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -39,6 +40,14 @@ const (
 	rootCoordClientTimout = 20 * time.Second
 	connEtcdMaxRetryTime  = 100000
 	connEtcdRetryInterval = 200 * time.Millisecond
+)
+
+var (
+	// TODO: sunby put to config
+	enableTtChecker  = true
+	ttCheckerName    = "dataTtChecker"
+	ttMaxInterval    = 3 * time.Minute
+	ttCheckerWarnMsg = fmt.Sprintf("we haven't received tt for %f minutes", ttMaxInterval.Minutes())
 )
 
 type (
@@ -312,6 +321,12 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 		zap.String("subscriptionName", Params.DataCoordSubscriptionName))
 	ttMsgStream.Start()
 	defer ttMsgStream.Close()
+
+	var checker *LongTermChecker
+	if enableTtChecker {
+		checker = NewLongTermChecker(ctx, ttCheckerName, ttMaxInterval, ttCheckerWarnMsg)
+		checker.Start()
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -331,6 +346,9 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 				continue
 			}
 			ttMsg := msg.(*msgstream.DataNodeTtMsg)
+			if enableTtChecker {
+				checker.Check()
+			}
 
 			ch := ttMsg.ChannelName
 			ts := ttMsg.Timestamp
