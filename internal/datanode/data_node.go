@@ -320,11 +320,11 @@ func (node *DataNode) Start() error {
 	}
 
 	connectEtcdFn := func() error {
-		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 		if err != nil {
 			return err
 		}
-		node.kvClient = etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+		node.kvClient = etcdKV
 		return nil
 	}
 	err = retry.Do(node.ctx, connectEtcdFn, retry.Attempts(ConnectEtcdMaxRetryTime))
