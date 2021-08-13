@@ -71,6 +71,7 @@ func (s *Server) init() error {
 	s.closer = closer
 
 	if err := s.indexcoord.Register(); err != nil {
+		log.Error("IndexCoord", zap.Any("register session error", err))
 		return err
 	}
 
@@ -78,11 +79,13 @@ func (s *Server) init() error {
 	go s.startGrpcLoop(Params.ServicePort)
 	// wait for grpc IndexCoord loop start
 	if err := <-s.grpcErrChan; err != nil {
+		log.Error("IndexCoord", zap.Any("init error", err))
 		return err
 	}
 	s.indexcoord.UpdateStateCode(internalpb.StateCode_Initializing)
 
 	if err := s.indexcoord.Init(); err != nil {
+		log.Error("IndexCoord", zap.Any("init error", err))
 		return err
 	}
 	return nil
@@ -147,7 +150,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	defer s.loopWg.Done()
 
-	log.Debug("IndexCoord", zap.Int("network port", grpcPort))
+	log.Debug("IndexCoord", zap.String("network address", Params.ServiceAddress), zap.Int("network port", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
 		log.Warn("IndexCoord", zap.String("GrpcServer:failed to listen", err.Error()))
