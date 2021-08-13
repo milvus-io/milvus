@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import argparse
 import logging
 import traceback
@@ -45,16 +46,17 @@ def get_image_tag(image_version):
 #         back_scheduler.shutdown(wait=False)
 
 
-def run_suite(run_type, suite, env_mode, env_params):
+def run_suite(run_type, suite, env_mode, env_params, timeout=None):
     try:
         start_status = False
         metric = api.Metric()
         deploy_mode = env_params["deploy_mode"]
+        deploy_opology = env_params["deploy_opology"] if "deploy_opology" in env_params else None
         env = get_env(env_mode, deploy_mode)
         metric.set_run_id()
         metric.set_mode(env_mode)
         metric.env = Env()
-        metric.server = Server(version=config.SERVER_VERSION, mode=deploy_mode)
+        metric.server = Server(version=config.SERVER_VERSION, mode=deploy_mode, deploy_opology=deploy_opology)
         logger.info(env_params)
         if env_mode == "local":
             metric.hardware = Hardware("")
@@ -228,7 +230,8 @@ def main():
             "host": args.host,
             "port": args.port,
             "deploy_mode": deploy_mode,
-            "server_tag": server_tag
+            "server_tag": server_tag,
+            "deploy_opology": deploy_params_dict
         }
         suite_file = args.suite
         with open(suite_file) as f:
@@ -242,8 +245,9 @@ def main():
         # ensure there is only one case in suite
         # suite = {"run_type": run_type, "run_params": collections[0]}
         suite = collections[0]
+        timeout = suite["timeout"] if "timeout" in suite else None
         env_mode = "local"
-        return run_suite(run_type, suite, env_mode, env_params)
+        return run_suite(run_type, suite, env_mode, env_params, timeout=timeout)
         # job = back_scheduler.add_job(run_suite, args=[run_type, suite, env_mode, env_params], misfire_grace_time=36000)
         # logger.info(job)
         # logger.info(job.id)

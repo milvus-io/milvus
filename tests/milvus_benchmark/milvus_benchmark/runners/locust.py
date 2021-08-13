@@ -269,13 +269,14 @@ class LocustSearchRunner(LocustRunner):
         load_start_time = time.time() 
         self.milvus.load_collection()
         logger.debug({"load_time": round(time.time()-load_start_time, 2)})
-        search_param = None
-        for op in case_param["task"]["types"]:
-            if op["type"] == "query":
-                search_param = op["params"]["search_param"]
-                break
-        logger.info("index_field_name: {}".format(index_field_name))
-        self.milvus.warm_query(index_field_name, search_param, metric_type, times=2)
+        # search_param = None
+        # for op in case_param["task"]["types"]:
+        #     if op["type"] == "query":
+        #         search_param = op["params"]["search_param"]
+        #         break
+        # logger.info("index_field_name: {}".format(index_field_name))
+        # TODO: enable warm query
+        # self.milvus.warm_query(index_field_name, search_param, metric_type, times=2)
 
 
 class LocustRandomRunner(LocustRunner):

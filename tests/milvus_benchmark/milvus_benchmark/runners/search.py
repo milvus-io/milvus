@@ -96,7 +96,7 @@ class SearchRunner(BaseRunner):
             return False
         logger.debug(self.milvus.count())
         logger.info("Start load collection")
-        self.milvus.load_collection()
+        self.milvus.load_collection(timeout=1200)
         # TODO: enable warm query
         # self.milvus.warm_query(index_field_name, search_params[0], times=2)
 
@@ -262,7 +262,7 @@ class InsertSearchRunner(BaseRunner):
         logger.info(self.milvus.count())
         logger.info("Start load collection")
         load_start_time = time.time() 
-        self.milvus.load_collection()
+        self.milvus.load_collection(timeout=1200)
         logger.debug({"load_time": round(time.time()-load_start_time, 2)})
         
     def run_case(self, case_metric, **case_param):
@@ -284,7 +284,7 @@ class InsertSearchRunner(BaseRunner):
         tmp_result = {"insert": self.insert_result, "build_time": self.build_time, "search_time": min_query_time, "avc_search_time": avg_query_time}
         # 
         # logger.info("Start load collection")
-        # self.milvus.load_collection()
+        # self.milvus.load_collection(timeout=1200)
         # logger.info("Release load collection")
         # self.milvus.release_collection()
         return tmp_result

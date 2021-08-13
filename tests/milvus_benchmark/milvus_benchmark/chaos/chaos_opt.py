@@ -6,10 +6,7 @@ from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 from milvus_benchmark import config as cf
 
-config.load_kube_config()
-api_instance = client.CustomObjectsApi()
 logger = logging.getLogger("milvus_benchmark.chaos.chaosOpt")
-
 
 class ChaosOpt(object):
     def __init__(self, kind, group=cf.DEFAULT_GROUP, version=cf.DEFAULT_VERSION, namespace=cf.CHAOS_NAMESPACE):
@@ -25,6 +22,8 @@ class ChaosOpt(object):
         # body = create_chaos_config(self.plural, self.metadata_name, spec_params)
         # logger.info(body)
         pretty = 'true'
+        config.load_kube_config()
+        api_instance = client.CustomObjectsApi()
         try:
             api_response = api_instance.create_namespaced_custom_object(self.group, self.version, self.namespace,
                                                                         plural=self.plural, body=body, pretty=pretty)
@@ -37,6 +36,8 @@ class ChaosOpt(object):
     def delete_chaos_object(self, metadata_name):
         print(metadata_name)
         try:
+            config.load_kube_config()
+            api_instance = client.CustomObjectsApi()
             data = api_instance.delete_namespaced_custom_object(self.group, self.version, self.namespace, self.plural,
                                                                 metadata_name)
             logger.info(data)
@@ -46,6 +47,8 @@ class ChaosOpt(object):
 
     def list_chaos_object(self):
         try:
+            config.load_kube_config()
+            api_instance = client.CustomObjectsApi()
             data = api_instance.list_namespaced_custom_object(self.group, self.version, self.namespace,
                                                               plural=self.plural)
             # pprint(data)

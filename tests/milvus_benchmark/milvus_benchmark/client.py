@@ -145,10 +145,10 @@ class MilvusClient(object):
         self._milvus.create_partition(collection_name, tag)
 
     @time_wrapper
-    def insert(self, entities, collection_name=None):
+    def insert(self, entities, collection_name=None, timeout=None):
         tmp_collection_name = self._collection_name if collection_name is None else collection_name
         try:
-            insert_res = self._milvus.insert(tmp_collection_name, entities)
+            insert_res = self._milvus.insert(tmp_collection_name, entities, timeout=timeout)
             return insert_res.primary_keys
         except Exception as e:
             logger.error(str(e))
@@ -234,9 +234,9 @@ class MilvusClient(object):
         #     raise Exception("Error occured")
 
     @time_wrapper
-    def flush(self,_async=False, collection_name=None):
+    def flush(self, _async=False, collection_name=None, timeout=None):
         tmp_collection_name = self._collection_name if collection_name is None else collection_name
-        self._milvus.flush([tmp_collection_name], _async=_async)
+        self._milvus.flush([tmp_collection_name], _async=_async, timeout=timeout)
 
     @time_wrapper
     def compact(self, collection_name=None):
@@ -246,11 +246,11 @@ class MilvusClient(object):
 
     # only support "in" in expr
     @time_wrapper
-    def get(self, ids, collection_name=None):
+    def get(self, ids, collection_name=None, timeout=None):
         tmp_collection_name = self._collection_name if collection_name is None else collection_name
         # res = self._milvus.get(tmp_collection_name, ids, output_fields=None, partition_names=None)
         ids_expr = "id in %s" % (str(ids))
-        res = self._milvus.query(tmp_collection_name, ids_expr, output_fields=None, partition_names=None)
+        res = self._milvus.query(tmp_collection_name, ids_expr, output_fields=None, partition_names=None, timeout=timeout)
         return res
 
     @time_wrapper
@@ -343,7 +343,7 @@ class MilvusClient(object):
             ids.append(res.ids)
         return ids
 
-    def query_rand(self, nq_max=100):
+    def query_rand(self, nq_max=100, timeout=None):
         # for ivf search
         dimension = 128
         top_k = random.randint(1, 100)
@@ -360,9 +360,9 @@ class MilvusClient(object):
             "metric_type": utils.metric_type_trans(metric_type),
             "params": search_param}
         }}
-        self.query(vector_query)
+        self.query(vector_query, timeout=timeout)
 
-    def load_query_rand(self, nq_max=100):
+    def load_query_rand(self, nq_max=100, timeout=None):
         # for ivf search
         dimension = 128
         top_k = random.randint(1, 100)
@@ -379,7 +379,7 @@ class MilvusClient(object):
             "metric_type": utils.metric_type_trans(metric_type),
             "params": search_param}
         }}
-        self.load_and_query(vector_query)
+        self.load_and_query(vector_query, timeout=timeout)
 
     # TODO: need to check
     def count(self, collection_name=None):

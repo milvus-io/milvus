@@ -113,7 +113,7 @@ def update_values(src_values_file, deploy_params_file):
             logging.info("TODO: Need to schedule pod on GPU server")
         logging.debug("Add tolerations into standalone server")
         values_dict['standalone']['tolerations'] = perf_tolerations
-        # values_dict['minio']['tolerations'] = perf_tolerations
+        values_dict['minio']['tolerations'] = perf_tolerations
         values_dict['etcd']['tolerations'] = perf_tolerations
     else:
         # TODO: mem limits on distributed mode
@@ -146,7 +146,7 @@ def update_values(src_values_file, deploy_params_file):
         values_dict['indexNode']['tolerations'] = perf_tolerations
         values_dict['dataNode']['tolerations'] = perf_tolerations
         values_dict['etcd']['tolerations'] = perf_tolerations
-        # values_dict['minio']['tolerations'] = perf_tolerations
+        values_dict['minio']['tolerations'] = perf_tolerations
         values_dict['pulsarStandalone']['tolerations'] = perf_tolerations
         # TODO: for distributed deployment
         # values_dict['pulsar']['autoRecovery']['tolerations'] = perf_tolerations

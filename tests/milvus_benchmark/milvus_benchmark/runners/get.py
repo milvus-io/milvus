@@ -116,4 +116,6 @@ class InsertGetRunner(GetRunner):
         flush_time = round(time.time() - start_time, 2)
         logger.debug({"collection count": self.milvus.count()})
         logger.debug({"flush_time": flush_time})
-        self.milvus.load_collection()
+        logger.debug("Start load collection")
+        self.milvus.load_collection(timeout=1200)
+        logger.debug("Load collection end")
