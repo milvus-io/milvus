@@ -18,6 +18,17 @@ default_nb = ct.default_nb
 class TestUtilityParams(TestcaseBase):
     """ Test case of index interface """
 
+    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
+    def get_invalid_metric_type(self, request):
+        if request.param == [] or request.param == "":
+            pytest.skip("metric empty is valid for distance calculation")
+        yield request.param
+
+    """
+    ******************************************************************
+    #  The followings are invalid cases
+    ******************************************************************
+    """
     @pytest.mark.tags(CaseLabel.L1)
     def test_has_collection_name_invalid(self, get_invalid_collection_name):
         """
@@ -208,6 +219,26 @@ class TestUtilityParams(TestcaseBase):
                                                                     "vectors with different dimension"})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue 7086")
+    def test_calc_distance_invalid_metric(self, get_invalid_metric_type):
+        """
+        target: test calculated distance with invalid metric
+        method: input invalid metric
+        expected: raise exception
+        """
+        self._connect()
+        vectors_l = cf.gen_vectors(default_nb, default_dim)
+        vectors_r = cf.gen_vectors(default_nb, default_dim)
+        op_l = {"float_vectors": vectors_l}
+        op_r = {"float_vectors": vectors_r}
+        metric = get_invalid_metric_type
+        params = {"metric": metric}
+        self.utility_wrap.calc_distance(op_l, op_r, params,
+                                        check_task=CheckTasks.err_res,
+                                        check_items={"err_code": 1,
+                                                     "err_msg": "Invalid metric type"})
+
+    @pytest.mark.tags(CaseLabel.L2)
     def test_calc_distance_invalid_using(self):
         """
         target: test calculated distance with invalid using
@@ -215,8 +246,8 @@ class TestUtilityParams(TestcaseBase):
         expected: raise exception
         """
         self._connect()
-        vectors_l = cf.gen_vectors(5, 64)
-        vectors_r = cf.gen_vectors(10, 64)
+        vectors_l = cf.gen_vectors(default_nb, default_dim)
+        vectors_r = cf.gen_vectors(default_nb, default_dim)
         op_l = {"float_vectors": vectors_l}
         op_r = {"float_vectors": vectors_r}
         params = {"metric": "L2", "sqrt": True}
@@ -239,12 +270,34 @@ class TestUtilityParams(TestcaseBase):
         vector_r = cf.gen_vectors(default_nb, dim)
         op_l = {"float_vectors": vector_l}
         op_r = {"float_vectors": vector_r}
-        ut = ApiUtilityWrapper()
-        ut.calc_distance(op_l, op_r,
-                         check_task=CheckTasks.err_res,
-                         check_items={"err_code": 1,
-                                      "err_msg": "Cannot calculate distance between "
-                                                 "vectors with different dimension"})
+        self.utility_wrap.calc_distance(op_l, op_r,
+                                        check_task=CheckTasks.err_res,
+                                        check_items={"err_code": 1,
+                                                     "err_msg": "Cannot calculate distance between "
+                                                                "vectors with different dimension"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue 7036")
+    def test_calc_distance_collection_before_load(self):
+        """
+        target: test calculated distance when entities is not ready
+        method: calculate distance before load
+        expected: raise exception
+        """
+        self._connect()
+        nb = 10
+        collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, True, nb,
+                                                                            is_index=True)
+        middle = len(insert_ids) // 2
+        op_l = {"ids": insert_ids[:middle], "collection": collection_w.name,
+                "field": default_field_name}
+        op_r = {"ids": insert_ids[middle:], "collection": collection_w.name,
+                "field": default_field_name}
+        params = {"metric": "L2", "sqrt": True}
+        self.utility_wrap.calc_distance(op_l, op_r, params,
+                                        check_task=CheckTasks.err_res,
+                                        check_items={"err_code": 1,
+                                                     "err_msg": "Failed to fetch vectors"})
 
 class TestUtilityBase(TestcaseBase):
     """ Test case of index interface """
