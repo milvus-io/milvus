@@ -306,3 +306,8 @@ message SegmentFlushCompletedMsg {
   SegmentInfo segment = 2;
 }
 
+message ChannelWatchInfo {
+    VchannelInfo vchan= 1;
+    int64 startTs = 2;
+    ChannelWatchState state = 3;
+}
