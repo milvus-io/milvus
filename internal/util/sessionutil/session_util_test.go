@@ -12,7 +12,6 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
-	"go.etcd.io/etcd/clientv3"
 	"golang.org/x/net/context"
 )
 
@@ -29,11 +28,10 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	}
 
 	etcdEndpoints := strings.Split(endpoints, ",")
-	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
-	assert.Nil(t, err)
-	etcdKV := etcdkv.NewEtcdKV(cli, "")
-	_, err = cli.Delete(ctx, metaRoot, clientv3.WithPrefix())
-	assert.Nil(t, err)
+	etcdKV, err := etcdkv.NewEtcdKV(etcdEndpoints, metaRoot)
+	assert.NoError(t, err)
+	err = etcdKV.RemoveWithPrefix("")
+	assert.NoError(t, err)
 
 	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix("")
@@ -72,14 +70,13 @@ func TestInit(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
+	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
 	etcdEndpoints := strings.Split(endpoints, ",")
-	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
-	assert.Nil(t, err)
-	etcdKV := etcdkv.NewEtcdKV(cli, "")
-	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-	_, err = cli.Delete(ctx, metaRoot, clientv3.WithPrefix())
-	assert.Nil(t, err)
+	etcdKV, err := etcdkv.NewEtcdKV(etcdEndpoints, metaRoot)
+	assert.NoError(t, err)
+	err = etcdKV.RemoveWithPrefix("")
+	assert.NoError(t, err)
 
 	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix("")
@@ -103,12 +100,9 @@ func TestUpdateSessions(t *testing.T) {
 	}
 
 	etcdEndpoints := strings.Split(endpoints, ",")
-	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
-	assert.Nil(t, err)
-	etcdKV := etcdkv.NewEtcdKV(cli, "")
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-	_, err = cli.Delete(ctx, metaRoot, clientv3.WithPrefix())
-	assert.Nil(t, err)
+	etcdKV, err := etcdkv.NewEtcdKV(etcdEndpoints, "")
+	assert.NoError(t, err)
 
 	defer etcdKV.Close()
 	defer etcdKV.RemoveWithPrefix("")

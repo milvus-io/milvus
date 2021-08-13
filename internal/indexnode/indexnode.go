@@ -19,7 +19,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
@@ -90,8 +89,8 @@ func (i *IndexNode) Register() error {
 
 func (i *IndexNode) Init() error {
 	connectEtcdFn := func() error {
-		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
-		i.etcdKV = etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+		i.etcdKV = etcdKV
 		return err
 	}
 	err := retry.Do(i.loopCtx, connectEtcdFn, retry.Attempts(300))

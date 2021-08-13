@@ -24,7 +24,6 @@ import (
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/stretchr/testify/assert"
-	"go.etcd.io/etcd/clientv3"
 )
 
 func TestFixChannelName(t *testing.T) {
@@ -34,19 +33,19 @@ func TestFixChannelName(t *testing.T) {
 	assert.Equal(t, len(fixName), FixedChannelNameLen)
 }
 
-func newEtcdClient() (*clientv3.Client, error) {
+func etcdEndpoints() []string {
 	endpoints := os.Getenv("ETCD_ENDPOINTS")
 	if endpoints == "" {
 		endpoints = "localhost:2379"
 	}
 	etcdEndpoints := strings.Split(endpoints, ",")
-	return clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
+	return etcdEndpoints
 }
 
 func TestRocksMQ(t *testing.T) {
-	cli, err := newEtcdClient()
+	ep := etcdEndpoints()
+	etcdKV, err := etcdkv.NewEtcdKV(ep, "/etcd/test/root")
 	assert.Nil(t, err)
-	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
@@ -97,9 +96,9 @@ func TestRocksMQ(t *testing.T) {
 }
 
 func TestRocksMQ_Loop(t *testing.T) {
-	cli, err := newEtcdClient()
+	ep := etcdEndpoints()
+	etcdKV, err := etcdkv.NewEtcdKV(ep, "/etcd/test/root")
 	assert.Nil(t, err)
-	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
@@ -161,9 +160,9 @@ func TestRocksMQ_Loop(t *testing.T) {
 }
 
 func TestRocksMQ_Goroutines(t *testing.T) {
-	cli, err := newEtcdClient()
+	ep := etcdEndpoints()
+	etcdKV, err := etcdkv.NewEtcdKV(ep, "/etcd/test/root")
 	assert.Nil(t, err)
-	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
@@ -228,9 +227,9 @@ func TestRocksMQ_Goroutines(t *testing.T) {
 		Consume: 90000 message / s
 */
 func TestRocksMQ_Throughout(t *testing.T) {
-	cli, err := newEtcdClient()
+	ep := etcdEndpoints()
+	etcdKV, err := etcdkv.NewEtcdKV(ep, "/etcd/test/root")
 	assert.Nil(t, err)
-	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
@@ -278,9 +277,9 @@ func TestRocksMQ_Throughout(t *testing.T) {
 }
 
 func TestRocksMQ_MultiChan(t *testing.T) {
-	cli, err := newEtcdClient()
+	ep := etcdEndpoints()
+	etcdKV, err := etcdkv.NewEtcdKV(ep, "/etcd/test/root")
 	assert.Nil(t, err)
-	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()

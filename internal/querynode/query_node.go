@@ -30,7 +30,6 @@ import (
 	"strconv"
 	"sync/atomic"
 
-	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
@@ -102,11 +101,10 @@ func (node *QueryNode) Register() error {
 func (node *QueryNode) Init() error {
 	//ctx := context.Background()
 	connectEtcdFn := func() error {
-		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 		if err != nil {
 			return err
 		}
-		etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
 		node.etcdKV = etcdKV
 		return err
 	}

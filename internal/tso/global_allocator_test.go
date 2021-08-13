@@ -29,7 +29,9 @@ func TestGlobalTSOAllocator_All(t *testing.T) {
 		endpoints = "localhost:2379"
 	}
 	etcdEndpoints := strings.Split(endpoints, ",")
-	gTestTsoAllocator = NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase(etcdEndpoints, "/test/root/kv", "tsoTest"))
+	etcdKV, err := tsoutil.NewTSOKVBase(etcdEndpoints, "/test/root/kv", "tsoTest")
+	assert.NoError(t, err)
+	gTestTsoAllocator = NewGlobalTSOAllocator("timestamp", etcdKV)
 	t.Run("Initialize", func(t *testing.T) {
 		err := gTestTsoAllocator.Initialize()
 		assert.Nil(t, err)

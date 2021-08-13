@@ -148,7 +148,11 @@ func NewTaskScheduler(ctx context.Context, meta Meta, cluster *queryNodeCluster,
 		dataCoord:        dataCoord,
 	}
 	s.triggerTaskQueue = NewTaskQueue()
-	idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "queryCoordTaskID"))
+	etcdKV, err := tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "queryCoordTaskID")
+	if err != nil {
+		return nil, err
+	}
+	idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", etcdKV)
 	if err := idAllocator.Initialize(); err != nil {
 		log.Debug("query coordinator idAllocator initialize failed", zap.Error(err))
 		return nil, err
@@ -156,7 +160,7 @@ func NewTaskScheduler(ctx context.Context, meta Meta, cluster *queryNodeCluster,
 	s.taskIDAllocator = func() (UniqueID, error) {
 		return idAllocator.AllocOne()
 	}
-	err := s.reloadFromKV()
+	err = s.reloadFromKV()
 	if err != nil {
 		return nil, err
 	}

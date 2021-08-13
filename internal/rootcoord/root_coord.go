@@ -902,7 +902,10 @@ func (c *Core) Init() error {
 			if c.MetaTable, initError = NewMetaTable(ms); initError != nil {
 				return initError
 			}
-			c.kvBase = etcdkv.NewEtcdKV(c.etcdCli, Params.KvRootPath)
+			if c.kvBase, initError = etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.KvRootPath); initError != nil {
+				return initError
+			}
+
 			return nil
 		}
 		log.Debug("RootCoord, Connect to Etcd")
@@ -912,7 +915,11 @@ func (c *Core) Init() error {
 		}
 
 		log.Debug("RootCoord, Set TSO and ID Allocator")
-		idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "gid"))
+		kv, initError := tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "gid")
+		if initError != nil {
+			return
+		}
+		idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", kv)
 		if initError = idAllocator.Initialize(); initError != nil {
 			return
 		}
@@ -923,7 +930,11 @@ func (c *Core) Init() error {
 			return idAllocator.UpdateID()
 		}
 
-		tsoAllocator := tso.NewGlobalTSOAllocator("timestamp", tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "tso"))
+		kv, initError = tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "tso")
+		if initError != nil {
+			return
+		}
+		tsoAllocator := tso.NewGlobalTSOAllocator("timestamp", kv)
 		if initError = tsoAllocator.Initialize(); initError != nil {
 			return
 		}
@@ -957,10 +968,16 @@ func (c *Core) Init() error {
 			c.chanTimeTick.GetProxy,
 			c.proxyClientManager.GetProxyClients,
 		)
+		if initError != nil {
+			return
+		}
 		c.proxyManager.AddSession(c.chanTimeTick.AddProxy, c.proxyClientManager.AddProxyClient)
 		c.proxyManager.DelSession(c.chanTimeTick.DelProxy, c.proxyClientManager.DelProxyClient)
 
 		initError = c.setMsgStreams()
+		if initError != nil {
+			return
+		}
 	})
 	if initError == nil {
 		log.Debug(typeutil.RootCoordRole, zap.String("State Code", internalpb.StateCode_name[int32(internalpb.StateCode_Initializing)]))

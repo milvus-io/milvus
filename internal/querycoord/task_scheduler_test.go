@@ -5,8 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"go.etcd.io/etcd/clientv3"
-
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -160,9 +158,8 @@ func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 }
 
 func TestUnMarshalTask_LoadCollection(t *testing.T) {
-	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 	assert.Nil(t, err)
-	kv := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
 
 	loadTask := &LoadCollectionTask{
 		LoadCollectionRequest: &querypb.LoadCollectionRequest{
