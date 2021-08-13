@@ -1262,6 +1262,15 @@ func (dct *DropCollectionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+// Support wildcard in output fields:
+//   "*" - all scalar fields
+//   "%" - all vector fields
+// For example, A and B are scalar fields, C and D are vector fields, duplicated fields will automatically be removed.
+//   output_fields=["*"] 	 ==> [A,B]
+//   output_fields=["%"] 	 ==> [C,D]
+//   output_fields=["*","%"] ==> [A,B,C,D]
+//   output_fields=["*",A] 	 ==> [A,B]
+//   output_fields=["*",C]   ==> [A,B,C]
 func translateOutputFields(outputFields []string, schema *schemapb.CollectionSchema, addPrimary bool) ([]string, error) {
 	var primaryFieldName string
 	scalarFieldNameMap := make(map[string]bool)
