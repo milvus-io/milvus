@@ -516,11 +516,13 @@ func (i *IndexCoord) watchNodeLoop() {
 				serverID := event.Session.ServerID
 				log.Debug("IndexCoord watchNodeLoop SessionAddEvent", zap.Any("serverID", serverID),
 					zap.Any("address", event.Session.Address))
-				err := i.nodeManager.AddNode(serverID, event.Session.Address)
-				if err != nil {
-					log.Debug("IndexCoord", zap.Any("Add IndexNode err", err))
-				}
-				log.Debug("IndexCoord", zap.Any("IndexNode number", len(i.nodeManager.nodeClients)))
+				go func() {
+					err := i.nodeManager.AddNode(serverID, event.Session.Address)
+					if err != nil {
+						log.Error("IndexCoord", zap.Any("Add IndexNode err", err))
+					}
+					log.Debug("IndexCoord", zap.Any("IndexNode number", len(i.nodeManager.nodeClients)))
+				}()
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
 				log.Debug("IndexCoord watchNodeLoop SessionDelEvent", zap.Any("serverID", serverID))
