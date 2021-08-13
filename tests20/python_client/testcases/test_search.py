@@ -25,7 +25,7 @@ default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
 default_int64_field_name = ct.default_int64_field_name
 default_float_field_name = ct.default_float_field_name
-
+vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
 
 class TestCollectionSearchInvalid(TestcaseBase):
     """ Test case of search interface """
@@ -111,7 +111,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
         log.info("test_search_no_connection: removed connection")
         # 3. search without connection
         log.info("test_search_no_connection: searching without connection")
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
                             default_search_exp,
@@ -134,7 +133,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.drop()
         # 3. Search without collection
         log.info("test_search_no_collection: Searching without collection ")
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors, default_search_field,
                             default_search_params, default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
@@ -211,7 +209,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
         invalid_search_field = get_invalid_fields_type
         log.info("test_search_param_invalid_field_type: searching with "
                  "invalid field: %s" % invalid_search_field)
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], invalid_search_field, default_search_params,
                             default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
@@ -232,7 +229,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
         invalid_search_field = get_invalid_fields_value
         log.info("test_search_param_invalid_field_value: searching with "
                  "invalid field: %s" % invalid_search_field)
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], invalid_search_field, default_search_params,
                             default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
@@ -252,7 +248,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 2. search with invalid metric_type
         log.info("test_search_param_invalid_metric_type: searching with invalid metric_type")
         invalid_metric = get_invalid_metric_type
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         search_params = {"metric_type": invalid_metric, "params": {"nprobe": 10}}
         collection_w.search(vectors[:default_nq], default_search_field, search_params,
                             default_limit, default_search_exp,
@@ -282,7 +277,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.load()
         # 3. search
         invalid_search_params = cf.gen_invaild_search_params_type()
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         for invalid_search_param in invalid_search_params:
             if index == invalid_search_param["index_type"]:
                 search_params = {"metric_type": "L2", "params": invalid_search_param["search_params"]}
@@ -306,7 +300,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
         invalid_limit = get_invalid_limit
         log.info("test_search_param_invalid_limit_type: searching with "
                  "invalid limit: %s" % invalid_limit)
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
                             invalid_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
@@ -325,8 +318,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w = self.init_collection_general(prefix)[0]
         # 2. search with invalid limit (topK)
         log.info("test_search_param_invalid_limit: searching with "
-                 "invalid limit (topK) = %s" % limit)
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+                 "invalid limit (topK) = %s" % limit)        
         err_msg = "limit %d is too large!" % limit
         if limit == 0:
             err_msg = "`limit` value 0 is illegal"
@@ -349,7 +341,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         invalid_search_expr = get_invalid_expr_type
         log.info("test_search_param_invalid_expr_type: searching with "
                  "invalid expr: {}".format(invalid_search_expr))
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit, invalid_search_expr,
                             check_task=CheckTasks.err_res,
@@ -369,7 +361,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
         invalid_search_expr = get_invalid_expr_value
         log.info("test_search_param_invalid_expr_value: searching with "
                  "invalid expr: %s" % invalid_search_expr)
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit, invalid_search_expr,
                             check_task=CheckTasks.err_res,
@@ -386,7 +377,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
         """
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix)[0]
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         # 2. search the invalid partition
         partition_name = get_invalid_partition
         err_msg = "`partition_name_array` value {} is illegal".format(partition_name)
@@ -409,7 +399,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
         log.info("test_search_with_output_fields_invalid_type: Searching collection %s" % collection_w.name)
         output_fields = get_invalid_output_fields
         err_msg = "`output_fields` value {} is illegal".format(output_fields)
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
                             default_search_exp, output_fields=output_fields,
@@ -432,7 +421,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.release()
         # 3. Search the released collection
         log.info("test_search_release_collection: Searching without collection ")
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors, default_search_field,
                             default_search_params, default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
@@ -460,7 +448,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 3. Search the released partition
         log.info("test_search_release_partition: Searching specifying the released partition")
         limit = 10
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors, default_search_field,
                             default_search_params, limit, default_search_exp,
                             [par_name],
@@ -480,7 +467,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 2. search collection without data before load
         log.info("test_search_with_empty_collection: Searching empty collection %s"
                  % collection_w.name)
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         err_msg = "collection" + collection_w.name + "was not loaded into memory"
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
                             default_limit, default_search_exp, timeout=1,
@@ -517,7 +503,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.load()
         # 3. search after delete partitions
         log.info("test_search_partition_deleted: searching deleted partition")
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit, default_search_exp,
                             [deleted_par_name],
@@ -571,7 +556,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
         """
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix, True)[0]
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         # 2. create index
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
@@ -633,7 +617,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True)
         # 2. search
         log.info("test_search_with_output_fields_not_exist: Searching collection %s" % collection_w.name)
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
                             default_search_exp, output_fields=["int63"],
@@ -654,7 +637,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w = self.init_collection_general(prefix, True)[0]
         # 2. search
         log.info("test_search_output_field_vector: Searching collection %s" % collection_w.name)
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
                             default_search_exp, output_fields=output_fields,
@@ -674,7 +656,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w = self.init_collection_general(prefix, True)[0]
         # 2. search
         log.info("test_search_output_field_vector: Searching collection %s" % collection_w.name)
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
                             default_search_exp, output_fields=output_fields,
@@ -730,8 +711,31 @@ class TestCollectionSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
-                                         "limit": default_limit})
-
+                                         "limit": default_limit}) 
+                                    
+    @pytest.mark.tag(CaseLabel.L0)
+    def test_search_with_hit_vectors(self, nq, dim, auto_id):
+        """
+        target: test search with vectors in collections
+        method: create connections,collection insert and search vectors in collections
+        expected: search successfully with limit(topK) and can be hit at top 1 (min distance is 0)
+        """
+        collection_w, _vectors, _, insert_ids = \
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim)
+        # get vectors that inserted into collection
+        vectors = np.array(_vectors[0]).tolist()
+        vectors = [vectors[i][-1] for i in range(nq)]
+        search_res, _ = collection_w.search(vectors[:nq], default_search_field,
+                                            default_search_params, default_limit,
+                                            default_search_exp,
+                                            check_task=CheckTasks.check_search_results,
+                                            check_items={"nq": nq,
+                                                         "ids": insert_ids,
+                                                         "limit": default_limit})
+        for hits in search_res:
+            # verify that top 1 hit is itself,so min distance is 0
+            assert hits.distances[0] == 0.0
+        
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_empty_vectors(self, dim, auto_id, _async):
         """
@@ -1272,7 +1276,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                       partition_num=1,
                                                                       auto_id=auto_id,
                                                                       is_index=True)
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        
         # 2. create index
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
@@ -1643,7 +1647,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                       auto_id=auto_id)
         # 2. search
         log.info("test_search_with_output_field: Searching collection %s" % collection_w.name)
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        
         res = collection_w.search(vectors[:default_nq], default_search_field,
                                   default_search_params, default_limit,
                                   default_search_exp, _async=_async,
@@ -1703,7 +1707,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                       auto_id=auto_id)
         # 2. search
         log.info("test_search_with_output_field_wildcard: Searching collection %s" % collection_w.name)
-        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        
         res = collection_w.search(vectors[:default_nq], default_search_field,
                                   default_search_params, default_limit,
                                   default_search_exp, _async=_async,
