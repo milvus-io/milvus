@@ -138,10 +138,15 @@ type InsertData struct {
 type InsertCodec struct {
 	Schema          *etcdpb.CollectionMeta
 	readerCloseFunc []func() error
+	compressType    CompressType
 }
 
 func NewInsertCodec(schema *etcdpb.CollectionMeta) *InsertCodec {
 	return &InsertCodec{Schema: schema}
+}
+
+func (insertCodec *InsertCodec) setCompressType(compressType CompressType) {
+	insertCodec.compressType = compressType
 }
 
 func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID UniqueID, data *InsertData) ([]*Blob, []*Blob, error) {
@@ -167,6 +172,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 
 		// encode fields
 		writer = NewInsertBinlogWriter(field.DataType, insertCodec.Schema.ID, partitionID, segmentID, field.FieldID)
+		writer.setCompressType(insertCodec.compressType)
 		eventWriter, err := writer.NextInsertEventWriter()
 		if err != nil {
 			return nil, nil, err
@@ -484,14 +490,20 @@ func (insertCodec *InsertCodec) Close() error {
 type DataDefinitionCodec struct {
 	collectionID    int64
 	readerCloseFunc []func() error
+	compressType    CompressType
 }
 
 func NewDataDefinitionCodec(collectionID int64) *DataDefinitionCodec {
 	return &DataDefinitionCodec{collectionID: collectionID}
 }
 
+func (dataDefinitionCodec *DataDefinitionCodec) setCompressType(compressType CompressType) {
+	dataDefinitionCodec.compressType = compressType
+}
+
 func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequests []string, eventTypes []EventTypeCode) ([]*Blob, error) {
 	writer := NewDDLBinlogWriter(schemapb.DataType_Int64, dataDefinitionCodec.collectionID)
+	writer.setCompressType(dataDefinitionCodec.compressType)
 
 	var blobs []*Blob
 

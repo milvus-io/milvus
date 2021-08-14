@@ -23,7 +23,7 @@ import (
 func TestPayload_ReaderandWriter(t *testing.T) {
 
 	t.Run("TestBool", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -59,7 +59,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 	})
 
 	t.Run("TestInt8", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int8)
+		w, err := NewPayloadWriter(schemapb.DataType_Int8, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -97,7 +97,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 	})
 
 	t.Run("TestInt16", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int16)
+		w, err := NewPayloadWriter(schemapb.DataType_Int16, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -133,7 +133,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 	})
 
 	t.Run("TestInt32", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int32)
+		w, err := NewPayloadWriter(schemapb.DataType_Int32, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -170,7 +170,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 	})
 
 	t.Run("TestInt64", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int64)
+		w, err := NewPayloadWriter(schemapb.DataType_Int64, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -207,7 +207,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 	})
 
 	t.Run("TestFloat32", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Float)
+		w, err := NewPayloadWriter(schemapb.DataType_Float, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -244,7 +244,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 	})
 
 	t.Run("TestDouble", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Double)
+		w, err := NewPayloadWriter(schemapb.DataType_Double, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -281,7 +281,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddOneString", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_String)
+		w, err := NewPayloadWriter(schemapb.DataType_String, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -346,7 +346,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 	})
 
 	t.Run("TestBinaryVector", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_BinaryVector)
+		w, err := NewPayloadWriter(schemapb.DataType_BinaryVector, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -395,7 +395,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 	})
 
 	t.Run("TestFloatVector", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_FloatVector)
+		w, err := NewPayloadWriter(schemapb.DataType_FloatVector, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -436,7 +436,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddDataToPayload", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool, CompressType_UNCOMPRESSED)
 		w.colType = 999
 		require.Nil(t, err)
 		require.NotNil(t, w)
@@ -459,7 +459,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddBoolAfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -475,7 +475,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 	})
 
 	t.Run("TestAddInt8AfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int8)
+		w, err := NewPayloadWriter(schemapb.DataType_Int8, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		defer w.Close()
@@ -491,7 +491,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 	t.Run("TestAddInt16AfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int16)
+		w, err := NewPayloadWriter(schemapb.DataType_Int16, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		defer w.Close()
@@ -507,7 +507,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 	t.Run("TestAddInt32AfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int32)
+		w, err := NewPayloadWriter(schemapb.DataType_Int32, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		defer w.Close()
@@ -523,7 +523,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 	t.Run("TestAddInt64AfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int64)
+		w, err := NewPayloadWriter(schemapb.DataType_Int64, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		defer w.Close()
@@ -539,7 +539,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 	t.Run("TestAddFloatAfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Float)
+		w, err := NewPayloadWriter(schemapb.DataType_Float, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		defer w.Close()
@@ -555,7 +555,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 	t.Run("TestAddDoubleAfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Double)
+		w, err := NewPayloadWriter(schemapb.DataType_Double, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		defer w.Close()
@@ -571,7 +571,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 	t.Run("TestAddStringAfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_String)
+		w, err := NewPayloadWriter(schemapb.DataType_String, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		defer w.Close()
@@ -587,7 +587,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 	t.Run("TestAddBinVectorAfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_BinaryVector)
+		w, err := NewPayloadWriter(schemapb.DataType_BinaryVector, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		defer w.Close()
@@ -611,7 +611,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 	t.Run("TestAddFloatVectorAfterFinish", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_FloatVector)
+		w, err := NewPayloadWriter(schemapb.DataType_FloatVector, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 		defer w.Close()
@@ -652,7 +652,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 	t.Run("TestGetBoolError", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Int8)
+		w, err := NewPayloadWriter(schemapb.DataType_Int8, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -676,7 +676,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 	t.Run("TestGetInt8Error", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -700,7 +700,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 	t.Run("TestGetInt16Error", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -724,7 +724,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 	t.Run("TestGetInt32Error", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -748,7 +748,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 	t.Run("TestGetInt64Error", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -772,7 +772,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 	t.Run("TestGetFloatError", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -796,7 +796,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 	t.Run("TestGetDoubleError", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -820,7 +820,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 	t.Run("TestGetStringError", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -844,7 +844,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 	t.Run("TestGetBinaryVectorError", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
@@ -868,7 +868,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 	t.Run("TestGetFloatVectorError", func(t *testing.T) {
-		w, err := NewPayloadWriter(schemapb.DataType_Bool)
+		w, err := NewPayloadWriter(schemapb.DataType_Bool, CompressType_UNCOMPRESSED)
 		require.Nil(t, err)
 		require.NotNil(t, w)
 

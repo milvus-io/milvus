@@ -253,9 +253,9 @@ macro(build_arrow)
             -DARROW_PLASMA_JAVA_CLIENT=OFF
             -DARROW_PYTHON=OFF
             -DARROW_WITH_BZ2=OFF
-            -DARROW_WITH_ZLIB=OFF
+            -DARROW_WITH_ZLIB=ON
             -DARROW_WITH_LZ4=OFF
-            -DARROW_WITH_SNAPPY=OFF
+            -DARROW_WITH_SNAPPY=ON
             -DARROW_WITH_ZSTD=OFF
             -DARROW_WITH_BROTLI=OFF
             -DCMAKE_BUILD_TYPE=Release

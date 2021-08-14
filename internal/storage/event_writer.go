@@ -200,8 +200,8 @@ func newDescriptorEvent() *descriptorEvent {
 	}
 }
 
-func newInsertEventWriter(dataType schemapb.DataType) (*insertEventWriter, error) {
-	payloadWriter, err := NewPayloadWriter(dataType)
+func newInsertEventWriter(dataType schemapb.DataType, compressType CompressType) (*insertEventWriter, error) {
+	payloadWriter, err := NewPayloadWriter(dataType, compressType)
 	if err != nil {
 		return nil, err
 	}
@@ -222,8 +222,8 @@ func newInsertEventWriter(dataType schemapb.DataType) (*insertEventWriter, error
 	return writer, nil
 }
 
-func newDeleteEventWriter(dataType schemapb.DataType) (*deleteEventWriter, error) {
-	payloadWriter, err := NewPayloadWriter(dataType)
+func newDeleteEventWriter(dataType schemapb.DataType, compressType CompressType) (*deleteEventWriter, error) {
+	payloadWriter, err := NewPayloadWriter(dataType, compressType)
 	if err != nil {
 		return nil, err
 	}
@@ -242,12 +242,12 @@ func newDeleteEventWriter(dataType schemapb.DataType) (*deleteEventWriter, error
 	writer.baseEventWriter.writeEventData = writer.deleteEventData.WriteEventData
 	return writer, nil
 }
-func newCreateCollectionEventWriter(dataType schemapb.DataType) (*createCollectionEventWriter, error) {
+func newCreateCollectionEventWriter(dataType schemapb.DataType, compressType CompressType) (*createCollectionEventWriter, error) {
 	if dataType != schemapb.DataType_String && dataType != schemapb.DataType_Int64 {
 		return nil, errors.New("incorrect data type")
 	}
 
-	payloadWriter, err := NewPayloadWriter(dataType)
+	payloadWriter, err := NewPayloadWriter(dataType, compressType)
 	if err != nil {
 		return nil, err
 	}
@@ -267,12 +267,12 @@ func newCreateCollectionEventWriter(dataType schemapb.DataType) (*createCollecti
 	writer.baseEventWriter.writeEventData = writer.createCollectionEventData.WriteEventData
 	return writer, nil
 }
-func newDropCollectionEventWriter(dataType schemapb.DataType) (*dropCollectionEventWriter, error) {
+func newDropCollectionEventWriter(dataType schemapb.DataType, compressType CompressType) (*dropCollectionEventWriter, error) {
 	if dataType != schemapb.DataType_String && dataType != schemapb.DataType_Int64 {
 		return nil, errors.New("incorrect data type")
 	}
 
-	payloadWriter, err := NewPayloadWriter(dataType)
+	payloadWriter, err := NewPayloadWriter(dataType, compressType)
 	if err != nil {
 		return nil, err
 	}
@@ -291,12 +291,12 @@ func newDropCollectionEventWriter(dataType schemapb.DataType) (*dropCollectionEv
 	writer.baseEventWriter.writeEventData = writer.dropCollectionEventData.WriteEventData
 	return writer, nil
 }
-func newCreatePartitionEventWriter(dataType schemapb.DataType) (*createPartitionEventWriter, error) {
+func newCreatePartitionEventWriter(dataType schemapb.DataType, compressType CompressType) (*createPartitionEventWriter, error) {
 	if dataType != schemapb.DataType_String && dataType != schemapb.DataType_Int64 {
 		return nil, errors.New("incorrect data type")
 	}
 
-	payloadWriter, err := NewPayloadWriter(dataType)
+	payloadWriter, err := NewPayloadWriter(dataType, compressType)
 	if err != nil {
 		return nil, err
 	}
@@ -316,12 +316,12 @@ func newCreatePartitionEventWriter(dataType schemapb.DataType) (*createPartition
 	writer.baseEventWriter.writeEventData = writer.createPartitionEventData.WriteEventData
 	return writer, nil
 }
-func newDropPartitionEventWriter(dataType schemapb.DataType) (*dropPartitionEventWriter, error) {
+func newDropPartitionEventWriter(dataType schemapb.DataType, compressType CompressType) (*dropPartitionEventWriter, error) {
 	if dataType != schemapb.DataType_String && dataType != schemapb.DataType_Int64 {
 		return nil, errors.New("incorrect data type")
 	}
 
-	payloadWriter, err := NewPayloadWriter(dataType)
+	payloadWriter, err := NewPayloadWriter(dataType, compressType)
 	if err != nil {
 		return nil, err
 	}

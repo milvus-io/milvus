@@ -30,6 +30,12 @@ typedef struct CStatus {
   const char *error_msg;
 } CStatus;
 
+enum CompressType{
+    UNCOMPRESSED,
+    SNAPPY,
+    GZIP
+} ;
+
 CPayloadWriter NewPayloadWriter(int columnType);
 CStatus AddBooleanToPayload(CPayloadWriter payloadWriter, bool *values, int length);
 CStatus AddInt8ToPayload(CPayloadWriter payloadWriter, int8_t *values, int length);
@@ -42,7 +48,7 @@ CStatus AddOneStringToPayload(CPayloadWriter payloadWriter, char *cstr, int str_
 CStatus AddBinaryVectorToPayload(CPayloadWriter payloadWriter, uint8_t *values, int dimension, int length);
 CStatus AddFloatVectorToPayload(CPayloadWriter payloadWriter, float *values, int dimension, int length);
 
-CStatus FinishPayloadWriter(CPayloadWriter payloadWriter);
+CStatus FinishPayloadWriter(CPayloadWriter payloadWriter, enum CompressType compressType);
 CBuffer GetPayloadBufferFromWriter(CPayloadWriter payloadWriter);
 int GetPayloadLengthFromWriter(CPayloadWriter payloadWriter);
 CStatus ReleasePayloadWriter(CPayloadWriter handler);

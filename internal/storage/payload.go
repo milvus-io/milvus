@@ -14,7 +14,7 @@ package storage
 /*
 #cgo CFLAGS: -I${SRCDIR}/cwrapper
 
-#cgo LDFLAGS: -L${SRCDIR}/cwrapper/output -lwrapper -lparquet -larrow -lthrift -lutf8proc -lstdc++ -lm
+#cgo LDFLAGS: -L${SRCDIR}/cwrapper/output -lwrapper -lparquet -larrow -lthrift -lutf8proc -lstdc++ -lm -lz -lsnappy -lbz2
 #include <stdlib.h>
 #include "ParquetWrapper.h"
 */
@@ -63,9 +63,11 @@ type PayloadReaderInterface interface {
 	ReleasePayloadReader() error
 	Close() error
 }
+
 type PayloadWriter struct {
 	payloadWriterPtr C.CPayloadWriter
 	colType          schemapb.DataType
+	compressType     CompressType
 }
 
 type PayloadReader struct {
@@ -73,12 +75,12 @@ type PayloadReader struct {
 	colType          schemapb.DataType
 }
 
-func NewPayloadWriter(colType schemapb.DataType) (*PayloadWriter, error) {
+func NewPayloadWriter(colType schemapb.DataType, compressType CompressType) (*PayloadWriter, error) {
 	w := C.NewPayloadWriter(C.int(colType))
 	if w == nil {
 		return nil, errors.New("create Payload writer failed")
 	}
-	return &PayloadWriter{payloadWriterPtr: w, colType: colType}, nil
+	return &PayloadWriter{payloadWriterPtr: w, colType: colType, compressType: compressType}, nil
 }
 
 func (w *PayloadWriter) AddDataToPayload(msgs interface{}, dim ...int) error {
@@ -379,7 +381,7 @@ func (w *PayloadWriter) AddFloatVectorToPayload(floatVec []float32, dim int) err
 }
 
 func (w *PayloadWriter) FinishPayloadWriter() error {
-	st := C.FinishPayloadWriter(w.payloadWriterPtr)
+	st := C.FinishPayloadWriter(w.payloadWriterPtr, uint32(w.compressType))
 	errCode := commonpb.ErrorCode(st.error_code)
 	if errCode != commonpb.ErrorCode_Success {
 		msg := C.GoString(st.error_msg)

@@ -39,6 +39,14 @@ const (
 	MagicNumber int32 = 0xfffabc
 )
 
+type CompressType int32
+
+const (
+	CompressType_UNCOMPRESSED CompressType = 0
+	CompressType_SNAPPY       CompressType = 1
+	CompressType_GZIP         CompressType = 2
+)
+
 type baseBinlogWriter struct {
 	descriptorEvent
 	magicNumber  int32
@@ -46,6 +54,11 @@ type baseBinlogWriter struct {
 	eventWriters []EventWriter
 	buffer       *bytes.Buffer
 	length       int32
+	compressType CompressType
+}
+
+func (writer *baseBinlogWriter) setCompressType(compressType CompressType) {
+	writer.compressType = compressType
 }
 
 func (writer *baseBinlogWriter) isClosed() bool {
@@ -139,7 +152,7 @@ func (writer *InsertBinlogWriter) NextInsertEventWriter() (*insertEventWriter, e
 	if writer.isClosed() {
 		return nil, errors.New("binlog has closed")
 	}
-	event, err := newInsertEventWriter(writer.PayloadDataType)
+	event, err := newInsertEventWriter(writer.PayloadDataType, writer.compressType)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +168,7 @@ func (writer *DeleteBinlogWriter) NextDeleteEventWriter() (*deleteEventWriter, e
 	if writer.isClosed() {
 		return nil, errors.New("binlog has closed")
 	}
-	event, err := newDeleteEventWriter(writer.PayloadDataType)
+	event, err := newDeleteEventWriter(writer.PayloadDataType, writer.compressType)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +184,7 @@ func (writer *DDLBinlogWriter) NextCreateCollectionEventWriter() (*createCollect
 	if writer.isClosed() {
 		return nil, errors.New("binlog has closed")
 	}
-	event, err := newCreateCollectionEventWriter(writer.PayloadDataType)
+	event, err := newCreateCollectionEventWriter(writer.PayloadDataType, writer.compressType)
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +196,7 @@ func (writer *DDLBinlogWriter) NextDropCollectionEventWriter() (*dropCollectionE
 	if writer.isClosed() {
 		return nil, errors.New("binlog has closed")
 	}
-	event, err := newDropCollectionEventWriter(writer.PayloadDataType)
+	event, err := newDropCollectionEventWriter(writer.PayloadDataType, writer.compressType)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +208,7 @@ func (writer *DDLBinlogWriter) NextCreatePartitionEventWriter() (*createPartitio
 	if writer.isClosed() {
 		return nil, errors.New("binlog has closed")
 	}
-	event, err := newCreatePartitionEventWriter(writer.PayloadDataType)
+	event, err := newCreatePartitionEventWriter(writer.PayloadDataType, writer.compressType)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +220,7 @@ func (writer *DDLBinlogWriter) NextDropPartitionEventWriter() (*dropPartitionEve
 	if writer.isClosed() {
 		return nil, errors.New("binlog has closed")
 	}
-	event, err := newDropPartitionEventWriter(writer.PayloadDataType)
+	event, err := newDropPartitionEventWriter(writer.PayloadDataType, writer.compressType)
 	if err != nil {
 		return nil, err
 	}
@@ -229,6 +242,7 @@ func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID
 			binlogType:      InsertBinlog,
 			eventWriters:    make([]EventWriter, 0),
 			buffer:          nil,
+			compressType:    CompressType_UNCOMPRESSED,
 		},
 	}
 }
@@ -243,6 +257,7 @@ func NewDeleteBinlogWriter(dataType schemapb.DataType, collectionID int64) *Dele
 			binlogType:      DeleteBinlog,
 			eventWriters:    make([]EventWriter, 0),
 			buffer:          nil,
+			compressType:    CompressType_UNCOMPRESSED,
 		},
 	}
 }
@@ -257,6 +272,7 @@ func NewDDLBinlogWriter(dataType schemapb.DataType, collectionID int64) *DDLBinl
 			binlogType:      DDLBinlog,
 			eventWriters:    make([]EventWriter, 0),
 			buffer:          nil,
+			compressType:    CompressType_UNCOMPRESSED,
 		},
 	}
 }

@@ -270,7 +270,7 @@ extern "C" CStatus AddFloatVectorToPayload(CPayloadWriter payloadWriter, float *
   return st;
 }
 
-extern "C" CStatus FinishPayloadWriter(CPayloadWriter payloadWriter) {
+extern "C" CStatus FinishPayloadWriter(CPayloadWriter payloadWriter, CompressType compressType) {
   CStatus st;
   st.error_code = static_cast<int>(ErrorCode::SUCCESS);
   st.error_msg = nullptr;
@@ -290,7 +290,24 @@ extern "C" CStatus FinishPayloadWriter(CPayloadWriter payloadWriter) {
     }
     auto table = arrow::Table::Make(p->schema, {array});
     p->output = std::make_shared<wrapper::PayloadOutputStream>();
-    ast = parquet::arrow::WriteTable(*table, arrow::default_memory_pool(), p->output, 1024 * 1024 * 1024);
+    parquet::WriterProperties::Builder builder;
+    builder.compression(parquet::Compression::SNAPPY);
+    switch(compressType) {
+        case SNAPPY: {
+            builder.compression(parquet::Compression::SNAPPY);
+            break;
+        }
+        case GZIP: {
+            builder.compression(parquet::Compression::GZIP);
+            break;
+        }
+        default: {
+            builder.compression(parquet::Compression::UNCOMPRESSED);
+            break;
+        }
+    }
+    std::shared_ptr<parquet::WriterProperties> props = builder.build();
+    ast = parquet::arrow::WriteTable(*table, arrow::default_memory_pool(), p->output, 1024 * 1024 * 1024, props);
     if (!ast.ok()) {
       st.error_code = static_cast<int>(ErrorCode::UNEXPECTED_ERROR);
       st.error_msg = ErrorMsg(ast.message());
