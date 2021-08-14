@@ -11,12 +11,11 @@ package datacoord
 
 import (
 	"context"
+	"math/rand"
 	"path"
 	"strconv"
 	"testing"
 	"time"
-
-	"math/rand"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -28,6 +27,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.etcd.io/etcd/clientv3"
 )
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
 
 func TestGetSegmentInfoChannel(t *testing.T) {
 	svr := newTestServer(t, nil)
@@ -622,6 +625,70 @@ func TestDataNodeTtChannel(t *testing.T) {
 		assert.EqualValues(t, 1, len(flushReq.SegmentIDs))
 		assert.EqualValues(t, assign.SegID, flushReq.SegmentIDs[0])
 	})
+
+	t.Run("test expire allocation after receiving tt msg", func(t *testing.T) {
+		ch := make(chan interface{}, 1)
+		helper := ServerHelper{
+			eventAfterHandleDataNodeTt: func() { ch <- struct{}{} },
+		}
+		svr := newTestServer(t, nil, SetServerHelper(helper))
+		defer closeTestServer(t, svr)
+
+		svr.meta.AddCollection(&datapb.CollectionInfo{
+			ID:         0,
+			Schema:     newTestSchema(),
+			Partitions: []int64{0},
+		})
+
+		ttMsgStream, err := svr.msFactory.NewMsgStream(context.TODO())
+		assert.Nil(t, err)
+		ttMsgStream.AsProducer([]string{Params.TimeTickChannelName})
+		ttMsgStream.Start()
+		defer ttMsgStream.Close()
+		info := &datapb.DataNodeInfo{
+			Address: "localhost:7777",
+			Version: 0,
+			Channels: []*datapb.ChannelStatus{
+				{
+					Name:  "ch-1",
+					State: datapb.ChannelWatchState_Complete,
+				},
+			},
+		}
+		node := NewNodeInfo(context.TODO(), info)
+		node.client, err = newMockDataNodeClient(1, ch)
+		assert.Nil(t, err)
+		svr.cluster.Register(node)
+
+		resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
+			NodeID:   0,
+			PeerRole: "",
+			SegmentIDRequests: []*datapb.SegmentIDRequest{
+				{
+					CollectionID: 0,
+					PartitionID:  0,
+					ChannelName:  "ch-1",
+					Count:        100,
+				},
+			},
+		})
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, 1, len(resp.SegIDAssignments))
+
+		assignedSegmentID := resp.SegIDAssignments[0].SegID
+		segment := svr.meta.GetSegment(assignedSegmentID)
+		assert.EqualValues(t, 1, len(segment.allocations))
+
+		msgPack := msgstream.MsgPack{}
+		msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", resp.SegIDAssignments[0].ExpireTime)
+		msgPack.Msgs = append(msgPack.Msgs, msg)
+		ttMsgStream.Produce(&msgPack)
+
+		<-ch
+		segment = svr.meta.GetSegment(assignedSegmentID)
+		assert.EqualValues(t, 0, len(segment.allocations))
+	})
 }
 
 func TestGetVChannelPos(t *testing.T) {
@@ -816,10 +883,10 @@ func TestGetRecoveryInfo(t *testing.T) {
 	})
 }
 
-func newTestServer(t *testing.T, receiveCh chan interface{}) *Server {
+func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Server {
 	Params.Init()
-	Params.TimeTickChannelName += strconv.Itoa(rand.Int())
-	Params.StatisticsChannelName += strconv.Itoa(rand.Int())
+	Params.TimeTickChannelName = strconv.Itoa(rand.Int())
+	Params.StatisticsChannelName = strconv.Itoa(rand.Int())
 	var err error
 	factory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
@@ -836,7 +903,7 @@ func newTestServer(t *testing.T, receiveCh chan interface{}) *Server {
 	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
-	svr, err := CreateServer(context.TODO(), factory)
+	svr, err := CreateServer(context.TODO(), factory, opts...)
 	assert.Nil(t, err)
 	svr.dataClientCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
 		return newMockDataNodeClient(0, receiveCh)
