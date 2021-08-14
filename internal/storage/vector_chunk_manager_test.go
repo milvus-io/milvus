@@ -44,19 +44,19 @@ func TestVectorChunkManager(t *testing.T) {
 
 	lcm := NewLocalChunkManager(localPath)
 
-	schema := initSchema()
+	meta := initMeta()
 	vcm := NewVectorChunkManager(lcm, rcm)
 	assert.NotNil(t, vcm)
 
-	binlogs := initBinlogFile(schema)
+	binlogs := initBinlogFile(meta)
 	assert.NotNil(t, binlogs)
 	for _, binlog := range binlogs {
 		rcm.Write(binlog.Key, binlog.Value)
 	}
-	err = vcm.DownloadVectorFile("108", schema)
+	err = vcm.DownloadVectorFile("108", meta.ID, meta.Schema)
 	assert.Nil(t, err)
 
-	err = vcm.DownloadVectorFile("109", schema)
+	err = vcm.DownloadVectorFile("109", meta.ID, meta.Schema)
 	assert.Nil(t, err)
 
 	content, err := vcm.Read("108")
@@ -107,8 +107,8 @@ func newMinIOKVClient(ctx context.Context, bucketName string) (*miniokv.MinIOKV,
 	return client, err
 }
 
-func initSchema() *etcdpb.CollectionMeta {
-	schema := &etcdpb.CollectionMeta{
+func initMeta() *etcdpb.CollectionMeta {
+	meta := &etcdpb.CollectionMeta{
 		ID:            1,
 		CreateTime:    1,
 		SegmentIDs:    []int64{0, 1},
@@ -156,7 +156,7 @@ func initSchema() *etcdpb.CollectionMeta {
 			},
 		},
 	}
-	return schema
+	return meta
 }
 
 func initBinlogFile(schema *etcdpb.CollectionMeta) []*Blob {

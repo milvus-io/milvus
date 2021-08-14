@@ -12,7 +12,6 @@
 package querynode
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -28,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -843,18 +841,14 @@ func (q *queryCollection) search(msg queryMsg) error {
 	}
 
 	searchResults := make([]*SearchResult, 0)
-	sealedSegmentSearched := make([]UniqueID, 0)
 
 	// historical search
-	hisSearchResults, hisSegmentResults, err1 := q.historical.search(searchRequests, collectionID, searchMsg.PartitionIDs, plan, travelTimestamp)
+	hisSearchResults, sealedSegmentSearched, err1 := q.historical.search(searchRequests, collectionID, searchMsg.PartitionIDs, plan, travelTimestamp)
 	if err1 != nil {
 		log.Warn(err1.Error())
 		return err1
 	}
 	searchResults = append(searchResults, hisSearchResults...)
-	for _, seg := range hisSegmentResults {
-		sealedSegmentSearched = append(sealedSegmentSearched, seg.segmentID)
-	}
 	tr.Record("historical search done")
 
 	// streaming search
@@ -1045,98 +1039,6 @@ func (q *queryCollection) search(msg queryMsg) error {
 	return nil
 }
 
-func (q *queryCollection) fillVectorFieldsData(segment *Segment, result *segcorepb.RetrieveResults) error {
-	// If segment is growing, vector data is in memory
-	if segment.segmentType == segmentTypeGrowing {
-		log.Debug("Segment is growing, all vector data is in memory")
-		log.Debug("FillVectorFieldData", zap.Any("segmentType", segment.segmentType))
-		return nil
-	}
-	collection, _ := q.streaming.replica.getCollectionByID(q.collectionID)
-	schema := &etcdpb.CollectionMeta{
-		ID:     q.collectionID,
-		Schema: collection.schema}
-	schemaHelper, err := typeutil.CreateSchemaHelper(collection.schema)
-	if err != nil {
-		return err
-	}
-	for _, resultFieldData := range result.FieldsData {
-		log.Debug("FillVectorFieldData for fieldID", zap.Any("fieldID", resultFieldData.FieldId))
-		// If the vector field doesn't have index. Vector data is in memory for
-		// brute force search. No need to download data from remote.
-		_, ok := segment.indexInfos[resultFieldData.FieldId]
-		if !ok {
-			log.Debug("FillVectorFieldData fielD doesn't have index",
-				zap.Any("fielD", resultFieldData.FieldId))
-			continue
-		}
-
-		vecFieldInfo, err := segment.getVectorFieldInfo(resultFieldData.FieldId)
-		if err != nil {
-			continue
-		}
-		dim := resultFieldData.GetVectors().GetDim()
-		log.Debug("FillVectorFieldData", zap.Any("dim", dim))
-		fieldSchema, err := schemaHelper.GetFieldFromID(resultFieldData.FieldId)
-		if err != nil {
-			return err
-		}
-		dataType := fieldSchema.DataType
-		log.Debug("FillVectorFieldData", zap.Any("datatype", dataType))
-
-		data := resultFieldData.GetVectors().GetData()
-
-		for i, offset := range result.Offset {
-			var vecPath string
-			for index, idBinlogRowSize := range segment.idBinlogRowSizes {
-				if offset < idBinlogRowSize {
-					vecPath = vecFieldInfo.fieldBinlog.Binlogs[index]
-					break
-				} else {
-					offset -= idBinlogRowSize
-				}
-			}
-			log.Debug("FillVectorFieldData", zap.Any("path", vecPath))
-			err := q.vcm.DownloadVectorFile(vecPath, schema)
-			if err != nil {
-				return err
-			}
-
-			switch dataType {
-			case schemapb.DataType_BinaryVector:
-				rowBytes := dim / 8
-				content := make([]byte, rowBytes)
-				_, err := q.vcm.ReadAt(vecPath, content, offset*rowBytes)
-				if err != nil {
-					return err
-				}
-				log.Debug("FillVectorFieldData", zap.Any("binaryVectorResult", content))
-
-				resultLen := dim / 8
-				copy(data.(*schemapb.VectorField_BinaryVector).BinaryVector[i*int(resultLen):(i+1)*int(resultLen)], content)
-			case schemapb.DataType_FloatVector:
-				rowBytes := dim * 4
-				content := make([]byte, rowBytes)
-				_, err := q.vcm.ReadAt(vecPath, content, offset*rowBytes)
-				if err != nil {
-					return err
-				}
-				floatResult := make([]float32, dim)
-				buf := bytes.NewReader(content)
-				err = binary.Read(buf, binary.LittleEndian, &floatResult)
-				if err != nil {
-					return err
-				}
-				log.Debug("FillVectorFieldData", zap.Any("floatVectorResult", floatResult))
-
-				resultLen := dim
-				copy(data.(*schemapb.VectorField_FloatVector).FloatVector.Data[i*int(resultLen):(i+1)*int(resultLen)], floatResult)
-			}
-		}
-	}
-	return nil
-}
-
 func (q *queryCollection) retrieve(msg queryMsg) error {
 	// TODO(yukun)
 	// step 1: get retrieve object and defer destruction
@@ -1170,77 +1072,30 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("retrieve %d", retrieveMsg.CollectionID))
 
 	var globalSealedSegments []UniqueID
-	var partitionIDsInHistorical []UniqueID
-	var partitionIDsInStreaming []UniqueID
-	partitionIDsInQuery := retrieveMsg.PartitionIDs
-	if len(partitionIDsInQuery) == 0 {
-		globalSealedSegments = q.historical.getGlobalSegmentIDsByCollectionID(collectionID)
-		partitionIDsInHistoricalCol, err1 := q.historical.replica.getPartitionIDs(collectionID)
-		partitionIDsInStreamingCol, err2 := q.streaming.replica.getPartitionIDs(collectionID)
-		if err1 != nil && err2 != nil {
-			return err2
-		}
-		partitionIDsInHistorical = partitionIDsInHistoricalCol
-		partitionIDsInStreaming = partitionIDsInStreamingCol
+	if len(retrieveMsg.PartitionIDs) > 0 {
+		globalSealedSegments = q.historical.getGlobalSegmentIDsByPartitionIds(retrieveMsg.PartitionIDs)
 	} else {
-		globalSealedSegments = q.historical.getGlobalSegmentIDsByPartitionIds(partitionIDsInQuery)
-		for _, id := range partitionIDsInQuery {
-			_, err1 := q.historical.replica.getPartitionByID(id)
-			if err1 == nil {
-				partitionIDsInHistorical = append(partitionIDsInHistorical, id)
-			}
-			_, err2 := q.streaming.replica.getPartitionByID(id)
-			if err2 == nil {
-				partitionIDsInStreaming = append(partitionIDsInStreaming, id)
-			}
-			if err1 != nil && err2 != nil {
-				return err2
-			}
-		}
+		globalSealedSegments = q.historical.getGlobalSegmentIDsByCollectionID(collectionID)
 	}
-	sealedSegmentRetrieved := make([]UniqueID, 0)
-	var mergeList []*segcorepb.RetrieveResults
-	for _, partitionID := range partitionIDsInHistorical {
-		segmentIDs, err := q.historical.replica.getSegmentIDs(partitionID)
-		if err != nil {
-			return err
-		}
-		for _, segmentID := range segmentIDs {
-			segment, err := q.historical.replica.getSegmentByID(segmentID)
-			if err != nil {
-				return err
-			}
-			result, err := segment.getEntityByIds(plan)
-			if err != nil {
-				return err
-			}
 
-			if err = q.fillVectorFieldsData(segment, result); err != nil {
-				return err
-			}
-			mergeList = append(mergeList, result)
-			sealedSegmentRetrieved = append(sealedSegmentRetrieved, segmentID)
-		}
+	var mergeList []*segcorepb.RetrieveResults
+
+	// historical retrieve
+	hisRetrieveResults, sealedSegmentRetrieved, err1 := q.historical.retrieve(collectionID, retrieveMsg.PartitionIDs, q.vcm, plan)
+	if err1 != nil {
+		log.Warn(err1.Error())
+		return err1
 	}
+	mergeList = append(mergeList, hisRetrieveResults...)
 	tr.Record("historical retrieve done")
 
-	for _, partitionID := range partitionIDsInStreaming {
-		segmentIDs, err := q.streaming.replica.getSegmentIDs(partitionID)
-		if err != nil {
-			return err
-		}
-		for _, segmentID := range segmentIDs {
-			segment, err := q.streaming.replica.getSegmentByID(segmentID)
-			if err != nil {
-				return err
-			}
-			result, err := segment.getEntityByIds(plan)
-			if err != nil {
-				return err
-			}
-			mergeList = append(mergeList, result)
-		}
+	// streaming retrieve
+	strRetrieveResults, _, err2 := q.streaming.retrieve(collectionID, retrieveMsg.PartitionIDs, plan)
+	if err2 != nil {
+		log.Warn(err2.Error())
+		return err2
 	}
+	mergeList = append(mergeList, strRetrieveResults...)
 	tr.Record("streaming retrieve done")
 
 	result, err := mergeRetrieveResults(mergeList)

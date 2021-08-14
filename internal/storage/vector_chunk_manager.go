@@ -17,6 +17,7 @@ import (
 	"errors"
 
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
 type VectorChunkManager struct {
@@ -31,11 +32,14 @@ func NewVectorChunkManager(localChunkManager ChunkManager, remoteChunkManager Ch
 	}
 }
 
-func (vcm *VectorChunkManager) DownloadVectorFile(key string, schema *etcdpb.CollectionMeta) error {
+func (vcm *VectorChunkManager) DownloadVectorFile(key string, collectionID UniqueID, schema *schemapb.CollectionSchema) error {
 	if vcm.localChunkManager.Exist(key) {
 		return nil
 	}
-	insertCodec := NewInsertCodec(schema)
+	insertCodec := NewInsertCodec(&etcdpb.CollectionMeta{
+		ID:     collectionID,
+		Schema: schema,
+	})
 	content, err := vcm.remoteChunkManager.Read(key)
 	if err != nil {
 		return err
