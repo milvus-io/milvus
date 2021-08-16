@@ -200,7 +200,7 @@ func (node *DataNode) Init() error {
 func (node *DataNode) StartWatchChannels(ctx context.Context) {
 	defer logutil.LogPanic()
 	// REF MEP#7 watch path should be [prefix]/channel/{node_id}/{channel_name}
-	watchPrefix := fmt.Sprintf("channel/%d", node.NodeID)
+	watchPrefix := fmt.Sprintf("%s/%d", Params.ChannelWatchSubPath, node.NodeID)
 	evtChan := node.kvClient.WatchWithPrefix(watchPrefix)
 	// after watch, first check all exists nodes first
 	node.checkWatchedList()
@@ -236,8 +236,7 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 // serves the corner case for etcd connection lost and missing some events
 func (node *DataNode) checkWatchedList() error {
 	// REF MEP#7 watch path should be [prefix]/channel/{node_id}/{channel_name}
-	prefix := fmt.Sprintf("channel/%d", node.NodeID)
-
+	prefix := fmt.Sprintf("%s/%d", Params.ChannelWatchSubPath, node.NodeID)
 	keys, values, err := node.kvClient.LoadWithPrefix(prefix)
 	if err != nil {
 		return err
@@ -285,7 +284,7 @@ func (node *DataNode) handleWatchInfo(key string, data []byte) {
 		log.Warn("fail to Marshal watchInfo", zap.String("key", key), zap.Error(err))
 		return
 	}
-	err = node.kvClient.Save(fmt.Sprintf("channel/%d/%s", node.NodeID, watchInfo.Vchan.ChannelName), string(v))
+	err = node.kvClient.Save(fmt.Sprintf("%s/%d/%s", Params.ChannelWatchSubPath, node.NodeID, watchInfo.Vchan.ChannelName), string(v))
 	if err != nil {
 		log.Warn("fail to change WatchState to complete", zap.String("key", key), zap.Error(err))
 		node.ReleaseDataSyncService(key)

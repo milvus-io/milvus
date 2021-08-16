@@ -35,6 +35,7 @@ type ParamTable struct {
 	KvRootPath              string
 	SegmentBinlogSubPath    string
 	CollectionBinlogSubPath string
+	ChannelWatchSubPath     string
 
 	// --- Pulsar ---
 	PulsarAddress string
@@ -82,6 +83,7 @@ func (p *ParamTable) Init() {
 	p.initKvRootPath()
 	p.initSegmentBinlogSubPath()
 	p.initCollectionBinlogSubPath()
+	p.initChannelWatchPrefix()
 
 	p.initPulsarAddress()
 	p.initRocksmqPath()
@@ -257,4 +259,10 @@ func (p *ParamTable) initStatsStreamPosSubPath() {
 		panic(err)
 	}
 	p.StatsStreamPosSubPath = subPath
+}
+
+func (p *ParamTable) initChannelWatchPrefix() {
+	// WARN: this value should not be put to milvus.yaml. It's a default value for channel watch path.
+	// This will be removed after we reconstruct our config module.
+	p.ChannelWatchSubPath = "channelwatch"
 }

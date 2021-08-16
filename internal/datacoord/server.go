@@ -71,11 +71,8 @@ const (
 	ServerStateHealthy ServerState = 2
 )
 
-// DataNodeCreatorFunc creator function for datanode
-type DataNodeCreatorFunc func(ctx context.Context, addr string) (types.DataNode, error)
-
-// RootCoordCreatorFunc creator function for rootcoord
-type RootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error)
+type dataNodeCreatorFunc func(ctx context.Context, addr string) (types.DataNode, error)
+type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error)
 
 // makes sure Server implements `DataCoord`
 var _ types.DataCoord = (*Server)(nil)
@@ -98,6 +95,7 @@ type Server struct {
 	segmentManager  Manager
 	allocator       allocator
 	cluster         *Cluster
+	channelManager  *ChannelManager
 	rootCoordClient types.RootCoord
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
@@ -109,8 +107,8 @@ type Server struct {
 	liveCh  <-chan bool
 	eventCh <-chan *sessionutil.SessionEvent
 
-	dataNodeCreator        DataNodeCreatorFunc
-	rootCoordClientCreator RootCoordCreatorFunc
+	dataNodeCreator        dataNodeCreatorFunc
+	rootCoordClientCreator rootCoordCreatorFunc
 }
 
 // ServerHelper datacoord server injection helper
@@ -128,7 +126,7 @@ func defaultServerHelper() ServerHelper {
 type Option func(svr *Server)
 
 // SetRootCoordCreator returns an `Option` setting RootCoord creator with provided parameter
-func SetRootCoordCreator(creator RootCoordCreatorFunc) Option {
+func SetRootCoordCreator(creator rootCoordCreatorFunc) Option {
 	return func(svr *Server) {
 		svr.rootCoordClientCreator = creator
 	}
@@ -149,7 +147,7 @@ func SetCluster(cluster *Cluster) Option {
 }
 
 // SetDataNodeCreator returns an `Option` setting DataNode create function
-func SetDataNodeCreator(creator DataNodeCreatorFunc) Option {
+func SetDataNodeCreator(creator dataNodeCreatorFunc) Option {
 	return func(svr *Server) {
 		svr.dataNodeCreator = creator
 	}
@@ -175,7 +173,6 @@ func CreateServer(ctx context.Context, factory msgstream.Factory, opts ...Option
 	return s, nil
 }
 
-// defaultDataNodeCreatorFunc defines the default behavior to get a DataNode
 func defaultDataNodeCreatorFunc(ctx context.Context, addr string) (types.DataNode, error) {
 	return datanodeclient.NewClient(ctx, addr)
 }
@@ -248,13 +245,18 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) initCluster() error {
-	var err error
-	// cluster could be set by options
-	// by-pass default NewCluster process if already set
-	if s.cluster == nil {
-		s.cluster, err = NewCluster(s.ctx, s.kvClient, NewNodesInfo(), s)
+	if s.cluster != nil {
+		return nil
 	}
-	return err
+
+	var err error
+	s.channelManager, err = NewChannelManager(s.kvClient, s)
+	if err != nil {
+		return err
+	}
+	sessionManager := NewSessionManager(withSessionCreator(s.dataNodeCreator))
+	s.cluster = NewCluster(sessionManager, s.channelManager)
+	return nil
 }
 
 func (s *Server) initServiceDiscovery() error {
@@ -267,13 +269,11 @@ func (s *Server) initServiceDiscovery() error {
 
 	datanodes := make([]*NodeInfo, 0, len(sessions))
 	for _, session := range sessions {
-		info := &datapb.DataNodeInfo{
-			Address:  session.Address,
-			Version:  session.ServerID,
-			Channels: []*datapb.ChannelStatus{},
+		info := &NodeInfo{
+			NodeID:  session.ServerID,
+			Address: session.Address,
 		}
-		nodeInfo := NewNodeInfo(s.ctx, info)
-		datanodes = append(datanodes, nodeInfo)
+		datanodes = append(datanodes, info)
 	}
 
 	s.cluster.Startup(datanodes)
@@ -426,7 +426,7 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 				s.meta.SetLastFlushTime(id, time.Now())
 			}
 			if len(segmentInfos) > 0 {
-				s.cluster.Flush(segmentInfos)
+				s.cluster.Flush(s.ctx, segmentInfos)
 			}
 		}
 		s.helper.eventAfterHandleDataNodeTt()
@@ -442,39 +442,56 @@ func (s *Server) startWatchService(ctx context.Context) {
 			log.Debug("watch service shutdown")
 			return
 		case event := <-s.eventCh:
-			s.handleSessionEvent(ctx, event)
+			if err := s.handleSessionEvent(ctx, event); err != nil {
+				go func() {
+					if err := s.Stop(); err != nil {
+						log.Warn("datacoord server stop error", zap.Error(err))
+					}
+				}()
+				return
+			}
 		}
 	}
 }
 
 // handles session events - DataNodes Add/Del
-func (s *Server) handleSessionEvent(ctx context.Context, event *sessionutil.SessionEvent) {
+func (s *Server) handleSessionEvent(ctx context.Context, event *sessionutil.SessionEvent) error {
 	if event == nil {
-		return
+		return nil
 	}
 	info := &datapb.DataNodeInfo{
 		Address:  event.Session.Address,
 		Version:  event.Session.ServerID,
 		Channels: []*datapb.ChannelStatus{},
 	}
-	node := NewNodeInfo(ctx, info)
+	node := &NodeInfo{
+		NodeID:  event.Session.ServerID,
+		Address: event.Session.Address,
+	}
 	switch event.EventType {
 	case sessionutil.SessionAddEvent:
 		log.Info("received datanode register",
 			zap.String("address", info.Address),
 			zap.Int64("serverID", info.Version))
-		s.cluster.Register(node)
+		if err := s.cluster.Register(node); err != nil {
+			log.Warn("failed to regisger node", zap.Int64("id", node.NodeID), zap.String("address", node.Address), zap.Error(err))
+			return err
+		}
 		s.metricsCacheManager.InvalidateSystemInfoMetrics()
 	case sessionutil.SessionDelEvent:
 		log.Info("received datanode unregister",
 			zap.String("address", info.Address),
 			zap.Int64("serverID", info.Version))
-		s.cluster.UnRegister(node)
+		if err := s.cluster.UnRegister(node); err != nil {
+			log.Warn("failed to deregisger node", zap.Int64("id", node.NodeID), zap.String("address", node.Address), zap.Error(err))
+			return err
+		}
 		s.metricsCacheManager.InvalidateSystemInfoMetrics()
 	default:
 		log.Warn("receive unknown service event type",
 			zap.Any("type", event.EventType))
 	}
+	return nil
 }
 
 func (s *Server) startFlushLoop(ctx context.Context) {
@@ -629,65 +646,56 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 }
 
 // GetVChanPositions get vchannel latest postitions with provided dml channel names
-func (s *Server) GetVChanPositions(vchans []vchannel, seekFromStartPosition bool) ([]*datapb.VchannelInfo, error) {
-	if s.kvClient == nil {
-		return nil, errNilKvClient
-	}
-	pairs := make([]*datapb.VchannelInfo, 0, len(vchans))
-
-	for _, vchan := range vchans {
-		segments := s.meta.GetSegmentsByChannel(vchan.DmlChannel)
-		flushed := make([]*datapb.SegmentInfo, 0)
-		unflushed := make([]*datapb.SegmentInfo, 0)
-		var seekPosition *internalpb.MsgPosition
-		var useUnflushedPosition bool
-		for _, s := range segments {
-			if s.State == commonpb.SegmentState_Flushing || s.State == commonpb.SegmentState_Flushed {
-				flushed = append(flushed, s.SegmentInfo)
-				if seekPosition == nil || (!useUnflushedPosition && s.DmlPosition.Timestamp > seekPosition.Timestamp) {
-					seekPosition = s.DmlPosition
-				}
-				continue
+func (s *Server) GetVChanPositions(channel string, collectionID UniqueID, seekFromStartPosition bool) *datapb.VchannelInfo {
+	segments := s.meta.GetSegmentsByChannel(channel)
+	flushed := make([]*datapb.SegmentInfo, 0)
+	unflushed := make([]*datapb.SegmentInfo, 0)
+	var seekPosition *internalpb.MsgPosition
+	var useUnflushedPosition bool
+	for _, s := range segments {
+		if s.State == commonpb.SegmentState_Flushing || s.State == commonpb.SegmentState_Flushed {
+			flushed = append(flushed, s.SegmentInfo)
+			if seekPosition == nil || (!useUnflushedPosition && s.DmlPosition.Timestamp > seekPosition.Timestamp) {
+				seekPosition = s.DmlPosition
 			}
-
-			if s.DmlPosition == nil {
-				continue
-			}
-
-			unflushed = append(unflushed, s.SegmentInfo)
-
-			if seekPosition == nil || !useUnflushedPosition || s.DmlPosition.Timestamp < seekPosition.Timestamp {
-				useUnflushedPosition = true
-				if !seekFromStartPosition {
-					seekPosition = s.DmlPosition
-				} else {
-					seekPosition = s.StartPosition
-				}
-			}
+			continue
 		}
 
-		// use collection start position when segment position is not found
-		if seekPosition == nil {
-			coll := s.meta.GetCollection(vchan.CollectionID)
-			if coll != nil {
-				for _, sp := range coll.GetStartPositions() {
-					if sp.GetKey() == rootcoord.ToPhysicalChannel(vchan.DmlChannel) {
-						seekPosition = &internalpb.MsgPosition{
-							ChannelName: vchan.DmlChannel,
-							MsgID:       sp.GetData(),
-						}
+		if s.DmlPosition == nil {
+			continue
+		}
+
+		unflushed = append(unflushed, s.SegmentInfo)
+
+		if seekPosition == nil || !useUnflushedPosition || s.DmlPosition.Timestamp < seekPosition.Timestamp {
+			useUnflushedPosition = true
+			if !seekFromStartPosition {
+				seekPosition = s.DmlPosition
+			} else {
+				seekPosition = s.StartPosition
+			}
+		}
+	}
+	// use collection start position when segment position is not found
+	if seekPosition == nil {
+		coll := s.meta.GetCollection(collectionID)
+		if coll != nil {
+			for _, sp := range coll.GetStartPositions() {
+				if sp.GetKey() == rootcoord.ToPhysicalChannel(channel) {
+					seekPosition = &internalpb.MsgPosition{
+						ChannelName: channel,
+						MsgID:       sp.GetData(),
 					}
 				}
 			}
 		}
-
-		pairs = append(pairs, &datapb.VchannelInfo{
-			CollectionID:      vchan.CollectionID,
-			ChannelName:       vchan.DmlChannel,
-			SeekPosition:      seekPosition,
-			UnflushedSegments: unflushed,
-			FlushedSegments:   flushed,
-		})
 	}
-	return pairs, nil
+
+	return &datapb.VchannelInfo{
+		CollectionID:      collectionID,
+		ChannelName:       channel,
+		SeekPosition:      seekPosition,
+		FlushedSegments:   flushed,
+		UnflushedSegments: unflushed,
+	}
 }
