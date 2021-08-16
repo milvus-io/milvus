@@ -1043,10 +1043,12 @@ func initRmq(name string) *etcdkv.EtcdKV {
 }
 
 func Close(rocksdbName string, intputStream, outputStream MsgStream, etcdKV *etcdkv.EtcdKV) {
+	rocksmq.CloseRocksMQ()
 	intputStream.Close()
 	outputStream.Close()
 	etcdKV.Close()
 	err := os.RemoveAll(rocksdbName)
+	_ = os.RemoveAll(rocksdbName + "_meta_kv")
 	log.Println(err)
 }
 

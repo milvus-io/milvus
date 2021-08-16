@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -23,7 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/tecbot/gorocksdb"
 
-	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 )
 
 type UniqueID = typeutil.UniqueID
@@ -32,6 +33,17 @@ const (
 	DefaultMessageID        = "-1"
 	FixedChannelNameLen     = 320
 	RocksDBLRUCacheCapacity = 3 << 30
+	RocksmqPageSize         = 2 << 30
+
+	kvSuffix = "_meta_kv"
+
+	MessageSizeTitle  = "message_size/"
+	PageMsgSizeTitle  = "page_message_size/"
+	TopicBeginIDTitle = "topic_begin_id/"
+	BeginIDTitle      = "begin_id/"
+	AckedTsTitle      = "acked_ts/"
+	AckedSizeTitle    = "acked_size/"
+	LastRetTsTitle    = "last_retention_ts/"
 )
 
 /**
@@ -63,13 +75,35 @@ func combKey(channelName string, id UniqueID) (string, error) {
 	return fixName + "/" + strconv.FormatInt(id, 10), nil
 }
 
+/**
+ * Construct table name and fixed channel name to be a key with length of FixedChannelNameLen,
+ * used for meta infos
+ */
+func constructKey(metaName, topic string) (string, error) {
+	// Check metaName/topic
+	oldLen := len(metaName + topic)
+	if oldLen > FixedChannelNameLen {
+		return "", errors.New("Topic name exceeds limit")
+	}
+
+	nameBytes := make([]byte, FixedChannelNameLen-oldLen)
+
+	for i := 0; i < len(nameBytes); i++ {
+		nameBytes[i] = byte('*')
+	}
+	return metaName + topic + string(nameBytes), nil
+}
+
+var topicMu sync.Map = sync.Map{}
+
 type rocksmq struct {
 	store       *gorocksdb.DB
 	kv          kv.BaseKV
 	idAllocator allocator.GIDAllocator
-	channelMu   sync.Map
+	consumers   sync.Map
+	ackedMu     sync.Map
 
-	consumers sync.Map
+	retentionInfo *retentionInfo
 }
 
 func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, error) {
@@ -85,16 +119,36 @@ func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, erro
 		return nil, err
 	}
 
-	mkv := memkv.NewMemoryKV()
+	kvName := name + kvSuffix
+	kv, err := rocksdbkv.NewRocksdbKV(kvName)
+	if err != nil {
+		return nil, err
+	}
 
 	rmq := &rocksmq{
 		store:       db,
-		kv:          mkv,
+		kv:          kv,
 		idAllocator: idAllocator,
+		consumers:   sync.Map{},
+		ackedMu:     sync.Map{},
 	}
-	rmq.channelMu = sync.Map{}
-	rmq.consumers = sync.Map{}
+
+	ri, err := initRetentionInfo(kv, db)
+	if err != nil {
+		return nil, err
+	}
+	rmq.retentionInfo = ri
+
+	err = rmq.retentionInfo.startRetentionInfo()
+	if err != nil {
+		return nil, err
+	}
+
 	return rmq, nil
+}
+
+func (rmq *rocksmq) stopRetention() {
+	rmq.retentionInfo.ctx.Done()
 }
 
 func (rmq *rocksmq) checkKeyExist(key string) bool {
@@ -123,12 +177,56 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 		log.Debug("RocksMQ: save " + endKey + " failed.")
 		return err
 	}
-	rmq.channelMu.Store(topicName, new(sync.Mutex))
+	if _, ok := topicMu.Load(topicName); !ok {
+		topicMu.Store(topicName, new(sync.Mutex))
+	}
+	if _, ok := rmq.ackedMu.Load(topicName); !ok {
+		rmq.ackedMu.Store(topicName, new(sync.Mutex))
+	}
 
+	// Initialize retention infos
+	// Initialize acked size to 0 for topic
+	ackedSizeKey := AckedSizeTitle + topicName
+	err = rmq.kv.Save(ackedSizeKey, "0")
+	if err != nil {
+		return err
+	}
+
+	// Initialize topic begin id to defaultMessageID
+	topicBeginIDKey := TopicBeginIDTitle + topicName
+	err = rmq.kv.Save(topicBeginIDKey, DefaultMessageID)
+	if err != nil {
+		return err
+	}
+
+	// Initialize topic message size to 0
+	msgSizeKey := MessageSizeTitle + topicName
+	err = rmq.kv.Save(msgSizeKey, "0")
+	if err != nil {
+		return err
+	}
+
+	// Initialize last retention timestamp to time_now
+	lastRetentionTsKey := LastRetTsTitle + topicName
+	timeNow := time.Now().Unix()
+	err = rmq.kv.Save(lastRetentionTsKey, strconv.FormatInt(timeNow, 10))
+	if err != nil {
+		return nil
+	}
+	rmq.retentionInfo.topics = append(rmq.retentionInfo.topics, topicName)
+	rmq.retentionInfo.pageInfo.Store(topicName, &topicPageInfo{
+		pageEndID:   make([]UniqueID, 0),
+		pageMsgSize: map[UniqueID]int64{},
+	})
+	rmq.retentionInfo.lastRetentionTime.Store(topicName, timeNow)
+	rmq.retentionInfo.ackedInfo.Store(topicName, &topicAckedInfo{
+		ackedTs: map[UniqueID]int64{},
+	})
 	return nil
 }
 
 func (rmq *rocksmq) DestroyTopic(topicName string) error {
+	log.Debug("In DestroyTopic")
 	beginKey := topicName + "/begin_id"
 	endKey := topicName + "/end_id"
 
@@ -145,13 +243,50 @@ func (rmq *rocksmq) DestroyTopic(topicName string) error {
 	}
 
 	rmq.consumers.Delete(topicName)
-	log.Debug("DestroyTopic: " + topicName)
+
+	ackedSizeKey := AckedSizeTitle + topicName
+	err = rmq.kv.Remove(ackedSizeKey)
+	if err != nil {
+		return err
+	}
+	topicBeginIDKey := TopicBeginIDTitle + topicName
+	err = rmq.kv.Remove(topicBeginIDKey)
+	if err != nil {
+		return err
+	}
+	lastRetTsKey := LastRetTsTitle + topicName
+	err = rmq.kv.Remove(lastRetTsKey)
+	if err != nil {
+		return err
+	}
+	msgSizeKey := MessageSizeTitle + topicName
+	err = rmq.kv.Remove(msgSizeKey)
+	if err != nil {
+		return err
+	}
+
+	topicMu.Delete(topicName)
+	rmq.retentionInfo.ackedInfo.Delete(topicName)
+	rmq.retentionInfo.lastRetentionTime.Delete(topicName)
+	rmq.retentionInfo.pageInfo.Delete(topicName)
 
 	return nil
 }
 
 func (rmq *rocksmq) ExistConsumerGroup(topicName, groupName string) (bool, *Consumer) {
 	key := groupName + "/" + topicName + "/current_id"
+	// keyExist := false
+	// if ll, ok := topicMu.Load(topicName); !ok {
+	// 	keyExist = rmq.checkKeyExist(key)
+	// } else {
+	// 	if lock, lok := ll.(*sync.Mutex); lok {
+	// 		lock.Lock()
+	// 		defer lock.Unlock()
+	// 		keyExist = rmq.checkKeyExist(key)
+	// 	} else {
+	// 		keyExist = rmq.checkKeyExist(key)
+	// 	}
+	// }
 	if rmq.checkKeyExist(key) {
 		if vals, ok := rmq.consumers.Load(topicName); ok {
 			for _, v := range vals.([]*Consumer) {
@@ -216,13 +351,11 @@ func (rmq *rocksmq) DestroyConsumerGroup(topicName, groupName string) error {
 		}
 	}
 
-	log.Debug("DestroyConsumerGroup: " + topicName + "+" + groupName)
-
 	return nil
 }
 
 func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) error {
-	ll, ok := rmq.channelMu.Load(topicName)
+	ll, ok := topicMu.Load(topicName)
 	if !ok {
 		return fmt.Errorf("topic name = %s not exist", topicName)
 	}
@@ -248,6 +381,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) error 
 
 	/* Step I: Insert data to store system */
 	batch := gorocksdb.NewWriteBatch()
+	msgSizes := make(map[UniqueID]int64)
 	for i := 0; i < msgLen && idStart+UniqueID(i) < idEnd; i++ {
 		key, err := combKey(topicName, idStart+UniqueID(i))
 		if err != nil {
@@ -256,6 +390,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) error 
 		}
 
 		batch.Put([]byte(key), messages[i].Payload)
+		msgSizes[idStart+UniqueID(i)] = int64(len(messages[i].Payload))
 	}
 
 	err = rmq.store.Write(gorocksdb.NewDefaultWriteOptions(), batch)
@@ -299,11 +434,68 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) error 
 			}
 		}
 	}
+
+	// Update message page info
+	// TODO(yukun): Should this be in a go routine
+	err = rmq.UpdatePageInfo(topicName, msgSizes)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (rmq *rocksmq) UpdatePageInfo(topicName string, msgSizes map[UniqueID]int64) error {
+	msgSizeKey := MessageSizeTitle + topicName
+	msgSizeVal, err := rmq.kv.Load(msgSizeKey)
+	if err != nil {
+		return err
+	}
+	curMsgSize, err := strconv.ParseInt(msgSizeVal, 10, 64)
+	if err != nil {
+		return err
+	}
+	fixedPageSizeKey, err := constructKey(PageMsgSizeTitle, topicName)
+	if err != nil {
+		return err
+	}
+	for k, v := range msgSizes {
+		if curMsgSize+v > RocksmqPageSize {
+			// Current page is full
+			newPageSize := curMsgSize + v
+			pageEndID := k
+			// Update page message size for current page. key is page end ID
+			pageMsgSizeKey := fixedPageSizeKey + "/" + strconv.FormatInt(pageEndID, 10)
+			err := rmq.kv.Save(pageMsgSizeKey, strconv.FormatInt(newPageSize, 10))
+			if err != nil {
+				return err
+			}
+
+			if pageInfo, ok := rmq.retentionInfo.pageInfo.Load(topicName); ok {
+				pageInfo.(*topicPageInfo).pageEndID = append(pageInfo.(*topicPageInfo).pageEndID, pageEndID)
+				pageInfo.(*topicPageInfo).pageMsgSize[pageEndID] = newPageSize
+				rmq.retentionInfo.pageInfo.Store(topicName, pageInfo)
+			}
+
+			// Update message size to 0
+			err = rmq.kv.Save(msgSizeKey, strconv.FormatInt(0, 10))
+			if err != nil {
+				return err
+			}
+			curMsgSize = 0
+		} else {
+			curMsgSize += v
+			// Update message size to current message size
+			err := rmq.kv.Save(msgSizeKey, strconv.FormatInt(curMsgSize, 10))
+			if err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
 func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]ConsumerMessage, error) {
-	ll, ok := rmq.channelMu.Load(topicName)
+	ll, ok := topicMu.Load(topicName)
 	if !ok {
 		return nil, fmt.Errorf("topic name = %s not exist", topicName)
 	}
@@ -372,7 +564,7 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 
 	// When already consume to last mes, an empty slice will be returned
 	if len(consumerMessage) == 0 {
-		//log.Debug("RocksMQ: consumerMessage is empty")
+		// log.Debug("RocksMQ: consumerMessage is empty")
 		return consumerMessage, nil
 	}
 
@@ -382,6 +574,9 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 		log.Debug("RocksMQ: Seek(" + groupName + "," + topicName + "," + strconv.FormatInt(newID, 10) + ") failed")
 		return nil, err
 	}
+
+	msgSize := len(consumerMessage[len(consumerMessage)-1].Payload)
+	go rmq.UpdateAckedInfo(topicName, groupName, newID, int64(msgSize))
 
 	return consumerMessage, nil
 }
@@ -430,4 +625,87 @@ func (rmq *rocksmq) Notify(topicName, groupName string) {
 			}
 		}
 	}
+}
+
+func (rmq *rocksmq) UpdateAckedInfo(topicName, groupName string, newID UniqueID, msgSize int64) error {
+	ll, ok := rmq.ackedMu.Load(topicName)
+	if !ok {
+		return fmt.Errorf("topic name = %s not exist", topicName)
+	}
+	lock, ok := ll.(*sync.Mutex)
+	if !ok {
+		return fmt.Errorf("get mutex failed, topic name = %s", topicName)
+	}
+	lock.Lock()
+	defer lock.Unlock()
+
+	fixedBeginIDKey, err := constructKey(BeginIDTitle, topicName)
+	if err != nil {
+		return err
+	}
+	// Update begin_id for the consumer_group
+	beginIDKey := fixedBeginIDKey + "/" + groupName
+	err = rmq.kv.Save(beginIDKey, strconv.FormatInt(newID, 10))
+	if err != nil {
+		return err
+	}
+
+	// Update begin_id for topic
+	if vals, ok := rmq.consumers.Load(topicName); ok {
+		var minBeginID int64 = -1
+		for _, v := range vals.([]*Consumer) {
+			curBeginIDKey := fixedBeginIDKey + "/" + v.GroupName
+			curBeginIDVal, err := rmq.kv.Load(curBeginIDKey)
+			if err != nil {
+				return err
+			}
+			curBeginID, err := strconv.ParseInt(curBeginIDVal, 10, 64)
+			if err != nil {
+				return err
+			}
+			if curBeginID > minBeginID {
+				minBeginID = curBeginID
+			}
+		}
+		topicBeginIDKey := TopicBeginIDTitle + topicName
+		err = rmq.kv.Save(topicBeginIDKey, strconv.FormatInt(minBeginID, 10))
+		if err != nil {
+			return err
+		}
+
+		// Update acked info for msg of begin id
+		fixedAckedTsKey, err := constructKey(AckedTsTitle, topicName)
+		if err != nil {
+			return err
+		}
+		ackedTsKey := fixedAckedTsKey + "/" + strconv.FormatInt(minBeginID, 10)
+		ts := time.Now().Unix()
+		err = rmq.kv.Save(ackedTsKey, strconv.FormatInt(ts, 10))
+		if err != nil {
+			return err
+		}
+		if minBeginID == newID {
+			// Means the begin_id of topic update to newID, so needs to update acked size
+			ackedSizeKey := AckedSizeTitle + topicName
+			ackedSizeVal, err := rmq.kv.Load(ackedSizeKey)
+			if err != nil {
+				return err
+			}
+			ackedSize, err := strconv.ParseInt(ackedSizeVal, 10, 64)
+			if err != nil {
+				return err
+			}
+			ackedSize += msgSize
+			err = rmq.kv.Save(ackedSizeKey, strconv.FormatInt(ackedSize, 10))
+			if err != nil {
+				return err
+			}
+			if info, ok := rmq.retentionInfo.ackedInfo.Load(topicName); ok {
+				ackedInfo := info.(*topicAckedInfo)
+				ackedInfo.ackedSize = ackedSize
+				rmq.retentionInfo.ackedInfo.Store(topicName, ackedInfo)
+			}
+		}
+	}
+	return nil
 }
