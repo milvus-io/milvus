@@ -4,7 +4,6 @@ from operator import methodcaller
 from kubernetes import client, config
 from milvus_benchmark import config as cf
 
-
 logger = logging.getLogger("milvus_benchmark.chaos.utils")
 
 

@@ -28,20 +28,20 @@ class Tasks(TaskSet):
                 if isinstance(filter, dict) and "term" in filter:
                     filter_query.append(eval(filter["term"]))
         # logger.debug(filter_query)
-        self.client.query(vector_query, filter_query=filter_query, log=False, timeout=120)
+        self.client.query(vector_query, filter_query=filter_query, log=False, timeout=30)
 
     @task
     def flush(self):
-        self.client.flush(log=False)
+        self.client.flush(log=False, timeout=30)
 
     @task
     def load(self):
-        self.client.load_collection()
+        self.client.load_collection(timeout=30)
 
     @task
     def release(self):
         self.client.release_collection()
-        self.client.load_collection()
+        self.client.load_collection(timeout=30)
 
     # @task
     # def release_index(self):

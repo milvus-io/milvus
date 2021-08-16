@@ -1,4 +1,4 @@
-from .insert import InsertRunner
+from .insert import InsertRunner, BPInsertRunner
 from .locust import LocustInsertRunner, LocustSearchRunner, LocustRandomRunner
 from .search import SearchRunner, InsertSearchRunner
 from .build import BuildRunner, InsertBuildRunner
@@ -11,6 +11,7 @@ from .chaos import SimpleChaosRunner
 def get_runner(name, env, metric):
     return {
         "insert_performance": InsertRunner(env, metric),
+        "bp_insert_performance": BPInsertRunner(env, metric),
         "search_performance": SearchRunner(env, metric),
         "insert_search_performance": InsertSearchRunner(env, metric),
         "locust_insert_performance": LocustInsertRunner(env, metric),

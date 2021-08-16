@@ -90,7 +90,7 @@ class AccuracyRunner(BaseRunner):
         self.milvus.set_collection(collection_name)
         if not self.milvus.exists_collection():
             logger.info("collection not exist")
-        self.milvus.load_collection()
+        self.milvus.load_collection(timeout=600)
 
     def run_case(self, case_metric, **case_param):
         collection_size = case_param["collection_size"]
