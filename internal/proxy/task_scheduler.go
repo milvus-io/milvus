@@ -808,9 +808,9 @@ func (sched *TaskScheduler) collectResultLoop() {
 						continue
 					}
 
-					st, ok := t.(*RetrieveTask)
+					st, ok := t.(*QueryTask)
 					if !ok {
-						log.Debug("Proxy collectResultLoop type assert t as RetrieveTask failed")
+						log.Debug("Proxy collectResultLoop type assert t as QueryTask failed")
 						delete(queryResultBufs, reqID)
 						queryResultBufFlags[reqID] = true
 						continue
@@ -842,7 +842,7 @@ func (sched *TaskScheduler) collectResultLoop() {
 
 					//t := sched.getTaskByReqID(reqID)
 					{
-						colName := t.(*RetrieveTask).retrieve.CollectionName
+						colName := t.(*QueryTask).query.CollectionName
 						log.Debug("Proxy collectResultLoop", zap.String("collection name", colName), zap.String("reqID", reqIDStr), zap.Int("answer cnt", len(queryResultBufs[reqID].resultBuf)))
 					}
 

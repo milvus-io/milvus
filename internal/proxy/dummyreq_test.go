@@ -11,49 +11,30 @@
 
 package proxy
 
-import (
-	"testing"
+// func TestParseDummyQueryRequest(t *testing.T) {
+// 	invalidStr := `{"request_type":"query"`
+// 	_, err := parseDummyQueryRequest(invalidStr)
+// 	assert.NotNil(t, err)
 
-	"github.com/stretchr/testify/assert"
-)
+// 	onlytypeStr := `{"request_type":"query"}`
+// 	drr, err := parseDummyQueryRequest(onlytypeStr)
+// 	assert.Nil(t, err)
+// 	assert.Equal(t, drr.RequestType, "query")
+// 	assert.Equal(t, len(drr.DbName), 0)
 
-func TestParseDummyRequestType(t *testing.T) {
-	invalidStr := `{"request_type":"retrieve"`
-	_, err := parseDummyRequestType(invalidStr)
-	assert.NotNil(t, err)
-
-	retrievetypeStr := `{"request_type":"retrieve"}`
-	drt, err := parseDummyRequestType(retrievetypeStr)
-	assert.Nil(t, err)
-	assert.Equal(t, drt.RequestType, "retrieve")
-}
-
-func TestParseDummyRetrieveRequest(t *testing.T) {
-	invalidStr := `{"request_type":"retrieve"`
-	_, err := parseDummyRetrieveRequest(invalidStr)
-	assert.NotNil(t, err)
-
-	onlytypeStr := `{"request_type":"retrieve"}`
-	drr, err := parseDummyRetrieveRequest(onlytypeStr)
-	assert.Nil(t, err)
-	assert.Equal(t, drr.RequestType, "retrieve")
-	assert.Equal(t, len(drr.DbName), 0)
-
-	fulltypeStr := `{
-	"request_type":"retrieve",
-	"dbname":"",
-	"collection_name":"test",
-	"partition_names": [],
-	"ids": [100, 101],
-	"output_fields": ["_id", "age"]
-	}`
-	drr2, err := parseDummyRetrieveRequest(fulltypeStr)
-	assert.Nil(t, err)
-	assert.Equal(t, drr2.RequestType, "retrieve")
-	assert.Equal(t, len(drr2.DbName), 0)
-	assert.Equal(t, drr2.CollectionName, "test")
-	assert.Equal(t, len(drr2.PartitionNames), 0)
-	assert.Equal(t, len(drr2.Ids), 2)
-	assert.Equal(t, drr2.Ids, []int64{100, 101})
-	assert.Equal(t, drr2.OutputFields, []string{"_id", "age"})
-}
+// 	fulltypeStr := `{
+// 	"request_type":"query",
+// 	"dbname":"",
+// 	"collection_name":"test",
+// 	"partition_names": [],
+// 	"expr": "_id in [ 100 ,101 ]",
+// 	"output_fields": ["_id", "age"]
+// 	}`
+// 	drr2, err := parseDummyQueryRequest(fulltypeStr)
+// 	assert.Nil(t, err)
+// 	assert.Equal(t, drr2.RequestType, "retrieve")
+// 	assert.Equal(t, len(drr2.DbName), 0)
+// 	assert.Equal(t, drr2.CollectionName, "test")
+// 	assert.Equal(t, len(drr2.PartitionNames), 0)
+// 	assert.Equal(t, drr2.OutputFields, []string{"_id", "age"})
+// }
