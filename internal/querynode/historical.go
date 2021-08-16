@@ -179,7 +179,7 @@ func (h *historical) removeGlobalSegmentIDsByPartitionIds(partitionIDs []UniqueI
 	}
 }
 
-func (h *historical) retrieve(collID UniqueID, partIDs []UniqueID, vcm *storage.VectorChunkManager,
+func (h *historical) retrieve(collID UniqueID, partIDs []UniqueID, vcm storage.ChunkManager,
 	plan *RetrievePlan) ([]*segcorepb.RetrieveResults, []UniqueID, error) {
 
 	retrieveResults := make([]*segcorepb.RetrieveResults, 0)
@@ -202,11 +202,6 @@ func (h *historical) retrieve(collID UniqueID, partIDs []UniqueID, vcm *storage.
 		}
 	}
 
-	col, err := h.replica.getCollectionByID(collID)
-	if err != nil {
-		return nil, nil, err
-	}
-
 	for _, partID := range retrievePartIDs {
 		segIDs, err := h.replica.getSegmentIDs(partID)
 		if err != nil {
@@ -222,7 +217,7 @@ func (h *historical) retrieve(collID UniqueID, partIDs []UniqueID, vcm *storage.
 				return retrieveResults, retrieveSegmentIDs, err
 			}
 
-			if err = seg.fillVectorFieldsData(collID, col.schema, vcm, result); err != nil {
+			if err = seg.fillVectorFieldsData(collID, vcm, result); err != nil {
 				return retrieveResults, retrieveSegmentIDs, err
 			}
 			retrieveResults = append(retrieveResults, result)

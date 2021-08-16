@@ -14,12 +14,14 @@ package querynode
 import "C"
 import (
 	"context"
+	"strconv"
 
 	"go.uber.org/zap"
 
 	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
 )
 
@@ -34,8 +36,9 @@ type queryService struct {
 
 	factory msgstream.Factory
 
-	lcm storage.ChunkManager
-	rcm storage.ChunkManager
+	lcm               storage.ChunkManager
+	rcm               storage.ChunkManager
+	localCacheEnabled bool
 }
 
 func newQueryService(ctx context.Context,
@@ -45,10 +48,14 @@ func newQueryService(ctx context.Context,
 
 	queryServiceCtx, queryServiceCancel := context.WithCancel(ctx)
 
-	path, err := Params.Load("storage.path")
+	//TODO godchen: change this to configuration
+	path, err := Params.Load("localStorage.Path")
 	if err != nil {
-		panic(err)
+		path = "/tmp/milvus/data"
 	}
+	enabled, _ := Params.Load("localStorage.enabled")
+	localCacheEnabled, _ := strconv.ParseBool(enabled)
+
 	lcm := storage.NewLocalChunkManager(path)
 
 	option := &miniokv.Option{
@@ -77,8 +84,9 @@ func newQueryService(ctx context.Context,
 
 		factory: factory,
 
-		lcm: lcm,
-		rcm: rcm,
+		lcm:               lcm,
+		rcm:               rcm,
+		localCacheEnabled: localCacheEnabled,
 	}
 }
 
@@ -96,6 +104,13 @@ func (q *queryService) addQueryCollection(collectionID UniqueID) {
 		log.Warn("query collection already exists", zap.Any("collectionID", collectionID))
 		return
 	}
+	collection, _ := q.historical.replica.getCollectionByID(collectionID)
+
+	vcm := storage.NewVectorChunkManager(q.lcm, q.rcm,
+		&etcdpb.CollectionMeta{
+			ID:     collection.id,
+			Schema: collection.schema,
+		}, q.localCacheEnabled)
 
 	ctx1, cancel := context.WithCancel(q.ctx)
 	qc := newQueryCollection(ctx1,
@@ -104,8 +119,8 @@ func (q *queryService) addQueryCollection(collectionID UniqueID) {
 		q.historical,
 		q.streaming,
 		q.factory,
-		q.lcm,
-		q.rcm)
+		vcm,
+	)
 	q.queryCollections[collectionID] = qc
 }
 

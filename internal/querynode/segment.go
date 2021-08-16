@@ -318,8 +318,8 @@ func (s *Segment) getEntityByIds(plan *RetrievePlan) (*segcorepb.RetrieveResults
 	return result, nil
 }
 
-func (s *Segment) fillVectorFieldsData(collectionID UniqueID, schema *schemapb.CollectionSchema,
-	vcm *storage.VectorChunkManager, result *segcorepb.RetrieveResults) error {
+func (s *Segment) fillVectorFieldsData(collectionID UniqueID,
+	vcm storage.ChunkManager, result *segcorepb.RetrieveResults) error {
 
 	for _, fieldData := range result.FieldsData {
 		log.Debug("FillVectorFieldData for fieldID", zap.Any("fieldID", fieldData.FieldId))
@@ -352,10 +352,6 @@ func (s *Segment) fillVectorFieldsData(collectionID UniqueID, schema *schemapb.C
 				}
 			}
 			log.Debug("FillVectorFieldData", zap.Any("path", vecPath))
-			err := vcm.DownloadVectorFile(vecPath, collectionID, schema)
-			if err != nil {
-				return err
-			}
 
 			switch fieldData.Type {
 			case schemapb.DataType_BinaryVector:

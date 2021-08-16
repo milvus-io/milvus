@@ -49,6 +49,7 @@ type queryCollection struct {
 	cancel     context.CancelFunc
 
 	collectionID UniqueID
+	collection   *Collection
 	historical   *historical
 	streaming    *streaming
 
@@ -64,7 +65,7 @@ type queryCollection struct {
 	queryMsgStream       msgstream.MsgStream
 	queryResultMsgStream msgstream.MsgStream
 
-	vcm *storage.VectorChunkManager
+	vcm storage.ChunkManager
 }
 
 type ResultEntityIds []UniqueID
@@ -75,21 +76,22 @@ func newQueryCollection(releaseCtx context.Context,
 	historical *historical,
 	streaming *streaming,
 	factory msgstream.Factory,
-	lcm storage.ChunkManager,
-	rcm storage.ChunkManager) *queryCollection {
+	vcm storage.ChunkManager,
+) *queryCollection {
 
 	unsolvedMsg := make([]queryMsg, 0)
 
 	queryStream, _ := factory.NewQueryMsgStream(releaseCtx)
 	queryResultStream, _ := factory.NewQueryMsgStream(releaseCtx)
 
-	vcm := storage.NewVectorChunkManager(lcm, rcm)
+	collection, _ := streaming.replica.getCollectionByID(collectionID)
 
 	qc := &queryCollection{
 		releaseCtx: releaseCtx,
 		cancel:     cancel,
 
 		collectionID: collectionID,
+		collection:   collection,
 		historical:   historical,
 		streaming:    streaming,
 
@@ -784,12 +786,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 	searchTimestamp := searchMsg.BeginTs()
 	travelTimestamp := searchMsg.TravelTimestamp
 
-	collectionID := searchMsg.CollectionID
-	collection, err := q.streaming.replica.getCollectionByID(collectionID)
-	if err != nil {
-		return err
-	}
-	schema, err := typeutil.CreateSchemaHelper(collection.schema)
+	schema, err := typeutil.CreateSchemaHelper(q.collection.schema)
 	if err != nil {
 		return err
 	}
@@ -797,13 +794,13 @@ func (q *queryCollection) search(msg queryMsg) error {
 	var plan *SearchPlan
 	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
 		expr := searchMsg.SerializedExprPlan
-		plan, err = createSearchPlanByExpr(collection, expr)
+		plan, err = createSearchPlanByExpr(q.collection, expr)
 		if err != nil {
 			return err
 		}
 	} else {
 		dsl := searchMsg.Dsl
-		plan, err = createSearchPlan(collection, dsl)
+		plan, err = createSearchPlan(q.collection, dsl)
 		if err != nil {
 			return err
 		}
@@ -841,13 +838,13 @@ func (q *queryCollection) search(msg queryMsg) error {
 	if len(searchMsg.PartitionIDs) > 0 {
 		globalSealedSegments = q.historical.getGlobalSegmentIDsByPartitionIds(searchMsg.PartitionIDs)
 	} else {
-		globalSealedSegments = q.historical.getGlobalSegmentIDsByCollectionID(collectionID)
+		globalSealedSegments = q.historical.getGlobalSegmentIDsByCollectionID(q.collection.id)
 	}
 
 	searchResults := make([]*SearchResult, 0)
 
 	// historical search
-	hisSearchResults, sealedSegmentSearched, err1 := q.historical.search(searchRequests, collectionID, searchMsg.PartitionIDs, plan, travelTimestamp)
+	hisSearchResults, sealedSegmentSearched, err1 := q.historical.search(searchRequests, q.collection.id, searchMsg.PartitionIDs, plan, travelTimestamp)
 	if err1 != nil {
 		log.Warn(err1.Error())
 		return err1
@@ -857,9 +854,9 @@ func (q *queryCollection) search(msg queryMsg) error {
 
 	// streaming search
 	var err2 error
-	for _, channel := range collection.getVChannels() {
+	for _, channel := range q.collection.getVChannels() {
 		var strSearchResults []*SearchResult
-		strSearchResults, err2 = q.streaming.search(searchRequests, collectionID, searchMsg.PartitionIDs, channel, plan, travelTimestamp)
+		strSearchResults, err2 = q.streaming.search(searchRequests, q.collection.id, searchMsg.PartitionIDs, channel, plan, travelTimestamp)
 		if err2 != nil {
 			log.Warn(err2.Error())
 			return err2
@@ -913,14 +910,14 @@ func (q *queryCollection) search(msg queryMsg) error {
 					SlicedNumCount:           1,
 					MetricType:               plan.getMetricType(),
 					SealedSegmentIDsSearched: sealedSegmentSearched,
-					ChannelIDsSearched:       collection.getVChannels(),
+					ChannelIDsSearched:       q.collection.getVChannels(),
 					GlobalSealedSegmentIDs:   globalSealedSegments,
 				},
 			}
 			log.Debug("QueryNode Empty SearchResultMsg",
-				zap.Any("collectionID", collection.ID()),
+				zap.Any("collectionID", q.collection.id),
 				zap.Any("msgID", searchMsg.ID()),
-				zap.Any("vChannels", collection.getVChannels()),
+				zap.Any("vChannels", q.collection.getVChannels()),
 				zap.Any("sealedSegmentSearched", sealedSegmentSearched),
 			)
 			err = q.publishQueryResult(searchResultMsg, searchMsg.CollectionID)
@@ -1004,14 +1001,14 @@ func (q *queryCollection) search(msg queryMsg) error {
 				SlicedNumCount:           1,
 				MetricType:               plan.getMetricType(),
 				SealedSegmentIDsSearched: sealedSegmentSearched,
-				ChannelIDsSearched:       collection.getVChannels(),
+				ChannelIDsSearched:       q.collection.getVChannels(),
 				GlobalSealedSegmentIDs:   globalSealedSegments,
 			},
 		}
 		log.Debug("QueryNode SearchResultMsg",
-			zap.Any("collectionID", collection.ID()),
+			zap.Any("collectionID", q.collection.id),
 			zap.Any("msgID", searchMsg.ID()),
-			zap.Any("vChannels", collection.getVChannels()),
+			zap.Any("vChannels", q.collection.getVChannels()),
 			zap.Any("sealedSegmentSearched", sealedSegmentSearched),
 		)
 
