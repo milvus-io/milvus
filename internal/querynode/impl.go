@@ -19,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -477,5 +479,77 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 		Infos: infos,
+	}, nil
+}
+
+func (node *QueryNode) isHealthy() bool {
+	code := node.stateCode.Load().(internalpb.StateCode)
+	return code == internalpb.StateCode_Healthy
+}
+
+// TODO(dragondriver): cache the Metrics and set a retention to the cache
+func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	log.Debug("QueryNode.GetMetrics",
+		zap.Int64("node_id", Params.QueryNodeID),
+		zap.String("req", req.Request))
+
+	if !node.isHealthy() {
+		log.Warn("QueryNode.GetMetrics failed",
+			zap.Int64("node_id", Params.QueryNodeID),
+			zap.String("req", req.Request),
+			zap.Error(errQueryNodeIsUnhealthy(Params.QueryNodeID)))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    msgQueryNodeIsUnhealthy(Params.QueryNodeID),
+			},
+			Response: "",
+		}, nil
+	}
+
+	metricType, err := metricsinfo.ParseMetricType(req.Request)
+	if err != nil {
+		log.Warn("QueryNode.GetMetrics failed to parse metric type",
+			zap.Int64("node_id", Params.QueryNodeID),
+			zap.String("req", req.Request),
+			zap.Error(err))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+			Response: "",
+		}, nil
+	}
+
+	log.Debug("QueryNode.GetMetrics",
+		zap.String("metric_type", metricType))
+
+	if metricType == metricsinfo.SystemInfoMetrics {
+		metrics, err := getSystemInfoMetrics(ctx, req, node)
+
+		log.Debug("QueryNode.GetMetrics",
+			zap.Int64("node_id", Params.QueryNodeID),
+			zap.String("req", req.Request),
+			zap.String("metric_type", metricType),
+			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
+			zap.Error(err))
+
+		return metrics, err
+	}
+
+	log.Debug("QueryNode.GetMetrics failed, request metric type is not implemented yet",
+		zap.Int64("node_id", Params.QueryNodeID),
+		zap.String("req", req.Request),
+		zap.String("metric_type", metricType))
+
+	return &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    metricsinfo.MsgUnimplementedMetric,
+		},
+		Response: "",
 	}, nil
 }

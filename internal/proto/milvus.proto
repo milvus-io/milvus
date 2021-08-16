@@ -472,6 +472,17 @@ message RegisterLinkResponse {
   common.Status status = 2;
 }
 
+message GetMetricsRequest {
+  common.MsgBase base = 1;
+  string request = 2; // request is of jsonic format
+}
+
+message GetMetricsResponse {
+  common.Status status = 1;
+  string response = 2;  // response is of jsonic format
+  string component_name = 3; // metrics from which component
+}
+
 service ProxyService {
   rpc RegisterLink(RegisterLinkRequest) returns (RegisterLinkResponse) {}
 }

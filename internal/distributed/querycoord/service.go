@@ -275,3 +275,7 @@ func (s *Server) CreateQueryChannel(ctx context.Context, req *querypb.CreateQuer
 func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	return s.queryCoord.GetSegmentInfo(ctx, req)
 }
+
+func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	return s.queryCoord.GetMetrics(ctx, req)
+}
