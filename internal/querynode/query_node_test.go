@@ -48,7 +48,7 @@ func setup() {
 	Params.MetaRootPath = "/etcd/test/root/querynode"
 }
 
-func genTestCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.CollectionInfo {
+func genTestCollectionSchema(collectionID UniqueID, isBinary bool, dim int) *schemapb.CollectionSchema {
 	var fieldVec schemapb.FieldSchema
 	if isBinary {
 		fieldVec = schemapb.FieldSchema{
@@ -59,7 +59,7 @@ func genTestCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.Collect
 			TypeParams: []*commonpb.KeyValuePair{
 				{
 					Key:   "dim",
-					Value: "128",
+					Value: strconv.Itoa(dim * 8),
 				},
 			},
 			IndexParams: []*commonpb.KeyValuePair{
@@ -78,7 +78,7 @@ func genTestCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.Collect
 			TypeParams: []*commonpb.KeyValuePair{
 				{
 					Key:   "dim",
-					Value: "16",
+					Value: strconv.Itoa(dim),
 				},
 			},
 			IndexParams: []*commonpb.KeyValuePair{
@@ -97,16 +97,22 @@ func genTestCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.Collect
 		DataType:     schemapb.DataType_Int32,
 	}
 
-	schema := schemapb.CollectionSchema{
+	schema := &schemapb.CollectionSchema{
 		AutoID: true,
 		Fields: []*schemapb.FieldSchema{
 			&fieldVec, &fieldInt,
 		},
 	}
 
+	return schema
+}
+
+func genTestCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.CollectionInfo {
+	schema := genTestCollectionSchema(collectionID, isBinary, 16)
+
 	collectionMeta := etcdpb.CollectionInfo{
 		ID:           collectionID,
-		Schema:       &schema,
+		Schema:       schema,
 		CreateTime:   Timestamp(0),
 		PartitionIDs: []UniqueID{defaultPartitionID},
 	}

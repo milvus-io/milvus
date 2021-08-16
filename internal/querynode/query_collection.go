@@ -222,11 +222,17 @@ func (q *queryCollection) consumeQuery() {
 			for _, msg := range msgPack.Msgs {
 				switch sm := msg.(type) {
 				case *msgstream.SearchMsg:
-					q.receiveQueryMsg(sm)
+					err := q.receiveQueryMsg(sm)
+					if err != nil {
+						log.Warn(err.Error())
+					}
 				case *msgstream.LoadBalanceSegmentsMsg:
 					q.loadBalance(sm)
 				case *msgstream.RetrieveMsg:
-					q.receiveQueryMsg(sm)
+					err := q.receiveQueryMsg(sm)
+					if err != nil {
+						log.Warn(err.Error())
+					}
 				default:
 					log.Warn("unsupported msg type in search channel", zap.Any("msg", sm))
 				}
@@ -266,7 +272,7 @@ func (q *queryCollection) loadBalance(msg *msgstream.LoadBalanceSegmentsMsg) {
 	//	zap.Int("num of segment", len(msg.Infos)))
 }
 
-func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
+func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 	msgType := msg.Type()
 	var collectionID UniqueID
 	var msgTypeStr string
@@ -288,8 +294,7 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
 		//)
 	default:
 		err := fmt.Errorf("receive invalid msgType = %d", msgType)
-		log.Warn(err.Error())
-		return
+		return err
 	}
 	if collectionID != q.collectionID {
 		//log.Warn("not target collection query request",
@@ -297,7 +302,8 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
 		//	zap.Int64("target collectionID", collectionID),
 		//	zap.Int64("msgID", msg.ID()),
 		//)
-		return
+		err := fmt.Errorf("not target collection query request, collectionID = %d, targetCollectionID = %d, msgID = %d", q.collectionID, collectionID, msg.ID())
+		return err
 	}
 
 	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
@@ -307,38 +313,36 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
 	// check if collection has been released
 	collection, err := q.historical.replica.getCollectionByID(collectionID)
 	if err != nil {
-		log.Warn(err.Error())
-		err = q.publishFailedQueryResult(msg, err.Error())
-		if err != nil {
-			log.Warn(err.Error())
-		} else {
-			log.Debug("do query failed in receiveQueryMsg, publish failed query result",
-				zap.Int64("collectionID", collectionID),
-				zap.Int64("msgID", msg.ID()),
-				zap.String("msgType", msgTypeStr),
-			)
+		publishErr := q.publishFailedQueryResult(msg, err.Error())
+		if publishErr != nil {
+			finalErr := fmt.Errorf("first err = %s, second err = %s", err, publishErr)
+			return finalErr
 		}
-		return
+		log.Debug("do query failed in receiveQueryMsg, publish failed query result",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64("msgID", msg.ID()),
+			zap.String("msgType", msgTypeStr),
+		)
+		return err
 	}
 	guaranteeTs := msg.GuaranteeTs()
 	if guaranteeTs >= collection.getReleaseTime() {
 		err = fmt.Errorf("retrieve failed, collection has been released, msgID = %d, collectionID = %d", msg.ID(), collectionID)
-		log.Warn(err.Error())
-		err = q.publishFailedQueryResult(msg, err.Error())
-		if err != nil {
-			log.Warn(err.Error())
-		} else {
-			log.Debug("do query failed in receiveQueryMsg, publish failed query result",
-				zap.Int64("collectionID", collectionID),
-				zap.Int64("msgID", msg.ID()),
-				zap.String("msgType", msgTypeStr),
-			)
+		publishErr := q.publishFailedQueryResult(msg, err.Error())
+		if publishErr != nil {
+			finalErr := fmt.Errorf("first err = %s, second err = %s", err, publishErr)
+			return finalErr
 		}
-		return
+		log.Debug("do query failed in receiveQueryMsg, publish failed query result",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64("msgID", msg.ID()),
+			zap.String("msgType", msgTypeStr),
+		)
+		return err
 	}
 
 	serviceTime := q.getServiceableTime()
-	if guaranteeTs > serviceTime {
+	if guaranteeTs > serviceTime && len(collection.getVChannels()) > 0 {
 		gt, _ := tsoutil.ParseTS(guaranteeTs)
 		st, _ := tsoutil.ParseTS(serviceTime)
 		log.Debug("query node::receiveQueryMsg: add to unsolvedMsg",
@@ -357,7 +361,7 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
 			oplog.Float64("delta seconds", float64(guaranteeTs-serviceTime)/(1000.0*1000.0*1000.0)),
 		)
 		sp.Finish()
-		return
+		return nil
 	}
 	tr.Record("get searchable time done")
 
@@ -372,24 +376,23 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
 	case commonpb.MsgType_Search:
 		err = q.search(msg)
 	default:
-		err := fmt.Errorf("receive invalid msgType = %d", msgType)
-		log.Warn(err.Error())
-		return
+		err = fmt.Errorf("receive invalid msgType = %d", msgType)
+		return err
 	}
 	tr.Record("operation done")
 
 	if err != nil {
-		log.Warn(err.Error())
-		err = q.publishFailedQueryResult(msg, err.Error())
-		if err != nil {
-			log.Warn(err.Error())
-		} else {
-			log.Debug("do query failed in receiveQueryMsg, publish failed query result",
-				zap.Int64("collectionID", collectionID),
-				zap.Int64("msgID", msg.ID()),
-				zap.String("msgType", msgTypeStr),
-			)
+		publishErr := q.publishFailedQueryResult(msg, err.Error())
+		if publishErr != nil {
+			finalErr := fmt.Errorf("first err = %s, second err = %s", err, publishErr)
+			return finalErr
 		}
+		log.Debug("do query failed in receiveQueryMsg, publish failed query result",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64("msgID", msg.ID()),
+			zap.String("msgType", msgTypeStr),
+		)
+		return err
 	}
 	log.Debug("do query done in receiveQueryMsg",
 		zap.Int64("collectionID", collectionID),
@@ -398,6 +401,7 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
 	)
 	tr.Elapse("all done")
 	sp.Finish()
+	return nil
 }
 
 func (q *queryCollection) doUnsolvedQueryMsg() {
