@@ -15,6 +15,8 @@
 
 #include "query/SearchOnSealed.h"
 #include <knowhere/index/vector_index/VecIndex.h>
+#include "knowhere/index/vector_index/ConfAdapter.h"
+#include "knowhere/index/vector_index/ConfAdapterMgr.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include <boost_ext/dynamic_bitset_ext.hpp>
@@ -92,6 +94,9 @@ SearchOnSealed(const Schema& schema,
         auto conf = search_info.search_params_;
         conf[milvus::knowhere::meta::TOPK] = search_info.topk_;
         conf[milvus::knowhere::Metric::TYPE] = MetricTypeToName(field_indexing->metric_type_);
+        auto index_type = field_indexing->indexing_->index_type();
+        auto adapter = milvus::knowhere::AdapterMgr::GetInstance().GetAdapter(index_type);
+        Assert(adapter->CheckSearch(conf, index_type, field_indexing->indexing_->index_mode()));
         return field_indexing->indexing_->Query(ds, conf, bitset);
     }();
 
