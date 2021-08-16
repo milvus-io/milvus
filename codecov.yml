@@ -16,7 +16,7 @@ coverage:
         if_ci_failed: error #success, failure, error, ignore
         informational: false
         only_pulls: false
-      delta:
+      patch:
         # basic
         target: 70%
         threshold: 0%
