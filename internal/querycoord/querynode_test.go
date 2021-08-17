@@ -184,3 +184,7 @@ func TestQueryNode_MultiNode_reStart(t *testing.T) {
 	}
 	queryCoord.Stop()
 }
+
+func TestQueryNode_getMetrics(t *testing.T) {
+	log.Info("TestQueryNode_getMetrics, todo")
+}

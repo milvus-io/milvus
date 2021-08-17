@@ -17,6 +17,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
@@ -63,6 +65,8 @@ type Node interface {
 	loadSegments(ctx context.Context, in *querypb.LoadSegmentsRequest) error
 	releaseSegments(ctx context.Context, in *querypb.ReleaseSegmentsRequest) error
 	getComponentInfo(ctx context.Context) *internalpb.ComponentInfo
+
+	getMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
 type queryNode struct {
@@ -592,6 +596,16 @@ func (qn *queryNode) getComponentInfo(ctx context.Context) *internalpb.Component
 	}
 
 	return res.State
+}
+
+func (qn *queryNode) getMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	qn.serviceLock.RLock()
+	if !qn.onService {
+		return nil, errQueryNodeIsNotOnService(qn.id)
+	}
+	qn.serviceLock.RUnlock()
+
+	return qn.client.GetMetrics(ctx, in)
 }
 
 func (qn *queryNode) loadSegments(ctx context.Context, in *querypb.LoadSegmentsRequest) error {

@@ -311,3 +311,7 @@ func (s *Server) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmen
 func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	return s.querynode.GetSegmentInfo(ctx, req)
 }
+
+func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	return s.querynode.GetMetrics(ctx, req)
+}

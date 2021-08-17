@@ -20,6 +20,8 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
@@ -345,6 +347,27 @@ func (c *queryNodeCluster) getSegmentInfo(ctx context.Context, in *querypb.GetSe
 
 	//TODO::update meta
 	return segmentInfos, nil
+}
+
+type queryNodeGetMetricsResponse struct {
+	resp *milvuspb.GetMetricsResponse
+	err  error
+}
+
+func (c *queryNodeCluster) getMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) []queryNodeGetMetricsResponse {
+	c.RLock()
+	defer c.RUnlock()
+
+	ret := make([]queryNodeGetMetricsResponse, 0, len(c.nodes))
+	for _, node := range c.nodes {
+		resp, err := node.getMetrics(ctx, in)
+		ret = append(ret, queryNodeGetMetricsResponse{
+			resp: resp,
+			err:  err,
+		})
+	}
+
+	return ret
 }
 
 func (c *queryNodeCluster) getNumDmChannels(nodeID int64) (int, error) {
