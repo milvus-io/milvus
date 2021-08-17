@@ -53,6 +53,18 @@ pipeline {
         }
     }
     post {
+        unsuccessful {
+            container('jnlp') {
+                script {
+                    def authorEmail = sh returnStdout: true, script: 'git --no-pager show -s --format=\'%ae\' HEAD'
+                    emailext subject: '$DEFAULT_SUBJECT',
+                    body: '$DEFAULT_CONTENT',
+                    recipientProviders: [developers(), culprits()],
+                    replyTo: '$DEFAULT_REPLYTO',
+                    to: "${authorEmail},qa@zilliz.com"
+                }
+            }
+        }
         cleanup {
             container('main') {
                 script {
