@@ -158,11 +158,13 @@ class TestChaos(TestChaosBase):
             log.debug(f"Thread {k} is_alive(): {t.is_alive()}")
         sleep(2)
         # reconnect if needed
-        sleep(constants.WAIT_PER_OP*2)
+        sleep(constants.WAIT_PER_OP*4)
         reconnect(connections, self.host, self.port)
+        log.debug("re-connect milvus")
 
         # reset counting again
         reset_counting(self.health_checkers)
+        log.debug("re-set counting for 3rd")
 
         # wait 300s (varies by feature)
         sleep(constants.WAIT_PER_OP*5)

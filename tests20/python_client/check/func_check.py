@@ -34,6 +34,9 @@ class ResponseChecker:
             # Interface return error code and error message check
             result = self.assert_exception(self.response, self.succ, self.check_items)
 
+        elif self.check_task == CheckTasks.check_nothing:
+            result = self.succ
+
         elif self.check_task == CheckTasks.ccr:
             # Connection interface response check
             result = self.check_value_equal(self.response, self.func_name, self.check_items)
