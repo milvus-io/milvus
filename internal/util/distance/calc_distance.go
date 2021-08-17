@@ -239,11 +239,12 @@ func CalcTanimotoCoefficient(dim int64, hamming []int32) ([]float32, error) {
 
 	array := make([]float32, len(hamming))
 	for i := 0; i < len(hamming); i++ {
-		if hamming[i] >= int32(dim)*2 {
+		if hamming[i] > int32(dim) {
 			err := errors.New("Invalid hamming for tanimoto")
 			return nil, err
 		}
-		array[i] = float32(hamming[i]) / (float32(dim)*2 - float32(hamming[i]))
+		equalBits := int32(dim) - hamming[i]
+		array[i] = float32(equalBits) / (float32(dim)*2 - float32(equalBits))
 	}
 
 	return array, nil
