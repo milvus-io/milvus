@@ -37,6 +37,11 @@ func NewNodeManager() *NodeManager {
 }
 
 func (nm *NodeManager) setClient(nodeID UniqueID, client types.IndexNode) {
+	nm.lock.Lock()
+	defer nm.lock.Unlock()
+
+	log.Debug("IndexCoord NodeManager setClient", zap.Int64("nodeID", nodeID))
+	defer log.Debug("IndexNode NodeManager setclient success", zap.Any("nodeID", nodeID))
 	item := &PQItem{
 		key:      nodeID,
 		priority: 0,
@@ -55,9 +60,6 @@ func (nm *NodeManager) RemoveNode(nodeID UniqueID) {
 }
 
 func (nm *NodeManager) AddNode(nodeID UniqueID, address string) error {
-	nm.lock.Lock()
-	defer nm.lock.Unlock()
-
 	log.Debug("IndexCoord addNode", zap.Any("nodeID", nodeID), zap.Any("node address", address))
 	if nm.pq.CheckExist(nodeID) {
 		log.Debug("IndexCoord", zap.Any("Node client already exist with ID:", nodeID))
@@ -66,10 +68,12 @@ func (nm *NodeManager) AddNode(nodeID UniqueID, address string) error {
 
 	nodeClient, err := grpcindexnodeclient.NewClient(context.TODO(), address)
 	if err != nil {
+		log.Error("IndexCoord NodeManager", zap.Any("Add node err", err))
 		return err
 	}
 	err = nodeClient.Init()
 	if err != nil {
+		log.Error("IndexCoord NodeManager", zap.Any("Add node err", err))
 		return err
 	}
 	nm.setClient(nodeID, nodeClient)
