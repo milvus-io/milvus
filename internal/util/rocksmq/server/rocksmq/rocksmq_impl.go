@@ -275,6 +275,7 @@ func (rmq *rocksmq) DestroyTopic(topicName string) error {
 
 func (rmq *rocksmq) ExistConsumerGroup(topicName, groupName string) (bool, *Consumer) {
 	key := groupName + "/" + topicName + "/current_id"
+
 	// keyExist := false
 	// if ll, ok := topicMu.Load(topicName); !ok {
 	// 	keyExist = rmq.checkKeyExist(key)
