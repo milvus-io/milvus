@@ -14,6 +14,8 @@ package querycoord
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -21,7 +23,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // TODO(dragondriver): add more detail metrics
@@ -31,11 +32,13 @@ func getSystemInfoMetrics(
 	qc *QueryCoord,
 ) (*milvuspb.GetMetricsResponse, error) {
 
-	coordTopology := metricsinfo.CoordTopology{
-		Self: metricsinfo.ComponentInfos{
-			Name: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, Params.QueryCoordID),
+	clusterTopology := metricsinfo.QueryClusterTopology{
+		Self: metricsinfo.QueryCoordInfos{
+			BaseComponentInfos: metricsinfo.BaseComponentInfos{
+				Name: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, Params.QueryCoordID),
+			},
 		},
-		ConnectedNodes: make([]metricsinfo.ComponentInfos, 0),
+		ConnectedNodes: make([]metricsinfo.QueryNodeInfos, 0),
 	}
 
 	nodesMetrics := qc.cluster.getMetrics(ctx, req)
@@ -43,11 +46,13 @@ func getSystemInfoMetrics(
 		if nodeMetrics.err != nil {
 			log.Warn("invalid metrics of query node was found",
 				zap.Error(nodeMetrics.err))
-			coordTopology.ConnectedNodes = append(coordTopology.ConnectedNodes, metricsinfo.ComponentInfos{
-				HasError:    true,
-				ErrorReason: nodeMetrics.err.Error(),
-				// Name doesn't matter here cause we can't get it when error occurs, using address as the Name?
-				Name: "",
+			clusterTopology.ConnectedNodes = append(clusterTopology.ConnectedNodes, metricsinfo.QueryNodeInfos{
+				BaseComponentInfos: metricsinfo.BaseComponentInfos{
+					HasError:    true,
+					ErrorReason: nodeMetrics.err.Error(),
+					// Name doesn't matter here cause we can't get it when error occurs, using address as the Name?
+					Name: "",
+				},
 			})
 			continue
 		}
@@ -56,37 +61,50 @@ func getSystemInfoMetrics(
 			log.Warn("invalid metrics of query node was found",
 				zap.Any("error_code", nodeMetrics.resp.Status.ErrorCode),
 				zap.Any("error_reason", nodeMetrics.resp.Status.Reason))
-			coordTopology.ConnectedNodes = append(coordTopology.ConnectedNodes, metricsinfo.ComponentInfos{
-				HasError:    true,
-				ErrorReason: nodeMetrics.resp.Status.Reason,
-				Name:        nodeMetrics.resp.ComponentName,
+			clusterTopology.ConnectedNodes = append(clusterTopology.ConnectedNodes, metricsinfo.QueryNodeInfos{
+				BaseComponentInfos: metricsinfo.BaseComponentInfos{
+					HasError:    true,
+					ErrorReason: nodeMetrics.resp.Status.Reason,
+					Name:        nodeMetrics.resp.ComponentName,
+				},
 			})
 			continue
 		}
 
-		infos := metricsinfo.ComponentInfos{}
-		err := infos.Unmarshal(nodeMetrics.resp.Response)
+		infos := metricsinfo.QueryNodeInfos{}
+		err := metricsinfo.UnmarshalComponentInfos(nodeMetrics.resp.Response, &infos)
 		if err != nil {
 			log.Warn("invalid metrics of query node was found",
 				zap.Error(err))
-			coordTopology.ConnectedNodes = append(coordTopology.ConnectedNodes, metricsinfo.ComponentInfos{
-				HasError:    true,
-				ErrorReason: err.Error(),
-				Name:        nodeMetrics.resp.ComponentName,
+			clusterTopology.ConnectedNodes = append(clusterTopology.ConnectedNodes, metricsinfo.QueryNodeInfos{
+				BaseComponentInfos: metricsinfo.BaseComponentInfos{
+					HasError:    true,
+					ErrorReason: err.Error(),
+					Name:        nodeMetrics.resp.ComponentName,
+				},
 			})
 			continue
 		}
-		coordTopology.ConnectedNodes = append(coordTopology.ConnectedNodes, infos)
+		clusterTopology.ConnectedNodes = append(clusterTopology.ConnectedNodes, infos)
 	}
 
-	resp, err := coordTopology.Marshal()
+	coordTopology := metricsinfo.QueryCoordTopology{
+		Cluster: clusterTopology,
+		Connections: metricsinfo.ConnTopology{
+			Name: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, Params.QueryCoordID),
+			// TODO(dragondriver): connection info
+		},
+	}
+
+	resp, err := metricsinfo.MarshalTopology(coordTopology)
 	if err != nil {
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
-			Response: "",
+			Response:      "",
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, Params.QueryCoordID),
 		}, nil
 	}
 
@@ -95,6 +113,7 @@ func getSystemInfoMetrics(
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		Response: resp,
+		Response:      resp,
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, Params.QueryCoordID),
 	}, nil
 }

@@ -22,10 +22,12 @@ import (
 
 func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, node *QueryNode) (*milvuspb.GetMetricsResponse, error) {
 	// TODO(dragondriver): add more metrics
-	nodeInfos := metricsinfo.ComponentInfos{
-		Name: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, Params.QueryNodeID),
+	nodeInfos := metricsinfo.QueryNodeInfos{
+		BaseComponentInfos: metricsinfo.BaseComponentInfos{
+			Name: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, Params.QueryNodeID),
+		},
 	}
-	resp, err := nodeInfos.Marshal()
+	resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
 	if err != nil {
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{

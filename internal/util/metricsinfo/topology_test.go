@@ -38,38 +38,34 @@ func TestConstructComponentName(t *testing.T) {
 	}
 }
 
-func TestComponentInfos_Codec(t *testing.T) {
-	infos1 := ComponentInfos{
-		Name: ConstructComponentName(typeutil.ProxyRole, 1),
-	}
-	s, err := infos1.Marshal()
-	assert.Equal(t, nil, err)
-	var infos2 ComponentInfos
-	err = infos2.Unmarshal(s)
-	assert.Equal(t, nil, err)
-	assert.Equal(t, infos1.Name, infos2.Name)
-}
-
-func TestCoordTopology_Codec(t *testing.T) {
-	topology1 := CoordTopology{
-		Self: ComponentInfos{
-			Name: ConstructComponentName(typeutil.QueryCoordRole, 1),
+func TestQueryCoordTopology_Codec(t *testing.T) {
+	topology1 := QueryClusterTopology{
+		Self: QueryCoordInfos{
+			BaseComponentInfos: BaseComponentInfos{
+				Name: ConstructComponentName(typeutil.QueryCoordRole, 1),
+			},
 		},
-		ConnectedNodes: []ComponentInfos{
+		ConnectedNodes: []QueryNodeInfos{
 			{
-				Name: ConstructComponentName(typeutil.QueryNodeRole, 1),
+				BaseComponentInfos: BaseComponentInfos{
+					Name: ConstructComponentName(typeutil.QueryNodeRole, 1),
+				},
 			},
 			{
-				Name: ConstructComponentName(typeutil.QueryNodeRole, 2),
+				BaseComponentInfos: BaseComponentInfos{
+					Name: ConstructComponentName(typeutil.QueryNodeRole, 2),
+				},
 			},
 		},
 	}
-	s, err := topology1.Marshal()
+	s, err := MarshalTopology(topology1)
 	assert.Equal(t, nil, err)
-	var topology2 CoordTopology
-	err = topology2.Unmarshal(s)
+	log.Info("TestQueryCoordTopology_Codec",
+		zap.String("marshaled_result", s))
+	var topology2 QueryClusterTopology
+	err = UnmarshalTopology(s, &topology2)
 	assert.Equal(t, nil, err)
-	assert.Equal(t, topology1.Self.Name, topology2.Self.Name)
+	assert.Equal(t, topology1.Self, topology2.Self)
 	assert.Equal(t, len(topology1.ConnectedNodes), len(topology2.ConnectedNodes))
 	for i := range topology1.ConnectedNodes {
 		assert.Equal(t, topology1.ConnectedNodes[i], topology2.ConnectedNodes[i])
@@ -86,10 +82,12 @@ func TestConnTopology_Codec(t *testing.T) {
 			ConstructComponentName(typeutil.IndexCoordRole, 1),
 		},
 	}
-	s, err := topology1.Marshal()
+	s, err := MarshalTopology(topology1)
 	assert.Equal(t, nil, err)
+	log.Info("TestConnTopology_Codec",
+		zap.String("marshaled_result", s))
 	var topology2 ConnTopology
-	err = topology2.Unmarshal(s)
+	err = UnmarshalTopology(s, &topology2)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, topology1.Name, topology2.Name)
 	assert.Equal(t, len(topology1.ConnectedComponents), len(topology2.ConnectedComponents))
@@ -99,10 +97,37 @@ func TestConnTopology_Codec(t *testing.T) {
 }
 
 func TestSystemTopology_Codec(t *testing.T) {
-	topology1 := SystemTopology{}
-	s, err := topology1.Marshal()
+	topology1 := SystemTopology{
+		NodesInfo: []SystemTopologyNode{
+			{
+				Identifier: 1,
+				Infos: &QueryCoordInfos{
+					BaseComponentInfos: BaseComponentInfos{
+						Name: ConstructComponentName(typeutil.QueryCoordRole, 1),
+					},
+				},
+				Connected: []ConnectionEdge{
+					{
+						ConnectedIdentifier: 2,
+						Type:                CoordConnectToNode,
+						TargetType:          typeutil.QueryNodeRole,
+					},
+				},
+			},
+			{
+				Identifier: 2,
+				Infos: &QueryNodeInfos{
+					BaseComponentInfos: BaseComponentInfos{
+						Name: ConstructComponentName(typeutil.QueryNodeRole, 2),
+					},
+				},
+				Connected: []ConnectionEdge{},
+			},
+		},
+	}
+	s, err := MarshalTopology(topology1)
 	assert.Equal(t, nil, err)
-	var topology2 SystemTopology
-	err = topology2.Unmarshal(s)
-	assert.Equal(t, nil, err)
+	log.Info("TestSystemTopology_Codec",
+		zap.String("marshaled_result", s))
+	// no need to test unmarshal
 }

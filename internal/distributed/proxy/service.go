@@ -406,3 +406,7 @@ func (s *Server) Dummy(ctx context.Context, request *milvuspb.DummyRequest) (*mi
 func (s *Server) RegisterLink(ctx context.Context, request *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error) {
 	return s.proxy.RegisterLink(ctx, request)
 }
+
+func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	return s.proxy.GetMetrics(ctx, request)
+}
