@@ -129,10 +129,14 @@ func (i *IndexCoord) Init() error {
 		log.Debug("IndexCoord", zap.Any("Get IndexNode Sessions error", err))
 	}
 	for _, session := range sessions {
-		if err = i.nodeManager.AddNode(session.ServerID, session.Address); err != nil {
-			log.Debug("IndexCoord", zap.Any("ServerID", session.ServerID),
-				zap.Any("Add IndexNode error", err))
-		}
+		session := session
+		go func() {
+			if err = i.nodeManager.AddNode(session.ServerID, session.Address); err != nil {
+				log.Debug("IndexCoord", zap.Any("ServerID", session.ServerID),
+					zap.Any("Add IndexNode error", err))
+			}
+		}()
+
 	}
 	log.Debug("IndexCoord", zap.Any("IndexNode number", len(i.nodeManager.nodeClients)))
 	i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, revision+1)
