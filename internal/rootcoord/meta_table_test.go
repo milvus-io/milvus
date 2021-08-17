@@ -121,16 +121,18 @@ func Test_MockKV(t *testing.T) {
 	k1.save = func(key, value string) (typeutil.Timestamp, error) {
 		return 0, fmt.Errorf("save tenant error")
 	}
-	_, err = m1.AddTenant(&pb.TenantMeta{})
-	assert.NotNil(t, err)
-	assert.EqualError(t, err, "save tenant error")
+	assert.Panics(t, func() { m1.AddTenant(&pb.TenantMeta{}) })
+	//_, err = m1.AddTenant(&pb.TenantMeta{})
+	//assert.NotNil(t, err)
+	//assert.EqualError(t, err, "save tenant error")
 
 	k1.save = func(key, value string) (typeutil.Timestamp, error) {
 		return 0, fmt.Errorf("save proxy error")
 	}
-	_, err = m1.AddProxy(&pb.ProxyMeta{})
-	assert.NotNil(t, err)
-	assert.EqualError(t, err, "save proxy error")
+	assert.Panics(t, func() { m1.AddProxy(&pb.ProxyMeta{}) })
+	//_, err = m1.AddProxy(&pb.ProxyMeta{})
+	//assert.NotNil(t, err)
+	//assert.EqualError(t, err, "save proxy error")
 }
 
 func TestMetaTable(t *testing.T) {
@@ -458,9 +460,10 @@ func TestMetaTable(t *testing.T) {
 		collInfo.PartitionIDs = nil
 		collInfo.PartitionNames = nil
 		collInfo.PartitionCreatedTimestamps = nil
-		_, err := mt.AddCollection(collInfo, idxInfo, nil)
-		assert.NotNil(t, err)
-		assert.EqualError(t, err, "multi save error")
+		assert.Panics(t, func() { mt.AddCollection(collInfo, idxInfo, nil) })
+		//_, err := mt.AddCollection(collInfo, idxInfo, nil)
+		//assert.NotNil(t, err)
+		//assert.EqualError(t, err, "multi save error")
 	})
 
 	t.Run("delete collection failed", func(t *testing.T) {
@@ -482,9 +485,10 @@ func TestMetaTable(t *testing.T) {
 		_, err := mt.AddCollection(collInfo, idxInfo, nil)
 		assert.Nil(t, err)
 		mt.indexID2Meta = make(map[int64]pb.IndexInfo)
-		_, err = mt.DeleteCollection(collInfo.ID, nil)
-		assert.NotNil(t, err)
-		assert.EqualError(t, err, "multi save and remove with prefix error")
+		assert.Panics(t, func() { mt.DeleteCollection(collInfo.ID, nil) })
+		//_, err = mt.DeleteCollection(collInfo.ID, nil)
+		//assert.NotNil(t, err)
+		//assert.EqualError(t, err, "multi save and remove with prefix error")
 	})
 
 	t.Run("get collection failed", func(t *testing.T) {
@@ -539,9 +543,10 @@ func TestMetaTable(t *testing.T) {
 		mockKV.multiSave = func(kvs map[string]string, addition ...func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error) {
 			return 0, fmt.Errorf("multi save error")
 		}
-		_, err = mt.AddPartition(coll.ID, "no-part", 22, nil)
-		assert.NotNil(t, err)
-		assert.EqualError(t, err, "multi save error")
+		assert.Panics(t, func() { mt.AddPartition(coll.ID, "no-part", 22, nil) })
+		//_, err = mt.AddPartition(coll.ID, "no-part", 22, nil)
+		//assert.NotNil(t, err)
+		//assert.EqualError(t, err, "multi save error")
 
 		mockKV.multiSave = func(kvs map[string]string, addition ...func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error) {
 			ts := ftso()
@@ -556,10 +561,10 @@ func TestMetaTable(t *testing.T) {
 		collInfo.PartitionNames = nil
 		collInfo.PartitionCreatedTimestamps = nil
 
-		_, err = mt.AddCollection(collInfo, idxInfo, nil)
-		assert.Nil(t, err)
-		_, err = mt.AddPartition(coll.ID, partName, partID, nil)
-		assert.Nil(t, err)
+		//_, err = mt.AddCollection(collInfo, idxInfo, nil)
+		//assert.Nil(t, err)
+		//_, err = mt.AddPartition(coll.ID, partName, partID, nil)
+		//assert.Nil(t, err)
 		_, err = mt.AddPartition(coll.ID, partName, 22, nil)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("partition name = %s already exists", partName))
@@ -623,9 +628,10 @@ func TestMetaTable(t *testing.T) {
 		mockKV.multiSaveAndRemoveWithPrefix = func(saves map[string]string, removals []string, addition ...func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error) {
 			return 0, fmt.Errorf("multi save and remove with prefix error")
 		}
-		_, _, err = mt.DeletePartition(collInfo.ID, partName, nil)
-		assert.NotNil(t, err)
-		assert.EqualError(t, err, "multi save and remove with prefix error")
+		assert.Panics(t, func() { mt.DeletePartition(collInfo.ID, partName, nil) })
+		//_, _, err = mt.DeletePartition(collInfo.ID, partName, nil)
+		//assert.NotNil(t, err)
+		//assert.EqualError(t, err, "multi save and remove with prefix error")
 
 		mt.collID2Meta = make(map[int64]pb.CollectionInfo)
 		_, _, err = mt.DeletePartition(collInfo.ID, "abc", nil)
@@ -688,9 +694,10 @@ func TestMetaTable(t *testing.T) {
 		mockKV.save = func(key, value string) (typeutil.Timestamp, error) {
 			return 0, fmt.Errorf("save error")
 		}
-		_, err = mt.AddIndex(&segIdxInfo)
-		assert.NotNil(t, err)
-		assert.EqualError(t, err, "save error")
+		assert.Panics(t, func() { mt.AddIndex(&segIdxInfo) })
+		//_, err = mt.AddIndex(&segIdxInfo)
+		//assert.NotNil(t, err)
+		//assert.EqualError(t, err, "save error")
 	})
 
 	t.Run("drop index failed", func(t *testing.T) {
@@ -759,9 +766,10 @@ func TestMetaTable(t *testing.T) {
 		mockKV.multiSaveAndRemoveWithPrefix = func(saves map[string]string, removals []string, addition ...func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error) {
 			return 0, fmt.Errorf("multi save and remove with prefix error")
 		}
-		_, _, _, err = mt.DropIndex(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idxInfo[0].IndexName)
-		assert.NotNil(t, err)
-		assert.EqualError(t, err, "multi save and remove with prefix error")
+		assert.Panics(t, func() { mt.DropIndex(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idxInfo[0].IndexName) })
+		//_, _, _, err = mt.DropIndex(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idxInfo[0].IndexName)
+		//assert.NotNil(t, err)
+		//assert.EqualError(t, err, "multi save and remove with prefix error")
 	})
 
 	t.Run("get segment index info by id", func(t *testing.T) {
@@ -928,9 +936,10 @@ func TestMetaTable(t *testing.T) {
 		mockKV.multiSave = func(kvs map[string]string, addition ...func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error) {
 			return 0, fmt.Errorf("multi save error")
 		}
-		_, _, err = mt.GetNotIndexedSegments(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idx, nil)
-		assert.NotNil(t, err)
-		assert.EqualError(t, err, "multi save error")
+		assert.Panics(t, func() { mt.GetNotIndexedSegments(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idx, nil) })
+		//_, _, err = mt.GetNotIndexedSegments(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idx, nil)
+		//assert.NotNil(t, err)
+		//assert.EqualError(t, err, "multi save error")
 
 		mockKV.multiSave = func(kvs map[string]string, addition ...func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error) {
 			ts := ftso()
@@ -944,8 +953,8 @@ func TestMetaTable(t *testing.T) {
 		collInfo.PartitionIDs = nil
 		collInfo.PartitionNames = nil
 		collInfo.PartitionCreatedTimestamps = nil
-		_, err = mt.AddCollection(collInfo, idxInfo, nil)
-		assert.Nil(t, err)
+		//_, err = mt.AddCollection(collInfo, idxInfo, nil)
+		//assert.Nil(t, err)
 		coll, ok := mt.collID2Meta[collInfo.ID]
 		assert.True(t, ok)
 		coll.FieldIndexes = append(coll.FieldIndexes, &pb.FieldIndexInfo{FiledID: coll.FieldIndexes[0].FiledID, IndexID: coll.FieldIndexes[0].IndexID + 1})
@@ -967,9 +976,10 @@ func TestMetaTable(t *testing.T) {
 		mockKV.multiSave = func(kvs map[string]string, addition ...func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error) {
 			return 0, fmt.Errorf("multi save error")
 		}
-		_, _, err = mt.GetNotIndexedSegments(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idx, nil)
-		assert.NotNil(t, err)
-		assert.EqualError(t, err, "multi save error")
+		assert.Panics(t, func() { mt.GetNotIndexedSegments(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idx, nil) })
+		//_, _, err = mt.GetNotIndexedSegments(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idx, nil)
+		//assert.NotNil(t, err)
+		//assert.EqualError(t, err, "multi save error")
 	})
 
 	t.Run("get index by name failed", func(t *testing.T) {

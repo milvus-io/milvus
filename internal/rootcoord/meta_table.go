@@ -200,7 +200,8 @@ func (mt *metaTable) AddTenant(te *pb.TenantMeta) (typeutil.Timestamp, error) {
 
 	ts, err := mt.client.Save(k, v)
 	if err != nil {
-		return 0, err
+		log.Error("SnapShotKV Save fail", zap.Error(err))
+		panic("SnapShotKV Save fail")
 	}
 	mt.tenantID2Meta[te.ID] = *te
 	return ts, nil
@@ -215,7 +216,8 @@ func (mt *metaTable) AddProxy(po *pb.ProxyMeta) (typeutil.Timestamp, error) {
 
 	ts, err := mt.client.Save(k, v)
 	if err != nil {
-		return 0, err
+		log.Error("SnapShotKV Save fail", zap.Error(err))
+		panic("SnapShotKV Save fail")
 	}
 	mt.proxyID2Meta[po.ID] = *po
 	return ts, nil
@@ -266,8 +268,8 @@ func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, idx []*pb.IndexInfo,
 
 	ts, err := mt.client.MultiSave(meta, addition, saveColl)
 	if err != nil {
-		_ = mt.reloadFromKV()
-		return 0, err
+		log.Error("SnapShotKV MultiSave fail", zap.Error(err))
+		panic("SnapShotKV MultiSave fail")
 	}
 
 	return ts, nil
@@ -319,8 +321,8 @@ func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ddOpStr func(ts 
 	addition := mt.getAdditionKV(ddOpStr, saveMeta)
 	ts, err := mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMetakeys, addition)
 	if err != nil {
-		_ = mt.reloadFromKV()
-		return 0, err
+		log.Error("SnapShotKV MultiSaveAndRemoveWithPrefix fail", zap.Error(err))
+		panic("SnapShotKV MultiSaveAndRemoveWithPrefix fail")
 	}
 
 	return ts, nil
@@ -504,8 +506,8 @@ func (mt *metaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 
 	ts, err := mt.client.MultiSave(meta, addition, saveColl)
 	if err != nil {
-		_ = mt.reloadFromKV()
-		return 0, err
+		log.Error("SnapShotKV MultiSave fail", zap.Error(err))
+		panic("SnapShotKV MultiSave fail")
 	}
 	return ts, nil
 }
@@ -587,7 +589,7 @@ func (mt *metaTable) HasPartition(collID typeutil.UniqueID, partitionName string
 	return err == nil
 }
 
-//return timestamp, partitionid, error
+//return timestamp, partition id, error
 func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName string, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, typeutil.UniqueID, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
@@ -646,8 +648,8 @@ func (mt *metaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 
 	ts, err := mt.client.MultiSaveAndRemoveWithPrefix(meta, delMetaKeys, addition)
 	if err != nil {
-		_ = mt.reloadFromKV()
-		return 0, 0, err
+		log.Error("SnapShotKV MultiSaveAndRemoveWithPrefix fail", zap.Error(err))
+		panic("SnapShotKV MultiSaveAndRemoveWithPrefix fail")
 	}
 	return ts, partID, nil
 }
@@ -699,8 +701,8 @@ func (mt *metaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo) (typeutil.Timesta
 
 	ts, err := mt.client.Save(k, v)
 	if err != nil {
-		_ = mt.reloadFromKV()
-		return 0, err
+		log.Error("SnapShotKV Save fail", zap.Error(err))
+		panic("SnapShotKV Save fail")
 	}
 
 	return ts, nil
@@ -772,8 +774,8 @@ func (mt *metaTable) DropIndex(collName, fieldName, indexName string) (typeutil.
 
 	ts, err := mt.client.MultiSaveAndRemoveWithPrefix(saveMeta, delMeta)
 	if err != nil {
-		_ = mt.reloadFromKV()
-		return 0, 0, false, err
+		log.Error("SnapShotKV MultiSaveAndRemoveWithPrefix fail", zap.Error(err))
+		panic("SnapShotKV MultiSaveAndRemoveWithPrefix fail")
 	}
 
 	return ts, dropIdxID, true, nil
@@ -946,8 +948,8 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 
 		_, err = mt.client.MultiSave(meta)
 		if err != nil {
-			_ = mt.reloadFromKV()
-			return nil, schemapb.FieldSchema{}, err
+			log.Error("SnapShotKV MultiSave fail", zap.Error(err))
+			panic("SnapShotKV MultiSave fail")
 		}
 
 	} else {
@@ -969,8 +971,8 @@ func (mt *metaTable) GetNotIndexedSegments(collName string, fieldName string, id
 
 			_, err = mt.client.MultiSave(meta)
 			if err != nil {
-				_ = mt.reloadFromKV()
-				return nil, schemapb.FieldSchema{}, err
+				log.Error("SnapShotKV MultiSave fail", zap.Error(err))
+				panic("SnapShotKV MultiSave fail")
 			}
 		}
 	}
