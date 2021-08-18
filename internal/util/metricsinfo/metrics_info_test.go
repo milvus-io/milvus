@@ -67,3 +67,35 @@ func TestQueryCoordInfos_Codec(t *testing.T) {
 	assert.Equal(t, nil, err)
 	assert.Equal(t, infos1.Name, infos2.Name)
 }
+
+func TestIndexNodeInfos_Codec(t *testing.T) {
+	infos1 := IndexNodeInfos{
+		BaseComponentInfos: BaseComponentInfos{
+			Name: ConstructComponentName(typeutil.IndexNodeRole, 1),
+		},
+	}
+	s, err := MarshalComponentInfos(infos1)
+	assert.Equal(t, nil, err)
+	log.Info("TestIndexNodeInfos_Codec",
+		zap.String("marshaled_result", s))
+	var infos2 IndexNodeInfos
+	err = UnmarshalComponentInfos(s, &infos2)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, infos1.Name, infos2.Name)
+}
+
+func TestIndexCoordInfos_Codec(t *testing.T) {
+	infos1 := IndexCoordInfos{
+		BaseComponentInfos: BaseComponentInfos{
+			Name: ConstructComponentName(typeutil.IndexCoordRole, 1),
+		},
+	}
+	s, err := MarshalComponentInfos(infos1)
+	assert.Equal(t, nil, err)
+	log.Info("TestIndexCoordInfos_Codec",
+		zap.String("marshaled_result", s))
+	var infos2 IndexCoordInfos
+	err = UnmarshalComponentInfos(s, &infos2)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, infos1.Name, infos2.Name)
+}

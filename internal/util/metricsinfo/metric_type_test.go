@@ -15,6 +15,9 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -52,8 +55,26 @@ func TestParseMetricType(t *testing.T) {
 		got, err := ParseMetricType(test.s)
 		assert.Equal(t, test.errIsNil, err == nil)
 		if test.errIsNil && test.want != got {
-			t.Errorf("ParseMetricType(%s) = %s", test.s, test.want)
+			t.Errorf("ParseMetricType(%s) = %s, but got: %s", test.s, test.want, got)
 		}
 	}
 
+}
+
+func TestConstructRequestByMetricType(t *testing.T) {
+	cases := []struct {
+		metricType string
+		errIsNil   bool
+	}{
+		{SystemInfoMetrics, true},
+	}
+
+	for _, test := range cases {
+		got, err := ConstructRequestByMetricType(test.metricType)
+		assert.Equal(t, test.errIsNil, err == nil)
+		if test.errIsNil {
+			log.Info("TestConstructRequestByMetricType",
+				zap.String("request", got.Request))
+		}
+	}
 }

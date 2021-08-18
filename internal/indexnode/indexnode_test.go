@@ -18,6 +18,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
 	"github.com/golang/protobuf/proto"
@@ -424,6 +429,16 @@ func TestIndexNode(t *testing.T) {
 		resp, err := in.GetStatisticsChannel(ctx)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("GetMetrics_system_info", func(t *testing.T) {
+		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+		assert.Nil(t, err)
+		resp, err := in.GetMetrics(ctx, req)
+		assert.Nil(t, err)
+		log.Info("GetMetrics_system_info",
+			zap.String("resp", resp.Response),
+			zap.String("name", resp.ComponentName))
 	})
 
 	err = in.Stop()

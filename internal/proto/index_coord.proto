@@ -16,6 +16,9 @@ service IndexCoord {
   rpc GetIndexStates(GetIndexStatesRequest) returns (GetIndexStatesResponse) {}
   rpc GetIndexFilePaths(GetIndexFilePathsRequest) returns (GetIndexFilePathsResponse){}
   rpc DropIndex(DropIndexRequest) returns (common.Status) {}
+
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
+  rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
 }
 
 service IndexNode {
@@ -23,6 +26,9 @@ service IndexNode {
   rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
   rpc CreateIndex(CreateIndexRequest) returns (common.Status){}
+
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
+  rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
 }
 
 message RegisterNodeRequest {

@@ -146,6 +146,10 @@ func (s *Server) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFil
 	return s.indexcoord.GetIndexFilePaths(ctx, req)
 }
 
+func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	return s.indexcoord.GetMetrics(ctx, request)
+}
+
 func (s *Server) startGrpcLoop(grpcPort int) {
 
 	defer s.loopWg.Done()
