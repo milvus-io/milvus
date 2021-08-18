@@ -39,16 +39,14 @@ It's easy to achieve this in a `single-node` database. But for a `Distributed Sy
 
 ## Timestamp Oracle(TSO)
 
-Like [TiKV](https://github.com/tikv/tikv), `Milvus 2.0` provides `TSO` service, all the events must alloc timestamp from `TSO`，not use local timestamp any more, so the first problem should be solved.
+Like [TiKV](https://github.com/tikv/tikv), Milvus 2.0 provides `TSO` service, all the events must alloc timestamp from `TSO`，not use local timestamp, so the first problem can be solved.
 
-`TSO` is provided by `RootCoord` component, clients could alloc one or more timestamp at single request, the `proto` is defined as follows.
+`TSO` is provided by `RootCoord` component, clients could alloc one or more timestamp in a single request, the `proto` is defined as following.
 
 ```proto
 service RootCoord {
     ...
-    
     rpc AllocTimestamp(AllocTimestampRequest) returns (AllocTimestampResponse) {}
-    
     ...  
 }
 
@@ -62,28 +60,28 @@ message AllocTimestampResponse {
     uint64 timestamp = 2;
     uint32 count = 3;
 }
-
 ```
-`Timestamp` is type of `uint64`, contains physical and logical parts. 
+`Timestamp` is with type `uint64`, containing physical and logical parts. 
 
 This is the format of `Timestamp`
 
 ![Timestamp struct](./graphs/time_stamp_struct.png)
 
-In the `AllocTimestamp` request, if `AllocTimestampRequest.count` if greater than `1`, then in the response, `AllocTimestampResponse.timestamp` indicates the first available timestamp.
+In an `AllocTimestamp` request, if `AllocTimestampRequest.count` is greater than `1`, `AllocTimestampResponse.timestamp` indicates the first available timestamp in the response.
 
 ## Time Synchronization
-In order to understand the `Time Synchronization` better, firstly we need to introduce the data operation of `Milvus 2.0` briefly, taking `Insert Operation` as example.
-- Users can configure lots of `Proxy` to achieve load balancing, in `Milvus 2.0`
-- `SDK` could connect to any `Proxy`
-- When `Proxy` receieves `Insert` Request from `SDK`, it would hash the `InsrtMsg` by `Primary key`, and then split the `InsertMsg` into different `MsgStream` according to the hash value.
-- Each `InsertMsg` would be assigned an `Timestamp` before send to the `MsgStream.`
+To understand the `Time Synchronization` better, let's introduce the data operation of Milvus 2.0 briefly.
+Taking `Insert Operation` as an example.
+- User can configure lots of `Proxy` to achieve load balancing, in `Milvus 2.0`
+- User can use `SDK` to connect to any `Proxy`
+- When `Proxy` receives `Insert` Request from `SDK`, it splits `InsertMsg` into different `MsgStream` according to the hash value of `Primary Key`
+- Each `InsertMsg` would be assigned with a `Timestamp` before sending to the `MsgStream`
 
-*Note: `MsgStream` is the wrapper of message queue, the default message queue in `Milvus 2.0` is `pulsar`*
+>*Note: `MsgStream` is the wrapper of message queue, the default message queue in `Milvus 2.0` is `pulsar`*
 
 ![proxy insert](./graphs/timesync_proxy_insert_msg.png)
 
-Based on the above information, we can know that the `MsgStream` have the following characteristics:
+Based on above information, we can know that the `MsgStream` have the following characteristics:
 - In `MsgStream`, `InsertMsg` from the same `Proxy` must be incremented in timestamp
 - In `MsgStream`, `InsertMsg` from different `Proxy` have no relationship in timestamp
 
@@ -93,24 +91,24 @@ The 3 `InsertMsg` from `Proxy1` are incremented in timestamp, and the 2 `InsertM
 
 ![msgstream](./graphs/timesync_msgstream.png)
 
-So the second problem has turned into this: after reading a message from `MsgStream`, how to make sure that all the messages earlier than this timestamp have been consumed. For example, when I read a message , whoes timestamp is `110` and produced by `Proxy2`, from `MsgStream`, but the message ,whoes timestamp is `80` and produced by `Proxy1`, is still in the `MsgStream`, what shoudl I do on this status?
+So the second problem has turned into this: after reading a message from `MsgStream`, how to make sure that all the messages with smaller timestamp have been consumed ?
+
+For example, when read a message with timestamp `110` produced by `Proxy2`, but the message with timestamp `80` produced by `Proxy1`, is still in the `MsgStream`, how to handle this situation ?
 
 The following graph shows the core logic of `Time Synchronization System` in `Milvus 2.0`, it should solve the second problem.
-- Each `Proxy` will periodically reports the latest timestamp of every `MsgStream` to `RootCoord`, the default interval is `200ms`
-- For each `Msgstream`, `Rootcoord` finds the minimum timestamp of all `Proxies` on this `Msgstream`, and inserts this minimum timestamp into the `Msgstream`
-- When the consumer reads the timestamp inserted by the `RootCoord` on the `MsgStream`, it indicates that the messages eariler than this timestamp have been consumed, so all actions that depend on this timestamp can be executed safely
+- Each `Proxy` will periodically reports its latest timestamp of every `MsgStream` to `RootCoord`, the default interval is `200ms`
+- For each `Msgstream`, `Rootcoord` finds the minimum timestamp of all `Proxy` on this `Msgstream`, and inserts this minimum timestamp into the `Msgstream`
+- When the consumer reads the timestamp inserted by the `RootCoord` on the `MsgStream`, it indicates that all messages with smaller timestamp have been consumed, so all actions that depend on this timestamp can be executed safely
 - The message inserted by `RootCoord` into `MsgStream` is type of `TimeTick`
 
 ![upload time tick](./graphs/timesync_proxy_upload_time_tick.png)
 
-This is the `Proto` that usecd by `Proxy` to report timestamp to `RootCoord`:
+This is the `Proto` that used by `Proxy` to report timestamp to `RootCoord`:
 
 ```proto
 service RootCoord {
     ...
-
     rpc UpdateChannelTimeTick(internal.ChannelTimeTickMsg) returns (common.Status) {}
-
     ...  
 }
 
@@ -122,7 +120,7 @@ message ChannelTimeTickMsg {
 }
 ```
 
-After inserting `Timetick`, the `Msgstream` should looks like this:
+After inserting `Timetick`, the `Msgstream` should look like this:
 ![msgstream time tick](./graphs/timesync_msgtream_timetick.png)
 
-`MsgStream` will process the messages in batches according to `TimeTick` , and ensures that the output messages meet the requirements of timestamp. For more details, please refer to the `MsgStream` design detail.
+`MsgStream` will process the messages in batches according to `TimeTick`, and ensure that the output messages meet the requirements of timestamp. For more details, please refer to the `MsgStream` design detail.
