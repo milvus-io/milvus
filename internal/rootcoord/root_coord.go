@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -85,8 +86,11 @@ type Core struct {
 	etcdCli *clientv3.Client
 	kvBase  *etcdkv.EtcdKV
 
+	//DDL lock
+	ddlLock sync.Mutex
+
 	//setMsgStreams, send time tick into dd channel and time tick channel
-	SendTimeTick func(t typeutil.Timestamp) error
+	SendTimeTick func(t typeutil.Timestamp, reason string) error
 
 	//setMsgStreams, send create collection into dd channel
 	SendDdCreateCollectionReq func(ctx context.Context, req *internalpb.CreateCollectionRequest, channelNames []string) error
@@ -152,6 +156,7 @@ func NewCore(c context.Context, factory ms.Factory) (*Core, error) {
 	core := &Core{
 		ctx:       ctx,
 		cancel:    cancel,
+		ddlLock:   sync.Mutex{},
 		msFactory: factory,
 	}
 	core.UpdateStateCode(internalpb.StateCode_Abnormal)
@@ -232,9 +237,11 @@ func (c *Core) startTimeTickLoop() {
 			log.Debug("rootcoord context closed", zap.Error(c.ctx.Err()))
 			return
 		case <-ticker.C:
+			c.ddlLock.Lock()
 			if ts, err := c.TSOAllocator(1); err == nil {
-				c.SendTimeTick(ts)
+				c.SendTimeTick(ts, "timetick loop")
 			}
+			c.ddlLock.Unlock()
 		}
 	}
 }
@@ -352,8 +359,12 @@ func (c *Core) checkFlushedSegmentsLoop() {
 								if info.BuildID != 0 {
 									info.EnableIndex = true
 								}
-								if _, err := c.MetaTable.AddIndex(&info); err != nil {
-									log.Debug("Add index into meta table failed", zap.Int64("collection_id", collMeta.ID), zap.Int64("index_id", info.IndexID), zap.Int64("build_id", info.BuildID), zap.Error(err))
+								if err := c.MetaTable.AddIndex(&info, 0); err != nil {
+									log.Debug("Add index into meta table failed",
+										zap.Int64("collection_id", collMeta.ID),
+										zap.Int64("index_id", info.IndexID),
+										zap.Int64("build_id", info.BuildID),
+										zap.Error(err))
 								}
 							}
 						}
@@ -396,11 +407,8 @@ func (c *Core) setDdMsgSendFlag(b bool) error {
 		return nil
 	}
 
-	if b {
-		_, err = c.MetaTable.client.Save(DDMsgSendPrefix, "true")
-		return err
-	}
-	_, err = c.MetaTable.client.Save(DDMsgSendPrefix, "false")
+	ts, _ := c.TSOAllocator(1)
+	err = c.MetaTable.client.Save(DDMsgSendPrefix, strconv.FormatBool(b), ts)
 	return err
 }
 
@@ -420,7 +428,7 @@ func (c *Core) setMsgStreams() error {
 	timeTickStream.AsProducer([]string{Params.TimeTickChannel})
 	log.Debug("rootcoord AsProducer: " + Params.TimeTickChannel)
 
-	c.SendTimeTick = func(t typeutil.Timestamp) error {
+	c.SendTimeTick = func(t typeutil.Timestamp, reason string) error {
 		msgPack := ms.MsgPack{}
 		baseMsg := ms.BaseMsg{
 			BeginTimestamp: t,
@@ -462,7 +470,11 @@ func (c *Core) setMsgStreams() error {
 			Timestamps:       pt,
 			DefaultTimestamp: t,
 		}
-		return c.chanTimeTick.UpdateTimeTick(&ttMsg)
+		log.Debug("update timetick",
+			zap.Any("DefaultTs", t),
+			zap.Any("sourceID", c.session.ServerID),
+			zap.Any("reason", reason))
+		return c.chanTimeTick.UpdateTimeTick(&ttMsg, reason)
 	}
 
 	c.SendDdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest, channelNames []string) error {
@@ -883,19 +895,8 @@ func (c *Core) Init() error {
 			if c.etcdCli, initError = clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints, DialTimeout: 5 * time.Second}); initError != nil {
 				return initError
 			}
-			tsAlloc := func() typeutil.Timestamp {
-				for {
-					var ts typeutil.Timestamp
-					var err error
-					if ts, err = c.TSOAllocator(1); err == nil {
-						return ts
-					}
-					time.Sleep(100 * time.Millisecond)
-					log.Debug("alloc time stamp error", zap.Error(err))
-				}
-			}
 			var ms *metaSnapshot
-			ms, initError = newMetaSnapshot(c.etcdCli, Params.MetaRootPath, TimestampPrefix, 1024, tsAlloc)
+			ms, initError = newMetaSnapshot(c.etcdCli, Params.MetaRootPath, TimestampPrefix, 1024)
 			if initError != nil {
 				return initError
 			}
@@ -1832,7 +1833,7 @@ func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.Channel
 		status.Reason = fmt.Sprintf("UpdateChannelTimeTick receive invalid message %d", in.Base.GetMsgType())
 		return status, nil
 	}
-	err := c.chanTimeTick.UpdateTimeTick(in)
+	err := c.chanTimeTick.UpdateTimeTick(in, "gRPC")
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
@@ -1913,7 +1914,8 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlus
 			log.Error("build index fail", zap.Int64("buildid", info.BuildID), zap.Error(err))
 			continue
 		}
-		_, err = c.MetaTable.AddIndex(&info)
+		ts, _ := c.TSOAllocator(1)
+		err = c.MetaTable.AddIndex(&info, ts)
 		if err != nil {
 			log.Error("AddIndex fail", zap.String("err", err.Error()))
 		}

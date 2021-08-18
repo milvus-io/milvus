@@ -35,11 +35,10 @@ type rtPair struct {
 }
 
 type metaSnapshot struct {
-	cli          *clientv3.Client
-	root         string
-	tsKey        string
-	lock         sync.RWMutex
-	timeAllactor func() typeutil.Timestamp
+	cli   *clientv3.Client
+	root  string
+	tsKey string
+	lock  sync.RWMutex
 
 	ts2Rev []rtPair
 	minPos int
@@ -47,20 +46,19 @@ type metaSnapshot struct {
 	numTs  int
 }
 
-func newMetaSnapshot(cli *clientv3.Client, root, tsKey string, bufSize int, timeAllactor func() typeutil.Timestamp) (*metaSnapshot, error) {
+func newMetaSnapshot(cli *clientv3.Client, root, tsKey string, bufSize int) (*metaSnapshot, error) {
 	if bufSize <= 0 {
 		bufSize = 1024
 	}
 	ms := &metaSnapshot{
-		cli:          cli,
-		root:         root,
-		tsKey:        tsKey,
-		lock:         sync.RWMutex{},
-		timeAllactor: timeAllactor,
-		ts2Rev:       make([]rtPair, bufSize),
-		minPos:       0,
-		maxPos:       0,
-		numTs:        0,
+		cli:    cli,
+		root:   root,
+		tsKey:  tsKey,
+		lock:   sync.RWMutex{},
+		ts2Rev: make([]rtPair, bufSize),
+		minPos: 0,
+		maxPos: 0,
+		numTs:  0,
 	}
 	if err := ms.loadTs(); err != nil {
 		return nil, err
@@ -263,24 +261,23 @@ func (ms *metaSnapshot) getRev(ts typeutil.Timestamp) (int64, error) {
 	return 0, fmt.Errorf("can't find revision on ts=%d", ts)
 }
 
-func (ms *metaSnapshot) Save(key, value string) (typeutil.Timestamp, error) {
+func (ms *metaSnapshot) Save(key, value string, ts typeutil.Timestamp) error {
 	ms.lock.Lock()
 	defer ms.lock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
 	defer cancel()
 
-	ts := ms.timeAllactor()
 	strTs := strconv.FormatInt(int64(ts), 10)
 	resp, err := ms.cli.Txn(ctx).If().Then(
 		clientv3.OpPut(path.Join(ms.root, key), value),
 		clientv3.OpPut(path.Join(ms.root, ms.tsKey), strTs),
 	).Commit()
 	if err != nil {
-		return 0, err
+		return err
 	}
 	ms.putTs(resp.Header.Revision, ts)
 
-	return ts, nil
+	return nil
 }
 
 func (ms *metaSnapshot) Load(key string, ts typeutil.Timestamp) (string, error) {
@@ -313,18 +310,18 @@ func (ms *metaSnapshot) Load(key string, ts typeutil.Timestamp) (string, error) 
 	return string(resp.Kvs[0].Value), nil
 }
 
-func (ms *metaSnapshot) MultiSave(kvs map[string]string, additions ...func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error) {
+func (ms *metaSnapshot) MultiSave(kvs map[string]string, ts typeutil.Timestamp, additions ...func(ts typeutil.Timestamp) (string, string, error)) error {
 	ms.lock.Lock()
 	defer ms.lock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
 	defer cancel()
 
-	ts := ms.timeAllactor()
-	strTs := strconv.FormatInt(int64(ts), 10)
 	ops := make([]clientv3.Op, 0, len(kvs)+2)
 	for key, value := range kvs {
 		ops = append(ops, clientv3.OpPut(path.Join(ms.root, key), value))
 	}
+
+	strTs := strconv.FormatInt(int64(ts), 10)
 	for _, addition := range additions {
 		if addition == nil {
 			continue
@@ -336,10 +333,10 @@ func (ms *metaSnapshot) MultiSave(kvs map[string]string, additions ...func(ts ty
 	ops = append(ops, clientv3.OpPut(path.Join(ms.root, ms.tsKey), strTs))
 	resp, err := ms.cli.Txn(ctx).If().Then(ops...).Commit()
 	if err != nil {
-		return 0, err
+		return err
 	}
 	ms.putTs(resp.Header.Revision, ts)
-	return ts, nil
+	return nil
 }
 func (ms *metaSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 	ms.lock.RLock()
@@ -378,18 +375,18 @@ func (ms *metaSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]str
 	return keys, values, nil
 }
 
-func (ms *metaSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, additions ...func(ts typeutil.Timestamp) (string, string, error)) (typeutil.Timestamp, error) {
+func (ms *metaSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, ts typeutil.Timestamp, additions ...func(ts typeutil.Timestamp) (string, string, error)) error {
 	ms.lock.Lock()
 	defer ms.lock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
 	defer cancel()
 
-	ts := ms.timeAllactor()
-	strTs := strconv.FormatInt(int64(ts), 10)
 	ops := make([]clientv3.Op, 0, len(saves)+len(removals)+2)
 	for key, value := range saves {
 		ops = append(ops, clientv3.OpPut(path.Join(ms.root, key), value))
 	}
+
+	strTs := strconv.FormatInt(int64(ts), 10)
 	for _, addition := range additions {
 		if addition == nil {
 			continue
@@ -404,8 +401,8 @@ func (ms *metaSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, re
 	ops = append(ops, clientv3.OpPut(path.Join(ms.root, ms.tsKey), strTs))
 	resp, err := ms.cli.Txn(ctx).If().Then(ops...).Commit()
 	if err != nil {
-		return 0, err
+		return err
 	}
 	ms.putTs(resp.Header.Revision, ts)
-	return ts, nil
+	return nil
 }

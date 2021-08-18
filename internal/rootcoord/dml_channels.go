@@ -146,7 +146,7 @@ func (d *dmlChannels) RemoveProducerChannels(names ...string) {
 	defer d.lock.Unlock()
 
 	for _, name := range names {
-		log.Debug("delete dml channel", zap.String("channel name", name))
+		//log.Debug("delete dml channel", zap.String("channel name", name))
 		if ds, ok := d.dml[name]; ok {
 			ds.valid = false
 		}
