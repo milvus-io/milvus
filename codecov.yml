@@ -1,4 +1,8 @@
 #Configuration File for CodeCov
+codecov:
+  notify:
+    require_ci_to_pass: yes
+
 coverage:
   precision: 2
   round: down
@@ -16,6 +20,7 @@ coverage:
         threshold: 0%
         branches:
           - master
+        if_ci_failed: error #success, failure, error, ignore
 
 comment:
   layout: "reach, diff, flags, files"
