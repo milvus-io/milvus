@@ -26,44 +26,25 @@ func ConstructComponentName(role string, id typeutil.UniqueID) string {
 	return role + strconv.Itoa(int(id))
 }
 
-// TODO(dragondriver): how different components extend their metrics information?
-//					   so maybe providing a interface instead of a struct is better?
-//					   then every components can implement it to extend metrics.
-
-// ComponentInfos shows the all necessary metrics of node.
-type ComponentInfos struct {
-	HasError    bool   `json:"has_error"`
-	ErrorReason string `json:"error_reason"`
-	Name        string `json:"name"`
-	// TODO(dragondriver): more required information
+// Topology defines the interface of topology graph between different components
+type Topology interface {
 }
 
-// Marshal returns the json string of ComponentInfos
-func (infos *ComponentInfos) Marshal() (string, error) {
-	binary, err := json.Marshal(infos)
-	return string(binary), err
-}
-
-// Unmarshal constructs a ComponentInfos object using a json string
-func (infos *ComponentInfos) Unmarshal(s string) error {
-	return json.Unmarshal([]byte(s), infos)
-}
-
-// CoordTopology used for coordinator to show their managed nodes.
-type CoordTopology struct {
-	Self           ComponentInfos   `json:"self"`
-	ConnectedNodes []ComponentInfos `json:"connected_nodes"`
-}
-
-// Marshal returns the json string of CoordTopology
-func (topology *CoordTopology) Marshal() (string, error) {
+// MarshalTopology returns the json string of Topology
+func MarshalTopology(topology Topology) (string, error) {
 	binary, err := json.Marshal(topology)
 	return string(binary), err
 }
 
-// Unmarshal constructs a CoordTopology object using a json string
-func (topology *CoordTopology) Unmarshal(s string) error {
+// UnmarshalTopology constructs a Topology object using the json string
+func UnmarshalTopology(s string, topology Topology) error {
 	return json.Unmarshal([]byte(s), topology)
+}
+
+// QueryClusterTopology shows the topology between QueryCoord and QueryNodes
+type QueryClusterTopology struct {
+	Self           QueryCoordInfos  `json:"self"`
+	ConnectedNodes []QueryNodeInfos `json:"connected_nodes"`
 }
 
 // TODO(dragondriver)
@@ -76,28 +57,34 @@ type ConnTopology struct {
 	ConnectedComponents []string `json:"connected_components"`
 }
 
-// Marshal returns the json string of ConnTopology
-func (topology *ConnTopology) Marshal() (string, error) {
-	binary, err := json.Marshal(topology)
-	return string(binary), err
+// QueryCoordTopology shows the whole metrics of query cluster
+type QueryCoordTopology struct {
+	Cluster     QueryClusterTopology `json:"cluster"`
+	Connections ConnTopology         `json:"connections"`
 }
 
-// Unmarshal constructs a ConnTopology object using a json string
-func (topology *ConnTopology) Unmarshal(s string) error {
-	return json.Unmarshal([]byte(s), topology)
+type ConnectionType string
+
+const (
+	CoordConnectToNode ConnectionType = "manage"
+	Forward            ConnectionType = "forward"
+)
+
+type ConnectionTargetType string
+
+type ConnectionEdge struct {
+	ConnectedIdentifier int                  `json:"connected_identifier"`
+	Type                ConnectionType       `json:"type"`
+	TargetType          ConnectionTargetType `json:"target_type"` // RootCoord, DataCoord ...
+}
+
+type SystemTopologyNode struct {
+	Identifier int              `json:"identifier"` // unique in the SystemTopology graph
+	Connected  []ConnectionEdge `json:"connected"`
+	Infos      ComponentInfos   `json:"infos"`
 }
 
 // SystemTopology shows the system topology
 type SystemTopology struct {
-}
-
-// Marshal returns the json string of SystemTopology
-func (topology *SystemTopology) Marshal() (string, error) {
-	binary, err := json.Marshal(topology)
-	return string(binary), err
-}
-
-// Unmarshal constructs a SystemTopology object using a json string
-func (topology *SystemTopology) Unmarshal(s string) error {
-	return json.Unmarshal([]byte(s), topology)
+	NodesInfo []SystemTopologyNode `json:"nodes_info"`
 }
