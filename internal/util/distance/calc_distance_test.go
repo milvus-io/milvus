@@ -228,7 +228,7 @@ func TestCalcHamming(t *testing.T) {
 	hamming := make([]int32, 1)
 	hamming[0] = n
 	tanimoto, err := CalcTanimotoCoefficient(dim, hamming)
-	realTanimoto := float64(n) / (float64(dim)*2.0 - float64(n))
+	realTanimoto := float64(int32(dim)-n) / (float64(dim)*2.0 - float64(int32(dim)-n))
 	assert.Nil(t, err)
 	assert.Less(t, math.Abs(float64(tanimoto[0])-realTanimoto), float64(PRECISION))
 }
