@@ -7,6 +7,8 @@ from base.collection_wrapper import ApiCollectionWrapper
 from common import common_func as cf
 from common import common_type as ct
 import constants
+
+from common.common_type import CheckTasks
 from utils.util_log import test_log as log
 
 
@@ -63,7 +65,7 @@ class SearchChecker(Checker):
                                 data=search_vec,
                                 anns_field=ct.default_float_vec_field_name,
                                 param={"nprobe": 32},
-                                limit=1, timeout=timeout
+                                limit=1, timeout=timeout, check_task=CheckTasks.check_nothing
                             )
             if result:
                 self._succ += 1
@@ -82,7 +84,7 @@ class InsertFlushChecker(Checker):
         while self._running:
             _, insert_result = \
                 self.c_wrap.insert(data=cf.gen_default_list_data(nb=constants.DELTA_PER_INS),
-                                   timeout=timeout)
+                                   timeout=timeout, check_task=CheckTasks.check_nothing)
             if not self._flush:
                 if insert_result:
                     self._succ += 1
@@ -106,7 +108,7 @@ class CreateChecker(Checker):
             _, result = self.c_wrap.init_collection(
                                     name=cf.gen_unique_str("CreateChecker_"),
                                     schema=cf.gen_default_collection_schema(),
-                                    timeout=timeout
+                                    timeout=timeout, check_task=CheckTasks.check_nothing
                                 )
             if result:
                 self._succ += 1
@@ -128,7 +130,7 @@ class IndexChecker(Checker):
             _, result = self.c_wrap.create_index(ct.default_float_vec_field_name,
                                                  constants.DEFAULT_INDEX_PARAM,
                                                  name=cf.gen_unique_str('index_'),
-                                                 timeout=timeout)
+                                                 timeout=timeout, check_task=CheckTasks.check_nothing)
             if result:
                 self._succ += 1
                 self.c_wrap.drop_index(timeout=timeout)
@@ -147,7 +149,7 @@ class QueryChecker(Checker):
             for _ in range(5):
                 int_values.append(randint(0, constants.ENTITIES_FOR_SEARCH))
             term_expr = f'{ct.default_int64_field_name} in {int_values}'
-            _, result = self.c_wrap.query(term_expr, timeout=timeout)
+            _, result = self.c_wrap.query(term_expr, timeout=timeout, check_task=CheckTasks.check_nothing)
             if result:
                 self._succ += 1
             else:
