@@ -286,6 +286,11 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
 		t.core.SendTimeTick(ts, reason)
 
+		for _, chanName := range collMeta.PhysicalChannelNames {
+			// send tt into deleted channels to tell data_node to clear flowgragh
+			t.core.chanTimeTick.SendChannelTimeTick(chanName, ts)
+		}
+
 		// remove dml channel after send dd msg
 		t.core.dmlChannels.RemoveProducerChannels(collMeta.PhysicalChannelNames...)
 		return nil
