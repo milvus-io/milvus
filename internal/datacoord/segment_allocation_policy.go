@@ -13,9 +13,11 @@ package datacoord
 
 import (
 	"sort"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -80,9 +82,6 @@ type sealPolicy func(maxCount, writtenCount, allocatedCount int64) bool
 // segmentSealPolicy seal policy applies to segment
 type segmentSealPolicy func(segment *SegmentInfo, ts Timestamp) bool
 
-// channelSealPolicy seal policy applies to channel
-type channelSealPolicy func(string, []*SegmentInfo, Timestamp) []*SegmentInfo
-
 // getSegmentCapacityPolicy get segmentSealPolicy with segment size factor policy
 func getSegmentCapacityPolicy(sizeFactor float64) segmentSealPolicy {
 	return func(segment *SegmentInfo, ts Timestamp) bool {
@@ -95,11 +94,17 @@ func getSegmentCapacityPolicy(sizeFactor float64) segmentSealPolicy {
 }
 
 // getLastExpiresLifetimePolicy get segmentSealPolicy with lifetime limit compares ts - segment.lastExpireTime
-func getLastExpiresLifetimePolicy(lifetime uint64) segmentSealPolicy {
+func sealByLifetimePolicy(lifetime time.Duration) segmentSealPolicy {
 	return func(segment *SegmentInfo, ts Timestamp) bool {
-		return (ts - segment.GetLastExpireTime()) > lifetime
+		pts, _ := tsoutil.ParseTS(ts)
+		epts, _ := tsoutil.ParseTS(segment.GetLastExpireTime())
+		d := pts.Sub(epts)
+		return d >= lifetime
 	}
 }
+
+// channelSealPolicy seal policy applies to channel
+type channelSealPolicy func(string, []*SegmentInfo, Timestamp) []*SegmentInfo
 
 // getChannelCapacityPolicy get channelSealPolicy with channel segment capacity policy
 func getChannelOpenSegCapacityPolicy(limit int) channelSealPolicy {
@@ -118,10 +123,6 @@ func sortSegmentsByLastExpires(segs []*SegmentInfo) {
 	sort.Slice(segs, func(i, j int) bool {
 		return segs[i].LastExpireTime < segs[j].LastExpireTime
 	})
-}
-
-func sealPolicyV1(maxCount, writtenCount, allocatedCount int64) bool {
-	return float64(writtenCount) >= Params.SegmentSealProportion*float64(maxCount)
 }
 
 type flushPolicy func(segment *SegmentInfo, t Timestamp) bool
