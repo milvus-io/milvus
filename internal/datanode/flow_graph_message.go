@@ -35,7 +35,7 @@ type flushMsg struct {
 	timestamp    Timestamp
 	segmentID    UniqueID
 	collectionID UniqueID
-	dmlFlushedCh chan<- []*datapb.ID2PathList
+	dmlFlushedCh chan<- []*datapb.FieldBinlog
 }
 
 func (iMsg *insertMsg) TimeTick() Timestamp {
