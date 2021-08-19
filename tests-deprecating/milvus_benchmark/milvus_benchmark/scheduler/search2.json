@@ -1,0 +1,11 @@
+[
+    {
+        "server_tag": "16c32m0g",
+        "suite_params": [
+            {
+                "suite": "2_cpu_search.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    }
+]
