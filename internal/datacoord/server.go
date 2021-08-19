@@ -396,6 +396,7 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 					continue
 				}
 				segmentInfos = append(segmentInfos, sInfo.SegmentInfo)
+				s.meta.SetLastFlushTime(id, time.Now())
 			}
 			if len(segmentInfos) > 0 {
 				s.cluster.Flush(segmentInfos)

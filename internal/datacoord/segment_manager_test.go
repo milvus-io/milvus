@@ -12,6 +12,7 @@ package datacoord
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -199,4 +200,43 @@ func TestExpireAllocation(t *testing.T) {
 	segment = meta.GetSegment(id)
 	assert.NotNil(t, segment)
 	assert.EqualValues(t, 0, len(segment.allocations))
+}
+
+func TestGetFlushableSegments(t *testing.T) {
+	t.Run("get flushable segments between small interval", func(t *testing.T) {
+		Params.Init()
+		mockAllocator := newMockAllocator()
+		meta, err := newMemoryMeta(mockAllocator)
+		assert.Nil(t, err)
+
+		schema := newTestSchema()
+		collID, err := mockAllocator.allocID()
+		assert.Nil(t, err)
+		meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
+		segmentManager := newSegmentManager(meta, mockAllocator)
+		allocations, err := segmentManager.AllocSegment(context.TODO(), collID, 0, "c1", 2)
+		assert.Nil(t, err)
+		assert.EqualValues(t, 1, len(allocations))
+
+		ids, err := segmentManager.SealAllSegments(context.TODO(), collID)
+		assert.Nil(t, err)
+		assert.EqualValues(t, 1, len(ids))
+		assert.EqualValues(t, allocations[0].SegmentID, ids[0])
+
+		ids, err = segmentManager.GetFlushableSegments(context.TODO(), "c1", allocations[0].ExpireTime)
+		assert.Nil(t, err)
+		assert.EqualValues(t, 1, len(ids))
+		assert.EqualValues(t, allocations[0].SegmentID, ids[0])
+
+		meta.SetLastFlushTime(allocations[0].SegmentID, time.Now())
+		ids, err = segmentManager.GetFlushableSegments(context.TODO(), "c1", allocations[0].ExpireTime)
+		assert.Nil(t, err)
+		assert.Empty(t, ids)
+
+		meta.SetLastFlushTime(allocations[0].SegmentID, time.Now().Local().Add(-flushInterval))
+		ids, err = segmentManager.GetFlushableSegments(context.TODO(), "c1", allocations[0].ExpireTime)
+		assert.Nil(t, err)
+		assert.EqualValues(t, 1, len(ids))
+		assert.EqualValues(t, allocations[0].SegmentID, ids[0])
+	})
 }
