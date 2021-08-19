@@ -12,6 +12,7 @@ package datacoord
 import (
 	"context"
 	"math/rand"
+	"os"
 	"path"
 	"strconv"
 	"testing"
@@ -28,8 +29,9 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
-func init() {
+func TestMain(m *testing.M) {
 	rand.Seed(time.Now().UnixNano())
+	os.Exit(m.Run())
 }
 
 func TestGetSegmentInfoChannel(t *testing.T) {
