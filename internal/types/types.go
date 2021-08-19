@@ -68,6 +68,7 @@ type IndexNode interface {
 	TimeTickProvider
 
 	CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error)
+	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
 type IndexCoord interface {

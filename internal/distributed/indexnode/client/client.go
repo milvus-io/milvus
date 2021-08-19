@@ -160,3 +160,10 @@ func (c *Client) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	})
 	return ret.(*commonpb.Status), err
 }
+
+func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	ret, err := c.recall(func() (interface{}, error) {
+		return c.grpcClient.GetMetrics(ctx, req)
+	})
+	return ret.(*milvuspb.GetMetricsResponse), err
+}

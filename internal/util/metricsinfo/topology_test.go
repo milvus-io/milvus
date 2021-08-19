@@ -38,7 +38,7 @@ func TestConstructComponentName(t *testing.T) {
 	}
 }
 
-func TestQueryCoordTopology_Codec(t *testing.T) {
+func TestQueryClusterTopology_Codec(t *testing.T) {
 	topology1 := QueryClusterTopology{
 		Self: QueryCoordInfos{
 			BaseComponentInfos: BaseComponentInfos{
@@ -60,7 +60,7 @@ func TestQueryCoordTopology_Codec(t *testing.T) {
 	}
 	s, err := MarshalTopology(topology1)
 	assert.Equal(t, nil, err)
-	log.Info("TestQueryCoordTopology_Codec",
+	log.Info("TestQueryClusterTopology_Codec",
 		zap.String("marshaled_result", s))
 	var topology2 QueryClusterTopology
 	err = UnmarshalTopology(s, &topology2)
@@ -69,6 +69,134 @@ func TestQueryCoordTopology_Codec(t *testing.T) {
 	assert.Equal(t, len(topology1.ConnectedNodes), len(topology2.ConnectedNodes))
 	for i := range topology1.ConnectedNodes {
 		assert.Equal(t, topology1.ConnectedNodes[i], topology2.ConnectedNodes[i])
+	}
+}
+
+func TestQueryCoordTopology_Codec(t *testing.T) {
+	topology1 := QueryCoordTopology{
+		Cluster: QueryClusterTopology{
+			Self: QueryCoordInfos{
+				BaseComponentInfos: BaseComponentInfos{
+					Name: ConstructComponentName(typeutil.QueryCoordRole, 1),
+				},
+			},
+			ConnectedNodes: []QueryNodeInfos{
+				{
+					BaseComponentInfos: BaseComponentInfos{
+						Name: ConstructComponentName(typeutil.QueryNodeRole, 1),
+					},
+				},
+				{
+					BaseComponentInfos: BaseComponentInfos{
+						Name: ConstructComponentName(typeutil.QueryNodeRole, 2),
+					},
+				},
+			},
+		},
+		Connections: ConnTopology{
+			Name: ConstructComponentName(typeutil.QueryCoordRole, 1),
+			ConnectedComponents: []string{
+				ConstructComponentName(typeutil.RootCoordRole, 1),
+			},
+		},
+	}
+	s, err := MarshalTopology(topology1)
+	assert.Equal(t, nil, err)
+	log.Info("TestQueryCoordTopology_Codec",
+		zap.String("marshaled_result", s))
+	var topology2 QueryCoordTopology
+	err = UnmarshalTopology(s, &topology2)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, topology1.Cluster.Self, topology2.Cluster.Self)
+	assert.Equal(t, len(topology1.Cluster.ConnectedNodes), len(topology2.Cluster.ConnectedNodes))
+	for i := range topology1.Cluster.ConnectedNodes {
+		assert.Equal(t, topology1.Cluster.ConnectedNodes[i], topology2.Cluster.ConnectedNodes[i])
+	}
+	assert.Equal(t, topology1.Connections.Name, topology2.Connections.Name)
+	assert.Equal(t, len(topology1.Connections.ConnectedComponents), len(topology1.Connections.ConnectedComponents))
+	for i := range topology1.Connections.ConnectedComponents {
+		assert.Equal(t, topology1.Connections.ConnectedComponents[i], topology2.Connections.ConnectedComponents[i])
+	}
+}
+
+func TestIndexClusterTopology_Codec(t *testing.T) {
+	topology1 := IndexClusterTopology{
+		Self: IndexCoordInfos{
+			BaseComponentInfos: BaseComponentInfos{
+				Name: ConstructComponentName(typeutil.IndexCoordRole, 1),
+			},
+		},
+		ConnectedNodes: []IndexNodeInfos{
+			{
+				BaseComponentInfos: BaseComponentInfos{
+					Name: ConstructComponentName(typeutil.IndexNodeRole, 1),
+				},
+			},
+			{
+				BaseComponentInfos: BaseComponentInfos{
+					Name: ConstructComponentName(typeutil.IndexNodeRole, 2),
+				},
+			},
+		},
+	}
+	s, err := MarshalTopology(topology1)
+	assert.Equal(t, nil, err)
+	log.Info("TestIndexClusterTopology_Codec",
+		zap.String("marshaled_result", s))
+	var topology2 IndexClusterTopology
+	err = UnmarshalTopology(s, &topology2)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, topology1.Self, topology2.Self)
+	assert.Equal(t, len(topology1.ConnectedNodes), len(topology2.ConnectedNodes))
+	for i := range topology1.ConnectedNodes {
+		assert.Equal(t, topology1.ConnectedNodes[i], topology2.ConnectedNodes[i])
+	}
+}
+
+func TestIndexCoordTopology_Codec(t *testing.T) {
+	topology1 := IndexCoordTopology{
+		Cluster: IndexClusterTopology{
+			Self: IndexCoordInfos{
+				BaseComponentInfos: BaseComponentInfos{
+					Name: ConstructComponentName(typeutil.IndexCoordRole, 1),
+				},
+			},
+			ConnectedNodes: []IndexNodeInfos{
+				{
+					BaseComponentInfos: BaseComponentInfos{
+						Name: ConstructComponentName(typeutil.IndexNodeRole, 1),
+					},
+				},
+				{
+					BaseComponentInfos: BaseComponentInfos{
+						Name: ConstructComponentName(typeutil.IndexNodeRole, 2),
+					},
+				},
+			},
+		},
+		Connections: ConnTopology{
+			Name: ConstructComponentName(typeutil.IndexCoordRole, 1),
+			ConnectedComponents: []string{
+				ConstructComponentName(typeutil.RootCoordRole, 1),
+			},
+		},
+	}
+	s, err := MarshalTopology(topology1)
+	assert.Equal(t, nil, err)
+	log.Info("TestIndexCoordTopology_Codec",
+		zap.String("marshaled_result", s))
+	var topology2 IndexCoordTopology
+	err = UnmarshalTopology(s, &topology2)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, topology1.Cluster.Self, topology2.Cluster.Self)
+	assert.Equal(t, len(topology1.Cluster.ConnectedNodes), len(topology2.Cluster.ConnectedNodes))
+	for i := range topology1.Cluster.ConnectedNodes {
+		assert.Equal(t, topology1.Cluster.ConnectedNodes[i], topology2.Cluster.ConnectedNodes[i])
+	}
+	assert.Equal(t, topology1.Connections.Name, topology2.Connections.Name)
+	assert.Equal(t, len(topology1.Connections.ConnectedComponents), len(topology1.Connections.ConnectedComponents))
+	for i := range topology1.Connections.ConnectedComponents {
+		assert.Equal(t, topology1.Connections.ConnectedComponents[i], topology2.Connections.ConnectedComponents[i])
 	}
 }
 

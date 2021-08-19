@@ -55,3 +55,15 @@ type ProxyInfos struct {
 	BaseComponentInfos
 	// TODO(dragondriver): add more detail metrics
 }
+
+// IndexNodeInfos implements ComponentInfos
+type IndexNodeInfos struct {
+	BaseComponentInfos
+	// TODO(dragondriver): add more detail metrics
+}
+
+// IndexCoordInfos implements ComponentInfos
+type IndexCoordInfos struct {
+	BaseComponentInfos
+	// TODO(dragondriver): add more detail metrics
+}

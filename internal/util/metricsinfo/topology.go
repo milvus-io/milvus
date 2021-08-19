@@ -63,6 +63,18 @@ type QueryCoordTopology struct {
 	Connections ConnTopology         `json:"connections"`
 }
 
+// IndexClusterTopology shows the topology between IndexCoord and IndexNodes
+type IndexClusterTopology struct {
+	Self           IndexCoordInfos  `json:"self"`
+	ConnectedNodes []IndexNodeInfos `json:"connected_nodes"`
+}
+
+// IndexCoordTopology shows the whole metrics of index cluster
+type IndexCoordTopology struct {
+	Cluster     IndexClusterTopology `json:"cluster"`
+	Connections ConnTopology         `json:"connections"`
+}
+
 type ConnectionType string
 
 const (

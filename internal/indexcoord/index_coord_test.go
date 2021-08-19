@@ -17,6 +17,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
+
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
@@ -60,6 +70,66 @@ func (in *indexNodeMock) CreateIndex(ctx context.Context, req *indexpb.CreateInd
 	time.Sleep(10 * time.Second)
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
+func getSystemInfoMetricsByIndexNodeMock(
+	ctx context.Context,
+	req *milvuspb.GetMetricsRequest,
+	in *indexNodeMock,
+) (*milvuspb.GetMetricsResponse, error) {
+
+	id := UniqueID(16384)
+
+	nodeInfos := metricsinfo.IndexNodeInfos{
+		BaseComponentInfos: metricsinfo.BaseComponentInfos{
+			Name: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, id),
+		},
+	}
+	resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
+	if err != nil {
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+			Response:      "",
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, id),
+		}, nil
+	}
+
+	return &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		Response:      resp,
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, id),
+	}, nil
+}
+
+func (in *indexNodeMock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	metricType, err := metricsinfo.ParseMetricType(req.Request)
+	if err != nil {
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+			Response: "",
+		}, nil
+	}
+
+	if metricType == metricsinfo.SystemInfoMetrics {
+		return getSystemInfoMetricsByIndexNodeMock(ctx, req, in)
+	}
+
+	return &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    metricsinfo.MsgUnimplementedMetric,
+		},
+		Response: "",
 	}, nil
 }
 
@@ -139,6 +209,16 @@ func TestIndexCoord(t *testing.T) {
 		resp, err := ic.DropIndex(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("GetMetrics, system info", func(t *testing.T) {
+		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+		assert.Nil(t, err)
+		resp, err := ic.GetMetrics(ctx, req)
+		assert.Nil(t, err)
+		log.Info("GetMetrics, system info",
+			zap.String("name", resp.ComponentName),
+			zap.String("resp", resp.Response))
 	})
 
 	time.Sleep(11 * time.Second)

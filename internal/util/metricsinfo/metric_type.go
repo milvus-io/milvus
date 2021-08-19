@@ -14,6 +14,8 @@ package metricsinfo
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
 const (
@@ -21,6 +23,7 @@ const (
 	SystemInfoMetrics = "system_info"
 )
 
+// ParseMetricType returns the metric type of req
 func ParseMetricType(req string) (string, error) {
 	m := make(map[string]interface{})
 	err := json.Unmarshal([]byte(req), &m)
@@ -32,4 +35,18 @@ func ParseMetricType(req string) (string, error) {
 		return "", fmt.Errorf("%s not found in request", MetricTypeKey)
 	}
 	return metricType.(string), nil
+}
+
+// ConstructRequestByMetricType constructs a request according to the metric type
+func ConstructRequestByMetricType(metricType string) (*milvuspb.GetMetricsRequest, error) {
+	m := make(map[string]interface{})
+	m[MetricTypeKey] = metricType
+	binary, err := json.Marshal(m)
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct request by metric type %s: %s", metricType, err.Error())
+	}
+	return &milvuspb.GetMetricsRequest{
+		Base:    nil,
+		Request: string(binary),
+	}, nil
 }

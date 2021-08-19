@@ -184,6 +184,10 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	return s.indexnode.CreateIndex(ctx, req)
 }
 
+func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	return s.indexnode.GetMetrics(ctx, request)
+}
+
 func NewServer(ctx context.Context) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	node, err := indexnode.NewIndexNode(ctx1)

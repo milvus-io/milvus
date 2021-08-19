@@ -21,6 +21,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"github.com/milvus-io/milvus/internal/util/trace"
 
 	"github.com/coreos/etcd/mvcc/mvccpb"
@@ -231,6 +233,11 @@ func (i *IndexCoord) UpdateStateCode(code internalpb.StateCode) {
 	i.stateCode.Store(code)
 }
 
+func (i *IndexCoord) isHealthy() bool {
+	code := i.stateCode.Load().(internalpb.StateCode)
+	return code == internalpb.StateCode_Healthy
+}
+
 func (i *IndexCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	log.Debug("get IndexCoord component states ...")
 	stateInfo := &internalpb.ComponentInfo{
@@ -430,6 +437,72 @@ func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetInde
 	log.Debug("IndexCoord GetIndexFilePaths ", zap.Any("FilePaths", ret.FilePaths))
 
 	return ret, nil
+}
+
+func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	log.Debug("IndexCoord.GetMetrics",
+		zap.Int64("node_id", i.ID),
+		zap.String("req", req.Request))
+
+	if !i.isHealthy() {
+		log.Warn("IndexCoord.GetMetrics failed",
+			zap.Int64("node_id", i.ID),
+			zap.String("req", req.Request),
+			zap.Error(errIndexCoordIsUnhealthy(i.ID)))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    msgIndexCoordIsUnhealthy(i.ID),
+			},
+			Response: "",
+		}, nil
+	}
+
+	metricType, err := metricsinfo.ParseMetricType(req.Request)
+	if err != nil {
+		log.Warn("IndexCoord.GetMetrics failed to parse metric type",
+			zap.Int64("node_id", i.ID),
+			zap.String("req", req.Request),
+			zap.Error(err))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+			Response: "",
+		}, nil
+	}
+
+	log.Debug("IndexCoord.GetMetrics",
+		zap.String("metric_type", metricType))
+
+	if metricType == metricsinfo.SystemInfoMetrics {
+		metrics, err := getSystemInfoMetrics(ctx, req, i)
+
+		log.Debug("IndexCoord.GetMetrics",
+			zap.Int64("node_id", i.ID),
+			zap.String("req", req.Request),
+			zap.String("metric_type", metricType),
+			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
+			zap.Error(err))
+
+		return metrics, err
+	}
+
+	log.Debug("IndexCoord.GetMetrics failed, request metric type is not implemented yet",
+		zap.Int64("node_id", i.ID),
+		zap.String("req", req.Request),
+		zap.String("metric_type", metricType))
+
+	return &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    metricsinfo.MsgUnimplementedMetric,
+		},
+		Response: "",
+	}, nil
 }
 
 func (i *IndexCoord) tsLoop() {
