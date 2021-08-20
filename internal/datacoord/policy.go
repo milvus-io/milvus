@@ -21,12 +21,6 @@ import (
 	"go.uber.org/zap"
 )
 
-type clusterDeltaChange struct {
-	newNodes []string
-	offlines []string
-	restarts []string
-}
-
 // data node register func, simple func wrapping policy
 type dataNodeRegisterPolicy func(cluster []*NodeInfo, session *NodeInfo, buffer []*datapb.ChannelStatus) ([]*NodeInfo, []*datapb.ChannelStatus)
 
