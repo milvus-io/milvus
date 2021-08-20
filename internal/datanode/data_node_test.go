@@ -340,6 +340,7 @@ func TestWatchChannel(t *testing.T) {
 		c := make(chan struct{})
 		go func() {
 			ec := kv.WatchWithPrefix(fmt.Sprintf("channel/%d", node.NodeID))
+			c <- struct{}{}
 			cnt := 0
 			for {
 				evt := <-ec
@@ -354,6 +355,8 @@ func TestWatchChannel(t *testing.T) {
 			}
 			c <- struct{}{}
 		}()
+		// wait for check goroutine start Watch
+		<-c
 
 		vchan := &datapb.VchannelInfo{
 			CollectionID:      1,
@@ -369,6 +372,7 @@ func TestWatchChannel(t *testing.T) {
 		err = kv.Save(path, string(val))
 		assert.Nil(t, err)
 
+		// wait for check goroutine received 2 events
 		<-c
 		node.chanMut.RLock()
 		_, has := node.vchan2SyncService[ch]
