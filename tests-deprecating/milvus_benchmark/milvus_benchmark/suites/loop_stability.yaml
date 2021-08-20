@@ -1,0 +1,17 @@
+loop_stability:
+  collections:
+    - 
+      server:
+        suffix_path: true 
+        db_config.primary_path: /test/milvus/db_data_11/loop_stability
+        engine_config.use_blas_threshold: 1100
+        engine_config.gpu_search_threshold: 10
+        gpu_resource_config.enable: true 
+        gpu_resource_config.cache_capacity: 2GB
+        gpu_resource_config.search_resources:
+          - gpu0
+        gpu_resource_config.build_index_resources:
+          - gpu0
+        wal_enable: true
+      pull_interval: 20
+      collection_num: 4

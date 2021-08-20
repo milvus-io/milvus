@@ -11,7 +11,7 @@
 
 FROM python:3.6.8-jessie
 
-COPY ./tests/python_test/requirements.txt /requirements.txt
+COPY ./tests/python_client/requirements.txt /requirements.txt
 
 RUN python3 -m pip install --no-cache-dir -r /requirements.txt
 

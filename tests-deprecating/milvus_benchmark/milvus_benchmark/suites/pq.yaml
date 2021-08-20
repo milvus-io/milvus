@@ -1,0 +1,27 @@
+ann_accuracy:
+  collections:
+
+    -
+      server:
+        cache_config.cpu_cache_capacity: 16
+        engine_config.use_blas_threshold: 1100
+        engine_config.gpu_search_threshold: 1
+        gpu_resource_config.enable: false
+        gpu_resource_config.cache_capacity: 4
+        gpu_resource_config.search_resources:
+          - gpu0
+          - gpu1
+        gpu_resource_config.build_index_resources:
+          - gpu0
+          - gpu1
+      source_file: /test/milvus/ann_hdf5/glove-200-angular.hdf5
+      collection_name: glove_200_angular
+      index_file_sizes: [1024]
+      index_types: ['ivf_pq']
+      index_params:
+        nlist: [16384]
+        m: [20]
+      top_ks: [10]
+      nqs: [10000]
+      search_params:
+        nprobe: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
