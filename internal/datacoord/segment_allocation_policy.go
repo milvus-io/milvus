@@ -12,6 +12,7 @@
 package datacoord
 
 import (
+	"errors"
 	"sort"
 	"time"
 
@@ -24,9 +25,16 @@ import (
 type calUpperLimitPolicy func(schema *schemapb.CollectionSchema) (int, error)
 
 func calBySchemaPolicy(schema *schemapb.CollectionSchema) (int, error) {
+	if schema == nil {
+		return -1, errors.New("nil schema")
+	}
 	sizePerRecord, err := typeutil.EstimateSizePerRecord(schema)
 	if err != nil {
 		return -1, err
+	}
+	// check zero value, preventing panicking
+	if sizePerRecord == 0 {
+		return -1, errors.New("zero size record schema found")
 	}
 	threshold := Params.SegmentMaxSize * 1024 * 1024
 	return int(threshold / float64(sizePerRecord)), nil
