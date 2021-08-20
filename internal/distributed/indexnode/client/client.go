@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
@@ -61,10 +62,12 @@ func (c *Client) Init() error {
 }
 
 func (c *Client) connect(retryOptions ...retry.Option) error {
+	ctx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
+	defer cancel()
 	connectGrpcFunc := func() error {
 		opts := trace.GetInterceptorOpts()
 		log.Debug("IndexNodeClient try connect ", zap.String("address", c.addr))
-		conn, err := grpc.DialContext(c.ctx, c.addr,
+		conn, err := grpc.DialContext(ctx, c.addr,
 			grpc.WithInsecure(), grpc.WithBlock(),
 			grpc.WithDefaultCallOptions(
 				grpc.MaxCallRecvMsgSize(Params.ClientMaxRecvSize),
@@ -93,7 +96,7 @@ func (c *Client) connect(retryOptions ...retry.Option) error {
 		return nil
 	}
 
-	err := retry.Do(c.ctx, connectGrpcFunc, retryOptions...)
+	err := retry.Do(ctx, connectGrpcFunc, retryOptions...)
 	if err != nil {
 		log.Debug("IndexNodeClient try connect failed", zap.Error(err))
 		return err
