@@ -1489,7 +1489,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
 					Reason:    err.Error(),
 				},
-			}, nil
+			}, err
 		}
 
 		err = qt.WaitToFinish()
@@ -1499,7 +1499,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
 					Reason:    err.Error(),
 				},
-			}, nil
+			}, err
 		}
 
 		return &milvuspb.QueryResults{

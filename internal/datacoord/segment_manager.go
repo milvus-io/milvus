@@ -29,6 +29,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
+const segmentMaxLifetime = 24 * time.Hour
+
 // Manager manage segment related operations.
 type Manager interface {
 	// AllocSegment allocate rows and record the allocation.
@@ -133,12 +135,11 @@ func defaultAlocatePolicy() AllocatePolicy {
 	return AllocatePolicyV1
 }
 
-func defaultSealPolicy() sealPolicy {
-	return sealPolicyV1
-}
-
-func defaultSegmentSealPolicy() segmentSealPolicy {
-	return getSegmentCapacityPolicy(Params.SegmentSealProportion)
+func defaultSegmentSealPolicy() []segmentSealPolicy {
+	return []segmentSealPolicy{
+		sealByLifetimePolicy(segmentMaxLifetime),
+		getSegmentCapacityPolicy(Params.SegmentSealProportion),
+	}
 }
 
 func defaultFlushPolicy() flushPolicy {
@@ -154,8 +155,8 @@ func newSegmentManager(meta *meta, allocator allocator, opts ...allocOption) *Se
 		segments:            make([]UniqueID, 0),
 		estimatePolicy:      defaultCalUpperLimitPolicy(),
 		allocPolicy:         defaultAlocatePolicy(),
-		segmentSealPolicies: []segmentSealPolicy{defaultSegmentSealPolicy()}, // default only segment size policy
-		channelSealPolicies: []channelSealPolicy{},                           // no default channel seal policy
+		segmentSealPolicies: defaultSegmentSealPolicy(), // default only segment size policy
+		channelSealPolicies: []channelSealPolicy{},      // no default channel seal policy
 		flushPolicy:         defaultFlushPolicy(),
 		allocPool: sync.Pool{
 			New: func() interface{} {

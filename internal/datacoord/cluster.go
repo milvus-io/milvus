@@ -90,7 +90,7 @@ func withAssignPolicy(p channelAssignPolicy) ClusterOption {
 }
 
 func defaultRegisterPolicy() dataNodeRegisterPolicy {
-	return newAssiggBufferRegisterPolicy()
+	return newAssignBufferRegisterPolicy()
 }
 
 func defaultUnregisterPolicy() dataNodeUnregisterPolicy {
@@ -257,7 +257,7 @@ func (c *Cluster) handleEvent(node *NodeInfo) {
 				resp, err := cli.FlushSegments(tCtx, req)
 				cancel()
 				if err = VerifyResponse(resp, err); err != nil {
-					log.Warn("failed to flush segments", zap.String("addr", node.Info.GetAddress()))
+					log.Warn("failed to flush segments", zap.String("addr", node.Info.GetAddress()), zap.Error(err))
 				}
 			default:
 				log.Warn("unknown event type", zap.Any("type", event.Type))

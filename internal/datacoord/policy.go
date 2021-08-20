@@ -21,12 +21,6 @@ import (
 	"go.uber.org/zap"
 )
 
-type clusterDeltaChange struct {
-	newNodes []string
-	offlines []string
-	restarts []string
-}
-
 // data node register func, simple func wrapping policy
 type dataNodeRegisterPolicy func(cluster []*NodeInfo, session *NodeInfo, buffer []*datapb.ChannelStatus) ([]*NodeInfo, []*datapb.ChannelStatus)
 
@@ -45,7 +39,7 @@ func newEmptyRegisterPolicy() dataNodeRegisterPolicy {
 	return emptyRegister
 }
 
-func newAssiggBufferRegisterPolicy() dataNodeRegisterPolicy {
+func newAssignBufferRegisterPolicy() dataNodeRegisterPolicy {
 	return registerAssignWithBuffer
 }
 
@@ -108,33 +102,6 @@ func newEmptyUnregisterPolicy() dataNodeUnregisterPolicy {
 // channelAssignFunc, function shortcut for policy
 type channelAssignPolicy func(cluster []*NodeInfo, channel string, collectionID UniqueID) []*NodeInfo
 
-// deprecated
-// test logic, assign channel to all existing data node, works fine only when there is only one data node!
-var assignAllFunc channelAssignPolicy = func(cluster []*NodeInfo, channel string, collectionID UniqueID) []*NodeInfo {
-	ret := make([]*NodeInfo, 0)
-	for _, node := range cluster {
-		has := false
-		for _, ch := range node.Info.GetChannels() {
-			if ch.Name == channel {
-				has = true
-				break
-			}
-		}
-		if has {
-			continue
-		}
-		c := &datapb.ChannelStatus{
-			Name:         channel,
-			State:        datapb.ChannelWatchState_Uncomplete,
-			CollectionID: collectionID,
-		}
-		n := node.Clone(AddChannels([]*datapb.ChannelStatus{c}))
-		ret = append(ret, n)
-	}
-
-	return ret
-}
-
 // balanced assign channel, select the datanode with least amount of channels to assign
 var balancedAssignFunc channelAssignPolicy = func(cluster []*NodeInfo, channel string, collectionID UniqueID) []*NodeInfo {
 	if len(cluster) == 0 {
@@ -165,10 +132,6 @@ var balancedAssignFunc channelAssignPolicy = func(cluster []*NodeInfo, channel s
 	n := cluster[target].Clone(AddChannels([]*datapb.ChannelStatus{c}))
 	ret = append(ret, n)
 	return ret
-}
-
-func newAssignAllPolicy() channelAssignPolicy {
-	return assignAllFunc
 }
 
 func newBalancedAssignPolicy() channelAssignPolicy {
