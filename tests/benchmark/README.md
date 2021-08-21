@@ -15,6 +15,9 @@ The milvus_benchmark is a non-functional testing tool or service which allows us
    Use `ci/main_jenkinsfile` as the jenkins pipeline file
 -  Using argo： 
    example argo workflow yaml configuration: `ci/argo.yaml`
+
+   The client environment can be found in file `Dockerfile`
+
 -  Local test：
 
    1. set PYTHONPATH:
@@ -29,8 +32,10 @@ The milvus_benchmark is a non-functional testing tool or service which allows us
    3. install requirements:
 
       `pip install -r requirements.txt`
+
+   4. install the Python-SDK for milvus
    
-   4. write test yaml and run with the yaml param:
+   5. write test yaml and run with the yaml param:
    
       `cd milvus-benchmark/ && python main.py --local --host=* --port=19530 --suite=suites/2_insert_data.yaml`
 
@@ -131,6 +136,24 @@ data:
             nlist: 1024
 ```
 
+### How to prepare data
+
+#### Source data
+
+There are several kinds of data types provided in benchmark:
+1. Insert from `local`: random generated vectors
+2. Insert from the file: the other data type such as `sift/deep`, the following list shows where the source data comes from, make sure to convert to `.npy` file format that can be loaded by `numpy`, and update the value of `RAW_DATA_DIR` in `config.py` to your own data path
+
+|  data type   | sift                           | deep  |
+|  ----        |                          ----  | ----  |
+|  url         | http://corpus-texmex.irisa.fr/ | https://github.com/erikbern/ann-benchmarks/
+
+There are also many optional datasets could be used to test milvus, here is the reference: http://big-ann-benchmarks.com/index.html
+
+If the first few characters in the `collection_name` in test suite yaml are matched with the above type, the corresponding data will be created during inserting entities in milvus
+
+Also, you should provide the field value of the source data file path `source_file` if running with `ann_accuracy` runner type, the source datasets could be found from https://github.com/erikbern/ann-benchmarks/, `SIFT/Kosarak/GloVe-200` are the datasets which are frequently used in regression testing for milvus
+
 ## Overview of the benchmark
 
 ### Conponents
@@ -179,6 +202,60 @@ data:
 
    <img src="asserts/uml.jpg" />
 
+## Test report
 
+### Metrics
 
-   
+As the above section mentioned, we will collect the test metrics after test case run finished, here is the main metric field:
+```
+   run_id      : each test suite will generate a run_id
+   mode        : run mode such as local
+   server      : describe server resource and server version
+   hardware    : server host
+   env         : server config
+   status      : run result
+   err_message : error msg when run failed
+   collection  : collection info
+   index       : index type and index params
+   search      : search params
+   run_params  : extra run params
+   metrics     : metric type and metric value
+```
+
+### How to visualize test result
+
+As the metrics uploaded to the db (we use MongoDB currently), we suppose use Redash to visualize test result from https://redash.io/.
+
+For example, in order to find the most suitable insert batch size when preparing data with milvus, a benchmark test suite type named `bp_insert_performance` will run regularly, different `ni_per` in this suite yaml will be executed and the average response time and TPS (Number of rows inserted per second) will be collected.
+
+The query expression:
+```
+{
+    "collection": "doc",
+    "query": {
+        "metrics.type": "bp_insert_performance",
+        "collection.dataset_name": "sift_1m_128_l2",
+        "_type": "case",
+        "server.value.mode": "single"
+    },
+    "fields": {
+        "metrics.value.rps": 1,
+        "datetime": 4,
+        "run_id": 5,
+        "server.value.mode": 6,
+        "collection.ni_per": 7,
+        "metrics.value.ni_time": 8
+    },
+    "sort": [{
+        "name": "run_id",
+        "direction": -1
+    }],
+    "limit": 28
+}
+```
+
+After the execution of the above query is complete, we will get its charts:
+
+ <img src="asserts/dash.png" />
+
+In this chart, we will found there has an improvement from 2.0.0-RC3 to 2.0.0-RC5.
