@@ -55,7 +55,7 @@ func newHistorical(ctx context.Context,
 	factory msgstream.Factory,
 	etcdKV *etcdkv.EtcdKV) *historical {
 	replica := newCollectionReplica(etcdKV)
-	loader := newSegmentLoader(ctx, rootCoord, indexCoord, replica, etcdKV)
+	loader := newSegmentLoader(ctx, rootCoord, indexCoord, replica)
 	ss := newStatsService(ctx, replica, loader.indexLoader.fieldStatsChan, factory)
 
 	return &historical{
