@@ -1512,9 +1512,9 @@ class TestCollectionSearch(TestcaseBase):
         assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(expression="500 <= int64 < 1000",reason="issue:7142")
-    @pytest.mark.parametrize("expression",cf.gen_normal_expressions())
-    def test_search_with_expression(self, dim, expression , _async):
+    @pytest.mark.xfail(expression="500 <= int64 < 1000", reason="issue:7142")
+    @pytest.mark.parametrize("expression", cf.gen_normal_expressions())
+    def test_search_with_expression(self, dim, expression, _async):
         """
         target: test search with different expressions
         method: test search with different expressions
@@ -1523,14 +1523,14 @@ class TestCollectionSearch(TestcaseBase):
         # 1. initialize with data
         nb = 1000
         collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True,
-                                                                      nb, dim=dim,
-                                                                      is_index=True)
+                                                                             nb, dim=dim,
+                                                                             is_index=True)
 
         # filter result with expression in colllection
         _vectors = _vectors[0]
         expression =  expression.replace("&&", "and").replace("||", "or")
         filter_ids = [] 
-        for i,_id in enumerate(insert_ids):
+        for i, _id in enumerate(insert_ids):
             int64 = _vectors.int64[i]
             float = _vectors.float[i]
             if not expression or eval(expression):
@@ -1545,13 +1545,13 @@ class TestCollectionSearch(TestcaseBase):
         log.info("test_search_with_expression: searching with expression: %s" % expression)
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, nb, expression,
-                            _async=_async,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "ids": insert_ids,
-                                         "limit": min(nb,len(filter_ids)),
-                                         "_async": _async})
+                                            default_search_params, nb, expression,
+                                            _async=_async,
+                                            check_task=CheckTasks.check_search_results,
+                                            check_items={"nq": default_nq,
+                                                         "ids": insert_ids,
+                                                         "limit": min(nb, len(filter_ids)),
+                                                         "_async": _async})
         if _async:
             search_res.done()
             search_res = search_res.result()
@@ -1562,8 +1562,8 @@ class TestCollectionSearch(TestcaseBase):
             assert set(ids).issubset(filter_ids_set)                                     
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(expression=f"500 <= {default_float_field_name} <= 1000",reason="issue:7142")
-    @pytest.mark.parametrize("expression",cf.gen_normal_expressions_field(default_float_field_name))
+    @pytest.mark.xfail(expression=f"500 <= {default_float_field_name} <= 1000", reason="issue:7142")
+    @pytest.mark.parametrize("expression", cf.gen_normal_expressions_field(default_float_field_name))
     def test_search_with_expression_auto_id(self, dim, expression, _async):
         """
         target: test search with different expressions
@@ -1573,14 +1573,14 @@ class TestCollectionSearch(TestcaseBase):
         # 1. initialize with data
         nb = 1000
         collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True, nb,
-                                                                      auto_id=True,
-                                                                      dim=dim,
-                                                                      is_index=True)
+                                                                             auto_id=True,
+                                                                             dim=dim,
+                                                                             is_index=True)
         
         
         # filter result with expression in colllection
         _vectors = _vectors[0]
-        expression =  expression.replace("&&", "and").replace("||", "or")
+        expression = expression.replace("&&", "and").replace("||", "or")
         filter_ids = []
         for i, _id in enumerate(insert_ids):
             exec(f"{default_float_field_name} = _vectors.{default_float_field_name}[i]")
@@ -1597,13 +1597,13 @@ class TestCollectionSearch(TestcaseBase):
         log.info("test_search_with_expression: searching with expression: %s" % expression)
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, nb, expression,
-                            _async=_async,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "ids": insert_ids,
-                                         "limit": min(nb,len(filter_ids)),
-                                         "_async": _async})
+                                            default_search_params, nb, expression,
+                                            _async=_async,
+                                            check_task=CheckTasks.check_search_results,
+                                            check_items={"nq": default_nq,
+                                                         "ids": insert_ids,
+                                                         "limit": min(nb, len(filter_ids)),
+                                                         "_async": _async})
         if _async:
             search_res.done()
             search_res = search_res.result()

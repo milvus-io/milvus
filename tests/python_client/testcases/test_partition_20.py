@@ -398,6 +398,7 @@ class TestPartitionOperations(TestcaseBase):
             assert collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="skip for memory issue check")
     def test_partition_maximum_partitions(self):
         """
         target: verify create maximum partitions
