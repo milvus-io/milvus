@@ -5,7 +5,7 @@ Vector index is a time-efficient and space-efficient data structure built on vec
 Since accurate retrieval is usually very time-consuming, most of the vector index types of Milvus use ANNS (Approximate Nearest Neighbors Search). Compared with accurate retrieval, the core idea of ANNS is no longer limited to returning the most accurate result, but only searching for neighbors of the target. ANNS improves retrieval efficiency by sacrificing accuracy within an acceptable range.
 
 ## What can knowhere do
-Knowhere is the vector index module of Milvus. It encapsulates many popular vector index algorithm libraries, such as faiss, hnswlib, NGT, annoy, and provides a set of unified interfaces. In addition, Knowhere also supports heterogeneous computing.
+Knowhere is the vector search execution engine of Milvus. It encapsulates many popular vector index algorithm libraries, such as faiss, hnswlib, NGT, annoy, and provides a set of unified interfaces. In addition, Knowhere also supports heterogeneous computing.
 
 ## Framework
 ![Knowhere framework](graphs/knowhere_framework.png)
