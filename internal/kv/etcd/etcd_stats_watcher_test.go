@@ -20,7 +20,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 func TestEtcdStatsWatcher(t *testing.T) {

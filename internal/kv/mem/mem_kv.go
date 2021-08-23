@@ -42,8 +42,20 @@ func (kv *MemoryKV) Load(key string) (string, error) {
 	kv.RLock()
 	defer kv.RUnlock()
 	item := kv.tree.Get(memoryKVItem{key, ""})
+	// TODO，load unexisted key behavior is weird
 	if item == nil {
 		return "", nil
+	}
+	return item.(memoryKVItem).value, nil
+}
+
+func (kv *MemoryKV) LoadWithDefault(key string, defaultValue string) (string, error) {
+	kv.RLock()
+	defer kv.RUnlock()
+	item := kv.tree.Get(memoryKVItem{key, ""})
+
+	if item == nil {
+		return defaultValue, nil
 	}
 	return item.(memoryKVItem).value, nil
 }

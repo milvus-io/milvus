@@ -19,9 +19,9 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/golang/protobuf/proto"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
