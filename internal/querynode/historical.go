@@ -27,6 +27,8 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 )
 
@@ -91,7 +93,7 @@ func (h *historical) watchGlobalSegmentMeta() {
 			for _, event := range resp.Events {
 				segmentID, err := strconv.ParseInt(filepath.Base(string(event.Kv.Key)), 10, 64)
 				if err != nil {
-					log.Error("watchGlobalSegmentMeta failed", zap.Any("error", err.Error()))
+					log.Warn("watchGlobalSegmentMeta failed", zap.Any("error", err.Error()))
 					continue
 				}
 				switch event.Type {
@@ -102,7 +104,7 @@ func (h *historical) watchGlobalSegmentMeta() {
 					segmentInfo := &querypb.SegmentInfo{}
 					err = proto.UnmarshalText(string(event.Kv.Value), segmentInfo)
 					if err != nil {
-						log.Error("watchGlobalSegmentMeta failed", zap.Any("error", err.Error()))
+						log.Warn("watchGlobalSegmentMeta failed", zap.Any("error", err.Error()))
 						continue
 					}
 					h.addGlobalSegmentInfo(segmentID, segmentInfo)
@@ -177,25 +179,66 @@ func (h *historical) removeGlobalSegmentIDsByPartitionIds(partitionIDs []UniqueI
 	}
 }
 
-func (h *historical) search(searchReqs []*searchRequest,
-	collID UniqueID,
-	partIDs []UniqueID,
-	plan *SearchPlan,
-	searchTs Timestamp) ([]*SearchResult, []*Segment, error) {
+func (h *historical) retrieve(collID UniqueID, partIDs []UniqueID, vcm storage.ChunkManager,
+	plan *RetrievePlan) ([]*segcorepb.RetrieveResults, []UniqueID, error) {
+
+	retrieveResults := make([]*segcorepb.RetrieveResults, 0)
+	retrieveSegmentIDs := make([]UniqueID, 0)
+
+	// get historical partition ids
+	var retrievePartIDs []UniqueID
+	if len(partIDs) == 0 {
+		hisPartIDs, err := h.replica.getPartitionIDs(collID)
+		if err != nil {
+			return retrieveResults, retrieveSegmentIDs, err
+		}
+		retrievePartIDs = hisPartIDs
+	} else {
+		for _, id := range partIDs {
+			_, err := h.replica.getPartitionByID(id)
+			if err == nil {
+				retrievePartIDs = append(retrievePartIDs, id)
+			}
+		}
+	}
+
+	for _, partID := range retrievePartIDs {
+		segIDs, err := h.replica.getSegmentIDs(partID)
+		if err != nil {
+			return retrieveResults, retrieveSegmentIDs, err
+		}
+		for _, segID := range segIDs {
+			seg, err := h.replica.getSegmentByID(segID)
+			if err != nil {
+				return retrieveResults, retrieveSegmentIDs, err
+			}
+			result, err := seg.getEntityByIds(plan)
+			if err != nil {
+				return retrieveResults, retrieveSegmentIDs, err
+			}
+
+			if err = seg.fillVectorFieldsData(collID, vcm, result); err != nil {
+				return retrieveResults, retrieveSegmentIDs, err
+			}
+			retrieveResults = append(retrieveResults, result)
+			retrieveSegmentIDs = append(retrieveSegmentIDs, segID)
+		}
+	}
+	return retrieveResults, retrieveSegmentIDs, nil
+}
+
+func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, plan *SearchPlan,
+	searchTs Timestamp) ([]*SearchResult, []UniqueID, error) {
 
 	searchResults := make([]*SearchResult, 0)
-	segmentResults := make([]*Segment, 0)
+	searchSegmentIDs := make([]UniqueID, 0)
 
 	// get historical partition ids
 	var searchPartIDs []UniqueID
 	if len(partIDs) == 0 {
 		hisPartIDs, err := h.replica.getPartitionIDs(collID)
-		if len(hisPartIDs) == 0 {
-			// no partitions in collection, do empty search
-			return nil, nil, nil
-		}
 		if err != nil {
-			return searchResults, segmentResults, err
+			return searchResults, searchSegmentIDs, err
 		}
 		log.Debug("no partition specified, search all partitions",
 			zap.Any("collectionID", collID),
@@ -223,9 +266,7 @@ func (h *historical) search(searchReqs []*searchRequest,
 	// all partitions have been released
 	if len(searchPartIDs) == 0 && col.getLoadType() == loadTypePartition {
 		return nil, nil, errors.New("partitions have been released , collectionID = " +
-			fmt.Sprintln(collID) +
-			"target partitionIDs = " +
-			fmt.Sprintln(partIDs))
+			fmt.Sprintln(collID) + "target partitionIDs = " + fmt.Sprintln(partIDs))
 	}
 
 	if len(searchPartIDs) == 0 && col.getLoadType() == loadTypeCollection {
@@ -244,24 +285,24 @@ func (h *historical) search(searchReqs []*searchRequest,
 	for _, partID := range searchPartIDs {
 		segIDs, err := h.replica.getSegmentIDs(partID)
 		if err != nil {
-			return searchResults, segmentResults, err
+			return searchResults, searchSegmentIDs, err
 		}
 		for _, segID := range segIDs {
 			seg, err := h.replica.getSegmentByID(segID)
 			if err != nil {
-				return searchResults, segmentResults, err
+				return searchResults, searchSegmentIDs, err
 			}
 			if !seg.getOnService() {
 				continue
 			}
 			searchResult, err := seg.search(plan, searchReqs, []Timestamp{searchTs})
 			if err != nil {
-				return searchResults, segmentResults, err
+				return searchResults, searchSegmentIDs, err
 			}
 			searchResults = append(searchResults, searchResult)
-			segmentResults = append(segmentResults, seg)
+			searchSegmentIDs = append(searchSegmentIDs, seg.segmentID)
 		}
 	}
 
-	return searchResults, segmentResults, nil
+	return searchResults, searchSegmentIDs, nil
 }

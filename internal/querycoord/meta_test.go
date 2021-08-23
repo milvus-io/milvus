@@ -16,15 +16,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.etcd.io/etcd/clientv3"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 )
 
 func TestReplica_Release(t *testing.T) {
-	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 	assert.Nil(t, err)
-	etcdKV := etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
 	meta, err := newMeta(etcdKV)
 	assert.Nil(t, err)
 	err = meta.addCollection(1, nil)

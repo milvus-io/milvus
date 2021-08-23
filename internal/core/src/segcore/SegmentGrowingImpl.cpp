@@ -240,18 +240,6 @@ SegmentGrowingImpl::Delete(int64_t reserved_begin,
     //    return Status::OK();
 }
 
-Status
-SegmentGrowingImpl::Close() {
-    if (this->record_.reserved != this->record_.ack_responder_.GetAck()) {
-        PanicInfo("insert not ready");
-    }
-    if (this->deleted_record_.reserved != this->deleted_record_.ack_responder_.GetAck()) {
-        PanicInfo("delete not ready");
-    }
-    state_ = SegmentState::Closed;
-    return Status::OK();
-}
-
 int64_t
 SegmentGrowingImpl::GetMemoryUsageInBytes() const {
     int64_t total_bytes = 0;
@@ -261,17 +249,6 @@ SegmentGrowingImpl::GetMemoryUsageInBytes() const {
     int64_t del_n = upper_align(deleted_record_.reserved, size_per_chunk);
     total_bytes += del_n * (16 * 2);
     return total_bytes;
-}
-
-Status
-SegmentGrowingImpl::LoadIndexing(const LoadIndexInfo& info) {
-    auto field_offset = schema_->get_offset(FieldId(info.field_id));
-
-    Assert(info.index_params.count("metric_type"));
-    auto metric_type_str = info.index_params.at("metric_type");
-
-    sealed_indexing_record_.append_field_indexing(field_offset, GetMetricType(metric_type_str), info.index);
-    return Status::OK();
 }
 
 SpanBase
@@ -329,35 +306,29 @@ SegmentGrowingImpl::bulk_subscript(FieldOffset field_offset,
             break;
         }
         case DataType::INT8: {
-            bulk_subscript_impl<int8_t>(*vec_ptr, seg_offsets, count, 0, output);
+            bulk_subscript_impl<int8_t>(*vec_ptr, seg_offsets, count, -1, output);
             break;
         }
-
         case DataType::INT16: {
-            bulk_subscript_impl<int16_t>(*vec_ptr, seg_offsets, count, 0, output);
+            bulk_subscript_impl<int16_t>(*vec_ptr, seg_offsets, count, -1, output);
             break;
         }
-
         case DataType::INT32: {
-            bulk_subscript_impl<int32_t>(*vec_ptr, seg_offsets, count, 0, output);
+            bulk_subscript_impl<int32_t>(*vec_ptr, seg_offsets, count, -1, output);
             break;
         }
-
         case DataType::INT64: {
-            bulk_subscript_impl<int64_t>(*vec_ptr, seg_offsets, count, 0, output);
+            bulk_subscript_impl<int64_t>(*vec_ptr, seg_offsets, count, -1, output);
             break;
         }
-
         case DataType::FLOAT: {
-            bulk_subscript_impl<float>(*vec_ptr, seg_offsets, count, 0, output);
+            bulk_subscript_impl<float>(*vec_ptr, seg_offsets, count, -1.0, output);
             break;
         }
-
         case DataType::DOUBLE: {
-            bulk_subscript_impl<double>(*vec_ptr, seg_offsets, count, 0, output);
+            bulk_subscript_impl<double>(*vec_ptr, seg_offsets, count, -1.0, output);
             break;
         }
-
         default: {
             PanicInfo("unsupported type");
         }
@@ -507,8 +478,7 @@ SegmentGrowingImpl::get_active_count(Timestamp ts) const {
 }
 
 void
-SegmentGrowingImpl::mask_with_timestamps(std::deque<boost::dynamic_bitset<>>& bitset_chunks,
-                                         Timestamp timestamp) const {
+SegmentGrowingImpl::mask_with_timestamps(boost::dynamic_bitset<>& bitset_chunk, Timestamp timestamp) const {
     // DO NOTHING
 }
 

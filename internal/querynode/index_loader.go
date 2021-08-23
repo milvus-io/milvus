@@ -26,13 +26,13 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
 type indexParam = map[string]string
@@ -85,7 +85,7 @@ type indexLoader struct {
 //	// sendQueryNodeStats
 //	err := loader.sendQueryNodeStats()
 //	if err != nil {
-//		log.Error(err.Error())
+//		log.Warn(err.Error())
 //		wg.Done()
 //		return
 //	}
@@ -107,7 +107,10 @@ func (loader *indexLoader) loadIndex(segment *Segment, fieldID int64) error {
 		}
 		return nil
 	}
-	err = msgstream.Retry(5, time.Millisecond*200, fn)
+	//TODO retry should be set by config
+	err = retry.Do(context.TODO(), fn, retry.Attempts(10),
+		retry.Sleep(time.Second*1), retry.MaxSleepTime(time.Second*10))
+
 	if err != nil {
 		return err
 	}

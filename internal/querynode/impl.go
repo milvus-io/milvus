@@ -19,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -211,24 +213,28 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		return status, err
 	}
 	log.Debug("watchDmChannelsTask Enqueue done", zap.Any("collectionID", in.CollectionID))
 
-	func() {
+	waitFunc := func() (*commonpb.Status, error) {
 		err = dct.WaitToFinish()
 		if err != nil {
-			log.Error(err.Error())
-			return
+			status := &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			}
+			log.Warn(err.Error())
+			return status, err
 		}
 		log.Debug("watchDmChannelsTask WaitToFinish done", zap.Any("collectionID", in.CollectionID))
-	}()
-
-	status := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}, nil
 	}
-	return status, nil
+
+	return waitFunc()
 }
 
 func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegmentsRequest) (*commonpb.Status, error) {
@@ -256,7 +262,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		return status, err
 	}
 	segmentIDs := make([]UniqueID, 0)
@@ -265,19 +271,23 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 	}
 	log.Debug("loadSegmentsTask Enqueue done", zap.Int64s("segmentIDs", segmentIDs))
 
-	func() {
+	waitFunc := func() (*commonpb.Status, error) {
 		err = dct.WaitToFinish()
 		if err != nil {
-			log.Error(err.Error())
-			return
+			status := &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			}
+			log.Warn(err.Error())
+			return status, err
 		}
 		log.Debug("loadSegmentsTask WaitToFinish done", zap.Int64s("segmentIDs", segmentIDs))
-	}()
-
-	status := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}, nil
 	}
-	return status, nil
+
+	return waitFunc()
 }
 
 func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.ReleaseCollectionRequest) (*commonpb.Status, error) {
@@ -305,7 +315,7 @@ func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.Releas
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		return status, err
 	}
 	log.Debug("releaseCollectionTask Enqueue done", zap.Any("collectionID", in.CollectionID))
@@ -313,7 +323,7 @@ func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.Releas
 	func() {
 		err = dct.WaitToFinish()
 		if err != nil {
-			log.Error(err.Error())
+			log.Warn(err.Error())
 			return
 		}
 		log.Debug("releaseCollectionTask WaitToFinish done", zap.Any("collectionID", in.CollectionID))
@@ -350,7 +360,7 @@ func (node *QueryNode) ReleasePartitions(ctx context.Context, in *queryPb.Releas
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		return status, err
 	}
 	log.Debug("releasePartitionsTask Enqueue done", zap.Any("collectionID", in.CollectionID))
@@ -358,7 +368,7 @@ func (node *QueryNode) ReleasePartitions(ctx context.Context, in *queryPb.Releas
 	func() {
 		err = dct.WaitToFinish()
 		if err != nil {
-			log.Error(err.Error())
+			log.Warn(err.Error())
 			return
 		}
 		log.Debug("releasePartitionsTask WaitToFinish done", zap.Any("collectionID", in.CollectionID))
@@ -469,5 +479,77 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 		Infos: infos,
+	}, nil
+}
+
+func (node *QueryNode) isHealthy() bool {
+	code := node.stateCode.Load().(internalpb.StateCode)
+	return code == internalpb.StateCode_Healthy
+}
+
+// TODO(dragondriver): cache the Metrics and set a retention to the cache
+func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	log.Debug("QueryNode.GetMetrics",
+		zap.Int64("node_id", Params.QueryNodeID),
+		zap.String("req", req.Request))
+
+	if !node.isHealthy() {
+		log.Warn("QueryNode.GetMetrics failed",
+			zap.Int64("node_id", Params.QueryNodeID),
+			zap.String("req", req.Request),
+			zap.Error(errQueryNodeIsUnhealthy(Params.QueryNodeID)))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    msgQueryNodeIsUnhealthy(Params.QueryNodeID),
+			},
+			Response: "",
+		}, nil
+	}
+
+	metricType, err := metricsinfo.ParseMetricType(req.Request)
+	if err != nil {
+		log.Warn("QueryNode.GetMetrics failed to parse metric type",
+			zap.Int64("node_id", Params.QueryNodeID),
+			zap.String("req", req.Request),
+			zap.Error(err))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+			Response: "",
+		}, nil
+	}
+
+	log.Debug("QueryNode.GetMetrics",
+		zap.String("metric_type", metricType))
+
+	if metricType == metricsinfo.SystemInfoMetrics {
+		metrics, err := getSystemInfoMetrics(ctx, req, node)
+
+		log.Debug("QueryNode.GetMetrics",
+			zap.Int64("node_id", Params.QueryNodeID),
+			zap.String("req", req.Request),
+			zap.String("metric_type", metricType),
+			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
+			zap.Error(err))
+
+		return metrics, err
+	}
+
+	log.Debug("QueryNode.GetMetrics failed, request metric type is not implemented yet",
+		zap.Int64("node_id", Params.QueryNodeID),
+		zap.String("req", req.Request),
+		zap.String("metric_type", metricType))
+
+	return &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    metricsinfo.MsgUnimplementedMetric,
+		},
+		Response: "",
 	}, nil
 }

@@ -26,6 +26,9 @@ service QueryCoord {
   rpc CreateQueryChannel(CreateQueryChannelRequest) returns (CreateQueryChannelResponse) {}
   rpc GetPartitionStates(GetPartitionStatesRequest) returns (GetPartitionStatesResponse) {}
   rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
+
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
+  rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
 }
 
 service QueryNode {
@@ -41,28 +44,35 @@ service QueryNode {
   rpc ReleasePartitions(ReleasePartitionsRequest) returns (common.Status) {}
   rpc ReleaseSegments(ReleaseSegmentsRequest) returns (common.Status) {}
   rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
+
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
+  rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
 }
 
 //--------------------query coordinator proto------------------
 message ShowCollectionsRequest {
   common.MsgBase base = 1;
   int64 dbID = 2;
+  repeated int64 collectionIDs = 3;
 }
 
 message ShowCollectionsResponse {
   common.Status status = 1;
   repeated int64 collectionIDs = 2;
+  repeated int64 inMemory_percentages = 3;
 }
 
 message ShowPartitionsRequest {
   common.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
+  repeated int64 partitionIDs = 4;
 }
 
 message ShowPartitionsResponse {
   common.Status status = 1;
   repeated int64 partitionIDs = 2;
+  repeated int64 inMemory_percentages = 3;
 }
 
 message LoadCollectionRequest {
@@ -126,6 +136,7 @@ enum PartitionState {
 message PartitionStates {
   int64 partitionID = 1;
   PartitionState state = 2;
+  int64 inMemory_percentage = 3;
 }
 
 message GetPartitionStatesResponse {
@@ -241,6 +252,11 @@ enum SegmentState {
   sealed = 4;
 }
 
+enum LoadType {
+  LoadPartition = 0;
+  loadCollection = 1;
+}
+
 message DmChannelInfo {
   int64 nodeID_loaded = 1;
   repeated string channelIDs = 2;
@@ -255,10 +271,12 @@ message QueryChannelInfo {
 message CollectionInfo {
   int64 collectionID = 1;
   repeated int64 partitionIDs = 2;
-  repeated DmChannelInfo channel_infos = 3;
-  bool load_collection = 4;
-  schema.CollectionSchema schema = 5;
-  repeated int64 released_partitionIDs = 6;
+  repeated PartitionStates partition_states = 3;
+  repeated DmChannelInfo channel_infos = 4;
+  LoadType load_type = 5;
+  schema.CollectionSchema schema = 6;
+  repeated int64 released_partitionIDs = 7;
+  int64 inMemory_percentage = 8;
 }
 
 message HandoffSegments {

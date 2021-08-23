@@ -72,7 +72,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	flushChan := make(chan *flushMsg, 100)
 	iBNode := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
 
-	dmlFlushedCh := make(chan []*datapb.ID2PathList, 1)
+	dmlFlushedCh := make(chan []*datapb.FieldBinlog, 1)
 
 	flushChan <- &flushMsg{
 		msgID:        1,
@@ -151,15 +151,15 @@ func TestFlushSegment(t *testing.T) {
 		Data: make(map[storage.FieldID]storage.FieldData),
 	}
 	insertData.Data[0] = &storage.Int64FieldData{
-		NumRows: 10,
+		NumRows: []int64{10},
 		Data:    []int64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
 	}
 	insertData.Data[1] = &storage.Int64FieldData{
-		NumRows: 10,
+		NumRows: []int64{10},
 		Data:    []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
 	}
 	insertData.Data[107] = &storage.FloatFieldData{
-		NumRows: 10,
+		NumRows: []int64{10},
 		Data:    make([]float32, 10),
 	}
 	flushMap.Store(segmentID, insertData)
@@ -374,9 +374,9 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 
 			if i == 1 {
 				assert.Equal(t, test.expectedSegID, flushUnit[0].segID)
-				assert.Equal(t, int32(0), iBNode.insertBuffer.size(UniqueID(i+1)))
+				assert.Equal(t, int64(0), iBNode.insertBuffer.size(UniqueID(i+1)))
 			} else {
-				assert.Equal(t, int32(1), iBNode.insertBuffer.size(UniqueID(i+1)))
+				assert.Equal(t, int64(1), iBNode.insertBuffer.size(UniqueID(i+1)))
 			}
 		}
 
@@ -413,7 +413,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		assert.Equal(t, len(iBNode.insertBuffer.insertData), 1)
 		assert.Equal(t, iBNode.insertBuffer.size(3), int32(50+16000))
 
-		dmlFlushedCh := make(chan []*datapb.ID2PathList, 1)
+		dmlFlushedCh := make(chan []*datapb.FieldBinlog, 1)
 
 		flushChan <- &flushMsg{
 			msgID:        3,
@@ -431,8 +431,8 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		flushSeg := <-dmlFlushedCh
 		assert.NotNil(t, flushSeg)
 		assert.Equal(t, len(flushSeg), 1)
-		assert.Equal(t, flushSeg[0].ID, int64(1))
-		assert.NotNil(t, flushSeg[0].Paths)
+		assert.Equal(t, flushSeg[0].FieldID, int64(1))
+		assert.NotNil(t, flushSeg[0].Binlogs)
 		assert.Equal(t, len(iBNode.segmentCheckPoints), 2)
 		assert.Equal(t, iBNode.segmentCheckPoints[2].numRows, int64(100+32000))
 		assert.Equal(t, iBNode.segmentCheckPoints[3].numRows, int64(0))
@@ -465,8 +465,8 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		flushSeg = <-dmlFlushedCh
 		assert.NotNil(t, flushSeg)
 		assert.Equal(t, len(flushSeg), 1)
-		assert.Equal(t, flushSeg[0].ID, int64(3))
-		assert.NotNil(t, flushSeg[0].Paths)
+		assert.Equal(t, flushSeg[0].FieldID, int64(3))
+		assert.NotNil(t, flushSeg[0].Binlogs)
 		assert.Equal(t, len(iBNode.segmentCheckPoints), 1)
 		assert.Equal(t, iBNode.segmentCheckPoints[2].numRows, int64(100+32000))
 		assert.Equal(t, iBNode.segmentCheckPoints[2].pos.Timestamp, Timestamp(234))

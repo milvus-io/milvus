@@ -15,6 +15,8 @@ import (
 	"context"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+
 	grpcindexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/types"
@@ -36,6 +38,20 @@ func NewNodeManager() *NodeManager {
 	}
 }
 
+func (nm *NodeManager) setClient(nodeID UniqueID, client types.IndexNode) {
+	nm.lock.Lock()
+	defer nm.lock.Unlock()
+
+	log.Debug("IndexCoord NodeManager setClient", zap.Int64("nodeID", nodeID))
+	defer log.Debug("IndexNode NodeManager setclient success", zap.Any("nodeID", nodeID))
+	item := &PQItem{
+		key:      nodeID,
+		priority: 0,
+	}
+	nm.nodeClients[nodeID] = client
+	nm.pq.Push(item)
+}
+
 func (nm *NodeManager) RemoveNode(nodeID UniqueID) {
 	nm.lock.Lock()
 	defer nm.lock.Unlock()
@@ -46,9 +62,6 @@ func (nm *NodeManager) RemoveNode(nodeID UniqueID) {
 }
 
 func (nm *NodeManager) AddNode(nodeID UniqueID, address string) error {
-	nm.lock.Lock()
-	defer nm.lock.Unlock()
-
 	log.Debug("IndexCoord addNode", zap.Any("nodeID", nodeID), zap.Any("node address", address))
 	if nm.pq.CheckExist(nodeID) {
 		log.Debug("IndexCoord", zap.Any("Node client already exist with ID:", nodeID))
@@ -57,18 +70,15 @@ func (nm *NodeManager) AddNode(nodeID UniqueID, address string) error {
 
 	nodeClient, err := grpcindexnodeclient.NewClient(context.TODO(), address)
 	if err != nil {
+		log.Error("IndexCoord NodeManager", zap.Any("Add node err", err))
 		return err
 	}
 	err = nodeClient.Init()
 	if err != nil {
+		log.Error("IndexCoord NodeManager", zap.Any("Add node err", err))
 		return err
 	}
-	item := &PQItem{
-		key:      nodeID,
-		priority: 0,
-	}
-	nm.nodeClients[nodeID] = nodeClient
-	nm.pq.Push(item)
+	nm.setClient(nodeID, nodeClient)
 	return nil
 }
 
@@ -85,4 +95,25 @@ func (nm *NodeManager) PeekClient() (UniqueID, types.IndexNode) {
 		return nodeID, nil
 	}
 	return nodeID, client
+}
+
+type indexNodeGetMetricsResponse struct {
+	resp *milvuspb.GetMetricsResponse
+	err  error
+}
+
+func (nm *NodeManager) getMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) []indexNodeGetMetricsResponse {
+	nm.lock.RLock()
+	defer nm.lock.RUnlock()
+
+	ret := make([]indexNodeGetMetricsResponse, 0, len(nm.nodeClients))
+	for _, node := range nm.nodeClients {
+		resp, err := node.GetMetrics(ctx, req)
+		ret = append(ret, indexNodeGetMetricsResponse{
+			resp: resp,
+			err:  err,
+		})
+	}
+
+	return ret
 }

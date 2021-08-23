@@ -28,7 +28,17 @@ VerifyExprVisitor::visit(TermExpr& expr) {
 }
 
 void
-VerifyExprVisitor::visit(RangeExpr& expr) {
+VerifyExprVisitor::visit(UnaryRangeExpr& expr) {
+    // TODO
+}
+
+void
+VerifyExprVisitor::visit(BinaryRangeExpr& expr) {
+    // TODO
+}
+
+void
+VerifyExprVisitor::visit(CompareExpr& expr) {
     // TODO
 }
 

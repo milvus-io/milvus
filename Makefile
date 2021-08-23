@@ -63,7 +63,7 @@ static-check:
 	@GO111MODULE=on ${GOPATH}/bin/golangci-lint cache clean
 	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./internal/...
 	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./cmd/...
-	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./tests/go/...
+#	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./tests/go_client/...
 
 ruleguard:
 ifdef GO_DIFF_FILES
@@ -73,10 +73,10 @@ else
 	@echo "Running $@ check"
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./internal/...
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./cmd/...
-	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./tests/go/...
+#	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./tests/go/...
 endif
 
-verifiers: getdeps cppcheck fmt static-check ruleguard
+verifiers: build-cpp getdeps cppcheck fmt static-check ruleguard
 
 # Builds various components locally.
 binlog:
@@ -111,10 +111,11 @@ build-cpp-with-unittest:
 # Runs the tests.
 unittest: test-cpp test-go
 
-test-go: build-cpp
+test-go: build-cpp-with-unittest
 	@echo "Running go unittests..."
 	@echo "disable go unittest for now, enable it later"
-	@(env bash $(PWD)/scripts/run_go_unittest.sh)
+	@(env bash $(PWD)/scripts/run_go_codecov.sh)
+# 	@(env bash $(PWD)/scripts/run_go_unittest.sh)
 
 test-cpp: build-cpp-with-unittest
 	@echo "Running cpp unittests..."

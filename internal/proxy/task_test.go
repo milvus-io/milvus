@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TODO(dragondriver): add more test cases
+
 func TestGetNumRowsOfScalarField(t *testing.T) {
 	cases := []struct {
 		datas interface{}
@@ -385,4 +387,124 @@ func TestInsertTask_checkRowNums(t *testing.T) {
 	case2.req.FieldsData[7] = newBinaryVectorFieldData("BinaryVector", numRows, dim)
 	err = case2.checkRowNums()
 	assert.Equal(t, nil, err)
+}
+
+func TestTranslateOutputFields(t *testing.T) {
+	const (
+		idFieldName           = "id"
+		tsFieldName           = "timestamp"
+		floatVectorFieldName  = "float_vector"
+		binaryVectorFieldName = "binary_vector"
+	)
+	var outputFields []string
+	var err error
+
+	schema := &schemapb.CollectionSchema{
+		Name:        "TestTranslateOutputFields",
+		Description: "TestTranslateOutputFields",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			{Name: idFieldName, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{Name: tsFieldName, DataType: schemapb.DataType_Int64},
+			{Name: floatVectorFieldName, DataType: schemapb.DataType_FloatVector},
+			{Name: binaryVectorFieldName, DataType: schemapb.DataType_BinaryVector},
+		},
+	}
+
+	outputFields, err = translateOutputFields([]string{}, schema, false)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{idFieldName}, schema, false)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{idFieldName, tsFieldName}, schema, false)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{idFieldName, tsFieldName, floatVectorFieldName}, schema, false)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{"*"}, schema, false)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{" * "}, schema, false)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{"%"}, schema, false)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{floatVectorFieldName, binaryVectorFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{" % "}, schema, false)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{floatVectorFieldName, binaryVectorFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{"*", "%"}, schema, false)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{"*", tsFieldName}, schema, false)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{"*", floatVectorFieldName}, schema, false)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{"%", floatVectorFieldName}, schema, false)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{floatVectorFieldName, binaryVectorFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{"%", idFieldName}, schema, false)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, floatVectorFieldName, binaryVectorFieldName}, outputFields)
+
+	//=========================================================================
+	outputFields, err = translateOutputFields([]string{}, schema, true)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{idFieldName}, schema, true)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{idFieldName, tsFieldName}, schema, true)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{idFieldName, tsFieldName, floatVectorFieldName}, schema, true)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{"*"}, schema, true)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{"%"}, schema, true)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, floatVectorFieldName, binaryVectorFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{"*", "%"}, schema, true)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName, binaryVectorFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{"*", tsFieldName}, schema, true)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{"*", floatVectorFieldName}, schema, true)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, tsFieldName, floatVectorFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{"%", floatVectorFieldName}, schema, true)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, floatVectorFieldName, binaryVectorFieldName}, outputFields)
+
+	outputFields, err = translateOutputFields([]string{"%", idFieldName}, schema, true)
+	assert.Equal(t, nil, err)
+	assert.ElementsMatch(t, []string{idFieldName, floatVectorFieldName, binaryVectorFieldName}, outputFields)
 }

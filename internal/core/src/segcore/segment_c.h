@@ -46,9 +46,6 @@ Search(CSegmentInterface c_segment,
 CProtoResult
 GetEntityByIds(CSegmentInterface c_segment, CRetrievePlan c_plan, uint64_t timestamp);
 
-CStatus
-FillTargetEntry(CSegmentInterface c_segment, CSearchPlan c_plan, CSearchResult result);
-
 int64_t
 GetMemoryUsageInBytes(CSegmentInterface c_segment);
 
@@ -94,16 +91,6 @@ DropFieldData(CSegmentInterface c_segment, int64_t field_id);
 
 CStatus
 DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id);
-
-//////////////////////////////    deprecated interfaces    //////////////////////////////
-CStatus
-UpdateSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_index_info);
-
-int
-Close(CSegmentInterface c_segment);
-
-bool
-IsOpened(CSegmentInterface c_segment);
 
 #ifdef __cplusplus
 }

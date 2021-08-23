@@ -57,6 +57,7 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 }
 
 func (c *Client) Init() error {
+	Params.Init()
 	return c.connect(retry.Attempts(20))
 }
 
@@ -64,13 +65,17 @@ func (c *Client) connect(retryOptions ...retry.Option) error {
 	connectGrpcFunc := func() error {
 		opts := trace.GetInterceptorOpts()
 		log.Debug("QueryNodeClient try connect ", zap.String("address", c.addr))
-		conn, err := grpc.DialContext(c.ctx, c.addr,
-			grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(2*time.Second),
+		ctx, cancel := context.WithTimeout(c.ctx, 15*time.Second)
+		defer cancel()
+		conn, err := grpc.DialContext(ctx, c.addr,
+			grpc.WithInsecure(), grpc.WithBlock(),
+			grpc.WithDefaultCallOptions(
+				grpc.MaxCallRecvMsgSize(Params.ClientMaxRecvSize),
+				grpc.MaxCallSendMsgSize(Params.ClientMaxSendSize)),
 			grpc.WithUnaryInterceptor(
 				grpc_middleware.ChainUnaryClient(
 					grpc_retry.UnaryClientInterceptor(
 						grpc_retry.WithMax(3),
-						grpc_retry.WithPerRetryTimeout(time.Second*10),
 						grpc_retry.WithCodes(codes.Aborted, codes.Unavailable),
 					),
 					grpc_opentracing.UnaryClientInterceptor(opts...),
@@ -78,7 +83,6 @@ func (c *Client) connect(retryOptions ...retry.Option) error {
 			grpc.WithStreamInterceptor(
 				grpc_middleware.ChainStreamClient(
 					grpc_retry.StreamClientInterceptor(grpc_retry.WithMax(3),
-						grpc_retry.WithPerRetryTimeout(time.Second*10),
 						grpc_retry.WithCodes(codes.Aborted, codes.Unavailable),
 					),
 					grpc_opentracing.StreamClientInterceptor(opts...),
@@ -206,4 +210,11 @@ func (c *Client) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 		return c.grpcClient.GetSegmentInfo(ctx, req)
 	})
 	return ret.(*querypb.GetSegmentInfoResponse), err
+}
+
+func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	ret, err := c.recall(func() (interface{}, error) {
+		return c.grpcClient.GetMetrics(ctx, req)
+	})
+	return ret.(*milvuspb.GetMetricsResponse), err
 }

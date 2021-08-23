@@ -3,13 +3,10 @@ version: '3.5'
 services:
   etcd:
     container_name: milvus-etcd
-    image: quay.io/coreos/etcd:latest
-    command: etcd -listen-peer-urls=http://127.0.0.1:2380 -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379,http://0.0.0.0:4001 -initial-advertise-peer-urls=http://127.0.0.1:2380 --listen-metrics-urls=http://127.0.0.1:2381 --initial-cluster default=http://127.0.0.1:2380
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--tries=1", "--spider", "http://localhost:2381/health"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
+    image: quay.io/coreos/etcd:v3.5.0
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/etcd:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
 
   minio:
     container_name: milvus-minio
@@ -17,6 +14,8 @@ services:
     environment:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/minio:/minio_data
     command: minio server /minio_data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
@@ -26,11 +25,13 @@ services:
 
   standalone:
     container_name: milvus-standalone
-    image: milvusdb/milvus:v2.0.0-rc2-20210712-a8e5fd2
+    image: milvusdb/milvus:v2.0.0-rc4-20210811-bdb8396
     command: ["milvus", "run", "standalone"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/milvus:/var/lib/milvus
     ports:
       - "19530:19530"
     depends_on:

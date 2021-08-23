@@ -11,11 +11,12 @@ package datacoord
 
 import (
 	"context"
-	"math"
 	"testing"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -32,27 +33,15 @@ func TestAllocSegment(t *testing.T) {
 	collID, err := mockAllocator.allocID()
 	assert.Nil(t, err)
 	meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
-	cases := []struct {
-		collectionID UniqueID
-		partitionID  UniqueID
-		channelName  string
-		requestRows  int64
-		expectResult bool
-	}{
-		{collID, 100, "c1", 100, true},
-		{collID, 100, "c1", math.MaxInt64, false},
-	}
-	for _, c := range cases {
-		id, count, expireTime, err := segmentManager.AllocSegment(ctx, c.collectionID, c.partitionID, c.channelName, c.requestRows)
-		if c.expectResult {
-			assert.Nil(t, err)
-			assert.EqualValues(t, c.requestRows, count)
-			assert.NotEqualValues(t, 0, id)
-			assert.NotEqualValues(t, 0, expireTime)
-		} else {
-			assert.NotNil(t, err)
-		}
-	}
+
+	t.Run("normal allocation", func(t *testing.T) {
+		allocations, err := segmentManager.AllocSegment(ctx, collID, 100, "c1", 100)
+		assert.Nil(t, err)
+		assert.EqualValues(t, 1, len(allocations))
+		assert.EqualValues(t, 100, allocations[0].NumOfRows)
+		assert.NotEqualValues(t, 0, allocations[0].SegmentID)
+		assert.NotEqualValues(t, 0, allocations[0].ExpireTime)
+	})
 }
 
 func TestLoadSegmentsFromMeta(t *testing.T) {
@@ -116,13 +105,14 @@ func TestSaveSegmentsToMeta(t *testing.T) {
 	assert.Nil(t, err)
 	meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
 	segmentManager := newSegmentManager(meta, mockAllocator)
-	segID, _, expireTs, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000)
+	allocations, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000)
 	assert.Nil(t, err)
+	assert.EqualValues(t, 1, len(allocations))
 	_, err = segmentManager.SealAllSegments(context.Background(), collID)
 	assert.Nil(t, err)
-	segment := meta.GetSegment(segID)
+	segment := meta.GetSegment(allocations[0].SegmentID)
 	assert.NotNil(t, segment)
-	assert.EqualValues(t, segment.LastExpireTime, expireTs)
+	assert.EqualValues(t, segment.LastExpireTime, allocations[0].ExpireTime)
 	assert.EqualValues(t, commonpb.SegmentState_Sealed, segment.State)
 }
 
@@ -137,12 +127,116 @@ func TestDropSegment(t *testing.T) {
 	assert.Nil(t, err)
 	meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
 	segmentManager := newSegmentManager(meta, mockAllocator)
-	segID, _, _, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000)
+	allocations, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000)
 	assert.Nil(t, err)
+	assert.EqualValues(t, 1, len(allocations))
+	segID := allocations[0].SegmentID
 	segment := meta.GetSegment(segID)
 	assert.NotNil(t, segment)
 
 	segmentManager.DropSegment(context.Background(), segID)
 	segment = meta.GetSegment(segID)
 	assert.NotNil(t, segment)
+}
+
+func TestAllocRowsLargerThanOneSegment(t *testing.T) {
+	Params.Init()
+	mockAllocator := newMockAllocator()
+	meta, err := newMemoryMeta(mockAllocator)
+	assert.Nil(t, err)
+
+	schema := newTestSchema()
+	collID, err := mockAllocator.allocID()
+	assert.Nil(t, err)
+	meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
+
+	var mockPolicy = func(schema *schemapb.CollectionSchema) (int, error) {
+		return 1, nil
+	}
+	segmentManager := newSegmentManager(meta, mockAllocator, withCalUpperLimitPolicy(mockPolicy))
+	allocations, err := segmentManager.AllocSegment(context.TODO(), collID, 0, "c1", 2)
+	assert.Nil(t, err)
+	assert.EqualValues(t, 2, len(allocations))
+	assert.EqualValues(t, 1, allocations[0].NumOfRows)
+	assert.EqualValues(t, 1, allocations[1].NumOfRows)
+}
+
+func TestExpireAllocation(t *testing.T) {
+	Params.Init()
+	mockAllocator := newMockAllocator()
+	meta, err := newMemoryMeta(mockAllocator)
+	assert.Nil(t, err)
+
+	schema := newTestSchema()
+	collID, err := mockAllocator.allocID()
+	assert.Nil(t, err)
+	meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
+
+	var mockPolicy = func(schema *schemapb.CollectionSchema) (int, error) {
+		return 10000000, nil
+	}
+	segmentManager := newSegmentManager(meta, mockAllocator, withCalUpperLimitPolicy(mockPolicy))
+	// alloc 100 times and expire
+	var maxts Timestamp
+	var id int64 = -1
+	for i := 0; i < 100; i++ {
+		allocs, err := segmentManager.AllocSegment(context.TODO(), collID, 0, "ch1", 100)
+		assert.Nil(t, err)
+		assert.EqualValues(t, 1, len(allocs))
+		if id == -1 {
+			id = allocs[0].SegmentID
+		} else {
+			assert.EqualValues(t, id, allocs[0].SegmentID)
+		}
+		if allocs[0].ExpireTime > maxts {
+			maxts = allocs[0].ExpireTime
+		}
+	}
+
+	segment := meta.GetSegment(id)
+	assert.NotNil(t, segment)
+	assert.EqualValues(t, 100, len(segment.allocations))
+	segmentManager.ExpireAllocations("ch1", maxts)
+	segment = meta.GetSegment(id)
+	assert.NotNil(t, segment)
+	assert.EqualValues(t, 0, len(segment.allocations))
+}
+
+func TestGetFlushableSegments(t *testing.T) {
+	t.Run("get flushable segments between small interval", func(t *testing.T) {
+		Params.Init()
+		mockAllocator := newMockAllocator()
+		meta, err := newMemoryMeta(mockAllocator)
+		assert.Nil(t, err)
+
+		schema := newTestSchema()
+		collID, err := mockAllocator.allocID()
+		assert.Nil(t, err)
+		meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
+		segmentManager := newSegmentManager(meta, mockAllocator)
+		allocations, err := segmentManager.AllocSegment(context.TODO(), collID, 0, "c1", 2)
+		assert.Nil(t, err)
+		assert.EqualValues(t, 1, len(allocations))
+
+		ids, err := segmentManager.SealAllSegments(context.TODO(), collID)
+		assert.Nil(t, err)
+		assert.EqualValues(t, 1, len(ids))
+		assert.EqualValues(t, allocations[0].SegmentID, ids[0])
+
+		ids, err = segmentManager.GetFlushableSegments(context.TODO(), "c1", allocations[0].ExpireTime)
+		assert.Nil(t, err)
+		assert.EqualValues(t, 1, len(ids))
+		assert.EqualValues(t, allocations[0].SegmentID, ids[0])
+
+		meta.SetLastFlushTime(allocations[0].SegmentID, time.Now())
+		ids, err = segmentManager.GetFlushableSegments(context.TODO(), "c1", allocations[0].ExpireTime)
+		assert.Nil(t, err)
+		assert.Empty(t, ids)
+
+		meta.SetLastFlushTime(allocations[0].SegmentID, time.Now().Local().Add(-flushInterval))
+		ids, err = segmentManager.GetFlushableSegments(context.TODO(), "c1", allocations[0].ExpireTime)
+		assert.Nil(t, err)
+		assert.EqualValues(t, 1, len(ids))
+		assert.EqualValues(t, allocations[0].SegmentID, ids[0])
+	})
 }

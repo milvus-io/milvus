@@ -7,14 +7,14 @@ on:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
       - 'tests/docker/Dockerfile'
-      - 'tests/python_test/requirements.txt'
+      - 'tests/python_client/requirements.txt'
       - '.github/workflows/publish-test-images.yaml'
       - '!**.md'
   pull_request:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
       - 'tests/docker/Dockerfile'
-      - 'tests/python_test/requirements.txt'
+      - 'tests/python_client/requirements.txt'
       - '.github/workflows/publish-test-images.yaml'
       - '!**.md'
 
@@ -35,13 +35,13 @@ jobs:
         shell: bash
         working-directory: tests/docker
         run: |
-          IMAGE_TAG=latest docker-compose pull --ignore-pull-failures pytest
+          docker-compose pull --ignore-pull-failures pytest
       - name: Docker Build
         shell: bash
         working-directory: tests/docker
         run: |
-          docker-compose pull --ignore-pull-failures pytest
           IMAGE_TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }} docker-compose build pytest
+          export LATEST_IMAGE_TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}
           IMAGE_TAG=latest docker-compose build pytest
       - name: Docker Push
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
@@ -61,6 +61,7 @@ jobs:
         working-directory: tests/docker
         run: |
           sed -i "s#^IMAGE_TAG=.*#IMAGE_TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" .env
+          sed -i "s#^LATEST_IMAGE_TAG=.*#LATEST_IMAGE_TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" .env
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add .env

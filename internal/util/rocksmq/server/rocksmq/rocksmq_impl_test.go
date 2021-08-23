@@ -24,7 +24,6 @@ import (
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/stretchr/testify/assert"
-	"go.etcd.io/etcd/clientv3"
 )
 
 func TestFixChannelName(t *testing.T) {
@@ -34,19 +33,19 @@ func TestFixChannelName(t *testing.T) {
 	assert.Equal(t, len(fixName), FixedChannelNameLen)
 }
 
-func newEtcdClient() (*clientv3.Client, error) {
+func etcdEndpoints() []string {
 	endpoints := os.Getenv("ETCD_ENDPOINTS")
 	if endpoints == "" {
 		endpoints = "localhost:2379"
 	}
 	etcdEndpoints := strings.Split(endpoints, ",")
-	return clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
+	return etcdEndpoints
 }
 
 func TestRocksMQ(t *testing.T) {
-	cli, err := newEtcdClient()
+	ep := etcdEndpoints()
+	etcdKV, err := etcdkv.NewEtcdKV(ep, "/etcd/test/root")
 	assert.Nil(t, err)
-	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
@@ -54,6 +53,9 @@ func TestRocksMQ(t *testing.T) {
 	name := "/tmp/rocksmq"
 	_ = os.RemoveAll(name)
 	defer os.RemoveAll(name)
+	kvName := name + "_meta_kv"
+	_ = os.RemoveAll(kvName)
+	defer os.RemoveAll(kvName)
 	rmq, err := NewRocksMQ(name, idAllocator)
 	assert.Nil(t, err)
 
@@ -94,12 +96,13 @@ func TestRocksMQ(t *testing.T) {
 	assert.Equal(t, len(cMsgs), 2)
 	assert.Equal(t, string(cMsgs[0].Payload), "b_message")
 	assert.Equal(t, string(cMsgs[1].Payload), "c_message")
+	rmq.stopRetention()
 }
 
 func TestRocksMQ_Loop(t *testing.T) {
-	cli, err := newEtcdClient()
+	ep := etcdEndpoints()
+	etcdKV, err := etcdkv.NewEtcdKV(ep, "/etcd/test/root")
 	assert.Nil(t, err)
-	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
@@ -107,6 +110,9 @@ func TestRocksMQ_Loop(t *testing.T) {
 	name := "/tmp/rocksmq_1"
 	_ = os.RemoveAll(name)
 	defer os.RemoveAll(name)
+	kvName := name + "_meta_kv"
+	_ = os.RemoveAll(kvName)
+	defer os.RemoveAll(kvName)
 	rmq, err := NewRocksMQ(name, idAllocator)
 	assert.Nil(t, err)
 
@@ -158,18 +164,22 @@ func TestRocksMQ_Loop(t *testing.T) {
 	cMsgs, err = rmq.Consume(channelName, groupName, 1)
 	assert.Nil(t, err)
 	assert.Equal(t, len(cMsgs), 0)
+	rmq.stopRetention()
 }
 
 func TestRocksMQ_Goroutines(t *testing.T) {
-	cli, err := newEtcdClient()
+	ep := etcdEndpoints()
+	etcdKV, err := etcdkv.NewEtcdKV(ep, "/etcd/test/root")
 	assert.Nil(t, err)
-	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
 	name := "/tmp/rocksmq_2"
 	defer os.RemoveAll(name)
+	kvName := name + "_meta_kv"
+	_ = os.RemoveAll(kvName)
+	defer os.RemoveAll(kvName)
 	rmq, err := NewRocksMQ(name, idAllocator)
 	assert.Nil(t, err)
 
@@ -215,6 +225,7 @@ func TestRocksMQ_Goroutines(t *testing.T) {
 		}(&wg, rmq)
 	}
 	wg.Wait()
+	rmq.stopRetention()
 }
 
 /**
@@ -228,15 +239,18 @@ func TestRocksMQ_Goroutines(t *testing.T) {
 		Consume: 90000 message / s
 */
 func TestRocksMQ_Throughout(t *testing.T) {
-	cli, err := newEtcdClient()
+	ep := etcdEndpoints()
+	etcdKV, err := etcdkv.NewEtcdKV(ep, "/etcd/test/root")
 	assert.Nil(t, err)
-	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
 	name := "/tmp/rocksmq_3"
 	defer os.RemoveAll(name)
+	kvName := name + "_meta_kv"
+	_ = os.RemoveAll(kvName)
+	defer os.RemoveAll(kvName)
 	rmq, err := NewRocksMQ(name, idAllocator)
 	assert.Nil(t, err)
 
@@ -275,18 +289,22 @@ func TestRocksMQ_Throughout(t *testing.T) {
 	ct1 := time.Now().UnixNano() / int64(time.Millisecond)
 	cDuration := ct1 - ct0
 	log.Printf("Total consume %d item, cost %v ms, throughout %v / s", entityNum, cDuration, int64(entityNum)*1000/cDuration)
+	rmq.stopRetention()
 }
 
 func TestRocksMQ_MultiChan(t *testing.T) {
-	cli, err := newEtcdClient()
+	ep := etcdEndpoints()
+	etcdKV, err := etcdkv.NewEtcdKV(ep, "/etcd/test/root")
 	assert.Nil(t, err)
-	etcdKV := etcdkv.NewEtcdKV(cli, "/etcd/test/root")
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
 	name := "/tmp/rocksmq_multichan"
 	defer os.RemoveAll(name)
+	kvName := name + "_meta_kv"
+	_ = os.RemoveAll(kvName)
+	defer os.RemoveAll(kvName)
 	rmq, err := NewRocksMQ(name, idAllocator)
 	assert.Nil(t, err)
 
@@ -320,4 +338,5 @@ func TestRocksMQ_MultiChan(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, len(cMsgs), 1)
 	assert.Equal(t, string(cMsgs[0].Payload), "for_chann1_"+strconv.Itoa(0))
+	rmq.stopRetention()
 }

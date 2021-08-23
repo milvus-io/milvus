@@ -21,6 +21,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
@@ -61,15 +62,52 @@ func (s *streaming) close() {
 	s.replica.freeAll()
 }
 
-func (s *streaming) search(searchReqs []*searchRequest,
-	collID UniqueID,
-	partIDs []UniqueID,
-	vChannel Channel,
-	plan *SearchPlan,
-	searchTs Timestamp) ([]*SearchResult, []*Segment, error) {
+func (s *streaming) retrieve(collID UniqueID, partIDs []UniqueID, plan *RetrievePlan) ([]*segcorepb.RetrieveResults, []UniqueID, error) {
+	retrieveResults := make([]*segcorepb.RetrieveResults, 0)
+	retrieveSegmentIDs := make([]UniqueID, 0)
+
+	var retrievePartIDs []UniqueID
+	if len(partIDs) == 0 {
+		strPartIDs, err := s.replica.getPartitionIDs(collID)
+		if err != nil {
+			return retrieveResults, retrieveSegmentIDs, err
+		}
+		retrievePartIDs = strPartIDs
+	} else {
+		for _, id := range partIDs {
+			_, err := s.replica.getPartitionByID(id)
+			if err == nil {
+				retrievePartIDs = append(retrievePartIDs, id)
+			}
+		}
+	}
+
+	for _, partID := range retrievePartIDs {
+		segIDs, err := s.replica.getSegmentIDs(partID)
+		if err != nil {
+			return retrieveResults, retrieveSegmentIDs, err
+		}
+		for _, segID := range segIDs {
+			seg, err := s.replica.getSegmentByID(segID)
+			if err != nil {
+				return retrieveResults, retrieveSegmentIDs, err
+			}
+			result, err := seg.getEntityByIds(plan)
+			if err != nil {
+				return retrieveResults, retrieveSegmentIDs, err
+			}
+
+			retrieveResults = append(retrieveResults, result)
+			retrieveSegmentIDs = append(retrieveSegmentIDs, segID)
+		}
+	}
+	return retrieveResults, retrieveSegmentIDs, nil
+}
+
+func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, vChannel Channel,
+	plan *SearchPlan, searchTs Timestamp) ([]*SearchResult, error) {
 
 	searchResults := make([]*SearchResult, 0)
-	segmentResults := make([]*Segment, 0)
 
 	// get streaming partition ids
 	var searchPartIDs []UniqueID
@@ -77,10 +115,10 @@ func (s *streaming) search(searchReqs []*searchRequest,
 		strPartIDs, err := s.replica.getPartitionIDs(collID)
 		if len(strPartIDs) == 0 {
 			// no partitions in collection, do empty search
-			return nil, nil, nil
+			return nil, nil
 		}
 		if err != nil {
-			return searchResults, segmentResults, err
+			return searchResults, err
 		}
 		log.Debug("no partition specified, search all partitions",
 			zap.Any("collectionID", collID),
@@ -104,22 +142,20 @@ func (s *streaming) search(searchReqs []*searchRequest,
 
 	col, err := s.replica.getCollectionByID(collID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// all partitions have been released
 	if len(searchPartIDs) == 0 && col.getLoadType() == loadTypePartition {
-		return nil, nil, errors.New("partitions have been released , collectionID = " +
-			fmt.Sprintln(collID) +
-			"target partitionIDs = " +
-			fmt.Sprintln(partIDs))
+		err = errors.New("partitions have been released , collectionID = " + fmt.Sprintln(collID) + "target partitionIDs = " + fmt.Sprintln(partIDs))
+		return nil, err
 	}
 
 	if len(searchPartIDs) == 0 && col.getLoadType() == loadTypeCollection {
 		if err = col.checkReleasedPartitions(partIDs); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		return nil, nil, nil
+		return nil, nil
 	}
 
 	log.Debug("doing search in streaming",
@@ -143,14 +179,14 @@ func (s *streaming) search(searchReqs []*searchRequest,
 			zap.Any("segmentIDs", segIDs),
 		)
 		if err != nil {
-			log.Error(err.Error())
-			return searchResults, segmentResults, err
+			log.Warn(err.Error())
+			return searchResults, err
 		}
 		for _, segID := range segIDs {
 			seg, err := s.replica.getSegmentByID(segID)
 			if err != nil {
-				log.Error(err.Error())
-				return searchResults, segmentResults, err
+				log.Warn(err.Error())
+				return searchResults, err
 			}
 
 			// TSafe less than searchTs means this vChannel is not available
@@ -175,12 +211,11 @@ func (s *streaming) search(searchReqs []*searchRequest,
 
 			searchResult, err := seg.search(plan, searchReqs, []Timestamp{searchTs})
 			if err != nil {
-				return searchResults, segmentResults, err
+				return searchResults, err
 			}
 			searchResults = append(searchResults, searchResult)
-			segmentResults = append(segmentResults, seg)
 		}
 	}
 
-	return searchResults, segmentResults, nil
+	return searchResults, nil
 }

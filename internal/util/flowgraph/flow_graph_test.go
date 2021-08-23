@@ -13,20 +13,25 @@ package flowgraph
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"math"
 	"math/rand"
-	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
-const ctxTimeInMillisecond = 3000
+// Flow graph basic example: count `d = pow(a) + sqrt(a)`
+// nodeA: receive input value a from input channel
+// nodeB: count b = pow(a, 2)
+// nodeC: count c = sqrt(a)
+// nodeD: count d = b + c
 
 type nodeA struct {
 	BaseNode
-	a float64
+	inputChan chan float64
+	a         float64
 }
 
 type nodeB struct {
@@ -41,162 +46,97 @@ type nodeC struct {
 
 type nodeD struct {
 	BaseNode
-	d       float64
-	resChan chan float64
+	d          float64
+	outputChan chan float64
 }
 
-type intMsg struct {
+type numMsg struct {
 	num float64
-	t   Timestamp
 }
 
-func (m *intMsg) TimeTick() Timestamp {
-	return m.t
+func (m *numMsg) TimeTick() Timestamp {
+	return Timestamp(0)
 }
 
-func (m *intMsg) DownStreamNodeIdx() int {
-	return 1
-}
-
-func intMsg2Msg(in []*intMsg) []Msg {
-	out := make([]Msg, 0)
-	for _, msg := range in {
-		var m Msg = msg
-		out = append(out, m)
-	}
-	return out
-}
-
-func msg2IntMsg(in []Msg) []*intMsg {
-	out := make([]*intMsg, 0)
-	for _, msg := range in {
-		out = append(out, msg.(*intMsg))
-	}
-	return out
-}
-
-func (a *nodeA) Name() string {
+func (n *nodeA) Name() string {
 	return "NodeA"
 }
 
-func (a *nodeA) Operate(in []Msg) []Msg {
-	return append(in, in...)
+func (n *nodeA) Operate(in []Msg) []Msg {
+	// ignore `in` because nodeA doesn't have any upstream node.
+	a := <-n.inputChan
+	var res Msg = &numMsg{
+		num: a,
+	}
+	return []Msg{res, res}
 }
 
-func (b *nodeB) Name() string {
+func (n *nodeB) Name() string {
 	return "NodeB"
 }
 
-func (b *nodeB) Operate(in []Msg) []Msg {
-	messages := make([]*intMsg, 0)
-	for _, msg := range msg2IntMsg(in) {
-		messages = append(messages, &intMsg{
-			num: math.Pow(msg.num, 2),
-		})
+func (n *nodeB) Operate(in []Msg) []Msg {
+	if len(in) != 1 {
+		panic("illegal in")
 	}
-	return intMsg2Msg(messages)
+	a, ok := in[0].(*numMsg)
+	if !ok {
+		return []Msg{}
+	}
+	b := math.Pow(a.num, 2)
+	var res Msg = &numMsg{
+		num: b,
+	}
+	return []Msg{res}
 }
 
-func (c *nodeC) Name() string {
+func (n *nodeC) Name() string {
 	return "NodeC"
 }
 
-func (c *nodeC) Operate(in []Msg) []Msg {
-	messages := make([]*intMsg, 0)
-	for _, msg := range msg2IntMsg(in) {
-		messages = append(messages, &intMsg{
-			num: math.Sqrt(msg.num),
-		})
+func (n *nodeC) Operate(in []Msg) []Msg {
+	if len(in) != 1 {
+		panic("illegal in")
 	}
-	return intMsg2Msg(messages)
+	a, ok := in[0].(*numMsg)
+	if !ok {
+		return []Msg{}
+	}
+	c := math.Sqrt(a.num)
+	var res Msg = &numMsg{
+		num: c,
+	}
+	return []Msg{res}
 }
 
-func (d *nodeD) Name() string {
+func (n *nodeD) Name() string {
 	return "NodeD"
 }
 
-func (d *nodeD) Operate(in []Msg) []Msg {
-	messages := make([]*intMsg, 0)
-	outLength := len(in) / 2
-	inMessages := msg2IntMsg(in)
-	for i := 0; i < outLength; i++ {
-		var msg = &intMsg{
-			num: inMessages[i].num + inMessages[i+outLength].num,
-		}
-		messages = append(messages, msg)
+func (n *nodeD) Operate(in []Msg) []Msg {
+	if len(in) != 2 {
+		panic("illegal in")
 	}
-	d.d = messages[0].num
-	d.resChan <- d.d
-	fmt.Println("flow graph result:", d.d)
-	return intMsg2Msg(messages)
-}
-
-func sendMsgFromCmd(ctx context.Context, fg *TimeTickedFlowGraph) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			time.Sleep(time.Millisecond * time.Duration(500))
-			var num = float64(rand.Int() % 100)
-			var msg Msg = &intMsg{num: num}
-			a := nodeA{}
-			fg.nodeCtx[a.Name()].inputChannels[0] <- msg
-			fmt.Println("send number", num, "to node", a.Name())
-			res, ok := receiveResult(ctx, fg)
-			if !ok {
-				return
-			}
-			// assert result
-			expect := math.Pow(num, 2) + math.Sqrt(num)
-			resBits := math.Float64bits(res)
-			expBits := math.Float64bits(expect)
-			var diffBits uint64
-			if resBits >= expBits {
-				diffBits = resBits - expBits
-			} else {
-				diffBits = expBits - resBits
-			}
-			if diffBits > 2 {
-				panic("wrong answer")
-			}
-		}
-	}
-}
-
-func receiveResultFromNodeD(res *float64, fg *TimeTickedFlowGraph, wg *sync.WaitGroup) {
-	d := nodeD{}
-	node := fg.nodeCtx[d.Name()]
-	nd, ok := node.node.(*nodeD)
+	b, ok := in[0].(*numMsg)
 	if !ok {
-		log.Fatal("not nodeD type")
+		return nil
 	}
-	*res = <-nd.resChan
-	wg.Done()
-}
-
-func receiveResult(ctx context.Context, fg *TimeTickedFlowGraph) (float64, bool) {
-	d := nodeD{}
-	node := fg.nodeCtx[d.Name()]
-	nd, ok := node.node.(*nodeD)
+	c, ok := in[1].(*numMsg)
 	if !ok {
-		log.Fatal("not nodeD type")
+		return nil
 	}
-	select {
-	case <-ctx.Done():
-		return 0, false
-	case res := <-nd.resChan:
-		return res, true
-	}
+	d := b.num + c.num
+	n.outputChan <- d
+	// return nil because nodeD doesn't have any downstream node.
+	return nil
 }
 
-func TestTimeTickedFlowGraph_Start(t *testing.T) {
+func createExampleFlowGraph() (*TimeTickedFlowGraph, chan float64, chan float64, context.CancelFunc) {
 	const MaxQueueLength = 1024
-	const MaxParallelism = 1024
 
-	duration := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
-	ctx, cancel := context.WithDeadline(context.Background(), duration)
-	defer cancel()
+	ctx, cancel := context.WithCancel(context.Background())
+	inputChan := make(chan float64, MaxQueueLength)
+	outputChan := make(chan float64, MaxQueueLength)
 
 	fg := NewTimeTickedFlowGraph(ctx)
 
@@ -204,6 +144,7 @@ func TestTimeTickedFlowGraph_Start(t *testing.T) {
 		BaseNode: BaseNode{
 			maxQueueLength: MaxQueueLength,
 		},
+		inputChan: inputChan,
 	}
 	var b Node = &nodeB{
 		BaseNode: BaseNode{
@@ -219,7 +160,7 @@ func TestTimeTickedFlowGraph_Start(t *testing.T) {
 		BaseNode: BaseNode{
 			maxQueueLength: MaxQueueLength,
 		},
-		resChan: make(chan float64),
+		outputChan: outputChan,
 	}
 
 	fg.AddNode(a)
@@ -259,11 +200,26 @@ func TestTimeTickedFlowGraph_Start(t *testing.T) {
 		log.Fatal("set edges failed")
 	}
 
-	// init node A
-	nodeCtxA := fg.nodeCtx[a.Name()]
-	nodeCtxA.inputChannels = []chan Msg{make(chan Msg, 10)}
+	return fg, inputChan, outputChan, cancel
+}
 
+func TestTimeTickedFlowGraph_Example(t *testing.T) {
+	fg, inputChan, outputChan, cancel := createExampleFlowGraph()
+	defer cancel()
 	go fg.Start()
 
-	sendMsgFromCmd(ctx, fg)
+	// input
+	time.Sleep(10 * time.Millisecond)
+	go func() {
+		for i := 0; i < 10; i++ {
+			a := float64(rand.Int())
+			inputChan <- a
+
+			// output check
+			d := <-outputChan
+			res := math.Pow(a, 2) + math.Sqrt(a)
+			assert.Equal(t, d, res)
+		}
+	}()
+	time.Sleep(50 * time.Millisecond)
 }

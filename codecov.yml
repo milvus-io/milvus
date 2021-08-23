@@ -1,0 +1,37 @@
+#Configuration File for CodeCov
+codecov:
+  notify:
+    require_ci_to_pass: yes
+
+coverage:
+  precision: 2
+  round: down
+  range: "70...100"
+
+  status:
+    project:
+      default:
+        threshold: 0% #Allow the coverage to drop by threshold%, and posting a success status.
+        branches:
+          - master
+    patch:
+      default:
+        target: 70%
+        threshold: 0%
+        branches:
+          - master
+        if_ci_failed: error #success, failure, error, ignore
+
+comment:
+  layout: "reach, diff, flags, files"
+  behavior: default
+  require_changes: false
+  branches: # branch names that can post comment
+    - master
+
+ignore:
+  - "LICENSES"
+  - ".git"
+  - "*.yml"
+  - "*.md"
+  - "docs/.*"

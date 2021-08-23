@@ -12,7 +12,12 @@
 package grpcquerycoord
 
 import (
+	"strconv"
 	"sync"
+
+	"github.com/milvus-io/milvus/internal/distributed/grpcconfigs"
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
@@ -24,9 +29,11 @@ type ParamTable struct {
 	paramtable.BaseTable
 	Port int
 
-	IndexCoordAddress string
-	RootCoordAddress  string
-	DataCoordAddress  string
+	RootCoordAddress string
+	DataCoordAddress string
+
+	ServerMaxSendSize int
+	ServerMaxRecvSize int
 }
 
 func (pt *ParamTable) Init() {
@@ -34,8 +41,10 @@ func (pt *ParamTable) Init() {
 		pt.BaseTable.Init()
 		pt.initPort()
 		pt.initRootCoordAddress()
-		pt.initIndexCoordAddress()
 		pt.initDataCoordAddress()
+
+		pt.initServerMaxSendSize()
+		pt.initServerMaxRecvSize()
 	})
 }
 
@@ -45,14 +54,6 @@ func (pt *ParamTable) initRootCoordAddress() {
 		panic(err)
 	}
 	pt.RootCoordAddress = ret
-}
-
-func (pt *ParamTable) initIndexCoordAddress() {
-	ret, err := pt.Load("IndexCoordAddress")
-	if err != nil {
-		panic(err)
-	}
-	pt.IndexCoordAddress = ret
 }
 
 func (pt *ParamTable) initDataCoordAddress() {
@@ -65,4 +66,50 @@ func (pt *ParamTable) initDataCoordAddress() {
 
 func (pt *ParamTable) initPort() {
 	pt.Port = pt.ParseInt("queryCoord.port")
+}
+
+func (pt *ParamTable) initServerMaxSendSize() {
+	var err error
+
+	valueStr, err := pt.Load("queryCoord.grpc.serverMaxSendSize")
+	if err != nil { // not set
+		pt.ServerMaxSendSize = grpcconfigs.DefaultServerMaxSendSize
+	}
+
+	value, err := strconv.Atoi(valueStr)
+	if err != nil { // not in valid format
+		log.Warn("Failed to parse queryCoord.grpc.serverMaxSendSize, set to default",
+			zap.String("queryCoord.grpc.serverMaxSendSize", valueStr),
+			zap.Error(err))
+
+		pt.ServerMaxSendSize = grpcconfigs.DefaultServerMaxSendSize
+	} else {
+		pt.ServerMaxSendSize = value
+	}
+
+	log.Debug("initServerMaxSendSize",
+		zap.Int("queryCoord.grpc.serverMaxSendSize", pt.ServerMaxSendSize))
+}
+
+func (pt *ParamTable) initServerMaxRecvSize() {
+	var err error
+
+	valueStr, err := pt.Load("queryCoord.grpc.serverMaxRecvSize")
+	if err != nil { // not set
+		pt.ServerMaxRecvSize = grpcconfigs.DefaultServerMaxRecvSize
+	}
+
+	value, err := strconv.Atoi(valueStr)
+	if err != nil { // not in valid format
+		log.Warn("Failed to parse queryCoord.grpc.serverMaxRecvSize, set to default",
+			zap.String("queryCoord.grpc.serverMaxRecvSize", valueStr),
+			zap.Error(err))
+
+		pt.ServerMaxRecvSize = grpcconfigs.DefaultServerMaxRecvSize
+	} else {
+		pt.ServerMaxRecvSize = value
+	}
+
+	log.Debug("initServerMaxRecvSize",
+		zap.Int("queryCoord.grpc.serverMaxRecvSize", pt.ServerMaxRecvSize))
 }

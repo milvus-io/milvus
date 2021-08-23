@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -48,6 +49,7 @@ type queryCollection struct {
 	cancel     context.CancelFunc
 
 	collectionID UniqueID
+	collection   *Collection
 	historical   *historical
 	streaming    *streaming
 
@@ -62,6 +64,8 @@ type queryCollection struct {
 
 	queryMsgStream       msgstream.MsgStream
 	queryResultMsgStream msgstream.MsgStream
+
+	vcm storage.ChunkManager
 }
 
 type ResultEntityIds []UniqueID
@@ -71,18 +75,23 @@ func newQueryCollection(releaseCtx context.Context,
 	collectionID UniqueID,
 	historical *historical,
 	streaming *streaming,
-	factory msgstream.Factory) *queryCollection {
+	factory msgstream.Factory,
+	vcm storage.ChunkManager,
+) *queryCollection {
 
 	unsolvedMsg := make([]queryMsg, 0)
 
 	queryStream, _ := factory.NewQueryMsgStream(releaseCtx)
 	queryResultStream, _ := factory.NewQueryMsgStream(releaseCtx)
 
+	collection, _ := streaming.replica.getCollectionByID(collectionID)
+
 	qc := &queryCollection{
 		releaseCtx: releaseCtx,
 		cancel:     cancel,
 
 		collectionID: collectionID,
+		collection:   collection,
 		historical:   historical,
 		streaming:    streaming,
 
@@ -92,6 +101,8 @@ func newQueryCollection(releaseCtx context.Context,
 
 		queryMsgStream:       queryStream,
 		queryResultMsgStream: queryResultStream,
+
+		vcm: vcm,
 	}
 
 	qc.register()
@@ -117,7 +128,7 @@ func (q *queryCollection) close() {
 func (q *queryCollection) register() {
 	collection, err := q.streaming.replica.getCollectionByID(q.collectionID)
 	if err != nil {
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		return
 	}
 
@@ -155,7 +166,7 @@ func (q *queryCollection) waitNewTSafe() Timestamp {
 	// block until any vChannel updating tSafe
 	_, _, recvOK := reflect.Select(q.watcherSelectCase)
 	if !recvOK {
-		log.Error("tSafe has been closed", zap.Any("collectionID", q.collectionID))
+		//log.Warn("tSafe has been closed", zap.Any("collectionID", q.collectionID))
 		return Timestamp(math.MaxInt64)
 	}
 	//log.Debug("wait new tSafe", zap.Any("collectionID", s.collectionID))
@@ -201,23 +212,29 @@ func (q *queryCollection) consumeQuery() {
 		default:
 			msgPack := q.queryMsgStream.Consume()
 			if msgPack == nil || len(msgPack.Msgs) <= 0 {
-				msgPackNil := msgPack == nil
-				msgPackEmpty := true
-				if msgPack != nil {
-					msgPackEmpty = len(msgPack.Msgs) <= 0
-				}
-				log.Debug("consume query message failed", zap.Any("msgPack is Nil", msgPackNil),
-					zap.Any("msgPackEmpty", msgPackEmpty))
+				//msgPackNil := msgPack == nil
+				//msgPackEmpty := true
+				//if msgPack != nil {
+				//	msgPackEmpty = len(msgPack.Msgs) <= 0
+				//}
+				//log.Debug("consume query message failed", zap.Any("msgPack is Nil", msgPackNil),
+				//	zap.Any("msgPackEmpty", msgPackEmpty))
 				continue
 			}
 			for _, msg := range msgPack.Msgs {
 				switch sm := msg.(type) {
 				case *msgstream.SearchMsg:
-					q.receiveQueryMsg(sm)
+					err := q.receiveQueryMsg(sm)
+					if err != nil {
+						log.Warn(err.Error())
+					}
 				case *msgstream.LoadBalanceSegmentsMsg:
 					q.loadBalance(sm)
 				case *msgstream.RetrieveMsg:
-					q.receiveQueryMsg(sm)
+					err := q.receiveQueryMsg(sm)
+					if err != nil {
+						log.Warn(err.Error())
+					}
 				default:
 					log.Warn("unsupported msg type in search channel", zap.Any("msg", sm))
 				}
@@ -236,7 +253,7 @@ func (q *queryCollection) loadBalance(msg *msgstream.LoadBalanceSegmentsMsg) {
 	//	if nodeID == info.SourceNodeID {
 	//		err := s.historical.replica.removeSegment(segmentID)
 	//		if err != nil {
-	//			log.Error("loadBalance failed when remove segment",
+	//			log.Warn("loadBalance failed when remove segment",
 	//				zap.Error(err),
 	//				zap.Any("segmentID", segmentID))
 	//		}
@@ -244,7 +261,7 @@ func (q *queryCollection) loadBalance(msg *msgstream.LoadBalanceSegmentsMsg) {
 	//	if nodeID == info.DstNodeID {
 	//		segment, err := s.historical.replica.getSegmentByID(segmentID)
 	//		if err != nil {
-	//			log.Error("loadBalance failed when making segment on service",
+	//			log.Warn("loadBalance failed when making segment on service",
 	//				zap.Error(err),
 	//				zap.Any("segmentID", segmentID))
 	//			continue // not return, try to load balance all segment
@@ -257,7 +274,7 @@ func (q *queryCollection) loadBalance(msg *msgstream.LoadBalanceSegmentsMsg) {
 	//	zap.Int("num of segment", len(msg.Infos)))
 }
 
-func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
+func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 	msgType := msg.Type()
 	var collectionID UniqueID
 	var msgTypeStr string
@@ -266,29 +283,29 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
 	case commonpb.MsgType_Retrieve:
 		collectionID = msg.(*msgstream.RetrieveMsg).CollectionID
 		msgTypeStr = "retrieve"
-		log.Debug("consume retrieve message",
-			zap.Any("collectionID", collectionID),
-			zap.Int64("msgID", msg.ID()),
-		)
+		//log.Debug("consume retrieve message",
+		//	zap.Any("collectionID", collectionID),
+		//	zap.Int64("msgID", msg.ID()),
+		//)
 	case commonpb.MsgType_Search:
 		collectionID = msg.(*msgstream.SearchMsg).CollectionID
 		msgTypeStr = "search"
-		log.Debug("consume search message",
-			zap.Any("collectionID", collectionID),
-			zap.Int64("msgID", msg.ID()),
-		)
+		//log.Debug("consume search message",
+		//	zap.Any("collectionID", collectionID),
+		//	zap.Int64("msgID", msg.ID()),
+		//)
 	default:
 		err := fmt.Errorf("receive invalid msgType = %d", msgType)
-		log.Error(err.Error())
-		return
+		return err
 	}
 	if collectionID != q.collectionID {
-		log.Error("not target collection query request",
-			zap.Any("collectionID", q.collectionID),
-			zap.Int64("target collectionID", collectionID),
-			zap.Int64("msgID", msg.ID()),
-		)
-		return
+		//log.Warn("not target collection query request",
+		//	zap.Any("collectionID", q.collectionID),
+		//	zap.Int64("target collectionID", collectionID),
+		//	zap.Int64("msgID", msg.ID()),
+		//)
+		err := fmt.Errorf("not target collection query request, collectionID = %d, targetCollectionID = %d, msgID = %d", q.collectionID, collectionID, msg.ID())
+		return err
 	}
 
 	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
@@ -298,38 +315,36 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
 	// check if collection has been released
 	collection, err := q.historical.replica.getCollectionByID(collectionID)
 	if err != nil {
-		log.Error(err.Error())
-		err = q.publishFailedQueryResult(msg, err.Error())
-		if err != nil {
-			log.Error(err.Error())
-		} else {
-			log.Debug("do query failed in receiveQueryMsg, publish failed query result",
-				zap.Int64("collectionID", collectionID),
-				zap.Int64("msgID", msg.ID()),
-				zap.String("msgType", msgTypeStr),
-			)
+		publishErr := q.publishFailedQueryResult(msg, err.Error())
+		if publishErr != nil {
+			finalErr := fmt.Errorf("first err = %s, second err = %s", err, publishErr)
+			return finalErr
 		}
-		return
+		log.Debug("do query failed in receiveQueryMsg, publish failed query result",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64("msgID", msg.ID()),
+			zap.String("msgType", msgTypeStr),
+		)
+		return err
 	}
 	guaranteeTs := msg.GuaranteeTs()
 	if guaranteeTs >= collection.getReleaseTime() {
 		err = fmt.Errorf("retrieve failed, collection has been released, msgID = %d, collectionID = %d", msg.ID(), collectionID)
-		log.Error(err.Error())
-		err = q.publishFailedQueryResult(msg, err.Error())
-		if err != nil {
-			log.Error(err.Error())
-		} else {
-			log.Debug("do query failed in receiveQueryMsg, publish failed query result",
-				zap.Int64("collectionID", collectionID),
-				zap.Int64("msgID", msg.ID()),
-				zap.String("msgType", msgTypeStr),
-			)
+		publishErr := q.publishFailedQueryResult(msg, err.Error())
+		if publishErr != nil {
+			finalErr := fmt.Errorf("first err = %s, second err = %s", err, publishErr)
+			return finalErr
 		}
-		return
+		log.Debug("do query failed in receiveQueryMsg, publish failed query result",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64("msgID", msg.ID()),
+			zap.String("msgType", msgTypeStr),
+		)
+		return err
 	}
 
 	serviceTime := q.getServiceableTime()
-	if guaranteeTs > serviceTime {
+	if guaranteeTs > serviceTime && len(collection.getVChannels()) > 0 {
 		gt, _ := tsoutil.ParseTS(guaranteeTs)
 		st, _ := tsoutil.ParseTS(serviceTime)
 		log.Debug("query node::receiveQueryMsg: add to unsolvedMsg",
@@ -348,7 +363,7 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
 			oplog.Float64("delta seconds", float64(guaranteeTs-serviceTime)/(1000.0*1000.0*1000.0)),
 		)
 		sp.Finish()
-		return
+		return nil
 	}
 	tr.Record("get searchable time done")
 
@@ -363,24 +378,23 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
 	case commonpb.MsgType_Search:
 		err = q.search(msg)
 	default:
-		err := fmt.Errorf("receive invalid msgType = %d", msgType)
-		log.Error(err.Error())
-		return
+		err = fmt.Errorf("receive invalid msgType = %d", msgType)
+		return err
 	}
 	tr.Record("operation done")
 
 	if err != nil {
-		log.Error(err.Error())
-		err = q.publishFailedQueryResult(msg, err.Error())
-		if err != nil {
-			log.Error(err.Error())
-		} else {
-			log.Debug("do query failed in receiveQueryMsg, publish failed query result",
-				zap.Int64("collectionID", collectionID),
-				zap.Int64("msgID", msg.ID()),
-				zap.String("msgType", msgTypeStr),
-			)
+		publishErr := q.publishFailedQueryResult(msg, err.Error())
+		if publishErr != nil {
+			finalErr := fmt.Errorf("first err = %s, second err = %s", err, publishErr)
+			return finalErr
 		}
+		log.Debug("do query failed in receiveQueryMsg, publish failed query result",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64("msgID", msg.ID()),
+			zap.String("msgType", msgTypeStr),
+		)
+		return err
 	}
 	log.Debug("do query done in receiveQueryMsg",
 		zap.Int64("collectionID", collectionID),
@@ -389,6 +403,7 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) {
 	)
 	tr.Elapse("all done")
 	sp.Finish()
+	return nil
 }
 
 func (q *queryCollection) doUnsolvedQueryMsg() {
@@ -401,10 +416,10 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 		default:
 			//time.Sleep(10 * time.Millisecond)
 			serviceTime := q.waitNewTSafe()
-			st, _ := tsoutil.ParseTS(serviceTime)
-			log.Debug("get tSafe from flow graph",
-				zap.Int64("collectionID", q.collectionID),
-				zap.Any("tSafe", st))
+			//st, _ := tsoutil.ParseTS(serviceTime)
+			//log.Debug("get tSafe from flow graph",
+			//	zap.Int64("collectionID", q.collectionID),
+			//	zap.Any("tSafe", st))
 
 			q.setServiceableTime(serviceTime)
 			//log.Debug("query node::doUnsolvedMsg: setServiceableTime", zap.Any("serviceTime", st))
@@ -415,7 +430,7 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 			for _, m := range tempMsg {
 				guaranteeTs := m.GuaranteeTs()
 				gt, _ := tsoutil.ParseTS(guaranteeTs)
-				st, _ = tsoutil.ParseTS(serviceTime)
+				st, _ := tsoutil.ParseTS(serviceTime)
 				log.Debug("get query message from unsolvedMsg",
 					zap.Int64("collectionID", q.collectionID),
 					zap.Int64("msgID", m.ID()),
@@ -457,15 +472,15 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 					err = q.search(m)
 				default:
 					err := fmt.Errorf("receive invalid msgType = %d", msgType)
-					log.Error(err.Error())
+					log.Warn(err.Error())
 					return
 				}
 
 				if err != nil {
-					log.Error(err.Error())
+					log.Warn(err.Error())
 					err = q.publishFailedQueryResult(m, err.Error())
 					if err != nil {
-						log.Error(err.Error())
+						log.Warn(err.Error())
 					} else {
 						log.Debug("do query failed in doUnsolvedMsg, publish failed query result",
 							zap.Int64("collectionID", q.collectionID),
@@ -754,7 +769,7 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 			finalResult.FieldsData = append(finalResult.FieldsData, newCol)
 			blobOffset += blobLen
 		default:
-			return nil, fmt.Errorf("unsupport data type %s", schemapb.DataType_name[int32(fieldMeta.DataType)])
+			return nil, fmt.Errorf("unsupported data type %s", schemapb.DataType_name[int32(fieldMeta.DataType)])
 		}
 	}
 
@@ -771,12 +786,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 	searchTimestamp := searchMsg.BeginTs()
 	travelTimestamp := searchMsg.TravelTimestamp
 
-	collectionID := searchMsg.CollectionID
-	collection, err := q.streaming.replica.getCollectionByID(collectionID)
-	if err != nil {
-		return err
-	}
-	schema, err := typeutil.CreateSchemaHelper(collection.schema)
+	schema, err := typeutil.CreateSchemaHelper(q.collection.schema)
 	if err != nil {
 		return err
 	}
@@ -784,13 +794,13 @@ func (q *queryCollection) search(msg queryMsg) error {
 	var plan *SearchPlan
 	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
 		expr := searchMsg.SerializedExprPlan
-		plan, err = createSearchPlanByExpr(collection, expr)
+		plan, err = createSearchPlanByExpr(q.collection, expr)
 		if err != nil {
 			return err
 		}
 	} else {
 		dsl := searchMsg.Dsl
-		plan, err = createSearchPlan(collection, dsl)
+		plan, err = createSearchPlan(q.collection, dsl)
 		if err != nil {
 			return err
 		}
@@ -828,38 +838,30 @@ func (q *queryCollection) search(msg queryMsg) error {
 	if len(searchMsg.PartitionIDs) > 0 {
 		globalSealedSegments = q.historical.getGlobalSegmentIDsByPartitionIds(searchMsg.PartitionIDs)
 	} else {
-		globalSealedSegments = q.historical.getGlobalSegmentIDsByCollectionID(collectionID)
+		globalSealedSegments = q.historical.getGlobalSegmentIDsByCollectionID(q.collection.id)
 	}
 
 	searchResults := make([]*SearchResult, 0)
-	matchedSegments := make([]*Segment, 0)
-	sealedSegmentSearched := make([]UniqueID, 0)
 
 	// historical search
-	hisSearchResults, hisSegmentResults, err1 := q.historical.search(searchRequests, collectionID, searchMsg.PartitionIDs, plan, travelTimestamp)
+	hisSearchResults, sealedSegmentSearched, err1 := q.historical.search(searchRequests, q.collection.id, searchMsg.PartitionIDs, plan, travelTimestamp)
 	if err1 != nil {
-		log.Error(err1.Error())
+		log.Warn(err1.Error())
 		return err1
 	}
 	searchResults = append(searchResults, hisSearchResults...)
-	matchedSegments = append(matchedSegments, hisSegmentResults...)
-	for _, seg := range hisSegmentResults {
-		sealedSegmentSearched = append(sealedSegmentSearched, seg.segmentID)
-	}
 	tr.Record("historical search done")
 
 	// streaming search
 	var err2 error
-	for _, channel := range collection.getVChannels() {
+	for _, channel := range q.collection.getVChannels() {
 		var strSearchResults []*SearchResult
-		var strSegmentResults []*Segment
-		strSearchResults, strSegmentResults, err2 = q.streaming.search(searchRequests, collectionID, searchMsg.PartitionIDs, channel, plan, travelTimestamp)
+		strSearchResults, err2 = q.streaming.search(searchRequests, q.collection.id, searchMsg.PartitionIDs, channel, plan, travelTimestamp)
 		if err2 != nil {
-			log.Error(err2.Error())
+			log.Warn(err2.Error())
 			return err2
 		}
 		searchResults = append(searchResults, strSearchResults...)
-		matchedSegments = append(matchedSegments, strSegmentResults...)
 	}
 	tr.Record("streaming search done")
 
@@ -908,14 +910,14 @@ func (q *queryCollection) search(msg queryMsg) error {
 					SlicedNumCount:           1,
 					MetricType:               plan.getMetricType(),
 					SealedSegmentIDsSearched: sealedSegmentSearched,
-					ChannelIDsSearched:       collection.getVChannels(),
+					ChannelIDsSearched:       q.collection.getVChannels(),
 					GlobalSealedSegmentIDs:   globalSealedSegments,
 				},
 			}
 			log.Debug("QueryNode Empty SearchResultMsg",
-				zap.Any("collectionID", collection.ID()),
+				zap.Any("collectionID", q.collection.id),
 				zap.Any("msgID", searchMsg.ID()),
-				zap.Any("vChannels", collection.getVChannels()),
+				zap.Any("vChannels", q.collection.getVChannels()),
 				zap.Any("sealedSegmentSearched", sealedSegmentSearched),
 			)
 			err = q.publishQueryResult(searchResultMsg, searchMsg.CollectionID)
@@ -928,38 +930,19 @@ func (q *queryCollection) search(msg queryMsg) error {
 		}
 	}
 
-	inReduced := make([]bool, len(searchResults))
 	numSegment := int64(len(searchResults))
 	var marshaledHits *MarshaledHits = nil
-	if numSegment == 1 {
-		inReduced[0] = true
-		err = fillTargetEntry(plan, searchResults, matchedSegments, inReduced)
-		sp.LogFields(oplog.String("statistical time", "fillTargetEntry end"))
-		if err != nil {
-			return err
-		}
-		marshaledHits, err = reorganizeSingleSearchResult(plan, searchRequests, searchResults[0])
-		sp.LogFields(oplog.String("statistical time", "reorganizeSingleSearchResult end"))
-		if err != nil {
-			return err
-		}
-	} else {
-		err = reduceSearchResults(searchResults, numSegment, inReduced)
-		sp.LogFields(oplog.String("statistical time", "reduceSearchResults end"))
-		if err != nil {
-			return err
-		}
-		err = fillTargetEntry(plan, searchResults, matchedSegments, inReduced)
-		sp.LogFields(oplog.String("statistical time", "fillTargetEntry end"))
-		if err != nil {
-			return err
-		}
-		marshaledHits, err = reorganizeSearchResults(plan, searchRequests, searchResults, numSegment, inReduced)
-		sp.LogFields(oplog.String("statistical time", "reorganizeSearchResults end"))
-		if err != nil {
-			return err
-		}
+	err = reduceSearchResultsAndFillData(plan, searchResults, numSegment)
+	sp.LogFields(oplog.String("statistical time", "reduceSearchResults end"))
+	if err != nil {
+		return err
 	}
+	marshaledHits, err = reorganizeSearchResults(searchResults, numSegment)
+	sp.LogFields(oplog.String("statistical time", "reorganizeSearchResults end"))
+	if err != nil {
+		return err
+	}
+
 	hitsBlob, err := marshaledHits.getHitsBlob()
 	sp.LogFields(oplog.String("statistical time", "getHitsBlob end"))
 	if err != nil {
@@ -1018,14 +1001,14 @@ func (q *queryCollection) search(msg queryMsg) error {
 				SlicedNumCount:           1,
 				MetricType:               plan.getMetricType(),
 				SealedSegmentIDsSearched: sealedSegmentSearched,
-				ChannelIDsSearched:       collection.getVChannels(),
+				ChannelIDsSearched:       q.collection.getVChannels(),
 				GlobalSealedSegmentIDs:   globalSealedSegments,
 			},
 		}
 		log.Debug("QueryNode SearchResultMsg",
-			zap.Any("collectionID", collection.ID()),
+			zap.Any("collectionID", q.collection.id),
 			zap.Any("msgID", searchMsg.ID()),
-			zap.Any("vChannels", collection.getVChannels()),
+			zap.Any("vChannels", q.collection.getVChannels()),
 			zap.Any("sealedSegmentSearched", sealedSegmentSearched),
 		)
 
@@ -1090,73 +1073,30 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("retrieve %d", retrieveMsg.CollectionID))
 
 	var globalSealedSegments []UniqueID
-	var partitionIDsInHistorical []UniqueID
-	var partitionIDsInStreaming []UniqueID
-	partitionIDsInQuery := retrieveMsg.PartitionIDs
-	if len(partitionIDsInQuery) == 0 {
-		globalSealedSegments = q.historical.getGlobalSegmentIDsByCollectionID(collectionID)
-		partitionIDsInHistoricalCol, err1 := q.historical.replica.getPartitionIDs(collectionID)
-		partitionIDsInStreamingCol, err2 := q.streaming.replica.getPartitionIDs(collectionID)
-		if err1 != nil && err2 != nil {
-			return err2
-		}
-		partitionIDsInHistorical = partitionIDsInHistoricalCol
-		partitionIDsInStreaming = partitionIDsInStreamingCol
+	if len(retrieveMsg.PartitionIDs) > 0 {
+		globalSealedSegments = q.historical.getGlobalSegmentIDsByPartitionIds(retrieveMsg.PartitionIDs)
 	} else {
-		globalSealedSegments = q.historical.getGlobalSegmentIDsByPartitionIds(partitionIDsInQuery)
-		for _, id := range partitionIDsInQuery {
-			_, err1 := q.historical.replica.getPartitionByID(id)
-			if err1 == nil {
-				partitionIDsInHistorical = append(partitionIDsInHistorical, id)
-			}
-			_, err2 := q.streaming.replica.getPartitionByID(id)
-			if err2 == nil {
-				partitionIDsInStreaming = append(partitionIDsInStreaming, id)
-			}
-			if err1 != nil && err2 != nil {
-				return err2
-			}
-		}
+		globalSealedSegments = q.historical.getGlobalSegmentIDsByCollectionID(collectionID)
 	}
-	sealedSegmentRetrieved := make([]UniqueID, 0)
+
 	var mergeList []*segcorepb.RetrieveResults
-	for _, partitionID := range partitionIDsInHistorical {
-		segmentIDs, err := q.historical.replica.getSegmentIDs(partitionID)
-		if err != nil {
-			return err
-		}
-		for _, segmentID := range segmentIDs {
-			segment, err := q.historical.replica.getSegmentByID(segmentID)
-			if err != nil {
-				return err
-			}
-			result, err := segment.getEntityByIds(plan)
-			if err != nil {
-				return err
-			}
-			mergeList = append(mergeList, result)
-			sealedSegmentRetrieved = append(sealedSegmentRetrieved, segmentID)
-		}
+
+	// historical retrieve
+	hisRetrieveResults, sealedSegmentRetrieved, err1 := q.historical.retrieve(collectionID, retrieveMsg.PartitionIDs, q.vcm, plan)
+	if err1 != nil {
+		log.Warn(err1.Error())
+		return err1
 	}
+	mergeList = append(mergeList, hisRetrieveResults...)
 	tr.Record("historical retrieve done")
 
-	for _, partitionID := range partitionIDsInStreaming {
-		segmentIDs, err := q.streaming.replica.getSegmentIDs(partitionID)
-		if err != nil {
-			return err
-		}
-		for _, segmentID := range segmentIDs {
-			segment, err := q.streaming.replica.getSegmentByID(segmentID)
-			if err != nil {
-				return err
-			}
-			result, err := segment.getEntityByIds(plan)
-			if err != nil {
-				return err
-			}
-			mergeList = append(mergeList, result)
-		}
+	// streaming retrieve
+	strRetrieveResults, _, err2 := q.streaming.retrieve(collectionID, retrieveMsg.PartitionIDs, plan)
+	if err2 != nil {
+		log.Warn(err2.Error())
+		return err2
 	}
+	mergeList = append(mergeList, strRetrieveResults...)
 	tr.Record("streaming retrieve done")
 
 	result, err := mergeRetrieveResults(mergeList)
@@ -1200,7 +1140,8 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 func mergeRetrieveResults(dataArr []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error) {
 	var final *segcorepb.RetrieveResults
 	for _, data := range dataArr {
-		if data == nil {
+		// skip empty result, it will break merge result
+		if data == nil || len(data.Offset) == 0 {
 			continue
 		}
 

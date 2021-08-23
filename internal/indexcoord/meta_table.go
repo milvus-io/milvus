@@ -124,7 +124,7 @@ func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequ
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 	_, ok := mt.indexBuildID2Meta[indexBuildID]
-	log.Debug("IndexCoord metaTable AddIndex", zap.Any(" index already exist", ok))
+	log.Debug("IndexCoord metaTable AddIndex", zap.Any("indexBuildID", indexBuildID), zap.Any(" index already exist", ok))
 	if ok {
 		return fmt.Errorf("index already exists with ID = %d", indexBuildID)
 	}
@@ -221,7 +221,7 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 	log.Debug("IndexCoord metaTable MarkIndexAsDeleted ", zap.Int64("indexID", indexID))
 
 	for _, meta := range mt.indexBuildID2Meta {
-		if meta.indexMeta.Req.IndexID == indexID {
+		if meta.indexMeta.Req.IndexID == indexID && !meta.indexMeta.MarkDeleted {
 			meta.indexMeta.MarkDeleted = true
 			if err := mt.saveIndexMeta(&meta); err != nil {
 				log.Debug("IndexCoord metaTable MarkIndexAsDeleted saveIndexMeta failed", zap.Error(err))
@@ -351,16 +351,6 @@ func (mt *metaTable) GetUnusedIndexFiles(limit int) []Meta {
 	return metas
 }
 
-func (mt *metaTable) GetIndexMeta(indexBuildID UniqueID) Meta {
-	mt.lock.Lock()
-	defer mt.lock.Unlock()
-
-	meta, ok := mt.indexBuildID2Meta[indexBuildID]
-	log.Debug("IndexCoord metaTable GetIndexMeta", zap.Any("indexBuildID", indexBuildID),
-		zap.Any("exist", ok))
-	return meta
-}
-
 func (mt *metaTable) GetUnassignedTasks(onlineNodeIDs []int64) []Meta {
 	mt.lock.RLock()
 	defer mt.lock.RUnlock()
@@ -468,9 +458,12 @@ func (mt *metaTable) LoadMetaFromETCD(indexBuildID int64, revision int64) bool {
 		if meta.revision >= revision {
 			return false
 		}
+	} else {
+		log.Debug("Index not exist", zap.Int64("IndexBuildID", indexBuildID))
+		return false
 	}
 
-	m, err := mt.reloadMeta(meta.indexMeta.IndexBuildID)
+	m, err := mt.reloadMeta(indexBuildID)
 	if m == nil {
 		log.Debug("IndexCoord metaTable reloadMeta failed", zap.Error(err))
 		return false

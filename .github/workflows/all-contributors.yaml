@@ -11,7 +11,7 @@ on:
     #         │ │ │ │ │
     #         │ │ │ │ │
     #         │ │ │ │ │
-    - cron:  '0 * * * *'
+    - cron:  '* 0 * * *'
 
 jobs:
   contributor:

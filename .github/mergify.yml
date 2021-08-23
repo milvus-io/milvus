@@ -5,6 +5,7 @@ pull_request_rules:
       - "status-success=Code Checker AMD64 Ubuntu 18.04"
       - "status-success=Build and test AMD64 Ubuntu 18.04"
       - "status-success=continuous-integration/jenkins/pr-merge"
+      - "status-success=codecov/patch"
     actions:
       label:
         add:
@@ -13,28 +14,28 @@ pull_request_rules:
   - name: Test passed for tests changed
     conditions:
       - base=master
-      - -files~=^(?!tests\/python_test).+
+      - -files~=^(?!tests\/python_client).+
       - "status-success=continuous-integration/jenkins/pr-merge"
     actions:
       label:
         add:
           - ci-passed
 
-  - name: Test passed for tests20 changed
-    conditions:
-      - base=master
-      - -files~=^(?!tests20\/python_client).+
-      - "status-success=continuous-integration/jenkins/pr-merge"
-    actions:
-      label:
-        add:
-          - ci-passed
+#  - name: Test passed for tests20 changed
+#    conditions:
+#      - base=master
+#      - -files~=^(?!tests20\/python_client).+
+#      - "status-success=continuous-integration/jenkins/pr-merge"
+#    actions:
+#      label:
+#        add:
+#          - ci-passed
 
   - name: Test passed for document changed
     conditions:
       - base=master
       - -files~=^[^\.]+$
-      - -files~=\.(?!md|png)
+      - -files~=\S+\.(?!md$|png$)
     actions:
       label:
         add:
@@ -44,6 +45,16 @@ pull_request_rules:
     conditions:
       - base=master
       - -files~=^(?!\.github\/mergify\.yml).*$
+    actions:
+      label:
+        add:
+          - ci-passed
+
+  - name: Test passed for title skip ci
+    conditions:
+      - base=master
+      - title~=\[skip ci\]
+      - -files~=^internal\/
     actions:
       label:
         add:
@@ -84,4 +95,36 @@ pull_request_rules:
       label:
         remove:
           - ci-passed
+
+  - name: Blocking PR if missing a related issue
+    conditions:
+      - base=master
+      - -body~=\#[0-9]{1,6}(\s+|$)
+      - -title~=\[automated\]
+    actions:
+      label:
+        add:
+          - do-not-merge/missing-related-issue
+      comment:
+        message: |
+          @{{author}} Please associate the related issue to the body of your Pull Request.  (eg. “issue: #6534”)
+
+
+  - name: Dismiss block label if related issue be added into PR
+    conditions:
+      - base=master
+      - body~=\#[0-9]{1,6}(\s+|$)
+    actions:
+      label:
+        remove:
+          - do-not-merge/missing-related-issue
+
+  - name: Dismiss block label if automated create PR
+    conditions:
+      - base=master
+      - title~=\[automated\]
+    actions:
+      label:
+        remove:
+          - do-not-merge/missing-related-issue
 

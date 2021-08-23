@@ -105,6 +105,7 @@ message FieldData {
     ScalarField scalars = 3;
     VectorField vectors = 4;
   }
+  int64 field_id = 5;
 }
 
 message IDs {

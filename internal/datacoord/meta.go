@@ -13,6 +13,7 @@ package datacoord
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -150,45 +151,66 @@ func (m *meta) SetState(segmentID UniqueID, state commonpb.SegmentState) error {
 	return nil
 }
 
-func (m *meta) SaveBinlogAndCheckPoints(segID UniqueID, flushed bool,
-	binlogs map[string]string, checkpoints []*datapb.CheckPoint,
+func (m *meta) UpdateFlushSegmentsInfo(segmentID UniqueID, flushed bool,
+	binlogs []*datapb.FieldBinlog, checkpoints []*datapb.CheckPoint,
 	startPositions []*datapb.SegmentStartPosition) error {
 	m.Lock()
 	defer m.Unlock()
-	kv := make(map[string]string)
-	for k, v := range binlogs {
-		kv[k] = v
-	}
-	if flushed {
-		m.segments.SetState(segID, commonpb.SegmentState_Flushing)
+
+	segment := m.segments.GetSegment(segmentID)
+	if segment == nil {
+		return nil
 	}
 
-	modSegments := make([]UniqueID, 0)
+	kv := make(map[string]string)
+	modSegments := make(map[UniqueID]struct{})
+
+	if flushed {
+		m.segments.SetState(segmentID, commonpb.SegmentState_Flushing)
+		modSegments[segmentID] = struct{}{}
+	}
+
+	currBinlogs := segment.Clone().SegmentInfo.GetBinlogs()
+	var getFieldBinlogs = func(id UniqueID, binlogs []*datapb.FieldBinlog) *datapb.FieldBinlog {
+		for _, binlog := range binlogs {
+			if id == binlog.GetFieldID() {
+				return binlog
+			}
+		}
+		return nil
+	}
+	for _, tBinlogs := range binlogs {
+		fieldBinlogs := getFieldBinlogs(tBinlogs.GetFieldID(), currBinlogs)
+		if fieldBinlogs == nil {
+			currBinlogs = append(currBinlogs, tBinlogs)
+		} else {
+			fieldBinlogs.Binlogs = append(fieldBinlogs.Binlogs, tBinlogs.Binlogs...)
+		}
+	}
+	m.segments.SetBinlogs(segmentID, currBinlogs)
+	modSegments[segmentID] = struct{}{}
+
 	for _, pos := range startPositions {
-		if len(pos.GetStartPosition().GetMsgID()) != 0 {
+		if len(pos.GetStartPosition().GetMsgID()) == 0 {
 			continue
 		}
-		if segment := m.segments.GetSegment(pos.GetSegmentID()); segment != nil {
-			m.segments.SetStartPosition(pos.GetSegmentID(), pos.GetStartPosition())
-			modSegments = append(modSegments, pos.GetSegmentID())
-		}
+		m.segments.SetStartPosition(pos.GetSegmentID(), pos.GetStartPosition())
+		modSegments[segmentID] = struct{}{}
 	}
 
 	for _, cp := range checkpoints {
-		if segment := m.segments.GetSegment(cp.GetSegmentID()); segment != nil {
-			if segment.DmlPosition != nil && segment.DmlPosition.Timestamp >= cp.Position.Timestamp {
-				// segment position in etcd is larger than checkpoint, then dont change it
-				continue
-			}
-			m.segments.SetDmlPositino(cp.GetSegmentID(), cp.GetPosition())
-			m.segments.SetRowCount(cp.GetSegmentID(), cp.GetNumOfRows())
-			modSegments = append(modSegments, segment.GetID())
+		if segment.DmlPosition != nil && segment.DmlPosition.Timestamp >= cp.Position.Timestamp {
+			// segment position in etcd is larger than checkpoint, then dont change it
+			continue
 		}
+		m.segments.SetDmlPosition(cp.GetSegmentID(), cp.GetPosition())
+		m.segments.SetRowCount(cp.GetSegmentID(), cp.GetNumOfRows())
+		modSegments[segmentID] = struct{}{}
 	}
 
-	for _, id := range modSegments {
+	for id := range modSegments {
 		if segment := m.segments.GetSegment(id); segment != nil {
-			segBytes := proto.MarshalTextString(segment)
+			segBytes := proto.MarshalTextString(segment.SegmentInfo)
 			key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
 			kv[key] = segBytes
 		}
@@ -299,6 +321,12 @@ func (m *meta) SetCurrentRows(segmentID UniqueID, rows int64) {
 	m.Lock()
 	defer m.Unlock()
 	m.segments.SetCurrentRows(segmentID, rows)
+}
+
+func (m *meta) SetLastFlushTime(segmentID UniqueID, t time.Time) {
+	m.Lock()
+	defer m.Unlock()
+	m.segments.SetFlushTime(segmentID, t)
 }
 
 func (m *meta) saveSegmentInfo(segment *SegmentInfo) error {

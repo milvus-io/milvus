@@ -21,12 +21,6 @@ import (
 	"go.uber.org/zap"
 )
 
-type clusterDeltaChange struct {
-	newNodes []string
-	offlines []string
-	restarts []string
-}
-
 // data node register func, simple func wrapping policy
 type dataNodeRegisterPolicy func(cluster []*NodeInfo, session *NodeInfo, buffer []*datapb.ChannelStatus) ([]*NodeInfo, []*datapb.ChannelStatus)
 
@@ -45,7 +39,7 @@ func newEmptyRegisterPolicy() dataNodeRegisterPolicy {
 	return emptyRegister
 }
 
-func newAssiggBufferRegisterPolicy() dataNodeRegisterPolicy {
+func newAssignBufferRegisterPolicy() dataNodeRegisterPolicy {
 	return registerAssignWithBuffer
 }
 
@@ -62,15 +56,12 @@ var emptyUnregisterFunc dataNodeUnregisterPolicy = func(cluster []*NodeInfo, ses
 var randomAssignRegisterFunc dataNodeUnregisterPolicy = func(cluster []*NodeInfo, session *NodeInfo) []*NodeInfo {
 	if len(cluster) == 0 || // no available node
 		session == nil ||
-		len(session.info.GetChannels()) == 0 { // lost node not watching any channels
+		len(session.Info.GetChannels()) == 0 { // lost node not watching any channels
 		return []*NodeInfo{}
 	}
 
-	appliedNodes := make([]*NodeInfo, 0, len(session.info.GetChannels()))
-	channels := session.info.GetChannels()
-	// clear unregistered node's channels
-	node := session.Clone(SetChannels(nil))
-	appliedNodes = append(appliedNodes, node)
+	appliedNodes := make([]*NodeInfo, 0, len(session.Info.GetChannels()))
+	channels := session.Info.GetChannels()
 
 	raResult := make(map[int][]*datapb.ChannelStatus)
 	for _, chanSt := range channels {
@@ -111,33 +102,6 @@ func newEmptyUnregisterPolicy() dataNodeUnregisterPolicy {
 // channelAssignFunc, function shortcut for policy
 type channelAssignPolicy func(cluster []*NodeInfo, channel string, collectionID UniqueID) []*NodeInfo
 
-// deprecated
-// test logic, assign channel to all existing data node, works fine only when there is only one data node!
-var assignAllFunc channelAssignPolicy = func(cluster []*NodeInfo, channel string, collectionID UniqueID) []*NodeInfo {
-	ret := make([]*NodeInfo, 0)
-	for _, node := range cluster {
-		has := false
-		for _, ch := range node.info.GetChannels() {
-			if ch.Name == channel {
-				has = true
-				break
-			}
-		}
-		if has {
-			continue
-		}
-		c := &datapb.ChannelStatus{
-			Name:         channel,
-			State:        datapb.ChannelWatchState_Uncomplete,
-			CollectionID: collectionID,
-		}
-		n := node.Clone(AddChannels([]*datapb.ChannelStatus{c}))
-		ret = append(ret, n)
-	}
-
-	return ret
-}
-
 // balanced assign channel, select the datanode with least amount of channels to assign
 var balancedAssignFunc channelAssignPolicy = func(cluster []*NodeInfo, channel string, collectionID UniqueID) []*NodeInfo {
 	if len(cluster) == 0 {
@@ -145,7 +109,7 @@ var balancedAssignFunc channelAssignPolicy = func(cluster []*NodeInfo, channel s
 	}
 	// filter existed channel
 	for _, node := range cluster {
-		for _, c := range node.info.GetChannels() {
+		for _, c := range node.Info.GetChannels() {
 			if c.GetName() == channel && c.GetCollectionID() == collectionID {
 				return nil
 			}
@@ -153,9 +117,9 @@ var balancedAssignFunc channelAssignPolicy = func(cluster []*NodeInfo, channel s
 	}
 	target, min := -1, math.MaxInt32
 	for k, v := range cluster {
-		if len(v.info.GetChannels()) < min {
+		if len(v.Info.GetChannels()) < min {
 			target = k
-			min = len(v.info.GetChannels())
+			min = len(v.Info.GetChannels())
 		}
 	}
 
@@ -168,10 +132,6 @@ var balancedAssignFunc channelAssignPolicy = func(cluster []*NodeInfo, channel s
 	n := cluster[target].Clone(AddChannels([]*datapb.ChannelStatus{c}))
 	ret = append(ret, n)
 	return ret
-}
-
-func newAssignAllPolicy() channelAssignPolicy {
-	return assignAllFunc
 }
 
 func newBalancedAssignPolicy() channelAssignPolicy {

@@ -12,7 +12,9 @@
 package rocksmq
 
 import (
+	"github.com/milvus-io/milvus/internal/log"
 	server "github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
+	"go.uber.org/zap"
 )
 
 type producer struct {
@@ -46,4 +48,11 @@ func (p *producer) Send(message *ProducerMessage) error {
 			Payload: message.Payload,
 		},
 	})
+}
+
+func (p *producer) Close() {
+	err := p.c.server.DestroyTopic(p.topic)
+	if err != nil {
+		log.Debug("Producer close failed", zap.Any("topicName", p.topic), zap.Any("error", err))
+	}
 }

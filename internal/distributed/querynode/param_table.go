@@ -12,7 +12,12 @@
 package grpcquerynode
 
 import (
+	"strconv"
 	"sync"
+
+	"github.com/milvus-io/milvus/internal/distributed/grpcconfigs"
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -32,6 +37,9 @@ type ParamTable struct {
 	IndexCoordAddress string
 	DataCoordAddress  string
 	QueryCoordAddress string
+
+	ServerMaxSendSize int
+	ServerMaxRecvSize int
 }
 
 func (pt *ParamTable) Init() {
@@ -42,6 +50,9 @@ func (pt *ParamTable) Init() {
 		pt.initIndexCoordAddress()
 		pt.initDataCoordAddress()
 		pt.initQueryCoordAddress()
+
+		pt.initServerMaxSendSize()
+		pt.initServerMaxRecvSize()
 	})
 }
 
@@ -88,4 +99,50 @@ func (pt *ParamTable) initQueryCoordAddress() {
 func (pt *ParamTable) initPort() {
 	port := pt.ParseInt("queryNode.port")
 	pt.QueryNodePort = port
+}
+
+func (pt *ParamTable) initServerMaxSendSize() {
+	var err error
+
+	valueStr, err := pt.Load("queryNode.grpc.serverMaxSendSize")
+	if err != nil { // not set
+		pt.ServerMaxSendSize = grpcconfigs.DefaultServerMaxSendSize
+	}
+
+	value, err := strconv.Atoi(valueStr)
+	if err != nil { // not in valid format
+		log.Warn("Failed to parse queryNode.grpc.serverMaxSendSize, set to default",
+			zap.String("queryNode.grpc.serverMaxSendSize", valueStr),
+			zap.Error(err))
+
+		pt.ServerMaxSendSize = grpcconfigs.DefaultServerMaxSendSize
+	} else {
+		pt.ServerMaxSendSize = value
+	}
+
+	log.Debug("initServerMaxSendSize",
+		zap.Int("queryNode.grpc.serverMaxSendSize", pt.ServerMaxSendSize))
+}
+
+func (pt *ParamTable) initServerMaxRecvSize() {
+	var err error
+
+	valueStr, err := pt.Load("queryNode.grpc.serverMaxRecvSize")
+	if err != nil { // not set
+		pt.ServerMaxRecvSize = grpcconfigs.DefaultServerMaxRecvSize
+	}
+
+	value, err := strconv.Atoi(valueStr)
+	if err != nil { // not in valid format
+		log.Warn("Failed to parse queryNode.grpc.serverMaxRecvSize, set to default",
+			zap.String("queryNode.grpc.serverMaxRecvSize", valueStr),
+			zap.Error(err))
+
+		pt.ServerMaxRecvSize = grpcconfigs.DefaultServerMaxRecvSize
+	} else {
+		pt.ServerMaxRecvSize = value
+	}
+
+	log.Debug("initServerMaxRecvSize",
+		zap.Int("queryNode.grpc.serverMaxRecvSize", pt.ServerMaxRecvSize))
 }

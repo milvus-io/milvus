@@ -205,46 +205,27 @@ type DdTaskQueue struct {
 
 type pChanStatInfo struct {
 	pChanStatistics
-	refCnt int
+	tsSet map[Timestamp]struct{}
 }
 
 type DmTaskQueue struct {
 	BaseTaskQueue
+	lock sync.Mutex
+
 	statsLock            sync.RWMutex
 	pChanStatisticsInfos map[pChan]*pChanStatInfo
 }
 
 func (queue *DmTaskQueue) Enqueue(t task) error {
-	err := t.OnEnqueue()
+	queue.lock.Lock()
+	defer queue.lock.Unlock()
+
+	err := queue.BaseTaskQueue.Enqueue(t)
 	if err != nil {
 		return err
 	}
+	_ = queue.addPChanStats(t)
 
-	ts, err := queue.sched.tsoAllocator.AllocOne()
-	if err != nil {
-		return err
-	}
-	t.SetTs(ts)
-
-	reqID, err := queue.sched.idAllocator.AllocOne()
-	if err != nil {
-		return err
-	}
-	t.SetID(reqID)
-
-	return queue.addUnissuedTask(t)
-}
-
-func (queue *DmTaskQueue) addUnissuedTask(t task) error {
-	queue.utLock.Lock()
-	defer queue.utLock.Unlock()
-
-	if queue.utFull() {
-		return errors.New("task queue is full")
-	}
-	queue.unissuedTasks.PushBack(t)
-	queue.addPChanStats(t)
-	queue.utBufChan <- 1
 	return nil
 }
 
@@ -266,32 +247,35 @@ func (queue *DmTaskQueue) addPChanStats(t task) error {
 	if dmT, ok := t.(dmlTask); ok {
 		stats, err := dmT.getPChanStats()
 		if err != nil {
+			log.Debug("Proxy DmTaskQueue addPChanStats", zap.Any("tID", t.ID()),
+				zap.Any("stats", stats), zap.Error(err))
 			return err
 		}
-		log.Debug("Proxy DmTaskQueue addPChanStats", zap.Any("tID", t.ID()),
-			zap.Any("stats", stats))
 		queue.statsLock.Lock()
 		for cName, stat := range stats {
 			info, ok := queue.pChanStatisticsInfos[cName]
 			if !ok {
 				info = &pChanStatInfo{
 					pChanStatistics: stat,
-					refCnt:          1,
+					tsSet: map[Timestamp]struct{}{
+						stat.minTs: {},
+					},
 				}
 				queue.pChanStatisticsInfos[cName] = info
+				dmT.getChannelsTimerTicker().addPChan(cName)
 			} else {
 				if info.minTs > stat.minTs {
-					info.minTs = stat.minTs
+					queue.pChanStatisticsInfos[cName].minTs = stat.minTs
 				}
 				if info.maxTs < stat.maxTs {
-					info.maxTs = stat.maxTs
+					queue.pChanStatisticsInfos[cName].maxTs = stat.maxTs
 				}
-				info.refCnt++
+				queue.pChanStatisticsInfos[cName].tsSet[info.minTs] = struct{}{}
 			}
 		}
 		queue.statsLock.Unlock()
 	} else {
-		return fmt.Errorf("Proxy addUnissuedTask reflect to dmlTask failed, tID:%v", t.ID())
+		return fmt.Errorf("proxy addUnissuedTask reflect to dmlTask failed, tID:%v", t.ID())
 	}
 	return nil
 }
@@ -306,9 +290,17 @@ func (queue *DmTaskQueue) popPChanStats(t task) error {
 		for _, cName := range channels {
 			info, ok := queue.pChanStatisticsInfos[cName]
 			if ok {
-				info.refCnt--
-				if info.refCnt <= 0 {
+				delete(queue.pChanStatisticsInfos[cName].tsSet, info.minTs)
+				if len(queue.pChanStatisticsInfos[cName].tsSet) <= 0 {
 					delete(queue.pChanStatisticsInfos, cName)
+				} else if queue.pChanStatisticsInfos[cName].minTs == info.minTs {
+					minTs := info.maxTs
+					for ts := range queue.pChanStatisticsInfos[cName].tsSet {
+						if ts < minTs {
+							minTs = ts
+						}
+					}
+					queue.pChanStatisticsInfos[cName].minTs = minTs
 				}
 			}
 		}
@@ -446,7 +438,16 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 			"ID":   t.ID(),
 		})
 	defer span.Finish()
+
+	span.LogFields(oplog.Int64("scheduler process AddActiveTask", t.ID()))
+	q.AddActiveTask(t)
+
+	defer func() {
+		span.LogFields(oplog.Int64("scheduler process PopActiveTask", t.ID()))
+		q.PopActiveTask(t.ID())
+	}()
 	span.LogFields(oplog.Int64("scheduler process PreExecute", t.ID()))
+
 	err := t.PreExecute(ctx)
 
 	defer func() {
@@ -457,19 +458,13 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 		return
 	}
 
-	span.LogFields(oplog.Int64("scheduler process AddActiveTask", t.ID()))
-	q.AddActiveTask(t)
-
-	defer func() {
-		span.LogFields(oplog.Int64("scheduler process PopActiveTask", t.ID()))
-		q.PopActiveTask(t.ID())
-	}()
 	span.LogFields(oplog.Int64("scheduler process Execute", t.ID()))
 	err = t.Execute(ctx)
 	if err != nil {
 		trace.LogError(span, err)
 		return
 	}
+
 	span.LogFields(oplog.Int64("scheduler process PostExecute", t.ID()))
 	err = t.PostExecute(ctx)
 }
@@ -706,7 +701,7 @@ func (sched *TaskScheduler) collectResultLoop() {
 						continue
 					}
 					t := sched.getTaskByReqID(reqID)
-					log.Debug("Proxy collectResultLoop Got a SearchResultMsg", zap.Any("ReqID", reqID), zap.Any("t", t))
+					log.Debug("Proxy collectResultLoop Got a SearchResultMsg", zap.Any("ReqID", reqID))
 					if t == nil {
 						log.Debug("Proxy collectResultLoop GetTaskByReqID failed", zap.String("reqID", reqIDStr))
 						delete(searchResultBufs, reqID)
@@ -716,7 +711,7 @@ func (sched *TaskScheduler) collectResultLoop() {
 
 					st, ok := t.(*SearchTask)
 					if !ok {
-						log.Debug("Proxy collectResultLoop type assert t as SearchTask failed", zap.Any("t", t))
+						log.Debug("Proxy collectResultLoop type assert t as SearchTask failed", zap.Any("ReqID", reqID))
 						delete(searchResultBufs, reqID)
 						searchResultBufFlags[reqID] = true
 						continue
@@ -805,7 +800,7 @@ func (sched *TaskScheduler) collectResultLoop() {
 						continue
 					}
 					t := sched.getTaskByReqID(reqID)
-					log.Debug("Proxy collectResultLoop Got a queryResultMsg", zap.Any("ReqID", reqID), zap.Any("t", t))
+					log.Debug("Proxy collectResultLoop Got a queryResultMsg", zap.Any("ReqID", reqID))
 					if t == nil {
 						log.Debug("Proxy collectResultLoop GetTaskByReqID failed", zap.String("reqID", reqIDStr))
 						delete(queryResultBufs, reqID)
@@ -813,9 +808,9 @@ func (sched *TaskScheduler) collectResultLoop() {
 						continue
 					}
 
-					st, ok := t.(*RetrieveTask)
+					st, ok := t.(*QueryTask)
 					if !ok {
-						log.Debug("Proxy collectResultLoop type assert t as RetrieveTask failed", zap.Any("t", t))
+						log.Debug("Proxy collectResultLoop type assert t as QueryTask failed")
 						delete(queryResultBufs, reqID)
 						queryResultBufFlags[reqID] = true
 						continue
@@ -847,7 +842,7 @@ func (sched *TaskScheduler) collectResultLoop() {
 
 					//t := sched.getTaskByReqID(reqID)
 					{
-						colName := t.(*RetrieveTask).retrieve.CollectionName
+						colName := t.(*QueryTask).query.CollectionName
 						log.Debug("Proxy collectResultLoop", zap.String("collection name", colName), zap.String("reqID", reqIDStr), zap.Int("answer cnt", len(queryResultBufs[reqID].resultBuf)))
 					}
 

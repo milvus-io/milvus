@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -118,13 +117,10 @@ func refreshChannelNames() {
 }
 
 func clearEtcd(rootPath string) error {
-	etcdEndpoints := Params.EtcdEndpoints
-	log.Info("etcd tests address", zap.Any("endpoints", etcdEndpoints))
-	etcdClient, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
+	etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, rootPath)
 	if err != nil {
 		return err
 	}
-	etcdKV := etcdkv.NewEtcdKV(etcdClient, rootPath)
 
 	err = etcdKV.RemoveWithPrefix("writer/segment")
 	if err != nil {

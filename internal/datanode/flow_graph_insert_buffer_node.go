@@ -83,10 +83,10 @@ type segmentFlushUnit struct {
 
 type insertBuffer struct {
 	insertData map[UniqueID]*InsertData // SegmentID to InsertData
-	maxSize    int32
+	maxSize    int64
 }
 
-func (ib *insertBuffer) size(segmentID UniqueID) int32 {
+func (ib *insertBuffer) size(segmentID UniqueID) int64 {
 	if ib.insertData == nil || len(ib.insertData) <= 0 {
 		return 0
 	}
@@ -95,16 +95,32 @@ func (ib *insertBuffer) size(segmentID UniqueID) int32 {
 		return 0
 	}
 
-	var maxSize int32 = 0
+	var maxSize int64 = 0
 	for _, data := range idata.Data {
 		fdata, ok := data.(*storage.FloatVectorFieldData)
-		if ok && int32(fdata.NumRows) > maxSize {
-			maxSize = int32(fdata.NumRows)
+		if ok {
+			totalNumRows := int64(0)
+			if fdata.NumRows != nil {
+				for _, numRow := range fdata.NumRows {
+					totalNumRows += numRow
+				}
+			}
+			if totalNumRows > maxSize {
+				maxSize = totalNumRows
+			}
 		}
 
 		bdata, ok := data.(*storage.BinaryVectorFieldData)
-		if ok && int32(bdata.NumRows) > maxSize {
-			maxSize = int32(bdata.NumRows)
+		if ok {
+			totalNumRows := int64(0)
+			if bdata.NumRows != nil {
+				for _, numRow := range bdata.NumRows {
+					totalNumRows += numRow
+				}
+			}
+			if totalNumRows > maxSize {
+				maxSize = totalNumRows
+			}
 		}
 
 	}
@@ -112,7 +128,7 @@ func (ib *insertBuffer) size(segmentID UniqueID) int32 {
 }
 
 func (ib *insertBuffer) full(segmentID UniqueID) bool {
-	log.Debug("Segment size", zap.Any("segment", segmentID), zap.Int32("size", ib.size(segmentID)), zap.Int32("maxsize", ib.maxSize))
+	log.Debug("Segment size", zap.Any("segment", segmentID), zap.Int64("size", ib.size(segmentID)), zap.Int64("maxsize", ib.maxSize))
 	return ib.size(segmentID) >= ib.maxSize
 }
 
@@ -136,6 +152,8 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 
 	if iMsg == nil {
+		ibNode.timeTickStream.Close()
+		ibNode.segmentStatisticsStream.Close()
 		return []Msg{}
 	}
 
@@ -162,7 +180,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		collID := msg.GetCollectionID()
 		partitionID := msg.GetPartitionID()
 
-		if !ibNode.replica.hasSegment(currentSegID) {
+		if !ibNode.replica.hasSegment(currentSegID, true) {
 			err := ibNode.replica.addNewSegment(currentSegID, collID, partitionID, msg.GetChannelID(),
 				iMsg.startPositions[0], iMsg.endPositions[0])
 			if err != nil {
@@ -247,7 +265,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.FloatVectorFieldData{
-						NumRows: 0,
+						NumRows: make([]int64, 0, 1),
 						Data:    make([]float32, 0),
 						Dim:     dim,
 					}
@@ -269,7 +287,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 					}
 				}
 				pos += offset
-				fieldData.NumRows += len(msg.RowIDs)
+				fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 
 			case schemapb.DataType_BinaryVector:
 				var dim int
@@ -289,7 +307,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.BinaryVectorFieldData{
-						NumRows: 0,
+						NumRows: make([]int64, 0, 1),
 						Data:    make([]byte, 0),
 						Dim:     dim,
 					}
@@ -303,12 +321,12 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 					offset = len(bv)
 				}
 				pos += offset
-				fieldData.NumRows += len(msg.RowData)
+				fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 
 			case schemapb.DataType_Bool:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.BoolFieldData{
-						NumRows: 0,
+						NumRows: make([]int64, 0, 1),
 						Data:    make([]bool, 0),
 					}
 				}
@@ -324,12 +342,12 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 				}
 				pos += int(unsafe.Sizeof(*(&v)))
-				fieldData.NumRows += len(msg.RowIDs)
+				fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 
 			case schemapb.DataType_Int8:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.Int8FieldData{
-						NumRows: 0,
+						NumRows: make([]int64, 0, 1),
 						Data:    make([]int8, 0),
 					}
 				}
@@ -344,12 +362,12 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 					fieldData.Data = append(fieldData.Data, v)
 				}
 				pos += int(unsafe.Sizeof(*(&v)))
-				fieldData.NumRows += len(msg.RowIDs)
+				fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 
 			case schemapb.DataType_Int16:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.Int16FieldData{
-						NumRows: 0,
+						NumRows: make([]int64, 0, 1),
 						Data:    make([]int16, 0),
 					}
 				}
@@ -364,12 +382,12 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 					fieldData.Data = append(fieldData.Data, v)
 				}
 				pos += int(unsafe.Sizeof(*(&v)))
-				fieldData.NumRows += len(msg.RowIDs)
+				fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 
 			case schemapb.DataType_Int32:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.Int32FieldData{
-						NumRows: 0,
+						NumRows: make([]int64, 0, 1),
 						Data:    make([]int32, 0),
 					}
 				}
@@ -379,17 +397,17 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				for _, blob := range msg.RowData {
 					buf := bytes.NewReader(blob.GetValue()[pos:])
 					if err := binary.Read(buf, binary.LittleEndian, &v); err != nil {
-						log.Error("binary.Read int32 wrong", zap.Error(err))
+						log.Error("binary.Read int64 wrong", zap.Error(err))
 					}
 					fieldData.Data = append(fieldData.Data, v)
 				}
 				pos += int(unsafe.Sizeof(*(&v)))
-				fieldData.NumRows += len(msg.RowIDs)
+				fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 
 			case schemapb.DataType_Int64:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.Int64FieldData{
-						NumRows: 0,
+						NumRows: make([]int64, 0, 1),
 						Data:    make([]int64, 0),
 					}
 				}
@@ -398,12 +416,12 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				switch field.FieldID {
 				case 0: // rowIDs
 					fieldData.Data = append(fieldData.Data, msg.RowIDs...)
-					fieldData.NumRows += len(msg.RowIDs)
+					fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 				case 1: // Timestamps
 					for _, ts := range msg.Timestamps {
 						fieldData.Data = append(fieldData.Data, int64(ts))
 					}
-					fieldData.NumRows += len(msg.Timestamps)
+					fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 				default:
 					var v int64
 					for _, blob := range msg.RowData {
@@ -414,13 +432,13 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 						fieldData.Data = append(fieldData.Data, v)
 					}
 					pos += int(unsafe.Sizeof(*(&v)))
-					fieldData.NumRows += len(msg.RowIDs)
+					fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 				}
 
 			case schemapb.DataType_Float:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.FloatFieldData{
-						NumRows: 0,
+						NumRows: make([]int64, 0, 1),
 						Data:    make([]float32, 0),
 					}
 				}
@@ -435,12 +453,12 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 					fieldData.Data = append(fieldData.Data, v)
 				}
 				pos += int(unsafe.Sizeof(*(&v)))
-				fieldData.NumRows += len(msg.RowIDs)
+				fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 
 			case schemapb.DataType_Double:
 				if _, ok := idata.Data[field.FieldID]; !ok {
 					idata.Data[field.FieldID] = &storage.DoubleFieldData{
-						NumRows: 0,
+						NumRows: make([]int64, 0, 1),
 						Data:    make([]float64, 0),
 					}
 				}
@@ -456,7 +474,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				}
 
 				pos += int(unsafe.Sizeof(*(&v)))
-				fieldData.NumRows += len(msg.RowIDs)
+				fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
 			}
 		}
 
@@ -475,7 +493,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				log.Debug("......")
 				break
 			}
-			log.Debug("seg buffer status", zap.Int64("segmentID", k), zap.Int32("buffer size", ibNode.insertBuffer.size(k)))
+			log.Debug("seg buffer status", zap.Int64("segmentID", k), zap.Int64("buffer size", ibNode.insertBuffer.size(k)))
 			stopSign++
 		}
 	}
@@ -486,7 +504,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		// If full, auto flush
 		if ibNode.insertBuffer.full(segToFlush) {
 			log.Debug(". Insert Buffer full, auto flushing ",
-				zap.Int32("num of rows", ibNode.insertBuffer.size(segToFlush)))
+				zap.Int64("num of rows", ibNode.insertBuffer.size(segToFlush)))
 
 			collMeta, err := ibNode.getCollMetabySegID(segToFlush, iMsg.timeRange.timestampMax)
 			if err != nil {
@@ -541,7 +559,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				flushed:    true,
 			})
 			ibNode.replica.segmentFlushed(currentSegID)
-			fmsg.dmlFlushedCh <- []*datapb.ID2PathList{{ID: currentSegID, Paths: []string{}}}
+			fmsg.dmlFlushedCh <- []*datapb.FieldBinlog{{FieldID: currentSegID, Binlogs: []string{}}}
 		} else { //insertBuffer(not empty) -> binLogs -> minIO/S3
 			log.Debug(".. Buffer not empty, flushing ..")
 			finishCh := make(chan segmentFlushUnit, 1)
@@ -553,7 +571,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				log.Debug(".. Clearing flush Buffer ..")
 				ibNode.flushMap.Delete(currentSegID)
 				close(finishCh)
-				fmsg.dmlFlushedCh <- []*datapb.ID2PathList{{ID: currentSegID, Paths: nil}}
+				fmsg.dmlFlushedCh <- []*datapb.FieldBinlog{{FieldID: currentSegID, Binlogs: nil}}
 			}
 
 			collID, partitionID, err := ibNode.getCollectionandPartitionIDbySegID(currentSegID)
@@ -585,7 +603,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 					ibNode.replica.segmentFlushed(fu.segID)
 				}
 			}
-			fmsg.dmlFlushedCh <- []*datapb.ID2PathList{{ID: currentSegID, Paths: []string{}}}
+			fmsg.dmlFlushedCh <- []*datapb.FieldBinlog{{FieldID: currentSegID, Binlogs: []string{}}}
 		}
 
 	default:
@@ -773,7 +791,7 @@ func (ibNode *insertBufferNode) updateSegStatistics(segIDs []UniqueID) error {
 }
 
 func (ibNode *insertBufferNode) getCollMetabySegID(segmentID UniqueID, ts Timestamp) (meta *etcdpb.CollectionMeta, err error) {
-	if !ibNode.replica.hasSegment(segmentID) {
+	if !ibNode.replica.hasSegment(segmentID, true) {
 		return nil, fmt.Errorf("No such segment %d in the replica", segmentID)
 	}
 

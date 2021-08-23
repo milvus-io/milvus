@@ -147,7 +147,7 @@ func (c *client) Close() {
 		log.Debug("Close" + opt.Topic + "+" + opt.SubscriptionName)
 		_ = c.server.DestroyConsumerGroup(opt.Topic, opt.SubscriptionName)
 		//TODO(yukun): Should topic be closed?
-		//_ = c.server.DestroyTopic(opt.Topic)
+		_ = c.server.DestroyTopic(opt.Topic)
 	}
 	c.cancel()
 }

@@ -1,0 +1,62 @@
+[
+    {
+        "server": "idc-sh002",
+        "suite_params": [
+            {
+                "suite": "011_cpu_accuracy_ann.yaml",
+                "image_type": "cpu"
+            },
+            {
+                "suite": "011_gpu_accuracy_ann.yaml",
+                "image_type": "gpu"
+            }
+        ]
+    },
+    {
+        "server": "idc-sh003",
+        "suite_params": [
+            {
+                "suite": "locust_mix.yaml",
+                "image_type": "gpu"
+            }
+        ]
+    },
+    {
+        "server": "idc-sh004",
+        "suite_params": [
+            {
+                "suite": "011_insert_performance.yaml",
+                "image_type": "cpu"
+            },
+            {   
+                "suite": "011_gpu_accuracy.yaml",
+                "image_type": "gpu"
+            },
+            {
+                "suite": "011_gpu_build.yaml",
+                "image_type": "gpu"
+            }
+        ]
+    },
+    {
+        "server": "idc-sh005",
+        "suite_params": [
+            {
+                "suite": "011_gpu_search.yaml",
+                "image_type": "gpu"
+            },
+            {
+                "suite": "011_cpu_search.yaml",
+                "image_type": "cpu"
+            },
+            {
+                "suite": "011_cpu_accuracy.yaml",
+                "image_type": "cpu"
+            },
+            {
+                "suite": "011_locust_search.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    }
+]

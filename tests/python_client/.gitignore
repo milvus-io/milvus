@@ -1,0 +1,17 @@
+# python files
+.pytest_cache
+**/.pytest_cache
+.idea
+*.html
+
+.python-version
+__pycache__
+.vscode
+
+test_out/
+*.pyc
+
+db/
+logs/
+
+.coverage

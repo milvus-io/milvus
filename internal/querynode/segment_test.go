@@ -15,6 +15,7 @@ import (
 	"encoding/binary"
 	"log"
 	"math"
+	"sync"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
@@ -434,22 +435,15 @@ func TestSegment_segmentSearch(t *testing.T) {
 	placeholderGroups = append(placeholderGroups, holder)
 
 	searchResults := make([]*SearchResult, 0)
-	matchedSegments := make([]*Segment, 0)
-
 	searchResult, err := segment.search(plan, placeholderGroups, []Timestamp{travelTimestamp})
 	assert.Nil(t, err)
-
 	searchResults = append(searchResults, searchResult)
-	matchedSegments = append(matchedSegments, segment)
 
 	///////////////////////////////////
-	inReduced := make([]bool, len(searchResults))
 	numSegment := int64(len(searchResults))
-	err2 := reduceSearchResults(searchResults, numSegment, inReduced)
-	assert.NoError(t, err2)
-	err = fillTargetEntry(plan, searchResults, matchedSegments, inReduced)
+	err = reduceSearchResultsAndFillData(plan, searchResults, numSegment)
 	assert.NoError(t, err)
-	marshaledHits, err := reorganizeSearchResults(plan, placeholderGroups, searchResults, numSegment, inReduced)
+	marshaledHits, err := reorganizeSearchResults(searchResults, numSegment)
 	assert.NoError(t, err)
 	hitsBlob, err := marshaledHits.getHitsBlob()
 	assert.NoError(t, err)
@@ -582,5 +576,37 @@ func TestSegment_segmentLoadFieldData(t *testing.T) {
 	assert.NoError(t, err)
 
 	deleteSegment(segment)
+	deleteCollection(collection)
+}
+
+func TestSegment_ConcurrentOperation(t *testing.T) {
+	const N = 16
+	var ages = []int32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+
+	collectionID := UniqueID(0)
+	partitionID := UniqueID(0)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
+	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
+	assert.Equal(t, collection.ID(), collectionID)
+
+	wg := sync.WaitGroup{}
+	for i := 0; i < 1000; i++ {
+		segmentID := UniqueID(i)
+		segment := newSegment(collection, segmentID, partitionID, collectionID, "", segmentTypeSealed, true)
+		assert.Equal(t, segmentID, segment.segmentID)
+		assert.Equal(t, partitionID, segment.partitionID)
+
+		wg.Add(2)
+		go func() {
+			deleteSegment(segment)
+			wg.Done()
+		}()
+		go func() {
+			// segmentLoadFieldData result error may be nil or not, we just expected this test would not crash.
+			_ = segment.segmentLoadFieldData(101, N, ages)
+			wg.Done()
+		}()
+	}
+	wg.Wait()
 	deleteCollection(collection)
 }

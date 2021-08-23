@@ -28,7 +28,10 @@ func TestGlobalTSOAllocator_All(t *testing.T) {
 		endpoints = "localhost:2379"
 	}
 	etcdEndpoints := strings.Split(endpoints, ",")
-	gTestIDAllocator = NewGlobalIDAllocator("idTimestamp", tsoutil.NewTSOKVBase(etcdEndpoints, "/test/root/kv", "gidTest"))
+	etcdKV, err := tsoutil.NewTSOKVBase(etcdEndpoints, "/test/root/kv", "gidTest")
+	assert.NoError(t, err)
+
+	gTestIDAllocator = NewGlobalIDAllocator("idTimestamp", etcdKV)
 
 	t.Run("Initialize", func(t *testing.T) {
 		err := gTestIDAllocator.Initialize()
@@ -48,5 +51,17 @@ func TestGlobalTSOAllocator_All(t *testing.T) {
 		idStart, idEnd, err := gTestIDAllocator.Alloc(count)
 		assert.Nil(t, err)
 		assert.Equal(t, count, uint32(idEnd-idStart))
+	})
+
+	t.Run("Alloc2", func(t *testing.T) {
+		count1 := uint32(2 << 18)
+		id1, err := gTestIDAllocator.allocator.GenerateTSO(count1)
+		assert.Nil(t, err)
+
+		count2 := uint32(2 << 8)
+		id2, err := gTestIDAllocator.allocator.GenerateTSO(count2)
+		assert.Nil(t, err)
+		assert.Equal(t, id2-id1, uint64(count2))
+
 	})
 }

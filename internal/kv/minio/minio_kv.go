@@ -86,6 +86,11 @@ func NewMinIOKV(ctx context.Context, option *Option) (*MinIOKV, error) {
 	return kv, nil
 }
 
+func (kv *MinIOKV) Exist(key string) bool {
+	_, err := kv.minioClient.StatObject(kv.ctx, kv.bucketName, key, minio.StatObjectOptions{})
+	return err == nil
+}
+
 func (kv *MinIOKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	objects := kv.minioClient.ListObjects(kv.ctx, kv.bucketName, minio.ListObjectsOptions{Prefix: key})
 
@@ -105,6 +110,9 @@ func (kv *MinIOKV) LoadWithPrefix(key string) ([]string, []string, error) {
 
 func (kv *MinIOKV) Load(key string) (string, error) {
 	object, err := kv.minioClient.GetObject(kv.ctx, kv.bucketName, key, minio.GetObjectOptions{})
+	if object != nil {
+		defer object.Close()
+	}
 	if err != nil {
 		return "", err
 	}

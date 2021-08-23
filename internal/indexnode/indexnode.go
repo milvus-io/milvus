@@ -19,9 +19,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
-	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
@@ -32,8 +31,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -50,8 +50,6 @@ type IndexNode struct {
 
 	kv      kv.BaseKV
 	session *sessionutil.Session
-
-	serviceClient types.IndexCoord // method factory
 
 	// Add callback functions at different stages
 	startCallbacks []func()
@@ -90,8 +88,8 @@ func (i *IndexNode) Register() error {
 
 func (i *IndexNode) Init() error {
 	connectEtcdFn := func() error {
-		etcdClient, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
-		i.etcdKV = etcdkv.NewEtcdKV(etcdClient, Params.MetaRootPath)
+		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+		i.etcdKV = etcdKV
 		return err
 	}
 	err := retry.Do(i.loopCtx, connectEtcdFn, retry.Attempts(300))
@@ -115,6 +113,7 @@ func (i *IndexNode) Init() error {
 		return err
 	}
 	log.Debug("IndexNode NewMinIOKV success")
+	i.closer = trace.InitTracing("index_node")
 
 	i.UpdateStateCode(internalpb.StateCode_Healthy)
 	log.Debug("IndexNode", zap.Any("State", i.stateCode.Load()))
@@ -148,8 +147,9 @@ func (i *IndexNode) UpdateStateCode(code internalpb.StateCode) {
 	i.stateCode.Store(code)
 }
 
-func (i *IndexNode) SetIndexCoordClient(serviceClient types.IndexCoord) {
-	i.serviceClient = serviceClient
+func (i *IndexNode) isHealthy() bool {
+	code := i.stateCode.Load().(internalpb.StateCode)
+	return code == internalpb.StateCode_Healthy
 }
 
 func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
@@ -168,6 +168,9 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 		zap.Strings("DataPaths", request.DataPaths),
 		zap.Any("TypeParams", request.TypeParams),
 		zap.Any("IndexParams", request.IndexParams))
+
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "CreateIndex")
+	defer sp.Finish()
 
 	t := &IndexBuildTask{
 		BaseTask: BaseTask{
@@ -244,5 +247,72 @@ func (i *IndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringR
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
+	}, nil
+}
+
+// TODO(dragondriver): cache the Metrics and set a retention to the cache
+func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	log.Debug("IndexNode.GetMetrics",
+		zap.Int64("node_id", Params.NodeID),
+		zap.String("req", req.Request))
+
+	if !i.isHealthy() {
+		log.Warn("IndexNode.GetMetrics failed",
+			zap.Int64("node_id", Params.NodeID),
+			zap.String("req", req.Request),
+			zap.Error(errIndexNodeIsUnhealthy(Params.NodeID)))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    msgIndexNodeIsUnhealthy(Params.NodeID),
+			},
+			Response: "",
+		}, nil
+	}
+
+	metricType, err := metricsinfo.ParseMetricType(req.Request)
+	if err != nil {
+		log.Warn("IndexNode.GetMetrics failed to parse metric type",
+			zap.Int64("node_id", Params.NodeID),
+			zap.String("req", req.Request),
+			zap.Error(err))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+			Response: "",
+		}, nil
+	}
+
+	log.Debug("IndexNode.GetMetrics",
+		zap.String("metric_type", metricType))
+
+	if metricType == metricsinfo.SystemInfoMetrics {
+		metrics, err := getSystemInfoMetrics(ctx, req, i)
+
+		log.Debug("IndexNode.GetMetrics",
+			zap.Int64("node_id", Params.NodeID),
+			zap.String("req", req.Request),
+			zap.String("metric_type", metricType),
+			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
+			zap.Error(err))
+
+		return metrics, err
+	}
+
+	log.Debug("IndexNode.GetMetrics failed, request metric type is not implemented yet",
+		zap.Int64("node_id", Params.NodeID),
+		zap.String("req", req.Request),
+		zap.String("metric_type", metricType))
+
+	return &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    metricsinfo.MsgUnimplementedMetric,
+		},
+		Response: "",
 	}, nil
 }

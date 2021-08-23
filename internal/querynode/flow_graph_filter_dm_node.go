@@ -46,7 +46,7 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	msgStreamMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
-		log.Error("type assertion failed for MsgStreamMsg")
+		log.Warn("type assertion failed for MsgStreamMsg")
 		// TODO: add error handling
 	}
 
@@ -128,7 +128,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 	if fdmNode.loadType == loadTypeCollection {
 		col, err := fdmNode.replica.getCollectionByID(msg.CollectionID)
 		if err != nil {
-			log.Error(err.Error())
+			log.Warn(err.Error())
 			return nil
 		}
 		if err = col.checkReleasedPartitions([]UniqueID{msg.PartitionID}); err != nil {
@@ -142,7 +142,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 	// so we need to compare the endTimestamp of received messages and position's timestamp.
 	excludedSegments, err := fdmNode.replica.getExcludedSegments(fdmNode.collectionID)
 	if err != nil {
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		return nil
 	}
 	for _, segmentInfo := range excludedSegments {
@@ -156,7 +156,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 
 	if len(msg.RowIDs) != len(msg.Timestamps) || len(msg.RowIDs) != len(msg.RowData) {
 		// TODO: what if the messages are misaligned? Here, we ignore those messages and print error
-		log.Error("Error, misaligned messages detected")
+		log.Warn("Error, misaligned messages detected")
 		return nil
 	}
 
@@ -184,7 +184,7 @@ func newFilteredDmNode(replica ReplicaInterface,
 
 	if loadType != loadTypeCollection && loadType != loadTypePartition {
 		err := errors.New("invalid flow graph type")
-		log.Error(err.Error())
+		log.Warn(err.Error())
 	}
 
 	return &filterDmNode{

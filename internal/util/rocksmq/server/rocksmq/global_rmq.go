@@ -16,12 +16,16 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"go.uber.org/zap"
 
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 )
 
 var Rmq *rocksmq
 var once sync.Once
+var params paramtable.BaseTable
 
 func InitRmq(rocksdbName string, idAllocator allocator.GIDAllocator) error {
 	var err error
@@ -29,10 +33,13 @@ func InitRmq(rocksdbName string, idAllocator allocator.GIDAllocator) error {
 	return err
 }
 
-func InitRocksMQ(rocksdbName string) error {
+func InitRocksMQ() error {
 	var err error
 	once.Do(func() {
-		_, err := os.Stat(rocksdbName)
+		params.Init()
+		rocksdbName, _ := params.Load("_RocksmqPath")
+		log.Debug("RocksmqPath=" + rocksdbName)
+		_, err = os.Stat(rocksdbName)
 		if os.IsNotExist(err) {
 			err = os.MkdirAll(rocksdbName, os.ModePerm)
 			if err != nil {
@@ -49,6 +56,9 @@ func InitRocksMQ(rocksdbName string) error {
 		idAllocator := allocator.NewGlobalIDAllocator("rmq_id", rocksdbKV)
 		_ = idAllocator.Initialize()
 
+		RocksmqRetentionTimeInMinutes = params.ParseInt64("rocksmq.retentionTimeInMinutes")
+		RocksmqRetentionSizeInMB = params.ParseInt64("rocksmq.retentionSizeInMB")
+		log.Debug("Rocksmq retention: ", zap.Any("RocksmqRetentionTimeInMinutes", RocksmqRetentionTimeInMinutes), zap.Any("RocksmqRetentionSizeInMB", RocksmqRetentionSizeInMB))
 		Rmq, err = NewRocksMQ(rocksdbName, idAllocator)
 		if err != nil {
 			panic(err)
@@ -58,7 +68,11 @@ func InitRocksMQ(rocksdbName string) error {
 }
 
 func CloseRocksMQ() {
-	if Rmq != nil && Rmq.store != nil {
-		Rmq.store.Close()
+	log.Debug("Close Rocksmq!")
+	if Rmq != nil {
+		Rmq.stopRetention()
+		if Rmq.store != nil {
+			Rmq.store.Close()
+		}
 	}
 }

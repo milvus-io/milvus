@@ -1,0 +1,4782 @@
+{
+    "annotations": {
+      "list": [
+        {
+          "builtIn": 1,
+          "datasource": "-- Grafana --",
+          "enable": true,
+          "hide": true,
+          "iconColor": "rgba(0, 211, 255, 1)",
+          "name": "Annotations & Alerts",
+          "type": "dashboard"
+        }
+      ]
+    },
+    "editable": true,
+    "gnetId": null,
+    "graphTooltip": 0,
+    "id": 25,
+    "iteration": 1627009292125,
+    "links": [],
+    "panels": [
+      {
+        "collapsed": true,
+        "datasource": null,
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 0
+        },
+        "id": 123155,
+        "panels": [
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "super-light-blue",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 0,
+              "y": 1
+            },
+            "id": 123161,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_has_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Has Collection Total",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 4,
+              "y": 1
+            },
+            "id": 123165,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_has_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Has Collection Success",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "super-light-blue",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 8,
+              "y": 1
+            },
+            "id": 123159,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_create_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Create Collection Total",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 12,
+              "y": 1
+            },
+            "id": 123160,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_create_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Create Collection Success",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "super-light-blue",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 16,
+              "y": 1
+            },
+            "id": 123163,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_show_collections_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Show Collection Total",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 20,
+              "y": 1
+            },
+            "id": 123164,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_show_collections_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Show Collection Success",
+            "type": "stat"
+          },
+          {
+            "aliasColors": {},
+            "bars": false,
+            "dashLength": 10,
+            "dashes": false,
+            "datasource": "$datasource",
+            "description": "per-second rate of has_collection_total as measured over the last 5 minutes",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {}
+              },
+              "overrides": []
+            },
+            "fill": 1,
+            "fillGradient": 0,
+            "gridPos": {
+              "h": 6,
+              "w": 8,
+              "x": 0,
+              "y": 6
+            },
+            "hiddenSeries": false,
+            "id": 123149,
+            "legend": {
+              "avg": false,
+              "current": false,
+              "max": false,
+              "min": false,
+              "show": true,
+              "total": false,
+              "values": false
+            },
+            "lines": true,
+            "linewidth": 1,
+            "nullPointMode": "null",
+            "options": {
+              "alertThreshold": true
+            },
+            "percentage": false,
+            "pluginVersion": "7.3.4",
+            "pointradius": 2,
+            "points": false,
+            "renderer": "flot",
+            "seriesOverrides": [],
+            "spaceLength": 10,
+            "stack": false,
+            "steppedLine": false,
+            "targets": [
+              {
+                "expr": "sum(rate(milvus_rootcoord_has_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "total",
+                "queryType": "randomWalk",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(milvus_rootcoord_has_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "success",
+                "refId": "B"
+              }
+            ],
+            "thresholds": [],
+            "timeFrom": null,
+            "timeRegions": [],
+            "timeShift": null,
+            "title": "Has Collection Rate",
+            "tooltip": {
+              "shared": true,
+              "sort": 0,
+              "value_type": "individual"
+            },
+            "type": "graph",
+            "xaxis": {
+              "buckets": null,
+              "mode": "time",
+              "name": null,
+              "show": true,
+              "values": []
+            },
+            "yaxes": [
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": "0",
+                "show": true
+              },
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": null,
+                "show": true
+              }
+            ],
+            "yaxis": {
+              "align": false,
+              "alignLevel": null
+            }
+          },
+          {
+            "aliasColors": {},
+            "bars": false,
+            "dashLength": 10,
+            "dashes": false,
+            "datasource": "$datasource",
+            "description": "per-second rate of create_collection as measured over the last 5 minutes",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {}
+              },
+              "overrides": []
+            },
+            "fill": 1,
+            "fillGradient": 0,
+            "gridPos": {
+              "h": 6,
+              "w": 8,
+              "x": 8,
+              "y": 6
+            },
+            "hiddenSeries": false,
+            "id": 123139,
+            "legend": {
+              "avg": false,
+              "current": false,
+              "max": false,
+              "min": false,
+              "show": true,
+              "total": false,
+              "values": false
+            },
+            "lines": true,
+            "linewidth": 1,
+            "nullPointMode": "null",
+            "options": {
+              "alertThreshold": true
+            },
+            "percentage": false,
+            "pluginVersion": "7.3.4",
+            "pointradius": 2,
+            "points": false,
+            "renderer": "flot",
+            "seriesOverrides": [],
+            "spaceLength": 10,
+            "stack": false,
+            "steppedLine": false,
+            "targets": [
+              {
+                "expr": "sum(rate(milvus_rootcoord_create_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "total",
+                "queryType": "randomWalk",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(milvus_rootcoord_create_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "success",
+                "refId": "B"
+              }
+            ],
+            "thresholds": [],
+            "timeFrom": null,
+            "timeRegions": [],
+            "timeShift": null,
+            "title": "Create Collection Rate",
+            "tooltip": {
+              "shared": true,
+              "sort": 0,
+              "value_type": "individual"
+            },
+            "type": "graph",
+            "xaxis": {
+              "buckets": null,
+              "mode": "time",
+              "name": null,
+              "show": true,
+              "values": []
+            },
+            "yaxes": [
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": "0",
+                "show": true
+              },
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": null,
+                "show": true
+              }
+            ],
+            "yaxis": {
+              "align": false,
+              "alignLevel": null
+            }
+          },
+          {
+            "aliasColors": {},
+            "bars": false,
+            "dashLength": 10,
+            "dashes": false,
+            "datasource": "$datasource",
+            "description": "per-second rate of show_collections_total as measured over the last 5 minutes",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {}
+              },
+              "overrides": []
+            },
+            "fill": 1,
+            "fillGradient": 0,
+            "gridPos": {
+              "h": 6,
+              "w": 8,
+              "x": 16,
+              "y": 6
+            },
+            "hiddenSeries": false,
+            "id": 123152,
+            "legend": {
+              "avg": false,
+              "current": false,
+              "max": false,
+              "min": false,
+              "show": true,
+              "total": false,
+              "values": false
+            },
+            "lines": true,
+            "linewidth": 1,
+            "nullPointMode": "null",
+            "options": {
+              "alertThreshold": true
+            },
+            "percentage": false,
+            "pluginVersion": "7.3.4",
+            "pointradius": 2,
+            "points": false,
+            "renderer": "flot",
+            "seriesOverrides": [],
+            "spaceLength": 10,
+            "stack": false,
+            "steppedLine": false,
+            "targets": [
+              {
+                "expr": "sum(rate(milvus_rootcoord_show_collections_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "total",
+                "queryType": "randomWalk",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(milvus_rootcoord_show_collections_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "success",
+                "refId": "B"
+              }
+            ],
+            "thresholds": [],
+            "timeFrom": null,
+            "timeRegions": [],
+            "timeShift": null,
+            "title": "Show Collection Rate",
+            "tooltip": {
+              "shared": true,
+              "sort": 0,
+              "value_type": "individual"
+            },
+            "type": "graph",
+            "xaxis": {
+              "buckets": null,
+              "mode": "time",
+              "name": null,
+              "show": true,
+              "values": []
+            },
+            "yaxes": [
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": "0",
+                "show": true
+              },
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": null,
+                "show": true
+              }
+            ],
+            "yaxis": {
+              "align": false,
+              "alignLevel": null
+            }
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "super-light-blue",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 0,
+              "y": 12
+            },
+            "id": 123162,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_describe_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Describe Collection Total",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 4,
+              "y": 12
+            },
+            "id": 123166,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_describe_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Describe Collection Success",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "super-light-blue",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 8,
+              "y": 12
+            },
+            "id": 123167,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_drop_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Drop Collection Total",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 12,
+              "y": 12
+            },
+            "id": 123168,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_drop_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Drop Collection Success",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "super-light-blue",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 16,
+              "y": 12
+            },
+            "id": 123176,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_drop_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Drop Partition Total",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 20,
+              "y": 12
+            },
+            "id": 123175,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_drop_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Drop Partition Success",
+            "type": "stat"
+          },
+          {
+            "aliasColors": {},
+            "bars": false,
+            "dashLength": 10,
+            "dashes": false,
+            "datasource": "$datasource",
+            "description": "per-second rate of describe_collection as measured over the last 5 minutes",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {}
+              },
+              "overrides": []
+            },
+            "fill": 1,
+            "fillGradient": 0,
+            "gridPos": {
+              "h": 6,
+              "w": 8,
+              "x": 0,
+              "y": 17
+            },
+            "hiddenSeries": false,
+            "id": 123145,
+            "legend": {
+              "avg": false,
+              "current": false,
+              "max": false,
+              "min": false,
+              "show": true,
+              "total": false,
+              "values": false
+            },
+            "lines": true,
+            "linewidth": 1,
+            "nullPointMode": "null",
+            "options": {
+              "alertThreshold": true
+            },
+            "percentage": false,
+            "pluginVersion": "7.3.4",
+            "pointradius": 2,
+            "points": false,
+            "renderer": "flot",
+            "seriesOverrides": [],
+            "spaceLength": 10,
+            "stack": false,
+            "steppedLine": false,
+            "targets": [
+              {
+                "expr": "sum(rate(milvus_rootcoord_describe_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "total",
+                "queryType": "randomWalk",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(milvus_rootcoord_describe_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "success",
+                "refId": "B"
+              }
+            ],
+            "thresholds": [],
+            "timeFrom": null,
+            "timeRegions": [],
+            "timeShift": null,
+            "title": "Describe Collection Rate",
+            "tooltip": {
+              "shared": true,
+              "sort": 0,
+              "value_type": "individual"
+            },
+            "type": "graph",
+            "xaxis": {
+              "buckets": null,
+              "mode": "time",
+              "name": null,
+              "show": true,
+              "values": []
+            },
+            "yaxes": [
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": "0",
+                "show": true
+              },
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": null,
+                "show": true
+              }
+            ],
+            "yaxis": {
+              "align": false,
+              "alignLevel": null
+            }
+          },
+          {
+            "aliasColors": {},
+            "bars": false,
+            "dashLength": 10,
+            "dashes": false,
+            "datasource": "$datasource",
+            "description": "per-second rate of drop_collection as measured over the last 5 minutes",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {}
+              },
+              "overrides": []
+            },
+            "fill": 1,
+            "fillGradient": 0,
+            "gridPos": {
+              "h": 6,
+              "w": 8,
+              "x": 8,
+              "y": 17
+            },
+            "hiddenSeries": false,
+            "id": 123147,
+            "legend": {
+              "avg": false,
+              "current": false,
+              "max": false,
+              "min": false,
+              "show": true,
+              "total": false,
+              "values": false
+            },
+            "lines": true,
+            "linewidth": 1,
+            "nullPointMode": "null",
+            "options": {
+              "alertThreshold": true
+            },
+            "percentage": false,
+            "pluginVersion": "7.3.4",
+            "pointradius": 2,
+            "points": false,
+            "renderer": "flot",
+            "seriesOverrides": [],
+            "spaceLength": 10,
+            "stack": false,
+            "steppedLine": false,
+            "targets": [
+              {
+                "expr": "sum(rate(milvus_rootcoord_drop_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "total",
+                "queryType": "randomWalk",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(milvus_rootcoord_drop_collection_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "success",
+                "refId": "B"
+              }
+            ],
+            "thresholds": [],
+            "timeFrom": null,
+            "timeRegions": [],
+            "timeShift": null,
+            "title": "Drop Collection Rate",
+            "tooltip": {
+              "shared": true,
+              "sort": 0,
+              "value_type": "individual"
+            },
+            "type": "graph",
+            "xaxis": {
+              "buckets": null,
+              "mode": "time",
+              "name": null,
+              "show": true,
+              "values": []
+            },
+            "yaxes": [
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": "0",
+                "show": true
+              },
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": null,
+                "show": true
+              }
+            ],
+            "yaxis": {
+              "align": false,
+              "alignLevel": null
+            }
+          },
+          {
+            "aliasColors": {},
+            "bars": false,
+            "dashLength": 10,
+            "dashes": false,
+            "datasource": "$datasource",
+            "description": "per-second rate of has_partition as measured over the last 5 minutes",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {}
+              },
+              "overrides": []
+            },
+            "fill": 1,
+            "fillGradient": 0,
+            "gridPos": {
+              "h": 6,
+              "w": 8,
+              "x": 16,
+              "y": 17
+            },
+            "hiddenSeries": false,
+            "id": 123177,
+            "legend": {
+              "avg": false,
+              "current": false,
+              "max": false,
+              "min": false,
+              "show": true,
+              "total": false,
+              "values": false
+            },
+            "lines": true,
+            "linewidth": 1,
+            "nullPointMode": "null",
+            "options": {
+              "alertThreshold": true
+            },
+            "percentage": false,
+            "pluginVersion": "7.3.4",
+            "pointradius": 2,
+            "points": false,
+            "renderer": "flot",
+            "seriesOverrides": [],
+            "spaceLength": 10,
+            "stack": false,
+            "steppedLine": false,
+            "targets": [
+              {
+                "expr": "sum(rate(milvus_rootcoord_drop_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "total",
+                "queryType": "randomWalk",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(milvus_rootcoord_drop_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "success",
+                "refId": "B"
+              }
+            ],
+            "thresholds": [],
+            "timeFrom": null,
+            "timeRegions": [],
+            "timeShift": null,
+            "title": "Drop Partition Rate",
+            "tooltip": {
+              "shared": true,
+              "sort": 0,
+              "value_type": "individual"
+            },
+            "type": "graph",
+            "xaxis": {
+              "buckets": null,
+              "mode": "time",
+              "name": null,
+              "show": true,
+              "values": []
+            },
+            "yaxes": [
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": "0",
+                "show": true
+              },
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": null,
+                "show": true
+              }
+            ],
+            "yaxis": {
+              "align": false,
+              "alignLevel": null
+            }
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "super-light-blue",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 0,
+              "y": 23
+            },
+            "id": 123181,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_show_partitions_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Show Partition Total",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 4,
+              "y": 23
+            },
+            "id": 123170,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_show_partitions_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Show Partition Success",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "super-light-blue",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 8,
+              "y": 23
+            },
+            "id": 123178,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_create_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Create Partition Total",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 12,
+              "y": 23
+            },
+            "id": 123173,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_create_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Create Partition Success",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "super-light-blue",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 16,
+              "y": 23
+            },
+            "id": 123169,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_has_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Has Partition Total",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 20,
+              "y": 23
+            },
+            "id": 123179,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_has_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Has Partition Success",
+            "type": "stat"
+          },
+          {
+            "aliasColors": {},
+            "bars": false,
+            "dashLength": 10,
+            "dashes": false,
+            "datasource": "$datasource",
+            "description": "per-second rate of show_partitions as measured over the last 5 minutes",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {}
+              },
+              "overrides": []
+            },
+            "fill": 1,
+            "fillGradient": 0,
+            "gridPos": {
+              "h": 6,
+              "w": 8,
+              "x": 0,
+              "y": 28
+            },
+            "hiddenSeries": false,
+            "id": 123153,
+            "legend": {
+              "avg": false,
+              "current": false,
+              "max": false,
+              "min": false,
+              "show": true,
+              "total": false,
+              "values": false
+            },
+            "lines": true,
+            "linewidth": 1,
+            "nullPointMode": "null",
+            "options": {
+              "alertThreshold": true
+            },
+            "percentage": false,
+            "pluginVersion": "7.3.4",
+            "pointradius": 2,
+            "points": false,
+            "renderer": "flot",
+            "seriesOverrides": [],
+            "spaceLength": 10,
+            "stack": false,
+            "steppedLine": false,
+            "targets": [
+              {
+                "expr": "sum(rate(milvus_rootcoord_show_partitions_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "total",
+                "queryType": "randomWalk",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(milvus_rootcoord_show_partitions_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "success",
+                "refId": "B"
+              }
+            ],
+            "thresholds": [],
+            "timeFrom": null,
+            "timeRegions": [],
+            "timeShift": null,
+            "title": "Show Partition Rate",
+            "tooltip": {
+              "shared": true,
+              "sort": 0,
+              "value_type": "individual"
+            },
+            "type": "graph",
+            "xaxis": {
+              "buckets": null,
+              "mode": "time",
+              "name": null,
+              "show": true,
+              "values": []
+            },
+            "yaxes": [
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": "0",
+                "show": true
+              },
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": null,
+                "show": true
+              }
+            ],
+            "yaxis": {
+              "align": false,
+              "alignLevel": null
+            }
+          },
+          {
+            "aliasColors": {},
+            "bars": false,
+            "dashLength": 10,
+            "dashes": false,
+            "datasource": "$datasource",
+            "description": "per-second rate of create_partition as measured over the last 5 minutes",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {}
+              },
+              "overrides": []
+            },
+            "fill": 1,
+            "fillGradient": 0,
+            "gridPos": {
+              "h": 6,
+              "w": 8,
+              "x": 8,
+              "y": 28
+            },
+            "hiddenSeries": false,
+            "id": 123143,
+            "legend": {
+              "avg": false,
+              "current": false,
+              "max": false,
+              "min": false,
+              "show": true,
+              "total": false,
+              "values": false
+            },
+            "lines": true,
+            "linewidth": 1,
+            "nullPointMode": "null",
+            "options": {
+              "alertThreshold": true
+            },
+            "percentage": false,
+            "pluginVersion": "7.3.4",
+            "pointradius": 2,
+            "points": false,
+            "renderer": "flot",
+            "seriesOverrides": [],
+            "spaceLength": 10,
+            "stack": false,
+            "steppedLine": false,
+            "targets": [
+              {
+                "expr": "sum(rate(milvus_rootcoord_create_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "total",
+                "queryType": "randomWalk",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(milvus_rootcoord_create_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "success",
+                "refId": "B"
+              }
+            ],
+            "thresholds": [],
+            "timeFrom": null,
+            "timeRegions": [],
+            "timeShift": null,
+            "title": "Create Partition Rate",
+            "tooltip": {
+              "shared": true,
+              "sort": 0,
+              "value_type": "individual"
+            },
+            "type": "graph",
+            "xaxis": {
+              "buckets": null,
+              "mode": "time",
+              "name": null,
+              "show": true,
+              "values": []
+            },
+            "yaxes": [
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": "0",
+                "show": true
+              },
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": null,
+                "show": true
+              }
+            ],
+            "yaxis": {
+              "align": false,
+              "alignLevel": null
+            }
+          },
+          {
+            "aliasColors": {},
+            "bars": false,
+            "dashLength": 10,
+            "dashes": false,
+            "datasource": "$datasource",
+            "description": "per-second rate of has_partition as measured over the last 5 minutes",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {}
+              },
+              "overrides": []
+            },
+            "fill": 1,
+            "fillGradient": 0,
+            "gridPos": {
+              "h": 6,
+              "w": 8,
+              "x": 16,
+              "y": 28
+            },
+            "hiddenSeries": false,
+            "id": 123180,
+            "legend": {
+              "avg": false,
+              "current": false,
+              "max": false,
+              "min": false,
+              "show": true,
+              "total": false,
+              "values": false
+            },
+            "lines": true,
+            "linewidth": 1,
+            "nullPointMode": "null",
+            "options": {
+              "alertThreshold": true
+            },
+            "percentage": false,
+            "pluginVersion": "7.3.4",
+            "pointradius": 2,
+            "points": false,
+            "renderer": "flot",
+            "seriesOverrides": [],
+            "spaceLength": 10,
+            "stack": false,
+            "steppedLine": false,
+            "targets": [
+              {
+                "expr": "sum(rate(milvus_rootcoord_has_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "total",
+                "queryType": "randomWalk",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(milvus_rootcoord_has_partition_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "success",
+                "refId": "B"
+              }
+            ],
+            "thresholds": [],
+            "timeFrom": null,
+            "timeRegions": [],
+            "timeShift": null,
+            "title": "Has Partition Rate",
+            "tooltip": {
+              "shared": true,
+              "sort": 0,
+              "value_type": "individual"
+            },
+            "type": "graph",
+            "xaxis": {
+              "buckets": null,
+              "mode": "time",
+              "name": null,
+              "show": true,
+              "values": []
+            },
+            "yaxes": [
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": "0",
+                "show": true
+              },
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": null,
+                "show": true
+              }
+            ],
+            "yaxis": {
+              "align": false,
+              "alignLevel": null
+            }
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "super-light-blue",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 0,
+              "y": 34
+            },
+            "id": 123174,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_create_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Create Index Total",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 4,
+              "y": 34
+            },
+            "id": 123182,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_create_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Create Index Success",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "super-light-blue",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 8,
+              "y": 34
+            },
+            "id": 123184,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_drop_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Drop Index Total",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 12,
+              "y": 34
+            },
+            "id": 123185,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_drop_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Drop Index Success",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "super-light-blue",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 16,
+              "y": 34
+            },
+            "id": 123187,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_describe_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Describe Index Total",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 20,
+              "y": 34
+            },
+            "id": 123188,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_describe_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Describe Index Success",
+            "type": "stat"
+          },
+          {
+            "aliasColors": {},
+            "bars": false,
+            "dashLength": 10,
+            "dashes": false,
+            "datasource": "$datasource",
+            "description": "per-second rate of create_index as measured over the last 5 minutes",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {}
+              },
+              "overrides": []
+            },
+            "fill": 1,
+            "fillGradient": 0,
+            "gridPos": {
+              "h": 6,
+              "w": 8,
+              "x": 0,
+              "y": 39
+            },
+            "hiddenSeries": false,
+            "id": 123183,
+            "legend": {
+              "avg": false,
+              "current": false,
+              "max": false,
+              "min": false,
+              "show": true,
+              "total": false,
+              "values": false
+            },
+            "lines": true,
+            "linewidth": 1,
+            "nullPointMode": "null",
+            "options": {
+              "alertThreshold": true
+            },
+            "percentage": false,
+            "pluginVersion": "7.3.4",
+            "pointradius": 2,
+            "points": false,
+            "renderer": "flot",
+            "seriesOverrides": [],
+            "spaceLength": 10,
+            "stack": false,
+            "steppedLine": false,
+            "targets": [
+              {
+                "expr": "sum(rate(milvus_rootcoord_create_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "total",
+                "queryType": "randomWalk",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(milvus_rootcoord_create_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "success",
+                "refId": "B"
+              }
+            ],
+            "thresholds": [],
+            "timeFrom": null,
+            "timeRegions": [],
+            "timeShift": null,
+            "title": "Create Index Rate",
+            "tooltip": {
+              "shared": true,
+              "sort": 0,
+              "value_type": "individual"
+            },
+            "type": "graph",
+            "xaxis": {
+              "buckets": null,
+              "mode": "time",
+              "name": null,
+              "show": true,
+              "values": []
+            },
+            "yaxes": [
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": "0",
+                "show": true
+              },
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": null,
+                "show": true
+              }
+            ],
+            "yaxis": {
+              "align": false,
+              "alignLevel": null
+            }
+          },
+          {
+            "aliasColors": {},
+            "bars": false,
+            "dashLength": 10,
+            "dashes": false,
+            "datasource": "$datasource",
+            "description": "per-second rate of drop_index as measured over the last 5 minutes",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {}
+              },
+              "overrides": []
+            },
+            "fill": 1,
+            "fillGradient": 0,
+            "gridPos": {
+              "h": 6,
+              "w": 8,
+              "x": 8,
+              "y": 39
+            },
+            "hiddenSeries": false,
+            "id": 123186,
+            "legend": {
+              "avg": false,
+              "current": false,
+              "max": false,
+              "min": false,
+              "show": true,
+              "total": false,
+              "values": false
+            },
+            "lines": true,
+            "linewidth": 1,
+            "nullPointMode": "null",
+            "options": {
+              "alertThreshold": true
+            },
+            "percentage": false,
+            "pluginVersion": "7.3.4",
+            "pointradius": 2,
+            "points": false,
+            "renderer": "flot",
+            "seriesOverrides": [],
+            "spaceLength": 10,
+            "stack": false,
+            "steppedLine": false,
+            "targets": [
+              {
+                "expr": "sum(rate(milvus_rootcoord_drop_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "total",
+                "queryType": "randomWalk",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(milvus_rootcoord_drop_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "success",
+                "refId": "B"
+              }
+            ],
+            "thresholds": [],
+            "timeFrom": null,
+            "timeRegions": [],
+            "timeShift": null,
+            "title": "Drop Index Rate",
+            "tooltip": {
+              "shared": true,
+              "sort": 0,
+              "value_type": "individual"
+            },
+            "type": "graph",
+            "xaxis": {
+              "buckets": null,
+              "mode": "time",
+              "name": null,
+              "show": true,
+              "values": []
+            },
+            "yaxes": [
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": "0",
+                "show": true
+              },
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": null,
+                "show": true
+              }
+            ],
+            "yaxis": {
+              "align": false,
+              "alignLevel": null
+            }
+          },
+          {
+            "aliasColors": {},
+            "bars": false,
+            "dashLength": 10,
+            "dashes": false,
+            "datasource": "$datasource",
+            "description": "per-second rate of describe_index as measured over the last 5 minutes",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {}
+              },
+              "overrides": []
+            },
+            "fill": 1,
+            "fillGradient": 0,
+            "gridPos": {
+              "h": 6,
+              "w": 8,
+              "x": 16,
+              "y": 39
+            },
+            "hiddenSeries": false,
+            "id": 123189,
+            "legend": {
+              "avg": false,
+              "current": false,
+              "max": false,
+              "min": false,
+              "show": true,
+              "total": false,
+              "values": false
+            },
+            "lines": true,
+            "linewidth": 1,
+            "nullPointMode": "null",
+            "options": {
+              "alertThreshold": true
+            },
+            "percentage": false,
+            "pluginVersion": "7.3.4",
+            "pointradius": 2,
+            "points": false,
+            "renderer": "flot",
+            "seriesOverrides": [],
+            "spaceLength": 10,
+            "stack": false,
+            "steppedLine": false,
+            "targets": [
+              {
+                "expr": "sum(rate(milvus_rootcoord_describe_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "total",
+                "queryType": "randomWalk",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(milvus_rootcoord_describe_index_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "success",
+                "refId": "B"
+              }
+            ],
+            "thresholds": [],
+            "timeFrom": null,
+            "timeRegions": [],
+            "timeShift": null,
+            "title": "Describe Index Rate",
+            "tooltip": {
+              "shared": true,
+              "sort": 0,
+              "value_type": "individual"
+            },
+            "type": "graph",
+            "xaxis": {
+              "buckets": null,
+              "mode": "time",
+              "name": null,
+              "show": true,
+              "values": []
+            },
+            "yaxes": [
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": "0",
+                "show": true
+              },
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": null,
+                "show": true
+              }
+            ],
+            "yaxis": {
+              "align": false,
+              "alignLevel": null
+            }
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "super-light-blue",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 0,
+              "y": 45
+            },
+            "id": 123195,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_show_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Show Segments Total",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 4,
+              "y": 45
+            },
+            "id": 123191,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_show_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Show Segments Success",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "super-light-blue",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 8,
+              "y": 45
+            },
+            "id": 123192,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_describe_segment_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Describe Segments Total",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 12,
+              "y": 45
+            },
+            "id": 123193,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_describe_segment_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Descirbe Segments Success",
+            "type": "stat"
+          },
+          {
+            "aliasColors": {},
+            "bars": false,
+            "dashLength": 10,
+            "dashes": false,
+            "datasource": "$datasource",
+            "description": "List of proxy nodes which has register with etcd",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {}
+              },
+              "overrides": []
+            },
+            "fill": 1,
+            "fillGradient": 0,
+            "gridPos": {
+              "h": 6,
+              "w": 8,
+              "x": 16,
+              "y": 45
+            },
+            "hiddenSeries": false,
+            "id": 123141,
+            "legend": {
+              "avg": false,
+              "current": false,
+              "max": false,
+              "min": false,
+              "show": true,
+              "total": false,
+              "values": false
+            },
+            "lines": true,
+            "linewidth": 1,
+            "nullPointMode": "null",
+            "options": {
+              "alertThreshold": true
+            },
+            "percentage": false,
+            "pluginVersion": "7.3.4",
+            "pointradius": 2,
+            "points": false,
+            "renderer": "flot",
+            "seriesOverrides": [],
+            "spaceLength": 10,
+            "stack": false,
+            "steppedLine": false,
+            "targets": [
+              {
+                "expr": "sum(milvus_rootcoord_list_of_proxy_node{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (client_id)",
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "{{client_id}}",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "thresholds": [],
+            "timeFrom": null,
+            "timeRegions": [],
+            "timeShift": null,
+            "title": "Proxy Node List",
+            "tooltip": {
+              "shared": true,
+              "sort": 0,
+              "value_type": "individual"
+            },
+            "type": "graph",
+            "xaxis": {
+              "buckets": null,
+              "mode": "time",
+              "name": null,
+              "show": true,
+              "values": []
+            },
+            "yaxes": [
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": "0",
+                "show": true
+              },
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": null,
+                "show": true
+              }
+            ],
+            "yaxis": {
+              "align": false,
+              "alignLevel": null
+            }
+          },
+          {
+            "aliasColors": {},
+            "bars": false,
+            "dashLength": 10,
+            "dashes": false,
+            "datasource": "$datasource",
+            "description": "per-second rate of show_segments as measured over the last 5 minutes",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {}
+              },
+              "overrides": []
+            },
+            "fill": 1,
+            "fillGradient": 0,
+            "gridPos": {
+              "h": 6,
+              "w": 8,
+              "x": 0,
+              "y": 50
+            },
+            "hiddenSeries": false,
+            "id": 123151,
+            "legend": {
+              "avg": false,
+              "current": false,
+              "max": false,
+              "min": false,
+              "show": true,
+              "total": false,
+              "values": false
+            },
+            "lines": true,
+            "linewidth": 1,
+            "nullPointMode": "null",
+            "options": {
+              "alertThreshold": true
+            },
+            "percentage": false,
+            "pluginVersion": "7.3.4",
+            "pointradius": 2,
+            "points": false,
+            "renderer": "flot",
+            "seriesOverrides": [],
+            "spaceLength": 10,
+            "stack": false,
+            "steppedLine": false,
+            "targets": [
+              {
+                "expr": "sum(rate(milvus_rootcoord_show_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "total",
+                "queryType": "randomWalk",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(milvus_rootcoord_show_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "success",
+                "refId": "B"
+              }
+            ],
+            "thresholds": [],
+            "timeFrom": null,
+            "timeRegions": [],
+            "timeShift": null,
+            "title": "Show Segment Rate",
+            "tooltip": {
+              "shared": true,
+              "sort": 0,
+              "value_type": "individual"
+            },
+            "type": "graph",
+            "xaxis": {
+              "buckets": null,
+              "mode": "time",
+              "name": null,
+              "show": true,
+              "values": []
+            },
+            "yaxes": [
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": null,
+                "show": true
+              },
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": null,
+                "show": true
+              }
+            ],
+            "yaxis": {
+              "align": false,
+              "alignLevel": null
+            }
+          },
+          {
+            "aliasColors": {},
+            "bars": false,
+            "dashLength": 10,
+            "dashes": false,
+            "datasource": "$datasource",
+            "description": "per-second rate of describe_segments as measured over the last 5 minutes",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {}
+              },
+              "overrides": []
+            },
+            "fill": 1,
+            "fillGradient": 0,
+            "gridPos": {
+              "h": 6,
+              "w": 8,
+              "x": 8,
+              "y": 50
+            },
+            "hiddenSeries": false,
+            "id": 123194,
+            "legend": {
+              "avg": false,
+              "current": false,
+              "max": false,
+              "min": false,
+              "show": true,
+              "total": false,
+              "values": false
+            },
+            "lines": true,
+            "linewidth": 1,
+            "nullPointMode": "null",
+            "options": {
+              "alertThreshold": true
+            },
+            "percentage": false,
+            "pluginVersion": "7.3.4",
+            "pointradius": 2,
+            "points": false,
+            "renderer": "flot",
+            "seriesOverrides": [],
+            "spaceLength": 10,
+            "stack": false,
+            "steppedLine": false,
+            "targets": [
+              {
+                "expr": "sum(rate(milvus_rootcoord_describe_segment_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "total",
+                "queryType": "randomWalk",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(milvus_rootcoord_describe_segment_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "success",
+                "refId": "B"
+              }
+            ],
+            "thresholds": [],
+            "timeFrom": null,
+            "timeRegions": [],
+            "timeShift": null,
+            "title": "Descirbe Segment Rate",
+            "tooltip": {
+              "shared": true,
+              "sort": 0,
+              "value_type": "individual"
+            },
+            "type": "graph",
+            "xaxis": {
+              "buckets": null,
+              "mode": "time",
+              "name": null,
+              "show": true,
+              "values": []
+            },
+            "yaxes": [
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": null,
+                "show": true
+              },
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": null,
+                "show": true
+              }
+            ],
+            "yaxis": {
+              "align": false,
+              "alignLevel": null
+            }
+          }
+        ],
+        "title": "Root Coordinator",
+        "type": "row"
+      },
+      {
+        "collapsed": true,
+        "datasource": null,
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 1
+        },
+        "id": 123172,
+        "panels": [
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "super-light-blue",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 0,
+              "y": 2
+            },
+            "id": 123190,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_dataNode_flush_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Flush Segments Total",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 4,
+              "y": 2
+            },
+            "id": 123196,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_dataNode_flush_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Flush Segments Success",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "super-light-blue",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 8,
+              "y": 2
+            },
+            "id": 123198,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_dataNode_watch_dm_channels_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Watch dm_channels Total",
+            "type": "stat"
+          },
+          {
+            "datasource": "$datasource",
+            "description": "",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {},
+                "mappings": [],
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    }
+                  ]
+                }
+              },
+              "overrides": []
+            },
+            "gridPos": {
+              "h": 5,
+              "w": 4,
+              "x": 12,
+              "y": 2
+            },
+            "id": 123199,
+            "options": {
+              "colorMode": "value",
+              "graphMode": "none",
+              "justifyMode": "auto",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": [
+                  "lastNotNull"
+                ],
+                "fields": "",
+                "values": false
+              },
+              "textMode": "auto"
+            },
+            "pluginVersion": "7.3.4",
+            "targets": [
+              {
+                "expr": "sum(milvus_dataNode_watch_dm_channels_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}) by (pod)",
+                "instant": false,
+                "interval": "",
+                "intervalFactor": 2,
+                "legendFormat": "",
+                "queryType": "randomWalk",
+                "refId": "A"
+              }
+            ],
+            "timeFrom": null,
+            "timeShift": null,
+            "title": "Watch dm_channels Success",
+            "type": "stat"
+          },
+          {
+            "aliasColors": {},
+            "bars": false,
+            "dashLength": 10,
+            "dashes": false,
+            "datasource": "$datasource",
+            "description": "per-second rate of flush_segments as measured over the last 5 minutes",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {}
+              },
+              "overrides": []
+            },
+            "fill": 1,
+            "fillGradient": 0,
+            "gridPos": {
+              "h": 6,
+              "w": 8,
+              "x": 0,
+              "y": 7
+            },
+            "hiddenSeries": false,
+            "id": 123197,
+            "legend": {
+              "avg": false,
+              "current": false,
+              "max": false,
+              "min": false,
+              "show": true,
+              "total": false,
+              "values": false
+            },
+            "lines": true,
+            "linewidth": 1,
+            "nullPointMode": "null",
+            "options": {
+              "alertThreshold": true
+            },
+            "percentage": false,
+            "pluginVersion": "7.3.4",
+            "pointradius": 2,
+            "points": false,
+            "renderer": "flot",
+            "seriesOverrides": [],
+            "spaceLength": 10,
+            "stack": false,
+            "steppedLine": false,
+            "targets": [
+              {
+                "expr": "sum(rate(milvus_dataNode_flush_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "total",
+                "queryType": "randomWalk",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(milvus_dataNode_flush_segments_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "success",
+                "refId": "B"
+              }
+            ],
+            "thresholds": [],
+            "timeFrom": null,
+            "timeRegions": [],
+            "timeShift": null,
+            "title": "Flush Segments Rate",
+            "tooltip": {
+              "shared": true,
+              "sort": 0,
+              "value_type": "individual"
+            },
+            "type": "graph",
+            "xaxis": {
+              "buckets": null,
+              "mode": "time",
+              "name": null,
+              "show": true,
+              "values": []
+            },
+            "yaxes": [
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": null,
+                "show": true
+              },
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": null,
+                "show": true
+              }
+            ],
+            "yaxis": {
+              "align": false,
+              "alignLevel": null
+            }
+          },
+          {
+            "aliasColors": {},
+            "bars": false,
+            "dashLength": 10,
+            "dashes": false,
+            "datasource": "$datasource",
+            "description": "per-second rate of watch_dm_channels as measured over the last 5 minutes",
+            "fieldConfig": {
+              "defaults": {
+                "custom": {}
+              },
+              "overrides": []
+            },
+            "fill": 1,
+            "fillGradient": 0,
+            "gridPos": {
+              "h": 6,
+              "w": 8,
+              "x": 8,
+              "y": 7
+            },
+            "hiddenSeries": false,
+            "id": 123200,
+            "legend": {
+              "avg": false,
+              "current": false,
+              "max": false,
+              "min": false,
+              "show": true,
+              "total": false,
+              "values": false
+            },
+            "lines": true,
+            "linewidth": 1,
+            "nullPointMode": "null",
+            "options": {
+              "alertThreshold": true
+            },
+            "percentage": false,
+            "pluginVersion": "7.3.4",
+            "pointradius": 2,
+            "points": false,
+            "renderer": "flot",
+            "seriesOverrides": [],
+            "spaceLength": 10,
+            "stack": false,
+            "steppedLine": false,
+            "targets": [
+              {
+                "expr": "sum(rate(milvus_dataNode_watch_dm_channels_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"total\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "total",
+                "queryType": "randomWalk",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(milvus_dataNode_watch_dm_channels_total{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", type=\"success\"}[5m])) by (pod)",
+                "interval": "",
+                "legendFormat": "success",
+                "refId": "B"
+              }
+            ],
+            "thresholds": [],
+            "timeFrom": null,
+            "timeRegions": [],
+            "timeShift": null,
+            "title": "Watch dm_channels Rate",
+            "tooltip": {
+              "shared": true,
+              "sort": 0,
+              "value_type": "individual"
+            },
+            "type": "graph",
+            "xaxis": {
+              "buckets": null,
+              "mode": "time",
+              "name": null,
+              "show": true,
+              "values": []
+            },
+            "yaxes": [
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": null,
+                "show": true
+              },
+              {
+                "format": "short",
+                "label": null,
+                "logBase": 1,
+                "max": null,
+                "min": null,
+                "show": true
+              }
+            ],
+            "yaxis": {
+              "align": false,
+              "alignLevel": null
+            }
+          }
+        ],
+        "title": "Data Coordinator",
+        "type": "row"
+      },
+      {
+        "collapsed": false,
+        "datasource": null,
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 2
+        },
+        "id": 123157,
+        "panels": [],
+        "title": "Runtime",
+        "type": "row"
+      },
+      {
+        "aliasColors": {},
+        "bars": false,
+        "dashLength": 10,
+        "dashes": false,
+        "datasource": "$datasource",
+        "description": "",
+        "fieldConfig": {
+          "defaults": {
+            "custom": {}
+          },
+          "overrides": []
+        },
+        "fill": 1,
+        "fillGradient": 0,
+        "gridPos": {
+          "h": 6,
+          "w": 8,
+          "x": 0,
+          "y": 3
+        },
+        "hiddenSeries": false,
+        "id": 123202,
+        "legend": {
+          "avg": false,
+          "current": false,
+          "max": false,
+          "min": false,
+          "show": true,
+          "total": false,
+          "values": false
+        },
+        "lines": true,
+        "linewidth": 1,
+        "nullPointMode": "null",
+        "options": {
+          "alertThreshold": true
+        },
+        "percentage": false,
+        "pluginVersion": "7.3.4",
+        "pointradius": 2,
+        "points": false,
+        "renderer": "flot",
+        "seriesOverrides": [],
+        "spaceLength": 10,
+        "stack": false,
+        "steppedLine": false,
+        "targets": [
+          {
+            "expr": "sum(rate(process_cpu_seconds_total{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}[5m]))",
+            "interval": "",
+            "intervalFactor": 2,
+            "legendFormat": "{{component}}: {{pod}}",
+            "queryType": "randomWalk",
+            "refId": "A"
+          }
+        ],
+        "thresholds": [],
+        "timeFrom": null,
+        "timeRegions": [],
+        "timeShift": null,
+        "title": "CPU Total usage",
+        "tooltip": {
+          "shared": true,
+          "sort": 0,
+          "value_type": "individual"
+        },
+        "type": "graph",
+        "xaxis": {
+          "buckets": null,
+          "mode": "time",
+          "name": null,
+          "show": true,
+          "values": []
+        },
+        "yaxes": [
+          {
+            "format": "short",
+            "label": null,
+            "logBase": 1,
+            "max": null,
+            "min": null,
+            "show": true
+          },
+          {
+            "format": "short",
+            "label": null,
+            "logBase": 1,
+            "max": null,
+            "min": null,
+            "show": true
+          }
+        ],
+        "yaxis": {
+          "align": false,
+          "alignLevel": null
+        }
+      },
+      {
+        "aliasColors": {},
+        "bars": false,
+        "dashLength": 10,
+        "dashes": false,
+        "datasource": "$datasource",
+        "fieldConfig": {
+          "defaults": {
+            "custom": {}
+          },
+          "overrides": []
+        },
+        "fill": 1,
+        "fillGradient": 0,
+        "gridPos": {
+          "h": 6,
+          "w": 8,
+          "x": 8,
+          "y": 3
+        },
+        "hiddenSeries": false,
+        "id": 123204,
+        "legend": {
+          "avg": false,
+          "current": false,
+          "max": false,
+          "min": false,
+          "show": true,
+          "total": false,
+          "values": false
+        },
+        "lines": true,
+        "linewidth": 1,
+        "nullPointMode": "null",
+        "options": {
+          "alertThreshold": true
+        },
+        "percentage": false,
+        "pluginVersion": "7.3.4",
+        "pointradius": 2,
+        "points": false,
+        "renderer": "flot",
+        "seriesOverrides": [],
+        "spaceLength": 10,
+        "stack": false,
+        "steppedLine": false,
+        "targets": [
+          {
+            "expr": "sum(process_resident_memory_bytes{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"})",
+            "interval": "",
+            "intervalFactor": 2,
+            "legendFormat": "{{component}}: {{pod}}",
+            "queryType": "randomWalk",
+            "refId": "A"
+          }
+        ],
+        "thresholds": [],
+        "timeFrom": null,
+        "timeRegions": [],
+        "timeShift": null,
+        "title": "Memory Total",
+        "tooltip": {
+          "shared": true,
+          "sort": 0,
+          "value_type": "individual"
+        },
+        "type": "graph",
+        "xaxis": {
+          "buckets": null,
+          "mode": "time",
+          "name": null,
+          "show": true,
+          "values": []
+        },
+        "yaxes": [
+          {
+            "format": "bytes",
+            "label": null,
+            "logBase": 1,
+            "max": null,
+            "min": null,
+            "show": true
+          },
+          {
+            "format": "bytes",
+            "label": null,
+            "logBase": 1,
+            "max": null,
+            "min": null,
+            "show": true
+          }
+        ],
+        "yaxis": {
+          "align": false,
+          "alignLevel": null
+        }
+      },
+      {
+        "aliasColors": {},
+        "bars": false,
+        "dashLength": 10,
+        "dashes": false,
+        "datasource": "$datasource",
+        "description": "Number of goroutines that currently exist.",
+        "fieldConfig": {
+          "defaults": {
+            "custom": {}
+          },
+          "overrides": []
+        },
+        "fill": 1,
+        "fillGradient": 0,
+        "gridPos": {
+          "h": 6,
+          "w": 8,
+          "x": 16,
+          "y": 3
+        },
+        "hiddenSeries": false,
+        "id": 123206,
+        "legend": {
+          "avg": false,
+          "current": false,
+          "max": false,
+          "min": false,
+          "show": true,
+          "total": false,
+          "values": false
+        },
+        "lines": true,
+        "linewidth": 1,
+        "nullPointMode": "null",
+        "options": {
+          "alertThreshold": true
+        },
+        "percentage": false,
+        "pluginVersion": "7.3.4",
+        "pointradius": 2,
+        "points": false,
+        "renderer": "flot",
+        "seriesOverrides": [],
+        "spaceLength": 10,
+        "stack": false,
+        "steppedLine": false,
+        "targets": [
+          {
+            "expr": "sum(go_goroutines{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"})",
+            "interval": "",
+            "intervalFactor": 2,
+            "legendFormat": "{{component}}: {{pod}}",
+            "queryType": "randomWalk",
+            "refId": "A"
+          }
+        ],
+        "thresholds": [],
+        "timeFrom": null,
+        "timeRegions": [],
+        "timeShift": null,
+        "title": "Goroutines Total",
+        "tooltip": {
+          "shared": true,
+          "sort": 0,
+          "value_type": "individual"
+        },
+        "type": "graph",
+        "xaxis": {
+          "buckets": null,
+          "mode": "time",
+          "name": null,
+          "show": true,
+          "values": []
+        },
+        "yaxes": [
+          {
+            "format": "short",
+            "label": null,
+            "logBase": 1,
+            "max": null,
+            "min": null,
+            "show": true
+          },
+          {
+            "format": "short",
+            "label": null,
+            "logBase": 1,
+            "max": null,
+            "min": null,
+            "show": true
+          }
+        ],
+        "yaxis": {
+          "align": false,
+          "alignLevel": null
+        }
+      },
+      {
+        "aliasColors": {},
+        "bars": false,
+        "dashLength": 10,
+        "dashes": false,
+        "datasource": "$datasource",
+        "description": "",
+        "fieldConfig": {
+          "defaults": {
+            "custom": {}
+          },
+          "overrides": []
+        },
+        "fill": 1,
+        "fillGradient": 0,
+        "gridPos": {
+          "h": 6,
+          "w": 8,
+          "x": 0,
+          "y": 9
+        },
+        "hiddenSeries": false,
+        "id": 123135,
+        "legend": {
+          "avg": false,
+          "current": false,
+          "max": false,
+          "min": false,
+          "show": true,
+          "total": false,
+          "values": false
+        },
+        "lines": true,
+        "linewidth": 1,
+        "nullPointMode": "null",
+        "options": {
+          "alertThreshold": true
+        },
+        "percentage": false,
+        "pluginVersion": "7.3.4",
+        "pointradius": 2,
+        "points": false,
+        "renderer": "flot",
+        "seriesOverrides": [],
+        "spaceLength": 10,
+        "stack": false,
+        "steppedLine": false,
+        "targets": [
+          {
+            "expr": "rate(process_cpu_seconds_total{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}[5m])",
+            "interval": "",
+            "intervalFactor": 2,
+            "legendFormat": "{{component}}: {{pod}}",
+            "queryType": "randomWalk",
+            "refId": "A"
+          }
+        ],
+        "thresholds": [],
+        "timeFrom": null,
+        "timeRegions": [],
+        "timeShift": null,
+        "title": "CPU usage",
+        "tooltip": {
+          "shared": true,
+          "sort": 0,
+          "value_type": "individual"
+        },
+        "type": "graph",
+        "xaxis": {
+          "buckets": null,
+          "mode": "time",
+          "name": null,
+          "show": true,
+          "values": []
+        },
+        "yaxes": [
+          {
+            "format": "short",
+            "label": null,
+            "logBase": 1,
+            "max": null,
+            "min": null,
+            "show": true
+          },
+          {
+            "format": "short",
+            "label": null,
+            "logBase": 1,
+            "max": null,
+            "min": null,
+            "show": true
+          }
+        ],
+        "yaxis": {
+          "align": false,
+          "alignLevel": null
+        }
+      },
+      {
+        "aliasColors": {},
+        "bars": false,
+        "dashLength": 10,
+        "dashes": false,
+        "datasource": "$datasource",
+        "fieldConfig": {
+          "defaults": {
+            "custom": {}
+          },
+          "overrides": []
+        },
+        "fill": 1,
+        "fillGradient": 0,
+        "gridPos": {
+          "h": 6,
+          "w": 8,
+          "x": 8,
+          "y": 9
+        },
+        "hiddenSeries": false,
+        "id": 123133,
+        "legend": {
+          "avg": false,
+          "current": false,
+          "max": false,
+          "min": false,
+          "show": true,
+          "total": false,
+          "values": false
+        },
+        "lines": true,
+        "linewidth": 1,
+        "nullPointMode": "null",
+        "options": {
+          "alertThreshold": true
+        },
+        "percentage": false,
+        "pluginVersion": "7.3.4",
+        "pointradius": 2,
+        "points": false,
+        "renderer": "flot",
+        "seriesOverrides": [],
+        "spaceLength": 10,
+        "stack": false,
+        "steppedLine": false,
+        "targets": [
+          {
+            "expr": "process_resident_memory_bytes{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}",
+            "interval": "",
+            "intervalFactor": 2,
+            "legendFormat": "{{component}}: {{pod}}",
+            "queryType": "randomWalk",
+            "refId": "A"
+          }
+        ],
+        "thresholds": [],
+        "timeFrom": null,
+        "timeRegions": [],
+        "timeShift": null,
+        "title": "Memory",
+        "tooltip": {
+          "shared": true,
+          "sort": 0,
+          "value_type": "individual"
+        },
+        "type": "graph",
+        "xaxis": {
+          "buckets": null,
+          "mode": "time",
+          "name": null,
+          "show": true,
+          "values": []
+        },
+        "yaxes": [
+          {
+            "format": "bytes",
+            "label": null,
+            "logBase": 1,
+            "max": null,
+            "min": null,
+            "show": true
+          },
+          {
+            "format": "bytes",
+            "label": null,
+            "logBase": 1,
+            "max": null,
+            "min": null,
+            "show": true
+          }
+        ],
+        "yaxis": {
+          "align": false,
+          "alignLevel": null
+        }
+      },
+      {
+        "aliasColors": {},
+        "bars": false,
+        "dashLength": 10,
+        "dashes": false,
+        "datasource": "$datasource",
+        "description": "Number of goroutines that currently exist.",
+        "fieldConfig": {
+          "defaults": {
+            "custom": {}
+          },
+          "overrides": []
+        },
+        "fill": 1,
+        "fillGradient": 0,
+        "gridPos": {
+          "h": 6,
+          "w": 8,
+          "x": 16,
+          "y": 9
+        },
+        "hiddenSeries": false,
+        "id": 123125,
+        "legend": {
+          "avg": false,
+          "current": false,
+          "max": false,
+          "min": false,
+          "show": true,
+          "total": false,
+          "values": false
+        },
+        "lines": true,
+        "linewidth": 1,
+        "nullPointMode": "null",
+        "options": {
+          "alertThreshold": true
+        },
+        "percentage": false,
+        "pluginVersion": "7.3.4",
+        "pointradius": 2,
+        "points": false,
+        "renderer": "flot",
+        "seriesOverrides": [],
+        "spaceLength": 10,
+        "stack": false,
+        "steppedLine": false,
+        "targets": [
+          {
+            "expr": "go_goroutines{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}",
+            "interval": "",
+            "intervalFactor": 2,
+            "legendFormat": "{{component}}: {{pod}}",
+            "queryType": "randomWalk",
+            "refId": "A"
+          }
+        ],
+        "thresholds": [],
+        "timeFrom": null,
+        "timeRegions": [],
+        "timeShift": null,
+        "title": "Goroutines",
+        "tooltip": {
+          "shared": true,
+          "sort": 0,
+          "value_type": "individual"
+        },
+        "type": "graph",
+        "xaxis": {
+          "buckets": null,
+          "mode": "time",
+          "name": null,
+          "show": true,
+          "values": []
+        },
+        "yaxes": [
+          {
+            "format": "short",
+            "label": null,
+            "logBase": 1,
+            "max": null,
+            "min": null,
+            "show": true
+          },
+          {
+            "format": "short",
+            "label": null,
+            "logBase": 1,
+            "max": null,
+            "min": null,
+            "show": true
+          }
+        ],
+        "yaxis": {
+          "align": false,
+          "alignLevel": null
+        }
+      },
+      {
+        "aliasColors": {},
+        "bars": false,
+        "dashLength": 10,
+        "dashes": false,
+        "datasource": "$datasource",
+        "description": "Number of bytes allocated and still in use.",
+        "fieldConfig": {
+          "defaults": {
+            "custom": {}
+          },
+          "overrides": []
+        },
+        "fill": 1,
+        "fillGradient": 0,
+        "gridPos": {
+          "h": 6,
+          "w": 8,
+          "x": 0,
+          "y": 15
+        },
+        "hiddenSeries": false,
+        "id": 123137,
+        "legend": {
+          "avg": false,
+          "current": false,
+          "max": false,
+          "min": false,
+          "show": true,
+          "total": false,
+          "values": false
+        },
+        "lines": true,
+        "linewidth": 1,
+        "nullPointMode": "null",
+        "options": {
+          "alertThreshold": true
+        },
+        "percentage": false,
+        "pluginVersion": "7.3.4",
+        "pointradius": 2,
+        "points": false,
+        "renderer": "flot",
+        "seriesOverrides": [],
+        "spaceLength": 10,
+        "stack": false,
+        "steppedLine": false,
+        "targets": [
+          {
+            "expr": "go_memstats_alloc_bytes{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}",
+            "interval": "",
+            "intervalFactor": 2,
+            "legendFormat": "{{component}}: {{pod}}",
+            "queryType": "randomWalk",
+            "refId": "A"
+          }
+        ],
+        "thresholds": [],
+        "timeFrom": null,
+        "timeRegions": [],
+        "timeShift": null,
+        "title": "Go Allocated Memory",
+        "tooltip": {
+          "shared": true,
+          "sort": 0,
+          "value_type": "individual"
+        },
+        "type": "graph",
+        "xaxis": {
+          "buckets": null,
+          "mode": "time",
+          "name": null,
+          "show": true,
+          "values": []
+        },
+        "yaxes": [
+          {
+            "format": "bytes",
+            "label": null,
+            "logBase": 1,
+            "max": null,
+            "min": null,
+            "show": true
+          },
+          {
+            "format": "bytes",
+            "label": null,
+            "logBase": 1,
+            "max": null,
+            "min": null,
+            "show": true
+          }
+        ],
+        "yaxis": {
+          "align": false,
+          "alignLevel": null
+        }
+      },
+      {
+        "aliasColors": {},
+        "bars": false,
+        "dashLength": 10,
+        "dashes": false,
+        "datasource": "$datasource",
+        "description": "GC max duration_seconds",
+        "fieldConfig": {
+          "defaults": {
+            "custom": {}
+          },
+          "overrides": []
+        },
+        "fill": 1,
+        "fillGradient": 0,
+        "gridPos": {
+          "h": 6,
+          "w": 8,
+          "x": 8,
+          "y": 15
+        },
+        "hiddenSeries": false,
+        "id": 123131,
+        "legend": {
+          "avg": false,
+          "current": false,
+          "max": false,
+          "min": false,
+          "show": true,
+          "total": false,
+          "values": false
+        },
+        "lines": true,
+        "linewidth": 1,
+        "nullPointMode": "null",
+        "options": {
+          "alertThreshold": true
+        },
+        "percentage": false,
+        "pluginVersion": "7.3.4",
+        "pointradius": 2,
+        "points": false,
+        "renderer": "flot",
+        "seriesOverrides": [],
+        "spaceLength": 10,
+        "stack": false,
+        "steppedLine": false,
+        "targets": [
+          {
+            "expr": "go_gc_duration_seconds{quantile=\"1\", app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}",
+            "interval": "",
+            "legendFormat": "{{component}}: {{pod}}",
+            "queryType": "randomWalk",
+            "refId": "A"
+          }
+        ],
+        "thresholds": [],
+        "timeFrom": null,
+        "timeRegions": [],
+        "timeShift": null,
+        "title": "GC max duration_seconds",
+        "tooltip": {
+          "shared": true,
+          "sort": 0,
+          "value_type": "individual"
+        },
+        "type": "graph",
+        "xaxis": {
+          "buckets": null,
+          "mode": "time",
+          "name": null,
+          "show": true,
+          "values": []
+        },
+        "yaxes": [
+          {
+            "format": "short",
+            "label": null,
+            "logBase": 1,
+            "max": null,
+            "min": null,
+            "show": true
+          },
+          {
+            "format": "short",
+            "label": null,
+            "logBase": 1,
+            "max": null,
+            "min": null,
+            "show": true
+          }
+        ],
+        "yaxis": {
+          "align": false,
+          "alignLevel": null
+        }
+      },
+      {
+        "aliasColors": {},
+        "bars": false,
+        "dashLength": 10,
+        "dashes": false,
+        "datasource": "$datasource",
+        "description": "Number of OS threads created.",
+        "fieldConfig": {
+          "defaults": {
+            "custom": {}
+          },
+          "overrides": []
+        },
+        "fill": 1,
+        "fillGradient": 0,
+        "gridPos": {
+          "h": 6,
+          "w": 8,
+          "x": 16,
+          "y": 15
+        },
+        "hiddenSeries": false,
+        "id": 123127,
+        "legend": {
+          "avg": false,
+          "current": false,
+          "max": false,
+          "min": false,
+          "show": true,
+          "total": false,
+          "values": false
+        },
+        "lines": true,
+        "linewidth": 1,
+        "nullPointMode": "null",
+        "options": {
+          "alertThreshold": true
+        },
+        "percentage": false,
+        "pluginVersion": "7.3.4",
+        "pointradius": 2,
+        "points": false,
+        "renderer": "flot",
+        "seriesOverrides": [],
+        "spaceLength": 10,
+        "stack": false,
+        "steppedLine": false,
+        "targets": [
+          {
+            "expr": "go_threads{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\"}",
+            "interval": "",
+            "intervalFactor": 2,
+            "legendFormat": "{{component}}: {{pod}}",
+            "queryType": "randomWalk",
+            "refId": "A"
+          }
+        ],
+        "thresholds": [],
+        "timeFrom": null,
+        "timeRegions": [],
+        "timeShift": null,
+        "title": "Threads",
+        "tooltip": {
+          "shared": true,
+          "sort": 0,
+          "value_type": "individual"
+        },
+        "type": "graph",
+        "xaxis": {
+          "buckets": null,
+          "mode": "time",
+          "name": null,
+          "show": true,
+          "values": []
+        },
+        "yaxes": [
+          {
+            "decimals": null,
+            "format": "short",
+            "label": null,
+            "logBase": 1,
+            "max": null,
+            "min": "0",
+            "show": true
+          },
+          {
+            "format": "short",
+            "label": null,
+            "logBase": 1,
+            "max": null,
+            "min": null,
+            "show": true
+          }
+        ],
+        "yaxis": {
+          "align": false,
+          "alignLevel": null
+        }
+      },
+      {
+        "aliasColors": {},
+        "bars": false,
+        "dashLength": 10,
+        "dashes": false,
+        "datasource": "$datasource",
+        "description": "",
+        "fieldConfig": {
+          "defaults": {
+            "custom": {}
+          },
+          "overrides": []
+        },
+        "fill": 1,
+        "fillGradient": 0,
+        "gridPos": {
+          "h": 6,
+          "w": 8,
+          "x": 16,
+          "y": 21
+        },
+        "hiddenSeries": false,
+        "id": 123129,
+        "legend": {
+          "avg": false,
+          "current": false,
+          "max": false,
+          "min": false,
+          "show": true,
+          "total": false,
+          "values": false
+        },
+        "lines": true,
+        "linewidth": 1,
+        "nullPointMode": "null",
+        "options": {
+          "alertThreshold": true
+        },
+        "percentage": false,
+        "pluginVersion": "7.3.4",
+        "pointradius": 2,
+        "points": false,
+        "renderer": "flot",
+        "seriesOverrides": [],
+        "spaceLength": 10,
+        "stack": false,
+        "steppedLine": false,
+        "targets": [
+          {
+            "expr": "go_memstats_next_gc_bytes{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}",
+            "interval": "",
+            "intervalFactor": 2,
+            "legendFormat": "{{component}}: {{pod}}",
+            "queryType": "randomWalk",
+            "refId": "A"
+          }
+        ],
+        "thresholds": [],
+        "timeFrom": null,
+        "timeRegions": [],
+        "timeShift": null,
+        "title": "Next GC Bytes",
+        "tooltip": {
+          "shared": true,
+          "sort": 0,
+          "value_type": "individual"
+        },
+        "type": "graph",
+        "xaxis": {
+          "buckets": null,
+          "mode": "time",
+          "name": null,
+          "show": true,
+          "values": []
+        },
+        "yaxes": [
+          {
+            "format": "short",
+            "label": null,
+            "logBase": 1,
+            "max": null,
+            "min": null,
+            "show": true
+          },
+          {
+            "format": "short",
+            "label": null,
+            "logBase": 1,
+            "max": null,
+            "min": null,
+            "show": true
+          }
+        ],
+        "yaxis": {
+          "align": false,
+          "alignLevel": null
+        }
+      }
+    ],
+    "schemaVersion": 26,
+    "style": "dark",
+    "tags": [
+      "milvus2.0"
+    ],
+    "templating": {
+      "list": [
+        {
+          "current": {
+            "selected": false,
+            "text": "prometheus",
+            "value": "prometheus"
+          },
+          "error": null,
+          "hide": 0,
+          "includeAll": false,
+          "label": null,
+          "multi": false,
+          "name": "datasource",
+          "options": [],
+          "query": "prometheus",
+          "queryValue": "",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "type": "datasource"
+        },
+        {
+          "current": {
+            "selected": true,
+            "text": "milvus",
+            "value": "milvus"
+          },
+          "error": null,
+          "hide": 2,
+          "label": null,
+          "name": "app_name",
+          "options": [
+            {
+              "selected": true,
+              "text": "milvus",
+              "value": "milvus"
+            }
+          ],
+          "query": "milvus",
+          "skipUrlSync": false,
+          "type": "textbox"
+        },
+        {
+          "allValue": null,
+          "current": {
+            "selected": false,
+            "text": "test",
+            "value": "test"
+          },
+          "datasource": "$datasource",
+          "definition": "label_values(kube_pod_info, namespace)",
+          "error": null,
+          "hide": 0,
+          "includeAll": false,
+          "label": null,
+          "multi": false,
+          "name": "namespace",
+          "options": [],
+          "query": "label_values(kube_pod_info, namespace)",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "sort": 1,
+          "tagValuesQuery": "",
+          "tags": [],
+          "tagsQuery": "",
+          "type": "query",
+          "useTags": false
+        },
+        {
+          "allValue": null,
+          "current": {
+            "selected": false,
+            "text": "All",
+            "value": "$__all"
+          },
+          "datasource": "$datasource",
+          "definition": "label_values(go_info{app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}, app_kubernetes_io_instance)",
+          "error": null,
+          "hide": 0,
+          "includeAll": true,
+          "label": null,
+          "multi": false,
+          "name": "instance",
+          "options": [],
+          "query": "label_values(go_info{app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}, app_kubernetes_io_instance)",
+          "refresh": 2,
+          "regex": "",
+          "skipUrlSync": false,
+          "sort": 1,
+          "tagValuesQuery": "",
+          "tags": [],
+          "tagsQuery": "",
+          "type": "query",
+          "useTags": false
+        },
+        {
+          "allValue": null,
+          "current": {
+            "isNone": true,
+            "selected": false,
+            "text": "None",
+            "value": ""
+          },
+          "datasource": "$datasource",
+          "definition": "label_values(go_info{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\",app_kubernetes_io_name=\"$app_name\"} , pod)",
+          "error": null,
+          "hide": 2,
+          "includeAll": false,
+          "label": null,
+          "multi": true,
+          "name": "pod",
+          "options": [],
+          "query": "label_values(go_info{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\",app_kubernetes_io_name=\"$app_name\"} , pod)",
+          "refresh": 2,
+          "regex": "",
+          "skipUrlSync": false,
+          "sort": 1,
+          "tagValuesQuery": "",
+          "tags": [],
+          "tagsQuery": "",
+          "type": "query",
+          "useTags": false
+        }
+      ]
+    },
+    "time": {
+      "from": "now-5m",
+      "to": "now"
+    },
+    "timepicker": {
+      "hidden": false,
+      "refresh_intervals": [
+        "5s",
+        "10s",
+        "30s",
+        "1m",
+        "5m",
+        "15m",
+        "30m",
+        "1h",
+        "2h",
+        "1d"
+      ],
+      "time_options": [
+        "5m",
+        "15m",
+        "1h",
+        "6h",
+        "12h",
+        "24h",
+        "2d",
+        "7d",
+        "30d"
+      ],
+      "type": "timepicker"
+    },
+    "timezone": "browser",
+    "title": "Milvus2.0",
+    "uid": "uLf5cJ3Gz",
+    "version": 59
+  }

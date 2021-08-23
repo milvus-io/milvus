@@ -1,0 +1,49 @@
+search_performance:
+  collections:
+    -
+      milvus:
+        db_config.primary_path: /test/milvus/db_data_011/binary_50m_512_jaccard
+        cache_config.cpu_cache_capacity: 32GB
+        engine_config.use_blas_threshold: 0
+        engine_config.gpu_search_threshold: 100
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 6GB
+        gpu_resource_config.search_resources:
+          - gpu0
+          - gpu1
+        gpu_resource_config.build_index_resources:
+          - gpu0
+          - gpu1
+        wal_enable: true
+      collection_name: binary_50m_512_jaccard
+      run_count: 2
+      top_ks: [10, 1, 100, 1000]
+      nqs: [1, 10, 100, 1000, 1200]
+      search_params:
+        -
+          nprobe: 8
+
+    -
+      milvus:
+        db_config.primary_path: /test/milvus/db_data_011/binary_50m_512_jaccard_ivf
+        cache_config.cpu_cache_capacity: 32GB
+        engine_config.use_blas_threshold: 0
+        engine_config.gpu_search_threshold: 100
+        gpu_resource_config.enable: true
+        gpu_resource_config.cache_capacity: 6GB
+        gpu_resource_config.search_resources:
+          - gpu0
+          - gpu1
+        gpu_resource_config.build_index_resources:
+          - gpu0
+          - gpu1
+        wal_enable: true
+      collection_name: binary_50m_512_jaccard
+      run_count: 2
+      top_ks: [10, 1, 100, 1000]
+      nqs: [1, 10, 100, 1000, 1200]
+      search_params:
+        -
+          nprobe: 8
+        -
+          nprobe: 32

@@ -172,29 +172,6 @@ message SegmentMsg{
   SegmentInfo segment = 2;
 }
 
-// key: ${prefix}/${segmentID}/${fieldID}/${idx}
-message SegmentFieldBinlogMeta {
-    int64  fieldID = 1;
-    string binlog_path = 2;
-}
-
-// key: ${prefix}/${collectionID}/${idx}
-message DDLBinlogMeta {
-    string ddl_binlog_path = 1;
-    string ts_binlog_path = 2;
-}
-
-message FieldFlushMeta {
-    int64 fieldID = 1;
-    repeated string binlog_paths = 2;
-}
-
-message SegmentFlushMeta{
-    int64 segmentID = 1;
-    bool is_flushed = 2;
-    repeated FieldFlushMeta fields = 5;
-}
-
 message DDLFlushMeta {
     int64 collectionID = 1;
     repeated string binlog_paths = 2;
@@ -212,16 +189,13 @@ message SegmentInfo {
   string insert_channel = 4;
   int64 num_of_rows = 5;
   common.SegmentState state = 6;
-  internal.MsgPosition dml_position = 7;
-  int64 max_row_num = 8;
-  uint64 last_expire_time = 9;
-  internal.MsgPosition start_position = 10;
+  int64 max_row_num = 7;
+  uint64 last_expire_time = 8;
+  internal.MsgPosition start_position = 9;
+  internal.MsgPosition dml_position = 10;
+  repeated FieldBinlog binlogs = 11;
 }
 
-message ID2PathList {
-  int64 ID = 1;
-  repeated string Paths = 2;
-}
 
 message SegmentStartPosition {
   internal.MsgPosition start_position = 1;
@@ -232,7 +206,7 @@ message SaveBinlogPathsRequest {
   common.MsgBase base = 1;
   int64 segmentID = 2;
   int64 collectionID = 3;
-  repeated ID2PathList field2BinlogPaths = 4;
+  repeated FieldBinlog field2BinlogPaths = 4;
   repeated CheckPoint checkPoints = 5;
   repeated SegmentStartPosition start_positions = 6;                                                             
   bool flushed = 7;
@@ -306,3 +280,8 @@ message SegmentFlushCompletedMsg {
   SegmentInfo segment = 2;
 }
 
+message ChannelWatchInfo {
+    VchannelInfo vchan= 1;
+    int64 startTs = 2;
+    ChannelWatchState state = 3;
+}

@@ -12,7 +12,12 @@
 package grpcindexcoord
 
 import (
+	"strconv"
 	"sync"
+
+	"github.com/milvus-io/milvus/internal/distributed/grpcconfigs"
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
@@ -22,6 +27,9 @@ type ParamTable struct {
 
 	ServiceAddress string
 	ServicePort    int
+
+	ServerMaxSendSize int
+	ServerMaxRecvSize int
 }
 
 var Params ParamTable
@@ -37,6 +45,9 @@ func (pt *ParamTable) Init() {
 func (pt *ParamTable) initParams() {
 	pt.initServicePort()
 	pt.initServiceAddress()
+
+	pt.initServerMaxSendSize()
+	pt.initServerMaxRecvSize()
 }
 
 func (pt *ParamTable) initServicePort() {
@@ -49,4 +60,50 @@ func (pt *ParamTable) initServiceAddress() {
 		panic(err)
 	}
 	pt.ServiceAddress = ret
+}
+
+func (pt *ParamTable) initServerMaxSendSize() {
+	var err error
+
+	valueStr, err := pt.Load("indexCoord.grpc.serverMaxSendSize")
+	if err != nil { // not set
+		pt.ServerMaxSendSize = grpcconfigs.DefaultServerMaxSendSize
+	}
+
+	value, err := strconv.Atoi(valueStr)
+	if err != nil { // not in valid format
+		log.Warn("Failed to parse indexCoord.grpc.serverMaxSendSize, set to default",
+			zap.String("indexCoord.grpc.serverMaxSendSize", valueStr),
+			zap.Error(err))
+
+		pt.ServerMaxSendSize = grpcconfigs.DefaultServerMaxSendSize
+	} else {
+		pt.ServerMaxSendSize = value
+	}
+
+	log.Debug("initServerMaxSendSize",
+		zap.Int("indexCoord.grpc.serverMaxSendSize", pt.ServerMaxSendSize))
+}
+
+func (pt *ParamTable) initServerMaxRecvSize() {
+	var err error
+
+	valueStr, err := pt.Load("indexCoord.grpc.serverMaxRecvSize")
+	if err != nil { // not set
+		pt.ServerMaxRecvSize = grpcconfigs.DefaultServerMaxRecvSize
+	}
+
+	value, err := strconv.Atoi(valueStr)
+	if err != nil { // not in valid format
+		log.Warn("Failed to parse indexCoord.grpc.serverMaxRecvSize, set to default",
+			zap.String("indexCoord.grpc.serverMaxRecvSize", valueStr),
+			zap.Error(err))
+
+		pt.ServerMaxRecvSize = grpcconfigs.DefaultServerMaxRecvSize
+	} else {
+		pt.ServerMaxRecvSize = value
+	}
+
+	log.Debug("initServerMaxRecvSize",
+		zap.Int("indexCoord.grpc.serverMaxRecvSize", pt.ServerMaxRecvSize))
 }

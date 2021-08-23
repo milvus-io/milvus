@@ -41,20 +41,21 @@ func TestMetaSnapshot(t *testing.T) {
 		return vtso
 	}
 
-	ms, err := newMetaSnapshot(etcdCli, rootPath, tsKey, 4, ftso)
+	ms, err := newMetaSnapshot(etcdCli, rootPath, tsKey, 4)
 	assert.Nil(t, err)
 	assert.NotNil(t, ms)
 
 	for i := 0; i < 8; i++ {
 		vtso = typeutil.Timestamp(100 + i)
-		ts, err := ms.Save("abc", fmt.Sprintf("value-%d", i))
+		ts := ftso()
+		err = ms.Save("abc", fmt.Sprintf("value-%d", i), ts)
 		assert.Nil(t, err)
 		assert.Equal(t, vtso, ts)
 		_, err = etcdCli.Put(context.Background(), "other", fmt.Sprintf("other-%d", i))
 		assert.Nil(t, err)
 	}
 
-	ms, err = newMetaSnapshot(etcdCli, rootPath, tsKey, 4, ftso)
+	ms, err = newMetaSnapshot(etcdCli, rootPath, tsKey, 4)
 	assert.Nil(t, err)
 	assert.NotNil(t, ms)
 }
@@ -224,13 +225,14 @@ func TestLoad(t *testing.T) {
 		return vtso
 	}
 
-	ms, err := newMetaSnapshot(etcdCli, rootPath, tsKey, 7, ftso)
+	ms, err := newMetaSnapshot(etcdCli, rootPath, tsKey, 7)
 	assert.Nil(t, err)
 	assert.NotNil(t, ms)
 
 	for i := 0; i < 20; i++ {
 		vtso = typeutil.Timestamp(100 + i*5)
-		ts, err := ms.Save("key", fmt.Sprintf("value-%d", i))
+		ts := ftso()
+		err = ms.Save("key", fmt.Sprintf("value-%d", i), ts)
 		assert.Nil(t, err)
 		assert.Equal(t, vtso, ts)
 	}
@@ -243,7 +245,7 @@ func TestLoad(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, "value-19", val)
 
-	ms, err = newMetaSnapshot(etcdCli, rootPath, tsKey, 11, ftso)
+	ms, err = newMetaSnapshot(etcdCli, rootPath, tsKey, 11)
 	assert.Nil(t, err)
 	assert.NotNil(t, ms)
 
@@ -271,14 +273,15 @@ func TestMultiSave(t *testing.T) {
 		return vtso
 	}
 
-	ms, err := newMetaSnapshot(etcdCli, rootPath, tsKey, 7, ftso)
+	ms, err := newMetaSnapshot(etcdCli, rootPath, tsKey, 7)
 	assert.Nil(t, err)
 	assert.NotNil(t, ms)
 
 	for i := 0; i < 20; i++ {
 		saves := map[string]string{"k1": fmt.Sprintf("v1-%d", i), "k2": fmt.Sprintf("v2-%d", i)}
 		vtso = typeutil.Timestamp(100 + i*5)
-		ts, err := ms.MultiSave(saves, nil)
+		ts := ftso()
+		err = ms.MultiSave(saves, ts)
 		assert.Nil(t, err)
 		assert.Equal(t, vtso, ts)
 	}
@@ -301,7 +304,7 @@ func TestMultiSave(t *testing.T) {
 	assert.Equal(t, vals[0], "v1-19")
 	assert.Equal(t, vals[1], "v2-19")
 
-	ms, err = newMetaSnapshot(etcdCli, rootPath, tsKey, 11, ftso)
+	ms, err = newMetaSnapshot(etcdCli, rootPath, tsKey, 11)
 	assert.Nil(t, err)
 	assert.NotNil(t, ms)
 
@@ -334,13 +337,14 @@ func TestMultiSaveAndRemoveWithPrefix(t *testing.T) {
 	}
 	defer etcdCli.Close()
 
-	ms, err := newMetaSnapshot(etcdCli, rootPath, tsKey, 7, ftso)
+	ms, err := newMetaSnapshot(etcdCli, rootPath, tsKey, 7)
 	assert.Nil(t, err)
 	assert.NotNil(t, ms)
 
 	for i := 0; i < 20; i++ {
 		vtso = typeutil.Timestamp(100 + i*5)
-		ts, err := ms.Save(fmt.Sprintf("kd-%04d", i), fmt.Sprintf("value-%d", i))
+		ts := ftso()
+		err = ms.Save(fmt.Sprintf("kd-%04d", i), fmt.Sprintf("value-%d", i), ts)
 		assert.Nil(t, err)
 		assert.Equal(t, vtso, ts)
 	}
@@ -348,7 +352,8 @@ func TestMultiSaveAndRemoveWithPrefix(t *testing.T) {
 		sm := map[string]string{"ks": fmt.Sprintf("value-%d", i)}
 		dm := []string{fmt.Sprintf("kd-%04d", i-20)}
 		vtso = typeutil.Timestamp(100 + i*5)
-		ts, err := ms.MultiSaveAndRemoveWithPrefix(sm, dm, nil)
+		ts := ftso()
+		err = ms.MultiSaveAndRemoveWithPrefix(sm, dm, ts)
 		assert.Nil(t, err)
 		assert.Equal(t, vtso, ts)
 	}
@@ -370,7 +375,7 @@ func TestMultiSaveAndRemoveWithPrefix(t *testing.T) {
 		assert.Equal(t, 39-i, len(vals))
 	}
 
-	ms, err = newMetaSnapshot(etcdCli, rootPath, tsKey, 11, ftso)
+	ms, err = newMetaSnapshot(etcdCli, rootPath, tsKey, 11)
 	assert.Nil(t, err)
 	assert.NotNil(t, ms)
 

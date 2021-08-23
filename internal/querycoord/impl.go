@@ -16,6 +16,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -84,11 +86,41 @@ func (qc *QueryCoord) ShowCollections(ctx context.Context, req *querypb.ShowColl
 			Status: status,
 		}, err
 	}
-	collectionIDs := qc.meta.showCollections()
-	log.Debug("show collection end", zap.Int64s("collections", collectionIDs))
+	collectionInfos := qc.meta.showCollections()
+	ID2collectionInfo := make(map[UniqueID]*querypb.CollectionInfo)
+	inMemoryCollectionIDs := make([]UniqueID, 0)
+	for _, info := range collectionInfos {
+		ID2collectionInfo[info.CollectionID] = info
+		inMemoryCollectionIDs = append(inMemoryCollectionIDs, info.CollectionID)
+	}
+	inMemoryPercentages := make([]int64, 0)
+	if len(req.CollectionIDs) == 0 {
+		for _, id := range inMemoryCollectionIDs {
+			inMemoryPercentages = append(inMemoryPercentages, ID2collectionInfo[id].InMemoryPercentage)
+		}
+		log.Debug("show collection end", zap.Int64s("collections", inMemoryCollectionIDs), zap.Int64s("inMemoryPercentage", inMemoryPercentages))
+		return &querypb.ShowCollectionsResponse{
+			Status:              status,
+			CollectionIDs:       inMemoryCollectionIDs,
+			InMemoryPercentages: inMemoryPercentages,
+		}, nil
+	}
+	for _, id := range req.CollectionIDs {
+		if _, ok := ID2collectionInfo[id]; !ok {
+			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			err := errors.New("collection has not been loaded to memory or load failed")
+			status.Reason = err.Error()
+			return &querypb.ShowCollectionsResponse{
+				Status: status,
+			}, err
+		}
+		inMemoryPercentages = append(inMemoryPercentages, ID2collectionInfo[id].InMemoryPercentage)
+	}
+	log.Debug("show collection end", zap.Int64s("collections", req.CollectionIDs), zap.Int64s("inMemoryPercentage", inMemoryPercentages))
 	return &querypb.ShowCollectionsResponse{
-		Status:        status,
-		CollectionIDs: collectionIDs,
+		Status:              status,
+		CollectionIDs:       req.CollectionIDs,
+		InMemoryPercentages: inMemoryPercentages,
 	}, nil
 }
 
@@ -175,14 +207,14 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 	}
 
 	log.Debug("ReleaseCollectionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID))
-	//qc.meta.printMeta()
+	//qc.MetaReplica.printMeta()
 	//qc.cluster.printMeta()
 	return status, nil
 }
 
 func (qc *QueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 	collectionID := req.CollectionID
-	log.Debug("show partitions start, ", zap.Int64("collectionID", collectionID))
+	log.Debug("show partitions start, ", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", req.PartitionIDs))
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
@@ -196,7 +228,7 @@ func (qc *QueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowParti
 		}, err
 	}
 
-	partitionIDs, err := qc.meta.showPartitions(collectionID)
+	partitionStates, err := qc.meta.showPartitions(collectionID)
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
@@ -204,12 +236,42 @@ func (qc *QueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowParti
 			Status: status,
 		}, err
 	}
+	ID2PartitionState := make(map[UniqueID]*querypb.PartitionStates)
+	inMemoryPartitionIDs := make([]UniqueID, 0)
+	for _, state := range partitionStates {
+		ID2PartitionState[state.PartitionID] = state
+		inMemoryPartitionIDs = append(inMemoryPartitionIDs, state.PartitionID)
+	}
+	inMemoryPercentages := make([]int64, 0)
+	if len(req.PartitionIDs) == 0 {
+		for _, id := range inMemoryPartitionIDs {
+			inMemoryPercentages = append(inMemoryPercentages, ID2PartitionState[id].InMemoryPercentage)
+		}
+		log.Debug("show partitions end", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", inMemoryPartitionIDs), zap.Int64s("inMemoryPercentage", inMemoryPercentages))
+		return &querypb.ShowPartitionsResponse{
+			Status:              status,
+			PartitionIDs:        inMemoryPartitionIDs,
+			InMemoryPercentages: inMemoryPercentages,
+		}, nil
+	}
+	for _, id := range req.PartitionIDs {
+		if _, ok := ID2PartitionState[id]; !ok {
+			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			err := errors.New("partition has not been loaded to memory or load failed")
+			status.Reason = err.Error()
+			return &querypb.ShowPartitionsResponse{
+				Status: status,
+			}, err
+		}
+		inMemoryPercentages = append(inMemoryPercentages, ID2PartitionState[id].InMemoryPercentage)
+	}
 
-	log.Debug("show partitions end", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
+	log.Debug("show partitions end", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", req.PartitionIDs), zap.Int64s("inMemoryPercentage", inMemoryPercentages))
 
 	return &querypb.ShowPartitionsResponse{
-		Status:       status,
-		PartitionIDs: partitionIDs,
+		Status:              status,
+		PartitionIDs:        req.PartitionIDs,
+		InMemoryPercentages: inMemoryPercentages,
 	}, nil
 }
 
@@ -239,8 +301,8 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 	hasCollection := qc.meta.hasCollection(collectionID)
 	if hasCollection {
 		partitionIDsToLoad := make([]UniqueID, 0)
-		loadCollection, _ := qc.meta.getLoadCollection(collectionID)
-		if loadCollection {
+		loadType, _ := qc.meta.getLoadType(collectionID)
+		if loadType == querypb.LoadType_loadCollection {
 			for _, partitionID := range partitionIDs {
 				hasReleasePartition := qc.meta.hasReleasePartition(collectionID, partitionID)
 				if hasReleasePartition {
@@ -336,7 +398,7 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 		return status, err
 	}
 	log.Debug("ReleasePartitionRequest completed", zap.String("role", Params.RoleName), zap.Int64("msgID", req.Base.MsgID), zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs))
-	//qc.meta.printMeta()
+	//qc.MetaReplica.printMeta()
 	//qc.cluster.printMeta()
 	return status, nil
 }
@@ -382,7 +444,7 @@ func (qc *QueryCoord) GetPartitionStates(ctx context.Context, req *querypb.GetPa
 	partitionIDs := req.PartitionIDs
 	partitionStates := make([]*querypb.PartitionStates, 0)
 	for _, partitionID := range partitionIDs {
-		state, err := qc.meta.getPartitionStateByID(partitionID)
+		res, err := qc.meta.getPartitionStatesByID(req.CollectionID, partitionID)
 		if err != nil {
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			status.Reason = err.Error()
@@ -392,7 +454,7 @@ func (qc *QueryCoord) GetPartitionStates(ctx context.Context, req *querypb.GetPa
 		}
 		partitionState := &querypb.PartitionStates{
 			PartitionID: partitionID,
-			State:       state,
+			State:       res.State,
 		}
 		partitionStates = append(partitionStates, partitionState)
 	}
@@ -419,9 +481,9 @@ func (qc *QueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmen
 
 	totalMemSize := int64(0)
 	totalNumRows := int64(0)
-	//TODO::get segment infos from meta
+	//TODO::get segment infos from MetaReplica
 	//segmentIDs := req.SegmentIDs
-	//segmentInfos, err := qs.meta.getSegmentInfos(segmentIDs)
+	//segmentInfos, err := qs.MetaReplica.getSegmentInfos(segmentIDs)
 	segmentInfos, err := qc.cluster.getSegmentInfo(ctx, req)
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
@@ -438,5 +500,76 @@ func (qc *QueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmen
 	return &querypb.GetSegmentInfoResponse{
 		Status: status,
 		Infos:  segmentInfos,
+	}, nil
+}
+
+func (qc *QueryCoord) isHealthy() bool {
+	code := qc.stateCode.Load().(internalpb.StateCode)
+	return code == internalpb.StateCode_Healthy
+}
+
+func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	log.Debug("QueryCoord.GetMetrics",
+		zap.Int64("node_id", Params.QueryCoordID),
+		zap.String("req", req.Request))
+
+	if !qc.isHealthy() {
+		log.Warn("QueryCoord.GetMetrics failed",
+			zap.Int64("node_id", Params.QueryCoordID),
+			zap.String("req", req.Request),
+			zap.Error(errQueryCoordIsUnhealthy(Params.QueryCoordID)))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    msgQueryCoordIsUnhealthy(Params.QueryCoordID),
+			},
+			Response: "",
+		}, nil
+	}
+
+	metricType, err := metricsinfo.ParseMetricType(req.Request)
+	if err != nil {
+		log.Warn("QueryCoord.GetMetrics failed to parse metric type",
+			zap.Int64("node_id", Params.QueryCoordID),
+			zap.String("req", req.Request),
+			zap.Error(err))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+			Response: "",
+		}, nil
+	}
+
+	log.Debug("QueryCoord.GetMetrics",
+		zap.String("metric_type", metricType))
+
+	if metricType == metricsinfo.SystemInfoMetrics {
+		metrics, err := getSystemInfoMetrics(ctx, req, qc)
+
+		log.Debug("QueryCoord.GetMetrics",
+			zap.Int64("node_id", Params.QueryCoordID),
+			zap.String("req", req.Request),
+			zap.String("metric_type", metricType),
+			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
+			zap.Error(err))
+
+		return metrics, err
+	}
+
+	log.Debug("QueryCoord.GetMetrics failed, request metric type is not implemented yet",
+		zap.Int64("node_id", Params.QueryCoordID),
+		zap.String("req", req.Request),
+		zap.String("metric_type", metricType))
+
+	return &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    metricsinfo.MsgUnimplementedMetric,
+		},
+		Response: "",
 	}, nil
 }

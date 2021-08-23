@@ -36,7 +36,8 @@ func (stNode *serviceTimeNode) Name() string {
 }
 
 func (stNode *serviceTimeNode) Close() {
-	//stNode.timeTickMsgStream.Close()
+	// `Close` needs to be invoked to close producers
+	stNode.timeTickMsgStream.Close()
 }
 
 func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
@@ -49,7 +50,7 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	serviceTimeMsg, ok := in[0].(*serviceTimeMsg)
 	if !ok {
-		log.Error("type assertion failed for serviceTimeMsg")
+		log.Warn("type assertion failed for serviceTimeMsg")
 		// TODO: add error handling
 	}
 
@@ -73,7 +74,7 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	//)
 
 	//if err := stNode.sendTimeTick(serviceTimeMsg.timeRange.timestampMax); err != nil {
-	//	log.Error("Error: send time tick into pulsar channel failed", zap.Error(err))
+	//	log.Warn("Error: send time tick into pulsar channel failed", zap.Error(err))
 	//}
 
 	var res Msg = &gcMsg{
@@ -121,7 +122,7 @@ func newServiceTimeNode(ctx context.Context,
 
 	timeTimeMsgStream, err := factory.NewMsgStream(ctx)
 	if err != nil {
-		log.Error(err.Error())
+		log.Warn(err.Error())
 	} else {
 		// TODO: use param table
 		timeTickChannel := "query-node-time-tick-0"

@@ -63,11 +63,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     Status
     Delete(int64_t reserverd_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) override;
 
-    // stop receive insert requests
-    // will move data to immutable vector or something
-    Status
-    Close() override;
-
     int64_t
     GetMemoryUsageInBytes() const override;
 
@@ -106,6 +101,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return indexing_record_.get_finished_ack();
     }
 
+    // deprecated
     const knowhere::Index*
     chunk_index_impl(FieldOffset field_offset, int64_t chunk_id) const final {
         return indexing_record_.get_field_indexing(field_offset).get_chunk_indexing(chunk_id);
@@ -117,6 +113,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
  public:
+    // only for debug
     void
     debug_disable_small_index() override {
         debug_disable_small_index_ = true;
@@ -125,11 +122,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     ssize_t
     get_row_count() const override {
         return record_.ack_responder_.GetAck();
-    }
-
-    SegmentState
-    get_state() const override {
-        return state_.load(std::memory_order_relaxed);
     }
 
     ssize_t
@@ -160,9 +152,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     bulk_subscript(FieldOffset field_offset, const int64_t* seg_offsets, int64_t count, void* output) const override;
 
-    Status
-    LoadIndexing(const LoadIndexInfo& info) override;
-
  public:
     friend std::unique_ptr<SegmentGrowing>
     CreateGrowingSegment(SchemaPtr schema, const SegcoreConfig& segcore_config);
@@ -175,7 +164,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     void
-    mask_with_timestamps(std::deque<boost::dynamic_bitset<>>& bitset_chunks, Timestamp timestamp) const override;
+    mask_with_timestamps(boost::dynamic_bitset<>& bitset_chunk, Timestamp timestamp) const override;
 
     void
     vector_search(int64_t vec_count,
@@ -216,7 +205,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
  private:
     SegcoreConfig segcore_config_;
     SchemaPtr schema_;
-    std::atomic<SegmentState> state_ = SegmentState::Open;
 
     InsertRecord record_;
     DeletedRecord deleted_record_;

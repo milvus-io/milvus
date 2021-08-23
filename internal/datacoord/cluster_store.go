@@ -29,7 +29,7 @@ type ClusterStore interface {
 }
 
 type NodeInfo struct {
-	info    *datapb.DataNodeInfo
+	Info    *datapb.DataNodeInfo
 	eventCh chan *NodeEvent
 	client  types.DataNode
 	ctx     context.Context
@@ -46,7 +46,7 @@ type NodeEvent struct {
 func NewNodeInfo(ctx context.Context, info *datapb.DataNodeInfo) *NodeInfo {
 	ctx, cancel := context.WithCancel(ctx)
 	return &NodeInfo{
-		info:    info,
+		Info:    info,
 		eventCh: make(chan *NodeEvent, eventChBuffer),
 		ctx:     ctx,
 		cancel:  cancel,
@@ -55,7 +55,7 @@ func NewNodeInfo(ctx context.Context, info *datapb.DataNodeInfo) *NodeInfo {
 
 func (n *NodeInfo) ShadowClone(opts ...NodeOpt) *NodeInfo {
 	cloned := &NodeInfo{
-		info:    n.info,
+		Info:    n.Info,
 		eventCh: n.eventCh,
 		client:  n.client,
 		ctx:     n.ctx,
@@ -68,9 +68,9 @@ func (n *NodeInfo) ShadowClone(opts ...NodeOpt) *NodeInfo {
 }
 
 func (n *NodeInfo) Clone(opts ...NodeOpt) *NodeInfo {
-	info := proto.Clone(n.info).(*datapb.DataNodeInfo)
+	info := proto.Clone(n.Info).(*datapb.DataNodeInfo)
 	cloned := &NodeInfo{
-		info:    info,
+		Info:    info,
 		eventCh: n.eventCh,
 		client:  n.client,
 		ctx:     n.ctx,
@@ -156,7 +156,7 @@ func SetWatched(channelsName []string) NodeOpt {
 		for _, channelName := range channelsName {
 			channelsMap[channelName] = struct{}{}
 		}
-		for _, ch := range n.info.Channels {
+		for _, ch := range n.Info.Channels {
 			_, ok := channelsMap[ch.GetName()]
 			if !ok {
 				continue
@@ -176,12 +176,12 @@ func SetClient(client types.DataNode) NodeOpt {
 
 func AddChannels(channels []*datapb.ChannelStatus) NodeOpt {
 	return func(n *NodeInfo) {
-		n.info.Channels = append(n.info.Channels, channels...)
+		n.Info.Channels = append(n.Info.Channels, channels...)
 	}
 }
 
 func SetChannels(channels []*datapb.ChannelStatus) NodeOpt {
 	return func(n *NodeInfo) {
-		n.info.Channels = channels
+		n.Info.Channels = channels
 	}
 }

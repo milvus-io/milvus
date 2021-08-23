@@ -32,7 +32,6 @@ service MilvusService {
 
   rpc Insert(InsertRequest) returns (MutationResult) {}
   rpc Search(SearchRequest) returns (SearchResults) {}
-  rpc Retrieve(RetrieveRequest) returns (RetrieveResults) {}
   rpc Flush(FlushRequest) returns (FlushResponse) {}
   rpc Query(QueryRequest) returns (QueryResults) {}
   rpc CalcDistance(CalcDistanceRequest) returns (CalcDistanceResults) {}
@@ -44,6 +43,9 @@ service MilvusService {
 
   // TODO: remove
   rpc RegisterLink(RegisterLinkRequest) returns (RegisterLinkResponse) {}
+
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse) {}
 }
 
 message CreateCollectionRequest {
@@ -92,6 +94,8 @@ message DescribeCollectionResponse {
   int64 collectionID = 3;
   repeated string virtual_channel_names = 4;
   repeated string physical_channel_names = 5;
+  uint64 created_timestamp = 6; // hybrid timestamp
+  uint64 created_utc_timestamp = 7; // physical timestamp
 }
 
 message LoadCollectionRequest {
@@ -117,7 +121,7 @@ message GetCollectionStatisticsResponse {
   repeated common.KeyValuePair stats = 2;
 }
 
-enum ShowCollectionsType {
+enum ShowType {
   All = 0;
   InMemory = 1;
 }
@@ -126,13 +130,17 @@ message ShowCollectionsRequest {
   common.MsgBase base = 1; // must
   string db_name = 2;
   uint64 time_stamp = 3;
-  ShowCollectionsType type = 4;
+  ShowType type = 4;
+  repeated string collection_names = 5; // show collection in querynode, showType = InMemory
 }
 
 message ShowCollectionsResponse {
   common.Status status = 1;
   repeated string collection_names = 2;
   repeated int64 collection_ids = 3;
+  repeated uint64 created_timestamps = 4; // hybrid timestamps
+  repeated uint64 created_utc_timestamps = 5; // physical timestamps
+  repeated int64 inMemory_percentages = 6; // load percentage on querynode
 }
 
 message CreatePartitionRequest {
@@ -187,12 +195,17 @@ message ShowPartitionsRequest {
   string db_name = 2;
   string collection_name = 3; // must
   int64 collectionID = 4;
+  repeated string partition_names = 5; // show partition in querynode, showType = InMemory
+  ShowType type = 6;
 }
 
 message ShowPartitionsResponse {
   common.Status status = 1;
   repeated string partition_names = 2;
   repeated int64 partitionIDs = 3;
+  repeated uint64 created_timestamps = 4; // hybrid timestamps
+  repeated uint64 created_utc_timestamps = 5; // physical timestamps
+  repeated int64 inMemory_percentages = 6; // load percentage on querynode
 }
 
 message DescribeSegmentRequest {
@@ -272,6 +285,7 @@ message GetIndexStateRequest {
 message GetIndexStateResponse {
   common.Status status = 1;
   common.IndexState state = 2;
+  string fail_reason = 3;
 }
 
 message DropIndexRequest {
@@ -336,23 +350,6 @@ message SearchRequest {
   uint64 guarantee_timestamp = 11; // guarantee_timestamp
 }
 
-message RetrieveRequest {
-  common.MsgBase base = 1; // must
-  string db_name = 2;
-  string collection_name = 3; // must
-  repeated string partition_names = 4; // must
-  schema.IDs ids = 5; // must
-  repeated string output_fields = 6; // must
-  uint64 travel_timestamp = 7;
-  uint64 guarantee_timestamp = 8; // guarantee_timestamp
-}
-
-message RetrieveResults {
-  common.Status status = 1;
-  schema.IDs ids = 2;
-  repeated schema.FieldData fields_data = 3;
-}
-
 message Hits {
   repeated int64 IDs = 1;
   repeated bytes row_data = 2;
@@ -383,6 +380,8 @@ message QueryRequest {
   string expr = 4;
   repeated string output_fields = 5;
   repeated string partition_names = 6;
+  uint64 travel_timestamp = 7;
+  uint64 guarantee_timestamp = 8; // guarantee_timestamp
 }
 
 message QueryResults {
@@ -474,6 +473,17 @@ message RegisterLinkRequest {
 message RegisterLinkResponse {
   common.Address address = 1;
   common.Status status = 2;
+}
+
+message GetMetricsRequest {
+  common.MsgBase base = 1;
+  string request = 2; // request is of jsonic format
+}
+
+message GetMetricsResponse {
+  common.Status status = 1;
+  string response = 2;  // response is of jsonic format
+  string component_name = 3; // metrics from which component
 }
 
 service ProxyService {

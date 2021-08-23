@@ -23,14 +23,9 @@ import (
 	"runtime"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 	"unsafe"
-
-	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
-
-	"github.com/milvus-io/milvus/internal/proto/planpb"
-
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 
 	"go.uber.org/zap"
 
@@ -43,9 +38,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -55,6 +53,7 @@ const (
 	DropCollectionTaskName          = "DropCollectionTask"
 	SearchTaskName                  = "SearchTask"
 	RetrieveTaskName                = "RetrieveTask"
+	QueryTaskName                   = "QueryTask"
 	AnnsFieldKey                    = "anns_field"
 	TopKKey                         = "topk"
 	MetricTypeKey                   = "metric_type"
@@ -101,6 +100,7 @@ type dmlTask interface {
 	task
 	getChannels() ([]vChan, error)
 	getPChanStats() (map[pChan]pChanStatistics, error)
+	getChannelsTimerTicker() channelsTimeTicker
 }
 
 type BaseInsertTask = msgstream.InsertMsg
@@ -153,6 +153,10 @@ func (it *InsertTask) SetTs(ts Timestamp) {
 
 func (it *InsertTask) EndTs() Timestamp {
 	return it.EndTimestamp
+}
+
+func (it *InsertTask) getChannelsTimerTicker() channelsTimeTicker {
+	return it.chTicker
 }
 
 func (it *InsertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
@@ -651,6 +655,7 @@ func (it *InsertTask) checkFieldAutoID() error {
 	if autoIDLoc >= 0 {
 		fieldData := schemapb.FieldData{
 			FieldName: primaryFieldName,
+			FieldId:   -1,
 			Type:      schemapb.DataType_Int64,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
@@ -818,7 +823,6 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 	}
 
 	reqSegCountMap := make(map[int32]map[UniqueID]uint32)
-
 	for channelID, count := range channelCountMap {
 		ts, ok := channelMaxTSMap[channelID]
 		if !ok {
@@ -831,6 +835,8 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 		}
 		mapInfo, err := it.segIDAssigner.GetSegmentID(it.CollectionID, it.PartitionID, channelName, count, ts)
 		if err != nil {
+			log.Debug("InsertTask.go", zap.Any("MapInfo", mapInfo),
+				zap.Error(err))
 			return nil, err
 		}
 		reqSegCountMap[channelID] = make(map[UniqueID]uint32)
@@ -881,7 +887,7 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 				return segIDSlice[index]
 			}
 		}
-		log.Warn("Can't Found SegmentID")
+		log.Warn("Can't Found SegmentID", zap.Any("reqSegAllocateCounter", reqSegAllocateCounter))
 		return 0
 	}
 
@@ -922,6 +928,9 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 			rowID := insertRequest.RowIDs[index]
 			row := insertRequest.RowData[index]
 			segmentID := getSegmentID(key)
+			if segmentID == 0 {
+				return nil, fmt.Errorf("get SegmentID failed, segmentID is zero")
+			}
 			_, ok := result[key]
 			if !ok {
 				sliceRequest := internalpb.InsertRequest{
@@ -1020,15 +1029,6 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 			it.result.Status.Reason = err.Error()
 			return err
 		}
-	}
-
-	pchans, err := it.chMgr.getChannels(collID)
-	if err != nil {
-		return err
-	}
-	for _, pchan := range pchans {
-		log.Debug("Proxy InsertTask add pchan", zap.Any("pchan", pchan))
-		_ = it.chTicker.addPChan(pchan)
 	}
 
 	// Assign SegmentID
@@ -1263,6 +1263,58 @@ func (dct *DropCollectionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+// Support wildcard in output fields:
+//   "*" - all scalar fields
+//   "%" - all vector fields
+// For example, A and B are scalar fields, C and D are vector fields, duplicated fields will automatically be removed.
+//   output_fields=["*"] 	 ==> [A,B]
+//   output_fields=["%"] 	 ==> [C,D]
+//   output_fields=["*","%"] ==> [A,B,C,D]
+//   output_fields=["*",A] 	 ==> [A,B]
+//   output_fields=["*",C]   ==> [A,B,C]
+func translateOutputFields(outputFields []string, schema *schemapb.CollectionSchema, addPrimary bool) ([]string, error) {
+	var primaryFieldName string
+	scalarFieldNameMap := make(map[string]bool)
+	vectorFieldNameMap := make(map[string]bool)
+	resultFieldNameMap := make(map[string]bool)
+	resultFieldNames := make([]string, 0)
+
+	for _, field := range schema.Fields {
+		if field.IsPrimaryKey {
+			primaryFieldName = field.Name
+		}
+		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
+			vectorFieldNameMap[field.Name] = true
+		} else {
+			scalarFieldNameMap[field.Name] = true
+		}
+	}
+
+	for _, outputFieldName := range outputFields {
+		outputFieldName = strings.TrimSpace(outputFieldName)
+		if outputFieldName == "*" {
+			for fieldName := range scalarFieldNameMap {
+				resultFieldNameMap[fieldName] = true
+			}
+		} else if outputFieldName == "%" {
+			for fieldName := range vectorFieldNameMap {
+				resultFieldNameMap[fieldName] = true
+			}
+		} else {
+			resultFieldNameMap[outputFieldName] = true
+		}
+	}
+
+	if addPrimary {
+		resultFieldNameMap[primaryFieldName] = true
+	}
+
+	for fieldName := range resultFieldNameMap {
+		resultFieldNames = append(resultFieldNames, fieldName)
+	}
+	return resultFieldNames, nil
+}
+
 type SearchTask struct {
 	Condition
 	*internalpb.SearchRequest
@@ -1378,6 +1430,7 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 		zap.Any("collections", showResp.CollectionIDs),
 	)
 	collectionLoaded := false
+
 	for _, collectionID := range showResp.CollectionIDs {
 		if collectionID == collID {
 			collectionLoaded = true
@@ -1396,6 +1449,14 @@ func (st *SearchTask) PreExecute(ctx context.Context) error {
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
+
+	outputFields, err := translateOutputFields(st.query.OutputFields, schema, false)
+	if err != nil {
+		return err
+	}
+	log.Debug("translate output fields", zap.Any("OutputFields", outputFields))
+	st.query.OutputFields = outputFields
+
 	if st.query.GetDslType() == commonpb.DslType_BoolExprV1 {
 		annsField, err := GetAttrByKeyFromRepeatedKV(AnnsFieldKey, st.query.SearchParams)
 		if err != nil {
@@ -1570,7 +1631,7 @@ func decodeSearchResultsSerial(searchResults []*internalpb.SearchResults) ([]*sc
 	results := make([]*schemapb.SearchResultData, 0)
 	// necessary to parallel this?
 	for i, partialSearchResult := range searchResults {
-		log.Debug("decodeSearchResultsSerial", zap.Any("i", i), zap.Any("SlicedBob", partialSearchResult.SlicedBlob))
+		log.Debug("decodeSearchResultsSerial", zap.Any("i", i), zap.Any("len(SlicedBob)", len(partialSearchResult.SlicedBlob)))
 		if partialSearchResult.SlicedBlob == nil {
 			continue
 		}
@@ -1637,30 +1698,36 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 
 		j := 0
 		for ; j < topk; j++ {
-			valid := false
+			valid := true
 			choice, maxDistance := 0, minFloat32
 			for q, loc := range locs { // query num, the number of ways to merge
 				if loc >= topk {
 					continue
 				}
-				distance := searchResultData[q].Scores[idx*topk+loc]
-				if distance > maxDistance || (math.Abs(float64(distance-maxDistance)) < math.SmallestNonzeroFloat32 && choice != q) {
-					choice = q
-					maxDistance = distance
-					valid = true
+				curIdx := idx*topk + loc
+				id := searchResultData[q].Ids.GetIntId().Data[curIdx]
+				if id == -1 {
+					valid = false
+				} else {
+					distance := searchResultData[q].Scores[curIdx]
+					if distance > maxDistance {
+						choice = q
+						maxDistance = distance
+					}
 				}
 			}
 			if !valid {
 				break
 			}
 			choiceOffset := locs[choice]
-			// check if distance is valid, `invalid` here means very very big,
-			// in this process, distance here is the smallest, so the rest of distance are all invalid
-			if searchResultData[choice].Scores[idx*topk+choiceOffset] <= minFloat32 {
-				break
-			}
 			curIdx := idx*topk + choiceOffset
-			ret.Results.Ids.GetIntId().Data = append(ret.Results.Ids.GetIntId().Data, searchResultData[choice].Ids.GetIntId().Data[curIdx])
+
+			// ignore invalid search result
+			id := searchResultData[choice].Ids.GetIntId().Data[curIdx]
+			if id == -1 {
+				continue
+			}
+			ret.Results.Ids.GetIntId().Data = append(ret.Results.Ids.GetIntId().Data, id)
 			// TODO(yukun): Process searchResultData.FieldsData
 			for k, fieldData := range searchResultData[choice].FieldsData {
 				switch fieldType := fieldData.Field.(type) {
@@ -1668,6 +1735,7 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 					if ret.Results.FieldsData[k] == nil || ret.Results.FieldsData[k].GetScalars() == nil {
 						ret.Results.FieldsData[k] = &schemapb.FieldData{
 							FieldName: fieldData.FieldName,
+							FieldId:   fieldData.FieldId,
 							Field: &schemapb.FieldData_Scalars{
 								Scalars: &schemapb.ScalarField{},
 							},
@@ -1743,6 +1811,7 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 					if ret.Results.FieldsData[k] == nil || ret.Results.FieldsData[k].GetVectors() == nil {
 						ret.Results.FieldsData[k] = &schemapb.FieldData{
 							FieldName: fieldData.FieldName,
+							FieldId:   fieldData.FieldId,
 							Field: &schemapb.FieldData_Vectors{
 								Vectors: &schemapb.VectorField{
 									Dim: dim,
@@ -1909,7 +1978,8 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 				for k, fieldName := range st.query.OutputFields {
 					for _, field := range schema.Fields {
 						if st.result.Results.FieldsData[k] != nil && field.Name == fieldName {
-							st.result.Results.FieldsData[k].FieldName = fieldName
+							st.result.Results.FieldsData[k].FieldName = field.Name
+							st.result.Results.FieldsData[k].FieldId = field.FieldID
 							st.result.Results.FieldsData[k].Type = field.DataType
 						}
 					}
@@ -1921,118 +1991,146 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 	}
 }
 
-type RetrieveTask struct {
+type QueryTask struct {
 	Condition
 	*internalpb.RetrieveRequest
 	ctx       context.Context
 	resultBuf chan []*internalpb.RetrieveResults
-	result    *milvuspb.RetrieveResults
-	retrieve  *milvuspb.RetrieveRequest
+	result    *milvuspb.QueryResults
+	query     *milvuspb.QueryRequest
 	chMgr     channelsMgr
 	qc        types.QueryCoord
 }
 
-func (rt *RetrieveTask) TraceCtx() context.Context {
-	return rt.ctx
+func (qt *QueryTask) TraceCtx() context.Context {
+	return qt.ctx
 }
 
-func (rt *RetrieveTask) ID() UniqueID {
-	return rt.Base.MsgID
+func (qt *QueryTask) ID() UniqueID {
+	return qt.Base.MsgID
 }
 
-func (rt *RetrieveTask) SetID(uid UniqueID) {
-	rt.Base.MsgID = uid
+func (qt *QueryTask) SetID(uid UniqueID) {
+	qt.Base.MsgID = uid
 }
 
-func (rt *RetrieveTask) Name() string {
+func (qt *QueryTask) Name() string {
 	return RetrieveTaskName
 }
 
-func (rt *RetrieveTask) Type() commonpb.MsgType {
-	return rt.Base.MsgType
+func (qt *QueryTask) Type() commonpb.MsgType {
+	return qt.Base.MsgType
 }
 
-func (rt *RetrieveTask) BeginTs() Timestamp {
-	return rt.Base.Timestamp
+func (qt *QueryTask) BeginTs() Timestamp {
+	return qt.Base.Timestamp
 }
 
-func (rt *RetrieveTask) EndTs() Timestamp {
-	return rt.Base.Timestamp
+func (qt *QueryTask) EndTs() Timestamp {
+	return qt.Base.Timestamp
 }
 
-func (rt *RetrieveTask) SetTs(ts Timestamp) {
-	rt.Base.Timestamp = ts
+func (qt *QueryTask) SetTs(ts Timestamp) {
+	qt.Base.Timestamp = ts
 }
 
-func (rt *RetrieveTask) OnEnqueue() error {
-	rt.Base.MsgType = commonpb.MsgType_Retrieve
+func (qt *QueryTask) OnEnqueue() error {
+	qt.Base.MsgType = commonpb.MsgType_Retrieve
 	return nil
 }
 
-func (rt *RetrieveTask) getChannels() ([]pChan, error) {
-	collID, err := globalMetaCache.GetCollectionID(rt.ctx, rt.retrieve.CollectionName)
+func (qt *QueryTask) getChannels() ([]pChan, error) {
+	collID, err := globalMetaCache.GetCollectionID(qt.ctx, qt.query.CollectionName)
 	if err != nil {
 		return nil, err
 	}
 
-	return rt.chMgr.getChannels(collID)
+	return qt.chMgr.getChannels(collID)
 }
 
-func (rt *RetrieveTask) getVChannels() ([]vChan, error) {
-	collID, err := globalMetaCache.GetCollectionID(rt.ctx, rt.retrieve.CollectionName)
+func (qt *QueryTask) getVChannels() ([]vChan, error) {
+	collID, err := globalMetaCache.GetCollectionID(qt.ctx, qt.query.CollectionName)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = rt.chMgr.getChannels(collID)
+	_, err = qt.chMgr.getChannels(collID)
 	if err != nil {
-		err := rt.chMgr.createDMLMsgStream(collID)
+		err := qt.chMgr.createDMLMsgStream(collID)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	return rt.chMgr.getVChannels(collID)
+	return qt.chMgr.getVChannels(collID)
 }
 
-func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
-	rt.Base.MsgType = commonpb.MsgType_Retrieve
-	rt.Base.SourceID = Params.ProxyID
+func parseIdsFromExpr(exprStr string, schema *typeutil.SchemaHelper) ([]int64, error) {
+	expr, err := parseQueryExpr(schema, exprStr)
+	if err != nil {
+		return nil, err
+	}
 
-	collectionName := rt.retrieve.CollectionName
+	switch xExpr := expr.Expr.(type) {
+	case *planpb.Expr_TermExpr:
+		var ids []int64
+		for _, value := range xExpr.TermExpr.Values {
+			switch v := value.Val.(type) {
+			case *planpb.GenericValue_Int64Val:
+				ids = append(ids, v.Int64Val)
+			default:
+				return nil, errors.New("column is not int64")
+			}
+		}
+
+		if !xExpr.TermExpr.ColumnInfo.IsPrimaryKey {
+			return nil, errors.New("column is not primary key")
+		}
+
+		return ids, nil
+	default:
+		return nil, errors.New("not top level term")
+	}
+}
+
+func (qt *QueryTask) PreExecute(ctx context.Context) error {
+	qt.Base.MsgType = commonpb.MsgType_Retrieve
+	qt.Base.SourceID = Params.ProxyID
+
+	collectionName := qt.query.CollectionName
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	if err != nil {
 		log.Debug("Failed to get collection id.", zap.Any("collectionName", collectionName),
-			zap.Any("requestID", rt.Base.MsgID), zap.Any("requestType", "retrieve"))
+			zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 		return err
 	}
 	log.Info("Get collection id by name.", zap.Any("collectionName", collectionName),
-		zap.Any("requestID", rt.Base.MsgID), zap.Any("requestType", "retrieve"))
+		zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 
-	if err := ValidateCollectionName(rt.retrieve.CollectionName); err != nil {
+	if err := ValidateCollectionName(qt.query.CollectionName); err != nil {
 		log.Debug("Invalid collection name.", zap.Any("collectionName", collectionName),
-			zap.Any("requestID", rt.Base.MsgID), zap.Any("requestType", "retrieve"))
+			zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 		return err
 	}
 	log.Info("Validate collection name.", zap.Any("collectionName", collectionName),
-		zap.Any("requestID", rt.Base.MsgID), zap.Any("requestType", "retrieve"))
+		zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 
-	for _, tag := range rt.retrieve.PartitionNames {
+	for _, tag := range qt.query.PartitionNames {
 		if err := ValidatePartitionTag(tag, false); err != nil {
 			log.Debug("Invalid partition name.", zap.Any("partitionName", tag),
-				zap.Any("requestID", rt.Base.MsgID), zap.Any("requestType", "retrieve"))
+				zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 			return err
 		}
 	}
 	log.Info("Validate partition names.",
-		zap.Any("requestID", rt.Base.MsgID), zap.Any("requestType", "retrieve"))
+		zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 
 	// check if collection was already loaded into query node
-	showResp, err := rt.qc.ShowCollections(rt.ctx, &querypb.ShowCollectionsRequest{
+	showResp, err := qt.qc.ShowCollections(qt.ctx, &querypb.ShowCollectionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_ShowCollections,
-			MsgID:     rt.Base.MsgID,
-			Timestamp: rt.Base.Timestamp,
+			MsgID:     qt.Base.MsgID,
+			Timestamp: qt.Base.Timestamp,
 			SourceID:  Params.ProxyID,
 		},
 		DbID: 0, // TODO(dragondriver)
@@ -2046,6 +2144,7 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 	log.Debug("query coordinator show collections",
 		zap.Any("collections", showResp.CollectionIDs),
 		zap.Any("collID", collectionID))
+
 	collectionLoaded := false
 	for _, collID := range showResp.CollectionIDs {
 		if collectionID == collID {
@@ -2057,42 +2156,61 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 		return fmt.Errorf("collection %v was not loaded into memory", collectionName)
 	}
 
-	// TODO(dragondriver): necessary to check if partition was loaded into query node?
-
-	rt.Base.MsgType = commonpb.MsgType_Retrieve
-	if rt.retrieve.Ids == nil {
-		errMsg := "Retrieve ids is nil"
-		return errors.New(errMsg)
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, qt.query.CollectionName)
+	if err != nil { // err is not nil if collection not exists
+		return err
 	}
-	rt.Ids = rt.retrieve.Ids
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	if err != nil {
 		return err
 	}
-	if len(rt.retrieve.OutputFields) == 0 {
+
+	// TODO(dragondriver): necessary to check if partition was loaded into query node?
+
+	if qt.Ids == nil {
+		if qt.query.Expr == "" {
+			errMsg := "Query expression is empty"
+			return fmt.Errorf(errMsg)
+		}
+
+		ids, err := parseIdsFromExpr(qt.query.Expr, schemaHelper)
+		if err != nil {
+			return err
+		}
+		qt.Base.MsgType = commonpb.MsgType_Retrieve
+		qt.Ids = &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: ids,
+				},
+			},
+		}
+	}
+	qt.query.OutputFields, err = translateOutputFields(qt.query.OutputFields, schema, true)
+	if err != nil {
+		return err
+	}
+	log.Debug("translate output fields", zap.Any("OutputFields", qt.query.OutputFields))
+	if len(qt.query.OutputFields) == 0 {
 		for _, field := range schema.Fields {
 			if field.FieldID >= 100 && field.DataType != schemapb.DataType_FloatVector && field.DataType != schemapb.DataType_BinaryVector {
-				rt.OutputFieldsId = append(rt.OutputFieldsId, field.FieldID)
+				qt.OutputFieldsId = append(qt.OutputFieldsId, field.FieldID)
 			}
 		}
 	} else {
-		for _, reqField := range rt.retrieve.OutputFields {
+		addPrimaryKey := false
+		for _, reqField := range qt.query.OutputFields {
 			findField := false
-			addPrimaryKey := false
 			for _, field := range schema.Fields {
 				if reqField == field.Name {
-					if field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_BinaryVector {
-						errMsg := "Query does not support vector field currently"
-						return errors.New(errMsg)
-					}
 					if field.IsPrimaryKey {
 						addPrimaryKey = true
 					}
 					findField = true
-					rt.OutputFieldsId = append(rt.OutputFieldsId, field.FieldID)
+					qt.OutputFieldsId = append(qt.OutputFieldsId, field.FieldID)
 				} else {
 					if field.IsPrimaryKey && !addPrimaryKey {
-						rt.OutputFieldsId = append(rt.OutputFieldsId, field.FieldID)
+						qt.OutputFieldsId = append(qt.OutputFieldsId, field.FieldID)
 						addPrimaryKey = true
 					}
 				}
@@ -2103,47 +2221,48 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 			}
 		}
 	}
+	log.Debug("translate output fields to field ids", zap.Any("OutputFieldsID", qt.OutputFieldsId))
 
-	travelTimestamp := rt.retrieve.TravelTimestamp
+	travelTimestamp := qt.query.TravelTimestamp
 	if travelTimestamp == 0 {
-		travelTimestamp = rt.BeginTs()
+		travelTimestamp = qt.BeginTs()
 	}
-	guaranteeTimestamp := rt.retrieve.GuaranteeTimestamp
+	guaranteeTimestamp := qt.query.GuaranteeTimestamp
 	if guaranteeTimestamp == 0 {
-		guaranteeTimestamp = rt.BeginTs()
+		guaranteeTimestamp = qt.BeginTs()
 	}
-	rt.RetrieveRequest.TravelTimestamp = travelTimestamp
-	rt.RetrieveRequest.GuaranteeTimestamp = guaranteeTimestamp
+	qt.TravelTimestamp = travelTimestamp
+	qt.GuaranteeTimestamp = guaranteeTimestamp
 
-	rt.ResultChannelID = Params.RetrieveResultChannelNames[0]
-	rt.DbID = 0 // todo(yukun)
+	qt.ResultChannelID = Params.RetrieveResultChannelNames[0]
+	qt.DbID = 0 // todo(yukun)
 
-	rt.CollectionID = collectionID
-	rt.PartitionIDs = make([]UniqueID, 0)
+	qt.CollectionID = collectionID
+	qt.PartitionIDs = make([]UniqueID, 0)
 
 	partitionsMap, err := globalMetaCache.GetPartitions(ctx, collectionName)
 	if err != nil {
 		log.Debug("Failed to get partitions in collection.", zap.Any("collectionName", collectionName),
-			zap.Any("requestID", rt.Base.MsgID), zap.Any("requestType", "retrieve"))
+			zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 		return err
 	}
 	log.Info("Get partitions in collection.", zap.Any("collectionName", collectionName),
-		zap.Any("requestID", rt.Base.MsgID), zap.Any("requestType", "retrieve"))
+		zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 
 	partitionsRecord := make(map[UniqueID]bool)
-	for _, partitionName := range rt.retrieve.PartitionNames {
+	for _, partitionName := range qt.query.PartitionNames {
 		pattern := fmt.Sprintf("^%s$", partitionName)
 		re, err := regexp.Compile(pattern)
 		if err != nil {
 			log.Debug("Failed to compile partition name regex expression.", zap.Any("partitionName", partitionName),
-				zap.Any("requestID", rt.Base.MsgID), zap.Any("requestType", "retrieve"))
+				zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 			return errors.New("invalid partition names")
 		}
 		found := false
 		for name, pID := range partitionsMap {
 			if re.MatchString(name) {
 				if _, exist := partitionsRecord[pID]; !exist {
-					rt.PartitionIDs = append(rt.PartitionIDs, pID)
+					qt.PartitionIDs = append(qt.PartitionIDs, pID)
 					partitionsRecord[pID] = true
 				}
 				found = true
@@ -2156,46 +2275,46 @@ func (rt *RetrieveTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	log.Info("Retrieve PreExecute done.",
-		zap.Any("requestID", rt.Base.MsgID), zap.Any("requestType", "retrieve"))
+	log.Info("Query PreExecute done.",
+		zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 	return nil
 }
 
-func (rt *RetrieveTask) Execute(ctx context.Context) error {
+func (qt *QueryTask) Execute(ctx context.Context) error {
 	var tsMsg msgstream.TsMsg = &msgstream.RetrieveMsg{
-		RetrieveRequest: *rt.RetrieveRequest,
+		RetrieveRequest: *qt.RetrieveRequest,
 		BaseMsg: msgstream.BaseMsg{
 			Ctx:            ctx,
 			HashValues:     []uint32{uint32(Params.ProxyID)},
-			BeginTimestamp: rt.Base.Timestamp,
-			EndTimestamp:   rt.Base.Timestamp,
+			BeginTimestamp: qt.Base.Timestamp,
+			EndTimestamp:   qt.Base.Timestamp,
 		},
 	}
 	msgPack := msgstream.MsgPack{
-		BeginTs: rt.Base.Timestamp,
-		EndTs:   rt.Base.Timestamp,
+		BeginTs: qt.Base.Timestamp,
+		EndTs:   qt.Base.Timestamp,
 		Msgs:    make([]msgstream.TsMsg, 1),
 	}
 	msgPack.Msgs[0] = tsMsg
 
-	collectionName := rt.retrieve.CollectionName
+	collectionName := qt.query.CollectionName
 	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	if err != nil {
 		return err
 	}
 
-	stream, err := rt.chMgr.getDQLStream(collID)
+	stream, err := qt.chMgr.getDQLStream(collID)
 	if err != nil {
-		err = rt.chMgr.createDQLStream(collID)
+		err = qt.chMgr.createDQLStream(collID)
 		if err != nil {
-			rt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			rt.result.Status.Reason = err.Error()
+			qt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			qt.result.Status.Reason = err.Error()
 			return err
 		}
-		stream, err = rt.chMgr.getDQLStream(collID)
+		stream, err = qt.chMgr.getDQLStream(collID)
 		if err != nil {
-			rt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			rt.result.Status.Reason = err.Error()
+			qt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			qt.result.Status.Reason = err.Error()
 			return err
 		}
 	}
@@ -2203,24 +2322,24 @@ func (rt *RetrieveTask) Execute(ctx context.Context) error {
 	log.Debug("proxy", zap.Int("length of retrieveMsg", len(msgPack.Msgs)))
 	if err != nil {
 		log.Debug("Failed to send retrieve request.",
-			zap.Any("requestID", rt.Base.MsgID), zap.Any("requestType", "retrieve"))
+			zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 	}
 
-	log.Info("Retrieve Execute done.",
-		zap.Any("requestID", rt.Base.MsgID), zap.Any("requestType", "retrieve"))
+	log.Info("Query Execute done.",
+		zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 	return err
 }
 
-func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
+func (qt *QueryTask) PostExecute(ctx context.Context) error {
 	t0 := time.Now()
 	defer func() {
 		log.Debug("WaitAndPostExecute", zap.Any("time cost", time.Since(t0)))
 	}()
 	select {
-	case <-rt.TraceCtx().Done():
-		log.Debug("proxy", zap.Int64("Retrieve: wait to finish failed, timeout!, taskID:", rt.ID()))
-		return fmt.Errorf("RetrieveTask:wait to finish failed, timeout : %d", rt.ID())
-	case retrieveResults := <-rt.resultBuf:
+	case <-qt.TraceCtx().Done():
+		log.Debug("proxy", zap.Int64("Query: wait to finish failed, timeout!, taskID:", qt.ID()))
+		return fmt.Errorf("QueryTask:wait to finish failed, timeout : %d", qt.ID())
+	case retrieveResults := <-qt.resultBuf:
 		retrieveResult := make([]*internalpb.RetrieveResults, 0)
 		var reason string
 		for _, partialRetrieveResult := range retrieveResults {
@@ -2232,87 +2351,56 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 		}
 
 		if len(retrieveResult) == 0 {
-			rt.result = &milvuspb.RetrieveResults{
+			qt.result = &milvuspb.QueryResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
 					Reason:    reason,
 				},
 			}
-			log.Debug("Retrieve failed on all querynodes.",
-				zap.Any("requestID", rt.Base.MsgID), zap.Any("requestType", "retrieve"))
+			log.Debug("Query failed on all querynodes.",
+				zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 			return errors.New(reason)
 		}
 
 		availableQueryNodeNum := 0
-		rt.result = &milvuspb.RetrieveResults{
+		qt.result = &milvuspb.QueryResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 			},
-			Ids:        &schemapb.IDs{},
 			FieldsData: make([]*schemapb.FieldData, 0),
 		}
 		for idx, partialRetrieveResult := range retrieveResult {
-			log.Debug("Index-" + strconv.Itoa(idx))
 			availableQueryNodeNum++
 			if partialRetrieveResult.Ids == nil {
 				reason += "ids is nil\n"
 				continue
 			} else {
-				intIds, intOk := partialRetrieveResult.Ids.IdField.(*schemapb.IDs_IntId)
-				strIds, strOk := partialRetrieveResult.Ids.IdField.(*schemapb.IDs_StrId)
-				if !intOk && !strOk {
-					reason += "ids is empty\n"
-					continue
-				}
-
-				if !intOk {
-					if idsStr, ok := rt.result.Ids.IdField.(*schemapb.IDs_StrId); ok {
-						idsStr.StrId.Data = append(idsStr.StrId.Data, strIds.StrId.Data...)
-					} else {
-						rt.result.Ids.IdField = &schemapb.IDs_StrId{
-							StrId: &schemapb.StringArray{
-								Data: strIds.StrId.Data,
-							},
-						}
-					}
-				} else {
-					if idsInt, ok := rt.result.Ids.IdField.(*schemapb.IDs_IntId); ok {
-						idsInt.IntId.Data = append(idsInt.IntId.Data, intIds.IntId.Data...)
-					} else {
-						rt.result.Ids.IdField = &schemapb.IDs_IntId{
-							IntId: &schemapb.LongArray{
-								Data: intIds.IntId.Data,
-							},
-						}
-					}
-				}
-
 				if idx == 0 {
-					rt.result.FieldsData = append(rt.result.FieldsData, partialRetrieveResult.FieldsData...)
+					qt.result.FieldsData = append(qt.result.FieldsData, partialRetrieveResult.FieldsData...)
 				} else {
 					for k, fieldData := range partialRetrieveResult.FieldsData {
 						switch fieldType := fieldData.Field.(type) {
 						case *schemapb.FieldData_Scalars:
 							switch scalarType := fieldType.Scalars.Data.(type) {
 							case *schemapb.ScalarField_BoolData:
-								rt.result.FieldsData[k].GetScalars().GetBoolData().Data = append(rt.result.FieldsData[k].GetScalars().GetBoolData().Data, scalarType.BoolData.Data...)
+								qt.result.FieldsData[k].GetScalars().GetBoolData().Data = append(qt.result.FieldsData[k].GetScalars().GetBoolData().Data, scalarType.BoolData.Data...)
 							case *schemapb.ScalarField_IntData:
-								rt.result.FieldsData[k].GetScalars().GetIntData().Data = append(rt.result.FieldsData[k].GetScalars().GetIntData().Data, scalarType.IntData.Data...)
+								qt.result.FieldsData[k].GetScalars().GetIntData().Data = append(qt.result.FieldsData[k].GetScalars().GetIntData().Data, scalarType.IntData.Data...)
 							case *schemapb.ScalarField_LongData:
-								rt.result.FieldsData[k].GetScalars().GetLongData().Data = append(rt.result.FieldsData[k].GetScalars().GetLongData().Data, scalarType.LongData.Data...)
+								qt.result.FieldsData[k].GetScalars().GetLongData().Data = append(qt.result.FieldsData[k].GetScalars().GetLongData().Data, scalarType.LongData.Data...)
 							case *schemapb.ScalarField_FloatData:
-								rt.result.FieldsData[k].GetScalars().GetFloatData().Data = append(rt.result.FieldsData[k].GetScalars().GetFloatData().Data, scalarType.FloatData.Data...)
+								qt.result.FieldsData[k].GetScalars().GetFloatData().Data = append(qt.result.FieldsData[k].GetScalars().GetFloatData().Data, scalarType.FloatData.Data...)
 							case *schemapb.ScalarField_DoubleData:
-								rt.result.FieldsData[k].GetScalars().GetDoubleData().Data = append(rt.result.FieldsData[k].GetScalars().GetDoubleData().Data, scalarType.DoubleData.Data...)
+								qt.result.FieldsData[k].GetScalars().GetDoubleData().Data = append(qt.result.FieldsData[k].GetScalars().GetDoubleData().Data, scalarType.DoubleData.Data...)
 							default:
-								log.Debug("Retrieve received not supported data type")
+								log.Debug("Query received not supported data type")
 							}
 						case *schemapb.FieldData_Vectors:
 							switch vectorType := fieldType.Vectors.Data.(type) {
 							case *schemapb.VectorField_BinaryVector:
-								rt.result.FieldsData[k].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector = append(rt.result.FieldsData[k].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector, vectorType.BinaryVector...)
+								qt.result.FieldsData[k].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector = append(qt.result.FieldsData[k].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector, vectorType.BinaryVector...)
 							case *schemapb.VectorField_FloatVector:
-								rt.result.FieldsData[k].GetVectors().GetFloatVector().Data = append(rt.result.FieldsData[k].GetVectors().GetFloatVector().Data, vectorType.FloatVector.Data...)
+								qt.result.FieldsData[k].GetVectors().GetFloatVector().Data = append(qt.result.FieldsData[k].GetVectors().GetFloatVector().Data, vectorType.FloatVector.Data...)
 							}
 						default:
 						}
@@ -2324,8 +2412,8 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 
 		if availableQueryNodeNum == 0 {
 			log.Info("Not any valid result found.",
-				zap.Any("requestID", rt.Base.MsgID), zap.Any("requestType", "retrieve"))
-			rt.result = &milvuspb.RetrieveResults{
+				zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
+			qt.result = &milvuspb.QueryResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
 					Reason:    reason,
@@ -2334,10 +2422,10 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 			return nil
 		}
 
-		if len(rt.result.FieldsData) == 0 {
-			log.Info("Retrieve result is nil.",
-				zap.Any("requestID", rt.Base.MsgID), zap.Any("requestType", "retrieve"))
-			rt.result = &milvuspb.RetrieveResults{
+		if len(qt.result.FieldsData) == 0 {
+			log.Info("Query result is nil.",
+				zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
+			qt.result = &milvuspb.QueryResults{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_EmptyCollection,
 					Reason:    reason,
@@ -2346,22 +2434,23 @@ func (rt *RetrieveTask) PostExecute(ctx context.Context) error {
 			return nil
 		}
 
-		schema, err := globalMetaCache.GetCollectionSchema(ctx, rt.retrieve.CollectionName)
+		schema, err := globalMetaCache.GetCollectionSchema(ctx, qt.query.CollectionName)
 		if err != nil {
 			return err
 		}
-		for i := 0; i < len(rt.result.FieldsData); i++ {
+		for i := 0; i < len(qt.result.FieldsData); i++ {
 			for _, field := range schema.Fields {
-				if field.FieldID == rt.OutputFieldsId[i] {
-					rt.result.FieldsData[i].FieldName = field.Name
-					rt.result.FieldsData[i].Type = field.DataType
+				if field.FieldID == qt.OutputFieldsId[i] {
+					qt.result.FieldsData[i].FieldName = field.Name
+					qt.result.FieldsData[i].FieldId = field.FieldID
+					qt.result.FieldsData[i].Type = field.DataType
 				}
 			}
 		}
 	}
 
-	log.Info("Retrieve PostExecute done.",
-		zap.Any("requestID", rt.Base.MsgID), zap.Any("requestType", "retrieve"))
+	log.Info("Query PostExecute done.",
+		zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 	return nil
 }
 
@@ -2523,6 +2612,8 @@ func (dct *DescribeCollectionTask) Execute(ctx context.Context) error {
 		dct.result.CollectionID = result.CollectionID
 		dct.result.VirtualChannelNames = result.VirtualChannelNames
 		dct.result.PhysicalChannelNames = result.PhysicalChannelNames
+		dct.result.CreatedTimestamp = result.CreatedTimestamp
+		dct.result.CreatedUtcTimestamp = result.CreatedUtcTimestamp
 
 		for _, field := range result.Schema.Fields {
 			if field.FieldID >= 100 { // TODO(dragondriver): use StartOfUserFieldID replacing 100
@@ -2774,13 +2865,18 @@ func (sct *ShowCollectionsTask) OnEnqueue() error {
 func (sct *ShowCollectionsTask) PreExecute(ctx context.Context) error {
 	sct.Base.MsgType = commonpb.MsgType_ShowCollections
 	sct.Base.SourceID = Params.ProxyID
+	if sct.GetType() == milvuspb.ShowType_InMemory {
+		for _, collectionName := range sct.CollectionNames {
+			if err := ValidateCollectionName(collectionName); err != nil {
+				return err
+			}
+		}
+	}
 
 	return nil
 }
 
 func (sct *ShowCollectionsTask) Execute(ctx context.Context) error {
-	var err error
-
 	respFromRootCoord, err := sct.rootCoord.ShowCollections(ctx, sct.ShowCollectionsRequest)
 
 	if err != nil {
@@ -2795,15 +2891,33 @@ func (sct *ShowCollectionsTask) Execute(ctx context.Context) error {
 		return errors.New(respFromRootCoord.Status.Reason)
 	}
 
-	if sct.ShowCollectionsRequest.Type == milvuspb.ShowCollectionsType_InMemory {
+	if sct.GetType() == milvuspb.ShowType_InMemory {
+		IDs2Names := make(map[UniqueID]string)
+		for offset, collectionName := range respFromRootCoord.CollectionNames {
+			collectionID := respFromRootCoord.CollectionIds[offset]
+			IDs2Names[collectionID] = collectionName
+		}
+		collectionIDs := make([]UniqueID, 0)
+		for _, collectionName := range sct.CollectionNames {
+			collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+			if err != nil {
+				log.Debug("Failed to get collection id.", zap.Any("collectionName", collectionName),
+					zap.Any("requestID", sct.Base.MsgID), zap.Any("requestType", "showCollections"))
+				return err
+			}
+			collectionIDs = append(collectionIDs, collectionID)
+			IDs2Names[collectionID] = collectionName
+		}
+
 		resp, err := sct.queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_ShowCollections,
-				MsgID:     sct.ShowCollectionsRequest.Base.MsgID,
-				Timestamp: sct.ShowCollectionsRequest.Base.Timestamp,
-				SourceID:  sct.ShowCollectionsRequest.Base.SourceID,
+				MsgID:     sct.Base.MsgID,
+				Timestamp: sct.Base.Timestamp,
+				SourceID:  sct.Base.SourceID,
 			},
 			//DbID: sct.ShowCollectionsRequest.DbName,
+			CollectionIDs: collectionIDs,
 		})
 
 		if err != nil {
@@ -2819,19 +2933,32 @@ func (sct *ShowCollectionsTask) Execute(ctx context.Context) error {
 		}
 
 		sct.result = &milvuspb.ShowCollectionsResponse{
-			Status:          resp.Status,
-			CollectionNames: make([]string, 0, len(resp.CollectionIDs)),
-			CollectionIds:   make([]int64, 0, len(resp.CollectionIDs)),
+			Status:               resp.Status,
+			CollectionNames:      make([]string, 0, len(resp.CollectionIDs)),
+			CollectionIds:        make([]int64, 0, len(resp.CollectionIDs)),
+			CreatedTimestamps:    make([]uint64, 0, len(resp.CollectionIDs)),
+			CreatedUtcTimestamps: make([]uint64, 0, len(resp.CollectionIDs)),
+			InMemoryPercentages:  make([]int64, 0, len(resp.CollectionIDs)),
 		}
 
-		idMap := make(map[int64]string)
-		for i, name := range respFromRootCoord.CollectionNames {
-			idMap[respFromRootCoord.CollectionIds[i]] = name
-		}
-
-		for _, id := range resp.CollectionIDs {
+		for offset, id := range resp.CollectionIDs {
+			collectionName, ok := IDs2Names[id]
+			if !ok {
+				log.Debug("Failed to get collection info.", zap.Any("collectionName", collectionName),
+					zap.Any("requestID", sct.Base.MsgID), zap.Any("requestType", "showCollections"))
+				return errors.New("failed to show collections")
+			}
+			collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, collectionName)
+			if err != nil {
+				log.Debug("Failed to get collection info.", zap.Any("collectionName", collectionName),
+					zap.Any("requestID", sct.Base.MsgID), zap.Any("requestType", "showCollections"))
+				return err
+			}
 			sct.result.CollectionIds = append(sct.result.CollectionIds, id)
-			sct.result.CollectionNames = append(sct.result.CollectionNames, idMap[id])
+			sct.result.CollectionNames = append(sct.result.CollectionNames, collectionName)
+			sct.result.CreatedTimestamps = append(sct.result.CreatedTimestamps, collectionInfo.createdTimestamp)
+			sct.result.CreatedUtcTimestamps = append(sct.result.CreatedUtcTimestamps, collectionInfo.createdUtcTimestamp)
+			sct.result.InMemoryPercentages = append(sct.result.InMemoryPercentages, resp.InMemoryPercentages[offset])
 		}
 	} else {
 		sct.result = respFromRootCoord
@@ -3077,9 +3204,10 @@ func (hpt *HasPartitionTask) PostExecute(ctx context.Context) error {
 type ShowPartitionsTask struct {
 	Condition
 	*milvuspb.ShowPartitionsRequest
-	ctx       context.Context
-	rootCoord types.RootCoord
-	result    *milvuspb.ShowPartitionsResponse
+	ctx        context.Context
+	rootCoord  types.RootCoord
+	queryCoord types.QueryCoord
+	result     *milvuspb.ShowPartitionsResponse
 }
 
 func (spt *ShowPartitionsTask) TraceCtx() context.Context {
@@ -3126,19 +3254,112 @@ func (spt *ShowPartitionsTask) PreExecute(ctx context.Context) error {
 	if err := ValidateCollectionName(spt.CollectionName); err != nil {
 		return err
 	}
+
+	if spt.GetType() == milvuspb.ShowType_InMemory {
+		for _, partitionName := range spt.PartitionNames {
+			if err := ValidatePartitionTag(partitionName, true); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 
 func (spt *ShowPartitionsTask) Execute(ctx context.Context) error {
-	var err error
-	spt.result, err = spt.rootCoord.ShowPartitions(ctx, spt.ShowPartitionsRequest)
-	if spt.result == nil {
-		return errors.New("get collection statistics resp is nil")
+	respFromRootCoord, err := spt.rootCoord.ShowPartitions(ctx, spt.ShowPartitionsRequest)
+	if err != nil {
+		return err
 	}
-	if spt.result.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return errors.New(spt.result.Status.Reason)
+
+	if respFromRootCoord == nil {
+		return errors.New("failed to show partitions")
 	}
-	return err
+
+	if respFromRootCoord.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(respFromRootCoord.Status.Reason)
+	}
+
+	if spt.GetType() == milvuspb.ShowType_InMemory {
+		collectionName := spt.CollectionName
+		collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+		if err != nil {
+			log.Debug("Failed to get collection id.", zap.Any("collectionName", collectionName),
+				zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"))
+			return err
+		}
+		IDs2Names := make(map[UniqueID]string)
+		for offset, partitionName := range respFromRootCoord.PartitionNames {
+			partitionID := respFromRootCoord.PartitionIDs[offset]
+			IDs2Names[partitionID] = partitionName
+		}
+		partitionIDs := make([]UniqueID, 0)
+		for _, partitionName := range spt.PartitionNames {
+			partitionID, err := globalMetaCache.GetPartitionID(ctx, collectionName, partitionName)
+			if err != nil {
+				log.Debug("Failed to get partition id.", zap.Any("partitionName", partitionName),
+					zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"))
+				return err
+			}
+			partitionIDs = append(partitionIDs, partitionID)
+			IDs2Names[partitionID] = partitionName
+		}
+		resp, err := spt.queryCoord.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_ShowCollections,
+				MsgID:     spt.Base.MsgID,
+				Timestamp: spt.Base.Timestamp,
+				SourceID:  spt.Base.SourceID,
+			},
+			CollectionID: collectionID,
+			PartitionIDs: partitionIDs,
+		})
+
+		if err != nil {
+			return err
+		}
+
+		if resp == nil {
+			return errors.New("failed to show partitions")
+		}
+
+		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+			return errors.New(resp.Status.Reason)
+		}
+
+		spt.result = &milvuspb.ShowPartitionsResponse{
+			Status:               resp.Status,
+			PartitionNames:       make([]string, 0, len(resp.PartitionIDs)),
+			PartitionIDs:         make([]int64, 0, len(resp.PartitionIDs)),
+			CreatedTimestamps:    make([]uint64, 0, len(resp.PartitionIDs)),
+			CreatedUtcTimestamps: make([]uint64, 0, len(resp.PartitionIDs)),
+			InMemoryPercentages:  make([]int64, 0, len(resp.PartitionIDs)),
+		}
+
+		for offset, id := range resp.PartitionIDs {
+			partitionName, ok := IDs2Names[id]
+			if !ok {
+				log.Debug("Failed to get partition id.", zap.Any("partitionName", partitionName),
+					zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"))
+				return errors.New("failed to show partitions")
+			}
+			partitionInfo, err := globalMetaCache.GetPartitionInfo(ctx, collectionName, partitionName)
+			if err != nil {
+				log.Debug("Failed to get partition id.", zap.Any("partitionName", partitionName),
+					zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"))
+				return err
+			}
+			spt.result.PartitionIDs = append(spt.result.PartitionIDs, id)
+			spt.result.PartitionNames = append(spt.result.PartitionNames, partitionName)
+			spt.result.CreatedTimestamps = append(spt.result.CreatedTimestamps, partitionInfo.createdTimestamp)
+			spt.result.CreatedUtcTimestamps = append(spt.result.CreatedUtcTimestamps, partitionInfo.createdUtcTimestamp)
+			spt.result.InMemoryPercentages = append(spt.result.InMemoryPercentages, resp.InMemoryPercentages[offset])
+		}
+	} else {
+		spt.result = respFromRootCoord
+	}
+
+	return nil
 }
 
 func (spt *ShowPartitionsTask) PostExecute(ctx context.Context) error {
@@ -3807,7 +4028,8 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		State: commonpb.IndexState_Finished,
+		State:      commonpb.IndexState_Finished,
+		FailReason: "",
 	}
 
 	log.Debug("Proxy GetIndexState", zap.Int("IndexBuildIDs", len(getIndexStatesRequest.IndexBuildIDs)), zap.Error(err))
@@ -3831,8 +4053,9 @@ func (gist *GetIndexStateTask) Execute(ctx context.Context) error {
 	for _, state := range states.States {
 		if state.State != commonpb.IndexState_Finished {
 			gist.result = &milvuspb.GetIndexStateResponse{
-				Status: states.Status,
-				State:  state.State,
+				Status:     states.Status,
+				State:      state.State,
+				FailReason: state.Reason,
 			}
 			return nil
 		}

@@ -23,8 +23,6 @@
 
 namespace milvus {
 namespace segcore {
-// using engine::DataChunk;
-// using engine::DataChunkPtr;
 using SearchResult = milvus::SearchResult;
 struct RowBasedRawData {
     void* raw_data;      // schema
@@ -41,14 +39,6 @@ int
 TestABI();
 
 class SegmentGrowing : public SegmentInternalInterface {
- public:
-    // definitions
-    enum class SegmentState {
-        Invalid = 0,
-        Open,   // able to insert data
-        Closed  // able to build index
-    };
-
  public:
     virtual void
     debug_disable_small_index() = 0;
@@ -76,18 +66,7 @@ class SegmentGrowing : public SegmentInternalInterface {
     virtual Status
     Delete(int64_t reserved_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) = 0;
 
-    virtual Status
-    LoadIndexing(const LoadIndexInfo& info) = 0;
-
-    // stop receive insert requests
-    virtual Status
-    Close() = 0;
-
  public:
-    // feature not implemented
-    virtual SegmentState
-    get_state() const = 0;
-
     virtual ssize_t
     get_deleted_count() const = 0;
 };

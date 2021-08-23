@@ -14,11 +14,15 @@ package querynode
 import "C"
 import (
 	"context"
+	"strconv"
 
 	"go.uber.org/zap"
 
+	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 type queryService struct {
@@ -31,6 +35,10 @@ type queryService struct {
 	queryCollections map[UniqueID]*queryCollection
 
 	factory msgstream.Factory
+
+	lcm               storage.ChunkManager
+	rcm               storage.ChunkManager
+	localCacheEnabled bool
 }
 
 func newQueryService(ctx context.Context,
@@ -39,6 +47,32 @@ func newQueryService(ctx context.Context,
 	factory msgstream.Factory) *queryService {
 
 	queryServiceCtx, queryServiceCancel := context.WithCancel(ctx)
+
+	//TODO godchen: change this to configuration
+	path, err := Params.Load("localStorage.Path")
+	if err != nil {
+		path = "/tmp/milvus/data"
+	}
+	enabled, _ := Params.Load("localStorage.enabled")
+	localCacheEnabled, _ := strconv.ParseBool(enabled)
+
+	lcm := storage.NewLocalChunkManager(path)
+
+	option := &miniokv.Option{
+		Address:           Params.MinioEndPoint,
+		AccessKeyID:       Params.MinioAccessKeyID,
+		SecretAccessKeyID: Params.MinioSecretAccessKey,
+		UseSSL:            Params.MinioUseSSLStr,
+		CreateBucket:      true,
+		BucketName:        Params.MinioBucketName,
+	}
+
+	client, err := miniokv.NewMinIOKV(ctx, option)
+	if err != nil {
+		panic(err)
+	}
+	rcm := storage.NewMinioChunkManager(client)
+
 	return &queryService{
 		ctx:    queryServiceCtx,
 		cancel: queryServiceCancel,
@@ -49,6 +83,10 @@ func newQueryService(ctx context.Context,
 		queryCollections: make(map[UniqueID]*queryCollection),
 
 		factory: factory,
+
+		lcm:               lcm,
+		rcm:               rcm,
+		localCacheEnabled: localCacheEnabled,
 	}
 }
 
@@ -66,6 +104,13 @@ func (q *queryService) addQueryCollection(collectionID UniqueID) {
 		log.Warn("query collection already exists", zap.Any("collectionID", collectionID))
 		return
 	}
+	collection, _ := q.historical.replica.getCollectionByID(collectionID)
+
+	vcm := storage.NewVectorChunkManager(q.lcm, q.rcm,
+		&etcdpb.CollectionMeta{
+			ID:     collection.id,
+			Schema: collection.schema,
+		}, q.localCacheEnabled)
 
 	ctx1, cancel := context.WithCancel(q.ctx)
 	qc := newQueryCollection(ctx1,
@@ -73,7 +118,9 @@ func (q *queryService) addQueryCollection(collectionID UniqueID) {
 		collectionID,
 		q.historical,
 		q.streaming,
-		q.factory)
+		q.factory,
+		vcm,
+	)
 	q.queryCollections[collectionID] = qc
 }
 
@@ -85,7 +132,7 @@ func (q *queryService) hasQueryCollection(collectionID UniqueID) bool {
 func (q *queryService) stopQueryCollection(collectionID UniqueID) {
 	sc, ok := q.queryCollections[collectionID]
 	if !ok {
-		log.Error("stopQueryCollection failed, collection doesn't exist", zap.Int64("collectionID", collectionID))
+		log.Warn("stopQueryCollection failed, collection doesn't exist", zap.Int64("collectionID", collectionID))
 		return
 	}
 	sc.close()

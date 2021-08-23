@@ -22,12 +22,8 @@ package querynode
 import "C"
 import (
 	"errors"
-	"fmt"
 	"strconv"
-	"sync"
 	"unsafe"
-
-	"github.com/milvus-io/milvus/internal/log"
 )
 
 type SearchResult struct {
@@ -38,17 +34,15 @@ type MarshaledHits struct {
 	cMarshaledHits C.CMarshaledHits
 }
 
-func reduceSearchResults(searchResults []*SearchResult, numSegments int64, inReduced []bool) error {
+func reduceSearchResultsAndFillData(plan *SearchPlan, searchResults []*SearchResult, numSegments int64) error {
 	cSearchResults := make([]C.CSearchResult, 0)
 	for _, res := range searchResults {
 		cSearchResults = append(cSearchResults, res.cSearchResult)
 	}
 	cSearchResultPtr := (*C.CSearchResult)(&cSearchResults[0])
 	cNumSegments := C.long(numSegments)
-	cInReduced := (*C.bool)(&inReduced[0])
 
-	status := C.ReduceSearchResults(cSearchResultPtr, cNumSegments, cInReduced)
-
+	status := C.ReduceSearchResultsAndFillData(plan.cSearchPlan, cSearchResultPtr, cNumSegments)
 	errorCode := status.error_code
 
 	if errorCode != 0 {
@@ -59,33 +53,7 @@ func reduceSearchResults(searchResults []*SearchResult, numSegments int64, inRed
 	return nil
 }
 
-func fillTargetEntry(plan *SearchPlan, searchResults []*SearchResult, matchedSegments []*Segment, inReduced []bool) error {
-	wg := &sync.WaitGroup{}
-	fmt.Println(inReduced)
-	for i := range inReduced {
-		if inReduced[i] {
-			wg.Add(1)
-			go func(i int) {
-				err := matchedSegments[i].fillTargetEntry(plan, searchResults[i])
-				if err != nil {
-					log.Error(err.Error())
-				}
-				wg.Done()
-			}(i)
-		}
-	}
-	wg.Wait()
-	return nil
-}
-
-func reorganizeSearchResults(plan *SearchPlan, searchRequests []*searchRequest, searchResults []*SearchResult, numSegments int64, inReduced []bool) (*MarshaledHits, error) {
-	cPlaceholderGroups := make([]C.CPlaceholderGroup, 0)
-	for _, pg := range searchRequests {
-		cPlaceholderGroups = append(cPlaceholderGroups, (*pg).cPlaceholderGroup)
-	}
-	var cPlaceHolderGroupPtr = (*C.CPlaceholderGroup)(&cPlaceholderGroups[0])
-	var cNumGroup = (C.long)(len(searchRequests))
-
+func reorganizeSearchResults(searchResults []*SearchResult, numSegments int64) (*MarshaledHits, error) {
 	cSearchResults := make([]C.CSearchResult, 0)
 	for _, res := range searchResults {
 		cSearchResults = append(cSearchResults, res.cSearchResult)
@@ -93,32 +61,9 @@ func reorganizeSearchResults(plan *SearchPlan, searchRequests []*searchRequest, 
 	cSearchResultPtr := (*C.CSearchResult)(&cSearchResults[0])
 
 	var cNumSegments = C.long(numSegments)
-	var cInReduced = (*C.bool)(&inReduced[0])
 	var cMarshaledHits C.CMarshaledHits
 
-	status := C.ReorganizeSearchResults(&cMarshaledHits, cPlaceHolderGroupPtr, cNumGroup, cSearchResultPtr, cInReduced, cNumSegments, plan.cSearchPlan)
-	errorCode := status.error_code
-
-	if errorCode != 0 {
-		errorMsg := C.GoString(status.error_msg)
-		defer C.free(unsafe.Pointer(status.error_msg))
-		return nil, errors.New("reorganizeSearchResults failed, C runtime error detected, error code = " + strconv.Itoa(int(errorCode)) + ", error msg = " + errorMsg)
-	}
-	return &MarshaledHits{cMarshaledHits: cMarshaledHits}, nil
-}
-
-func reorganizeSingleSearchResult(plan *SearchPlan, placeholderGroups []*searchRequest, searchResult *SearchResult) (*MarshaledHits, error) {
-	cPlaceholderGroups := make([]C.CPlaceholderGroup, 0)
-	for _, pg := range placeholderGroups {
-		cPlaceholderGroups = append(cPlaceholderGroups, (*pg).cPlaceholderGroup)
-	}
-	var cPlaceHolderGroupPtr = (*C.CPlaceholderGroup)(&cPlaceholderGroups[0])
-	var cNumGroup = (C.long)(len(placeholderGroups))
-
-	cSearchResult := searchResult.cSearchResult
-	var cMarshaledHits C.CMarshaledHits
-
-	status := C.ReorganizeSingleSearchResult(&cMarshaledHits, cPlaceHolderGroupPtr, cNumGroup, cSearchResult, plan.cSearchPlan)
+	status := C.ReorganizeSearchResults(&cMarshaledHits, cSearchResultPtr, cNumSegments)
 	errorCode := status.error_code
 
 	if errorCode != 0 {
@@ -144,10 +89,10 @@ func (mh *MarshaledHits) getHitsBlob() ([]byte, error) {
 
 func (mh *MarshaledHits) hitBlobSizeInGroup(groupOffset int64) ([]int64, error) {
 	cGroupOffset := (C.long)(groupOffset)
-	numQueries := C.GetNumQueriesPeerGroup(mh.cMarshaledHits, cGroupOffset)
+	numQueries := C.GetNumQueriesPerGroup(mh.cMarshaledHits, cGroupOffset)
 	result := make([]int64, int64(numQueries))
 	cResult := (*C.long)(&result[0])
-	C.GetHitSizePeerQueries(mh.cMarshaledHits, cGroupOffset, cResult)
+	C.GetHitSizePerQueries(mh.cMarshaledHits, cGroupOffset, cResult)
 	return result, nil
 }
 

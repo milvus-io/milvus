@@ -1,0 +1,15 @@
+[
+    {
+        "server": "apollo",
+        "suite_params": [
+            {
+                "suite": "shards_insert_performance_sift1m.yaml",
+                "image_type": "cpu"
+            },
+            {
+                "suite": "shards_search_performance_sift1m.yaml",
+                "image_type": "cpu"
+            }
+        ]
+    }
+]

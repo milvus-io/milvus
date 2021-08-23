@@ -15,7 +15,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math"
 	"net"
 	"strconv"
 	"sync"
@@ -95,8 +94,8 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	opts := trace.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
-		grpc.MaxRecvMsgSize(math.MaxInt32),
-		grpc.MaxSendMsgSize(math.MaxInt32),
+		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
+		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
 		grpc.MaxRecvMsgSize(GRPCMaxMagSize),
 		grpc.UnaryInterceptor(
 			grpc_opentracing.UnaryServerInterceptor(opts...)),
@@ -375,10 +374,6 @@ func (s *Server) Search(ctx context.Context, request *milvuspb.SearchRequest) (*
 	return s.proxy.Search(ctx, request)
 }
 
-func (s *Server) Retrieve(ctx context.Context, request *milvuspb.RetrieveRequest) (*milvuspb.RetrieveResults, error) {
-	return s.proxy.Retrieve(ctx, request)
-}
-
 func (s *Server) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*milvuspb.FlushResponse, error) {
 	return s.proxy.Flush(ctx, request)
 }
@@ -410,4 +405,8 @@ func (s *Server) Dummy(ctx context.Context, request *milvuspb.DummyRequest) (*mi
 
 func (s *Server) RegisterLink(ctx context.Context, request *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error) {
 	return s.proxy.RegisterLink(ctx, request)
+}
+
+func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	return s.proxy.GetMetrics(ctx, request)
 }

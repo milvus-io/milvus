@@ -13,7 +13,10 @@ package grpcdatanode
 
 import (
 	"net"
+	"strconv"
 	"sync"
+
+	"github.com/milvus-io/milvus/internal/distributed/grpcconfigs"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -33,6 +36,9 @@ type ParamTable struct {
 
 	RootCoordAddress string
 	DataCoordAddress string
+
+	ServerMaxSendSize int
+	ServerMaxRecvSize int
 }
 
 func (pt *ParamTable) Init() {
@@ -41,6 +47,9 @@ func (pt *ParamTable) Init() {
 		pt.initRootCoordAddress()
 		pt.initDataCoordAddress()
 		pt.initPort()
+
+		pt.initServerMaxSendSize()
+		pt.initServerMaxRecvSize()
 	})
 }
 
@@ -78,4 +87,50 @@ func (pt *ParamTable) initDataCoordAddress() {
 		panic(err)
 	}
 	pt.DataCoordAddress = ret
+}
+
+func (pt *ParamTable) initServerMaxSendSize() {
+	var err error
+
+	valueStr, err := pt.Load("dataNode.grpc.serverMaxSendSize")
+	if err != nil { // not set
+		pt.ServerMaxSendSize = grpcconfigs.DefaultServerMaxSendSize
+	}
+
+	value, err := strconv.Atoi(valueStr)
+	if err != nil { // not in valid format
+		log.Warn("Failed to parse dataNode.grpc.serverMaxSendSize, set to default",
+			zap.String("dataNode.grpc.serverMaxSendSize", valueStr),
+			zap.Error(err))
+
+		pt.ServerMaxSendSize = grpcconfigs.DefaultServerMaxSendSize
+	} else {
+		pt.ServerMaxSendSize = value
+	}
+
+	log.Debug("initServerMaxSendSize",
+		zap.Int("dataNode.grpc.serverMaxSendSize", pt.ServerMaxSendSize))
+}
+
+func (pt *ParamTable) initServerMaxRecvSize() {
+	var err error
+
+	valueStr, err := pt.Load("dataNode.grpc.serverMaxRecvSize")
+	if err != nil { // not set
+		pt.ServerMaxRecvSize = grpcconfigs.DefaultServerMaxRecvSize
+	}
+
+	value, err := strconv.Atoi(valueStr)
+	if err != nil { // not in valid format
+		log.Warn("Failed to parse dataNode.grpc.serverMaxRecvSize, set to default",
+			zap.String("dataNode.grpc.serverMaxRecvSize", valueStr),
+			zap.Error(err))
+
+		pt.ServerMaxRecvSize = grpcconfigs.DefaultServerMaxRecvSize
+	} else {
+		pt.ServerMaxRecvSize = value
+	}
+
+	log.Debug("initServerMaxRecvSize",
+		zap.Int("dataNode.grpc.serverMaxRecvSize", pt.ServerMaxRecvSize))
 }

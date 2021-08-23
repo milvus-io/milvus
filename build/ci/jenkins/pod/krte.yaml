@@ -6,24 +6,29 @@ metadata:
 spec:
   containers:
   - name: main
-    image: registry.zilliz.com/milvus/krte:v20210414-bd36693
+    image: milvusdb/krte:20210722-806d13f
     env:
     - name: DOCKER_IN_DOCKER_ENABLED
       value: "true"
     - name: DOCKER_VOLUME_DIRECTORY
       value: "/mnt/disk/.docker"
+    - name: KRTE_POD_IP
+      valueFrom:
+        fieldRef:
+          fieldPath: status.podIP
     securityContext:
       privileged: true
     tty: true
     args: ["cat"]
     resources:
       limits:
-        memory: 14Gi
-        ephemeral-storage: "30Gi"
-      requests:
-        cpu: "4"
+        cpu: "6"
         memory: 12Gi
-        ephemeral-storage: "30Gi"
+        ephemeral-storage: "50Gi"
+      requests:
+        cpu: "3"
+        memory: 10Gi
+        ephemeral-storage: "50Gi"
     volumeMounts:
     - mountPath: /docker-graph
       name: docker-graph
@@ -37,6 +42,23 @@ spec:
     - mountPath: /mnt/disk/.docker
       name: build-cache
       subPath: docker-volume
+  - name: etcd
+    image: quay.io/coreos/etcd:v3.5.0
+    env:
+    - name: ETCD_LOG_LEVEL
+      value: debug
+    command:
+    - etcd
+    - -advertise-client-urls=http://127.0.0.1:2379
+    - -listen-client-urls=http://0.0.0.0:2379
+    resources:
+      limits:
+        cpu: "2"
+        memory: "4Gi"
+    ports:
+    - containerPort: 2379
+      name: client
+      protocol: TCP
   volumes:
   - emptyDir: {}
     name: docker-graph
@@ -56,13 +78,11 @@ spec:
     name: cgroup
   affinity:
     podAntiAffinity:
-      preferredDuringSchedulingIgnoredDuringExecution:
-      - weight: 100
-        podAffinityTerm:
-          labelSelector:
-            matchExpressions:
-            - key: app
-              operator: In
-              values:
-              - milvus-e2e
-          topologyKey: kubernetes.io/hostname
+      requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchExpressions:
+          - key: app
+            operator: In
+            values:
+            - milvus-e2e
+        topologyKey: kubernetes.io/hostname

@@ -36,38 +36,89 @@ pulsar:
 
 rocksmq:
   path: /var/lib/milvus/rdb_data
+  retentionTimeInMinutes: 4320
+  retentionSizeInMB: 0
 
 rootCoord:
   address: localhost
   port: 53100
 
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
 proxy:
   port: 19530
+
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
 
 queryCoord:
   address: localhost
   port: 19531
 
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
 queryNode:
   gracefulTime: 1000 # ms, for search
   port: 21123
+
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
 
 indexCoord:
   address: localhost
   port: 31000
 
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
 indexNode:
   port: 21121
+
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
 
 dataCoord:
   address: localhost
   port: 13333
 
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
 dataNode:
   port: 21124
 
-storage:
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
+localStorage:
   path: /var/lib/milvus/data/
+  enabled: true
 
 log:
   level: debug # info, warn, error, panic, fatal

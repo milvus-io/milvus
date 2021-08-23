@@ -15,7 +15,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math"
 	"net"
 	"strconv"
 	"sync"
@@ -200,8 +199,8 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	opts := trace.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
-		grpc.MaxRecvMsgSize(math.MaxInt32),
-		grpc.MaxSendMsgSize(math.MaxInt32),
+		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
+		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
 		grpc.UnaryInterceptor(
 			grpc_opentracing.UnaryServerInterceptor(opts...)),
 		grpc.StreamInterceptor(
@@ -311,4 +310,8 @@ func (s *Server) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmen
 
 func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	return s.querynode.GetSegmentInfo(ctx, req)
+}
+
+func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	return s.querynode.GetMetrics(ctx, req)
 }

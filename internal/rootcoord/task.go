@@ -16,6 +16,8 @@ import (
 	"fmt"
 
 	"github.com/golang/protobuf/proto"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -23,8 +25,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 type reqTask interface {
@@ -60,6 +62,9 @@ func executeTask(t reqTask) error {
 	case <-t.Ctx().Done():
 		return fmt.Errorf("context canceled")
 	case err := <-errChan:
+		if t.Core().ctx.Err() != nil || t.Ctx().Err() != nil {
+			return fmt.Errorf("context canceled")
+		}
 		return err
 	}
 }
@@ -118,7 +123,6 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("alloc collection id error = %w", err)
 	}
-	collTs := t.Req.Base.Timestamp
 	partID, _, err := t.core.IDAllocator(1)
 	if err != nil {
 		return fmt.Errorf("alloc partition id error = %w", err)
@@ -137,14 +141,14 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	}
 
 	collInfo := etcdpb.CollectionInfo{
-		ID:                   collID,
-		Schema:               &schema,
-		CreateTime:           collTs,
-		PartitionIDs:         []typeutil.UniqueID{partID},
-		PartitionNames:       []string{Params.DefaultPartitionName},
-		FieldIndexes:         make([]*etcdpb.FieldIndexInfo, 0, 16),
-		VirtualChannelNames:  vchanNames,
-		PhysicalChannelNames: chanNames,
+		ID:                         collID,
+		Schema:                     &schema,
+		PartitionIDs:               []typeutil.UniqueID{partID},
+		PartitionNames:             []string{Params.DefaultPartitionName},
+		FieldIndexes:               make([]*etcdpb.FieldIndexInfo, 0, 16),
+		VirtualChannelNames:        vchanNames,
+		PhysicalChannelNames:       chanNames,
+		PartitionCreatedTimestamps: []uint64{0},
 	}
 
 	idxInfo := make([]*etcdpb.IndexInfo, 0, 16)
@@ -176,27 +180,47 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		return EncodeDdOperation(&ddCollReq, CreateCollectionDDType)
 	}
 
-	ts, err := t.core.MetaTable.AddCollection(&collInfo, idxInfo, ddOp)
+	reason := fmt.Sprintf("create collection %d", collID)
+	ts, err := t.core.TSOAllocator(1)
 	if err != nil {
-		return fmt.Errorf("meta table add collection failed,error = %w", err)
+		return fmt.Errorf("TSO alloc fail, error = %w", err)
 	}
 
-	// add dml channel before send dd msg
-	t.core.dmlChannels.AddProducerChannels(chanNames...)
+	// use lambda function here to guarantee all resources to be released
+	createCollectionFn := func() error {
+		// lock for ddl operation
+		t.core.ddlLock.Lock()
+		defer t.core.ddlLock.Unlock()
 
-	err = t.core.SendDdCreateCollectionReq(ctx, &ddCollReq, chanNames)
-	if err != nil {
-		return fmt.Errorf("send dd create collection req failed, error = %w", err)
+		t.core.chanTimeTick.AddDdlTimeTick(ts, reason)
+		// clear ddl timetick in all conditions
+		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+
+		err = t.core.MetaTable.AddCollection(&collInfo, ts, idxInfo, ddOp)
+		if err != nil {
+			return fmt.Errorf("meta table add collection failed,error = %w", err)
+		}
+
+		// add dml channel before send dd msg
+		t.core.dmlChannels.AddProducerChannels(chanNames...)
+
+		err = t.core.SendDdCreateCollectionReq(ctx, &ddCollReq, chanNames)
+		if err != nil {
+			return fmt.Errorf("send dd create collection req failed, error = %w", err)
+		}
+
+		t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		t.core.SendTimeTick(ts, reason)
+		return nil
 	}
 
-	t.core.SendTimeTick(ts)
+	err = createCollectionFn()
+	if err != nil {
+		return err
+	}
 
 	// Update DDOperation in etcd
-	err = t.core.setDdMsgSendFlag(true)
-	if err != nil {
-		return fmt.Errorf("send dd msg send flag failed,error = %w", err)
-	}
-	return nil
+	return t.core.setDdMsgSendFlag(true)
 }
 
 type DropCollectionReqTask struct {
@@ -233,27 +257,55 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		return EncodeDdOperation(&ddReq, DropCollectionDDType)
 	}
 
-	ts, err := t.core.MetaTable.DeleteCollection(collMeta.ID, ddOp)
+	reason := fmt.Sprintf("drop collection %d", collMeta.ID)
+	ts, err := t.core.TSOAllocator(1)
+	if err != nil {
+		return fmt.Errorf("TSO alloc fail, error = %w", err)
+	}
+
+	// use lambda function here to guarantee all resources to be released
+	dropCollectionFn := func() error {
+		// lock for ddl operation
+		t.core.ddlLock.Lock()
+		defer t.core.ddlLock.Unlock()
+
+		t.core.chanTimeTick.AddDdlTimeTick(ts, reason)
+		// clear ddl timetick in all conditions
+		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+
+		err = t.core.MetaTable.DeleteCollection(collMeta.ID, ts, ddOp)
+		if err != nil {
+			return err
+		}
+
+		err = t.core.SendDdDropCollectionReq(ctx, &ddReq, collMeta.PhysicalChannelNames)
+		if err != nil {
+			return err
+		}
+
+		t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		t.core.SendTimeTick(ts, reason)
+
+		for _, chanName := range collMeta.PhysicalChannelNames {
+			// send tt into deleted channels to tell data_node to clear flowgragh
+			t.core.chanTimeTick.SendChannelTimeTick(chanName, ts)
+		}
+
+		// remove dml channel after send dd msg
+		t.core.dmlChannels.RemoveProducerChannels(collMeta.PhysicalChannelNames...)
+		return nil
+	}
+
+	err = dropCollectionFn()
 	if err != nil {
 		return err
 	}
-
-	err = t.core.SendDdDropCollectionReq(ctx, &ddReq, collMeta.PhysicalChannelNames)
-	if err != nil {
-		return err
-	}
-
-	t.core.SendTimeTick(ts)
-
-	// remove dml channel after send dd msg
-	t.core.dmlChannels.RemoveProducerChannels(collMeta.PhysicalChannelNames...)
 
 	//notify query service to release collection
-	go func() {
-		if err = t.core.CallReleaseCollectionService(t.core.ctx, ts, 0, collMeta.ID); err != nil {
-			log.Warn("CallReleaseCollectionService failed", zap.String("error", err.Error()))
-		}
-	}()
+	if err = t.core.CallReleaseCollectionService(t.core.ctx, ts, 0, collMeta.ID); err != nil {
+		log.Error("CallReleaseCollectionService failed", zap.String("error", err.Error()))
+		return err
+	}
 
 	req := proxypb.InvalidateCollMetaCacheRequest{
 		Base: &commonpb.MsgBase{
@@ -336,6 +388,11 @@ func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
 
 	t.Rsp.VirtualChannelNames = collInfo.VirtualChannelNames
 	t.Rsp.PhysicalChannelNames = collInfo.PhysicalChannelNames
+
+	t.Rsp.CreatedTimestamp = collInfo.CreateTime
+	createdPhysicalTime, _ := tsoutil.ParseHybridTs(collInfo.CreateTime)
+	t.Rsp.CreatedUtcTimestamp = createdPhysicalTime
+
 	return nil
 }
 
@@ -357,9 +414,12 @@ func (t *ShowCollectionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for name, id := range coll {
+	for name, meta := range coll {
 		t.Rsp.CollectionNames = append(t.Rsp.CollectionNames, name)
-		t.Rsp.CollectionIds = append(t.Rsp.CollectionIds, id)
+		t.Rsp.CollectionIds = append(t.Rsp.CollectionIds, meta.ID)
+		t.Rsp.CreatedTimestamps = append(t.Rsp.CreatedTimestamps, meta.CreateTime)
+		physical, _ := tsoutil.ParseHybridTs(meta.CreateTime)
+		t.Rsp.CreatedUtcTimestamps = append(t.Rsp.CreatedUtcTimestamps, physical)
 	}
 	return nil
 }
@@ -403,17 +463,41 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		return EncodeDdOperation(&ddReq, CreatePartitionDDType)
 	}
 
-	ts, err := t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partID, ddOp)
+	reason := fmt.Sprintf("create partition %s", t.Req.PartitionName)
+	ts, err := t.core.TSOAllocator(1)
+	if err != nil {
+		return fmt.Errorf("TSO alloc fail, error = %w", err)
+	}
+
+	// use lambda function here to guarantee all resources to be released
+	createPartitionFn := func() error {
+		// lock for ddl operation
+		t.core.ddlLock.Lock()
+		defer t.core.ddlLock.Unlock()
+
+		t.core.chanTimeTick.AddDdlTimeTick(ts, reason)
+		// clear ddl timetick in all conditions
+		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+
+		err = t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partID, ts, ddOp)
+		if err != nil {
+			return err
+		}
+
+		err = t.core.SendDdCreatePartitionReq(ctx, &ddReq, collMeta.PhysicalChannelNames)
+		if err != nil {
+			return err
+		}
+
+		t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		t.core.SendTimeTick(ts, reason)
+		return nil
+	}
+
+	err = createPartitionFn()
 	if err != nil {
 		return err
 	}
-
-	err = t.core.SendDdCreatePartitionReq(ctx, &ddReq, collMeta.PhysicalChannelNames)
-	if err != nil {
-		return err
-	}
-
-	t.core.SendTimeTick(ts)
 
 	req := proxypb.InvalidateCollMetaCacheRequest{
 		Base: &commonpb.MsgBase{
@@ -471,17 +555,41 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		return EncodeDdOperation(&ddReq, DropPartitionDDType)
 	}
 
-	ts, _, err := t.core.MetaTable.DeletePartition(collInfo.ID, t.Req.PartitionName, ddOp)
+	reason := fmt.Sprintf("drop partition %s", t.Req.PartitionName)
+	ts, err := t.core.TSOAllocator(1)
+	if err != nil {
+		return fmt.Errorf("TSO alloc fail, error = %w", err)
+	}
+
+	// use lambda function here to guarantee all resources to be released
+	dropPartitionFn := func() error {
+		// lock for ddl operation
+		t.core.ddlLock.Lock()
+		defer t.core.ddlLock.Unlock()
+
+		t.core.chanTimeTick.AddDdlTimeTick(ts, reason)
+		// clear ddl timetick in all conditions
+		defer t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+
+		_, err = t.core.MetaTable.DeletePartition(collInfo.ID, t.Req.PartitionName, ts, ddOp)
+		if err != nil {
+			return err
+		}
+
+		err = t.core.SendDdDropPartitionReq(ctx, &ddReq, collInfo.PhysicalChannelNames)
+		if err != nil {
+			return err
+		}
+
+		t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		t.core.SendTimeTick(ts, reason)
+		return nil
+	}
+
+	err = dropPartitionFn()
 	if err != nil {
 		return err
 	}
-
-	err = t.core.SendDdDropPartitionReq(ctx, &ddReq, collInfo.PhysicalChannelNames)
-	if err != nil {
-		return err
-	}
-
-	t.core.SendTimeTick(ts)
 
 	req := proxypb.InvalidateCollMetaCacheRequest{
 		Base: &commonpb.MsgBase{
@@ -497,11 +605,10 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	t.core.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
 
 	//notify query service to release partition
-	go func() {
-		if err = t.core.CallReleasePartitionService(t.core.ctx, ts, 0, collInfo.ID, []typeutil.UniqueID{partID}); err != nil {
-			log.Warn("CallReleaseCollectionService failed", zap.String("error", err.Error()))
-		}
-	}()
+	if err = t.core.CallReleasePartitionService(t.core.ctx, ts, 0, collInfo.ID, []typeutil.UniqueID{partID}); err != nil {
+		log.Error("CallReleaseCollectionService failed", zap.String("error", err.Error()))
+		return err
+	}
 
 	// Update DDOperation in etcd
 	return t.core.setDdMsgSendFlag(true)
@@ -555,6 +662,12 @@ func (t *ShowPartitionReqTask) Execute(ctx context.Context) error {
 	}
 	t.Rsp.PartitionIDs = coll.PartitionIDs
 	t.Rsp.PartitionNames = coll.PartitionNames
+	t.Rsp.CreatedTimestamps = coll.PartitionCreatedTimestamps
+	t.Rsp.CreatedUtcTimestamps = make([]uint64, 0, len(coll.PartitionCreatedTimestamps))
+	for _, ts := range coll.PartitionCreatedTimestamps {
+		physical, _ := tsoutil.ParseHybridTs(ts)
+		t.Rsp.CreatedUtcTimestamps = append(t.Rsp.CreatedUtcTimestamps, physical)
+	}
 
 	return nil
 }
@@ -708,7 +821,8 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 		if info.BuildID != 0 {
 			info.EnableIndex = true
 		}
-		if _, err := t.core.MetaTable.AddIndex(&info); err != nil {
+		ts, _ := t.core.TSOAllocator(1)
+		if err := t.core.MetaTable.AddIndex(&info, ts); err != nil {
 			log.Debug("Add index into meta table failed", zap.Int64("collection_id", collMeta.ID), zap.Int64("index_id", info.IndexID), zap.Int64("build_id", info.BuildID), zap.Error(err))
 		}
 	}
@@ -779,6 +893,7 @@ func (t *DropIndexReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_, _, _, err = t.core.MetaTable.DropIndex(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName)
+	ts, _ := t.core.TSOAllocator(1)
+	_, _, err = t.core.MetaTable.DropIndex(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName, ts)
 	return err
 }

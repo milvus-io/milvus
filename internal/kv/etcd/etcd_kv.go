@@ -33,12 +33,22 @@ type EtcdKV struct {
 }
 
 // NewEtcdKV creates a new etcd kv.
-func NewEtcdKV(client *clientv3.Client, rootPath string) *EtcdKV {
+// func NewEtcdKV(etcdEndpints []string, rootPath string) (*EtcdKV, error)
+func NewEtcdKV(etcdEndpoints []string, rootPath string) (*EtcdKV, error) {
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints:   etcdEndpoints,
+		DialTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	kv := &EtcdKV{
 		client:   client,
 		rootPath: rootPath,
 	}
-	return kv
+
+	return kv, nil
 }
 
 func (kv *EtcdKV) Close() {
@@ -139,6 +149,25 @@ func (kv *EtcdKV) MultiLoad(keys []string) ([]string, error) {
 	return result, nil
 }
 
+func (kv *EtcdKV) LoadWithRevision(key string) ([]string, []string, int64, error) {
+	key = path.Join(kv.rootPath, key)
+	log.Debug("LoadWithPrefix ", zap.String("prefix", key))
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	keys := make([]string, 0, resp.Count)
+	values := make([]string, 0, resp.Count)
+	for _, kv := range resp.Kvs {
+		keys = append(keys, string(kv.Key))
+		values = append(values, string(kv.Value))
+	}
+	return keys, values, resp.Header.Revision, nil
+}
+
 func (kv *EtcdKV) Save(key, value string) error {
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
@@ -201,7 +230,7 @@ func (kv *EtcdKV) MultiRemove(keys []string) error {
 }
 
 func (kv *EtcdKV) MultiSaveAndRemove(saves map[string]string, removals []string) error {
-	ops := make([]clientv3.Op, 0, len(saves))
+	ops := make([]clientv3.Op, 0, len(saves)+len(removals))
 	for key, value := range saves {
 		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
 	}
@@ -227,6 +256,12 @@ func (kv *EtcdKV) Watch(key string) clientv3.WatchChan {
 func (kv *EtcdKV) WatchWithPrefix(key string) clientv3.WatchChan {
 	key = path.Join(kv.rootPath, key)
 	rch := kv.client.Watch(context.Background(), key, clientv3.WithPrefix(), clientv3.WithCreatedNotify())
+	return rch
+}
+
+func (kv *EtcdKV) WatchWithRevision(key string, revision int64) clientv3.WatchChan {
+	key = path.Join(kv.rootPath, key)
+	rch := kv.client.Watch(context.Background(), key, clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision))
 	return rch
 }
 

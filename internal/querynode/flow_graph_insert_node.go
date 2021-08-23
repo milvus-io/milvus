@@ -51,7 +51,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	iMsg, ok := in[0].(*insertMsg)
 	if !ok {
-		log.Error("type assertion failed for insertMsg")
+		log.Warn("type assertion failed for insertMsg")
 		// TODO: add error handling
 	}
 
@@ -79,7 +79,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		if hasPartition := iNode.replica.hasPartition(task.PartitionID); !hasPartition {
 			err := iNode.replica.addPartition(task.CollectionID, task.PartitionID)
 			if err != nil {
-				log.Error(err.Error())
+				log.Warn(err.Error())
 				continue
 			}
 		}
@@ -88,7 +88,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		if !iNode.replica.hasSegment(task.SegmentID) {
 			err := iNode.replica.addSegment(task.SegmentID, task.PartitionID, task.CollectionID, task.ChannelID, segmentTypeGrowing, true)
 			if err != nil {
-				log.Error(err.Error())
+				log.Warn(err.Error())
 				continue
 			}
 		}
@@ -102,15 +102,14 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	for segmentID := range insertData.insertRecords {
 		var targetSegment, err = iNode.replica.getSegmentByID(segmentID)
 		if err != nil {
-			log.Error("preInsert failed")
-			// TODO: add error handling
+			log.Warn(err.Error())
 		}
 
 		var numOfRecords = len(insertData.insertRecords[segmentID])
 		if targetSegment != nil {
 			offset, err := targetSegment.segmentPreInsert(numOfRecords)
 			if err != nil {
-				log.Error(err.Error())
+				log.Warn(err.Error())
 			}
 			insertData.insertOffset[segmentID] = offset
 			log.Debug("insertNode operator", zap.Int("insert size", numOfRecords), zap.Int64("insert offset", offset), zap.Int64("segment id", segmentID))
@@ -144,7 +143,7 @@ func (iNode *insertNode) insert(insertData *InsertData, segmentID int64, wg *syn
 		return
 	}
 	if err != nil {
-		log.Error("cannot find segment:", zap.Int64("segmentID", segmentID))
+		log.Warn("cannot find segment:", zap.Int64("segmentID", segmentID))
 		// TODO: add error handling
 		wg.Done()
 		return

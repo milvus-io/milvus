@@ -382,6 +382,9 @@ type GlobalParamsTable struct {
 	MasterAddress string
 	PulsarAddress string
 	RocksmqPath   string
+
+	RocksmqRetentionTimeInMinutes int64
+	RocksmqRetentionSizeInMB 	  int64
 	
 	ProxyID                            UniqueID
 	TimeTickInterval                   time.Duration
