@@ -83,13 +83,13 @@ func newTimeTickSync(core *Core) *timetickSync {
 
 // sendToChannel send all channels' timetick to sendChan
 // lock is needed by the invoker
-func (t *timetickSync) sendToChannel() error {
+func (t *timetickSync) sendToChannel() {
 	if len(t.proxyTimeTick) == 0 {
-		return fmt.Errorf("proxyTimeTick empty")
+		return
 	}
 	for _, v := range t.proxyTimeTick {
 		if v == nil {
-			return fmt.Errorf("proxyTimeTick has not been fulfilled")
+			return
 		}
 	}
 	// clear proxyTimeTick and send a clone
@@ -99,7 +99,6 @@ func (t *timetickSync) sendToChannel() error {
 		t.proxyTimeTick[k] = nil
 	}
 	t.sendChan <- ptt
-	return nil
 }
 
 // AddDmlTimeTick add ts into ddlTimetickInfos[sourceID],
@@ -191,12 +190,10 @@ func (t *timetickSync) UpdateTimeTick(in *internalpb.ChannelTimeTickMsg, reason 
 	}
 
 	t.proxyTimeTick[in.Base.SourceID] = newChannelTimeTickMsg(in)
-	log.Debug("update proxyTimeTick", zap.Int64("source id", in.Base.SourceID),
-		zap.Uint64("inTs", in.DefaultTimestamp), zap.String("reason", reason))
+	//log.Debug("update proxyTimeTick", zap.Int64("source id", in.Base.SourceID),
+	//	zap.Uint64("inTs", in.DefaultTimestamp), zap.String("reason", reason))
 
-	if err := t.sendToChannel(); err != nil {
-		log.Debug("sendToChannel fail", zap.Any("err", err.Error()))
-	}
+	t.sendToChannel()
 	return nil
 }
 

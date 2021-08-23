@@ -470,10 +470,10 @@ func (c *Core) setMsgStreams() error {
 			Timestamps:       pt,
 			DefaultTimestamp: t,
 		}
-		log.Debug("update timetick",
-			zap.Any("DefaultTs", t),
-			zap.Any("sourceID", c.session.ServerID),
-			zap.Any("reason", reason))
+		//log.Debug("update timetick",
+		//	zap.Any("DefaultTs", t),
+		//	zap.Any("sourceID", c.session.ServerID),
+		//	zap.Any("reason", reason))
 		return c.chanTimeTick.UpdateTimeTick(&ttMsg, reason)
 	}
 
