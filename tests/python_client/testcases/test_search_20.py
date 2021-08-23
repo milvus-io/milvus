@@ -1512,10 +1512,9 @@ class TestCollectionSearch(TestcaseBase):
         assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("expression, limit",
-                             zip(cf.gen_normal_expressions(),
-                                 [1000, 999, 898, 997, 2, 3]))
-    def test_search_with_expression(self, dim, expression, limit, _async):
+    @pytest.mark.xfail(expression="500 <= int64 < 1000",reason="issue:7142")
+    @pytest.mark.parametrize("expression",cf.gen_normal_expressions())
+    def test_search_with_expression(self, dim, expression , _async):
         """
         target: test search with different expressions
         method: test search with different expressions
@@ -1523,30 +1522,49 @@ class TestCollectionSearch(TestcaseBase):
         """
         # 1. initialize with data
         nb = 1000
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
+        collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True,
                                                                       nb, dim=dim,
                                                                       is_index=True)
+
+        # filter result with expression in colllection
+        _vectors = _vectors[0]
+        expression =  expression.replace("&&", "and").replace("||", "or")
+        filter_ids = [] 
+        for i,_id in enumerate(insert_ids):
+            int64 = _vectors.int64[i]
+            float = _vectors.float[i]
+            if not expression or eval(expression):
+                filter_ids.append(_id)
+        
         # 2. create index
         index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
         collection_w.load()
-        # 3. search with different expressions
+
+        # 3. search with expression
         log.info("test_search_with_expression: searching with expression: %s" % expression)
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
-        collection_w.search(vectors[:default_nq], default_search_field,
+        search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, nb, expression,
                             _async=_async,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
-                                         "limit": limit,
+                                         "limit": min(nb,len(filter_ids)),
                                          "_async": _async})
+        if _async:
+            search_res.done()
+            search_res = search_res.result()
+        
+        filter_ids_set = set(filter_ids)
+        for hits in search_res:
+            ids = hits.ids
+            assert set(ids).issubset(filter_ids_set)                                     
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("expression, limit",
-                             zip(cf.gen_normal_expressions_field(default_float_field_name),
-                                 [1000, 999, 898, 997, 2, 3]))
-    def test_search_with_expression_auto_id(self, dim, expression, limit, _async):
+    @pytest.mark.xfail(expression=f"500 <= {default_float_field_name} <= 1000",reason="issue:7142")
+    @pytest.mark.parametrize("expression",cf.gen_normal_expressions_field(default_float_field_name))
+    def test_search_with_expression_auto_id(self, dim, expression, _async):
         """
         target: test search with different expressions
         method: test search with different expressions
@@ -1554,25 +1572,46 @@ class TestCollectionSearch(TestcaseBase):
         """
         # 1. initialize with data
         nb = 1000
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
+        collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True, nb,
                                                                       auto_id=True,
                                                                       dim=dim,
                                                                       is_index=True)
+        
+        
+        # filter result with expression in colllection
+        _vectors = _vectors[0]
+        expression =  expression.replace("&&", "and").replace("||", "or")
+        filter_ids = []
+        for i, _id in enumerate(insert_ids):
+            exec(f"{default_float_field_name} = _vectors.{default_float_field_name}[i]")
+            if not expression or eval(expression):
+                filter_ids.append(_id)        
+        
         # 2. create index
         index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
         collection_w.load()
+
+
         # 3. search with different expressions
         log.info("test_search_with_expression: searching with expression: %s" % expression)
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
-        collection_w.search(vectors[:default_nq], default_search_field,
+        search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, nb, expression,
                             _async=_async,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
-                                         "limit": limit,
+                                         "limit": min(nb,len(filter_ids)),
                                          "_async": _async})
+        if _async:
+            search_res.done()
+            search_res = search_res.result()
+        
+        filter_ids_set = set(filter_ids)
+        for hits in search_res:
+            ids = hits.ids
+            assert set(ids).issubset(filter_ids_set)        
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_expression_all_data_type(self, nb, nq, dim, auto_id, _async):

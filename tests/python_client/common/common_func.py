@@ -338,6 +338,9 @@ def gen_normal_expressions():
         "int64 not in [1, 2, 3]",
         "int64 in [1, 2, 3] and float != 2",
         "int64 == 0 || int64 == 1 || int64 == 2",
+        "0 < int64 < 400",
+        "500 <= int64 < 1000",
+        "200+300 < int64 <= 500+500"
     ]
     return expressions
 
@@ -350,6 +353,9 @@ def gen_normal_expressions_field(field):
         f"{field} not in [1, 2, 3]",
         f"{field} in [1, 2, 3] and {field} != 2",
         f"{field} == 0 || {field} == 1 || {field} == 2",
+        f"0 < {field} < 400",
+        f"500 <= {field} <= 1000",
+        f"200+300 <= {field} <= 500+500"
     ]
     return expressions
 
