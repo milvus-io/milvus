@@ -6,6 +6,8 @@ require (
 	github.com/HdrHistogram/hdrhistogram-go v1.0.1 // indirect
 	github.com/antonmedv/expr v1.8.9
 	github.com/apache/pulsar-client-go v0.5.0
+	github.com/bits-and-blooms/bitset v1.2.0 // indirect
+	github.com/bits-and-blooms/bloom/v3 v3.0.1 // indirect
 	github.com/coreos/etcd v3.3.13+incompatible
 	github.com/facebookgo/ensure v0.0.0-20200202191622-63f1cf65ac4c // indirect
 	github.com/facebookgo/stack v0.0.0-20160209184415-751773369052 // indirect
