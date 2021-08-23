@@ -12,23 +12,35 @@
 package datacoord
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"golang.org/x/net/context"
 )
 
 func TestAllocator_Basic(t *testing.T) {
 	ms := newMockRootCoordService()
-	allocator := newRootCoordAllocator(context.Background(), ms)
+	allocator := newRootCoordAllocator(ms)
+	ctx := context.Background()
 
 	t.Run("Test allocTimestamp", func(t *testing.T) {
-		_, err := allocator.allocTimestamp()
+		_, err := allocator.allocTimestamp(ctx)
 		assert.NoError(t, err)
 	})
 
 	t.Run("Test allocID", func(t *testing.T) {
-		_, err := allocator.allocID()
+		_, err := allocator.allocID(ctx)
 		assert.NoError(t, err)
+	})
+
+	t.Run("Test Unhealthy Root", func(t *testing.T) {
+		ms := newMockRootCoordService()
+		allocator := newRootCoordAllocator(ms)
+		ms.Stop()
+
+		_, err := allocator.allocTimestamp(ctx)
+		assert.Error(t, err)
+		_, err = allocator.allocID(ctx)
+		assert.Error(t, err)
 	})
 }

@@ -23,7 +23,6 @@ type vchannel struct {
 // positionProvider provides vchannel pair related position pairs
 type positionProvider interface {
 	GetVChanPositions(vchans []vchannel, seekFromStartPosition bool) ([]*datapb.VchannelInfo, error)
-	GetDdlChannel() string
 }
 
 type dummyPosProvider struct{}
@@ -40,14 +39,4 @@ func (dp dummyPosProvider) GetVChanPositions(vchans []vchannel, seekFromStartPos
 		})
 	}
 	return pairs, nil
-}
-
-//GetDdlChannel implements positionProvider
-func (dp dummyPosProvider) GetDdlChannel() string {
-	return "dummy_ddl"
-}
-
-//GetDdlChannel implements positionProvider
-func (s *Server) GetDdlChannel() string {
-	return s.ddChannelName
 }

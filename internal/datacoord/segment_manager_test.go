@@ -30,7 +30,7 @@ func TestAllocSegment(t *testing.T) {
 	segmentManager := newSegmentManager(meta, mockAllocator)
 
 	schema := newTestSchema()
-	collID, err := mockAllocator.allocID()
+	collID, err := mockAllocator.allocID(ctx)
 	assert.Nil(t, err)
 	meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
 
@@ -45,13 +45,14 @@ func TestAllocSegment(t *testing.T) {
 }
 
 func TestLoadSegmentsFromMeta(t *testing.T) {
+	ctx := context.Background()
 	Params.Init()
 	mockAllocator := newMockAllocator()
 	meta, err := newMemoryMeta(mockAllocator)
 	assert.Nil(t, err)
 
 	schema := newTestSchema()
-	collID, err := mockAllocator.allocID()
+	collID, err := mockAllocator.allocID(ctx)
 	assert.Nil(t, err)
 	meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
 
@@ -101,7 +102,7 @@ func TestSaveSegmentsToMeta(t *testing.T) {
 	assert.Nil(t, err)
 
 	schema := newTestSchema()
-	collID, err := mockAllocator.allocID()
+	collID, err := mockAllocator.allocID(context.Background())
 	assert.Nil(t, err)
 	meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
 	segmentManager := newSegmentManager(meta, mockAllocator)
@@ -123,7 +124,7 @@ func TestDropSegment(t *testing.T) {
 	assert.Nil(t, err)
 
 	schema := newTestSchema()
-	collID, err := mockAllocator.allocID()
+	collID, err := mockAllocator.allocID(context.Background())
 	assert.Nil(t, err)
 	meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
 	segmentManager := newSegmentManager(meta, mockAllocator)
@@ -146,7 +147,7 @@ func TestAllocRowsLargerThanOneSegment(t *testing.T) {
 	assert.Nil(t, err)
 
 	schema := newTestSchema()
-	collID, err := mockAllocator.allocID()
+	collID, err := mockAllocator.allocID(context.Background())
 	assert.Nil(t, err)
 	meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
 
@@ -168,7 +169,7 @@ func TestExpireAllocation(t *testing.T) {
 	assert.Nil(t, err)
 
 	schema := newTestSchema()
-	collID, err := mockAllocator.allocID()
+	collID, err := mockAllocator.allocID(context.Background())
 	assert.Nil(t, err)
 	meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
 
@@ -210,7 +211,7 @@ func TestGetFlushableSegments(t *testing.T) {
 		assert.Nil(t, err)
 
 		schema := newTestSchema()
-		collID, err := mockAllocator.allocID()
+		collID, err := mockAllocator.allocID(context.Background())
 		assert.Nil(t, err)
 		meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
 		segmentManager := newSegmentManager(meta, mockAllocator)
