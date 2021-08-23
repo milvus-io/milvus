@@ -32,18 +32,20 @@ func newMemoryMeta(allocator allocator) (*meta, error) {
 	return newMeta(memoryKV)
 }
 
+var _ allocator = (*MockAllocator)(nil)
+
 type MockAllocator struct {
 	cnt int64
 }
 
-func (m *MockAllocator) allocTimestamp() (Timestamp, error) {
+func (m *MockAllocator) allocTimestamp(ctx context.Context) (Timestamp, error) {
 	val := atomic.AddInt64(&m.cnt, 1)
 	phy := time.Now().UnixNano() / int64(time.Millisecond)
 	ts := tsoutil.ComposeTS(phy, val)
 	return ts, nil
 }
 
-func (m *MockAllocator) allocID() (UniqueID, error) {
+func (m *MockAllocator) allocID(ctx context.Context) (UniqueID, error) {
 	val := atomic.AddInt64(&m.cnt, 1)
 	return val, nil
 }
@@ -121,11 +123,12 @@ func (c *mockDataNodeClient) Stop() error {
 }
 
 type mockRootCoordService struct {
-	cnt int64
+	state internalpb.StateCode
+	cnt   int64
 }
 
 func newMockRootCoordService() *mockRootCoordService {
-	return &mockRootCoordService{}
+	return &mockRootCoordService{state: internalpb.StateCode_Healthy}
 }
 
 func (m *mockRootCoordService) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
@@ -141,6 +144,7 @@ func (m *mockRootCoordService) Start() error {
 }
 
 func (m *mockRootCoordService) Stop() error {
+	m.state = internalpb.StateCode_Abnormal
 	return nil
 }
 
@@ -153,7 +157,7 @@ func (m *mockRootCoordService) GetComponentStates(ctx context.Context) (*interna
 		State: &internalpb.ComponentInfo{
 			NodeID:    0,
 			Role:      "",
-			StateCode: internalpb.StateCode_Healthy,
+			StateCode: m.state,
 			ExtraInfo: []*commonpb.KeyValuePair{},
 		},
 		SubcomponentStates: []*internalpb.ComponentInfo{},
@@ -243,6 +247,10 @@ func (m *mockRootCoordService) DropIndex(ctx context.Context, req *milvuspb.Drop
 
 //global timestamp allocator
 func (m *mockRootCoordService) AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
+	if m.state != internalpb.StateCode_Healthy {
+		return &rootcoordpb.AllocTimestampResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}, nil
+	}
+
 	val := atomic.AddInt64(&m.cnt, int64(req.Count))
 	phy := time.Now().UnixNano() / int64(time.Millisecond)
 	ts := tsoutil.ComposeTS(phy, val)
@@ -257,6 +265,9 @@ func (m *mockRootCoordService) AllocTimestamp(ctx context.Context, req *rootcoor
 }
 
 func (m *mockRootCoordService) AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
+	if m.state != internalpb.StateCode_Healthy {
+		return &rootcoordpb.AllocIDResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}, nil
+	}
 	val := atomic.AddInt64(&m.cnt, int64(req.Count))
 	return &rootcoordpb.AllocIDResponse{
 		Status: &commonpb.Status{

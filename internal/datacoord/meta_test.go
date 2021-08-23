@@ -11,6 +11,7 @@
 package datacoord
 
 import (
+	"context"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
@@ -24,6 +25,7 @@ func TestMeta_Basic(t *testing.T) {
 	const partID0 = UniqueID(100)
 	const partID1 = UniqueID(101)
 	const channelName = "c1"
+	ctx := context.Background()
 
 	mockAllocator := newMockAllocator()
 	meta, err := newMemoryMeta(mockAllocator)
@@ -58,13 +60,13 @@ func TestMeta_Basic(t *testing.T) {
 	t.Run("Test Segment", func(t *testing.T) {
 		meta.AddCollection(collInfoWoPartition)
 		// create seg0 for partition0, seg0/seg1 for partition1
-		segID0_0, err := mockAllocator.allocID()
+		segID0_0, err := mockAllocator.allocID(ctx)
 		assert.Nil(t, err)
 		segInfo0_0 := buildSegment(collID, partID0, segID0_0, channelName)
-		segID1_0, err := mockAllocator.allocID()
+		segID1_0, err := mockAllocator.allocID(ctx)
 		assert.Nil(t, err)
 		segInfo1_0 := buildSegment(collID, partID1, segID1_0, channelName)
-		segID1_1, err := mockAllocator.allocID()
+		segID1_1, err := mockAllocator.allocID(ctx)
 		assert.Nil(t, err)
 		segInfo1_1 := buildSegment(collID, partID1, segID1_1, channelName)
 
@@ -127,7 +129,7 @@ func TestMeta_Basic(t *testing.T) {
 		assert.EqualValues(t, 0, nums)
 
 		// add seg1 with 100 rows
-		segID0, err := mockAllocator.allocID()
+		segID0, err := mockAllocator.allocID(ctx)
 		assert.Nil(t, err)
 		segInfo0 := buildSegment(collID, partID0, segID0, channelName)
 		segInfo0.NumOfRows = rowCount0
@@ -135,7 +137,7 @@ func TestMeta_Basic(t *testing.T) {
 		assert.Nil(t, err)
 
 		// add seg2 with 300 rows
-		segID1, err := mockAllocator.allocID()
+		segID1, err := mockAllocator.allocID(ctx)
 		assert.Nil(t, err)
 		segInfo1 := buildSegment(collID, partID0, segID1, channelName)
 		segInfo1.NumOfRows = rowCount1

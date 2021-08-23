@@ -19,25 +19,30 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 )
 
+// allocator is the interface for allocating `UniqueID` or `Timestamp`
 type allocator interface {
-	allocTimestamp() (Timestamp, error)
-	allocID() (UniqueID, error)
+	allocTimestamp(context.Context) (Timestamp, error)
+	allocID(context.Context) (UniqueID, error)
 }
 
+var _ allocator = (*rootCoordAllocator)(nil)
+
+// rootCoordAllocator use RootCoord as allocator
 type rootCoordAllocator struct {
-	ctx             context.Context
-	rootCoordClient types.RootCoord
+	types.RootCoord
 }
 
-func newRootCoordAllocator(ctx context.Context, rootCoordClient types.RootCoord) *rootCoordAllocator {
+// newRootCoordAllocator get an allocator from RootCoord
+func newRootCoordAllocator(rootCoordClient types.RootCoord) allocator {
 	return &rootCoordAllocator{
-		ctx:             ctx,
-		rootCoordClient: rootCoordClient,
+		RootCoord: rootCoordClient,
 	}
 }
 
-func (alloc *rootCoordAllocator) allocTimestamp() (Timestamp, error) {
-	resp, err := alloc.rootCoordClient.AllocTimestamp(alloc.ctx, &rootcoordpb.AllocTimestampRequest{
+// allocTimestamp allocate a Timestamp
+// invoking RootCoord `AllocTimestamp`
+func (alloc *rootCoordAllocator) allocTimestamp(ctx context.Context) (Timestamp, error) {
+	resp, err := alloc.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_RequestTSO,
 			MsgID:     0,
@@ -52,8 +57,9 @@ func (alloc *rootCoordAllocator) allocTimestamp() (Timestamp, error) {
 	return resp.Timestamp, nil
 }
 
-func (alloc *rootCoordAllocator) allocID() (UniqueID, error) {
-	resp, err := alloc.rootCoordClient.AllocID(alloc.ctx, &rootcoordpb.AllocIDRequest{
+// allocID allocate an `UniqueID` from RootCoord, invoking AllocID grpc
+func (alloc *rootCoordAllocator) allocID(ctx context.Context) (UniqueID, error) {
+	resp, err := alloc.AllocID(ctx, &rootcoordpb.AllocIDRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_RequestID,
 			MsgID:     0,

@@ -197,7 +197,7 @@ func (s *Server) Start() error {
 		return err
 	}
 
-	s.allocator = newRootCoordAllocator(s.ctx, s.rootCoordClient)
+	s.allocator = newRootCoordAllocator(s.rootCoordClient)
 
 	s.startSegmentManager()
 	if err = s.initServiceDiscovery(); err != nil {

@@ -234,7 +234,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 		requestRows, int64(maxCountPerSegment))
 
 	// create new segments and add allocations
-	expireTs, err := s.genExpireTs()
+	expireTs, err := s.genExpireTs(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -261,8 +261,8 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	return allocations, nil
 }
 
-func (s *SegmentManager) genExpireTs() (Timestamp, error) {
-	ts, err := s.allocator.allocTimestamp()
+func (s *SegmentManager) genExpireTs(ctx context.Context) (Timestamp, error) {
+	ts, err := s.allocator.allocTimestamp(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -275,7 +275,7 @@ func (s *SegmentManager) genExpireTs() (Timestamp, error) {
 func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string) (*SegmentInfo, error) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
-	id, err := s.allocator.allocID()
+	id, err := s.allocator.allocID(ctx)
 	if err != nil {
 		return nil, err
 	}
