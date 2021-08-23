@@ -122,6 +122,8 @@ type RootCoordComponent interface {
 	SetIndexCoord(IndexCoord) error
 	SetQueryCoord(QueryCoord) error
 	SetNewProxyClient(func(sess *sessionutil.Session) (Proxy, error))
+
+	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
 type Proxy interface {

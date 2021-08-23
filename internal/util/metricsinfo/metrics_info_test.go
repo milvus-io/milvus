@@ -99,3 +99,19 @@ func TestIndexCoordInfos_Codec(t *testing.T) {
 	assert.Equal(t, nil, err)
 	assert.Equal(t, infos1.Name, infos2.Name)
 }
+
+func TestRootCoordInfos_Codec(t *testing.T) {
+	infos1 := RootCoordInfos{
+		BaseComponentInfos: BaseComponentInfos{
+			Name: ConstructComponentName(typeutil.RootCoordRole, 1),
+		},
+	}
+	s, err := MarshalComponentInfos(infos1)
+	assert.Equal(t, nil, err)
+	log.Info("TestRootCoordInfos_Codec",
+		zap.String("marshaled_result", s))
+	var infos2 RootCoordInfos
+	err = UnmarshalComponentInfos(s, &infos2)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, infos1.Name, infos2.Name)
+}
