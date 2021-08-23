@@ -143,3 +143,9 @@ clean:
 	@rm -rf bin/
 	@rm -rf lib/
 	@rm $(GOPATH)/bin/milvus
+
+milvus-tools: 
+	@echo "Building tools ..."
+	@mkdir -p $(INSTALL_PATH)/tools && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build \
+		-ldflags="-X 'main.BuildTags=$(BUILD_TAGS)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)' -X 'main.GoVersion=$(GO_VERSION)'" \
+		-o $(INSTALL_PATH)/tools $(PWD)/cmd/tools/* 1>/dev/null

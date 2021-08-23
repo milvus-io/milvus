@@ -206,6 +206,10 @@ func (s *Server) Start() error {
 
 	s.startServerLoop()
 
+	helper := NewMoveBinlogPathHelper(s.kvClient, s.meta)
+	if err := helper.Execute(); err != nil {
+		return err
+	}
 	atomic.StoreInt64(&s.isServing, ServerStateHealthy)
 	log.Debug("dataCoordinator startup success")
 	return nil
@@ -275,7 +279,7 @@ func (s *Server) initMeta() error {
 		}
 
 		s.kvClient = etcdKV
-		s.meta, err = newMeta(s.kvClient)
+		s.meta, err = NewMeta(s.kvClient)
 		if err != nil {
 			return err
 		}

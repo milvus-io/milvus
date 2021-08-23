@@ -285,3 +285,9 @@ message ChannelWatchInfo {
     int64 startTs = 2;
     ChannelWatchState state = 3;
 }
+
+// Deprecated
+message SegmentFieldBinlogMeta {
+  int64  fieldID = 1;
+  string binlog_path = 2;
+}
