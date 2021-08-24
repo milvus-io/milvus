@@ -166,6 +166,11 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		vchanInfo.GetChannelName(),
 	)
 
+	var deleteNode Node = newDeleteDNode(
+		dsService.ctx,
+		dsService.replica,
+	)
+
 	// recover segment checkpoints
 	for _, us := range vchanInfo.GetUnflushedSegments() {
 		if us.CollectionID != dsService.collectionID ||
@@ -192,6 +197,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 	dsService.fg.AddNode(dmStreamNode)
 	dsService.fg.AddNode(ddNode)
 	dsService.fg.AddNode(insertBufferNode)
+	dsService.fg.AddNode(deleteNode)
 
 	// ddStreamNode
 	err = dsService.fg.SetEdges(dmStreamNode.Name(),
@@ -216,10 +222,20 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 	// insertBufferNode
 	err = dsService.fg.SetEdges(insertBufferNode.Name(),
 		[]string{ddNode.Name()},
-		[]string{},
+		[]string{deleteNode.Name()},
 	)
 	if err != nil {
 		log.Error("set edges failed in node", zap.String("name", insertBufferNode.Name()), zap.Error(err))
+		return err
+	}
+
+	//deleteNode
+	err = dsService.fg.SetEdges(deleteNode.Name(),
+		[]string{insertBufferNode.Name()},
+		[]string{},
+	)
+	if err != nil {
+		log.Error("set edges failed in node", zap.String("name", deleteNode.Name()), zap.Error(err))
 		return err
 	}
 	return nil

@@ -19,6 +19,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -58,6 +59,11 @@ type Segment struct {
 	checkPoint segmentCheckPoint
 	startPos   *internalpb.MsgPosition // TODO readonly
 	endPos     *internalpb.MsgPosition
+
+	pkFilter *bloom.BloomFilter //  bloom filter of pk inside a segment
+	// TODO silverxia, needs to change to interface to support `string` type PK
+	minPK int64 //	minimal pk value, shortcut for checking whether a pk is inside this segment
+	maxPK int64 //  maximal pk value, same above
 }
 
 // SegmentReplica is the data replication of persistent data in datanode.
