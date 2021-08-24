@@ -12,8 +12,12 @@
 package datanode
 
 import (
+	"encoding/binary"
+	"math"
+	"math/rand"
 	"testing"
 
+	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -39,6 +43,13 @@ func newSegmentReplica(rc types.RootCoord, collID UniqueID) *SegmentReplica {
 func TestSegmentReplica(t *testing.T) {
 	rc := &RootCoordFactory{}
 	collID := UniqueID(1)
+
+	t.Run("Test coll mot match", func(t *testing.T) {
+		replica := newSegmentReplica(rc, collID)
+
+		err := replica.addNewSegment(1, collID+1, 0, "", nil, nil)
+		assert.NotNil(t, err)
+	})
 
 	t.Run("Test segmentFlushed", func(t *testing.T) {
 		testReplica := &SegmentReplica{
@@ -190,4 +201,70 @@ func TestSegmentReplica(t *testing.T) {
 		replica.updateSegmentCheckPoint(1)
 		assert.Equal(t, int64(20), replica.normalSegments[UniqueID(1)].checkPoint.numRows)
 	})
+}
+
+func TestSegmentUpdatePKRange(t *testing.T) {
+	seg := &Segment{
+		pkFilter: bloom.NewWithEstimates(100000, 0.005),
+		maxPK:    math.MinInt64,
+		minPK:    math.MaxInt64,
+	}
+
+	cases := make([]int64, 0, 100)
+	for i := 0; i < 100; i++ {
+		cases = append(cases, rand.Int63())
+	}
+	buf := make([]byte, 8)
+	for _, c := range cases {
+		seg.updatePKRange([]int64{c})
+
+		assert.LessOrEqual(t, seg.minPK, c)
+		assert.GreaterOrEqual(t, seg.maxPK, c)
+
+		binary.BigEndian.PutUint64(buf, uint64(c))
+		assert.True(t, seg.pkFilter.Test(buf))
+	}
+}
+
+func TestReplicaUpdatePKRange(t *testing.T) {
+	rc := &RootCoordFactory{}
+	collID := UniqueID(1)
+	partID := UniqueID(2)
+	chanName := "insert-02"
+	startPos := &internalpb.MsgPosition{ChannelName: chanName, Timestamp: Timestamp(100)}
+	endPos := &internalpb.MsgPosition{ChannelName: chanName, Timestamp: Timestamp(200)}
+	cpPos := &internalpb.MsgPosition{ChannelName: chanName, Timestamp: Timestamp(10)}
+	cp := &segmentCheckPoint{int64(10), *cpPos}
+
+	replica := newSegmentReplica(rc, collID)
+
+	err := replica.addNewSegment(1, collID, partID, chanName, startPos, endPos)
+	assert.Nil(t, err)
+	err = replica.addNormalSegment(2, collID, partID, chanName, 100, cp)
+	assert.Nil(t, err)
+
+	segNew := replica.newSegments[1]
+	segNormal := replica.normalSegments[2]
+
+	cases := make([]int64, 0, 100)
+	for i := 0; i < 100; i++ {
+		cases = append(cases, rand.Int63())
+	}
+	buf := make([]byte, 8)
+	for _, c := range cases {
+		replica.updateSegmentPKRange(1, []int64{c}) // new segment
+		replica.updateSegmentPKRange(2, []int64{c}) // normal segment
+		replica.updateSegmentPKRange(3, []int64{c}) // non-exist segment
+
+		assert.LessOrEqual(t, segNew.minPK, c)
+		assert.GreaterOrEqual(t, segNew.maxPK, c)
+		assert.LessOrEqual(t, segNormal.minPK, c)
+		assert.GreaterOrEqual(t, segNormal.maxPK, c)
+
+		binary.BigEndian.PutUint64(buf, uint64(c))
+		assert.True(t, segNew.pkFilter.Test(buf))
+		assert.True(t, segNormal.pkFilter.Test(buf))
+
+	}
+
 }

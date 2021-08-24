@@ -483,6 +483,8 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 		// store current endPositions as Segment->EndPostion
 		ibNode.replica.updateSegmentEndPosition(currentSegID, iMsg.endPositions[0])
+		// update segment pk filter
+		ibNode.replica.updateSegmentPKRange(currentSegID, msg.GetRowIDs())
 	}
 
 	if len(iMsg.insertMessages) > 0 {
