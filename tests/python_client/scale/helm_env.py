@@ -6,10 +6,11 @@ from utils.util_log import test_log as log
 from common import common_func as cf
 from scale import scale_common as sc
 
-milvus_chart_path = sc.get_milvus_chart_env_var()
-
 
 class HelmEnv:
+
+    milvus_chart_path = sc.get_milvus_chart_env_var()
+
     def __init__(self, release_name=None, **kwargs):
         self.release_name = release_name if release_name else cf.gen_unique_str("scale")
         self.proxy = kwargs.get(constants.PROXY, 1)
@@ -40,7 +41,7 @@ class HelmEnv:
                       f'{self.release_name} . '
         log.debug(f'install_cmd: {install_cmd}')
         try:
-            os.system(f'cd {milvus_chart_path} && {install_cmd}')
+            os.system(f'cd {self.milvus_chart_path} && {install_cmd}')
         except Exception:
             raise Exception("Failed to deploy cluster milvus")
         return self.get_service_ip()
@@ -63,7 +64,7 @@ class HelmEnv:
                       f'--set queryNode.replicas={query_node} ' \
                       f'--reuse-values'
         log.debug(f'upgrade_cmd: {upgrade_cmd}')
-        if os.system(f'cd {milvus_chart_path} && {upgrade_cmd}'):
+        if os.system(f'cd {self.milvus_chart_path} && {upgrade_cmd}'):
             raise Exception(f'Failed to upgrade cluster milvus with {kwargs}')
 
     def helm_uninstall_cluster_milvus(self):
