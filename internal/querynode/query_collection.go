@@ -867,31 +867,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 
 	sp.LogFields(oplog.String("statistical time", "segment search end"))
 	if len(searchResults) <= 0 {
-		for _, group := range searchRequests {
-			nq := group.getNumOfQuery()
-			nilHits := make([][]byte, nq)
-			hit := &milvuspb.Hits{}
-			for i := 0; i < int(nq); i++ {
-				bs, err := proto.Marshal(hit)
-				if err != nil {
-					return err
-				}
-				nilHits[i] = bs
-			}
-
-			// TODO: remove inefficient code in cgo and use SearchResultData directly
-			// TODO: Currently add a translate layer from hits to SearchResultData
-			// TODO: hits marshal and unmarshal is likely bottleneck
-
-			transformed, err := translateHits(schema, searchMsg.OutputFieldsId, nilHits)
-			if err != nil {
-				return err
-			}
-			byteBlobs, err := proto.Marshal(transformed)
-			if err != nil {
-				return err
-			}
-
+		for range searchRequests {
 			resultChannelInt := 0
 			searchResultMsg := &msgstream.SearchResultMsg{
 				BaseMsg: msgstream.BaseMsg{Ctx: searchMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}},
@@ -904,11 +880,12 @@ func (q *queryCollection) search(msg queryMsg) error {
 					},
 					Status:                   &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 					ResultChannelID:          searchMsg.ResultChannelID,
-					Hits:                     nilHits,
-					SlicedBlob:               byteBlobs,
+					MetricType:               plan.getMetricType(),
+					NumQueries:               queryNum,
+					TopK:                     topK,
+					SlicedBlob:               nil,
 					SlicedOffset:             1,
 					SlicedNumCount:           1,
-					MetricType:               plan.getMetricType(),
 					SealedSegmentIDsSearched: sealedSegmentSearched,
 					ChannelIDsSearched:       q.collection.getVChannels(),
 					GlobalSealedSegmentIDs:   globalSealedSegments,
@@ -995,11 +972,12 @@ func (q *queryCollection) search(msg queryMsg) error {
 				},
 				Status:                   &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 				ResultChannelID:          searchMsg.ResultChannelID,
-				Hits:                     hits,
+				MetricType:               plan.getMetricType(),
+				NumQueries:               queryNum,
+				TopK:                     topK,
 				SlicedBlob:               byteBlobs,
 				SlicedOffset:             1,
 				SlicedNumCount:           1,
-				MetricType:               plan.getMetricType(),
 				SealedSegmentIDsSearched: sealedSegmentSearched,
 				ChannelIDsSearched:       q.collection.getVChannels(),
 				GlobalSealedSegmentIDs:   globalSealedSegments,

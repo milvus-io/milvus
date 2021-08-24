@@ -1659,9 +1659,8 @@ func decodeSearchResults(searchResults []*internalpb.SearchResults) ([]*schemapb
 	// return decodeSearchResultsParallelByCPU(searchResults)
 }
 
-func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultData, availableQueryNodeNum int64, metricType string, maxParallel int) (*milvuspb.SearchResults, error) {
-	nq := searchResultData[0].NumQueries
-	topk := searchResultData[0].TopK
+func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultData, availableQueryNodeNum int64,
+	nq int64, topk int64, metricType string, maxParallel int) (*milvuspb.SearchResults, error) {
 
 	log.Debug("reduceSearchResultDataParallel",
 		zap.Int("len(searchResultData)", len(searchResultData)),
@@ -1887,25 +1886,26 @@ func reduceSearchResultDataParallel(searchResultData []*schemapb.SearchResultDat
 	return ret, nil
 }
 
-func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, availableQueryNodeNum int64, metricType string) (*milvuspb.SearchResults, error) {
+func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, availableQueryNodeNum int64,
+	nq int64, topk int64, metricType string) (*milvuspb.SearchResults, error) {
 	t := time.Now()
 	defer func() {
 		log.Debug("reduceSearchResults", zap.Any("time cost", time.Since(t)))
 	}()
-	return reduceSearchResultDataParallel(searchResultData, availableQueryNodeNum, metricType, runtime.NumCPU())
+	return reduceSearchResultDataParallel(searchResultData, availableQueryNodeNum, nq, topk, metricType, runtime.NumCPU())
 }
 
-func printSearchResult(partialSearchResult *internalpb.SearchResults) {
-	for i := 0; i < len(partialSearchResult.Hits); i++ {
-		testHits := milvuspb.Hits{}
-		err := proto.Unmarshal(partialSearchResult.Hits[i], &testHits)
-		if err != nil {
-			panic(err)
-		}
-		fmt.Println(testHits.IDs)
-		fmt.Println(testHits.Scores)
-	}
-}
+//func printSearchResult(partialSearchResult *internalpb.SearchResults) {
+//	for i := 0; i < len(partialSearchResult.Hits); i++ {
+//		testHits := milvuspb.Hits{}
+//		err := proto.Unmarshal(partialSearchResult.Hits[i], &testHits)
+//		if err != nil {
+//			panic(err)
+//		}
+//		fmt.Println(testHits.IDs)
+//		fmt.Println(testHits.Scores)
+//	}
+//}
 
 func (st *SearchTask) PostExecute(ctx context.Context) error {
 	t0 := time.Now()
@@ -1947,10 +1947,10 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 			availableQueryNodeNum = 0
 			for _, partialSearchResult := range filterSearchResult {
 				if partialSearchResult.SlicedBlob == nil {
-					filterReason += "nq is zero\n"
-					continue
+					filterReason += "empty search result\n"
+				} else {
+					availableQueryNodeNum++
 				}
-				availableQueryNodeNum++
 			}
 			log.Debug("Proxy Search PostExecute stage2", zap.Any("availableQueryNodeNum", availableQueryNodeNum))
 
@@ -1962,6 +1962,10 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 						ErrorCode: commonpb.ErrorCode_Success,
 						Reason:    filterReason,
 					},
+					Results: &schemapb.SearchResultData{
+						NumQueries: searchResults[0].NumQueries,
+						Topks:      make([]int64, searchResults[0].NumQueries),
+					},
 				}
 				return nil
 			}
@@ -1972,7 +1976,8 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 				return err
 			}
 
-			st.result, err = reduceSearchResultData(results, int64(availableQueryNodeNum), searchResults[0].MetricType)
+			st.result, err = reduceSearchResultData(results, int64(availableQueryNodeNum),
+				searchResults[0].NumQueries, searchResults[0].TopK, searchResults[0].MetricType)
 			if err != nil {
 				return err
 			}
