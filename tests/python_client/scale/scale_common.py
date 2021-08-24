@@ -23,21 +23,23 @@ def get_milvus_chart_env_var(var=constants.MILVUS_CHART_ENV):
     return milvus_helm_chart
 
 
-def e2e_milvus(host, c_name):
+def e2e_milvus(host, c_name, collection_exist=False):
     # connect
     connections.add_connection(default={"host": host, "port": 19530})
     connections.connect(alias='default')
 
     # create
-    # c_name = cf.gen_unique_str(prefix)
     collection_w = ApiCollectionWrapper()
-    collection_w.init_collection(name=c_name, schema=cf.gen_default_collection_schema())
-    # collection_w.init_collection(name=c_name)
+    if collection_exist:
+        collection_w.init_collection(name=c_name)
+    else:
+        collection_w.init_collection(name=c_name, schema=cf.gen_default_collection_schema())
 
     # insert
     data = cf.gen_default_list_data(ct.default_nb)
     mutation_res, _ = collection_w.insert(data)
     assert mutation_res.insert_count == ct.default_nb
+    log.debug(collection_w.num_entities)
 
     # create index
     collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
@@ -50,6 +52,7 @@ def e2e_milvus(host, c_name):
     search_res, _ = collection_w.search(data[-1][:ct.default_nq], ct.default_float_vec_field_name,
                                         ct.default_search_params, ct.default_limit)
     assert len(search_res[0]) == ct.default_limit
+    log.debug(search_res[0][0].id)
 
     # query
     ids = search_res[0].ids[0]

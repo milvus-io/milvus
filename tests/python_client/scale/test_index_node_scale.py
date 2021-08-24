@@ -28,8 +28,7 @@ class TestIndexNodeScale:
         """
         release_name = "scale-index"
         env = HelmEnv(release_name=release_name)
-        env.helm_install_cluster_milvus()
-        host = env.get_svc_external_ip()
+        host = env.helm_install_cluster_milvus()
 
         # connect
         connections.add_connection(default={"host": host, "port": 19530})
@@ -82,10 +81,10 @@ class TestIndexNodeScale:
         """
         release_name = "scale-index"
         env = HelmEnv(release_name=release_name, indexNode=2)
-        env.helm_install_cluster_milvus()
+        host = env.helm_install_cluster_milvus()
 
         # connect
-        connections.add_connection(default={"host": '10.98.0.8', "port": 19530})
+        connections.add_connection(default={"host": host, "port": 19530})
         connections.connect(alias='default')
 
         data = cf.gen_default_dataframe_data(nb)
@@ -112,8 +111,7 @@ class TestIndexNodeScale:
         collection_w.drop_index()
         assert not collection_w.has_index()[0]
 
-        # expand indexNode from 1 to 2
-        # pdb.set_trace()
+        # expand indexNode from 2 to 1
         env.helm_upgrade_cluster_milvus(indexNode=1)
 
         start = datetime.datetime.now()
