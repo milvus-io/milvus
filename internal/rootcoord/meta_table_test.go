@@ -337,9 +337,9 @@ func TestMetaTable(t *testing.T) {
 			IndexParams: params,
 		}
 
-		_, _, err := mt.GetNotIndexedSegments("collTest", "field110", idxInfo, nil)
+		_, _, err := mt.GetNotIndexedSegments("collTest", "field110", idxInfo, nil, 0)
 		assert.NotNil(t, err)
-		seg, field, err := mt.GetNotIndexedSegments("testColl", "field110", idxInfo, []typeutil.UniqueID{segID, segID2})
+		seg, field, err := mt.GetNotIndexedSegments("testColl", "field110", idxInfo, []typeutil.UniqueID{segID, segID2}, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, 1, len(seg))
 		assert.Equal(t, segID2, seg[0])
@@ -355,7 +355,7 @@ func TestMetaTable(t *testing.T) {
 		idxInfo.IndexID = 2001
 		idxInfo.IndexName = "field110-1"
 
-		seg, field, err = mt.GetNotIndexedSegments("testColl", "field110", idxInfo, []typeutil.UniqueID{segID, segID2})
+		seg, field, err = mt.GetNotIndexedSegments("testColl", "field110", idxInfo, []typeutil.UniqueID{segID, segID2}, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, 2, len(seg))
 		assert.Equal(t, segID, seg[0])
@@ -916,7 +916,7 @@ func TestMetaTable(t *testing.T) {
 		}
 
 		mt.collName2ID["abc"] = 123
-		_, _, err = mt.GetNotIndexedSegments("abc", "no-field", idx, nil)
+		_, _, err = mt.GetNotIndexedSegments("abc", "no-field", idx, nil, 0)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "collection abc not found")
 
@@ -941,13 +941,13 @@ func TestMetaTable(t *testing.T) {
 		err = mt.AddCollection(collInfo, ts, idxInfo, nil)
 		assert.Nil(t, err)
 
-		_, _, err = mt.GetNotIndexedSegments(collInfo.Schema.Name, "no-field", idx, nil)
+		_, _, err = mt.GetNotIndexedSegments(collInfo.Schema.Name, "no-field", idx, nil, 0)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("collection %s doesn't have filed no-field", collInfo.Schema.Name))
 
 		bakMeta := mt.indexID2Meta
 		mt.indexID2Meta = make(map[int64]pb.IndexInfo)
-		_, _, err = mt.GetNotIndexedSegments(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idx, nil)
+		_, _, err = mt.GetNotIndexedSegments(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idx, nil, 0)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("index id = %d not found", idxInfo[0].IndexID))
 		mt.indexID2Meta = bakMeta
@@ -955,7 +955,7 @@ func TestMetaTable(t *testing.T) {
 		mockKV.multiSave = func(kvs map[string]string, ts typeutil.Timestamp, addition ...func(ts typeutil.Timestamp) (string, string, error)) error {
 			return fmt.Errorf("multi save error")
 		}
-		assert.Panics(t, func() { mt.GetNotIndexedSegments(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idx, nil) })
+		assert.Panics(t, func() { mt.GetNotIndexedSegments(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idx, nil, 0) })
 		//_, _, err = mt.GetNotIndexedSegments(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idx, nil)
 		//assert.NotNil(t, err)
 		//assert.EqualError(t, err, "multi save error")
@@ -994,7 +994,7 @@ func TestMetaTable(t *testing.T) {
 		mockKV.multiSave = func(kvs map[string]string, ts typeutil.Timestamp, addition ...func(ts typeutil.Timestamp) (string, string, error)) error {
 			return fmt.Errorf("multi save error")
 		}
-		assert.Panics(t, func() { mt.GetNotIndexedSegments(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idx, nil) })
+		assert.Panics(t, func() { mt.GetNotIndexedSegments(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idx, nil, 0) })
 		//_, _, err = mt.GetNotIndexedSegments(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idx, nil)
 		//assert.NotNil(t, err)
 		//assert.EqualError(t, err, "multi save error")
