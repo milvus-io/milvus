@@ -116,6 +116,12 @@ func (s *SegmentsInfo) SetFlushTime(segmentID UniqueID, t time.Time) {
 	}
 }
 
+func (s *SegmentsInfo) AddSegmentBinlogs(segmentID UniqueID, field2Binlogs map[UniqueID][]string) {
+	if segment, ok := s.segments[segmentID]; ok {
+		s.segments[segmentID] = segment.Clone(addSegmentBinlogs(field2Binlogs))
+	}
+}
+
 func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 	info := proto.Clone(s.SegmentInfo).(*datapb.SegmentInfo)
 	cloned := &SegmentInfo{
@@ -204,5 +210,28 @@ func SetBinlogs(binlogs []*datapb.FieldBinlog) SegmentInfoOption {
 func SetFlushTime(t time.Time) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.lastFlushTime = t
+	}
+}
+
+func addSegmentBinlogs(field2Binlogs map[UniqueID][]string) SegmentInfoOption {
+	return func(segment *SegmentInfo) {
+		for fieldID, binlogPaths := range field2Binlogs {
+			found := false
+			for _, binlog := range segment.Binlogs {
+				if binlog.FieldID != fieldID {
+					continue
+				}
+				binlog.Binlogs = append(binlog.Binlogs, binlogPaths...)
+				found = true
+				break
+			}
+			if !found {
+				// if no field matched
+				segment.Binlogs = append(segment.Binlogs, &datapb.FieldBinlog{
+					FieldID: fieldID,
+					Binlogs: binlogPaths,
+				})
+			}
+		}
 	}
 }

@@ -34,7 +34,7 @@ type meta struct {
 	segments    *SegmentsInfo                       // segment id to segment info
 }
 
-func newMeta(kv kv.TxnKV) (*meta, error) {
+func NewMeta(kv kv.TxnKV) (*meta, error) {
 	mt := &meta{
 		client:      kv,
 		collections: make(map[UniqueID]*datapb.CollectionInfo),
@@ -222,6 +222,19 @@ func (m *meta) UpdateFlushSegmentsInfo(segmentID UniqueID, flushed bool,
 	return nil
 }
 
+func (m *meta) ListSegmentIds() []UniqueID {
+	m.RLock()
+	defer m.RUnlock()
+
+	infos := make([]UniqueID, 0)
+	segments := m.segments.GetSegments()
+	for _, segment := range segments {
+		infos = append(infos, segment.GetID())
+	}
+	return infos
+
+}
+
 func (m *meta) GetSegmentsByChannel(dmlCh string) []*SegmentInfo {
 	m.RLock()
 	defer m.RUnlock()
@@ -327,6 +340,23 @@ func (m *meta) SetLastFlushTime(segmentID UniqueID, t time.Time) {
 	m.Lock()
 	defer m.Unlock()
 	m.segments.SetFlushTime(segmentID, t)
+}
+
+func (m *meta) MoveSegmentBinlogs(segmentID UniqueID, oldPathPrefix string, field2Binlogs map[UniqueID][]string) error {
+	m.Lock()
+	defer m.Unlock()
+
+	m.segments.AddSegmentBinlogs(segmentID, field2Binlogs)
+
+	removals := []string{oldPathPrefix}
+	kv := make(map[string]string)
+
+	if segment := m.segments.GetSegment(segmentID); segment != nil {
+		k := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+		kv[k] = proto.MarshalTextString(segment.SegmentInfo)
+	}
+	m.client.MultiSaveAndRemoveWithPrefix(kv, removals)
+	return nil
 }
 
 func (m *meta) saveSegmentInfo(segment *SegmentInfo) error {

@@ -157,7 +157,26 @@ func (kv *MemoryKV) MultiRemoveWithPrefix(keys []string) error {
 	panic("not implement")
 }
 func (kv *MemoryKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
-	panic("not implement")
+	kv.Lock()
+	defer kv.Unlock()
+
+	keys := make([]memoryKVItem, 0)
+	for _, key := range removals {
+		kv.tree.Ascend(func(i btree.Item) bool {
+			if strings.HasPrefix(i.(memoryKVItem).key, key) {
+				keys = append(keys, i.(memoryKVItem))
+			}
+			return true
+		})
+	}
+	for _, item := range keys {
+		kv.tree.Delete(item)
+	}
+
+	for key, value := range saves {
+		kv.tree.ReplaceOrInsert(memoryKVItem{key, value})
+	}
+	return nil
 }
 
 func (kv *MemoryKV) RemoveWithPrefix(key string) error {
