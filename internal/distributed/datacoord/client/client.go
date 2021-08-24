@@ -436,3 +436,18 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	}
 	return ret.(*milvuspb.GetMetricsResponse), err
 }
+
+func (c *Client) GetBloomFilterFiles(ctx context.Context, req *datapb.GetBloomFilterFileRequest) (*datapb.GetBloomFilterFileResponse, error) {
+	ret, err := c.recall(func() (interface{}, error) {
+		client, err := c.getGrpcClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return client.GetBloomFilterFiles(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*datapb.GetBloomFilterFileResponse), err
+}

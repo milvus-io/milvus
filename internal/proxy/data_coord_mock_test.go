@@ -164,6 +164,10 @@ func (coord *DataCoordMock) GetMetrics(ctx context.Context, req *milvuspb.GetMet
 	}, nil
 }
 
+func (coord *DataCoordMock) GetBloomFilterFiles(ctx context.Context, in *datapb.GetBloomFilterFileRequest) (*datapb.GetBloomFilterFileResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func NewDataCoordMock() *DataCoordMock {
 	return &DataCoordMock{
 		nodeID:            typeutil.UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),

@@ -1437,6 +1437,59 @@ func TestPostFlush(t *testing.T) {
 	})
 }
 
+func TestGetBloomFilterFiles(t *testing.T) {
+	t.Run("test only return segments that have bloom filter file", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		segments := []struct {
+			id              int64
+			channel         string
+			bloomFilterFile string
+		}{
+			{1, "ch1", "file1"},
+			{2, "ch1", ""},
+			{3, "ch2", "file3"},
+			{4, "ch2", ""},
+		}
+
+		for _, segment := range segments {
+			s := &SegmentInfo{
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:              segment.id,
+					InsertChannel:   segment.channel,
+					BloomFilterFile: segment.bloomFilterFile,
+				},
+			}
+			err := svr.meta.AddSegment(s)
+			assert.Nil(t, err)
+		}
+
+		req := &datapb.GetBloomFilterFileRequest{
+			Channel: "ch1",
+		}
+
+		resp, err := svr.GetBloomFilterFiles(context.TODO(), req)
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.EqualValues(t, "ch1", resp.GetChannel())
+		assert.EqualValues(t, []int64{1}, resp.GetSegments())
+		assert.EqualValues(t, []string{"file1"}, resp.GetFiles())
+	})
+
+	t.Run("with closed server", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		closeTestServer(t, svr)
+
+		req := &datapb.GetBloomFilterFileRequest{
+			Channel: "ch1",
+		}
+		resp, err := svr.GetBloomFilterFiles(context.TODO(), req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Equal(t, serverNotServingErrMsg, resp.Status.Reason)
+
+	})
+}
+
 func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Server {
 	Params.Init()
 	Params.TimeTickChannelName = Params.TimeTickChannelName + strconv.Itoa(rand.Int())

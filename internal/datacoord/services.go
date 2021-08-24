@@ -545,3 +545,36 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		Response: "",
 	}, nil
 }
+
+func (s *Server) GetBloomFilterFiles(ctx context.Context, in *datapb.GetBloomFilterFileRequest) (*datapb.GetBloomFilterFileResponse, error) {
+	resp := &datapb.GetBloomFilterFileResponse{}
+
+	if s.isClosed() {
+		resp.Status = &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    serverNotServingErrMsg,
+		}
+		return resp, nil
+	}
+
+	segments := s.meta.GetSegmentsByChannel(in.Channel)
+	segmentIds := make([]UniqueID, 0, len(segments))
+	files := make([]string, 0, len(segments))
+
+	for _, segment := range segments {
+		if len(segment.GetBloomFilterFile()) != 0 {
+			segmentIds = append(segmentIds, segment.GetID())
+			files = append(files, segment.GetBloomFilterFile())
+		}
+	}
+
+	resp.Status = &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}
+	resp.Channel = in.GetChannel()
+	resp.Segments = segmentIds
+	resp.Files = files
+
+	return resp, nil
+
+}

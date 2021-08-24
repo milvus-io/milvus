@@ -150,6 +150,7 @@ type DataCoord interface {
 	GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error)
 
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+	GetBloomFilterFiles(ctx context.Context, in *datapb.GetBloomFilterFileRequest) (*datapb.GetBloomFilterFileResponse, error)
 }
 
 // IndexNode is the interface `indexnode` package implements

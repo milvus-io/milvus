@@ -78,6 +78,10 @@ func (m *MockDataCoordClient) GetMetrics(ctx context.Context, in *milvuspb.GetMe
 	return &milvuspb.GetMetricsResponse{}, m.err
 }
 
+func (m *MockDataCoordClient) GetBloomFilterFiles(ctx context.Context, in *datapb.GetBloomFilterFileRequest, opts ...grpc.CallOption) (*datapb.GetBloomFilterFileResponse, error) {
+	return &datapb.GetBloomFilterFileResponse{}, m.err
+}
+
 func Test_NewClient(t *testing.T) {
 	proxy.Params.InitOnce()
 
@@ -150,6 +154,9 @@ func Test_NewClient(t *testing.T) {
 
 		r15, err := client.GetMetrics(ctx, nil)
 		retCheck(retNotNil, r15, err)
+
+		r16, err := client.GetBloomFilterFiles(ctx, nil)
+		retCheck(retNotNil, r16, err)
 	}
 
 	client.getGrpcClient = func() (datapb.DataCoordClient, error) {

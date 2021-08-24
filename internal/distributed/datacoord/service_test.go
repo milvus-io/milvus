@@ -25,24 +25,25 @@ import (
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockDataCoord struct {
-	states       *internalpb.ComponentStates
-	status       *commonpb.Status
-	err          error
-	initErr      error
-	startErr     error
-	stopErr      error
-	regErr       error
-	strResp      *milvuspb.StringResponse
-	infoResp     *datapb.GetSegmentInfoResponse
-	flushResp    *datapb.FlushResponse
-	assignResp   *datapb.AssignSegmentIDResponse
-	segStateResp *datapb.GetSegmentStatesResponse
-	binResp      *datapb.GetInsertBinlogPathsResponse
-	colStatResp  *datapb.GetCollectionStatisticsResponse
-	partStatResp *datapb.GetPartitionStatisticsResponse
-	recoverResp  *datapb.GetRecoveryInfoResponse
-	flushSegResp *datapb.GetFlushedSegmentsResponse
-	metricResp   *milvuspb.GetMetricsResponse
+	states          *internalpb.ComponentStates
+	status          *commonpb.Status
+	err             error
+	initErr         error
+	startErr        error
+	stopErr         error
+	regErr          error
+	strResp         *milvuspb.StringResponse
+	infoResp        *datapb.GetSegmentInfoResponse
+	flushResp       *datapb.FlushResponse
+	assignResp      *datapb.AssignSegmentIDResponse
+	segStateResp    *datapb.GetSegmentStatesResponse
+	binResp         *datapb.GetInsertBinlogPathsResponse
+	colStatResp     *datapb.GetCollectionStatisticsResponse
+	partStatResp    *datapb.GetPartitionStatisticsResponse
+	recoverResp     *datapb.GetRecoveryInfoResponse
+	flushSegResp    *datapb.GetFlushedSegmentsResponse
+	metricResp      *milvuspb.GetMetricsResponse
+	bloomFilterResp *datapb.GetBloomFilterFileResponse
 }
 
 func (m *MockDataCoord) Init() error {
@@ -119,6 +120,10 @@ func (m *MockDataCoord) GetFlushedSegments(ctx context.Context, req *datapb.GetF
 
 func (m *MockDataCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return m.metricResp, m.err
+}
+
+func (m *MockDataCoord) GetBloomFilterFiles(ctx context.Context, in *datapb.GetBloomFilterFileRequest) (*datapb.GetBloomFilterFileResponse, error) {
+	return m.bloomFilterResp, m.err
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -269,6 +274,14 @@ func Test_NewServer(t *testing.T) {
 		assert.NotNil(t, resp)
 	})
 
+	t.Run("GetBloomFilterFiles", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			bloomFilterResp: &datapb.GetBloomFilterFileResponse{},
+		}
+		resp, err := server.GetBloomFilterFiles(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, resp)
+	})
 	err = server.Stop()
 	assert.Nil(t, err)
 }
