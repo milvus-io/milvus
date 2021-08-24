@@ -13,52 +13,66 @@ package etcdkv
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
+	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
 	clientv3 "go.etcd.io/etcd/client/v3"
-
+	"go.etcd.io/etcd/server/v3/embed"
+	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 )
 
-const (
-	RequestTimeout = 10 * time.Second
-)
-
-type EtcdKV struct {
-	client   *clientv3.Client
-	rootPath string
+type EmbedEtcdKV struct {
+	client    *clientv3.Client
+	rootPath  string
+	etcd      *embed.Etcd
+	closeOnce sync.Once
 }
 
-// NewEtcdKV creates a new etcd kv.
-func NewEtcdKV(etcdEndpoints []string, rootPath string) (*EtcdKV, error) {
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   etcdEndpoints,
-		DialTimeout: 5 * time.Second,
-	})
+// NewEmbededEtcdKV creates a new etcd kv.
+func NewEmbededEtcdKV(cfg *embed.Config, rootPath string) (*EmbedEtcdKV, error) {
+	e, err := embed.StartEtcd(cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	kv := &EtcdKV{
+	client := v3client.New(e.Server)
+
+	kv := &EmbedEtcdKV{
 		client:   client,
 		rootPath: rootPath,
+		etcd:     e,
 	}
 
+	//wait until embed etcd is ready
+	select {
+	case <-e.Server.ReadyNotify():
+		log.Info("Embedded etcd is ready!")
+	case <-time.After(60 * time.Second):
+		e.Server.Stop() // trigger a shutdown
+		return nil, errors.New("Embedded etcd took too long to start")
+	}
 	return kv, nil
 }
 
-func (kv *EtcdKV) Close() {
-	kv.client.Close()
+func (kv *EmbedEtcdKV) Close() {
+	kv.closeOnce.Do(func() {
+		kv.client.Close()
+		kv.etcd.Close()
+	})
+
 }
 
-func (kv *EtcdKV) GetPath(key string) string {
+func (kv *EmbedEtcdKV) GetPath(key string) string {
 	return path.Join(kv.rootPath, key)
 }
 
-func (kv *EtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
+func (kv *EmbedEtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	key = path.Join(kv.rootPath, key)
 	log.Debug("LoadWithPrefix ", zap.String("prefix", key))
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
@@ -77,7 +91,7 @@ func (kv *EtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	return keys, values, nil
 }
 
-func (kv *EtcdKV) LoadWithPrefix2(key string) ([]string, []string, []int64, error) {
+func (kv *EmbedEtcdKV) LoadWithPrefix2(key string) ([]string, []string, []int64, error) {
 	key = path.Join(kv.rootPath, key)
 	log.Debug("LoadWithPrefix ", zap.String("prefix", key))
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
@@ -98,7 +112,7 @@ func (kv *EtcdKV) LoadWithPrefix2(key string) ([]string, []string, []int64, erro
 	return keys, values, versions, nil
 }
 
-func (kv *EtcdKV) Load(key string) (string, error) {
+func (kv *EmbedEtcdKV) Load(key string) (string, error) {
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
@@ -113,7 +127,7 @@ func (kv *EtcdKV) Load(key string) (string, error) {
 	return string(resp.Kvs[0].Value), nil
 }
 
-func (kv *EtcdKV) MultiLoad(keys []string) ([]string, error) {
+func (kv *EmbedEtcdKV) MultiLoad(keys []string) ([]string, error) {
 	ops := make([]clientv3.Op, 0, len(keys))
 	for _, keyLoad := range keys {
 		ops = append(ops, clientv3.OpGet(path.Join(kv.rootPath, keyLoad)))
@@ -148,7 +162,7 @@ func (kv *EtcdKV) MultiLoad(keys []string) ([]string, error) {
 	return result, nil
 }
 
-func (kv *EtcdKV) LoadWithRevision(key string) ([]string, []string, int64, error) {
+func (kv *EmbedEtcdKV) LoadWithRevision(key string) ([]string, []string, int64, error) {
 	key = path.Join(kv.rootPath, key)
 	log.Debug("LoadWithPrefix ", zap.String("prefix", key))
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
@@ -167,7 +181,7 @@ func (kv *EtcdKV) LoadWithRevision(key string) ([]string, []string, int64, error
 	return keys, values, resp.Header.Revision, nil
 }
 
-func (kv *EtcdKV) Save(key, value string) error {
+func (kv *EmbedEtcdKV) Save(key, value string) error {
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
@@ -176,7 +190,7 @@ func (kv *EtcdKV) Save(key, value string) error {
 }
 
 // SaveWithLease is a function to put value in etcd with etcd lease options.
-func (kv *EtcdKV) SaveWithLease(key, value string, id clientv3.LeaseID) error {
+func (kv *EmbedEtcdKV) SaveWithLease(key, value string, id clientv3.LeaseID) error {
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
@@ -184,7 +198,7 @@ func (kv *EtcdKV) SaveWithLease(key, value string, id clientv3.LeaseID) error {
 	return err
 }
 
-func (kv *EtcdKV) MultiSave(kvs map[string]string) error {
+func (kv *EmbedEtcdKV) MultiSave(kvs map[string]string) error {
 	ops := make([]clientv3.Op, 0, len(kvs))
 	for key, value := range kvs {
 		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
@@ -197,7 +211,7 @@ func (kv *EtcdKV) MultiSave(kvs map[string]string) error {
 	return err
 }
 
-func (kv *EtcdKV) RemoveWithPrefix(prefix string) error {
+func (kv *EmbedEtcdKV) RemoveWithPrefix(prefix string) error {
 	key := path.Join(kv.rootPath, prefix)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
@@ -206,7 +220,7 @@ func (kv *EtcdKV) RemoveWithPrefix(prefix string) error {
 	return err
 }
 
-func (kv *EtcdKV) Remove(key string) error {
+func (kv *EmbedEtcdKV) Remove(key string) error {
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
@@ -215,7 +229,7 @@ func (kv *EtcdKV) Remove(key string) error {
 	return err
 }
 
-func (kv *EtcdKV) MultiRemove(keys []string) error {
+func (kv *EmbedEtcdKV) MultiRemove(keys []string) error {
 	ops := make([]clientv3.Op, 0, len(keys))
 	for _, key := range keys {
 		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, key)))
@@ -228,7 +242,7 @@ func (kv *EtcdKV) MultiRemove(keys []string) error {
 	return err
 }
 
-func (kv *EtcdKV) MultiSaveAndRemove(saves map[string]string, removals []string) error {
+func (kv *EmbedEtcdKV) MultiSaveAndRemove(saves map[string]string, removals []string) error {
 	ops := make([]clientv3.Op, 0, len(saves)+len(removals))
 	for key, value := range saves {
 		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
@@ -246,25 +260,25 @@ func (kv *EtcdKV) MultiSaveAndRemove(saves map[string]string, removals []string)
 	return err
 }
 
-func (kv *EtcdKV) Watch(key string) clientv3.WatchChan {
+func (kv *EmbedEtcdKV) Watch(key string) clientv3.WatchChan {
 	key = path.Join(kv.rootPath, key)
 	rch := kv.client.Watch(context.Background(), key, clientv3.WithCreatedNotify())
 	return rch
 }
 
-func (kv *EtcdKV) WatchWithPrefix(key string) clientv3.WatchChan {
+func (kv *EmbedEtcdKV) WatchWithPrefix(key string) clientv3.WatchChan {
 	key = path.Join(kv.rootPath, key)
 	rch := kv.client.Watch(context.Background(), key, clientv3.WithPrefix(), clientv3.WithCreatedNotify())
 	return rch
 }
 
-func (kv *EtcdKV) WatchWithRevision(key string, revision int64) clientv3.WatchChan {
+func (kv *EmbedEtcdKV) WatchWithRevision(key string, revision int64) clientv3.WatchChan {
 	key = path.Join(kv.rootPath, key)
 	rch := kv.client.Watch(context.Background(), key, clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision))
 	return rch
 }
 
-func (kv *EtcdKV) MultiRemoveWithPrefix(keys []string) error {
+func (kv *EmbedEtcdKV) MultiRemoveWithPrefix(keys []string) error {
 	ops := make([]clientv3.Op, 0, len(keys))
 	for _, k := range keys {
 		op := clientv3.OpDelete(path.Join(kv.rootPath, k), clientv3.WithPrefix())
@@ -278,7 +292,7 @@ func (kv *EtcdKV) MultiRemoveWithPrefix(keys []string) error {
 	return err
 }
 
-func (kv *EtcdKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
+func (kv *EmbedEtcdKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
 	ops := make([]clientv3.Op, 0, len(saves))
 	for key, value := range saves {
 		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
@@ -297,14 +311,14 @@ func (kv *EtcdKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals
 }
 
 // Grant creates a new lease implemented in etcd grant interface.
-func (kv *EtcdKV) Grant(ttl int64) (id clientv3.LeaseID, err error) {
+func (kv *EmbedEtcdKV) Grant(ttl int64) (id clientv3.LeaseID, err error) {
 	resp, err := kv.client.Grant(context.Background(), ttl)
 	return resp.ID, err
 }
 
 // KeepAlive keeps the lease alive forever with leaseID.
 // Implemented in etcd interface.
-func (kv *EtcdKV) KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+func (kv *EmbedEtcdKV) KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
 	ch, err := kv.client.KeepAlive(context.Background(), id)
 	if err != nil {
 		return nil, err
@@ -314,7 +328,7 @@ func (kv *EtcdKV) KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliv
 
 // CompareValueAndSwap compares the existing value with compare, and if they are
 // equal, the target is stored in etcd.
-func (kv *EtcdKV) CompareValueAndSwap(key, value, target string, opts ...clientv3.OpOption) error {
+func (kv *EmbedEtcdKV) CompareValueAndSwap(key, value, target string, opts ...clientv3.OpOption) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 	resp, err := kv.client.Txn(ctx).If(
@@ -335,7 +349,7 @@ func (kv *EtcdKV) CompareValueAndSwap(key, value, target string, opts ...clientv
 
 // CompareVersionAndSwap compares the existing key-value's version with version, and if
 // they are equal, the target is stored in etcd.
-func (kv *EtcdKV) CompareVersionAndSwap(key string, version int64, target string, opts ...clientv3.OpOption) error {
+func (kv *EmbedEtcdKV) CompareVersionAndSwap(key string, version int64, target string, opts ...clientv3.OpOption) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 	resp, err := kv.client.Txn(ctx).If(
@@ -352,4 +366,8 @@ func (kv *EtcdKV) CompareVersionAndSwap(key string, version int64, target string
 	}
 
 	return nil
+}
+
+func (kv *EmbedEtcdKV) GetConfig() embed.Config {
+	return kv.etcd.Config()
 }

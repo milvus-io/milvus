@@ -8,57 +8,45 @@ require (
 	github.com/apache/pulsar-client-go v0.5.0
 	github.com/bits-and-blooms/bitset v1.2.0 // indirect
 	github.com/bits-and-blooms/bloom/v3 v3.0.1 // indirect
-	github.com/coreos/etcd v3.3.13+incompatible
 	github.com/facebookgo/ensure v0.0.0-20200202191622-63f1cf65ac4c // indirect
 	github.com/facebookgo/stack v0.0.0-20160209184415-751773369052 // indirect
 	github.com/facebookgo/subset v0.0.0-20200203212716-c811ad88dec4 // indirect
 	github.com/frankban/quicktest v1.10.2 // indirect
 	github.com/go-basic/ipv4 v1.0.0
 	github.com/gogo/protobuf v1.3.2
-	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e // indirect
-	github.com/golang/protobuf v1.4.3
-	github.com/google/btree v1.0.0
-	github.com/grpc-ecosystem/go-grpc-middleware v1.0.0
+	github.com/golang/mock v1.5.0
+	github.com/golang/protobuf v1.5.2
+	github.com/google/btree v1.0.1
+	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/jarcoal/httpmock v1.0.8
 	github.com/klauspost/compress v1.10.11 // indirect
 	github.com/lingdor/stackerror v0.0.0-20191119040541-976d8885ed76
 	github.com/minio/minio-go/v7 v7.0.10
-	github.com/mitchellh/mapstructure v1.1.2
+	github.com/mitchellh/mapstructure v1.4.1
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/pierrec/lz4 v2.5.2+incompatible // indirect
 	github.com/pkg/errors v0.9.1
-	github.com/prometheus/client_golang v1.7.1
-	github.com/sirupsen/logrus v1.6.0 // indirect
+	github.com/prometheus/client_golang v1.11.0
 	github.com/spaolacci/murmur3 v1.1.0
-	github.com/spf13/cast v1.3.0
-	github.com/spf13/viper v1.7.1
-	github.com/stretchr/testify v1.6.1
+	github.com/spf13/cast v1.3.1
+	github.com/spf13/viper v1.8.0
+	github.com/stretchr/testify v1.7.0
 	github.com/tecbot/gorocksdb v0.0.0-20191217155057-f0fad39f321c
 	github.com/uber/jaeger-client-go v2.25.0+incompatible
 	github.com/uber/jaeger-lib v2.4.0+incompatible // indirect
 	github.com/yahoo/athenz v1.9.16 // indirect
-	go.etcd.io/etcd v3.3.25+incompatible
-	go.uber.org/zap v1.15.0
-	golang.org/x/crypto v0.0.0-20200820211705-5c72a883971a // indirect
-	golang.org/x/exp v0.0.0-20191030013958-a1ab85dbe136
-	golang.org/x/lint v0.0.0-20200302205851-738671d3881b // indirect
-	golang.org/x/net v0.0.0-20201202161906-c7110b5ffcbb
-	golang.org/x/time v0.0.0-20191024005414-555d28b269f0 // indirect
-	google.golang.org/grpc v1.31.0
-	google.golang.org/protobuf v1.25.0 // indirect
+	go.etcd.io/etcd/api/v3 v3.5.0
+	go.etcd.io/etcd/client/v3 v3.5.0
+	go.etcd.io/etcd/server/v3 v3.5.0
+	go.uber.org/zap v1.17.0
+	golang.org/x/exp v0.0.0-20200224162631-6cc2880d07d6
+	golang.org/x/net v0.0.0-20210405180319-a5a99cb37ef4
+	google.golang.org/grpc v1.38.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
-	honnef.co/go/tools v0.0.1-2020.1.4 // indirect
-	sigs.k8s.io/yaml v1.2.0 // indirect
 )
 
 replace (
 	github.com/apache/pulsar-client-go => github.com/apache/pulsar-client-go v0.5.0
-	github.com/coreos/etcd => github.com/ozonru/etcd v3.3.20-grpc1.27-origmodule+incompatible
-	go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
-
-	//google.golang.org/api => google.golang.org/api v0.14.0
-
-	//replace go.etcd.io/etcd => go.etcd.io/etcd v0.5.0-alpha.5.0.20200329194405-dd816f0735f8
-	google.golang.org/grpc => google.golang.org/grpc v1.27.0
+	google.golang.org/grpc => google.golang.org/grpc v1.38.0
 )

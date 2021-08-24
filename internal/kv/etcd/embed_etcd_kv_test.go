@@ -13,41 +13,35 @@ package etcdkv_test
 
 import (
 	"os"
-	"strings"
 	"testing"
 
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	embed_etcd_kv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-var Params paramtable.BaseTable
-
-func TestMain(m *testing.M) {
-	Params.Init()
-	code := m.Run()
-	os.Exit(code)
-}
-
-func TestEtcdKV_Load(te *testing.T) {
-	endpoints, err := Params.Load("_EtcdEndpoints")
-	if err != nil {
-		panic(err)
-	}
-
-	etcdEndPoints := strings.Split(endpoints, ",")
-
+func TestEmbedEtcd(te *testing.T) {
+	os.Setenv("DEPLOY_MODE", "STANDALONE")
+	param := new(paramtable.BaseParamTable)
+	param.Init()
+	param.BaseTable.Save("etcd.use.embed", "true")
+	param.BaseTable.Save("etcd.data.dir", "etcd.test.data.dir")
+	param.LoadCfgToMemory()
+	//clean up data
+	defer func() {
+		os.RemoveAll("etcd.test.data.dir")
+	}()
 	te.Run("EtcdKV SaveAndLoad", func(t *testing.T) {
 		rootPath := "/etcd/test/root/saveandload"
-		etcdKV, err := etcdkv.NewEtcdKV(etcdEndPoints, rootPath)
-		require.NoError(t, err)
-		err = etcdKV.RemoveWithPrefix("")
+		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, param)
+		require.NoError(te, err)
+		assert.NotNil(te, metaKv)
 		require.NoError(t, err)
 
-		defer etcdKV.Close()
-		defer etcdKV.RemoveWithPrefix("")
+		defer metaKv.Close()
+		defer metaKv.RemoveWithPrefix("")
 
 		saveAndLoadTests := []struct {
 			key   string
@@ -61,11 +55,11 @@ func TestEtcdKV_Load(te *testing.T) {
 
 		for i, test := range saveAndLoadTests {
 			if i < 4 {
-				err = etcdKV.Save(test.key, test.value)
+				err = metaKv.Save(test.key, test.value)
 				assert.NoError(t, err)
 			}
 
-			val, err := etcdKV.Load(test.key)
+			val, err := metaKv.Load(test.key)
 			assert.NoError(t, err)
 			assert.Equal(t, test.value, val)
 		}
@@ -79,7 +73,7 @@ func TestEtcdKV_Load(te *testing.T) {
 		}
 
 		for _, test := range invalidLoadTests {
-			val, err := etcdKV.Load(test.invalidKey)
+			val, err := metaKv.Load(test.invalidKey)
 			assert.Error(t, err)
 			assert.Zero(t, val)
 		}
@@ -92,33 +86,33 @@ func TestEtcdKV_Load(te *testing.T) {
 			expectedError  error
 		}{
 			{"test", []string{
-				etcdKV.GetPath("test1"),
-				etcdKV.GetPath("test2"),
-				etcdKV.GetPath("test1/a"),
-				etcdKV.GetPath("test1/b")}, []string{"value1", "value2", "value_a", "value_b"}, nil},
+				metaKv.GetPath("test1"),
+				metaKv.GetPath("test2"),
+				metaKv.GetPath("test1/a"),
+				metaKv.GetPath("test1/b")}, []string{"value1", "value2", "value_a", "value_b"}, nil},
 			{"test1", []string{
-				etcdKV.GetPath("test1"),
-				etcdKV.GetPath("test1/a"),
-				etcdKV.GetPath("test1/b")}, []string{"value1", "value_a", "value_b"}, nil},
-			{"test2", []string{etcdKV.GetPath("test2")}, []string{"value2"}, nil},
+				metaKv.GetPath("test1"),
+				metaKv.GetPath("test1/a"),
+				metaKv.GetPath("test1/b")}, []string{"value1", "value_a", "value_b"}, nil},
+			{"test2", []string{metaKv.GetPath("test2")}, []string{"value2"}, nil},
 			{"", []string{
-				etcdKV.GetPath("test1"),
-				etcdKV.GetPath("test2"),
-				etcdKV.GetPath("test1/a"),
-				etcdKV.GetPath("test1/b")}, []string{"value1", "value2", "value_a", "value_b"}, nil},
-			{"test1/a", []string{etcdKV.GetPath("test1/a")}, []string{"value_a"}, nil},
+				metaKv.GetPath("test1"),
+				metaKv.GetPath("test2"),
+				metaKv.GetPath("test1/a"),
+				metaKv.GetPath("test1/b")}, []string{"value1", "value2", "value_a", "value_b"}, nil},
+			{"test1/a", []string{metaKv.GetPath("test1/a")}, []string{"value_a"}, nil},
 			{"a", []string{}, []string{}, nil},
 			{"root", []string{}, []string{}, nil},
 			{"/etcd/test/root", []string{}, []string{}, nil},
 		}
 
 		for _, test := range loadPrefixTests {
-			actualKeys, actualValues, err := etcdKV.LoadWithPrefix(test.prefix)
+			actualKeys, actualValues, err := metaKv.LoadWithPrefix(test.prefix)
 			assert.ElementsMatch(t, test.expectedKeys, actualKeys)
 			assert.ElementsMatch(t, test.expectedValues, actualValues)
 			assert.Equal(t, test.expectedError, err)
 
-			actualKeys, actualValues, versions, err := etcdKV.LoadWithPrefix2(test.prefix)
+			actualKeys, actualValues, versions, err := metaKv.LoadWithPrefix2(test.prefix)
 			assert.ElementsMatch(t, test.expectedKeys, actualKeys)
 			assert.ElementsMatch(t, test.expectedValues, actualValues)
 			assert.NotZero(t, versions)
@@ -136,26 +130,26 @@ func TestEtcdKV_Load(te *testing.T) {
 		}
 
 		for _, test := range removeTests {
-			err = etcdKV.Remove(test.validKey)
+			err = metaKv.Remove(test.validKey)
 			assert.NoError(t, err)
 
-			_, err = etcdKV.Load(test.validKey)
+			_, err = metaKv.Load(test.validKey)
 			assert.Error(t, err)
 
-			err = etcdKV.Remove(test.validKey)
+			err = metaKv.Remove(test.validKey)
 			assert.NoError(t, err)
-			err = etcdKV.Remove(test.invalidKey)
+			err = metaKv.Remove(test.invalidKey)
 			assert.NoError(t, err)
 		}
 	})
 
 	te.Run("EtcdKV LoadWithRevision", func(t *testing.T) {
 		rootPath := "/etcd/test/root/LoadWithRevision"
-		etcdKV, err := etcdkv.NewEtcdKV(etcdEndPoints, rootPath)
+		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, param)
 		assert.Nil(t, err)
 
-		defer etcdKV.Close()
-		defer etcdKV.RemoveWithPrefix("")
+		defer metaKv.Close()
+		defer metaKv.RemoveWithPrefix("")
 
 		prepareKV := []struct {
 			inKey   string
@@ -169,7 +163,7 @@ func TestEtcdKV_Load(te *testing.T) {
 		}
 
 		for _, test := range prepareKV {
-			err = etcdKV.Save(test.inKey, test.inValue)
+			err = metaKv.Save(test.inKey, test.inValue)
 			require.NoError(t, err)
 		}
 
@@ -185,7 +179,7 @@ func TestEtcdKV_Load(te *testing.T) {
 		}
 
 		for _, test := range loadWithRevisionTests {
-			keys, values, revision, err := etcdKV.LoadWithRevision(test.inKey)
+			keys, values, revision, err := metaKv.LoadWithRevision(test.inKey)
 			assert.NoError(t, err)
 			assert.Equal(t, test.expectedKeyNo, len(keys))
 			assert.ElementsMatch(t, test.expectedValues, values)
@@ -196,11 +190,11 @@ func TestEtcdKV_Load(te *testing.T) {
 
 	te.Run("EtcdKV MultiSaveAndMultiLoad", func(t *testing.T) {
 		rootPath := "/etcd/test/root/multi_save_and_multi_load"
-		etcdKV, err := etcdkv.NewEtcdKV(etcdEndPoints, rootPath)
+		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, param)
 		assert.Nil(t, err)
 
-		defer etcdKV.Close()
-		defer etcdKV.RemoveWithPrefix("")
+		defer metaKv.Close()
+		defer metaKv.RemoveWithPrefix("")
 
 		multiSaveTests := map[string]string{
 			"key_1":      "value_1",
@@ -211,10 +205,10 @@ func TestEtcdKV_Load(te *testing.T) {
 			"_":          "other",
 		}
 
-		err = etcdKV.MultiSave(multiSaveTests)
+		err = metaKv.MultiSave(multiSaveTests)
 		assert.NoError(t, err)
 		for k, v := range multiSaveTests {
-			actualV, err := etcdKV.Load(k)
+			actualV, err := metaKv.Load(k)
 			assert.NoError(t, err)
 			assert.Equal(t, v, actualV)
 		}
@@ -230,7 +224,7 @@ func TestEtcdKV_Load(te *testing.T) {
 		}
 
 		for _, test := range multiLoadTests {
-			vs, err := etcdKV.MultiLoad(test.inputKeys)
+			vs, err := metaKv.MultiLoad(test.inputKeys)
 			assert.NoError(t, err)
 			assert.Equal(t, test.expectedValues, vs)
 		}
@@ -246,7 +240,7 @@ func TestEtcdKV_Load(te *testing.T) {
 		}
 
 		for _, test := range invalidMultiLoad {
-			vs, err := etcdKV.MultiLoad(test.invalidKeys)
+			vs, err := metaKv.MultiLoad(test.invalidKeys)
 			assert.Error(t, err)
 			assert.Equal(t, test.expectedValues, vs)
 		}
@@ -257,10 +251,10 @@ func TestEtcdKV_Load(te *testing.T) {
 		}
 
 		for _, k := range removeWithPrefixTests {
-			err = etcdKV.RemoveWithPrefix(k)
+			err = metaKv.RemoveWithPrefix(k)
 			assert.NoError(t, err)
 
-			ks, vs, err := etcdKV.LoadWithPrefix(k)
+			ks, vs, err := metaKv.LoadWithPrefix(k)
 			assert.Empty(t, ks)
 			assert.Empty(t, vs)
 			assert.NoError(t, err)
@@ -273,10 +267,10 @@ func TestEtcdKV_Load(te *testing.T) {
 			"_",
 		}
 
-		err = etcdKV.MultiRemove(multiRemoveTests)
+		err = metaKv.MultiRemove(multiRemoveTests)
 		assert.NoError(t, err)
 
-		ks, vs, err := etcdKV.LoadWithPrefix("")
+		ks, vs, err := metaKv.LoadWithPrefix("")
 		assert.NoError(t, err)
 		assert.Empty(t, ks)
 		assert.Empty(t, vs)
@@ -293,11 +287,11 @@ func TestEtcdKV_Load(te *testing.T) {
 			{make(map[string]string), []string{"multikey_2"}},
 		}
 		for _, test := range multiSaveAndRemoveTests {
-			err = etcdKV.MultiSaveAndRemove(test.multiSaves, test.multiRemoves)
+			err = metaKv.MultiSaveAndRemove(test.multiSaves, test.multiRemoves)
 			assert.NoError(t, err)
 		}
 
-		ks, vs, err = etcdKV.LoadWithPrefix("")
+		ks, vs, err = metaKv.LoadWithPrefix("")
 		assert.NoError(t, err)
 		assert.Empty(t, ks)
 		assert.Empty(t, vs)
@@ -305,11 +299,11 @@ func TestEtcdKV_Load(te *testing.T) {
 
 	te.Run("EtcdKV MultiRemoveWithPrefix", func(t *testing.T) {
 		rootPath := "/etcd/test/root/multi_remove_with_prefix"
-		etcdKV, err := etcdkv.NewEtcdKV(etcdEndPoints, rootPath)
+		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, param)
 		require.NoError(t, err)
 
-		defer etcdKV.Close()
-		defer etcdKV.RemoveWithPrefix("")
+		defer metaKv.Close()
+		defer metaKv.RemoveWithPrefix("")
 
 		prepareTests := map[string]string{
 			"x/abc/1": "1",
@@ -320,7 +314,7 @@ func TestEtcdKV_Load(te *testing.T) {
 			"x/den/2": "200",
 		}
 
-		err = etcdKV.MultiSave(prepareTests)
+		err = metaKv.MultiSave(prepareTests)
 		require.NoError(t, err)
 
 		multiRemoveWithPrefixTests := []struct {
@@ -346,21 +340,21 @@ func TestEtcdKV_Load(te *testing.T) {
 
 		for _, test := range multiRemoveWithPrefixTests {
 			if len(test.prefix) > 0 {
-				err = etcdKV.MultiRemoveWithPrefix(test.prefix)
+				err = metaKv.MultiRemoveWithPrefix(test.prefix)
 				assert.NoError(t, err)
 			}
 
-			v, _ := etcdKV.Load(test.testKey)
+			v, _ := metaKv.Load(test.testKey)
 			assert.Equal(t, test.expectedValue, v)
 		}
 
-		k, v, err := etcdKV.LoadWithPrefix("/")
+		k, v, err := metaKv.LoadWithPrefix("/")
 		assert.NoError(t, err)
 		assert.Zero(t, len(k))
 		assert.Zero(t, len(v))
 
 		// MultiSaveAndRemoveWithPrefix
-		err = etcdKV.MultiSave(prepareTests)
+		err = metaKv.MultiSave(prepareTests)
 		require.NoError(t, err)
 		multiSaveAndRemoveWithPrefixTests := []struct {
 			multiSave map[string]string
@@ -378,14 +372,14 @@ func TestEtcdKV_Load(te *testing.T) {
 		}
 
 		for _, test := range multiSaveAndRemoveWithPrefixTests {
-			k, _, err = etcdKV.LoadWithPrefix(test.loadPrefix)
+			k, _, err = metaKv.LoadWithPrefix(test.loadPrefix)
 			assert.NoError(t, err)
 			assert.Equal(t, test.lengthBeforeRemove, len(k))
 
-			err = etcdKV.MultiSaveAndRemoveWithPrefix(test.multiSave, test.prefix)
+			err = metaKv.MultiSaveAndRemoveWithPrefix(test.multiSave, test.prefix)
 			assert.NoError(t, err)
 
-			k, _, err = etcdKV.LoadWithPrefix(test.loadPrefix)
+			k, _, err = metaKv.LoadWithPrefix(test.loadPrefix)
 			assert.NoError(t, err)
 			assert.Equal(t, test.lengthAfterRemove, len(k))
 		}
@@ -393,28 +387,28 @@ func TestEtcdKV_Load(te *testing.T) {
 
 	te.Run("EtcdKV Watch", func(t *testing.T) {
 		rootPath := "/etcd/test/root/watch"
-		etcdKV, err := etcdkv.NewEtcdKV(etcdEndPoints, rootPath)
+		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, param)
 		assert.Nil(t, err)
 
-		defer etcdKV.Close()
-		defer etcdKV.RemoveWithPrefix("")
+		defer metaKv.Close()
+		defer metaKv.RemoveWithPrefix("")
 
-		ch := etcdKV.Watch("x")
+		ch := metaKv.Watch("x")
 		resp := <-ch
 		assert.True(t, resp.Created)
 
-		ch = etcdKV.WatchWithPrefix("x")
+		ch = metaKv.WatchWithPrefix("x")
 		resp = <-ch
 		assert.True(t, resp.Created)
 	})
 
 	te.Run("Etcd Revision", func(t *testing.T) {
 		rootPath := "/etcd/test/root/watch"
-		etcdKV, err := etcdkv.NewEtcdKV(etcdEndPoints, rootPath)
+		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, param)
 		assert.Nil(t, err)
 
-		defer etcdKV.Close()
-		defer etcdKV.RemoveWithPrefix("")
+		defer metaKv.Close()
+		defer metaKv.RemoveWithPrefix("")
 
 		revisionTests := []struct {
 			inKey       string
@@ -427,13 +421,13 @@ func TestEtcdKV_Load(te *testing.T) {
 		}
 
 		for _, test := range revisionTests {
-			err = etcdKV.Save(test.inKey, test.fistValue)
+			err = metaKv.Save(test.inKey, test.fistValue)
 			require.NoError(t, err)
 
-			_, _, revision, _ := etcdKV.LoadWithRevision(test.inKey)
-			ch := etcdKV.WatchWithRevision(test.inKey, revision+1)
+			_, _, revision, _ := metaKv.LoadWithRevision(test.inKey)
+			ch := metaKv.WatchWithRevision(test.inKey, revision+1)
 
-			err = etcdKV.Save(test.inKey, test.secondValue)
+			err = metaKv.Save(test.inKey, test.secondValue)
 			require.NoError(t, err)
 
 			resp := <-ch
@@ -442,35 +436,35 @@ func TestEtcdKV_Load(te *testing.T) {
 			assert.Equal(t, revision+1, resp.Header.Revision)
 		}
 
-		err = etcdKV.CompareVersionAndSwap("a/b/c", 0, "1")
+		err = metaKv.CompareVersionAndSwap("a/b/c", 0, "1")
 		assert.NoError(t, err)
 
-		value, err := etcdKV.Load("a/b/c")
+		value, err := metaKv.Load("a/b/c")
 		assert.NoError(t, err)
 		assert.Equal(t, value, "1")
 
-		err = etcdKV.CompareVersionAndSwap("a/b/c", 0, "1")
+		err = metaKv.CompareVersionAndSwap("a/b/c", 0, "1")
 		assert.Error(t, err)
 
-		err = etcdKV.CompareValueAndSwap("a/b/c", "1", "2")
+		err = metaKv.CompareValueAndSwap("a/b/c", "1", "2")
 		assert.NoError(t, err)
 
-		err = etcdKV.CompareValueAndSwap("a/b/c", "1", "2")
+		err = metaKv.CompareValueAndSwap("a/b/c", "1", "2")
 		assert.Error(t, err)
 	})
 
 	te.Run("Etcd Lease", func(t *testing.T) {
 		rootPath := "/etcd/test/root/lease"
-		etcdKV, err := etcdkv.NewEtcdKV(etcdEndPoints, rootPath)
+		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, param)
 		assert.Nil(t, err)
 
-		defer etcdKV.Close()
-		defer etcdKV.RemoveWithPrefix("")
+		defer metaKv.Close()
+		defer metaKv.RemoveWithPrefix("")
 
-		leaseID, err := etcdKV.Grant(10)
+		leaseID, err := metaKv.Grant(10)
 		assert.NoError(t, err)
 
-		etcdKV.KeepAlive(leaseID)
+		metaKv.KeepAlive(leaseID)
 
 		tests := map[string]string{
 			"a/b":   "v1",
@@ -479,10 +473,10 @@ func TestEtcdKV_Load(te *testing.T) {
 		}
 
 		for k, v := range tests {
-			err = etcdKV.SaveWithLease(k, v, leaseID)
+			err = metaKv.SaveWithLease(k, v, leaseID)
 			assert.NoError(t, err)
 
-			err = etcdKV.SaveWithLease(k, v, clientv3.LeaseID(999))
+			err = metaKv.SaveWithLease(k, v, clientv3.LeaseID(999))
 			assert.Error(t, err)
 		}
 

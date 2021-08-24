@@ -18,7 +18,7 @@ import (
 
 	"go.uber.org/zap/zapcore"
 
-	etcd "go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc/grpclog"
 
 	"go.uber.org/zap"
@@ -130,7 +130,7 @@ func SetupLogger(cfg *log.Config) {
 
 		wrapper := &zapWrapper{lg}
 		grpclog.SetLoggerV2(wrapper)
-		etcd.SetLogger(wrapper)
+		clientv3.SetLogger(wrapper)
 		_globalZapWrapper.Store(wrapper)
 	})
 }
