@@ -359,7 +359,8 @@ func (c *Core) checkFlushedSegmentsLoop() {
 								if info.BuildID != 0 {
 									info.EnableIndex = true
 								}
-								if err := c.MetaTable.AddIndex(&info, 0); err != nil {
+								ts, _ := c.TSOAllocator(1)
+								if err := c.MetaTable.AddIndex(&info, ts); err != nil {
 									log.Debug("Add index into meta table failed",
 										zap.Int64("collection_id", collMeta.ID),
 										zap.Int64("index_id", info.IndexID),
