@@ -22,7 +22,6 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
 type streaming struct {
@@ -190,24 +189,24 @@ func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs
 			}
 
 			// TSafe less than searchTs means this vChannel is not available
-			ts := s.tSafeReplica.getTSafe(seg.vChannelID)
-			gracefulTimeInMilliSecond := Params.GracefulTime
-			if gracefulTimeInMilliSecond > 0 {
-				gracefulTime := tsoutil.ComposeTS(gracefulTimeInMilliSecond, 0)
-				ts += gracefulTime
-			}
-			tsp, _ := tsoutil.ParseTS(ts)
-			stp, _ := tsoutil.ParseTS(searchTs)
-			log.Debug("timestamp check in streaming search",
-				zap.Any("collectionID", collID),
-				zap.Any("serviceTime_l", ts),
-				zap.Any("searchTime_l", searchTs),
-				zap.Any("serviceTime_p", tsp),
-				zap.Any("searchTime_p", stp),
-			)
-			if ts < searchTs {
-				continue
-			}
+			//ts := s.tSafeReplica.getTSafe(seg.vChannelID)
+			//gracefulTimeInMilliSecond := Params.GracefulTime
+			//if gracefulTimeInMilliSecond > 0 {
+			//	gracefulTime := tsoutil.ComposeTS(gracefulTimeInMilliSecond, 0)
+			//	ts += gracefulTime
+			//}
+			//tsp, _ := tsoutil.ParseTS(ts)
+			//stp, _ := tsoutil.ParseTS(searchTs)
+			//log.Debug("timestamp check in streaming search",
+			//	zap.Any("collectionID", collID),
+			//	zap.Any("serviceTime_l", ts),
+			//	zap.Any("searchTime_l", searchTs),
+			//	zap.Any("serviceTime_p", tsp),
+			//	zap.Any("searchTime_p", stp),
+			//)
+			//if ts < searchTs {
+			//	continue
+			//}
 
 			searchResult, err := seg.search(plan, searchReqs, []Timestamp{searchTs})
 			if err != nil {
