@@ -22,6 +22,20 @@ class TestUtilityParams(TestcaseBase):
     def get_invalid_metric_type(self, request):
         if request.param == [] or request.param == "":
             pytest.skip("metric empty is valid for distance calculation")
+        if isinstance(request.param, str):
+            pytest.skip("string is valid type for metric")
+        yield request.param
+
+    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
+    def get_invalid_metric_value(self, request):
+        if request.param == [] or request.param == "":
+            pytest.skip("metric empty is valid for distance calculation")
+        if not isinstance(request.param, str):
+            pytest.skip("Skip invalid type for metric")
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["JACCARD", "Superstructure", "Substructure"])
+    def get_not_support_metric(self, request):
         yield request.param
 
     """
@@ -203,6 +217,7 @@ class TestUtilityParams(TestcaseBase):
                                                                     "is illegal".format(invalid_vector)})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue 7038")
     def test_calc_distance_right_vector_invalid_value(self, get_invalid_vector_dict):
         """
         target: test calculated distance with invalid vectors
@@ -221,8 +236,7 @@ class TestUtilityParams(TestcaseBase):
                                                                     "vectors with different dimension"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue 7086")
-    def test_calc_distance_invalid_metric(self, get_invalid_metric_type):
+    def test_calc_distance_invalid_metric_type(self, get_invalid_metric_type):
         """
         target: test calculated distance with invalid metric
         method: input invalid metric
@@ -234,6 +248,45 @@ class TestUtilityParams(TestcaseBase):
         op_l = {"float_vectors": vectors_l}
         op_r = {"float_vectors": vectors_r}
         metric = get_invalid_metric_type
+        params = {"metric": metric}
+        self.utility_wrap.calc_distance(op_l, op_r, params,
+                                        check_task=CheckTasks.err_res,
+                                        check_items={"err_code": 1,
+                                                     "err_msg": "params value {} "
+                                                                "is illegal".format(params)})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_calc_distance_invalid_metric_value(self, get_invalid_metric_value):
+        """
+        target: test calculated distance with invalid metric
+        method: input invalid metric
+        expected: raise exception
+        """
+        self._connect()
+        vectors_l = cf.gen_vectors(default_nb, default_dim)
+        vectors_r = cf.gen_vectors(default_nb, default_dim)
+        op_l = {"float_vectors": vectors_l}
+        op_r = {"float_vectors": vectors_r}
+        metric = get_invalid_metric_value
+        params = {"metric": metric}
+        self.utility_wrap.calc_distance(op_l, op_r, params,
+                                        check_task=CheckTasks.err_res,
+                                        check_items={"err_code": 1,
+                                                     "err_msg": "Invalid metric type"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_calc_distance_not_support_metric(self, get_not_support_metric):
+        """
+        target: test calculated distance with invalid metric
+        method: input invalid metric
+        expected: raise exception
+        """
+        self._connect()
+        vectors_l = cf.gen_vectors(default_nb, default_dim)
+        vectors_r = cf.gen_vectors(default_nb, default_dim)
+        op_l = {"float_vectors": vectors_l}
+        op_r = {"float_vectors": vectors_r}
+        metric = get_not_support_metric
         params = {"metric": metric}
         self.utility_wrap.calc_distance(op_l, op_r, params,
                                         check_task=CheckTasks.err_res,
@@ -279,7 +332,6 @@ class TestUtilityParams(TestcaseBase):
                                                                 "vectors with different dimension"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue 7036")
     def test_calc_distance_collection_before_load(self):
         """
         target: test calculated distance when entities is not ready
@@ -299,7 +351,8 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.calc_distance(op_l, op_r, params,
                                         check_task=CheckTasks.err_res,
                                         check_items={"err_code": 1,
-                                                     "err_msg": "Failed to fetch vectors"})
+                                                     "err_msg": "collection {} was not "
+                                                                "loaded into memory)".format(collection_w.name)})
 
 class TestUtilityBase(TestcaseBase):
     """ Test case of index interface """
@@ -312,7 +365,7 @@ class TestUtilityBase(TestcaseBase):
     def metric(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["HAMMING", "TANIMOTO", "JACCARD"])
+    @pytest.fixture(scope="function", params=["HAMMING", "TANIMOTO"])
     def metric_binary(self, request):
         yield request.param
 
@@ -596,6 +649,7 @@ class TestUtilityBase(TestcaseBase):
                                                      "metric": metric})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue 7217")
     def test_calc_distance_default_metric(self, sqrt):
         """
         target: test calculated distance with default param
@@ -615,7 +669,6 @@ class TestUtilityBase(TestcaseBase):
                                                      "sqrt": sqrt})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue 7064")
     def test_calc_distance_binary_metric(self, metric_binary):
         """
         target: test calculate distance with binary vectors
@@ -629,9 +682,8 @@ class TestUtilityBase(TestcaseBase):
         op_l = {"bin_vectors": vectors_l}
         op_r = {"bin_vectors": vectors_r}
         params = {"metric": metric_binary}
-        if metric_binary == "HAMMING":
-            vectors_l = raw_vectors_l
-            vectors_r = raw_vectors_r
+        vectors_l = raw_vectors_l
+        vectors_r = raw_vectors_r
         self.utility_wrap.calc_distance(op_l, op_r, params,
                                         check_task=CheckTasks.check_distance,
                                         check_items={"vectors_l": vectors_l,
@@ -745,7 +797,6 @@ class TestUtilityBase(TestcaseBase):
                                                      "sqrt": sqrt})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue 7046")
     def test_calc_distance_from_partition_ids(self, metric, sqrt):
         """
         target: test calculated distance from one partition entities
@@ -773,7 +824,6 @@ class TestUtilityBase(TestcaseBase):
                                                          "sqrt": sqrt})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue 7046")
     def test_calc_distance_from_partitions(self, metric, sqrt):
         """
         target: test calculated distance between entities from partitions
@@ -800,7 +850,6 @@ class TestUtilityBase(TestcaseBase):
                                                      "sqrt": sqrt})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue 7046")
     def test_calc_distance_left_vectors_and_partition_ids(self, metric, sqrt):
         """
         target: test calculated distance between vectors and partition entities
@@ -827,7 +876,6 @@ class TestUtilityBase(TestcaseBase):
                                                          "sqrt": sqrt})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue 7046")
     def test_calc_distance_right_vectors_and_partition_ids(self, metric, sqrt):
         """
         target: test calculated distance between vectors and partition entities
