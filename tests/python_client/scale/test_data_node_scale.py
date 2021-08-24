@@ -27,10 +27,9 @@ class TestDataNodeScale:
         expected: two collection create and insert op are both correctly
         """
         # deploy all nodes one pod cluster milvus with helm
-        release_name = "scale-test"
+        release_name = "scale-data"
         env = HelmEnv(release_name=release_name)
-        env.helm_install_cluster_milvus()
-        host = env.get_svc_external_ip()
+        host = env.helm_install_cluster_milvus()
 
         # connect
         connections.add_connection(default={"host": host, "port": 19530})
@@ -71,12 +70,12 @@ class TestDataNodeScale:
         method: 1.create collection and insert df 2. shrink dataNode 3.insert df
         expected: verify the property of collection which channel on shrink pod
         """
-        release_name = "scale-test"
+        release_name = "scale-data"
         env = HelmEnv(release_name=release_name, dataNode=2)
-        env.helm_install_cluster_milvus(image_pull_policy=constants.IF_NOT_PRESENT)
+        host = env.helm_install_cluster_milvus(image_pull_policy=constants.IF_NOT_PRESENT)
 
         # connect
-        connections.add_connection(default={"host": '10.98.0.8', "port": 19530})
+        connections.add_connection(default={"host": host, "port": 19530})
         connections.connect(alias='default')
 
         c_name = "data_scale_one"

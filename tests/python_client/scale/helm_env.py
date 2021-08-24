@@ -6,6 +6,8 @@ from utils.util_log import test_log as log
 from common import common_func as cf
 from scale import scale_common as sc
 
+milvus_chart_path = sc.get_milvus_chart_env_var()
+
 
 class HelmEnv:
     def __init__(self, release_name=None, **kwargs):
@@ -37,14 +39,11 @@ class HelmEnv:
                       f'--set queryNode.replicas={self.query_node} ' \
                       f'{self.release_name} . '
         log.debug(f'install_cmd: {install_cmd}')
-        log.debug(f'MILVUS CHART: {sc.get_milvus_chart_env_var()}')
         try:
-            os.system(f'cd {sc.get_milvus_chart_env_var()} && {install_cmd}')
-        except Exception as e:
-            raise
-        # raise Exception("Failed to deploy cluster milvus")
-        #     todo
-        #   return svc ip
+            os.system(f'cd {milvus_chart_path} && {install_cmd}')
+        except Exception:
+            raise Exception("Failed to deploy cluster milvus")
+        return self.get_service_ip()
 
     def helm_upgrade_cluster_milvus(self, **kwargs):
         """
@@ -57,19 +56,14 @@ class HelmEnv:
         data_node = kwargs.get(constants.DATA_NODE, self.data_node)
         index_node = kwargs.get(constants.INDEX_NODE, self.index_node)
         query_node = kwargs.get(constants.QUERY_NODE, self.query_node)
-        upgrade_cmd = f'helm upgrade --install ' \
-                      f'--set image.all.repository={constants.IMAGE_REPOSITORY} ' \
-                      f'--set image.all.tag={constants.IMAGE_TAG} ' \
-                      f'--set cluster.enabled=true ' \
-                      f'--set service.type=LoadBalancer ' \
+        upgrade_cmd = f'helm upgrade {self.release_name} . ' \
                       f'--set proxy.replicas={proxy} ' \
                       f'--set dataNode.replicas={data_node} ' \
                       f'--set indexNode.replicas={index_node} ' \
                       f'--set queryNode.replicas={query_node} ' \
-                      f'{self.release_name} . '
+                      f'--reuse-values'
         log.debug(f'upgrade_cmd: {upgrade_cmd}')
-        log.debug(f'MILVUS CHART: {sc.get_milvus_chart_env_var()}')
-        if os.system(f'cd {sc.get_milvus_chart_env_var()} && {upgrade_cmd}'):
+        if os.system(f'cd {milvus_chart_path} && {upgrade_cmd}'):
             raise Exception(f'Failed to upgrade cluster milvus with {kwargs}')
 
     def helm_uninstall_cluster_milvus(self):
@@ -87,7 +81,7 @@ class HelmEnv:
         # delete plusar
         # delete_pvc_plusar_cmd = "kubectl delete pvc scale-test-milvus-pulsar"
 
-    def get_svc_external_ip(self):
+    def get_service_ip(self):
         from kubernetes import client, config
         # from kubernetes.client.rest import ApiException
         config.load_kube_config()
@@ -120,12 +114,11 @@ class HelmEnv:
 
 if __name__ == '__main__':
     # default deploy q replicas
-    release_name = "milvus-chaos"
+    release_name = "scale-proxy"
     env = HelmEnv(release_name=release_name)
-    # host = env.get_svc_external_ip()
-    # log.debug(host)
     # env.helm_install_cluster_milvus()
+    # host = env.get_service_ip()
     # env.helm_upgrade_cluster_milvus(queryNode=2)
-    env.helm_uninstall_cluster_milvus()
+    # env.helm_uninstall_cluster_milvus()
+    env.export_all_logs()
     # sleep(5)
-    # env.export_all_logs()
