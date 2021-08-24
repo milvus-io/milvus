@@ -200,6 +200,7 @@ message SegmentInfo {
   internal.MsgPosition start_position = 9;
   internal.MsgPosition dml_position = 10;
   repeated FieldBinlog binlogs = 11;
+  string bloom_filter_file = 12;
 }
 
 
@@ -297,4 +298,15 @@ message ChannelWatchInfo {
 message SegmentFieldBinlogMeta {
   int64  fieldID = 1;
   string binlog_path = 2;
+}
+
+message GetBloomFilterFileRequest {
+  string channel = 1;
+}
+
+message GetBloomFilterFileResponse {
+  common.Status status = 1;
+  string channel = 2;
+  repeated int64 segments = 3;
+  repeated string files = 4;
 }
