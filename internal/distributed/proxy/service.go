@@ -370,6 +370,10 @@ func (s *Server) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*
 	return s.proxy.Insert(ctx, request)
 }
 
+func (s *Server) Delete(ctx context.Context, request *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error) {
+	return s.proxy.Delete(ctx, request)
+}
+
 func (s *Server) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 	return s.proxy.Search(ctx, request)
 }
