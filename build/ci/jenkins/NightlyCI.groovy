@@ -5,8 +5,8 @@
 String cron_timezone = "TZ=Asia/Shanghai"
 String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
 
-int total_timeout_minutes = 240
-int e2e_timeout_seconds = 3 * 60 * 60
+int total_timeout_minutes = 300
+int e2e_timeout_seconds = 4 * 60 * 60
 
 pipeline {
     agent none
