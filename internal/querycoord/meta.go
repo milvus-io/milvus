@@ -57,8 +57,6 @@ type Meta interface {
 
 	getPartitionStatesByID(collectionID UniqueID, partitionID UniqueID) (*querypb.PartitionStates, error)
 
-	hasWatchedDmChannel(collectionID UniqueID, channelID string) (bool, error)
-	getDmChannelsByCollectionID(collectionID UniqueID) ([]string, error)
 	getDmChannelsByNodeID(collectionID UniqueID, nodeID int64) ([]string, error)
 	addDmChannel(collectionID UniqueID, nodeID int64, channels []string) error
 	removeDmChannel(collectionID UniqueID, nodeID int64, channels []string) error
@@ -486,40 +484,6 @@ func (m *MetaReplica) releasePartition(collectionID UniqueID, partitionID Unique
 	}
 
 	return nil
-}
-
-func (m *MetaReplica) hasWatchedDmChannel(collectionID UniqueID, channelID string) (bool, error) {
-	m.RLock()
-	defer m.RUnlock()
-
-	if info, ok := m.collectionInfos[collectionID]; ok {
-		channelInfos := info.ChannelInfos
-		for _, channelInfo := range channelInfos {
-			for _, channel := range channelInfo.ChannelIDs {
-				if channel == channelID {
-					return true, nil
-				}
-			}
-		}
-		return false, nil
-	}
-
-	return false, errors.New("hasWatchedDmChannel: can't find collection in collectionInfos")
-}
-
-func (m *MetaReplica) getDmChannelsByCollectionID(collectionID UniqueID) ([]string, error) {
-	m.RLock()
-	defer m.RUnlock()
-
-	if info, ok := m.collectionInfos[collectionID]; ok {
-		channels := make([]string, 0)
-		for _, channelsInfo := range info.ChannelInfos {
-			channels = append(channels, channelsInfo.ChannelIDs...)
-		}
-		return channels, nil
-	}
-
-	return nil, errors.New("getDmChannelsByCollectionID: can't find collection in collectionInfos")
 }
 
 func (m *MetaReplica) getDmChannelsByNodeID(collectionID UniqueID, nodeID int64) ([]string, error) {

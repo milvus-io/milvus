@@ -27,7 +27,7 @@ import (
 func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
 	factory := msgstream.NewPmsFactory()
 
-	coord, err := NewQueryCoord(ctx, factory)
+	coord, err := NewQueryCoordTest(ctx, factory)
 	if err != nil {
 		return nil, err
 	}
@@ -59,6 +59,31 @@ func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
 	return coord, nil
 }
 
+//func waitQueryNodeOnline(cluster *queryNodeCluster, nodeID int64)
+
+func waitAllQueryNodeOffline(cluster *queryNodeCluster, nodes map[int64]Node) bool {
+	reDoCount := 20
+	for {
+		if reDoCount <= 0 {
+			return false
+		}
+		allOffline := true
+		for nodeID := range nodes {
+			_, err := cluster.getNodeByID(nodeID)
+			if err == nil {
+				allOffline = false
+				break
+			}
+		}
+		if allOffline {
+			return true
+		}
+		log.Debug("wait all queryNode offline")
+		time.Sleep(time.Second)
+		reDoCount--
+	}
+}
+
 func TestQueryNode_MultiNode_stop(t *testing.T) {
 	baseCtx := context.Background()
 
@@ -68,23 +93,11 @@ func TestQueryNode_MultiNode_stop(t *testing.T) {
 	queryNode1, err := startQueryNodeServer(baseCtx)
 	assert.Nil(t, err)
 
-	//queryNode2, err := startQueryNodeServer(baseCtx)
-	//assert.Nil(t, err)
-
-	//queryNode3, err := startQueryNodeServer(baseCtx)
-	//assert.Nil(t, err)
-
-	//queryNode4, err := startQueryNodeServer(baseCtx)
-	//assert.Nil(t, err)
-
 	queryNode5, err := startQueryNodeServer(baseCtx)
 	assert.Nil(t, err)
 
 	time.Sleep(2 * time.Second)
 	queryNode1.stop()
-	//queryNode2.stop()
-	//queryNode3.stop()
-	//queryNode4.stop()
 
 	queryCoord.LoadCollection(baseCtx, &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{
@@ -106,21 +119,8 @@ func TestQueryNode_MultiNode_stop(t *testing.T) {
 	assert.Nil(t, err)
 	queryNode5.stop()
 
-	for {
-		allOffline := true
-		for nodeID := range nodes {
-			_, err = queryCoord.cluster.getNodeByID(nodeID)
-			if err == nil {
-				allOffline = false
-				time.Sleep(time.Second)
-				break
-			}
-		}
-		if allOffline {
-			break
-		}
-		log.Debug("wait all queryNode offline")
-	}
+	allNodeOffline := waitAllQueryNodeOffline(queryCoord.cluster, nodes)
+	assert.Equal(t, allNodeOffline, true)
 	queryCoord.Stop()
 }
 
@@ -133,9 +133,6 @@ func TestQueryNode_MultiNode_reStart(t *testing.T) {
 	queryNode1, err := startQueryNodeServer(baseCtx)
 	assert.Nil(t, err)
 
-	//queryNode2, err := startQueryNodeServer(baseCtx)
-	//assert.Nil(t, err)
-
 	time.Sleep(2 * time.Second)
 	queryCoord.LoadCollection(baseCtx, &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{
@@ -145,13 +142,8 @@ func TestQueryNode_MultiNode_reStart(t *testing.T) {
 		Schema:       genCollectionSchema(defaultCollectionID, false),
 	})
 	queryNode1.stop()
-	//queryNode2.stop()
 	queryNode3, err := startQueryNodeServer(baseCtx)
 	assert.Nil(t, err)
-	//queryNode4, err := startQueryNodeServer(baseCtx)
-	//assert.Nil(t, err)
-	//queryNode5, err := startQueryNodeServer(baseCtx)
-	//assert.Nil(t, err)
 
 	time.Sleep(2 * time.Second)
 	_, err = queryCoord.ReleaseCollection(baseCtx, &querypb.ReleaseCollectionRequest{
@@ -164,24 +156,9 @@ func TestQueryNode_MultiNode_reStart(t *testing.T) {
 	nodes, err := queryCoord.cluster.onServiceNodes()
 	assert.Nil(t, err)
 	queryNode3.stop()
-	//queryNode4.stop()
-	//queryNode5.stop()
 
-	for {
-		allOffline := true
-		for nodeID := range nodes {
-			_, err = queryCoord.cluster.getNodeByID(nodeID)
-			if err == nil {
-				allOffline = false
-				time.Sleep(time.Second)
-				break
-			}
-		}
-		if allOffline {
-			break
-		}
-		log.Debug("wait all queryNode offline")
-	}
+	allNodeOffline := waitAllQueryNodeOffline(queryCoord.cluster, nodes)
+	assert.Equal(t, allNodeOffline, true)
 	queryCoord.Stop()
 }
 
