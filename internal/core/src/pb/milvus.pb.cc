@@ -185,6 +185,10 @@ class MutationResultDefaultTypeInternal {
  public:
   ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<MutationResult> _instance;
 } _MutationResult_default_instance_;
+class DeleteRequestDefaultTypeInternal {
+ public:
+  ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<DeleteRequest> _instance;
+} _DeleteRequest_default_instance_;
 class PlaceholderValueDefaultTypeInternal {
  public:
   ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<PlaceholderValue> _instance;
@@ -389,6 +393,21 @@ static void InitDefaultsscc_info_CreatePartitionRequest_milvus_2eproto() {
 
 ::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<1> scc_info_CreatePartitionRequest_milvus_2eproto =
     {{ATOMIC_VAR_INIT(::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase::kUninitialized), 1, InitDefaultsscc_info_CreatePartitionRequest_milvus_2eproto}, {
+      &scc_info_MsgBase_common_2eproto.base,}};
+
+static void InitDefaultsscc_info_DeleteRequest_milvus_2eproto() {
+  GOOGLE_PROTOBUF_VERIFY_VERSION;
+
+  {
+    void* ptr = &::milvus::proto::milvus::_DeleteRequest_default_instance_;
+    new (ptr) ::milvus::proto::milvus::DeleteRequest();
+    ::PROTOBUF_NAMESPACE_ID::internal::OnShutdownDestroyMessage(ptr);
+  }
+  ::milvus::proto::milvus::DeleteRequest::InitAsDefaultInstance();
+}
+
+::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<1> scc_info_DeleteRequest_milvus_2eproto =
+    {{ATOMIC_VAR_INIT(::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase::kUninitialized), 1, InitDefaultsscc_info_DeleteRequest_milvus_2eproto}, {
       &scc_info_MsgBase_common_2eproto.base,}};
 
 static void InitDefaultsscc_info_DescribeCollectionRequest_milvus_2eproto() {
@@ -1252,7 +1271,7 @@ static void InitDefaultsscc_info_VectorsArray_milvus_2eproto() {
       &scc_info_VectorIDs_milvus_2eproto.base,
       &scc_info_VectorField_schema_2eproto.base,}};
 
-static ::PROTOBUF_NAMESPACE_ID::Metadata file_level_metadata_milvus_2eproto[63];
+static ::PROTOBUF_NAMESPACE_ID::Metadata file_level_metadata_milvus_2eproto[64];
 static const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* file_level_enum_descriptors_milvus_2eproto[2];
 static constexpr ::PROTOBUF_NAMESPACE_ID::ServiceDescriptor const** file_level_service_descriptors_milvus_2eproto = nullptr;
 
@@ -1596,6 +1615,16 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_milvus_2eproto::offsets[] PROT
   PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::MutationResult, upsert_cnt_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::MutationResult, timestamp_),
   ~0u,  // no _has_bits_
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::DeleteRequest, _internal_metadata_),
+  ~0u,  // no _extensions_
+  ~0u,  // no _oneof_case_
+  ~0u,  // no _weak_field_map_
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::DeleteRequest, base_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::DeleteRequest, db_name_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::DeleteRequest, collection_name_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::DeleteRequest, partition_name_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::DeleteRequest, expr_),
+  ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::PlaceholderValue, _internal_metadata_),
   ~0u,  // no _extensions_
   ~0u,  // no _oneof_case_
@@ -1850,32 +1879,33 @@ static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOB
   { 302, -1, sizeof(::milvus::proto::milvus::DropIndexRequest)},
   { 312, -1, sizeof(::milvus::proto::milvus::InsertRequest)},
   { 324, -1, sizeof(::milvus::proto::milvus::MutationResult)},
-  { 338, -1, sizeof(::milvus::proto::milvus::PlaceholderValue)},
-  { 346, -1, sizeof(::milvus::proto::milvus::PlaceholderGroup)},
-  { 352, -1, sizeof(::milvus::proto::milvus::SearchRequest)},
-  { 368, -1, sizeof(::milvus::proto::milvus::Hits)},
-  { 376, -1, sizeof(::milvus::proto::milvus::SearchResults)},
-  { 383, -1, sizeof(::milvus::proto::milvus::FlushRequest)},
-  { 391, 398, sizeof(::milvus::proto::milvus::FlushResponse_CollSegIDsEntry_DoNotUse)},
-  { 400, -1, sizeof(::milvus::proto::milvus::FlushResponse)},
-  { 408, -1, sizeof(::milvus::proto::milvus::QueryRequest)},
-  { 421, -1, sizeof(::milvus::proto::milvus::QueryResults)},
-  { 428, -1, sizeof(::milvus::proto::milvus::VectorIDs)},
-  { 437, -1, sizeof(::milvus::proto::milvus::VectorsArray)},
-  { 445, -1, sizeof(::milvus::proto::milvus::CalcDistanceRequest)},
-  { 454, -1, sizeof(::milvus::proto::milvus::CalcDistanceResults)},
-  { 463, -1, sizeof(::milvus::proto::milvus::PersistentSegmentInfo)},
-  { 473, -1, sizeof(::milvus::proto::milvus::GetPersistentSegmentInfoRequest)},
-  { 481, -1, sizeof(::milvus::proto::milvus::GetPersistentSegmentInfoResponse)},
-  { 488, -1, sizeof(::milvus::proto::milvus::QuerySegmentInfo)},
-  { 500, -1, sizeof(::milvus::proto::milvus::GetQuerySegmentInfoRequest)},
-  { 508, -1, sizeof(::milvus::proto::milvus::GetQuerySegmentInfoResponse)},
-  { 515, -1, sizeof(::milvus::proto::milvus::DummyRequest)},
-  { 521, -1, sizeof(::milvus::proto::milvus::DummyResponse)},
-  { 527, -1, sizeof(::milvus::proto::milvus::RegisterLinkRequest)},
-  { 532, -1, sizeof(::milvus::proto::milvus::RegisterLinkResponse)},
-  { 539, -1, sizeof(::milvus::proto::milvus::GetMetricsRequest)},
-  { 546, -1, sizeof(::milvus::proto::milvus::GetMetricsResponse)},
+  { 338, -1, sizeof(::milvus::proto::milvus::DeleteRequest)},
+  { 348, -1, sizeof(::milvus::proto::milvus::PlaceholderValue)},
+  { 356, -1, sizeof(::milvus::proto::milvus::PlaceholderGroup)},
+  { 362, -1, sizeof(::milvus::proto::milvus::SearchRequest)},
+  { 378, -1, sizeof(::milvus::proto::milvus::Hits)},
+  { 386, -1, sizeof(::milvus::proto::milvus::SearchResults)},
+  { 393, -1, sizeof(::milvus::proto::milvus::FlushRequest)},
+  { 401, 408, sizeof(::milvus::proto::milvus::FlushResponse_CollSegIDsEntry_DoNotUse)},
+  { 410, -1, sizeof(::milvus::proto::milvus::FlushResponse)},
+  { 418, -1, sizeof(::milvus::proto::milvus::QueryRequest)},
+  { 431, -1, sizeof(::milvus::proto::milvus::QueryResults)},
+  { 438, -1, sizeof(::milvus::proto::milvus::VectorIDs)},
+  { 447, -1, sizeof(::milvus::proto::milvus::VectorsArray)},
+  { 455, -1, sizeof(::milvus::proto::milvus::CalcDistanceRequest)},
+  { 464, -1, sizeof(::milvus::proto::milvus::CalcDistanceResults)},
+  { 473, -1, sizeof(::milvus::proto::milvus::PersistentSegmentInfo)},
+  { 483, -1, sizeof(::milvus::proto::milvus::GetPersistentSegmentInfoRequest)},
+  { 491, -1, sizeof(::milvus::proto::milvus::GetPersistentSegmentInfoResponse)},
+  { 498, -1, sizeof(::milvus::proto::milvus::QuerySegmentInfo)},
+  { 510, -1, sizeof(::milvus::proto::milvus::GetQuerySegmentInfoRequest)},
+  { 518, -1, sizeof(::milvus::proto::milvus::GetQuerySegmentInfoResponse)},
+  { 525, -1, sizeof(::milvus::proto::milvus::DummyRequest)},
+  { 531, -1, sizeof(::milvus::proto::milvus::DummyResponse)},
+  { 537, -1, sizeof(::milvus::proto::milvus::RegisterLinkRequest)},
+  { 542, -1, sizeof(::milvus::proto::milvus::RegisterLinkResponse)},
+  { 549, -1, sizeof(::milvus::proto::milvus::GetMetricsRequest)},
+  { 556, -1, sizeof(::milvus::proto::milvus::GetMetricsResponse)},
 };
 
 static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] = {
@@ -1916,6 +1946,7 @@ static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] =
   reinterpret_cast<const ::PROTOBUF_NAMESPACE_ID::Message*>(&::milvus::proto::milvus::_DropIndexRequest_default_instance_),
   reinterpret_cast<const ::PROTOBUF_NAMESPACE_ID::Message*>(&::milvus::proto::milvus::_InsertRequest_default_instance_),
   reinterpret_cast<const ::PROTOBUF_NAMESPACE_ID::Message*>(&::milvus::proto::milvus::_MutationResult_default_instance_),
+  reinterpret_cast<const ::PROTOBUF_NAMESPACE_ID::Message*>(&::milvus::proto::milvus::_DeleteRequest_default_instance_),
   reinterpret_cast<const ::PROTOBUF_NAMESPACE_ID::Message*>(&::milvus::proto::milvus::_PlaceholderValue_default_instance_),
   reinterpret_cast<const ::PROTOBUF_NAMESPACE_ID::Message*>(&::milvus::proto::milvus::_PlaceholderGroup_default_instance_),
   reinterpret_cast<const ::PROTOBUF_NAMESPACE_ID::Message*>(&::milvus::proto::milvus::_SearchRequest_default_instance_),
@@ -2082,185 +2113,191 @@ const char descriptor_table_protodef_milvus_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "\nsucc_index\030\003 \003(\r\022\021\n\terr_index\030\004 \003(\r\022\024\n\014"
   "acknowledged\030\005 \001(\010\022\022\n\ninsert_cnt\030\006 \001(\003\022\022"
   "\n\ndelete_cnt\030\007 \001(\003\022\022\n\nupsert_cnt\030\010 \001(\003\022\021"
-  "\n\ttimestamp\030\t \001(\004\"c\n\020PlaceholderValue\022\013\n"
-  "\003tag\030\001 \001(\t\0222\n\004type\030\002 \001(\0162$.milvus.proto."
-  "milvus.PlaceholderType\022\016\n\006values\030\003 \003(\014\"O"
-  "\n\020PlaceholderGroup\022;\n\014placeholders\030\001 \003(\013"
-  "2%.milvus.proto.milvus.PlaceholderValue\""
-  "\336\002\n\rSearchRequest\022*\n\004base\030\001 \001(\0132\034.milvus"
-  ".proto.common.MsgBase\022\017\n\007db_name\030\002 \001(\t\022\027"
-  "\n\017collection_name\030\003 \001(\t\022\027\n\017partition_nam"
-  "es\030\004 \003(\t\022\013\n\003dsl\030\005 \001(\t\022\031\n\021placeholder_gro"
-  "up\030\006 \001(\014\022.\n\010dsl_type\030\007 \001(\0162\034.milvus.prot"
-  "o.common.DslType\022\025\n\routput_fields\030\010 \003(\t\022"
-  "8\n\rsearch_params\030\t \003(\0132!.milvus.proto.co"
-  "mmon.KeyValuePair\022\030\n\020travel_timestamp\030\n "
-  "\001(\004\022\033\n\023guarantee_timestamp\030\013 \001(\004\"5\n\004Hits"
-  "\022\013\n\003IDs\030\001 \003(\003\022\020\n\010row_data\030\002 \003(\014\022\016\n\006score"
-  "s\030\003 \003(\002\"t\n\rSearchResults\022+\n\006status\030\001 \001(\013"
-  "2\033.milvus.proto.common.Status\0226\n\007results"
-  "\030\002 \001(\0132%.milvus.proto.schema.SearchResul"
-  "tData\"e\n\014FlushRequest\022*\n\004base\030\001 \001(\0132\034.mi"
-  "lvus.proto.common.MsgBase\022\017\n\007db_name\030\002 \001"
-  "(\t\022\030\n\020collection_names\030\003 \003(\t\"\351\001\n\rFlushRe"
-  "sponse\022+\n\006status\030\001 \001(\0132\033.milvus.proto.co"
-  "mmon.Status\022\017\n\007db_name\030\002 \001(\t\022G\n\013coll_seg"
-  "IDs\030\003 \003(\01322.milvus.proto.milvus.FlushRes"
-  "ponse.CollSegIDsEntry\032Q\n\017CollSegIDsEntry"
-  "\022\013\n\003key\030\001 \001(\t\022-\n\005value\030\002 \001(\0132\036.milvus.pr"
-  "oto.schema.LongArray:\0028\001\"\331\001\n\014QueryReques"
-  "t\022*\n\004base\030\001 \001(\0132\034.milvus.proto.common.Ms"
-  "gBase\022\017\n\007db_name\030\002 \001(\t\022\027\n\017collection_nam"
-  "e\030\003 \001(\t\022\014\n\004expr\030\004 \001(\t\022\025\n\routput_fields\030\005"
-  " \003(\t\022\027\n\017partition_names\030\006 \003(\t\022\030\n\020travel_"
-  "timestamp\030\007 \001(\004\022\033\n\023guarantee_timestamp\030\010"
-  " \001(\004\"p\n\014QueryResults\022+\n\006status\030\001 \001(\0132\033.m"
-  "ilvus.proto.common.Status\0223\n\013fields_data"
-  "\030\002 \003(\0132\036.milvus.proto.schema.FieldData\"}"
-  "\n\tVectorIDs\022\027\n\017collection_name\030\001 \001(\t\022\022\n\n"
-  "field_name\030\002 \001(\t\022*\n\010id_array\030\003 \001(\0132\030.mil"
-  "vus.proto.schema.IDs\022\027\n\017partition_names\030"
-  "\004 \003(\t\"\203\001\n\014VectorsArray\0222\n\010id_array\030\001 \001(\013"
-  "2\036.milvus.proto.milvus.VectorIDsH\000\0226\n\nda"
-  "ta_array\030\002 \001(\0132 .milvus.proto.schema.Vec"
-  "torFieldH\000B\007\n\005array\"\335\001\n\023CalcDistanceRequ"
+  "\n\ttimestamp\030\t \001(\004\"\213\001\n\rDeleteRequest\022*\n\004b"
+  "ase\030\001 \001(\0132\034.milvus.proto.common.MsgBase\022"
+  "\017\n\007db_name\030\002 \001(\t\022\027\n\017collection_name\030\003 \001("
+  "\t\022\026\n\016partition_name\030\004 \001(\t\022\014\n\004expr\030\005 \001(\t\""
+  "c\n\020PlaceholderValue\022\013\n\003tag\030\001 \001(\t\0222\n\004type"
+  "\030\002 \001(\0162$.milvus.proto.milvus.Placeholder"
+  "Type\022\016\n\006values\030\003 \003(\014\"O\n\020PlaceholderGroup"
+  "\022;\n\014placeholders\030\001 \003(\0132%.milvus.proto.mi"
+  "lvus.PlaceholderValue\"\336\002\n\rSearchRequest\022"
+  "*\n\004base\030\001 \001(\0132\034.milvus.proto.common.MsgB"
+  "ase\022\017\n\007db_name\030\002 \001(\t\022\027\n\017collection_name\030"
+  "\003 \001(\t\022\027\n\017partition_names\030\004 \003(\t\022\013\n\003dsl\030\005 "
+  "\001(\t\022\031\n\021placeholder_group\030\006 \001(\014\022.\n\010dsl_ty"
+  "pe\030\007 \001(\0162\034.milvus.proto.common.DslType\022\025"
+  "\n\routput_fields\030\010 \003(\t\0228\n\rsearch_params\030\t"
+  " \003(\0132!.milvus.proto.common.KeyValuePair\022"
+  "\030\n\020travel_timestamp\030\n \001(\004\022\033\n\023guarantee_t"
+  "imestamp\030\013 \001(\004\"5\n\004Hits\022\013\n\003IDs\030\001 \003(\003\022\020\n\010r"
+  "ow_data\030\002 \003(\014\022\016\n\006scores\030\003 \003(\002\"t\n\rSearchR"
+  "esults\022+\n\006status\030\001 \001(\0132\033.milvus.proto.co"
+  "mmon.Status\0226\n\007results\030\002 \001(\0132%.milvus.pr"
+  "oto.schema.SearchResultData\"e\n\014FlushRequ"
   "est\022*\n\004base\030\001 \001(\0132\034.milvus.proto.common."
-  "MsgBase\0222\n\007op_left\030\002 \001(\0132!.milvus.proto."
-  "milvus.VectorsArray\0223\n\010op_right\030\003 \001(\0132!."
-  "milvus.proto.milvus.VectorsArray\0221\n\006para"
-  "ms\030\004 \003(\0132!.milvus.proto.common.KeyValueP"
-  "air\"\265\001\n\023CalcDistanceResults\022+\n\006status\030\001 "
-  "\001(\0132\033.milvus.proto.common.Status\0221\n\010int_"
-  "dist\030\002 \001(\0132\035.milvus.proto.schema.IntArra"
-  "yH\000\0225\n\nfloat_dist\030\003 \001(\0132\037.milvus.proto.s"
-  "chema.FloatArrayH\000B\007\n\005array\"\231\001\n\025Persiste"
-  "ntSegmentInfo\022\021\n\tsegmentID\030\001 \001(\003\022\024\n\014coll"
-  "ectionID\030\002 \001(\003\022\023\n\013partitionID\030\003 \001(\003\022\020\n\010n"
-  "um_rows\030\004 \001(\003\0220\n\005state\030\005 \001(\0162!.milvus.pr"
-  "oto.common.SegmentState\"u\n\037GetPersistent"
-  "SegmentInfoRequest\022*\n\004base\030\001 \001(\0132\034.milvu"
-  "s.proto.common.MsgBase\022\016\n\006dbName\030\002 \001(\t\022\026"
-  "\n\016collectionName\030\003 \001(\t\"\212\001\n GetPersistent"
-  "SegmentInfoResponse\022+\n\006status\030\001 \001(\0132\033.mi"
-  "lvus.proto.common.Status\0229\n\005infos\030\002 \003(\0132"
-  "*.milvus.proto.milvus.PersistentSegmentI"
-  "nfo\"\231\001\n\020QuerySegmentInfo\022\021\n\tsegmentID\030\001 "
-  "\001(\003\022\024\n\014collectionID\030\002 \001(\003\022\023\n\013partitionID"
-  "\030\003 \001(\003\022\020\n\010mem_size\030\004 \001(\003\022\020\n\010num_rows\030\005 \001"
-  "(\003\022\022\n\nindex_name\030\006 \001(\t\022\017\n\007indexID\030\007 \001(\003\""
-  "p\n\032GetQuerySegmentInfoRequest\022*\n\004base\030\001 "
-  "\001(\0132\034.milvus.proto.common.MsgBase\022\016\n\006dbN"
-  "ame\030\002 \001(\t\022\026\n\016collectionName\030\003 \001(\t\"\200\001\n\033Ge"
-  "tQuerySegmentInfoResponse\022+\n\006status\030\001 \001("
-  "\0132\033.milvus.proto.common.Status\0224\n\005infos\030"
-  "\002 \003(\0132%.milvus.proto.milvus.QuerySegment"
-  "Info\"$\n\014DummyRequest\022\024\n\014request_type\030\001 \001"
-  "(\t\"!\n\rDummyResponse\022\020\n\010response\030\001 \001(\t\"\025\n"
-  "\023RegisterLinkRequest\"r\n\024RegisterLinkResp"
-  "onse\022-\n\007address\030\001 \001(\0132\034.milvus.proto.com"
-  "mon.Address\022+\n\006status\030\002 \001(\0132\033.milvus.pro"
-  "to.common.Status\"P\n\021GetMetricsRequest\022*\n"
-  "\004base\030\001 \001(\0132\034.milvus.proto.common.MsgBas"
-  "e\022\017\n\007request\030\002 \001(\t\"k\n\022GetMetricsResponse"
-  "\022+\n\006status\030\001 \001(\0132\033.milvus.proto.common.S"
-  "tatus\022\020\n\010response\030\002 \001(\t\022\026\n\016component_nam"
-  "e\030\003 \001(\t*!\n\010ShowType\022\007\n\003All\020\000\022\014\n\010InMemory"
-  "\020\001*>\n\017PlaceholderType\022\010\n\004None\020\000\022\020\n\014Binar"
-  "yVector\020d\022\017\n\013FloatVector\020e2\201\030\n\rMilvusSer"
-  "vice\022_\n\020CreateCollection\022,.milvus.proto."
-  "milvus.CreateCollectionRequest\032\033.milvus."
-  "proto.common.Status\"\000\022[\n\016DropCollection\022"
-  "*.milvus.proto.milvus.DropCollectionRequ"
-  "est\032\033.milvus.proto.common.Status\"\000\022_\n\rHa"
-  "sCollection\022).milvus.proto.milvus.HasCol"
-  "lectionRequest\032!.milvus.proto.milvus.Boo"
-  "lResponse\"\000\022[\n\016LoadCollection\022*.milvus.p"
-  "roto.milvus.LoadCollectionRequest\032\033.milv"
-  "us.proto.common.Status\"\000\022a\n\021ReleaseColle"
-  "ction\022-.milvus.proto.milvus.ReleaseColle"
+  "MsgBase\022\017\n\007db_name\030\002 \001(\t\022\030\n\020collection_n"
+  "ames\030\003 \003(\t\"\351\001\n\rFlushResponse\022+\n\006status\030\001"
+  " \001(\0132\033.milvus.proto.common.Status\022\017\n\007db_"
+  "name\030\002 \001(\t\022G\n\013coll_segIDs\030\003 \003(\01322.milvus"
+  ".proto.milvus.FlushResponse.CollSegIDsEn"
+  "try\032Q\n\017CollSegIDsEntry\022\013\n\003key\030\001 \001(\t\022-\n\005v"
+  "alue\030\002 \001(\0132\036.milvus.proto.schema.LongArr"
+  "ay:\0028\001\"\331\001\n\014QueryRequest\022*\n\004base\030\001 \001(\0132\034."
+  "milvus.proto.common.MsgBase\022\017\n\007db_name\030\002"
+  " \001(\t\022\027\n\017collection_name\030\003 \001(\t\022\014\n\004expr\030\004 "
+  "\001(\t\022\025\n\routput_fields\030\005 \003(\t\022\027\n\017partition_"
+  "names\030\006 \003(\t\022\030\n\020travel_timestamp\030\007 \001(\004\022\033\n"
+  "\023guarantee_timestamp\030\010 \001(\004\"p\n\014QueryResul"
+  "ts\022+\n\006status\030\001 \001(\0132\033.milvus.proto.common"
+  ".Status\0223\n\013fields_data\030\002 \003(\0132\036.milvus.pr"
+  "oto.schema.FieldData\"}\n\tVectorIDs\022\027\n\017col"
+  "lection_name\030\001 \001(\t\022\022\n\nfield_name\030\002 \001(\t\022*"
+  "\n\010id_array\030\003 \001(\0132\030.milvus.proto.schema.I"
+  "Ds\022\027\n\017partition_names\030\004 \003(\t\"\203\001\n\014VectorsA"
+  "rray\0222\n\010id_array\030\001 \001(\0132\036.milvus.proto.mi"
+  "lvus.VectorIDsH\000\0226\n\ndata_array\030\002 \001(\0132 .m"
+  "ilvus.proto.schema.VectorFieldH\000B\007\n\005arra"
+  "y\"\335\001\n\023CalcDistanceRequest\022*\n\004base\030\001 \001(\0132"
+  "\034.milvus.proto.common.MsgBase\0222\n\007op_left"
+  "\030\002 \001(\0132!.milvus.proto.milvus.VectorsArra"
+  "y\0223\n\010op_right\030\003 \001(\0132!.milvus.proto.milvu"
+  "s.VectorsArray\0221\n\006params\030\004 \003(\0132!.milvus."
+  "proto.common.KeyValuePair\"\265\001\n\023CalcDistan"
+  "ceResults\022+\n\006status\030\001 \001(\0132\033.milvus.proto"
+  ".common.Status\0221\n\010int_dist\030\002 \001(\0132\035.milvu"
+  "s.proto.schema.IntArrayH\000\0225\n\nfloat_dist\030"
+  "\003 \001(\0132\037.milvus.proto.schema.FloatArrayH\000"
+  "B\007\n\005array\"\231\001\n\025PersistentSegmentInfo\022\021\n\ts"
+  "egmentID\030\001 \001(\003\022\024\n\014collectionID\030\002 \001(\003\022\023\n\013"
+  "partitionID\030\003 \001(\003\022\020\n\010num_rows\030\004 \001(\003\0220\n\005s"
+  "tate\030\005 \001(\0162!.milvus.proto.common.Segment"
+  "State\"u\n\037GetPersistentSegmentInfoRequest"
+  "\022*\n\004base\030\001 \001(\0132\034.milvus.proto.common.Msg"
+  "Base\022\016\n\006dbName\030\002 \001(\t\022\026\n\016collectionName\030\003"
+  " \001(\t\"\212\001\n GetPersistentSegmentInfoRespons"
+  "e\022+\n\006status\030\001 \001(\0132\033.milvus.proto.common."
+  "Status\0229\n\005infos\030\002 \003(\0132*.milvus.proto.mil"
+  "vus.PersistentSegmentInfo\"\231\001\n\020QuerySegme"
+  "ntInfo\022\021\n\tsegmentID\030\001 \001(\003\022\024\n\014collectionI"
+  "D\030\002 \001(\003\022\023\n\013partitionID\030\003 \001(\003\022\020\n\010mem_size"
+  "\030\004 \001(\003\022\020\n\010num_rows\030\005 \001(\003\022\022\n\nindex_name\030\006"
+  " \001(\t\022\017\n\007indexID\030\007 \001(\003\"p\n\032GetQuerySegment"
+  "InfoRequest\022*\n\004base\030\001 \001(\0132\034.milvus.proto"
+  ".common.MsgBase\022\016\n\006dbName\030\002 \001(\t\022\026\n\016colle"
+  "ctionName\030\003 \001(\t\"\200\001\n\033GetQuerySegmentInfoR"
+  "esponse\022+\n\006status\030\001 \001(\0132\033.milvus.proto.c"
+  "ommon.Status\0224\n\005infos\030\002 \003(\0132%.milvus.pro"
+  "to.milvus.QuerySegmentInfo\"$\n\014DummyReque"
+  "st\022\024\n\014request_type\030\001 \001(\t\"!\n\rDummyRespons"
+  "e\022\020\n\010response\030\001 \001(\t\"\025\n\023RegisterLinkReque"
+  "st\"r\n\024RegisterLinkResponse\022-\n\007address\030\001 "
+  "\001(\0132\034.milvus.proto.common.Address\022+\n\006sta"
+  "tus\030\002 \001(\0132\033.milvus.proto.common.Status\"P"
+  "\n\021GetMetricsRequest\022*\n\004base\030\001 \001(\0132\034.milv"
+  "us.proto.common.MsgBase\022\017\n\007request\030\002 \001(\t"
+  "\"k\n\022GetMetricsResponse\022+\n\006status\030\001 \001(\0132\033"
+  ".milvus.proto.common.Status\022\020\n\010response\030"
+  "\002 \001(\t\022\026\n\016component_name\030\003 \001(\t*!\n\010ShowTyp"
+  "e\022\007\n\003All\020\000\022\014\n\010InMemory\020\001*>\n\017PlaceholderT"
+  "ype\022\010\n\004None\020\000\022\020\n\014BinaryVector\020d\022\017\n\013Float"
+  "Vector\020e2\326\030\n\rMilvusService\022_\n\020CreateColl"
+  "ection\022,.milvus.proto.milvus.CreateColle"
   "ctionRequest\032\033.milvus.proto.common.Statu"
-  "s\"\000\022w\n\022DescribeCollection\022..milvus.proto"
-  ".milvus.DescribeCollectionRequest\032/.milv"
-  "us.proto.milvus.DescribeCollectionRespon"
-  "se\"\000\022\206\001\n\027GetCollectionStatistics\0223.milvu"
-  "s.proto.milvus.GetCollectionStatisticsRe"
-  "quest\0324.milvus.proto.milvus.GetCollectio"
-  "nStatisticsResponse\"\000\022n\n\017ShowCollections"
-  "\022+.milvus.proto.milvus.ShowCollectionsRe"
-  "quest\032,.milvus.proto.milvus.ShowCollecti"
-  "onsResponse\"\000\022]\n\017CreatePartition\022+.milvu"
-  "s.proto.milvus.CreatePartitionRequest\032\033."
-  "milvus.proto.common.Status\"\000\022Y\n\rDropPart"
-  "ition\022).milvus.proto.milvus.DropPartitio"
-  "nRequest\032\033.milvus.proto.common.Status\"\000\022"
-  "]\n\014HasPartition\022(.milvus.proto.milvus.Ha"
-  "sPartitionRequest\032!.milvus.proto.milvus."
-  "BoolResponse\"\000\022[\n\016LoadPartitions\022*.milvu"
-  "s.proto.milvus.LoadPartitionsRequest\032\033.m"
-  "ilvus.proto.common.Status\"\000\022a\n\021ReleasePa"
-  "rtitions\022-.milvus.proto.milvus.ReleasePa"
-  "rtitionsRequest\032\033.milvus.proto.common.St"
-  "atus\"\000\022\203\001\n\026GetPartitionStatistics\0222.milv"
-  "us.proto.milvus.GetPartitionStatisticsRe"
-  "quest\0323.milvus.proto.milvus.GetPartition"
-  "StatisticsResponse\"\000\022k\n\016ShowPartitions\022*"
-  ".milvus.proto.milvus.ShowPartitionsReque"
-  "st\032+.milvus.proto.milvus.ShowPartitionsR"
-  "esponse\"\000\022U\n\013CreateIndex\022\'.milvus.proto."
-  "milvus.CreateIndexRequest\032\033.milvus.proto"
-  ".common.Status\"\000\022h\n\rDescribeIndex\022).milv"
-  "us.proto.milvus.DescribeIndexRequest\032*.m"
-  "ilvus.proto.milvus.DescribeIndexResponse"
-  "\"\000\022h\n\rGetIndexState\022).milvus.proto.milvu"
-  "s.GetIndexStateRequest\032*.milvus.proto.mi"
-  "lvus.GetIndexStateResponse\"\000\022\200\001\n\025GetInde"
-  "xBuildProgress\0221.milvus.proto.milvus.Get"
-  "IndexBuildProgressRequest\0322.milvus.proto"
-  ".milvus.GetIndexBuildProgressResponse\"\000\022"
-  "Q\n\tDropIndex\022%.milvus.proto.milvus.DropI"
-  "ndexRequest\032\033.milvus.proto.common.Status"
-  "\"\000\022S\n\006Insert\022\".milvus.proto.milvus.Inser"
-  "tRequest\032#.milvus.proto.milvus.MutationR"
-  "esult\"\000\022R\n\006Search\022\".milvus.proto.milvus."
-  "SearchRequest\032\".milvus.proto.milvus.Sear"
-  "chResults\"\000\022P\n\005Flush\022!.milvus.proto.milv"
-  "us.FlushRequest\032\".milvus.proto.milvus.Fl"
-  "ushResponse\"\000\022O\n\005Query\022!.milvus.proto.mi"
-  "lvus.QueryRequest\032!.milvus.proto.milvus."
-  "QueryResults\"\000\022d\n\014CalcDistance\022(.milvus."
-  "proto.milvus.CalcDistanceRequest\032(.milvu"
-  "s.proto.milvus.CalcDistanceResults\"\000\022\211\001\n"
-  "\030GetPersistentSegmentInfo\0224.milvus.proto"
-  ".milvus.GetPersistentSegmentInfoRequest\032"
-  "5.milvus.proto.milvus.GetPersistentSegme"
-  "ntInfoResponse\"\000\022z\n\023GetQuerySegmentInfo\022"
-  "/.milvus.proto.milvus.GetQuerySegmentInf"
-  "oRequest\0320.milvus.proto.milvus.GetQueryS"
-  "egmentInfoResponse\"\000\022P\n\005Dummy\022!.milvus.p"
-  "roto.milvus.DummyRequest\032\".milvus.proto."
-  "milvus.DummyResponse\"\000\022e\n\014RegisterLink\022("
-  ".milvus.proto.milvus.RegisterLinkRequest"
-  "\032).milvus.proto.milvus.RegisterLinkRespo"
-  "nse\"\000\022_\n\nGetMetrics\022&.milvus.proto.milvu"
-  "s.GetMetricsRequest\032\'.milvus.proto.milvu"
-  "s.GetMetricsResponse\"\0002u\n\014ProxyService\022e"
-  "\n\014RegisterLink\022(.milvus.proto.milvus.Reg"
-  "isterLinkRequest\032).milvus.proto.milvus.R"
-  "egisterLinkResponse\"\000B5Z3github.com/milv"
-  "us-io/milvus/internal/proto/milvuspbb\006pr"
-  "oto3"
+  "s\"\000\022[\n\016DropCollection\022*.milvus.proto.mil"
+  "vus.DropCollectionRequest\032\033.milvus.proto"
+  ".common.Status\"\000\022_\n\rHasCollection\022).milv"
+  "us.proto.milvus.HasCollectionRequest\032!.m"
+  "ilvus.proto.milvus.BoolResponse\"\000\022[\n\016Loa"
+  "dCollection\022*.milvus.proto.milvus.LoadCo"
+  "llectionRequest\032\033.milvus.proto.common.St"
+  "atus\"\000\022a\n\021ReleaseCollection\022-.milvus.pro"
+  "to.milvus.ReleaseCollectionRequest\032\033.mil"
+  "vus.proto.common.Status\"\000\022w\n\022DescribeCol"
+  "lection\022..milvus.proto.milvus.DescribeCo"
+  "llectionRequest\032/.milvus.proto.milvus.De"
+  "scribeCollectionResponse\"\000\022\206\001\n\027GetCollec"
+  "tionStatistics\0223.milvus.proto.milvus.Get"
+  "CollectionStatisticsRequest\0324.milvus.pro"
+  "to.milvus.GetCollectionStatisticsRespons"
+  "e\"\000\022n\n\017ShowCollections\022+.milvus.proto.mi"
+  "lvus.ShowCollectionsRequest\032,.milvus.pro"
+  "to.milvus.ShowCollectionsResponse\"\000\022]\n\017C"
+  "reatePartition\022+.milvus.proto.milvus.Cre"
+  "atePartitionRequest\032\033.milvus.proto.commo"
+  "n.Status\"\000\022Y\n\rDropPartition\022).milvus.pro"
+  "to.milvus.DropPartitionRequest\032\033.milvus."
+  "proto.common.Status\"\000\022]\n\014HasPartition\022(."
+  "milvus.proto.milvus.HasPartitionRequest\032"
+  "!.milvus.proto.milvus.BoolResponse\"\000\022[\n\016"
+  "LoadPartitions\022*.milvus.proto.milvus.Loa"
+  "dPartitionsRequest\032\033.milvus.proto.common"
+  ".Status\"\000\022a\n\021ReleasePartitions\022-.milvus."
+  "proto.milvus.ReleasePartitionsRequest\032\033."
+  "milvus.proto.common.Status\"\000\022\203\001\n\026GetPart"
+  "itionStatistics\0222.milvus.proto.milvus.Ge"
+  "tPartitionStatisticsRequest\0323.milvus.pro"
+  "to.milvus.GetPartitionStatisticsResponse"
+  "\"\000\022k\n\016ShowPartitions\022*.milvus.proto.milv"
+  "us.ShowPartitionsRequest\032+.milvus.proto."
+  "milvus.ShowPartitionsResponse\"\000\022U\n\013Creat"
+  "eIndex\022\'.milvus.proto.milvus.CreateIndex"
+  "Request\032\033.milvus.proto.common.Status\"\000\022h"
+  "\n\rDescribeIndex\022).milvus.proto.milvus.De"
+  "scribeIndexRequest\032*.milvus.proto.milvus"
+  ".DescribeIndexResponse\"\000\022h\n\rGetIndexStat"
+  "e\022).milvus.proto.milvus.GetIndexStateReq"
+  "uest\032*.milvus.proto.milvus.GetIndexState"
+  "Response\"\000\022\200\001\n\025GetIndexBuildProgress\0221.m"
+  "ilvus.proto.milvus.GetIndexBuildProgress"
+  "Request\0322.milvus.proto.milvus.GetIndexBu"
+  "ildProgressResponse\"\000\022Q\n\tDropIndex\022%.mil"
+  "vus.proto.milvus.DropIndexRequest\032\033.milv"
+  "us.proto.common.Status\"\000\022S\n\006Insert\022\".mil"
+  "vus.proto.milvus.InsertRequest\032#.milvus."
+  "proto.milvus.MutationResult\"\000\022S\n\006Delete\022"
+  "\".milvus.proto.milvus.DeleteRequest\032#.mi"
+  "lvus.proto.milvus.MutationResult\"\000\022R\n\006Se"
+  "arch\022\".milvus.proto.milvus.SearchRequest"
+  "\032\".milvus.proto.milvus.SearchResults\"\000\022P"
+  "\n\005Flush\022!.milvus.proto.milvus.FlushReque"
+  "st\032\".milvus.proto.milvus.FlushResponse\"\000"
+  "\022O\n\005Query\022!.milvus.proto.milvus.QueryReq"
+  "uest\032!.milvus.proto.milvus.QueryResults\""
+  "\000\022d\n\014CalcDistance\022(.milvus.proto.milvus."
+  "CalcDistanceRequest\032(.milvus.proto.milvu"
+  "s.CalcDistanceResults\"\000\022\211\001\n\030GetPersisten"
+  "tSegmentInfo\0224.milvus.proto.milvus.GetPe"
+  "rsistentSegmentInfoRequest\0325.milvus.prot"
+  "o.milvus.GetPersistentSegmentInfoRespons"
+  "e\"\000\022z\n\023GetQuerySegmentInfo\022/.milvus.prot"
+  "o.milvus.GetQuerySegmentInfoRequest\0320.mi"
+  "lvus.proto.milvus.GetQuerySegmentInfoRes"
+  "ponse\"\000\022P\n\005Dummy\022!.milvus.proto.milvus.D"
+  "ummyRequest\032\".milvus.proto.milvus.DummyR"
+  "esponse\"\000\022e\n\014RegisterLink\022(.milvus.proto"
+  ".milvus.RegisterLinkRequest\032).milvus.pro"
+  "to.milvus.RegisterLinkResponse\"\000\022_\n\nGetM"
+  "etrics\022&.milvus.proto.milvus.GetMetricsR"
+  "equest\032\'.milvus.proto.milvus.GetMetricsR"
+  "esponse\"\0002u\n\014ProxyService\022e\n\014RegisterLin"
+  "k\022(.milvus.proto.milvus.RegisterLinkRequ"
+  "est\032).milvus.proto.milvus.RegisterLinkRe"
+  "sponse\"\000B5Z3github.com/milvus-io/milvus/"
+  "internal/proto/milvuspbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_milvus_2eproto_deps[2] = {
   &::descriptor_table_common_2eproto,
   &::descriptor_table_schema_2eproto,
 };
-static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_milvus_2eproto_sccs[63] = {
+static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_milvus_2eproto_sccs[64] = {
   &scc_info_BoolResponse_milvus_2eproto.base,
   &scc_info_CalcDistanceRequest_milvus_2eproto.base,
   &scc_info_CalcDistanceResults_milvus_2eproto.base,
   &scc_info_CreateCollectionRequest_milvus_2eproto.base,
   &scc_info_CreateIndexRequest_milvus_2eproto.base,
   &scc_info_CreatePartitionRequest_milvus_2eproto.base,
+  &scc_info_DeleteRequest_milvus_2eproto.base,
   &scc_info_DescribeCollectionRequest_milvus_2eproto.base,
   &scc_info_DescribeCollectionResponse_milvus_2eproto.base,
   &scc_info_DescribeIndexRequest_milvus_2eproto.base,
@@ -2322,10 +2359,10 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_mil
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_milvus_2eproto_once;
 static bool descriptor_table_milvus_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_milvus_2eproto = {
-  &descriptor_table_milvus_2eproto_initialized, descriptor_table_protodef_milvus_2eproto, "milvus.proto", 12124,
-  &descriptor_table_milvus_2eproto_once, descriptor_table_milvus_2eproto_sccs, descriptor_table_milvus_2eproto_deps, 63, 2,
+  &descriptor_table_milvus_2eproto_initialized, descriptor_table_protodef_milvus_2eproto, "milvus.proto", 12351,
+  &descriptor_table_milvus_2eproto_once, descriptor_table_milvus_2eproto_sccs, descriptor_table_milvus_2eproto_deps, 64, 2,
   schemas, file_default_instances, TableStruct_milvus_2eproto::offsets,
-  file_level_metadata_milvus_2eproto, 63, file_level_enum_descriptors_milvus_2eproto, file_level_service_descriptors_milvus_2eproto,
+  file_level_metadata_milvus_2eproto, 64, file_level_enum_descriptors_milvus_2eproto, file_level_service_descriptors_milvus_2eproto,
 };
 
 // Force running AddDescriptors() at dynamic initialization time.
@@ -19201,6 +19238,530 @@ void MutationResult::InternalSwap(MutationResult* other) {
 
 // ===================================================================
 
+void DeleteRequest::InitAsDefaultInstance() {
+  ::milvus::proto::milvus::_DeleteRequest_default_instance_._instance.get_mutable()->base_ = const_cast< ::milvus::proto::common::MsgBase*>(
+      ::milvus::proto::common::MsgBase::internal_default_instance());
+}
+class DeleteRequest::_Internal {
+ public:
+  static const ::milvus::proto::common::MsgBase& base(const DeleteRequest* msg);
+};
+
+const ::milvus::proto::common::MsgBase&
+DeleteRequest::_Internal::base(const DeleteRequest* msg) {
+  return *msg->base_;
+}
+void DeleteRequest::clear_base() {
+  if (GetArenaNoVirtual() == nullptr && base_ != nullptr) {
+    delete base_;
+  }
+  base_ = nullptr;
+}
+DeleteRequest::DeleteRequest()
+  : ::PROTOBUF_NAMESPACE_ID::Message(), _internal_metadata_(nullptr) {
+  SharedCtor();
+  // @@protoc_insertion_point(constructor:milvus.proto.milvus.DeleteRequest)
+}
+DeleteRequest::DeleteRequest(const DeleteRequest& from)
+  : ::PROTOBUF_NAMESPACE_ID::Message(),
+      _internal_metadata_(nullptr) {
+  _internal_metadata_.MergeFrom(from._internal_metadata_);
+  db_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (!from.db_name().empty()) {
+    db_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.db_name_);
+  }
+  collection_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (!from.collection_name().empty()) {
+    collection_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.collection_name_);
+  }
+  partition_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (!from.partition_name().empty()) {
+    partition_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.partition_name_);
+  }
+  expr_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (!from.expr().empty()) {
+    expr_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.expr_);
+  }
+  if (from.has_base()) {
+    base_ = new ::milvus::proto::common::MsgBase(*from.base_);
+  } else {
+    base_ = nullptr;
+  }
+  // @@protoc_insertion_point(copy_constructor:milvus.proto.milvus.DeleteRequest)
+}
+
+void DeleteRequest::SharedCtor() {
+  ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_DeleteRequest_milvus_2eproto.base);
+  db_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  collection_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  partition_name_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  expr_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  base_ = nullptr;
+}
+
+DeleteRequest::~DeleteRequest() {
+  // @@protoc_insertion_point(destructor:milvus.proto.milvus.DeleteRequest)
+  SharedDtor();
+}
+
+void DeleteRequest::SharedDtor() {
+  db_name_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  collection_name_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  partition_name_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  expr_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (this != internal_default_instance()) delete base_;
+}
+
+void DeleteRequest::SetCachedSize(int size) const {
+  _cached_size_.Set(size);
+}
+const DeleteRequest& DeleteRequest::default_instance() {
+  ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&::scc_info_DeleteRequest_milvus_2eproto.base);
+  return *internal_default_instance();
+}
+
+
+void DeleteRequest::Clear() {
+// @@protoc_insertion_point(message_clear_start:milvus.proto.milvus.DeleteRequest)
+  ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  db_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  collection_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  partition_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  expr_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (GetArenaNoVirtual() == nullptr && base_ != nullptr) {
+    delete base_;
+  }
+  base_ = nullptr;
+  _internal_metadata_.Clear();
+}
+
+#if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+const char* DeleteRequest::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    ::PROTOBUF_NAMESPACE_ID::uint32 tag;
+    ptr = ::PROTOBUF_NAMESPACE_ID::internal::ReadTag(ptr, &tag);
+    CHK_(ptr);
+    switch (tag >> 3) {
+      // .milvus.proto.common.MsgBase base = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 10)) {
+          ptr = ctx->ParseMessage(mutable_base(), ptr);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      // string db_name = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 18)) {
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(mutable_db_name(), ptr, ctx, "milvus.proto.milvus.DeleteRequest.db_name");
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      // string collection_name = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 26)) {
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(mutable_collection_name(), ptr, ctx, "milvus.proto.milvus.DeleteRequest.collection_name");
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      // string partition_name = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 34)) {
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(mutable_partition_name(), ptr, ctx, "milvus.proto.milvus.DeleteRequest.partition_name");
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      // string expr = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 42)) {
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(mutable_expr(), ptr, ctx, "milvus.proto.milvus.DeleteRequest.expr");
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      default: {
+      handle_unusual:
+        if ((tag & 7) == 4 || tag == 0) {
+          ctx->SetLastTag(tag);
+          goto success;
+        }
+        ptr = UnknownFieldParse(tag, &_internal_metadata_, ptr, ctx);
+        CHK_(ptr != nullptr);
+        continue;
+      }
+    }  // switch
+  }  // while
+success:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto success;
+#undef CHK_
+}
+#else  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+bool DeleteRequest::MergePartialFromCodedStream(
+    ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) {
+#define DO_(EXPRESSION) if (!PROTOBUF_PREDICT_TRUE(EXPRESSION)) goto failure
+  ::PROTOBUF_NAMESPACE_ID::uint32 tag;
+  // @@protoc_insertion_point(parse_start:milvus.proto.milvus.DeleteRequest)
+  for (;;) {
+    ::std::pair<::PROTOBUF_NAMESPACE_ID::uint32, bool> p = input->ReadTagWithCutoffNoLastTag(127u);
+    tag = p.first;
+    if (!p.second) goto handle_unusual;
+    switch (::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::GetTagFieldNumber(tag)) {
+      // .milvus.proto.common.MsgBase base = 1;
+      case 1: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (10 & 0xFF)) {
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadMessage(
+               input, mutable_base()));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      // string db_name = 2;
+      case 2: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (18 & 0xFF)) {
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
+                input, this->mutable_db_name()));
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+            this->db_name().data(), static_cast<int>(this->db_name().length()),
+            ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
+            "milvus.proto.milvus.DeleteRequest.db_name"));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      // string collection_name = 3;
+      case 3: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (26 & 0xFF)) {
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
+                input, this->mutable_collection_name()));
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+            this->collection_name().data(), static_cast<int>(this->collection_name().length()),
+            ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
+            "milvus.proto.milvus.DeleteRequest.collection_name"));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      // string partition_name = 4;
+      case 4: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (34 & 0xFF)) {
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
+                input, this->mutable_partition_name()));
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+            this->partition_name().data(), static_cast<int>(this->partition_name().length()),
+            ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
+            "milvus.proto.milvus.DeleteRequest.partition_name"));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      // string expr = 5;
+      case 5: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (42 & 0xFF)) {
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
+                input, this->mutable_expr()));
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+            this->expr().data(), static_cast<int>(this->expr().length()),
+            ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
+            "milvus.proto.milvus.DeleteRequest.expr"));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      default: {
+      handle_unusual:
+        if (tag == 0) {
+          goto success;
+        }
+        DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SkipField(
+              input, tag, _internal_metadata_.mutable_unknown_fields()));
+        break;
+      }
+    }
+  }
+success:
+  // @@protoc_insertion_point(parse_success:milvus.proto.milvus.DeleteRequest)
+  return true;
+failure:
+  // @@protoc_insertion_point(parse_failure:milvus.proto.milvus.DeleteRequest)
+  return false;
+#undef DO_
+}
+#endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+
+void DeleteRequest::SerializeWithCachedSizes(
+    ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const {
+  // @@protoc_insertion_point(serialize_start:milvus.proto.milvus.DeleteRequest)
+  ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // .milvus.proto.common.MsgBase base = 1;
+  if (this->has_base()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteMessageMaybeToArray(
+      1, _Internal::base(this), output);
+  }
+
+  // string db_name = 2;
+  if (this->db_name().size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->db_name().data(), static_cast<int>(this->db_name().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.proto.milvus.DeleteRequest.db_name");
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringMaybeAliased(
+      2, this->db_name(), output);
+  }
+
+  // string collection_name = 3;
+  if (this->collection_name().size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->collection_name().data(), static_cast<int>(this->collection_name().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.proto.milvus.DeleteRequest.collection_name");
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringMaybeAliased(
+      3, this->collection_name(), output);
+  }
+
+  // string partition_name = 4;
+  if (this->partition_name().size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->partition_name().data(), static_cast<int>(this->partition_name().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.proto.milvus.DeleteRequest.partition_name");
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringMaybeAliased(
+      4, this->partition_name(), output);
+  }
+
+  // string expr = 5;
+  if (this->expr().size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->expr().data(), static_cast<int>(this->expr().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.proto.milvus.DeleteRequest.expr");
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringMaybeAliased(
+      5, this->expr(), output);
+  }
+
+  if (_internal_metadata_.have_unknown_fields()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFields(
+        _internal_metadata_.unknown_fields(), output);
+  }
+  // @@protoc_insertion_point(serialize_end:milvus.proto.milvus.DeleteRequest)
+}
+
+::PROTOBUF_NAMESPACE_ID::uint8* DeleteRequest::InternalSerializeWithCachedSizesToArray(
+    ::PROTOBUF_NAMESPACE_ID::uint8* target) const {
+  // @@protoc_insertion_point(serialize_to_array_start:milvus.proto.milvus.DeleteRequest)
+  ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // .milvus.proto.common.MsgBase base = 1;
+  if (this->has_base()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessageToArray(
+        1, _Internal::base(this), target);
+  }
+
+  // string db_name = 2;
+  if (this->db_name().size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->db_name().data(), static_cast<int>(this->db_name().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.proto.milvus.DeleteRequest.db_name");
+    target =
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringToArray(
+        2, this->db_name(), target);
+  }
+
+  // string collection_name = 3;
+  if (this->collection_name().size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->collection_name().data(), static_cast<int>(this->collection_name().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.proto.milvus.DeleteRequest.collection_name");
+    target =
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringToArray(
+        3, this->collection_name(), target);
+  }
+
+  // string partition_name = 4;
+  if (this->partition_name().size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->partition_name().data(), static_cast<int>(this->partition_name().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.proto.milvus.DeleteRequest.partition_name");
+    target =
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringToArray(
+        4, this->partition_name(), target);
+  }
+
+  // string expr = 5;
+  if (this->expr().size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->expr().data(), static_cast<int>(this->expr().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.proto.milvus.DeleteRequest.expr");
+    target =
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringToArray(
+        5, this->expr(), target);
+  }
+
+  if (_internal_metadata_.have_unknown_fields()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFieldsToArray(
+        _internal_metadata_.unknown_fields(), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:milvus.proto.milvus.DeleteRequest)
+  return target;
+}
+
+size_t DeleteRequest::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:milvus.proto.milvus.DeleteRequest)
+  size_t total_size = 0;
+
+  if (_internal_metadata_.have_unknown_fields()) {
+    total_size +=
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::ComputeUnknownFieldsSize(
+        _internal_metadata_.unknown_fields());
+  }
+  ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // string db_name = 2;
+  if (this->db_name().size() > 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->db_name());
+  }
+
+  // string collection_name = 3;
+  if (this->collection_name().size() > 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->collection_name());
+  }
+
+  // string partition_name = 4;
+  if (this->partition_name().size() > 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->partition_name());
+  }
+
+  // string expr = 5;
+  if (this->expr().size() > 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->expr());
+  }
+
+  // .milvus.proto.common.MsgBase base = 1;
+  if (this->has_base()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+        *base_);
+  }
+
+  int cached_size = ::PROTOBUF_NAMESPACE_ID::internal::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void DeleteRequest::MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) {
+// @@protoc_insertion_point(generalized_merge_from_start:milvus.proto.milvus.DeleteRequest)
+  GOOGLE_DCHECK_NE(&from, this);
+  const DeleteRequest* source =
+      ::PROTOBUF_NAMESPACE_ID::DynamicCastToGenerated<DeleteRequest>(
+          &from);
+  if (source == nullptr) {
+  // @@protoc_insertion_point(generalized_merge_from_cast_fail:milvus.proto.milvus.DeleteRequest)
+    ::PROTOBUF_NAMESPACE_ID::internal::ReflectionOps::Merge(from, this);
+  } else {
+  // @@protoc_insertion_point(generalized_merge_from_cast_success:milvus.proto.milvus.DeleteRequest)
+    MergeFrom(*source);
+  }
+}
+
+void DeleteRequest::MergeFrom(const DeleteRequest& from) {
+// @@protoc_insertion_point(class_specific_merge_from_start:milvus.proto.milvus.DeleteRequest)
+  GOOGLE_DCHECK_NE(&from, this);
+  _internal_metadata_.MergeFrom(from._internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from.db_name().size() > 0) {
+
+    db_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.db_name_);
+  }
+  if (from.collection_name().size() > 0) {
+
+    collection_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.collection_name_);
+  }
+  if (from.partition_name().size() > 0) {
+
+    partition_name_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.partition_name_);
+  }
+  if (from.expr().size() > 0) {
+
+    expr_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.expr_);
+  }
+  if (from.has_base()) {
+    mutable_base()->::milvus::proto::common::MsgBase::MergeFrom(from.base());
+  }
+}
+
+void DeleteRequest::CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) {
+// @@protoc_insertion_point(generalized_copy_from_start:milvus.proto.milvus.DeleteRequest)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+void DeleteRequest::CopyFrom(const DeleteRequest& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:milvus.proto.milvus.DeleteRequest)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool DeleteRequest::IsInitialized() const {
+  return true;
+}
+
+void DeleteRequest::InternalSwap(DeleteRequest* other) {
+  using std::swap;
+  _internal_metadata_.Swap(&other->_internal_metadata_);
+  db_name_.Swap(&other->db_name_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+    GetArenaNoVirtual());
+  collection_name_.Swap(&other->collection_name_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+    GetArenaNoVirtual());
+  partition_name_.Swap(&other->partition_name_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+    GetArenaNoVirtual());
+  expr_.Swap(&other->expr_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+    GetArenaNoVirtual());
+  swap(base_, other->base_);
+}
+
+::PROTOBUF_NAMESPACE_ID::Metadata DeleteRequest::GetMetadata() const {
+  return GetMetadataStatic();
+}
+
+
+// ===================================================================
+
 void PlaceholderValue::InitAsDefaultInstance() {
 }
 class PlaceholderValue::_Internal {
@@ -29331,6 +29892,9 @@ template<> PROTOBUF_NOINLINE ::milvus::proto::milvus::InsertRequest* Arena::Crea
 }
 template<> PROTOBUF_NOINLINE ::milvus::proto::milvus::MutationResult* Arena::CreateMaybeMessage< ::milvus::proto::milvus::MutationResult >(Arena* arena) {
   return Arena::CreateInternal< ::milvus::proto::milvus::MutationResult >(arena);
+}
+template<> PROTOBUF_NOINLINE ::milvus::proto::milvus::DeleteRequest* Arena::CreateMaybeMessage< ::milvus::proto::milvus::DeleteRequest >(Arena* arena) {
+  return Arena::CreateInternal< ::milvus::proto::milvus::DeleteRequest >(arena);
 }
 template<> PROTOBUF_NOINLINE ::milvus::proto::milvus::PlaceholderValue* Arena::CreateMaybeMessage< ::milvus::proto::milvus::PlaceholderValue >(Arena* arena) {
   return Arena::CreateInternal< ::milvus::proto::milvus::PlaceholderValue >(arena);
