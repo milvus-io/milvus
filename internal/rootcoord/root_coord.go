@@ -297,82 +297,86 @@ func (c *Core) checkFlushedSegmentsLoop() {
 			return
 		case <-ticker.C:
 			log.Debug("check flushed segments")
-			collID2Meta, segID2IndexMeta, indexID2Meta := c.MetaTable.dupMeta()
-			for _, collMeta := range collID2Meta {
-				if len(collMeta.FieldIndexes) == 0 {
-					continue
-				}
-				for _, partID := range collMeta.PartitionIDs {
-					ctx2, cancel2 := context.WithTimeout(c.ctx, 3*time.Minute)
-					segIDs, err := c.CallGetFlushedSegmentsService(ctx2, collMeta.ID, partID)
-					if err != nil {
-						log.Debug("get flushed segments from data coord failed",
-							zap.Int64("collection id", collMeta.ID),
-							zap.Int64("partition id", partID),
-							zap.Error(err))
+			c.checkFlushedSegments(c.ctx)
+		}
+	}
+}
+
+func (c *Core) checkFlushedSegments(ctx context.Context) {
+	collID2Meta, segID2IndexMeta, indexID2Meta := c.MetaTable.dupMeta()
+	for _, collMeta := range collID2Meta {
+		if len(collMeta.FieldIndexes) == 0 {
+			continue
+		}
+		for _, partID := range collMeta.PartitionIDs {
+			ctx2, cancel2 := context.WithTimeout(ctx, 3*time.Minute)
+			segIDs, err := c.CallGetFlushedSegmentsService(ctx2, collMeta.ID, partID)
+			if err != nil {
+				log.Debug("get flushed segments from data coord failed",
+					zap.Int64("collection id", collMeta.ID),
+					zap.Int64("partition id", partID),
+					zap.Error(err))
+			} else {
+				for _, segID := range segIDs {
+					indexInfos := []*etcdpb.FieldIndexInfo{}
+					indexMeta, ok := segID2IndexMeta[segID]
+					if !ok {
+						indexInfos = append(indexInfos, collMeta.FieldIndexes...)
 					} else {
-						for _, segID := range segIDs {
-							indexInfos := []*etcdpb.FieldIndexInfo{}
-							indexMeta, ok := segID2IndexMeta[segID]
-							if !ok {
-								indexInfos = append(indexInfos, collMeta.FieldIndexes...)
-							} else {
-								for _, idx := range collMeta.FieldIndexes {
-									if _, ok := indexMeta[idx.IndexID]; !ok {
-										indexInfos = append(indexInfos, idx)
-									}
-								}
-							}
-							for _, idxInfo := range indexInfos {
-								field, err := GetFieldSchemaByID(&collMeta, idxInfo.FiledID)
-								if err != nil {
-									log.Debug("GetFieldSchemaByID",
-										zap.Any("collection_meta", collMeta),
-										zap.Int64("field id", idxInfo.FiledID))
-									continue
-								}
-								indexMeta, ok := indexID2Meta[idxInfo.IndexID]
-								if !ok {
-									log.Debug("index meta not exist", zap.Int64("index_id", idxInfo.IndexID))
-									continue
-								}
-								info := etcdpb.SegmentIndexInfo{
-									CollectionID: collMeta.ID,
-									PartitionID:  partID,
-									SegmentID:    segID,
-									FieldID:      idxInfo.FiledID,
-									IndexID:      idxInfo.IndexID,
-									EnableIndex:  false,
-								}
-								log.Debug("build index by background checker",
-									zap.Int64("segment_id", segID),
-									zap.Int64("index_id", indexMeta.IndexID),
-									zap.Int64("collection_id", collMeta.ID))
-								info.BuildID, err = c.BuildIndex(ctx2, segID, field, &indexMeta, false)
-								if err != nil {
-									log.Debug("build index failed",
-										zap.Int64("segment_id", segID),
-										zap.Int64("field_id", field.FieldID),
-										zap.Int64("index_id", indexMeta.IndexID))
-									continue
-								}
-								if info.BuildID != 0 {
-									info.EnableIndex = true
-								}
-								ts, _ := c.TSOAllocator(1)
-								if err := c.MetaTable.AddIndex(&info, ts); err != nil {
-									log.Debug("Add index into meta table failed",
-										zap.Int64("collection_id", collMeta.ID),
-										zap.Int64("index_id", info.IndexID),
-										zap.Int64("build_id", info.BuildID),
-										zap.Error(err))
-								}
+						for _, idx := range collMeta.FieldIndexes {
+							if _, ok := indexMeta[idx.IndexID]; !ok {
+								indexInfos = append(indexInfos, idx)
 							}
 						}
 					}
-					cancel2()
+					for _, idxInfo := range indexInfos {
+						field, err := GetFieldSchemaByID(&collMeta, idxInfo.FiledID)
+						if err != nil {
+							log.Debug("GetFieldSchemaByID",
+								zap.Any("collection_meta", collMeta),
+								zap.Int64("field id", idxInfo.FiledID))
+							continue
+						}
+						indexMeta, ok := indexID2Meta[idxInfo.IndexID]
+						if !ok {
+							log.Debug("index meta not exist", zap.Int64("index_id", idxInfo.IndexID))
+							continue
+						}
+						info := etcdpb.SegmentIndexInfo{
+							CollectionID: collMeta.ID,
+							PartitionID:  partID,
+							SegmentID:    segID,
+							FieldID:      idxInfo.FiledID,
+							IndexID:      idxInfo.IndexID,
+							EnableIndex:  false,
+						}
+						log.Debug("build index by background checker",
+							zap.Int64("segment_id", segID),
+							zap.Int64("index_id", indexMeta.IndexID),
+							zap.Int64("collection_id", collMeta.ID))
+						info.BuildID, err = c.BuildIndex(ctx2, segID, field, &indexMeta, false)
+						if err != nil {
+							log.Debug("build index failed",
+								zap.Int64("segment_id", segID),
+								zap.Int64("field_id", field.FieldID),
+								zap.Int64("index_id", indexMeta.IndexID))
+							continue
+						}
+						if info.BuildID != 0 {
+							info.EnableIndex = true
+						}
+						ts, _ := c.TSOAllocator(1)
+						if err := c.MetaTable.AddIndex(&info, ts); err != nil {
+							log.Debug("Add index into meta table failed",
+								zap.Int64("collection_id", collMeta.ID),
+								zap.Int64("index_id", info.IndexID),
+								zap.Int64("build_id", info.BuildID),
+								zap.Error(err))
+						}
+					}
 				}
 			}
+			cancel2()
 		}
 	}
 }

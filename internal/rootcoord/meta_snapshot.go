@@ -80,6 +80,7 @@ func (ms *metaSnapshot) loadTs() error {
 	}
 	version := resp.Kvs[0].Version
 	revision := resp.Kvs[0].ModRevision
+	createRevision := resp.Kvs[0].CreateRevision
 	strTs := string(resp.Kvs[0].Value)
 	ts, err := strconv.ParseUint(strTs, 10, 64)
 	if err != nil {
@@ -88,11 +89,11 @@ func (ms *metaSnapshot) loadTs() error {
 	log.Info("load last ts", zap.Int64("version", version), zap.Int64("revision", revision))
 
 	ms.initTs(revision, ts)
-	for version--; version > 0; version-- {
+	// start from revision-1, until equals to create revision
+	for revision--; revision >= createRevision; revision-- {
 		if ms.numTs == len(ms.ts2Rev) {
 			break
 		}
-		revision--
 		resp, err = ms.cli.Get(ctx, key, clientv3.WithRev(revision))
 		if err != nil {
 			return err
@@ -104,9 +105,18 @@ func (ms *metaSnapshot) loadTs() error {
 		curVer := resp.Kvs[0].Version
 		curRev := resp.Kvs[0].ModRevision
 		if curVer > version {
+			log.Warn("version go backwards", zap.Int64("curVer", curVer), zap.Int64("version", version))
 			return nil
 		}
+		if curVer == version {
+			log.Debug("snapshot found save version with different revision", zap.Int64("revision", revision), zap.Int64("version", version))
+		}
 		strTs := string(resp.Kvs[0].Value)
+		if strTs == "0" {
+			//#issue 7150, index building inserted "0", skipping
+			//this is a special fix for backward compatibility, previous version will put 0 ts into snapshot building index
+			continue
+		}
 		curTs, err := strconv.ParseUint(strTs, 10, 64)
 		if err != nil {
 			return err
@@ -117,6 +127,7 @@ func (ms *metaSnapshot) loadTs() error {
 		ms.initTs(curRev, curTs)
 		ts = curTs
 		revision = curRev
+		version = curVer
 	}
 
 	return nil
