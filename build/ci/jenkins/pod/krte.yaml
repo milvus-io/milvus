@@ -49,6 +49,10 @@ spec:
       value: debug
     - name: ETCD_QUOTA_BACKEND_BYTES
       value: "4294967296"
+    - name: ETCD_AUTO_COMPACTION_MODE
+      value: "revision"
+    - name: ETCD_AUTO_COMPACTION_RETENTION
+      value: "1000"
     command:
     - etcd
     - -advertise-client-urls=http://127.0.0.1:2379
