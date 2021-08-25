@@ -4537,3 +4537,72 @@ func (rpt *ReleasePartitionTask) Execute(ctx context.Context) (err error) {
 func (rpt *ReleasePartitionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
+
+type DeleteTask struct {
+	Condition
+	*milvuspb.DeleteRequest
+	ctx    context.Context
+	result *milvuspb.MutationResult
+}
+
+func (dt *DeleteTask) TraceCtx() context.Context {
+	return dt.ctx
+}
+
+func (dt *DeleteTask) ID() UniqueID {
+	return dt.Base.MsgID
+}
+
+func (dt *DeleteTask) SetID(uid UniqueID) {
+	dt.Base.MsgID = uid
+}
+
+func (dt *DeleteTask) Type() commonpb.MsgType {
+	return dt.Base.MsgType
+}
+
+func (dt *DeleteTask) Name() string {
+	return ReleasePartitionTaskName
+}
+
+func (dt *DeleteTask) BeginTs() Timestamp {
+	return dt.Base.Timestamp
+}
+
+func (dt *DeleteTask) EndTs() Timestamp {
+	return dt.Base.Timestamp
+}
+
+func (dt *DeleteTask) SetTs(ts Timestamp) {
+	dt.Base.Timestamp = ts
+}
+
+func (dt *DeleteTask) OnEnqueue() error {
+	dt.Base = &commonpb.MsgBase{}
+	return nil
+}
+
+func (dt *DeleteTask) PreExecute(ctx context.Context) error {
+	dt.Base.MsgType = commonpb.MsgType_ReleasePartitions
+	dt.Base.SourceID = Params.ProxyID
+
+	collName := dt.CollectionName
+	if err := ValidateCollectionName(collName); err != nil {
+		return err
+	}
+
+	partitionTag := dt.PartitionName
+	if err := ValidatePartitionTag(partitionTag, true); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (dt *DeleteTask) Execute(ctx context.Context) (err error) {
+	return nil
+}
+
+func (dt *DeleteTask) PostExecute(ctx context.Context) error {
+	return nil
+}

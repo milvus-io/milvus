@@ -31,6 +31,7 @@ service MilvusService {
   rpc DropIndex(DropIndexRequest) returns (common.Status) {}
 
   rpc Insert(InsertRequest) returns (MutationResult) {}
+  rpc Delete(DeleteRequest) returns (MutationResult) {}
   rpc Search(SearchRequest) returns (SearchResults) {}
   rpc Flush(FlushRequest) returns (FlushResponse) {}
   rpc Query(QueryRequest) returns (QueryResults) {}
@@ -316,6 +317,14 @@ message MutationResult {
   int64 delete_cnt = 7;
   int64 upsert_cnt = 8;
   uint64 timestamp = 9;
+}
+
+message DeleteRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+  string partition_name = 4;
+  string expr = 5;
 }
 
 enum PlaceholderType {
