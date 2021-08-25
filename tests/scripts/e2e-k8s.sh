@@ -302,10 +302,11 @@ if [[ -z "${SKIP_INSTALL:-}" ]]; then
 fi
 
 if [[ -z "${SKIP_TEST:-}" ]]; then
+  trace "prepare e2e test" "${ROOT}/tests/scripts/prepare_e2e.sh"
   if [[ -n "${TEST_TIMEOUT:-}" ]]; then
-    trace "test" "timeout" "-v" "${TEST_TIMEOUT}" "${ROOT}/tests/scripts/e2e.sh" "${TEST_EXTRA_ARG}"
+    trace "e2e test" "timeout" "-v" "${TEST_TIMEOUT}" "${ROOT}/tests/scripts/e2e.sh" "${TEST_EXTRA_ARG}"
   else
-    trace "test" "${ROOT}/tests/scripts/e2e.sh" "${TEST_EXTRA_ARG}"
+    trace "e2e test" "${ROOT}/tests/scripts/e2e.sh" "${TEST_EXTRA_ARG}"
   fi
 fi
 
