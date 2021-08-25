@@ -24,3 +24,4 @@ delayed-assert
 kubernetes==17.17.0
 PyYAML==5.4.1
 pytest-sugar==0.9.4
+pytest-reportportal==5.0.10
