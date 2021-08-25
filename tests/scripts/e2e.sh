@@ -54,11 +54,6 @@ if [[ "${TEST_ENV:-}" =~ ^kind*  ]]; then
 fi
 
 pushd "${ROOT}/tests/docker"
-  docker-compose pull --ignore-pull-failures pytest
-  if [[ -z "${SKIP_CHECK_PYTEST_ENV:-}" ]]; then
-    docker-compose build pytest
-  fi
-
   if [[ "${TEST_ENV:-}" =~ ^kind*  ]]; then
     export PRE_EXIST_NETWORK="true"
     export PYTEST_NETWORK="kind"
