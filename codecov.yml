@@ -35,4 +35,4 @@ ignore:
   - "*.yml"
   - "*.md"
   - "docs/.*"
-  - "*/*.pb.go"
+  - "**/*.pb.go"
