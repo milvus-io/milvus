@@ -14,6 +14,7 @@ package rootcoord
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"path"
@@ -1908,4 +1909,158 @@ func TestCheckInit(t *testing.T) {
 	}
 	err = c.checkInit()
 	assert.Nil(t, err)
+}
+
+func TestCheckFlushedSegments(t *testing.T) {
+	const (
+		dbName   = "testDb"
+		collName = "testColl"
+		partName = "testPartition"
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	msFactory := msgstream.NewPmsFactory()
+	Params.Init()
+	core, err := NewCore(ctx, msFactory)
+	assert.Nil(t, err)
+	randVal := rand.Int()
+
+	Params.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
+	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
+	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
+	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+
+	err = core.Register()
+	assert.Nil(t, err)
+
+	dm := &dataMock{randVal: randVal}
+	err = core.SetDataCoord(ctx, dm)
+	assert.Nil(t, err)
+
+	im := &indexMock{
+		fileArray:  []string{},
+		idxBuildID: []int64{},
+		idxID:      []int64{},
+		idxDropID:  []int64{},
+		mutex:      sync.Mutex{},
+	}
+	err = core.SetIndexCoord(im)
+	assert.Nil(t, err)
+
+	qm := &queryMock{
+		collID: nil,
+		mutex:  sync.Mutex{},
+	}
+	err = core.SetQueryCoord(qm)
+	assert.Nil(t, err)
+
+	core.NewProxyClient = func(*sessionutil.Session) (types.Proxy, error) {
+		return nil, nil
+	}
+
+	err = core.Init()
+	assert.Nil(t, err)
+
+	err = core.Start()
+	assert.Nil(t, err)
+
+	m := map[string]interface{}{
+		"receiveBufSize": 1024,
+		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarBufSize":  1024}
+	err = msFactory.SetParams(m)
+	assert.Nil(t, err)
+
+	timeTickStream, _ := msFactory.NewMsgStream(ctx)
+	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
+	timeTickStream.Start()
+
+	time.Sleep(100 * time.Millisecond)
+	t.Run("check flushed segments", func(t *testing.T) {
+		ctx := context.Background()
+		var collID int64 = 1
+		var partID int64 = 2
+		var segID int64 = 1001
+		var fieldID int64 = 101
+		var indexID int64 = 6001
+		core.MetaTable.segID2IndexMeta[segID] = make(map[int64]etcdpb.SegmentIndexInfo)
+		core.MetaTable.partID2SegID[partID] = make(map[int64]bool)
+		core.MetaTable.collID2Meta[collID] = etcdpb.CollectionInfo{ID: collID}
+		// do nothing, since collection has 0 index
+		core.checkFlushedSegments(ctx)
+
+		// get field schema by id fail
+		core.MetaTable.collID2Meta[collID] = etcdpb.CollectionInfo{
+			ID:           collID,
+			PartitionIDs: []int64{partID},
+			FieldIndexes: []*etcdpb.FieldIndexInfo{
+				{
+					FiledID: fieldID,
+					IndexID: indexID,
+				},
+			},
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{},
+			},
+		}
+		core.checkFlushedSegments(ctx)
+
+		// fail to get segment id ,dont panic
+		core.CallGetFlushedSegmentsService = func(_ context.Context, collID, partID int64) ([]int64, error) {
+			return []int64{}, errors.New("service not available")
+		}
+		core.checkFlushedSegments(core.ctx)
+		// non-exist segID
+		core.CallGetFlushedSegmentsService = func(_ context.Context, collID, partID int64) ([]int64, error) {
+			return []int64{2001}, nil
+		}
+		core.checkFlushedSegments(core.ctx)
+
+		// missing index info
+		core.MetaTable.collID2Meta[collID] = etcdpb.CollectionInfo{
+			ID:           collID,
+			PartitionIDs: []int64{partID},
+			FieldIndexes: []*etcdpb.FieldIndexInfo{
+				{
+					FiledID: fieldID,
+					IndexID: indexID,
+				},
+			},
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID: fieldID,
+					},
+				},
+			},
+		}
+		core.checkFlushedSegments(ctx)
+		// existing segID, buildIndex failed
+		core.CallGetFlushedSegmentsService = func(_ context.Context, cid, pid int64) ([]int64, error) {
+			assert.Equal(t, collID, cid)
+			assert.Equal(t, partID, pid)
+			return []int64{segID}, nil
+		}
+		core.MetaTable.indexID2Meta[indexID] = etcdpb.IndexInfo{
+			IndexID: indexID,
+		}
+		core.CallBuildIndexService = func(_ context.Context, binlog []string, field *schemapb.FieldSchema, idx *etcdpb.IndexInfo) (int64, error) {
+			assert.Equal(t, fieldID, field.FieldID)
+			assert.Equal(t, indexID, idx.IndexID)
+			return -1, errors.New("build index build")
+		}
+
+		core.checkFlushedSegments(ctx)
+
+		var indexBuildID int64 = 10001
+		core.CallBuildIndexService = func(_ context.Context, binlog []string, field *schemapb.FieldSchema, idx *etcdpb.IndexInfo) (int64, error) {
+			return indexBuildID, nil
+		}
+		core.checkFlushedSegments(core.ctx)
+
+	})
+
 }

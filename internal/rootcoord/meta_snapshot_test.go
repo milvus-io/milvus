@@ -397,3 +397,58 @@ func TestMultiSaveAndRemoveWithPrefix(t *testing.T) {
 		assert.Equal(t, 39-i, len(vals))
 	}
 }
+
+func TestTsBackward(t *testing.T) {
+	rand.Seed(time.Now().UnixNano())
+	randVal := rand.Int()
+
+	Params.Init()
+	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
+	tsKey := "timestamp"
+
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	assert.Nil(t, err)
+	defer etcdCli.Close()
+
+	kv, err := newMetaSnapshot(etcdCli, rootPath, tsKey, 1024)
+	assert.Nil(t, err)
+
+	err = kv.loadTs()
+	assert.Nil(t, err)
+
+	kv.Save("a", "b", 100)
+	kv.Save("a", "c", 99) // backward
+	kv.Save("a", "d", 200)
+
+	kv, err = newMetaSnapshot(etcdCli, rootPath, tsKey, 1024)
+	assert.Error(t, err)
+
+}
+
+func TestFix7150(t *testing.T) {
+	rand.Seed(time.Now().UnixNano())
+	randVal := rand.Int()
+
+	Params.Init()
+	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
+	tsKey := "timestamp"
+
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	assert.Nil(t, err)
+	defer etcdCli.Close()
+
+	kv, err := newMetaSnapshot(etcdCli, rootPath, tsKey, 1024)
+	assert.Nil(t, err)
+
+	err = kv.loadTs()
+	assert.Nil(t, err)
+
+	kv.Save("a", "b", 100)
+	kv.Save("a", "c", 0) // bug introduced
+	kv.Save("a", "d", 200)
+
+	kv, err = newMetaSnapshot(etcdCli, rootPath, tsKey, 1024)
+	assert.Nil(t, err)
+	err = kv.loadTs()
+	assert.Nil(t, err)
+}
