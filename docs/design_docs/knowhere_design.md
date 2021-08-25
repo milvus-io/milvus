@@ -30,7 +30,7 @@ Load(const BinarySet&);
 
 /*
  * Create index
- * @param dataset_ptr: index data
+ * @param dataset_ptr: index data (key of the Dataset is "tensor", "rows" and "dim")
  * @parma config: index param
  */
 void
@@ -38,10 +38,10 @@ BuildAll(const DatasetPtr& dataset_ptr, const Config& config);
 
 /*
  * KNN (K-Nearest Neighbors) Query
- * @param dataset_ptr: query data
+ * @param dataset_ptr: query data (key of the Dataset is "tensor" and "rows")
  * @parma config: query param
  * @parma blacklist: mark for deletion
- * @return: query result
+ * @return: query result (key of the Dataset is "ids" and "distance")
  */
 DatasetPtr
 Query(const DatasetPtr& dataset_ptr, const Config& config, BitsetView blacklist);
@@ -54,7 +54,26 @@ Query(const DatasetPtr& dataset_ptr, const Config& config, BitsetView blacklist)
 VecIndexPtr
 CopyGpuToCpu();
 
+/*
+ * If the user IDs has been set, they will be returned in the Query interface;
+ * else the range of the returned IDs is [0, row_num-1].
+ * @parma uids: user ids
+ */
+void
+SetUids(std::shared_ptr<std::vector<IDType>> uids);
+
+/*
+ * Get the size of the index in memory.
+ * @return: index memory size
+ */
+int64_t
+Size();
 ```
+
+## Data Format
+The vector data used for index and query is stored as a one-dimensional array.
+And the first `dim * sizeof(data_type)` bytes of the array is the first vector; then `row_num -1` vectors followed.
+
 
 ## Sequence
 ### Create index
