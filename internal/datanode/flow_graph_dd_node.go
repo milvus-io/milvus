@@ -92,14 +92,21 @@ func (ddn *ddNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			}
 		case commonpb.MsgType_Insert:
 			log.Debug("DDNode with insert messages")
+			imsg := msg.(*msgstream.InsertMsg)
 			if msg.EndTs() < FilterThreshold {
 				log.Info("Filtering Insert Messages",
 					zap.Uint64("Message endts", msg.EndTs()),
 					zap.Uint64("FilterThreshold", FilterThreshold),
 				)
-				if ddn.filterFlushedSegmentInsertMessages(msg.(*msgstream.InsertMsg)) {
+				if ddn.filterFlushedSegmentInsertMessages(imsg) {
 					continue
 				}
+			}
+			if imsg.CollectionID != ddn.collectionID {
+				//log.Debug("filter invalid InsertMsg, collection mis-match",
+				//	zap.Int64("msg collID", imsg.CollectionID),
+				//	zap.Int64("ddn collID", ddn.collectionID))
+				continue
 			}
 			iMsg.insertMessages = append(iMsg.insertMessages, msg.(*msgstream.InsertMsg))
 		}
