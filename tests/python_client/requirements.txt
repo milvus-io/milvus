@@ -12,7 +12,7 @@ pytest-print==0.2.1
 pytest-level==0.1.1
 pytest-xdist==2.2.1
 # pytest-parallel
-pymilvus==2.0.0rc5.dev20
+pymilvus==2.0.0rc5.dev29
 pytest-rerunfailures==9.1.1
 git+https://github.com/Projectplace/pytest-tags
 ndg-httpsclient
