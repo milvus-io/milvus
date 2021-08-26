@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -65,7 +66,10 @@ type queryCollection struct {
 	queryMsgStream       msgstream.MsgStream
 	queryResultMsgStream msgstream.MsgStream
 
-	vcm storage.ChunkManager
+	localChunkManager  storage.ChunkManager
+	remoteChunkManager storage.ChunkManager
+	vectorChunkManager storage.ChunkManager
+	localCacheEnabled  bool
 }
 
 type ResultEntityIds []UniqueID
@@ -76,7 +80,9 @@ func newQueryCollection(releaseCtx context.Context,
 	historical *historical,
 	streaming *streaming,
 	factory msgstream.Factory,
-	vcm storage.ChunkManager,
+	localChunkManager storage.ChunkManager,
+	remoteChunkManager storage.ChunkManager,
+	localCacheEnabled bool,
 ) *queryCollection {
 
 	unsolvedMsg := make([]queryMsg, 0)
@@ -102,7 +108,9 @@ func newQueryCollection(releaseCtx context.Context,
 		queryMsgStream:       queryStream,
 		queryResultMsgStream: queryResultStream,
 
-		vcm: vcm,
+		localChunkManager:  localChunkManager,
+		remoteChunkManager: remoteChunkManager,
+		localCacheEnabled:  localCacheEnabled,
 	}
 
 	qc.register()
@@ -1059,8 +1067,21 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 
 	var mergeList []*segcorepb.RetrieveResults
 
+	if q.vectorChunkManager == nil {
+		if q.localChunkManager == nil {
+			return fmt.Errorf("can not create vector chunk manager for local chunk manager is nil")
+		}
+		if q.remoteChunkManager == nil {
+			return fmt.Errorf("can not create vector chunk manager for remote chunk manager is nil")
+		}
+		q.vectorChunkManager = storage.NewVectorChunkManager(q.localChunkManager, q.remoteChunkManager,
+			&etcdpb.CollectionMeta{
+				ID:     collection.id,
+				Schema: collection.schema,
+			}, q.localCacheEnabled)
+	}
 	// historical retrieve
-	hisRetrieveResults, sealedSegmentRetrieved, err1 := q.historical.retrieve(collectionID, retrieveMsg.PartitionIDs, q.vcm, plan)
+	hisRetrieveResults, sealedSegmentRetrieved, err1 := q.historical.retrieve(collectionID, retrieveMsg.PartitionIDs, q.vectorChunkManager, plan)
 	if err1 != nil {
 		log.Warn(err1.Error())
 		return err1
