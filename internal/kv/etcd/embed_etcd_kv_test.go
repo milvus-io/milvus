@@ -27,6 +27,7 @@ func TestEmbedEtcd(te *testing.T) {
 	param := new(paramtable.BaseParamTable)
 	param.Init()
 	param.BaseTable.Save("etcd.use.embed", "true")
+	param.BaseTable.Save("etcd.config.path", "../../../configs/advanced/etcd.yaml")
 	param.BaseTable.Save("etcd.data.dir", "etcd.test.data.dir")
 	param.LoadCfgToMemory()
 	//clean up data

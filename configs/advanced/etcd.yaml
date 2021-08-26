@@ -33,10 +33,10 @@ election-timeout: 1000
 quota-backend-bytes: 0
 
 # List of comma separated URLs to listen on for peer traffic.
-listen-peer-urls: http://localhost:2380
+listen-peer-urls: http://localhost:2480
 
 # List of comma separated URLs to listen on for client traffic.
-listen-client-urls: http://localhost:2379
+listen-client-urls: http://localhost:2479
 
 # Maximum number of snapshot files to retain (0 is unlimited).
 max-snapshots: 5
@@ -49,11 +49,11 @@ cors:
 
 # List of this member's peer URLs to advertise to the rest of the cluster.
 # The URLs needed to be a comma-separated list.
-initial-advertise-peer-urls: http://localhost:2380
+initial-advertise-peer-urls: http://localhost:2480
 
 # List of this member's client URLs to advertise to the public.
 # The URLs needed to be a comma-separated list.
-advertise-client-urls: http://localhost:2379
+advertise-client-urls: http://localhost:2479
 
 # Discovery URL used to bootstrap the cluster.
 discovery:
@@ -68,7 +68,7 @@ discovery-proxy:
 discovery-srv:
 
 # Initial cluster configuration for bootstrapping.
-initial-cluster:
+initial-cluster: default=http://localhost:2480
 
 # Initial cluster token for the etcd cluster during bootstrap.
 initial-cluster-token: 'etcd-cluster'
