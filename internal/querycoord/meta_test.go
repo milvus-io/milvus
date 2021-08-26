@@ -12,15 +12,19 @@
 package querycoord
 
 import (
+	"fmt"
 	"testing"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
 func TestReplica_Release(t *testing.T) {
+	refreshParams()
 	etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 	assert.Nil(t, err)
 	meta, err := newMeta(etcdKV)
@@ -47,4 +51,54 @@ func TestReplica_Release(t *testing.T) {
 	collections = meta.showCollections()
 	assert.Equal(t, 0, len(collections))
 	meta.releaseCollection(1)
+}
+
+func TestReloadMetaFromKV(t *testing.T) {
+	refreshParams()
+	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	assert.Nil(t, err)
+	meta := &MetaReplica{
+		client:            kv,
+		collectionInfos:   map[UniqueID]*querypb.CollectionInfo{},
+		segmentInfos:      map[UniqueID]*querypb.SegmentInfo{},
+		queryChannelInfos: map[UniqueID]*querypb.QueryChannelInfo{},
+	}
+
+	kvs := make(map[string]string)
+	collectionInfo := &querypb.CollectionInfo{
+		CollectionID: defaultCollectionID,
+	}
+	collectionBlobs := proto.MarshalTextString(collectionInfo)
+	collectionKey := fmt.Sprintf("%s/%d", collectionMetaPrefix, defaultCollectionID)
+	kvs[collectionKey] = collectionBlobs
+
+	segmentInfo := &querypb.SegmentInfo{
+		SegmentID: defaultSegmentID,
+	}
+	segmentBlobs := proto.MarshalTextString(segmentInfo)
+	segmentKey := fmt.Sprintf("%s/%d", segmentMetaPrefix, defaultSegmentID)
+	kvs[segmentKey] = segmentBlobs
+
+	queryChannelInfo := &querypb.QueryChannelInfo{
+		CollectionID: defaultCollectionID,
+	}
+	queryChannelBlobs := proto.MarshalTextString(queryChannelInfo)
+	queryChannelKey := fmt.Sprintf("%s/%d", queryChannelMetaPrefix, defaultCollectionID)
+	kvs[queryChannelKey] = queryChannelBlobs
+
+	err = kv.MultiSave(kvs)
+	assert.Nil(t, err)
+
+	err = meta.reloadFromKV()
+	assert.Nil(t, err)
+
+	assert.Equal(t, 1, len(meta.collectionInfos))
+	assert.Equal(t, 1, len(meta.segmentInfos))
+	assert.Equal(t, 1, len(meta.queryChannelInfos))
+	_, ok := meta.collectionInfos[defaultCollectionID]
+	assert.Equal(t, true, ok)
+	_, ok = meta.segmentInfos[defaultSegmentID]
+	assert.Equal(t, true, ok)
+	_, ok = meta.queryChannelInfos[defaultCollectionID]
+	assert.Equal(t, true, ok)
 }

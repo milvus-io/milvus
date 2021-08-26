@@ -16,17 +16,13 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"net"
 	"path"
 	"strconv"
 	"sync"
 
-	"google.golang.org/grpc"
-
 	"github.com/milvus-io/milvus/internal/kv"
 	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -34,13 +30,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	qn "github.com/milvus-io/milvus/internal/querynode"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
 const (
@@ -372,164 +365,4 @@ func newIndexCoordMock() *indexCoordMock {
 
 func (c *indexCoordMock) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
 	return nil, errors.New("get index file path fail")
-}
-
-type queryNodeServerMock struct {
-	querypb.QueryNodeServer
-	ctx         context.Context
-	cancel      context.CancelFunc
-	queryNode   *qn.QueryNode
-	grpcErrChan chan error
-	grpcServer  *grpc.Server
-
-	addQueryChannels  func() (*commonpb.Status, error)
-	watchDmChannels   func() (*commonpb.Status, error)
-	loadSegment       func() (*commonpb.Status, error)
-	releaseCollection func() (*commonpb.Status, error)
-	releasePartition  func() (*commonpb.Status, error)
-	releaseSegment    func() (*commonpb.Status, error)
-}
-
-func newQueryNodeServerMock(ctx context.Context) *queryNodeServerMock {
-	ctx1, cancel := context.WithCancel(ctx)
-	factory := msgstream.NewPmsFactory()
-
-	return &queryNodeServerMock{
-		ctx:         ctx,
-		cancel:      cancel,
-		queryNode:   qn.NewQueryNode(ctx1, factory),
-		grpcErrChan: make(chan error),
-
-		addQueryChannels:  returnSuccessResult,
-		watchDmChannels:   returnSuccessResult,
-		loadSegment:       returnSuccessResult,
-		releaseCollection: returnSuccessResult,
-		releasePartition:  returnSuccessResult,
-		releaseSegment:    returnSuccessResult,
-	}
-}
-
-func (qs *queryNodeServerMock) init() error {
-	qn.Params.Init()
-	qn.Params.MetaRootPath = Params.MetaRootPath
-	qn.Params.QueryNodeIP = funcutil.GetLocalIP()
-	grpcPort := Params.Port
-
-	go func() {
-		var lis net.Listener
-		var err error
-
-		err = retry.Do(qs.ctx, func() error {
-			addr := ":" + strconv.Itoa(grpcPort)
-			lis, err = net.Listen("tcp", addr)
-			if err == nil {
-				qn.Params.QueryNodePort = int64(lis.Addr().(*net.TCPAddr).Port)
-			} else {
-				// set port=0 to get next available port
-				grpcPort = 0
-			}
-			return err
-		}, retry.Attempts(10))
-
-		if err != nil {
-			log.Error(err.Error())
-		}
-
-		qs.grpcServer = grpc.NewServer()
-		querypb.RegisterQueryNodeServer(qs.grpcServer, qs)
-		if err = qs.grpcServer.Serve(lis); err != nil {
-			log.Error(err.Error())
-		}
-	}()
-
-	rootCoord := newRootCoordMock()
-	indexCoord := newIndexCoordMock()
-	qs.queryNode.SetRootCoord(rootCoord)
-	qs.queryNode.SetIndexCoord(indexCoord)
-	err := qs.queryNode.Init()
-	if err != nil {
-		return err
-	}
-
-	if err = qs.queryNode.Register(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (qs *queryNodeServerMock) start() error {
-	return qs.queryNode.Start()
-}
-
-func (qs *queryNodeServerMock) stop() error {
-	qs.cancel()
-	if qs.grpcServer != nil {
-		qs.grpcServer.GracefulStop()
-	}
-
-	err := qs.queryNode.Stop()
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (qs *queryNodeServerMock) run() error {
-	if err := qs.init(); err != nil {
-		return err
-	}
-
-	if err := qs.start(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (qs *queryNodeServerMock) AddQueryChannel(ctx context.Context, req *querypb.AddQueryChannelRequest) (*commonpb.Status, error) {
-	return qs.addQueryChannels()
-}
-
-func (qs *queryNodeServerMock) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
-	return qs.watchDmChannels()
-}
-
-func (qs *queryNodeServerMock) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
-	return qs.loadSegment()
-}
-
-func (qs *queryNodeServerMock) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	return qs.releaseCollection()
-}
-
-func (qs *queryNodeServerMock) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
-	return qs.releasePartition()
-}
-
-func (qs *queryNodeServerMock) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
-	return qs.releaseSegment()
-}
-
-func startQueryNodeServer(ctx context.Context) (*queryNodeServerMock, error) {
-	node := newQueryNodeServerMock(ctx)
-	err := node.run()
-	if err != nil {
-		return nil, err
-	}
-
-	return node, nil
-}
-
-func returnSuccessResult() (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
-}
-
-func returnFailedResult() (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-	}, errors.New("query node do task failed")
 }

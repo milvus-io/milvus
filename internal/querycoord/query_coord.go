@@ -52,6 +52,7 @@ type QueryCoord struct {
 	queryCoordID uint64
 	meta         Meta
 	cluster      *queryNodeCluster
+	newNodeFn    newQueryNodeFn
 	scheduler    *TaskScheduler
 
 	dataCoordClient types.DataCoord
@@ -98,7 +99,7 @@ func (qc *QueryCoord) Init() error {
 		return err
 	}
 
-	qc.cluster, err = newQueryNodeCluster(qc.meta, qc.kvClient)
+	qc.cluster, err = newQueryNodeCluster(qc.meta, qc.kvClient, qc.newNodeFn)
 	if err != nil {
 		log.Error("query coordinator init cluster failed", zap.Error(err))
 		return err
@@ -160,6 +161,7 @@ func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord,
 		loopCtx:    ctx1,
 		loopCancel: cancel,
 		msFactory:  factory,
+		newNodeFn:  newQueryNode,
 	}
 
 	service.UpdateStateCode(internalpb.StateCode_Abnormal)

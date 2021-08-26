@@ -14,91 +14,61 @@ package querycoord
 import (
 	"context"
 	"math/rand"
+	"os"
 	"strconv"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
 func setup() {
 	Params.Init()
+}
+
+func refreshParams() {
 	rand.Seed(time.Now().UnixNano())
 	suffix := "-test-query-Coord" + strconv.FormatInt(rand.Int63(), 10)
+	Params.StatsChannelName = Params.StatsChannelName + suffix
+	Params.TimeTickChannelName = Params.TimeTickChannelName + suffix
 	Params.MetaRootPath = Params.MetaRootPath + suffix
 }
 
-func refreshChannelNames() {
-	suffix := "-test-query-Coord" + strconv.FormatInt(rand.Int63n(1000000), 10)
-	Params.StatsChannelName = Params.StatsChannelName + suffix
-	Params.TimeTickChannelName = Params.TimeTickChannelName + suffix
-}
-
 func TestMain(m *testing.M) {
-	/*
-		setup()
-		//refreshChannelNames()
-		exitCode := m.Run()
-		os.Exit(exitCode)
-	*/
+	setup()
+	//refreshChannelNames()
+	exitCode := m.Run()
+	os.Exit(exitCode)
 }
 
-func TestQueryCoord_Init(t *testing.T) {
-	ctx := context.Background()
-	msFactory := msgstream.NewPmsFactory()
-	service, err := NewQueryCoord(context.Background(), msFactory)
-	assert.Nil(t, err)
-	service.Register()
-	service.Init()
-	service.Start()
+func NewQueryCoordTest(ctx context.Context, factory msgstream.Factory) (*QueryCoord, error) {
+	refreshParams()
+	rand.Seed(time.Now().UnixNano())
+	queryChannels := make([]*queryChannelInfo, 0)
+	channelID := len(queryChannels)
+	searchPrefix := Params.SearchChannelPrefix
+	searchResultPrefix := Params.SearchResultChannelPrefix
+	allocatedQueryChannel := searchPrefix + "-" + strconv.FormatInt(int64(channelID), 10)
+	allocatedQueryResultChannel := searchResultPrefix + "-" + strconv.FormatInt(int64(channelID), 10)
 
-	t.Run("Test Get statistics channel", func(t *testing.T) {
-		response, err := service.GetStatisticsChannel(ctx)
-		assert.Nil(t, err)
-		assert.Equal(t, response.Value, "query-node-stats")
+	queryChannels = append(queryChannels, &queryChannelInfo{
+		requestChannel:  allocatedQueryChannel,
+		responseChannel: allocatedQueryResultChannel,
 	})
 
-	t.Run("Test Get timeTick channel", func(t *testing.T) {
-		response, err := service.GetTimeTickChannel(ctx)
-		assert.Nil(t, err)
-		assert.Equal(t, response.Value, "queryTimeTick")
-	})
+	ctx1, cancel := context.WithCancel(ctx)
+	service := &QueryCoord{
+		loopCtx:    ctx1,
+		loopCancel: cancel,
+		msFactory:  factory,
+		newNodeFn:  newQueryNodeTest,
+	}
 
-	service.Stop()
+	service.UpdateStateCode(internalpb.StateCode_Abnormal)
+	log.Debug("query coordinator", zap.Any("queryChannels", queryChannels))
+	return service, nil
 }
-
-//func TestQueryCoord_load(t *testing.T) {
-//	ctx := context.Background()
-//	msFactory := msgstream.NewPmsFactory()
-//	service, err := NewQueryCoord(context.Background(), msFactory)
-//	assert.Nil(t, err)
-//	service.Init()
-//	service.Start()
-//	service.SetRootCoord(newRootCoordMock())
-//	service.SetDataCoord(NewDataMock())
-//	registerNodeRequest := &querypb.RegisterNodeRequest{
-//		Address: &commonpb.Address{},
-//	}
-//	service.RegisterNode(ctx, registerNodeRequest)
-//
-//	t.Run("Test LoadSegment", func(t *testing.T) {
-//		loadCollectionRequest := &querypb.LoadCollectionRequest{
-//			CollectionID: 1,
-//		}
-//		response, err := service.LoadCollection(ctx, loadCollectionRequest)
-//		assert.Nil(t, err)
-//		assert.Equal(t, response.ErrorCode, commonpb.ErrorCode_Success)
-//	})
-//
-//	t.Run("Test LoadPartition", func(t *testing.T) {
-//		loadPartitionRequest := &querypb.LoadPartitionsRequest{
-//			CollectionID: 1,
-//			PartitionIDs: []UniqueID{1},
-//		}
-//		response, err := service.LoadPartitions(ctx, loadPartitionRequest)
-//		assert.Nil(t, err)
-//		assert.Equal(t, response.ErrorCode, commonpb.ErrorCode_Success)
-//	})
-//}

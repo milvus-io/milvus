@@ -559,7 +559,6 @@ func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 
 		return metrics, err
 	}
-
 	log.Debug("QueryCoord.GetMetrics failed, request metric type is not implemented yet",
 		zap.Int64("node_id", Params.QueryCoordID),
 		zap.String("req", req.Request),

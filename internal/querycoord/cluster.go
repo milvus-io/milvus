@@ -20,14 +20,13 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
@@ -66,20 +65,24 @@ type Cluster interface {
 	printMeta()
 }
 
+type newQueryNodeFn func(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) (Node, error)
+
 type queryNodeCluster struct {
 	client *etcdkv.EtcdKV
 
 	sync.RWMutex
 	clusterMeta Meta
 	nodes       map[int64]Node
+	newNodeFn   newQueryNodeFn
 }
 
-func newQueryNodeCluster(clusterMeta Meta, kv *etcdkv.EtcdKV) (*queryNodeCluster, error) {
+func newQueryNodeCluster(clusterMeta Meta, kv *etcdkv.EtcdKV, newNodeFn newQueryNodeFn) (*queryNodeCluster, error) {
 	nodes := make(map[int64]Node)
 	c := &queryNodeCluster{
 		client:      kv,
 		clusterMeta: clusterMeta,
 		nodes:       nodes,
+		newNodeFn:   newNodeFn,
 	}
 	err := c.reloadFromKV()
 	if err != nil {
@@ -428,7 +431,11 @@ func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionuti
 		if err != nil {
 			return err
 		}
-		c.nodes[id] = newQueryNode(ctx, session.Address, id, c.client)
+		c.nodes[id], err = c.newNodeFn(ctx, session.Address, id, c.client)
+		if err != nil {
+			log.Debug("RegisterNode: create a new query node failed", zap.Int64("nodeID", id), zap.Error(err))
+			return err
+		}
 		log.Debug("RegisterNode: create a new query node", zap.Int64("nodeID", id), zap.String("address", session.Address))
 
 		go func() {
@@ -480,6 +487,9 @@ func (c *queryNodeCluster) removeNodeInfo(nodeID int64) error {
 }
 
 func (c *queryNodeCluster) stopNode(nodeID int64) {
+	c.Lock()
+	defer c.Unlock()
+
 	if node, ok := c.nodes[nodeID]; ok {
 		node.stop()
 		log.Debug("StopNode: queryNode offline", zap.Int64("nodeID", nodeID))
