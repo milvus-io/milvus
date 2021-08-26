@@ -29,6 +29,7 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
@@ -90,6 +91,8 @@ type Segment struct {
 
 	vectorFieldMutex sync.RWMutex // guards vectorFieldInfos
 	vectorFieldInfos map[UniqueID]*VectorFieldInfo
+
+	pkFilter *bloom.BloomFilter //  bloom filter of pk inside a segment
 }
 
 //-------------------------------------------------------------------------------------- common interfaces

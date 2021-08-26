@@ -13,6 +13,8 @@ package datanode
 
 import (
 	"context"
+	"encoding/binary"
+	"errors"
 
 	"go.uber.org/zap"
 
@@ -53,6 +55,27 @@ func (ddn *deleteNode) Operate(in []Msg) []Msg {
 	}
 
 	return []Msg{}
+}
+
+func getSegmentsByPKs(pks []int64, segments []*Segment) (map[int64][]int64, error) {
+	if pks == nil {
+		return nil, errors.New("pks is nil when getSegmentsByPKs")
+	}
+	if segments == nil {
+		return nil, errors.New("segments is nil when getSegmentsByPKs")
+	}
+	results := make(map[int64][]int64)
+	buf := make([]byte, 8)
+	for _, segment := range segments {
+		for _, pk := range pks {
+			binary.BigEndian.PutUint64(buf, uint64(pk))
+			exist := segment.pkFilter.Test(buf)
+			if exist {
+				results[segment.segmentID] = append(results[segment.segmentID], pk)
+			}
+		}
+	}
+	return results, nil
 }
 
 func newDeleteDNode(ctx context.Context, replica Replica) *deleteNode {

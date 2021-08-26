@@ -1136,6 +1136,27 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 	return nil
 }
 
+func getSegmentsByPKs(pks []int64, segments []*Segment) (map[int64][]int64, error) {
+	if pks == nil {
+		return nil, fmt.Errorf("pks is nil when getSegmentsByPKs")
+	}
+	if segments == nil {
+		return nil, fmt.Errorf("segments is nil when getSegmentsByPKs")
+	}
+	results := make(map[int64][]int64)
+	buf := make([]byte, 8)
+	for _, segment := range segments {
+		for _, pk := range pks {
+			binary.BigEndian.PutUint64(buf, uint64(pk))
+			exist := segment.pkFilter.Test(buf)
+			if exist {
+				results[segment.segmentID] = append(results[segment.segmentID], pk)
+			}
+		}
+	}
+	return results, nil
+}
+
 func mergeRetrieveResults(dataArr []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error) {
 	var final *segcorepb.RetrieveResults
 	for _, data := range dataArr {
