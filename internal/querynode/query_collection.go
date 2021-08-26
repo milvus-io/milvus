@@ -304,8 +304,8 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 		//	zap.Int64("target collectionID", collectionID),
 		//	zap.Int64("msgID", msg.ID()),
 		//)
-		err := fmt.Errorf("not target collection query request, collectionID = %d, targetCollectionID = %d, msgID = %d", q.collectionID, collectionID, msg.ID())
-		return err
+		//err := fmt.Errorf("not target collection query request, collectionID = %d, targetCollectionID = %d, msgID = %d", q.collectionID, collectionID, msg.ID())
+		return nil
 	}
 
 	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
