@@ -1,6 +1,7 @@
 package sessionutil
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"strconv"
@@ -12,7 +13,6 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
-	"golang.org/x/net/context"
 )
 
 var Params paramtable.BaseTable
