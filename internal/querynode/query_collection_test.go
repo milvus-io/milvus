@@ -62,7 +62,7 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 	assert.Nil(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	queryCollection := newQueryCollection(ctx, cancel, 0, historical, streaming, factory, nil)
+	queryCollection := newQueryCollection(ctx, cancel, 0, historical, streaming, factory, nil, nil, false)
 
 	producerChannels := []string{"testResultChannel"}
 	queryCollection.queryResultMsgStream.AsProducer(producerChannels)
