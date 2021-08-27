@@ -13,6 +13,7 @@ package datanode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"path"
@@ -35,6 +36,78 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
+
+// CDFMsFactory count down fails msg factory
+type CDFMsFactory struct {
+	msgstream.Factory
+	cd int
+}
+
+func (f *CDFMsFactory) NewMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
+	f.cd--
+	if f.cd < 0 {
+		return nil, errors.New("fail")
+	}
+	return f.Factory.NewMsgStream(ctx)
+}
+
+func TestFLowGraphInsertBufferNodeCreate(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	insertChannelName := "datanode-01-test-flowgraphinsertbuffernode-create"
+
+	testPath := "/test/datanode/root/meta"
+	err := clearEtcd(testPath)
+	require.NoError(t, err)
+	Params.MetaRootPath = testPath
+
+	Factory := &MetaFactory{}
+	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
+	mockRootCoord := &RootCoordFactory{}
+
+	replica := newReplica(mockRootCoord, collMeta.ID)
+
+	err = replica.addNewSegment(1, collMeta.ID, 0, insertChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+	require.NoError(t, err)
+
+	msFactory := msgstream.NewPmsFactory()
+	m := map[string]interface{}{
+		"receiveBufSize": 1024,
+		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarBufSize":  1024}
+	err = msFactory.SetParams(m)
+	assert.Nil(t, err)
+
+	saveBinlog := func(fu *segmentFlushUnit) error {
+		t.Log(fu)
+		return nil
+	}
+
+	flushChan := make(chan *flushMsg, 100)
+	iBNode, err := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+	assert.NotNil(t, iBNode)
+	require.NoError(t, err)
+
+	ctxDone, cancel := context.WithCancel(ctx)
+	cancel() // cancel now to make context done
+	_, err = newInsertBufferNode(ctxDone, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+	assert.Error(t, err)
+
+	cdf := &CDFMsFactory{
+		Factory: msFactory,
+		cd:      0,
+	}
+
+	_, err = newInsertBufferNode(ctx, replica, cdf, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+	assert.Error(t, err)
+	cdf = &CDFMsFactory{
+		Factory: msFactory,
+		cd:      1,
+	}
+	_, err = newInsertBufferNode(ctx, replica, cdf, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+	assert.Error(t, err)
+}
 
 func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -70,7 +143,8 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	}
 
 	flushChan := make(chan *flushMsg, 100)
-	iBNode := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+	iBNode, err := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+	require.NoError(t, err)
 
 	dmlFlushedCh := make(chan []*datapb.FieldBinlog, 1)
 
@@ -175,7 +249,8 @@ func TestFlushSegment(t *testing.T) {
 	saveBinlog := func(*segmentFlushUnit) error {
 		return nil
 	}
-	ibNode := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+	ibNode, err := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+	require.NoError(t, err)
 
 	flushSegment(collMeta,
 		segmentID,
@@ -289,7 +364,8 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	}
 
 	flushChan := make(chan *flushMsg, 100)
-	iBNode := newInsertBufferNode(ctx, colRep, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+	iBNode, err := newInsertBufferNode(ctx, colRep, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+	require.NoError(t, err)
 
 	// Auto flush number of rows set to 2
 
