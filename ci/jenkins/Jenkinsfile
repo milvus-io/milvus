@@ -1,7 +1,7 @@
 #!/usr/bin/env groovy
 
 String cron_timezone = "TZ=Asia/Shanghai"
-String cron_string = BRANCH_NAME == "1.1" ? "50 3 * * SUN " : ""
+String cron_string = BRANCH_NAME == "1.1" ? "50 3 * * 0 " : ""
 
 pipeline {
     agent none
