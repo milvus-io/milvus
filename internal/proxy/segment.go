@@ -24,16 +24,18 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 const (
-	SegCountPerRPC     = 20000
-	ActiveTimeDuration = 100 //second
+	SegCountPerRPC = 20000
 )
 
 type Allocator = allocator.Allocator
+
+type DataCoord interface {
+	AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error)
+}
 
 type segRequest struct {
 	allocator.BaseRequest
@@ -128,10 +130,6 @@ func (info *assignInfo) Assign(ts Timestamp, count uint32) (map[UniqueID]uint32,
 	return result, nil
 }
 
-func (info *assignInfo) IsActive(now time.Time) bool {
-	return now.Sub(info.lastInsertTime) <= ActiveTimeDuration*time.Second
-}
-
 type SegIDAssigner struct {
 	Allocator
 	assignInfos map[UniqueID]*list.List // collectionID -> *list.List
@@ -139,11 +137,11 @@ type SegIDAssigner struct {
 	getTickFunc func() Timestamp
 	PeerID      UniqueID
 
-	dataCoord   types.DataCoord
+	dataCoord   DataCoord
 	countPerRPC uint32
 }
 
-func NewSegIDAssigner(ctx context.Context, dataCoord types.DataCoord, getTickFunc func() Timestamp) (*SegIDAssigner, error) {
+func NewSegIDAssigner(ctx context.Context, dataCoord DataCoord, getTickFunc func() Timestamp) (*SegIDAssigner, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	sa := &SegIDAssigner{
 		Allocator: Allocator{
@@ -167,10 +165,6 @@ func NewSegIDAssigner(ctx context.Context, dataCoord types.DataCoord, getTickFun
 	return sa, nil
 }
 
-func (sa *SegIDAssigner) SetServiceClient(client types.DataCoord) {
-	sa.dataCoord = client
-}
-
 func (sa *SegIDAssigner) collectExpired() {
 	ts := sa.getTickFunc()
 	for _, info := range sa.assignInfos {
@@ -185,11 +179,12 @@ func (sa *SegIDAssigner) collectExpired() {
 }
 
 func (sa *SegIDAssigner) pickCanDoFunc() {
+	log.Debug("Proxy SegIDAssigner pickCanDoFunc", zap.Any("len(ToDoReqs)", len(sa.ToDoReqs)))
 	if sa.ToDoReqs == nil {
 		return
 	}
 	records := make(map[UniqueID]map[UniqueID]map[string]uint32)
-	newTodoReqs := sa.ToDoReqs[0:0]
+	var newTodoReqs []allocator.Request
 	for _, req := range sa.ToDoReqs {
 		segRequest := req.(*segRequest)
 		collID := segRequest.collID
@@ -209,6 +204,11 @@ func (sa *SegIDAssigner) pickCanDoFunc() {
 
 		records[collID][partitionID][channelName] += segRequest.count
 		assign, err := sa.getAssign(segRequest.collID, segRequest.partitionID, segRequest.channelName)
+		if err != nil {
+			log.Debug("Proxy SegIDAssigner, pickCanDoFunc getAssign err:", zap.Any("collID", segRequest.collID),
+				zap.Any("partitionID", segRequest.partitionID), zap.Any("channelName", segRequest.channelName),
+				zap.Error(err))
+		}
 		if err != nil || assign.Capacity(segRequest.timestamp) < records[collID][partitionID][channelName] {
 			sa.segReqs = append(sa.segReqs, &datapb.SegmentIDRequest{
 				ChannelName:  channelName,
@@ -221,6 +221,9 @@ func (sa *SegIDAssigner) pickCanDoFunc() {
 			sa.CanDoReqs = append(sa.CanDoReqs, req)
 		}
 	}
+	log.Debug("Proxy SegIDAssigner pickCanDoFunc", zap.Any("records", records),
+		zap.Any("len(newTodoReqs)", len(newTodoReqs)),
+		zap.Any("len(CanDoReqs)", len(sa.CanDoReqs)))
 	sa.ToDoReqs = newTodoReqs
 }
 
@@ -258,13 +261,18 @@ func (sa *SegIDAssigner) checkSegReqEqual(req1, req2 *datapb.SegmentIDRequest) b
 }
 
 func (sa *SegIDAssigner) reduceSegReqs() {
-
+	log.Debug("Proxy SegIDAssigner reduceSegReqs", zap.Any("len(segReqs)", len(sa.segReqs)))
 	if len(sa.segReqs) == 0 {
 		return
 	}
-
+	beforeCnt := uint32(0)
 	var newSegReqs []*datapb.SegmentIDRequest
 	for _, req1 := range sa.segReqs {
+		if req1.Count == 0 {
+			log.Debug("Proxy SegIDAssigner reduceSegReqs hit perCount == 0")
+			req1.Count = sa.countPerRPC
+		}
+		beforeCnt += req1.Count
 		var req2 *datapb.SegmentIDRequest
 		for _, req3 := range newSegReqs {
 			if sa.checkSegReqEqual(req1, req3) {
@@ -278,13 +286,14 @@ func (sa *SegIDAssigner) reduceSegReqs() {
 			req2.Count += req1.Count
 		}
 	}
-
+	afterCnt := uint32(0)
 	for _, req := range newSegReqs {
-		if req.Count == 0 {
-			req.Count = sa.countPerRPC
-		}
+		afterCnt += req.Count
 	}
 	sa.segReqs = newSegReqs
+	log.Debug("Proxy SegIDAssigner reduceSegReqs after reduce", zap.Any("len(segReqs)", len(sa.segReqs)),
+		zap.Any("BeforeCnt", beforeCnt),
+		zap.Any("AfterCnt", afterCnt))
 }
 
 func (sa *SegIDAssigner) syncSegments() (bool, error) {
@@ -298,18 +307,27 @@ func (sa *SegIDAssigner) syncSegments() (bool, error) {
 		SegmentIDRequests: sa.segReqs,
 	}
 
-	sa.segReqs = []*datapb.SegmentIDRequest{}
+	sa.segReqs = nil
+
 	resp, err := sa.dataCoord.AssignSegmentID(context.Background(), req)
 
 	if err != nil {
 		return false, fmt.Errorf("syncSegmentID Failed:%w", err)
 	}
 
+	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return false, fmt.Errorf("syncSegmentID Failed:%s", resp.Status.Reason)
+	}
+
+	var errMsg string
 	now := time.Now()
-	success := false
+	success := true
 	for _, info := range resp.SegIDAssignments {
 		if info.Status.GetErrorCode() != commonpb.ErrorCode_Success {
 			log.Debug("proxy", zap.String("SyncSegment Error", info.Status.Reason))
+			errMsg += info.Status.Reason
+			errMsg += "\n"
+			success = false
 			continue
 		}
 		assign, err := sa.getAssign(info.CollectionID, info.PartitionID, info.ChannelName)
@@ -338,7 +356,9 @@ func (sa *SegIDAssigner) syncSegments() (bool, error) {
 			assign.segInfos.PushBack(segInfo2)
 		}
 		assign.lastInsertTime = now
-		success = true
+	}
+	if !success {
+		return false, fmt.Errorf(errMsg)
 	}
 	return success, nil
 }
