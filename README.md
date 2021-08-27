@@ -331,7 +331,8 @@ For guidance on installation, development, deployment, and administration, check
 
 The implemented SDK and its API documentation are listed below:
 
-- [PyMilvus-ORM](https://github.com/milvus-io/pymilvus-orm)
+- [PyMilvus-ORM SDK](https://github.com/milvus-io/pymilvus-orm)
+- [Node SDK](https://github.com/milvus-io/milvus-sdk-node)
 
 
 
