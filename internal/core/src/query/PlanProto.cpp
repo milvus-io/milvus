@@ -95,6 +95,8 @@ ExtractBinaryRangeExprImpl(FieldOffset field_offset, DataType data_type, const p
     };
     setValue(result->lower_value_, expr_proto.lower_value());
     setValue(result->upper_value_, expr_proto.upper_value());
+    result->lower_inclusive_ = expr_proto.lower_inclusive();
+    result->upper_inclusive_ = expr_proto.upper_inclusive();
     return result;
 }
 
