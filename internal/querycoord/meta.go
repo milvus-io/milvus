@@ -466,6 +466,14 @@ func (m *MetaReplica) releasePartition(collectionID UniqueID, partitionID Unique
 		}
 		releasedPartitionIDs = append(releasedPartitionIDs, partitionID)
 		info.ReleasedPartitionIDs = releasedPartitionIDs
+
+		// If user loaded a collectionA, and release a partitionB which belongs to collectionA,
+		// and then load collectionA again, if we don't set the inMemoryPercentage to 0 when releasing
+		// partitionB, the second loading of collectionA would directly return because
+		// the inMemoryPercentage in ShowCollection response is still the old value -- 100.
+		// So if releasing partition, inMemoryPercentage should be set to 0.
+		info.InMemoryPercentage = 0
+
 		err := saveGlobalCollectionInfo(collectionID, info, m.client)
 		if err != nil {
 			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
