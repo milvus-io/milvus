@@ -101,7 +101,7 @@ pipeline {
                                 sh "./tests/scripts/export_logs.sh"
                                 dir("${env.ARTIFACTS}") {
                                     sh "find ./kind -path '*/history/*' -type f | xargs tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-${MILVUS_CLIENT}-e2e-logs.tar.gz --transform='s:^[^/]*/[^/]*/[^/]*/[^/]*/::g' || true"
-                                    if ("${MILVUS_CLIENT}" == "pymilvus-orm") {
+                                    if ("${MILVUS_CLIENT}" == "pymilvus") {
                                         sh "tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${MILVUS_CLIENT}-pytest-logs.tar.gz ./tests/pytest_logs --remove-files || true"
                                     }
                                     archiveArtifacts artifacts: "**.tar.gz", allowEmptyArchive: true
