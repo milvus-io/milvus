@@ -1171,28 +1171,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		chMgr:          node.chMgr,
 		chTicker:       node.chTicker,
 	}
-	if len(it.PartitionName) <= 0 {
-		it.PartitionName = Params.DefaultPartitionName
-	}
-
-	result := &milvuspb.MutationResult{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-	}
-	err := node.sched.DmQueue.Enqueue(it)
-
-	if err != nil {
-		result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		result.Status.Reason = err.Error()
-		numRows := it.req.NumRows
-		errIndex := make([]uint32, numRows)
-		for i := uint32(0); i < numRows; i++ {
-			errIndex[i] = i
-		}
-		result.ErrIndex = errIndex
-		return result, nil
-	}
+	var err error
 
 	log.Debug("Insert",
 		zap.String("role", Params.RoleName),
@@ -1203,6 +1182,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		zap.String("partition", request.PartitionName),
 		zap.Any("len(RowData)", len(it.RowData)),
 		zap.Any("len(RowIDs)", len(it.RowIDs)))
+
 	defer func() {
 		log.Debug("Insert Done",
 			zap.Error(err),
@@ -1215,6 +1195,29 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 			zap.Any("len(RowData)", len(it.RowData)),
 			zap.Any("len(RowIDs)", len(it.RowIDs)))
 	}()
+
+	if len(it.PartitionName) <= 0 {
+		it.PartitionName = Params.DefaultPartitionName
+	}
+
+	result := &milvuspb.MutationResult{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+	}
+	err = node.sched.DmQueue.Enqueue(it)
+
+	if err != nil {
+		result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		result.Status.Reason = err.Error()
+		numRows := it.req.NumRows
+		errIndex := make([]uint32, numRows)
+		for i := uint32(0); i < numRows; i++ {
+			errIndex[i] = i
+		}
+		result.ErrIndex = errIndex
+		return result, nil
+	}
 
 	err = it.WaitToFinish()
 	if err != nil {
