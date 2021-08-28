@@ -127,7 +127,11 @@ func (c *Client) Start() error {
 }
 
 func (c *Client) Stop() error {
-	return c.conn.Close()
+	c.cancel()
+	if c.conn != nil {
+		c.conn.Close()
+	}
+	return nil
 }
 
 // Register dummy
