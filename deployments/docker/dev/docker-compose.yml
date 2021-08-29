@@ -10,15 +10,19 @@ services:
       - "4001:4001"
 
   pulsar:
-    image: apachepulsar/pulsar:2.6.1
-    command: >
-      /bin/sh -c "
-                  echo "" >> /pulsar/conf/standalone.conf &&
-                  echo "maxMessageSize=104857600" >> /pulsar/conf/standalone.conf &&
-                  echo "" >> /pulsar/conf/standalone.conf &&
-                  echo "nettyMaxFrameSizeBytes=104857600" >> /pulsar/conf/standalone.conf &&
-                  sed -i 's/^defaultRetentionTimeInMinutes=.*/defaultRetentionTimeInMinutes=10080/' /pulsar/conf/broker.conf && \
-                  bin/pulsar standalone"
+    image: apachepulsar/pulsar:2.7.3
+    environment:
+      # bin/apply-config-from-env.py script will modify the configuration file based on the environment variables
+      # nettyMaxFrameSizeBytes must be calculated from maxMessageSize + 10240 (padding)
+      - nettyMaxFrameSizeBytes=104867840 # this is 104857600 + 10240 (padding)
+      - defaultRetentionTimeInMinutes=10080
+      # maxMessageSize is missing from standalone.conf, must use PULSAR_PREFIX_ to get it configured
+      - PULSAR_PREFIX_maxMessageSize=104857600
+      - PULSAR_GC=-XX:+UseG1GC
+    command: |
+      /bin/bash -c 
+      "bin/apply-config-from-env.py conf/standalone.conf
+      && exec bin/pulsar standalone --no-functions-worker --no-stream-storage"
     ports:
       - "6650:6650"
       - "18080:8080"
