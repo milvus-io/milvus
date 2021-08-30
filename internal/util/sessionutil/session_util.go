@@ -195,7 +195,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 			Then(clientv3.OpPut(path.Join(s.metaRoot, DefaultServiceRoot, key), string(sessionJSON), clientv3.WithLease(resp.ID))).Commit()
 
 		if err != nil {
-			fmt.Printf("compare and swap error %s\n. maybe the key has registered", err)
+			log.Warn("compare and swap error, maybe the key has ben registered", zap.Error(err))
 			return err
 		}
 
