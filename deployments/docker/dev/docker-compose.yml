@@ -20,9 +20,9 @@ services:
       - PULSAR_PREFIX_maxMessageSize=104857600
       - PULSAR_GC=-XX:+UseG1GC
     command: |
-      /bin/bash -c 
-      "bin/apply-config-from-env.py conf/standalone.conf
-      && exec bin/pulsar standalone --no-functions-worker --no-stream-storage"
+      /bin/bash -c \
+      "bin/apply-config-from-env.py conf/standalone.conf && \
+      exec bin/pulsar standalone --no-functions-worker --no-stream-storage"
     ports:
       - "6650:6650"
       - "18080:8080"
