@@ -562,16 +562,12 @@ func newQueryResultBuf() *queryResultBuf {
 }
 
 func setContain(m1, m2 map[interface{}]struct{}) bool {
-	log.Debug("Proxy task_scheduler setContain", zap.Any("len(m1)", len(m1)),
-		zap.Any("len(m2)", len(m2)))
 	if len(m1) < len(m2) {
 		return false
 	}
 
 	for k2 := range m2 {
 		_, ok := m1[k2]
-		log.Debug("Proxy task_scheduler setContain", zap.Any("k2", fmt.Sprintf("%v", k2)),
-			zap.Any("ok", ok))
 		if !ok {
 			return false
 		}
@@ -608,19 +604,25 @@ func (sr *resultBufHeader) readyToReduce() bool {
 		sealedGlobalSegmentIDsStrMap[x.(int64)] = 1
 	}
 
-	ret1 := setContain(sr.receivedVChansSet, sr.usedVChans)
-	log.Debug("Proxy searchResultBuf readyToReduce", zap.Any("receivedVChansSet", receivedVChansSetStrMap),
-		zap.Any("usedVChans", usedVChansSetStrMap),
-		zap.Any("receivedSealedSegmentIDsSet", sealedSegmentIDsStrMap),
-		zap.Any("receivedGlobalSegmentIDsSet", sealedGlobalSegmentIDsStrMap),
-		zap.Any("ret1", ret1),
-	)
-	if !ret1 {
+	vchanReady := setContain(sr.receivedVChansSet, sr.usedVChans)
+	if !vchanReady {
+		log.Debug("Proxy searchResultBuf not ready to reduce", zap.Any("receivedVChansSet", receivedVChansSetStrMap),
+			zap.Any("usedVChans", usedVChansSetStrMap),
+			zap.Any("receivedSealedSegmentIDsSet", sealedSegmentIDsStrMap),
+			zap.Any("receivedGlobalSegmentIDsSet", sealedGlobalSegmentIDsStrMap),
+		)
 		return false
 	}
-	ret := setContain(sr.receivedSealedSegmentIDsSet, sr.receivedGlobalSegmentIDsSet)
-	log.Debug("Proxy searchResultBuf readyToReduce", zap.Any("ret", ret))
-	return ret
+
+	sealedReady := setContain(sr.receivedSealedSegmentIDsSet, sr.receivedGlobalSegmentIDsSet)
+	if !sealedReady {
+		log.Debug("Proxy searchResultBuf not ready to reduce",
+			zap.Any("receivedSealedSegmentIDsSet", sealedSegmentIDsStrMap),
+			zap.Any("receivedGlobalSegmentIDsSet", sealedGlobalSegmentIDsStrMap),
+		)
+		return false
+	}
+	return true
 }
 
 func (sr *resultBufHeader) addPartialResult(vchans []vChan, searchSegIDs, globalSegIDs []UniqueID) {

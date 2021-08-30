@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -129,6 +130,10 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, collectionName stri
 	collInfo, ok := m.collInfo[collectionName]
 
 	if !ok {
+		t0 := time.Now()
+		defer log.Debug("Failed to find collection info, reload from rootcoord ",
+			zap.String("collection name ", collectionName),
+			zap.Any("time take ", time.Since(t0)))
 		m.mu.RUnlock()
 		coll, err := m.describeCollection(ctx, collectionName)
 		if err != nil {

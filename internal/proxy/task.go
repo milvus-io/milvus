@@ -1932,7 +1932,9 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 			}
 
 			availableQueryNodeNum := len(filterSearchResult)
-			log.Debug("Proxy Search PostExecute stage1", zap.Any("availableQueryNodeNum", availableQueryNodeNum))
+			log.Debug("Proxy Search PostExecute stage1",
+				zap.Any("availableQueryNodeNum", availableQueryNodeNum),
+				zap.Any("time cost", time.Since(t0)))
 			if availableQueryNodeNum <= 0 {
 				log.Debug("Proxy Search PostExecute failed", zap.Any("filterReason", filterReason))
 				st.result = &milvuspb.SearchResults{
@@ -1971,7 +1973,6 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 			}
 
 			results, err := decodeSearchResults(filterSearchResult)
-			log.Debug("Proxy Search PostExecute decodeSearchResults", zap.Error(err))
 			if err != nil {
 				return err
 			}
@@ -1997,7 +1998,6 @@ func (st *SearchTask) PostExecute(ctx context.Context) error {
 					}
 				}
 			}
-			log.Debug("Proxy Search PostExecute Done")
 			return nil
 		}
 	}
