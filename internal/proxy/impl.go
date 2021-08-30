@@ -1207,6 +1207,16 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	}
 	err = node.sched.DmQueue.Enqueue(it)
 
+	log.Debug("Insert Task Enqueue",
+		zap.Int64("msgID", it.BaseInsertTask.InsertRequest.Base.MsgID),
+		zap.Uint64("timestamp", it.BaseInsertTask.InsertRequest.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("partition", request.PartitionName),
+		zap.Any("len(RowData)", len(it.RowData)),
+		zap.Any("len(RowIDs)", len(it.RowIDs)),
+	)
+
 	if err != nil {
 		result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		result.Status.Reason = err.Error()
