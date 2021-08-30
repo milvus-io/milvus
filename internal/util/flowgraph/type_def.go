@@ -16,6 +16,11 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+// Timestamp shortcut for typeutil.Timestamp
 type Timestamp = typeutil.Timestamp
+
+// NodeName shortcut for string key
 type NodeName = string
+
+// MsgPosition shortcut for internalpb.MsgPosition
 type MsgPosition = internalpb.MsgPosition
