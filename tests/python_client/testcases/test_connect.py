@@ -37,8 +37,7 @@ class TestConnect:
         method: disconnect a connected client, disconnect again
         expected: raise an error after disconnected
         '''
-        with pytest.raises(Exception) as e:
-            dis_connect.close()
+        dis_connect.close()
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_connect_correct_ip_port(self, args):
