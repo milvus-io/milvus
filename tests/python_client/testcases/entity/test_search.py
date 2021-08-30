@@ -1223,7 +1223,7 @@ class TestSearchDSL(object):
         collection_term = gen_unique_str("term")
         connect.create_collection(collection_term, term_fields)
         term_entities = add_field(entities, field_name="term")
-        ids = connect.insert(collection_term, term_entities)
+        ids = connect.insert(collection_term, term_entities).primary_keys
         assert len(ids) == default_nb
         connect.flush([collection_term])
         # count = connect.count_entities(collection_term)

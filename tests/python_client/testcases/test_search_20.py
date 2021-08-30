@@ -1512,7 +1512,6 @@ class TestCollectionSearch(TestcaseBase):
         assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(expression="500 <= int64 < 1000", reason="issue:7142")
     @pytest.mark.parametrize("expression", cf.gen_normal_expressions())
     def test_search_with_expression(self, dim, expression, _async):
         """
@@ -1526,10 +1525,10 @@ class TestCollectionSearch(TestcaseBase):
                                                                              nb, dim=dim,
                                                                              is_index=True)
 
-        # filter result with expression in colllection
+        # filter result with expression in collection
         _vectors = _vectors[0]
-        expression =  expression.replace("&&", "and").replace("||", "or")
-        filter_ids = [] 
+        expression = expression.replace("&&", "and").replace("||", "or")
+        filter_ids = []
         for i, _id in enumerate(insert_ids):
             int64 = _vectors.int64[i]
             float = _vectors.float[i]
@@ -1559,10 +1558,9 @@ class TestCollectionSearch(TestcaseBase):
         filter_ids_set = set(filter_ids)
         for hits in search_res:
             ids = hits.ids
-            assert set(ids).issubset(filter_ids_set)                                     
+            assert set(ids).issubset(filter_ids_set)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(expression=f"500 <= {default_float_field_name} <= 1000", reason="issue:7142")
     @pytest.mark.parametrize("expression", cf.gen_normal_expressions_field(default_float_field_name))
     def test_search_with_expression_auto_id(self, dim, expression, _async):
         """
@@ -1578,14 +1576,14 @@ class TestCollectionSearch(TestcaseBase):
                                                                              is_index=True)
         
         
-        # filter result with expression in colllection
+        # filter result with expression in collection
         _vectors = _vectors[0]
         expression = expression.replace("&&", "and").replace("||", "or")
         filter_ids = []
         for i, _id in enumerate(insert_ids):
             exec(f"{default_float_field_name} = _vectors.{default_float_field_name}[i]")
             if not expression or eval(expression):
-                filter_ids.append(_id)        
+                filter_ids.append(_id)
         
         # 2. create index
         index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
