@@ -672,12 +672,12 @@ func flushSegment(
 	// write insert binlog
 	for _, blob := range binLogs {
 		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
-		log.Debug("save binlog", zap.Int64("fieldID", fieldID))
 		if err != nil {
 			log.Error("Flush failed ... cannot parse string to fieldID ..", zap.Error(err))
 			clearFn(false)
 			return
 		}
+		log.Debug("save binlog", zap.Int64("fieldID", fieldID))
 
 		logidx, err := idAllocator.allocID()
 		if err != nil {
@@ -800,7 +800,7 @@ func (ibNode *insertBufferNode) getCollMetabySegID(segmentID UniqueID, ts Timest
 	collID := ibNode.replica.getCollectionID()
 	sch, err := ibNode.replica.getCollectionSchema(collID, ts)
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	meta = &etcdpb.CollectionMeta{
@@ -822,7 +822,7 @@ func newInsertBufferNode(
 	flushCh <-chan *flushMsg,
 	saveBinlog func(*segmentFlushUnit) error,
 	channelName string,
-) *insertBufferNode {
+) (*insertBufferNode, error) {
 
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
@@ -849,20 +849,26 @@ func newInsertBufferNode(
 
 	minIOKV, err := miniokv.NewMinIOKV(ctx, option)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	//input stream, data node time tick
-	wTt, _ := factory.NewMsgStream(ctx)
+	wTt, err := factory.NewMsgStream(ctx)
+	if err != nil {
+		return nil, err
+	}
 	wTt.AsProducer([]string{Params.TimeTickChannelName})
-	log.Debug("datanode AsProducer: " + Params.TimeTickChannelName)
+	log.Debug("datanode AsProducer", zap.String("TimeTickChannelName", Params.TimeTickChannelName))
 	var wTtMsgStream msgstream.MsgStream = wTt
 	wTtMsgStream.Start()
 
 	// update statistics channel
-	segS, _ := factory.NewMsgStream(ctx)
+	segS, err := factory.NewMsgStream(ctx)
+	if err != nil {
+		return nil, err
+	}
 	segS.AsProducer([]string{Params.SegmentStatisticsChannelName})
-	log.Debug("datanode AsProducer: " + Params.SegmentStatisticsChannelName)
+	log.Debug("datanode AsProducer", zap.String("SegmentStatisChannelName", Params.SegmentStatisticsChannelName))
 	var segStatisticsMsgStream msgstream.MsgStream = segS
 	segStatisticsMsgStream.Start()
 
@@ -881,5 +887,5 @@ func newInsertBufferNode(
 		idAllocator:        idAllocator,
 		dsSaveBinlog:       saveBinlog,
 		segmentCheckPoints: make(map[UniqueID]segmentCheckPoint),
-	}
+	}, nil
 }

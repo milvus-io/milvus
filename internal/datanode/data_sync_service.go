@@ -156,7 +156,8 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		vchanInfo.GetSeekPosition(),
 	)
 	var ddNode Node = newDDNode(dsService.clearSignal, dsService.collectionID, vchanInfo)
-	var insertBufferNode Node = newInsertBufferNode(
+	var insertBufferNode Node
+	insertBufferNode, err = newInsertBufferNode(
 		dsService.ctx,
 		dsService.replica,
 		dsService.msFactory,
@@ -165,6 +166,9 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		saveBinlog,
 		vchanInfo.GetChannelName(),
 	)
+	if err != nil {
+		return err
+	}
 
 	var deleteNode Node = newDeleteDNode(
 		dsService.ctx,
