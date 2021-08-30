@@ -250,7 +250,7 @@ func (node *Proxy) Init() error {
 		return m, nil
 	}
 
-	chMgr := newChannelsMgr(getDmlChannelsFunc, defaultInsertRepackFunc, getDqlChannelsFunc, nil, node.msFactory)
+	chMgr := newChannelsMgrImpl(getDmlChannelsFunc, defaultInsertRepackFunc, getDqlChannelsFunc, nil, node.msFactory)
 	node.chMgr = chMgr
 
 	node.sched, err = NewTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator, node.msFactory)

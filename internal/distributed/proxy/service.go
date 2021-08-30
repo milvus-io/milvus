@@ -138,8 +138,11 @@ func (s *Server) init() error {
 
 	proxy.Params.Init()
 	log.Debug("init params done ...")
+
+	// NetworkPort & IP don't matter here, NetworkAddress matters
 	proxy.Params.NetworkPort = Params.Port
 	proxy.Params.IP = Params.IP
+
 	proxy.Params.NetworkAddress = Params.Address
 	// for purpose of ID Allocator
 	proxy.Params.RootCoordAddress = Params.RootCoordAddress

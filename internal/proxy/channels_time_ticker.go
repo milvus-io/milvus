@@ -21,11 +21,6 @@ import (
 	"go.uber.org/zap"
 )
 
-type pChanStatistics struct {
-	minTs Timestamp
-	maxTs Timestamp
-}
-
 // ticker can update ts only when the minTs greater than the ts of ticker, we can use maxTs to update current later
 type getPChanStatisticsFuncType func() (map[pChan]*pChanStatistics, error)
 
