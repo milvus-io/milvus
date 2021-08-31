@@ -412,7 +412,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-		assert.Equal(t, 2, len(core.dmlChannels.dml))
+		assert.Equal(t, 2, core.dmlChannels.GetNumChannels())
 
 		pChan := core.MetaTable.ListCollectionPhysicalChannels()
 		dmlStream.AsConsumer([]string{pChan[0]}, Params.MsgChannelSubName)
@@ -1433,7 +1433,10 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		time.Sleep(100 * time.Millisecond)
 
-		core.dmlChannels.AddProducerChannels("c0", "c1", "c2")
+		cn0 := core.dmlChannels.GetDmlMsgStreamName()
+		cn1 := core.dmlChannels.GetDmlMsgStreamName()
+		cn2 := core.dmlChannels.GetDmlMsgStreamName()
+		core.dmlChannels.AddProducerChannels(cn0, cn1, cn2)
 
 		msg0 := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{

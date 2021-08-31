@@ -125,6 +125,7 @@ func (q *queryNodeFlowGraph) consumerFlowGraph(channel Channel, subName ConsumeS
 	log.Debug("query node flow graph consumes from pChannel",
 		zap.Any("collectionID", q.collectionID),
 		zap.Any("channel", channel),
+		zap.Any("subName", subName),
 	)
 	return nil
 }
