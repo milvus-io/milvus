@@ -18,20 +18,24 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/internal/types"
 )
 
-type TimestampAllocator struct {
-	ctx       context.Context
-	rootCoord types.RootCoord
-	peerID    UniqueID
+// use timestampAllocatorInterface to keep TimestampAllocator testable
+type timestampAllocatorInterface interface {
+	AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error)
 }
 
-func NewTimestampAllocator(ctx context.Context, rc types.RootCoord, peerID UniqueID) (*TimestampAllocator, error) {
+type TimestampAllocator struct {
+	ctx    context.Context
+	tso    timestampAllocatorInterface
+	peerID UniqueID
+}
+
+func NewTimestampAllocator(ctx context.Context, tso timestampAllocatorInterface, peerID UniqueID) (*TimestampAllocator, error) {
 	a := &TimestampAllocator{
-		ctx:       ctx,
-		peerID:    peerID,
-		rootCoord: rc,
+		ctx:    ctx,
+		peerID: peerID,
+		tso:    tso,
 	}
 	return a, nil
 }
@@ -48,7 +52,7 @@ func (ta *TimestampAllocator) Alloc(count uint32) ([]Timestamp, error) {
 		Count: count,
 	}
 
-	resp, err := ta.rootCoord.AllocTimestamp(ctx, req)
+	resp, err := ta.tso.AllocTimestamp(ctx, req)
 	defer cancel()
 
 	if err != nil {
