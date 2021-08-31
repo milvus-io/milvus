@@ -504,7 +504,6 @@ class TestUtilityBase(TestcaseBase):
                 check_task=CheckTasks.err_res,
                 check_items={ct.err_code: 1, ct.err_msg: "can't find collection"})
 
-    @pytest.mark.xfail(reason="issue #5673")
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_process_collection_empty(self):
         """
@@ -514,13 +513,9 @@ class TestUtilityBase(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         self.init_collection_wrap(name=c_name)
-        res, _ = self.utility_wrap.index_building_progress(c_name)
-        assert "indexed_rows" in res
-        assert res["indexed_rows"] == 0
-        assert "total_rows" in res
-        assert res["total_rows"] == 0
+        error = {ct.err_code: 1, ct.err_msg: "no index is created"}
+        self.utility_wrap.index_building_progress(c_name, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.xfail(reason="issue #5674")
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_process_collection_insert_no_index(self):
         """
@@ -533,13 +528,9 @@ class TestUtilityBase(TestcaseBase):
         cw = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(nb)
         cw.insert(data=data)
-        res, _ = self.utility_wrap.index_building_progress(c_name)
-        assert "indexed_rows" in res
-        assert res["indexed_rows"] == 0
-        assert "total_rows" in res
-        assert res["total_rows"] == nb
+        error = {ct.err_code: 1, ct.err_msg: "no index is created"}
+        self.utility_wrap.index_building_progress(c_name, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.xfail(reason="issue #5674")
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_process_collection_index(self):
         """
@@ -552,11 +543,8 @@ class TestUtilityBase(TestcaseBase):
         cw = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(nb)
         cw.insert(data=data)
-        res, _ = self.utility_wrap.index_building_progress(c_name)
-        assert "indexed_rows" in res
-        assert res["indexed_rows"] == nb
-        assert "total_rows" in res
-        assert res["total_rows"] == nb
+        error = {ct.err_code: 1, ct.err_msg: "no index is created"}
+        self.utility_wrap.index_building_progress(c_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_process_collection_indexing(self):
