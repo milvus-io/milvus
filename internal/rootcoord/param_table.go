@@ -40,7 +40,6 @@ type ParamTable struct {
 	TimeTickChannel               string
 	StatisticsChannel             string
 
-	DmlChannelNum               int64
 	MaxPartitionNum             int64
 	DefaultPartitionName        string
 	DefaultIndexName            string
@@ -73,7 +72,6 @@ func (p *ParamTable) Init() {
 		p.initTimeTickChannel()
 		p.initStatisticsChannelName()
 
-		p.initDmlChannelNum()
 		p.initMaxPartitionNum()
 		p.initMinSegmentSizeToEnableIndex()
 		p.initDefaultPartitionName()
@@ -161,10 +159,6 @@ func (p *ParamTable) initStatisticsChannelName() {
 		panic(err)
 	}
 	p.StatisticsChannel = channel
-}
-
-func (p *ParamTable) initDmlChannelNum() {
-	p.DmlChannelNum = p.ParseInt64("rootcoord.dmlChannelNum")
 }
 
 func (p *ParamTable) initMaxPartitionNum() {

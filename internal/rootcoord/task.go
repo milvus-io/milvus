@@ -136,7 +136,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	vchanNames := make([]string, t.Req.ShardsNum)
 	chanNames := make([]string, t.Req.ShardsNum)
 	for i := int32(0); i < t.Req.ShardsNum; i++ {
-		vchanNames[i] = fmt.Sprintf("%s_%dv", t.core.dmlChannels.GetDmlMsgStreamName(), collID)
+		vchanNames[i] = fmt.Sprintf("%s_%d_%d_v", t.Req.CollectionName, collID, i)
 		chanNames[i] = ToPhysicalChannel(vchanNames[i])
 	}
 
@@ -286,8 +286,10 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		t.core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
 		t.core.SendTimeTick(ts, reason)
 
-		// send tt into deleted channels to tell data_node to clear flowgragh
-		t.core.chanTimeTick.SendTimeTickToChannel(collMeta.PhysicalChannelNames, ts)
+		for _, chanName := range collMeta.PhysicalChannelNames {
+			// send tt into deleted channels to tell data_node to clear flowgragh
+			t.core.chanTimeTick.SendChannelTimeTick(chanName, ts)
+		}
 
 		// remove dml channel after send dd msg
 		t.core.dmlChannels.RemoveProducerChannels(collMeta.PhysicalChannelNames...)
