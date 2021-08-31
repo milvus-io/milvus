@@ -1,6 +1,6 @@
 # Guidelines for Test Framewrok
 
-This document guides you through the pytest-based PyMilvus ORM test framework.
+This document guides you through the Pytest-based PyMilvus test framework.
 
 > You can find the test code on [GitHub](https://github.com/milvus-io/milvus/tree/master/tests/python_client).
 
@@ -10,7 +10,7 @@ This document guides you through the pytest-based PyMilvus ORM test framework.
 
 ### Deploy Milvus
 
-To accommodate the variety of requirements, Milvus offers as much as four deployment methods. PyMilvus ORM supports Milvus deployed with any of the methods below:
+To accommodate the variety of requirements, Milvus offers as much as four deployment methods. PyMilvus supports Milvus deployed with any of the methods below:
 
 1. [Build from source code](https://github.com/milvus-io/milvus#to-start-developing-milvus)
 2. Install with Docker Compose 
@@ -71,9 +71,9 @@ To accommodate the variety of requirements, Milvus offers as much as four deploy
 
 
 
-### PyMilvus ORM Test Environment Deployment and Case Execution
+### PyMilvus Test Environment Deployment and Case Execution
 
-We recommend using Python 3 (3.6 or higher), consistent with the version supported by PyMilvus ORM.
+We recommend using Python 3 (3.6 or higher), consistent with the version supported by PyMilvus.
 
 > Note: Procedures listed below will be completed automatically if you deployed Milvus using KinD.
 
@@ -117,7 +117,7 @@ where `host` should be set as the IP address of the Milvus service, and `*.html`
 
 ### Working directories and files
 
-- **base**: stores the encapsulated **PyMilvus ORM** **module** files, and setup & teardown functions for pytest framework.
+- **base**: stores the encapsulated **PyMilvus** **module** files, and setup & teardown functions for pytest framework.
 - **check**: stores the **check module** files for returned results from interface.
 - **common**: stores the files of **common methods and parameters** for test cases.
 - **config**: stores the **basic configuration file.**
@@ -168,7 +168,7 @@ This section specifies references while adding new test cases or framework tools
 
 2. Notice
 
-- Do not initialize ORM objects in the test case files.
+- Do not initialize PyMilvus objects in the test case files.
 - Generally, do not add log IDs to test case files.
 - Directly call the encapsulated methods or attributes in test cases, as shown below:
 
@@ -206,7 +206,7 @@ This section specifies references while adding new test cases or framework tools
 
 3. Adding test cases
 
-- Find the encapsulated tested interface with the same name in the ***_wrapper.py** files under **base** directory. Each interface returns a list with two values, among which one is interface returned results of PyMilvus ORM, and the other is the assertion of normal/abnormal results, i.e. `True`/`False`. The returned judgment can be used in the extra result checking of test cases.
+- Find the encapsulated tested interface with the same name in the ***_wrapper.py** files under **base** directory. Each interface returns a list with two values, among which one is interface returned results of PyMilvus, and the other is the assertion of normal/abnormal results, i.e. `True`/`False`. The returned judgment can be used in the extra result checking of test cases.
 - Add the test cases in the corresponding test file of the tested interface in **testcases** folder. You can refer to all test files under this directory to create your own test cases as shown below:
 
    ```python
@@ -240,7 +240,7 @@ This section specifies references while adding new test cases or framework tools
    self.collection_schema_wrap = ApiCollectionSchemaWrapper()
    self.field_schema_wrap = ApiFieldSchemaWrapper()
    ```
-   - Pass the parameters with corresponding encapsulated methods when calling the interface you need to test on. As shown below, align all parameters with those in PyMilvus ORM interfaces except for `check_task` and `check_items`.
+   - Pass the parameters with corresponding encapsulated methods when calling the interface you need to test on. As shown below, align all parameters with those in PyMilvus interfaces except for `check_task` and `check_items`.
    ```
    def init_partition(self, collection, name, description="", check_task=None, check_items=None, **kwargs)
    ```
