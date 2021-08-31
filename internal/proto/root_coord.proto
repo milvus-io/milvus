@@ -98,6 +98,9 @@ service RootCoord {
     rpc UpdateChannelTimeTick(internal.ChannelTimeTickMsg) returns (common.Status) {}
     rpc ReleaseDQLMessageStream(proxy.ReleaseDQLMessageStreamRequest) returns (common.Status) {}
     rpc SegmentFlushCompleted(data.SegmentFlushCompletedMsg) returns (common.Status) {}
+
+    // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
+    rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
 }
 
 message AllocTimestampRequest {

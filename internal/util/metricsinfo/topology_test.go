@@ -200,6 +200,35 @@ func TestIndexCoordTopology_Codec(t *testing.T) {
 	}
 }
 
+func TestRootCoordTopology_Codec(t *testing.T) {
+	topology1 := RootCoordTopology{
+		Self: RootCoordInfos{
+			BaseComponentInfos: BaseComponentInfos{
+				Name: ConstructComponentName(typeutil.RootCoordRole, 1),
+			},
+		},
+		Connections: ConnTopology{
+			Name: ConstructComponentName(typeutil.RootCoordRole, 1),
+			ConnectedComponents: []string{
+				ConstructComponentName(typeutil.RootCoordRole, 1),
+			},
+		},
+	}
+	s, err := MarshalTopology(topology1)
+	assert.Equal(t, nil, err)
+	log.Info("TestRootCoordTopology_Codec",
+		zap.String("marshaled_result", s))
+	var topology2 RootCoordTopology
+	err = UnmarshalTopology(s, &topology2)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, topology1.Self, topology2.Self)
+	assert.Equal(t, topology1.Connections.Name, topology2.Connections.Name)
+	assert.Equal(t, len(topology1.Connections.ConnectedComponents), len(topology1.Connections.ConnectedComponents))
+	for i := range topology1.Connections.ConnectedComponents {
+		assert.Equal(t, topology1.Connections.ConnectedComponents[i], topology2.Connections.ConnectedComponents[i])
+	}
+}
+
 func TestConnTopology_Codec(t *testing.T) {
 	topology1 := ConnTopology{
 		Name: ConstructComponentName(typeutil.ProxyRole, 1),

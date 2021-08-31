@@ -75,6 +75,12 @@ type IndexCoordTopology struct {
 	Connections ConnTopology         `json:"connections"`
 }
 
+// RootCoordTopology shows the whole metrics of root coordinator
+type RootCoordTopology struct {
+	Self        RootCoordInfos `json:"self"`
+	Connections ConnTopology   `json:"connections"`
+}
+
 type ConnectionType string
 
 const (

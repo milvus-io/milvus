@@ -326,3 +326,10 @@ func (c *GrpcClient) SegmentFlushCompleted(ctx context.Context, in *datapb.Segme
 	})
 	return ret.(*commonpb.Status), err
 }
+
+func (c *GrpcClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	ret, err := c.recall(func() (interface{}, error) {
+		return c.grpcClient.GetMetrics(ctx, in)
+	})
+	return ret.(*milvuspb.GetMetricsResponse), err
+}

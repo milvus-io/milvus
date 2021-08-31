@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"github.com/golang/protobuf/proto"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -1475,6 +1477,50 @@ func TestRootCoord(t *testing.T) {
 
 		// add 3 proxy channels
 		assert.Equal(t, 3, core.chanTimeTick.GetChanNum()-numChan)
+	})
+
+	t.Run("get metrics", func(t *testing.T) {
+		// not healthy
+		stateSave := core.stateCode.Load().(internalpb.StateCode)
+		core.UpdateStateCode(internalpb.StateCode_Abnormal)
+		resp, err := core.GetMetrics(ctx, &milvuspb.GetMetricsRequest{})
+		assert.Nil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		core.UpdateStateCode(stateSave)
+
+		// failed to parse metric type
+		invalidRequest := "invalid request"
+		resp, err = core.GetMetrics(ctx, &milvuspb.GetMetricsRequest{
+			Request: invalidRequest,
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		// unsupported metric type
+		unsupportedMetricType := "unsupported"
+		req, err := metricsinfo.ConstructRequestByMetricType(unsupportedMetricType)
+		assert.Nil(t, err)
+		resp, err = core.GetMetrics(ctx, req)
+		assert.Nil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		// normal case
+		systemInfoMetricType := metricsinfo.SystemInfoMetrics
+		req, err = metricsinfo.ConstructRequestByMetricType(systemInfoMetricType)
+		assert.Nil(t, err)
+		resp, err = core.GetMetrics(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("get system info", func(t *testing.T) {
+		// normal case
+		systemInfoMetricType := metricsinfo.SystemInfoMetrics
+		req, err := metricsinfo.ConstructRequestByMetricType(systemInfoMetricType)
+		assert.Nil(t, err)
+		resp, err := core.getSystemInfoMetrics(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	err = core.Stop()

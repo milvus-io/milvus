@@ -22,6 +22,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/allocator"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -165,6 +167,11 @@ func NewCore(c context.Context, factory ms.Factory) (*Core, error) {
 
 func (c *Core) UpdateStateCode(code internalpb.StateCode) {
 	c.stateCode.Store(code)
+}
+
+func (c *Core) isHealthy() bool {
+	code := c.stateCode.Load().(internalpb.StateCode)
+	return code == internalpb.StateCode_Healthy
 }
 
 func (c *Core) checkInit() error {
@@ -1929,5 +1936,71 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlus
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
+	}, nil
+}
+
+func (c *Core) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	log.Debug("RootCoord.GetMetrics",
+		zap.Int64("node_id", c.session.ServerID),
+		zap.String("req", req.Request))
+
+	if !c.isHealthy() {
+		log.Warn("RootCoord.GetMetrics failed",
+			zap.Int64("node_id", c.session.ServerID),
+			zap.String("req", req.Request),
+			zap.Error(errRootCoordIsUnhealthy(c.session.ServerID)))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    msgRootCoordIsUnhealthy(c.session.ServerID),
+			},
+			Response: "",
+		}, nil
+	}
+
+	metricType, err := metricsinfo.ParseMetricType(req.Request)
+	if err != nil {
+		log.Warn("RootCoord.GetMetrics failed to parse metric type",
+			zap.Int64("node_id", c.session.ServerID),
+			zap.String("req", req.Request),
+			zap.Error(err))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+			Response: "",
+		}, nil
+	}
+
+	log.Debug("RootCoord.GetMetrics",
+		zap.String("metric_type", metricType))
+
+	if metricType == metricsinfo.SystemInfoMetrics {
+		systemInfoMetrics, err := c.getSystemInfoMetrics(ctx, req)
+
+		log.Debug("RootCoord.GetMetrics",
+			zap.Int64("node_id", c.session.ServerID),
+			zap.String("req", req.Request),
+			zap.String("metric_type", metricType),
+			zap.Any("systemInfoMetrics", systemInfoMetrics), // TODO(dragondriver): necessary? may be very large
+			zap.Error(err))
+
+		return systemInfoMetrics, err
+	}
+
+	log.Debug("RootCoord.GetMetrics failed, request metric type is not implemented yet",
+		zap.Int64("node_id", c.session.ServerID),
+		zap.String("req", req.Request),
+		zap.String("metric_type", metricType))
+
+	return &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    metricsinfo.MsgUnimplementedMetric,
+		},
+		Response: "",
 	}, nil
 }
