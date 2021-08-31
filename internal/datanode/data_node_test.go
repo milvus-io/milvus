@@ -21,6 +21,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -207,6 +211,52 @@ func TestDataNode(t *testing.T) {
 	t.Run("Test GetStatisticsChannel", func(t *testing.T) {
 		_, err := node.GetStatisticsChannel(node.ctx)
 		assert.NoError(t, err)
+	})
+
+	t.Run("Test getSystemInfoMetrics", func(t *testing.T) {
+		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+		assert.NoError(t, err)
+		resp, err := node.getSystemInfoMetrics(node.ctx, req)
+		assert.NoError(t, err)
+		log.Info("Test DataNode.getSystemInfoMetrics",
+			zap.String("name", resp.ComponentName),
+			zap.String("response", resp.Response))
+	})
+
+	t.Run("Test GetMetrics", func(t *testing.T) {
+		// server is closed
+		stateSave := node.State.Load().(internalpb.StateCode)
+		node.State.Store(internalpb.StateCode_Abnormal)
+		resp, err := node.GetMetrics(ctx, &milvuspb.GetMetricsRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		node.State.Store(stateSave)
+
+		// failed to parse metric type
+		invalidRequest := "invalid request"
+		resp, err = node.GetMetrics(ctx, &milvuspb.GetMetricsRequest{
+			Request: invalidRequest,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		// unsupported metric type
+		unsupportedMetricType := "unsupported"
+		req, err := metricsinfo.ConstructRequestByMetricType(unsupportedMetricType)
+		assert.NoError(t, err)
+		resp, err = node.GetMetrics(ctx, req)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		// normal case
+		req, err = metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+		assert.NoError(t, err)
+		resp, err = node.GetMetrics(node.ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		log.Info("Test DataNode.GetMetrics",
+			zap.String("name", resp.ComponentName),
+			zap.String("response", resp.Response))
 	})
 
 	t.Run("Test BackGroundGC", func(te *testing.T) {

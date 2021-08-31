@@ -200,6 +200,87 @@ func TestIndexCoordTopology_Codec(t *testing.T) {
 	}
 }
 
+func TestDataClusterTopology_Codec(t *testing.T) {
+	topology1 := DataClusterTopology{
+		Self: DataCoordInfos{
+			BaseComponentInfos: BaseComponentInfos{
+				Name: ConstructComponentName(typeutil.DataCoordRole, 1),
+			},
+		},
+		ConnectedNodes: []DataNodeInfos{
+			{
+				BaseComponentInfos: BaseComponentInfos{
+					Name: ConstructComponentName(typeutil.DataNodeRole, 1),
+				},
+			},
+			{
+				BaseComponentInfos: BaseComponentInfos{
+					Name: ConstructComponentName(typeutil.DataNodeRole, 2),
+				},
+			},
+		},
+	}
+	s, err := MarshalTopology(topology1)
+	assert.Equal(t, nil, err)
+	log.Info("TestDataClusterTopology_Codec",
+		zap.String("marshaled_result", s))
+	var topology2 DataClusterTopology
+	err = UnmarshalTopology(s, &topology2)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, topology1.Self, topology2.Self)
+	assert.Equal(t, len(topology1.ConnectedNodes), len(topology2.ConnectedNodes))
+	for i := range topology1.ConnectedNodes {
+		assert.Equal(t, topology1.ConnectedNodes[i], topology2.ConnectedNodes[i])
+	}
+}
+
+func TestDataCoordTopology_Codec(t *testing.T) {
+	topology1 := DataCoordTopology{
+		Cluster: DataClusterTopology{
+			Self: DataCoordInfos{
+				BaseComponentInfos: BaseComponentInfos{
+					Name: ConstructComponentName(typeutil.DataCoordRole, 1),
+				},
+			},
+			ConnectedNodes: []DataNodeInfos{
+				{
+					BaseComponentInfos: BaseComponentInfos{
+						Name: ConstructComponentName(typeutil.DataNodeRole, 1),
+					},
+				},
+				{
+					BaseComponentInfos: BaseComponentInfos{
+						Name: ConstructComponentName(typeutil.DataNodeRole, 2),
+					},
+				},
+			},
+		},
+		Connections: ConnTopology{
+			Name: ConstructComponentName(typeutil.DataCoordRole, 1),
+			ConnectedComponents: []string{
+				ConstructComponentName(typeutil.RootCoordRole, 1),
+			},
+		},
+	}
+	s, err := MarshalTopology(topology1)
+	assert.Equal(t, nil, err)
+	log.Info("TestDataCoordTopology_Codec",
+		zap.String("marshaled_result", s))
+	var topology2 DataCoordTopology
+	err = UnmarshalTopology(s, &topology2)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, topology1.Cluster.Self, topology2.Cluster.Self)
+	assert.Equal(t, len(topology1.Cluster.ConnectedNodes), len(topology2.Cluster.ConnectedNodes))
+	for i := range topology1.Cluster.ConnectedNodes {
+		assert.Equal(t, topology1.Cluster.ConnectedNodes[i], topology2.Cluster.ConnectedNodes[i])
+	}
+	assert.Equal(t, topology1.Connections.Name, topology2.Connections.Name)
+	assert.Equal(t, len(topology1.Connections.ConnectedComponents), len(topology1.Connections.ConnectedComponents))
+	for i := range topology1.Connections.ConnectedComponents {
+		assert.Equal(t, topology1.Connections.ConnectedComponents[i], topology2.Connections.ConnectedComponents[i])
+	}
+}
+
 func TestRootCoordTopology_Codec(t *testing.T) {
 	topology1 := RootCoordTopology{
 		Self: RootCoordInfos{

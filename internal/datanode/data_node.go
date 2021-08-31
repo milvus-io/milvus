@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -348,6 +349,11 @@ func (node *DataNode) UpdateStateCode(code internalpb.StateCode) {
 	node.State.Store(code)
 }
 
+func (node *DataNode) isHealthy() bool {
+	code := node.State.Load().(internalpb.StateCode)
+	return code == internalpb.StateCode_Healthy
+}
+
 // WatchDmChannels create a new dataSyncService for every unique dmlVchannel name, ignore if dmlVchannel existed.
 func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	metrics.DataNodeWatchDmChannelsCounter.WithLabelValues(MetricRequestsTotal).Inc()
@@ -567,5 +573,72 @@ func (node *DataNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.Strin
 			Reason:    "",
 		},
 		Value: "",
+	}, nil
+}
+
+// TODO(dragondriver): cache the Metrics and set a retention to the cache
+func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	log.Debug("DataNode.GetMetrics",
+		zap.Int64("node_id", Params.NodeID),
+		zap.String("req", req.Request))
+
+	if !node.isHealthy() {
+		log.Warn("DataNode.GetMetrics failed",
+			zap.Int64("node_id", Params.NodeID),
+			zap.String("req", req.Request),
+			zap.Error(errDataNodeIsUnhealthy(Params.NodeID)))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    msgDataNodeIsUnhealthy(Params.NodeID),
+			},
+			Response: "",
+		}, nil
+	}
+
+	metricType, err := metricsinfo.ParseMetricType(req.Request)
+	if err != nil {
+		log.Warn("DataNode.GetMetrics failed to parse metric type",
+			zap.Int64("node_id", Params.NodeID),
+			zap.String("req", req.Request),
+			zap.Error(err))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+			Response: "",
+		}, nil
+	}
+
+	log.Debug("DataNode.GetMetrics",
+		zap.String("metric_type", metricType))
+
+	if metricType == metricsinfo.SystemInfoMetrics {
+		systemInfoMetrics, err := node.getSystemInfoMetrics(ctx, req)
+
+		log.Debug("DataNode.GetMetrics",
+			zap.Int64("node_id", Params.NodeID),
+			zap.String("req", req.Request),
+			zap.String("metric_type", metricType),
+			zap.Any("systemInfoMetrics", systemInfoMetrics), // TODO(dragondriver): necessary? may be very large
+			zap.Error(err))
+
+		return systemInfoMetrics, err
+	}
+
+	log.Debug("DataNode.GetMetrics failed, request metric type is not implemented yet",
+		zap.Int64("node_id", Params.NodeID),
+		zap.String("req", req.Request),
+		zap.String("metric_type", metricType))
+
+	return &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    metricsinfo.MsgUnimplementedMetric,
+		},
+		Response: "",
 	}, nil
 }

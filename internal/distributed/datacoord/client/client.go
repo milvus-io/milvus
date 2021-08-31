@@ -255,3 +255,10 @@ func (c *Client) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 	})
 	return ret.(*datapb.GetFlushedSegmentsResponse), err
 }
+
+func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	ret, err := c.recall(func() (interface{}, error) {
+		return c.grpcClient.GetMetrics(ctx, req)
+	})
+	return ret.(*milvuspb.GetMetricsResponse), err
+}

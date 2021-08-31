@@ -15,6 +15,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 
@@ -310,4 +313,35 @@ func (m *mockRootCoordService) SegmentFlushCompleted(ctx context.Context, in *da
 }
 func (m *mockRootCoordService) AddNewSegment(ctx context.Context, in *datapb.SegmentMsg) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
+}
+
+func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	// TODO(dragondriver): change the id, though it's not important in ut
+	nodeID := UniqueID(20210819)
+
+	nodeInfos := metricsinfo.DataNodeInfos{
+		BaseComponentInfos: metricsinfo.BaseComponentInfos{
+			Name: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, nodeID),
+		},
+	}
+	resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
+	if err != nil {
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+			Response:      "",
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, nodeID),
+		}, nil
+	}
+
+	return &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		Response:      resp,
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, nodeID),
+	}, nil
 }

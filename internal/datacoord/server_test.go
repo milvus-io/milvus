@@ -15,8 +15,16 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -277,6 +285,71 @@ func TestGetSegmentInfo(t *testing.T) {
 	resp, err := svr.GetSegmentInfo(svr.ctx, req)
 	assert.Nil(t, err)
 	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+}
+
+func TestServer_GetMetrics(t *testing.T) {
+	svr := newTestServer(t, nil)
+	defer closeTestServer(t, svr)
+
+	var err error
+
+	// server is closed
+	stateSave := atomic.LoadInt64(&svr.isServing)
+	atomic.StoreInt64(&svr.isServing, ServerStateInitializing)
+	resp, err := svr.GetMetrics(svr.ctx, &milvuspb.GetMetricsRequest{})
+	assert.Nil(t, err)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	atomic.StoreInt64(&svr.isServing, stateSave)
+
+	// failed to parse metric type
+	invalidRequest := "invalid request"
+	resp, err = svr.GetMetrics(svr.ctx, &milvuspb.GetMetricsRequest{
+		Request: invalidRequest,
+	})
+	assert.Nil(t, err)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+	// unsupported metric type
+	unsupportedMetricType := "unsupported"
+	req, err := metricsinfo.ConstructRequestByMetricType(unsupportedMetricType)
+	assert.Nil(t, err)
+	resp, err = svr.GetMetrics(svr.ctx, req)
+	assert.Nil(t, err)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+	// normal case
+	req, err = metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+	assert.Nil(t, err)
+	resp, err = svr.GetMetrics(svr.ctx, req)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	log.Info("TestServer_GetMetrics",
+		zap.String("name", resp.ComponentName),
+		zap.String("response", resp.Response))
+}
+
+func TestServer_getSystemInfoMetrics(t *testing.T) {
+	svr := newTestServer(t, nil)
+	defer closeTestServer(t, svr)
+
+	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+	assert.Nil(t, err)
+	resp, err := svr.getSystemInfoMetrics(svr.ctx, req)
+	assert.Nil(t, err)
+	log.Info("TestServer_getSystemInfoMetrics",
+		zap.String("name", resp.ComponentName),
+		zap.String("response", resp.Response))
+
+	var coordTopology metricsinfo.DataCoordTopology
+	err = metricsinfo.UnmarshalTopology(resp.Response, &coordTopology)
+	assert.Nil(t, err)
+	assert.Equal(t, len(svr.cluster.GetNodes()), len(coordTopology.Cluster.ConnectedNodes))
+	for _, nodeMetrics := range coordTopology.Cluster.ConnectedNodes {
+		assert.Equal(t, false, nodeMetrics.HasError)
+		assert.Equal(t, 0, len(nodeMetrics.ErrorReason))
+		_, err = metricsinfo.MarshalComponentInfos(nodeMetrics)
+		assert.Nil(t, err)
+	}
 }
 
 func TestChannel(t *testing.T) {

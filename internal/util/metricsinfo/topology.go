@@ -75,6 +75,18 @@ type IndexCoordTopology struct {
 	Connections ConnTopology         `json:"connections"`
 }
 
+// DataClusterTopology shows the topology between DataCoord and DataNodes
+type DataClusterTopology struct {
+	Self           DataCoordInfos  `json:"self"`
+	ConnectedNodes []DataNodeInfos `json:"connected_nodes"`
+}
+
+// DataCoordTopology shows the whole metrics of index cluster
+type DataCoordTopology struct {
+	Cluster     DataClusterTopology `json:"cluster"`
+	Connections ConnTopology        `json:"connections"`
+}
+
 // RootCoordTopology shows the whole metrics of root coordinator
 type RootCoordTopology struct {
 	Self        RootCoordInfos `json:"self"`
