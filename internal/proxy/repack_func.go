@@ -12,11 +12,23 @@
 package proxy
 
 import (
+	"fmt"
+
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
-func insertRepackFunc(tsMsgs []msgstream.TsMsg,
-	hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
+func insertRepackFunc(
+	tsMsgs []msgstream.TsMsg,
+	hashKeys [][]int32,
+) (map[int32]*msgstream.MsgPack, error) {
+
+	if len(hashKeys) < len(tsMsgs) {
+		return nil, fmt.Errorf(
+			"the length of hash keys (%d) is less than the length of messages (%d)",
+			len(hashKeys),
+			len(tsMsgs),
+		)
+	}
 
 	result := make(map[int32]*msgstream.MsgPack)
 	for i, request := range tsMsgs {
@@ -28,17 +40,32 @@ func insertRepackFunc(tsMsgs []msgstream.TsMsg,
 				result[key] = &msgstream.MsgPack{}
 			}
 			result[key].Msgs = append(result[key].Msgs, request)
+		} else {
+			return nil, fmt.Errorf("no hash key for %dth message", i)
 		}
 	}
+
 	return result, nil
 }
 
-func defaultInsertRepackFunc(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error) {
+func defaultInsertRepackFunc(
+	tsMsgs []msgstream.TsMsg,
+	hashKeys [][]int32,
+) (map[int32]*msgstream.MsgPack, error) {
+
+	if len(hashKeys) < len(tsMsgs) {
+		return nil, fmt.Errorf(
+			"the length of hash keys (%d) is less than the length of messages (%d)",
+			len(hashKeys),
+			len(tsMsgs),
+		)
+	}
+
 	// after assigning segment id to msg, tsMsgs was already re-bucketed
 	pack := make(map[int32]*msgstream.MsgPack)
 	for idx, msg := range tsMsgs {
 		if len(hashKeys[idx]) <= 0 {
-			continue
+			return nil, fmt.Errorf("no hash key for %dth message", idx)
 		}
 		key := hashKeys[idx][0]
 		_, ok := pack[key]

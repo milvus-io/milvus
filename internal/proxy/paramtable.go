@@ -31,16 +31,21 @@ const (
 type ParamTable struct {
 	paramtable.BaseTable
 
-	NetworkPort    int
-	IP             string
+	// NetworkPort & IP are not used
+	NetworkPort int
+	IP          string
+
 	NetworkAddress string
-	Alias          string
+
+	// TODO(dragondriver): maybe using the Proxy + ProxyID as the alias is more reasonable
+	Alias string
 
 	EtcdEndpoints    []string
 	MetaRootPath     string
 	RootCoordAddress string
 	PulsarAddress    string
-	RocksmqPath      string
+
+	RocksmqPath string // not used in Proxy
 
 	ProxyID                    UniqueID
 	TimeTickInterval           time.Duration

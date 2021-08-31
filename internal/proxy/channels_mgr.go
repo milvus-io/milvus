@@ -24,9 +24,6 @@ import (
 	"go.uber.org/zap"
 )
 
-type vChan = string
-type pChan = string
-
 type channelsMgr interface {
 	getChannels(collectionID UniqueID) ([]pChan, error)
 	getVChannels(collectionID UniqueID) ([]vChan, error)
@@ -179,7 +176,12 @@ func (mgr *singleTypeChannelsMgr) getAllVIDs(collectionID UniqueID) ([]int, erro
 	mgr.collMtx.RLock()
 	defer mgr.collMtx.RUnlock()
 
-	return mgr.collectionID2VIDs[collectionID], nil
+	ids, exist := mgr.collectionID2VIDs[collectionID]
+	if !exist {
+		return nil, fmt.Errorf("collection %d not found", collectionID)
+	}
+
+	return ids, nil
 }
 
 func (mgr *singleTypeChannelsMgr) getVChansByVID(vid int) ([]vChan, error) {
@@ -339,10 +341,15 @@ func (mgr *singleTypeChannelsMgr) getVChannels(collectionID UniqueID) ([]vChan, 
 
 func (mgr *singleTypeChannelsMgr) createMsgStream(collectionID UniqueID) error {
 	channels, err := mgr.getChannelsFunc(collectionID)
-	log.Debug("singleTypeChannelsMgr", zap.Any("createMsgStream.getChannels", channels))
 	if err != nil {
+		log.Warn("failed to create message stream",
+			zap.Int64("collection_id", collectionID),
+			zap.Error(err))
 		return err
 	}
+	log.Debug("singleTypeChannelsMgr",
+		zap.Int64("collection_id", collectionID),
+		zap.Any("createMsgStream.getChannels", channels))
 
 	mgr.updateChannels(channels)
 
@@ -480,13 +487,13 @@ func (mgr *channelsMgrImpl) removeAllDMLStream() error {
 	return mgr.dmlChannelsMgr.removeAllStream()
 }
 
-func newChannelsMgr(
+func newChannelsMgrImpl(
 	getDmlChannelsFunc getChannelsFuncType,
 	dmlRepackFunc repackFuncType,
 	getDqlChannelsFunc getChannelsFuncType,
 	dqlRepackFunc repackFuncType,
 	msgStreamFactory msgstream.Factory,
-) channelsMgr {
+) *channelsMgrImpl {
 	return &channelsMgrImpl{
 		dmlChannelsMgr: newSingleTypeChannelsMgr(getDmlChannelsFunc, msgStreamFactory, dmlRepackFunc, dmlStreamType),
 		dqlChannelsMgr: newSingleTypeChannelsMgr(getDqlChannelsFunc, msgStreamFactory, dqlRepackFunc, dqlStreamType),
