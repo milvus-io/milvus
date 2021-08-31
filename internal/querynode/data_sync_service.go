@@ -26,8 +26,8 @@ import (
 type loadType = int32
 
 const (
-	loadTypeCollection = 0
-	loadTypePartition  = 1
+	loadTypeCollection loadType = 0
+	loadTypePartition  loadType = 1
 )
 
 type dataSyncService struct {
@@ -43,7 +43,7 @@ type dataSyncService struct {
 }
 
 // collection flow graph
-func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, vChannels []string) error {
+func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, vChannels []Channel) error {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
@@ -69,7 +69,7 @@ func (dsService *dataSyncService) addCollectionFlowGraph(collectionID UniqueID, 
 	return nil
 }
 
-func (dsService *dataSyncService) getCollectionFlowGraphs(collectionID UniqueID, vChannels []string) (map[Channel]*queryNodeFlowGraph, error) {
+func (dsService *dataSyncService) getCollectionFlowGraphs(collectionID UniqueID, vChannels []Channel) (map[Channel]*queryNodeFlowGraph, error) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
@@ -87,7 +87,7 @@ func (dsService *dataSyncService) getCollectionFlowGraphs(collectionID UniqueID,
 	return tmpFGs, nil
 }
 
-func (dsService *dataSyncService) startCollectionFlowGraph(collectionID UniqueID, vChannels []string) error {
+func (dsService *dataSyncService) startCollectionFlowGraph(collectionID UniqueID, vChannels []Channel) error {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
@@ -119,7 +119,7 @@ func (dsService *dataSyncService) removeCollectionFlowGraph(collectionID UniqueI
 }
 
 // partition flow graph
-func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID, partitionID UniqueID, vChannels []string) error {
+func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID, partitionID UniqueID, vChannels []Channel) error {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
@@ -140,7 +140,7 @@ func (dsService *dataSyncService) addPartitionFlowGraph(collectionID UniqueID, p
 	return nil
 }
 
-func (dsService *dataSyncService) getPartitionFlowGraphs(partitionID UniqueID, vChannels []string) (map[Channel]*queryNodeFlowGraph, error) {
+func (dsService *dataSyncService) getPartitionFlowGraphs(partitionID UniqueID, vChannels []Channel) (map[Channel]*queryNodeFlowGraph, error) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
@@ -158,7 +158,7 @@ func (dsService *dataSyncService) getPartitionFlowGraphs(partitionID UniqueID, v
 	return tmpFGs, nil
 }
 
-func (dsService *dataSyncService) startPartitionFlowGraph(partitionID UniqueID, vChannels []string) error {
+func (dsService *dataSyncService) startPartitionFlowGraph(partitionID UniqueID, vChannels []Channel) error {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
@@ -180,9 +180,11 @@ func (dsService *dataSyncService) removePartitionFlowGraph(partitionID UniqueID)
 	defer dsService.mu.Unlock()
 
 	if _, ok := dsService.partitionFlowGraphs[partitionID]; ok {
-		for _, nodeFG := range dsService.partitionFlowGraphs[partitionID] {
+		for channel, nodeFG := range dsService.partitionFlowGraphs[partitionID] {
 			// close flow graph
 			nodeFG.close()
+			// remove tSafe record
+			dsService.tSafeReplica.removeRecord(channel, partitionID)
 		}
 		dsService.partitionFlowGraphs[partitionID] = nil
 	}

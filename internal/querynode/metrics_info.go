@@ -36,7 +36,7 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 			},
 			Response:      "",
 			ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, Params.QueryNodeID),
-		}, nil
+		}, err
 	}
 
 	return &milvuspb.GetMetricsResponse{
@@ -46,5 +46,5 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 		},
 		Response:      resp,
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, Params.QueryNodeID),
-	}, nil
+	}, err
 }

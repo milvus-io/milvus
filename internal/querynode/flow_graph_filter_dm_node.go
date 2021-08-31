@@ -185,6 +185,7 @@ func newFilteredDmNode(replica ReplicaInterface,
 	if loadType != loadTypeCollection && loadType != loadTypePartition {
 		err := errors.New("invalid flow graph type")
 		log.Warn(err.Error())
+		return nil
 	}
 
 	return &filterDmNode{

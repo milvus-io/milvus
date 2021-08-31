@@ -121,7 +121,7 @@ func (node *QueryNode) Init() error {
 		node.indexCoord,
 		node.msFactory,
 		node.etcdKV)
-	node.streaming = newStreaming(node.queryNodeLoopCtx, node.msFactory, node.etcdKV)
+	node.streaming = newStreaming(node.queryNodeLoopCtx, node.msFactory)
 
 	C.SegcoreInit()
 

@@ -79,10 +79,23 @@ func (c *Collection) removePartitionID(partitionID UniqueID) {
 }
 
 func (c *Collection) addVChannels(channels []Channel) {
-	log.Debug("add vChannels to collection",
-		zap.Any("channels", channels),
-		zap.Any("collectionID", c.ID()))
-	c.vChannels = append(c.vChannels, channels...)
+dstLoop:
+	for _, dstChan := range channels {
+		for _, srcChan := range c.vChannels {
+			if dstChan == srcChan {
+				log.Debug("vChannel has been existed in collection's vChannels",
+					zap.Any("collectionID", c.ID()),
+					zap.Any("vChannel", dstChan),
+				)
+				continue dstLoop
+			}
+		}
+		log.Debug("add vChannel to collection",
+			zap.Any("collectionID", c.ID()),
+			zap.Any("vChannel", dstChan),
+		)
+		c.vChannels = append(c.vChannels, dstChan)
+	}
 }
 
 func (c *Collection) getVChannels() []Channel {
@@ -90,10 +103,24 @@ func (c *Collection) getVChannels() []Channel {
 }
 
 func (c *Collection) addPChannels(channels []Channel) {
-	log.Debug("add pChannels to collection",
-		zap.Any("channels", channels),
-		zap.Any("collectionID", c.ID()))
-	c.pChannels = append(c.pChannels, channels...)
+	tmp := make(map[Channel]struct{})
+	for _, srcChan := range c.pChannels {
+		tmp[srcChan] = struct{}{}
+	}
+	for _, dstChan := range channels {
+		if _, ok := tmp[dstChan]; !ok {
+			c.pChannels = append(c.pChannels, dstChan)
+			log.Debug("add pChannel to collection",
+				zap.Any("collectionID", c.ID()),
+				zap.Any("pChannel", dstChan),
+			)
+		} else {
+			log.Debug("pChannel has been existed in collection's pChannels",
+				zap.Any("collectionID", c.ID()),
+				zap.Any("pChannel", dstChan),
+			)
+		}
+	}
 }
 
 func (c *Collection) getPChannels() []Channel {

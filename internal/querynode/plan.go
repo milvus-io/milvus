@@ -22,6 +22,7 @@ package querynode
 import "C"
 import (
 	"errors"
+	"github.com/milvus-io/milvus/internal/log"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
@@ -60,11 +61,19 @@ func createSearchPlanByExpr(col *Collection, expr []byte) (*SearchPlan, error) {
 }
 
 func (plan *SearchPlan) getTopK() int64 {
+	if plan == nil || plan.cSearchPlan == nil {
+		log.Warn("null search plan")
+		return 0
+	}
 	topK := C.GetTopK(plan.cSearchPlan)
 	return int64(topK)
 }
 
 func (plan *SearchPlan) getMetricType() string {
+	if plan == nil || plan.cSearchPlan == nil {
+		log.Warn("null search plan")
+		return ""
+	}
 	cMetricType := C.GetMetricType(plan.cSearchPlan)
 	defer C.free(unsafe.Pointer(cMetricType))
 	metricType := C.GoString(cMetricType)
@@ -72,6 +81,10 @@ func (plan *SearchPlan) getMetricType() string {
 }
 
 func (plan *SearchPlan) delete() {
+	if plan == nil || plan.cSearchPlan == nil {
+		log.Warn("null search plan")
+		return
+	}
 	C.DeleteSearchPlan(plan.cSearchPlan)
 }
 
@@ -126,5 +139,9 @@ func createRetrievePlan(col *Collection, msg *segcorepb.RetrieveRequest, timesta
 }
 
 func (plan *RetrievePlan) delete() {
+	if plan == nil || plan.cRetrievePlan == nil {
+		log.Warn("null retrieve plan")
+		return
+	}
 	C.DeleteRetrievePlan(plan.cRetrievePlan)
 }

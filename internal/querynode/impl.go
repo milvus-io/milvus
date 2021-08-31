@@ -106,7 +106,15 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 
 	// add search collection
 	if !node.queryService.hasQueryCollection(collectionID) {
-		node.queryService.addQueryCollection(collectionID)
+		err := node.queryService.addQueryCollection(collectionID)
+		if err != nil {
+			log.Warn(err.Error())
+			status := &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			}
+			return status, err
+		}
 		log.Debug("add query collection", zap.Any("collectionID", collectionID))
 	}
 
@@ -124,11 +132,6 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 	log.Debug("querynode AsProducer: " + strings.Join(producerChannels, ", "))
 
 	// message stream need to asConsumer before start
-	// add search collection
-	if !node.queryService.hasQueryCollection(collectionID) {
-		node.queryService.addQueryCollection(collectionID)
-		log.Debug("add query collection", zap.Any("collectionID", collectionID))
-	}
 	sc.start()
 	log.Debug("start query collection", zap.Any("collectionID", collectionID))
 
@@ -499,13 +502,14 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 			zap.String("req", req.Request),
 			zap.Error(errQueryNodeIsUnhealthy(Params.QueryNodeID)))
 
+		err := fmt.Errorf(msgQueryNodeIsUnhealthy(Params.QueryNodeID))
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgQueryNodeIsUnhealthy(Params.QueryNodeID),
+				Reason:    err.Error(),
 			},
 			Response: "",
-		}, nil
+		}, err
 	}
 
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
@@ -521,7 +525,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 				Reason:    err.Error(),
 			},
 			Response: "",
-		}, nil
+		}, err
 	}
 
 	log.Debug("QueryNode.GetMetrics",

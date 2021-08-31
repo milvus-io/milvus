@@ -16,7 +16,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
@@ -106,39 +105,14 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 			segmentGC()
 			return err
 		}
-		if onService {
-			key := fmt.Sprintf("%s/%d", queryCoordSegmentMetaPrefix, segmentID)
-			value, err := loader.etcdKV.Load(key)
-			if err != nil {
-				deleteSegment(segment)
-				log.Warn("error when load segment info from etcd", zap.Any("error", err.Error()))
-				segmentGC()
-				return err
-			}
-			segmentInfo := &querypb.SegmentInfo{}
-			err = proto.UnmarshalText(value, segmentInfo)
-			if err != nil {
-				deleteSegment(segment)
-				log.Warn("error when unmarshal segment info from etcd", zap.Any("error", err.Error()))
-				segmentGC()
-				return err
-			}
-			segmentInfo.SegmentState = querypb.SegmentState_sealed
-			newKey := fmt.Sprintf("%s/%d", queryNodeSegmentMetaPrefix, segmentID)
-			err = loader.etcdKV.Save(newKey, proto.MarshalTextString(segmentInfo))
-			if err != nil {
-				deleteSegment(segment)
-				log.Warn("error when update segment info to etcd", zap.Any("error", err.Error()))
-				segmentGC()
-				return err
-			}
-		}
 		newSegments = append(newSegments, segment)
 	}
 	setSegments()
 
-	// sendQueryNodeStats
-	return loader.indexLoader.sendQueryNodeStats()
+	//// sendQueryNodeStats
+	//return loader.indexLoader.sendQueryNodeStats()
+
+	return nil
 }
 
 func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment *Segment, segmentLoadInfo *querypb.SegmentLoadInfo) error {
@@ -186,26 +160,6 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment 
 
 	return nil
 }
-
-//func (loader *segmentLoader) GetSegmentStates(segmentID UniqueID) (*datapb.GetSegmentStatesResponse, error) {
-//	ctx := context.TODO()
-//	if loader.dataCoord == nil {
-//		return nil, errors.New("null data service client")
-//	}
-//
-//	segmentStatesRequest := &datapb.GetSegmentStatesRequest{
-//		SegmentIDs: []int64{segmentID},
-//	}
-//	statesResponse, err := loader.dataCoord.GetSegmentStates(ctx, segmentStatesRequest)
-//	if err != nil || statesResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
-//		return nil, err
-//	}
-//	if len(statesResponse.States) != 1 {
-//		return nil, errors.New("segment states' len should be 1")
-//	}
-//
-//	return statesResponse, nil
-//}
 
 func (loader *segmentLoader) filterFieldBinlogs(fieldBinlogs []*datapb.FieldBinlog, skipFieldIDs []int64) []*datapb.FieldBinlog {
 	result := make([]*datapb.FieldBinlog, 0)

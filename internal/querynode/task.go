@@ -139,6 +139,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	)
 
 	// init replica
+	w.node.streaming.replica.initExcludedSegments(collectionID)
 	if hasCollectionInStreaming := w.node.streaming.replica.hasCollection(collectionID); !hasCollectionInStreaming {
 		err := w.node.streaming.replica.addCollection(collectionID, w.req.Schema)
 		if err != nil {
@@ -302,6 +303,14 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		err = w.node.streaming.dataSyncService.startCollectionFlowGraph(collectionID, vChannels)
 		if err != nil {
 			return err
+		}
+	}
+
+	// add vChannelStage
+	if w.node.queryService.hasQueryCollection(collectionID) {
+		for _, c := range vChannels {
+			w.node.queryService.queryCollections[collectionID].addVChannelStage(c)
+			w.node.queryService.queryCollections[collectionID].startVChannelStage(c)
 		}
 	}
 

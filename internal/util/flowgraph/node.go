@@ -105,7 +105,6 @@ func (nodeCtx *nodeCtx) Start(ctx context.Context, wg *sync.WaitGroup) {
 func (nodeCtx *nodeCtx) Close() {
 	for _, channel := range nodeCtx.inputChannels {
 		close(channel)
-		log.Warn("close inputChannel")
 	}
 	nodeCtx.node.Close()
 }

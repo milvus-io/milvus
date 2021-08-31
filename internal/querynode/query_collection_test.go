@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
+// TODO: fix query collection
 func TestQueryCollection_withoutVChannel(t *testing.T) {
 	m := map[string]interface{}{
 		"PulsarAddress":  Params.PulsarAddress,
@@ -56,14 +57,15 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 	assert.Nil(t, err)
 
 	//create a streaming
-	streaming := newStreaming(context.Background(), factory, etcdKV)
+	streaming := newStreaming(context.Background(), factory)
 	err = streaming.replica.addCollection(0, schema)
 	assert.Nil(t, err)
 	err = streaming.replica.addPartition(0, 1)
 	assert.Nil(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	queryCollection := newQueryCollection(ctx, cancel, 0, historical, streaming, factory, nil, nil, false)
+	queryCollection, err := newQueryCollection(ctx, cancel, 0, historical, streaming, factory, nil, nil, false)
+	assert.NoError(t, err)
 
 	producerChannels := []string{"testResultChannel"}
 	queryCollection.queryResultMsgStream.AsProducer(producerChannels)
@@ -100,7 +102,7 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 	placeGroupByte, err := proto.Marshal(&placeholderGroup)
 	assert.Nil(t, err)
 
-	queryMsg := &msgstream.SearchMsg{
+	_ = &msgstream.SearchMsg{
 		BaseMsg: msgstream.BaseMsg{
 			Ctx:            ctx,
 			BeginTimestamp: 10,
@@ -121,13 +123,94 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 			GuaranteeTimestamp: 10,
 		},
 	}
-	err = queryCollection.receiveQueryMsg(queryMsg)
-	assert.Nil(t, err)
+	//err = queryCollection.receiveQueryMsg(queryMsg)
+	//assert.Nil(t, err)
 
 	queryCollection.cancel()
 	queryCollection.close()
 	historical.close()
 	streaming.close()
+}
+
+func TestQueryCollection_addVChannelStage_and_removeVChannelStage(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	historical, err := genSimpleHistorical(ctx)
+	assert.NoError(t, err)
+
+	streaming, err := genSimpleStreaming(ctx)
+	assert.NoError(t, err)
+
+	fac, err := genFactory()
+	assert.NoError(t, err)
+
+	localManager, err := genLocalChunkManager()
+	assert.NoError(t, err)
+
+	remoteManager, err := genRemoteChunkManager(ctx)
+	assert.NoError(t, err)
+
+	queryCollection, err := newQueryCollection(ctx,
+		cancel,
+		defaultCollectionID,
+		historical,
+		streaming,
+		fac,
+		localManager,
+		remoteManager,
+		false)
+	assert.NoError(t, err)
+
+	queryChannel := genQueryChannel()
+	queryResChannel := genQueryResultChannel()
+	queryCollection.queryMsgStream.AsConsumer([]Channel{queryChannel}, defaultSubName)
+	queryCollection.queryResultMsgStream.AsProducer([]Channel{queryResChannel})
+
+	queryCollection.start()
+	defer queryCollection.close()
+
+	err = produceSimpleSearchMsg(ctx, queryChannel)
+	assert.NoError(t, err)
+
+	stream, err := initConsumer(ctx, queryResChannel)
+	assert.NoError(t, err)
+	defer stream.Close()
+
+	res, err := consumeSimpleSearchResult(stream)
+	assert.NoError(t, err)
+	assert.Equal(t, defaultTopK, res.TopK)
+	assert.Equal(t, 1, len(res.ChannelIDsSearched)) // defaultChannel
+	assert.Equal(t, 1, len(res.SealedSegmentIDsSearched))
+	assert.Equal(t, defaultSegmentID, res.SealedSegmentIDsSearched[0])
+
+	// add channel and query again
+	newChan := "query-node-unittest-channel-1"
+	queryCollection.addVChannelStage(newChan)
+	queryCollection.startVChannelStage(newChan)
+
+	err = produceSimpleSearchMsg(ctx, queryChannel)
+	assert.NoError(t, err)
+
+	res, err = consumeSimpleSearchResult(stream)
+	assert.NoError(t, err)
+	assert.Equal(t, defaultTopK, res.TopK)
+	assert.Equal(t, 2, len(res.ChannelIDsSearched)) // defaultChannel + newChan
+	assert.Equal(t, 1, len(res.SealedSegmentIDsSearched))
+	assert.Equal(t, defaultSegmentID, res.SealedSegmentIDsSearched[0])
+
+	// remove channel and query again
+	queryCollection.removeVChannelStage(newChan)
+
+	err = produceSimpleSearchMsg(ctx, queryChannel)
+	assert.NoError(t, err)
+
+	res, err = consumeSimpleSearchResult(stream)
+	assert.NoError(t, err)
+	assert.Equal(t, defaultTopK, res.TopK)
+	assert.Equal(t, 1, len(res.ChannelIDsSearched)) // defaultChannel
+	assert.Equal(t, 1, len(res.SealedSegmentIDsSearched))
+	assert.Equal(t, defaultSegmentID, res.SealedSegmentIDsSearched[0])
 }
 
 func TestGetSegmentsByPKs(t *testing.T) {

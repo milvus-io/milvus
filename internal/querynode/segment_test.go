@@ -12,6 +12,7 @@
 package querynode
 
 import (
+	"context"
 	"encoding/binary"
 	"log"
 	"math"
@@ -590,7 +591,7 @@ func TestSegment_ConcurrentOperation(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	wg := sync.WaitGroup{}
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 100; i++ {
 		segmentID := UniqueID(i)
 		segment := newSegment(collection, segmentID, partitionID, collectionID, "", segmentTypeSealed, true)
 		assert.Equal(t, segmentID, segment.segmentID)
@@ -609,4 +610,110 @@ func TestSegment_ConcurrentOperation(t *testing.T) {
 	}
 	wg.Wait()
 	deleteCollection(collection)
+}
+
+func TestSegment_indexInfoTest(t *testing.T) {
+	t.Run("Test_valid", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		h, err := genSimpleHistorical(ctx)
+		assert.NoError(t, err)
+
+		seg, err := h.replica.getSegmentByID(defaultSegmentID)
+		assert.NoError(t, err)
+
+		fieldID := simpleVecField.id
+
+		err = seg.setIndexInfo(fieldID, &indexInfo{})
+		assert.NoError(t, err)
+
+		indexName := "query-node-test-index"
+		err = seg.setIndexName(fieldID, indexName)
+		assert.NoError(t, err)
+		name := seg.getIndexName(fieldID)
+		assert.Equal(t, indexName, name)
+
+		indexParam := make(map[string]string)
+		indexParam["index_type"] = "IVF_PQ"
+		indexParam["index_mode"] = "cpu"
+		err = seg.setIndexParam(fieldID, indexParam)
+		assert.NoError(t, err)
+		param := seg.getIndexParams(fieldID)
+		assert.Equal(t, len(indexParam), len(param))
+		assert.Equal(t, indexParam["index_type"], param["index_type"])
+		assert.Equal(t, indexParam["index_mode"], param["index_mode"])
+
+		indexPaths := []string{"query-node-test-index-path"}
+		err = seg.setIndexPaths(fieldID, indexPaths)
+		assert.NoError(t, err)
+		paths := seg.getIndexPaths(fieldID)
+		assert.Equal(t, len(indexPaths), len(paths))
+		assert.Equal(t, indexPaths[0], paths[0])
+
+		indexID := UniqueID(0)
+		err = seg.setIndexID(fieldID, indexID)
+		assert.NoError(t, err)
+		id := seg.getIndexID(fieldID)
+		assert.Equal(t, indexID, id)
+
+		buildID := UniqueID(0)
+		err = seg.setBuildID(fieldID, buildID)
+		assert.NoError(t, err)
+		id = seg.getBuildID(fieldID)
+		assert.Equal(t, buildID, id)
+
+		// TODO: add match index test
+	})
+
+	t.Run("Test_invalid", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		h, err := genSimpleHistorical(ctx)
+		assert.NoError(t, err)
+
+		seg, err := h.replica.getSegmentByID(defaultSegmentID)
+		assert.NoError(t, err)
+
+		fieldID := simpleVecField.id
+
+		indexName := "query-node-test-index"
+		err = seg.setIndexName(fieldID, indexName)
+		assert.Error(t, err)
+		name := seg.getIndexName(fieldID)
+		assert.Equal(t, "", name)
+
+		indexParam := make(map[string]string)
+		indexParam["index_type"] = "IVF_PQ"
+		indexParam["index_mode"] = "cpu"
+		err = seg.setIndexParam(fieldID, indexParam)
+		assert.Error(t, err)
+		err = seg.setIndexParam(fieldID, nil)
+		assert.Error(t, err)
+		param := seg.getIndexParams(fieldID)
+		assert.Nil(t, param)
+
+		indexPaths := []string{"query-node-test-index-path"}
+		err = seg.setIndexPaths(fieldID, indexPaths)
+		assert.Error(t, err)
+		paths := seg.getIndexPaths(fieldID)
+		assert.Nil(t, paths)
+
+		indexID := UniqueID(0)
+		err = seg.setIndexID(fieldID, indexID)
+		assert.Error(t, err)
+		id := seg.getIndexID(fieldID)
+		assert.Equal(t, int64(-1), id)
+
+		buildID := UniqueID(0)
+		err = seg.setBuildID(fieldID, buildID)
+		assert.Error(t, err)
+		id = seg.getBuildID(fieldID)
+		assert.Equal(t, int64(-1), id)
+
+		seg.indexInfos = nil
+		err = seg.setIndexInfo(fieldID, &indexInfo{})
+		assert.Error(t, err)
+	})
 }
