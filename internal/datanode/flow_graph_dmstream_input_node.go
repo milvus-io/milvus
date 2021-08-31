@@ -13,19 +13,24 @@ package datanode
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
-func newDmInputNode(ctx context.Context, factory msgstream.Factory, pchannelName string, seekPos *internalpb.MsgPosition) *flowgraph.InputNode {
+func newDmInputNode(ctx context.Context, factory msgstream.Factory, collID UniqueID, chanName string, seekPos *internalpb.MsgPosition) *flowgraph.InputNode {
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
-	consumeSubName := Params.MsgChannelSubName
+
+	// subName should be unique, since pchannelName is shared among several collections
+	consumeSubName := Params.MsgChannelSubName + "-" + strconv.FormatInt(collID, 10)
 	insertStream, _ := factory.NewTtMsgStream(ctx)
 
+	pchannelName := rootcoord.ToPhysicalChannel(chanName)
 	insertStream.AsConsumer([]string{pchannelName}, consumeSubName)
 	log.Debug("datanode AsConsumer physical channel: " + pchannelName + " : " + consumeSubName)
 
