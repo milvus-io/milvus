@@ -1,11 +1,11 @@
 <h1 >测试框架使用指南</h1>
 <h3 >简介</h3>
-<p>基于 pytest 编写的 <strong>pymilvus-orm</strong> 的测试框架。</p>
+<p>基于 pytest 编写的 <strong>PyMilvus</strong> 的测试框架。</p>
 <p><strong><em>测试代码：</em></strong><em><a href='https://github.com/milvus-io/milvus/tree/master/tests/python_client' target='_blank' class='url'>https://github.com/milvus-io/milvus/tree/master/tests/python_client</a></em></p>
 <p>&nbsp;</p>
 <h3 >快速开始</h3>
 <h5 >部署 Milvus </h5>
-<p>Milvus 支持4种部署方式，请根据需求选择部署方式，pymilvus_orm 支持任意部署下的 Milvus。</p>
+<p>Milvus 支持4种部署方式，请根据需求选择部署方式，PyMilvus 支持任意部署下的 Milvus。</p>
 <ol>
 <li><a href='https://github.com/milvus-io/milvus/blob/master/DEVELOPMENT.md'>源码编译部署</a></li>
 <li>Docker Compose 部署(<a href='https://milvus.io/cn/docs/v2.0.0/install_standalone-docker.md'>单机版本</a> <a href='https://milvus.io/cn/docs/v2.0.0/install_cluster-docker.md'>分布式版本</a>)</li>
@@ -61,11 +61,11 @@
 <pre><code> kind export logs .
 </code></pre>
 <p>&nbsp;</p>
-<h5 >pymilvus_orm 测试环境部署及用例执行</h5>
-<p>推荐使用  <strong>Python 3(&gt;= 3.6)</strong> ，与 <strong><a href='https://pymilvus-orm.readthedocs.io/en/latest/install.html'>pymilvus_orm</a></strong> 支持的 python 版本保持一致。</p>
+<h5 >PyMilvus 测试环境部署及用例执行</h5>
+<p>推荐使用  <strong>Python 3(&gt;= 3.6)</strong> ，与 <strong><a href='https://pymilvus.readthedocs.io/en/latest/install.html'>PyMilvus</a></strong> 支持的 python 版本保持一致。</p>
 <p>Note: 如选择KinD部署方式，以下步骤可以自动完成。</p>
 <ol>
-<li>安装测试所需的 python 包，进入代码 <strong>*/milvus/tests/python_client/</strong> 目录，执行命令：</li>
+<li>安装测试所需的 Python 包，进入代码 <strong>*/milvus/tests/python_client/</strong> 目录，执行命令：</li>
 
 <pre><code>pip install -r requirements.txt
 </code></pre>
@@ -93,7 +93,7 @@
 <p><img src="https://github.com/milvus-io/milvus/blob/master/tests/python_client/graphs/module_call_diagram.jpg" referrerpolicy="no-referrer" alt="img"></p>
 <h5 > 工作目录及文件介绍</h5>
 <ul>
-<li><strong>base</strong>：放置已封装好的 <strong>pymilvus-orm 模块文件</strong>，以及 pytest 框架的 setup 和 teardown 处理等</li>
+<li><strong>base</strong>：放置已封装好的 <strong>PyMilvus 模块文件</strong>，以及 Pytest 框架的 setup 和 teardown 处理等</li>
 <li><strong>check</strong>：接口返回结果的<strong>检查模块</strong></li>
 <li><strong>common</strong>：测试用例<strong>通用的方法和参数</strong></li>
 <li><strong>config</strong>：<strong>基础配置</strong>内容</li>
@@ -177,7 +177,7 @@
 </ol>
 <ul>
 <ul>
-    <li>不能在测试用例文件中初始化 ORM 对象</li>
+    <li>不能在测试用例文件中初始化 PyMilvus 对象</li>
     <li>一般情况下，不在测试用例文件中直接添加日志代码</li>
     <li>在测试用例中，应直接调用封装好的方法或者属性，如下所示：</li>
 </ul>
@@ -225,7 +225,7 @@ partition_w = self.init_partition_wrap(collection_w, partition_name, check_task=
 </ol>
 <ul>
 <ul>
-    <li>在 base 文件夹的 wrapper 文件底下找到封装好的同名被测接口，各接口返回2个值的list，第一个是 pymilvus-orm 的接口返回结果，第二个是接口返回结果正常/异常的判断，为True/False。该返回可用于在用例中做额外的结果检查。</li>
+    <li>在 base 文件夹的 wrapper 文件底下找到封装好的同名被测接口，各接口返回2个值的list，第一个是 PyMilvus 的接口返回结果，第二个是接口返回结果正常/异常的判断，为True/False。该返回可用于在用例中做额外的结果检查。</li>
     <li>在 testcases 文件夹下找到被测接口相应的测试文件，进行用例添加。如下所示，全部测试用例可直接参考 testcases 目录下的所有 test 文件：</li>
 </ul>
 
@@ -268,7 +268,7 @@ self.field_schema_wrap = ApiFieldSchemaWrapper()
 </code></pre>
 
 <ul>
-    <li>调用需要测试的接口，应按照相应封装好的方法传入参数。如下所示，除了 check_task，check_items 两个参数外，其余参数与 pymilvus-orm 的接口参数一致。</li>
+    <li>调用需要测试的接口，应按照相应封装好的方法传入参数。如下所示，除了 check_task，check_items 两个参数外，其余参数与 PyMilvus 的接口参数一致。</li>
 </ul>
 <pre><code>def init_partition(self, collection, name, description="", check_task=None, check_items=None, **kwargs)
 </code></pre>
