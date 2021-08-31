@@ -120,6 +120,25 @@ func genTestCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.Collect
 	return &collectionMeta
 }
 
+func genTestCollectionMetaWithPK(collectionID UniqueID, isBinary bool) *etcdpb.CollectionInfo {
+	schema := genTestCollectionSchema(collectionID, isBinary, 16)
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID:      UniqueID(0),
+		Name:         "id",
+		IsPrimaryKey: true,
+		DataType:     schemapb.DataType_Int64,
+	})
+
+	collectionMeta := etcdpb.CollectionInfo{
+		ID:           collectionID,
+		Schema:       schema,
+		CreateTime:   Timestamp(0),
+		PartitionIDs: []UniqueID{defaultPartitionID},
+	}
+
+	return &collectionMeta
+}
+
 func initTestMeta(t *testing.T, node *QueryNode, collectionID UniqueID, segmentID UniqueID, optional ...bool) {
 	isBinary := false
 	if len(optional) > 0 {

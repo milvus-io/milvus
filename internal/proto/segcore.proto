@@ -4,11 +4,6 @@ package milvus.proto.segcore;
 option go_package = "github.com/milvus-io/milvus/internal/proto/segcorepb";
 import "schema.proto";
 
-message RetrieveRequest {
-  schema.IDs ids = 1;
-  repeated int64 output_fields_id = 2;
-}
-
 message RetrieveResults {
   schema.IDs ids = 1;
   repeated int64 offset = 2;

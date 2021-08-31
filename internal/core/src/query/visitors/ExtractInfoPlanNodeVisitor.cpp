@@ -48,4 +48,11 @@ ExtractInfoPlanNodeVisitor::visit(BinaryVectorANNS& node) {
     }
 }
 
+void
+ExtractInfoPlanNodeVisitor::visit(RetrievePlanNode& node) {
+    // Assert(node.predicate_.has_value());
+    ExtractInfoExprVisitor expr_visitor(plan_info_);
+    node.predicate_->accept(expr_visitor);
+}
+
 }  // namespace milvus::query

@@ -83,6 +83,17 @@ struct SearchResult {
 
 using SearchResultPtr = std::shared_ptr<SearchResult>;
 
+struct RetrieveResult {
+    RetrieveResult() = default;
+
+ public:
+    void* segment_;
+    std::vector<int64_t> result_offsets_;
+    std::vector<DataArray> field_data_;
+};
+
+using RetrieveResultPtr = std::shared_ptr<RetrieveResult>;
+
 struct EntityResults {
     // use protobuf results to simplify
 };

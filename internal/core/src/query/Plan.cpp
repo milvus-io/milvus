@@ -396,6 +396,13 @@ CreatePlanByExpr(const Schema& schema, const char* serialized_expr_plan, int64_t
     return ProtoParser(schema).CreatePlan(plan_node);
 }
 
+std::unique_ptr<RetrievePlan>
+CreateRetrievePlanByExpr(const Schema& schema, const char* serialized_expr_plan, int size) {
+    proto::plan::PlanNode plan_node;
+    plan_node.ParseFromArray(serialized_expr_plan, size);
+    return ProtoParser(schema).CreateRetrievePlan(plan_node);
+}
+
 std::vector<ExprPtr>
 Parser::ParseItemList(const Json& body) {
     std::vector<ExprPtr> results;
@@ -546,15 +553,15 @@ GetNumOfQueries(const PlaceholderGroup* group) {
     return group->at(0).num_of_queries_;
 }
 
-std::unique_ptr<RetrievePlan>
-CreateRetrievePlan(const Schema& schema, proto::segcore::RetrieveRequest&& request) {
-    auto plan = std::make_unique<RetrievePlan>();
-    plan->ids_ = std::unique_ptr<proto::schema::IDs>(request.release_ids());
-    for (auto& field_id : request.output_fields_id()) {
-        plan->field_offsets_.push_back(schema.get_offset(FieldId(field_id)));
-    }
-    return plan;
-}
+// std::unique_ptr<RetrievePlan>
+// CreateRetrievePlan(const Schema& schema, proto::segcore::RetrieveRequest&& request) {
+//    auto plan = std::make_unique<RetrievePlan>();
+//    plan->ids_ = std::unique_ptr<proto::schema::IDs>(request.release_ids());
+//    for (auto& field_id : request.output_fields_id()) {
+//        plan->field_offsets_.push_back(schema.get_offset(FieldId(field_id)));
+//    }
+//    return plan;
+//}
 
 void
 Plan::check_identical(Plan& other) {

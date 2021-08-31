@@ -108,7 +108,7 @@ CreateScalarArrayFrom(const void* data_raw, int64_t count, DataType data_type) {
             break;
         }
         case DataType::INT32: {
-            auto data = reinterpret_cast<const int16_t*>(data_raw);
+            auto data = reinterpret_cast<const int32_t*>(data_raw);
             auto obj = scalar_array->mutable_int_data();
             obj->mutable_data()->Add(data, data + count);
             break;
@@ -192,29 +192,31 @@ SegmentInternalInterface::BulkSubScript(FieldOffset field_offset, const SegOffse
 }
 
 std::unique_ptr<proto::segcore::RetrieveResults>
-SegmentInternalInterface::GetEntityById(const std::vector<FieldOffset>& field_offsets,
-                                        const IdArray& id_array,
-                                        Timestamp timestamp) const {
+SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan, Timestamp timestamp) const {
+    std::shared_lock lck(mutex_);
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    query::ExecPlanNodeVisitor visitor(*this, timestamp);
+    auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
+    retrieve_results.segment_ = (void*)this;
 
-    auto [ids_, seg_offsets] = search_ids(id_array, timestamp);
-
-    // std::string dbg_log;
-    // dbg_log += "id_array:" + id_array.DebugString() + "\n";
-    // dbg_log += "ids:" + ids_->DebugString() + "\n";
-    // dbg_log += "segment_info:" + this->debug();
-    // std::cout << dbg_log << std::endl;
-
-    results->set_allocated_ids(ids_.release());
-
-    for (auto& seg_offset : seg_offsets) {
-        results->add_offset(seg_offset.get());
+    for (auto& seg_offset : retrieve_results.result_offsets_) {
+        results->add_offset(seg_offset);
     }
 
     auto fields_data = results->mutable_fields_data();
-    for (auto field_offset : field_offsets) {
-        auto col = BulkSubScript(field_offset, seg_offsets.data(), seg_offsets.size());
-        fields_data->AddAllocated(col.release());
+    auto ids = results->mutable_ids();
+    auto pk_offset = plan->schema_.get_primary_key_offset();
+    for (auto field_offset : plan->field_offsets_) {
+        auto col = BulkSubScript(field_offset, (SegOffset*)retrieve_results.result_offsets_.data(),
+                                 retrieve_results.result_offsets_.size());
+        auto col_data = col.release();
+        fields_data->AddAllocated(col_data);
+        if (pk_offset.has_value() && pk_offset.value() == field_offset) {
+            auto int_ids = ids->mutable_int_id();
+            for (int j = 0; j < col_data->scalars().long_data().data_size(); ++j) {
+                int_ids->add_data(col_data->scalars().long_data().data(j));
+            }
+        }
     }
     return results;
 }

@@ -50,8 +50,14 @@ class ProtoParser {
     std::unique_ptr<VectorPlanNode>
     PlanNodeFromProto(const proto::plan::PlanNode& plan_node_proto);
 
+    std::unique_ptr<RetrievePlanNode>
+    RetrievePlanNodeFromProto(const proto::plan::PlanNode& plan_node_proto);
+
     std::unique_ptr<Plan>
     CreatePlan(const proto::plan::PlanNode& plan_node_proto);
+
+    std::unique_ptr<RetrievePlan>
+    CreateRetrievePlan(const proto::plan::PlanNode& plan_node_proto);
 
  private:
     const Schema& schema;

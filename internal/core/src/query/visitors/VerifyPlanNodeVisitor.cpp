@@ -108,4 +108,8 @@ VerifyPlanNodeVisitor::visit(BinaryVectorANNS& node) {
     }
 }
 
+void
+VerifyPlanNodeVisitor::visit(RetrievePlanNode& node) {
+}
+
 }  // namespace milvus::query

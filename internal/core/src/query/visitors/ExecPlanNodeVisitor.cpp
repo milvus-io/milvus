@@ -115,6 +115,33 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
 }
 
 void
+ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
+    assert(!retrieve_ret_.has_value());
+    auto segment = dynamic_cast<const segcore::SegmentInternalInterface*>(&segment_);
+    AssertInfo(segment, "Support SegmentSmallIndex Only");
+    RetrieveRetType ret;
+
+    boost::dynamic_bitset<> bitset_holder;
+    auto active_count = segment->get_active_count(timestamp_);
+
+    if (active_count == 0) {
+        return;
+    }
+
+    if (node.predicate_ != nullptr) {
+        ExecExprVisitor::RetType expr_ret =
+            ExecExprVisitor(*segment, active_count, timestamp_).call_child(*(node.predicate_));
+        bitset_holder = std::move(expr_ret);
+    }
+
+    segment->mask_with_timestamps(bitset_holder, timestamp_);
+
+    auto seg_offsets = std::move(segment->search_ids(bitset_holder, MAX_TIMESTAMP));
+    ret.result_offsets_.assign((int64_t*)seg_offsets.data(), (int64_t*)seg_offsets.data() + seg_offsets.size());
+    retrieve_ret_ = ret;
+}
+
+void
 ExecPlanNodeVisitor::visit(FloatVectorANNS& node) {
     VectorVisitorImpl<FloatVector>(node);
 }

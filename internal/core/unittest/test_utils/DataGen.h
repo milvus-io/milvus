@@ -148,8 +148,11 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42) {
                         x = index++;
                     }
                 } else {
+                    int i = 0;
                     for (auto& x : data) {
                         x = er() % (2 * N);
+                        x = i;
+                        i++;
                     }
                 }
                 insert_cols(data);
@@ -191,7 +194,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42) {
         res.row_ids_.push_back(i);
         res.timestamps_.push_back(i);
     }
-    std::shuffle(res.row_ids_.begin(), res.row_ids_.end(), er);
+    //    std::shuffle(res.row_ids_.begin(), res.row_ids_.end(), er);
     res.generate_rows(N, schema);
     return std::move(res);
 }
