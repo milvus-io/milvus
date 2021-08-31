@@ -184,13 +184,9 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			err := ibNode.replica.addNewSegment(currentSegID, collID, partitionID, msg.GetChannelID(),
 				iMsg.startPositions[0], iMsg.endPositions[0])
 			if err != nil {
-				log.Error("add segment wrong",
-					zap.Int64("segID", currentSegID),
-					zap.Int64("collID", collID),
-					zap.Int64("partID", partitionID),
-					zap.String("chanName", msg.GetChannelID()),
-					zap.Error(err))
+				log.Error("add segment wrong", zap.Error(err))
 			}
+
 		}
 
 		segNum := uniqueSeg[currentSegID]
@@ -203,7 +199,7 @@ func (ibNode *insertBufferNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 		err := ibNode.replica.updateStatistics(id, num)
 		if err != nil {
-			log.Error("update Segment Row number wrong", zap.Int64("segID", id), zap.Error(err))
+			log.Error("update Segment Row number wrong", zap.Error(err))
 		}
 	}
 
