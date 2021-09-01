@@ -8,6 +8,7 @@ from time import sleep
 from multiprocessing import Process
 import sklearn.preprocessing
 from utils.utils import *
+from common.common_type import CaseLabel
 
 index_file_size = 10
 vectors = gen_vectors(10000, default_dim)

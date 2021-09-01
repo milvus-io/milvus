@@ -94,7 +94,7 @@ To run E2E tests, use these command:
 ```shell
 MILVUS_SERVICE_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $(docker-compose ps -q builder))
 cd tests/docker
-docker-compose run --rm pytest /bin/bash -c "pytest --ip ${MILVUS_SERVICE_IP}"
+docker-compose run --rm pytest /bin/bash -c "pytest --host ${MILVUS_SERVICE_IP}"
 ```
 
 

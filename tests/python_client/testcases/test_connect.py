@@ -4,6 +4,7 @@ import threading
 from multiprocessing import Process
 import concurrent.futures
 from utils.utils import *
+from common.common_type import CaseLabel
 
 CONNECT_TIMEOUT = 12
 

@@ -70,7 +70,7 @@ pipeline {
                                             --install-extra-arg "--set etcd.enabled=false --set externalEtcd.enabled=true --set externalEtcd.endpoints={\$KRTE_POD_IP:2379}" \
                                             --skip-export-logs \
                                             --skip-cleanup \
-                                            --test-extra-arg "-x --tags smoke L0 L1" \
+                                            --test-extra-arg "-x --tags L0 L1" \
                                             --test-timeout ${e2e_timeout_seconds}
                                             """
 //                                         } else if ("${MILVUS_CLIENT}" == "pymilvus-orm") {

@@ -7,6 +7,7 @@ from multiprocessing import Pool, Process
 import pytest
 from utils.utils import *
 from common.constants import *
+from common.common_type import CaseLabel
 
 TIMEOUT = 120
 
@@ -17,7 +18,7 @@ class TestCreateBase:
       The following cases are used to test `create_partition` function 
     ******************************************************************
     """
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_a(self, connect, collection):
         '''
         target: test create partition, check status returned
@@ -55,7 +56,7 @@ class TestCreateBase:
         with pytest.raises(Exception) as e:
             connect.create_partition(collection, tag_tmp)
 
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_repeat(self, connect, collection):
         '''
         target: test create partition, check status returned
@@ -88,7 +89,7 @@ class TestCreateBase:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "create partition failed: can't find collection: %s" % collection_name
 
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_name_name_None(self, connect, collection):
         '''
         target: test create partition, tag name set None, check status returned
@@ -101,7 +102,7 @@ class TestCreateBase:
         except Exception as e:
             assert e.args[0] == "`partition_name` value None is illegal"
 
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_create_different_partition_names(self, connect, collection):
         '''
         target: test create partition twice with different names
@@ -113,7 +114,7 @@ class TestCreateBase:
         connect.create_partition(collection, tag_name)
         assert compare_list_elements(connect.list_partitions(collection), [default_tag, tag_name, '_default'])
 
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_insert_default(self, connect, id_collection):
         '''
         target: test create partition, and insert vectors, check status returned
@@ -125,7 +126,7 @@ class TestCreateBase:
         result = connect.insert(id_collection, default_entities)
         assert len(result.primary_keys) == len(ids)
 
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_insert_with_tag(self, connect, id_collection):
         '''
         target: test create partition, and insert vectors, check status returned
@@ -137,7 +138,7 @@ class TestCreateBase:
         result = connect.insert(id_collection, default_entities, partition_name=default_tag)
         assert len(result.primary_keys) == len(ids)
 
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_insert_with_tag_not_existed(self, connect, collection):
         '''
         target: test create partition, and insert vectors, check status returned
@@ -155,7 +156,7 @@ class TestCreateBase:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "partitionID of partitionName:%s can not be find" % tag_new
 
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_insert_same_tags(self, connect, id_collection):
         '''
         target: test create partition, and insert vectors, check status returned
@@ -202,7 +203,7 @@ class TestShowBase:
       The following cases are used to test `list_partitions` function 
     ******************************************************************
     """
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_list_partitions(self, connect, collection):
         '''
         target: test show partitions, check status and partitions returned
@@ -212,7 +213,7 @@ class TestShowBase:
         connect.create_partition(collection, default_tag)
         assert compare_list_elements(connect.list_partitions(collection), [default_tag, '_default'])
 
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_list_partitions_no_partition(self, connect, collection):
         '''
         target: test show partitions with collection name, check status and partitions returned
@@ -222,7 +223,7 @@ class TestShowBase:
         res = connect.list_partitions(collection)
         assert compare_list_elements(res, ['_default'])
 
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_show_multi_partitions(self, connect, collection):
         '''
         target: test show partitions, check status and partitions returned
@@ -250,7 +251,7 @@ class TestHasBase:
     def get_tag_name(self, request):
         yield request.param
 
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_has_partition_a(self, connect, collection):
         '''
         target: test has_partition, check status and result
@@ -262,7 +263,7 @@ class TestHasBase:
         logging.getLogger().info(res)
         assert res
 
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_has_partition_multi_partitions(self, connect, collection):
         '''
         target: test has_partition, check status and result
@@ -275,7 +276,7 @@ class TestHasBase:
             res = connect.has_partition(collection, tag_name)
             assert res
 
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_has_partition_name_not_existed(self, connect, collection):
         '''
         target: test has_partition, check status and result
@@ -286,7 +287,7 @@ class TestHasBase:
         logging.getLogger().info(res)
         assert not res
 
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_has_partition_collection_not_existed(self, connect, collection):
         '''
         target: test has_partition, check status and result
@@ -322,7 +323,7 @@ class TestDropBase:
       The following cases are used to test `drop_partition` function 
     ******************************************************************
     """
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_drop_partition_a(self, connect, collection):
         '''
         target: test drop partition, check status and partition if existed
@@ -336,7 +337,7 @@ class TestDropBase:
         res2 = connect.list_partitions(collection)
         assert default_tag not in res2
 
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_drop_partition_name_not_existed(self, connect, collection):
         '''
         target: test drop partition, but tag not existed
@@ -353,7 +354,7 @@ class TestDropBase:
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "DropPartition failed: partition %s does not exist" % new_tag
 
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_drop_partition_name_not_existed_A(self, connect, collection):
         '''
         target: test drop partition, but collection not existed
@@ -390,7 +391,7 @@ class TestDropBase:
         tag_list = connect.list_partitions(collection)
         assert default_tag not in tag_list
 
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_drop_partition_create(self, connect, collection):
         '''
         target: test drop partition, and create again, check status
@@ -460,7 +461,7 @@ class TestNameInvalid(object):
 
 class TestNewCase(object):
 
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_drop_default_partition_A(self, connect, collection):
         '''
         target: test drop partition of default, check status returned
@@ -477,7 +478,7 @@ class TestNewCase(object):
         list_partition = connect.list_partitions(collection)
         assert '_default' in list_partition
 
-    @pytest.mark.tags(CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_drop_default_partition_B(self, connect, collection):
         '''
         target: test drop partition of default, check status returned

@@ -1023,9 +1023,3 @@ class MyThread(threading.Thread):
             raise self.exc
 
 
-class CaseLabel:
-    tags_smoke = "smoke"
-    L1 = "L1"
-    L2 = "L2"
-    L3 = "L3"
-
