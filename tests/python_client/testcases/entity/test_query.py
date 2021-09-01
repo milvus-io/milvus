@@ -5,6 +5,7 @@ import pytest
 from pymilvus import DataType
 
 import utils.utils as ut
+from common.common_type import CaseLabel
 
 default_entities = ut.gen_entities(ut.default_nb, is_normal=True)
 raw_vectors, default_binary_entities = ut.gen_binary_entities(ut.default_nb)
@@ -80,7 +81,7 @@ class TestQueryBase:
     def get_simple_index(self, request, connect):
         return request.param
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_invalid(self, connect, collection):
         """
         target: test query
@@ -94,7 +95,7 @@ class TestQueryBase:
         with pytest.raises(Exception):
             res = connect.query(collection, term_expr)
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_valid(self, connect, collection):
         """
         target: test query
@@ -116,7 +117,7 @@ class TestQueryBase:
             if res[index][default_int_field_name] == entities[0]["values"][index]:
                 ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_collection_not_existed(self, connect):
         """
         target: test query not existed collection
@@ -127,7 +128,7 @@ class TestQueryBase:
         with pytest.raises(Exception):
             connect.query(collection, default_term_expr)
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_without_connect(self, dis_connect, collection):
         """
         target: test query without connection
@@ -137,7 +138,7 @@ class TestQueryBase:
         with pytest.raises(Exception):
             dis_connect.query(collection, default_term_expr)
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_invalid_collection_name(self, connect, get_collection_name):
         """
         target: test query with invalid collection name
@@ -148,7 +149,7 @@ class TestQueryBase:
         with pytest.raises(Exception):
             connect.query(collection_name, default_term_expr)
     
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_after_index(self, connect, collection, get_simple_index):
         """
         target: test query after creating index
@@ -168,7 +169,7 @@ class TestQueryBase:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
                 ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[-1]["values"][index])
 
-    @pytest.mark.tags(ut.CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_after_search(self, connect, collection):
         """
         target: test query after search
@@ -193,7 +194,7 @@ class TestQueryBase:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
                 ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_empty_collection(self, connect, collection):
         """
         target: test query empty collection
@@ -205,7 +206,7 @@ class TestQueryBase:
         logging.getLogger().info(res)
         assert len(res) == 0
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_without_loading(self, connect, collection):
         """
         target: test query without loading
@@ -217,7 +218,7 @@ class TestQueryBase:
         with pytest.raises(Exception):
             connect.query(collection, default_term_expr)
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_collection_not_primary_key(self, connect, collection):
         """
         target: test query on collection that not on the primary field
@@ -231,7 +232,7 @@ class TestQueryBase:
         with pytest.raises(Exception):
             connect.query(collection, term_expr)
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_expr_none(self, connect, collection):
         """
         target: test query with none expr
@@ -244,7 +245,7 @@ class TestQueryBase:
         with pytest.raises(Exception):
             connect.query(collection, None)
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("expr", [1, "1", "12-s", "中文", [], {}, ()])
     def test_query_expr_invalid_string(self, connect, collection, expr):
         """
@@ -258,7 +259,7 @@ class TestQueryBase:
         with pytest.raises(Exception):
             connect.query(collection, expr)
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_expr_not_existed_field(self, connect, collection):
         """
         target: test query with not existed field
@@ -275,7 +276,7 @@ class TestQueryBase:
     @pytest.mark.parametrize("expr", [f'{default_int_field_name} inn [1, 2]',
                                       f'{default_int_field_name} not in [1, 2]',
                                       f'{default_int_field_name} in not [1, 2]'])
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_expr_wrong_term_keyword(self, connect, collection, expr):
         """
         target: test query with wrong term expr keyword
@@ -289,7 +290,7 @@ class TestQueryBase:
     @pytest.mark.parametrize("expr", [f'{default_int_field_name} in 1',
                                       f'{default_int_field_name} in "in"',
                                       f'{default_int_field_name} in (mn)'])
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_expr_non_array_term(self, connect, collection, expr):
         """
         target: test query with non-array term expr
@@ -300,7 +301,7 @@ class TestQueryBase:
         with pytest.raises(Exception):
             connect.query(collection, expr)
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_expr_empty_term_array(self, connect, collection):
         """
         target: test query with empty array term expr
@@ -314,7 +315,7 @@ class TestQueryBase:
         res = connect.query(collection, term_expr)
         assert len(res) == 0
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_expr_single_term_array(self, connect, collection):
         """
         target: test query with single array term expr
@@ -332,7 +333,7 @@ class TestQueryBase:
         ut.assert_equal_vector(res[0][ut.default_float_vec_field_name], entities[2]["values"][0])
 
     @pytest.mark.xfail(reason="#6072")
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_binary_expr_single_term_array(self, connect, binary_collection):
         """
         target: test query with single array term expr
@@ -349,7 +350,7 @@ class TestQueryBase:
         assert res[1][default_float_field_name] == binary_entities[1]["values"][0]
         assert res[2][ut.default_float_vec_field_name] == binary_entities[2]["values"][0]
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_expr_all_term_array(self, connect, collection):
         """
         target: test query with all array term expr
@@ -367,7 +368,7 @@ class TestQueryBase:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
                 ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_expr_repeated_term_array(self, connect, collection):
         """
         target: test query with repeated term array on primary field with unique value
@@ -382,7 +383,7 @@ class TestQueryBase:
         res = connect.query(collection, term_expr)
         assert len(res) == 2 
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_expr_inconstant_term_array(self, connect, collection):
         """
         target: test query with term expr that field and array are inconsistent
@@ -396,7 +397,7 @@ class TestQueryBase:
         with pytest.raises(Exception):
             connect.query(collection, expr)
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_expr_mix_term_array(self, connect, collection):
         """
         target: test query with mix type value expr
@@ -411,7 +412,7 @@ class TestQueryBase:
             connect.query(collection, expr)
 
     @pytest.mark.parametrize("constant", [[1], (), {}])
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_expr_non_constant_array_term(self, connect, collection, constant):
         """
         target: test query with non-constant array term expr
@@ -425,7 +426,7 @@ class TestQueryBase:
         with pytest.raises(Exception):
             connect.query(collection, expr)
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_output_field_empty(self, connect, collection):
         """
         target: test query with none output field
@@ -440,7 +441,7 @@ class TestQueryBase:
         assert default_float_field_name not in res[0].keys()
         assert ut.default_float_vec_field_name not in res[0].keys()
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_output_one_field(self, connect, collection):
         """
         target: test query with output one field
@@ -454,7 +455,7 @@ class TestQueryBase:
         assert default_int_field_name in res[0].keys()
         assert len(res[0].keys()) == 1
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_output_all_fields(self, connect, collection):
         """
         target: test query with none output field
@@ -470,7 +471,7 @@ class TestQueryBase:
         for field in fields:
             assert field in res[0].keys()
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_output_not_existed_field(self, connect, collection):
         """
         target: test query output not existed field
@@ -483,7 +484,7 @@ class TestQueryBase:
             connect.query(collection, default_term_expr, output_fields=["int"])
 
     # @pytest.mark.xfail(reason="#6074")
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_output_part_not_existed_field(self, connect, collection):
         """
         target: test query output part not existed field
@@ -496,7 +497,7 @@ class TestQueryBase:
             connect.query(collection, default_term_expr, output_fields=[default_int_field_name, "int"])
 
     @pytest.mark.parametrize("fields", ut.gen_invalid_strs())
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_invalid_output_fields(self, connect, collection, fields):
         """
         target: test query with invalid output fields
@@ -514,7 +515,7 @@ class TestQueryPartition:
     test Query interface
     query(collection_name, expr, output_fields=None, partition_names=None, timeout=None)
     """
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_partition(self, connect, collection):
         """
         target: test query on partition
@@ -531,7 +532,7 @@ class TestQueryPartition:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
                 ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
   
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_partition_without_loading(self, connect, collection):
         """
         target: test query on partition without loading
@@ -544,7 +545,7 @@ class TestQueryPartition:
         with pytest.raises(Exception):
             connect.query(collection, default_term_expr, partition_names=[ut.default_tag])
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_default_partition(self, connect, collection):
         """
         target: test query on default partition
@@ -560,7 +561,7 @@ class TestQueryPartition:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
                 ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
-    @pytest.mark.tags(ut.CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_empty_partition(self, connect, collection):
         """
         target: test query on empty partition
@@ -572,7 +573,7 @@ class TestQueryPartition:
         res = connect.query(collection, default_term_expr, partition_names=[ut.default_partition_name])
         assert len(res) == 0
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_not_existed_partition(self, connect, collection):
         """
         target: test query on a not existed partition
@@ -584,7 +585,7 @@ class TestQueryPartition:
         with pytest.raises(Exception):
             connect.query(collection, default_term_expr, partition_names=[tag])
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_partition_repeatedly(self, connect, collection):
         """
         target: test query repeatedly on partition
@@ -599,7 +600,7 @@ class TestQueryPartition:
         res_two = connect.query(collection, default_term_expr, partition_names=[ut.default_tag])
         assert res_one == res_two
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_another_partition(self, connect, collection):
         """
         target: test query another partition
@@ -613,7 +614,7 @@ class TestQueryPartition:
         res = connect.query(collection, term_expr, partition_names=[ut.default_tag])
         assert len(res) == 0
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_multi_partitions_multi_results(self, connect, collection):
         """
         target: test query on multi partitions and get multi results
@@ -632,7 +633,7 @@ class TestQueryPartition:
         assert len(res) == 1
         assert res[0][default_int_field_name] == entities_2[0]["values"][0]
 
-    @pytest.mark.tags(ut.CaseLabel.tags_smoke)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_multi_partitions_single_result(self, connect, collection):
         """
         target: test query on multi partitions and get single result

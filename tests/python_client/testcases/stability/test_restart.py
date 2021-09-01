@@ -7,6 +7,7 @@ import json
 from multiprocessing import Pool, Process
 import pytest
 from utils.utils import *
+from common.common_type import CaseLabel
 
 
 uid = "wal"
