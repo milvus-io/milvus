@@ -68,19 +68,19 @@ type timestampOracle struct {
 	lastSavedTime atomic.Value
 }
 
-func (t *timestampOracle) loadTimestamp() (time.Time, error) {
-	strData, err := t.txnKV.Load(t.key)
-
-	var binData []byte = []byte(strData)
-
-	if err != nil {
-		return typeutil.ZeroTime, err
-	}
-	if len(binData) == 0 {
-		return typeutil.ZeroTime, nil
-	}
-	return typeutil.ParseTimestamp(binData)
-}
+//func (t *timestampOracle) loadTimestamp() (time.Time, error) {
+//	strData, err := t.txnKV.Load(t.key)
+//
+//	var binData []byte = []byte(strData)
+//
+//	if err != nil {
+//		return typeutil.ZeroTime, err
+//	}
+//	if len(binData) == 0 {
+//		return typeutil.ZeroTime, nil
+//	}
+//	return typeutil.ParseTimestamp(binData)
+//}
 
 // save timestamp, if lastTs is 0, we think the timestamp doesn't exist, so create it,
 // otherwise, update it.
@@ -95,12 +95,10 @@ func (t *timestampOracle) saveTimestamp(ts time.Time) error {
 }
 
 func (t *timestampOracle) InitTimestamp() error {
-
 	//last, err := t.loadTimestamp()
 	//if err != nil {
 	//	return err
 	//}
-
 	next := time.Now()
 
 	// If the current system time minus the saved etcd timestamp is less than `updateTimestampGuard`,
