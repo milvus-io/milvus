@@ -78,6 +78,11 @@ network:
 #                      | Note: please using differnet bucket for different milvus   |            |                 |
 #                      |       cluster.                                             |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# s3_region            | The aws region for where bucket created.                   | String     | ""              |
+#                      | This parameter may not needed for some self-managed s3,    |            |                 |
+#                      | like ceph-radosgw, minio, when deploy on aws s3 service,   |            |                 |
+#                      | this should be set correctly, e.g "ap-east-1", "us-east-1" |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 storage:
   path: /var/lib/milvus
   auto_flush_interval: 1

@@ -98,6 +98,8 @@ const char* CONFIG_STORAGE_S3_SECRET_KEY = "s3_secret_key";
 const char* CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT = "";
 const char* CONFIG_STORAGE_S3_BUCKET = "s3_bucket";
 const char* CONFIG_STORAGE_S3_BUCKET_DEFAULT = "";
+const char* CONFIG_STORAGE_S3_REGION = "s3_region";
+const char* CONFIG_STORAGE_S3_REGION_DEFAULT = "";
 #endif
 
 const int64_t CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MIN = 0;
@@ -379,6 +381,9 @@ Config::ValidateConfig() {
 
     std::string storage_s3_bucket;
     STATUS_CHECK(GetStorageConfigS3Bucket(storage_s3_bucket));
+
+    std::string storage_s3_region;
+    STATUS_CHECK(GetStorageConfigS3Region(storage_s3_region));
 #endif
 
     /* metric config */
@@ -1376,6 +1381,10 @@ Config::CheckStorageConfigS3Bucket(const std::string& value) {
     return Status::OK();
 }
 
+Status
+Config::CheckStorageConfigS3Region(const std::string& /* unused */) {
+    return Status::OK();
+}
 #endif
 
 /* metric config */
@@ -2431,6 +2440,12 @@ Config::GetStorageConfigS3Bucket(std::string& value) {
     value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_BUCKET, CONFIG_STORAGE_S3_BUCKET_DEFAULT);
     return Status::OK();
 }
+
+Status
+Config::GetStorageConfigS3Region(std::string& value) {
+    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_REGION, CONFIG_STORAGE_S3_REGION_DEFAULT);
+    return Status::OK();
+}
 #endif
 
 /* metric config */
@@ -2965,6 +2980,11 @@ Config::SetStorageConfigS3Bucket(const std::string& value) {
     return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_BUCKET, value);
 }
 
+Status
+Config::SetStorageConfigS3Region(const std::string& value) {
+    STATUS_CHECK(CheckStorageConfigS3Region(value));
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_REGION, value);
+}
 #endif
 
 /* metric config */

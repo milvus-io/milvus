@@ -71,6 +71,7 @@ class S3ClientWrapper {
     std::string s3_access_key_;
     std::string s3_secret_key_;
     std::string s3_bucket_;
+    std::string s3_region_;
 };
 
 }  // namespace storage

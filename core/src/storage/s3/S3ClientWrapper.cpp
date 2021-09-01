@@ -12,6 +12,7 @@
 #include "storage/s3/S3ClientWrapper.h"
 
 #include <aws/core/auth/AWSCredentialsProvider.h>
+#include <aws/s3/model/BucketLocationConstraint.h>
 #include <aws/s3/model/CreateBucketRequest.h>
 #include <aws/s3/model/DeleteBucketRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
@@ -49,6 +50,7 @@ S3ClientWrapper::StartService() {
     config.GetStorageConfigS3AccessKey(s3_access_key_);
     config.GetStorageConfigS3SecretKey(s3_secret_key_);
     config.GetStorageConfigS3Bucket(s3_bucket_);
+    config.GetStorageConfigS3Region(s3_region_);
 
     Aws::InitAPI(options_);
 
@@ -56,6 +58,9 @@ S3ClientWrapper::StartService() {
     cfg.endpointOverride = s3_address_ + ":" + s3_port_;
     cfg.scheme = Aws::Http::Scheme::HTTP;
     cfg.verifySSL = false;
+    if (!s3_region_.empty()) {
+        cfg.region = s3_region_.c_str();
+    }
     client_ptr_ =
         std::make_shared<Aws::S3::S3Client>(Aws::Auth::AWSCredentials(s3_access_key_, s3_secret_key_), cfg,
                                             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Always, false);
@@ -81,7 +86,14 @@ S3ClientWrapper::StopService() {
 Status
 S3ClientWrapper::CreateBucket() {
     Aws::S3::Model::CreateBucketRequest request;
+    auto constraint = Aws::S3::Model::BucketLocationConstraintMapper::GetBucketLocationConstraintForName(s3_region_);
+    Aws::S3::Model::CreateBucketConfiguration createBucketConfig;
+    createBucketConfig.WithLocationConstraint(constraint);
+
     request.WithBucket(s3_bucket_);
+    if (!s3_region_.empty()) {
+        request.WithCreateBucketConfiguration(createBucketConfig);
+    }
 
     auto outcome = client_ptr_->CreateBucket(request);
 

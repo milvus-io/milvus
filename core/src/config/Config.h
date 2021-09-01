@@ -281,6 +281,8 @@ class Config {
     CheckStorageConfigS3SecretKey(const std::string& value);
     Status
     CheckStorageConfigS3Bucket(const std::string& value);
+    Status
+    CheckStorageConfigS3Region(const std::string& value);
 #endif
 
     /* metric config */
@@ -446,6 +448,9 @@ class Config {
 
     Status
     GetStorageConfigS3Bucket(std::string& value);
+
+    Status
+    GetStorageConfigS3Region(std::string& value);
 #endif
 
     /* metric config */
@@ -599,6 +604,8 @@ class Config {
     SetStorageConfigS3SecretKey(const std::string& value);
     Status
     SetStorageConfigS3Bucket(const std::string& value);
+    Status
+    SetStorageConfigS3Region(const std::string& value);
 #endif
 
     /* metric config */
