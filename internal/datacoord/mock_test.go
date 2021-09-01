@@ -120,6 +120,37 @@ func (c *mockDataNodeClient) FlushSegments(ctx context.Context, in *datapb.Flush
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
+func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	// TODO(dragondriver): change the id, though it's not important in ut
+	nodeID := UniqueID(20210819)
+
+	nodeInfos := metricsinfo.DataNodeInfos{
+		BaseComponentInfos: metricsinfo.BaseComponentInfos{
+			Name: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, nodeID),
+		},
+	}
+	resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
+	if err != nil {
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+			Response:      "",
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, nodeID),
+		}, nil
+	}
+
+	return &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		Response:      resp,
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, nodeID),
+	}, nil
+}
+
 func (c *mockDataNodeClient) Stop() error {
 	c.state = internalpb.StateCode_Abnormal
 	return nil
@@ -315,16 +346,24 @@ func (m *mockRootCoordService) AddNewSegment(ctx context.Context, in *datapb.Seg
 	panic("not implemented") // TODO: Implement
 }
 
-func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+func (m *mockRootCoordService) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	// TODO(dragondriver): change the id, though it's not important in ut
-	nodeID := UniqueID(20210819)
+	nodeID := UniqueID(20210901)
 
-	nodeInfos := metricsinfo.DataNodeInfos{
-		BaseComponentInfos: metricsinfo.BaseComponentInfos{
-			Name: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, nodeID),
+	rootCoordTopology := metricsinfo.RootCoordTopology{
+		Self: metricsinfo.RootCoordInfos{
+			BaseComponentInfos: metricsinfo.BaseComponentInfos{
+				Name: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, nodeID),
+			},
+		},
+		Connections: metricsinfo.ConnTopology{
+			Name: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, nodeID),
+			// TODO(dragondriver): fill ConnectedComponents if necessary
+			ConnectedComponents: []metricsinfo.ConnectionInfo{},
 		},
 	}
-	resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
+
+	resp, err := metricsinfo.MarshalTopology(rootCoordTopology)
 	if err != nil {
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
@@ -332,7 +371,7 @@ func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMe
 				Reason:    err.Error(),
 			},
 			Response:      "",
-			ComponentName: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, nodeID),
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, nodeID),
 		}, nil
 	}
 
@@ -342,6 +381,6 @@ func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMe
 			Reason:    "",
 		},
 		Response:      resp,
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, nodeID),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, nodeID),
 	}, nil
 }

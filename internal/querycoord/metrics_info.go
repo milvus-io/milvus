@@ -92,7 +92,8 @@ func getSystemInfoMetrics(
 		Cluster: clusterTopology,
 		Connections: metricsinfo.ConnTopology{
 			Name: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, Params.QueryCoordID),
-			// TODO(dragondriver): connection info
+			// TODO(dragondriver): fill ConnectedComponents if necessary
+			ConnectedComponents: []metricsinfo.ConnectionInfo{},
 		},
 	}
 

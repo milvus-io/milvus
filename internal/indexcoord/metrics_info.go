@@ -35,7 +35,7 @@ func getSystemInfoMetrics(
 	clusterTopology := metricsinfo.IndexClusterTopology{
 		Self: metricsinfo.IndexCoordInfos{
 			BaseComponentInfos: metricsinfo.BaseComponentInfos{
-				Name: metricsinfo.ConstructComponentName(typeutil.IndexCoordRole, coord.ID),
+				Name: metricsinfo.ConstructComponentName(typeutil.IndexCoordRole, coord.session.ServerID),
 			},
 		},
 		ConnectedNodes: make([]metricsinfo.IndexNodeInfos, 0),
@@ -91,8 +91,9 @@ func getSystemInfoMetrics(
 	coordTopology := metricsinfo.IndexCoordTopology{
 		Cluster: clusterTopology,
 		Connections: metricsinfo.ConnTopology{
-			Name: metricsinfo.ConstructComponentName(typeutil.IndexCoordRole, coord.ID),
-			// TODO(dragondriver): connection info
+			Name: metricsinfo.ConstructComponentName(typeutil.IndexCoordRole, coord.session.ServerID),
+			// TODO(dragondriver): fill ConnectedComponents if necessary
+			ConnectedComponents: []metricsinfo.ConnectionInfo{},
 		},
 	}
 
@@ -104,7 +105,7 @@ func getSystemInfoMetrics(
 				Reason:    err.Error(),
 			},
 			Response:      "",
-			ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexCoordRole, coord.ID),
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexCoordRole, coord.session.ServerID),
 		}, nil
 	}
 
@@ -114,6 +115,6 @@ func getSystemInfoMetrics(
 			Reason:    "",
 		},
 		Response:      resp,
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexCoordRole, coord.ID),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexCoordRole, coord.session.ServerID),
 	}, nil
 }
