@@ -12,6 +12,7 @@
 package tso
 
 import (
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -87,8 +88,58 @@ func TestGlobalTSOAllocator_All(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	t.Run("Alloc", func(t *testing.T) {
+		_, err := gTestTsoAllocator.Alloc(100)
+		assert.Nil(t, err)
+	})
+
+	t.Run("AllocOne", func(t *testing.T) {
+		_, err := gTestTsoAllocator.AllocOne()
+		assert.Nil(t, err)
+	})
+
 	t.Run("Reset", func(t *testing.T) {
 		gTestTsoAllocator.Reset()
 	})
+}
 
+func TestGlobalTSOAllocator_Fail(t *testing.T) {
+	endpoints := os.Getenv("ETCD_ENDPOINTS")
+	if endpoints == "" {
+		endpoints = "localhost:2379"
+	}
+	etcdEndpoints := strings.Split(endpoints, ",")
+	etcdKV, err := tsoutil.NewTSOKVBase(etcdEndpoints, "/test/root/kv", "tsoTest")
+	assert.NoError(t, err)
+	gTestTsoAllocator = NewGlobalTSOAllocator("timestamp", etcdKV)
+	t.Run("Initialize", func(t *testing.T) {
+		err := gTestTsoAllocator.Initialize()
+		assert.Nil(t, err)
+	})
+
+	t.Run("GenerateTSO_invalid", func(t *testing.T) {
+		_, err := gTestTsoAllocator.GenerateTSO(0)
+		assert.NotNil(t, err)
+	})
+
+	gTestTsoAllocator.SetLimitMaxLogic(true)
+	t.Run("SetTSO_invalid", func(t *testing.T) {
+		err := gTestTsoAllocator.SetTSO(0)
+		assert.NotNil(t, err)
+
+		err = gTestTsoAllocator.SetTSO(math.MaxUint64)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("Alloc_invalid", func(t *testing.T) {
+		_, err := gTestTsoAllocator.Alloc(0)
+		assert.NotNil(t, err)
+
+		_, err = gTestTsoAllocator.Alloc(math.MaxUint32)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("Reset", func(t *testing.T) {
+		gTestTsoAllocator.Reset()
+	})
 }
