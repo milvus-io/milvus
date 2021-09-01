@@ -377,7 +377,7 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	if pageInfo != nil {
 		// Judge expire by ackedSize
 		if msgSizeExpiredCheck(deletedAckedSize, ackedInfo.ackedSize) {
-			for _, pEndID := range pageInfo.pageEndID[pageRetentionOffset:0] {
+			for _, pEndID := range pageInfo.pageEndID[pageRetentionOffset:] {
 				curDeletedSize := deletedAckedSize + pageInfo.pageMsgSize[pEndID]
 				if msgSizeExpiredCheck(curDeletedSize, ackedInfo.ackedSize) {
 					endID = pEndID
