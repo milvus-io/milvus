@@ -95,8 +95,10 @@ func TestQueryCoordTopology_Codec(t *testing.T) {
 		},
 		Connections: ConnTopology{
 			Name: ConstructComponentName(typeutil.QueryCoordRole, 1),
-			ConnectedComponents: []string{
-				ConstructComponentName(typeutil.RootCoordRole, 1),
+			ConnectedComponents: []ConnectionInfo{
+				{
+					TargetType: typeutil.RootCoordRole,
+				},
 			},
 		},
 	}
@@ -176,8 +178,10 @@ func TestIndexCoordTopology_Codec(t *testing.T) {
 		},
 		Connections: ConnTopology{
 			Name: ConstructComponentName(typeutil.IndexCoordRole, 1),
-			ConnectedComponents: []string{
-				ConstructComponentName(typeutil.RootCoordRole, 1),
+			ConnectedComponents: []ConnectionInfo{
+				{
+					TargetType: typeutil.RootCoordRole,
+				},
 			},
 		},
 	}
@@ -257,8 +261,10 @@ func TestDataCoordTopology_Codec(t *testing.T) {
 		},
 		Connections: ConnTopology{
 			Name: ConstructComponentName(typeutil.DataCoordRole, 1),
-			ConnectedComponents: []string{
-				ConstructComponentName(typeutil.RootCoordRole, 1),
+			ConnectedComponents: []ConnectionInfo{
+				{
+					TargetType: typeutil.RootCoordRole,
+				},
 			},
 		},
 	}
@@ -290,8 +296,10 @@ func TestRootCoordTopology_Codec(t *testing.T) {
 		},
 		Connections: ConnTopology{
 			Name: ConstructComponentName(typeutil.RootCoordRole, 1),
-			ConnectedComponents: []string{
-				ConstructComponentName(typeutil.RootCoordRole, 1),
+			ConnectedComponents: []ConnectionInfo{
+				{
+					TargetType: typeutil.IndexCoordRole,
+				},
 			},
 		},
 	}
@@ -313,11 +321,19 @@ func TestRootCoordTopology_Codec(t *testing.T) {
 func TestConnTopology_Codec(t *testing.T) {
 	topology1 := ConnTopology{
 		Name: ConstructComponentName(typeutil.ProxyRole, 1),
-		ConnectedComponents: []string{
-			ConstructComponentName(typeutil.RootCoordRole, 1),
-			ConstructComponentName(typeutil.QueryCoordRole, 1),
-			ConstructComponentName(typeutil.DataCoordRole, 1),
-			ConstructComponentName(typeutil.IndexCoordRole, 1),
+		ConnectedComponents: []ConnectionInfo{
+			{
+				TargetType: typeutil.IndexCoordRole,
+			},
+			{
+				TargetType: typeutil.DataCoordRole,
+			},
+			{
+				TargetType: typeutil.QueryCoordRole,
+			},
+			{
+				TargetType: typeutil.RootCoordRole,
+			},
 		},
 	}
 	s, err := MarshalTopology(topology1)

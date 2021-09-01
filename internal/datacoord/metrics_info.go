@@ -41,7 +41,21 @@ func (s *Server) getSystemInfoMetrics(
 	}
 
 	nodes := s.cluster.GetNodes()
+	log.Debug("datacoord.getSystemInfoMetrics",
+		zap.Int("data nodes num", len(nodes)))
 	for _, node := range nodes {
+		if node == nil {
+			log.Warn("skip invalid data node",
+				zap.String("reason", "datanode is nil"))
+			continue
+		}
+
+		if node.GetClient() == nil {
+			log.Warn("skip invalid data node",
+				zap.String("reason", "datanode client is nil"))
+			continue
+		}
+
 		metrics, err := node.GetClient().GetMetrics(ctx, req)
 		if err != nil {
 			log.Warn("invalid metrics of query node was found",
@@ -92,7 +106,8 @@ func (s *Server) getSystemInfoMetrics(
 		Cluster: clusterTopology,
 		Connections: metricsinfo.ConnTopology{
 			Name: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, Params.NodeID),
-			// TODO(dragondriver): connection info
+			// TODO(dragondriver): fill ConnectedComponents if necessary
+			ConnectedComponents: []metricsinfo.ConnectionInfo{},
 		},
 	}
 

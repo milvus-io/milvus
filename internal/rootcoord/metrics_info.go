@@ -26,12 +26,20 @@ import (
 
 func (c *Core) getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	// TODO(dragondriver): add more metrics
-	nodeInfos := metricsinfo.RootCoordInfos{
-		BaseComponentInfos: metricsinfo.BaseComponentInfos{
+	rootCoordTopology := metricsinfo.RootCoordTopology{
+		Self: metricsinfo.RootCoordInfos{
+			BaseComponentInfos: metricsinfo.BaseComponentInfos{
+				Name: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, c.session.ServerID),
+			},
+		},
+		Connections: metricsinfo.ConnTopology{
 			Name: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, c.session.ServerID),
+			// TODO(dragondriver): fill ConnectedComponents if necessary
+			ConnectedComponents: []metricsinfo.ConnectionInfo{},
 		},
 	}
-	resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
+
+	resp, err := metricsinfo.MarshalTopology(rootCoordTopology)
 	if err != nil {
 		log.Warn("Failed to marshal system info metrics of root coordinator",
 			zap.Error(err))
