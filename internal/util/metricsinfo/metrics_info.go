@@ -68,6 +68,18 @@ type IndexCoordInfos struct {
 	// TODO(dragondriver): add more detail metrics
 }
 
+// DataNodeInfos implements ComponentInfos
+type DataNodeInfos struct {
+	BaseComponentInfos
+	// TODO(dragondriver): add more detail metrics
+}
+
+// DataCoordInfos implements ComponentInfos
+type DataCoordInfos struct {
+	BaseComponentInfos
+	// TODO(dragondriver): add more detail metrics
+}
+
 // RootCoordInfos implements ComponentInfos
 type RootCoordInfos struct {
 	BaseComponentInfos

@@ -169,3 +169,10 @@ func (c *Client) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsReq
 	})
 	return ret.(*commonpb.Status), err
 }
+
+func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	ret, err := c.recall(func() (interface{}, error) {
+		return c.grpc.GetMetrics(ctx, req)
+	})
+	return ret.(*milvuspb.GetMetricsResponse), err
+}

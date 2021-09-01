@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"go.uber.org/zap"
 )
 
@@ -428,5 +429,71 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 		Segments: ret,
+	}, nil
+}
+
+func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	log.Debug("DataCoord.GetMetrics",
+		zap.Int64("node_id", Params.NodeID),
+		zap.String("req", req.Request))
+
+	if s.isClosed() {
+		log.Warn("DataCoord.GetMetrics failed",
+			zap.Int64("node_id", Params.NodeID),
+			zap.String("req", req.Request),
+			zap.Error(errDataCoordIsUnhealthy(Params.NodeID)))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    msgDataCoordIsUnhealthy(Params.NodeID),
+			},
+			Response: "",
+		}, nil
+	}
+
+	metricType, err := metricsinfo.ParseMetricType(req.Request)
+	if err != nil {
+		log.Warn("DataCoord.GetMetrics failed to parse metric type",
+			zap.Int64("node_id", Params.NodeID),
+			zap.String("req", req.Request),
+			zap.Error(err))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+			Response: "",
+		}, nil
+	}
+
+	log.Debug("DataCoord.GetMetrics",
+		zap.String("metric_type", metricType))
+
+	if metricType == metricsinfo.SystemInfoMetrics {
+		metrics, err := s.getSystemInfoMetrics(ctx, req)
+
+		log.Debug("DataCoord.GetMetrics",
+			zap.Int64("node_id", Params.NodeID),
+			zap.String("req", req.Request),
+			zap.String("metric_type", metricType),
+			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
+			zap.Error(err))
+
+		return metrics, err
+	}
+
+	log.Debug("DataCoord.GetMetrics failed, request metric type is not implemented yet",
+		zap.Int64("node_id", Params.NodeID),
+		zap.String("req", req.Request),
+		zap.String("metric_type", metricType))
+
+	return &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    metricsinfo.MsgUnimplementedMetric,
+		},
+		Response: "",
 	}, nil
 }
