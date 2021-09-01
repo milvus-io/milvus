@@ -14,6 +14,7 @@ on:
       - '.env'
       - docker-compose.yml
       - Makefile
+      - go.mod
       - '!**.md'
       - '!build/ci/jenkins/**'
   pull_request:
@@ -27,6 +28,7 @@ on:
       - '.env'
       - docker-compose.yml
       - Makefile
+      - go.mod
       - '!**.md'
       - '!build/ci/jenkins/**'
 
