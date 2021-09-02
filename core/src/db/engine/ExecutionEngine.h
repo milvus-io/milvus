@@ -102,7 +102,7 @@ class ExecutionEngine {
     CopyToCpu() = 0;
 
     virtual Status
-    CopyToApu(uint32_t i) = 0;
+    CopyToApu(uint32_t i, std::string collection_name) = 0;
 
     //    virtual std::shared_ptr<ExecutionEngine>
     //    Clone() = 0;

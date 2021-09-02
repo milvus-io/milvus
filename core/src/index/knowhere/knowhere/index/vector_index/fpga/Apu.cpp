@@ -1,5 +1,5 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
@@ -15,6 +15,11 @@
 #include <fstream>
 #include <string>
 
+#include <db/Utils.h>
+#include <db/engine/ExecutionEngine.h>
+#include <segment/DeletedDocs.h>
+#include <segment/SegmentReader.h>
+#include "GsiBaseIndex.h"
 #include "knowhere/common/Exception.h"
 #include "utils/Log.h"
 
@@ -79,10 +84,92 @@ ApuInterface::InitApu() {
 }
 
 void
+ApuInterface::load(uint32_t dimention, uint32_t row_count, const std::string location, APU_METRIC_TYPE type,
+                   const std::string& collection_name) {
+    std::lock_guard<std::mutex> apu_lock(operation_mutex_);
+    cleanApuResources(Fpga::APU_CLEAN_TYPE::NEW_DB);
+    PopulateApuParams(dimention, row_count, location);
+    createBdb();
+    loadSessionToApu(type);
+    removeDeleteDocsFromApu();
+    num_records_ -= delete_docs_.size();
+    loaded_collection_name_ = collection_name;
+}
+
+void
+ApuInterface::Query(gsl_matrix_u32& indices, gsl_matrix_f32& distances, gsl_matrix_u1& queries, APU_METRIC_TYPE type,
+                    uint32_t topK) {
+    std::lock_guard<std::mutex> apu_lock(operation_mutex_);
+    if (tanimoto_reject_ind) {
+        KNOWHERE_THROW_MSG("Apu search failed. Add/Remove is not permitted for Tanimoto collection");
+    }
+
+    int status;
+    topK_ = topK;
+    switch (type) {
+        case APU_METRIC_TYPE::TANIMOTO: {
+            auto start_t = std::chrono::steady_clock::now();
+            status = gsl_flat_tanimoto_search_u1(session_hdl_, &indices, &distances, &queries);
+            auto end_t = std::chrono::steady_clock::now();
+            LOG_ENGINE_DEBUG_ << "Apu search time in microseconds: "
+                              << std::chrono::duration_cast<std::chrono::microseconds>(end_t - start_t).count()
+                              << " µs";
+            break;
+        }
+        case APU_METRIC_TYPE::HAMMING:
+            auto start_h = std::chrono::steady_clock::now();
+            status = gsl_flat_hamming_search_u1(session_hdl_, &indices, &distances, &queries);
+            auto end_h = std::chrono::steady_clock::now();
+            LOG_ENGINE_DEBUG_ << "Apu search time in microseconds: "
+                              << std::chrono::duration_cast<std::chrono::microseconds>(end_h - start_h).count()
+                              << " µs";
+            break;
+    }
+    if (status != GSI_SUCCESS) {
+        KNOWHERE_THROW_MSG("Apu query Failed. error code : " + std::to_string(status));
+    }
+}
+
+milvus::Status
+ApuInterface::insertVectors(milvus::engine::VectorsData& vectors, std::string collection_name) {
+    std::lock_guard<std::mutex> apu_lock(operation_mutex_);
+    auto binary_data = vectors.binary_data_;
+    if (loaded_collection_name_ != collection_name || binary_data.empty()) {
+        return milvus::Status().OK();
+    }
+
+    int vectors_count = binary_data.size() / num_bytes_in_rec_;
+    activities_counter_ += vectors_count;
+    auto gsi_index = std::static_pointer_cast<milvus::knowhere::GsiBaseIndex>(index_);
+    if (gsi_index->getMetricType() == milvus::engine::MetricType::TANIMOTO) {
+        tanimoto_reject_ind = true;
+        return milvus::Status(-1, "Add/Remove action from loaded Tanimoto collection is not supported");
+    } else if (activities_counter_ > MAX_ACTIVITIES_BEFORE_RELOAD) {
+        cleanApuResources(APU_CLEAN_TYPE::NEW_DB);
+        return milvus::Status().OK();
+    }
+
+    gsl_matrix_u1 records_to_add = {.row_size = num_bfeatures_,
+                                    .row_stride = num_bytes_in_rec_,
+                                    .num_rows = (uint32_t)vectors_count,
+                                    .rows_u1 = records_to_add.rows_u1 = (void*)binary_data.data()};
+
+    int status = gsl_flat_hamming_append_recs_u1(session_hdl_, &records_to_add);
+    if (status != 0) {
+        return milvus::Status(status, "Error occuered while adding records to APU");
+    }
+
+    auto ids = index_->GetUids();
+    ids->insert(ids->end(), vectors.id_array_.begin(), vectors.id_array_.end());
+    return milvus::Status().OK();
+}
+
+void
 ApuInterface::PopulateApuParams(uint32_t dimention, uint32_t row_count, const std::string location) {
     num_bfeatures_ = dimention;
-    num_records_ = row_count;
     location_ = location;
+    getDeletedDocs(location_, delete_docs_);
+    num_records_ = row_count + delete_docs_.size();
     num_bytes_in_rec_ = num_bfeatures_ / CHAR_BITS;
 }
 
@@ -107,9 +194,7 @@ ApuInterface::createBdb() {
         fin.close();
     }
 
-    int status = 0;
-    bdbh_ = 0;
-    status = gsl_create_bdb(gsl_ctx_, &bdbh_, &bdb_);
+    int status = gsl_create_bdb(gsl_ctx_, &bdbh_, &bdb_);
     if (status != GSI_SUCCESS) {
         KNOWHERE_THROW_MSG("Apu failed create Bdb. error code : " + std::to_string(status));
     }
@@ -146,50 +231,13 @@ ApuInterface::loadTanimotoSessionToApu() {
     }
 }
 
-void
-ApuInterface::Query(gsl_matrix_u32& indices, gsl_matrix_f32& distances, gsl_matrix_u1& queries, APU_METRIC_TYPE type) {
-    int status;
-    switch (type) {
-        case APU_METRIC_TYPE::TANIMOTO: {
-            auto start_t = std::chrono::steady_clock::now();
-            status = gsl_flat_tanimoto_search_u1(session_hdl_, &indices, &distances, &queries);
-            auto end_t = std::chrono::steady_clock::now();
-            LOG_ENGINE_DEBUG_ << "Apu search time in microseconds: "
-                              << std::chrono::duration_cast<std::chrono::microseconds>(end_t - start_t).count()
-                              << " µs";
-            break;
-        }
-        case APU_METRIC_TYPE::HAMMING:
-            auto start_h = std::chrono::steady_clock::now();
-            status = gsl_flat_hamming_search_u1(session_hdl_, &indices, &distances, &queries);
-            auto end_h = std::chrono::steady_clock::now();
-            LOG_ENGINE_DEBUG_ << "Apu search time in microseconds: "
-                              << std::chrono::duration_cast<std::chrono::microseconds>(end_h - start_h).count()
-                              << " µs";
-            break;
-    }
-    if (status != GSI_SUCCESS) {
-        KNOWHERE_THROW_MSG("Apu query Failed. error code : " + std::to_string(status));
-    }
-}
-
-bool
-ApuInterface::isLoadNeeded(std::string cur_location) {
-    if (location_ == "") {
-        return true;
-    } else if (cur_location != location_) {
-        cleanApuResources(APU_CLEAN_TYPE::NEW_DB);
-        return true;
-    }
-    return false;
-}
-
 ApuInterface::~ApuInterface() {
     cleanApuResources(APU_CLEAN_TYPE::FULL);
 }
 
 void
 ApuInterface::cleanApuResources(APU_CLEAN_TYPE type) {
+    std::lock_guard<std::mutex> apu_lock(cleanup_mutex_);
     switch (type) {
         case APU_CLEAN_TYPE::FULL:
             if (session_hdl_)
@@ -197,6 +245,7 @@ ApuInterface::cleanApuResources(APU_CLEAN_TYPE type) {
             if (bdbh_)
                 gsl_destroy_bdb(bdbh_);
             gdl_exit();
+            loaded_collection_name_ = "";
             break;
         case APU_CLEAN_TYPE::SESSION_HDL:
             if (session_hdl_)
@@ -206,16 +255,23 @@ ApuInterface::cleanApuResources(APU_CLEAN_TYPE type) {
             gsl_destroy_bdb(bdbh_);
             break;
         case APU_CLEAN_TYPE::NEW_DB:
-            if (session_hdl_)
+            if (session_hdl_) {
                 gsl_search_session_destroy(session_hdl_);
-            if (bdbh_)
+                session_hdl_ = NULL;
+            }
+            if (bdbh_) {
                 gsl_destroy_bdb(bdbh_);
+                bdbh_ = NULL;
+            }
+            loaded_collection_name_ = "";
+            tanimoto_reject_ind = false;
+            activities_counter_ = 0;
             break;
     }
 }
 
 void
-ApuInterface::loadSeesionToApu(APU_METRIC_TYPE type) {
+ApuInterface::loadSessionToApu(APU_METRIC_TYPE type) {
     switch (type) {
         case APU_METRIC_TYPE::TANIMOTO: {
             tanimoto_desc_ = {.typical_num_queries = NUM_QUERIES,
@@ -236,13 +292,135 @@ ApuInterface::loadSeesionToApu(APU_METRIC_TYPE type) {
     }
 }
 
-uint32_t
-ApuInterface::getTopK() const {
-    return topK_;
+bool
+ApuInterface::getApuLoadStatus(std::string collection_name) {
+    std::lock_guard<std::mutex> apu_lock(operation_mutex_);
+    bool is_loaded = true;
+    if (loaded_collection_name_ != collection_name) {
+        is_loaded = false;
+    }
+    return is_loaded;
 }
 
 void
-ApuInterface::setTopK(uint32_t topK) {
-    topK_ = topK;
+ApuInterface::setIndex(const milvus::knowhere::VecIndexPtr& index) {
+    std::lock_guard<std::mutex> apu_lock(operation_mutex_);
+    index_ = index;
 }
+
+void
+ApuInterface::removeDeleteDocsFromApu() {
+    uint32_t num_of_offsets = delete_docs_.size();
+    auto gsi_index = std::static_pointer_cast<milvus::knowhere::GsiBaseIndex>(index_);
+    if (num_of_offsets == 0) {
+        return;
+    } else if (num_of_offsets > 0 && gsi_index->getMetricType() == milvus::engine::MetricType::TANIMOTO) {
+        tanimoto_reject_ind = true;
+        KNOWHERE_THROW_MSG("Apu load failed. Remove from Tanimoto collection is not permitted");
+    }
+
+    activities_counter_ += num_of_offsets;
+    if (activities_counter_ > MAX_ACTIVITIES_BEFORE_RELOAD) {
+        cleanApuResources(APU_CLEAN_TYPE::NEW_DB);
+        return;
+    }
+    gsl_matrix_u32 offsets_to_remove;
+    gsl_matrix_u32 moved_items;
+    getDeleteObjects(num_of_offsets, offsets_to_remove, moved_items, (uint32_t*)delete_docs_.data());
+    // delete records from apu according to offsets
+    int status = gsl_flat_hamming_remove_recs(session_hdl_, &moved_items, &offsets_to_remove);
+
+    if (status == 0) {
+        alignApuUids(moved_items, delete_docs_.size());
+    }
+}
+
+void
+ApuInterface::alignApuUids(gsl_matrix_u32& moved_items, int record_count) const {
+    if (record_count == 0) {
+        return;
+    }
+
+    uint32_t* tmpPtr = NULL;
+    uint32_t old_pos;
+    uint32_t new_pos;
+
+    auto uids = index_->GetUids();
+    for (int i = 0; i < record_count; ++i) {
+        tmpPtr = (uint32_t*)((char*)moved_items.rows_u32 + moved_items.row_stride * i);
+        old_pos = *tmpPtr;
+        new_pos = *(++tmpPtr);
+        if (new_pos != INDEX_SENTINEL_VALUE && old_pos != INDEX_SENTINEL_VALUE) {
+            uids->at(new_pos) = uids->at(old_pos);
+            uids->erase(uids->begin() + old_pos);
+        } else {
+            uids->pop_back();
+        }
+    }
+
+    free((void*)moved_items.rows_u32);
+}
+
+milvus::Status
+ApuInterface::deleteVectors(milvus::engine::IDNumbers vector_ids, std::string collection_name) {
+    std::lock_guard<std::mutex> apu_lock(operation_mutex_);
+
+    uint32_t num_of_records = vector_ids.size();
+    if (loaded_collection_name_ != collection_name || num_of_records == 0) {
+        return milvus::Status().OK();
+    }
+    std::vector<uint32_t> offsets;
+    offsets.resize(num_of_records);
+    int records_found = getOffsetByValue(index_->GetUids(), vector_ids, offsets);
+
+    activities_counter_ += records_found;
+    auto gsi_index = std::static_pointer_cast<milvus::knowhere::GsiBaseIndex>(index_);
+    if (gsi_index->getMetricType() == milvus::engine::MetricType::TANIMOTO) {
+        tanimoto_reject_ind = true;
+        return milvus::Status(-1, "Add/Remove action from loaded Tanimoto collection is not supported");
+    } else if (activities_counter_ > MAX_ACTIVITIES_BEFORE_RELOAD) {
+        cleanApuResources(APU_CLEAN_TYPE::NEW_DB);
+        return milvus::Status().OK();
+    } else if (records_found == 0) {
+        return milvus::Status().OK();
+    }
+
+    gsl_matrix_u32 offsets_to_remove;
+    gsl_matrix_u32 moved_items;
+    getDeleteObjects(records_found, offsets_to_remove, moved_items, offsets.data());
+
+    int status = gsl_flat_hamming_remove_recs(session_hdl_, &moved_items, &offsets_to_remove);
+
+    if (status == 0) {
+        alignApuUids(moved_items, records_found);
+    }
+    return milvus::Status::OK();
+}
+
+void
+ApuInterface::getDeleteObjects(uint32_t num_of_offsets, gsl_matrix_u32& offsets_to_remove, gsl_matrix_u32& moved_items,
+                               uint32_t* data) const {
+    offsets_to_remove = {
+        .row_size = num_of_offsets, .row_stride = num_of_offsets * sizeof(uint32_t), .num_rows = 1, .rows_u32 = data};
+    moved_items = {.row_size = 2,
+                   .row_stride = 2 * sizeof(uint32_t),
+                   .num_rows = num_of_offsets,
+                   .rows_u32 = (uint32_t*)calloc(num_of_offsets * 2, sizeof(uint32_t))};
+}
+
+const milvus::knowhere::VecIndexPtr&
+ApuInterface::getIndex() const {
+    return index_;
+}
+
+milvus::Status
+ApuInterface::dropCollection(std::string collection_name) {
+    std::lock_guard<std::mutex> apu_lock(operation_mutex_);
+    if (collection_name == loaded_collection_name_) {
+        loaded_collection_name_ = "";
+        tanimoto_reject_ind = false;
+    }
+    return milvus::Status::OK();
+}
+
 }  // namespace Fpga

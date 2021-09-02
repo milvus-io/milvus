@@ -25,10 +25,10 @@ class GsiHammingIndex : public GsiBaseIndex {
  public:
     explicit GsiHammingIndex(uint32_t dim) : GsiBaseIndex(dim) {
         index_type_ = IndexEnum::INDEX_FAISS_BIN_IDMAP;
+        metric_type_ = milvus::engine::MetricType::HAMMING;
     }
-
     void
-    CopyIndexToFpga(uint32_t row_count, const std::string& location) override;
+    CopyIndexToFpga(uint32_t row_count, const std::string& location, std::string collection_name) override;
 
     DatasetPtr
     Query(const DatasetPtr& dataset, const Config& config, faiss::ConcurrentBitsetPtr blacklist) override;

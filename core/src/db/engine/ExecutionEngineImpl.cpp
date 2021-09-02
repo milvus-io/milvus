@@ -641,14 +641,14 @@ ExecutionEngineImpl::CopyToFpga() {
 }
 
 Status
-ExecutionEngineImpl::CopyToApu(uint32_t row_count) {
+ExecutionEngineImpl::CopyToApu(uint32_t row_count, std::string collection_name) {
 #ifdef MILVUS_APU_VERSION
-
     auto cache_index_ =
         std::static_pointer_cast<knowhere::VecIndex>(cache::FpgaCacheMgr::GetInstance()->GetItem(location_));
-    bool already_in_cache = (cache_index_ != nullptr);
 
-    if (!already_in_cache) {
+    auto apu = Fpga::ApuInst::getInstance();
+    auto status = apu->getApuLoadStatus(collection_name);
+    if (!status) {
         cache::FpgaCacheMgr::GetInstance()->ClearCache();  // clear cache to support cache switch .
         std::shared_ptr<knowhere::GsiBaseIndex> gsi_index;
         // factory is needed here
@@ -658,11 +658,12 @@ ExecutionEngineImpl::CopyToApu(uint32_t row_count) {
             gsi_index = std::make_shared<knowhere::GsiTanimotoIndex>(dim_);
 
         gsi_index->SetUids(index_->GetUids());
-        gsi_index->CopyIndexToFpga(row_count, location_);
+        apu->setIndex(gsi_index);
+        gsi_index->CopyIndexToFpga(row_count, location_, collection_name);
         index_ = gsi_index;
         FpgaCache();
     } else {
-        index_ = cache_index_;
+        index_ = apu->getIndex();
     }
 #endif
     return Status::OK();

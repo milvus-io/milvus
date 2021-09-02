@@ -42,6 +42,7 @@ enum class MergeStrategyType {
     SIMPLE = 1,
     LAYERED = 2,
     ADAPTIVE = 3,
+    APU_MERGE = 4,
 };
 
 class MergeManager {

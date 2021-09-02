@@ -17,19 +17,30 @@
 #include <cstdio>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <vector>
+
+#include <db/Types.h>
+#include <knowhere/common/Typedef.h>
+#include <utils/Status.h>
+#include "knowhere/index/vector_index/fpga/ApuUtils.h"
+#include "segment/DeletedDocs.h"
 
 extern "C" {
 #include <gsi/libgdl.h>
 #include <gsi/libgsl.h>
+#include <gsi/libgsl_flat_hamming.h>
 #include <gsi/libgsl_flat_tanimoto.h>
 #include <gsi/libgsl_matrix.h>
 }
 
-#define NUM_QUERIES (100)
-#define CHAR_BITS (8)
-#define INIT_K (50)
-#define GSI_SUCCESS (0)
+#define NUM_QUERIES 100
+#define CHAR_BITS 8
+#define INIT_K 50
+#define GSI_SUCCESS 0
+#define MAX_ACTIVITIES_BEFORE_RELOAD 4000
+#define INDEX_SENTINEL_VALUE 4294967295
 
 namespace Fpga {
 
@@ -52,34 +63,37 @@ class ApuInterface {
     ~ApuInterface();
 
     void
-    PopulateApuParams(uint32_t dimention, uint32_t row_count, const std::string location);
+    load(uint32_t dimention, uint32_t row_count, const std::string location, APU_METRIC_TYPE type,
+         const std::string& collection_name);
 
     void
-    createBdb();
+    Query(gsl_matrix_u32& indices, gsl_matrix_f32& distances, gsl_matrix_u1& queries, APU_METRIC_TYPE type,
+          uint32_t topK);
 
-    void
-    loadSeesionToApu(APU_METRIC_TYPE type);
+    milvus::Status
+    insertVectors(milvus::engine::VectorsData& vectors, std::string collection_name);
 
-    void
-    Query(gsl_matrix_u32& indices, gsl_matrix_f32& distances, gsl_matrix_u1& queries, APU_METRIC_TYPE type);
+    milvus::Status
+    deleteVectors(milvus::engine::IDNumbers vector_ids, std::string collection_name);
 
     bool
-    isLoadNeeded(std::string location_);
+    getApuLoadStatus(std::string collection_name);
+
+    void
+    setIndex(const milvus::knowhere::VecIndexPtr& index);
+
+    const milvus::knowhere::VecIndexPtr&
+    getIndex() const;
+
+    milvus::Status
+    dropCollection(std::string collection_name);
+
+ private:
+    void
+    InitApu();
 
     void
     cleanApuResources(APU_CLEAN_TYPE type);
-
-    uint32_t
-    getTopK() const;
-
-    void
-    setTopK(uint32_t topK);
-
- private:
-    gsl_bdb_hdl bdbh_ = NULL;
-
-    void
-    InitApu();
 
     void
     loadHammingSessionToApu();
@@ -87,7 +101,32 @@ class ApuInterface {
     void
     loadTanimotoSessionToApu();
 
+    void
+    PopulateApuParams(uint32_t dimention, uint32_t row_count, const std::string location);
+
+    void
+    createBdb();
+
+    void
+    loadSessionToApu(APU_METRIC_TYPE type);
+
+    void
+    removeDeleteDocsFromApu();
+
+    void
+    alignApuUids(gsl_matrix_u32& moved_items, int record_count) const;
+
+    void
+    getDeleteObjects(uint32_t num_of_offsets, gsl_matrix_u32& offsets_to_remove, gsl_matrix_u32& moved_items,
+                     uint32_t* data) const;
+
     std::string location_ = "";
+
+    int32_t metric_type_;
+
+    std::string loaded_collection_name_ = "";
+
+    int activities_counter_ = 0;
 
     uint32_t num_records_ = 0;
 
@@ -97,15 +136,27 @@ class ApuInterface {
 
     gsl_context gsl_ctx_;
 
-    struct gsl_matrix_u1 bdb_;
+    gsl_matrix_u1 bdb_;
 
-    gsl_search_session_hdl session_hdl_;
+    gsl_bdb_hdl bdbh_ = NULL;
+
+    gsl_search_session_hdl session_hdl_ = NULL;
 
     gsl_flat_hamming_desc hamming_desc_;
 
     gsl_flat_tanimoto_desc tanimoto_desc_;
 
     uint32_t topK_ = INIT_K;
+
+    milvus::knowhere::VecIndexPtr index_ = nullptr;
+
+    std::vector<milvus::segment::offset_t> delete_docs_;
+
+    std::mutex operation_mutex_;
+
+    std::mutex cleanup_mutex_;
+
+    bool tanimoto_reject_ind = false;
 };  // namespace ApuInterface
 using ApuInterfacePtr = std::shared_ptr<ApuInterface>;
 }  // namespace Fpga

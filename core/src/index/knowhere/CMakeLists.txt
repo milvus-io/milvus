@@ -104,6 +104,7 @@ if (MILVUS_APU_VERSION)
             knowhere/index/vector_index/fpga/GsiTanimotoIndex.cpp
             knowhere/index/vector_index/fpga/Apu.cpp
             knowhere/index/vector_index/fpga/ApuInst.cpp
+	    knowhere/index/vector_index/fpga/ApuUtils.cpp
         )
 
 endif ()

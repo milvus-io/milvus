@@ -75,10 +75,13 @@ class GsiBaseIndex : public VecIndex {
     ~GsiBaseIndex();
 
     virtual void
-    CopyIndexToFpga(uint32_t row_count, const std::string& location) = 0;
+    CopyIndexToFpga(uint32_t row_count, const std::string& location, std::string collection_name) = 0;
 
     virtual DatasetPtr
     Query(const DatasetPtr& dataset, const Config& config, faiss::ConcurrentBitsetPtr blacklist) = 0;
+
+    engine::MetricType
+    getMetricType() const;
 
  protected:
     void
@@ -104,7 +107,9 @@ class GsiBaseIndex : public VecIndex {
 
     void
     freeAllocatedMem();
-};
+
+    milvus::engine::MetricType metric_type_;
+};  // GsiBaseIndex
 }  // namespace knowhere
 }  // namespace milvus
 #endif

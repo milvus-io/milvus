@@ -17,16 +17,13 @@ namespace milvus {
 namespace knowhere {
 
 void
-GsiTanimotoIndex::CopyIndexToFpga(uint32_t row_count, const std::string& location) {
+GsiTanimotoIndex::CopyIndexToFpga(uint32_t row_count, const std::string& location, std::string collection_name) {
     num_bfeatures_ = Dim();
     num_bytes_in_rec_ = num_bfeatures_ / CHAR_BITS;
     index_size_ = row_count * num_bytes_in_rec_;
 
     auto apu = Fpga::ApuInst::getInstance();
-    apu->cleanApuResources(Fpga::APU_CLEAN_TYPE::NEW_DB);
-    apu->PopulateApuParams(num_bfeatures_, row_count, location);
-    apu->createBdb();
-    apu->loadSeesionToApu(Fpga::APU_METRIC_TYPE::TANIMOTO);
+    apu->load(num_bfeatures_, row_count, location, Fpga::APU_METRIC_TYPE::TANIMOTO, collection_name);
 }
 
 DatasetPtr
@@ -38,15 +35,15 @@ GsiTanimotoIndex::Query(const DatasetPtr& dataset, const Config& config, faiss::
     num_bytes_in_rec_ = num_bfeatures_ / CHAR_BITS;
     topK_ = config[meta::TOPK];
 
-    apu->setTopK(topK_);
     AllocateMemory(dataset, config);
 
-    apu->Query(indices_, distances_, queries_, Fpga::APU_METRIC_TYPE::TANIMOTO);
+    apu->Query(indices_, distances_, queries_, Fpga::APU_METRIC_TYPE::TANIMOTO, topK_);
 
-    auto ret_ds = std::make_shared<Dataset>();
     int64_t* ids_int64 = (int64_t*)calloc(topK_ * num_queries_, sizeof(int64_t));
     convertToInt64_t(&indices_, ids_int64);
+    MapOffsetToUid(ids_int64, static_cast<size_t>(topK_ * num_queries_));
 
+    auto ret_ds = std::make_shared<Dataset>();
     ret_ds->Set(meta::IDS, ids_int64);
     ret_ds->Set(meta::DISTANCE, distances_.rows_f32);
     free((void*)indices_.rows_u32);

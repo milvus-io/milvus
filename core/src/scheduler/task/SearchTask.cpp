@@ -159,8 +159,16 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
             stat = index_engine_->CopyToFpga();
             type_str = "CPU2FPGA";
         } else if (type == LoadType::CPU2APU) {
-            stat = index_engine_->CopyToApu(file_->row_count_);
-            type_str = "CPU2APU";
+            if (auto job = job_.lock()) {
+                auto search_job = std::static_pointer_cast<scheduler::SearchJob>(job);
+                if (search_job->index_files().size() > 1) {
+                    error_msg = "Flush collection is needed in order to binary search over Apu";
+                    stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);
+                } else {
+                    stat = index_engine_->CopyToApu(file_->row_count_, file_->collection_id_);
+                    type_str = "CPU2APU";
+                }
+            }
         } else {
             error_msg = "Wrong load type";
             stat = Status(SERVER_UNEXPECTED_ERROR, error_msg);

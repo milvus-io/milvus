@@ -126,5 +126,10 @@ GsiBaseIndex::Size() {
     return index_size_;
 }
 
+engine::MetricType
+GsiBaseIndex::getMetricType() const {
+    return metric_type_;
+}
+
 }  //  namespace knowhere
 }  //  namespace milvus

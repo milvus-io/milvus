@@ -11,6 +11,7 @@
 
 #include "db/merge/MergeManagerImpl.h"
 #include "db/merge/MergeAdaptiveStrategy.h"
+#include "db/merge/MergeApuStrategy.h"
 #include "db/merge/MergeLayeredStrategy.h"
 #include "db/merge/MergeSimpleStrategy.h"
 #include "db/merge/MergeStrategy.h"
@@ -39,6 +40,10 @@ MergeManagerImpl::UseStrategy(MergeStrategyType type) {
         }
         case MergeStrategyType::ADAPTIVE: {
             strategy_ = std::make_shared<MergeAdaptiveStrategy>();
+            break;
+        }
+        case MergeStrategyType::APU_MERGE: {
+            strategy_ = std::make_shared<MergeApuStrategy>();
             break;
         }
         default: {

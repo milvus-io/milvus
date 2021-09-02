@@ -54,6 +54,9 @@
 #include "utils/TimeRecorder.h"
 #include "utils/ValidationUtil.h"
 #include "wal/WalDefinations.h"
+#ifdef MILVUS_APU_VERSION
+#include <knowhere/index/vector_index/fpga/ApuInst.h>
+#endif
 
 namespace milvus {
 namespace engine {
@@ -280,6 +283,10 @@ DBImpl::DropCollection(const std::string& collection_id) {
         return status;
     }
 
+#ifdef MILVUS_APU_VERSION
+    auto apu = Fpga::ApuInst::getInstance();
+    status = apu->dropCollection(collection_id);
+#endif
     return Status::OK();
 }
 
@@ -776,6 +783,12 @@ DBImpl::InsertVectors(const std::string& collection_id, const std::string& parti
         status = ExecWalRecord(record);
     }
 
+#ifdef MILVUS_APU_VERSION
+    if (!vectors.binary_data_.empty()) {
+        auto apu = Fpga::ApuInst::getInstance();
+        status = apu->insertVectors(vectors, collection_id);
+    }
+#endif
     return status;
 }
 
@@ -921,6 +934,12 @@ DBImpl::DeleteVectors(const std::string& collection_id, const std::string& parti
 
         status = ExecWalRecord(record);
     }
+#ifdef MILVUS_APU_VERSION
+    if (!vector_ids.empty()) {
+        auto apu = Fpga::ApuInst::getInstance();
+        status = apu->deleteVectors(vector_ids, collection_id);
+    }
+#endif
 
     return status;
 }
@@ -959,6 +978,11 @@ DBImpl::Flush(const std::string& collection_id) {
         LOG_ENGINE_DEBUG_ << "MemTable flush";
         InternalFlush(collection_id);
     }
+
+#ifdef MILVUS_APU_VERSION
+    std::set<std::string> merge_collection_id = {collection_id};
+    StartMergeTask(merge_collection_id, true);
+#endif
 
     LOG_ENGINE_DEBUG_ << "End flush collection: " << collection_id;
 
@@ -1988,7 +2012,11 @@ DBImpl::BackgroundMerge(std::set<std::string> collection_ids, bool force_merge_a
 
         auto old_strategy = merge_mgr_ptr_->Strategy();
         if (force_merge_all) {
+#ifdef MILVUS_APU_VERSION
+            merge_mgr_ptr_->UseStrategy(MergeStrategyType::APU_MERGE);
+#else
             merge_mgr_ptr_->UseStrategy(MergeStrategyType::ADAPTIVE);
+#endif
         }
 
         auto status = merge_mgr_ptr_->MergeFiles(collection_id);

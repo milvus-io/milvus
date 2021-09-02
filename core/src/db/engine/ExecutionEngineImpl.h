@@ -61,7 +61,7 @@ class ExecutionEngineImpl : public ExecutionEngine {
     CopyToFpga() override;
 
     Status
-    CopyToApu(uint32_t row_count) override;
+    CopyToApu(uint32_t row_count, std::string collection_name) override;
 
 #if 0
     Status
