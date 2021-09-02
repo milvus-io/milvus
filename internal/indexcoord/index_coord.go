@@ -72,6 +72,8 @@ type IndexCoord struct {
 	metaTable   *metaTable
 	nodeManager *NodeManager
 
+	metricsCacheManager *metricsinfo.MetricsCacheManager
+
 	nodeLock sync.RWMutex
 
 	// Add callback functions at different stages
@@ -186,6 +188,9 @@ func (i *IndexCoord) Init() error {
 		return err
 	}
 	log.Debug("IndexCoord new task scheduler success")
+
+	i.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
+
 	i.UpdateStateCode(internalpb.StateCode_Healthy)
 	log.Debug("IndexCoord", zap.Any("State", i.stateCode.Load()))
 
@@ -478,6 +483,13 @@ func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReq
 		zap.String("metric_type", metricType))
 
 	if metricType == metricsinfo.SystemInfoMetrics {
+		ret, err := i.metricsCacheManager.GetSystemInfoMetrics()
+		if err == nil && ret != nil {
+			return ret, nil
+		}
+		log.Debug("failed to get system info metrics from cache, recompute instead",
+			zap.Error(err))
+
 		metrics, err := getSystemInfoMetrics(ctx, req, i)
 
 		log.Debug("IndexCoord.GetMetrics",
@@ -486,6 +498,8 @@ func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReq
 			zap.String("metric_type", metricType),
 			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
 			zap.Error(err))
+
+		i.metricsCacheManager.UpdateSystemInfoMetrics(metrics)
 
 		return metrics, err
 	}
@@ -599,10 +613,12 @@ func (i *IndexCoord) watchNodeLoop() {
 					}
 					log.Debug("IndexCoord", zap.Any("IndexNode number", len(i.nodeManager.nodeClients)))
 				}()
+				i.metricsCacheManager.InvalidateSystemInfoMetrics()
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
 				log.Debug("IndexCoord watchNodeLoop SessionDelEvent", zap.Any("serverID", serverID))
 				i.nodeManager.RemoveNode(serverID)
+				i.metricsCacheManager.InvalidateSystemInfoMetrics()
 			}
 		}
 	}

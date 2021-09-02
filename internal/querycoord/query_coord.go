@@ -20,6 +20,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"github.com/golang/protobuf/proto"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.uber.org/zap"
@@ -54,6 +56,8 @@ type QueryCoord struct {
 	cluster      *queryNodeCluster
 	newNodeFn    newQueryNodeFn
 	scheduler    *TaskScheduler
+
+	metricsCacheManager *metricsinfo.MetricsCacheManager
 
 	dataCoordClient types.DataCoord
 	rootCoordClient types.RootCoord
@@ -110,6 +114,8 @@ func (qc *QueryCoord) Init() error {
 		log.Error("query coordinator init task scheduler failed", zap.Error(err))
 		return err
 	}
+
+	qc.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
 	return nil
 }
@@ -240,6 +246,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 				if err != nil {
 					log.Error("query node failed to register", zap.Int64("nodeID", serverID), zap.String("error info", err.Error()))
 				}
+				qc.metricsCacheManager.InvalidateSystemInfoMetrics()
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
 				log.Debug("get a del event after queryNode down", zap.Int64("nodeID", serverID))
@@ -272,6 +279,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 					meta:               qc.meta,
 				}
 				qc.scheduler.Enqueue([]task{loadBalanceTask})
+				qc.metricsCacheManager.InvalidateSystemInfoMetrics()
 			}
 		}
 	}

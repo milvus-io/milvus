@@ -2202,6 +2202,13 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 		zap.String("metric_type", metricType))
 
 	if metricType == metricsinfo.SystemInfoMetrics {
+		ret, err := node.metricsCacheManager.GetSystemInfoMetrics()
+		if err == nil && ret != nil {
+			return ret, nil
+		}
+		log.Debug("failed to get system info metrics from cache, recompute instead",
+			zap.Error(err))
+
 		metrics, err := getSystemInfoMetrics(ctx, req, node)
 
 		log.Debug("Proxy.GetMetrics",
@@ -2210,6 +2217,8 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 			zap.String("metric_type", metricType),
 			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
 			zap.Error(err))
+
+		node.metricsCacheManager.UpdateSystemInfoMetrics(metrics)
 
 		return metrics, err
 	}
