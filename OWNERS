@@ -2,7 +2,6 @@ filters:
   ".*":
     reviewers:
       - czs007
-      - del-zhenwu
       - jeffoverflow
       - scsven
       - shengjun1985
