@@ -32,7 +32,7 @@ func newTestSchema() *schemapb.CollectionSchema {
 
 	for name, value := range schemapb.DataType_value {
 		dataType := schemapb.DataType(value)
-		if !typeutil.IsIntergerType(dataType) && !typeutil.IsFloatingType(dataType) && !typeutil.IsVectorType(dataType) {
+		if !typeutil.IsIntegerType(dataType) && !typeutil.IsFloatingType(dataType) && !typeutil.IsVectorType(dataType) {
 			continue
 		}
 		newField := &schemapb.FieldSchema{

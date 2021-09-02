@@ -63,7 +63,7 @@ func TestVectorChunkManager(t *testing.T) {
 
 	floatResult := make([]float32, 0)
 	for i := 0; i < len(content)/4; i++ {
-		singleData := typeutil.ByteToFloat32(content[i*4 : i*4+4])
+		singleData := typeutil.BytesToFloat32(content[i*4 : i*4+4])
 		floatResult = append(floatResult, singleData)
 	}
 	assert.Equal(t, []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 111, 222, 333, 444, 555, 777, 666}, floatResult)
@@ -75,7 +75,7 @@ func TestVectorChunkManager(t *testing.T) {
 
 	floatResult = make([]float32, 0)
 	for i := 0; i < len(content)/4; i++ {
-		singleData := typeutil.ByteToFloat32(content[i*4 : i*4+4])
+		singleData := typeutil.BytesToFloat32(content[i*4 : i*4+4])
 		floatResult = append(floatResult, singleData)
 	}
 	assert.Equal(t, []float32{0, 111, 222, 333, 444, 555, 777, 666}, floatResult)
@@ -119,7 +119,7 @@ func TestVectorChunkManagerWithLocalCache(t *testing.T) {
 
 	floatResult := make([]float32, 0)
 	for i := 0; i < len(content)/4; i++ {
-		singleData := typeutil.ByteToFloat32(content[i*4 : i*4+4])
+		singleData := typeutil.BytesToFloat32(content[i*4 : i*4+4])
 		floatResult = append(floatResult, singleData)
 	}
 	assert.Equal(t, []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 111, 222, 333, 444, 555, 777, 666}, floatResult)
@@ -131,7 +131,7 @@ func TestVectorChunkManagerWithLocalCache(t *testing.T) {
 
 	floatResult = make([]float32, 0)
 	for i := 0; i < len(content)/4; i++ {
-		singleData := typeutil.ByteToFloat32(content[i*4 : i*4+4])
+		singleData := typeutil.BytesToFloat32(content[i*4 : i*4+4])
 		floatResult = append(floatResult, singleData)
 	}
 	assert.Equal(t, []float32{0, 111, 222, 333, 444, 555, 777, 666}, floatResult)
