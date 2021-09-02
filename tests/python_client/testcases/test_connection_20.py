@@ -1,11 +1,14 @@
 import pytest
+import concurrent.futures
 from pymilvus import DefaultConfig
 
 from base.client_base import TestcaseBase
-from utils.util_log import test_log as log
+from utils.utils import *
 import common.common_type as ct
 import common.common_func as cf
 from common.code_mapping import ConnectionErrorMessage as cem
+
+CONNECT_TIMEOUT = 12
 
 
 class TestConnectionParams(TestcaseBase):
@@ -742,3 +745,147 @@ class TestConnectionOperation(TestcaseBase):
 
         # drop collection success
         self.collection_wrap.drop()
+
+
+class TestConnect:
+
+    def local_ip(self, args):
+        '''
+        check if ip is localhost or not
+        '''
+        if not args["ip"] or args["ip"] == 'localhost' or args["ip"] == "127.0.0.1":
+            return True
+        else:
+            return False
+
+    @pytest.mark.tags(ct.CaseLabel.L2)
+    def test_close_repeatedly(self, dis_connect, args):
+        '''
+        target: test disconnect repeatedly
+        method: disconnect a connected client, disconnect again
+        expected: raise an error after disconnected
+        '''
+        dis_connect.close()
+
+    @pytest.mark.tags(ct.CaseLabel.L2)
+    def test_connect_uri(self, args):
+        '''
+        target: test connect with correct uri
+        method: uri format and value are both correct
+        expected: connected is True
+        '''
+        uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
+        milvus = get_milvus(args["ip"], args["port"], uri=uri_value, handler=args["handler"])
+
+    @pytest.mark.tags(ct.CaseLabel.L2)
+    def test_connect_uri_null(self, args):
+        '''
+        target: test connect with null uri
+        method: uri set null
+        expected: connected is True
+        '''
+        uri_value = ""
+        if self.local_ip(args):
+            milvus = get_milvus(None, None, uri=uri_value, handler=args["handler"])
+        else:
+            with pytest.raises(Exception) as e:
+                milvus = get_milvus(None, None, uri=uri_value, handler=args["handler"])
+
+    @pytest.mark.tags(ct.CaseLabel.L2)
+    def test_connect_with_multiprocess(self, args):
+        '''
+        target: test uri connect with multiprocess
+        method: set correct uri, test with multiprocessing connecting
+        expected: all connection is connected
+        '''
+
+        def connect():
+            milvus = get_milvus(args["ip"], args["port"], handler=args["handler"])
+            assert milvus
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            future_results = {executor.submit(
+                connect): i for i in range(100)}
+            for future in concurrent.futures.as_completed(future_results):
+                future.result()
+
+    @pytest.mark.tags(ct.CaseLabel.L2)
+    def test_connect_repeatedly(self, args):
+        '''
+        target: test connect repeatedly
+        method: connect again
+        expected: status.code is 0, and status.message shows have connected already
+        '''
+        uri_value = "tcp://%s:%s" % (args["ip"], args["port"])
+        milvus = Milvus(uri=uri_value, handler=args["handler"])
+        milvus = Milvus(uri=uri_value, handler=args["handler"])
+
+
+class TestConnectIPInvalid(object):
+    """
+    Test connect server with invalid ip
+    """
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_invalid_ips()
+    )
+    def get_invalid_ip(self, request):
+        yield request.param
+
+    @pytest.mark.tags(ct.CaseLabel.L2)
+    @pytest.mark.timeout(CONNECT_TIMEOUT)
+    def test_connect_with_invalid_ip(self, args, get_invalid_ip):
+        ip = get_invalid_ip
+        with pytest.raises(Exception) as e:
+            milvus = get_milvus(ip, args["port"], args["handler"])
+
+
+class TestConnectPortInvalid(object):
+    """
+    Test connect server with invalid ip
+    """
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_invalid_ints()
+    )
+    def get_invalid_port(self, request):
+        yield request.param
+
+    @pytest.mark.tags(ct.CaseLabel.L2)
+    @pytest.mark.timeout(CONNECT_TIMEOUT)
+    def test_connect_with_invalid_port(self, args, get_invalid_port):
+        '''
+        target: test ip:port connect with invalid port value
+        method: set port in gen_invalid_ports
+        expected: connected is False
+        '''
+        port = get_invalid_port
+        with pytest.raises(Exception) as e:
+            milvus = get_milvus(args["ip"], port, args["handler"])
+
+
+class TestConnectURIInvalid(object):
+    """
+    Test connect server with invalid uri
+    """
+
+    @pytest.fixture(
+        scope="function",
+        params=gen_invalid_uris()
+    )
+    def get_invalid_uri(self, request):
+        yield request.param
+
+    @pytest.mark.tags(ct.CaseLabel.L2)
+    @pytest.mark.timeout(CONNECT_TIMEOUT)
+    def test_connect_with_invalid_uri(self, get_invalid_uri, args):
+        '''
+        target: test uri connect with invalid uri value
+        method: set port in gen_invalid_uris
+        expected: connected is False
+        '''
+        uri_value = get_invalid_uri
+        with pytest.raises(Exception) as e:
+            milvus = get_milvus(uri=uri_value, handler=args["handler"])
