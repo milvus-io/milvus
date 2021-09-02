@@ -46,3 +46,8 @@ func TestParamTable_MinIOUseSSL(t *testing.T) {
 	useSSL := Params.MinIOUseSSL
 	assert.Equal(t, useSSL, false)
 }
+
+func TestParamTable_MinIORegion(t *testing.T) {
+	region := Params.MinIORegion
+	assert.Equal(t, region, "")
+}

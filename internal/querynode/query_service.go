@@ -62,6 +62,7 @@ func newQueryService(ctx context.Context,
 		AccessKeyID:       Params.MinioAccessKeyID,
 		SecretAccessKeyID: Params.MinioSecretAccessKey,
 		UseSSL:            Params.MinioUseSSLStr,
+		Region:            Params.MinioRegion,
 		CreateBucket:      true,
 		BucketName:        Params.MinioBucketName,
 	}
