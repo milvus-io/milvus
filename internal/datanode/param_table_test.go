@@ -94,6 +94,11 @@ func TestParamTable_DataNode(t *testing.T) {
 		log.Println("MinioUseSSL:", useSSL)
 	})
 
+	t.Run("Test MinioRegion", func(t *testing.T) {
+		name := Params.MinioRegion
+		log.Println("MinioRegion:", name)
+	})
+
 	t.Run("Test MinioBucketName", func(t *testing.T) {
 		name := Params.MinioBucketName
 		log.Println("MinioBucketName:", name)

@@ -284,6 +284,7 @@ func newDataCoordMock(ctx context.Context) (*dataCoordMock, error) {
 		SecretAccessKeyID: Params.MinioSecretAccessKey,
 		UseSSL:            Params.MinioUseSSLStr,
 		BucketName:        Params.MinioBucketName,
+		Region:            Params.MinioRegion,
 		CreateBucket:      true,
 	}
 	kv, err := minioKV.NewMinIOKV(ctx, option)

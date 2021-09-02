@@ -169,6 +169,7 @@ func (i *IndexCoord) Init() error {
 		AccessKeyID:       Params.MinIOAccessKeyID,
 		SecretAccessKeyID: Params.MinIOSecretAccessKey,
 		UseSSL:            Params.MinIOUseSSL,
+		Region:            Params.MinIORegion,
 		BucketName:        Params.MinioBucketName,
 		CreateBucket:      true,
 	}

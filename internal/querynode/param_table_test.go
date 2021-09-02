@@ -54,6 +54,11 @@ func TestParamTable_minio(t *testing.T) {
 		useSSL := Params.MinioUseSSLStr
 		assert.Equal(t, useSSL, false)
 	})
+
+	t.Run("Test region", func(t *testing.T) {
+		region := Params.MinioRegion
+		assert.Equal(t, region, "")
+	})
 }
 
 func TestParamTable_statsServiceTimeInterval(t *testing.T) {

@@ -45,6 +45,7 @@ type ParamTable struct {
 	MinIOAccessKeyID     string
 	MinIOSecretAccessKey string
 	MinIOUseSSL          bool
+	MinIORegion          string
 	MinioBucketName      string
 
 	Log log.Config
@@ -70,6 +71,7 @@ func (pt *ParamTable) initParams() {
 	pt.initMinIOAccessKeyID()
 	pt.initMinIOSecretAccessKey()
 	pt.initMinIOUseSSL()
+	pt.initMinIORegion()
 	pt.initMinioBucketName()
 	pt.initEtcdEndpoints()
 	pt.initMetaRootPath()
@@ -108,6 +110,14 @@ func (pt *ParamTable) initMinIOUseSSL() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func (pt *ParamTable) initMinIORegion() {
+	ret, err := pt.Load("minio.region")
+	if err != nil {
+		panic(err)
+	}
+	pt.MinIORegion = ret
 }
 
 func (pt *ParamTable) initEtcdEndpoints() {

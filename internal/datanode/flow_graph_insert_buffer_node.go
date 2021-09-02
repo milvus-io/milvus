@@ -847,6 +847,7 @@ func newInsertBufferNode(
 		AccessKeyID:       Params.MinioAccessKeyID,
 		SecretAccessKeyID: Params.MinioSecretAccessKey,
 		UseSSL:            Params.MinioUseSSL,
+		Region:            Params.MinioRegion,
 		CreateBucket:      true,
 		BucketName:        Params.MinioBucketName,
 	}

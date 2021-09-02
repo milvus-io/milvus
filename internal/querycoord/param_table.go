@@ -57,6 +57,7 @@ type ParamTable struct {
 	MinioAccessKeyID     string
 	MinioSecretAccessKey string
 	MinioUseSSLStr       bool
+	MinioRegion          string
 	MinioBucketName      string
 }
 
@@ -95,6 +96,7 @@ func (p *ParamTable) Init() {
 		p.initMinioAccessKeyID()
 		p.initMinioSecretAccessKey()
 		p.initMinioUseSSLStr()
+		p.initMinioRegion()
 		p.initMinioBucketName()
 	})
 }
@@ -238,6 +240,14 @@ func (p *ParamTable) initMinioUseSSLStr() {
 		panic(err)
 	}
 	p.MinioUseSSLStr = sslBoolean
+}
+
+func (p *ParamTable) initMinioRegion() {
+	region, err := p.Load("minio.region")
+	if err != nil {
+		panic(err)
+	}
+	p.MinioRegion = region
 }
 
 func (p *ParamTable) initMinioBucketName() {
