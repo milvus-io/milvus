@@ -163,13 +163,12 @@ func (node *Proxy) Init() error {
 		return err
 	}
 
-	idAllocator, err := allocator.NewIDAllocator(node.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
-
+	idAllocator, err := allocator.NewIDAllocator(node.ctx, node.rootCoord, Params.ProxyID)
 	if err != nil {
 		return err
 	}
+
 	node.idAllocator = idAllocator
-	node.idAllocator.PeerID = Params.ProxyID
 
 	tsoAllocator, err := NewTimestampAllocator(node.ctx, node.rootCoord, Params.ProxyID)
 	if err != nil {
