@@ -817,6 +817,7 @@ func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID
 		AccessKeyID:       Params.MinioAccessKeyID,
 		SecretAccessKeyID: Params.MinioSecretAccessKey,
 		UseSSL:            Params.MinioUseSSLStr,
+		Region:            Params.MinioRegion,
 		BucketName:        bucketName,
 		CreateBucket:      true,
 	}
@@ -902,6 +903,7 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 		AccessKeyID:       Params.MinioAccessKeyID,
 		SecretAccessKeyID: Params.MinioSecretAccessKey,
 		UseSSL:            Params.MinioUseSSLStr,
+		Region:            Params.MinioRegion,
 		BucketName:        Params.MinioBucketName,
 		CreateBucket:      true,
 	}

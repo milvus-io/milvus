@@ -146,11 +146,13 @@ func newMinIOKVClient(ctx context.Context, bucketName string) (*miniokv.MinIOKV,
 	secretAccessKey, _ := Params.Load("minio.secretAccessKey")
 	useSSLStr, _ := Params.Load("minio.useSSL")
 	useSSL, _ := strconv.ParseBool(useSSLStr)
+	region, _ := Params.Load("minio.region")
 	option := &miniokv.Option{
 		Address:           endPoint,
 		AccessKeyID:       accessKeyID,
 		SecretAccessKeyID: secretAccessKey,
 		UseSSL:            useSSL,
+		Region:            region,
 		BucketName:        bucketName,
 		CreateBucket:      true,
 	}

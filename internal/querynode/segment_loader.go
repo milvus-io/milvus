@@ -313,6 +313,7 @@ func newSegmentLoader(ctx context.Context, rootCoord types.RootCoord, indexCoord
 		AccessKeyID:       Params.MinioAccessKeyID,
 		SecretAccessKeyID: Params.MinioSecretAccessKey,
 		UseSSL:            Params.MinioUseSSLStr,
+		Region:            Params.MinioRegion,
 		CreateBucket:      true,
 		BucketName:        Params.MinioBucketName,
 	}
