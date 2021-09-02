@@ -12,52 +12,22 @@
 package typeutil
 
 import (
-	"log"
 	"testing"
-	"unsafe"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func TestUint64(t *testing.T) {
-	var i int64 = -1
-	var u uint64 = uint64(i)
-	t.Log(i)
-	t.Log(u)
+func TestParseTimestamp(t *testing.T) {
+	ts, err := ParseTimestamp(Int64ToBytes(1000))
+	t.Log(ts.String())
+	assert.Nil(t, err)
 }
 
-func TestHash32_Uint64(t *testing.T) {
-	var u uint64 = 0x12
-	h, err := Hash32Uint64(u)
-	assert.Nil(t, err)
-	t.Log(h)
-
-	h1, err := Hash32Int64(int64(u))
-	assert.Nil(t, err)
-	t.Log(h1)
-	assert.Equal(t, h, h1)
-
-	b := make([]byte, unsafe.Sizeof(u))
-	b[0] = 0x12
-	h2, err := Hash32Bytes(b)
-	assert.Nil(t, err)
-
-	t.Log(h2)
-	assert.Equal(t, h, h2)
-}
-
-func TestHash32_String(t *testing.T) {
-	var u string = "ok"
-	h, err := Hash32String(u)
-	assert.Nil(t, err)
-
-	t.Log(h)
-	log.Println(h)
-
-	b := []byte(u)
-	h2, err := Hash32Bytes(b)
-	assert.Nil(t, err)
-	log.Println(h2)
-
-	assert.Equal(t, uint32(h), h2)
+func TestSubTimeByWallClock(t *testing.T) {
+	beg := time.Now()
+	time.Sleep(100 * time.Millisecond)
+	end := time.Now()
+	span := SubTimeByWallClock(end, beg)
+	t.Log(span.String())
 }

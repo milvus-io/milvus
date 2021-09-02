@@ -534,7 +534,7 @@ func (context *ParserContext) handleLeafValue(nodeRaw *ant_ast.Node, dataType sc
 					FloatVal: float64(node.Value),
 				},
 			}
-		} else if typeutil.IsIntergerType(dataType) {
+		} else if typeutil.IsIntegerType(dataType) {
 			gv = &planpb.GenericValue{
 				Val: &planpb.GenericValue_Int64Val{
 					Int64Val: int64(node.Value),
