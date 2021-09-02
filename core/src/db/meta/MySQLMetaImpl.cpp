@@ -259,7 +259,8 @@ MySQLMetaImpl::Initialize() {
     }
 
     mysql_connection_pool_ = std::make_shared<MySQLConnectionPool>(
-        uri_info.db_name_, uri_info.username_, uri_info.password_, uri_info.host_, port, max_pool_size);
+        uri_info.db_name_, uri_info.username_, uri_info.password_, uri_info.host_, options_.ssl_ca_, options_.ssl_key_,
+        options_.ssl_cert_, port, max_pool_size);
     LOG_ENGINE_DEBUG_ << "MySQL connection pool: maximum pool size = " << std::to_string(max_pool_size);
 
     // step 4: validate to avoid open old version schema
@@ -288,59 +289,45 @@ MySQLMetaImpl::Initialize() {
         throw Exception(DB_INVALID_META_URI, msg);
     }
 
+    auto create_meta_table = [&](const MetaSchema& schema) {
+        mysqlpp::Query query_statement = connectionPtr->query();
+        query_statement << "SHOW TABLES LIKE '" << schema.name() << "';";
+
+        bool exist = false;
+        try {
+            mysqlpp::StoreQueryResult res = query_statement.store();
+            exist = (res.num_rows() > 0);
+        } catch (std::exception& e) {
+        }
+
+        fiu_do_on("MySQLMetaImpl.Initialize.meta_schema_exist", exist = false);
+        if (!exist) {
+            mysqlpp::Query InitializeQuery = connectionPtr->query();
+            InitializeQuery << "CREATE TABLE IF NOT EXISTS " << schema.name() << " (" << schema.ToString() + ");";
+
+            LOG_ENGINE_DEBUG_ << "Initialize: " << InitializeQuery.str();
+
+            bool initialize_query_exec = InitializeQuery.exec();
+            fiu_do_on("MySQLMetaImpl.Initialize.fail_create_meta_schema", initialize_query_exec = false);
+            if (!initialize_query_exec) {
+                std::string msg = "Failed to create meta table" + schema.name() + " in MySQL";
+                LOG_ENGINE_ERROR_ << msg;
+                throw Exception(DB_META_TRANSACTION_FAILED, msg);
+            }
+        }
+    };
+
     // step 7: create meta collection Tables
-    mysqlpp::Query InitializeQuery = connectionPtr->query();
-
-    InitializeQuery << "CREATE TABLE IF NOT EXISTS " << TABLES_SCHEMA.name() << " (" << TABLES_SCHEMA.ToString() + ");";
-
-    LOG_ENGINE_DEBUG_ << "Initialize: " << InitializeQuery.str();
-
-    bool initialize_query_exec = InitializeQuery.exec();
-    fiu_do_on("MySQLMetaImpl.Initialize.fail_create_collection_scheme", initialize_query_exec = false);
-    if (!initialize_query_exec) {
-        std::string msg = "Failed to create meta collection 'Tables' in MySQL";
-        LOG_ENGINE_ERROR_ << msg;
-        throw Exception(DB_META_TRANSACTION_FAILED, msg);
-    }
+    create_meta_table(TABLES_SCHEMA);
 
     // step 8: create meta collection TableFiles
-    InitializeQuery << "CREATE TABLE IF NOT EXISTS " << TABLEFILES_SCHEMA.name() << " ("
-                    << TABLEFILES_SCHEMA.ToString() + ");";
-
-    LOG_ENGINE_DEBUG_ << "Initialize: " << InitializeQuery.str();
-
-    initialize_query_exec = InitializeQuery.exec();
-    fiu_do_on("MySQLMetaImpl.Initialize.fail_create_collection_files", initialize_query_exec = false);
-    if (!initialize_query_exec) {
-        std::string msg = "Failed to create meta collection 'TableFiles' in MySQL";
-        LOG_ENGINE_ERROR_ << msg;
-        throw Exception(DB_META_TRANSACTION_FAILED, msg);
-    }
+    create_meta_table(TABLEFILES_SCHEMA);
 
     // step 9: create meta table Environment
-    InitializeQuery << "CREATE TABLE IF NOT EXISTS " << ENVIRONMENT_SCHEMA.name() << " ("
-                    << ENVIRONMENT_SCHEMA.ToString() + ");";
-
-    LOG_ENGINE_DEBUG_ << "Initialize: " << InitializeQuery.str();
-
-    initialize_query_exec = InitializeQuery.exec();
-    if (!initialize_query_exec) {
-        std::string msg = "Failed to create meta table 'Environment' in MySQL";
-        LOG_ENGINE_ERROR_ << msg;
-        throw Exception(DB_META_TRANSACTION_FAILED, msg);
-    }
+    create_meta_table(ENVIRONMENT_SCHEMA);
 
     // step 10: create meta table Field
-    InitializeQuery << "CREATE TABLE IF NOT EXISTS " << FIELDS_SCHEMA.name() << " (" << FIELDS_SCHEMA.ToString() + ");";
-
-    LOG_ENGINE_DEBUG_ << "Initialize: " << InitializeQuery.str();
-
-    initialize_query_exec = InitializeQuery.exec();
-    if (!initialize_query_exec) {
-        std::string msg = "Failed to create meta table 'Fields' in MySQL";
-        LOG_ENGINE_ERROR_ << msg;
-        throw Exception(DB_META_TRANSACTION_FAILED, msg);
-    }
+    create_meta_table(FIELDS_SCHEMA);
 
     return Status::OK();
 }

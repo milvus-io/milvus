@@ -68,11 +68,6 @@ SearchJob::GetResultDistances() {
     return result_distances_;
 }
 
-Status&
-SearchJob::GetStatus() {
-    return status_;
-}
-
 json
 SearchJob::Dump() const {
     json ret{
@@ -88,6 +83,18 @@ SearchJob::Dump() const {
 const std::shared_ptr<server::Context>&
 SearchJob::GetContext() const {
     return context_;
+}
+
+void
+SearchJob::SetStatus(const Status& status) {
+    std::lock_guard<std::mutex> lock(status_mutex_);
+    status_ = status;
+}
+
+void
+SearchJob::GetStatus(Status& status) {
+    std::lock_guard<std::mutex> lock(status_mutex_);
+    status = status_;
 }
 
 }  // namespace scheduler

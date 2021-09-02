@@ -500,14 +500,11 @@ TEST_F(MySqlMetaTest, INVALID_INITILIZE_TEST) {
         fiu_disable("MySQLMetaImpl.Initialize.is_thread_aware");
     }
     {
-        FIU_ENABLE_FIU("MySQLMetaImpl.Initialize.fail_create_collection_scheme");
+        FIU_ENABLE_FIU("MySQLMetaImpl.Initialize.meta_schema_exist");
+        FIU_ENABLE_FIU("MySQLMetaImpl.Initialize.fail_create_meta_schema");
         ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl(GetOptions().meta_, GetOptions().mode_));
-        fiu_disable("MySQLMetaImpl.Initialize.fail_create_collection_scheme");
-    }
-    {
-        FIU_ENABLE_FIU("MySQLMetaImpl.Initialize.fail_create_collection_files");
-        ASSERT_ANY_THROW(milvus::engine::meta::MySQLMetaImpl impl(GetOptions().meta_, GetOptions().mode_));
-        fiu_disable("MySQLMetaImpl.Initialize.fail_create_collection_files");
+        fiu_disable("MySQLMetaImpl.Initialize.fail_create_meta_schema");
+        fiu_disable("MySQLMetaImpl.Initialize.meta_schema_exist");
     }
     {
         FIU_ENABLE_FIU("MySQLConnectionPool.create.throw_exception");

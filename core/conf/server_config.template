@@ -33,9 +33,20 @@ cluster:
 #                      | Keep 'dialect://:@:/', 'dialect' can be either 'sqlite' or |            |                 |
 #                      | 'mysql', replace other texts with real values.             |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# meta_ssl_ca          | The path of the Certificate Authority (CA) certificate     | String     |                 |
+#                      | file in PEM format.                                        |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# meta_ssl_key         | The path of the client SSL private key file in PEM format. | String     |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# meta_ssl_cert        | The path of the client SSL public key certificate file in  | String     |                 |
+#                      | PEM format.                                                |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 general:
   timezone: UTC+8
   meta_uri: sqlite://:@:/
+  meta_ssl_ca: 
+  meta_ssl_key: 
+  meta_ssl_cert: 
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Network Config       | Description                                                | Type       | Default         |

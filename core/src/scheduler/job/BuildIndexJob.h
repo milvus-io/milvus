@@ -50,15 +50,16 @@ class BuildIndexJob : public Job, public server::CacheConfigHandler {
     void
     BuildIndexDone(size_t to_index_id);
 
+    void
+    SetStatus(const Status& status);
+
+    void
+    GetStatus(Status& status);
+
     json
     Dump() const override;
 
  public:
-    Status&
-    GetStatus() {
-        return status_;
-    }
-
     Id2ToIndexMap&
     to_index_files() {
         return to_index_files_;
@@ -84,6 +85,8 @@ class BuildIndexJob : public Job, public server::CacheConfigHandler {
     engine::DBOptions options_;
 
     Status status_;
+    std::mutex status_mutex_;
+
     std::mutex mutex_;
     std::condition_variable cv_;
 };
