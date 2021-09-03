@@ -21,6 +21,12 @@ import (
 	"strings"
 	"syscall"
 
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
+
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"github.com/milvus-io/milvus/cmd/roles"
 )
 
@@ -37,6 +43,7 @@ const (
 	roleStandalone = "standalone"
 )
 
+// inject variable at build-time
 var (
 	BuildTags = "unknown"
 	BuildTime = "unknown"
@@ -57,6 +64,16 @@ func printBanner() {
 	fmt.Println("GitCommit: " + GitCommit)
 	fmt.Println("GoVersion: " + GoVersion)
 	fmt.Println()
+}
+
+func injectVariablesToEnv() {
+	// inject in need
+
+	err := os.Setenv(metricsinfo.GitCommitEnvKey, GitCommit)
+	if err != nil {
+		log.Warn("failed to inject git commit to environment variable",
+			zap.Error(err))
+	}
 }
 
 func getPidFileName(serverType string, alias string) string {
@@ -257,6 +274,7 @@ func main() {
 	switch command {
 	case "run":
 		printBanner()
+		injectVariablesToEnv()
 		fd, err := createPidFile(filename, runtimeDir)
 		if err != nil {
 			panic(err)

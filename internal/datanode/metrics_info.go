@@ -13,6 +13,7 @@ package datanode
 
 import (
 	"context"
+	"os"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
@@ -25,6 +26,24 @@ func (node *DataNode) getSystemInfoMetrics(ctx context.Context, req *milvuspb.Ge
 	nodeInfos := metricsinfo.DataNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			Name: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, Params.NodeID),
+			HardwareInfos: metricsinfo.HardwareMetrics{
+				IP:           node.session.Address,
+				CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
+				CPUCoreUsage: metricsinfo.GetCPUUsage(),
+				Memory:       metricsinfo.GetMemoryCount(),
+				MemoryUsage:  metricsinfo.GetUsedMemoryCount(),
+				Disk:         metricsinfo.GetDiskCount(),
+				DiskUsage:    metricsinfo.GetDiskUsage(),
+			},
+			SystemInfo: metricsinfo.DeployMetrics{
+				SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
+				DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
+			},
+			// TODO(dragondriver): CreatedTime & UpdatedTime, easy but time-costing
+			Type: typeutil.DataNodeRole,
+		},
+		SystemConfigurations: metricsinfo.DataNodeConfiguration{
+			FlushInsertBufferSize: Params.FlushInsertBufferSize,
 		},
 	}
 	resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)

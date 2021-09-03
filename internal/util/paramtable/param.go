@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"github.com/milvus-io/milvus/internal/log"
 )
 
@@ -66,7 +68,7 @@ func (p *BaseParamTable) initEtcdConf() {
 
 func (p *BaseParamTable) initUseEmbedEtcd() {
 	p.UseEmbedEtcd = p.ParseBool("etcd.use.embed", false)
-	if p.UseEmbedEtcd && (os.Getenv("DEPLOY_MODE") != "STANDALONE") {
+	if p.UseEmbedEtcd && (os.Getenv(metricsinfo.DeployModeEnvKey) != metricsinfo.StandaloneDeployMode) {
 		panic("embedded etcd can not be used under distributed mode")
 	}
 }

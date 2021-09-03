@@ -21,6 +21,8 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"github.com/milvus-io/milvus/cmd/components"
 	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/datanode"
@@ -321,7 +323,7 @@ func (mr *MilvusRoles) runMsgStreamCoord(ctx context.Context) *components.MsgStr
 }
 
 func (mr *MilvusRoles) Run(localMsg bool, alias string) {
-	if os.Getenv("DEPLOY_MODE") == "STANDALONE" {
+	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
 		closer := trace.InitTracing("standalone")
 		if closer != nil {
 			defer closer.Close()
@@ -332,10 +334,15 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 
 	// only standalone enable localMsg
 	if localMsg {
-		os.Setenv("DEPLOY_MODE", "STANDALONE")
+		os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
 		cfg := mr.setLogConfigFilename("standalone.log")
 		logutil.SetupLogger(cfg)
 		defer log.Sync()
+	} else {
+		err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode)
+		if err != nil {
+			fmt.Println("failed to set deploy mode: ", err)
+		}
 	}
 
 	var rc *components.RootCoord

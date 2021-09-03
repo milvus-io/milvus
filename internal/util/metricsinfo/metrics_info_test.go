@@ -13,6 +13,7 @@ package metricsinfo
 
 import (
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -24,7 +25,25 @@ import (
 
 func TestBaseComponentInfos_Codec(t *testing.T) {
 	infos1 := BaseComponentInfos{
-		Name: ConstructComponentName(typeutil.ProxyRole, 1),
+		HasError:    false,
+		ErrorReason: "",
+		Name:        ConstructComponentName(typeutil.ProxyRole, 1),
+		HardwareInfos: HardwareMetrics{
+			IP:           "193.168.1.2",
+			CPUCoreCount: 4,
+			CPUCoreUsage: 0.5,
+			Memory:       32 * 1024,
+			MemoryUsage:  4 * 1024,
+			Disk:         100 * 1024,
+			DiskUsage:    2 * 1024,
+		},
+		SystemInfo: DeployMetrics{
+			SystemVersion: "8b1ae98fa97ce1c7ba853e8b9ff1c7ce24458dc1",
+			DeployMode:    ClusterDeployMode,
+		},
+		CreatedTime: time.Now().String(),
+		UpdatedTime: time.Now().String(),
+		Type:        typeutil.ProxyRole,
 	}
 	s, err := MarshalComponentInfos(infos1)
 	assert.Equal(t, nil, err)
@@ -33,13 +52,39 @@ func TestBaseComponentInfos_Codec(t *testing.T) {
 	var infos2 BaseComponentInfos
 	err = UnmarshalComponentInfos(s, &infos2)
 	assert.Equal(t, nil, err)
-	assert.Equal(t, infos1.Name, infos2.Name)
+	assert.Equal(t, infos1, infos2)
 }
 
 func TestQueryNodeInfos_Codec(t *testing.T) {
 	infos1 := QueryNodeInfos{
 		BaseComponentInfos: BaseComponentInfos{
-			Name: ConstructComponentName(typeutil.QueryNodeRole, 1),
+			HasError:    false,
+			ErrorReason: "",
+			Name:        ConstructComponentName(typeutil.QueryNodeRole, 1),
+			HardwareInfos: HardwareMetrics{
+				IP:           "193.168.1.2",
+				CPUCoreCount: 4,
+				CPUCoreUsage: 0.5,
+				Memory:       32 * 1024,
+				MemoryUsage:  4 * 1024,
+				Disk:         100 * 1024,
+				DiskUsage:    2 * 1024,
+			},
+			SystemInfo: DeployMetrics{
+				SystemVersion: "8b1ae98fa97ce1c7ba853e8b9ff1c7ce24458dc1",
+				DeployMode:    ClusterDeployMode,
+			},
+			CreatedTime: time.Now().String(),
+			UpdatedTime: time.Now().String(),
+			Type:        typeutil.QueryNodeRole,
+		},
+		SystemConfigurations: QueryNodeConfiguration{
+			SearchReceiveBufSize:         1024,
+			SearchPulsarBufSize:          1024,
+			SearchResultReceiveBufSize:   1024,
+			RetrieveReceiveBufSize:       1024,
+			RetrievePulsarBufSize:        1024,
+			RetrieveResultReceiveBufSize: 1024,
 		},
 	}
 	s, err := MarshalComponentInfos(infos1)
@@ -49,13 +94,35 @@ func TestQueryNodeInfos_Codec(t *testing.T) {
 	var infos2 QueryNodeInfos
 	err = UnmarshalComponentInfos(s, &infos2)
 	assert.Equal(t, nil, err)
-	assert.Equal(t, infos1.Name, infos2.Name)
+	assert.Equal(t, infos1, infos2)
 }
 
 func TestQueryCoordInfos_Codec(t *testing.T) {
 	infos1 := QueryCoordInfos{
 		BaseComponentInfos: BaseComponentInfos{
-			Name: ConstructComponentName(typeutil.QueryCoordRole, 1),
+			HasError:    false,
+			ErrorReason: "",
+			Name:        ConstructComponentName(typeutil.QueryCoordRole, 1),
+			HardwareInfos: HardwareMetrics{
+				IP:           "193.168.1.2",
+				CPUCoreCount: 4,
+				CPUCoreUsage: 0.5,
+				Memory:       32 * 1024,
+				MemoryUsage:  4 * 1024,
+				Disk:         100 * 1024,
+				DiskUsage:    2 * 1024,
+			},
+			SystemInfo: DeployMetrics{
+				SystemVersion: "8b1ae98fa97ce1c7ba853e8b9ff1c7ce24458dc1",
+				DeployMode:    ClusterDeployMode,
+			},
+			CreatedTime: time.Now().String(),
+			UpdatedTime: time.Now().String(),
+			Type:        typeutil.QueryCoordRole,
+		},
+		SystemConfigurations: QueryCoordConfiguration{
+			SearchChannelPrefix:       "search",
+			SearchResultChannelPrefix: "search-result",
 		},
 	}
 	s, err := MarshalComponentInfos(infos1)
@@ -65,13 +132,34 @@ func TestQueryCoordInfos_Codec(t *testing.T) {
 	var infos2 QueryCoordInfos
 	err = UnmarshalComponentInfos(s, &infos2)
 	assert.Equal(t, nil, err)
-	assert.Equal(t, infos1.Name, infos2.Name)
+	assert.Equal(t, infos1, infos2)
 }
 
 func TestIndexNodeInfos_Codec(t *testing.T) {
 	infos1 := IndexNodeInfos{
 		BaseComponentInfos: BaseComponentInfos{
-			Name: ConstructComponentName(typeutil.IndexNodeRole, 1),
+			HasError:    false,
+			ErrorReason: "",
+			Name:        ConstructComponentName(typeutil.IndexNodeRole, 1),
+			HardwareInfos: HardwareMetrics{
+				IP:           "193.168.1.2",
+				CPUCoreCount: 4,
+				CPUCoreUsage: 0.5,
+				Memory:       32 * 1024,
+				MemoryUsage:  4 * 1024,
+				Disk:         100 * 1024,
+				DiskUsage:    2 * 1024,
+			},
+			SystemInfo: DeployMetrics{
+				SystemVersion: "8b1ae98fa97ce1c7ba853e8b9ff1c7ce24458dc1",
+				DeployMode:    ClusterDeployMode,
+			},
+			CreatedTime: time.Now().String(),
+			UpdatedTime: time.Now().String(),
+			Type:        typeutil.IndexNodeRole,
+		},
+		SystemConfigurations: IndexNodeConfiguration{
+			MinioBucketName: "a-bucket",
 		},
 	}
 	s, err := MarshalComponentInfos(infos1)
@@ -81,13 +169,34 @@ func TestIndexNodeInfos_Codec(t *testing.T) {
 	var infos2 IndexNodeInfos
 	err = UnmarshalComponentInfos(s, &infos2)
 	assert.Equal(t, nil, err)
-	assert.Equal(t, infos1.Name, infos2.Name)
+	assert.Equal(t, infos1, infos2)
 }
 
 func TestIndexCoordInfos_Codec(t *testing.T) {
 	infos1 := IndexCoordInfos{
 		BaseComponentInfos: BaseComponentInfos{
-			Name: ConstructComponentName(typeutil.IndexCoordRole, 1),
+			HasError:    false,
+			ErrorReason: "",
+			Name:        ConstructComponentName(typeutil.IndexCoordRole, 1),
+			HardwareInfos: HardwareMetrics{
+				IP:           "193.168.1.2",
+				CPUCoreCount: 4,
+				CPUCoreUsage: 0.5,
+				Memory:       32 * 1024,
+				MemoryUsage:  4 * 1024,
+				Disk:         100 * 1024,
+				DiskUsage:    2 * 1024,
+			},
+			SystemInfo: DeployMetrics{
+				SystemVersion: "8b1ae98fa97ce1c7ba853e8b9ff1c7ce24458dc1",
+				DeployMode:    ClusterDeployMode,
+			},
+			CreatedTime: time.Now().String(),
+			UpdatedTime: time.Now().String(),
+			Type:        typeutil.IndexCoordRole,
+		},
+		SystemConfigurations: IndexCoordConfiguration{
+			MinioBucketName: "a-bucket",
 		},
 	}
 	s, err := MarshalComponentInfos(infos1)
@@ -97,13 +206,34 @@ func TestIndexCoordInfos_Codec(t *testing.T) {
 	var infos2 IndexCoordInfos
 	err = UnmarshalComponentInfos(s, &infos2)
 	assert.Equal(t, nil, err)
-	assert.Equal(t, infos1.Name, infos2.Name)
+	assert.Equal(t, infos1, infos2)
 }
 
 func TestDataNodeInfos_Codec(t *testing.T) {
 	infos1 := DataNodeInfos{
 		BaseComponentInfos: BaseComponentInfos{
-			Name: ConstructComponentName(typeutil.DataNodeRole, 1),
+			HasError:    false,
+			ErrorReason: "",
+			Name:        ConstructComponentName(typeutil.DataNodeRole, 1),
+			HardwareInfos: HardwareMetrics{
+				IP:           "193.168.1.2",
+				CPUCoreCount: 4,
+				CPUCoreUsage: 0.5,
+				Memory:       32 * 1024,
+				MemoryUsage:  4 * 1024,
+				Disk:         100 * 1024,
+				DiskUsage:    2 * 1024,
+			},
+			SystemInfo: DeployMetrics{
+				SystemVersion: "8b1ae98fa97ce1c7ba853e8b9ff1c7ce24458dc1",
+				DeployMode:    ClusterDeployMode,
+			},
+			CreatedTime: time.Now().String(),
+			UpdatedTime: time.Now().String(),
+			Type:        typeutil.DataNodeRole,
+		},
+		SystemConfigurations: DataNodeConfiguration{
+			FlushInsertBufferSize: 1024,
 		},
 	}
 	s, err := MarshalComponentInfos(infos1)
@@ -113,13 +243,34 @@ func TestDataNodeInfos_Codec(t *testing.T) {
 	var infos2 DataNodeInfos
 	err = UnmarshalComponentInfos(s, &infos2)
 	assert.Equal(t, nil, err)
-	assert.Equal(t, infos1.Name, infos2.Name)
+	assert.Equal(t, infos1, infos2)
 }
 
 func TestDataCoordInfos_Codec(t *testing.T) {
 	infos1 := DataCoordInfos{
 		BaseComponentInfos: BaseComponentInfos{
-			Name: ConstructComponentName(typeutil.DataCoordRole, 1),
+			HasError:    false,
+			ErrorReason: "",
+			Name:        ConstructComponentName(typeutil.DataCoordRole, 1),
+			HardwareInfos: HardwareMetrics{
+				IP:           "193.168.1.2",
+				CPUCoreCount: 4,
+				CPUCoreUsage: 0.5,
+				Memory:       32 * 1024,
+				MemoryUsage:  4 * 1024,
+				Disk:         100 * 1024,
+				DiskUsage:    2 * 1024,
+			},
+			SystemInfo: DeployMetrics{
+				SystemVersion: "8b1ae98fa97ce1c7ba853e8b9ff1c7ce24458dc1",
+				DeployMode:    ClusterDeployMode,
+			},
+			CreatedTime: time.Now().String(),
+			UpdatedTime: time.Now().String(),
+			Type:        typeutil.DataCoordRole,
+		},
+		SystemConfigurations: DataCoordConfiguration{
+			SegmentMaxSize: 1024 * 1024,
 		},
 	}
 	s, err := MarshalComponentInfos(infos1)
@@ -129,13 +280,34 @@ func TestDataCoordInfos_Codec(t *testing.T) {
 	var infos2 DataCoordInfos
 	err = UnmarshalComponentInfos(s, &infos2)
 	assert.Equal(t, nil, err)
-	assert.Equal(t, infos1.Name, infos2.Name)
+	assert.Equal(t, infos1, infos2)
 }
 
 func TestRootCoordInfos_Codec(t *testing.T) {
 	infos1 := RootCoordInfos{
 		BaseComponentInfos: BaseComponentInfos{
-			Name: ConstructComponentName(typeutil.RootCoordRole, 1),
+			HasError:    false,
+			ErrorReason: "",
+			Name:        ConstructComponentName(typeutil.RootCoordRole, 1),
+			HardwareInfos: HardwareMetrics{
+				IP:           "193.168.1.2",
+				CPUCoreCount: 4,
+				CPUCoreUsage: 0.5,
+				Memory:       32 * 1024,
+				MemoryUsage:  4 * 1024,
+				Disk:         100 * 1024,
+				DiskUsage:    2 * 1024,
+			},
+			SystemInfo: DeployMetrics{
+				SystemVersion: "8b1ae98fa97ce1c7ba853e8b9ff1c7ce24458dc1",
+				DeployMode:    ClusterDeployMode,
+			},
+			CreatedTime: time.Now().String(),
+			UpdatedTime: time.Now().String(),
+			Type:        typeutil.RootCoordRole,
+		},
+		SystemConfigurations: RootCoordConfiguration{
+			MinSegmentSizeToEnableIndex: 1024 * 10,
 		},
 	}
 	s, err := MarshalComponentInfos(infos1)
@@ -145,5 +317,5 @@ func TestRootCoordInfos_Codec(t *testing.T) {
 	var infos2 RootCoordInfos
 	err = UnmarshalComponentInfos(s, &infos2)
 	assert.Equal(t, nil, err)
-	assert.Equal(t, infos1.Name, infos2.Name)
+	assert.Equal(t, infos1, infos2)
 }

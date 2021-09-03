@@ -13,6 +13,7 @@ package querycoord
 
 import (
 	"context"
+	"os"
 
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
@@ -36,6 +37,25 @@ func getSystemInfoMetrics(
 		Self: metricsinfo.QueryCoordInfos{
 			BaseComponentInfos: metricsinfo.BaseComponentInfos{
 				Name: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, Params.QueryCoordID),
+				HardwareInfos: metricsinfo.HardwareMetrics{
+					IP:           qc.session.Address,
+					CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
+					CPUCoreUsage: metricsinfo.GetCPUUsage(),
+					Memory:       metricsinfo.GetMemoryCount(),
+					MemoryUsage:  metricsinfo.GetUsedMemoryCount(),
+					Disk:         metricsinfo.GetDiskCount(),
+					DiskUsage:    metricsinfo.GetDiskUsage(),
+				},
+				SystemInfo: metricsinfo.DeployMetrics{
+					SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
+					DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
+				},
+				// TODO(dragondriver): CreatedTime & UpdatedTime, easy but time-costing
+				Type: typeutil.QueryCoordRole,
+			},
+			SystemConfigurations: metricsinfo.QueryCoordConfiguration{
+				SearchChannelPrefix:       Params.SearchChannelPrefix,
+				SearchResultChannelPrefix: Params.SearchResultChannelPrefix,
 			},
 		},
 		ConnectedNodes: make([]metricsinfo.QueryNodeInfos, 0),

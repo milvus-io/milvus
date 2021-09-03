@@ -13,6 +13,7 @@ package proxy
 
 import (
 	"context"
+	"os"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 
@@ -47,6 +48,25 @@ func getSystemInfoMetrics(
 				HasError:    false,
 				ErrorReason: "",
 				Name:        proxyRoleName,
+				HardwareInfos: metricsinfo.HardwareMetrics{
+					IP:           node.session.Address,
+					CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
+					CPUCoreUsage: metricsinfo.GetCPUUsage(),
+					Memory:       metricsinfo.GetMemoryCount(),
+					MemoryUsage:  metricsinfo.GetUsedMemoryCount(),
+					Disk:         metricsinfo.GetDiskCount(),
+					DiskUsage:    metricsinfo.GetDiskUsage(),
+				},
+				SystemInfo: metricsinfo.DeployMetrics{
+					SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
+					DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
+				},
+				// TODO(dragondriver): CreatedTime & UpdatedTime, easy but time-costing
+				Type: typeutil.ProxyRole,
+			},
+			SystemConfigurations: metricsinfo.ProxyConfiguration{
+				DefaultPartitionName: Params.DefaultPartitionName,
+				DefaultIndexName:     Params.DefaultIndexName,
 			},
 		},
 	}
