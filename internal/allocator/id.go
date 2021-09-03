@@ -18,11 +18,9 @@ import (
 
 	"go.uber.org/zap"
 
-	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -32,12 +30,16 @@ const (
 
 type UniqueID = typeutil.UniqueID
 
+type idAllocatorInterface interface {
+	AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error)
+}
+
 type IDAllocator struct {
 	Allocator
 
-	etcdEndpoints   []string
-	metaRoot        string
-	rootCoordClient types.RootCoord
+	etcdEndpoints []string
+	metaRoot      string
+	idAllocator   idAllocatorInterface
 
 	countPerRPC uint32
 
@@ -47,7 +49,7 @@ type IDAllocator struct {
 	PeerID UniqueID
 }
 
-func NewIDAllocator(ctx context.Context, metaRoot string, etcdEndpoints []string) (*IDAllocator, error) {
+func NewIDAllocator(ctx context.Context, idAlloctor idAllocatorInterface, peerID UniqueID) (*IDAllocator, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	a := &IDAllocator{
 		Allocator: Allocator{
@@ -55,9 +57,9 @@ func NewIDAllocator(ctx context.Context, metaRoot string, etcdEndpoints []string
 			CancelFunc: cancel,
 			Role:       "IDAllocator",
 		},
-		countPerRPC:   IDCountPerRPC,
-		metaRoot:      metaRoot,
-		etcdEndpoints: etcdEndpoints,
+		countPerRPC: IDCountPerRPC,
+		idAllocator: idAlloctor,
+		PeerID:      peerID,
 	}
 	a.TChan = &EmptyTicker{}
 	a.Allocator.SyncFunc = a.syncID
@@ -69,20 +71,6 @@ func NewIDAllocator(ctx context.Context, metaRoot string, etcdEndpoints []string
 }
 
 func (ia *IDAllocator) Start() error {
-	var err error
-
-	ia.rootCoordClient, err = rcc.NewClient(ia.Ctx, ia.metaRoot, ia.etcdEndpoints)
-	if err != nil {
-		panic(err)
-	}
-
-	if err = ia.rootCoordClient.Init(); err != nil {
-		panic(err)
-	}
-
-	if err = ia.rootCoordClient.Start(); err != nil {
-		panic(err)
-	}
 	return ia.Allocator.Start()
 }
 
@@ -112,7 +100,7 @@ func (ia *IDAllocator) syncID() (bool, error) {
 		},
 		Count: need,
 	}
-	resp, err := ia.rootCoordClient.AllocID(ctx, req)
+	resp, err := ia.idAllocator.AllocID(ctx, req)
 
 	cancel()
 	if err != nil {
