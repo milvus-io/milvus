@@ -905,17 +905,21 @@ func (c *Core) Init() error {
 	c.initOnce.Do(func() {
 		connectEtcdFn := func() error {
 			if c.etcdCli, initError = clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints, DialTimeout: 5 * time.Second}); initError != nil {
+				log.Error("RootCoord, Failed to new Etcd client", zap.Any("reason", initError))
 				return initError
 			}
 			var ms *metaSnapshot
 			ms, initError = newMetaSnapshot(c.etcdCli, Params.MetaRootPath, TimestampPrefix, 1024)
 			if initError != nil {
+				log.Error("RootCoord, Failed to new MetaSnapshot", zap.Any("reason", initError))
 				return initError
 			}
 			if c.MetaTable, initError = NewMetaTable(ms); initError != nil {
+				log.Error("RootCoord, Failed to new MetaTable", zap.Any("reason", initError))
 				return initError
 			}
 			if c.kvBase, initError = etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.KvRootPath); initError != nil {
+				log.Error("RootCoord, Failed to new EtcdKV", zap.Any("reason", initError))
 				return initError
 			}
 
