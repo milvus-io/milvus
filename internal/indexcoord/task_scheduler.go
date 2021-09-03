@@ -32,7 +32,7 @@ type TaskQueue interface {
 	utEmpty() bool
 	utFull() bool
 	addUnissuedTask(t task) error
-	FrontUnissuedTask() task
+	//FrontUnissuedTask() task
 	PopUnissuedTask() task
 	AddActiveTask(t task)
 	PopActiveTask(tID UniqueID) task
@@ -78,17 +78,17 @@ func (queue *BaseTaskQueue) addUnissuedTask(t task) error {
 	return nil
 }
 
-func (queue *BaseTaskQueue) FrontUnissuedTask() task {
-	queue.utLock.Lock()
-	defer queue.utLock.Unlock()
-
-	if queue.unissuedTasks.Len() <= 0 {
-		log.Warn("sorry, but the unissued task list is empty!")
-		return nil
-	}
-
-	return queue.unissuedTasks.Front().Value.(task)
-}
+//func (queue *BaseTaskQueue) FrontUnissuedTask() task {
+//	queue.utLock.Lock()
+//	defer queue.utLock.Unlock()
+//
+//	if queue.unissuedTasks.Len() <= 0 {
+//		log.Warn("sorry, but the unissued task list is empty!")
+//		return nil
+//	}
+//
+//	return queue.unissuedTasks.Front().Value.(task)
+//}
 
 func (queue *BaseTaskQueue) PopUnissuedTask() task {
 	queue.utLock.Lock()

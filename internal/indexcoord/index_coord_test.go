@@ -17,9 +17,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+
+	grpcindexnode "github.com/milvus-io/milvus/internal/distributed/indexnode"
+
+	"github.com/milvus-io/milvus/internal/indexnode"
 
 	"go.uber.org/zap"
 
@@ -27,111 +29,12 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
-
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/types"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
-
-type indexNodeMock struct {
-	types.IndexNode
-}
-
-func (in *indexNodeMock) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
-	indexMeta := indexpb.IndexMeta{}
-	etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
-	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		}, err
-	}
-	_, values, versions, err := etcdKV.LoadWithPrefix2(req.MetaPath)
-	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		}, err
-	}
-	err = proto.UnmarshalText(values[0], &indexMeta)
-	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		}, err
-	}
-	indexMeta.IndexFilePaths = []string{"IndexFilePath-1", "IndexFilePath-2"}
-	indexMeta.State = commonpb.IndexState_Finished
-	_ = etcdKV.CompareVersionAndSwap(req.MetaPath, versions[0],
-		proto.MarshalTextString(&indexMeta))
-
-	time.Sleep(10 * time.Second)
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
-}
-
-func getSystemInfoMetricsByIndexNodeMock(
-	ctx context.Context,
-	req *milvuspb.GetMetricsRequest,
-	in *indexNodeMock,
-) (*milvuspb.GetMetricsResponse, error) {
-
-	id := UniqueID(16384)
-
-	nodeInfos := metricsinfo.IndexNodeInfos{
-		BaseComponentInfos: metricsinfo.BaseComponentInfos{
-			Name: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, id),
-		},
-	}
-	resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
-	if err != nil {
-		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-			Response:      "",
-			ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, id),
-		}, nil
-	}
-
-	return &milvuspb.GetMetricsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
-		Response:      resp,
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, id),
-	}, nil
-}
-
-func (in *indexNodeMock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	metricType, err := metricsinfo.ParseMetricType(req.Request)
-	if err != nil {
-		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-			Response: "",
-		}, nil
-	}
-
-	if metricType == metricsinfo.SystemInfoMetrics {
-		return getSystemInfoMetricsByIndexNodeMock(ctx, req, in)
-	}
-
-	return &milvuspb.GetMetricsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    metricsinfo.MsgUnimplementedMetric,
-		},
-		Response: "",
-	}, nil
-}
 
 func TestIndexCoord(t *testing.T) {
 	ctx := context.Background()
@@ -140,12 +43,23 @@ func TestIndexCoord(t *testing.T) {
 	Params.Init()
 	err = ic.Register()
 	assert.Nil(t, err)
-	// TODO: add indexNodeMock to etcd
+
 	err = ic.Init()
 	assert.Nil(t, err)
-	indexNodeID := UniqueID(100)
-	ic.nodeManager.setClient(indexNodeID, &indexNodeMock{})
 	err = ic.Start()
+	assert.Nil(t, err)
+
+	in, err := grpcindexnode.NewServer(ctx)
+	assert.Nil(t, err)
+	assert.NotNil(t, in)
+	inm := &indexnode.Mock{
+		Build:   true,
+		Failure: false,
+	}
+	err = in.SetClient(inm)
+	assert.Nil(t, err)
+
+	err = in.Run()
 	assert.Nil(t, err)
 
 	state, err := ic.GetComponentStates(ctx)
@@ -183,7 +97,7 @@ func TestIndexCoord(t *testing.T) {
 			if resp.States[0].State == commonpb.IndexState_Finished {
 				break
 			}
-			time.Sleep(3 * time.Second)
+			time.Sleep(1 * time.Second)
 		}
 	})
 
@@ -221,8 +135,38 @@ func TestIndexCoord(t *testing.T) {
 			zap.String("resp", resp.Response))
 	})
 
+	t.Run("GetTimeTickChannel", func(t *testing.T) {
+		resp, err := ic.GetTimeTickChannel(ctx)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("GetStatisticsChannel", func(t *testing.T) {
+		resp, err := ic.GetStatisticsChannel(ctx)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("GetMetrics when indexcoord is not healthy", func(t *testing.T) {
+		ic.UpdateStateCode(internalpb.StateCode_Abnormal)
+		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+		assert.Nil(t, err)
+		resp, err := ic.GetMetrics(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		ic.UpdateStateCode(internalpb.StateCode_Healthy)
+	})
+
+	t.Run("GetMetrics when request is illegal", func(t *testing.T) {
+		req := &milvuspb.GetMetricsRequest{}
+		resp, err := ic.GetMetrics(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+	})
+
+	err = in.Stop()
+	assert.Nil(t, err)
 	time.Sleep(11 * time.Second)
-	ic.nodeManager.RemoveNode(indexNodeID)
 	err = ic.Stop()
 	assert.Nil(t, err)
 
