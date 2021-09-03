@@ -2156,7 +2156,7 @@ func (node *Proxy) RegisterLink(ctx context.Context, req *milvuspb.RegisterLinkR
 		Address: nil,
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    os.Getenv("DEPLOY_MODE"),
+			Reason:    os.Getenv(metricsinfo.DeployModeEnvKey),
 		},
 	}, nil
 }

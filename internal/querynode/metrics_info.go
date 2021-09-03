@@ -13,6 +13,7 @@ package querynode
 
 import (
 	"context"
+	"os"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
@@ -21,10 +22,32 @@ import (
 )
 
 func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, node *QueryNode) (*milvuspb.GetMetricsResponse, error) {
-	// TODO(dragondriver): add more metrics
 	nodeInfos := metricsinfo.QueryNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			Name: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, Params.QueryNodeID),
+			HardwareInfos: metricsinfo.HardwareMetrics{
+				IP:           node.session.Address,
+				CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
+				CPUCoreUsage: metricsinfo.GetCPUUsage(),
+				Memory:       metricsinfo.GetMemoryCount(),
+				MemoryUsage:  metricsinfo.GetUsedMemoryCount(),
+				Disk:         metricsinfo.GetDiskCount(),
+				DiskUsage:    metricsinfo.GetDiskUsage(),
+			},
+			SystemInfo: metricsinfo.DeployMetrics{
+				SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
+				DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
+			},
+			// TODO(dragondriver): CreatedTime & UpdatedTime, easy but time-costing
+			Type: typeutil.QueryNodeRole,
+		},
+		SystemConfigurations: metricsinfo.QueryNodeConfiguration{
+			SearchReceiveBufSize:         Params.SearchReceiveBufSize,
+			SearchPulsarBufSize:          Params.SearchPulsarBufSize,
+			SearchResultReceiveBufSize:   Params.SearchResultReceiveBufSize,
+			RetrieveReceiveBufSize:       Params.RetrieveReceiveBufSize,
+			RetrievePulsarBufSize:        Params.retrievePulsarBufSize,
+			RetrieveResultReceiveBufSize: Params.RetrieveResultReceiveBufSize,
 		},
 	}
 	resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)

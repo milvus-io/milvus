@@ -13,6 +13,7 @@ package rootcoord
 
 import (
 	"context"
+	"os"
 
 	"go.uber.org/zap"
 
@@ -25,11 +26,28 @@ import (
 )
 
 func (c *Core) getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	// TODO(dragondriver): add more metrics
 	rootCoordTopology := metricsinfo.RootCoordTopology{
 		Self: metricsinfo.RootCoordInfos{
 			BaseComponentInfos: metricsinfo.BaseComponentInfos{
 				Name: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, c.session.ServerID),
+				HardwareInfos: metricsinfo.HardwareMetrics{
+					IP:           c.session.Address,
+					CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
+					CPUCoreUsage: metricsinfo.GetCPUUsage(),
+					Memory:       metricsinfo.GetMemoryCount(),
+					MemoryUsage:  metricsinfo.GetUsedMemoryCount(),
+					Disk:         metricsinfo.GetDiskCount(),
+					DiskUsage:    metricsinfo.GetDiskUsage(),
+				},
+				SystemInfo: metricsinfo.DeployMetrics{
+					SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
+					DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
+				},
+				// TODO(dragondriver): CreatedTime & UpdatedTime, easy but time-costing
+				Type: typeutil.RootCoordRole,
+			},
+			SystemConfigurations: metricsinfo.RootCoordConfiguration{
+				MinSegmentSizeToEnableIndex: Params.MinSegmentSizeToEnableIndex,
 			},
 		},
 		Connections: metricsinfo.ConnTopology{

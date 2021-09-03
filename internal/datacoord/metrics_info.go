@@ -13,6 +13,7 @@ package datacoord
 
 import (
 	"context"
+	"os"
 
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
@@ -35,6 +36,24 @@ func (s *Server) getSystemInfoMetrics(
 		Self: metricsinfo.DataCoordInfos{
 			BaseComponentInfos: metricsinfo.BaseComponentInfos{
 				Name: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, Params.NodeID),
+				HardwareInfos: metricsinfo.HardwareMetrics{
+					IP:           s.session.Address,
+					CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
+					CPUCoreUsage: metricsinfo.GetCPUUsage(),
+					Memory:       metricsinfo.GetMemoryCount(),
+					MemoryUsage:  metricsinfo.GetUsedMemoryCount(),
+					Disk:         metricsinfo.GetDiskCount(),
+					DiskUsage:    metricsinfo.GetDiskUsage(),
+				},
+				SystemInfo: metricsinfo.DeployMetrics{
+					SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
+					DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
+				},
+				// TODO(dragondriver): CreatedTime & UpdatedTime, easy but time-costing
+				Type: typeutil.DataCoordRole,
+			},
+			SystemConfigurations: metricsinfo.DataCoordConfiguration{
+				SegmentMaxSize: Params.SegmentMaxSize,
 			},
 		},
 		ConnectedNodes: make([]metricsinfo.DataNodeInfos, 0),

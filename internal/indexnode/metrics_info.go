@@ -13,6 +13,7 @@ package indexnode
 
 import (
 	"context"
+	"os"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -31,6 +32,24 @@ func getSystemInfoMetrics(
 	nodeInfos := metricsinfo.IndexNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			Name: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, Params.NodeID),
+			HardwareInfos: metricsinfo.HardwareMetrics{
+				IP:           node.session.Address,
+				CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
+				CPUCoreUsage: metricsinfo.GetCPUUsage(),
+				Memory:       metricsinfo.GetMemoryCount(),
+				MemoryUsage:  metricsinfo.GetUsedMemoryCount(),
+				Disk:         metricsinfo.GetDiskCount(),
+				DiskUsage:    metricsinfo.GetDiskUsage(),
+			},
+			SystemInfo: metricsinfo.DeployMetrics{
+				SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
+				DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
+			},
+			// TODO(dragondriver): CreatedTime & UpdatedTime, easy but time-costing
+			Type: typeutil.IndexNodeRole,
+		},
+		SystemConfigurations: metricsinfo.IndexNodeConfiguration{
+			MinioBucketName: Params.MinioBucketName,
 		},
 	}
 	resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
