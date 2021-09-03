@@ -92,16 +92,17 @@ func (ticker *channelsTimeTickerImpl) tick() error {
 		return err
 	}
 
+	stats, err := ticker.getStatisticsFunc()
+	if err != nil {
+		log.Debug("Proxy channelsTimeTickerImpl failed to getStatistics", zap.Error(err))
+		return nil
+	}
+
 	ticker.statisticsMtx.Lock()
 	defer ticker.statisticsMtx.Unlock()
 
 	ticker.currentsMtx.Lock()
 	defer ticker.currentsMtx.Unlock()
-
-	stats, err := ticker.getStatisticsFunc()
-	if err != nil {
-		log.Debug("Proxy channelsTimeTickerImpl failed to getStatistics", zap.Error(err))
-	}
 
 	for pchan := range ticker.currents {
 		current := ticker.currents[pchan]
