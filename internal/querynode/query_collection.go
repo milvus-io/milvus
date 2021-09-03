@@ -1045,12 +1045,8 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 		return err
 	}
 
-	req := &segcorepb.RetrieveRequest{
-		Ids:            retrieveMsg.Ids,
-		OutputFieldsId: retrieveMsg.OutputFieldsId,
-	}
-
-	plan, err := createRetrievePlan(collection, req, timestamp)
+	expr := retrieveMsg.SerializedExprPlan
+	plan, err := createRetrievePlanByExpr(collection, expr, timestamp)
 	if err != nil {
 		return err
 	}

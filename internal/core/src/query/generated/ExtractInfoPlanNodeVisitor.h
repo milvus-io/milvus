@@ -24,6 +24,9 @@ class ExtractInfoPlanNodeVisitor : public PlanNodeVisitor {
     void
     visit(BinaryVectorANNS& node) override;
 
+    void
+    visit(RetrievePlanNode& node);
+
  public:
     explicit ExtractInfoPlanNodeVisitor(ExtractedPlanInfo& plan_info) : plan_info_(plan_info) {
     }

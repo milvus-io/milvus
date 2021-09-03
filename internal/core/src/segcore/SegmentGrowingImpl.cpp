@@ -437,6 +437,27 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     do_insert(reserved_offset, size, row_ids.data(), timestamps.data(), columns_data);
 }
 
+std::vector<SegOffset>
+SegmentGrowingImpl::search_ids(const boost::dynamic_bitset<>& bitset, Timestamp timestamp) const {
+    std::vector<SegOffset> res_offsets;
+
+    for (int i = 0; i < bitset.size(); i++) {
+        if (bitset[i]) {
+            SegOffset the_offset(-1);
+            auto offset = SegOffset(i);
+            if (record_.timestamps_[offset.get()] < timestamp) {
+                the_offset = std::max(the_offset, offset);
+            }
+
+            if (the_offset == SegOffset(-1)) {
+                continue;
+            }
+            res_offsets.push_back(the_offset);
+        }
+    }
+    return res_offsets;
+}
+
 std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
 SegmentGrowingImpl::search_ids(const IdArray& id_array, Timestamp timestamp) const {
     Assert(id_array.has_int_id());

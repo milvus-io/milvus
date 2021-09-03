@@ -27,14 +27,21 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     void
     visit(BinaryVectorANNS& node) override;
 
+    void
+    visit(RetrievePlanNode& node);
+
  public:
     using RetType = SearchResult;
+    using RetrieveRetType = RetrieveResult;
     ExecPlanNodeVisitor(const segcore::SegmentInterface& segment,
                         Timestamp timestamp,
                         const PlaceholderGroup& placeholder_group)
         : segment_(segment), timestamp_(timestamp), placeholder_group_(placeholder_group) {
     }
-    // using RetType = nlohmann::json;
+
+    ExecPlanNodeVisitor(const segcore::SegmentInterface& segment, Timestamp timestamp)
+        : segment_(segment), timestamp_(timestamp) {
+    }
 
     RetType
     get_moved_result(PlanNode& node) {
@@ -46,6 +53,17 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
         return ret;
     }
 
+    RetrieveRetType
+    get_retrieve_result(PlanNode& node) {
+        assert(!retrieve_ret_.has_value());
+        std::cout.flush();
+        node.accept(*this);
+        assert(retrieve_ret_.has_value());
+        auto retrieve_ret = std::move(retrieve_ret_).value();
+        retrieve_ret_ = std::nullopt;
+        return retrieve_ret;
+    }
+
  private:
     template <typename VectorType>
     void
@@ -55,8 +73,9 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     // std::optional<RetType> ret_;
     const segcore::SegmentInterface& segment_;
     Timestamp timestamp_;
-    const PlaceholderGroup& placeholder_group_;
+    PlaceholderGroup placeholder_group_;
 
     std::optional<RetType> ret_;
+    std::optional<RetrieveResult> retrieve_ret_;
 };
 }  // namespace milvus::query

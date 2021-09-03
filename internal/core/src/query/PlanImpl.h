@@ -81,7 +81,13 @@ struct Placeholder {
 };
 
 struct RetrievePlan {
-    std::unique_ptr<proto::schema::IDs> ids_;
+ public:
+    explicit RetrievePlan(const Schema& schema) : schema_(schema) {
+    }
+
+ public:
+    const Schema& schema_;
+    std::unique_ptr<RetrievePlanNode> plan_node_;
     std::vector<FieldOffset> field_offsets_;
 };
 

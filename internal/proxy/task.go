@@ -2012,6 +2012,7 @@ type QueryTask struct {
 	query     *milvuspb.QueryRequest
 	chMgr     channelsMgr
 	qc        types.QueryCoord
+	ids       *schemapb.IDs
 }
 
 func (qt *QueryTask) TraceCtx() context.Context {
@@ -2105,6 +2106,11 @@ func parseIdsFromExpr(exprStr string, schema *typeutil.SchemaHelper) ([]int64, e
 	}
 }
 
+func IDs2Expr(fieldName string, ids []int64) string {
+	idsStr := strings.Trim(strings.Join(strings.Fields(fmt.Sprint(ids)), ", "), "[]")
+	return fieldName + " in [ " + idsStr + " ]"
+}
+
 func (qt *QueryTask) PreExecute(ctx context.Context) error {
 	qt.Base.MsgType = commonpb.MsgType_Retrieve
 	qt.Base.SourceID = Params.ProxyID
@@ -2172,31 +2178,52 @@ func (qt *QueryTask) PreExecute(ctx context.Context) error {
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
-	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
-	if err != nil {
-		return err
-	}
+	// schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	// if err != nil {
+	// 	return err
+	// }
 
 	// TODO(dragondriver): necessary to check if partition was loaded into query node?
 
-	if qt.Ids == nil {
-		if qt.query.Expr == "" {
-			errMsg := "Query expression is empty"
-			return fmt.Errorf(errMsg)
-		}
+	// if qt.Ids == nil {
+	// 	if qt.query.Expr == "" {
+	// 		errMsg := "Query expression is empty"
+	// 		return fmt.Errorf(errMsg)
+	// 	}
 
-		ids, err := parseIdsFromExpr(qt.query.Expr, schemaHelper)
-		if err != nil {
-			return err
+	// 	ids, err := parseIdsFromExpr(qt.query.Expr, schemaHelper)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	qt.Base.MsgType = commonpb.MsgType_Retrieve
+	// 	qt.Ids = &schemapb.IDs{
+	// 		IdField: &schemapb.IDs_IntId{
+	// 			IntId: &schemapb.LongArray{
+	// 				Data: ids,
+	// 			},
+	// 		},
+	// 	}
+	// }
+
+	if qt.ids != nil {
+		pkField := ""
+		for _, field := range schema.Fields {
+			if field.IsPrimaryKey {
+				pkField = field.Name
+			}
 		}
-		qt.Base.MsgType = commonpb.MsgType_Retrieve
-		qt.Ids = &schemapb.IDs{
-			IdField: &schemapb.IDs_IntId{
-				IntId: &schemapb.LongArray{
-					Data: ids,
-				},
-			},
-		}
+		qt.query.Expr = IDs2Expr(pkField, qt.ids.GetIntId().Data)
+	}
+
+	if qt.query.Expr == "" {
+		errMsg := "Query expression is empty"
+		return fmt.Errorf(errMsg)
+	}
+
+	plan, err := CreateExprQueryPlan(schema, qt.query.Expr)
+	if err != nil {
+		//return errors.New("invalid expression: " + st.query.Dsl)
+		return err
 	}
 	qt.query.OutputFields, err = translateOutputFields(qt.query.OutputFields, schema, true)
 	if err != nil {
@@ -2220,9 +2247,11 @@ func (qt *QueryTask) PreExecute(ctx context.Context) error {
 					}
 					findField = true
 					qt.OutputFieldsId = append(qt.OutputFieldsId, field.FieldID)
+					plan.OutputFieldIds = append(plan.OutputFieldIds, field.FieldID)
 				} else {
 					if field.IsPrimaryKey && !addPrimaryKey {
 						qt.OutputFieldsId = append(qt.OutputFieldsId, field.FieldID)
+						plan.OutputFieldIds = append(plan.OutputFieldIds, field.FieldID)
 						addPrimaryKey = true
 					}
 				}
@@ -2234,6 +2263,11 @@ func (qt *QueryTask) PreExecute(ctx context.Context) error {
 		}
 	}
 	log.Debug("translate output fields to field ids", zap.Any("OutputFieldsID", qt.OutputFieldsId))
+
+	qt.RetrieveRequest.SerializedExprPlan, err = proto.Marshal(plan)
+	if err != nil {
+		return err
+	}
 
 	travelTimestamp := qt.query.TravelTimestamp
 	if travelTimestamp == 0 {

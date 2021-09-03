@@ -161,7 +161,7 @@ message RetrieveRequest {
   int64 dbID = 3;
   int64 collectionID = 4;
   repeated int64 partitionIDs = 5;
-  schema.IDs ids = 6;
+  bytes serialized_expr_plan = 6;
   repeated int64 output_fields_id = 7;
   uint64 travel_timestamp = 8;
   uint64 guarantee_timestamp = 9;

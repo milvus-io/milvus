@@ -25,4 +25,9 @@ BinaryVectorANNS::accept(PlanNodeVisitor& visitor) {
     visitor.visit(*this);
 }
 
+void
+RetrievePlanNode::accept(PlanNodeVisitor& visitor) {
+    visitor.visit(*this);
+}
+
 }  // namespace milvus::query

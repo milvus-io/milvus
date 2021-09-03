@@ -40,9 +40,7 @@ class SegmentInterface {
     Search(const query::Plan* Plan, const query::PlaceholderGroup& placeholder_group, Timestamp timestamp) const = 0;
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
-    GetEntityById(const std::vector<FieldOffset>& field_offsets,
-                  const IdArray& id_array,
-                  Timestamp timestamp) const = 0;
+    Retrieve(const query::RetrievePlan* Plan, Timestamp timestamp) const = 0;
 
     virtual int64_t
     GetMemoryUsageInBytes() const = 0;
@@ -88,9 +86,7 @@ class SegmentInternalInterface : public SegmentInterface {
     FillTargetEntry(const query::Plan* plan, SearchResult& results) const override;
 
     std::unique_ptr<proto::segcore::RetrieveResults>
-    GetEntityById(const std::vector<FieldOffset>& field_offsets,
-                  const IdArray& id_array,
-                  Timestamp timestamp) const override;
+    Retrieve(const query::RetrievePlan* plan, Timestamp timestamp) const override;
 
     virtual std::string
     debug() const = 0;
@@ -122,6 +118,9 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual int64_t
     get_active_count(Timestamp ts) const = 0;
+
+    virtual std::vector<SegOffset>
+    search_ids(const boost::dynamic_bitset<>& view, Timestamp timestamp) const = 0;
 
  protected:
     // internal API: return chunk_data in span

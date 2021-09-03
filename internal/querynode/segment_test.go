@@ -23,8 +23,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 )
 
 //-------------------------------------------------------------------------------------- constructor and destructor
@@ -133,7 +133,7 @@ func TestSegment_retrieve(t *testing.T) {
 			rawData = append(rawData, buf...)
 		}
 		bs := make([]byte, 4)
-		binary.LittleEndian.PutUint32(bs, 1)
+		binary.LittleEndian.PutUint32(bs, uint32(i+1))
 		rawData = append(rawData, bs...)
 		blob := &commonpb.Blob{
 			Value: rawData,
@@ -146,24 +146,58 @@ func TestSegment_retrieve(t *testing.T) {
 	err = segment.segmentInsert(offset, &ids, &timestamps, &records)
 	assert.NoError(t, err)
 
-	reqIds := &segcorepb.RetrieveRequest{
-		Ids: &schemapb.IDs{
-			IdField: &schemapb.IDs_IntId{
-				IntId: &schemapb.LongArray{
-					Data: []int64{2, 3, 1},
+	planNode := &planpb.PlanNode{
+		Node: &planpb.PlanNode_Predicates{
+			Predicates: &planpb.Expr{
+				Expr: &planpb.Expr_TermExpr{
+					TermExpr: &planpb.TermExpr{
+						ColumnInfo: &planpb.ColumnInfo{
+							FieldId:  101,
+							DataType: schemapb.DataType_Int32,
+						},
+						Values: []*planpb.GenericValue{
+							{
+								Val: &planpb.GenericValue_Int64Val{
+									Int64Val: 1,
+								},
+							},
+							{
+								Val: &planpb.GenericValue_Int64Val{
+									Int64Val: 2,
+								},
+							},
+							{
+								Val: &planpb.GenericValue_Int64Val{
+									Int64Val: 3,
+								},
+							},
+						},
+					},
 				},
 			},
 		},
-		OutputFieldsId: []int64{100},
+		OutputFieldIds: []int64{101},
 	}
-	plan, err := createRetrievePlan(collection, reqIds, 100)
+	// reqIds := &segcorepb.RetrieveRequest{
+	// 	Ids: &schemapb.IDs{
+	// 		IdField: &schemapb.IDs_IntId{
+	// 			IntId: &schemapb.LongArray{
+	// 				Data: []int64{2, 3, 1},
+	// 			},
+	// 		},
+	// 	},
+	// 	OutputFieldsId: []int64{100},
+	// }
+	planExpr, err := proto.Marshal(planNode)
+	assert.NoError(t, err)
+	plan, err := createRetrievePlanByExpr(collection, planExpr, 100)
 	defer plan.delete()
 	assert.NoError(t, err)
 
 	res, err := segment.getEntityByIds(plan)
 	assert.NoError(t, err)
 
-	assert.Equal(t, res.Ids.GetIntId().Data, []int64{2, 3, 1})
+	assert.Equal(t, res.GetFieldsData()[0].GetScalars().Data.(*schemapb.ScalarField_IntData).IntData.Data, []int32{1, 2, 3})
 }
 
 func TestSegment_getDeletedCount(t *testing.T) {

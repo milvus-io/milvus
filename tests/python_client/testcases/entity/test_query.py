@@ -273,8 +273,9 @@ class TestQueryBase:
         with pytest.raises(Exception):
             connect.query(collection, term_expr)
 
+    # TODO(yukun): "not in" is supported now
     @pytest.mark.parametrize("expr", [f'{default_int_field_name} inn [1, 2]',
-                                      f'{default_int_field_name} not in [1, 2]',
+                                    #   f'{default_int_field_name} not in [1, 2]',
                                       f'{default_int_field_name} in not [1, 2]'])
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_expr_wrong_term_keyword(self, connect, collection, expr):
@@ -368,7 +369,8 @@ class TestQueryBase:
                 assert res[index][default_float_field_name] == entities[1]["values"][index]
                 ut.assert_equal_vector(res[index][ut.default_float_vec_field_name], entities[2]["values"][index])
 
-    @pytest.mark.tags(CaseLabel.L0)
+    # @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.xfail(reason="Need to discuss")
     def test_query_expr_repeated_term_array(self, connect, collection):
         """
         target: test query with repeated term array on primary field with unique value

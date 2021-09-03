@@ -53,6 +53,9 @@ DeletePlaceholderGroup(CPlaceholderGroup placeholder_group);
 CStatus
 CreateRetrievePlan(CCollection c_col, CProto retrieve_request, CRetrievePlan* output);
 
+CStatus
+CreateRetrievePlanByExpr(CCollection c_col, const char* serialized_expr_plan, int64_t size, CRetrievePlan* res_plan);
+
 void
 DeleteRetrievePlan(CRetrievePlan plan);
 

@@ -202,9 +202,10 @@ class TestQueryBase(TestcaseBase):
         error_1 = {ct.err_code: 1, ct.err_msg: f'unexpected token Identifier("inn")'}
         collection_w.query(expr_1, check_task=CheckTasks.err_res, check_items=error_1)
 
-        expr_2 = f'{ct.default_int64_field_name} not in [1, 2]'
-        error_2 = {ct.err_code: 1, ct.err_msg: 'not top level term'}
-        collection_w.query(expr_2, check_task=CheckTasks.err_res, check_items=error_2)
+        # TODO(yukun): "not in" is supported now
+        # expr_2 = f'{ct.default_int64_field_name} not in [1, 2]'
+        # error_2 = {ct.err_code: 1, ct.err_msg: 'not top level term'}
+        # collection_w.query(expr_2, check_task=CheckTasks.err_res, check_items=error_2)
 
         expr_3 = f'{ct.default_int64_field_name} in not [1, 2]'
         error_3 = {ct.err_code: 1, ct.err_msg: 'right operand of the InExpr must be array'}

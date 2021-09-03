@@ -28,6 +28,9 @@ class ShowPlanNodeVisitor : public PlanNodeVisitor {
     void
     visit(BinaryVectorANNS& node) override;
 
+    void
+    visit(RetrievePlanNode& node) override;
+
  public:
     using RetType = nlohmann::json;
 

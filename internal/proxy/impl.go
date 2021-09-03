@@ -1660,13 +1660,13 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 					MsgType:  commonpb.MsgType_Retrieve,
 					SourceID: Params.ProxyID,
 				},
-				Ids:             ids.IdArray,
 				ResultChannelID: strconv.FormatInt(Params.ProxyID, 10),
 			},
 			resultBuf: make(chan []*internalpb.RetrieveResults),
 			query:     queryRequest,
 			chMgr:     node.chMgr,
 			qc:        node.queryCoord,
+			ids:       ids.IdArray,
 		}
 
 		err := node.sched.DqQueue.Enqueue(qt)
