@@ -130,6 +130,9 @@ type Core struct {
 	// proxy clients
 	proxyClientManager *proxyClientManager
 
+	// metrics cache manager
+	metricsCacheManager *metricsinfo.MetricsCacheManager
+
 	// channel timetick
 	chanTimeTick *timetickSync
 
@@ -993,6 +996,8 @@ func (c *Core) Init() error {
 		}
 		c.proxyManager.AddSession(c.chanTimeTick.AddProxy, c.proxyClientManager.AddProxyClient)
 		c.proxyManager.DelSession(c.chanTimeTick.DelProxy, c.proxyClientManager.DelProxyClient)
+
+		c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
 		initError = c.setMsgStreams()
 		if initError != nil {
@@ -1986,6 +1991,13 @@ func (c *Core) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) 
 		zap.String("metric_type", metricType))
 
 	if metricType == metricsinfo.SystemInfoMetrics {
+		ret, err := c.metricsCacheManager.GetSystemInfoMetrics()
+		if err == nil && ret != nil {
+			return ret, nil
+		}
+		log.Debug("failed to get system info metrics from cache, recompute instead",
+			zap.Error(err))
+
 		systemInfoMetrics, err := c.getSystemInfoMetrics(ctx, req)
 
 		log.Debug("RootCoord.GetMetrics",
@@ -1994,6 +2006,8 @@ func (c *Core) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) 
 			zap.String("metric_type", metricType),
 			zap.Any("systemInfoMetrics", systemInfoMetrics), // TODO(dragondriver): necessary? may be very large
 			zap.Error(err))
+
+		c.metricsCacheManager.UpdateSystemInfoMetrics(systemInfoMetrics)
 
 		return systemInfoMetrics, err
 	}

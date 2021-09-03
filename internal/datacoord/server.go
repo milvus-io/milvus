@@ -20,6 +20,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/logutil"
@@ -93,6 +95,8 @@ type Server struct {
 	rootCoordClient types.RootCoord
 	ddChannelName   string
 
+	metricsCacheManager *metricsinfo.MetricsCacheManager
+
 	flushCh   chan UniqueID
 	msFactory msgstream.Factory
 
@@ -138,6 +142,8 @@ func CreateServer(ctx context.Context, factory msgstream.Factory, opts ...Option
 		dataClientCreator:      defaultDataNodeCreatorFunc,
 		rootCoordClientCreator: defaultRootCoordCreatorFunc,
 		helper:                 defaultServerHelper(),
+
+		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
 	}
 
 	for _, opt := range opts {
@@ -431,11 +437,13 @@ func (s *Server) startWatchService(ctx context.Context) {
 					zap.String("address", info.Address),
 					zap.Int64("serverID", info.Version))
 				s.cluster.Register(node)
+				s.metricsCacheManager.InvalidateSystemInfoMetrics()
 			case sessionutil.SessionDelEvent:
 				log.Info("received datanode unregister",
 					zap.String("address", info.Address),
 					zap.Int64("serverID", info.Version))
 				s.cluster.UnRegister(node)
+				s.metricsCacheManager.InvalidateSystemInfoMetrics()
 			default:
 				log.Warn("receive unknown service event type",
 					zap.Any("type", event.EventType))

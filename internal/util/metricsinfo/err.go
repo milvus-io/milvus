@@ -13,6 +13,10 @@ package metricsinfo
 
 import "errors"
 
-const MsgUnimplementedMetric = "sorry, but this metric type is not implemented"
+const (
+	MsgUnimplementedMetric           = "sorry, but this metric type is not implemented"
+	MsgInvalidSystemInfosMetricCache = "system infos metric is invalid"
+)
 
 var ErrUnimplementedMetric = errors.New(MsgUnimplementedMetric)
+var ErrInvalidSystemInfosMetricCache = errors.New(MsgInvalidSystemInfosMetricCache)

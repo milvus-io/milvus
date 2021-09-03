@@ -20,6 +20,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"github.com/milvus-io/milvus/internal/metrics"
 
 	"go.uber.org/zap"
@@ -69,6 +71,8 @@ type Proxy struct {
 	idAllocator  *allocator.IDAllocator
 	tsoAllocator *TimestampAllocator
 	segAssigner  *SegIDAssigner
+
+	metricsCacheManager *metricsinfo.MetricsCacheManager
 
 	session *sessionutil.Session
 
@@ -260,6 +264,8 @@ func (node *Proxy) Init() error {
 	node.tick = newTimeTick(node.ctx, node.tsoAllocator, time.Millisecond*200, node.sched.TaskDoneTest, node.msFactory)
 
 	node.chTicker = newChannelsTimeTicker(node.ctx, channelMgrTickerInterval, []string{}, node.sched.getPChanStatistics, tsoAllocator)
+
+	node.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
 	return nil
 }
