@@ -25,26 +25,15 @@ import (
 )
 
 func InitTracing(serviceName string) io.Closer {
-	if opentracing.IsGlobalTracerRegistered() {
-		return nil
+	cfg := &config.Configuration{
+		ServiceName: serviceName,
+		Sampler: &config.SamplerConfig{
+			Type:  "const",
+			Param: 0,
+		},
 	}
-	var cfg *config.Configuration
-	var err error
 	if true {
-		cfg, err = config.FromEnv()
-		if err != nil {
-			log.Error(err)
-			return nil
-		}
-		cfg.ServiceName = serviceName
-	} else {
-		cfg = &config.Configuration{
-			ServiceName: serviceName,
-			Sampler: &config.SamplerConfig{
-				Type:  "const",
-				Param: 1,
-			},
-		}
+		cfg = InitFromEnv(serviceName)
 	}
 	tracer, closer, err := cfg.NewTracer()
 	if err != nil {
@@ -55,13 +44,27 @@ func InitTracing(serviceName string) io.Closer {
 	return closer
 }
 
+func InitFromEnv(serviceName string) *config.Configuration {
+	cfg, err := config.FromEnv()
+	if err != nil {
+		log.Error(err)
+		return nil
+	}
+	cfg.ServiceName = serviceName
+	return cfg
+}
+
 func StartSpanFromContext(ctx context.Context, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
+	return StartSpanFromContextWithSkip(ctx, 2, opts...)
+}
+
+func StartSpanFromContextWithSkip(ctx context.Context, skip int, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
 	if ctx == nil {
 		return NoopSpan(), ctx
 	}
 
 	var pcs [1]uintptr
-	n := runtime.Callers(2, pcs[:])
+	n := runtime.Callers(skip, pcs[:])
 	if n < 1 {
 		span, ctx := opentracing.StartSpanFromContext(ctx, "unknown", opts...)
 		span.LogFields(log.Error(errors.New("runtime.Callers failed")))
@@ -85,12 +88,16 @@ func StartSpanFromContext(ctx context.Context, opts ...opentracing.StartSpanOpti
 }
 
 func StartSpanFromContextWithOperationName(ctx context.Context, operationName string, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
+	return StartSpanFromContextWithOperationNameWithSkip(ctx, operationName, 2, opts...)
+}
+
+func StartSpanFromContextWithOperationNameWithSkip(ctx context.Context, operationName string, skip int, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
 	if ctx == nil {
 		return NoopSpan(), ctx
 	}
 
 	var pcs [1]uintptr
-	n := runtime.Callers(2, pcs[:])
+	n := runtime.Callers(skip, pcs[:])
 	if n < 1 {
 		span, ctx := opentracing.StartSpanFromContext(ctx, operationName, opts...)
 		span.LogFields(log.Error(errors.New("runtime.Callers failed")))
@@ -130,17 +137,21 @@ func LogError(span opentracing.Span, err error) error {
 }
 
 func InfoFromSpan(span opentracing.Span) (traceID string, sampled bool, found bool) {
-	if spanContext, ok := span.Context().(jaeger.SpanContext); ok {
-		traceID = spanContext.TraceID().String()
-		sampled = spanContext.IsSampled()
-		return traceID, sampled, true
+	if span != nil {
+		if spanContext, ok := span.Context().(jaeger.SpanContext); ok {
+			traceID = spanContext.TraceID().String()
+			sampled = spanContext.IsSampled()
+			return traceID, sampled, true
+		}
 	}
 	return "", false, false
 }
 
 func InfoFromContext(ctx context.Context) (traceID string, sampled bool, found bool) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		return InfoFromSpan(span)
+	if ctx != nil {
+		if span := opentracing.SpanFromContext(ctx); span != nil {
+			return InfoFromSpan(span)
+		}
 	}
 	return "", false, false
 }
