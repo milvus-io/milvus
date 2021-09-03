@@ -17,10 +17,12 @@ import (
 
 const serverNotServingErrMsg = "server is not serving"
 
+// checks whether server in Healthy State
 func (s *Server) isClosed() bool {
 	return atomic.LoadInt64(&s.isServing) != ServerStateHealthy
 }
 
+// GetTimeTickChannel legacy API, returns time tick channel name
 func (s *Server) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
@@ -30,6 +32,7 @@ func (s *Server) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 	}, nil
 }
 
+// GetStatisticsChannel legacy API, returns statistics channel name
 func (s *Server) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
@@ -39,6 +42,9 @@ func (s *Server) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 	}, nil
 }
 
+// Flush notify segment to flush
+// this api only guarantees all the segments requested is sealed
+// these segments will be flushed only after the Flush policy is fulfilled
 func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
 	log.Debug("receive flush request", zap.Int64("dbID", req.GetDbID()), zap.Int64("collectionID", req.GetCollectionID()))
 	resp := &datapb.FlushResponse{
@@ -67,6 +73,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	return resp, nil
 }
 
+// AssignSegmentID applies for segment ids and make allocation for records
 func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
 	if s.isClosed() {
 		return &datapb.AssignSegmentIDResponse{
@@ -130,6 +137,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 	}, nil
 }
 
+// GetSegmentStates returns segments state
 func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 	resp := &datapb.GetSegmentStatesResponse{
 		Status: &commonpb.Status{
@@ -162,6 +170,7 @@ func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 	return resp, nil
 }
 
+// GetInsertBinlogPaths returns binlog paths info for requested segments
 func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
 	resp := &datapb.GetInsertBinlogPathsResponse{
 		Status: &commonpb.Status{
@@ -190,6 +199,8 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 	return resp, nil
 }
 
+// GetCollectionStatistics returns statistics for collection
+// for now only row count is returned
 func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {
 	resp := &datapb.GetCollectionStatisticsResponse{
 		Status: &commonpb.Status{
@@ -206,6 +217,8 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 	return resp, nil
 }
 
+// GetPartitionStatistics return statistics for parition
+// for now only row count is returned
 func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error) {
 	resp := &datapb.GetPartitionStatisticsResponse{
 		Status: &commonpb.Status{
@@ -222,6 +235,7 @@ func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 	return resp, nil
 }
 
+// GetSegmentInfoChannel legacy API, returns segment info statistics channel
 func (s *Server) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
@@ -231,6 +245,7 @@ func (s *Server) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringRes
 	}, nil
 }
 
+// GetSegmentInfo returns segment info requested, status, row count, etc included
 func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
 	resp := &datapb.GetSegmentInfoResponse{
 		Status: &commonpb.Status{
@@ -255,6 +270,8 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	return resp, nil
 }
 
+// SaveBinlogPaths update segment related binlog path
+// works for Checkpoints and Flush
 func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
 	resp := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -314,6 +331,7 @@ func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 	return resp, nil
 }
 
+// GetRecoveryInfo get recovery info for segment
 func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
 	collectionID := req.GetCollectionID()
 	partitionID := req.GetPartitionID()
@@ -407,9 +425,23 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	return resp, nil
 }
 
+// GetFlushedSegments returns all segment matches provided criterion and in State Flushed
+// If requested partition id < 0, ignores the partition id filter
 func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
+	resp := &datapb.GetFlushedSegmentsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
+	}
 	collectionID := req.GetCollectionID()
 	partitionID := req.GetPartitionID()
+	log.Debug("GetFlushedSegment",
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("partitionID", partitionID))
+	if s.isClosed() {
+		resp.Status.Reason = serverNotServingErrMsg
+		return resp, nil
+	}
 	var segmentIDs []UniqueID
 	if partitionID < 0 {
 		segmentIDs = s.meta.GetSegmentsOfCollection(collectionID)
@@ -424,14 +456,13 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 		}
 		ret = append(ret, id)
 	}
-	return &datapb.GetFlushedSegmentsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Segments: ret,
-	}, nil
+	resp.Segments = ret
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
+	return resp, nil
 }
 
+// GetMetrics returns DataCoord metrics info
+// it may include SystemMetrics, Topology metrics, etc.
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log.Debug("DataCoord.GetMetrics",
 		zap.Int64("node_id", Params.NodeID),

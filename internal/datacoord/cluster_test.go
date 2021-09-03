@@ -12,9 +12,11 @@ package datacoord
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/kv"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/stretchr/testify/assert"
@@ -57,14 +59,24 @@ func spyWatchPolicy(ch chan interface{}) channelAssignPolicy {
 	}
 }
 
+// a mock kv that always fail when LoadWithPrefix
+type loadPrefixFailKv struct {
+	kv.TxnKV
+}
+
+// LoadWithPrefix override behavior
+func (kv *loadPrefixFailKv) LoadWithPrefix(key string) ([]string, []string, error) {
+	return []string{}, []string{}, errors.New("mocked fail")
+}
+
 func TestClusterCreate(t *testing.T) {
 	ch := make(chan interface{})
-	kv := memkv.NewMemoryKV()
+	memKv := memkv.NewMemoryKV()
 	spyClusterStore := &SpyClusterStore{
 		NodesInfo: NewNodesInfo(),
 		ch:        ch,
 	}
-	cluster, err := NewCluster(context.TODO(), kv, spyClusterStore, dummyPosProvider{})
+	cluster, err := NewCluster(context.TODO(), memKv, spyClusterStore, dummyPosProvider{})
 	assert.Nil(t, err)
 	defer cluster.Close()
 	addr := "localhost:8080"
@@ -79,6 +91,13 @@ func TestClusterCreate(t *testing.T) {
 	dataNodes := cluster.GetNodes()
 	assert.EqualValues(t, 1, len(dataNodes))
 	assert.EqualValues(t, "localhost:8080", dataNodes[0].Info.GetAddress())
+
+	t.Run("loadKv Fails", func(t *testing.T) {
+		fkv := &loadPrefixFailKv{TxnKV: memKv}
+		cluster, err := NewCluster(context.TODO(), fkv, spyClusterStore, dummyPosProvider{})
+		assert.NotNil(t, err)
+		assert.Nil(t, cluster)
+	})
 }
 
 func TestRegister(t *testing.T) {
