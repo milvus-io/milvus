@@ -34,10 +34,7 @@ func CompareIndexParams(indexParam1 []*commonpb.KeyValuePair, indexParam2 []*com
 	}
 
 	for k, v := range paramMap1 {
-		if _, ok := paramMap2[k]; !ok {
-			return false
-		}
-		if v != paramMap2[k] {
+		if _, ok := paramMap2[k]; !ok || v != paramMap2[k] {
 			return false
 		}
 	}

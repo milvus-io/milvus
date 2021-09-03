@@ -143,3 +143,25 @@ func TestGlobalTSOAllocator_Fail(t *testing.T) {
 		gTestTsoAllocator.Reset()
 	})
 }
+
+func TestGlobalTSOAllocator_Update(t *testing.T) {
+	endpoints := os.Getenv("ETCD_ENDPOINTS")
+	if endpoints == "" {
+		endpoints = "localhost:2379"
+	}
+	etcdEndpoints := strings.Split(endpoints, ",")
+	etcdKV, err := tsoutil.NewTSOKVBase(etcdEndpoints, "/test/root/kv", "tsoTest")
+	assert.NoError(t, err)
+	gTestTsoAllocator = NewGlobalTSOAllocator("timestamp", etcdKV)
+	err = gTestTsoAllocator.Initialize()
+	assert.Nil(t, err)
+
+	err = gTestTsoAllocator.UpdateTSO()
+	assert.Nil(t, err)
+	time.Sleep(160 * time.Millisecond)
+	err = gTestTsoAllocator.UpdateTSO()
+	assert.Nil(t, err)
+	time.Sleep(500 * time.Millisecond)
+	err = gTestTsoAllocator.UpdateTSO()
+	assert.Nil(t, err)
+}

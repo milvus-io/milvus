@@ -44,6 +44,9 @@ func TestConversion(t *testing.T) {
 		comp(int64(-8654273))
 		comp(int64(math.MaxInt64))
 		comp(int64(math.MinInt64))
+
+		_, err := BytesToInt64([]byte("ab"))
+		assert.NotNil(t, err)
 	})
 
 	t.Run("TestConvertUint64", func(t *testing.T) {
@@ -57,6 +60,9 @@ func TestConversion(t *testing.T) {
 		comp(uint64(0))
 		comp(uint64(75123348654273))
 		comp(uint64(math.MaxUint64))
+
+		_, err := BytesToUint64([]byte("ab"))
+		assert.NotNil(t, err)
 	})
 
 	t.Run("TestSliceRemoveDuplicate", func(t *testing.T) {
