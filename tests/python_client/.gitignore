@@ -1,6 +1,9 @@
 # python files
 .pytest_cache
 **/.pytest_cache
+**/volumes
+**/logs
+**/docker-compose.yml
 .idea
 *.html
 
