@@ -21,10 +21,25 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/stretchr/testify/assert"
 )
+
+var Params paramtable.BaseTable
+var rmqPath string = "/tmp/rocksmq"
+
+func InitIDAllocator(kvPath string) *allocator.GlobalIDAllocator {
+	rocksdbKV, err := rocksdbkv.NewRocksdbKV(kvPath)
+	if err != nil {
+		panic(err)
+	}
+	idAllocator := allocator.NewGlobalIDAllocator("rmq_id", rocksdbKV)
+	_ = idAllocator.Initialize()
+	return idAllocator
+}
 
 func TestFixChannelName(t *testing.T) {
 	name := "abcd"
@@ -42,22 +57,112 @@ func etcdEndpoints() []string {
 	return etcdEndpoints
 }
 
-func TestRocksMQ(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdKV, err := etcdkv.NewEtcdKV(ep, "/etcd/test/root")
-	assert.Nil(t, err)
-	defer etcdKV.Close()
+func TestInitRmq(t *testing.T) {
+	name := "/tmp/rmq_init"
+	endpoints := os.Getenv("ETCD_ENDPOINTS")
+	if endpoints == "" {
+		endpoints = "localhost:2379"
+	}
+	etcdEndpoints := strings.Split(endpoints, ",")
+	etcdKV, err := etcdkv.NewEtcdKV(etcdEndpoints, "/etcd/test/root")
+	if err != nil {
+		log.Fatalf("New clientv3 error = %v", err)
+	}
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
-	name := "/tmp/rocksmq"
-	_ = os.RemoveAll(name)
-	defer os.RemoveAll(name)
-	kvName := name + "_meta_kv"
-	_ = os.RemoveAll(kvName)
-	defer os.RemoveAll(kvName)
-	rmq, err := NewRocksMQ(name, idAllocator)
+	err = InitRmq(name, idAllocator)
+	defer Rmq.stopRetention()
+	assert.NoError(t, err)
+	defer CloseRocksMQ()
+}
+
+func TestGlobalRmq(t *testing.T) {
+	// Params.Init()
+	rmqPath := "/tmp/milvus/rdb_data_global"
+	os.Setenv("ROCKSMQ_PATH", rmqPath)
+	defer os.RemoveAll(rmqPath)
+	err := InitRocksMQ()
+	defer Rmq.stopRetention()
+	assert.NoError(t, err)
+	defer CloseRocksMQ()
+}
+
+func TestRegisterConsumer(t *testing.T) {
+	kvPath := rmqPath + "_kv_register"
+	defer os.RemoveAll(kvPath)
+	idAllocator := InitIDAllocator(kvPath)
+
+	rocksdbPath := path + "_db_register"
+	defer os.RemoveAll(rocksdbPath)
+	metaPath := path + "_meta_kv_register"
+	defer os.RemoveAll(metaPath)
+
+	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
+	assert.NoError(t, err)
+	defer rmq.stopRetention()
+
+	topicName := "topic_register"
+	groupName := "group_register"
+	_ = rmq.DestroyConsumerGroup(topicName, groupName)
+	err = rmq.CreateConsumerGroup(topicName, groupName)
 	assert.Nil(t, err)
+
+	consumer := &Consumer{
+		Topic:     topicName,
+		GroupName: groupName,
+		MsgMutex:  make(chan struct{}),
+	}
+	rmq.RegisterConsumer(consumer)
+	exist, _ := rmq.ExistConsumerGroup(topicName, groupName)
+	assert.Equal(t, exist, true)
+	dummyGrpName := "group_dummy"
+	exist, _ = rmq.ExistConsumerGroup(topicName, dummyGrpName)
+	assert.Equal(t, exist, false)
+
+	msgA := "a_message"
+	pMsgs := make([]ProducerMessage, 1)
+	pMsgA := ProducerMessage{Payload: []byte(msgA)}
+	pMsgs[0] = pMsgA
+
+	_ = idAllocator.UpdateID()
+	err = rmq.Produce(topicName, pMsgs)
+	assert.Error(t, err)
+
+	rmq.Notify(topicName, groupName)
+
+	consumer1 := &Consumer{
+		Topic:     topicName,
+		GroupName: groupName,
+		MsgMutex:  make(chan struct{}),
+	}
+	rmq.RegisterConsumer(consumer1)
+
+	groupName2 := "group_register2"
+	consumer2 := &Consumer{
+		Topic:     topicName,
+		GroupName: groupName2,
+		MsgMutex:  make(chan struct{}),
+	}
+	rmq.RegisterConsumer(consumer2)
+
+	err = rmq.DestroyConsumerGroup(topicName, groupName)
+	assert.NoError(t, err)
+}
+
+func TestRocksMQ(t *testing.T) {
+	kvPath := rmqPath + "_kv_rmq"
+	defer os.RemoveAll(kvPath)
+	idAllocator := InitIDAllocator(kvPath)
+
+	rocksdbPath := path + "_db_rmq"
+	defer os.RemoveAll(rocksdbPath)
+	metaPath := path + "_meta_kv_rmq"
+	defer os.RemoveAll(metaPath)
+
+	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
+	assert.Nil(t, err)
+	defer rmq.stopRetention()
 
 	channelName := "channel_a"
 	err = rmq.CreateTopic(channelName)
@@ -96,7 +201,56 @@ func TestRocksMQ(t *testing.T) {
 	assert.Equal(t, len(cMsgs), 2)
 	assert.Equal(t, string(cMsgs[0].Payload), "b_message")
 	assert.Equal(t, string(cMsgs[1].Payload), "c_message")
+}
+
+func TestRocksMQDummy(t *testing.T) {
+	kvPath := rmqPath + "_kv_dummy"
+	defer os.RemoveAll(kvPath)
+	idAllocator := InitIDAllocator(kvPath)
+
+	rocksdbPath := path + "_db_dummy"
+	defer os.RemoveAll(rocksdbPath)
+	metaPath := path + "_meta_kv_dummy"
+	defer os.RemoveAll(metaPath)
+
+	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
+	assert.Nil(t, err)
+
+	channelName := "channel_a"
+	err = rmq.CreateTopic(channelName)
+	assert.Nil(t, err)
+	defer rmq.DestroyTopic(channelName)
+	err = rmq.CreateTopic(channelName)
+	assert.NoError(t, err)
+
+	channelName1 := "channel_dummy"
+	err = rmq.DestroyTopic(channelName1)
+	assert.NoError(t, err)
+
+	err = rmq.DestroyConsumerGroup(channelName, channelName1)
+	assert.NoError(t, err)
+
+	err = rmq.Produce(channelName, nil)
+	assert.Error(t, err)
+
+	err = rmq.Produce(channelName1, nil)
+	assert.Error(t, err)
+
+	groupName1 := "group_dummy"
+	err = rmq.Seek(channelName1, groupName1, 0)
+	assert.Error(t, err)
+
 	rmq.stopRetention()
+	channelName2 := strings.Repeat(channelName1, 100)
+	err = rmq.CreateTopic(string(channelName2))
+	assert.NoError(t, err)
+	err = rmq.Produce(string(channelName2), nil)
+	assert.Error(t, err)
+
+	msgA := "a_message"
+	pMsgs := make([]ProducerMessage, 1)
+	pMsgA := ProducerMessage{Payload: []byte(msgA)}
+	pMsgs[0] = pMsgA
 }
 
 func TestRocksMQ_Loop(t *testing.T) {
@@ -115,6 +269,7 @@ func TestRocksMQ_Loop(t *testing.T) {
 	defer os.RemoveAll(kvName)
 	rmq, err := NewRocksMQ(name, idAllocator)
 	assert.Nil(t, err)
+	defer rmq.stopRetention()
 
 	loopNum := 100
 	channelName := "channel_test"
@@ -164,7 +319,6 @@ func TestRocksMQ_Loop(t *testing.T) {
 	cMsgs, err = rmq.Consume(channelName, groupName, 1)
 	assert.Nil(t, err)
 	assert.Equal(t, len(cMsgs), 0)
-	rmq.stopRetention()
 }
 
 func TestRocksMQ_Goroutines(t *testing.T) {
@@ -182,6 +336,7 @@ func TestRocksMQ_Goroutines(t *testing.T) {
 	defer os.RemoveAll(kvName)
 	rmq, err := NewRocksMQ(name, idAllocator)
 	assert.Nil(t, err)
+	defer rmq.stopRetention()
 
 	loopNum := 100
 	channelName := "channel_test"
@@ -225,7 +380,6 @@ func TestRocksMQ_Goroutines(t *testing.T) {
 		}(&wg, rmq)
 	}
 	wg.Wait()
-	rmq.stopRetention()
 }
 
 /**
@@ -253,6 +407,7 @@ func TestRocksMQ_Throughout(t *testing.T) {
 	defer os.RemoveAll(kvName)
 	rmq, err := NewRocksMQ(name, idAllocator)
 	assert.Nil(t, err)
+	defer rmq.stopRetention()
 
 	channelName := "channel_throughout_test"
 	err = rmq.CreateTopic(channelName)
@@ -289,7 +444,6 @@ func TestRocksMQ_Throughout(t *testing.T) {
 	ct1 := time.Now().UnixNano() / int64(time.Millisecond)
 	cDuration := ct1 - ct0
 	log.Printf("Total consume %d item, cost %v ms, throughout %v / s", entityNum, cDuration, int64(entityNum)*1000/cDuration)
-	rmq.stopRetention()
 }
 
 func TestRocksMQ_MultiChan(t *testing.T) {
@@ -307,6 +461,7 @@ func TestRocksMQ_MultiChan(t *testing.T) {
 	defer os.RemoveAll(kvName)
 	rmq, err := NewRocksMQ(name, idAllocator)
 	assert.Nil(t, err)
+	defer rmq.stopRetention()
 
 	channelName0 := "chan01"
 	channelName1 := "chan11"
@@ -338,5 +493,4 @@ func TestRocksMQ_MultiChan(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, len(cMsgs), 1)
 	assert.Equal(t, string(cMsgs[0].Payload), "for_chann1_"+strconv.Itoa(0))
-	rmq.stopRetention()
 }

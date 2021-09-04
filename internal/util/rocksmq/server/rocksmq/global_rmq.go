@@ -14,6 +14,7 @@ package rocksmq
 import (
 	"os"
 	"sync"
+	"sync/atomic"
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/log"
@@ -56,8 +57,8 @@ func InitRocksMQ() error {
 		idAllocator := allocator.NewGlobalIDAllocator("rmq_id", rocksdbKV)
 		_ = idAllocator.Initialize()
 
-		RocksmqRetentionTimeInMinutes = params.ParseInt64("rocksmq.retentionTimeInMinutes")
-		RocksmqRetentionSizeInMB = params.ParseInt64("rocksmq.retentionSizeInMB")
+		atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, params.ParseInt64("rocksmq.retentionTimeInMinutes"))
+		atomic.StoreInt64(&RocksmqRetentionSizeInMB, params.ParseInt64("rocksmq.retentionSizeInMB"))
 		log.Debug("Rocksmq retention: ", zap.Any("RocksmqRetentionTimeInMinutes", RocksmqRetentionTimeInMinutes), zap.Any("RocksmqRetentionSizeInMB", RocksmqRetentionSizeInMB))
 		Rmq, err = NewRocksMQ(rocksdbName, idAllocator)
 		if err != nil {
