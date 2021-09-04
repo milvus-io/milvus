@@ -55,6 +55,27 @@ func TestSchema(t *testing.T) {
 			},
 			{
 				FieldID:      104,
+				Name:         "field_float",
+				IsPrimaryKey: false,
+				Description:  "",
+				DataType:     10,
+			},
+			{
+				FieldID:      105,
+				Name:         "field_double",
+				IsPrimaryKey: false,
+				Description:  "",
+				DataType:     11,
+			},
+			{
+				FieldID:      106,
+				Name:         "field_string",
+				IsPrimaryKey: false,
+				Description:  "",
+				DataType:     20,
+			},
+			{
+				FieldID:      107,
 				Name:         "field_float_vector",
 				IsPrimaryKey: false,
 				Description:  "",
@@ -73,7 +94,7 @@ func TestSchema(t *testing.T) {
 				},
 			},
 			{
-				FieldID:      105,
+				FieldID:      108,
 				Name:         "field_binary_vector",
 				IsPrimaryKey: false,
 				Description:  "",
@@ -90,11 +111,14 @@ func TestSchema(t *testing.T) {
 
 	t.Run("EstimateSizePerRecord", func(t *testing.T) {
 		size, err := EstimateSizePerRecord(schema)
-		assert.Equal(t, 543, size)
+		assert.Equal(t, 680, size)
 		assert.Nil(t, err)
 	})
 
 	t.Run("SchemaHelper", func(t *testing.T) {
+		_, err := CreateSchemaHelper(nil)
+		assert.NotNil(t, err)
+
 		helper, err := CreateSchemaHelper(schema)
 		assert.Nil(t, err)
 
@@ -110,10 +134,10 @@ func TestSchema(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, "field_int32", field2.Name)
 
-		dim, err := helper.GetVectorDimFromID(104)
+		dim, err := helper.GetVectorDimFromID(107)
 		assert.Nil(t, err)
 		assert.Equal(t, 128, dim)
-		dim1, err := helper.GetVectorDimFromID(105)
+		dim1, err := helper.GetVectorDimFromID(108)
 		assert.Nil(t, err)
 		assert.Equal(t, 128, dim1)
 		_, err = helper.GetVectorDimFromID(103)
@@ -153,5 +177,150 @@ func TestSchema(t *testing.T) {
 		assert.False(t, IsFloatingType(schemapb.DataType_String))
 		assert.False(t, IsFloatingType(schemapb.DataType_BinaryVector))
 		assert.False(t, IsFloatingType(schemapb.DataType_FloatVector))
+	})
+}
+
+func TestSchema_invalid(t *testing.T) {
+	t.Run("Duplicate field name", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name:        "testColl",
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "field_int8",
+					IsPrimaryKey: false,
+					Description:  "",
+					DataType:     2,
+				},
+				{
+					FieldID:      101,
+					Name:         "field_int8",
+					IsPrimaryKey: false,
+					Description:  "",
+					DataType:     3,
+				},
+			},
+		}
+		_, err := CreateSchemaHelper(schema)
+		assert.NotNil(t, err)
+		assert.EqualError(t, err, "duplicated fieldName: field_int8")
+	})
+	t.Run("Duplicate field id", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name:        "testColl",
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "field_int8",
+					IsPrimaryKey: false,
+					Description:  "",
+					DataType:     2,
+				},
+				{
+					FieldID:      100,
+					Name:         "field_int16",
+					IsPrimaryKey: false,
+					Description:  "",
+					DataType:     3,
+				},
+			},
+		}
+		_, err := CreateSchemaHelper(schema)
+		assert.NotNil(t, err)
+		assert.EqualError(t, err, "duplicated fieldID: 100")
+	})
+	t.Run("Duplicated primary key", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name:        "testColl",
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "field_int8",
+					IsPrimaryKey: true,
+					Description:  "",
+					DataType:     2,
+				},
+				{
+					FieldID:      101,
+					Name:         "field_int16",
+					IsPrimaryKey: true,
+					Description:  "",
+					DataType:     3,
+				},
+			},
+		}
+		_, err := CreateSchemaHelper(schema)
+		assert.NotNil(t, err)
+		assert.EqualError(t, err, "primary key is not unique")
+	})
+	t.Run("field not exist", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name:        "testColl",
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "field_int8",
+					IsPrimaryKey: false,
+					Description:  "",
+					DataType:     2,
+				},
+			},
+		}
+		helper, err := CreateSchemaHelper(schema)
+		assert.Nil(t, err)
+
+		_, err = helper.GetPrimaryKeyField()
+		assert.NotNil(t, err)
+		assert.EqualError(t, err, "no primary in schema")
+
+		_, err = helper.GetFieldFromName("none")
+		assert.NotNil(t, err)
+		assert.EqualError(t, err, "fieldName(none) not found")
+
+		_, err = helper.GetFieldFromID(101)
+		assert.NotNil(t, err)
+		assert.EqualError(t, err, "fieldID(101) not found")
+	})
+	t.Run("vector dim not exist", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Name:        "testColl",
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      103,
+					Name:         "field_int64",
+					IsPrimaryKey: true,
+					Description:  "",
+					DataType:     5,
+				},
+				{
+					FieldID:      107,
+					Name:         "field_float_vector",
+					IsPrimaryKey: false,
+					Description:  "",
+					DataType:     101,
+				},
+			},
+		}
+		helper, err := CreateSchemaHelper(schema)
+		assert.Nil(t, err)
+
+		_, err = helper.GetVectorDimFromID(100)
+		assert.NotNil(t, err)
+
+		_, err = helper.GetVectorDimFromID(103)
+		assert.NotNil(t, err)
+
+		_, err = helper.GetVectorDimFromID(107)
+		assert.NotNil(t, err)
 	})
 }
