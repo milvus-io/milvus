@@ -39,6 +39,7 @@ message CollectionInfo {
   repeated string virtual_channel_names = 7;
   repeated string physical_channel_names = 8;
   repeated uint64 partition_created_timestamps = 9;
+  int32 shards_num = 10;
 }
 
 message SegmentIndexInfo {

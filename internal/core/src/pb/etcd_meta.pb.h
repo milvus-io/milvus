@@ -845,6 +845,7 @@ class CollectionInfo :
     kSchemaFieldNumber = 2,
     kIDFieldNumber = 1,
     kCreateTimeFieldNumber = 3,
+    kShardsNumFieldNumber = 10,
   };
   // repeated int64 partitionIDs = 4;
   int partitionids_size() const;
@@ -948,6 +949,11 @@ class CollectionInfo :
   ::PROTOBUF_NAMESPACE_ID::uint64 create_time() const;
   void set_create_time(::PROTOBUF_NAMESPACE_ID::uint64 value);
 
+  // int32 shards_num = 10;
+  void clear_shards_num();
+  ::PROTOBUF_NAMESPACE_ID::int32 shards_num() const;
+  void set_shards_num(::PROTOBUF_NAMESPACE_ID::int32 value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.etcd.CollectionInfo)
  private:
   class _Internal;
@@ -964,6 +970,7 @@ class CollectionInfo :
   ::milvus::proto::schema::CollectionSchema* schema_;
   ::PROTOBUF_NAMESPACE_ID::int64 id_;
   ::PROTOBUF_NAMESPACE_ID::uint64 create_time_;
+  ::PROTOBUF_NAMESPACE_ID::int32 shards_num_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_etcd_5fmeta_2eproto;
 };
@@ -2106,6 +2113,20 @@ inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint64 >
 CollectionInfo::mutable_partition_created_timestamps() {
   // @@protoc_insertion_point(field_mutable_list:milvus.proto.etcd.CollectionInfo.partition_created_timestamps)
   return &partition_created_timestamps_;
+}
+
+// int32 shards_num = 10;
+inline void CollectionInfo::clear_shards_num() {
+  shards_num_ = 0;
+}
+inline ::PROTOBUF_NAMESPACE_ID::int32 CollectionInfo::shards_num() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.etcd.CollectionInfo.shards_num)
+  return shards_num_;
+}
+inline void CollectionInfo::set_shards_num(::PROTOBUF_NAMESPACE_ID::int32 value) {
+  
+  shards_num_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.etcd.CollectionInfo.shards_num)
 }
 
 // -------------------------------------------------------------------

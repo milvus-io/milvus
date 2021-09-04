@@ -207,6 +207,7 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_etcd_5fmeta_2eproto::offsets[]
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::CollectionInfo, virtual_channel_names_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::CollectionInfo, physical_channel_names_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::CollectionInfo, partition_created_timestamps_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::CollectionInfo, shards_num_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::etcd::SegmentIndexInfo, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -237,8 +238,8 @@ static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOB
   { 17, -1, sizeof(::milvus::proto::etcd::IndexInfo)},
   { 25, -1, sizeof(::milvus::proto::etcd::FieldIndexInfo)},
   { 32, -1, sizeof(::milvus::proto::etcd::CollectionInfo)},
-  { 46, -1, sizeof(::milvus::proto::etcd::SegmentIndexInfo)},
-  { 58, -1, sizeof(::milvus::proto::etcd::CollectionMeta)},
+  { 47, -1, sizeof(::milvus::proto::etcd::SegmentIndexInfo)},
+  { 59, -1, sizeof(::milvus::proto::etcd::CollectionMeta)},
 };
 
 static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] = {
@@ -262,7 +263,7 @@ const char descriptor_table_protodef_etcd_5fmeta_2eproto[] PROTOBUF_SECTION_VARI
   "\022\n\nindex_name\030\001 \001(\t\022\017\n\007indexID\030\002 \001(\003\0227\n\014"
   "index_params\030\003 \003(\0132!.milvus.proto.common"
   ".KeyValuePair\"2\n\016FieldIndexInfo\022\017\n\007filed"
-  "ID\030\001 \001(\003\022\017\n\007indexID\030\002 \001(\003\"\265\002\n\016Collection"
+  "ID\030\001 \001(\003\022\017\n\007indexID\030\002 \001(\003\"\311\002\n\016Collection"
   "Info\022\n\n\002ID\030\001 \001(\003\0225\n\006schema\030\002 \001(\0132%.milvu"
   "s.proto.schema.CollectionSchema\022\023\n\013creat"
   "e_time\030\003 \001(\004\022\024\n\014partitionIDs\030\004 \003(\003\022\026\n\016pa"
@@ -270,17 +271,17 @@ const char descriptor_table_protodef_etcd_5fmeta_2eproto[] PROTOBUF_SECTION_VARI
   "\0132!.milvus.proto.etcd.FieldIndexInfo\022\035\n\025"
   "virtual_channel_names\030\007 \003(\t\022\036\n\026physical_"
   "channel_names\030\010 \003(\t\022$\n\034partition_created"
-  "_timestamps\030\t \003(\004\"\231\001\n\020SegmentIndexInfo\022\024"
-  "\n\014collectionID\030\001 \001(\003\022\023\n\013partitionID\030\002 \001("
-  "\003\022\021\n\tsegmentID\030\003 \001(\003\022\017\n\007fieldID\030\004 \001(\003\022\017\n"
-  "\007indexID\030\005 \001(\003\022\017\n\007buildID\030\006 \001(\003\022\024\n\014enabl"
-  "e_index\030\007 \001(\010\"\252\001\n\016CollectionMeta\022\n\n\002ID\030\001"
-  " \001(\003\0225\n\006schema\030\002 \001(\0132%.milvus.proto.sche"
-  "ma.CollectionSchema\022\023\n\013create_time\030\003 \001(\004"
-  "\022\022\n\nsegmentIDs\030\004 \003(\003\022\026\n\016partition_tags\030\005"
-  " \003(\t\022\024\n\014partitionIDs\030\006 \003(\003B3Z1github.com"
-  "/milvus-io/milvus/internal/proto/etcdpbb"
-  "\006proto3"
+  "_timestamps\030\t \003(\004\022\022\n\nshards_num\030\n \001(\005\"\231\001"
+  "\n\020SegmentIndexInfo\022\024\n\014collectionID\030\001 \001(\003"
+  "\022\023\n\013partitionID\030\002 \001(\003\022\021\n\tsegmentID\030\003 \001(\003"
+  "\022\017\n\007fieldID\030\004 \001(\003\022\017\n\007indexID\030\005 \001(\003\022\017\n\007bu"
+  "ildID\030\006 \001(\003\022\024\n\014enable_index\030\007 \001(\010\"\252\001\n\016Co"
+  "llectionMeta\022\n\n\002ID\030\001 \001(\003\0225\n\006schema\030\002 \001(\013"
+  "2%.milvus.proto.schema.CollectionSchema\022"
+  "\023\n\013create_time\030\003 \001(\004\022\022\n\nsegmentIDs\030\004 \003(\003"
+  "\022\026\n\016partition_tags\030\005 \003(\t\022\024\n\014partitionIDs"
+  "\030\006 \003(\003B3Z1github.com/milvus-io/milvus/in"
+  "ternal/proto/etcdpbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_etcd_5fmeta_2eproto_deps[2] = {
   &::descriptor_table_common_2eproto,
@@ -298,7 +299,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_etc
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_etcd_5fmeta_2eproto_once;
 static bool descriptor_table_etcd_5fmeta_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_etcd_5fmeta_2eproto = {
-  &descriptor_table_etcd_5fmeta_2eproto_initialized, descriptor_table_protodef_etcd_5fmeta_2eproto, "etcd_meta.proto", 1127,
+  &descriptor_table_etcd_5fmeta_2eproto_initialized, descriptor_table_protodef_etcd_5fmeta_2eproto, "etcd_meta.proto", 1147,
   &descriptor_table_etcd_5fmeta_2eproto_once, descriptor_table_etcd_5fmeta_2eproto_sccs, descriptor_table_etcd_5fmeta_2eproto_deps, 7, 2,
   schemas, file_default_instances, TableStruct_etcd_5fmeta_2eproto::offsets,
   file_level_metadata_etcd_5fmeta_2eproto, 7, file_level_enum_descriptors_etcd_5fmeta_2eproto, file_level_service_descriptors_etcd_5fmeta_2eproto,
@@ -1816,16 +1817,16 @@ CollectionInfo::CollectionInfo(const CollectionInfo& from)
     schema_ = nullptr;
   }
   ::memcpy(&id_, &from.id_,
-    static_cast<size_t>(reinterpret_cast<char*>(&create_time_) -
-    reinterpret_cast<char*>(&id_)) + sizeof(create_time_));
+    static_cast<size_t>(reinterpret_cast<char*>(&shards_num_) -
+    reinterpret_cast<char*>(&id_)) + sizeof(shards_num_));
   // @@protoc_insertion_point(copy_constructor:milvus.proto.etcd.CollectionInfo)
 }
 
 void CollectionInfo::SharedCtor() {
   ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_CollectionInfo_etcd_5fmeta_2eproto.base);
   ::memset(&schema_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&create_time_) -
-      reinterpret_cast<char*>(&schema_)) + sizeof(create_time_));
+      reinterpret_cast<char*>(&shards_num_) -
+      reinterpret_cast<char*>(&schema_)) + sizeof(shards_num_));
 }
 
 CollectionInfo::~CollectionInfo() {
@@ -1863,8 +1864,8 @@ void CollectionInfo::Clear() {
   }
   schema_ = nullptr;
   ::memset(&id_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&create_time_) -
-      reinterpret_cast<char*>(&id_)) + sizeof(create_time_));
+      reinterpret_cast<char*>(&shards_num_) -
+      reinterpret_cast<char*>(&id_)) + sizeof(shards_num_));
   _internal_metadata_.Clear();
 }
 
@@ -1962,6 +1963,13 @@ const char* CollectionInfo::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE
           CHK_(ptr);
         } else if (static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 72) {
           add_partition_created_timestamps(::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr));
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      // int32 shards_num = 10;
+      case 10:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 80)) {
+          shards_num_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
           CHK_(ptr);
         } else goto handle_unusual;
         continue;
@@ -2123,6 +2131,19 @@ bool CollectionInfo::MergePartialFromCodedStream(
         break;
       }
 
+      // int32 shards_num = 10;
+      case 10: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (80 & 0xFF)) {
+
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
+                   ::PROTOBUF_NAMESPACE_ID::int32, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT32>(
+                 input, &shards_num_)));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
       default: {
       handle_unusual:
         if (tag == 0) {
@@ -2227,6 +2248,11 @@ void CollectionInfo::SerializeWithCachedSizes(
       this->partition_created_timestamps(i), output);
   }
 
+  // int32 shards_num = 10;
+  if (this->shards_num() != 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt32(10, this->shards_num(), output);
+  }
+
   if (_internal_metadata_.have_unknown_fields()) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFields(
         _internal_metadata_.unknown_fields(), output);
@@ -2319,6 +2345,11 @@ void CollectionInfo::SerializeWithCachedSizes(
          target);
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       WriteUInt64NoTagToArray(this->partition_created_timestamps_, target);
+  }
+
+  // int32 shards_num = 10;
+  if (this->shards_num() != 0) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt32ToArray(10, this->shards_num(), target);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -2428,6 +2459,13 @@ size_t CollectionInfo::ByteSizeLong() const {
         this->create_time());
   }
 
+  // int32 shards_num = 10;
+  if (this->shards_num() != 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32Size(
+        this->shards_num());
+  }
+
   int cached_size = ::PROTOBUF_NAMESPACE_ID::internal::ToCachedSize(total_size);
   SetCachedSize(cached_size);
   return total_size;
@@ -2470,6 +2508,9 @@ void CollectionInfo::MergeFrom(const CollectionInfo& from) {
   if (from.create_time() != 0) {
     set_create_time(from.create_time());
   }
+  if (from.shards_num() != 0) {
+    set_shards_num(from.shards_num());
+  }
 }
 
 void CollectionInfo::CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) {
@@ -2502,6 +2543,7 @@ void CollectionInfo::InternalSwap(CollectionInfo* other) {
   swap(schema_, other->schema_);
   swap(id_, other->id_);
   swap(create_time_, other->create_time_);
+  swap(shards_num_, other->shards_num_);
 }
 
 ::PROTOBUF_NAMESPACE_ID::Metadata CollectionInfo::GetMetadata() const {

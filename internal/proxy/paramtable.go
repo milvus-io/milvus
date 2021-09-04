@@ -56,6 +56,7 @@ type ParamTable struct {
 	MsgStreamTimeTickBufSize   int64
 	MaxNameLength              int64
 	MaxFieldNum                int64
+	MaxShardNum                int32
 	MaxDimension               int64
 	DefaultPartitionName       string
 	DefaultIndexName           string
@@ -91,6 +92,7 @@ func (pt *ParamTable) initParams() {
 	pt.initMsgStreamTimeTickBufSize()
 	pt.initMaxNameLength()
 	pt.initMaxFieldNum()
+	pt.initMaxShardNum()
 	pt.initMaxDimension()
 	pt.initDefaultPartitionName()
 	pt.initDefaultIndexName()
@@ -162,6 +164,18 @@ func (pt *ParamTable) initMaxNameLength() {
 		panic(err)
 	}
 	pt.MaxNameLength = maxNameLength
+}
+
+func (pt *ParamTable) initMaxShardNum() {
+	str, err := pt.Load("proxy.maxShardNum")
+	if err != nil {
+		panic(err)
+	}
+	maxShardNum, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	pt.MaxShardNum = int32(maxShardNum)
 }
 
 func (pt *ParamTable) initMaxFieldNum() {
