@@ -25,17 +25,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type mockTsoAllocator struct {
-}
-
-func (tso *mockTsoAllocator) AllocOne() (Timestamp, error) {
-	return Timestamp(time.Now().UnixNano()), nil
-}
-
-func newMockTsoAllocator() *mockTsoAllocator {
-	return &mockTsoAllocator{}
-}
-
 func newGetStatisticsFunc(pchans []pChan) getPChanStatisticsFuncType {
 	totalPchan := len(pchans)
 	pchanNum := rand.Uint64()%(uint64(totalPchan)) + 1

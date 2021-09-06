@@ -19,9 +19,10 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -31,7 +32,7 @@ import (
 	oplog "github.com/opentracing/opentracing-go/log"
 )
 
-type TaskQueue interface {
+type taskQueue interface {
 	utChan() <-chan int
 	utEmpty() bool
 	utFull() bool
@@ -45,7 +46,10 @@ type TaskQueue interface {
 	Enqueue(t task) error
 }
 
-type BaseTaskQueue struct {
+// TODO(dragondriver): load from config
+const maxTaskNum = 1024
+
+type baseTaskQueue struct {
 	unissuedTasks *list.List
 	activeTasks   map[UniqueID]task
 	utLock        sync.RWMutex
@@ -56,24 +60,25 @@ type BaseTaskQueue struct {
 
 	utBufChan chan int // to block scheduler
 
-	sched *TaskScheduler
+	tsoAllocatorIns tsoAllocator
+	idAllocatorIns  idAllocatorInterface
 }
 
-func (queue *BaseTaskQueue) utChan() <-chan int {
+func (queue *baseTaskQueue) utChan() <-chan int {
 	return queue.utBufChan
 }
 
-func (queue *BaseTaskQueue) utEmpty() bool {
+func (queue *baseTaskQueue) utEmpty() bool {
 	queue.utLock.RLock()
 	defer queue.utLock.RUnlock()
 	return queue.unissuedTasks.Len() == 0
 }
 
-func (queue *BaseTaskQueue) utFull() bool {
+func (queue *baseTaskQueue) utFull() bool {
 	return int64(queue.unissuedTasks.Len()) >= queue.maxTaskNum
 }
 
-func (queue *BaseTaskQueue) addUnissuedTask(t task) error {
+func (queue *baseTaskQueue) addUnissuedTask(t task) error {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
 
@@ -85,7 +90,7 @@ func (queue *BaseTaskQueue) addUnissuedTask(t task) error {
 	return nil
 }
 
-func (queue *BaseTaskQueue) FrontUnissuedTask() task {
+func (queue *baseTaskQueue) FrontUnissuedTask() task {
 	queue.utLock.RLock()
 	defer queue.utLock.RUnlock()
 
@@ -97,7 +102,7 @@ func (queue *BaseTaskQueue) FrontUnissuedTask() task {
 	return queue.unissuedTasks.Front().Value.(task)
 }
 
-func (queue *BaseTaskQueue) PopUnissuedTask() task {
+func (queue *baseTaskQueue) PopUnissuedTask() task {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
 
@@ -112,7 +117,7 @@ func (queue *BaseTaskQueue) PopUnissuedTask() task {
 	return ft.Value.(task)
 }
 
-func (queue *BaseTaskQueue) AddActiveTask(t task) {
+func (queue *baseTaskQueue) AddActiveTask(t task) {
 	queue.atLock.Lock()
 	defer queue.atLock.Unlock()
 	tID := t.ID()
@@ -124,7 +129,7 @@ func (queue *BaseTaskQueue) AddActiveTask(t task) {
 	queue.activeTasks[tID] = t
 }
 
-func (queue *BaseTaskQueue) PopActiveTask(tID UniqueID) task {
+func (queue *baseTaskQueue) PopActiveTask(tID UniqueID) task {
 	queue.atLock.Lock()
 	defer queue.atLock.Unlock()
 	t, ok := queue.activeTasks[tID]
@@ -137,7 +142,7 @@ func (queue *BaseTaskQueue) PopActiveTask(tID UniqueID) task {
 	return t
 }
 
-func (queue *BaseTaskQueue) getTaskByReqID(reqID UniqueID) task {
+func (queue *baseTaskQueue) getTaskByReqID(reqID UniqueID) task {
 	queue.utLock.RLock()
 	defer queue.utLock.RUnlock()
 	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
@@ -157,7 +162,7 @@ func (queue *BaseTaskQueue) getTaskByReqID(reqID UniqueID) task {
 	return nil
 }
 
-func (queue *BaseTaskQueue) TaskDoneTest(ts Timestamp) bool {
+func (queue *baseTaskQueue) TaskDoneTest(ts Timestamp) bool {
 	queue.utLock.RLock()
 	defer queue.utLock.RUnlock()
 	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
@@ -177,19 +182,19 @@ func (queue *BaseTaskQueue) TaskDoneTest(ts Timestamp) bool {
 	return true
 }
 
-func (queue *BaseTaskQueue) Enqueue(t task) error {
+func (queue *baseTaskQueue) Enqueue(t task) error {
 	err := t.OnEnqueue()
 	if err != nil {
 		return err
 	}
 
-	ts, err := queue.sched.tsoAllocator.AllocOne()
+	ts, err := queue.tsoAllocatorIns.AllocOne()
 	if err != nil {
 		return err
 	}
 	t.SetTs(ts)
 
-	reqID, err := queue.sched.idAllocator.AllocOne()
+	reqID, err := queue.idAllocatorIns.AllocOne()
 	if err != nil {
 		return err
 	}
@@ -198,8 +203,21 @@ func (queue *BaseTaskQueue) Enqueue(t task) error {
 	return queue.addUnissuedTask(t)
 }
 
-type DdTaskQueue struct {
-	BaseTaskQueue
+func newBaseTaskQueue(tsoAllocatorIns tsoAllocator, idAllocatorIns idAllocatorInterface) *baseTaskQueue {
+	return &baseTaskQueue{
+		unissuedTasks:   list.New(),
+		activeTasks:     make(map[UniqueID]task),
+		utLock:          sync.RWMutex{},
+		atLock:          sync.RWMutex{},
+		maxTaskNum:      maxTaskNum,
+		utBufChan:       make(chan int, maxTaskNum),
+		tsoAllocatorIns: tsoAllocatorIns,
+		idAllocatorIns:  idAllocatorIns,
+	}
+}
+
+type ddTaskQueue struct {
+	*baseTaskQueue
 	lock sync.Mutex
 }
 
@@ -208,19 +226,19 @@ type pChanStatInfo struct {
 	tsSet map[Timestamp]struct{}
 }
 
-type DmTaskQueue struct {
-	BaseTaskQueue
+type dmTaskQueue struct {
+	*baseTaskQueue
 	lock sync.Mutex
 
 	statsLock            sync.RWMutex
 	pChanStatisticsInfos map[pChan]*pChanStatInfo
 }
 
-func (queue *DmTaskQueue) Enqueue(t task) error {
+func (queue *dmTaskQueue) Enqueue(t task) error {
 	queue.lock.Lock()
 	defer queue.lock.Unlock()
 
-	err := queue.BaseTaskQueue.Enqueue(t)
+	err := queue.baseTaskQueue.Enqueue(t)
 	if err != nil {
 		return err
 	}
@@ -229,13 +247,13 @@ func (queue *DmTaskQueue) Enqueue(t task) error {
 	return nil
 }
 
-func (queue *DmTaskQueue) PopActiveTask(tID UniqueID) task {
+func (queue *dmTaskQueue) PopActiveTask(tID UniqueID) task {
 	queue.atLock.Lock()
 	defer queue.atLock.Unlock()
 	t, ok := queue.activeTasks[tID]
 	if ok {
 		delete(queue.activeTasks, tID)
-		log.Debug("Proxy DmTaskQueue popPChanStats", zap.Any("tID", t.ID()))
+		log.Debug("Proxy dmTaskQueue popPChanStats", zap.Any("tID", t.ID()))
 		queue.popPChanStats(t)
 	} else {
 		log.Debug("Proxy task not in active task list!", zap.Any("tID", tID))
@@ -243,11 +261,11 @@ func (queue *DmTaskQueue) PopActiveTask(tID UniqueID) task {
 	return t
 }
 
-func (queue *DmTaskQueue) addPChanStats(t task) error {
+func (queue *dmTaskQueue) addPChanStats(t task) error {
 	if dmT, ok := t.(dmlTask); ok {
 		stats, err := dmT.getPChanStats()
 		if err != nil {
-			log.Debug("Proxy DmTaskQueue addPChanStats", zap.Any("tID", t.ID()),
+			log.Debug("Proxy dmTaskQueue addPChanStats", zap.Any("tID", t.ID()),
 				zap.Any("stats", stats), zap.Error(err))
 			return err
 		}
@@ -262,7 +280,6 @@ func (queue *DmTaskQueue) addPChanStats(t task) error {
 					},
 				}
 				queue.pChanStatisticsInfos[cName] = info
-				dmT.getChannelsTimerTicker().addPChan(cName)
 			} else {
 				if info.minTs > stat.minTs {
 					queue.pChanStatisticsInfos[cName].minTs = stat.minTs
@@ -280,7 +297,7 @@ func (queue *DmTaskQueue) addPChanStats(t task) error {
 	return nil
 }
 
-func (queue *DmTaskQueue) popPChanStats(t task) error {
+func (queue *dmTaskQueue) popPChanStats(t task) error {
 	if dmT, ok := t.(dmlTask); ok {
 		channels, err := dmT.getChannels()
 		if err != nil {
@@ -306,12 +323,12 @@ func (queue *DmTaskQueue) popPChanStats(t task) error {
 		}
 		queue.statsLock.Unlock()
 	} else {
-		return fmt.Errorf("Proxy DmTaskQueue popPChanStats reflect to dmlTask failed, tID:%v", t.ID())
+		return fmt.Errorf("Proxy dmTaskQueue popPChanStats reflect to dmlTask failed, tID:%v", t.ID())
 	}
 	return nil
 }
 
-func (queue *DmTaskQueue) getPChanStatsInfo() (map[pChan]*pChanStatistics, error) {
+func (queue *dmTaskQueue) getPChanStatsInfo() (map[pChan]*pChanStatistics, error) {
 
 	ret := make(map[pChan]*pChanStatistics)
 	queue.statsLock.RLock()
@@ -325,60 +342,39 @@ func (queue *DmTaskQueue) getPChanStatsInfo() (map[pChan]*pChanStatistics, error
 	return ret, nil
 }
 
-type DqTaskQueue struct {
-	BaseTaskQueue
+type dqTaskQueue struct {
+	*baseTaskQueue
 }
 
-func (queue *DdTaskQueue) Enqueue(t task) error {
+func (queue *ddTaskQueue) Enqueue(t task) error {
 	queue.lock.Lock()
 	defer queue.lock.Unlock()
-	return queue.BaseTaskQueue.Enqueue(t)
+	return queue.baseTaskQueue.Enqueue(t)
 }
 
-func NewDdTaskQueue(sched *TaskScheduler) *DdTaskQueue {
-	return &DdTaskQueue{
-		BaseTaskQueue: BaseTaskQueue{
-			unissuedTasks: list.New(),
-			activeTasks:   make(map[UniqueID]task),
-			maxTaskNum:    1024,
-			utBufChan:     make(chan int, 1024),
-			sched:         sched,
-		},
+func newDdTaskQueue(tsoAllocatorIns tsoAllocator, idAllocatorIns idAllocatorInterface) *ddTaskQueue {
+	return &ddTaskQueue{
+		baseTaskQueue: newBaseTaskQueue(tsoAllocatorIns, idAllocatorIns),
 	}
 }
 
-func NewDmTaskQueue(sched *TaskScheduler) *DmTaskQueue {
-	return &DmTaskQueue{
-		BaseTaskQueue: BaseTaskQueue{
-			unissuedTasks: list.New(),
-			activeTasks:   make(map[UniqueID]task),
-			maxTaskNum:    1024,
-			utBufChan:     make(chan int, 1024),
-			sched:         sched,
-		},
+func newDmTaskQueue(tsoAllocatorIns tsoAllocator, idAllocatorIns idAllocatorInterface) *dmTaskQueue {
+	return &dmTaskQueue{
+		baseTaskQueue:        newBaseTaskQueue(tsoAllocatorIns, idAllocatorIns),
 		pChanStatisticsInfos: make(map[pChan]*pChanStatInfo),
 	}
 }
 
-func NewDqTaskQueue(sched *TaskScheduler) *DqTaskQueue {
-	return &DqTaskQueue{
-		BaseTaskQueue: BaseTaskQueue{
-			unissuedTasks: list.New(),
-			activeTasks:   make(map[UniqueID]task),
-			maxTaskNum:    1024,
-			utBufChan:     make(chan int, 1024),
-			sched:         sched,
-		},
+func newDqTaskQueue(tsoAllocatorIns tsoAllocator, idAllocatorIns idAllocatorInterface) *dqTaskQueue {
+	return &dqTaskQueue{
+		baseTaskQueue: newBaseTaskQueue(tsoAllocatorIns, idAllocatorIns),
 	}
 }
 
-type TaskScheduler struct {
-	DdQueue TaskQueue
-	DmQueue *DmTaskQueue
-	DqQueue TaskQueue
-
-	idAllocator  *allocator.IDAllocator
-	tsoAllocator *TimestampAllocator
+type taskScheduler struct {
+	ddQueue taskQueue
+	dmQueue *dmTaskQueue
+	dqQueue taskQueue
 
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -387,51 +383,49 @@ type TaskScheduler struct {
 	msFactory msgstream.Factory
 }
 
-func NewTaskScheduler(ctx context.Context,
-	idAllocator *allocator.IDAllocator,
-	tsoAllocator *TimestampAllocator,
-	factory msgstream.Factory) (*TaskScheduler, error) {
+func newTaskScheduler(ctx context.Context,
+	idAllocatorIns idAllocatorInterface,
+	tsoAllocatorIns tsoAllocator,
+	factory msgstream.Factory) (*taskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
-	s := &TaskScheduler{
-		idAllocator:  idAllocator,
-		tsoAllocator: tsoAllocator,
-		ctx:          ctx1,
-		cancel:       cancel,
-		msFactory:    factory,
+	s := &taskScheduler{
+		ctx:       ctx1,
+		cancel:    cancel,
+		msFactory: factory,
 	}
-	s.DdQueue = NewDdTaskQueue(s)
-	s.DmQueue = NewDmTaskQueue(s)
-	s.DqQueue = NewDqTaskQueue(s)
+	s.ddQueue = newDdTaskQueue(tsoAllocatorIns, idAllocatorIns)
+	s.dmQueue = newDmTaskQueue(tsoAllocatorIns, idAllocatorIns)
+	s.dqQueue = newDqTaskQueue(tsoAllocatorIns, idAllocatorIns)
 
 	return s, nil
 }
 
-func (sched *TaskScheduler) scheduleDdTask() task {
-	return sched.DdQueue.PopUnissuedTask()
+func (sched *taskScheduler) scheduleDdTask() task {
+	return sched.ddQueue.PopUnissuedTask()
 }
 
-func (sched *TaskScheduler) scheduleDmTask() task {
-	return sched.DmQueue.PopUnissuedTask()
+func (sched *taskScheduler) scheduleDmTask() task {
+	return sched.dmQueue.PopUnissuedTask()
 }
 
-func (sched *TaskScheduler) scheduleDqTask() task {
-	return sched.DqQueue.PopUnissuedTask()
+func (sched *taskScheduler) scheduleDqTask() task {
+	return sched.dqQueue.PopUnissuedTask()
 }
 
-func (sched *TaskScheduler) getTaskByReqID(collMeta UniqueID) task {
-	if t := sched.DdQueue.getTaskByReqID(collMeta); t != nil {
+func (sched *taskScheduler) getTaskByReqID(collMeta UniqueID) task {
+	if t := sched.ddQueue.getTaskByReqID(collMeta); t != nil {
 		return t
 	}
-	if t := sched.DmQueue.getTaskByReqID(collMeta); t != nil {
+	if t := sched.dmQueue.getTaskByReqID(collMeta); t != nil {
 		return t
 	}
-	if t := sched.DqQueue.getTaskByReqID(collMeta); t != nil {
+	if t := sched.dqQueue.getTaskByReqID(collMeta); t != nil {
 		return t
 	}
 	return nil
 }
 
-func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
+func (sched *taskScheduler) processTask(t task, q taskQueue) {
 	span, ctx := trace.StartSpanFromContext(t.TraceCtx(),
 		opentracing.Tags{
 			"Type": t.Name(),
@@ -469,47 +463,47 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 	err = t.PostExecute(ctx)
 }
 
-func (sched *TaskScheduler) definitionLoop() {
+func (sched *taskScheduler) definitionLoop() {
 	defer sched.wg.Done()
 	for {
 		select {
 		case <-sched.ctx.Done():
 			return
-		case <-sched.DdQueue.utChan():
-			if !sched.DdQueue.utEmpty() {
+		case <-sched.ddQueue.utChan():
+			if !sched.ddQueue.utEmpty() {
 				t := sched.scheduleDdTask()
-				sched.processTask(t, sched.DdQueue)
+				sched.processTask(t, sched.ddQueue)
 			}
 		}
 	}
 }
 
-func (sched *TaskScheduler) manipulationLoop() {
+func (sched *taskScheduler) manipulationLoop() {
 	defer sched.wg.Done()
 	for {
 		select {
 		case <-sched.ctx.Done():
 			return
-		case <-sched.DmQueue.utChan():
-			if !sched.DmQueue.utEmpty() {
+		case <-sched.dmQueue.utChan():
+			if !sched.dmQueue.utEmpty() {
 				t := sched.scheduleDmTask()
-				go sched.processTask(t, sched.DmQueue)
+				go sched.processTask(t, sched.dmQueue)
 			}
 		}
 	}
 }
 
-func (sched *TaskScheduler) queryLoop() {
+func (sched *taskScheduler) queryLoop() {
 	defer sched.wg.Done()
 
 	for {
 		select {
 		case <-sched.ctx.Done():
 			return
-		case <-sched.DqQueue.utChan():
-			if !sched.DqQueue.utEmpty() {
+		case <-sched.dqQueue.utChan():
+			if !sched.dqQueue.utEmpty() {
 				t := sched.scheduleDqTask()
-				go sched.processTask(t, sched.DqQueue)
+				go sched.processTask(t, sched.dqQueue)
 			} else {
 				log.Debug("query queue is empty ...")
 			}
@@ -561,25 +555,6 @@ func newQueryResultBuf() *queryResultBuf {
 	}
 }
 
-func setContain(m1, m2 map[interface{}]struct{}) bool {
-	log.Debug("Proxy task_scheduler setContain", zap.Any("len(m1)", len(m1)),
-		zap.Any("len(m2)", len(m2)))
-	if len(m1) < len(m2) {
-		return false
-	}
-
-	for k2 := range m2 {
-		_, ok := m1[k2]
-		log.Debug("Proxy task_scheduler setContain", zap.Any("k2", fmt.Sprintf("%v", k2)),
-			zap.Any("ok", ok))
-		if !ok {
-			return false
-		}
-	}
-
-	return true
-}
-
 func (sr *resultBufHeader) readyToReduce() bool {
 	if sr.haveError {
 		log.Debug("Proxy searchResultBuf readyToReduce", zap.Any("haveError", true))
@@ -608,7 +583,7 @@ func (sr *resultBufHeader) readyToReduce() bool {
 		sealedGlobalSegmentIDsStrMap[x.(int64)] = 1
 	}
 
-	ret1 := setContain(sr.receivedVChansSet, sr.usedVChans)
+	ret1 := funcutil.SetContain(sr.receivedVChansSet, sr.usedVChans)
 	log.Debug("Proxy searchResultBuf readyToReduce", zap.Any("receivedVChansSet", receivedVChansSetStrMap),
 		zap.Any("usedVChans", usedVChansSetStrMap),
 		zap.Any("receivedSealedSegmentIDsSet", sealedSegmentIDsStrMap),
@@ -618,7 +593,7 @@ func (sr *resultBufHeader) readyToReduce() bool {
 	if !ret1 {
 		return false
 	}
-	ret := setContain(sr.receivedSealedSegmentIDsSet, sr.receivedGlobalSegmentIDsSet)
+	ret := funcutil.SetContain(sr.receivedSealedSegmentIDsSet, sr.receivedGlobalSegmentIDsSet)
 	log.Debug("Proxy searchResultBuf readyToReduce", zap.Any("ret", ret))
 	return ret
 }
@@ -658,7 +633,7 @@ func (qr *queryResultBuf) addPartialResult(result *internalpb.RetrieveResults) {
 		result.GlobalSealedSegmentIDs)
 }
 
-func (sched *TaskScheduler) collectResultLoop() {
+func (sched *taskScheduler) collectResultLoop() {
 	defer sched.wg.Done()
 
 	queryResultMsgStream, _ := sched.msFactory.NewQueryMsgStream(sched.ctx)
@@ -862,7 +837,7 @@ func (sched *TaskScheduler) collectResultLoop() {
 	}
 }
 
-func (sched *TaskScheduler) Start() error {
+func (sched *taskScheduler) Start() error {
 	sched.wg.Add(1)
 	go sched.definitionLoop()
 
@@ -878,17 +853,17 @@ func (sched *TaskScheduler) Start() error {
 	return nil
 }
 
-func (sched *TaskScheduler) Close() {
+func (sched *taskScheduler) Close() {
 	sched.cancel()
 	sched.wg.Wait()
 }
 
-func (sched *TaskScheduler) TaskDoneTest(ts Timestamp) bool {
-	ddTaskDone := sched.DdQueue.TaskDoneTest(ts)
-	dmTaskDone := sched.DmQueue.TaskDoneTest(ts)
+func (sched *taskScheduler) TaskDoneTest(ts Timestamp) bool {
+	ddTaskDone := sched.ddQueue.TaskDoneTest(ts)
+	dmTaskDone := sched.dmQueue.TaskDoneTest(ts)
 	return ddTaskDone && dmTaskDone
 }
 
-func (sched *TaskScheduler) getPChanStatistics() (map[pChan]*pChanStatistics, error) {
-	return sched.DmQueue.getPChanStatsInfo()
+func (sched *taskScheduler) getPChanStatistics() (map[pChan]*pChanStatistics, error) {
+	return sched.dmQueue.getPChanStatsInfo()
 }

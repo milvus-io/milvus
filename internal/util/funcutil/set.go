@@ -9,13 +9,20 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package grpcconfigs
+package funcutil
 
-import "math"
+// SetContain returns true if set m1 contains set m2
+func SetContain(m1, m2 map[interface{}]struct{}) bool {
+	if len(m1) < len(m2) {
+		return false
+	}
 
-const (
-	DefaultServerMaxSendSize = math.MaxInt32
-	DefaultServerMaxRecvSize = math.MaxInt32
-	DefaultClientMaxSendSize = 100 * 1024 * 1024
-	DefaultClientMaxRecvSize = 100 * 1024 * 1024
-)
+	for k2 := range m2 {
+		_, ok := m1[k2]
+		if !ok {
+			return false
+		}
+	}
+
+	return true
+}

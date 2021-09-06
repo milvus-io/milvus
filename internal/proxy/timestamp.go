@@ -20,11 +20,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 )
 
-// use timestampAllocatorInterface to keep TimestampAllocator testable
-type timestampAllocatorInterface interface {
-	AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error)
-}
-
 type TimestampAllocator struct {
 	ctx    context.Context
 	tso    timestampAllocatorInterface

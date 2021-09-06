@@ -9,13 +9,24 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package grpcconfigs
+package proxy
 
-import "math"
+import (
+	"testing"
 
-const (
-	DefaultServerMaxSendSize = math.MaxInt32
-	DefaultServerMaxRecvSize = math.MaxInt32
-	DefaultClientMaxSendSize = 100 * 1024 * 1024
-	DefaultClientMaxRecvSize = 100 * 1024 * 1024
+	"github.com/stretchr/testify/assert"
 )
+
+func TestNaiveUniqueIntGenerator_get(t *testing.T) {
+	exists := make(map[int]bool)
+	num := 10
+
+	generator := newNaiveUniqueIntGenerator()
+
+	for i := 0; i < num; i++ {
+		g := generator.get()
+		_, ok := exists[g]
+		assert.False(t, ok)
+		exists[g] = true
+	}
+}

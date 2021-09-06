@@ -100,7 +100,6 @@ type dmlTask interface {
 	task
 	getChannels() ([]vChan, error)
 	getPChanStats() (map[pChan]pChanStatistics, error)
-	getChannelsTimerTicker() channelsTimeTicker
 }
 
 type BaseInsertTask = msgstream.InsertMsg
@@ -155,10 +154,6 @@ func (it *InsertTask) EndTs() Timestamp {
 	return it.EndTimestamp
 }
 
-func (it *InsertTask) getChannelsTimerTicker() channelsTimeTicker {
-	return it.chTicker
-}
-
 func (it *InsertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
 	ret := make(map[pChan]pChanStatistics)
 
@@ -192,6 +187,17 @@ func (it *InsertTask) getChannels() ([]pChan, error) {
 			return nil, err
 		}
 		channels, err = it.chMgr.getChannels(collID)
+		if err == nil {
+			for _, pchan := range channels {
+				err := it.chTicker.addPChan(pchan)
+				if err != nil {
+					log.Warn("failed to add pchan to channels time ticker",
+						zap.Error(err),
+						zap.Int64("collection id", collID),
+						zap.String("pchan", pchan))
+				}
+			}
+		}
 	}
 	return channels, err
 }
@@ -1022,6 +1028,17 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 			it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			it.result.Status.Reason = err.Error()
 			return err
+		}
+		channels, err := it.chMgr.getChannels(collID)
+		if err == nil {
+			for _, pchan := range channels {
+				err := it.chTicker.addPChan(pchan)
+				if err != nil {
+					log.Warn("failed to add pchan to channels time ticker",
+						zap.Error(err),
+						zap.String("pchan", pchan))
+				}
+			}
 		}
 		stream, err = it.chMgr.getDMLStream(collID)
 		if err != nil {
