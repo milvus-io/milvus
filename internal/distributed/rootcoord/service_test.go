@@ -313,6 +313,29 @@ func TestGrpcService(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 	})
 
+	t.Run("update channel timetick", func(t *testing.T) {
+		req := &internalpb.ChannelTimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_TimeTick,
+			},
+		}
+		status, err := svr.UpdateChannelTimeTick(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	})
+
+	t.Run("release DQL msg stream", func(t *testing.T) {
+		req := &proxypb.ReleaseDQLMessageStreamRequest{}
+		assert.Panics(t, func() { svr.ReleaseDQLMessageStream(ctx, req) })
+	})
+
+	t.Run("get metrics", func(t *testing.T) {
+		req := &milvuspb.GetMetricsRequest{}
+		rsp, err := svr.GetMetrics(ctx, req)
+		assert.Nil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+	})
+
 	t.Run("create collection", func(t *testing.T) {
 		schema := schemapb.CollectionSchema{
 			Name:   collName,
