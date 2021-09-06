@@ -137,6 +137,10 @@ func TestCalcFloatDistance(t *testing.T) {
 	distances, err := CalcFloatDistance(dim, left, right, "L2")
 	assert.Nil(t, err)
 
+	invalid := CreateFloatArray(rightNum, 10)
+	_, err = CalcFloatDistance(dim, left, invalid, "L2")
+	assert.Error(t, err)
+
 	for i := int64(0); i < leftNum; i++ {
 		for j := int64(0); j < rightNum; j++ {
 			v1 := left[i*dim : (i+1)*dim]
@@ -224,13 +228,6 @@ func TestCalcHamming(t *testing.T) {
 	v2[2] = 27
 	n := CalcHamming(dim, v1, 0, v2, 0)
 	assert.Equal(t, n, int32(4))
-
-	hamming := make([]int32, 1)
-	hamming[0] = n
-	tanimoto, err := CalcTanimotoCoefficient(dim, hamming)
-	realTanimoto := float64(int32(dim)-n) / (float64(dim)*2.0 - float64(int32(dim)-n))
-	assert.Nil(t, err)
-	assert.Less(t, math.Abs(float64(tanimoto[0])-realTanimoto), float64(PRECISION))
 }
 
 func TestCalcHamminDistance(t *testing.T) {
@@ -256,4 +253,31 @@ func TestCalcHamminDistance(t *testing.T) {
 
 	n = CalcHamming(dim, left, 1, left, 0)
 	assert.Equal(t, n, distances[2])
+
+	invalid := CreateBinaryArray(leftNum, 200)
+	_, e = CalcHammingDistance(dim, invalid, left)
+	assert.Error(t, e)
+
+	_, e = CalcHammingDistance(dim, left, invalid)
+	assert.Error(t, e)
+}
+
+func TestCalcTanimotoCoefficient(t *testing.T) {
+	var dim int64 = 22
+	hamming := make([]int32, 2)
+	hamming[0] = 4
+	hamming[1] = 17
+	tanimoto, err := CalcTanimotoCoefficient(dim, hamming)
+
+	for i := 0; i < len(hamming); i++ {
+		realTanimoto := float64(int32(dim)-hamming[i]) / (float64(dim)*2.0 - float64(int32(dim)-hamming[i]))
+		assert.Nil(t, err)
+		assert.Less(t, math.Abs(float64(tanimoto[i])-realTanimoto), float64(PRECISION))
+	}
+
+	_, err = CalcTanimotoCoefficient(-1, hamming)
+	assert.Error(t, err)
+
+	_, err = CalcTanimotoCoefficient(3, hamming)
+	assert.Error(t, err)
 }
