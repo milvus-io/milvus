@@ -104,6 +104,7 @@ func (i *IndexCoord) Register() error {
 
 func (i *IndexCoord) Init() error {
 	log.Debug("IndexCoord", zap.Any("etcd endpoints", Params.EtcdEndpoints))
+	i.UpdateStateCode(internalpb.StateCode_Initializing)
 
 	connectEtcdFn := func() error {
 		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
@@ -191,9 +192,6 @@ func (i *IndexCoord) Init() error {
 
 	i.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
-	i.UpdateStateCode(internalpb.StateCode_Healthy)
-	log.Debug("IndexCoord", zap.Any("State", i.stateCode.Load()))
-
 	log.Debug("IndexCoord assign tasks server success", zap.Error(err))
 	return nil
 }
@@ -219,7 +217,9 @@ func (i *IndexCoord) Start() error {
 	for _, cb := range i.startCallbacks {
 		cb()
 	}
-	log.Debug("IndexCoord start")
+	i.UpdateStateCode(internalpb.StateCode_Healthy)
+	log.Debug("IndexCoord", zap.Any("State", i.stateCode.Load()))
+	log.Debug("IndexCoord start successfully")
 
 	return nil
 }
@@ -227,6 +227,7 @@ func (i *IndexCoord) Start() error {
 func (i *IndexCoord) Stop() error {
 	i.loopCancel()
 	i.sched.Close()
+	i.loopWg.Wait()
 	for _, cb := range i.closeCallbacks {
 		cb()
 	}
@@ -699,7 +700,7 @@ func (i *IndexCoord) assignTaskLoop() {
 			if err != nil {
 				log.Debug("IndexCoord assignTaskLoop", zap.Any("GetSessions error", err))
 			}
-			if len(i.nodeManager.nodeClients) <= 0 {
+			if len(sessions) <= 0 {
 				log.Debug("There is no IndexNode available as this time.")
 				break
 			}

@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/types"
+
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -37,7 +39,7 @@ type UniqueID = typeutil.UniqueID
 type Timestamp = typeutil.Timestamp
 
 type Server struct {
-	indexcoord *indexcoord.IndexCoord
+	indexcoord types.IndexCoord
 
 	grpcServer  *grpc.Server
 	grpcErrChan chan error
@@ -82,8 +84,6 @@ func (s *Server) init() error {
 		log.Error("IndexCoord", zap.Any("init error", err))
 		return err
 	}
-	s.indexcoord.UpdateStateCode(internalpb.StateCode_Initializing)
-
 	if err := s.indexcoord.Init(); err != nil {
 		log.Error("IndexCoord", zap.Any("init error", err))
 		return err
@@ -115,6 +115,11 @@ func (s *Server) Stop() error {
 	}
 
 	s.loopWg.Wait()
+	return nil
+}
+
+func (s *Server) SetClient(indexCoordClient types.IndexCoord) error {
+	s.indexcoord = indexCoordClient
 	return nil
 }
 
