@@ -22,9 +22,9 @@ jobs:
           sudo git clone https://.:${{ secrets.ALL_CONTRIBUTORS_TOKEN }}@github.com/${{ github.repository }}.git
           git config --global user.email "sre-ci-robot@zilliz.com"
           git config --global user.name "sre-ci-robot"
-          export reponame=${{ github.repository }}
-          sudo chmod -R 777 ${reponame##*/}
-          cd ${reponame##*/}
+          sudo chmod -R 777 milvus
+          cd milvus
+          pwd
           
       - name: Update README.md
         uses: milvus-io/hero-bot@dco-enabled
@@ -37,6 +37,7 @@ jobs:
           isAscend: True
           width: '30px'
           customUserConfig: 'milvus-io/milvus/.contributors'
+          workingDir: '/home/runner/work/milvus/milvus/milvus'
           
       - name: Update README_CN.md
         uses: milvus-io/hero-bot@dco-enabled
@@ -49,10 +50,11 @@ jobs:
           isAscend: True
           width: '30px'
           customUserConfig: 'milvus-io/milvus/.contributors'
+          workingDir: '/home/runner/work/milvus/milvus/milvus'
     
       - name: commit code
         run: |
-          cd ${{ github.event.repository.name }}
+          cd milvus
           pwd
           git add -u
           git commit -s -m 'Update all contributors'
