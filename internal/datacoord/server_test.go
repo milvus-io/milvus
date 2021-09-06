@@ -11,6 +11,7 @@ package datacoord
 
 import (
 	"context"
+	"errors"
 	"math/rand"
 	"os"
 	"path"
@@ -19,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -61,16 +63,15 @@ func TestAssignSegmentID(t *testing.T) {
 	const channel0 = "channel0"
 	const channel1 = "channel1"
 
-	svr := newTestServer(t, nil)
-	defer closeTestServer(t, svr)
-	schema := newTestSchema()
-	svr.meta.AddCollection(&datapb.CollectionInfo{
-		ID:         collID,
-		Schema:     schema,
-		Partitions: []int64{},
-	})
-
 	t.Run("assign segment normally", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		schema := newTestSchema()
+		svr.meta.AddCollection(&datapb.CollectionInfo{
+			ID:         collID,
+			Schema:     schema,
+			Partitions: []int64{},
+		})
 		req := &datapb.SegmentIDRequest{
 			Count:        1000,
 			ChannelName:  channel0,
@@ -113,6 +114,14 @@ func TestAssignSegmentID(t *testing.T) {
 	})
 
 	t.Run("assign segment with invalid collection", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		schema := newTestSchema()
+		svr.meta.AddCollection(&datapb.CollectionInfo{
+			ID:         collID,
+			Schema:     schema,
+			Partitions: []int64{},
+		})
 		req := &datapb.SegmentIDRequest{
 			Count:        1000,
 			ChannelName:  channel0,
@@ -221,55 +230,57 @@ func TestGetStatisticsChannel(t *testing.T) {
 }
 
 func TestGetSegmentStates(t *testing.T) {
-	svr := newTestServer(t, nil)
-	defer closeTestServer(t, svr)
-	segment := &datapb.SegmentInfo{
-		ID:            1000,
-		CollectionID:  100,
-		PartitionID:   0,
-		InsertChannel: "c1",
-		NumOfRows:     0,
-		State:         commonpb.SegmentState_Growing,
-		StartPosition: &internalpb.MsgPosition{
-			ChannelName: "c1",
-			MsgID:       []byte{},
-			MsgGroup:    "",
-			Timestamp:   0,
-		},
-	}
-	err := svr.meta.AddSegment(NewSegmentInfo(segment))
-	assert.Nil(t, err)
+	t.Run("normal cases", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		segment := &datapb.SegmentInfo{
+			ID:            1000,
+			CollectionID:  100,
+			PartitionID:   0,
+			InsertChannel: "c1",
+			NumOfRows:     0,
+			State:         commonpb.SegmentState_Growing,
+			StartPosition: &internalpb.MsgPosition{
+				ChannelName: "c1",
+				MsgID:       []byte{},
+				MsgGroup:    "",
+				Timestamp:   0,
+			},
+		}
+		err := svr.meta.AddSegment(NewSegmentInfo(segment))
+		assert.Nil(t, err)
 
-	cases := []struct {
-		description   string
-		id            UniqueID
-		expected      bool
-		expectedState commonpb.SegmentState
-	}{
-		{"get existed segment", 1000, true, commonpb.SegmentState_Growing},
-		{"get non-existed segment", 10, false, commonpb.SegmentState_Growing},
-	}
+		cases := []struct {
+			description   string
+			id            UniqueID
+			expected      bool
+			expectedState commonpb.SegmentState
+		}{
+			{"get existed segment", 1000, true, commonpb.SegmentState_Growing},
+			{"get non-existed segment", 10, false, commonpb.SegmentState_Growing},
+		}
 
-	for _, test := range cases {
-		t.Run(test.description, func(t *testing.T) {
-			resp, err := svr.GetSegmentStates(context.TODO(), &datapb.GetSegmentStatesRequest{
-				Base: &commonpb.MsgBase{
-					MsgType:   0,
-					MsgID:     0,
-					Timestamp: 0,
-					SourceID:  0,
-				},
-				SegmentIDs: []int64{test.id},
+		for _, test := range cases {
+			t.Run(test.description, func(t *testing.T) {
+				resp, err := svr.GetSegmentStates(context.TODO(), &datapb.GetSegmentStatesRequest{
+					Base: &commonpb.MsgBase{
+						MsgType:   0,
+						MsgID:     0,
+						Timestamp: 0,
+						SourceID:  0,
+					},
+					SegmentIDs: []int64{test.id},
+				})
+				assert.Nil(t, err)
+				assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+				assert.EqualValues(t, 1, len(resp.States))
+				if test.expected {
+					assert.EqualValues(t, commonpb.ErrorCode_Success, resp.States[0].Status.ErrorCode)
+					assert.EqualValues(t, test.expectedState, resp.States[0].State)
+				}
 			})
-			assert.Nil(t, err)
-			assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-			assert.EqualValues(t, 1, len(resp.States))
-			if test.expected {
-				assert.EqualValues(t, commonpb.ErrorCode_Success, resp.States[0].Status.ErrorCode)
-				assert.EqualValues(t, test.expectedState, resp.States[0].State)
-			}
-		})
-	}
+		}
+	})
 
 	t.Run("with closed server", func(t *testing.T) {
 		svr := newTestServer(t, nil)
@@ -704,45 +715,46 @@ func TestChannel(t *testing.T) {
 }
 
 func TestSaveBinlogPaths(t *testing.T) {
-	svr := newTestServer(t, nil)
-	defer closeTestServer(t, svr)
-
-	collections := []struct {
-		ID         UniqueID
-		Partitions []int64
-	}{
-		{0, []int64{0, 1}},
-		{1, []int64{0, 1}},
-	}
-
-	for _, collection := range collections {
-		svr.meta.AddCollection(&datapb.CollectionInfo{
-			ID:         collection.ID,
-			Schema:     nil,
-			Partitions: collection.Partitions,
-		})
-	}
-
-	segments := []struct {
-		id           UniqueID
-		collectionID UniqueID
-		partitionID  UniqueID
-	}{
-		{0, 0, 0},
-		{1, 0, 0},
-		{2, 0, 1},
-		{3, 1, 1},
-	}
-	for _, segment := range segments {
-		s := &datapb.SegmentInfo{
-			ID:           segment.id,
-			CollectionID: segment.collectionID,
-			PartitionID:  segment.partitionID,
-		}
-		err := svr.meta.AddSegment(NewSegmentInfo(s))
-		assert.Nil(t, err)
-	}
 	t.Run("Normal SaveRequest", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		collections := []struct {
+			ID         UniqueID
+			Partitions []int64
+		}{
+			{0, []int64{0, 1}},
+			{1, []int64{0, 1}},
+		}
+
+		for _, collection := range collections {
+			svr.meta.AddCollection(&datapb.CollectionInfo{
+				ID:         collection.ID,
+				Schema:     nil,
+				Partitions: collection.Partitions,
+			})
+		}
+
+		segments := []struct {
+			id           UniqueID
+			collectionID UniqueID
+			partitionID  UniqueID
+		}{
+			{0, 0, 0},
+			{1, 0, 0},
+			{2, 0, 1},
+			{3, 1, 1},
+		}
+		for _, segment := range segments {
+			s := &datapb.SegmentInfo{
+				ID:           segment.id,
+				CollectionID: segment.collectionID,
+				PartitionID:  segment.partitionID,
+			}
+			err := svr.meta.AddSegment(NewSegmentInfo(s))
+			assert.Nil(t, err)
+		}
+
 		ctx := context.Background()
 		resp, err := svr.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
 			Base: &commonpb.MsgBase{
@@ -1118,14 +1130,15 @@ func TestGetVChannelPos(t *testing.T) {
 }
 
 func TestGetRecoveryInfo(t *testing.T) {
-	svr := newTestServer(t, nil)
-	defer closeTestServer(t, svr)
-
-	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
-		return newMockRootCoordService(), nil
-	}
 
 	t.Run("test get recovery info with no segments", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
+			return newMockRootCoordService(), nil
+		}
+
 		req := &datapb.GetRecoveryInfoRequest{
 			CollectionID: 0,
 			PartitionID:  0,
@@ -1162,6 +1175,13 @@ func TestGetRecoveryInfo(t *testing.T) {
 	}
 
 	t.Run("test get largest position of flushed segments as seek position", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
+			return newMockRootCoordService(), nil
+		}
+
 		seg1 := createSegment(0, 0, 0, 100, 10, "vchan1", commonpb.SegmentState_Flushed)
 		seg2 := createSegment(1, 0, 0, 100, 20, "vchan1", commonpb.SegmentState_Flushed)
 		err := svr.meta.AddSegment(NewSegmentInfo(seg1))
@@ -1183,6 +1203,13 @@ func TestGetRecoveryInfo(t *testing.T) {
 	})
 
 	t.Run("test get recovery of unflushed segments ", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
+			return newMockRootCoordService(), nil
+		}
+
 		seg1 := createSegment(3, 0, 0, 100, 30, "vchan1", commonpb.SegmentState_Growing)
 		seg2 := createSegment(4, 0, 0, 100, 40, "vchan1", commonpb.SegmentState_Growing)
 		err := svr.meta.AddSegment(NewSegmentInfo(seg1))
@@ -1203,6 +1230,13 @@ func TestGetRecoveryInfo(t *testing.T) {
 	})
 
 	t.Run("test get binlogs", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
+			return newMockRootCoordService(), nil
+		}
+
 		binlogReq := &datapb.SaveBinlogPathsRequest{
 			SegmentID:    0,
 			CollectionID: 0,
@@ -1244,6 +1278,169 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+	})
+}
+
+func TestOptions(t *testing.T) {
+	t.Run("SetRootCoordCreator", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		var crt rootCoordCreatorFunc = func(ctx context.Context, metaRoot string, endpoints []string) (types.RootCoord, error) {
+			return nil, errors.New("dummy")
+		}
+		opt := SetRootCoordCreator(crt)
+		assert.NotNil(t, opt)
+		svr.rootCoordClientCreator = nil
+		opt(svr)
+		// testify cannot compare function directly
+		// the behavior is actually undefined
+		assert.NotNil(t, crt)
+		assert.NotNil(t, svr.rootCoordClientCreator)
+	})
+	t.Run("SetCluster", func(t *testing.T) {
+
+		registerPolicy := newEmptyRegisterPolicy()
+		ch := make(chan interface{})
+		kv := memkv.NewMemoryKV()
+		spyClusterStore := &SpyClusterStore{
+			NodesInfo: NewNodesInfo(),
+			ch:        ch,
+		}
+		cluster, err := NewCluster(context.TODO(), kv, spyClusterStore, dummyPosProvider{}, withRegisterPolicy(registerPolicy))
+		assert.Nil(t, err)
+		opt := SetCluster(cluster)
+		assert.NotNil(t, opt)
+		svr := newTestServer(t, nil, opt)
+		defer closeTestServer(t, svr)
+
+		assert.Equal(t, cluster, svr.cluster)
+	})
+}
+
+func TestHandleSessionEvent(t *testing.T) {
+	registerPolicy := newEmptyRegisterPolicy()
+	unregisterPolicy := newEmptyUnregisterPolicy()
+	ch := make(chan interface{})
+	kv := memkv.NewMemoryKV()
+	spyClusterStore := &SpyClusterStore{
+		NodesInfo: NewNodesInfo(),
+		ch:        ch,
+	}
+	cluster, err := NewCluster(context.TODO(), kv, spyClusterStore,
+		dummyPosProvider{},
+		withRegisterPolicy(registerPolicy),
+		withUnregistorPolicy(unregisterPolicy))
+	assert.Nil(t, err)
+	defer cluster.Close()
+
+	cluster.Startup(nil)
+
+	svr := newTestServer(t, nil, SetCluster(cluster))
+	defer closeTestServer(t, svr)
+	t.Run("handle events", func(t *testing.T) {
+		// None event
+		evt := &sessionutil.SessionEvent{
+			EventType: sessionutil.SessionNoneEvent,
+			Session: &sessionutil.Session{
+				ServerID:   0,
+				ServerName: "",
+				Address:    "",
+				Exclusive:  false,
+			},
+		}
+		svr.handleSessionEvent(context.Background(), evt)
+
+		evt = &sessionutil.SessionEvent{
+			EventType: sessionutil.SessionAddEvent,
+			Session: &sessionutil.Session{
+				ServerID:   101,
+				ServerName: "DN101",
+				Address:    "DN127.0.0.101",
+				Exclusive:  false,
+			},
+		}
+		svr.handleSessionEvent(context.Background(), evt)
+		<-ch
+		dataNodes := svr.cluster.GetNodes()
+		assert.EqualValues(t, 1, len(dataNodes))
+		assert.EqualValues(t, "DN127.0.0.101", dataNodes[0].Info.GetAddress())
+
+		evt = &sessionutil.SessionEvent{
+			EventType: sessionutil.SessionDelEvent,
+			Session: &sessionutil.Session{
+				ServerID:   101,
+				ServerName: "DN101",
+				Address:    "DN127.0.0.101",
+				Exclusive:  false,
+			},
+		}
+		svr.handleSessionEvent(context.Background(), evt)
+		<-ch
+		dataNodes = svr.cluster.GetNodes()
+		assert.EqualValues(t, 0, len(dataNodes))
+	})
+
+	t.Run("nil evt", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			svr.handleSessionEvent(context.Background(), nil)
+		})
+	})
+}
+
+type rootCoordSegFlushComplete struct {
+	mockRootCoordService
+	flag bool
+}
+
+//SegmentFlushCompleted, override default behavior
+func (rc *rootCoordSegFlushComplete) SegmentFlushCompleted(ctx context.Context, req *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
+	if rc.flag {
+		return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+	}
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
+}
+
+func TestPostFlush(t *testing.T) {
+	t.Run("segment not found", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		err := svr.postFlush(context.Background(), 1)
+		assert.EqualValues(t, errors.New("segment not found"), err)
+	})
+	t.Run("failed to sync with Rootcoord", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		svr.rootCoordClient = &rootCoordSegFlushComplete{flag: false}
+
+		err := svr.meta.AddSegment(NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 1,
+			PartitionID:  1,
+			State:        commonpb.SegmentState_Flushing,
+		}))
+
+		assert.Nil(t, err)
+
+		err = svr.postFlush(context.Background(), 1)
+		assert.NotNil(t, err)
+	})
+	t.Run("success post flush", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		svr.rootCoordClient = &rootCoordSegFlushComplete{flag: true}
+
+		err := svr.meta.AddSegment(NewSegmentInfo(&datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 1,
+			PartitionID:  1,
+			State:        commonpb.SegmentState_Flushing,
+		}))
+
+		assert.Nil(t, err)
+
+		err = svr.postFlush(context.Background(), 1)
+		assert.Nil(t, err)
 	})
 }
 

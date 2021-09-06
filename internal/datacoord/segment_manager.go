@@ -19,7 +19,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
@@ -454,44 +453,4 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 		}
 	}
 	return nil
-}
-
-// only for test
-func (s *SegmentManager) SealSegment(ctx context.Context, segmentID UniqueID) error {
-	sp, _ := trace.StartSpanFromContext(ctx)
-	defer sp.Finish()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.meta.SetState(segmentID, commonpb.SegmentState_Sealed); err != nil {
-		return err
-	}
-	return nil
-}
-
-func createNewSegmentHelper(stream msgstream.MsgStream) allocHelper {
-	h := allocHelper{}
-	h.afterCreateSegment = func(segment *datapb.SegmentInfo) error {
-		infoMsg := &msgstream.SegmentInfoMsg{
-			BaseMsg: msgstream.BaseMsg{
-				HashValues: []uint32{0},
-			},
-			SegmentMsg: datapb.SegmentMsg{
-				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_SegmentInfo,
-					MsgID:     0,
-					Timestamp: 0,
-					SourceID:  Params.NodeID,
-				},
-				Segment: segment,
-			},
-		}
-		msgPack := &msgstream.MsgPack{
-			Msgs: []msgstream.TsMsg{infoMsg},
-		}
-		if err := stream.Produce(msgPack); err != nil {
-			return err
-		}
-		return nil
-	}
-	return h
 }
