@@ -419,9 +419,10 @@ func TestRootCoord(t *testing.T) {
 		dmlStream.Start()
 
 		// get CreateCollectionMsg
-		msgPack, ok := <-dmlStream.Chan()
-		assert.True(t, ok)
-		createMsg, ok := (msgPack.Msgs[0]).(*msgstream.CreateCollectionMsg)
+		// get CreateCollectionMsg
+		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
+		assert.Equal(t, 1, len(msgs))
+		createMsg, ok := (msgs[0]).(*msgstream.CreateCollectionMsg)
 		assert.True(t, ok)
 		createMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
