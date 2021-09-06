@@ -29,11 +29,12 @@ import (
 
 type UniqueID = typeutil.UniqueID
 
+var RocksmqPageSize int64 = 2 << 30
+
 const (
 	DefaultMessageID        = "-1"
 	FixedChannelNameLen     = 320
 	RocksDBLRUCacheCapacity = 3 << 30
-	RocksmqPageSize         = 2 << 30
 
 	kvSuffix = "_meta_kv"
 
@@ -275,19 +276,6 @@ func (rmq *rocksmq) DestroyTopic(topicName string) error {
 
 func (rmq *rocksmq) ExistConsumerGroup(topicName, groupName string) (bool, *Consumer) {
 	key := groupName + "/" + topicName + "/current_id"
-	// keyExist := false
-	// if ll, ok := topicMu.Load(topicName); !ok {
-	// 	keyExist = rmq.checkKeyExist(key)
-	// } else {
-	// 	if lock, lok := ll.(*sync.Mutex); lok {
-	// 		lock.Lock()
-	// 		defer lock.Unlock()
-	// 		keyExist = rmq.checkKeyExist(key)
-	// 	} else {
-	// 		keyExist = rmq.checkKeyExist(key)
-	// 	}
-	// }
-
 	if rmq.checkKeyExist(key) {
 		if vals, ok := rmq.consumers.Load(topicName); ok {
 			for _, v := range vals.([]*Consumer) {
@@ -376,22 +364,23 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) error 
 	}
 
 	if UniqueID(msgLen) != idEnd-idStart {
-		log.Debug("RocksMQ: Obtained id length is not equal that of message")
 		return errors.New("Obtained id length is not equal that of message")
 	}
 
 	/* Step I: Insert data to store system */
 	batch := gorocksdb.NewWriteBatch()
 	msgSizes := make(map[UniqueID]int64)
+	msgIDs := make([]UniqueID, msgLen)
 	for i := 0; i < msgLen && idStart+UniqueID(i) < idEnd; i++ {
-		key, err := combKey(topicName, idStart+UniqueID(i))
+		msgID := idStart + UniqueID(i)
+		key, err := combKey(topicName, msgID)
 		if err != nil {
-			log.Debug("RocksMQ: combKey(" + topicName + "," + strconv.FormatInt(idStart+UniqueID(i), 10) + ")")
 			return err
 		}
 
 		batch.Put([]byte(key), messages[i].Payload)
-		msgSizes[idStart+UniqueID(i)] = int64(len(messages[i].Payload))
+		msgIDs[i] = msgID
+		msgSizes[msgID] = int64(len(messages[i].Payload))
 	}
 
 	err = rmq.store.Write(gorocksdb.NewDefaultWriteOptions(), batch)
@@ -438,14 +427,14 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) error 
 
 	// Update message page info
 	// TODO(yukun): Should this be in a go routine
-	err = rmq.UpdatePageInfo(topicName, msgSizes)
+	err = rmq.UpdatePageInfo(topicName, msgIDs, msgSizes)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (rmq *rocksmq) UpdatePageInfo(topicName string, msgSizes map[UniqueID]int64) error {
+func (rmq *rocksmq) UpdatePageInfo(topicName string, msgIDs []UniqueID, msgSizes map[UniqueID]int64) error {
 	msgSizeKey := MessageSizeTitle + topicName
 	msgSizeVal, err := rmq.kv.Load(msgSizeKey)
 	if err != nil {
@@ -459,11 +448,12 @@ func (rmq *rocksmq) UpdatePageInfo(topicName string, msgSizes map[UniqueID]int64
 	if err != nil {
 		return err
 	}
-	for k, v := range msgSizes {
-		if curMsgSize+v > RocksmqPageSize {
+	for _, id := range msgIDs {
+		msgSize := msgSizes[id]
+		if curMsgSize+msgSize > RocksmqPageSize {
 			// Current page is full
-			newPageSize := curMsgSize + v
-			pageEndID := k
+			newPageSize := curMsgSize + msgSize
+			pageEndID := id
 			// Update page message size for current page. key is page end ID
 			pageMsgSizeKey := fixedPageSizeKey + "/" + strconv.FormatInt(pageEndID, 10)
 			err := rmq.kv.Save(pageMsgSizeKey, strconv.FormatInt(newPageSize, 10))
@@ -484,7 +474,7 @@ func (rmq *rocksmq) UpdatePageInfo(topicName string, msgSizes map[UniqueID]int64
 			}
 			curMsgSize = 0
 		} else {
-			curMsgSize += v
+			curMsgSize += msgSize
 			// Update message size to current message size
 			err := rmq.kv.Save(msgSizeKey, strconv.FormatInt(curMsgSize, 10))
 			if err != nil {
@@ -629,7 +619,7 @@ func (rmq *rocksmq) Notify(topicName, groupName string) {
 }
 
 func (rmq *rocksmq) UpdateAckedInfo(topicName, groupName string, newID UniqueID, msgSize int64) error {
-	ll, ok := rmq.ackedMu.Load(topicName)
+	ll, ok := topicMu.Load(topicName)
 	if !ok {
 		return fmt.Errorf("topic name = %s not exist", topicName)
 	}
@@ -684,6 +674,11 @@ func (rmq *rocksmq) UpdateAckedInfo(topicName, groupName string, newID UniqueID,
 		err = rmq.kv.Save(ackedTsKey, strconv.FormatInt(ts, 10))
 		if err != nil {
 			return err
+		}
+		if info, ok := rmq.retentionInfo.ackedInfo.Load(topicName); ok {
+			ackedInfo := info.(*topicAckedInfo)
+			ackedInfo.ackedTs[minBeginID] = ts
+			rmq.retentionInfo.ackedInfo.Store(topicName, ackedInfo)
 		}
 		if minBeginID == newID {
 			// Means the begin_id of topic update to newID, so needs to update acked size

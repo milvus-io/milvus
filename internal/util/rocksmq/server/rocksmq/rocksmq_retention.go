@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
@@ -27,7 +28,6 @@ import (
 var RocksmqRetentionTimeInMinutes int64
 var RocksmqRetentionSizeInMB int64
 var TickerTimeInMinutes int64 = 1
-var CheckTimeInterval int64 = 6
 
 const (
 	MB     = 2 << 20
@@ -194,10 +194,6 @@ func (ri *retentionInfo) loadRetentionInfo(topic string, wg *sync.WaitGroup) {
 		log.Debug("PrefixLoad failed", zap.Any("error", err))
 		return
 	}
-	if len(keys) != len(vals) {
-		log.Debug("LoadWithPrefix return unequal value length of keys and values")
-		return
-	}
 
 	for i, key := range keys {
 		offset := FixedChannelNameLen + 1
@@ -260,13 +256,13 @@ func (ri *retentionInfo) retention() error {
 			return nil
 		case t := <-ticker.C:
 			timeNow := t.Unix()
-			checkTime := RocksmqRetentionTimeInMinutes * MINUTE / 10
-			log.Debug("A retention triggered by time ticker: ", zap.Any("ticker", timeNow))
+			checkTime := atomic.LoadInt64(&RocksmqRetentionTimeInMinutes) * 60 / 10
+			log.Debug("In ticker: ", zap.Any("ticker", timeNow))
 			ri.lastRetentionTime.Range(func(k, v interface{}) bool {
 				if v.(int64)+checkTime < timeNow {
 					err := ri.expiredCleanUp(k.(string))
 					if err != nil {
-						panic(err)
+						log.Warn("Retention expired clean failed", zap.Any("error", err))
 					}
 				}
 				return true
@@ -360,11 +356,11 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 			break
 		}
 	}
-	if endID == 0 {
-		log.Debug("All messages are not expired", zap.Any("topic", topic))
-		return nil
-	}
 	log.Debug("Expired check by retention time", zap.Any("topic", topic), zap.Any("startID", startID), zap.Any("endID", endID), zap.Any("deletedAckedSize", deletedAckedSize))
+	// if endID == 0 {
+	// 	log.Debug("All messages are not expired")
+	// 	return nil
+	// }
 
 	// Delete page message size in rocksdb_kv
 	if pageInfo != nil {
@@ -405,6 +401,10 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 			pageInfo.pageEndID = pageInfo.pageEndID[pageRetentionOffset:]
 		}
 		ri.pageInfo.Store(topic, pageInfo)
+	}
+	if endID == 0 {
+		log.Debug("All messages are not expired")
+		return nil
 	}
 	log.Debug("ExpiredCleanUp: ", zap.Any("topic", topic), zap.Any("startID", startID), zap.Any("endID", endID), zap.Any("deletedAckedSize", deletedAckedSize))
 
@@ -483,9 +483,9 @@ func DeleteMessages(db *gorocksdb.DB, topic string, startID, endID UniqueID) err
 }
 
 func msgTimeExpiredCheck(ackedTs int64) bool {
-	return ackedTs+RocksmqRetentionTimeInMinutes*MINUTE < time.Now().Unix()
+	return ackedTs+atomic.LoadInt64(&RocksmqRetentionTimeInMinutes)*MINUTE < time.Now().Unix()
 }
 
 func msgSizeExpiredCheck(deletedAckedSize, ackedSize int64) bool {
-	return ackedSize-deletedAckedSize > RocksmqRetentionSizeInMB*MB
+	return ackedSize-deletedAckedSize > atomic.LoadInt64(&RocksmqRetentionSizeInMB)*MB
 }
