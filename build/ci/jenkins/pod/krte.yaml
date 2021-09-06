@@ -24,11 +24,11 @@ spec:
       limits:
         cpu: "6"
         memory: 12Gi
-        ephemeral-storage: "50Gi"
+        ephemeral-storage: "100Gi"
       requests:
         cpu: "3"
         memory: 10Gi
-        ephemeral-storage: "50Gi"
+        ephemeral-storage: "100Gi"
     volumeMounts:
     - mountPath: /docker-graph
       name: docker-graph
