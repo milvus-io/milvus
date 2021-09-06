@@ -93,6 +93,25 @@ func TestAssignSegmentID(t *testing.T) {
 		assert.EqualValues(t, 1000, assign.Count)
 	})
 
+	t.Run("with closed server", func(t *testing.T) {
+		req := &datapb.SegmentIDRequest{
+			Count:        100,
+			ChannelName:  channel0,
+			CollectionID: collID,
+			PartitionID:  partID,
+		}
+		svr := newTestServer(t, nil)
+		closeTestServer(t, svr)
+		resp, err := svr.AssignSegmentID(context.Background(), &datapb.AssignSegmentIDRequest{
+			NodeID:            0,
+			PeerRole:          "",
+			SegmentIDRequests: []*datapb.SegmentIDRequest{req},
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+	})
+
 	t.Run("assign segment with invalid collection", func(t *testing.T) {
 		req := &datapb.SegmentIDRequest{
 			Count:        1000,
@@ -112,16 +131,6 @@ func TestAssignSegmentID(t *testing.T) {
 }
 
 func TestFlush(t *testing.T) {
-	svr := newTestServer(t, nil)
-	defer closeTestServer(t, svr)
-	schema := newTestSchema()
-	svr.meta.AddCollection(&datapb.CollectionInfo{ID: 0, Schema: schema, Partitions: []int64{}})
-	allocations, err := svr.segmentManager.AllocSegment(context.TODO(), 0, 1, "channel-1", 1)
-	assert.Nil(t, err)
-	assert.EqualValues(t, 1, len(allocations))
-	expireTs := allocations[0].ExpireTime
-	segID := allocations[0].SegmentID
-
 	req := &datapb.FlushRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_Flush,
@@ -132,13 +141,34 @@ func TestFlush(t *testing.T) {
 		DbID:         0,
 		CollectionID: 0,
 	}
-	resp, err := svr.Flush(context.TODO(), req)
-	assert.Nil(t, err)
-	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	ids, err := svr.segmentManager.GetFlushableSegments(context.TODO(), "channel-1", expireTs)
-	assert.Nil(t, err)
-	assert.EqualValues(t, 1, len(ids))
-	assert.EqualValues(t, segID, ids[0])
+	t.Run("normal case", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		schema := newTestSchema()
+		svr.meta.AddCollection(&datapb.CollectionInfo{ID: 0, Schema: schema, Partitions: []int64{}})
+		allocations, err := svr.segmentManager.AllocSegment(context.TODO(), 0, 1, "channel-1", 1)
+		assert.Nil(t, err)
+		assert.EqualValues(t, 1, len(allocations))
+		expireTs := allocations[0].ExpireTime
+		segID := allocations[0].SegmentID
+
+		resp, err := svr.Flush(context.TODO(), req)
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		ids, err := svr.segmentManager.GetFlushableSegments(context.TODO(), "channel-1", expireTs)
+		assert.Nil(t, err)
+		assert.EqualValues(t, 1, len(ids))
+		assert.EqualValues(t, segID, ids[0])
+	})
+
+	t.Run("closed server", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		closeTestServer(t, svr)
+		resp, err := svr.Flush(context.Background(), req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+	})
 }
 
 //func TestGetComponentStates(t *testing.T) {
@@ -240,51 +270,292 @@ func TestGetSegmentStates(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("with closed server", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		closeTestServer(t, svr)
+		resp, err := svr.GetSegmentStates(context.TODO(), &datapb.GetSegmentStatesRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   0,
+				MsgID:     0,
+				Timestamp: 0,
+				SourceID:  0,
+			},
+			SegmentIDs: []int64{0},
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+	})
 }
 
 func TestGetInsertBinlogPaths(t *testing.T) {
-	svr := newTestServer(t, nil)
-	defer closeTestServer(t, svr)
+	t.Run("normal case", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
 
-	info := &datapb.SegmentInfo{
-		ID: 0,
-	}
-	svr.meta.AddSegment(NewSegmentInfo(info))
-	req := &datapb.GetInsertBinlogPathsRequest{
-		SegmentID: 0,
-	}
-	resp, err := svr.GetInsertBinlogPaths(svr.ctx, req)
-	assert.Nil(t, err)
-	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		info := &datapb.SegmentInfo{
+			ID: 0,
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 1,
+					Binlogs: []string{
+						"dev/datacoord/testsegment/1/part1",
+						"dev/datacoord/testsegment/1/part2",
+					},
+				},
+			},
+		}
+		svr.meta.AddSegment(NewSegmentInfo(info))
+		req := &datapb.GetInsertBinlogPathsRequest{
+			SegmentID: 0,
+		}
+		resp, err := svr.GetInsertBinlogPaths(svr.ctx, req)
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("with invalid segment id", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		info := &datapb.SegmentInfo{
+			ID: 0,
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 1,
+					Binlogs: []string{
+						"dev/datacoord/testsegment/1/part1",
+						"dev/datacoord/testsegment/1/part2",
+					},
+				},
+			},
+		}
+		svr.meta.AddSegment(NewSegmentInfo(info))
+		req := &datapb.GetInsertBinlogPathsRequest{
+			SegmentID: 1,
+		}
+		resp, err := svr.GetInsertBinlogPaths(svr.ctx, req)
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+
+	})
+
+	t.Run("with closed server", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		closeTestServer(t, svr)
+		resp, err := svr.GetInsertBinlogPaths(context.TODO(), &datapb.GetInsertBinlogPathsRequest{
+			SegmentID: 0,
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+	})
 }
 
 func TestGetCollectionStatistics(t *testing.T) {
-	svr := newTestServer(t, nil)
-	defer closeTestServer(t, svr)
+	t.Run("normal case", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
 
-	req := &datapb.GetCollectionStatisticsRequest{
-		CollectionID: 0,
-	}
-	resp, err := svr.GetCollectionStatistics(svr.ctx, req)
-	assert.Nil(t, err)
-	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		req := &datapb.GetCollectionStatisticsRequest{
+			CollectionID: 0,
+		}
+		resp, err := svr.GetCollectionStatistics(svr.ctx, req)
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+	})
+	t.Run("with closed server", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		closeTestServer(t, svr)
+		resp, err := svr.GetCollectionStatistics(context.Background(), &datapb.GetCollectionStatisticsRequest{
+			CollectionID: 0,
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+	})
+}
+
+func TestGetPartitionStatistics(t *testing.T) {
+	t.Run("normal cases", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		req := &datapb.GetPartitionStatisticsRequest{
+			CollectionID: 0,
+			PartitionID:  0,
+		}
+		resp, err := svr.GetPartitionStatistics(context.Background(), req)
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+	t.Run("with closed server", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		closeTestServer(t, svr)
+		resp, err := svr.GetPartitionStatistics(context.Background(), &datapb.GetPartitionStatisticsRequest{})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+	})
 }
 
 func TestGetSegmentInfo(t *testing.T) {
-	svr := newTestServer(t, nil)
-	defer closeTestServer(t, svr)
+	t.Run("normal case", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
 
-	segInfo := &datapb.SegmentInfo{
-		ID: 0,
-	}
-	svr.meta.AddSegment(NewSegmentInfo(segInfo))
+		segInfo := &datapb.SegmentInfo{
+			ID: 0,
+		}
+		svr.meta.AddSegment(NewSegmentInfo(segInfo))
 
-	req := &datapb.GetSegmentInfoRequest{
-		SegmentIDs: []int64{0},
+		req := &datapb.GetSegmentInfoRequest{
+			SegmentIDs: []int64{0},
+		}
+		resp, err := svr.GetSegmentInfo(svr.ctx, req)
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+	t.Run("with wrong segment id", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		segInfo := &datapb.SegmentInfo{
+			ID: 0,
+		}
+		svr.meta.AddSegment(NewSegmentInfo(segInfo))
+
+		req := &datapb.GetSegmentInfoRequest{
+			SegmentIDs: []int64{0, 1},
+		}
+		resp, err := svr.GetSegmentInfo(svr.ctx, req)
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+	})
+	t.Run("with closed server", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		closeTestServer(t, svr)
+		resp, err := svr.GetSegmentInfo(context.Background(), &datapb.GetSegmentInfoRequest{
+			SegmentIDs: []int64{},
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+	})
+
+}
+
+func TestGetComponentStates(t *testing.T) {
+	svr := &Server{}
+	type testCase struct {
+		state ServerState
+		code  internalpb.StateCode
 	}
-	resp, err := svr.GetSegmentInfo(svr.ctx, req)
-	assert.Nil(t, err)
-	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	cases := []testCase{
+		{state: ServerStateStopped, code: internalpb.StateCode_Abnormal},
+		{state: ServerStateInitializing, code: internalpb.StateCode_Initializing},
+		{state: ServerStateHealthy, code: internalpb.StateCode_Healthy},
+	}
+	for _, tc := range cases {
+		atomic.StoreInt64(&svr.isServing, tc.state)
+		resp, err := svr.GetComponentStates(context.Background())
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, tc.code, resp.GetState().GetStateCode())
+	}
+}
+
+func TestGetFlushedSegments(t *testing.T) {
+	t.Run("normal case", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		type testCase struct {
+			collID            int64
+			partID            int64
+			searchPartID      int64
+			flushedSegments   []int64
+			unflushedSegments []int64
+			expected          []int64
+		}
+		cases := []testCase{
+			{
+				collID:            1,
+				partID:            1,
+				searchPartID:      1,
+				flushedSegments:   []int64{1, 2, 3},
+				unflushedSegments: []int64{4},
+				expected:          []int64{1, 2, 3},
+			},
+			{
+				collID:            1,
+				partID:            2,
+				searchPartID:      2,
+				flushedSegments:   []int64{5, 6},
+				unflushedSegments: []int64{},
+				expected:          []int64{5, 6},
+			},
+			{
+				collID:            2,
+				partID:            3,
+				searchPartID:      3,
+				flushedSegments:   []int64{11, 12},
+				unflushedSegments: []int64{},
+				expected:          []int64{11, 12},
+			},
+			{
+				collID:       1,
+				searchPartID: -1,
+				expected:     []int64{1, 2, 3, 5, 6},
+			},
+			{
+				collID:       2,
+				searchPartID: -1,
+				expected:     []int64{11, 12},
+			},
+		}
+		for _, tc := range cases {
+			for _, fs := range tc.flushedSegments {
+				segInfo := &datapb.SegmentInfo{
+					ID:           fs,
+					CollectionID: tc.collID,
+					PartitionID:  tc.partID,
+					State:        commonpb.SegmentState_Flushed,
+				}
+				assert.Nil(t, svr.meta.AddSegment(NewSegmentInfo(segInfo)))
+			}
+			for _, us := range tc.unflushedSegments {
+				segInfo := &datapb.SegmentInfo{
+					ID:           us,
+					CollectionID: tc.collID,
+					PartitionID:  tc.partID,
+					State:        commonpb.SegmentState_Growing,
+				}
+				assert.Nil(t, svr.meta.AddSegment(NewSegmentInfo(segInfo)))
+			}
+
+			resp, err := svr.GetFlushedSegments(context.Background(), &datapb.GetFlushedSegmentsRequest{
+				CollectionID: tc.collID,
+				PartitionID:  tc.searchPartID,
+			})
+			assert.Nil(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+
+			assert.ElementsMatch(t, tc.expected, resp.GetSegments())
+		}
+	})
+
+	t.Run("with closed server", func(t *testing.T) {
+		t.Run("with closed server", func(t *testing.T) {
+			svr := newTestServer(t, nil)
+			closeTestServer(t, svr)
+			resp, err := svr.GetFlushedSegments(context.Background(), &datapb.GetFlushedSegmentsRequest{})
+			assert.Nil(t, err)
+			assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+			assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		})
+	})
 }
 
 func TestServer_GetMetrics(t *testing.T) {
@@ -521,6 +792,15 @@ func TestSaveBinlogPaths(t *testing.T) {
 		assert.EqualValues(t, segmentInfo.DmlPosition.ChannelName, "ch1")
 		assert.EqualValues(t, segmentInfo.DmlPosition.MsgID, []byte{1, 2, 3})
 		assert.EqualValues(t, segmentInfo.NumOfRows, 10)
+	})
+
+	t.Run("with closed server", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		closeTestServer(t, svr)
+		resp, err := svr.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+		assert.Equal(t, serverNotServingErrMsg, resp.GetReason())
 	})
 }
 
@@ -955,6 +1235,15 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.EqualValues(t, 1, len(resp.GetBinlogs()[0].GetFieldBinlogs()))
 		assert.EqualValues(t, 1, resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetFieldID())
 		assert.ElementsMatch(t, []string{"/binlog/file1", "/binlog/file2"}, resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetBinlogs())
+	})
+
+	t.Run("with closed server", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		closeTestServer(t, svr)
+		resp, err := svr.GetRecoveryInfo(context.TODO(), &datapb.GetRecoveryInfoRequest{})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
 	})
 }
 

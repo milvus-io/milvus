@@ -101,6 +101,7 @@ func defaultAssignPolicy() channelAssignPolicy {
 	return newBalancedAssignPolicy()
 }
 
+// NewCluster creates a cluster with provided components
 func NewCluster(ctx context.Context, kv kv.TxnKV, store ClusterStore,
 	posProvider positionProvider, opts ...ClusterOption) (*Cluster, error) {
 	ctx, cancel := context.WithCancel(ctx)
