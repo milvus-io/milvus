@@ -224,6 +224,7 @@ message SegmentLoadInfo {
   int64 dbID = 4;
   int64 flush_time = 5;
   repeated data.FieldBinlog binlog_paths = 6;
+  int64 num_of_rows = 7;
 }
 
 message LoadSegmentsRequest {
