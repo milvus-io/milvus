@@ -19,20 +19,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNaiveUniqueIntGenerator_get(t *testing.T) {
-	exists := make(map[int]bool)
-	num := 10
-
-	generator := newNaiveUniqueIntGenerator()
-
-	for i := 0; i < num; i++ {
-		g := generator.get()
-		_, ok := exists[g]
-		assert.False(t, ok)
-		exists[g] = true
-	}
-}
-
 func TestChannelsMgrImpl_getChannels(t *testing.T) {
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()

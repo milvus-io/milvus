@@ -24,14 +24,6 @@ import (
 // ticker can update ts only when the minTs greater than the ts of ticker, we can use maxTs to update current later
 type getPChanStatisticsFuncType func() (map[pChan]*pChanStatistics, error)
 
-// use interface tsoAllocator to keep channelsTimeTickerImpl testable
-type tsoAllocator interface {
-	//Start() error
-	AllocOne() (Timestamp, error)
-	//Alloc(count uint32) ([]Timestamp, error)
-	//ClearCache()
-}
-
 type channelsTimeTicker interface {
 	start() error
 	close() error

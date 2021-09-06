@@ -63,7 +63,7 @@ type Proxy struct {
 
 	chMgr channelsMgr
 
-	sched *TaskScheduler
+	sched *taskScheduler
 	tick  *timeTick
 
 	chTicker channelsTimeTicker
@@ -256,7 +256,7 @@ func (node *Proxy) Init() error {
 	chMgr := newChannelsMgrImpl(getDmlChannelsFunc, defaultInsertRepackFunc, getDqlChannelsFunc, nil, node.msFactory)
 	node.chMgr = chMgr
 
-	node.sched, err = NewTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator, node.msFactory)
+	node.sched, err = newTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator, node.msFactory)
 	if err != nil {
 		return err
 	}

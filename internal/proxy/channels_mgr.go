@@ -14,7 +14,6 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"runtime"
 	"sort"
 	"sync"
@@ -37,82 +36,8 @@ type channelsMgr interface {
 	removeAllDMLStream() error
 }
 
-type (
-	uniqueIntGenerator interface {
-		get() int
-	}
-	naiveUniqueIntGenerator struct {
-		now int
-		mtx sync.Mutex
-	}
-)
-
-func (generator *naiveUniqueIntGenerator) get() int {
-	generator.mtx.Lock()
-	defer func() {
-		generator.now++
-		generator.mtx.Unlock()
-	}()
-	return generator.now
-}
-
-func newNaiveUniqueIntGenerator() *naiveUniqueIntGenerator {
-	return &naiveUniqueIntGenerator{
-		now: 0,
-	}
-}
-
-var uniqueIntGeneratorIns uniqueIntGenerator
-var getUniqueIntGeneratorInsOnce sync.Once
-
-func getUniqueIntGeneratorIns() uniqueIntGenerator {
-	getUniqueIntGeneratorInsOnce.Do(func() {
-		uniqueIntGeneratorIns = newNaiveUniqueIntGenerator()
-	})
-	return uniqueIntGeneratorIns
-}
-
 type getChannelsFuncType = func(collectionID UniqueID) (map[vChan]pChan, error)
 type repackFuncType = func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error)
-
-type getChannelsService interface {
-	GetChannels(collectionID UniqueID) (map[vChan]pChan, error)
-}
-
-type mockGetChannelsService struct {
-	collectionID2Channels map[UniqueID]map[vChan]pChan
-}
-
-func newMockGetChannelsService() *mockGetChannelsService {
-	return &mockGetChannelsService{
-		collectionID2Channels: make(map[UniqueID]map[vChan]pChan),
-	}
-}
-
-func genUniqueStr() string {
-	l := rand.Uint64()%100 + 1
-	b := make([]byte, l)
-	if _, err := rand.Read(b); err != nil {
-		return ""
-	}
-	return fmt.Sprintf("%X", b)
-}
-
-func (m *mockGetChannelsService) GetChannels(collectionID UniqueID) (map[vChan]pChan, error) {
-	channels, ok := m.collectionID2Channels[collectionID]
-	if ok {
-		return channels, nil
-	}
-
-	channels = make(map[vChan]pChan)
-	l := rand.Uint64()%10 + 1
-	for i := 0; uint64(i) < l; i++ {
-		channels[genUniqueStr()] = genUniqueStr()
-	}
-
-	m.collectionID2Channels[collectionID] = channels
-	return channels, nil
-}
 
 type streamType int
 
