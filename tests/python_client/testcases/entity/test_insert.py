@@ -612,7 +612,6 @@ class TestInsertBinary:
         assert stats[row_count] == default_nb
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue 7027")
     def test_insert_binary_multi_times(self, connect, binary_collection):
         '''
         target: test insert entities multi times and final flush
