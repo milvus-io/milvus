@@ -68,6 +68,13 @@ func (p *proxyMock) GetCollArray() []string {
 	return ret
 }
 
+func (p *proxyMock) ReleaseDQLMessageStream(ctx context.Context, request *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
 type dataMock struct {
 	types.DataCoord
 	randVal int
@@ -272,6 +279,7 @@ func TestRootCoord(t *testing.T) {
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+	Params.DmlChannelName = fmt.Sprintf("dml-%d", randVal)
 
 	err = core.Register()
 	assert.Nil(t, err)
@@ -419,7 +427,6 @@ func TestRootCoord(t *testing.T) {
 		dmlStream.Start()
 
 		// get CreateCollectionMsg
-		// get CreateCollectionMsg
 		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
 		assert.Equal(t, 1, len(msgs))
 		createMsg, ok := (msgs[0]).(*msgstream.CreateCollectionMsg)
@@ -502,6 +509,9 @@ func TestRootCoord(t *testing.T) {
 		status, err = core.CreateCollection(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+
+		err = core.reSendDdMsg(core.ctx, true)
+		assert.Nil(t, err)
 	})
 
 	t.Run("has collection", func(t *testing.T) {
@@ -641,6 +651,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, collMeta.ID, ddReq.CollectionID)
 		assert.Equal(t, collMeta.PartitionIDs[1], ddReq.PartitionID)
+
+		err = core.reSendDdMsg(core.ctx, true)
+		assert.NotNil(t, err)
 	})
 
 	t.Run("has partition", func(t *testing.T) {
@@ -973,6 +986,25 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, collMeta.ID, ddReq.CollectionID)
 		assert.Equal(t, dropPartID, ddReq.PartitionID)
+
+		err = core.reSendDdMsg(core.ctx, true)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("remove DQL msgstream", func(t *testing.T) {
+		collMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
+		assert.Nil(t, err)
+
+		req := &proxypb.ReleaseDQLMessageStreamRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_RemoveQueryChannels,
+				SourceID: core.session.ServerID,
+			},
+			CollectionID: collMeta.ID,
+		}
+		status, err := core.ReleaseDQLMessageStream(core.ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 	})
 
 	t.Run("drop collection", func(t *testing.T) {
@@ -1043,6 +1075,9 @@ func TestRootCoord(t *testing.T) {
 		err = proto.UnmarshalText(ddOp.Body, &ddReq)
 		assert.Nil(t, err)
 		assert.Equal(t, collMeta.ID, ddReq.CollectionID)
+
+		err = core.reSendDdMsg(core.ctx, true)
+		assert.NotNil(t, err)
 	})
 
 	t.Run("context_cancel", func(t *testing.T) {
@@ -1417,7 +1452,6 @@ func TestRootCoord(t *testing.T) {
 		p1 := sessionutil.Session{
 			ServerID: 100,
 		}
-
 		p2 := sessionutil.Session{
 			ServerID: 101,
 		}
@@ -1428,9 +1462,11 @@ func TestRootCoord(t *testing.T) {
 		s2, err := json.Marshal(&p2)
 		assert.Nil(t, err)
 
-		_, err = core.etcdCli.Put(ctx2, path.Join(sessKey, typeutil.ProxyRole)+"-1", string(s1))
+		proxy1 := path.Join(sessKey, typeutil.ProxyRole) + "-1"
+		proxy2 := path.Join(sessKey, typeutil.ProxyRole) + "-2"
+		_, err = core.etcdCli.Put(ctx2, proxy1, string(s1))
 		assert.Nil(t, err)
-		_, err = core.etcdCli.Put(ctx2, path.Join(sessKey, typeutil.ProxyRole)+"-2", string(s2))
+		_, err = core.etcdCli.Put(ctx2, proxy2, string(s2))
 		assert.Nil(t, err)
 		time.Sleep(100 * time.Millisecond)
 
@@ -1481,6 +1517,11 @@ func TestRootCoord(t *testing.T) {
 
 		// add 3 proxy channels
 		assert.Equal(t, 3, core.chanTimeTick.GetChanNum()-numChan)
+
+		_, err = core.etcdCli.Delete(ctx2, proxy1)
+		assert.Nil(t, err)
+		_, err = core.etcdCli.Delete(ctx2, proxy2)
+		assert.Nil(t, err)
 	})
 
 	t.Run("get metrics", func(t *testing.T) {

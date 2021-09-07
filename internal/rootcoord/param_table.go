@@ -29,17 +29,14 @@ type ParamTable struct {
 	Address string
 	Port    int
 
-	PulsarAddress                 string
-	RocksmqPath                   string
-	RocksmqRetentionSizeInMinutes int64
-	RocksmqRetentionSizeInMB      int64
-	EtcdEndpoints                 []string
-	MetaRootPath                  string
-	KvRootPath                    string
-	MsgChannelSubName             string
-	TimeTickChannel               string
-	StatisticsChannel             string
-	DmlChannelName                string
+	PulsarAddress     string
+	EtcdEndpoints     []string
+	MetaRootPath      string
+	KvRootPath        string
+	MsgChannelSubName string
+	TimeTickChannel   string
+	StatisticsChannel string
+	DmlChannelName    string
 
 	DmlChannelNum               int64
 	MaxPartitionNum             int64
@@ -65,7 +62,6 @@ func (p *ParamTable) Init() {
 		}
 
 		p.initPulsarAddress()
-		p.initRocksmqPath()
 		p.initEtcdEndpoints()
 		p.initMetaRootPath()
 		p.initKvRootPath()
@@ -95,18 +91,6 @@ func (p *ParamTable) initPulsarAddress() {
 		panic(err)
 	}
 	p.PulsarAddress = addr
-}
-
-func (p *ParamTable) initRocksmqPath() {
-	path, err := p.Load("_RocksmqPath")
-	if err != nil {
-		panic(err)
-	}
-	p.RocksmqPath = path
-}
-
-func (p *ParamTable) initRocksmqRetentionTimeInMinutes() {
-	p.RocksmqRetentionSizeInMinutes = p.ParseInt64("rootcoord.RocksmqRetentionSizeInMinutes")
 }
 
 func (p *ParamTable) initEtcdEndpoints() {
