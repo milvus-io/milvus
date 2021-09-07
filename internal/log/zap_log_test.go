@@ -1,3 +1,14 @@
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
+
 // Copyright 2019 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -98,14 +109,14 @@ func TestLog(t *testing.T) {
 		zap.Duration("duration", 10*time.Second),
 	)
 	ts.assertMessages(
-		`[INFO] [zap_log_test.go:50] ["failed to fetch URL"] [url=http://example.com] [attempt=3] [backoff=1s]`,
-		`[INFO] [zap_log_test.go:55] ["failed to \"fetch\" [URL]: http://example.com"]`,
-		`[DEBUG] [zap_log_test.go:56] ["Slow query"] [sql="SELECT * FROM TABLE\n\tWHERE ID=\"abc\""] [duration=1.3s] ["process keys"=1500]`,
-		`[INFO] [zap_log_test.go:62] [Welcome]`,
-		`[INFO] [zap_log_test.go:63] [欢迎]`,
-		`[WARN] [zap_log_test.go:64] [Type] [Counter=NaN] [Score=+Inf]`,
-		`[INFO] [zap_log_test.go:69] ["new connection"] [connID=1] [traceID=dse1121]`,
-		`[INFO] [zap_log_test.go:70] ["Testing typs"] [filed1=noquote] `+
+		`[INFO] [zap_log_test.go:61] ["failed to fetch URL"] [url=http://example.com] [attempt=3] [backoff=1s]`,
+		`[INFO] [zap_log_test.go:66] ["failed to \"fetch\" [URL]: http://example.com"]`,
+		`[DEBUG] [zap_log_test.go:67] ["Slow query"] [sql="SELECT * FROM TABLE\n\tWHERE ID=\"abc\""] [duration=1.3s] ["process keys"=1500]`,
+		`[INFO] [zap_log_test.go:73] [Welcome]`,
+		`[INFO] [zap_log_test.go:74] [欢迎]`,
+		`[WARN] [zap_log_test.go:75] [Type] [Counter=NaN] [Score=+Inf]`,
+		`[INFO] [zap_log_test.go:80] ["new connection"] [connID=1] [traceID=dse1121]`,
+		`[INFO] [zap_log_test.go:81] ["Testing typs"] [filed1=noquote] `+
 			`[filed2="in quote"] [urls="[http://mock1.com:2347,http://mock2.com:2432]"] `+
 			`[urls-peer="[t1,\"t2 fine\"]"] ["store ids"="[1,4,5]"] [object="{username=user1}"] `+
 			`[object2="{username=\"user 2\"}"] [binary="YWIxMjM="] ["is processed"=true] `+
@@ -163,45 +174,6 @@ func TestZapCaller(t *testing.T) {
 	}
 }
 
-func TestRotateLog(t *testing.T) {
-	tempDir, _ := ioutil.TempDir("/tmp", "pd-test-log")
-	conf := &Config{
-		Level: "info",
-		File: FileLogConfig{
-			Filename: tempDir + "/test.log",
-			MaxSize:  1,
-		},
-	}
-	logger, _, err := InitLogger(conf)
-	assert.Nil(t, err)
-
-	var data []byte
-	for i := 1; i <= 1*1024*1024; i++ {
-		if i%1000 != 0 {
-			data = append(data, 'd')
-			continue
-		}
-		logger.Info(string(data))
-		data = data[:0]
-	}
-	files, _ := ioutil.ReadDir(tempDir)
-	assert.Len(t, files, 2)
-	_ = os.RemoveAll(tempDir)
-}
-
-func TestWithOptions(t *testing.T) {
-	ts := newTestLogSpy(t)
-	conf := &Config{
-		Level:               "debug",
-		DisableTimestamp:    true,
-		DisableErrorVerbose: true,
-	}
-	logger, _, _ := InitTestLogger(ts, conf, zap.AddStacktrace(zapcore.FatalLevel))
-	logger.Error("Testing", zap.Error(errors.New("log-with-option")))
-	ts.assertMessagesNotContains("errorVerbose")
-	ts.assertMessagesNotContains("stack")
-}
-
 func TestLogJSON(t *testing.T) {
 	ts := newTestLogSpy(t)
 	conf := &Config{Level: "debug", DisableTimestamp: true, Format: "json"}
@@ -215,8 +187,60 @@ func TestLogJSON(t *testing.T) {
 		"backoff", time.Second,
 	)
 	logger.With(zap.String("connID", "1"), zap.String("traceID", "dse1121")).Info("new connection")
-	ts.assertMessages("{\"level\":\"INFO\",\"caller\":\"zap_log_test.go:212\",\"message\":\"failed to fetch URL\",\"url\":\"http://example.com\",\"attempt\":3,\"backoff\":\"1s\"}",
-		"{\"level\":\"INFO\",\"caller\":\"zap_log_test.go:217\",\"message\":\"new connection\",\"connID\":\"1\",\"traceID\":\"dse1121\"}")
+	ts.assertMessages("{\"level\":\"INFO\",\"caller\":\"zap_log_test.go:184\",\"message\":\"failed to fetch URL\",\"url\":\"http://example.com\",\"attempt\":3,\"backoff\":\"1s\"}",
+		"{\"level\":\"INFO\",\"caller\":\"zap_log_test.go:189\",\"message\":\"new connection\",\"connID\":\"1\",\"traceID\":\"dse1121\"}")
+}
+
+func TestRotateLog(t *testing.T) {
+	cases := []struct {
+		desc            string
+		maxSize         int
+		writeSize       int
+		expectedFileNum int
+	}{
+		{"test default max size", 0, defaultLogMaxSize * 1024 * 1024, 2},
+		{"test limited max size", 1, 1 * 1024 * 1024, 2},
+	}
+	for _, c := range cases {
+		t.Run(c.desc, func(t *testing.T) {
+			tempDir, _ := ioutil.TempDir("/tmp", "pd-test-log")
+			conf := &Config{
+				Level: "info",
+				File: FileLogConfig{
+					Filename: tempDir + "/test.log",
+					MaxSize:  c.maxSize,
+				},
+			}
+			logger, _, err := InitLogger(conf)
+			assert.Nil(t, err)
+
+			var data []byte
+			for i := 1; i <= c.writeSize; i++ {
+				if i%1000 != 0 {
+					data = append(data, 'd')
+					continue
+				}
+				logger.Info(string(data))
+				data = data[:0]
+			}
+			files, _ := ioutil.ReadDir(tempDir)
+			assert.Len(t, files, c.expectedFileNum)
+			_ = os.RemoveAll(tempDir)
+		})
+	}
+}
+
+func TestWithOptions(t *testing.T) {
+	ts := newTestLogSpy(t)
+	conf := &Config{
+		Level:               "debug",
+		DisableTimestamp:    true,
+		DisableErrorVerbose: true,
+	}
+	logger, _, _ := InitTestLogger(ts, conf, zap.AddStacktrace(zapcore.FatalLevel))
+	logger.Error("Testing", zap.Error(errors.New("log-with-option")))
+	ts.assertMessagesNotContains("errorVerbose")
+	ts.assertMessagesNotContains("stack")
 }
 
 // testLogSpy is a testing.TB that captures logged messages.
