@@ -20,7 +20,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestParam(t *testing.T) {
+func TestBaseParamTable(t *testing.T) {
 	Params.Init()
 
 	assert.NotZero(t, len(Params.EtcdEndpoints))
