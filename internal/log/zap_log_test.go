@@ -198,7 +198,6 @@ func TestRotateLog(t *testing.T) {
 		writeSize       int
 		expectedFileNum int
 	}{
-		{"test default max size", 0, defaultLogMaxSize * 1024 * 1024, 2},
 		{"test limited max size", 1, 1 * 1024 * 1024, 2},
 	}
 	for _, c := range cases {
