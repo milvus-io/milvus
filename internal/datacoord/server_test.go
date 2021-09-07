@@ -45,17 +45,6 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func TestGetSegmentInfoChannel(t *testing.T) {
-	svr := newTestServer(t, nil)
-	defer closeTestServer(t, svr)
-	t.Run("get segment info channel", func(t *testing.T) {
-		resp, err := svr.GetSegmentInfoChannel(context.TODO())
-		assert.Nil(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		assert.EqualValues(t, Params.SegmentInfoChannelName, resp.Value)
-	})
-}
-
 func TestAssignSegmentID(t *testing.T) {
 	const collID = 100
 	const collIDInvalid = 101
@@ -180,37 +169,6 @@ func TestFlush(t *testing.T) {
 	})
 }
 
-//func TestGetComponentStates(t *testing.T) {
-//svr := newTestServer(t)
-//defer closeTestServer(t, svr)
-//cli := newMockDataNodeClient(1)
-//err := cli.Init()
-//assert.Nil(t, err)
-//err = cli.Start()
-//assert.Nil(t, err)
-
-//err = svr.cluster.Register(&dataNode{
-//id: 1,
-//address: struct {
-//ip   string
-//port int64
-//}{
-//ip:   "",
-//port: 0,
-//},
-//client:     cli,
-//channelNum: 0,
-//})
-//assert.Nil(t, err)
-
-//resp, err := svr.GetComponentStates(context.TODO())
-//assert.Nil(t, err)
-//assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-//assert.EqualValues(t, internalpb.StateCode_Healthy, resp.State.StateCode)
-//assert.EqualValues(t, 1, len(resp.SubcomponentStates))
-//assert.EqualValues(t, internalpb.StateCode_Healthy, resp.SubcomponentStates[0].StateCode)
-//}
-
 func TestGetTimeTickChannel(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)
@@ -223,7 +181,7 @@ func TestGetTimeTickChannel(t *testing.T) {
 func TestGetStatisticsChannel(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)
-	resp, err := svr.GetStatisticsChannel(context.TODO())
+	resp, err := svr.GetStatisticsChannel(context.TODO(), &internalpb.GetStatisticsChannelRequest{})
 	assert.Nil(t, err)
 	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	assert.EqualValues(t, Params.StatisticsChannelName, resp.Value)
@@ -471,7 +429,7 @@ func TestGetComponentStates(t *testing.T) {
 	}
 	for _, tc := range cases {
 		atomic.StoreInt64(&svr.isServing, tc.state)
-		resp, err := svr.GetComponentStates(context.Background())
+		resp, err := svr.GetComponentStates(context.Background(), &internalpb.GetComponentStatesRequest{})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, tc.code, resp.GetState().GetStateCode())

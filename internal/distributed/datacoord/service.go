@@ -32,18 +32,15 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
 type Server struct {
+	*datacoord.Server
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	wg        sync.WaitGroup
-	dataCoord *datacoord.Server
+	wg sync.WaitGroup
 
 	grpcErrChan chan error
 	grpcServer  *grpc.Server
@@ -60,7 +57,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory, opts ...datacoord
 		cancel:      cancel,
 		grpcErrChan: make(chan error),
 	}
-	s.dataCoord, err = datacoord.CreateServer(s.ctx, factory, opts...)
+	s.Server, err = datacoord.CreateServer(s.ctx, factory, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +75,7 @@ func (s *Server) init() error {
 	datacoord.Params.IP = Params.IP
 	datacoord.Params.Port = Params.Port
 
-	err := s.dataCoord.Register()
+	err := s.Register()
 	if err != nil {
 		log.Debug("DataCoord Register etcd failed", zap.Error(err))
 		return err
@@ -91,7 +88,7 @@ func (s *Server) init() error {
 		return err
 	}
 
-	if err := s.dataCoord.Init(); err != nil {
+	if err := s.Init(); err != nil {
 		log.Error("dataCoord init error", zap.Error(err))
 		return err
 	}
@@ -139,7 +136,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 }
 
 func (s *Server) start() error {
-	return s.dataCoord.Start()
+	return s.Start()
 }
 
 func (s *Server) Stop() error {
@@ -155,7 +152,7 @@ func (s *Server) Stop() error {
 		s.grpcServer.GracefulStop()
 	}
 
-	err = s.dataCoord.Stop()
+	err = s.Stop()
 	if err != nil {
 		return err
 	}
@@ -175,65 +172,4 @@ func (s *Server) Run() error {
 		return err
 	}
 	return nil
-}
-
-func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
-	return s.dataCoord.GetComponentStates(ctx)
-}
-
-func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.dataCoord.GetTimeTickChannel(ctx)
-}
-
-func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.dataCoord.GetStatisticsChannel(ctx)
-}
-
-func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
-	return s.dataCoord.GetSegmentInfo(ctx, req)
-}
-
-func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
-	return s.dataCoord.Flush(ctx, req)
-}
-
-func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
-	return s.dataCoord.AssignSegmentID(ctx, req)
-}
-
-func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
-	return s.dataCoord.GetSegmentStates(ctx, req)
-}
-
-func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
-	return s.dataCoord.GetInsertBinlogPaths(ctx, req)
-}
-
-func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {
-	return s.dataCoord.GetCollectionStatistics(ctx, req)
-}
-
-func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error) {
-	return s.dataCoord.GetPartitionStatistics(ctx, req)
-}
-
-func (s *Server) GetSegmentInfoChannel(ctx context.Context, req *datapb.GetSegmentInfoChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.dataCoord.GetSegmentInfoChannel(ctx)
-}
-
-//SaveBinlogPaths implement DataCoordServer, saves segment, collection binlog according to datanode request
-func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
-	return s.dataCoord.SaveBinlogPaths(ctx, req)
-}
-
-func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
-	return s.dataCoord.GetRecoveryInfo(ctx, req)
-}
-
-func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
-	return s.dataCoord.GetFlushedSegments(ctx, req)
-}
-
-func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	return s.dataCoord.GetMetrics(ctx, req)
 }

@@ -33,7 +33,7 @@ func (s *Server) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 }
 
 // GetStatisticsChannel legacy API, returns statistics channel name
-func (s *Server) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -235,16 +235,6 @@ func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 	return resp, nil
 }
 
-// GetSegmentInfoChannel legacy API, returns segment info statistics channel
-func (s *Server) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Value: Params.SegmentInfoChannelName,
-	}, nil
-}
-
 // GetSegmentInfo returns segment info requested, status, row count, etc included
 func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
 	resp := &datapb.GetSegmentInfoResponse{
@@ -306,8 +296,13 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	return resp, nil
 }
 
-// todo deprecated rpc
-func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+// GetComponentStates implement Component
+func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+	return s.GetComponnetState(ctx)
+}
+
+// GetComponnetState implement DataCoord
+func (s *Server) GetComponnetState(ctx context.Context) (*internalpb.ComponentStates, error) {
 	resp := &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{
 			NodeID:    Params.NodeID,
