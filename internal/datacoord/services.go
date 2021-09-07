@@ -349,6 +349,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	}
 	segmentIDs := s.meta.GetSegmentsOfPartition(collectionID, partitionID)
 	segment2Binlogs := make(map[UniqueID][]*datapb.FieldBinlog)
+	segmentsNumOfRows := make(map[UniqueID]int64)
 	for _, id := range segmentIDs {
 		segment := s.meta.GetSegment(id)
 		if segment == nil {
@@ -374,12 +375,15 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 			}
 			segment2Binlogs[id] = append(segment2Binlogs[id], fieldBinlogs)
 		}
+
+		segmentsNumOfRows[id] = segment.NumOfRows
 	}
 
 	binlogs := make([]*datapb.SegmentBinlogs, 0, len(segment2Binlogs))
 	for segmentID, fieldBinlogs := range segment2Binlogs {
 		sbl := &datapb.SegmentBinlogs{
 			SegmentID:    segmentID,
+			NumOfRows:    segmentsNumOfRows[segmentID],
 			FieldBinlogs: fieldBinlogs,
 		}
 		binlogs = append(binlogs, sbl)

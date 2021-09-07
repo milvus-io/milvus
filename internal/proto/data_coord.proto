@@ -251,6 +251,7 @@ message DataNodeInfo {
 message SegmentBinlogs {
   int64 segmentID = 1;
   repeated FieldBinlog fieldBinlogs = 2;
+  int64 num_of_rows = 3;
 }
 
 message FieldBinlog{
