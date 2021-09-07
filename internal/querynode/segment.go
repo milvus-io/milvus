@@ -573,6 +573,7 @@ func (s *Segment) segmentPreDelete(numOfRecords int) int64 {
 	return int64(offset)
 }
 
+// TODO: remove reference of slice
 func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps *[]Timestamp, records *[]*commonpb.Blob) error {
 	/*
 		CStatus

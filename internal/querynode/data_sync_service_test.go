@@ -12,6 +12,7 @@
 package querynode
 
 import (
+	"context"
 	"encoding/binary"
 	"math"
 	"testing"
@@ -122,5 +123,96 @@ func TestDataSyncService_Start(t *testing.T) {
 	assert.NoError(t, err)
 
 	<-node.queryNodeLoopCtx.Done()
-	node.Stop()
+	node.streaming.dataSyncService.close()
+
+	err = node.Stop()
+	assert.NoError(t, err)
+}
+
+func TestDataSyncService_collectionFlowGraphs(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	streaming, err := genSimpleStreaming(ctx)
+	assert.NoError(t, err)
+
+	fac, err := genFactory()
+	assert.NoError(t, err)
+
+	dataSyncService := newDataSyncService(ctx, streaming.replica, streaming.tSafeReplica, fac)
+	assert.NotNil(t, dataSyncService)
+
+	err = dataSyncService.addCollectionFlowGraph(defaultCollectionID, []Channel{defaultVChannel})
+	assert.NoError(t, err)
+
+	fg, err := dataSyncService.getCollectionFlowGraphs(defaultCollectionID, []Channel{defaultVChannel})
+	assert.NotNil(t, fg)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(fg))
+
+	fg, err = dataSyncService.getCollectionFlowGraphs(UniqueID(1000), []Channel{defaultVChannel})
+	assert.Nil(t, fg)
+	assert.Error(t, err)
+
+	fg, err = dataSyncService.getCollectionFlowGraphs(defaultCollectionID, []Channel{"invalid-vChannel"})
+	assert.NotNil(t, fg)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, len(fg))
+
+	fg, err = dataSyncService.getCollectionFlowGraphs(UniqueID(1000), []Channel{"invalid-vChannel"})
+	assert.Nil(t, fg)
+	assert.Error(t, err)
+
+	err = dataSyncService.startCollectionFlowGraph(defaultCollectionID, []Channel{defaultVChannel})
+	assert.NoError(t, err)
+
+	dataSyncService.removeCollectionFlowGraph(defaultCollectionID)
+
+	fg, err = dataSyncService.getCollectionFlowGraphs(defaultCollectionID, []Channel{defaultVChannel})
+	assert.Nil(t, fg)
+	assert.Error(t, err)
+}
+
+func TestDataSyncService_partitionFlowGraphs(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	streaming, err := genSimpleStreaming(ctx)
+	assert.NoError(t, err)
+
+	fac, err := genFactory()
+	assert.NoError(t, err)
+
+	dataSyncService := newDataSyncService(ctx, streaming.replica, streaming.tSafeReplica, fac)
+	assert.NotNil(t, dataSyncService)
+
+	err = dataSyncService.addPartitionFlowGraph(defaultPartitionID, defaultPartitionID, []Channel{defaultVChannel})
+	assert.NoError(t, err)
+
+	fg, err := dataSyncService.getPartitionFlowGraphs(defaultPartitionID, []Channel{defaultVChannel})
+	assert.NotNil(t, fg)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(fg))
+
+	fg, err = dataSyncService.getPartitionFlowGraphs(UniqueID(1000), []Channel{defaultVChannel})
+	assert.Nil(t, fg)
+	assert.Error(t, err)
+
+	fg, err = dataSyncService.getPartitionFlowGraphs(defaultPartitionID, []Channel{"invalid-vChannel"})
+	assert.NotNil(t, fg)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, len(fg))
+
+	fg, err = dataSyncService.getPartitionFlowGraphs(UniqueID(1000), []Channel{"invalid-vChannel"})
+	assert.Nil(t, fg)
+	assert.Error(t, err)
+
+	err = dataSyncService.startPartitionFlowGraph(defaultPartitionID, []Channel{defaultVChannel})
+	assert.NoError(t, err)
+
+	dataSyncService.removePartitionFlowGraph(defaultPartitionID)
+
+	fg, err = dataSyncService.getPartitionFlowGraphs(defaultPartitionID, []Channel{defaultVChannel})
+	assert.Nil(t, fg)
+	assert.Error(t, err)
 }

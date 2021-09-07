@@ -26,8 +26,8 @@ import (
 type loadType = int32
 
 const (
-	loadTypeCollection = 0
-	loadTypePartition  = 1
+	loadTypeCollection loadType = 0
+	loadTypePartition  loadType = 1
 )
 
 type dataSyncService struct {
