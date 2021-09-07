@@ -412,8 +412,6 @@ func (ms *mqMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 				log.Error("msMsgStream seek", zap.Error(err))
 			}
 		}
-
-		return nil
 	}
 	return nil
 }
