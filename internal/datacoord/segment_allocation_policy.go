@@ -49,9 +49,7 @@ func AllocatePolicyV1(segments []*SegmentInfo, count int64,
 	existedSegmentAllocations := make([]*Allocation, 0)
 	// create new segment if count >= max num
 	for count >= maxCountPerSegment {
-		allocation := &Allocation{
-			NumOfRows: maxCountPerSegment,
-		}
+		allocation := getAllocation(maxCountPerSegment)
 		newSegmentAllocations = append(newSegmentAllocations, allocation)
 		count -= maxCountPerSegment
 	}
@@ -69,18 +67,14 @@ func AllocatePolicyV1(segments []*SegmentInfo, count int64,
 		if free < count {
 			continue
 		}
-		allocation := &Allocation{
-			SegmentID: segment.GetID(),
-			NumOfRows: count,
-		}
+		allocation := getAllocation(count)
+		allocation.SegmentID = segment.GetID()
 		existedSegmentAllocations = append(existedSegmentAllocations, allocation)
 		return newSegmentAllocations, existedSegmentAllocations
 	}
 
 	// allocate new segment for remaining count
-	allocation := &Allocation{
-		NumOfRows: count,
-	}
+	allocation := getAllocation(count)
 	newSegmentAllocations = append(newSegmentAllocations, allocation)
 	return newSegmentAllocations, existedSegmentAllocations
 }
@@ -122,6 +116,9 @@ func getChannelOpenSegCapacityPolicy(limit int) channelSealPolicy {
 		}
 		sortSegmentsByLastExpires(segs)
 		offLen := len(segs) - limit
+		if offLen > len(segs) {
+			offLen = len(segs)
+		}
 		return segs[0:offLen]
 	}
 }
