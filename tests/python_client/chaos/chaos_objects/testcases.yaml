@@ -116,14 +116,38 @@ Collections:
     testcase:
       name: test_etcd_podkill
       chaos: chaos_etcd_podkill.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
   -
     testcase:
       name: test_minio_podkill
       chaos: chaos_minio_podkill.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
   -
     testcase:
       name: test_pulsar_podkill
-      chaos: chaos_minio_podkill.yaml
+      chaos: chaos_pulsar_podkill.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
   -
     testcase:
       name: test_querynode_cpu100p

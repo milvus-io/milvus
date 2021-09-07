@@ -691,6 +691,22 @@ class TestInsertOperation(TestcaseBase):
 
         assert collection_w.num_entities == ct.default_nb
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue #7513")
+    def test_insert_all_datatype_collection(self):
+        """
+        target: test insert into collection that contains all datatype fields
+        method: 1.create all datatype collection 2.insert data
+        expected: verify num entities
+        """
+        self._connect()
+        # need to add string field
+        df = cf.gen_dataframe_all_data_type()
+        log.debug(df.head(3))
+        self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
+                                                      primary_field=ct.default_int64_field_name)
+        assert self.collection_wrap.num_entities == ct.default_nb
+
 
 class TestInsertAsync(TestcaseBase):
     """

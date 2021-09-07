@@ -1,5 +1,7 @@
 import pytest
 import random
+import numpy as np
+import pandas as pd
 from pymilvus import DefaultConfig
 
 from base.client_base import TestcaseBase
@@ -82,7 +84,7 @@ class TestQueryBase(TestcaseBase):
                                    check_items={exp_res: res[:1]})
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_query_auto_id_not_existed_primary_key(self):
+    def test_query_auto_id_not_existed_primary_values(self):
         """
         target: test query on auto_id true collection
         method: 1.create auto_id true collection 2.query with not existed primary keys
@@ -111,7 +113,7 @@ class TestQueryBase(TestcaseBase):
         collection_w.query(None, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_query_expr_non_string(self):
+    def test_query_non_string_expr(self):
         """
         target: test query with non-string expr
         method: query with non-string expr, eg 1, [] ..
@@ -161,34 +163,87 @@ class TestQueryBase(TestcaseBase):
         collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_query_expr_unsupported_field(self):
+    def test_query_expr_non_primary_fields(self):
         """
-        target: test query on unsupported field
-        method: query on float field
-        expected: raise exception
+        target: test query on non-primary non-vector fields
+        method: query on non-primary non-vector fields
+        expected: verify query result
         """
-        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
-        term_expr = f'{ct.default_float_field_name} in [1., 2.]'
-        error = {ct.err_code: 1, ct.err_msg: "column is not int64"}
-        collection_w.query(term_expr, check_task=CheckTasks.err_res, check_items=error)
+        self._connect()
+        # construct dataframe and inert data
+        df = pd.DataFrame({
+            ct.default_int64_field_name: pd.Series(data=[i for i in range(ct.default_nb)]),
+            ct.default_int32_field_name: pd.Series(data=[np.int32(i) for i in range(ct.default_nb)], dtype="int32"),
+            ct.default_int16_field_name: pd.Series(data=[np.int16(i) for i in range(ct.default_nb)], dtype="int16"),
+            ct.default_float_field_name: pd.Series(data=[float(i) for i in range(ct.default_nb)], dtype="float32"),
+            ct.default_double_field_name: pd.Series(data=[np.double(i) for i in range(ct.default_nb)], dtype="double"),
+            ct.default_float_vec_field_name: cf.gen_vectors(ct.default_nb, ct.default_dim)
+        })
+        self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
+                                                      primary_field=ct.default_int64_field_name)
+        assert self.collection_wrap.num_entities == ct.default_nb
+        self.collection_wrap.load()
 
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_query_expr_non_primary_field(self):
+        # query by non_primary non_vector scalar field
+        non_primary_field = [ct.default_int32_field_name, ct.default_int16_field_name,
+                             ct.default_float_field_name, ct.default_double_field_name]
+
+        # exp res: first two rows and all fields expect last vec field
+        res = df.iloc[:2, :-1].to_dict('records')
+        for field in non_primary_field:
+            filter_values = df[field].tolist()[:2]
+            term_expr = f'{field} in {filter_values}'
+            self.collection_wrap.query(term_expr, output_fields=["*"],
+                                       check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue #7521 #7522")
+    def test_query_expr_by_bool_field(self):
         """
-        target: test query on non-primary field
-        method: query on non-primary int field
-        expected: raise exception
+        target: test query by bool field and output binary field
+        method: 1.create and insert with [int64, float, bool, float_vec] fields
+                2.query by bool field, and output all int64, bool fields
+        expected: verify query result and output fields
         """
-        fields = [cf.gen_int64_field(), cf.gen_int64_field(name='int2', is_primary=True), cf.gen_float_vec_field()]
-        schema = cf.gen_collection_schema(fields)
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
-        nb = 100
-        data = [[i for i in range(nb)], [i for i in range(nb)], cf.gen_vectors(nb, ct.default_dim)]
-        collection_w.insert(data)
-        assert collection_w.num_entities == nb
-        assert collection_w.primary_field.name == 'int2'
-        error = {ct.err_code: 1, ct.err_msg: "column is not primary key"}
-        collection_w.query(default_term_expr, check_task=CheckTasks.err_res, check_items=error)
+        self._connect()
+        df = cf.gen_default_dataframe_data()
+        bool_values = pd.Series(data=[True if i % 2 == 0 else False for i in range(ct.default_nb)], dtype="bool")
+        df.insert(2, ct.default_bool_field_name, bool_values)
+        self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
+                                                      primary_field=ct.default_int64_field_name)
+        assert self.collection_wrap.num_entities == ct.default_nb
+        self.collection_wrap.load()
+        term_expr = f'{ct.default_bool_field_name} in [True]'
+        res, _ = self.collection_wrap.query(term_expr, output_fields=[ct.default_bool_field_name])
+        assert len(res) == ct.default_nb / 2
+        assert set(res[0].keys()) == set(ct.default_int64_field_name, ct.default_bool_field_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_expr_by_int8_field(self):
+        """
+        target: test query by int8 field
+        method: 1.create and insert with [int64, float, int8, float_vec] fields
+                2.query by int8 field, and output all scalar fields
+        expected: verify query result
+        """
+        self._connect()
+        # construct collection from dataFrame according to [int64, float, int8, float_vec]
+        df = cf.gen_default_dataframe_data()
+        int8_values = pd.Series(data=[np.int8(i) for i in range(ct.default_nb)], dtype="int8")
+        df.insert(2, ct.default_int8_field_name, int8_values)
+        self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
+                                                      primary_field=ct.default_int64_field_name)
+        assert self.collection_wrap.num_entities == ct.default_nb
+        # query expression
+        term_expr = f'{ct.default_int8_field_name} in {[0]}'
+        # expected query result
+        res = []
+        # int8 range [-128, 127] so when nb=1200, there are many repeated int8 values equal to 0
+        for i in range(0, ct.default_nb, 256):
+            res.extend(df.iloc[i:i + 1, :-1].to_dict('records'))
+        self.collection_wrap.load()
+        self.collection_wrap.query(term_expr, output_fields=["*"],
+                                   check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_expr_wrong_term_keyword(self):
@@ -202,14 +257,83 @@ class TestQueryBase(TestcaseBase):
         error_1 = {ct.err_code: 1, ct.err_msg: f'unexpected token Identifier("inn")'}
         collection_w.query(expr_1, check_task=CheckTasks.err_res, check_items=error_1)
 
-        # TODO(yukun): "not in" is supported now
-        # expr_2 = f'{ct.default_int64_field_name} not in [1, 2]'
-        # error_2 = {ct.err_code: 1, ct.err_msg: 'not top level term'}
-        # collection_w.query(expr_2, check_task=CheckTasks.err_res, check_items=error_2)
-
         expr_3 = f'{ct.default_int64_field_name} in not [1, 2]'
         error_3 = {ct.err_code: 1, ct.err_msg: 'right operand of the InExpr must be array'}
         collection_w.query(expr_3, check_task=CheckTasks.err_res, check_items=error_3)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("field", [ct.default_int64_field_name, ct.default_float_field_name])
+    def test_query_expr_not_in_term(self, field):
+        """
+        target: test query with `not in` expr
+        method: query with not in expr
+        expected: verify query result
+        """
+        self._connect()
+        df = cf.gen_default_dataframe_data()
+        self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
+                                                      primary_field=ct.default_int64_field_name)
+        assert self.collection_wrap.num_entities == ct.default_nb
+        self.collection_wrap.load()
+        values = df[field].tolist()
+        pos = 100
+        term_expr = f'{field} not in {values[pos:]}'
+        res = df.iloc[:pos, :2].to_dict('records')
+        self.collection_wrap.query(term_expr, output_fields=["*"],
+                                   check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("pos", [0, ct.default_nb])
+    def test_query_expr_not_in_empty_and_all(self, pos):
+        self._connect()
+        df = cf.gen_default_dataframe_data()
+        self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
+                                                      primary_field=ct.default_int64_field_name)
+        assert self.collection_wrap.num_entities == ct.default_nb
+        self.collection_wrap.load()
+        int64_values = df[ct.default_int64_field_name].tolist()
+        term_expr = f'{ct.default_int64_field_name} not in {int64_values[pos:]}'
+        res = df.iloc[:pos, :1].to_dict('records')
+        self.collection_wrap.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tag(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #7544")
+    def test_query_expr_random_values(self):
+        """
+        target: test query with random filter values
+        method: query with random filter values, like [0, 2, 4, 3]
+        expected: correct query result
+        """
+        self._connect()
+        df = cf.gen_default_dataframe_data(nb=100)
+        log.debug(df.head(5))
+        self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
+                                                      primary_field=ct.default_int64_field_name)
+        assert self.collection_wrap.num_entities == 100
+        self.collection_wrap.load()
+
+        # random_values = [random.randint(0, ct.default_nb) for _ in range(4)]
+        random_values = [0, 2, 4, 0]
+        term_expr = f'{ct.default_int64_field_name} not in {random_values}'
+        res = df.iloc[random_values, :1].to_dict('records')
+        self.collection_wrap.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.xfail(reason="issue #7553")
+    def test_query_expr_not_in_random(self):
+        self._connect()
+        df = cf.gen_default_dataframe_data(nb=50)
+        log.debug(df.head(5))
+        self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
+                                                      primary_field=ct.default_int64_field_name)
+        assert self.collection_wrap.num_entities == 50
+        self.collection_wrap.load()
+
+        random_values = [i for i in range(10, 50)]
+        log.debug(f'random values: {random_values}')
+        random.shuffle(random_values)
+        term_expr = f'{ct.default_int64_field_name} not in {random_values}'
+        res = df.iloc[:10, :1].to_dict('records')
+        self.collection_wrap.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_expr_non_array_term(self):
@@ -640,7 +764,7 @@ class TestQueryOperation(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     # @pytest.mark.parametrize("collection_name, data",
-                             # [(cf.gen_unique_str(prefix), cf.gen_default_list_data(ct.default_nb))])
+    # [(cf.gen_unique_str(prefix), cf.gen_default_list_data(ct.default_nb))])
     def test_query_without_loading(self):
         """
         target: test query without loading
@@ -730,13 +854,12 @@ class TestQueryOperation(TestcaseBase):
         res, _ = collection_w.query(term_expr)
         assert len(res) == len(int_values)
 
-    @pytest.mark.xfail(reason="fail")
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_expr_repeated_term_array(self):
         """
         target: test query with repeated term array on primary field with unique value
         method: query with repeated array value
-        expected: todo
+        expected: return hit entities, no repeated
         """
         collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True)[0:3]
         int_values = [0, 0, 0, 0]
@@ -746,7 +869,6 @@ class TestQueryOperation(TestcaseBase):
         assert res[0][ct.default_int64_field_name] == int_values[0]
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #6624")
     def test_query_dup_ids_dup_term_array(self):
         """
         target: test query on duplicate primary keys with dup term array
@@ -755,14 +877,15 @@ class TestQueryOperation(TestcaseBase):
         expected: todo
         """
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
-        df = cf.gen_default_dataframe_data(nb=ct.default_nb)
+        df = cf.gen_default_dataframe_data(nb=100)
         df[ct.default_int64_field_name] = 0
         mutation_res, _ = collection_w.insert(df)
         assert mutation_res.primary_keys == df[ct.default_int64_field_name].tolist()
         collection_w.load()
         term_expr = f'{ct.default_int64_field_name} in {[0, 0, 0]}'
-        res, _ = collection_w.query(term_expr)
-        log.debug(res)
+        res = df.iloc[:, :2].to_dict('records')
+        collection_w.query(term_expr, output_fields=["*"], check_items=CheckTasks.check_query_results,
+                           check_task={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_after_index(self):
