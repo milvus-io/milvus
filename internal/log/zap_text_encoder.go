@@ -650,8 +650,7 @@ func (enc *textEncoder) encodeError(f zapcore.Field) {
 	if enc.disableErrorVerbose {
 		return
 	}
-	e, isFormatter := err.(fmt.Formatter)
-	if isFormatter {
+	if e, isFormatter := err.(fmt.Formatter); isFormatter {
 		verbose := fmt.Sprintf("%+v", e)
 		if verbose != basic {
 			// This is a rich error type, like those produced by
