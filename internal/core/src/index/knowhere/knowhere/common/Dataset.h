@@ -17,6 +17,7 @@
 #include <mutex>
 #include <string>
 #include <utility>
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 namespace milvus {
 namespace knowhere {
@@ -27,7 +28,20 @@ using ValuePtr = std::shared_ptr<Value>;
 class Dataset {
  public:
     Dataset() = default;
-
+    ~Dataset() {
+        for (auto const& d : data_) {
+            if (d.first == meta::IDS) {
+                auto row_data = Get<int64_t*>(milvus::knowhere::meta::IDS);
+                // the space of ids must be allocated through malloc
+                free(row_data);
+            }
+            if (d.first == meta::DISTANCE) {
+                auto row_data = Get<float*>(milvus::knowhere::meta::DISTANCE);
+                // the space of distance must be allocated through malloc
+                free(row_data);
+            }
+        }
+    }
     template <typename T>
     void
     Set(const std::string& k, T&& v) {
