@@ -70,7 +70,6 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
                 auto result = gpu_idx->Query(query_dataset, conf, nullptr);
                 AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
                 // PrintResult(result, nq, k);
-                ReleaseQueryResult(result);
             }
         }
     }
@@ -87,7 +86,6 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
         auto result = gpu_idx->Query(query_dataset, conf, nullptr);
         AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
         // PrintResult(result, nq, k);
-        ReleaseQueryResult(result);
 
         milvus::json quantizer_conf{{milvus::knowhere::meta::DEVICEID, DEVICEID}, {"mode", 2}};
         for (int i = 0; i < 2; ++i) {
@@ -98,7 +96,6 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
             auto result = new_idx->Query(query_dataset, conf, nullptr);
             AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
             // PrintResult(result, nq, k);
-            ReleaseQueryResult(result);
         }
     }
 
@@ -119,7 +116,6 @@ TEST_F(SingleIndexTest, IVFSQHybrid) {
             AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
             //            PrintResult(result, nq, k);
             hybrid_idx->UnsetQuantizer();
-            ReleaseQueryResult(result);
         }
     }
 }

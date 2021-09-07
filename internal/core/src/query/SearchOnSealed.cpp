@@ -58,17 +58,6 @@ AssembleNegBitset(const BitsetSimple& bitset_simple) {
     return result;
 }
 
-// TODO: temporary fix
-// remove this when internal destructor bug is fix
-static void
-ReleaseQueryResult(const knowhere::DatasetPtr& result) {
-    float* res_dist = result->Get<float*>(knowhere::meta::DISTANCE);
-    free(res_dist);
-
-    int64_t* res_ids = result->Get<int64_t*>(knowhere::meta::IDS);
-    free(res_ids);
-}
-
 void
 SearchOnSealed(const Schema& schema,
                const segcore::SealedIndexingRecord& record,
@@ -111,9 +100,5 @@ SearchOnSealed(const Schema& schema,
 
     std::copy_n(ids, total_num, result.internal_seg_offsets_.data());
     std::copy_n(distances, total_num, result.result_distances_.data());
-
-    // TODO: temporary fix
-    // remove this when internal destructor bug is fix
-    ReleaseQueryResult(final);
 }
 }  // namespace milvus::query

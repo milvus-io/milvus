@@ -79,7 +79,6 @@ TEST_P(HNSWTest, HNSW_basic) {
 
     auto result = index_->Query(query_dataset, conf, nullptr);
     AssertAnns(result, nq, k);
-    ReleaseQueryResult(result);
 
     // case: k > nb
     const int64_t new_rows = 6;
@@ -93,7 +92,6 @@ TEST_P(HNSWTest, HNSW_basic) {
             ASSERT_EQ(res_ids[i * k + j], -1);
         }
     }
-    ReleaseQueryResult(result2);
 }
 
 TEST_P(HNSWTest, HNSW_delete) {
@@ -124,11 +122,9 @@ TEST_P(HNSWTest, HNSW_delete) {
 
     auto result1 = index_->Query(query_dataset, conf, nullptr);
     AssertAnns(result1, nq, k);
-    ReleaseQueryResult(result1);
 
     auto result2 = index_->Query(query_dataset, conf, bitset);
     AssertAnns(result2, nq, k, CheckMode::CHECK_NOT_EQUAL);
-    ReleaseQueryResult(result2);
 
     /*
      * delete result checked by eyes
@@ -183,7 +179,6 @@ TEST_P(HNSWTest, HNSW_serialize) {
         EXPECT_EQ(index_->Dim(), dim);
         auto result = index_->Query(query_dataset, conf);
         AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
-        ReleaseQueryResult(result);
     }
 }*/
 

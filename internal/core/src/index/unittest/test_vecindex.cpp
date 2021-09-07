@@ -86,7 +86,6 @@ TEST_P(VecIndexTest, basic) {
     auto result = index_->Query(query_dataset, conf, nullptr);
     AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
     PrintResult(result, nq, k);
-    ReleaseQueryResult(result);
 }
 
 TEST_P(VecIndexTest, serialize) {
@@ -97,7 +96,6 @@ TEST_P(VecIndexTest, serialize) {
     EXPECT_EQ(index_->index_mode(), index_mode_);
     auto result = index_->Query(query_dataset, conf, nullptr);
     AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
-    ReleaseQueryResult(result);
 
     auto binaryset = index_->Serialize();
     auto new_index = milvus::knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type_, index_mode_);
@@ -108,7 +106,6 @@ TEST_P(VecIndexTest, serialize) {
     EXPECT_EQ(index_->index_mode(), new_index->index_mode());
     auto new_result = new_index_->Query(query_dataset, conf, nullptr);
     AssertAnns(new_result, nq, conf[milvus::knowhere::meta::TOPK]);
-    ReleaseQueryResult(new_result);
 }
 
 // todo

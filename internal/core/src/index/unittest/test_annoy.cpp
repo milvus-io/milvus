@@ -67,7 +67,6 @@ TEST_P(AnnoyTest, annoy_basic) {
 
     auto result = index_->Query(query_dataset, conf, nullptr);
     AssertAnns(result, nq, k);
-    ReleaseQueryResult(result);
 
     /*
      * output result to check by eyes
@@ -107,11 +106,9 @@ TEST_P(AnnoyTest, annoy_delete) {
 
     auto result1 = index_->Query(query_dataset, conf, nullptr);
     AssertAnns(result1, nq, k);
-    ReleaseQueryResult(result1);
 
     auto result2 = index_->Query(query_dataset, conf, bitset);
     AssertAnns(result2, nq, k, CheckMode::CHECK_NOT_EQUAL);
-    ReleaseQueryResult(result2);
 
     /*
      * delete result checked by eyes
@@ -217,7 +214,6 @@ TEST_P(AnnoyTest, annoy_slice) {
         ASSERT_EQ(index_->Dim(), dim);
         auto result = index_->Query(query_dataset, conf, nullptr);
         AssertAnns(result, nq, conf[milvus::knowhere::meta::TOPK]);
-        ReleaseQueryResult(result);
     }
 }
 

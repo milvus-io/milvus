@@ -103,7 +103,6 @@ TEST_F(NSGInterfaceTest, basic_test) {
 
     auto result_1 = index_->Query(query_dataset, search_conf, nullptr);
     AssertAnns(result_1, nq, k);
-    ReleaseQueryResult(result_1);
 
     /* test NSG GPU train */
     auto new_index = std::make_shared<milvus::knowhere::NSG_NM>(DEVICE_GPU0);
@@ -125,7 +124,6 @@ TEST_F(NSGInterfaceTest, basic_test) {
 
     auto result_2 = new_index->Query(query_dataset, search_conf, nullptr);
     AssertAnns(result_2, nq, k);
-    ReleaseQueryResult(result_2);
 
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dim(), dim);
@@ -199,9 +197,6 @@ TEST_F(NSGInterfaceTest, delete_test) {
     for (int i = 0; i < nq; i++) {
         ASSERT_NE(I_before[i * k], I_after[i * k]);
     }
-
-    ReleaseQueryResult(result);
-    ReleaseQueryResult(result_after);
 }
 
 TEST_F(NSGInterfaceTest, slice_test) {
@@ -232,7 +227,6 @@ TEST_F(NSGInterfaceTest, slice_test) {
 
     auto result = index_->Query(query_dataset, search_conf, nullptr);
     AssertAnns(result, nq, k);
-    ReleaseQueryResult(result);
 
     /* test NSG GPU train */
     auto new_index_1 = std::make_shared<milvus::knowhere::NSG_NM>(DEVICE_GPU0);
@@ -254,7 +248,6 @@ TEST_F(NSGInterfaceTest, slice_test) {
 
     auto new_result_1 = new_index_1->Query(query_dataset, search_conf, nullptr);
     AssertAnns(new_result_1, nq, k);
-    ReleaseQueryResult(new_result_1);
 
     ASSERT_EQ(index_->Count(), nb);
     ASSERT_EQ(index_->Dim(), dim);

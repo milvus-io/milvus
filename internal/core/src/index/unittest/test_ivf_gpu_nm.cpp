@@ -119,7 +119,6 @@ TEST_F(IVFNMGPUTest, ivf_basic_gpu) {
             SERIALIZE_AND_LOAD(clone_index);
             auto clone_result = clone_index->Query(query_dataset, conf_, nullptr);
             AssertEqual(result, clone_result);
-            ReleaseQueryResult(clone_result);
             std::cout << "clone G <=> C [" << index_type_ << "] success" << std::endl;
         });
     }
@@ -131,10 +130,7 @@ TEST_F(IVFNMGPUTest, ivf_basic_gpu) {
 
     auto result_bs_1 = index_->Query(query_dataset, conf_, concurrent_bitset_ptr);
     AssertAnns(result_bs_1, nq, k, CheckMode::CHECK_NOT_EQUAL);
-    ReleaseQueryResult(result_bs_1);
 
     milvus::knowhere::FaissGpuResourceMgr::GetInstance().Dump();
-
-    ReleaseQueryResult(result);
 }
 #endif
