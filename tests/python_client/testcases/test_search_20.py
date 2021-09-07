@@ -1399,7 +1399,8 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_binary_jaccard_flat_index(self, nq, dim, auto_id, _async):
+    @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
+    def test_search_binary_jaccard_flat_index(self, nq, dim, auto_id, _async, index):
         """
         target: search binary_collection, and check the result: distance
         method: compare the return distance value with value computed with JACCARD
@@ -1412,7 +1413,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                                       dim=dim,
                                                                                       is_index=True)
         # 2. create index
-        default_index = {"index_type": "BIN_IVF_FLAT", "params": {"nlist": 128}, "metric_type": "JACCARD"}
+        default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "JACCARD"}
         collection_w.create_index("binary_vector", default_index)
         collection_w.load()
         # 3. compute the distance
@@ -1435,7 +1436,8 @@ class TestCollectionSearch(TestcaseBase):
         assert abs(res[0]._distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_binary_hamming_flat_index(self, nq, dim, auto_id, _async):
+    @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
+    def test_search_binary_hamming_flat_index(self, nq, dim, auto_id, _async, index):
         """
         target: search binary_collection, and check the result: distance
         method: compare the return distance value with value computed with HAMMING
@@ -1448,7 +1450,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                                       dim=dim,
                                                                                       is_index=True)
         # 2. create index
-        default_index = {"index_type": "BIN_IVF_FLAT", "params": {"nlist": 128}, "metric_type": "HAMMING"}
+        default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "HAMMING"}
         collection_w.create_index("binary_vector", default_index)
         # 3. compute the distance
         collection_w.load()
@@ -1472,7 +1474,8 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="issue 6843")
-    def test_search_binary_tanimoto_flat_index(self, nq, dim, auto_id, _async):
+    @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
+    def test_search_binary_tanimoto_flat_index(self, nq, dim, auto_id, _async, index):
         """
         target: search binary_collection, and check the result: distance
         method: compare the return distance value with value computed with TANIMOTO
@@ -1486,7 +1489,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                                       is_index=True)
         log.info("auto_id= %s, _async= %s" % (auto_id, _async))
         # 2. create index
-        default_index = {"index_type": "BIN_IVF_FLAT", "params": {"nlist": 128}, "metric_type": "TANIMOTO"}
+        default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "TANIMOTO"}
         collection_w.create_index("binary_vector", default_index)
         collection_w.load()
         # 3. compute the distance
