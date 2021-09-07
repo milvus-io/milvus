@@ -27,7 +27,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func TestBaseParams_SaveAndLoad(t *testing.T) {
+func TestBaseTable_SaveAndLoad(t *testing.T) {
 	err1 := baseParams.Save("int", "10")
 	assert.Nil(t, err1)
 
@@ -56,7 +56,7 @@ func TestBaseParams_SaveAndLoad(t *testing.T) {
 	assert.Nil(t, err6)
 }
 
-func TestBaseParams_LoadFromKVPair(t *testing.T) {
+func TestBaseTable_LoadFromKVPair(t *testing.T) {
 	var kvPairs []*commonpb.KeyValuePair
 	kvPairs = append(kvPairs, &commonpb.KeyValuePair{
 		Key:   "k1",
@@ -79,7 +79,7 @@ func TestBaseParams_LoadFromKVPair(t *testing.T) {
 	assert.Equal(t, "v2", v)
 }
 
-func TestBaseParams_LoadRange(t *testing.T) {
+func TestBaseTable_LoadRange(t *testing.T) {
 	_ = baseParams.Save("xxxaab", "10")
 	_ = baseParams.Save("xxxfghz", "20")
 	_ = baseParams.Save("xxxbcde", "1.1")
@@ -101,7 +101,7 @@ func TestBaseParams_LoadRange(t *testing.T) {
 	_ = baseParams.Remove("zhi")
 }
 
-func TestBaseParams_Remove(t *testing.T) {
+func TestBaseTable_Remove(t *testing.T) {
 	err1 := baseParams.Save("RemoveInt", "10")
 	assert.Nil(t, err1)
 
@@ -121,7 +121,7 @@ func TestBaseParams_Remove(t *testing.T) {
 	assert.Nil(t, err6)
 }
 
-func TestBaseParams_LoadYaml(t *testing.T) {
+func TestBaseTable_LoadYaml(t *testing.T) {
 	err := baseParams.LoadYaml("milvus.yaml")
 	assert.Nil(t, err)
 	err = baseParams.LoadYaml("advanced/channel.yaml")
@@ -134,7 +134,7 @@ func TestBaseParams_LoadYaml(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func TestBaseParams_Parse(t *testing.T) {
+func TestBaseTable_Parse(t *testing.T) {
 	t.Run("ParseBool", func(t *testing.T) {
 		assert.Nil(t, baseParams.Save("key", "true"))
 		assert.True(t, baseParams.ParseBool("key", false))
@@ -181,7 +181,7 @@ func TestBaseParams_Parse(t *testing.T) {
 	})
 }
 
-func TestBaseParams_ConvertRange(t *testing.T) {
+func Test_ConvertRangeToIntSlice(t *testing.T) {
 	t.Run("ConvertRangeToIntSlice", func(t *testing.T) {
 		slice := ConvertRangeToIntSlice("0,10", ",")
 		assert.Equal(t, 10, len(slice))
