@@ -12,6 +12,7 @@ package datacoord
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"time"
 
@@ -51,6 +52,17 @@ func (m *MockAllocator) allocTimestamp(ctx context.Context) (Timestamp, error) {
 func (m *MockAllocator) allocID(ctx context.Context) (UniqueID, error) {
 	val := atomic.AddInt64(&m.cnt, 1)
 	return val, nil
+}
+
+// FailsAllocator allocator that fails
+type FailsAllocator struct{}
+
+func (a *FailsAllocator) allocTimestamp(_ context.Context) (Timestamp, error) {
+	return 0, errors.New("always fail")
+}
+
+func (a *FailsAllocator) allocID(_ context.Context) (UniqueID, error) {
+	return 0, errors.New("always fail")
 }
 
 func newMockAllocator() *MockAllocator {

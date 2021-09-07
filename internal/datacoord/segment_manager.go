@@ -28,6 +28,37 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
+var (
+	allocPool = sync.Pool{
+		New: func() interface{} {
+			return &Allocation{}
+		},
+	}
+)
+
+// getAllocation unified way to retrieve allocation struct
+func getAllocation(numOfRows int64) *Allocation {
+	v := allocPool.Get()
+	a, ok := v.(*Allocation)
+	if !ok {
+		a = &Allocation{}
+	}
+	if a == nil {
+		return &Allocation{
+			NumOfRows: numOfRows,
+		}
+	}
+	a.NumOfRows = numOfRows
+	a.ExpireTime = 0
+	a.SegmentID = 0
+	return a
+}
+
+// putAllocation put allocation for recycling
+func putAllocation(a *Allocation) {
+	allocPool.Put(a)
+}
+
 const segmentMaxLifetime = 24 * time.Hour
 
 // Manager manage segment related operations.
@@ -63,7 +94,6 @@ type SegmentManager struct {
 	segmentSealPolicies []segmentSealPolicy
 	channelSealPolicies []channelSealPolicy
 	flushPolicy         flushPolicy
-	allocPool           sync.Pool
 }
 
 type allocHelper struct {
@@ -157,11 +187,6 @@ func newSegmentManager(meta *meta, allocator allocator, opts ...allocOption) *Se
 		segmentSealPolicies: defaultSegmentSealPolicy(), // default only segment size policy
 		channelSealPolicies: []channelSealPolicy{},      // no default channel seal policy
 		flushPolicy:         defaultFlushPolicy(),
-		allocPool: sync.Pool{
-			New: func() interface{} {
-				return &Allocation{}
-			},
-		},
 	}
 	for _, opt := range opts {
 		opt.apply(manager)
@@ -178,27 +203,6 @@ func (s *SegmentManager) loadSegmentsFromMeta() {
 		segmentsID = append(segmentsID, segment.GetID())
 	}
 	s.segments = segmentsID
-}
-
-// getAllocation unified way to retrieve allocation struct
-func (s *SegmentManager) getAllocation(numOfRows int64) *Allocation {
-	v := s.allocPool.Get()
-	if v == nil {
-		return &Allocation{
-			NumOfRows: numOfRows,
-		}
-	}
-	a, ok := v.(*Allocation)
-	if !ok {
-		a = &Allocation{}
-	}
-	a.NumOfRows = numOfRows
-	return a
-}
-
-// putAllocation put allocation for recycling
-func (s *SegmentManager) putAllocation(a *Allocation) {
-	s.allocPool.Put(a)
 }
 
 // AllocSegment allocate segment per request collcation, partication, channel and rows
@@ -339,7 +343,7 @@ func (s *SegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
 	}
 	s.meta.SetAllocations(segmentID, []*Allocation{})
 	for _, allocation := range segment.allocations {
-		s.putAllocation(allocation)
+		putAllocation(allocation)
 	}
 }
 
@@ -407,7 +411,7 @@ func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) error {
 		for i := 0; i < len(segment.allocations); i++ {
 			if segment.allocations[i].ExpireTime <= ts {
 				a := segment.allocations[i]
-				s.putAllocation(a)
+				putAllocation(a)
 			} else {
 				allocations = append(allocations, segment.allocations[i])
 			}
