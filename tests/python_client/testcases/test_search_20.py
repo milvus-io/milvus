@@ -515,7 +515,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:9],
                                  ct.default_index_params[:9]))
-    def test_search_different_index_invalid_params(self, nq, dim, index, params, auto_id, _async):
+    def test_search_different_index_invalid_params(self, index, params):
         """
         target: test search with different index
         method: test search with different index
@@ -524,13 +524,11 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 1. initialize with data
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 5000,
                                                                       partition_num=1,
-                                                                      auto_id=auto_id,
-                                                                      dim=dim, is_index=True)
-        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+                                                                      is_index=True)
         # 2. create different index
         if params.get("m"):
-            if (dim % params["m"]) != 0:
-                params["m"] = dim//4
+            if (default_dim % params["m"]) != 0:
+                params["m"] = default_dim//4
         log.info("test_search_different_index_invalid_params: Creating index-%s" % index)
         default_index = {"index_type": index, "params": params, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
@@ -538,14 +536,13 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.load()
         # 3. search
         log.info("test_search_different_index_invalid_params: Searching after creating index-%s" % index)
-        collection_w.search(vectors[:nq], default_search_field,
+        collection_w.search(vectors, default_search_field,
                             default_search_params, default_limit,
-                            default_search_exp, _async=_async,
+                            default_search_exp,
                             check_task=CheckTasks.check_search_results,
-                            check_items={"nq": nq,
+                            check_items={"nq": default_nq,
                                          "ids": insert_ids,
-                                         "limit": default_limit,
-                                         "_async": _async})
+                                         "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_index_partition_not_existed(self):
