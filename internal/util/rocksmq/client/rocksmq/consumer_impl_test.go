@@ -17,7 +17,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestConsumer(t *testing.T) {
+func TestConsumer_newConsumer(t *testing.T) {
+	assert.Equal(t, EarliestMessageID(), int64(-1))
+
 	consumer, err := newConsumer(nil, ConsumerOptions{
 		Topic:                       newTopicName(),
 		SubscriptionName:            newConsumerName(),
@@ -32,15 +34,73 @@ func TestConsumer(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.Equal(t, InvalidConfiguration, err.(*Error).Result())
 
+	consumer, err = newConsumer1(newMockClient(), ConsumerOptions{}, nil)
+	assert.Nil(t, consumer)
+	assert.NotNil(t, err)
+	assert.Equal(t, InvalidConfiguration, err.(*Error).Result())
+
 	consumer, err = newConsumer(newMockClient(), ConsumerOptions{
 		Topic: newTopicName(),
 	})
 	assert.Nil(t, consumer)
 	assert.NotNil(t, err)
 	assert.Equal(t, InvalidConfiguration, err.(*Error).Result())
+
+	/////////////////////////////////////////////////
+	rmqPath := "/tmp/milvus/test_consumer1"
+	rmq := newRocksMQ(rmqPath)
+	defer removePath(rmqPath)
+	client, err := newClient(ClientOptions{
+		Server: rmq,
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+	consumerName := newConsumerName()
+	consumer1, err := newConsumer(client, ConsumerOptions{
+		Topic:            newTopicName(),
+		SubscriptionName: consumerName,
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, consumer1)
+	defer consumer1.Close()
+	assert.Equal(t, consumerName, consumer1.Subscription())
+
+	consumer2, err := newConsumer(client, ConsumerOptions{
+		Topic: "",
+	})
+	assert.Error(t, err)
+	assert.Nil(t, consumer2)
+
+	consumer3, err := newConsumer(client, ConsumerOptions{
+		Topic:            newTopicName(),
+		SubscriptionName: "",
+	})
+	assert.Error(t, err)
+	assert.Nil(t, consumer3)
+
+	consumer4, err := newConsumer1(client, ConsumerOptions{
+		Topic:            newTopicName(),
+		SubscriptionName: newConsumerName(),
+	}, nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, consumer4)
+
+	consumer5, err := newConsumer1(client, ConsumerOptions{
+		Topic: "",
+	}, nil)
+	assert.Error(t, err)
+	assert.Nil(t, consumer5)
+
+	consumer6, err := newConsumer1(client, ConsumerOptions{
+		Topic:            newTopicName(),
+		SubscriptionName: "",
+	}, nil)
+	assert.Error(t, err)
+	assert.Nil(t, consumer6)
 }
 
-func TestSubscription(t *testing.T) {
+func TestConsumer_Subscription(t *testing.T) {
 	topicName := newTopicName()
 	consumerName := newConsumerName()
 	consumer, err := newConsumer(newMockClient(), ConsumerOptions{
@@ -50,4 +110,27 @@ func TestSubscription(t *testing.T) {
 	assert.Nil(t, consumer)
 	assert.NotNil(t, err)
 	//assert.Equal(t, consumerName, consumer.Subscription())
+}
+
+func TestConsumer_Seek(t *testing.T) {
+	rmqPath := "/tmp/milvus/test_consumer2"
+	rmq := newRocksMQ(rmqPath)
+	defer removePath(rmqPath)
+	client, err := newClient(ClientOptions{
+		Server: rmq,
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	topicName := newTopicName()
+	consumerName := newConsumerName()
+	consumer, err := newConsumer(client, ConsumerOptions{
+		Topic:            topicName,
+		SubscriptionName: consumerName,
+	})
+	assert.NoError(t, err)
+	assert.NotNil(t, consumer)
+
+	consumer.Seek(0)
 }
