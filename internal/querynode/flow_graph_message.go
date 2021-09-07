@@ -19,31 +19,9 @@ import (
 type Msg = flowgraph.Msg
 type MsgStreamMsg = flowgraph.MsgStreamMsg
 
-type key2SegMsg struct {
-	tsMessages []msgstream.TsMsg
-	timeRange  TimeRange
-}
-
-type ddMsg struct {
-	collectionRecords map[UniqueID][]metaOperateRecord
-	partitionRecords  map[UniqueID][]metaOperateRecord
-	gcRecord          *gcRecord
-	timeRange         TimeRange
-}
-
-type metaOperateRecord struct {
-	createOrDrop bool // create: true, drop: false
-	timestamp    Timestamp
-}
-
 type insertMsg struct {
 	insertMessages []*msgstream.InsertMsg
 	gcRecord       *gcRecord
-	timeRange      TimeRange
-}
-
-type deleteMsg struct {
-	deleteMessages []*msgstream.DeleteMsg
 	timeRange      TimeRange
 }
 
@@ -86,20 +64,8 @@ type gcRecord struct {
 	partitions  []partitionWithID
 }
 
-func (ksMsg *key2SegMsg) TimeTick() Timestamp {
-	return ksMsg.timeRange.timestampMax
-}
-
-func (suMsg *ddMsg) TimeTick() Timestamp {
-	return suMsg.timeRange.timestampMax
-}
-
 func (iMsg *insertMsg) TimeTick() Timestamp {
 	return iMsg.timeRange.timestampMax
-}
-
-func (dMsg *deleteMsg) TimeTick() Timestamp {
-	return dMsg.timeRange.timestampMax
 }
 
 func (stMsg *serviceTimeMsg) TimeTick() Timestamp {

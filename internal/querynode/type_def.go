@@ -26,6 +26,7 @@ type (
 	UniqueID = typeutil.UniqueID
 	// Timestamp is timestamp
 	Timestamp = typeutil.Timestamp
+	FieldID   = int64
 	// IntPrimaryKey is the primary key of int type
 	IntPrimaryKey = typeutil.IntPrimaryKey
 	// DSL is the Domain Specific Language

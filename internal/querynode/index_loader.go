@@ -287,6 +287,11 @@ func (loader *indexLoader) sendQueryNodeStats() error {
 }
 
 func (loader *indexLoader) setIndexInfo(collectionID UniqueID, segment *Segment, fieldID UniqueID) error {
+	if loader.indexCoord == nil || loader.rootCoord == nil {
+		return errors.New("null index coordinator client or root coordinator client, collectionID = " +
+			fmt.Sprintln(collectionID))
+	}
+
 	ctx := context.TODO()
 	req := &milvuspb.DescribeSegmentRequest{
 		Base: &commonpb.MsgBase{
@@ -305,10 +310,6 @@ func (loader *indexLoader) setIndexInfo(collectionID UniqueID, segment *Segment,
 
 	if !response.EnableIndex {
 		return errors.New("there are no indexes on this segment")
-	}
-
-	if loader.indexCoord == nil {
-		return errors.New("null index coordinator client")
 	}
 
 	indexFilePathRequest := &indexpb.GetIndexFilePathsRequest{
