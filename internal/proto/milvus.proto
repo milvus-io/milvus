@@ -97,6 +97,7 @@ message DescribeCollectionResponse {
   repeated string physical_channel_names = 5;
   uint64 created_timestamp = 6; // hybrid timestamp
   uint64 created_utc_timestamp = 7; // physical timestamp
+  int32 shards_num = 8; // shards number
 }
 
 message LoadCollectionRequest {

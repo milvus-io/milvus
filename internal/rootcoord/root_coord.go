@@ -65,6 +65,8 @@ const (
 
 	// MetricRequestsSuccess used to count the num of successful requests
 	MetricRequestsSuccess = "success"
+
+	DefaultShardsNum = int32(2)
 )
 
 func metricProxy(v int64) string {
