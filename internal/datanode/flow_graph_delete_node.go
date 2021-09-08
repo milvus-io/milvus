@@ -12,7 +12,6 @@
 package datanode
 
 import (
-	"context"
 	"encoding/binary"
 	"errors"
 
@@ -27,30 +26,25 @@ type deleteNode struct {
 	replica Replica
 }
 
-func (ddn *deleteNode) Name() string {
-	return "deletedNode"
+func (dn *deleteNode) Name() string {
+	return "deleteNode"
 }
 
-func (ddn *deleteNode) Operate(in []Msg) []Msg {
-	// log.Debug("DDNode Operating")
+func (dn *deleteNode) Close() {
+	log.Info("Flowgraph Delete Node closing")
+}
+
+func (dn *deleteNode) Operate(in []Msg) []Msg {
+	// log.Debug("deleteNode Operating")
 
 	if len(in) != 1 {
-		log.Error("Invalid operate message input in deleteNode", zap.Int("input length", len(in)))
+		log.Warn("Invalid operate message input in deleteNode", zap.Int("input length", len(in)))
 		return []Msg{}
 	}
 
-	if len(in) == 0 {
-		return []Msg{}
-	}
-
-	msMsg, ok := in[0].(*MsgStreamMsg)
+	_, ok := in[0].(*MsgStreamMsg)
 	if !ok {
-		log.Error("type assertion failed for MsgStreamMsg")
-		return []Msg{}
-		// TODO: add error handling
-	}
-
-	if msMsg == nil {
+		log.Warn("type assertion failed for MsgStreamMsg")
 		return []Msg{}
 	}
 
@@ -59,10 +53,10 @@ func (ddn *deleteNode) Operate(in []Msg) []Msg {
 
 func getSegmentsByPKs(pks []int64, segments []*Segment) (map[int64][]int64, error) {
 	if pks == nil {
-		return nil, errors.New("pks is nil when getSegmentsByPKs")
+		return nil, errors.New("pks is nil")
 	}
 	if segments == nil {
-		return nil, errors.New("segments is nil when getSegmentsByPKs")
+		return nil, errors.New("segments is nil")
 	}
 	results := make(map[int64][]int64)
 	buf := make([]byte, 8)
@@ -78,12 +72,16 @@ func getSegmentsByPKs(pks []int64, segments []*Segment) (map[int64][]int64, erro
 	return results, nil
 }
 
-func newDeleteDNode(ctx context.Context, replica Replica) *deleteNode {
+func newDeleteDNode(replica Replica) (*deleteNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxParallelism(Params.FlowGraphMaxQueueLength)
+
+	if replica == nil {
+		return nil, errors.New("Nill input replica")
+	}
 
 	return &deleteNode{
 		BaseNode: baseNode,
 		replica:  replica,
-	}
+	}, nil
 }
