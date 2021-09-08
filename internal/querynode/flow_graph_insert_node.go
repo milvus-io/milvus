@@ -125,7 +125,6 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	wg.Wait()
 
 	var res Msg = &serviceTimeMsg{
-		gcRecord:  iMsg.gcRecord,
 		timeRange: iMsg.timeRange,
 	}
 	for _, sp := range spans {
