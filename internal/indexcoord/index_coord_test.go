@@ -17,8 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-
 	grpcindexnode "github.com/milvus-io/milvus/internal/distributed/indexnode"
 
 	"github.com/milvus-io/milvus/internal/indexnode"
@@ -38,6 +36,13 @@ import (
 
 func TestIndexCoord(t *testing.T) {
 	ctx := context.Background()
+	inm0 := &indexnode.Mock{}
+	err := inm0.Init()
+	assert.Nil(t, err)
+	err = inm0.Register()
+	assert.Nil(t, err)
+	err = inm0.Start()
+	assert.Nil(t, err)
 	ic, err := NewIndexCoord(ctx)
 	assert.Nil(t, err)
 	Params.Init()
@@ -47,6 +52,9 @@ func TestIndexCoord(t *testing.T) {
 	err = ic.Init()
 	assert.Nil(t, err)
 	err = ic.Start()
+	assert.Nil(t, err)
+
+	err = inm0.Stop()
 	assert.Nil(t, err)
 
 	in, err := grpcindexnode.NewServer(ctx)
@@ -158,7 +166,8 @@ func TestIndexCoord(t *testing.T) {
 	})
 
 	t.Run("GetMetrics when request is illegal", func(t *testing.T) {
-		req := &milvuspb.GetMetricsRequest{}
+		req, err := metricsinfo.ConstructRequestByMetricType("GetIndexNodeMetrics")
+		assert.Nil(t, err)
 		resp, err := ic.GetMetrics(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
