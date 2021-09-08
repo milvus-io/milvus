@@ -1470,6 +1470,7 @@ class DescribeCollectionResponse :
     kCollectionIDFieldNumber = 3,
     kCreatedTimestampFieldNumber = 6,
     kCreatedUtcTimestampFieldNumber = 7,
+    kShardsNumFieldNumber = 8,
   };
   // repeated string virtual_channel_names = 4;
   int virtual_channel_names_size() const;
@@ -1536,6 +1537,11 @@ class DescribeCollectionResponse :
   ::PROTOBUF_NAMESPACE_ID::uint64 created_utc_timestamp() const;
   void set_created_utc_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
 
+  // int32 shards_num = 8;
+  void clear_shards_num();
+  ::PROTOBUF_NAMESPACE_ID::int32 shards_num() const;
+  void set_shards_num(::PROTOBUF_NAMESPACE_ID::int32 value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.DescribeCollectionResponse)
  private:
   class _Internal;
@@ -1548,6 +1554,7 @@ class DescribeCollectionResponse :
   ::PROTOBUF_NAMESPACE_ID::int64 collectionid_;
   ::PROTOBUF_NAMESPACE_ID::uint64 created_timestamp_;
   ::PROTOBUF_NAMESPACE_ID::uint64 created_utc_timestamp_;
+  ::PROTOBUF_NAMESPACE_ID::int32 shards_num_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -12144,6 +12151,20 @@ inline void DescribeCollectionResponse::set_created_utc_timestamp(::PROTOBUF_NAM
   
   created_utc_timestamp_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.DescribeCollectionResponse.created_utc_timestamp)
+}
+
+// int32 shards_num = 8;
+inline void DescribeCollectionResponse::clear_shards_num() {
+  shards_num_ = 0;
+}
+inline ::PROTOBUF_NAMESPACE_ID::int32 DescribeCollectionResponse::shards_num() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.DescribeCollectionResponse.shards_num)
+  return shards_num_;
+}
+inline void DescribeCollectionResponse::set_shards_num(::PROTOBUF_NAMESPACE_ID::int32 value) {
+  
+  shards_num_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.DescribeCollectionResponse.shards_num)
 }
 
 // -------------------------------------------------------------------
