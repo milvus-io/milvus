@@ -56,13 +56,15 @@ var (
 )
 
 type (
-	UniqueID  = typeutil.UniqueID
+	// UniqueID shortcut for typeutil.UniqueID
+	UniqueID = typeutil.UniqueID
+	// Timestamp shortcurt for typeutil.Timestamp
 	Timestamp = typeutil.Timestamp
 )
 
 var errNilKvClient = errors.New("kv client not initialized")
 
-// ServerState type alias
+// ServerState type alias, presents datacoord Server State
 type ServerState = int64
 
 const (

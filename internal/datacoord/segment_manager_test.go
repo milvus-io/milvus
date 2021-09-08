@@ -11,14 +11,11 @@ package datacoord
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"math"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/kv"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -316,17 +313,6 @@ func TestGetFlushableSegments(t *testing.T) {
 	})
 }
 
-// a mock kv that always fail when do `Save`
-type saveFailKv struct {
-	kv.TxnKV
-}
-
-// LoadWithPrefix override behavior
-func (kv *saveFailKv) Save(key, value string) error {
-	fmt.Println("here")
-	return errors.New("mocked fail")
-}
-
 func TestTryToSealSegment(t *testing.T) {
 	t.Run("normal seal with segment policies", func(t *testing.T) {
 		Params.Init()
@@ -409,7 +395,7 @@ func TestTryToSealSegment(t *testing.T) {
 		Params.Init()
 		mockAllocator := newMockAllocator()
 		memoryKV := memkv.NewMemoryKV()
-		fkv := &saveFailKv{TxnKV: memoryKV}
+		fkv := &saveFailKV{TxnKV: memoryKV}
 		meta, err := NewMeta(memoryKV)
 
 		assert.Nil(t, err)
@@ -435,7 +421,7 @@ func TestTryToSealSegment(t *testing.T) {
 		Params.Init()
 		mockAllocator := newMockAllocator()
 		memoryKV := memkv.NewMemoryKV()
-		fkv := &saveFailKv{TxnKV: memoryKV}
+		fkv := &saveFailKV{TxnKV: memoryKV}
 		meta, err := NewMeta(memoryKV)
 
 		assert.Nil(t, err)

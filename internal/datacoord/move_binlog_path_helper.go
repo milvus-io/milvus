@@ -25,7 +25,7 @@ func NewMoveBinlogPathHelper(kv kv.TxnKV, meta *meta) *MoveBinlogPathHelper {
 }
 
 func (h *MoveBinlogPathHelper) Execute() error {
-	segmentIds := h.meta.ListSegmentIds()
+	segmentIds := h.meta.ListSegmentIDs()
 
 	if len(segmentIds) == 1 {
 		log.Debug("there's 1 segment's binlogs to move", zap.Int64("segmentID", segmentIds[0]))

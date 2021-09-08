@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
@@ -54,6 +55,8 @@ func (m *MockAllocator) allocID(ctx context.Context) (UniqueID, error) {
 	return val, nil
 }
 
+var _ allocator = (*FailsAllocator)(nil)
+
 // FailsAllocator allocator that fails
 type FailsAllocator struct{}
 
@@ -63,6 +66,22 @@ func (a *FailsAllocator) allocTimestamp(_ context.Context) (Timestamp, error) {
 
 func (a *FailsAllocator) allocID(_ context.Context) (UniqueID, error) {
 	return 0, errors.New("always fail")
+}
+
+// a mock kv that always fail when do `Save`
+type saveFailKV struct{ kv.TxnKV }
+
+// Save override behavior
+func (kv *saveFailKV) Save(key, value string) error {
+	return errors.New("mocked fail")
+}
+
+// a mock kv that always fail when do `Remove`
+type removeFailKV struct{ kv.TxnKV }
+
+// Remove override behavior, inject error
+func (kv *removeFailKV) Remove(key string) error {
+	return errors.New("mocked fail")
 }
 
 func newMockAllocator() *MockAllocator {

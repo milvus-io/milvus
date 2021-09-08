@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/stretchr/testify/assert"
@@ -117,6 +118,30 @@ func TestMeta_Basic(t *testing.T) {
 		info0_0 = meta.GetSegment(segID0_0)
 		assert.NotNil(t, info0_0)
 		assert.EqualValues(t, commonpb.SegmentState_Flushed, info0_0.State)
+	})
+
+	t.Run("Test segment with kv fails", func(t *testing.T) {
+		// inject error for `Save`
+		memoryKV := memkv.NewMemoryKV()
+		fkv := &saveFailKV{TxnKV: memoryKV}
+		meta, err := NewMeta(fkv)
+		assert.Nil(t, err)
+
+		err = meta.AddSegment(NewSegmentInfo(&datapb.SegmentInfo{}))
+		assert.NotNil(t, err)
+
+		fkv2 := &removeFailKV{TxnKV: memoryKV}
+		meta, err = NewMeta(fkv2)
+		assert.Nil(t, err)
+		// nil, since no segment yet
+		err = meta.DropSegment(0)
+		assert.Nil(t, err)
+		// nil, since Save error not injected
+		err = meta.AddSegment(NewSegmentInfo(&datapb.SegmentInfo{}))
+		assert.Nil(t, err)
+		// error injected
+		err = meta.DropSegment(0)
+		assert.NotNil(t, err)
 	})
 
 	t.Run("Test GetCount", func(t *testing.T) {
