@@ -14,7 +14,9 @@ import threading
 import traceback
 
 """" Methods of processing data """
-#l2 = lambda x, y: np.linalg.norm(np.array(x) - np.array(y))
+
+
+# l2 = lambda x, y: np.linalg.norm(np.array(x) - np.array(y))
 
 
 def gen_unique_str(str_value=None):
@@ -187,6 +189,7 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0):
     bool_values = pd.Series(data=[np.bool(i) for i in range(start, start + nb)], dtype="bool")
     float_values = pd.Series(data=[float(i) for i in range(start, start + nb)], dtype="float32")
     double_values = pd.Series(data=[np.double(i) for i in range(start, start + nb)], dtype="double")
+    # string_values = pd.Series(data=[str(i) for i in range(start, start + nb)], dtype="string")
     float_vec_values = gen_vectors(nb, dim)
     df = pd.DataFrame({
         ct.default_int64_field_name: int64_values,
@@ -195,6 +198,7 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0):
         ct.default_int8_field_name: int8_values,
         ct.default_bool_field_name: bool_values,
         ct.default_float_field_name: float_values,
+        # ct.default_string_field_name: string_values,
         ct.default_double_field_name: double_values,
         ct.default_float_vec_field_name: float_vec_values
     })
@@ -297,6 +301,7 @@ def gen_invaild_search_params_type():
                 search_params.append(annoy_search_param)
     return search_params
 
+
 def gen_search_param(index_type, metric_type="L2"):
     search_params = []
     if index_type in ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_SQ8H", "IVF_PQ"] \
@@ -320,6 +325,7 @@ def gen_search_param(index_type, metric_type="L2"):
         log.error("Invalid index_type.")
         raise Exception("Invalid index_type.")
     return search_params
+
 
 def gen_all_type_fields():
     fields = []
@@ -385,10 +391,12 @@ def tanimoto(x, y):
     y = np.asarray(y, np.bool)
     return -np.log2(np.double(np.bitwise_and(x, y).sum()) / np.double(np.bitwise_or(x, y).sum()))
 
+
 def tanimoto_calc(x, y):
     x = np.asarray(x, np.bool)
     y = np.asarray(y, np.bool)
     return np.double((len(x) - np.bitwise_xor(x, y).sum())) / (len(y) + np.bitwise_xor(x, y).sum())
+
 
 def substructure(x, y):
     x = np.asarray(x, np.bool)
@@ -400,6 +408,7 @@ def superstructure(x, y):
     x = np.asarray(x, np.bool)
     y = np.asarray(y, np.bool)
     return 1 - np.double(np.bitwise_and(x, y).sum()) / np.count_nonzero(x)
+
 
 def compare_distance_2d_vector(x, y, distance, metric, sqrt):
     for i in range(len(x)):

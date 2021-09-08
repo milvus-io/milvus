@@ -11,7 +11,6 @@ from common.common_type import CaseLabel, CheckTasks
 from utils.utils import *
 from common.constants import *
 
-
 prefix = "collection"
 exp_name = "name"
 exp_schema = "schema"
@@ -37,7 +36,6 @@ default_single_query = {
         ]
     }
 }
-
 
 
 class TestCollectionParams(TestcaseBase):
@@ -601,8 +599,9 @@ class TestCollectionParams(TestcaseBase):
         int_field_one = cf.gen_int64_field(is_primary=True)
         int_field_two = cf.gen_int64_field(name="int2", is_primary=True)
         error = {ct.err_code: 0, ct.err_msg: "Primary key field can only be one."}
-        self.collection_schema_wrap.init_collection_schema(fields=[int_field_one, int_field_two, cf.gen_float_vec_field()],
-                                                           check_task=CheckTasks.err_res, check_items=error)
+        self.collection_schema_wrap.init_collection_schema(
+            fields=[int_field_one, int_field_two, cf.gen_float_vec_field()],
+            check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_collection_primary_inconsistent(self):
@@ -821,7 +820,8 @@ class TestCollectionParams(TestcaseBase):
         int_field, _ = self.field_schema_wrap.init_field_schema(name=ct.default_int64_field_name, dtype=DataType.INT64,
                                                                 dim=ct.default_dim)
         float_vec_field = cf.gen_float_vec_field()
-        schema = cf.gen_collection_schema(fields=[int_field, float_vec_field], primary_field=ct.default_int64_field_name)
+        schema = cf.gen_collection_schema(fields=[int_field, float_vec_field],
+                                          primary_field=ct.default_int64_field_name)
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: schema})
 
@@ -961,6 +961,26 @@ class TestCollectionOperation(TestcaseBase):
         self.init_collection_wrap(name=c_name, check_task=CheckTasks.check_collection_property,
                                   check_items={exp_name: c_name, exp_schema: default_schema})
         assert self.utility_wrap.has_collection(c_name)[0]
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_collection_all_datatype_fields(self):
+        """
+        target: test create collection with all dataType fields
+        method: create collection with all dataType schema
+        expected: create successfully
+        """
+        self._connect()
+        fields = []
+        for k, v in DataType.__members__.items():
+            if v and v != DataType.UNKNOWN and v != DataType.FLOAT_VECTOR and v != DataType.BINARY_VECTOR:
+                field, _ = self.field_schema_wrap.init_field_schema(name=k.lower(), dtype=v)
+                fields.append(field)
+        fields.append(cf.gen_float_vec_field())
+        schema, _ = self.collection_schema_wrap.init_collection_schema(fields,
+                                                                       primary_field=ct.default_int64_field_name)
+        c_name = cf.gen_unique_str(prefix)
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
+                                             check_items={exp_name: c_name, exp_schema: schema})
 
 
 class TestCollectionDataframe(TestcaseBase):
@@ -1519,7 +1539,7 @@ class TestCollectionMultiCollections:
             stats = connect.get_collection_stats(collection_list[i])
             assert stats[row_count] == default_nb
             connect.drop_collection(collection_list[i])
-            
+
 
 class TestGetCollectionStats:
     """
@@ -1788,7 +1808,7 @@ class TestGetCollectionStats:
         connect.insert(collection, entities, partition_name=default_tag)
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
-        assert stats[row_count] == insert_count*2
+        assert stats[row_count] == insert_count * 2
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_get_collection_stats_partitions_D(self, connect, collection, insert_count):
@@ -1806,7 +1826,7 @@ class TestGetCollectionStats:
         connect.insert(collection, entities, partition_name=new_tag)
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
-        assert stats[row_count] == insert_count*2
+        assert stats[row_count] == insert_count * 2
 
     # TODO: assert metric type in stats response
     @pytest.mark.tags(CaseLabel.L0)
@@ -1902,7 +1922,7 @@ class TestGetCollectionStats:
                 assert index == index_2
                 # break
             connect.drop_collection(collection_list[i])
-            
+
 
 class TestCreateCollection:
     """
@@ -2090,7 +2110,7 @@ class TestCreateCollectionInvalid(object):
             assert code == 1
             message = getattr(e, 'message', "The exception does not contain the field of message.")
             assert message == "maximum field's number should be limited to 64"
-            
+
 
 class TestDescribeCollection:
 
@@ -2124,6 +2144,7 @@ class TestDescribeCollection:
       The following cases are used to test `describe_collection` function, no data in collection
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_collection_fields(self, connect, get_filter_field, get_vector_field):
         '''
@@ -2216,6 +2237,7 @@ class TestDescribeCollection:
       The following cases are used to test `describe_collection` function, and insert data in collection
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_describe_collection_fields_after_insert(self, connect, get_filter_field, get_vector_field):
         '''
@@ -2243,12 +2265,13 @@ class TestDescribeCollection:
             elif field["type"] == vector_field:
                 assert field["name"] == vector_field["name"]
                 assert field["params"] == vector_field["params"]
-                
+
 
 class TestDescribeCollectionInvalid(object):
     """
     Test describe collection with invalid params
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_invalid_strs()
@@ -2367,8 +2390,8 @@ class TestDropCollectionInvalid(object):
     def test_drop_collection_with_empty_or_None_collection_name(self, connect, collection_name):
         with pytest.raises(Exception) as e:
             connect.has_collection(collection_name)
-            
-            
+
+
 class TestHasCollection:
     """
     ******************************************************************
@@ -2415,6 +2438,7 @@ class TestHasCollection:
         def has():
             assert connect.has_collection(collection_name)
             # assert not assert_collection(connect, collection_name)
+
         for i in range(threads_num):
             t = MyThread(target=has, args=())
             threads.append(t)
@@ -2428,6 +2452,7 @@ class TestHasCollectionInvalid(object):
     """
     Test has collection with invalid params
     """
+
     @pytest.fixture(
         scope="function",
         params=gen_invalid_strs()
@@ -2452,7 +2477,7 @@ class TestHasCollectionInvalid(object):
         collection_name = None
         with pytest.raises(Exception) as e:
             connect.has_collection(collection_name)
-            
+
 
 class TestListCollections:
     """
@@ -2785,7 +2810,7 @@ class TestLoadCollection:
         with pytest.raises(Exception):
             connect.search(collection, default_single_query)
         # assert len(res[0]) == 0
-        
+
 
 class TestReleaseAdvanced:
 
@@ -2917,7 +2942,7 @@ class TestReleaseAdvanced:
         expected:
         """
         pass
-    
+
 
 class TestLoadCollectionInvalid(object):
     """
@@ -2942,7 +2967,7 @@ class TestLoadCollectionInvalid(object):
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.release_collection(collection_name)
-            
+
 
 class TestLoadPartition:
     """
@@ -3140,8 +3165,3 @@ class TestLoadPartitionInvalid(object):
         partition_name = get_partition_name
         with pytest.raises(Exception) as e:
             connect.load_partitions(collection, [partition_name])
-
-
-
-
-
