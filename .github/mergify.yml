@@ -96,10 +96,11 @@ pull_request_rules:
         remove:
           - ci-passed
 
-  - name: Blocking PR if missing a related issue
+  - name: Blocking PR if missing a related issue or PR doesn't have kind/improvement label
     conditions:
       - base=master
       - -body~=\#[0-9]{1,6}(\s+|$)
+      - -label=kind/improvement
       - -title~=\[automated\]
     actions:
       label:
@@ -112,8 +113,13 @@ pull_request_rules:
 
   - name: Dismiss block label if related issue be added into PR
     conditions:
-      - base=master
-      - body~=\#[0-9]{1,6}(\s+|$)
+      - or:
+        - and:
+          - base=master
+          - body~=\#[0-9]{1,6}(\s+|$)
+        - and:
+          - base=master
+          - label=kind/improvement
     actions:
       label:
         remove:
