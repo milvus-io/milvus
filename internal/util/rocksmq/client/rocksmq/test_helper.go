@@ -13,8 +13,12 @@ package rocksmq
 
 import (
 	"fmt"
+	"os"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/allocator"
+	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
+	rocksmq "github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
 	server "github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
 )
 
@@ -36,4 +40,33 @@ func newMockClient() *client {
 		Server: newMockRocksMQ(),
 	})
 	return client
+}
+
+func initIDAllocator(kvPath string) *allocator.GlobalIDAllocator {
+	rocksdbKV, err := rocksdbkv.NewRocksdbKV(kvPath)
+	if err != nil {
+		panic(err)
+	}
+	idAllocator := allocator.NewGlobalIDAllocator("rmq_id", rocksdbKV)
+	_ = idAllocator.Initialize()
+	return idAllocator
+}
+
+func newRocksMQ(rmqPath string) server.RocksMQ {
+	kvPath := rmqPath + "_kv"
+	idAllocator := initIDAllocator(kvPath)
+
+	rocksdbPath := rmqPath + "_db"
+
+	rmq, _ := rocksmq.NewRocksMQ(rocksdbPath, idAllocator)
+	return rmq
+}
+
+func removePath(rmqPath string) {
+	kvPath := rmqPath + "_kv"
+	os.RemoveAll(kvPath)
+	rocksdbPath := rmqPath + "_db"
+	os.RemoveAll(rocksdbPath)
+	metaPath := rmqPath + "_meta_kv"
+	os.RemoveAll(metaPath)
 }
