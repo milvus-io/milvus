@@ -1128,6 +1128,10 @@ func (cct *CreateCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	if cct.ShardsNum > Params.MaxShardNum {
+		return fmt.Errorf("maximum shards's number should be limited to %d", Params.MaxShardNum)
+	}
+
 	if int64(len(cct.schema.Fields)) > Params.MaxFieldNum {
 		return fmt.Errorf("maximum field's number should be limited to %d", Params.MaxFieldNum)
 	}

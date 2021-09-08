@@ -79,8 +79,6 @@ func (t *CreateCollectionReqTask) Type() commonpb.MsgType {
 }
 
 func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
-	const defaultShardsNum = 2
-
 	if t.Type() != commonpb.MsgType_CreateCollection {
 		return fmt.Errorf("create collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
@@ -93,12 +91,11 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	if t.Req.CollectionName != schema.Name {
 		return fmt.Errorf("collection name = %s, schema.Name=%s", t.Req.CollectionName, schema.Name)
 	}
-
 	if t.Req.ShardsNum <= 0 {
-		log.Debug("Set ShardsNum to default", zap.String("collection name", t.Req.CollectionName),
-			zap.Int32("defaultShardsNum", defaultShardsNum))
-		t.Req.ShardsNum = defaultShardsNum
+		t.Req.ShardsNum = DefaultShardsNum
 	}
+	log.Debug("CreateCollectionReqTask Execute", zap.Any("CollectionName", t.Req.CollectionName),
+		zap.Any("ShardsNum", t.Req.ShardsNum))
 
 	for idx, field := range schema.Fields {
 		field.FieldID = int64(idx + StartOfUserFieldID)
@@ -136,7 +133,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	vchanNames := make([]string, t.Req.ShardsNum)
 	chanNames := make([]string, t.Req.ShardsNum)
 	for i := int32(0); i < t.Req.ShardsNum; i++ {
-		vchanNames[i] = fmt.Sprintf("%s_%dv", t.core.dmlChannels.GetDmlMsgStreamName(), collID)
+		vchanNames[i] = fmt.Sprintf("%s_%dv%d", t.core.dmlChannels.GetDmlMsgStreamName(), collID, i)
 		chanNames[i] = ToPhysicalChannel(vchanNames[i])
 	}
 
@@ -148,6 +145,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		FieldIndexes:               make([]*etcdpb.FieldIndexInfo, 0, 16),
 		VirtualChannelNames:        vchanNames,
 		PhysicalChannelNames:       chanNames,
+		ShardsNum:                  t.Req.ShardsNum,
 		PartitionCreatedTimestamps: []uint64{0},
 	}
 
@@ -376,16 +374,12 @@ func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
 
 	t.Rsp.Schema = proto.Clone(collInfo.Schema).(*schemapb.CollectionSchema)
 	t.Rsp.CollectionID = collInfo.ID
-	//var newField []*schemapb.FieldSchema
-	//for _, field := range t.Rsp.Schema.Fields {
-	//	if field.FieldID >= StartOfUserFieldID {
-	//		newField = append(newField, field)
-	//	}
-	//}
-	//t.Rsp.Schema.Fields = newField
-
 	t.Rsp.VirtualChannelNames = collInfo.VirtualChannelNames
 	t.Rsp.PhysicalChannelNames = collInfo.PhysicalChannelNames
+	if collInfo.ShardsNum == 0 {
+		collInfo.ShardsNum = int32(len(collInfo.VirtualChannelNames))
+	}
+	t.Rsp.ShardsNum = collInfo.ShardsNum
 
 	t.Rsp.CreatedTimestamp = collInfo.CreateTime
 	createdPhysicalTime, _ := tsoutil.ParseHybridTs(collInfo.CreateTime)

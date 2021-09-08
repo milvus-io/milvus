@@ -13,7 +13,10 @@ package indexnode
 
 import (
 	"context"
+	"strconv"
 	"testing"
+
+	"github.com/golang/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -24,7 +27,9 @@ import (
 
 func TestIndexNodeMock(t *testing.T) {
 	Params.Init()
-	inm := Mock{}
+	inm := Mock{
+		Build: true,
+	}
 	err := inm.Register()
 	assert.Nil(t, err)
 	err = inm.Init()
@@ -69,7 +74,108 @@ func TestIndexNodeMock(t *testing.T) {
 		resp, err := inm.GetMetrics(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		assert.Equal(t, "IndexNode", resp.ComponentName)
+	})
+
+	err = inm.Stop()
+	assert.Nil(t, err)
+}
+
+func TestIndexNodeMockError(t *testing.T) {
+	inm := Mock{
+		Failure: false,
+		Build:   false,
+		Err:     true,
+	}
+
+	ctx := context.Background()
+	err := inm.Register()
+	assert.NotNil(t, err)
+
+	err = inm.Init()
+	assert.NotNil(t, err)
+
+	err = inm.Start()
+	assert.NotNil(t, err)
+
+	t.Run("GetComponentStates error", func(t *testing.T) {
+		resp, err := inm.GetComponentStates(ctx)
+		assert.NotNil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+	})
+
+	t.Run("GetStatisticsChannel error", func(t *testing.T) {
+		resp, err := inm.GetStatisticsChannel(ctx)
+		assert.NotNil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+	})
+
+	t.Run("GetTimeTickChannel error", func(t *testing.T) {
+		resp, err := inm.GetTimeTickChannel(ctx)
+		assert.NotNil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+	})
+
+	t.Run("CreateIndex error", func(t *testing.T) {
+		resp, err := inm.CreateIndex(ctx, &indexpb.CreateIndexRequest{})
+		assert.NotNil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+	})
+
+	t.Run("GetMetrics error", func(t *testing.T) {
+		req := &milvuspb.GetMetricsRequest{}
+		resp, err := inm.GetMetrics(ctx, req)
+
+		assert.NotNil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+	})
+
+	err = inm.Stop()
+	assert.NotNil(t, err)
+}
+
+func TestIndexNodeMockFiled(t *testing.T) {
+	inm := Mock{
+		Failure: true,
+		Build:   true,
+		Err:     false,
+	}
+
+	err := inm.Register()
+	assert.Nil(t, err)
+	err = inm.Init()
+	assert.Nil(t, err)
+	err = inm.Start()
+	assert.Nil(t, err)
+	ctx := context.Background()
+
+	t.Run("CreateIndex failed", func(t *testing.T) {
+		req := &indexpb.CreateIndexRequest{
+			IndexBuildID: 0,
+			IndexID:      0,
+			DataPaths:    []string{},
+		}
+		key := "/indexes/" + strconv.FormatInt(10, 10)
+		indexMeta := &indexpb.IndexMeta{
+			IndexBuildID: 10,
+			State:        commonpb.IndexState_InProgress,
+			Version:      0,
+		}
+
+		value := proto.MarshalTextString(indexMeta)
+		err := inm.etcdKV.Save(key, value)
+		assert.Nil(t, err)
+		resp, err := inm.CreateIndex(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		err = inm.etcdKV.RemoveWithPrefix(key)
+		assert.Nil(t, err)
+	})
+	t.Run("GetMetrics failed", func(t *testing.T) {
+		req := &milvuspb.GetMetricsRequest{}
+		resp, err := inm.GetMetrics(ctx, req)
+
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
 	})
 
 	err = inm.Stop()

@@ -113,7 +113,6 @@ unittest: test-cpp test-go
 
 test-go: build-cpp-with-unittest
 	@echo "Running go unittests..."
-	@echo "disable go unittest for now, enable it later"
 	@(env bash $(PWD)/scripts/run_go_codecov.sh)
 # 	@(env bash $(PWD)/scripts/run_go_unittest.sh)
 
@@ -142,7 +141,7 @@ clean:
 	@find . -name '*~' | xargs rm -fv
 	@rm -rf bin/
 	@rm -rf lib/
-	@rm $(GOPATH)/bin/milvus
+	@rm -rf $(GOPATH)/bin/milvus
 
 milvus-tools: 
 	@echo "Building tools ..."

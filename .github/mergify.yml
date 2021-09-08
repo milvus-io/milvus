@@ -21,6 +21,17 @@ pull_request_rules:
         add:
           - ci-passed
 
+  - name: Test passed for go unittest code changed
+    conditions:
+      - base=master
+      - "status-success=Code Checker AMD64 Ubuntu 18.04"
+      - "status-success=Build and test AMD64 Ubuntu 18.04"
+      - -files~=^(?!internal\/.*_test\.go).*$
+    actions:
+      label:
+        add:
+          - ci-passed
+
 #  - name: Test passed for tests20 changed
 #    conditions:
 #      - base=master
