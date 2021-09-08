@@ -98,3 +98,33 @@ func TestLevelGetterAndSetter(t *testing.T) {
 	SetLevel(zap.ErrorLevel)
 	assert.Equal(t, zap.ErrorLevel, GetLevel())
 }
+
+func TestSampling(t *testing.T) {
+	sample, drop := make(chan zapcore.SamplingDecision, 1), make(chan zapcore.SamplingDecision, 1)
+	samplingConf := zap.SamplingConfig{
+		Initial:    1,
+		Thereafter: 2,
+		Hook: func(entry zapcore.Entry, decision zapcore.SamplingDecision) {
+			switch decision {
+			case zapcore.LogSampled:
+				sample <- decision
+			case zapcore.LogDropped:
+				drop <- decision
+			}
+		},
+	}
+	conf := &Config{Level: "debug", File: FileLogConfig{}, Sampling: &samplingConf}
+
+	ts := newTestLogSpy(t)
+	logger, p, _ := InitTestLogger(ts, conf)
+	ReplaceGlobals(logger, p)
+
+	for i := 0; i < 10; i++ {
+		Debug("test")
+		if i%2 == 0 {
+			<-sample
+		} else {
+			<-drop
+		}
+	}
+}

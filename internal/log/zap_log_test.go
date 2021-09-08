@@ -26,7 +26,6 @@
 package log
 
 import (
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"math"
@@ -37,6 +36,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -240,6 +240,28 @@ func TestWithOptions(t *testing.T) {
 	logger.Error("Testing", zap.Error(errors.New("log-with-option")))
 	ts.assertMessagesNotContains("errorVerbose")
 	ts.assertMessagesNotContains("stack")
+}
+
+func TestNamedLogger(t *testing.T) {
+	ts := newTestLogSpy(t)
+	conf := &Config{
+		Level:               "debug",
+		DisableTimestamp:    true,
+		DisableErrorVerbose: true,
+	}
+	logger, _, _ := InitTestLogger(ts, conf, zap.AddStacktrace(zapcore.FatalLevel))
+	namedLogger := logger.Named("testLogger")
+	namedLogger.Error("testing")
+	ts.assertMessagesContains("testLogger")
+}
+
+func TestErrorLog(t *testing.T) {
+	ts := newTestLogSpy(t)
+	conf := &Config{Level: "debug", DisableTimestamp: true}
+	logger, _, _ := InitTestLogger(ts, conf)
+	logger.Error("", zap.NamedError("err", errors.New("log-stack-test")))
+	ts.assertMessagesContains("[err=log-stack-test]")
+	ts.assertMessagesContains("] [errVerbose=\"")
 }
 
 // testLogSpy is a testing.TB that captures logged messages.
