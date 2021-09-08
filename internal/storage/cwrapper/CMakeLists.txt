@@ -27,6 +27,10 @@ else()
 endif()
 message( STATUS "Thirdparty downloaded file path: ${THIRDPARTY_DOWNLOAD_PATH}" )
 
+# These three components is required by arrow
+find_package(Boost REQUIRED COMPONENTS regex system filesystem)
+message( STATUS "Find Boost: include dirs-${Boost_INCLUDE_DIRS}, version-${Boost_VERSION}")
+
 macro( build_arrow )
     message( STATUS "Building ARROW-${ARROW_VERSION} from source" )
 
@@ -53,6 +57,7 @@ macro( build_arrow )
         "-DARROW_S3=OFF"
         "-DCMAKE_VERBOSE_MAKEFILE=ON"
         "-DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}"
+        "-DCMAKE_INCLUDE_PATH=${Boost_INCLUDE_DIRS}"
         )
 
     ExternalProject_Add(
