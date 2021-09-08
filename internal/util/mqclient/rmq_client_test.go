@@ -12,9 +12,12 @@
 package mqclient
 
 import (
+	"context"
 	"os"
 	"testing"
+	"time"
 
+	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"github.com/stretchr/testify/assert"
@@ -27,14 +30,16 @@ var Params paramtable.BaseTable
 
 func TestMain(m *testing.M) {
 	Params.Init()
-	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus/rdb_data")
+	path := "/tmp/milvus/rdb_data"
+	os.Setenv("ROCKSMQ_PATH", path)
+	defer os.RemoveAll(path)
 	_ = rocksmq1.InitRocksMQ()
 	exitCode := m.Run()
 	defer rocksmq1.CloseRocksMQ()
 	os.Exit(exitCode)
 }
 
-func TestNewRmqClient(t *testing.T) {
+func Test_NewRmqClient(t *testing.T) {
 	opts := rocksmq.ClientOptions{}
 	client, err := NewRmqClient(opts)
 	defer client.Close()
@@ -42,35 +47,134 @@ func TestNewRmqClient(t *testing.T) {
 	assert.NotNil(t, client)
 }
 
-func TestRmqCreateProducer(t *testing.T) {
+func TestRmqClient_CreateProducer(t *testing.T) {
 	opts := rocksmq.ClientOptions{}
 	client, err := NewRmqClient(opts)
 	defer client.Close()
 	assert.Nil(t, err)
 	assert.NotNil(t, client)
 
-	topic := "test_CreateProducer"
+	topic := "TestRmqClient_CreateProducer"
 	proOpts := ProducerOptions{Topic: topic}
 	producer, err := client.CreateProducer(proOpts)
+	defer producer.Close()
 	assert.Nil(t, err)
 	assert.NotNil(t, producer)
+
+	rmqProducer := producer.(*rmqProducer)
+	defer rmqProducer.Close()
+	assert.Equal(t, rmqProducer.Topic(), topic)
+
+	msg := &ProducerMessage{
+		Payload:    []byte{},
+		Properties: nil,
+	}
+	err = rmqProducer.Send(context.TODO(), msg)
+	assert.Nil(t, err)
+
+	invalidOpts := ProducerOptions{Topic: ""}
+	producer, e := client.CreateProducer(invalidOpts)
+	assert.Nil(t, producer)
+	assert.Error(t, e)
 }
 
-func TestRmqSubscribe(t *testing.T) {
+func TestRmqClient_Subscribe(t *testing.T) {
 	opts := rocksmq.ClientOptions{}
 	client, err := NewRmqClient(opts)
 	defer client.Close()
 	assert.Nil(t, err)
 	assert.NotNil(t, client)
 
-	topic := "test_Subscribe"
-	subName := "subName_1"
+	topic := "TestRmqClient_Subscribe"
+	proOpts := ProducerOptions{Topic: topic}
+	producer, err := client.CreateProducer(proOpts)
+	defer producer.Close()
+	assert.Nil(t, err)
+	assert.NotNil(t, producer)
+
+	subName := "subName"
 	consumerOpts := ConsumerOptions{
-		Topic:            topic,
+		Topic:            "",
 		SubscriptionName: subName,
 		BufSize:          1024,
 	}
+
 	consumer, err := client.Subscribe(consumerOpts)
+	assert.NotNil(t, err)
+	assert.Nil(t, consumer)
+
+	consumerOpts.Topic = topic
+	consumer, err = client.Subscribe(consumerOpts)
+	defer consumer.Close()
 	assert.Nil(t, err)
 	assert.NotNil(t, consumer)
+	assert.Equal(t, consumer.Subscription(), subName)
+
+	msg := &ProducerMessage{
+		Payload:    []byte{1},
+		Properties: nil,
+	}
+	err = producer.Send(context.TODO(), msg)
+	assert.Nil(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg := <-consumer.Chan():
+			consumer.Ack(msg)
+			rmqmsg := msg.(*rmqMessage)
+			msgPayload := rmqmsg.Payload()
+			assert.NotEmpty(t, msgPayload)
+			msgTopic := rmqmsg.Topic()
+			assert.Equal(t, msgTopic, topic)
+			msgProp := rmqmsg.Properties()
+			assert.Empty(t, msgProp)
+			msgID := rmqmsg.ID()
+			rID := msgID.(*rmqID)
+			assert.NotZero(t, rID)
+			err = consumer.Seek(msgID)
+			assert.Nil(t, err)
+		}
+	}
+}
+
+func TestRmqClient_EarliestMessageID(t *testing.T) {
+	opts := rocksmq.ClientOptions{}
+	client, _ := NewRmqClient(opts)
+	defer client.Close()
+
+	mid := client.EarliestMessageID()
+	assert.NotNil(t, mid)
+}
+
+func TestRmqClient_StringToMsgID(t *testing.T) {
+	opts := rocksmq.ClientOptions{}
+	client, _ := NewRmqClient(opts)
+	defer client.Close()
+
+	str := "5"
+	res, err := client.StringToMsgID(str)
+	assert.Nil(t, err)
+	assert.NotNil(t, res)
+
+	str = "X"
+	res, err = client.StringToMsgID(str)
+	assert.Nil(t, res)
+	assert.NotNil(t, err)
+}
+
+func TestRmqClient_BytesToMsgID(t *testing.T) {
+	opts := rocksmq.ClientOptions{}
+	client, _ := NewRmqClient(opts)
+	defer client.Close()
+
+	mid := pulsar.EarliestMessageID()
+	binary := SerializePulsarMsgID(mid)
+
+	res, err := client.BytesToMsgID(binary)
+	assert.Nil(t, err)
+	assert.NotNil(t, res)
 }
