@@ -72,6 +72,7 @@ if (MILVUS_SUPPORT_SPTAG)
 endif ()
 
 include(ThirdPartyPackagesCore)
+add_subdirectory(thirdparty)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fPIC -DELPP_THREAD_SAFE -fopenmp")

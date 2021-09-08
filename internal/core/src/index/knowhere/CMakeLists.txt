@@ -14,7 +14,7 @@
 include_directories(${INDEX_SOURCE_DIR}/knowhere)
 include_directories(${INDEX_SOURCE_DIR}/thirdparty)
 include_directories(${INDEX_SOURCE_DIR}/thirdparty/NGT/lib)
-
+set(MILVUS_THIRDPARTY_SRC external)
 if (MILVUS_SUPPORT_SPTAG)
     include_directories(${INDEX_SOURCE_DIR}/thirdparty/SPTAG/AnnService)
 
