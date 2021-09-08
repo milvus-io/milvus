@@ -61,6 +61,17 @@ func Produce(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, 
 	log.Info("Produce done")
 }
 
+func VerifyMessage(t *testing.T, msg ConsumerMessage) {
+	pload := BytesToInt(msg.Payload())
+	log.Info("RECV", zap.Any("v", pload))
+	pm := msg.(*pulsarMessage)
+	topic := pm.Topic()
+	assert.NotEmpty(t, topic)
+	log.Info("RECV", zap.Any("t", topic))
+	prop := pm.Properties()
+	log.Info("RECV", zap.Any("p", len(prop)))
+}
+
 // Consume1 will consume random messages and record the last MessageID it received
 func Consume1(ctx context.Context, t *testing.T, pc *pulsarClient, topic string, subName string, c chan MessageID, total *int) {
 	consumer, err := pc.Subscribe(ConsumerOptions{
@@ -88,8 +99,7 @@ func Consume1(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 			return
 		case msg = <-consumer.Chan():
 			consumer.Ack(msg)
-			v := BytesToInt(msg.Payload())
-			log.Info("RECV", zap.Any("v", v))
+			VerifyMessage(t, msg)
 			(*total)++
 			//log.Debug("total", zap.Int("val", *total))
 		}
@@ -129,8 +139,7 @@ func Consume2(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 			return
 		case msg := <-consumer.Chan():
 			consumer.Ack(msg)
-			v := BytesToInt(msg.Payload())
-			log.Info("RECV", zap.Any("v", v))
+			VerifyMessage(t, msg)
 			(*total)++
 			//log.Debug("total", zap.Int("val", *total))
 		}
@@ -158,15 +167,14 @@ func Consume3(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 			return
 		case msg := <-consumer.Chan():
 			consumer.Ack(msg)
-			v := BytesToInt(msg.Payload())
-			log.Info("RECV", zap.Any("v", v))
+			VerifyMessage(t, msg)
 			(*total)++
 			//log.Debug("total", zap.Int("val", *total))
 		}
 	}
 }
 
-func TestPulsarClient(t *testing.T) {
+func TestPulsarClient_Consume1(t *testing.T) {
 	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	pc, err := GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
 	defer pc.Close()
@@ -317,7 +325,7 @@ func Consume23(ctx context.Context, t *testing.T, pc *pulsarClient, topic string
 	}
 }
 
-func TestPulsarClient2(t *testing.T) {
+func TestPulsarClient_Consume2(t *testing.T) {
 	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	pc, err := GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
 	defer pc.Close()
@@ -365,4 +373,49 @@ func TestPulsarClient2(t *testing.T) {
 	assert.Equal(t, 0, total3)
 
 	log.Info("main done")
+}
+
+func TestPulsarClient_EarliestMessageID(t *testing.T) {
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	client, _ := GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
+	defer client.Close()
+
+	mid := client.EarliestMessageID()
+	assert.NotNil(t, mid)
+}
+
+func TestPulsarClient_StringToMsgID(t *testing.T) {
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	client, _ := GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
+	defer client.Close()
+
+	mid := client.EarliestMessageID()
+	str := PulsarMsgIDToString(mid)
+
+	res, err := client.StringToMsgID(str)
+	assert.Nil(t, err)
+	assert.NotNil(t, res)
+
+	str = "X"
+	res, err = client.StringToMsgID(str)
+	assert.Nil(t, res)
+	assert.NotNil(t, err)
+}
+
+func TestPulsarClient_BytesToMsgID(t *testing.T) {
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	client, _ := GetPulsarClientInstance(pulsar.ClientOptions{URL: pulsarAddress})
+	defer client.Close()
+
+	mid := pulsar.EarliestMessageID()
+	binary := SerializePulsarMsgID(mid)
+
+	res, err := client.BytesToMsgID(binary)
+	assert.Nil(t, err)
+	assert.NotNil(t, res)
+
+	invalidBin := []byte{0}
+	res, err = client.BytesToMsgID(invalidBin)
+	assert.Nil(t, res)
+	assert.NotNil(t, err)
 }
