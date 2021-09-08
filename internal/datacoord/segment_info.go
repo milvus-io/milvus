@@ -20,6 +20,10 @@ type SegmentInfo struct {
 	lastFlushTime time.Time
 }
 
+// NewSegmentInfo create `SegmentInfo` wrapper from `datapb.SegmentInfo`
+// assign current rows to 0 and pre-allocate `allocations` slice
+// Note that the allocation information is not preserved,
+// the worst case scenario is to have a segment with twice size we expects
 func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
 	return &SegmentInfo{
 		SegmentInfo: info,
@@ -59,12 +63,6 @@ func (s *SegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo) {
 func (s *SegmentsInfo) SetRowCount(segmentID UniqueID, rowCount int64) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.segments[segmentID] = segment.ShadowClone(SetRowCount(rowCount))
-	}
-}
-
-func (s *SegmentsInfo) SetLasteExpiraTime(segmentID UniqueID, expireTs Timestamp) {
-	if segment, ok := s.segments[segmentID]; ok {
-		s.segments[segmentID] = segment.ShadowClone(SetExpireTime(expireTs))
 	}
 }
 
