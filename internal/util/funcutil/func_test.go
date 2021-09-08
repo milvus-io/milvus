@@ -81,7 +81,7 @@ func buildMockComponent(code internalpb.StateCode) *MockComponent {
 	return mc
 }
 
-func TestCheckGrpcReady(t *testing.T) {
+func Test_CheckGrpcReady(t *testing.T) {
 	errChan := make(chan error)
 
 	// test errChan can receive nil after interval
@@ -96,7 +96,7 @@ func TestCheckGrpcReady(t *testing.T) {
 	cancel()
 }
 
-func TestCheckPortAvailable(t *testing.T) {
+func Test_CheckPortAvailable(t *testing.T) {
 	num := 10
 
 	for i := 0; i < num; i++ {
@@ -105,13 +105,13 @@ func TestCheckPortAvailable(t *testing.T) {
 	}
 }
 
-func TestGetLocalIP(t *testing.T) {
+func Test_GetLocalIP(t *testing.T) {
 	ip := GetLocalIP()
 	assert.NotNil(t, ip)
 	assert.NotZero(t, len(ip))
 }
 
-func TestWaitForComponentInitOrHealthy(t *testing.T) {
+func Test_WaitForComponentInitOrHealthy(t *testing.T) {
 	mc := &MockComponent{
 		compState: nil,
 		strResp:   nil,
@@ -145,7 +145,7 @@ func TestWaitForComponentInitOrHealthy(t *testing.T) {
 	}
 }
 
-func TestWaitForComponentInit(t *testing.T) {
+func Test_WaitForComponentInit(t *testing.T) {
 	validCodes := []internalpb.StateCode{internalpb.StateCode_Initializing}
 	testCodes := []internalpb.StateCode{internalpb.StateCode_Initializing, internalpb.StateCode_Healthy, internalpb.StateCode_Abnormal}
 	for _, code := range testCodes {
@@ -159,7 +159,7 @@ func TestWaitForComponentInit(t *testing.T) {
 	}
 }
 
-func TestWaitForComponentHealthy(t *testing.T) {
+func Test_WaitForComponentHealthy(t *testing.T) {
 	validCodes := []internalpb.StateCode{internalpb.StateCode_Healthy}
 	testCodes := []internalpb.StateCode{internalpb.StateCode_Initializing, internalpb.StateCode_Healthy, internalpb.StateCode_Abnormal}
 	for _, code := range testCodes {
@@ -173,7 +173,7 @@ func TestWaitForComponentHealthy(t *testing.T) {
 	}
 }
 
-func TestParseIndexParamsMap(t *testing.T) {
+func Test_ParseIndexParamsMap(t *testing.T) {
 	num := 10
 	keys := make([]string, 0)
 	values := make([]string, 0)
