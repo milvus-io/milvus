@@ -2,7 +2,7 @@
 
 ## 1. System Overview
 
-In this section, we sketch the system design of Milvus, including data model, data organization, architecture, and state synchronization.
+In this section, we sketch the system design of Milvus, including the data model, data organization, architecture, and state synchronization.
 
 
 
