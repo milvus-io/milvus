@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestGetConfAdapterMgrInstance(t *testing.T) {
+func Test_GetConfAdapterMgrInstance(t *testing.T) {
 	adapterMgr := GetConfAdapterMgrInstance()
 
 	var adapter ConfAdapter
