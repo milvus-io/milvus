@@ -27,7 +27,7 @@
 #include "utils/ConfigUtils.h"
 #include "utils/Error.h"
 #include "utils/Log.h"
-#include "index/knowhere/knowhere/common/Exception.h"
+#include "knowhere/common/Exception.h"
 
 #include <string>
 #include <vector>
