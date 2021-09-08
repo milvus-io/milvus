@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestRandomString(t *testing.T) {
+func Test_RandomString(t *testing.T) {
 	length := 10
 	str := RandomString(length)
 	assert.Equal(t, len(str), length)

@@ -25,12 +25,12 @@ import (
 func dummyFunc() {
 }
 
-func TestGetFunctionName(t *testing.T) {
+func Test_GetFunctionName(t *testing.T) {
 	name := GetFunctionName(dummyFunc)
 	assert.True(t, strings.Contains(name, "dummyFunc"))
 }
 
-func TestProcessFuncParallel(t *testing.T) {
+func Test_ProcessFuncParallel(t *testing.T) {
 	total := 64
 	s := make([]int, total)
 
