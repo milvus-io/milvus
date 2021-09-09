@@ -19,14 +19,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestMain(m *testing.M) {
-	Params.Init()
-	Params.MaxNameLength = 255
-	Params.MaxFieldNum = 64
-	Params.MaxDimension = 32768
-	m.Run()
-}
-
 func TestValidateCollectionName(t *testing.T) {
 	assert.Nil(t, ValidateCollectionName("abc"))
 	assert.Nil(t, ValidateCollectionName("_123abc"))

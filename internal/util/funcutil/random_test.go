@@ -22,3 +22,7 @@ func Test_RandomString(t *testing.T) {
 	str := RandomString(length)
 	assert.Equal(t, len(str), length)
 }
+
+func TestGenRandomStr(t *testing.T) {
+	assert.True(t, len(GenRandomStr()) >= 1)
+}
