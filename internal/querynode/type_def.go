@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	rowIDFieldID     = 0
-	timestampFieldID = 1
+	rowIDFieldID     FieldID = 0
+	timestampFieldID FieldID = 1
 )
 
 const invalidTimestamp = Timestamp(0)
