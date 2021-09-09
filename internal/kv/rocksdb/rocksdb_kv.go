@@ -90,6 +90,14 @@ func (kv *RocksdbKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	return keys, values, nil
 }
 
+func (kv *RocksdbKV) ResetPrefixLength(len int) error {
+	kv.DB.Close()
+	kv.Opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(len))
+	var err error
+	kv.DB, err = gorocksdb.OpenDb(kv.Opts, kv.GetName())
+	return err
+}
+
 func (kv *RocksdbKV) MultiLoad(keys []string) ([]string, error) {
 	values := make([]string, 0, len(keys))
 	for _, key := range keys {
