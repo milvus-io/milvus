@@ -25,6 +25,126 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
+func getVchanInfo(cp bool, collID, ufCollID, ufSegID UniqueID, chanName, ufchanName string, ufNor int64) *datapb.VchannelInfo {
+	var ufs []*datapb.SegmentInfo
+	if cp {
+		ufs = []*datapb.SegmentInfo{{
+			CollectionID:  ufCollID,
+			PartitionID:   1,
+			InsertChannel: ufchanName,
+			ID:            ufSegID,
+			NumOfRows:     ufNor,
+			DmlPosition:   &internalpb.MsgPosition{},
+		}}
+	} else {
+		ufs = []*datapb.SegmentInfo{}
+	}
+
+	vi := &datapb.VchannelInfo{
+		CollectionID:      collID,
+		ChannelName:       chanName,
+		SeekPosition:      &internalpb.MsgPosition{},
+		UnflushedSegments: ufs,
+		FlushedSegments:   []int64{},
+	}
+	return vi
+}
+
+func TestDataSyncService_newDataSyncService(te *testing.T) {
+
+	ctx := context.Background()
+
+	tests := []struct {
+		isValidCase  bool
+		replicaNil   bool
+		inMsgFactory msgstream.Factory
+
+		collID     UniqueID
+		ufCollID   UniqueID
+		ufSegID    UniqueID
+		chanName   string
+		ufchanName string
+		ufNor      int64
+
+		description string
+	}{
+		{false, false, &mockMsgStreamFactory{false, true},
+			0, 0, 0, "", "", 0,
+			"SetParamsReturnError"},
+		{true, false, &mockMsgStreamFactory{true, true},
+			0, 1, 0, "", "", 0,
+			"CollID 0 mismach with seginfo collID 1"},
+		{true, false, &mockMsgStreamFactory{true, true},
+			1, 1, 0, "c1", "c2", 0,
+			"chanName c1 mismach with seginfo chanName c2"},
+		{true, false, &mockMsgStreamFactory{true, true},
+			1, 1, 0, "c1", "c1", 0,
+			"add normal segments"},
+		{false, false, &mockMsgStreamFactory{true, false},
+			0, 0, 0, "", "", 0,
+			"error when newinsertbufernode"},
+		{false, true, &mockMsgStreamFactory{true, false},
+			0, 0, 0, "", "", 0,
+			"replica nil"},
+	}
+
+	for _, test := range tests {
+		te.Run(test.description, func(t *testing.T) {
+			df := &DataCoordFactory{}
+
+			replica := newReplica(&RootCoordFactory{}, test.collID)
+			if test.replicaNil {
+				replica = nil
+			}
+
+			ds, err := newDataSyncService(ctx,
+				make(chan *flushMsg),
+				replica,
+				NewAllocatorFactory(),
+				test.inMsgFactory,
+				getVchanInfo(test.isValidCase, test.collID, test.ufCollID, test.ufSegID, test.chanName, test.ufchanName, test.ufNor),
+				make(chan UniqueID),
+				df,
+			)
+
+			if !test.isValidCase {
+				assert.Error(t, err)
+				assert.Nil(t, ds)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, ds)
+
+				// save binlog
+				fu := &segmentFlushUnit{
+					collID:     1,
+					segID:      100,
+					field2Path: map[UniqueID]string{100: "path1"},
+					checkPoint: map[UniqueID]segmentCheckPoint{100: {100, internalpb.MsgPosition{}}},
+				}
+
+				df.SaveBinlogPathError = true
+				err := ds.saveBinlog(fu)
+				assert.Error(t, err)
+
+				df.SaveBinlogPathError = false
+				df.SaveBinlogPathNotSucess = true
+				err = ds.saveBinlog(fu)
+				assert.Error(t, err)
+
+				df.SaveBinlogPathError = false
+				df.SaveBinlogPathNotSucess = false
+				err = ds.saveBinlog(fu)
+				assert.NoError(t, err)
+
+				// start
+				ds.fg = nil
+				ds.start()
+			}
+		})
+	}
+
+}
+
 // NOTE: start pulsar before test
 func TestDataSyncService_Start(t *testing.T) {
 	t.Skip()
