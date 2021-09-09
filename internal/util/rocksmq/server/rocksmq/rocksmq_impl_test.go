@@ -147,7 +147,7 @@ func TestRegisterConsumer(t *testing.T) {
 	rmq.RegisterConsumer(consumer2)
 
 	err = rmq.DestroyConsumerGroup(topicName, groupName)
-	assert.NoError(t, err)
+	assert.Error(t, err)
 }
 
 func TestRocksMQ(t *testing.T) {

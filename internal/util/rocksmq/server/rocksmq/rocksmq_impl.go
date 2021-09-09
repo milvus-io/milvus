@@ -321,6 +321,16 @@ func (rmq *rocksmq) RegisterConsumer(consumer *Consumer) {
 }
 
 func (rmq *rocksmq) DestroyConsumerGroup(topicName, groupName string) error {
+	ll, ok := topicMu.Load(topicName)
+	if !ok {
+		return fmt.Errorf("topic name = %s not exist", topicName)
+	}
+	lock, ok := ll.(*sync.Mutex)
+	if !ok {
+		return fmt.Errorf("get mutex failed, topic name = %s", topicName)
+	}
+	lock.Lock()
+	defer lock.Unlock()
 	key := groupName + "/" + topicName + "/current_id"
 
 	err := rmq.kv.Remove(key)
