@@ -141,6 +141,7 @@ func (it *InsertMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 }
 
 /////////////////////////////////////////FlushCompletedMsg//////////////////////////////////////////
+// TODO(wxyu): Not needed, to remove
 type FlushCompletedMsg struct {
 	BaseMsg
 	datapb.SegmentFlushCompletedMsg
@@ -194,6 +195,7 @@ func (fl *FlushCompletedMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 }
 
 /////////////////////////////////////////Delete//////////////////////////////////////////
+// TODO(wxyu): comment it until really needed
 type DeleteMsg struct {
 	BaseMsg
 	internalpb.DeleteRequest

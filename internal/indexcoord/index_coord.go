@@ -98,6 +98,9 @@ func NewIndexCoord(ctx context.Context) (*IndexCoord, error) {
 // Register register index service at etcd
 func (i *IndexCoord) Register() error {
 	i.session = sessionutil.NewSession(i.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
+	if i.session == nil {
+		return errors.New("failed to initialize session")
+	}
 	i.session.Init(typeutil.IndexCoordRole, Params.Address, true)
 	return nil
 }
@@ -135,7 +138,7 @@ func (i *IndexCoord) Init() error {
 	for _, session := range sessions {
 		session := session
 		go func() {
-			if err = i.nodeManager.AddNode(session.ServerID, session.Address); err != nil {
+			if err := i.nodeManager.AddNode(session.ServerID, session.Address); err != nil {
 				log.Debug("IndexCoord", zap.Any("ServerID", session.ServerID),
 					zap.Any("Add IndexNode error", err))
 			}

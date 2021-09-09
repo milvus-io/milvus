@@ -17,6 +17,7 @@ import (
 	"io"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/opentracing/opentracing-go/log"
@@ -24,7 +25,17 @@ import (
 	"github.com/uber/jaeger-client-go/config"
 )
 
+var tracingCloserMtx sync.Mutex
+var tracingCloser io.Closer
+
 func InitTracing(serviceName string) io.Closer {
+	tracingCloserMtx.Lock()
+	defer tracingCloserMtx.Unlock()
+
+	if tracingCloser != nil {
+		return tracingCloser
+	}
+
 	cfg := &config.Configuration{
 		ServiceName: serviceName,
 		Sampler: &config.SamplerConfig{
@@ -36,12 +47,14 @@ func InitTracing(serviceName string) io.Closer {
 		cfg = InitFromEnv(serviceName)
 	}
 	tracer, closer, err := cfg.NewTracer()
+	tracingCloser = closer
 	if err != nil {
 		log.Error(err)
-		return nil
+		tracingCloser = nil
 	}
 	opentracing.SetGlobalTracer(tracer)
-	return closer
+
+	return tracingCloser
 }
 
 func InitFromEnv(serviceName string) *config.Configuration {

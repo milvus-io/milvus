@@ -9,35 +9,33 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package funcutil
+package mqclient
 
 import (
-	"fmt"
-	"math/rand"
-	"time"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-var Rand *rand.Rand = nil
+func TestRmqID_Serialize(t *testing.T) {
+	rid := &rmqID{
+		messageID: 8,
+	}
 
-func init() {
-	Rand = rand.New(rand.NewSource(time.Now().UnixNano()))
+	bin := rid.Serialize()
+	assert.NotNil(t, bin)
+	assert.NotZero(t, len(bin))
 }
 
-var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-
-func RandomString(n int) string {
-	b := make([]rune, n)
-	for i := range b {
-		b[i] = letterRunes[Rand.Intn(len(letterRunes))]
-	}
-	return string(b)
+func Test_SerializeRmqID(t *testing.T) {
+	bin := SerializeRmqID(10)
+	assert.NotNil(t, bin)
+	assert.NotZero(t, len(bin))
 }
 
-func GenRandomStr() string {
-	l := rand.Uint64()%10 + 1
-	b := make([]byte, l)
-	if _, err := rand.Read(b); err != nil {
-		return ""
-	}
-	return fmt.Sprintf("%X", b)
+func Test_DeserializeRmqID(t *testing.T) {
+	bin := SerializeRmqID(5)
+	id, err := DeserializeRmqID(bin)
+	assert.Nil(t, err)
+	assert.Equal(t, id, int64(5))
 }

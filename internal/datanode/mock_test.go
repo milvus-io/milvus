@@ -520,10 +520,24 @@ func (m *RootCoordFactory) DescribeCollection(ctx context.Context, in *milvuspb.
 	f := MetaFactory{}
 	meta := f.CollectionMetaFactory(m.collectionID, m.collectionName)
 	resp := &milvuspb.DescribeCollectionResponse{
-		Status:       &commonpb.Status{},
-		CollectionID: m.collectionID,
-		Schema:       meta.Schema,
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
 	}
+
+	if m.collectionID == -2 {
+		resp.Status.Reason = "Status not success"
+		return resp, nil
+	}
+
+	if m.collectionID == -1 {
+		resp.Status.ErrorCode = commonpb.ErrorCode_Success
+		return resp, errors.New(resp.Status.GetReason())
+	}
+
+	resp.CollectionID = m.collectionID
+	resp.Schema = meta.Schema
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }
 

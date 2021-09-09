@@ -14,7 +14,12 @@ package proxy
 import (
 	"context"
 	"math/rand"
+	"sync"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+
+	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 
@@ -22,21 +27,34 @@ import (
 )
 
 type mockTimestampAllocatorInterface struct {
+	lastTs Timestamp
+	mtx    sync.Mutex
 }
 
 func (tso *mockTimestampAllocatorInterface) AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
+	tso.mtx.Lock()
+	defer tso.mtx.Unlock()
+
+	ts := uint64(time.Now().UnixNano())
+	if ts < tso.lastTs+Timestamp(req.Count) {
+		ts = tso.lastTs + Timestamp(req.Count)
+	}
+
+	tso.lastTs = ts
 	return &rootcoordpb.AllocTimestampResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		Timestamp: uint64(time.Now().UnixNano()),
+		Timestamp: ts,
 		Count:     req.Count,
 	}, nil
 }
 
 func newMockTimestampAllocatorInterface() timestampAllocatorInterface {
-	return &mockTimestampAllocatorInterface{}
+	return &mockTimestampAllocatorInterface{
+		lastTs: Timestamp(time.Now().UnixNano()),
+	}
 }
 
 type mockTsoAllocator struct {
@@ -54,7 +72,7 @@ type mockIDAllocatorInterface struct {
 }
 
 func (m *mockIDAllocatorInterface) AllocOne() (UniqueID, error) {
-	return UniqueID(getUniqueIntGeneratorIns().get()), nil
+	return UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()), nil
 }
 
 func newMockIDAllocatorInterface() idAllocatorInterface {
@@ -80,7 +98,7 @@ func (m *mockGetChannelsService) GetChannels(collectionID UniqueID) (map[vChan]p
 	channels = make(map[vChan]pChan)
 	l := rand.Uint64()%10 + 1
 	for i := 0; uint64(i) < l; i++ {
-		channels[genUniqueStr()] = genUniqueStr()
+		channels[funcutil.GenRandomStr()] = funcutil.GenRandomStr()
 	}
 
 	m.collectionID2Channels[collectionID] = channels
@@ -146,8 +164,8 @@ func (m *mockTask) PostExecute(ctx context.Context) error {
 func newMockTask(ctx context.Context) *mockTask {
 	return &mockTask{
 		TaskCondition: NewTaskCondition(ctx),
-		id:            UniqueID(getUniqueIntGeneratorIns().get()),
-		name:          genUniqueStr(),
+		id:            UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+		name:          funcutil.GenRandomStr(),
 		tType:         commonpb.MsgType_Undefined,
 		ts:            Timestamp(time.Now().Nanosecond()),
 	}
@@ -199,8 +217,8 @@ func newMockDmlTask(ctx context.Context) *mockDmlTask {
 	pchans := make([]pChan, 0, shardNum)
 
 	for i := 0; i < shardNum; i++ {
-		vchans = append(vchans, genUniqueStr())
-		pchans = append(pchans, genUniqueStr())
+		vchans = append(vchans, funcutil.GenRandomStr())
+		pchans = append(pchans, funcutil.GenRandomStr())
 	}
 
 	return &mockDmlTask{

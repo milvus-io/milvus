@@ -51,7 +51,7 @@ type Server struct {
 func (s *Server) Run() error {
 
 	if err := s.init(); err != nil {
-		return nil
+		return err
 	}
 
 	if err := s.start(); err != nil {

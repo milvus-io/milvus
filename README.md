@@ -354,7 +354,7 @@ Join the Milvus community on [Slack](https://join.slack.com/t/milvusio/shared_in
     <img src="https://zilliz-cms.s3.us-west-2.amazonaws.com/readme_slack_4a07c4c92f.png" alt="Miluvs Slack Channel"  height="150" width="500">
 </a>
 
-You can also check out our [FAQ page](https://milvus.io/docs/v1.0.0/performance_faq.md) to discover solutions or answers to your issues or questions.
+You can also check out our [FAQ page](https://milvus.io/docs/v2.0.0/performance_faq.md) to discover solutions or answers to your issues or questions.
 
 Subscribe to Milvus mailing lists:
 

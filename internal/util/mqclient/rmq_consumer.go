@@ -18,6 +18,7 @@ import (
 type RmqConsumer struct {
 	c          rocksmq.Consumer
 	msgChannel chan ConsumerMessage
+	closeCh    chan struct{}
 }
 
 func (rc *RmqConsumer) Subscription() string {
@@ -25,7 +26,6 @@ func (rc *RmqConsumer) Subscription() string {
 }
 
 func (rc *RmqConsumer) Chan() <-chan ConsumerMessage {
-
 	if rc.msgChannel == nil {
 		rc.msgChannel = make(chan ConsumerMessage)
 		go func() {
@@ -37,6 +37,9 @@ func (rc *RmqConsumer) Chan() <-chan ConsumerMessage {
 						return
 					}
 					rc.msgChannel <- &rmqMessage{msg: msg}
+				case <-rc.closeCh:
+					close(rc.msgChannel)
+					return
 				}
 			}
 		}()
@@ -53,4 +56,6 @@ func (rc *RmqConsumer) Ack(message ConsumerMessage) {
 }
 
 func (rc *RmqConsumer) Close() {
+	rc.c.Close()
+	close(rc.closeCh)
 }

@@ -75,6 +75,8 @@ func NewSession(ctx context.Context, metaRoot string, etcdEndpoints []string) *S
 	}
 	err := retry.Do(ctx, connectEtcdFn, retry.Attempts(300))
 	if err != nil {
+		log.Warn("failed to initialize session",
+			zap.Error(err))
 		return nil
 	}
 	log.Debug("Sessiont connect to etcd success")

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestCheckIntByRange(t *testing.T) {
+func Test_CheckIntByRange(t *testing.T) {
 	params := map[string]string{
 		"1":  strconv.Itoa(1),
 		"2":  strconv.Itoa(2),
@@ -46,7 +46,7 @@ func TestCheckIntByRange(t *testing.T) {
 	}
 }
 
-func TestCheckStrByValues(t *testing.T) {
+func Test_CheckStrByValues(t *testing.T) {
 	params := map[string]string{
 		"1": strconv.Itoa(1),
 		"2": strconv.Itoa(2),

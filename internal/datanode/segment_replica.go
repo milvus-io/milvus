@@ -177,7 +177,8 @@ func (replica *SegmentReplica) getCollectionAndPartitionID(segID UniqueID) (coll
 	return 0, 0, fmt.Errorf("Cannot find segment, id = %v", segID)
 }
 
-// addNewSegment adds a *New* and *NotFlushed* new segment
+// addNewSegment adds a *New* and *NotFlushed* new segment. Before add, please make sure there's no
+// such segment by `hasSegment`
 func (replica *SegmentReplica) addNewSegment(segID, collID, partitionID UniqueID, channelName string,
 	startPos, endPos *internalpb.MsgPosition) error {
 
@@ -185,7 +186,9 @@ func (replica *SegmentReplica) addNewSegment(segID, collID, partitionID UniqueID
 	defer replica.segMu.Unlock()
 
 	if collID != replica.collectionID {
-		log.Warn("Mismatch collection", zap.Int64("ID", collID))
+		log.Warn("Mismatch collection",
+			zap.Int64("input ID", collID),
+			zap.Int64("expected ID", replica.collectionID))
 		return fmt.Errorf("Mismatch collection, ID=%d", collID)
 	}
 
@@ -218,13 +221,16 @@ func (replica *SegmentReplica) addNewSegment(segID, collID, partitionID UniqueID
 	return nil
 }
 
-// addNormalSegment adds a *NotNew* and *NotFlushed* segment
+// addNormalSegment adds a *NotNew* and *NotFlushed* segment. Before add, please make sure there's no
+// such segment by `hasSegment`
 func (replica *SegmentReplica) addNormalSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, cp *segmentCheckPoint) error {
 	replica.segMu.Lock()
 	defer replica.segMu.Unlock()
 
 	if collID != replica.collectionID {
-		log.Warn("Mismatch collection", zap.Int64("ID", collID))
+		log.Warn("Mismatch collection",
+			zap.Int64("input ID", collID),
+			zap.Int64("expected ID", replica.collectionID))
 		return fmt.Errorf("Mismatch collection, ID=%d", collID)
 	}
 
@@ -409,7 +415,7 @@ func (replica *SegmentReplica) getCollectionSchema(collID UniqueID, ts Timestamp
 	defer replica.segMu.Unlock()
 
 	if !replica.validCollection(collID) {
-		log.Error("Mismatch collection for the replica",
+		log.Warn("Mismatch collection for the replica",
 			zap.Int64("Want", replica.collectionID),
 			zap.Int64("Actual", collID),
 		)
