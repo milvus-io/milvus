@@ -1,13 +1,9 @@
-name: Deploy_Test
+name: Deploy Test
 
 on:
   workflow_dispatch:
   schedule:
     - cron: "30 20 * * *"
-  push:
-    branches:
-      - master
-      - test_deploy
 
 jobs:
 
