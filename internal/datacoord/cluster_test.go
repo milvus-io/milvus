@@ -60,12 +60,12 @@ func spyWatchPolicy(ch chan interface{}) channelAssignPolicy {
 }
 
 // a mock kv that always fail when LoadWithPrefix
-type loadPrefixFailKv struct {
+type loadPrefixFailKV struct {
 	kv.TxnKV
 }
 
 // LoadWithPrefix override behavior
-func (kv *loadPrefixFailKv) LoadWithPrefix(key string) ([]string, []string, error) {
+func (kv *loadPrefixFailKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	return []string{}, []string{}, errors.New("mocked fail")
 }
 
@@ -93,7 +93,7 @@ func TestClusterCreate(t *testing.T) {
 	assert.EqualValues(t, "localhost:8080", dataNodes[0].Info.GetAddress())
 
 	t.Run("loadKv Fails", func(t *testing.T) {
-		fkv := &loadPrefixFailKv{TxnKV: memKv}
+		fkv := &loadPrefixFailKV{TxnKV: memKv}
 		cluster, err := NewCluster(context.TODO(), fkv, spyClusterStore, dummyPosProvider{})
 		assert.NotNil(t, err)
 		assert.Nil(t, cluster)
