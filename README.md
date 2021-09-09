@@ -80,13 +80,13 @@ Milvus was released under the [open-source Apache License 2.0](https://github.co
 
 ## Quick start
 
-### To start using Milvus
+### Install Milvus
 
 - [Standalone Quick Start Guide](https://milvus.io/docs/v2.0.0/install_standalone-docker.md)
 
 - [Cluster Quick Start Guide](https://milvus.io/docs/v2.0.0/install_cluster-docker.md)
 
-### To start developing Milvus
+### Build Milvus from source code
 
 ```bash
 # Clone github repository.

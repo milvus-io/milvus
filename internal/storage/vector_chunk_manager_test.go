@@ -26,120 +26,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var Params paramtable.BaseTable
-
-func TestVectorChunkManager(t *testing.T) {
-	Params.Init()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	bucketName := "fantastic-tech-test"
-	minIOKV, err := newMinIOKVClient(ctx, bucketName)
-	assert.Nil(t, err)
-	defer minIOKV.RemoveWithPrefix("")
-
-	rcm := NewMinioChunkManager(minIOKV)
-
-	localPath := "/tmp/milvus/data"
-
-	lcm := NewLocalChunkManager(localPath)
-
-	meta := initMeta()
-	vcm := NewVectorChunkManager(lcm, rcm, meta, false)
-	assert.NotNil(t, vcm)
-
-	binlogs := initBinlogFile(meta)
-	assert.NotNil(t, binlogs)
-	for _, binlog := range binlogs {
-		rcm.Write(binlog.Key, binlog.Value)
-	}
-
-	content, err := vcm.Read("108")
-	assert.Nil(t, err)
-	assert.Equal(t, []byte{0, 255}, content)
-
-	content, err = vcm.Read("109")
-	assert.Nil(t, err)
-
-	floatResult := make([]float32, 0)
-	for i := 0; i < len(content)/4; i++ {
-		singleData := typeutil.BytesToFloat32(content[i*4 : i*4+4])
-		floatResult = append(floatResult, singleData)
-	}
-	assert.Equal(t, []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 111, 222, 333, 444, 555, 777, 666}, floatResult)
-
-	content = make([]byte, 8*4)
-	byteLen, err := vcm.ReadAt("109", content, 8*4)
-	assert.Nil(t, err)
-	assert.Equal(t, 32, byteLen)
-
-	floatResult = make([]float32, 0)
-	for i := 0; i < len(content)/4; i++ {
-		singleData := typeutil.BytesToFloat32(content[i*4 : i*4+4])
-		floatResult = append(floatResult, singleData)
-	}
-	assert.Equal(t, []float32{0, 111, 222, 333, 444, 555, 777, 666}, floatResult)
-
-	os.Remove(path.Join(localPath, "108"))
-	os.Remove(path.Join(localPath, "109"))
-}
-
-func TestVectorChunkManagerWithLocalCache(t *testing.T) {
-	Params.Init()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	bucketName := "fantastic-tech-test"
-	minIOKV, err := newMinIOKVClient(ctx, bucketName)
-	assert.Nil(t, err)
-	defer minIOKV.RemoveWithPrefix("")
-
-	rcm := NewMinioChunkManager(minIOKV)
-
-	localPath := "/tmp/milvus/data"
-
-	lcm := NewLocalChunkManager(localPath)
-
-	meta := initMeta()
-	vcm := NewVectorChunkManager(lcm, rcm, meta, true)
-	assert.NotNil(t, vcm)
-
-	binlogs := initBinlogFile(meta)
-	assert.NotNil(t, binlogs)
-	for _, binlog := range binlogs {
-		rcm.Write(binlog.Key, binlog.Value)
-	}
-
-	content, err := vcm.Read("108")
-	assert.Nil(t, err)
-	assert.Equal(t, []byte{0, 255}, content)
-
-	content, err = vcm.Read("109")
-	assert.Nil(t, err)
-
-	floatResult := make([]float32, 0)
-	for i := 0; i < len(content)/4; i++ {
-		singleData := typeutil.BytesToFloat32(content[i*4 : i*4+4])
-		floatResult = append(floatResult, singleData)
-	}
-	assert.Equal(t, []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 111, 222, 333, 444, 555, 777, 666}, floatResult)
-
-	content = make([]byte, 8*4)
-	byteLen, err := vcm.ReadAt("109", content, 8*4)
-	assert.Nil(t, err)
-	assert.Equal(t, 32, byteLen)
-
-	floatResult = make([]float32, 0)
-	for i := 0; i < len(content)/4; i++ {
-		singleData := typeutil.BytesToFloat32(content[i*4 : i*4+4])
-		floatResult = append(floatResult, singleData)
-	}
-	assert.Equal(t, []float32{0, 111, 222, 333, 444, 555, 777, 666}, floatResult)
-
-	os.Remove(path.Join(localPath, "108"))
-	os.Remove(path.Join(localPath, "109"))
-}
-
 func newMinIOKVClient(ctx context.Context, bucketName string) (*miniokv.MinIOKV, error) {
 	endPoint, _ := Params.Load("_MinioAddress")
 	accessKeyID, _ := Params.Load("minio.accessKeyID")
@@ -244,4 +130,138 @@ func initBinlogFile(schema *etcdpb.CollectionMeta) []*Blob {
 		return nil
 	}
 	return blobs
+}
+
+func buildVectorChunkManager(t *testing.T, localPath string, localCacheEnable bool) (*VectorChunkManager, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	bucketName := "vector-chunk-manager"
+	minIOKV, err := newMinIOKVClient(ctx, bucketName)
+	assert.Nil(t, err)
+
+	rcm := NewMinioChunkManager(minIOKV)
+	lcm := NewLocalChunkManager(localPath)
+
+	meta := initMeta()
+	vcm := NewVectorChunkManager(lcm, rcm, meta, localCacheEnable)
+	assert.NotNil(t, vcm)
+
+	var allCancel context.CancelFunc = func() {
+		cancel()
+		minIOKV.RemoveWithPrefix("")
+	}
+	return vcm, allCancel
+}
+
+var Params paramtable.BaseTable
+var localPath string = "/tmp/milvus/data"
+
+func TestMain(m *testing.M) {
+	Params.Init()
+	exitCode := m.Run()
+	os.RemoveAll(localPath)
+	os.Exit(exitCode)
+}
+
+func TestVectorChunkManager_GetPath(t *testing.T) {
+	vcm, cancel := buildVectorChunkManager(t, localPath, true)
+	defer cancel()
+	assert.NotNil(t, vcm)
+
+	key := "1"
+	err := vcm.Write(key, []byte{1})
+	assert.Nil(t, err)
+	pathGet, err := vcm.GetPath(key)
+	assert.Nil(t, err)
+	pathJoin := path.Join(localPath, key)
+	assert.Equal(t, pathGet, pathJoin)
+
+	vcm.localCacheEnable = false
+	vcm.remoteChunkManager.Write(key, []byte{1})
+	pathGet, err = vcm.GetPath(key)
+	assert.Nil(t, err)
+	assert.Equal(t, pathGet, key)
+}
+
+func TestVectorChunkManager_Write(t *testing.T) {
+	vcm, cancel := buildVectorChunkManager(t, localPath, false)
+	defer cancel()
+	assert.NotNil(t, vcm)
+
+	key := "1"
+	err := vcm.Write(key, []byte{1})
+	assert.Error(t, err)
+
+	vcm.localCacheEnable = true
+	err = vcm.Write(key, []byte{1})
+	assert.Nil(t, err)
+
+	exist := vcm.Exist(key)
+	assert.True(t, exist)
+}
+
+func TestVectorChunkManager_Read(t *testing.T) {
+	meta := initMeta()
+	vcm, cancel := buildVectorChunkManager(t, localPath, false)
+	defer cancel()
+	assert.NotNil(t, vcm)
+
+	content, err := vcm.Read("9999")
+	assert.Error(t, err)
+	assert.Nil(t, content)
+
+	vcm.localCacheEnable = true
+
+	content, err = vcm.Read("9999")
+	assert.Error(t, err)
+	assert.Nil(t, content)
+
+	binlogs := initBinlogFile(meta)
+	assert.NotNil(t, binlogs)
+	for _, binlog := range binlogs {
+		vcm.remoteChunkManager.Write(binlog.Key, binlog.Value)
+	}
+
+	content, err = vcm.Read("108")
+	assert.Nil(t, err)
+	assert.Equal(t, []byte{0, 255}, content)
+
+	content, err = vcm.Read("109")
+	assert.Nil(t, err)
+
+	floatResult := make([]float32, 0)
+	for i := 0; i < len(content)/4; i++ {
+		singleData := typeutil.BytesToFloat32(content[i*4 : i*4+4])
+		floatResult = append(floatResult, singleData)
+	}
+	assert.Equal(t, []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 111, 222, 333, 444, 555, 777, 666}, floatResult)
+
+	content = make([]byte, 8*4)
+	byteLen, err := vcm.ReadAt("109", content, 8*4)
+	assert.Nil(t, err)
+	assert.Equal(t, 32, byteLen)
+
+	floatResult = make([]float32, 0)
+	for i := 0; i < len(content)/4; i++ {
+		singleData := typeutil.BytesToFloat32(content[i*4 : i*4+4])
+		floatResult = append(floatResult, singleData)
+	}
+	assert.Equal(t, []float32{0, 111, 222, 333, 444, 555, 777, 666}, floatResult)
+
+	byteLen, err = vcm.ReadAt("9999", content, 0)
+	assert.Error(t, err)
+	assert.Equal(t, -1, byteLen)
+
+	vcm.localCacheEnable = false
+	byteLen, err = vcm.ReadAt("109", content, 8*4)
+	assert.Nil(t, err)
+	assert.Equal(t, 32, byteLen)
+
+	byteLen, err = vcm.ReadAt("109", content, 9999)
+	assert.Error(t, err)
+	assert.Equal(t, 0, byteLen)
+
+	byteLen, err = vcm.ReadAt("9999", content, 0)
+	assert.Error(t, err)
+	assert.Equal(t, -1, byteLen)
 }

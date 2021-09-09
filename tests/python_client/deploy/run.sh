@@ -9,7 +9,8 @@ func() {
     exit -1
 
 }
-while getopts "hp:" OPT;do
+while getopts "hp:" OPT;
+do
     case $OPT in
 	p) Password="$OPTARG";;
 	h) func;;

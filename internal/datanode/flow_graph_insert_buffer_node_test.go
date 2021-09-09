@@ -32,8 +32,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
@@ -51,7 +53,7 @@ func (f *CDFMsFactory) NewMsgStream(ctx context.Context) (msgstream.MsgStream, e
 	return f.Factory.NewMsgStream(ctx)
 }
 
-func TestFLowGraphInsertBufferNodeCreate(t *testing.T) {
+func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -559,4 +561,138 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		assert.Equal(t, len(iBNode.insertBuffer.insertData), 0)
 
 	})
+}
+
+// CompactedRootCoord has meta info compacted at ts
+type CompactedRootCoord struct {
+	types.RootCoord
+	compactTs Timestamp
+}
+
+func (m *CompactedRootCoord) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	if in.GetTimeStamp() <= m.compactTs {
+		return &milvuspb.DescribeCollectionResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "meta compacted",
+			},
+		}, nil
+	}
+	return m.RootCoord.DescribeCollection(ctx, in)
+}
+
+func TestInsertBufferNode_getCollMetaBySegID(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	insertChannelName := "datanode-01-test-flowgraphinsertbuffernode-operate"
+
+	testPath := "/test/datanode/root/meta"
+	err := clearEtcd(testPath)
+	require.NoError(t, err)
+	Params.MetaRootPath = testPath
+
+	Factory := &MetaFactory{}
+	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
+
+	rcf := &RootCoordFactory{}
+	mockRootCoord := &CompactedRootCoord{
+		RootCoord: rcf,
+		compactTs: 100,
+	}
+
+	replica := newReplica(mockRootCoord, collMeta.ID)
+
+	err = replica.addNewSegment(1, collMeta.ID, 0, insertChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+	require.NoError(t, err)
+
+	msFactory := msgstream.NewPmsFactory()
+	m := map[string]interface{}{
+		"receiveBufSize": 1024,
+		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarBufSize":  1024}
+	err = msFactory.SetParams(m)
+	assert.Nil(t, err)
+
+	saveBinlog := func(fu *segmentFlushUnit) error {
+		t.Log(fu)
+		return nil
+	}
+
+	flushChan := make(chan *flushMsg, 100)
+	iBNode, err := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+	require.NoError(t, err)
+
+	meta, err := iBNode.getCollMetabySegID(1, 101)
+	assert.Nil(t, err)
+	assert.Equal(t, collMeta.ID, meta.ID)
+
+	_, err = iBNode.getCollMetabySegID(2, 101)
+	assert.NotNil(t, err)
+
+	meta, err = iBNode.getCollMetabySegID(1, 99)
+	assert.NotNil(t, err)
+}
+
+func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	insertChannelName := "datanode-01-test-flowgraphinsertbuffernode-operate"
+
+	testPath := "/test/datanode/root/meta"
+	err := clearEtcd(testPath)
+	require.NoError(t, err)
+	Params.MetaRootPath = testPath
+
+	Factory := &MetaFactory{}
+	collMeta := Factory.CollectionMetaFactory(UniqueID(0), "coll1")
+
+	rcf := &RootCoordFactory{}
+	mockRootCoord := &CompactedRootCoord{
+		RootCoord: rcf,
+		compactTs: 100,
+	}
+
+	replica := newReplica(mockRootCoord, collMeta.ID)
+
+	err = replica.addNewSegment(1, collMeta.ID, 0, insertChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+	require.NoError(t, err)
+
+	msFactory := msgstream.NewPmsFactory()
+	m := map[string]interface{}{
+		"receiveBufSize": 1024,
+		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarBufSize":  1024}
+	err = msFactory.SetParams(m)
+	assert.Nil(t, err)
+
+	saveBinlog := func(fu *segmentFlushUnit) error {
+		t.Log(fu)
+		return nil
+	}
+
+	flushChan := make(chan *flushMsg, 100)
+	iBNode, err := newInsertBufferNode(ctx, replica, msFactory, NewAllocatorFactory(), flushChan, saveBinlog, "string")
+	require.NoError(t, err)
+
+	inMsg := genInsertMsg(insertChannelName)
+	for _, msg := range inMsg.insertMessages {
+		msg.EndTimestamp = 101 // ts valid
+		err = iBNode.bufferInsertMsg(&inMsg, msg)
+		assert.Nil(t, err)
+	}
+
+	for _, msg := range inMsg.insertMessages {
+		msg.EndTimestamp = 99 // ts invalid
+		err = iBNode.bufferInsertMsg(&inMsg, msg)
+		assert.NotNil(t, err)
+	}
+
+	for _, msg := range inMsg.insertMessages {
+		msg.EndTimestamp = 101 // ts valid
+		msg.RowIDs = []int64{} //misaligned data
+		err = iBNode.bufferInsertMsg(&inMsg, msg)
+		assert.NotNil(t, err)
+	}
 }

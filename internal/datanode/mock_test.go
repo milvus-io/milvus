@@ -161,9 +161,19 @@ type RootCoordFactory struct {
 
 type DataCoordFactory struct {
 	types.DataCoord
+
+	SaveBinlogPathError     bool
+	SaveBinlogPathNotSucess bool
 }
 
 func (ds *DataCoordFactory) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
+	if ds.SaveBinlogPathError {
+		return nil, errors.New("Error")
+	}
+	if ds.SaveBinlogPathNotSucess {
+		return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
+	}
+
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 

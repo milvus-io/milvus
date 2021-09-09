@@ -13,6 +13,7 @@ package datanode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -36,6 +37,8 @@ type dataSyncService struct {
 	collectionID UniqueID
 	dataCoord    types.DataCoord
 	clearSignal  chan<- UniqueID
+
+	saveBinlog func(fu *segmentFlushUnit) error
 }
 
 func newDataSyncService(ctx context.Context,
@@ -48,6 +51,10 @@ func newDataSyncService(ctx context.Context,
 	dataCoord types.DataCoord,
 
 ) (*dataSyncService, error) {
+
+	if replica == nil {
+		return nil, errors.New("Nil input")
+	}
 
 	ctx1, cancel := context.WithCancel(ctx)
 
@@ -147,6 +154,8 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		return nil
 	}
 
+	dsService.saveBinlog = saveBinlog
+
 	var dmStreamNode Node = newDmInputNode(
 		dsService.ctx,
 		dsService.msFactory,
@@ -169,10 +178,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		return err
 	}
 
-	dn, err := newDeleteDNode(dsService.replica)
-	if err != nil {
-		return err
-	}
+	dn := newDeleteDNode(dsService.replica)
 
 	var deleteNode Node = dn
 
