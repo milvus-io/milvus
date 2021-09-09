@@ -9,35 +9,30 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package funcutil
+package datanode
 
 import (
-	"fmt"
-	"math/rand"
-	"time"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-var Rand *rand.Rand = nil
+func TestInsertMsg_TimeTick(te *testing.T) {
+	tests := []struct {
+		timeTimestanpMax Timestamp
 
-func init() {
-	Rand = rand.New(rand.NewSource(time.Now().UnixNano()))
-}
-
-var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-
-func RandomString(n int) string {
-	b := make([]rune, n)
-	for i := range b {
-		b[i] = letterRunes[Rand.Intn(len(letterRunes))]
+		description string
+	}{
+		{0, "Zero timestampMax"},
+		{1, "Normal timestampMax"},
 	}
-	return string(b)
-}
 
-func GenRandomStr() string {
-	l := rand.Uint64()%10 + 1
-	b := make([]byte, l)
-	if _, err := rand.Read(b); err != nil {
-		return ""
+	for _, test := range tests {
+		te.Run(test.description, func(t *testing.T) {
+			im := &insertMsg{timeRange: TimeRange{timestampMax: test.timeTimestanpMax}}
+
+			assert.Equal(t, test.timeTimestanpMax, im.TimeTick())
+		})
 	}
-	return fmt.Sprintf("%X", b)
+
 }

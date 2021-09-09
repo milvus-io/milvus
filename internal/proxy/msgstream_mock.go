@@ -9,15 +9,17 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package msgstream
+package proxy
 
 import (
 	"context"
 	"sync"
+
+	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
 type SimpleMsgStream struct {
-	msgChan chan *MsgPack
+	msgChan chan *msgstream.MsgPack
 
 	msgCount    int
 	msgCountMtx sync.RWMutex
@@ -29,7 +31,7 @@ func (ms *SimpleMsgStream) Start() {
 func (ms *SimpleMsgStream) Close() {
 }
 
-func (ms *SimpleMsgStream) Chan() <-chan *MsgPack {
+func (ms *SimpleMsgStream) Chan() <-chan *msgstream.MsgPack {
 	return ms.msgChan
 }
 
@@ -39,11 +41,11 @@ func (ms *SimpleMsgStream) AsProducer(channels []string) {
 func (ms *SimpleMsgStream) AsConsumer(channels []string, subName string) {
 }
 
-func (ms *SimpleMsgStream) ComputeProduceChannelIndexes(tsMsgs []TsMsg) [][]int32 {
+func (ms *SimpleMsgStream) ComputeProduceChannelIndexes(tsMsgs []msgstream.TsMsg) [][]int32 {
 	return nil
 }
 
-func (ms *SimpleMsgStream) SetRepackFunc(repackFunc RepackFunc) {
+func (ms *SimpleMsgStream) SetRepackFunc(repackFunc msgstream.RepackFunc) {
 }
 
 func (ms *SimpleMsgStream) getMsgCount() int {
@@ -64,7 +66,7 @@ func (ms *SimpleMsgStream) decreaseMsgCount(delta int) {
 	ms.increaseMsgCount(-delta)
 }
 
-func (ms *SimpleMsgStream) Produce(pack *MsgPack) error {
+func (ms *SimpleMsgStream) Produce(pack *msgstream.MsgPack) error {
 	defer ms.increaseMsgCount(1)
 
 	ms.msgChan <- pack
@@ -72,7 +74,7 @@ func (ms *SimpleMsgStream) Produce(pack *MsgPack) error {
 	return nil
 }
 
-func (ms *SimpleMsgStream) Broadcast(pack *MsgPack) error {
+func (ms *SimpleMsgStream) Broadcast(pack *msgstream.MsgPack) error {
 	return nil
 }
 
@@ -80,7 +82,7 @@ func (ms *SimpleMsgStream) GetProduceChannels() []string {
 	return nil
 }
 
-func (ms *SimpleMsgStream) Consume() *MsgPack {
+func (ms *SimpleMsgStream) Consume() *msgstream.MsgPack {
 	if ms.getMsgCount() <= 0 {
 		return nil
 	}
@@ -90,13 +92,13 @@ func (ms *SimpleMsgStream) Consume() *MsgPack {
 	return <-ms.msgChan
 }
 
-func (ms *SimpleMsgStream) Seek(offset []*MsgPosition) error {
+func (ms *SimpleMsgStream) Seek(offset []*msgstream.MsgPosition) error {
 	return nil
 }
 
 func NewSimpleMsgStream() *SimpleMsgStream {
 	return &SimpleMsgStream{
-		msgChan:  make(chan *MsgPack, 1024),
+		msgChan:  make(chan *msgstream.MsgPack, 1024),
 		msgCount: 0,
 	}
 }
@@ -108,15 +110,15 @@ func (factory *SimpleMsgStreamFactory) SetParams(params map[string]interface{}) 
 	return nil
 }
 
-func (factory *SimpleMsgStreamFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
+func (factory *SimpleMsgStreamFactory) NewMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
 	return NewSimpleMsgStream(), nil
 }
 
-func (factory *SimpleMsgStreamFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
+func (factory *SimpleMsgStreamFactory) NewTtMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
 	return NewSimpleMsgStream(), nil
 }
 
-func (factory *SimpleMsgStreamFactory) NewQueryMsgStream(ctx context.Context) (MsgStream, error) {
+func (factory *SimpleMsgStreamFactory) NewQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
 	return NewSimpleMsgStream(), nil
 }
 

@@ -58,11 +58,11 @@ enum DataType {
 
 # Intro to Index
 
-For more detailed information about indexes, please refer to [Milvus documentation index chapter.](https://milvus.io/docs/v0.11.0/index.md)
+For more detailed information about indexes, please refer to [Milvus documentation index chapter.](https://milvus.io/docs/v2.0.0/index.md)
 
 To learn how to choose an appropriate index for your application scenarios, please read [How to Select an Index in Milvus](https://medium.com/@milvusio/how-to-choose-an-index-in-milvus-4f3d15259212).
 
-To learn how to choose an appropriate index for a metric, see [Distance Metrics](https://www.milvus.io/docs/v0.11.0/metric.md).
+To learn how to choose an appropriate index for a metric, see [Distance Metrics](https://www.milvus.io/docs/v2.0.0/metric.md).
 
 Different index types use different index params in construction and query. All index params are represented by the structure of map. This doc shows the map code in python.
 

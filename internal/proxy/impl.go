@@ -147,8 +147,7 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		zap.Int64("msgID", request.Base.MsgID),
 		zap.Uint64("timestamp", request.Base.Timestamp),
 		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName),
-		zap.Any("schema", request.Schema))
+		zap.String("collection", request.CollectionName))
 	defer func() {
 		log.Debug("CreateCollection Done",
 			zap.Error(err),

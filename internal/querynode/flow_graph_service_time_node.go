@@ -77,11 +77,7 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	//	log.Warn("Error: send time tick into pulsar channel failed", zap.Error(err))
 	//}
 
-	var res Msg = &gcMsg{
-		gcRecord:  serviceTimeMsg.gcRecord,
-		timeRange: serviceTimeMsg.timeRange,
-	}
-	return []Msg{res}
+	return []Msg{}
 }
 
 //func (stNode *serviceTimeNode) sendTimeTick(ts Timestamp) error {

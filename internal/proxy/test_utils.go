@@ -12,20 +12,10 @@
 package proxy
 
 import (
-	"fmt"
 	"math/rand"
 
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
-
-func genUniqueStr() string {
-	l := rand.Uint64()%100 + 1
-	b := make([]byte, l)
-	if _, err := rand.Read(b); err != nil {
-		return ""
-	}
-	return fmt.Sprintf("%X", b)
-}
 
 func generateBoolArray(numRows int) []bool {
 	ret := make([]bool, 0, numRows)

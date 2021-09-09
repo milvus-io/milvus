@@ -176,6 +176,9 @@ func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string, etcdE
 // Register register data service at etcd
 func (s *Server) Register() error {
 	s.session = sessionutil.NewSession(s.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
+	if s.session == nil {
+		return errors.New("failed to initialize session")
+	}
 	s.activeCh = s.session.Init(typeutil.DataCoordRole, Params.IP, true)
 	Params.NodeID = s.session.ServerID
 	return nil

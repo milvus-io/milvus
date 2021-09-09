@@ -9,41 +9,47 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package proxy
+package uniquegenerator
 
 import "sync"
 
 type (
-	uniqueIntGenerator interface {
-		get() int
+	UniqueIntGenerator interface {
+		GetInt() int
+		GetInts(count int) (int, int)
 	}
-	naiveUniqueIntGenerator struct {
+	NaiveUniqueIntGenerator struct {
 		now int
 		mtx sync.Mutex
 	}
 )
 
-func (generator *naiveUniqueIntGenerator) get() int {
+func (generator *NaiveUniqueIntGenerator) GetInts(count int) (int, int) {
 	generator.mtx.Lock()
 	defer func() {
-		generator.now++
+		generator.now += count
 		generator.mtx.Unlock()
 	}()
-	return generator.now
+	return generator.now, generator.now + count
 }
 
-func newNaiveUniqueIntGenerator() *naiveUniqueIntGenerator {
-	return &naiveUniqueIntGenerator{
+func (generator *NaiveUniqueIntGenerator) GetInt() int {
+	begin, _ := generator.GetInts(1)
+	return begin
+}
+
+func NewNaiveUniqueIntGenerator() *NaiveUniqueIntGenerator {
+	return &NaiveUniqueIntGenerator{
 		now: 0,
 	}
 }
 
-var uniqueIntGeneratorIns uniqueIntGenerator
+var uniqueIntGeneratorIns UniqueIntGenerator
 var getUniqueIntGeneratorInsOnce sync.Once
 
-func getUniqueIntGeneratorIns() uniqueIntGenerator {
+func GetUniqueIntGeneratorIns() UniqueIntGenerator {
 	getUniqueIntGeneratorInsOnce.Do(func() {
-		uniqueIntGeneratorIns = newNaiveUniqueIntGenerator()
+		uniqueIntGeneratorIns = NewNaiveUniqueIntGenerator()
 	})
 	return uniqueIntGeneratorIns
 }
