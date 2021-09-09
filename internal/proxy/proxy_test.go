@@ -459,6 +459,9 @@ func TestProxy(t *testing.T) {
 	prefix := "test_proxy_"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
+	otherCollectionName := collectionName + funcutil.GenRandomStr()
+	partitionName := prefix + funcutil.GenRandomStr()
+	otherPartitionName := partitionName + funcutil.GenRandomStr()
 	shardsNum := int32(2)
 	int64Field := "int64"
 	floatVecField := "fVec"
@@ -501,9 +504,9 @@ func TestProxy(t *testing.T) {
 			},
 		}
 	}
+	schema := constructCollectionSchema()
 
 	constructCreateCollectionRequest := func() *milvuspb.CreateCollectionRequest {
-		schema := constructCollectionSchema()
 		bs, err := proto.Marshal(schema)
 		assert.NoError(t, err)
 		return &milvuspb.CreateCollectionRequest{
@@ -514,12 +517,512 @@ func TestProxy(t *testing.T) {
 			ShardsNum:      shardsNum,
 		}
 	}
+	createCollectionReq := constructCreateCollectionRequest()
 
 	t.Run("create collection", func(t *testing.T) {
-		req := constructCreateCollectionRequest()
+		req := createCollectionReq
 		resp, err := proxy.CreateCollection(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// recreate -> fail
+		req2 := constructCreateCollectionRequest()
+		resp, err = proxy.CreateCollection(ctx, req2)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("has collection", func(t *testing.T) {
+		resp, err := proxy.HasCollection(ctx, &milvuspb.HasCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			TimeStamp:      0,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.True(t, resp.Value)
+
+		// has other collection: false
+		resp, err = proxy.HasCollection(ctx, &milvuspb.HasCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: otherCollectionName,
+			TimeStamp:      0,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.False(t, resp.Value)
+	})
+
+	t.Run("load collection", func(t *testing.T) {
+		resp, err := proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// load other collection -> fail
+		resp, err = proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: otherCollectionName,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("show in-memory collections", func(t *testing.T) {
+		resp, err := proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+			Base:            nil,
+			DbName:          dbName,
+			TimeStamp:       0,
+			Type:            milvuspb.ShowType_InMemory,
+			CollectionNames: nil,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, 1, len(resp.CollectionNames))
+
+		// get in-memory percentage
+		resp, err = proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+			Base:            nil,
+			DbName:          dbName,
+			TimeStamp:       0,
+			Type:            milvuspb.ShowType_InMemory,
+			CollectionNames: []string{collectionName},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, 1, len(resp.CollectionNames))
+		assert.Equal(t, 1, len(resp.InMemoryPercentages))
+
+		// get in-memory percentage of  not loaded collection -> fail
+		resp, err = proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+			Base:            nil,
+			DbName:          dbName,
+			TimeStamp:       0,
+			Type:            milvuspb.ShowType_InMemory,
+			CollectionNames: []string{otherCollectionName},
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("describe collection", func(t *testing.T) {
+		collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+		assert.NoError(t, err)
+
+		resp, err := proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			CollectionID:   collectionID,
+			TimeStamp:      0,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, collectionID, resp.CollectionID)
+		// TODO(dragondriver): shards num
+		assert.Equal(t, len(schema.Fields), len(resp.Schema.Fields))
+		// TODO(dragondriver): compare fields schema, not sure the order of fields
+
+		// describe other collection -> fail
+		resp, err = proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: otherCollectionName,
+			CollectionID:   collectionID,
+			TimeStamp:      0,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("get collection statistics", func(t *testing.T) {
+		resp, err := proxy.GetCollectionStatistics(ctx, &milvuspb.GetCollectionStatisticsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		// TODO(dragondriver): check num rows
+
+		// get statistics of other collection -> fail
+		resp, err = proxy.GetCollectionStatistics(ctx, &milvuspb.GetCollectionStatisticsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: otherCollectionName,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("show collections", func(t *testing.T) {
+		resp, err := proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+			Base:            nil,
+			DbName:          dbName,
+			TimeStamp:       0,
+			Type:            milvuspb.ShowType_All,
+			CollectionNames: nil,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, 1, len(resp.CollectionNames))
+	})
+
+	t.Run("create partition", func(t *testing.T) {
+		resp, err := proxy.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  partitionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// recreate -> fail
+		resp, err = proxy.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  partitionName,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// create partition with non-exist collection -> fail
+		resp, err = proxy.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: otherCollectionName,
+			PartitionName:  partitionName,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("has partition", func(t *testing.T) {
+		resp, err := proxy.HasPartition(ctx, &milvuspb.HasPartitionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  partitionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.True(t, resp.Value)
+
+		resp, err = proxy.HasPartition(ctx, &milvuspb.HasPartitionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  otherPartitionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.False(t, resp.Value)
+
+		// non-exist collection -> fail
+		resp, err = proxy.HasPartition(ctx, &milvuspb.HasPartitionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: otherCollectionName,
+			PartitionName:  partitionName,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("load partitions", func(t *testing.T) {
+		resp, err := proxy.LoadPartitions(ctx, &milvuspb.LoadPartitionsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionNames: []string{partitionName},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// non-exist partition -> fail
+		resp, err = proxy.LoadPartitions(ctx, &milvuspb.LoadPartitionsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionNames: []string{otherPartitionName},
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// non-exist collection-> fail
+		resp, err = proxy.LoadPartitions(ctx, &milvuspb.LoadPartitionsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: otherCollectionName,
+			PartitionNames: []string{partitionName},
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("show in-memory partitions", func(t *testing.T) {
+		collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+		assert.NoError(t, err)
+
+		resp, err := proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			CollectionID:   collectionID,
+			PartitionNames: nil,
+			Type:           milvuspb.ShowType_InMemory,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		// default partition?
+		assert.Equal(t, 1, len(resp.PartitionNames))
+
+		// show partition not in-memory -> fail
+		resp, err = proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			CollectionID:   collectionID,
+			PartitionNames: []string{otherPartitionName},
+			Type:           milvuspb.ShowType_InMemory,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		// non-exist collection -> fail
+		resp, err = proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: otherCollectionName,
+			CollectionID:   collectionID,
+			PartitionNames: []string{partitionName},
+			Type:           milvuspb.ShowType_InMemory,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("get partition statistics", func(t *testing.T) {
+		resp, err := proxy.GetPartitionStatistics(ctx, &milvuspb.GetPartitionStatisticsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  partitionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		// non-exist partition -> fail
+		resp, err = proxy.GetPartitionStatistics(ctx, &milvuspb.GetPartitionStatisticsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  otherPartitionName,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		// non-exist collection -> fail
+		resp, err = proxy.GetPartitionStatistics(ctx, &milvuspb.GetPartitionStatisticsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: otherCollectionName,
+			PartitionName:  partitionName,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("show partitions", func(t *testing.T) {
+		collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+		assert.NoError(t, err)
+
+		resp, err := proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			CollectionID:   collectionID,
+			PartitionNames: nil,
+			Type:           milvuspb.ShowType_All,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		// default partition
+		assert.Equal(t, 2, len(resp.PartitionNames))
+
+		// non-exist collection -> fail
+		resp, err = proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: otherCollectionName,
+			CollectionID:   collectionID + 1,
+			PartitionNames: nil,
+			Type:           milvuspb.ShowType_All,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("release partition", func(t *testing.T) {
+		resp, err := proxy.ReleasePartitions(ctx, &milvuspb.ReleasePartitionsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionNames: []string{partitionName},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("show in-memory partitions after release partition", func(t *testing.T) {
+		collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+		assert.NoError(t, err)
+
+		resp, err := proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			CollectionID:   collectionID,
+			PartitionNames: nil,
+			Type:           milvuspb.ShowType_InMemory,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		// default partition
+		assert.Equal(t, 1, len(resp.PartitionNames))
+
+		resp, err = proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			CollectionID:   collectionID,
+			PartitionNames: []string{partitionName}, // released
+			Type:           milvuspb.ShowType_InMemory,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("drop partition", func(t *testing.T) {
+		resp, err := proxy.DropPartition(ctx, &milvuspb.DropPartitionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  partitionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// invalidate meta cache
+		resp, err = proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// drop non-exist partition -> fail
+
+		resp, err = proxy.DropPartition(ctx, &milvuspb.DropPartitionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  partitionName,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		resp, err = proxy.DropPartition(ctx, &milvuspb.DropPartitionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  otherCollectionName,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		resp, err = proxy.DropPartition(ctx, &milvuspb.DropPartitionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: otherCollectionName,
+			PartitionName:  partitionName,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("has partition after drop partition", func(t *testing.T) {
+		resp, err := proxy.HasPartition(ctx, &milvuspb.HasPartitionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  partitionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.False(t, resp.Value)
+	})
+
+	t.Run("show partitions after drop partition", func(t *testing.T) {
+		collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+		assert.NoError(t, err)
+
+		resp, err := proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			CollectionID:   collectionID,
+			PartitionNames: nil,
+			Type:           milvuspb.ShowType_All,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		// default partition
+		assert.Equal(t, 1, len(resp.PartitionNames))
+	})
+
+	t.Run("release collection", func(t *testing.T) {
+		collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+		assert.NoError(t, err)
+
+		resp, err := proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// release dql message stream
+		resp, err = proxy.ReleaseDQLMessageStream(ctx, &proxypb.ReleaseDQLMessageStreamRequest{
+			Base:         nil,
+			DbID:         0,
+			CollectionID: collectionID,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("show in-memory collections after release", func(t *testing.T) {
+		resp, err := proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+			Base:            nil,
+			DbName:          dbName,
+			TimeStamp:       0,
+			Type:            milvuspb.ShowType_InMemory,
+			CollectionNames: nil,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, 0, len(resp.CollectionNames))
 	})
 
 	t.Run("drop collection", func(t *testing.T) {
@@ -550,6 +1053,31 @@ func TestProxy(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("has collection after drop collection", func(t *testing.T) {
+		resp, err := proxy.HasCollection(ctx, &milvuspb.HasCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			TimeStamp:      0,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.False(t, resp.Value)
+	})
+
+	t.Run("show all collections after drop collection", func(t *testing.T) {
+		resp, err := proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+			Base:            nil,
+			DbName:          dbName,
+			TimeStamp:       0,
+			Type:            milvuspb.ShowType_All,
+			CollectionNames: nil,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, 0, len(resp.CollectionNames))
 	})
 
 	cancel()

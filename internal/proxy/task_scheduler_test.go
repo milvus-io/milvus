@@ -455,7 +455,7 @@ func TestTaskScheduler(t *testing.T) {
 	ctx := context.Background()
 	tsoAllocatorIns := newMockTsoAllocator()
 	idAllocatorIns := newMockIDAllocatorInterface()
-	factory := NewSimpleMsgStreamFactory()
+	factory := newSimpleMockMsgStreamFactory()
 
 	sched, err := newTaskScheduler(ctx, idAllocatorIns, tsoAllocatorIns, factory)
 	assert.NoError(t, err)
