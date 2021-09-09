@@ -541,8 +541,15 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 			return nil, err
 		}
 		msg := ConsumerMessage{
-			MsgID:   msgID,
-			Payload: val.Data(),
+			MsgID: msgID,
+		}
+		origData := val.Data()
+		dataLen := len(origData)
+		if dataLen == 0 {
+			msg.Payload = nil
+		} else {
+			msg.Payload = make([]byte, dataLen)
+			copy(msg.Payload, origData)
 		}
 		consumerMessage = append(consumerMessage, msg)
 		key.Free()
