@@ -61,7 +61,6 @@ func TestAssignSegmentID(t *testing.T) {
 	const collIDInvalid = 101
 	const partID = 0
 	const channel0 = "channel0"
-	const channel1 = "channel1"
 
 	t.Run("assign segment normally", func(t *testing.T) {
 		svr := newTestServer(t, nil)

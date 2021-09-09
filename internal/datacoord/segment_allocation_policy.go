@@ -79,8 +79,6 @@ func AllocatePolicyV1(segments []*SegmentInfo, count int64,
 	return newSegmentAllocations, existedSegmentAllocations
 }
 
-type sealPolicy func(maxCount, writtenCount, allocatedCount int64) bool
-
 // segmentSealPolicy seal policy applies to segment
 type segmentSealPolicy func(segment *SegmentInfo, ts Timestamp) bool
 
