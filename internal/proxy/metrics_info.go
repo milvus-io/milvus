@@ -156,12 +156,13 @@ func getSystemInfoMetrics(
 
 			// add query nodes to system topology graph
 			for _, queryNode := range queryCoordTopology.Cluster.ConnectedNodes {
+				node := queryNode
 				identifier := uniquegenerator.GetUniqueIntGeneratorIns().GetInt()
 				identifierMap[queryNode.Name] = identifier
 				queryNodeTopologyNode := metricsinfo.SystemTopologyNode{
 					Identifier: identifier,
 					Connected:  nil,
-					Infos:      &queryNode,
+					Infos:      &node,
 				}
 				systemTopology.NodesInfo = append(systemTopology.NodesInfo, queryNodeTopologyNode)
 				queryCoordTopologyNode.Connected = append(queryCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
@@ -231,12 +232,13 @@ func getSystemInfoMetrics(
 
 			// add data nodes to system topology graph
 			for _, dataNode := range dataCoordTopology.Cluster.ConnectedNodes {
+				node := dataNode
 				identifier := uniquegenerator.GetUniqueIntGeneratorIns().GetInt()
 				identifierMap[dataNode.Name] = identifier
 				dataNodeTopologyNode := metricsinfo.SystemTopologyNode{
 					Identifier: identifier,
 					Connected:  nil,
-					Infos:      &dataNode,
+					Infos:      &node,
 				}
 				systemTopology.NodesInfo = append(systemTopology.NodesInfo, dataNodeTopologyNode)
 				dataCoordTopologyNode.Connected = append(dataCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
@@ -306,12 +308,13 @@ func getSystemInfoMetrics(
 
 			// add index nodes to system topology graph
 			for _, indexNode := range indexCoordTopology.Cluster.ConnectedNodes {
+				node := indexNode
 				identifier := uniquegenerator.GetUniqueIntGeneratorIns().GetInt()
 				identifierMap[indexNode.Name] = identifier
 				indexNodeTopologyNode := metricsinfo.SystemTopologyNode{
 					Identifier: identifier,
 					Connected:  nil,
-					Infos:      &indexNode,
+					Infos:      &node,
 				}
 				systemTopology.NodesInfo = append(systemTopology.NodesInfo, indexNodeTopologyNode)
 				indexCoordTopologyNode.Connected = append(indexCoordTopologyNode.Connected, metricsinfo.ConnectionEdge{
