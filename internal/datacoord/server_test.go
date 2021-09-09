@@ -679,38 +679,6 @@ func TestChannel(t *testing.T) {
 		err := statsStream.Produce(&msgPack)
 		assert.Nil(t, err)
 	})
-
-	t.Run("Test SegmentFlushChannel", func(t *testing.T) {
-		genMsg := func(msgType commonpb.MsgType, t Timestamp) *msgstream.FlushCompletedMsg {
-			return &msgstream.FlushCompletedMsg{
-				BaseMsg: msgstream.BaseMsg{
-					HashValues: []uint32{0},
-				},
-				SegmentFlushCompletedMsg: datapb.SegmentFlushCompletedMsg{
-					Base: &commonpb.MsgBase{
-						MsgType:   msgType,
-						MsgID:     0,
-						Timestamp: t,
-						SourceID:  0,
-					},
-					Segment: &datapb.SegmentInfo{},
-				},
-			}
-		}
-
-		segInfoStream, _ := svr.msFactory.NewMsgStream(svr.ctx)
-		segInfoStream.AsProducer([]string{Params.SegmentInfoChannelName})
-		segInfoStream.Start()
-		defer segInfoStream.Close()
-
-		msgPack := msgstream.MsgPack{}
-		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentFlushDone, 123))
-		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentInfo, 234))
-		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentFlushDone, 345))
-		err := segInfoStream.Produce(&msgPack)
-		assert.Nil(t, err)
-		time.Sleep(time.Second)
-	})
 }
 
 func TestSaveBinlogPaths(t *testing.T) {
