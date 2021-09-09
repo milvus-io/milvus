@@ -361,3 +361,200 @@ func TestRetrieveResultMsg_Unmarshal_IllegalParameter(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.Nil(t, tsMsg)
 }
+
+func TestCreateCollectionMsg(t *testing.T) {
+	createCollectionMsg := &CreateCollectionMsg{
+		BaseMsg: generateBaseMsg(),
+		CreateCollectionRequest: internalpb.CreateCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreateCollection,
+				MsgID:     1,
+				Timestamp: 2,
+				SourceID:  3,
+			},
+			DbName:               "test_db",
+			CollectionName:       "test_collection",
+			PartitionName:        "test_partition",
+			DbID:                 4,
+			CollectionID:         5,
+			PartitionID:          6,
+			Schema:               []byte{},
+			VirtualChannelNames:  []string{},
+			PhysicalChannelNames: []string{},
+		},
+	}
+
+	assert.NotNil(t, createCollectionMsg.TraceCtx())
+
+	ctx := context.Background()
+	createCollectionMsg.SetTraceCtx(ctx)
+	assert.Equal(t, ctx, createCollectionMsg.TraceCtx())
+
+	assert.Equal(t, int64(1), createCollectionMsg.ID())
+	assert.Equal(t, commonpb.MsgType_CreateCollection, createCollectionMsg.Type())
+	assert.Equal(t, int64(3), createCollectionMsg.SourceID())
+
+	bytes, err := createCollectionMsg.Marshal(createCollectionMsg)
+	assert.Nil(t, err)
+
+	tsMsg, err := createCollectionMsg.Unmarshal(bytes)
+	assert.Nil(t, err)
+
+	createCollectionMsg2, ok := tsMsg.(*CreateCollectionMsg)
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), createCollectionMsg2.ID())
+	assert.Equal(t, commonpb.MsgType_CreateCollection, createCollectionMsg2.Type())
+	assert.Equal(t, int64(3), createCollectionMsg2.SourceID())
+}
+
+func TestCreateCollectionMsg_Unmarshal_IllegalParameter(t *testing.T) {
+	createCollectionMsg := &CreateCollectionMsg{}
+	tsMsg, err := createCollectionMsg.Unmarshal(10)
+	assert.NotNil(t, err)
+	assert.Nil(t, tsMsg)
+}
+
+func TestDropCollectionMsg(t *testing.T) {
+	dropCollectionMsg := &DropCollectionMsg{
+		BaseMsg: generateBaseMsg(),
+		DropCollectionRequest: internalpb.DropCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DropCollection,
+				MsgID:     1,
+				Timestamp: 2,
+				SourceID:  3,
+			},
+			DbName:         "test_db",
+			CollectionName: "test_collection",
+			DbID:           4,
+			CollectionID:   5,
+		},
+	}
+
+	assert.NotNil(t, dropCollectionMsg.TraceCtx())
+
+	ctx := context.Background()
+	dropCollectionMsg.SetTraceCtx(ctx)
+	assert.Equal(t, ctx, dropCollectionMsg.TraceCtx())
+
+	assert.Equal(t, int64(1), dropCollectionMsg.ID())
+	assert.Equal(t, commonpb.MsgType_DropCollection, dropCollectionMsg.Type())
+	assert.Equal(t, int64(3), dropCollectionMsg.SourceID())
+
+	bytes, err := dropCollectionMsg.Marshal(dropCollectionMsg)
+	assert.Nil(t, err)
+
+	tsMsg, err := dropCollectionMsg.Unmarshal(bytes)
+	assert.Nil(t, err)
+
+	dropCollectionMsg2, ok := tsMsg.(*DropCollectionMsg)
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), dropCollectionMsg2.ID())
+	assert.Equal(t, commonpb.MsgType_DropCollection, dropCollectionMsg2.Type())
+	assert.Equal(t, int64(3), dropCollectionMsg2.SourceID())
+}
+
+func TestDropCollectionMsg_Unmarshal_IllegalParameter(t *testing.T) {
+	dropCollectionMsg := &DropCollectionMsg{}
+	tsMsg, err := dropCollectionMsg.Unmarshal(10)
+	assert.NotNil(t, err)
+	assert.Nil(t, tsMsg)
+}
+
+func TestCreatePartitionMsg(t *testing.T) {
+	createPartitionMsg := &CreatePartitionMsg{
+		BaseMsg: generateBaseMsg(),
+		CreatePartitionRequest: internalpb.CreatePartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreatePartition,
+				MsgID:     1,
+				Timestamp: 2,
+				SourceID:  3,
+			},
+			DbName:         "test_db",
+			CollectionName: "test_collection",
+			PartitionName:  "test_partition",
+			DbID:           4,
+			CollectionID:   5,
+			PartitionID:    6,
+		},
+	}
+
+	assert.NotNil(t, createPartitionMsg.TraceCtx())
+
+	ctx := context.Background()
+	createPartitionMsg.SetTraceCtx(ctx)
+	assert.Equal(t, ctx, createPartitionMsg.TraceCtx())
+
+	assert.Equal(t, int64(1), createPartitionMsg.ID())
+	assert.Equal(t, commonpb.MsgType_CreatePartition, createPartitionMsg.Type())
+	assert.Equal(t, int64(3), createPartitionMsg.SourceID())
+
+	bytes, err := createPartitionMsg.Marshal(createPartitionMsg)
+	assert.Nil(t, err)
+
+	tsMsg, err := createPartitionMsg.Unmarshal(bytes)
+	assert.Nil(t, err)
+
+	createPartitionMsg2, ok := tsMsg.(*CreatePartitionMsg)
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), createPartitionMsg2.ID())
+	assert.Equal(t, commonpb.MsgType_CreatePartition, createPartitionMsg2.Type())
+	assert.Equal(t, int64(3), createPartitionMsg2.SourceID())
+}
+
+func TestCreatePartitionMsg_Unmarshal_IllegalParameter(t *testing.T) {
+	createPartitionMsg := &CreatePartitionMsg{}
+	tsMsg, err := createPartitionMsg.Unmarshal(10)
+	assert.NotNil(t, err)
+	assert.Nil(t, tsMsg)
+}
+
+func TestDropPartitionMsg(t *testing.T) {
+	dropPartitionMsg := &DropPartitionMsg{
+		BaseMsg: generateBaseMsg(),
+		DropPartitionRequest: internalpb.DropPartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DropPartition,
+				MsgID:     1,
+				Timestamp: 2,
+				SourceID:  3,
+			},
+			DbName:         "test_db",
+			CollectionName: "test_collection",
+			PartitionName:  "test_partition",
+			DbID:           4,
+			CollectionID:   5,
+			PartitionID:    6,
+		},
+	}
+
+	assert.NotNil(t, dropPartitionMsg.TraceCtx())
+
+	ctx := context.Background()
+	dropPartitionMsg.SetTraceCtx(ctx)
+	assert.Equal(t, ctx, dropPartitionMsg.TraceCtx())
+
+	assert.Equal(t, int64(1), dropPartitionMsg.ID())
+	assert.Equal(t, commonpb.MsgType_DropPartition, dropPartitionMsg.Type())
+	assert.Equal(t, int64(3), dropPartitionMsg.SourceID())
+
+	bytes, err := dropPartitionMsg.Marshal(dropPartitionMsg)
+	assert.Nil(t, err)
+
+	tsMsg, err := dropPartitionMsg.Unmarshal(bytes)
+	assert.Nil(t, err)
+
+	dropPartitionMsg2, ok := tsMsg.(*DropPartitionMsg)
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), dropPartitionMsg2.ID())
+	assert.Equal(t, commonpb.MsgType_DropPartition, dropPartitionMsg2.Type())
+	assert.Equal(t, int64(3), dropPartitionMsg2.SourceID())
+}
+
+func TestDropPartitionMsg_Unmarshal_IllegalParameter(t *testing.T) {
+	dropPartitionMsg := &DropPartitionMsg{}
+	tsMsg, err := dropPartitionMsg.Unmarshal(10)
+	assert.NotNil(t, err)
+	assert.Nil(t, tsMsg)
+}
