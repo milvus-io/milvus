@@ -234,7 +234,6 @@ func (s *Segment) getRowCount() int64 {
 		return -1
 	}
 	var rowCount = C.GetRowCount(s.segmentPtr)
-	//log.Debug("QueryNode::Segment::getRowCount", zap.Any("rowCount", rowCount))
 	return int64(rowCount)
 }
 
@@ -502,7 +501,7 @@ func (s *Segment) matchIndexParam(fieldID int64, indexParams indexParam) bool {
 	if fieldIndexParam == nil {
 		return false
 	}
-	paramSize := len(s.indexInfos)
+	paramSize := len(s.indexInfos[fieldID].indexParams)
 	matchCount := 0
 	for k, v := range indexParams {
 		value, ok := fieldIndexParam[k]
@@ -591,7 +590,6 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 	if s.segmentType != segmentTypeGrowing {
 		return nil
 	}
-	log.Debug("QueryNode::Segment::segmentInsert:", zap.Any("s.segmentPtr", s.segmentPtr))
 
 	if s.segmentPtr == nil {
 		return errors.New("null seg core pointer")
