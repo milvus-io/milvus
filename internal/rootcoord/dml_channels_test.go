@@ -13,7 +13,6 @@ package rootcoord
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -46,12 +45,20 @@ func TestDmlChannels(t *testing.T) {
 	chanNames := dml.ListChannels()
 	assert.Equal(t, 0, len(chanNames))
 
+	//randStr := funcutil.RandomString(8)
+	//assert.Panics(t, func() { dml.AddProducerChannels(randStr) })
+	//
+	//err = dml.Broadcast([]string{randStr}, nil)
+	//assert.NotNil(t, err)
+	//assert.EqualError(t, err, fmt.Sprintf("channel %s not exist", randStr))
+
 	randStr := funcutil.RandomString(8)
-	assert.Panics(t, func() { dml.AddProducerChannels(randStr) })
+	dml.AddProducerChannels(randStr)
 
 	err = dml.Broadcast([]string{randStr}, nil)
-	assert.NotNil(t, err)
-	assert.EqualError(t, err, fmt.Sprintf("channel %s not exist", randStr))
+	assert.Nil(t, err)
+
+	dml.RemoveProducerChannels(randStr)
 
 	// dml_xxx_0 => {chanName0, chanName2}
 	// dml_xxx_1 => {chanName1}
