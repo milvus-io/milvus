@@ -213,17 +213,29 @@ func (gp *BaseTable) LoadRange(key, endKey string, limit int) ([]string, []strin
 	return gp.params.LoadRange(strings.ToLower(key), strings.ToLower(endKey), limit)
 }
 
+// LoadYaml loads the yaml file into BaseTable.
+// If fileName is a relative path, it will
+//    * try to load configs from the `${SOURCE_CODE_ROOT}/configs/`
+//    * If failed, try to load from the `${WORKING_DIRECTORY}/configs/`
+// If fileName is an absolute path, it will load this yaml file directly.
+//
+// NOTE: There is a potential bug when the production machine contains the same directory as compile machine.
 func (gp *BaseTable) LoadYaml(fileName string) error {
 	config := viper.New()
-	_, fpath, _, _ := runtime.Caller(0)
-	configFile := path.Dir(fpath) + "/../../../configs/" + fileName
-	_, err := os.Stat(configFile)
-	if os.IsNotExist(err) {
-		runPath, err := os.Getwd()
-		if err != nil {
-			panic(err)
+	var configFile string
+	if !path.IsAbs(fileName) {
+		_, fpath, _, _ := runtime.Caller(0)
+		configFile = path.Dir(fpath) + "/../../../configs/" + fileName
+		_, err := os.Stat(configFile)
+		if os.IsNotExist(err) {
+			runPath, err := os.Getwd()
+			if err != nil {
+				panic(err)
+			}
+			configFile = runPath + "/configs/" + fileName
 		}
-		configFile = runPath + "/configs/" + fileName
+	} else {
+		configFile = fileName
 	}
 
 	config.SetConfigFile(configFile)
