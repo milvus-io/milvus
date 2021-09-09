@@ -360,7 +360,6 @@ class TestPartitionOperations(TestcaseBase):
                                            check_items={ct.err_code: 1, ct.err_msg: "can't find collection"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    # @pytest.mark.parametrize("partition_name", [cf.gen_unique_str(prefix)])
     def test_partition_same_name_in_diff_collections(self):
         """
         target: verify create partitions with same name in diff collections
